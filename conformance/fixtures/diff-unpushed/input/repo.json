@@ -1,0 +1,28 @@
+{
+  "command": "diff",
+  "repo": {
+    "name": "diff-unpushed",
+    "defaultBranch": "main",
+    "upstream": true,
+    "commits": [
+      {
+        "id": "base",
+        "message": "chore: seed",
+        "date": "2024-01-01T00:00:00Z",
+        "push": true,
+        "files": {
+          "README.md": "seed\n"
+        }
+      },
+      {
+        "id": "local",
+        "message": "feat: local work",
+        "date": "2024-01-02T00:00:00Z",
+        "files": {
+          "README.md": "seed\nlocal\n",
+          "lib/module.txt": "module\n"
+        }
+      }
+    ]
+  }
+}

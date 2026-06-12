@@ -1,0 +1,10 @@
+# Repo-level TOML formatting so *.toml diffs stay lean and consistent.
+# Run via `just fmt` (taplo fmt) / check via `just fmt-check`.
+include = ["**/*.toml"]
+
+[formatting]
+align_entries = false
+array_auto_expand = true
+indent_string = "  "
+reorder_keys = false
+trailing_newline = true

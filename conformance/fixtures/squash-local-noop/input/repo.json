@@ -1,0 +1,20 @@
+{
+  "command": "squash-local",
+  "message": "feat: noop result",
+  "repo": {
+    "name": "squash-local-noop",
+    "defaultBranch": "main",
+    "upstream": true,
+    "commits": [
+      {
+        "id": "base",
+        "message": "chore: already pushed",
+        "date": "2024-01-01T00:00:00Z",
+        "push": true,
+        "files": {
+          "README.md": "pushed\n"
+        }
+      }
+    ]
+  }
+}

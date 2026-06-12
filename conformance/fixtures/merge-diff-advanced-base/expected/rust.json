@@ -1,0 +1,127 @@
+{
+  "fixture": "merge-diff-advanced-base",
+  "command": "merge-diff",
+  "exitCode": 0,
+  "stdout": [
+    "merge-diff: 2 commits to merge into main, 2 files",
+    "wrote <MONOREPO>/.artifacts/merge-diff-merge-diff-advanced-base.html"
+  ],
+  "stderr": [],
+  "postState": {
+    "isGitRepo": true,
+    "branch": "feature/advanced",
+    "upstream": null,
+    "head": "e5175c383f245d05d74bba830a52110a42694442",
+    "status": [],
+    "subjects": [
+      "chore: root",
+      "feat: add branch file",
+      "feat: extend branch file"
+    ]
+  },
+  "html": {
+    "stats": {
+      "commits": 2,
+      "files": 2,
+      "added": 3,
+      "removed": 0
+    },
+    "refs": {
+      "branch": "feature/advanced",
+      "upstream": "main",
+      "base": "main"
+    },
+    "cmd": {
+      "lead": "git diff",
+      "range": "main...HEAD",
+      "trail": ""
+    },
+    "commits": [
+      {
+        "sha": "e5175c383",
+        "subject": "feat: extend branch file",
+        "body": "",
+        "date": "2024-01-04 00:00"
+      },
+      {
+        "sha": "446573b02",
+        "subject": "feat: add branch file",
+        "body": "",
+        "date": "2024-01-03 00:00"
+      }
+    ],
+    "files": [
+      {
+        "path": "feature.txt",
+        "added": 2,
+        "removed": 0,
+        "commits": [
+          "e5175c383",
+          "446573b02"
+        ]
+      },
+      {
+        "path": "shared.txt",
+        "added": 1,
+        "removed": 0,
+        "commits": [
+          "446573b02"
+        ]
+      }
+    ],
+    "diffRows": [
+      {
+        "class": "dl dl-meta",
+        "text": "new file mode 100644"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "index 0000000..46f5d2d"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "--- /dev/null"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "+++ b/feature.txt"
+      },
+      {
+        "class": "dl dl-hunk",
+        "text": "@@ -0,0 +1,2 @@"
+      },
+      {
+        "class": "dl dl-add",
+        "text": "+feature"
+      },
+      {
+        "class": "dl dl-add",
+        "text": "+more"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "index df967b9..4244412 100644"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "--- a/shared.txt"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "+++ b/shared.txt"
+      },
+      {
+        "class": "dl dl-hunk",
+        "text": "@@ -1 +1,2 @@"
+      },
+      {
+        "class": "dl dl-ctx",
+        "text": "base"
+      },
+      {
+        "class": "dl dl-add",
+        "text": "+feature"
+      }
+    ]
+  }
+}

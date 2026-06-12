@@ -1,0 +1,127 @@
+{
+  "fixture": "squash-preview-unpushed",
+  "command": "squash-preview",
+  "exitCode": 0,
+  "stdout": [
+    "squash-preview: 2 unpushed commit(s), 2 file(s)",
+    "wrote <MONOREPO>/.artifacts/squash-preview-squash-preview-unpushed.html"
+  ],
+  "stderr": [],
+  "postState": {
+    "isGitRepo": true,
+    "branch": "main",
+    "upstream": "origin/main",
+    "head": "541692f5d107dc6b256cc95f91fc28a3d8007a77",
+    "status": [],
+    "subjects": [
+      "chore: seed project",
+      "feat: add alpha",
+      "fix: tune alpha"
+    ]
+  },
+  "html": {
+    "stats": {
+      "commits": 2,
+      "files": 2,
+      "added": 3,
+      "removed": 0
+    },
+    "refs": {
+      "branch": "main",
+      "upstream": "origin/main",
+      "base": "origin/main"
+    },
+    "cmd": {
+      "lead": "git log",
+      "range": "origin/main..HEAD",
+      "trail": "--stat"
+    },
+    "commits": [
+      {
+        "sha": "541692f5d",
+        "subject": "fix: tune alpha",
+        "body": "",
+        "date": "2024-01-03 00:00"
+      },
+      {
+        "sha": "30cd79469",
+        "subject": "feat: add alpha",
+        "body": "Adds the first feature file.",
+        "date": "2024-01-02 00:00"
+      }
+    ],
+    "files": [
+      {
+        "path": "docs/notes.md",
+        "added": 1,
+        "removed": 0,
+        "commits": [
+          "541692f5d"
+        ]
+      },
+      {
+        "path": "src/alpha.txt",
+        "added": 2,
+        "removed": 0,
+        "commits": [
+          "541692f5d",
+          "30cd79469"
+        ]
+      }
+    ],
+    "diffRows": [
+      {
+        "class": "dl dl-meta",
+        "text": "new file mode 100644"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "index 0000000..bfa6551"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "--- /dev/null"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "+++ b/docs/notes.md"
+      },
+      {
+        "class": "dl dl-hunk",
+        "text": "@@ -0,0 +1 @@"
+      },
+      {
+        "class": "dl dl-add",
+        "text": "+notes"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "new file mode 100644"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "index 0000000..fbbee86"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "--- /dev/null"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "+++ b/src/alpha.txt"
+      },
+      {
+        "class": "dl dl-hunk",
+        "text": "@@ -0,0 +1,2 @@"
+      },
+      {
+        "class": "dl dl-add",
+        "text": "+alpha"
+      },
+      {
+        "class": "dl dl-add",
+        "text": "+beta"
+      }
+    ]
+  }
+}

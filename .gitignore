@@ -1,0 +1,8 @@
+/target
+*.exe
+*.pdb
+/.artifacts
+/.claude/.active-transcript
+# Pester -CI JUnit output
+testResults.xml
+.claude/skills

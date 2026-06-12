@@ -1,0 +1,19 @@
+[package]
+name = "git-tools"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "git-tools"
+path = "src/main.rs"
+
+[lib]
+name = "git_tools"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+
+[profile.release]
+strip = true

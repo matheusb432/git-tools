@@ -1,0 +1,34 @@
+{
+  "command": "diff",
+  "base": "$base",
+  "repo": {
+    "name": "diff-hash",
+    "defaultBranch": "main",
+    "upstream": false,
+    "commits": [
+      {
+        "id": "base",
+        "message": "chore: baseline",
+        "date": "2024-01-01T00:00:00Z",
+        "files": {
+          "app.txt": "one\n"
+        }
+      },
+      {
+        "id": "head",
+        "message": "feat: commit change",
+        "date": "2024-01-02T00:00:00Z",
+        "files": {
+          "app.txt": "one\ntwo\n",
+          "src/committed.txt": "committed\n"
+        }
+      }
+    ],
+    "workingTree": {
+      "files": {
+        "app.txt": "one\ntwo\nthree\n",
+        "scratch.txt": "scratch\n"
+      }
+    }
+  }
+}

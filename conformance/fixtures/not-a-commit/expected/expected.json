@@ -1,0 +1,21 @@
+{
+  "fixture": "not-a-commit",
+  "command": "diff",
+  "exitCode": 1,
+  "stdout": [],
+  "stderr": [
+    "fatal: Needed a single revision",
+    "not a commit: does-not-exist"
+  ],
+  "postState": {
+    "isGitRepo": true,
+    "branch": "main",
+    "upstream": null,
+    "head": "19165f2399838c832441a071c9db0070856069a5",
+    "status": [],
+    "subjects": [
+      "chore: baseline"
+    ]
+  },
+  "html": null
+}

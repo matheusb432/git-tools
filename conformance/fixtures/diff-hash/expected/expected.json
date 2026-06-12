@@ -1,0 +1,122 @@
+{
+  "fixture": "diff-hash",
+  "command": "diff",
+  "exitCode": 0,
+  "stdout": [
+    "diff-preview: 0b6554d..working, 2 file(s)",
+    "wrote <MONOREPO>/.artifacts/diff-preview-diff-hash.html"
+  ],
+  "stderr": [],
+  "postState": {
+    "isGitRepo": true,
+    "branch": "main",
+    "upstream": null,
+    "head": "2648dd1f68bbcf88cfa3473c2dda6a2c85c7743e",
+    "status": [
+      " M app.txt",
+      "?? scratch.txt"
+    ],
+    "subjects": [
+      "chore: baseline",
+      "feat: commit change"
+    ]
+  },
+  "html": {
+    "stats": {
+      "commits": 1,
+      "files": 2,
+      "added": 3,
+      "removed": 0
+    },
+    "refs": {
+      "branch": "main",
+      "upstream": "0b6554d",
+      "base": "0b6554d"
+    },
+    "cmd": {
+      "lead": "git diff",
+      "range": "0b6554d",
+      "trail": ""
+    },
+    "commits": [
+      {
+        "sha": "2648dd1f6",
+        "subject": "feat: commit change",
+        "body": "",
+        "date": "2024-01-02 00:00"
+      }
+    ],
+    "files": [
+      {
+        "path": "app.txt",
+        "added": 2,
+        "removed": 0,
+        "commits": [
+          "2648dd1f6"
+        ]
+      },
+      {
+        "path": "src/committed.txt",
+        "added": 1,
+        "removed": 0,
+        "commits": [
+          "2648dd1f6"
+        ]
+      }
+    ],
+    "diffRows": [
+      {
+        "class": "dl dl-meta",
+        "text": "index 5626abf..4cb29ea 100644"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "--- a/app.txt"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "+++ b/app.txt"
+      },
+      {
+        "class": "dl dl-hunk",
+        "text": "@@ -1 +1,3 @@"
+      },
+      {
+        "class": "dl dl-ctx",
+        "text": "one"
+      },
+      {
+        "class": "dl dl-add",
+        "text": "+two"
+      },
+      {
+        "class": "dl dl-add",
+        "text": "+three"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "new file mode 100644"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "index 0000000..d0fe822"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "--- /dev/null"
+      },
+      {
+        "class": "dl dl-meta",
+        "text": "+++ b/src/committed.txt"
+      },
+      {
+        "class": "dl dl-hunk",
+        "text": "@@ -0,0 +1 @@"
+      },
+      {
+        "class": "dl dl-add",
+        "text": "+committed"
+      }
+    ]
+  }
+}

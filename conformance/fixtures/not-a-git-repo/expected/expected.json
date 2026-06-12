@@ -1,0 +1,19 @@
+{
+  "fixture": "not-a-git-repo",
+  "command": "squash-preview",
+  "exitCode": 1,
+  "stdout": [],
+  "stderr": [
+    "fatal: not a git repository (or any of the parent directories): .git",
+    "not a git repo: <REPO>"
+  ],
+  "postState": {
+    "isGitRepo": false,
+    "branch": null,
+    "upstream": null,
+    "head": null,
+    "status": [],
+    "subjects": []
+  },
+  "html": null
+}

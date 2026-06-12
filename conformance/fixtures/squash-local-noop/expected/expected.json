@@ -1,0 +1,20 @@
+{
+  "fixture": "squash-local-noop",
+  "command": "squash-local",
+  "exitCode": 0,
+  "stdout": [
+    "nothing unpushed (HEAD == origin/main)"
+  ],
+  "stderr": [],
+  "postState": {
+    "isGitRepo": true,
+    "branch": "main",
+    "upstream": "origin/main",
+    "head": "c0e72938ac61345e0bafaf61edf1108b121abf62",
+    "status": [],
+    "subjects": [
+      "chore: already pushed"
+    ]
+  },
+  "html": null
+}

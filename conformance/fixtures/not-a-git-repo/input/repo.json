@@ -1,0 +1,7 @@
+{
+  "command": "squash-preview",
+  "repo": {
+    "name": "not-a-git-repo",
+    "kind": "non-git"
+  }
+}

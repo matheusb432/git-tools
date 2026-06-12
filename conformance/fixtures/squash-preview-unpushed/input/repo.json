@@ -1,0 +1,37 @@
+{
+  "command": "squash-preview",
+  "repo": {
+    "name": "squash-preview-unpushed",
+    "defaultBranch": "main",
+    "upstream": true,
+    "commits": [
+      {
+        "id": "base",
+        "message": "chore: seed project",
+        "date": "2024-01-01T00:00:00Z",
+        "push": true,
+        "files": {
+          "README.md": "project\n"
+        }
+      },
+      {
+        "id": "feature-a",
+        "message": "feat: add alpha",
+        "body": "Adds the first feature file.",
+        "date": "2024-01-02T00:00:00Z",
+        "files": {
+          "src/alpha.txt": "alpha\n"
+        }
+      },
+      {
+        "id": "feature-b",
+        "message": "fix: tune alpha",
+        "date": "2024-01-03T00:00:00Z",
+        "files": {
+          "src/alpha.txt": "alpha\nbeta\n",
+          "docs/notes.md": "notes\n"
+        }
+      }
+    ]
+  }
+}

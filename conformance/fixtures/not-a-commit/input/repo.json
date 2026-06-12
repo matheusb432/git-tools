@@ -1,0 +1,19 @@
+{
+  "command": "diff",
+  "base": "does-not-exist",
+  "repo": {
+    "name": "not-a-commit",
+    "defaultBranch": "main",
+    "upstream": false,
+    "commits": [
+      {
+        "id": "base",
+        "message": "chore: baseline",
+        "date": "2024-01-01T00:00:00Z",
+        "files": {
+          "README.md": "baseline\n"
+        }
+      }
+    ]
+  }
+}
