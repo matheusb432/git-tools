@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Ubuntu installer: delegate to scripts/install.ps1 (pwsh 7), then ensure ~/.local/bin on PATH.
+# Ubuntu installer: build + place git-tools via scripts/install.sh, then ensure ~/.local/bin on PATH.
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 bindir="${HOME}/.local/bin"
 
-pwsh -NoLogo -NoProfile -File "$repo/scripts/install.ps1" -Action install
+bash "$repo/scripts/install.sh" install
 
 case ":$PATH:" in
   *":$bindir:"*) ;;

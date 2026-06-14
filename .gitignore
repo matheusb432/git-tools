@@ -3,6 +3,7 @@
 *.pdb
 /.artifacts
 /.claude/.active-transcript
-# Pester -CI JUnit output
-testResults.xml
 .claude/skills
+# ShellSpec coverage / report output
+/coverage
+/report

@@ -1,0 +1,1036 @@
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use anyhow::{Context, anyhow};
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedRepo {
+    pub name: String,
+    pub path: PathBuf,
+    pub remote: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedExit {
+    Clean,
+    Warn,
+    Fail,
+    Usage,
+}
+
+impl ManagedExit {
+    pub fn code(self) -> i32 {
+        match self {
+            ManagedExit::Clean => 0,
+            ManagedExit::Warn => 1,
+            ManagedExit::Fail => 2,
+            ManagedExit::Usage => 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedOptions {
+    pub repos_file: Option<PathBuf>,
+    pub home_dir: Option<PathBuf>,
+    pub dry: bool,
+    pub json: bool,
+    pub message_for_all: Option<String>,
+    pub interactive: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedRun<T> {
+    pub exit: ManagedExit,
+    pub results: Vec<T>,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct PushPullResult {
+    pub name: String,
+    pub branch: String,
+    pub status: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct CommitFile {
+    pub status: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct CommitResult {
+    pub name: String,
+    pub present: bool,
+    pub dirty: bool,
+    pub files: Vec<CommitFile>,
+    pub action: String,
+    pub detail: String,
+}
+
+pub fn parse_manifest(raw: &str, home_dir: &Path) -> anyhow::Result<Vec<ManagedRepo>> {
+    let mut repos = Vec::new();
+
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let mut parts = trimmed.split('\t');
+        let local = parts.next().unwrap_or("").trim();
+        if local.is_empty() {
+            continue;
+        }
+        let remote = parts.next().unwrap_or("").trim();
+
+        repos.push(ManagedRepo {
+            name: local.to_string(),
+            path: home_dir.join(local),
+            remote: remote.to_string(),
+        });
+    }
+
+    Ok(repos)
+}
+
+pub fn resolve_home_dir(override_dir: Option<&Path>) -> PathBuf {
+    if let Some(dir) = override_dir {
+        return dir.to_path_buf();
+    }
+    if let Some(userprofile) = std::env::var_os("USERPROFILE") {
+        return PathBuf::from(userprofile);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home);
+    }
+    PathBuf::from(".")
+}
+
+pub fn resolve_repos_file(override_file: Option<&Path>) -> anyhow::Result<PathBuf> {
+    if let Some(file) = override_file {
+        return Ok(file.to_path_buf());
+    }
+    if let Some(file) = std::env::var_os("GIT_TOOLS_MANAGED_REPOS_FILE") {
+        return Ok(PathBuf::from(file));
+    }
+    if let Some(found) = find_upward_config(std::env::current_dir()?.as_path()) {
+        return Ok(found);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return Ok(PathBuf::from(home)
+            .join("self")
+            .join("sample_project")
+            .join("config")
+            .join("provisioning")
+            .join("linux")
+            .join("repos.txt"));
+    }
+    Err(anyhow!("managed-repos manifest path could not be resolved"))
+}
+
+fn find_upward_config(start: &Path) -> Option<PathBuf> {
+    for dir in start.ancestors() {
+        let candidate = dir
+            .join("config")
+            .join("provisioning")
+            .join("linux")
+            .join("repos.txt");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn load_repos(options: &ManagedOptions) -> anyhow::Result<Vec<ManagedRepo>> {
+    let repos_file = resolve_repos_file(options.repos_file.as_deref())?;
+    let home_dir = resolve_home_dir(options.home_dir.as_deref());
+    let raw = std::fs::read_to_string(&repos_file)
+        .with_context(|| format!("managed-repos manifest not found: {}", repos_file.display()))?;
+    parse_manifest(&raw, &home_dir)
+}
+
+pub fn push_pull_exit_code(statuses: &[&str]) -> ManagedExit {
+    if statuses.contains(&"fail") {
+        return ManagedExit::Fail;
+    }
+    if statuses.contains(&"warn") {
+        return ManagedExit::Warn;
+    }
+    ManagedExit::Clean
+}
+
+pub fn commit_exit_code(actions: &[&str], dry: bool) -> ManagedExit {
+    if actions.contains(&"fail") {
+        return ManagedExit::Fail;
+    }
+    if dry && actions.contains(&"would-commit") {
+        return ManagedExit::Warn;
+    }
+    if !dry && actions.contains(&"skipped") {
+        return ManagedExit::Warn;
+    }
+    ManagedExit::Clean
+}
+
+pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
+    match load_repos(options) {
+        Ok(repos) => {
+            let results = repos
+                .iter()
+                .map(|repo| push_one(repo, options.dry))
+                .collect::<Vec<_>>();
+            let statuses = results
+                .iter()
+                .map(|result| result.status.as_str())
+                .collect::<Vec<_>>();
+            let exit = push_pull_exit_code(&statuses);
+            let stdout = format_push_pull("push", options.dry, options.json, &results);
+            ManagedRun {
+                exit,
+                results,
+                stdout,
+                stderr: String::new(),
+            }
+        }
+        Err(error) => ManagedRun {
+            exit: ManagedExit::Fail,
+            results: Vec::new(),
+            stdout: String::new(),
+            stderr: format!("{error:#}"),
+        },
+    }
+}
+
+pub fn run_pull_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
+    match load_repos(options) {
+        Ok(repos) => {
+            let results = repos
+                .iter()
+                .map(|repo| pull_one(repo, options.dry))
+                .collect::<Vec<_>>();
+            let statuses = results
+                .iter()
+                .map(|result| result.status.as_str())
+                .collect::<Vec<_>>();
+            let exit = push_pull_exit_code(&statuses);
+            let stdout = format_push_pull("pull", options.dry, options.json, &results);
+            ManagedRun {
+                exit,
+                results,
+                stdout,
+                stderr: String::new(),
+            }
+        }
+        Err(error) => ManagedRun {
+            exit: ManagedExit::Fail,
+            results: Vec::new(),
+            stdout: String::new(),
+            stderr: format!("{error:#}"),
+        },
+    }
+}
+
+pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
+    if let Some(message) = &options.message_for_all
+        && message.trim().is_empty()
+    {
+        return ManagedRun {
+            exit: ManagedExit::Usage,
+            results: Vec::new(),
+            stdout: String::new(),
+            stderr: "commit-all: --message-for-all requires a non-empty message".to_string(),
+        };
+    }
+
+    if !options.dry && options.message_for_all.is_none() && !options.interactive {
+        return ManagedRun {
+            exit: ManagedExit::Usage,
+            results: Vec::new(),
+            stdout: String::new(),
+            stderr: "commit-all: non-interactive shell; pass --dry or --message-for-all \"msg\""
+                .to_string(),
+        };
+    }
+
+    match load_repos(options) {
+        Ok(repos) => {
+            let results = repos
+                .iter()
+                .map(|repo| commit_one(repo, options))
+                .collect::<Vec<_>>();
+            let actions = results
+                .iter()
+                .map(|result| result.action.as_str())
+                .collect::<Vec<_>>();
+            let exit = commit_exit_code(&actions, options.dry);
+            let stdout = format_commit(options.dry, options.json, &results);
+            ManagedRun {
+                exit,
+                results,
+                stdout,
+                stderr: String::new(),
+            }
+        }
+        Err(error) => ManagedRun {
+            exit: ManagedExit::Fail,
+            results: Vec::new(),
+            stdout: String::new(),
+            stderr: format!("{error:#}"),
+        },
+    }
+}
+
+fn push_one(repo: &ManagedRepo, dry: bool) -> PushPullResult {
+    let mut result = push_pull_result(repo, "", "", "");
+    if !repo.path.join(".git").exists() {
+        result.status = "skip".to_string();
+        result.detail = "not present on this machine".to_string();
+        return result;
+    }
+
+    let branch = match git_capture(&repo.path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+        Ok(output) if output.success() => output.stdout.trim().to_string(),
+        _ => String::new(),
+    };
+    result.branch = branch.clone();
+    if branch.is_empty() || branch == "HEAD" {
+        result.status = "warn".to_string();
+        result.detail = "detached HEAD - nothing to push".to_string();
+        return result;
+    }
+
+    match git_capture(&repo.path, &["remote", "get-url", "origin"]) {
+        Ok(output) if output.success() => {}
+        _ => {
+            result.status = "warn".to_string();
+            result.detail = "no 'origin' remote".to_string();
+            return result;
+        }
+    }
+
+    let mut args = vec!["push", "origin", branch.as_str()];
+    if dry {
+        args.push("--dry-run");
+    }
+    match git_capture(&repo.path, &args) {
+        Ok(output) if output.success() => {
+            let combined = output.combined();
+            if combined.contains("Everything up-to-date") {
+                result.status = "up-to-date".to_string();
+                result.detail = "up to date".to_string();
+            } else {
+                result.status = if dry { "would-push" } else { "pushed" }.to_string();
+                result.detail = last_non_empty_line(&combined)
+                    .unwrap_or("up to date")
+                    .to_string();
+            }
+        }
+        Ok(output) => {
+            result.status = "fail".to_string();
+            let combined = output.combined();
+            result.detail = push_failure_detail(&combined);
+        }
+        Err(error) => {
+            result.status = "fail".to_string();
+            result.detail = error.to_string();
+        }
+    }
+    result
+}
+
+fn pull_one(repo: &ManagedRepo, dry: bool) -> PushPullResult {
+    let mut result = push_pull_result(repo, "", "", "");
+    if !repo.path.join(".git").exists() {
+        result.status = "skip".to_string();
+        result.detail = "not present on this machine".to_string();
+        return result;
+    }
+
+    let branch = match git_capture(&repo.path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+        Ok(output) if output.success() => output.stdout.trim().to_string(),
+        _ => String::new(),
+    };
+    result.branch = branch.clone();
+    if branch.is_empty() || branch == "HEAD" {
+        result.status = "warn".to_string();
+        result.detail = "detached HEAD - nothing to pull onto".to_string();
+        return result;
+    }
+
+    match git_capture(&repo.path, &["remote", "get-url", "origin"]) {
+        Ok(output) if output.success() => {}
+        _ => {
+            result.status = "warn".to_string();
+            result.detail = "no 'origin' remote".to_string();
+            return result;
+        }
+    }
+
+    match git_capture(&repo.path, &["fetch", "origin"]) {
+        Ok(output) if output.success() => {}
+        Ok(output) => {
+            result.status = "fail".to_string();
+            result.detail = format!(
+                "fetch failed: {}",
+                last_non_empty_line(&output.combined()).unwrap_or("fetch failed")
+            );
+            return result;
+        }
+        Err(error) => {
+            result.status = "fail".to_string();
+            result.detail = format!("fetch failed: {error}");
+            return result;
+        }
+    }
+
+    let remote_branch = format!("refs/remotes/origin/{branch}");
+    match git_capture(
+        &repo.path,
+        &["rev-parse", "--verify", "--quiet", &remote_branch],
+    ) {
+        Ok(output) if output.success() => {}
+        _ => {
+            result.status = "warn".to_string();
+            result.detail = format!("no '{branch}' branch on origin");
+            return result;
+        }
+    }
+
+    let range = format!("origin/{branch}...{branch}");
+    let counts = match git_capture(&repo.path, &["rev-list", "--count", "--left-right", &range]) {
+        Ok(output) if output.success() => output.stdout,
+        _ => {
+            result.status = "fail".to_string();
+            result.detail = "rev-list failed".to_string();
+            return result;
+        }
+    };
+    let mut parts = counts.split_whitespace();
+    let behind = parts
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    let ahead = parts
+        .next()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+
+    if behind == 0 {
+        result.status = "up-to-date".to_string();
+        result.detail = if ahead > 0 {
+            format!("up to date (local ahead by {ahead} - push pending)")
+        } else {
+            "up to date".to_string()
+        };
+        return result;
+    }
+    if ahead > 0 {
+        result.status = "fail".to_string();
+        result.detail = format!("diverged (ahead {ahead}, behind {behind}) - resolve manually");
+        return result;
+    }
+    if dry {
+        result.status = "would-pull".to_string();
+        result.detail = format!("behind by {behind} - fast-forward");
+        return result;
+    }
+
+    let merge_ref = format!("origin/{branch}");
+    match git_capture(&repo.path, &["merge", "--ff-only", &merge_ref]) {
+        Ok(output) if output.success() => {
+            result.status = "pulled".to_string();
+            result.detail = format!(
+                "fast-forwarded {behind} commit{}",
+                if behind == 1 { "" } else { "s" }
+            );
+        }
+        Ok(output) => {
+            result.status = "fail".to_string();
+            let combined = output.combined();
+            result.detail = combined
+                .lines()
+                .find(|line| line.starts_with("error:") || line.starts_with("fatal:"))
+                .map(str::trim)
+                .unwrap_or("ff merge failed")
+                .to_string();
+        }
+        Err(error) => {
+            result.status = "fail".to_string();
+            result.detail = error.to_string();
+        }
+    }
+    result
+}
+
+fn commit_one(repo: &ManagedRepo, options: &ManagedOptions) -> CommitResult {
+    let state = dirty_state(&repo.path);
+    let mut result = CommitResult {
+        name: repo.name.clone(),
+        present: state.present,
+        dirty: state.dirty,
+        files: state.files,
+        action: String::new(),
+        detail: String::new(),
+    };
+
+    if !state.present {
+        result.action = "absent".to_string();
+        result.detail = "not present on this machine".to_string();
+        return result;
+    }
+    if !state.dirty {
+        result.action = "clean".to_string();
+        result.detail = "nothing to commit".to_string();
+        return result;
+    }
+    if options.dry {
+        result.action = "would-commit".to_string();
+        result.detail = format!("{} change(s)", result.files.len());
+        return result;
+    }
+
+    let Some(message) = options.message_for_all.as_ref() else {
+        result.action = "skipped".to_string();
+        result.detail = "blank message - skipped".to_string();
+        return result;
+    };
+
+    match git_capture(&repo.path, &["add", "-A"]) {
+        Ok(output) if output.success() => {}
+        _ => {
+            result.action = "fail".to_string();
+            result.detail = "git add failed".to_string();
+            return result;
+        }
+    }
+
+    match git_capture(&repo.path, &["commit", "-m", message]) {
+        Ok(output) if output.success() => {
+            result.action = "committed".to_string();
+            result.detail = last_non_empty_line(&output.combined())
+                .unwrap_or("committed")
+                .to_string();
+        }
+        Ok(output) => {
+            result.action = "fail".to_string();
+            result.detail = last_non_empty_line(&output.combined())
+                .unwrap_or("commit failed")
+                .to_string();
+        }
+        Err(error) => {
+            result.action = "fail".to_string();
+            result.detail = error.to_string();
+        }
+    }
+    result
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DirtyState {
+    present: bool,
+    dirty: bool,
+    files: Vec<CommitFile>,
+}
+
+fn dirty_state(repo: &Path) -> DirtyState {
+    if !repo.join(".git").exists() {
+        return DirtyState {
+            present: false,
+            dirty: false,
+            files: Vec::new(),
+        };
+    }
+
+    let output = match git_capture(repo, &["status", "--porcelain"]) {
+        Ok(output) if output.success() => output.stdout,
+        _ => String::new(),
+    };
+    let files = output
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| CommitFile {
+            status: line.get(0..2).unwrap_or("").trim().to_string(),
+            path: line.get(3..).unwrap_or("").to_string(),
+        })
+        .collect::<Vec<_>>();
+
+    DirtyState {
+        present: true,
+        dirty: !files.is_empty(),
+        files,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GitCapture {
+    stdout: String,
+    stderr: String,
+    code: i32,
+}
+
+impl GitCapture {
+    fn success(&self) -> bool {
+        self.code == 0
+    }
+
+    fn combined(&self) -> String {
+        format!("{}\n{}", self.stdout, self.stderr)
+    }
+}
+
+fn git_capture(repo: &Path, args: &[&str]) -> anyhow::Result<GitCapture> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .with_context(|| format!("failed to run git in {}", repo.display()))?;
+
+    Ok(GitCapture {
+        stdout: String::from_utf8(output.stdout).context("git stdout was not valid UTF-8")?,
+        stderr: String::from_utf8(output.stderr).context("git stderr was not valid UTF-8")?,
+        code: output.status.code().unwrap_or(1),
+    })
+}
+
+fn push_pull_result(
+    repo: &ManagedRepo,
+    branch: &str,
+    status: &str,
+    detail: &str,
+) -> PushPullResult {
+    PushPullResult {
+        name: repo.name.clone(),
+        branch: branch.to_string(),
+        status: status.to_string(),
+        detail: detail.to_string(),
+    }
+}
+
+fn push_failure_detail(output: &str) -> String {
+    output
+        .lines()
+        .find(|line| {
+            let trimmed = line.trim_start();
+            trimmed.starts_with("!")
+                || trimmed.starts_with("error:")
+                || trimmed.starts_with("fatal:")
+        })
+        .map(str::trim)
+        .or_else(|| last_non_empty_line(output))
+        .unwrap_or("push failed")
+        .to_string()
+}
+
+fn last_non_empty_line(output: &str) -> Option<&str> {
+    output
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+}
+
+pub fn format_push_pull(label: &str, dry: bool, json: bool, results: &[PushPullResult]) -> String {
+    if json {
+        return serde_json::to_string_pretty(results).unwrap_or_else(|_| "[]".to_string());
+    }
+
+    let mut out = String::new();
+    for result in results {
+        let verb = if dry {
+            format!("dry {label}")
+        } else {
+            label.to_string()
+        };
+        let arrow = if label == "pull" { "<-" } else { "->" };
+        out.push_str(&format!("{verb} {arrow} {}\n", result.name));
+    }
+    out.push('\n');
+    out.push_str(&format!(
+        "{:<30} {:<18} {:<12} {}\n",
+        "REPO", "BRANCH", "STATUS", "DETAIL"
+    ));
+    for result in results {
+        out.push_str(&format!(
+            "{:<30} {:<18} {:<12} {}\n",
+            result.name, result.branch, result.status, result.detail
+        ));
+    }
+    let fail = results
+        .iter()
+        .filter(|result| result.status == "fail")
+        .count();
+    let warn = results
+        .iter()
+        .filter(|result| result.status == "warn")
+        .count();
+    let statuses = results
+        .iter()
+        .map(|result| result.status.as_str())
+        .collect::<Vec<_>>();
+    out.push_str(&format!(
+        "\nexit {}  -  {} repos: {} fail, {} warn",
+        push_pull_exit_code(&statuses).code(),
+        results.len(),
+        fail,
+        warn
+    ));
+    out
+}
+
+pub fn format_commit(dry: bool, json: bool, results: &[CommitResult]) -> String {
+    if json {
+        return serde_json::to_string_pretty(results).unwrap_or_else(|_| "[]".to_string());
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!("{:<30} {:<14} {}\n", "REPO", "ACTION", "DETAIL"));
+    for result in results {
+        out.push_str(&format!(
+            "{:<30} {:<14} {}\n",
+            result.name, result.action, result.detail
+        ));
+    }
+    let actions = results
+        .iter()
+        .map(|result| result.action.as_str())
+        .collect::<Vec<_>>();
+    out.push_str(&format!(
+        "\nexit {}  -  {} repos",
+        commit_exit_code(&actions, dry).code(),
+        results.len()
+    ));
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn parses_manifest_like_sample_project() {
+        let repos = parse_manifest(
+            "# comment\nself/sample_project\thttps://example.invalid/cfg.git\n\n tools/git-tools\t\n",
+            Path::new("/home/me"),
+        )
+        .unwrap();
+
+        assert_eq!(repos.len(), 2);
+        assert_eq!(repos[0].name, "self/sample_project");
+        assert_eq!(
+            repos[0].path,
+            Path::new("/home/me").join("self/sample_project")
+        );
+        assert_eq!(repos[0].remote, "https://example.invalid/cfg.git");
+        assert_eq!(repos[1].name, "tools/git-tools");
+        assert_eq!(repos[1].remote, "");
+    }
+
+    #[test]
+    fn push_and_pull_exit_codes_preserve_fail_warn_clean_precedence() {
+        assert_eq!(
+            push_pull_exit_code(&["skip", "up-to-date"]),
+            ManagedExit::Clean
+        );
+        assert_eq!(
+            push_pull_exit_code(&["warn", "up-to-date"]),
+            ManagedExit::Warn
+        );
+        assert_eq!(push_pull_exit_code(&["warn", "fail"]), ManagedExit::Fail);
+    }
+
+    #[test]
+    fn commit_exit_codes_match_dry_and_real_modes() {
+        assert_eq!(
+            commit_exit_code(&["clean", "absent"], true),
+            ManagedExit::Clean
+        );
+        assert_eq!(commit_exit_code(&["would-commit"], true), ManagedExit::Warn);
+        assert_eq!(commit_exit_code(&["skipped"], false), ManagedExit::Warn);
+        assert_eq!(commit_exit_code(&["fail"], false), ManagedExit::Fail);
+    }
+
+    #[test]
+    fn commit_all_dry_reports_dirty_without_committing() {
+        let fixture = ManagedFixture::new("commit-dry");
+        let repo = fixture.init_repo("repo");
+        fixture.write_manifest(&[("repo", "")]);
+        fixture.write_file("repo/work.txt", "dirty\n");
+        let before = git_out(&repo, &["rev-parse", "HEAD"]);
+
+        let run = run_commit_all(&ManagedOptions {
+            repos_file: Some(fixture.manifest.clone()),
+            home_dir: Some(fixture.home.clone()),
+            dry: true,
+            json: false,
+            message_for_all: None,
+            interactive: false,
+        });
+
+        assert_eq!(run.exit, ManagedExit::Warn);
+        assert_eq!(run.results[0].action, "would-commit");
+        assert_eq!(git_out(&repo, &["rev-parse", "HEAD"]), before);
+    }
+
+    #[test]
+    fn commit_all_message_for_all_commits_dirty_repo() {
+        let fixture = ManagedFixture::new("commit-batch");
+        let repo = fixture.init_repo("repo");
+        fixture.write_manifest(&[("repo", "")]);
+        fixture.write_file("repo/work.txt", "dirty\n");
+
+        let run = run_commit_all(&ManagedOptions {
+            repos_file: Some(fixture.manifest.clone()),
+            home_dir: Some(fixture.home.clone()),
+            dry: false,
+            json: false,
+            message_for_all: Some("save work".to_string()),
+            interactive: false,
+        });
+
+        assert_eq!(run.exit, ManagedExit::Clean);
+        assert_eq!(run.results[0].action, "committed");
+        assert_eq!(git_out(&repo, &["status", "--porcelain"]), "");
+    }
+
+    #[test]
+    fn pull_all_dry_reports_would_pull_without_moving_head() {
+        let fixture = ManagedFixture::new("pull-dry");
+        let (origin, seed) = fixture.origin_with_seed();
+        let local = fixture.clone_repo(&origin, "repo");
+        fixture.write_manifest(&[("repo", "")]);
+        fixture.write_file_in(&seed, "remote.txt", "new\n");
+        git(&seed, &["add", "-A"]);
+        git(&seed, &["commit", "-m", "remote change"]);
+        git(&seed, &["push", "origin", "main"]);
+        let before = git_out(&local, &["rev-parse", "HEAD"]);
+
+        let run = run_pull_all(&ManagedOptions {
+            repos_file: Some(fixture.manifest.clone()),
+            home_dir: Some(fixture.home.clone()),
+            dry: true,
+            json: false,
+            message_for_all: None,
+            interactive: false,
+        });
+
+        assert_eq!(run.exit, ManagedExit::Clean);
+        assert_eq!(run.results[0].status, "would-pull");
+        assert_eq!(git_out(&local, &["rev-parse", "HEAD"]), before);
+    }
+
+    #[test]
+    fn pull_all_fails_divergence_without_merging() {
+        let fixture = ManagedFixture::new("pull-diverged");
+        let (origin, seed) = fixture.origin_with_seed();
+        let local = fixture.clone_repo(&origin, "repo");
+        fixture.write_manifest(&[("repo", "")]);
+        fixture.write_file_in(&seed, "remote.txt", "remote\n");
+        git(&seed, &["add", "-A"]);
+        git(&seed, &["commit", "-m", "remote change"]);
+        git(&seed, &["push", "origin", "main"]);
+        fixture.write_file_in(&local, "local.txt", "local\n");
+        git(&local, &["add", "-A"]);
+        git(&local, &["commit", "-m", "local change"]);
+        let before = git_out(&local, &["rev-parse", "HEAD"]);
+
+        let run = run_pull_all(&ManagedOptions {
+            repos_file: Some(fixture.manifest.clone()),
+            home_dir: Some(fixture.home.clone()),
+            dry: false,
+            json: false,
+            message_for_all: None,
+            interactive: false,
+        });
+
+        assert_eq!(run.exit, ManagedExit::Fail);
+        assert_eq!(run.results[0].status, "fail");
+        assert_eq!(git_out(&local, &["rev-parse", "HEAD"]), before);
+    }
+
+    #[test]
+    fn push_all_dry_reports_would_push_without_moving_remote() {
+        let fixture = ManagedFixture::new("push-dry");
+        let (origin, _seed) = fixture.origin_with_seed();
+        let local = fixture.clone_repo(&origin, "repo");
+        fixture.write_manifest(&[("repo", "")]);
+        let remote_before = git_out(&origin, &["rev-parse", "refs/heads/main"]);
+        fixture.write_file_in(&local, "local.txt", "local\n");
+        git(&local, &["add", "-A"]);
+        git(&local, &["commit", "-m", "local change"]);
+
+        let run = run_push_all(&ManagedOptions {
+            repos_file: Some(fixture.manifest.clone()),
+            home_dir: Some(fixture.home.clone()),
+            dry: true,
+            json: false,
+            message_for_all: None,
+            interactive: false,
+        });
+
+        assert_eq!(run.exit, ManagedExit::Clean);
+        assert_eq!(run.results[0].status, "would-push");
+        assert_eq!(
+            git_out(&origin, &["rev-parse", "refs/heads/main"]),
+            remote_before
+        );
+    }
+
+    struct ManagedFixture {
+        root: std::path::PathBuf,
+        home: std::path::PathBuf,
+        manifest: std::path::PathBuf,
+    }
+
+    impl ManagedFixture {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!("git-tools-{name}-{unique}"));
+            let home = root.join("home");
+            std::fs::create_dir_all(&home).unwrap();
+            let manifest = root.join("repos.txt");
+            Self {
+                root,
+                home,
+                manifest,
+            }
+        }
+
+        fn init_repo(&self, name: &str) -> std::path::PathBuf {
+            let repo = self.home.join(name);
+            std::fs::create_dir_all(&repo).unwrap();
+            cmd("git", &["init", "-b", "main", repo.to_str().unwrap()]);
+            configure_repo(&repo);
+            self.write_file(&format!("{name}/README.md"), "base\n");
+            git(&repo, &["add", "-A"]);
+            git(&repo, &["commit", "-m", "base"]);
+            repo
+        }
+
+        fn origin_with_seed(&self) -> (std::path::PathBuf, std::path::PathBuf) {
+            let origin = self.root.join("origin.git");
+            cmd(
+                "git",
+                &[
+                    "init",
+                    "--bare",
+                    "--initial-branch=main",
+                    origin.to_str().unwrap(),
+                ],
+            );
+            let seed = self.root.join("seed");
+            cmd(
+                "git",
+                &["clone", origin.to_str().unwrap(), seed.to_str().unwrap()],
+            );
+            configure_repo(&seed);
+            self.write_file_in(&seed, "README.md", "base\n");
+            git(&seed, &["add", "-A"]);
+            git(&seed, &["commit", "-m", "base"]);
+            git(&seed, &["push", "-u", "origin", "main"]);
+            (origin, seed)
+        }
+
+        fn clone_repo(&self, origin: &Path, name: &str) -> std::path::PathBuf {
+            let repo = self.home.join(name);
+            cmd(
+                "git",
+                &["clone", origin.to_str().unwrap(), repo.to_str().unwrap()],
+            );
+            configure_repo(&repo);
+            repo
+        }
+
+        fn write_manifest(&self, entries: &[(&str, &str)]) {
+            let text = entries
+                .iter()
+                .map(|(path, remote)| format!("{path}\t{remote}\n"))
+                .collect::<String>();
+            std::fs::write(&self.manifest, text).unwrap();
+        }
+
+        fn write_file(&self, relative: &str, text: &str) {
+            self.write_file_in(&self.home, relative, text);
+        }
+
+        fn write_file_in(&self, root: &Path, relative: &str, text: &str) {
+            let path = root.join(relative);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(path, text).unwrap();
+        }
+    }
+
+    impl Drop for ManagedFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn configure_repo(repo: &Path) {
+        git(repo, &["config", "user.name", "Test User"]);
+        git(repo, &["config", "user.email", "test@example.invalid"]);
+        git(repo, &["config", "commit.gpgsign", "false"]);
+    }
+
+    fn git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed\nstdout: {}\nstderr: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn git_out(repo: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {} failed\nstdout: {}\nstderr: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
+
+    fn cmd(program: &str, args: &[&str]) {
+        let output = Command::new(program).args(args).output().unwrap();
+        assert!(
+            output.status.success(),
+            "{} {} failed\nstdout: {}\nstderr: {}",
+            program,
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

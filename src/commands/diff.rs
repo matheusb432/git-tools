@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use crate::cli::DiffTarget;
 use crate::commands::{
     Mode, legacy_count_label, legacy_unpushed_commit_label, output_file, ranges, repo_name,
 };
@@ -9,36 +10,50 @@ use crate::model::View;
 use crate::open::open_file;
 use crate::render::build_html;
 
-pub fn run(
-    repo: impl AsRef<Path>,
-    monorepo: impl AsRef<Path>,
-    base: Option<&str>,
-) -> anyhow::Result<PathBuf> {
-    let top = git::top_level(repo)?;
-    let branch = git::current_branch(&top)?;
-    let repo_name = repo_name(&top);
+pub fn run(target: &DiffTarget) -> anyhow::Result<PathBuf> {
+    let top = git::top_level(".")?;
+    render(&top, &top, target)
+}
 
-    let base = base.map(str::trim).filter(|base| !base.is_empty());
-    let (base_ref, io_ranges, view_ranges) = if let Some(base) = base {
-        git::verify_commit(&top, base)?;
-        let short = git::short_ref(&top, base)?;
-        (
-            short.clone(),
-            ranges(base, Mode::Hash),
-            ranges(&short, Mode::Hash),
-        )
-    } else {
-        let upstream = git::upstream(&top)?;
-        (
-            upstream.clone(),
-            ranges(&upstream, Mode::Unpushed),
-            ranges(&upstream, Mode::Unpushed),
-        )
+pub(crate) fn render(
+    top: &str,
+    monorepo: impl AsRef<Path>,
+    target: &DiffTarget,
+) -> anyhow::Result<PathBuf> {
+    let branch = git::current_branch(top)?;
+    let repo_name = repo_name(top);
+
+    let (base_ref, io_ranges, view_ranges) = match target {
+        DiffTarget::Range(range) => {
+            verify_exact_range(top, range)?;
+            (
+                range.clone(),
+                ranges(range, Mode::ExactRange),
+                ranges(range, Mode::ExactRange),
+            )
+        }
+        DiffTarget::Base(base) => {
+            git::verify_commit(top, base)?;
+            let short = git::short_ref(top, base)?;
+            (
+                short.clone(),
+                ranges(base, Mode::Hash),
+                ranges(&short, Mode::Hash),
+            )
+        }
+        DiffTarget::Unpushed => {
+            let upstream = git::upstream(top)?;
+            (
+                upstream.clone(),
+                ranges(&upstream, Mode::Unpushed),
+                ranges(&upstream, Mode::Unpushed),
+            )
+        }
     };
 
-    let commits = git::log_commits(&top, &io_ranges.log_range)?;
-    let mut files = parse_diff(&git::diff_raw(&top, &io_ranges.diff_args)?);
-    let file_commits = git::file_commit_map(&top, &io_ranges.log_range)?;
+    let commits = git::log_commits(top, &io_ranges.log_range)?;
+    let mut files = parse_diff(&git::diff_raw(top, &io_ranges.diff_args)?);
+    let file_commits = git::file_commit_map(top, &io_ranges.log_range)?;
     git::attach_commits(&mut files, &file_commits);
 
     let view = View {
@@ -53,10 +68,10 @@ pub fn run(
         files,
     };
 
-    let summary = if base.is_some() {
-        format!("{}..working", base_ref)
-    } else {
-        legacy_unpushed_commit_label(view.commits.len())
+    let summary = match target {
+        DiffTarget::Range(_) => base_ref.clone(),
+        DiffTarget::Base(_) => format!("{base_ref}..working"),
+        DiffTarget::Unpushed => legacy_unpushed_commit_label(view.commits.len()),
     };
     let file_count = view.files.len();
     let html = build_html(&view);
@@ -69,4 +84,16 @@ pub fn run(
     println!("wrote {}", out_file.display());
     open_file(&out_file);
     Ok(out_file)
+}
+
+fn verify_exact_range(repo: impl AsRef<Path>, range: &str) -> anyhow::Result<()> {
+    let Some((start, end)) = range.split_once("..") else {
+        anyhow::bail!("range must use <start>..<end>");
+    };
+    if start.trim().is_empty() || end.trim().is_empty() {
+        anyhow::bail!("range must use <start>..<end>");
+    }
+    git::verify_commit(repo.as_ref(), start)?;
+    git::verify_commit(repo, end)?;
+    Ok(())
 }

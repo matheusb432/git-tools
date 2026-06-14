@@ -9,20 +9,20 @@ pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
     let mut cur: Option<FileDiff> = None;
 
     for line in raw.split('\n') {
-        if let Some(rest) = line.strip_prefix("diff --git a/") {
-            if let Some((_, path)) = rest.split_once(" b/") {
-                if let Some(file) = cur.take() {
-                    files.push(file);
-                }
-                cur = Some(FileDiff {
-                    path: path.to_string(),
-                    added: 0,
-                    removed: 0,
-                    lines: Vec::new(),
-                    commits: Vec::new(),
-                });
-                continue;
+        if let Some(rest) = line.strip_prefix("diff --git a/")
+            && let Some((_, path)) = rest.split_once(" b/")
+        {
+            if let Some(file) = cur.take() {
+                files.push(file);
             }
+            cur = Some(FileDiff {
+                path: path.to_string(),
+                added: 0,
+                removed: 0,
+                lines: Vec::new(),
+                commits: Vec::new(),
+            });
+            continue;
         }
 
         let Some(file) = cur.as_mut() else {

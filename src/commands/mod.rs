@@ -6,6 +6,8 @@ use anyhow::Context;
 use crate::model::{Cmd, Foot};
 
 pub mod diff;
+pub mod diff_subrepos;
+pub mod managed;
 pub mod merge_diff;
 pub mod squash_local;
 pub mod squash_preview;
@@ -15,6 +17,7 @@ pub enum Mode {
     Unpushed,
     Hash,
     Merge,
+    ExactRange,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +91,22 @@ pub fn ranges(base: &str, mode: Mode) -> Ranges {
                 },
             }
         }
+        Mode::ExactRange => Ranges {
+            diff_args: vec!["diff".to_string(), base.to_string()],
+            diff_range: base.to_string(),
+            log_range: base.to_string(),
+            title: "diff".to_string(),
+            cmd: Cmd {
+                lead: "git diff ".to_string(),
+                range: base.to_string(),
+                trail: String::new(),
+            },
+            commits_label: "# commits in range".to_string(),
+            foot: Foot {
+                cmd: format!("git diff {base}"),
+                note: "# commit range — read-only preview".to_string(),
+            },
+        },
     }
 }
 
@@ -157,6 +176,16 @@ mod tests {
         assert_eq!(ranges.title, "diff");
         assert_eq!(ranges.commits_label, "# unpushed commits");
         assert_eq!(ranges.foot.cmd, "git diff origin/main..HEAD");
+    }
+
+    #[test]
+    fn exact_range_mode_uses_range_for_diff_and_log() {
+        let ranges = ranges("abc123..def456", Mode::ExactRange);
+
+        assert_eq!(ranges.diff_args, vec!["diff", "abc123..def456"]);
+        assert_eq!(ranges.diff_range, "abc123..def456");
+        assert_eq!(ranges.log_range, "abc123..def456");
+        assert_eq!(ranges.commits_label, "# commits in range");
     }
 
     #[test]

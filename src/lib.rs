@@ -1,6 +1,7 @@
-//! git-tools - CLI skeleton: arg routing + a machine-readable exit-code contract.
+//! git-tools - CLI entry point: clap parsing + a machine-readable exit-code contract.
 
-use crate::cli::Command;
+use crate::cli::{Cli, Command, DiffTarget, ManagedArgs};
+use crate::commands::managed::{ManagedExit, ManagedOptions, ManagedRun};
 use crate::commands::squash_local::{SquashResult, Status, StdGitRunner, invoke_squash_local};
 
 pub mod cli;
@@ -41,68 +42,101 @@ fn squash_local_output_stream(status: Status) -> OutputStream {
     }
 }
 
-fn help_text() -> String {
-    format!(
-        "\
-git-tools - a CLI
-
-USAGE:
-    git-tools <command> [args]
-
-COMMANDS:
-    squash-preview --repo <path> --monorepo <path>
-    diff --repo <path> --monorepo <path> [--base <ref>]
-    merge-diff --repo <path> --monorepo <path> [--base <ref>] (default: {})
-    squash-local <message> --repo <path> [--dry]
-
-FLAGS:
-    -h, --help       Show this help
-    -V, --version    Show version",
-        commands::merge_diff::DEFAULT_BASE
-    )
-}
-
 /// Route argv (already stripped of argv[0]) to an [`ExitCode`].
 pub fn run(args: &[String]) -> ExitCode {
-    match args.first().map(String::as_str) {
-        None | Some("-h") | Some("--help") | Some("help") => {
-            println!("{}", help_text());
-            ExitCode::Ok
-        }
-        Some("-V") | Some("--version") => {
-            println!("git-tools {}", env!("CARGO_PKG_VERSION"));
-            ExitCode::Ok
-        }
-        Some(_) => dispatch(args),
+    match Cli::parse_args(args) {
+        Ok(cli) => dispatch(cli.command),
+        Err(error) => render_clap_error(&error),
     }
 }
 
-fn dispatch(args: &[String]) -> ExitCode {
-    match cli::parse(args) {
-        Ok(Command::SquashPreview { repo, monorepo }) => {
+/// Prints a clap parse outcome and maps it to an exit code: help/version are successes,
+/// everything else is a usage error.
+fn render_clap_error(error: &clap::Error) -> ExitCode {
+    use clap::error::ErrorKind;
+
+    // clap routes help/version to stdout and genuine usage errors to stderr.
+    let _ = error.print();
+    match error.kind() {
+        ErrorKind::DisplayHelp
+        | ErrorKind::DisplayVersion
+        | ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => ExitCode::Ok,
+        _ => ExitCode::Usage,
+    }
+}
+
+fn dispatch(command: Command) -> ExitCode {
+    match command {
+        Command::SquashPreview { repo, monorepo } => {
             html_exit(commands::squash_preview::run(repo, monorepo))
         }
-        Ok(Command::Diff {
+        Command::Diff { target } => html_exit(commands::diff::run(&DiffTarget::from_arg(
+            target.as_deref(),
+        ))),
+        Command::DiffSubrepos {
             repo,
             monorepo,
             base,
-        }) => html_exit(commands::diff::run(repo, monorepo, base.as_deref())),
-        Ok(Command::MergeDiff {
+        } => html_exit(commands::diff_subrepos::run(
+            repo,
+            monorepo,
+            base.as_deref(),
+        )),
+        Command::MergeDiff {
             repo,
             monorepo,
             base,
-        }) => html_exit(commands::merge_diff::run(repo, monorepo, base.as_deref())),
-        Ok(Command::SquashLocal { repo, message, dry }) => {
+        } => html_exit(commands::merge_diff::run(repo, monorepo, base.as_deref())),
+        Command::SquashLocal { repo, message, dry } => {
             let runner = StdGitRunner;
             let result = invoke_squash_local(&runner, repo, Some(&message), dry);
             print_squash_local_result(&result, &message);
             squash_local_exit_code(result.status)
         }
-        Err(error) => {
-            eprintln!("[git-tools]: {} (try `git-tools --help`)", error.message());
-            ExitCode::Usage
-        }
+        Command::PushAll(args) => managed_exit(commands::managed::run_push_all(&managed_options(
+            args, None,
+        ))),
+        Command::PullAll(args) => managed_exit(commands::managed::run_pull_all(&managed_options(
+            args, None,
+        ))),
+        Command::CommitAll {
+            managed,
+            message_for_all,
+        } => managed_exit(commands::managed::run_commit_all(&managed_options(
+            managed,
+            message_for_all,
+        ))),
     }
+}
+
+/// Builds the [`ManagedOptions`] for a fan-out command from its parsed flags.
+fn managed_options(args: ManagedArgs, message_for_all: Option<String>) -> ManagedOptions {
+    ManagedOptions {
+        repos_file: args.repos_file.map(Into::into),
+        home_dir: args.home_dir.map(Into::into),
+        dry: args.dry,
+        json: args.json,
+        message_for_all,
+        interactive: is_interactive(),
+    }
+}
+
+fn managed_exit<T>(run: ManagedRun<T>) -> ExitCode {
+    if !run.stdout.is_empty() {
+        println!("{}", run.stdout);
+    }
+    if !run.stderr.is_empty() {
+        eprintln!("{}", run.stderr);
+    }
+    match run.exit {
+        ManagedExit::Clean => ExitCode::Ok,
+        ManagedExit::Warn => ExitCode::Internal,
+        ManagedExit::Fail | ManagedExit::Usage => ExitCode::Usage,
+    }
+}
+
+fn is_interactive() -> bool {
+    std::io::IsTerminal::is_terminal(&std::io::stdin())
 }
 
 fn html_exit(result: anyhow::Result<std::path::PathBuf>) -> ExitCode {
@@ -179,11 +213,11 @@ mod tests {
     }
 
     #[test]
-    fn help_mentions_merge_diff_default_from_command_constant() {
-        assert!(help_text().contains(&format!(
-            "merge-diff --repo <path> --monorepo <path> [--base <ref>] (default: {})",
-            commands::merge_diff::DEFAULT_BASE
-        )));
+    fn blank_commit_all_message_is_usage() {
+        assert_eq!(
+            run(&["commit-all".into(), "--message-for-all".into(), "".into()]),
+            ExitCode::Usage
+        );
     }
 
     #[test]
