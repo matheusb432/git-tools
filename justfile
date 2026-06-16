@@ -1,4 +1,5 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+set windows-shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 _binname := if os() == "windows" { "git-tools.exe" } else { "git-tools" }
 _bin := justfile_directory() / "target" / "release" / _binname

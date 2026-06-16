@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, anyhow};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+const STATUS_COLORS_TOML: &str = include_str!("../../config/status-colors.toml");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedRepo {
@@ -36,6 +38,7 @@ pub struct ManagedOptions {
     pub home_dir: Option<PathBuf>,
     pub dry: bool,
     pub json: bool,
+    pub color: bool,
     pub message_for_all: Option<String>,
     pub interactive: bool,
 }
@@ -72,6 +75,21 @@ pub struct CommitResult {
     pub dirty: bool,
     pub files: Vec<CommitFile>,
     pub action: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct StatusResult {
+    pub name: String,
+    pub present: bool,
+    pub branch: String,
+    pub upstream: String,
+    pub ahead: usize,
+    pub dirty: bool,
+    pub dirty_count: usize,
+    pub untracked_count: usize,
+    pub state: String,
     pub detail: String,
 }
 
@@ -124,16 +142,9 @@ pub fn resolve_repos_file(override_file: Option<&Path>) -> anyhow::Result<PathBu
     if let Some(found) = find_upward_config(std::env::current_dir()?.as_path()) {
         return Ok(found);
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        return Ok(PathBuf::from(home)
-            .join("self")
-            .join("sample_project")
-            .join("config")
-            .join("provisioning")
-            .join("linux")
-            .join("repos.txt"));
-    }
-    Err(anyhow!("managed-repos manifest path could not be resolved"))
+    Err(anyhow!(
+        "managed-repos manifest not found; pass --file or set GIT_TOOLS_MANAGED_REPOS_FILE"
+    ))
 }
 
 fn find_upward_config(start: &Path) -> Option<PathBuf> {
@@ -150,7 +161,7 @@ fn find_upward_config(start: &Path) -> Option<PathBuf> {
     None
 }
 
-fn load_repos(options: &ManagedOptions) -> anyhow::Result<Vec<ManagedRepo>> {
+pub fn load_repos(options: &ManagedOptions) -> anyhow::Result<Vec<ManagedRepo>> {
     let repos_file = resolve_repos_file(options.repos_file.as_deref())?;
     let home_dir = resolve_home_dir(options.home_dir.as_deref());
     let raw = std::fs::read_to_string(&repos_file)
@@ -289,6 +300,27 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
     }
 }
 
+pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
+    match load_repos(options) {
+        Ok(repos) => {
+            let results = repos.iter().map(status_one).collect::<Vec<_>>();
+            let stdout = format_status(options.json, options.color, &results);
+            ManagedRun {
+                exit: ManagedExit::Clean,
+                results,
+                stdout,
+                stderr: String::new(),
+            }
+        }
+        Err(error) => ManagedRun {
+            exit: ManagedExit::Fail,
+            results: Vec::new(),
+            stdout: String::new(),
+            stderr: format!("{error:#}"),
+        },
+    }
+}
+
 fn push_one(repo: &ManagedRepo, dry: bool) -> PushPullResult {
     let mut result = push_pull_result(repo, "", "", "");
     if !repo.path.join(".git").exists() {
@@ -344,6 +376,93 @@ fn push_one(repo: &ManagedRepo, dry: bool) -> PushPullResult {
             result.detail = error.to_string();
         }
     }
+    result
+}
+
+fn status_one(repo: &ManagedRepo) -> StatusResult {
+    let mut result = StatusResult {
+        name: repo.name.clone(),
+        present: false,
+        branch: String::new(),
+        upstream: String::new(),
+        ahead: 0,
+        dirty: false,
+        dirty_count: 0,
+        untracked_count: 0,
+        state: "absent".to_string(),
+        detail: "not present".to_string(),
+    };
+
+    if !repo.path.join(".git").exists() {
+        return result;
+    }
+
+    result.present = true;
+    result.branch = match git_capture(&repo.path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+        Ok(output) if output.success() => output.stdout.trim().to_string(),
+        _ => String::new(),
+    };
+
+    let dirty = dirty_state(&repo.path);
+    result.untracked_count = dirty
+        .files
+        .iter()
+        .filter(|file| file.status == "??")
+        .count();
+    result.dirty_count = dirty.files.len().saturating_sub(result.untracked_count);
+    result.dirty = result.dirty_count > 0 || result.untracked_count > 0;
+
+    let mut parts = Vec::new();
+    if result.branch.is_empty() {
+        parts.push("branch-unavailable".to_string());
+    } else if result.branch == "HEAD" {
+        result.branch = "detached".to_string();
+        parts.push("detached".to_string());
+    } else {
+        result.upstream = match git_capture(
+            &repo.path,
+            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        ) {
+            Ok(output) if output.success() => output.stdout.trim().to_string(),
+            _ => String::new(),
+        };
+
+        if result.upstream.is_empty() {
+            parts.push("no-upstream".to_string());
+        } else {
+            result.ahead = match git_capture(&repo.path, &["rev-list", "--count", "@{u}..HEAD"]) {
+                Ok(output) if output.success() => output.stdout.trim().parse().unwrap_or(0),
+                _ => 0,
+            };
+            if result.ahead > 0 {
+                parts.push(format!("⇡{}", result.ahead));
+            }
+        }
+    }
+
+    let change_symbols = format!(
+        "{}{}",
+        if result.dirty_count > 0 { "!" } else { "" },
+        if result.untracked_count > 0 { "?" } else { "" }
+    );
+    if !change_symbols.is_empty() {
+        parts.push(change_symbols);
+    }
+    if parts.is_empty() {
+        parts.push("✓".to_string());
+    }
+
+    result.detail = parts.join(" ");
+    result.state = if result.detail == "✓" {
+        "clean".to_string()
+    } else if result.detail.contains("no-upstream")
+        || result.detail.contains("detached")
+        || result.detail.contains("branch-unavailable")
+    {
+        "warn".to_string()
+    } else {
+        "pending".to_string()
+    };
     result
 }
 
@@ -712,6 +831,147 @@ pub fn format_commit(dry: bool, json: bool, results: &[CommitResult]) -> String 
     out
 }
 
+pub fn format_status(json: bool, color: bool, results: &[StatusResult]) -> String {
+    if json {
+        return serde_json::to_string_pretty(results).unwrap_or_else(|_| "[]".to_string());
+    }
+
+    let palette = color.then(StatusColorPalette::from_embedded_toml);
+    results
+        .iter()
+        .map(|result| format_status_line(result, palette.as_ref()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn format_status_line(result: &StatusResult, palette: Option<&StatusColorPalette>) -> String {
+    if !result.present {
+        return format!(
+            "{} (absent) {}",
+            result.name,
+            format_bracketed_status(&result.detail, palette)
+        );
+    }
+
+    let branch = if result.branch.is_empty() {
+        "(unknown)"
+    } else {
+        result.branch.as_str()
+    };
+    format!(
+        "{} {} {}",
+        result.name,
+        branch,
+        format_bracketed_status(&result.detail, palette)
+    )
+}
+
+fn format_bracketed_status(detail: &str, palette: Option<&StatusColorPalette>) -> String {
+    let Some(palette) = palette else {
+        return format!("[{detail}]");
+    };
+
+    format!(
+        "\x1b[1m{}{}{}\x1b[0m",
+        palette.brackets.paint("["),
+        colorize_status_detail(detail, palette),
+        palette.brackets.paint("]")
+    )
+}
+
+fn colorize_status_detail(detail: &str, palette: &StatusColorPalette) -> String {
+    detail
+        .split_whitespace()
+        .map(|token| match token {
+            "✓" => palette.checkmark.paint(token),
+            "!" | "?" | "!?" | "?!" => palette.change_markers.paint(token),
+            ahead if ahead.starts_with('⇡') => colorize_ahead(ahead, palette),
+            _ => token.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn colorize_ahead(value: &str, palette: &StatusColorPalette) -> String {
+    let Some(count) = value.strip_prefix('⇡') else {
+        return value.to_string();
+    };
+    format!("{}{}", palette.ahead_arrow.paint("⇡"), count)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StatusColorPalette {
+    brackets: Rgb,
+    ahead_arrow: Rgb,
+    checkmark: Rgb,
+    change_markers: Rgb,
+}
+
+impl StatusColorPalette {
+    fn from_embedded_toml() -> Self {
+        Self::from_toml(STATUS_COLORS_TOML).expect("embedded status color palette should be valid")
+    }
+
+    fn from_toml(raw: &str) -> anyhow::Result<Self> {
+        let file: StatusColorPaletteToml =
+            toml::from_str(raw).context("failed to parse embedded status color palette TOML")?;
+        Ok(Self {
+            brackets: Rgb::from_hex(&file.brackets_color)
+                .context("invalid brackets_color in status color palette")?,
+            ahead_arrow: Rgb::from_hex(&file.ahead_arrow_color)
+                .context("invalid ahead_arrow_color in status color palette")?,
+            checkmark: Rgb::from_hex(&file.checkmark_color)
+                .context("invalid checkmark_color in status color palette")?,
+            change_markers: Rgb::from_hex(&file.change_markers_color)
+                .context("invalid change_markers_color in status color palette")?,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct StatusColorPaletteToml {
+    brackets_color: String,
+    ahead_arrow_color: String,
+    checkmark_color: String,
+    change_markers_color: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Rgb {
+    red: u8,
+    green: u8,
+    blue: u8,
+}
+
+impl Rgb {
+    fn from_hex(value: &str) -> anyhow::Result<Self> {
+        let hex = value
+            .strip_prefix('#')
+            .ok_or_else(|| anyhow!("hex color must start with '#': {value}"))?;
+        if hex.len() != 6 {
+            anyhow::bail!("hex color must use #rrggbb form: {value}");
+        }
+
+        Ok(Self {
+            red: parse_hex_channel(value, &hex[0..2])?,
+            green: parse_hex_channel(value, &hex[2..4])?,
+            blue: parse_hex_channel(value, &hex[4..6])?,
+        })
+    }
+
+    fn paint(self, value: &str) -> String {
+        format!(
+            "\x1b[38;2;{};{};{}m{value}\x1b[39m",
+            self.red, self.green, self.blue
+        )
+    }
+}
+
+fn parse_hex_channel(color: &str, channel: &str) -> anyhow::Result<u8> {
+    u8::from_str_radix(channel, 16)
+        .with_context(|| format!("hex color contains invalid digits: {color}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -720,22 +980,34 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn parses_manifest_like_sample_project() {
+    fn parses_manifest_with_comments_blanks_and_missing_remote() {
         let repos = parse_manifest(
-            "# comment\nself/sample_project\thttps://example.invalid/cfg.git\n\n tools/git-tools\t\n",
+            "# comment\nself/repo-b\thttps://example.invalid/cfg.git\n\n tools/git-tools\t\n",
             Path::new("/home/me"),
         )
         .unwrap();
 
         assert_eq!(repos.len(), 2);
-        assert_eq!(repos[0].name, "self/sample_project");
-        assert_eq!(
-            repos[0].path,
-            Path::new("/home/me").join("self/sample_project")
-        );
+        assert_eq!(repos[0].name, "self/repo-b");
+        assert_eq!(repos[0].path, Path::new("/home/me").join("self/repo-b"));
         assert_eq!(repos[0].remote, "https://example.invalid/cfg.git");
         assert_eq!(repos[1].name, "tools/git-tools");
         assert_eq!(repos[1].remote, "");
+    }
+
+    #[test]
+    fn resolve_repos_file_errors_without_override_env_or_upward_config() {
+        // No override, no env var, and the crate-root cwd has no
+        // config/provisioning/linux/repos.txt above it -> must Err (no personal default).
+        // SAFETY: single-threaded mutation guarded by no other test setting this var.
+        unsafe { std::env::remove_var("GIT_TOOLS_MANAGED_REPOS_FILE") };
+
+        let err = resolve_repos_file(None).expect_err("no manifest should be resolvable");
+        let message = err.to_string();
+        assert!(
+            message.contains("--file") && message.contains("GIT_TOOLS_MANAGED_REPOS_FILE"),
+            "error should point at --file / the env var, got: {message}"
+        );
     }
 
     #[test]
@@ -763,6 +1035,26 @@ mod tests {
     }
 
     #[test]
+    fn status_colors_live_in_toml() {
+        let raw = std::fs::read_to_string("config/status-colors.toml").unwrap();
+        let file: StatusColorPaletteToml = toml::from_str(&raw).unwrap();
+
+        assert_eq!(file.brackets_color, "#f28500");
+        assert_eq!(file.ahead_arrow_color, "#f28500");
+        assert_eq!(file.checkmark_color, "#2ecc71");
+        assert_eq!(file.change_markers_color, "#ff4d4d");
+
+        let source = std::fs::read_to_string("src/commands/managed.rs").unwrap();
+        let production_source = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("managed.rs should contain production source");
+        assert!(!production_source.contains("242;133;0m{value}"));
+        assert!(!production_source.contains("\\x1b[31m{value}"));
+        assert!(!production_source.contains("\\x1b[32m{value}"));
+    }
+
+    #[test]
     fn commit_all_dry_reports_dirty_without_committing() {
         let fixture = ManagedFixture::new("commit-dry");
         let repo = fixture.init_repo("repo");
@@ -775,6 +1067,7 @@ mod tests {
             home_dir: Some(fixture.home.clone()),
             dry: true,
             json: false,
+            color: false,
             message_for_all: None,
             interactive: false,
         });
@@ -796,6 +1089,7 @@ mod tests {
             home_dir: Some(fixture.home.clone()),
             dry: false,
             json: false,
+            color: false,
             message_for_all: Some("save work".to_string()),
             interactive: false,
         });
@@ -822,6 +1116,7 @@ mod tests {
             home_dir: Some(fixture.home.clone()),
             dry: true,
             json: false,
+            color: false,
             message_for_all: None,
             interactive: false,
         });
@@ -851,6 +1146,7 @@ mod tests {
             home_dir: Some(fixture.home.clone()),
             dry: false,
             json: false,
+            color: false,
             message_for_all: None,
             interactive: false,
         });
@@ -876,6 +1172,7 @@ mod tests {
             home_dir: Some(fixture.home.clone()),
             dry: true,
             json: false,
+            color: false,
             message_for_all: None,
             interactive: false,
         });

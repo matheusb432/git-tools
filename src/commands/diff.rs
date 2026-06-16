@@ -20,6 +20,22 @@ pub(crate) fn render(
     monorepo: impl AsRef<Path>,
     target: &DiffTarget,
 ) -> anyhow::Result<PathBuf> {
+    let (view, summary) = build_view(top, target)?;
+    let file_count = view.files.len();
+    let repo_name = view.repo_name.clone();
+    let html = build_html(&view);
+    let out_file = output_file(monorepo, &format!("diff-preview-{repo_name}.html"), &html)?;
+
+    println!(
+        "diff-preview: {summary}, {}",
+        legacy_count_label(file_count, "file")
+    );
+    println!("wrote {}", out_file.display());
+    open_file(&out_file);
+    Ok(out_file)
+}
+
+pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View, String)> {
     let branch = git::current_branch(top)?;
     let repo_name = repo_name(top);
 
@@ -49,6 +65,16 @@ pub(crate) fn render(
                 ranges(&upstream, Mode::Unpushed),
             )
         }
+        DiffTarget::Last(count) => {
+            // * "last N" is just the HEAD~N..HEAD range; reuse the verified ExactRange plumbing.
+            let range = format!("HEAD~{count}..HEAD");
+            verify_exact_range(top, &range)?;
+            (
+                range.clone(),
+                ranges(&range, Mode::ExactRange),
+                ranges(&range, Mode::ExactRange),
+            )
+        }
     };
 
     let commits = git::log_commits(top, &io_ranges.log_range)?;
@@ -72,18 +98,12 @@ pub(crate) fn render(
         DiffTarget::Range(_) => base_ref.clone(),
         DiffTarget::Base(_) => format!("{base_ref}..working"),
         DiffTarget::Unpushed => legacy_unpushed_commit_label(view.commits.len()),
+        DiffTarget::Last(count) => format!(
+            "last {}",
+            legacy_count_label(count.get() as usize, "commit")
+        ),
     };
-    let file_count = view.files.len();
-    let html = build_html(&view);
-    let out_file = output_file(monorepo, &format!("diff-preview-{repo_name}.html"), &html)?;
-
-    println!(
-        "diff-preview: {summary}, {}",
-        legacy_count_label(file_count, "file")
-    );
-    println!("wrote {}", out_file.display());
-    open_file(&out_file);
-    Ok(out_file)
+    Ok((view, summary))
 }
 
 fn verify_exact_range(repo: impl AsRef<Path>, range: &str) -> anyhow::Result<()> {

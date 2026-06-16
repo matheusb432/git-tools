@@ -18,6 +18,8 @@ fn top_level_help_lists_every_subcommand() {
         "diff-subrepos",
         "merge-diff",
         "squash-local",
+        "sync",
+        "status",
         "push-all",
         "pull-all",
         "commit-all",
@@ -59,6 +61,69 @@ fn lean_diff_rejects_explicit_flags_exit_2() {
 }
 
 #[test]
+fn diff_help_documents_the_last_flag() {
+    git_tools()
+        .args(["diff", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--last"))
+        .stdout(contains("last N commits"));
+}
+
+#[test]
+fn diff_help_lists_the_subrepos_subcommand() {
+    git_tools()
+        .args(["diff", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("subrepos"));
+}
+
+#[test]
+fn diff_subrepos_help_documents_the_last_flag() {
+    git_tools()
+        .args(["diff", "subrepos", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--last"))
+        .stdout(contains("last N commits"));
+}
+
+#[test]
+fn diff_help_documents_the_unpushed_flag() {
+    git_tools()
+        .args(["diff", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--unpushed"))
+        .stdout(contains("unpushed"));
+}
+
+#[test]
+fn diff_help_documents_the_all_flag_and_managed_overrides() {
+    git_tools()
+        .args(["diff", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--all"))
+        .stdout(contains("--repos-file"))
+        .stdout(contains("--home-dir"));
+}
+
+#[test]
+fn diff_last_zero_is_usage_error_exit_2() {
+    git_tools().args(["diff", "-l", "0"]).assert().code(2);
+}
+
+#[test]
+fn diff_last_with_target_is_usage_error_exit_2() {
+    git_tools()
+        .args(["diff", "abc123", "-l", "2"])
+        .assert()
+        .code(2);
+}
+
+#[test]
 fn diff_subrepos_without_required_flags_is_usage_error_exit_2() {
     // clap enforces the required --repo/--monorepo pair (only --repo given here).
     git_tools()
@@ -73,6 +138,31 @@ fn squash_local_without_message_is_usage_error_exit_2() {
         .args(["squash-local", "--repo", "r"])
         .assert()
         .code(2);
+}
+
+#[test]
+fn sync_help_documents_the_yes_flag() {
+    git_tools()
+        .args(["sync", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--yes"))
+        .stdout(contains("push"));
+}
+
+#[test]
+fn sync_without_message_is_usage_error_exit_2() {
+    git_tools().arg("sync").assert().code(2);
+}
+
+#[test]
+fn sync_empty_message_is_usage_error_exit_2() {
+    // Guarded before any git runs, so this is safe to assert from the crate dir.
+    git_tools()
+        .args(["sync", ""])
+        .assert()
+        .code(2)
+        .stderr(contains("non-empty commit message"));
 }
 
 #[test]
@@ -102,4 +192,26 @@ fn commit_all_help_lists_message_for_all() {
         .assert()
         .success()
         .stdout(contains("--message-for-all"));
+}
+
+#[test]
+fn status_help_lists_managed_repo_flags() {
+    git_tools()
+        .args(["status", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--repos-file"))
+        .stdout(contains("--home-dir"))
+        .stdout(contains("--json"))
+        .stdout(contains("--color"));
+}
+
+#[test]
+fn ls_alias_routes_to_status_help() {
+    git_tools()
+        .args(["ls", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--repos-file"))
+        .stdout(contains("--json"));
 }

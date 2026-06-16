@@ -316,6 +316,68 @@ pub fn build_html(view: &View) -> String {
     )
 }
 
+pub fn build_tabbed_html(title: &str, views: &[View]) -> String {
+    let tabs = views
+        .iter()
+        .enumerate()
+        .map(|(index, view)| {
+            let selected = if index == 0 { "true" } else { "false" };
+            let active = if index == 0 { " active" } else { "" };
+            format!(
+                r#"<button class="tab{active}" id="tab-{index}" role="tab" aria-selected="{selected}" aria-controls="panel-{index}" data-tab="{index}">{}</button>"#,
+                escape_html(&view.repo_name)
+            )
+        })
+        .collect::<String>();
+    let panels = views
+        .iter()
+        .enumerate()
+        .map(|(index, view)| {
+            let hidden = if index == 0 { "" } else { " hidden" };
+            format!(
+                r#"<section id="panel-{index}" role="tabpanel" aria-labelledby="tab-{index}"{hidden}><iframe title="{}" srcdoc="{}"></iframe></section>"#,
+                escape_html(&view.repo_name),
+                escape_html(&build_html(view))
+            )
+        })
+        .collect::<String>();
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+  :root{{color-scheme:dark;--bg:#0a0d13;--bar:#161b22;--line:#2d333b;--ink:#c9d1d9;--dim:#768390;--cyan:#39c5cf;--green:#3fb950;--mono:ui-monospace,"Cascadia Code","JetBrains Mono","SF Mono","Fira Code",Menlo,Consolas,monospace}}
+  *{{box-sizing:border-box}} body{{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:13px}}
+  .tabs{{position:sticky;top:0;z-index:10;display:flex;gap:6px;align-items:center;overflow-x:auto;padding:10px 12px;background:var(--bar);border-bottom:1px solid var(--line)}}
+  .tab{{flex:none;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim);background:#0d1117;border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}}
+  .tab:hover{{color:var(--ink);border-color:var(--cyan)}} .tab.active{{color:var(--green);border-color:var(--green)}}
+  section[hidden]{{display:none}} iframe{{display:block;width:100%;height:calc(100vh - 47px);border:0;background:var(--bg)}}
+</style></head>
+<body>
+<nav class="tabs" role="tablist" aria-label="Subrepo diffs">{tabs}</nav>
+{panels}
+<script>
+(function(){{
+  var tabs = [].slice.call(document.querySelectorAll('[role="tab"]'));
+  var panels = [].slice.call(document.querySelectorAll('[role="tabpanel"]'));
+  tabs.forEach(function(tab){{
+    tab.addEventListener('click', function(){{
+      var index = tab.getAttribute('data-tab');
+      tabs.forEach(function(t){{ var active = t === tab; t.classList.toggle('active', active); t.setAttribute('aria-selected', String(active)); }});
+      panels.forEach(function(panel){{ panel.hidden = panel.id !== 'panel-' + index; }});
+    }});
+  }});
+}})();
+</script>
+</body></html>"#,
+        title = escape_html(title),
+        tabs = tabs,
+        panels = panels,
+    )
+}
+
 fn is_meta_line(raw: &str) -> bool {
     raw.starts_with("index ")
         || raw.starts_with("--- ")
@@ -597,6 +659,22 @@ mod tests {
         assert!(html.contains("src/&lt;x&gt;&amp;&quot;.rs"));
         assert!(!html.contains("<script>x</script>"));
         assert!(html.contains("+&lt;script&gt;x&lt;/script&gt;"));
+    }
+
+    #[test]
+    fn build_tabbed_html_wraps_each_repo_view_in_a_tab() {
+        let mut api = sample_view();
+        api.repo_name = "api".to_string();
+        let mut web = sample_view();
+        web.repo_name = "web".to_string();
+
+        let html = build_tabbed_html("subrepo diff", &[api, web]);
+
+        assert!(html.starts_with("<!DOCTYPE html>"));
+        assert_eq!(html.matches(r#"<button class="tab"#).count(), 2);
+        assert!(html.contains("api"));
+        assert!(html.contains("web"));
+        assert!(html.contains("srcdoc="));
     }
 
     fn sample_view() -> View {

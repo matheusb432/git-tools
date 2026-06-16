@@ -20,6 +20,111 @@ struct Repo {
     monorepo: PathBuf,
 }
 
+struct NestedRepos {
+    _tmp: TempDir,
+    root: PathBuf,
+    repos: Vec<PathBuf>,
+}
+
+impl NestedRepos {
+    fn new(names: &[&str]) -> Self {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let repos = names.iter().map(|name| root.join(name)).collect::<Vec<_>>();
+
+        for repo in &repos {
+            std::fs::create_dir_all(repo).unwrap();
+            let out = Git::new("git")
+                .args(["init", "-b", "main"])
+                .arg(repo)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git init failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            git_in(repo, &["config", "user.name", "E2E Bot"]);
+            git_in(repo, &["config", "user.email", "e2e@example.invalid"]);
+            git_in(repo, &["config", "commit.gpgsign", "false"]);
+            git_in(repo, &["config", "core.autocrlf", "false"]);
+            commit_in(repo, "README.md", "base\n", "chore: base");
+            commit_in(repo, "README.md", "base\nlocal\n", "feat: local work");
+        }
+
+        Self {
+            _tmp: tmp,
+            root,
+            repos,
+        }
+    }
+
+    fn run(&self, args: &[&str]) -> Command {
+        let mut cmd = Command::cargo_bin("git-tools").unwrap();
+        cmd.args(args)
+            .current_dir(&self.root)
+            .env("GIT_TOOLS_NO_OPEN", "1");
+        cmd
+    }
+
+    fn artifact(&self) -> PathBuf {
+        self.root.join(".artifacts/diff-preview-subrepos.html")
+    }
+}
+
+fn git_in(repo: &Path, args: &[&str]) -> String {
+    let out = Git::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+fn commit_in(repo: &Path, file: &str, contents: &str, message: &str) -> String {
+    let path = repo.join(file);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(&path, contents).unwrap();
+    git_in(repo, &["add", "-A"]);
+    let out = Git::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["commit", "-m", message])
+        .env("GIT_AUTHOR_DATE", "2026-01-01T12:00:00")
+        .env("GIT_COMMITTER_DATE", "2026-01-01T12:00:00")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "commit failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    git_in(repo, &["rev-parse", "HEAD"])
+}
+
+fn add_upstream_for(repo: &Path, remote: &Path) {
+    let out = Git::new("git")
+        .args(["init", "--bare"])
+        .arg(remote)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "bare remote init failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    git_in(repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    git_in(repo, &["push", "-u", "origin", "HEAD"]);
+}
+
 impl Repo {
     /// Creates an initialized repo (branch `main`, deterministic identity) and a monorepo dir.
     fn new() -> Self {
@@ -193,6 +298,22 @@ fn diff_unpushed_writes_artifact() {
 }
 
 #[test]
+fn diff_unpushed_flag_writes_artifact() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+
+    repo.run(&["diff", "--unpushed"])
+        .assert()
+        .success()
+        .stdout(contains("diff-preview:"))
+        .stdout(contains("unpushed commit(s)"))
+        .stdout(contains("wrote"));
+    assert!(repo.repo.join(".artifacts/diff-preview-repo.html").exists());
+}
+
+#[test]
 fn diff_base_commit_form_writes_artifact() {
     let repo = Repo::new();
     let base = repo.commit("a.txt", "base\n", "chore: base");
@@ -221,6 +342,47 @@ fn diff_exact_range_form_writes_artifact() {
 }
 
 #[test]
+fn diff_last_n_commits_writes_artifact() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "1\n", "chore: one");
+    repo.commit("a.txt", "1\n2\n", "feat: two");
+    repo.commit("a.txt", "1\n2\n3\n", "feat: three");
+
+    // `-l 2` diffs HEAD~2..HEAD: the last two commits.
+    repo.run(&["diff", "-l", "2"])
+        .assert()
+        .success()
+        .stdout(contains("diff-preview: last 2 commit(s)"));
+    assert!(repo.repo.join(".artifacts/diff-preview-repo.html").exists());
+}
+
+#[test]
+fn diff_bare_last_diffs_the_last_commit() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "1\n", "chore: one");
+    repo.commit("a.txt", "1\n2\n", "feat: two");
+
+    // Bare `-l` defaults to the last commit only.
+    repo.run(&["diff", "-l"])
+        .assert()
+        .success()
+        .stdout(contains("diff-preview: last 1 commit(s)"));
+    assert!(repo.repo.join(".artifacts/diff-preview-repo.html").exists());
+}
+
+#[test]
+fn diff_last_beyond_history_errors() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "1\n", "chore: one");
+
+    // Asking for more commits than exist fails honestly: HEAD~5 is not a commit.
+    repo.run(&["diff", "-l", "5"])
+        .assert()
+        .code(1)
+        .stderr(contains("not a commit: HEAD~5"));
+}
+
+#[test]
 fn diff_unknown_commit_errors() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
@@ -242,6 +404,174 @@ fn diff_outside_a_git_repo_errors() {
         .assert()
         .code(1)
         .stderr(contains("not a git repo"));
+}
+
+// --- sync ------------------------------------------------------------------
+
+#[test]
+fn sync_with_yes_commits_and_pushes_dirty_repo() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    std::fs::write(repo.repo.join("a.txt"), "base\nlocal\n").unwrap();
+
+    repo.run(&["sync", "save work", "--yes"])
+        .assert()
+        .success()
+        .stdout(contains("sync — review before pushing"))
+        .stdout(contains("main"))
+        .stdout(contains("origin"))
+        .stdout(contains("staged, committed, and pushed"));
+
+    assert_eq!(
+        repo.git(&["status", "--porcelain"]),
+        "",
+        "tree is clean after sync"
+    );
+    assert_eq!(repo.unpushed_count(), 0, "the commit was pushed to origin");
+}
+
+#[test]
+fn sync_with_yes_pushes_clean_but_unpushed_commits() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.commit("a.txt", "base\nlocal\n", "feat: already committed");
+
+    repo.run(&["sync", "ignored message", "--yes"])
+        .assert()
+        .success()
+        .stdout(contains("nothing to commit; pushed"));
+
+    assert_eq!(repo.unpushed_count(), 0);
+}
+
+#[test]
+fn sync_noops_when_clean_and_up_to_date() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+
+    repo.run(&["sync", "nothing to do", "--yes"])
+        .assert()
+        .success()
+        .stdout(contains("already up to date"));
+}
+
+#[test]
+fn sync_without_yes_refuses_in_noninteractive_shell() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    std::fs::write(repo.repo.join("a.txt"), "base\nlocal\n").unwrap();
+
+    // assert_cmd runs without a TTY: the gate must refuse rather than auto-push.
+    repo.run(&["sync", "save work"])
+        .assert()
+        .code(2)
+        .stderr(contains("pass --yes"));
+
+    assert_ne!(
+        repo.git(&["status", "--porcelain"]),
+        "",
+        "nothing was committed; the tree is still dirty"
+    );
+    assert_eq!(repo.unpushed_count(), 0, "nothing was committed or pushed");
+}
+
+#[test]
+fn sync_outside_a_git_repo_errors() {
+    let tmp = tempfile::tempdir().unwrap();
+    Command::cargo_bin("git-tools")
+        .unwrap()
+        .args(["sync", "save work", "--yes"])
+        .current_dir(tmp.path())
+        .assert()
+        .code(1)
+        .stderr(contains("not a git repo"));
+}
+
+// --- managed status --------------------------------------------------------
+
+#[test]
+fn status_lists_managed_repos_with_compact_ahead_dirty_and_untracked_symbols() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+    std::fs::write(repo.repo.join("a.txt"), "base\nlocal\ndirty\n").unwrap();
+    std::fs::write(repo.repo.join("scratch.txt"), "untracked\n").unwrap();
+    let manifest = repo.root.join("repos.txt");
+    std::fs::write(&manifest, "repo\t\nmissing\t\n").unwrap();
+
+    Command::cargo_bin("git-tools")
+        .unwrap()
+        .args([
+            "status",
+            "--repos-file",
+            manifest.to_str().unwrap(),
+            "--home-dir",
+            repo.root.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(contains("repo main [⇡1 !?]"))
+        .stdout(contains("missing (absent) [not present]"));
+}
+
+#[test]
+fn status_color_always_bolds_brackets_and_marks_dirty_symbols_red() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+    std::fs::write(repo.repo.join("a.txt"), "base\nlocal\ndirty\n").unwrap();
+    std::fs::write(repo.repo.join("scratch.txt"), "untracked\n").unwrap();
+    let manifest = repo.root.join("repos.txt");
+    std::fs::write(&manifest, "repo\t\n").unwrap();
+
+    Command::cargo_bin("git-tools")
+        .unwrap()
+        .args([
+            "status",
+            "--color",
+            "always",
+            "--repos-file",
+            manifest.to_str().unwrap(),
+            "--home-dir",
+            repo.root.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(contains(
+            "repo main \u{1b}[1m\u{1b}[38;2;242;133;0m[\u{1b}[39m\u{1b}[38;2;242;133;0m⇡\u{1b}[39m1 \u{1b}[38;2;255;77;77m!?\u{1b}[39m\u{1b}[38;2;242;133;0m]\u{1b}[39m\u{1b}[0m",
+        ));
+}
+
+#[test]
+fn status_color_always_bolds_brackets_and_marks_clean_checkmark_green() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    let manifest = repo.root.join("repos.txt");
+    std::fs::write(&manifest, "repo\t\n").unwrap();
+
+    Command::cargo_bin("git-tools")
+        .unwrap()
+        .args([
+            "ls",
+            "--color",
+            "always",
+            "--repos-file",
+            manifest.to_str().unwrap(),
+            "--home-dir",
+            repo.root.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(contains(
+            "repo main \u{1b}[1m\u{1b}[38;2;242;133;0m[\u{1b}[39m\u{1b}[38;2;46;204;113m✓\u{1b}[39m\u{1b}[38;2;242;133;0m]\u{1b}[39m\u{1b}[0m",
+        ));
 }
 
 // --- diff-subrepos ---------------------------------------------------------
@@ -266,6 +596,65 @@ fn diff_subrepos_writes_under_monorepo_not_repo() {
     .stdout(contains("diff-preview:"));
     assert_html(&repo.artifact("diff-preview-repo.html"), "main");
     assert!(!repo.repo.join(".artifacts/diff-preview-repo.html").exists());
+}
+
+#[test]
+fn diff_subrepos_nested_last_writes_one_tabbed_artifact() {
+    let repos = NestedRepos::new(&["api", "web"]);
+
+    repos
+        .run(&["diff", "subrepos", "-l"])
+        .assert()
+        .success()
+        .stdout(contains("diff-subrepos: 2 repo(s)"))
+        .stdout(contains("wrote"));
+
+    let html = std::fs::read_to_string(repos.artifact()).unwrap();
+    assert_eq!(
+        html.matches(r#"<button class="tab"#).count(),
+        repos.repos.len()
+    );
+    assert!(html.contains("api"));
+    assert!(html.contains("web"));
+    assert!(html.contains("diff-preview"));
+}
+
+#[test]
+fn diff_all_writes_one_tabbed_artifact_for_managed_unpushed_repos() {
+    let repos = NestedRepos::new(&["api", "web"]);
+    for repo in &repos.repos {
+        let name = repo.file_name().unwrap().to_string_lossy();
+        add_upstream_for(repo, &repos.root.join(format!("{name}.git")));
+        commit_in(
+            repo,
+            "README.md",
+            &format!("base\nlocal\n{name} unpushed\n"),
+            "feat: queued work",
+        );
+    }
+    let manifest = repos.root.join("repos.txt");
+    std::fs::write(&manifest, "api\t\nweb\t\n").unwrap();
+
+    repos
+        .run(&[
+            "diff",
+            "--all",
+            "--repos-file",
+            manifest.to_str().unwrap(),
+            "--home-dir",
+            repos.root.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(contains("diff-all: 2 repo(s)"))
+        .stdout(contains("wrote"));
+
+    let artifact = repos.root.join(".artifacts/diff-preview-all.html");
+    let html = std::fs::read_to_string(&artifact).unwrap();
+    assert_eq!(html.matches(r#"<button class="tab"#).count(), 2);
+    assert!(html.contains("api"));
+    assert!(html.contains("web"));
+    assert!(html.contains("feat: queued work"));
 }
 
 // --- merge-diff ------------------------------------------------------------

@@ -1,6 +1,9 @@
 //! git-tools - CLI entry point: clap parsing + a machine-readable exit-code contract.
 
-use crate::cli::{Cli, Command, DiffTarget, ManagedArgs};
+use crate::cli::{
+    Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
+    ManagedReadArgs,
+};
 use crate::commands::managed::{ManagedExit, ManagedOptions, ManagedRun};
 use crate::commands::squash_local::{SquashResult, Status, StdGitRunner, invoke_squash_local};
 
@@ -70,9 +73,21 @@ fn dispatch(command: Command) -> ExitCode {
         Command::SquashPreview { repo, monorepo } => {
             html_exit(commands::squash_preview::run(repo, monorepo))
         }
-        Command::Diff { target } => html_exit(commands::diff::run(&DiffTarget::from_arg(
-            target.as_deref(),
-        ))),
+        Command::Diff(args) => match args.command {
+            Some(DiffCommand::Subrepos(subrepos)) => {
+                html_exit(commands::diff_subrepos::run_scan(".", subrepos.last))
+            }
+            None => match diff_invocation(args.target) {
+                DiffInvocation::Single(target) => html_exit(commands::diff::run(&target)),
+                DiffInvocation::ManagedAll {
+                    repos_file,
+                    home_dir,
+                } => {
+                    let options = managed_diff_options(repos_file, home_dir);
+                    html_exit(commands::diff_subrepos::run_managed_all(".", &options))
+                }
+            },
+        },
         Command::DiffSubrepos {
             repo,
             monorepo,
@@ -93,6 +108,10 @@ fn dispatch(command: Command) -> ExitCode {
             print_squash_local_result(&result, &message);
             squash_local_exit_code(result.status)
         }
+        Command::Sync { message, yes } => run_sync(&message, yes),
+        Command::Status(args) => {
+            managed_exit(commands::managed::run_status(&managed_read_options(args)))
+        }
         Command::PushAll(args) => managed_exit(commands::managed::run_push_all(&managed_options(
             args, None,
         ))),
@@ -109,6 +128,129 @@ fn dispatch(command: Command) -> ExitCode {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DiffInvocation {
+    Single(DiffTarget),
+    ManagedAll {
+        repos_file: Option<String>,
+        home_dir: Option<String>,
+    },
+}
+
+fn diff_invocation(args: DiffTargetArgs) -> DiffInvocation {
+    if args.all {
+        return DiffInvocation::ManagedAll {
+            repos_file: args.repos_file,
+            home_dir: args.home_dir,
+        };
+    }
+
+    DiffInvocation::Single(diff_target(args))
+}
+
+fn diff_target(args: DiffTargetArgs) -> DiffTarget {
+    // ? `-l N` wins via clap conflict guard; `target` is None whenever `last` is Some.
+    if args.unpushed {
+        DiffTarget::Unpushed
+    } else {
+        match args.last {
+            Some(count) => DiffTarget::Last(count),
+            None => DiffTarget::from_arg(args.target.as_deref()),
+        }
+    }
+}
+
+fn managed_diff_options(repos_file: Option<String>, home_dir: Option<String>) -> ManagedOptions {
+    ManagedOptions {
+        repos_file: repos_file.map(Into::into),
+        home_dir: home_dir.map(Into::into),
+        dry: false,
+        json: false,
+        color: false,
+        message_for_all: None,
+        interactive: false,
+    }
+}
+
+/// Orchestrates `sync`: plan read-only, show the confirmation block, gate on `--yes`/TTY,
+/// then stage+commit+push. The interactive prompt is the only side effect kept out of
+/// [`commands::sync`] so the logic stays unit-testable.
+fn run_sync(message: &str, yes: bool) -> ExitCode {
+    use crate::commands::sync;
+
+    if message.trim().is_empty() {
+        eprintln!("sync: a non-empty commit message is required");
+        return ExitCode::Usage;
+    }
+
+    let runner = StdGitRunner;
+    let target = match sync::plan(&runner, std::path::Path::new(".")) {
+        sync::Plan::Refused(detail) => {
+            eprintln!("sync: {detail}");
+            return ExitCode::Internal;
+        }
+        sync::Plan::Ready(target) => target,
+    };
+
+    println!("{}", sync::confirmation(&target));
+
+    match sync::gate(yes, is_interactive()) {
+        sync::Gate::RefuseNonInteractive => {
+            eprintln!("sync: non-interactive shell; pass --yes to confirm the push");
+            return ExitCode::Usage;
+        }
+        sync::Gate::Confirm if !prompt_confirmation() => {
+            eprintln!("sync: aborted — nothing committed or pushed");
+            return ExitCode::Ok;
+        }
+        sync::Gate::Confirm | sync::Gate::Proceed => {}
+    }
+
+    let result = sync::apply(&runner, &target, message);
+    match result.status {
+        sync::Status::Synced | sync::Status::Noop => {
+            println!("sync: {}", result.detail);
+            ExitCode::Ok
+        }
+        sync::Status::Fail | sync::Status::Refused => {
+            eprintln!("sync: {}", result.detail);
+            ExitCode::Internal
+        }
+    }
+}
+
+/// Prompts on stdout and reads a yes/no answer from stdin; anything but `y`/`yes` is a no.
+fn prompt_confirmation() -> bool {
+    use std::io::Write;
+
+    print!("Proceed? [y/N] ");
+    let _ = std::io::stdout().flush();
+    let mut input = String::new();
+    if std::io::stdin().read_line(&mut input).is_err() {
+        return false;
+    }
+    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+}
+
+/// Builds the [`ManagedOptions`] for a read-only managed command from its parsed flags.
+fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
+    let color = match args.color {
+        ColorChoice::Auto => stdout_is_terminal(),
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+    };
+
+    ManagedOptions {
+        repos_file: args.repos_file.map(Into::into),
+        home_dir: args.home_dir.map(Into::into),
+        dry: false,
+        json: args.json,
+        color,
+        message_for_all: None,
+        interactive: false,
+    }
+}
+
 /// Builds the [`ManagedOptions`] for a fan-out command from its parsed flags.
 fn managed_options(args: ManagedArgs, message_for_all: Option<String>) -> ManagedOptions {
     ManagedOptions {
@@ -116,6 +258,7 @@ fn managed_options(args: ManagedArgs, message_for_all: Option<String>) -> Manage
         home_dir: args.home_dir.map(Into::into),
         dry: args.dry,
         json: args.json,
+        color: false,
         message_for_all,
         interactive: is_interactive(),
     }
@@ -137,6 +280,10 @@ fn managed_exit<T>(run: ManagedRun<T>) -> ExitCode {
 
 fn is_interactive() -> bool {
     std::io::IsTerminal::is_terminal(&std::io::stdin())
+}
+
+fn stdout_is_terminal() -> bool {
+    std::io::IsTerminal::is_terminal(&std::io::stdout())
 }
 
 fn html_exit(result: anyhow::Result<std::path::PathBuf>) -> ExitCode {

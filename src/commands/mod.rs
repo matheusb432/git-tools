@@ -11,6 +11,7 @@ pub mod managed;
 pub mod merge_diff;
 pub mod squash_local;
 pub mod squash_preview;
+pub mod sync;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {

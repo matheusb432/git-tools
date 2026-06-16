@@ -1,0 +1,7 @@
+# Palette for `gtl status` / `gtl ls` ANSI foreground colors.
+# Use CSS-style #rrggbb hex values.
+
+brackets_color = "#f28500"       # tangerine orange
+ahead_arrow_color = "#f28500"    # tangerine orange
+checkmark_color = "#2ecc71"      # clean green
+change_markers_color = "#ff4d4d" # red change markers

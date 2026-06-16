@@ -1,7 +1,9 @@
 //! CLI surface, parsed with clap-derive. clap owns argument parsing, `--help`, and
 //! `--version`. Each variant/field doc comment is the single source of truth for its help text.
 
-use clap::{Args, Parser, Subcommand};
+use std::num::NonZeroU32;
+
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// git-tools — render git workflow HTML previews and squash local commits.
 #[derive(Debug, Parser)]
@@ -36,11 +38,8 @@ pub enum Command {
         #[arg(long)]
         monorepo: String,
     },
-    /// Render an HTML diff of the current repo: unpushed work, a base commit, or a `<start>..<end>` range.
-    Diff {
-        /// Base commit, a `<start>..<end>` range, or empty/omitted for unpushed work.
-        target: Option<String>,
-    },
+    /// Render an HTML diff of the current repo, or all managed repos with `--all`.
+    Diff(DiffArgs),
     /// Render a per-subrepo diff for a monorepo's subrepos.
     DiffSubrepos {
         /// Subrepo working tree to diff.
@@ -77,6 +76,17 @@ pub enum Command {
         #[arg(long)]
         dry: bool,
     },
+    /// Stage all changes, commit, and push the current repo (prompts for confirmation first).
+    Sync {
+        /// Commit message for the staged changes.
+        message: String,
+        /// Skip the confirmation prompt (for non-interactive use, e.g. a justfile recipe).
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
+    /// Show branch, unpushed commits, and pending changes for every managed repo.
+    #[command(visible_alias = "ls")]
+    Status(ManagedReadArgs),
     /// Push every managed repo that has unpushed commits.
     PushAll(ManagedArgs),
     /// Pull every managed repo.
@@ -89,6 +99,81 @@ pub enum Command {
         #[arg(long)]
         message_for_all: Option<String>,
     },
+}
+
+/// Arguments for the root `diff` command and its nested subcommands.
+#[derive(Debug, Args)]
+pub struct DiffArgs {
+    #[command(subcommand)]
+    pub command: Option<DiffCommand>,
+    #[command(flatten)]
+    pub target: DiffTargetArgs,
+}
+
+/// Nested commands under `diff`.
+#[derive(Debug, Subcommand)]
+pub enum DiffCommand {
+    /// Render one tabbed HTML diff for every git repo under the current directory.
+    Subrepos(DiffSubreposScanArgs),
+}
+
+/// Target flags for the root `diff` command.
+#[derive(Debug, Args)]
+pub struct DiffTargetArgs {
+    /// Render one tabbed HTML diff for all managed repos with unpushed commits.
+    #[arg(long, conflicts_with_all = ["target", "last", "unpushed"])]
+    pub all: bool,
+    /// Diff unpushed work (`@{u}..HEAD`); this is also the default when no target is supplied.
+    #[arg(long, conflicts_with_all = ["target", "last"])]
+    pub unpushed: bool,
+    /// Base commit, a `<start>..<end>` range, or empty/omitted for unpushed work.
+    #[arg(conflicts_with = "last")]
+    pub target: Option<String>,
+    /// Diff the last N commits (`HEAD~N..HEAD`); bare `-l` diffs the last commit.
+    #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
+    pub last: Option<NonZeroU32>,
+    /// Path to the managed-repos manifest (overrides the default lookup).
+    #[arg(long, requires = "all")]
+    pub repos_file: Option<String>,
+    /// Home directory used to resolve managed-repo paths (overrides `$HOME`).
+    #[arg(long, requires = "all")]
+    pub home_dir: Option<String>,
+}
+
+/// Flags for `diff subrepos`.
+#[derive(Debug, Args)]
+pub struct DiffSubreposScanArgs {
+    /// Diff the last N commits in every discovered repo; bare `-l` diffs the last commit.
+    #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
+    pub last: Option<NonZeroU32>,
+}
+
+/// Flags shared by read-only managed-repo commands (`status`/`ls`).
+#[derive(Debug, Args)]
+pub struct ManagedReadArgs {
+    /// Emit machine-readable JSON instead of human text.
+    #[arg(long)]
+    pub json: bool,
+    /// When to emit ANSI colors in human output.
+    #[arg(long, value_enum, default_value_t = ColorChoice::Auto)]
+    pub color: ColorChoice,
+    /// Path to the managed-repos manifest (overrides the default lookup).
+    #[arg(long)]
+    pub repos_file: Option<String>,
+    /// Home directory used to resolve managed-repo paths (overrides `$HOME`).
+    #[arg(long)]
+    pub home_dir: Option<String>,
+}
+
+/// ANSI color policy for human output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ColorChoice {
+    /// Color only when stdout is a terminal.
+    Auto,
+    /// Always emit ANSI color codes.
+    Always,
+    /// Never emit ANSI color codes.
+    Never,
 }
 
 /// Flags shared by the managed-repo fan-out commands (`push-all`, `pull-all`, `commit-all`).
@@ -117,6 +202,8 @@ pub enum DiffTarget {
     Base(String),
     /// An exact `<start>..<end>` commit range.
     Range(String),
+    /// The last N commits (`HEAD~N..HEAD`).
+    Last(NonZeroU32),
 }
 
 impl DiffTarget {
@@ -196,5 +283,113 @@ mod tests {
     #[test]
     fn parse_args_rejects_explicit_flags_on_lean_diff() {
         assert!(Cli::parse_args(&["diff".into(), "--repo".into(), "r".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_diff_last_takes_a_count() {
+        let cli = Cli::parse_args(&["diff".into(), "-l".into(), "5".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                command: None,
+                target: DiffTargetArgs {
+                    target: None,
+                    last: Some(n),
+                    ..
+                },
+            }) if n.get() == 5
+        ));
+    }
+
+    #[test]
+    fn parse_args_diff_bare_last_defaults_to_one() {
+        let cli = Cli::parse_args(&["diff".into(), "-l".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                command: None,
+                target: DiffTargetArgs {
+                    target: None,
+                    last: Some(n),
+                    ..
+                },
+            }) if n.get() == 1
+        ));
+    }
+
+    #[test]
+    fn parse_args_diff_subrepos_bare_last_defaults_to_one() {
+        let cli = Cli::parse_args(&["diff".into(), "subrepos".into(), "-l".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                command: Some(DiffCommand::Subrepos(DiffSubreposScanArgs { last: Some(n) })),
+                target: DiffTargetArgs {
+                    target: None,
+                    last: None,
+                    ..
+                },
+            }) if n.get() == 1
+        ));
+    }
+
+    #[test]
+    fn parse_args_diff_all_accepts_managed_overrides() {
+        let cli = Cli::parse_args(&[
+            "diff".into(),
+            "--all".into(),
+            "--repos-file".into(),
+            "repos.txt".into(),
+            "--home-dir".into(),
+            "/tmp/home".into(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                command: None,
+                target: DiffTargetArgs {
+                    all: true,
+                    repos_file: Some(repos_file),
+                    home_dir: Some(home_dir),
+                    target: None,
+                    last: None,
+                    ..
+                },
+            }) if repos_file == "repos.txt" && home_dir == "/tmp/home"
+        ));
+    }
+
+    #[test]
+    fn parse_args_diff_rejects_zero_last() {
+        // NonZeroU32 makes `-l 0` unrepresentable: clap rejects it before dispatch.
+        assert!(Cli::parse_args(&["diff".into(), "-l".into(), "0".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_diff_rejects_last_combined_with_target() {
+        assert!(
+            Cli::parse_args(&["diff".into(), "abc123".into(), "-l".into(), "2".into()]).is_err()
+        );
+    }
+
+    #[test]
+    fn parse_args_routes_sync_with_message() {
+        let cli = Cli::parse_args(&["sync".into(), "save work".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Sync { message, yes } if message == "save work" && !yes
+        ));
+    }
+
+    #[test]
+    fn parse_args_sync_yes_flag_sets_bypass() {
+        let cli = Cli::parse_args(&["sync".into(), "save work".into(), "--yes".into()]).unwrap();
+        assert!(matches!(cli.command, Command::Sync { yes, .. } if yes));
+    }
+
+    #[test]
+    fn parse_args_sync_requires_a_message() {
+        assert!(Cli::parse_args(&["sync".into()]).is_err());
     }
 }
