@@ -84,6 +84,7 @@ pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View
 
     let view = View {
         repo_name: repo_name.clone(),
+        repo_root: top.to_string(),
         branch,
         upstream: base_ref.clone(),
         title: view_ranges.title,

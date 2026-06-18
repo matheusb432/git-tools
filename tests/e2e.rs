@@ -3,7 +3,7 @@
 //!
 //! These replace the PowerShell conformance harness. That harness froze the legacy Node/PS
 //! originals as goldens to prove the Rust port matched them; the port is done and the diff
-//! surface has since moved on (lean `diff` + `diff-subrepos`, GTL-0002), so these pin
+//! surface has since moved on (lean `diff` + `diff subrepos`, GTL-0002), so these pin
 //! *current* behavior instead — one Rust test per scenario the harness fixtures covered.
 
 use assert_cmd::Command;
@@ -574,29 +574,7 @@ fn status_color_always_bolds_brackets_and_marks_clean_checkmark_green() {
         ));
 }
 
-// --- diff-subrepos ---------------------------------------------------------
-
-#[test]
-fn diff_subrepos_writes_under_monorepo_not_repo() {
-    let repo = Repo::new();
-    let base = repo.commit("a.txt", "base\n", "chore: base");
-    repo.commit("a.txt", "base\nsub\n", "feat: sub work");
-
-    repo.run(&[
-        "diff-subrepos",
-        "--repo",
-        repo.repo_arg(),
-        "--monorepo",
-        repo.monorepo_arg(),
-        "--base",
-        &base,
-    ])
-    .assert()
-    .success()
-    .stdout(contains("diff-preview:"));
-    assert_html(&repo.artifact("diff-preview-repo.html"), "main");
-    assert!(!repo.repo.join(".artifacts/diff-preview-repo.html").exists());
-}
+// --- diff subrepos ---------------------------------------------------------
 
 #[test]
 fn diff_subrepos_nested_last_writes_one_tabbed_artifact() {
@@ -606,7 +584,7 @@ fn diff_subrepos_nested_last_writes_one_tabbed_artifact() {
         .run(&["diff", "subrepos", "-l"])
         .assert()
         .success()
-        .stdout(contains("diff-subrepos: 2 repo(s)"))
+        .stdout(contains("diff subrepos: 2 repo(s)"))
         .stdout(contains("wrote"));
 
     let html = std::fs::read_to_string(repos.artifact()).unwrap();

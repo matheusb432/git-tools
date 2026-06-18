@@ -88,15 +88,6 @@ fn dispatch(command: Command) -> ExitCode {
                 }
             },
         },
-        Command::DiffSubrepos {
-            repo,
-            monorepo,
-            base,
-        } => html_exit(commands::diff_subrepos::run(
-            repo,
-            monorepo,
-            base.as_deref(),
-        )),
         Command::MergeDiff {
             repo,
             monorepo,

@@ -123,27 +123,57 @@ pub fn resolve_home_dir(override_dir: Option<&Path>) -> PathBuf {
     if let Some(dir) = override_dir {
         return dir.to_path_buf();
     }
-    if let Some(userprofile) = std::env::var_os("USERPROFILE") {
-        return PathBuf::from(userprofile);
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        return PathBuf::from(home);
-    }
-    PathBuf::from(".")
+    home_dir_from_env().unwrap_or_else(|| PathBuf::from("."))
 }
 
 pub fn resolve_repos_file(override_file: Option<&Path>) -> anyhow::Result<PathBuf> {
+    let env_file = std::env::var_os("GIT_TOOLS_MANAGED_REPOS_FILE").map(PathBuf::from);
+    let current_dir = std::env::current_dir()?;
+    let home_dir = home_dir_from_env();
+
+    resolve_repos_file_from_sources(
+        override_file,
+        env_file.as_deref(),
+        &current_dir,
+        home_dir.as_deref(),
+    )
+}
+
+fn home_dir_from_env() -> Option<PathBuf> {
+    if let Some(userprofile) = std::env::var_os("USERPROFILE") {
+        return Some(PathBuf::from(userprofile));
+    }
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+fn resolve_repos_file_from_sources(
+    override_file: Option<&Path>,
+    env_file: Option<&Path>,
+    current_dir: &Path,
+    home_dir: Option<&Path>,
+) -> anyhow::Result<PathBuf> {
     if let Some(file) = override_file {
         return Ok(file.to_path_buf());
     }
-    if let Some(file) = std::env::var_os("GIT_TOOLS_MANAGED_REPOS_FILE") {
-        return Ok(PathBuf::from(file));
+    if let Some(file) = env_file {
+        return Ok(file.to_path_buf());
     }
-    if let Some(found) = find_upward_config(std::env::current_dir()?.as_path()) {
+    if let Some(found) = find_upward_config(current_dir) {
         return Ok(found);
     }
+    if let Some(home_dir) = home_dir {
+        let candidate = home_default_repos_file(home_dir);
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    let home_hint = home_dir
+        .map(home_default_repos_file)
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "$HOME/self/sample_project/config/provisioning/linux/repos.txt".into());
     Err(anyhow!(
-        "managed-repos manifest not found; pass --file or set GIT_TOOLS_MANAGED_REPOS_FILE"
+        "managed-repos manifest not found; pass --repos-file, set GIT_TOOLS_MANAGED_REPOS_FILE, run from a sample_project checkout, or install sample_project at {home_hint}"
     ))
 }
 
@@ -159,6 +189,16 @@ fn find_upward_config(start: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn home_default_repos_file(home_dir: &Path) -> PathBuf {
+    home_dir
+        .join("self")
+        .join("sample_project")
+        .join("config")
+        .join("provisioning")
+        .join("linux")
+        .join("repos.txt")
 }
 
 pub fn load_repos(options: &ManagedOptions) -> anyhow::Result<Vec<ManagedRepo>> {
@@ -996,17 +1036,71 @@ mod tests {
     }
 
     #[test]
-    fn resolve_repos_file_errors_without_override_env_or_upward_config() {
-        // No override, no env var, and the crate-root cwd has no
-        // config/provisioning/linux/repos.txt above it -> must Err (no personal default).
-        // SAFETY: single-threaded mutation guarded by no other test setting this var.
-        unsafe { std::env::remove_var("GIT_TOOLS_MANAGED_REPOS_FILE") };
+    fn resolve_repos_file_sources_respect_precedence() {
+        let fixture = ManagedFixture::new("resolve-precedence");
+        let explicit = fixture.root.join("explicit.txt");
+        let env_file = fixture.root.join("env.txt");
+        let cwd = fixture.root.join("workspace").join("repo");
+        let upward = fixture
+            .root
+            .join("workspace/config/provisioning/linux/repos.txt");
+        let home_default = fixture
+            .home
+            .join("self/sample_project/config/provisioning/linux/repos.txt");
+        touch(&explicit);
+        touch(&env_file);
+        touch(&upward);
+        touch(&home_default);
 
-        let err = resolve_repos_file(None).expect_err("no manifest should be resolvable");
+        assert_eq!(
+            resolve_repos_file_from_sources(
+                Some(&explicit),
+                Some(&env_file),
+                &cwd,
+                Some(&fixture.home),
+            )
+            .unwrap(),
+            explicit
+        );
+        assert_eq!(
+            resolve_repos_file_from_sources(None, Some(&env_file), &cwd, Some(&fixture.home))
+                .unwrap(),
+            env_file
+        );
+        assert_eq!(
+            resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home)).unwrap(),
+            upward
+        );
+    }
+
+    #[test]
+    fn resolve_repos_file_uses_home_default_after_upward_search_misses() {
+        let fixture = ManagedFixture::new("resolve-home-default");
+        let cwd = fixture.root.join("elsewhere").join("repo");
+        let home_default = fixture
+            .home
+            .join("self/sample_project/config/provisioning/linux/repos.txt");
+        touch(&home_default);
+
+        assert_eq!(
+            resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home)).unwrap(),
+            home_default
+        );
+    }
+
+    #[test]
+    fn resolve_repos_file_errors_without_any_config_source() {
+        let fixture = ManagedFixture::new("resolve-missing");
+        let cwd = fixture.root.join("elsewhere").join("repo");
+
+        let err = resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home))
+            .expect_err("no manifest should be resolvable");
         let message = err.to_string();
         assert!(
-            message.contains("--file") && message.contains("GIT_TOOLS_MANAGED_REPOS_FILE"),
-            "error should point at --file / the env var, got: {message}"
+            message.contains("--repos-file")
+                && message.contains("GIT_TOOLS_MANAGED_REPOS_FILE")
+                && message.contains("self/sample_project"),
+            "error should point at supported manifest sources, got: {message}"
         );
     }
 
@@ -1317,6 +1411,13 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
+
+    fn touch(path: &Path) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, "").unwrap();
     }
 
     fn cmd(program: &str, args: &[&str]) {

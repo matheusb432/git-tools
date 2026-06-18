@@ -3,6 +3,7 @@
 //! surface (subcommand list, flags, and the 0/1/2 exit-code contract).
 
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 
 fn git_tools() -> Command {
@@ -15,7 +16,6 @@ fn top_level_help_lists_every_subcommand() {
     for sub in [
         "squash-preview",
         "diff",
-        "diff-subrepos",
         "merge-diff",
         "squash-local",
         "sync",
@@ -26,6 +26,15 @@ fn top_level_help_lists_every_subcommand() {
     ] {
         assert = assert.stdout(contains(sub));
     }
+}
+
+#[test]
+fn top_level_help_omits_legacy_diff_subrepos_command() {
+    git_tools()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(contains("diff-subrepos").not());
 }
 
 #[test]
@@ -124,12 +133,12 @@ fn diff_last_with_target_is_usage_error_exit_2() {
 }
 
 #[test]
-fn diff_subrepos_without_required_flags_is_usage_error_exit_2() {
-    // clap enforces the required --repo/--monorepo pair (only --repo given here).
+fn legacy_diff_subrepos_command_is_usage_error_exit_2() {
     git_tools()
         .args(["diff-subrepos", "--repo", "r"])
         .assert()
-        .code(2);
+        .code(2)
+        .stderr(contains("unrecognized subcommand"));
 }
 
 #[test]

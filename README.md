@@ -7,7 +7,8 @@ A small Rust CLI for git workflow previews and local-history housekeeping. Insta
 Per-repo:
 
 - `diff` — render an HTML diff of the current repo: unpushed work (the default), a base commit, an exact `<start>..<end>` range, or the last N commits (`-l N`).
-- `squash-preview` / `diff-subrepos` / `merge-diff` — render HTML previews of a subrepo's unpushed work, per-subrepo diffs, or a three-dot merge diff against a base branch.
+- `squash-preview` / `merge-diff` — render HTML previews of a subrepo's unpushed work or a three-dot merge diff against a base branch.
+- `diff subrepos` — render one tabbed HTML diff for every git repo under the current directory.
 - `squash-local` — squash all unpushed local commits into one (`--dry` to preview).
 - `sync` — stage, commit, and push the current repo (confirms first; `-y` to skip).
 
@@ -17,7 +18,9 @@ Across a set of managed repos (declared in a tab-separated `local-path<TAB>git-r
 - `status` (alias `ls`) — branch, unpushed commits, and pending changes for every repo (`--json` for machine output).
 - `push-all` / `pull-all` / `commit-all` — fan out push, pull, or commit across the set.
 
-The managed manifest is resolved from `--repos-file`, then the `GIT_TOOLS_MANAGED_REPOS_FILE` environment variable, then an upward search for `config/provisioning/linux/repos.txt` from the current directory.
+The managed manifest is resolved from `--repos-file`, then the `GIT_TOOLS_MANAGED_REPOS_FILE` environment variable, then an upward search for `config/provisioning/linux/repos.txt` from the current directory, then `$HOME/self/sample_project/config/provisioning/linux/repos.txt`.
+
+Every HTML preview is a single self-contained **offline** file (opens from `file://`, no network): fast on large diffs (offscreen file blocks are deferred via CSS `content-visibility`), theme-switchable, and with per-file copy buttons for the relative path, the absolute path, and the code with diff `+`/`-` markers stripped.
 
 Run `git-tools --help` (or `gtl --help`) for the full reference.
 

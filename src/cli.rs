@@ -40,18 +40,6 @@ pub enum Command {
     },
     /// Render an HTML diff of the current repo, or all managed repos with `--all`.
     Diff(DiffArgs),
-    /// Render a per-subrepo diff for a monorepo's subrepos.
-    DiffSubrepos {
-        /// Subrepo working tree to diff.
-        #[arg(long)]
-        repo: String,
-        /// Monorepo root the preview is written under (`.artifacts/`).
-        #[arg(long)]
-        monorepo: String,
-        /// Base ref to diff from; omit for unpushed work.
-        #[arg(long)]
-        base: Option<String>,
-    },
     /// Render a merge preview (three-dot diff) of a subrepo against a base branch.
     MergeDiff {
         /// Subrepo working tree to preview.

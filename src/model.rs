@@ -42,6 +42,9 @@ pub struct Foot {
 #[derive(Debug, Clone)]
 pub struct View {
     pub repo_name: String,
+    /// Absolute path to the repo root (git top-level), used to compose copy-able
+    /// absolute file paths in the preview. POSIX-joined with `path` at render time.
+    pub repo_root: String,
     pub branch: String,
     pub upstream: String,
     pub commits: Vec<Commit>,

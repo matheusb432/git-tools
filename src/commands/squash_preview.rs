@@ -23,6 +23,7 @@ pub fn run(repo: impl AsRef<Path>, monorepo: impl AsRef<Path>) -> anyhow::Result
 
     let view = View {
         repo_name: repo_name.clone(),
+        repo_root: top.clone(),
         branch,
         upstream: upstream.clone(),
         title: "squash-preview".to_string(),

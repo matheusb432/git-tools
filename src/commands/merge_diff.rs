@@ -31,6 +31,7 @@ pub fn run(
 
     let view = View {
         repo_name: repo_name.clone(),
+        repo_root: top.clone(),
         branch,
         upstream: base.to_string(),
         title: ranges.title,
