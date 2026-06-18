@@ -39,6 +39,7 @@ pub fn run(repo: impl AsRef<Path>, monorepo: impl AsRef<Path>) -> anyhow::Result
         },
         commits,
         files,
+        theme: None,
     };
 
     let commit_count = view.commits.len();

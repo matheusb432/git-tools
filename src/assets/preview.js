@@ -2,75 +2,196 @@
   // ! Scope every view to its own .layout root: the tabbed (diff subrepos) view inlines one
   // ! .layout per panel in a single document, so document.querySelector would only ever wire
   // ! the first panel. Querying within `root` keeps each tab independently interactive.
+
+  // ! Clipboard can be blocked on file:// (origin null) — mirror CopyButton's textarea +
+  // ! execCommand fallback so commit-card hash copy works from a local artifact.
+  function copyText(text){
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function(){ return true; }, function(){ return execCopy(text); });
+    }
+    return Promise.resolve(execCopy(text));
+  }
+  function execCopy(text){
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch (e) { return false; }
+  }
+
   function initView(root){
-    var layout = root;
     var fileEls = [].slice.call(root.querySelectorAll('details.file'));
-    var tocLinks = [].slice.call(root.querySelectorAll('nav.toc a'));
-    var commitEls = [].slice.call(root.querySelectorAll('.commit[data-sha]'));
-    var showAll = root.querySelector('.showall');
-    var treeToggle = root.querySelector('.tree-toggle');
+    var clineEls = [].slice.call(root.querySelectorAll('.cline[data-sha]'));
     var treeBody = root.querySelector('.tree-body');
+    var filterInput = root.querySelector('.search input');
+    var foldAll = root.querySelector('.foldall');
     var activeSha = null;
+    var filterText = '';
     function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function shasOf(el){ return (el.getAttribute('data-commits')||'').split(' ').filter(Boolean); }
-    // ---- commit filter: show only the files a commit touched ----
+    function matchesFilter(el){ return !filterText || (el.getAttribute('data-path')||'').toLowerCase().indexOf(filterText) !== -1; }
+
+    // ---- commit filter + name filter: a file shows only if it survives both ----
     function applyFilter(){
-      fileEls.forEach(function(el){ el.hidden = !!activeSha && shasOf(el).indexOf(activeSha) === -1; });
-      tocLinks.forEach(function(a){ a.hidden = !!activeSha && shasOf(a).indexOf(activeSha) === -1; });
-      commitEls.forEach(function(c){ c.classList.toggle('active', activeSha === c.getAttribute('data-sha')); });
-      if (showAll) showAll.hidden = !activeSha;
+      fileEls.forEach(function(el){
+        var byCommit = !!activeSha && shasOf(el).indexOf(activeSha) === -1;
+        el.hidden = byCommit || !matchesFilter(el);
+      });
+      syncBeads();
       buildTree();
     }
-    commitEls.forEach(function(c){
-      function toggle(){ var s = c.getAttribute('data-sha'); activeSha = (activeSha === s) ? null : s; applyFilter(); }
-      c.addEventListener('click', toggle);
-      c.addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
+
+    if (filterInput) filterInput.addEventListener('input', function(){
+      filterText = filterInput.value.trim().toLowerCase();
+      applyFilter();
     });
-    if (showAll) showAll.addEventListener('click', function(){ activeSha = null; applyFilter(); });
-    // ---- sidebar toggle: flips the layout state attribute; CSS reflows the rest ----
-    if (treeToggle) treeToggle.addEventListener('click', function(){
-      var open = layout.getAttribute('data-tree') === 'open';
-      layout.setAttribute('data-tree', open ? 'closed' : 'open');
-      treeToggle.setAttribute('aria-expanded', String(!open));
+
+    if (foldAll) foldAll.addEventListener('click', function(){
+      var anyOpen = fileEls.some(function(el){ return el.open; });
+      fileEls.forEach(function(el){ el.open = !anyOpen; });
     });
-    // ---- file tree: fold visible file paths into a nested, collapsible tree ----
+
+    // ---- file tree: fold visible files into a nested, collapsible tree.
+    // ! Follow DOM/server order (already tree-sorted in render) — DON'T re-sort, so the
+    // ! sidebar matches the center pane exactly. ----
     function buildTree(){
       if (!treeBody) return;
-      var root = { dirs:{}, files:[] };
+      var treeRoot = { dirs:{}, dirOrder:[], files:[] };
       fileEls.forEach(function(el){
         if (el.hidden) return;
         var parts = (el.getAttribute('data-path')||'').split('/');
-        var node = root;
-        for (var i = 0; i < parts.length - 1; i++){ node = node.dirs[parts[i]] = node.dirs[parts[i]] || { dirs:{}, files:[] }; }
-        // ! store the element itself, not its id: file ids can collide across repos in a tabbed view
-        node.files.push({ name: parts[parts.length - 1], el: el });
+        var node = treeRoot;
+        for (var i = 0; i < parts.length - 1; i++){
+          if (!node.dirs[parts[i]]) { node.dirs[parts[i]] = { dirs:{}, dirOrder:[], files:[] }; node.dirOrder.push(parts[i]); }
+          node = node.dirs[parts[i]];
+        }
+        node.files.push({
+          name: parts[parts.length - 1],
+          el: el,
+          status: el.getAttribute('data-status') || 'modified',
+          statusCode: el.getAttribute('data-status-code') || 'M',
+          statusLabel: el.getAttribute('data-status-label') || 'Modified file'
+        });
       });
       treeBody.innerHTML = '';
-      treeBody.appendChild(renderNode(root));
+      treeBody.appendChild(renderNode(treeRoot));
     }
     function renderNode(node){
       var ul = document.createElement('ul');
-      Object.keys(node.dirs).sort().forEach(function(name){
+      node.dirOrder.forEach(function(name){
         var li = document.createElement('li'); li.className = 'tnode tdir open';
         var label = document.createElement('div'); label.className = 'tlabel';
         label.innerHTML = '<span class="tcaret"></span><span class="tname">' + esc(name) + '</span>';
         label.addEventListener('click', function(){ li.classList.toggle('open'); });
         li.appendChild(label); li.appendChild(renderNode(node.dirs[name])); ul.appendChild(li);
       });
-      node.files.sort(function(a,b){ return a.name < b.name ? -1 : 1; }).forEach(function(f){
-        var li = document.createElement('li'); li.className = 'tnode tfile';
+      node.files.forEach(function(f){
+        var li = document.createElement('li'); li.className = 'tnode tfile status-' + f.status; li.setAttribute('data-target', f.el.id);
         var label = document.createElement('div'); label.className = 'tlabel';
-        label.innerHTML = '<span class="ticon"></span><span class="tname">' + esc(f.name) + '</span>';
+        var status = document.createElement('span');
+        status.className = 'tstatus status-' + f.status;
+        status.textContent = f.statusCode;
+        status.title = f.statusLabel;
+        status.setAttribute('aria-label', f.statusLabel);
+        var name = document.createElement('span');
+        name.className = 'tname';
+        name.textContent = f.name;
+        label.appendChild(name);
+        label.appendChild(status);
         label.addEventListener('click', function(){
           var t = f.el;
           if (!t) return;
           t.open = true; t.scrollIntoView({ behavior:'smooth', block:'start' });
           t.classList.add('flash'); setTimeout(function(){ t.classList.remove('flash'); }, 1200);
+          markCurrent(t);
         });
         li.appendChild(label); ul.appendChild(li);
       });
       return ul;
     }
+    // ! mark the active file's sidebar leaf so the tree shows where you are (j/k + tree-click).
+    function markCurrent(el){
+      if (!treeBody || !el) return;
+      [].forEach.call(treeBody.querySelectorAll('.tfile'), function(li){
+        li.classList.toggle('cur', li.getAttribute('data-target') === el.id);
+      });
+    }
+
+    // ---- commit shelf cards: card body click copies the hash only; the timeline bead is a
+    // separate <button> toggle for the commit filter; hover a card WITH notes shows its native
+    // popover (top-layer escapes the shelf scroll clip). ----
+    function syncBeads(){
+      clineEls.forEach(function(c){
+        var on = activeSha === c.getAttribute('data-sha');
+        c.classList.toggle('active', on);
+        var b = c.querySelector('.bead');
+        if (b) b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    clineEls.forEach(function(c){
+      var sha = c.getAttribute('data-sha');
+      c.addEventListener('click', function(){
+        copyText(sha);
+        c.classList.add('copied'); setTimeout(function(){ c.classList.remove('copied'); }, 900);
+      });
+      c.addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); c.click(); } });
+
+      var bead = c.querySelector('.bead');
+      if (bead) bead.addEventListener('click', function(e){
+        e.stopPropagation();
+        activeSha = (activeSha === sha) ? null : sha;
+        applyFilter();
+      });
+
+      var popId = c.getAttribute('data-pop');
+      if (!popId) return;
+      var pop = root.querySelector('#' + (window.CSS && CSS.escape ? CSS.escape(popId) : popId));
+      if (!pop) return;
+      var t;
+      function show(){
+        clearTimeout(t);
+        var r = c.getBoundingClientRect();
+        var left = r.left - 338;
+        if (left < 8) left = r.right + 6;
+        pop.style.left = left + 'px';
+        pop.style.top = Math.min(r.top, innerHeight - 210) + 'px';
+        if (pop.showPopover) pop.showPopover();
+      }
+      function hide(){ t = setTimeout(function(){ if (pop.hidePopover) pop.hidePopover(); }, 140); }
+      c.addEventListener('mouseenter', show); c.addEventListener('mouseleave', hide);
+      pop.addEventListener('mouseenter', function(){ clearTimeout(t); }); pop.addEventListener('mouseleave', hide);
+    });
+
+    // ---- keyboard (scoped): / focus filter, j/k next/prev file, c fold all ----
+    var curFile = -1;
+    function focusFile(i){
+      var visible = fileEls.filter(function(el){ return !el.hidden; });
+      if (!visible.length) return;
+      curFile = Math.max(0, Math.min(i, visible.length - 1));
+      var t = visible[curFile];
+      t.open = true; t.scrollIntoView({ behavior:'smooth', block:'start' });
+      t.classList.add('flash'); setTimeout(function(){ t.classList.remove('flash'); }, 800);
+      markCurrent(t);
+    }
+    // ! Listen on document (a div gets no keydown without focus) but ignore events while this
+    // ! layout's tabbed panel is hidden, so each panel stays independently driven.
+    document.addEventListener('keydown', function(e){
+      var panel = root.closest('.panel');
+      if (panel && panel.hidden) return;
+      var tag = (e.target.tagName||'').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+        if (e.key === 'Escape') e.target.blur();
+        return;
+      }
+      if (e.key === '/') { e.preventDefault(); if (filterInput) filterInput.focus(); }
+      else if (e.key === 'j') { e.preventDefault(); focusFile(curFile + 1); }
+      else if (e.key === 'k') { e.preventDefault(); focusFile(curFile - 1); }
+      else if (e.key === 'c') { e.preventDefault(); if (foldAll) foldAll.click(); }
+    });
+
     buildTree();
   }
   [].forEach.call(document.querySelectorAll('.layout'), initView);

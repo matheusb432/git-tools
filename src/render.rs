@@ -101,7 +101,10 @@ pub fn render_diff_lines(lines: &[String]) -> String {
 }
 
 // Body-only markup (the .layout block) shared by the single and tabbed views so the
-// document chrome — one <style>/<script> — lives only at the top level.
+// document chrome — one <style>/<script> — lives only at the top level. The Shelf is a
+// 3-column grid: file tree (left), diff (center), commit shelf (right), titlebar + keybar
+// spanning the full width. Per-commit [popover] elements live inside .layout so the
+// per-layout JS scoping in preview.js finds them.
 fn view_body(view: &View) -> Markup {
     let total_add: u32 = view.files.iter().map(|f| f.added).sum();
     let total_del: u32 = view.files.iter().map(|f| f.removed).sum();
@@ -109,53 +112,75 @@ fn view_body(view: &View) -> Markup {
     let file_count = view.files.len();
 
     html! {
-        div.layout data-tree="closed" {
+        div.layout {
+            header.titlebar {
+                div.brand {
+                    span.repo { "~/" b { (view.repo_name) } }
+                    span.kind { (view.title) }
+                }
+                div.branchline {
+                    span.ref-branch { (view.branch) }
+                    span.arr { "→" }
+                    span.ref-up { (view.upstream) }
+                }
+                div.spacer {}
+                button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
+                theme-switch {}
+            }
             aside.tree aria-label="Changed files tree" {
-                div.tree-head { span { "FILES" } }
+                div.search {
+                    input type="text" class="filter" placeholder="Filter files…  /" aria-label="Filter files";
+                }
+                div.tree-head {
+                    span { (view.commits_label) " · " (file_count) " file" (plural(file_count)) }
+                }
+                div.stats {
+                    span.stat { b { (commit_count) } " commit" (plural(commit_count)) }
+                    span.stat.add { "+" (total_add) }
+                    span.stat.del { "−" (total_del) }
+                }
                 div.tree-body {}
             }
-            div.term {
-                div.titlebar {
-                    button type="button" class="tree-toggle" aria-label="Toggle file tree" aria-expanded="false" title="Toggle file tree" {
-                        span {} span {} span {}
-                    }
-                    span.dots { i {} i {} i {} }
-                    span.ttl { "~/" b { (view.repo_name) } " — " (view.title) }
-                    theme-switch {}
+            main.main {
+                (file_blocks(view))
+            }
+            aside.shelf aria-label="Commits in range" {
+                div.shelf-head {
+                    h3 { (view.commits_label) }
+                    p.hint { span.dot {} "click card = copy hash · bead = filter to commit · hover = notes" }
                 }
-                div.screen {
-                    div.cmd {
-                        span.sig { "$" }
-                        (view.cmd.lead)
-                        span.hl { (view.cmd.range) }
-                        (view.cmd.trail)
+                (commit_rows(view))
+            }
+            footer.keybar {
+                span.cmd-line {
+                    (view.foot.cmd) " " span.dim { (view.foot.note) }
+                }
+                div.spacer {}
+                span.key { kbd { "j" } " " kbd { "k" } " file" }
+                span.key { kbd { "/" } " filter" }
+                span.key { kbd { "c" } " fold all" }
+            }
+            (commit_popovers(view))
+        }
+    }
+}
+
+// Native-popover bodies for commits that carry a body, emitted once per .layout (top-level
+// [popover] elements escape the sidebar's scroll clip). The id is keyed to the sha so the
+// shelf card's data-pop can resolve its popover within `root`.
+fn commit_popovers(view: &View) -> Markup {
+    html! {
+        @for commit in &view.commits {
+            @if !commit.body.trim().is_empty() {
+                div id={ "pop-" (commit.sha) } popover {
+                    div.pop-head {
+                        span.sha { (commit.sha) }
+                        @if !commit.date.is_empty() {
+                            span.when { (commit.date) }
+                        }
                     }
-                    div.refline {
-                        span.ref.ref-branch { (view.branch) }
-                        span.arr { "→" }
-                        span.ref.ref-up { (view.upstream) }
-                    }
-                    div.stats {
-                        span.stat { b { (commit_count) } " commit" (plural(commit_count)) }
-                        span.stat { b { (file_count) } " file" (plural(file_count)) }
-                        span.stat.add { "+" (total_add) }
-                        span.stat.del { "−" (total_del) }
-                    }
-                    div.sec.sec-commits {
-                        span { (view.commits_label) }
-                        button type="button" class="showall" hidden { "show all ✕" }
-                    }
-                    (commit_rows(view))
-                    div.sec { "# diff" }
-                    (toc(&view.files))
-                    (file_blocks(view))
-                    div.cmd.foot {
-                        span.sig { "$" }
-                        (view.foot.cmd)
-                        span.cursor {}
-                        " "
-                        span.dim { (view.foot.note) }
-                    }
+                    div.pop-sub { (commit.subject) }
+                    div.pop-body { (commit.body.trim()) }
                 }
             }
         }
@@ -163,15 +188,16 @@ fn view_body(view: &View) -> Markup {
 }
 
 pub fn build_html(view: &View) -> String {
+    let count = view.commits.len();
     html! {
         (DOCTYPE)
-        html lang="en" {
+        html lang="en" data-theme=[view.theme.as_deref()] {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 // ! page ships its own dark theme + switcher — tell Dark Reader to leave it alone.
                 meta name="darkreader-lock";
-                title { (view.title) " · " (view.repo_name) }
+                title { (view.repo_name) " — " (view.title) " · " (count) " commit" (plural(count)) }
                 script { (PreEscaped(THEME_BOOT_JS)) }
                 style { (PreEscaped(PREVIEW_CSS)) }
             }
@@ -188,9 +214,9 @@ pub fn build_html(view: &View) -> String {
 
 pub fn build_tabbed_html(title: &str, views: &[View]) -> String {
     // ? tab strip css/js stay inline; panels reuse the externalized preview.{css,js} chrome
-    const TABBED_CSS: &str = r#"  .tabs{position:sticky;top:0;z-index:60;display:flex;gap:6px;align-items:center;overflow-x:auto;padding:10px 12px;background:var(--bar);border-bottom:1px solid var(--line)}
-  .tab{flex:none;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim);background:var(--term);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
-  .tab:hover{color:var(--ink);border-color:var(--cyan)} .tab.active{color:var(--green);border-color:var(--green)}
+    const TABBED_CSS: &str = r#"  .tabs{position:sticky;top:0;z-index:60;display:flex;gap:6px;align-items:center;overflow-x:auto;padding:10px 12px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+  .tab{flex:none;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
+  .tab:hover{color:var(--ink);border-color:var(--acc-line)} .tab.active{color:var(--acc);border-color:var(--acc-line)}
   .panel[hidden]{display:none}"#;
     const TABBED_JS: &str = r#"(function(){
   var tabs = [].slice.call(document.querySelectorAll('.tabs .tab'));
@@ -204,9 +230,10 @@ pub fn build_tabbed_html(title: &str, views: &[View]) -> String {
   });
 })();"#;
 
+    let default_theme = views.first().and_then(|v| v.theme.as_deref());
     html! {
         (DOCTYPE)
-        html lang="en" {
+        html lang="en" data-theme=[default_theme] {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
@@ -299,6 +326,10 @@ fn file_commits(file: &FileDiff) -> String {
     file.commits.join(" ")
 }
 
+// Right-hand commit shelf cards. The card body copies its sha on click; the timeline `bead`
+// is a separate toggle button driving the commit filter. A card with a body also gets a
+// distinct `notes-ico` glyph + a `data-pop` pointer to its sibling [popover] (emitted by
+// commit_popovers). The always-visible body `pre` of the old terminal layout is gone.
 fn commit_rows(view: &View) -> Markup {
     if view.commits.is_empty() {
         return html! { div.empty { "no commits in range" } };
@@ -306,38 +337,28 @@ fn commit_rows(view: &View) -> Markup {
 
     html! {
         @for commit in &view.commits {
-            div.commit data-sha=(commit.sha) role="button" tabindex="0" title="show only this commit's files" {
-                div.crow {
+            @let has_notes = !commit.body.trim().is_empty();
+            div class=(if has_notes { "cline has" } else { "cline" })
+                data-sha=(commit.sha)
+                data-pop=[has_notes.then(|| format!("pop-{}", commit.sha))]
+                role="button" tabindex="0" title="click to copy hash" {
+                button.bead type="button" aria-pressed="false"
+                    aria-label="show only this commit's files"
+                    title="show only this commit's files" {}
+                div.top {
                     code.sha { (commit.sha) }
-                    span.subj { (commit.subject) }
+                    @if has_notes {
+                        span.notes-ico aria-hidden="true" title="has extended notes" {}
+                    }
                     @if !commit.date.is_empty() {
                         @if commit.iso.is_empty() {
-                            time.cdate { (commit.date) }
+                            time.when { (commit.date) }
                         } @else {
-                            time.cdate datetime=(commit.iso) title=(commit.iso) { (commit.date) }
+                            time.when datetime=(commit.iso) title=(commit.iso) { (commit.date) }
                         }
                     }
                 }
-                @if !commit.body.trim().is_empty() {
-                    pre.cbody { (commit.body.trim()) }
-                }
-            }
-        }
-    }
-}
-
-fn toc(files: &[FileDiff]) -> Markup {
-    if files.is_empty() {
-        return html! {};
-    }
-
-    html! {
-        nav.toc aria-label="Changed files" {
-            @for file in files {
-                @let name = file.path.rsplit('/').next().unwrap_or(&file.path);
-                a href={ "#" (slug(&file.path)) } data-commits=(file_commits(file)) {
-                    (name) " " span.a { "+" (file.added) } " " span.d { "−" (file.removed) }
-                }
+                div.sub { (commit.subject) }
             }
         }
     }
@@ -351,9 +372,18 @@ fn file_blocks(view: &View) -> Markup {
     html! {
         @for file in &view.files {
             @let absolute = format!("{}/{}", view.repo_root, file.path);
-            details open id=(slug(&file.path)) class="file" data-path=(file.path) data-commits=(file_commits(file)) {
+            @let status = file.status();
+            details open
+                id=(slug(&file.path))
+                class=(format!("file {}", status.css_class()))
+                data-path=(file.path)
+                data-commits=(file_commits(file))
+                data-status=(status.key())
+                data-status-code=(status.code())
+                data-status-label=(status.label()) {
                 summary {
                     span.path { (file.path) }
+                    span class=(format!("status-badge {}", status.css_class())) title=(status.label()) aria-label=(status.label()) { (status.code()) }
                     span.copies {
                         copy-button value=(file.path) label="path" {}
                         copy-button value=(absolute) label="abs" {}
@@ -451,6 +481,7 @@ mod tests {
                 cmd: "git diff origin/main..HEAD".to_string(),
                 note: "# read-only preview".to_string(),
             },
+            theme: None,
         };
 
         let html = build_html(&view);
@@ -466,23 +497,50 @@ mod tests {
     }
 
     #[test]
-    fn build_html_keeps_original_static_renderer_chrome() {
+    fn build_html_guards_shelf_structural_contract() {
         let html = build_html(&sample_view());
 
-        assert!(html.contains(
-            "radial-gradient(50vw 40vw at 88% -6%, rgba(57,197,207,.10), transparent 60%)"
-        ));
-        assert!(html.contains("background-attachment:fixed;-webkit-font-smoothing:antialiased;"));
-        assert!(
-            html.contains(
-                "box-shadow:0 30px 90px -28px rgba(0,0,0,.9), 0 0 70px -40px var(--cyan)"
-            )
-        );
-        assert!(html.contains(".diff::-webkit-scrollbar{height:10px}"));
-        assert!(html.contains(".showall:hover{border-color:var(--amber);color:var(--bright)}"));
-        assert!(html.contains(".titlebar{background:#f2f2f2}.ttl,.ttl b{color:#111}"));
-        assert!(html.contains("// ---- commit filter: show only the files a commit touched ----"));
-        assert!(html.contains("t.scrollIntoView({ behavior:'smooth', block:'start' });"));
+        // title reflects repo, view, and commit count
+        assert!(html.contains("<title>api — diff · 1 commit</title>"));
+
+        // three theme palettes: default :root (dark) + light + hearth, amber removed
+        assert!(html.contains(":root{"));
+        assert!(html.contains(r#":root[data-theme="light"]"#));
+        assert!(html.contains(r#":root[data-theme="hearth"]"#));
+        assert!(!html.contains(r#":root[data-theme="amber"]"#));
+
+        // perf + offline-theming guards survive the redesign
+        assert!(html.contains("content-visibility:auto"));
+        assert!(html.contains("@media print"));
+
+        // vendored Lit components stay in place
+        assert!(html.contains("<theme-switch"));
+        assert!(html.contains("<copy-button"));
+
+        // engine diff classes are styled (render_diff_lines emits these, untouched)
+        assert!(html.contains(".dl-add"));
+        assert!(html.contains(".dl-del"));
+
+        // native popover machinery + Shelf landmarks
+        assert!(html.contains("[popover]"));
+        assert!(html.contains(r#"<aside class="tree""#));
+        assert!(html.contains(r#"<aside class="shelf""#));
+        assert!(html.contains(r#"<footer class="keybar""#));
+
+        // commit-filter feature: files carry data-commits
+        assert!(html.contains(r#"data-commits="abc123def""#));
+
+        // commit card body copies the hash only; its title says so
+        assert!(html.contains(r#"title="click to copy hash""#));
+        // the timeline bead is a real focusable toggle button for the commit filter
+        assert!(html.contains(r#"<button class="bead" type="button" aria-pressed="false""#));
+        assert!(html.contains(r#"aria-label="show only this commit's files""#));
+        // notes are flagged by a distinct, non-emoji notes indicator (not the bead)
+        assert!(html.contains(r#"<span class="notes-ico" aria-hidden="true""#));
+
+        // offline: no network resources anywhere
+        assert!(!html.contains("http://"));
+        assert!(!html.contains("https://"));
     }
 
     #[test]
@@ -491,7 +549,7 @@ mod tests {
         view.repo_name = "a&b<repo>\"".to_string();
         view.branch = "main<script>".to_string();
         view.upstream = "origin/feat\"x".to_string();
-        view.cmd.range = "HEAD~1..HEAD&bad".to_string();
+        view.commits[0].subject = "feat: a&b<x>".to_string();
         view.files[0].path = "src/<x>&\".rs".to_string();
         view.files[0].lines = vec![
             "@@ -0,0 +1 @@".to_string(),
@@ -503,7 +561,7 @@ mod tests {
         assert!(html.contains("a&amp;b&lt;repo&gt;&quot;"));
         assert!(html.contains("main&lt;script&gt;"));
         assert!(html.contains("origin/feat&quot;x"));
-        assert!(html.contains("HEAD~1..HEAD&amp;bad"));
+        assert!(html.contains("feat: a&amp;b&lt;x&gt;"));
         assert!(html.contains("src/&lt;x&gt;&amp;&quot;.rs"));
         assert!(!html.contains("<script>x</script>"));
         assert!(html.contains("+&lt;script&gt;x&lt;/script&gt;"));
@@ -550,6 +608,102 @@ mod tests {
     }
 
     #[test]
+    fn build_html_marks_file_status_for_sidebar_tree() {
+        let mut view = sample_view();
+        view.files = vec![
+            FileDiff {
+                path: "src/new.rs".to_string(),
+                added: 1,
+                removed: 0,
+                lines: vec![
+                    "new file mode 100644".to_string(),
+                    "--- /dev/null".to_string(),
+                    "+++ b/src/new.rs".to_string(),
+                    "@@ -0,0 +1 @@".to_string(),
+                    "+hello".to_string(),
+                ],
+                commits: vec!["abc123def".to_string()],
+            },
+            FileDiff {
+                path: "src/gone.rs".to_string(),
+                added: 0,
+                removed: 1,
+                lines: vec![
+                    "deleted file mode 100644".to_string(),
+                    "--- a/src/gone.rs".to_string(),
+                    "+++ /dev/null".to_string(),
+                    "@@ -1 +0,0 @@".to_string(),
+                    "-bye".to_string(),
+                ],
+                commits: vec!["abc123def".to_string()],
+            },
+            FileDiff {
+                path: "src/new-name.rs".to_string(),
+                added: 0,
+                removed: 0,
+                lines: vec![
+                    "similarity index 100%".to_string(),
+                    "rename from src/old-name.rs".to_string(),
+                    "rename to src/new-name.rs".to_string(),
+                ],
+                commits: vec!["abc123def".to_string()],
+            },
+        ];
+
+        let html = build_html(&view);
+
+        assert!(html.contains(r#"data-status="added""#));
+        assert!(html.contains(r#"data-status-label="Added file""#));
+        assert!(html.contains(r#"class="file status-added""#));
+        assert!(html.contains(r#"data-status="deleted""#));
+        assert!(html.contains(r#"data-status-label="Deleted file""#));
+        assert!(html.contains(r#"class="file status-deleted""#));
+        assert!(html.contains(r#"data-status="renamed""#));
+        assert!(html.contains(r#"data-status-label="Renamed file""#));
+        assert!(html.contains(r#"class="file status-renamed""#));
+        assert!(html.contains("tstatus"));
+    }
+
+    #[test]
+    fn file_status_indicators_stay_compact_trailing_and_discreet() {
+        assert!(PREVIEW_JS.contains("li.className = 'tnode tfile status-' + f.status;"));
+        assert!(
+            PREVIEW_JS.contains("label.appendChild(name);\n        label.appendChild(status);")
+        );
+        assert!(!PREVIEW_JS.contains("label.appendChild(icon);"));
+
+        assert!(PREVIEW_CSS.contains(".tfile.status-added>.tlabel"));
+        assert!(PREVIEW_CSS.contains(".tfile.status-deleted>.tlabel"));
+        assert!(
+            PREVIEW_CSS.contains(".tlabel{display:flex;align-items:center;gap:5px;padding:2px 5px")
+        );
+        assert!(PREVIEW_CSS.contains("gap:7px;padding:7px 10px;font-size:12.5px"));
+    }
+
+    #[test]
+    fn preview_css_uses_responsive_sidebar_columns() {
+        assert!(PREVIEW_CSS.contains("--tree-col:262px"));
+        assert!(PREVIEW_CSS.contains("--shelf-col:252px"));
+        assert!(
+            PREVIEW_CSS
+                .contains("grid-template-columns:var(--tree-col) minmax(0,1fr) var(--shelf-col)")
+        );
+        assert!(PREVIEW_CSS.contains("@media (min-width:1600px) and (min-height:900px)"));
+        assert!(PREVIEW_CSS.contains("--tree-col:320px"));
+        assert!(PREVIEW_CSS.contains("--shelf-col:304px"));
+        assert!(PREVIEW_CSS.contains("@media (max-width:1280px)"));
+        assert!(PREVIEW_CSS.contains("--tree-col:220px"));
+        assert!(PREVIEW_CSS.contains("--shelf-col:210px"));
+        assert!(PREVIEW_CSS.contains("@media (max-width:1024px)"));
+        assert!(PREVIEW_CSS.contains("--side-display:none"));
+        assert!(PREVIEW_CSS.contains(".tdir>ul .tfile>.tlabel{padding-left:8px}"));
+        assert!(PREVIEW_CSS.contains(".tree{grid-column:1;grid-row:2"));
+        assert!(PREVIEW_CSS.contains(".main{grid-column:2;grid-row:2"));
+        assert!(PREVIEW_CSS.contains(".shelf{grid-column:3;grid-row:2"));
+        assert!(!PREVIEW_CSS.contains(".keybar{display:none}"));
+    }
+
+    #[test]
     fn build_html_copy_button_absolute_path_escapes_user_controlled_values() {
         let mut view = sample_view();
         view.repo_root = "/tmp/<r>".to_string();
@@ -579,7 +733,7 @@ mod tests {
             commits: vec![Commit {
                 sha: "abc123def".to_string(),
                 subject: "feat: thing".to_string(),
-                body: String::new(),
+                body: "extended notes".to_string(),
                 date: String::new(),
                 iso: String::new(),
             }],
@@ -606,6 +760,7 @@ mod tests {
                 cmd: "git diff origin/main..HEAD".to_string(),
                 note: "# read-only preview".to_string(),
             },
+            theme: None,
         }
     }
 }

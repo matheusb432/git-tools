@@ -40,6 +40,7 @@ pub fn run(
         foot: ranges.foot,
         commits,
         files,
+        theme: None,
     };
 
     let commit_count = view.commits.len();

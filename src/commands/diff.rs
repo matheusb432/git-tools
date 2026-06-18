@@ -79,6 +79,7 @@ pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View
 
     let commits = git::log_commits(top, &io_ranges.log_range)?;
     let mut files = parse_diff(&git::diff_raw(top, &io_ranges.diff_args)?);
+    crate::model::sort_files_tree_order(&mut files);
     let file_commits = git::file_commit_map(top, &io_ranges.log_range)?;
     git::attach_commits(&mut files, &file_commits);
 
@@ -93,6 +94,7 @@ pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View
         foot: view_ranges.foot,
         commits,
         files,
+        theme: crate::config::load().theme,
     };
 
     let summary = match target {

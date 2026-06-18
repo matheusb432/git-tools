@@ -5,19 +5,19 @@
 (function(){
 const {LitElement, html, css} = globalThis.Lit;
 
-const THEMES = ['dark', 'light', 'amber'];
+const THEMES = ['dark', 'light', 'hearth'];
 
 class ThemeSwitch extends LitElement {
   static properties = { theme: { type: String } };
 
   static styles = css`
     :host{display:inline-flex;align-items:center;gap:6px}
-    label{color:var(--dim);font-size:11px;letter-spacing:.04em}
+    label{color:var(--ink-2);font-size:11px;letter-spacing:.04em}
     select{
-      font:inherit;font-size:11px;color:var(--ink);background:var(--term);
-      border:1px solid var(--line2);border-radius:6px;padding:2px 6px;cursor:pointer;
+      font:inherit;font-size:11px;color:var(--ink);background:var(--surface-2);
+      border:1px solid var(--line-2);border-radius:4px;padding:2px 6px;cursor:pointer;
     }
-    select:hover{border-color:var(--cyan)}
+    select:hover{border-color:var(--acc-line)}
   `;
 
   constructor() {
@@ -86,13 +86,13 @@ class CopyButton extends LitElement {
   static styles = css`
     :host{display:inline-flex}
     button{
-      font:inherit;font-size:10px;letter-spacing:.04em;color:var(--dim);
-      background:var(--term);border:1px solid var(--line2);border-radius:5px;
+      font:inherit;font-size:10px;letter-spacing:.04em;color:var(--acc);
+      background:var(--acc-soft);border:1px solid var(--acc-line);border-radius:4px;
       padding:1px 6px;cursor:pointer;
     }
-    button:hover{color:var(--ink);border-color:var(--cyan)}
-    button[data-state="ok"]{color:var(--green);border-color:var(--green)}
-    button[data-state="err"]{color:var(--amber);border-color:var(--amber)}
+    button:hover{color:var(--bg);background:var(--acc);border-color:var(--acc)}
+    button[data-state="ok"]{color:var(--bg);background:var(--add);border-color:var(--add)}
+    button[data-state="err"]{color:var(--bg);background:var(--del);border-color:var(--del)}
   `;
 
   constructor() {

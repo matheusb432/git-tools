@@ -12,6 +12,79 @@ pub struct FileDiff {
     pub commits: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileStatus {
+    Added,
+    Deleted,
+    Renamed,
+    Modified,
+}
+
+impl FileStatus {
+    pub(crate) fn key(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Deleted => "deleted",
+            Self::Renamed => "renamed",
+            Self::Modified => "modified",
+        }
+    }
+
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::Added => "A",
+            Self::Deleted => "D",
+            Self::Renamed => "R",
+            Self::Modified => "M",
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Added => "Added file",
+            Self::Deleted => "Deleted file",
+            Self::Renamed => "Renamed file",
+            Self::Modified => "Modified file",
+        }
+    }
+
+    pub(crate) fn css_class(self) -> &'static str {
+        match self {
+            Self::Added => "status-added",
+            Self::Deleted => "status-deleted",
+            Self::Renamed => "status-renamed",
+            Self::Modified => "status-modified",
+        }
+    }
+}
+
+impl FileDiff {
+    pub(crate) fn status(&self) -> FileStatus {
+        if self
+            .lines
+            .iter()
+            .any(|line| line.starts_with("rename from ") || line.starts_with("rename to "))
+        {
+            return FileStatus::Renamed;
+        }
+        if self
+            .lines
+            .iter()
+            .any(|line| line.starts_with("new file ") || line == "--- /dev/null")
+        {
+            return FileStatus::Added;
+        }
+        if self
+            .lines
+            .iter()
+            .any(|line| line.starts_with("deleted file ") || line == "+++ /dev/null")
+        {
+            return FileStatus::Deleted;
+        }
+        FileStatus::Modified
+    }
+}
+
 /// One commit in range. `date`/`iso` are the human + machine timestamps.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Commit {
@@ -53,4 +126,74 @@ pub struct View {
     pub cmd: Cmd,
     pub commits_label: String,
     pub foot: Foot,
+    /// Diff-preview theme read from config; `None` = default.
+    pub theme: Option<String>,
+}
+
+/// Reorders changed files into directory-tree order: at each directory level,
+/// subdirectories come before files, both sorted alphabetically (depth-first).
+/// This is the single source of truth for file order; the sidebar follows it.
+pub fn sort_files_tree_order(files: &mut [FileDiff]) {
+    use std::cmp::Ordering;
+
+    files.sort_by(|a, b| {
+        let a_components: Vec<&str> = a.path.split('/').collect();
+        let b_components: Vec<&str> = b.path.split('/').collect();
+
+        for i in 0..a_components.len().min(b_components.len()) {
+            if a_components[i] == b_components[i] {
+                continue;
+            }
+            // ? a component that is not the last in its path is a directory name
+            let a_is_dir = i < a_components.len() - 1;
+            let b_is_dir = i < b_components.len() - 1;
+            return match (a_is_dir, b_is_dir) {
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                _ => a_components[i].cmp(b_components[i]),
+            };
+        }
+        // ? one path is a prefix of the other: shorter (shallower) comes first
+        a_components.len().cmp(&b_components.len())
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn file(path: &str) -> FileDiff {
+        FileDiff {
+            path: path.to_string(),
+            added: 0,
+            removed: 0,
+            lines: Vec::new(),
+            commits: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn sort_files_tree_order_dirs_before_files_alpha_per_level() {
+        let mut files = vec![
+            file("src/render.rs"),
+            file("docs/adr/0001-render-stack.md"),
+            file("src/assets/preview.css"),
+            file("src/model.rs"),
+            file("src/assets/components.js"),
+        ];
+
+        sort_files_tree_order(&mut files);
+
+        let order: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            order,
+            vec![
+                "docs/adr/0001-render-stack.md",
+                "src/assets/components.js",
+                "src/assets/preview.css",
+                "src/model.rs",
+                "src/render.rs",
+            ]
+        );
+    }
 }

@@ -9,6 +9,7 @@ use crate::commands::squash_local::{SquashResult, Status, StdGitRunner, invoke_s
 
 pub mod cli;
 pub mod commands;
+pub mod config;
 pub mod diff;
 pub mod git;
 pub mod model;
