@@ -74,6 +74,8 @@ pub enum Command {
     },
     /// List tags, show tag commits, or push tags.
     Tag(TagArgs),
+    /// Inspect git worktrees.
+    Wk(WorktreeArgs),
     /// Show branch, unpushed commits, and pending changes for every managed repo.
     #[command(visible_alias = "ls")]
     Status(ManagedReadArgs),
@@ -138,6 +140,22 @@ pub enum TagCommand {
     },
 }
 
+/// Arguments for `wk`.
+#[derive(Debug, Args)]
+pub struct WorktreeArgs {
+    #[command(subcommand)]
+    pub command: WorktreeCommand,
+}
+
+/// Nested commands under `wk`.
+#[derive(Debug, Subcommand)]
+pub enum WorktreeCommand {
+    /// Print the primary worktree path.
+    Base,
+    /// List worktrees in a readable table.
+    Ls,
+}
+
 /// Target flags for the root `diff` command.
 #[derive(Debug, Args)]
 pub struct DiffTargetArgs {
@@ -153,6 +171,9 @@ pub struct DiffTargetArgs {
     /// Diff the last N commits (`HEAD~N..HEAD`); bare `-l` diffs the last commit.
     #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
     pub last: Option<NonZeroU32>,
+    /// Diff what merging HEAD into BASE would introduce (`BASE...HEAD`).
+    #[arg(short = 'm', long = "merge", value_name = "BASE", conflicts_with_all = ["target", "last", "unpushed", "all"])]
+    pub merge: Option<String>,
     /// Path to the managed-repos manifest (overrides the default lookup).
     #[arg(long, requires = "all")]
     pub repos_file: Option<String>,
@@ -167,6 +188,9 @@ pub struct DiffSubreposScanArgs {
     /// Diff the last N commits in every discovered repo; bare `-l` diffs the last commit.
     #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
     pub last: Option<NonZeroU32>,
+    /// Include nested linked worktrees (e.g. `.worktrees/<name>`); skipped by default.
+    #[arg(short = 'w', long = "worktrees", visible_alias = "wk")]
+    pub worktrees: bool,
 }
 
 /// Flags shared by read-only managed-repo commands (`status`/`ls`).
@@ -223,6 +247,8 @@ pub enum DiffTarget {
     Base(String),
     /// An exact `<start>..<end>` commit range.
     Range(String),
+    /// A three-dot merge preview against the base branch.
+    Merge(String),
     /// The last N commits (`HEAD~N..HEAD`).
     Last(NonZeroU32),
 }
@@ -276,6 +302,25 @@ mod tests {
         assert!(matches!(
             cli.command,
             Command::SquashPreview { repo, monorepo } if repo == "r" && monorepo == "m"
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_worktree_commands() {
+        let cli = Cli::parse_args(&["wk".into(), "base".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Wk(WorktreeArgs {
+                command: WorktreeCommand::Base
+            })
+        ));
+
+        let cli = Cli::parse_args(&["wk".into(), "ls".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Wk(WorktreeArgs {
+                command: WorktreeCommand::Ls
+            })
         ));
     }
 
@@ -339,12 +384,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_args_diff_merge_sets_base() {
+        let cli = Cli::parse_args(&["diff".into(), "-m".into(), "main".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                command: None,
+                target: DiffTargetArgs {
+                    merge: Some(base),
+                    target: None,
+                    last: None,
+                    ..
+                },
+            }) if base == "main"
+        ));
+    }
+
+    #[test]
     fn parse_args_diff_subrepos_bare_last_defaults_to_one() {
         let cli = Cli::parse_args(&["diff".into(), "subrepos".into(), "-l".into()]).unwrap();
         assert!(matches!(
             cli.command,
             Command::Diff(DiffArgs {
-                command: Some(DiffCommand::Subrepos(DiffSubreposScanArgs { last: Some(n) })),
+                command: Some(DiffCommand::Subrepos(DiffSubreposScanArgs { last: Some(n), .. })),
                 target: DiffTargetArgs {
                     target: None,
                     last: None,
@@ -391,6 +453,16 @@ mod tests {
     fn parse_args_diff_rejects_last_combined_with_target() {
         assert!(
             Cli::parse_args(&["diff".into(), "abc123".into(), "-l".into(), "2".into()]).is_err()
+        );
+    }
+
+    #[test]
+    fn parse_args_diff_rejects_merge_combined_with_other_targets() {
+        assert!(
+            Cli::parse_args(&["diff".into(), "-m".into(), "main".into(), "abc123".into()]).is_err()
+        );
+        assert!(
+            Cli::parse_args(&["diff".into(), "-m".into(), "main".into(), "-l".into()]).is_err()
         );
     }
 

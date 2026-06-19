@@ -20,6 +20,7 @@ fn top_level_help_lists_every_subcommand() {
         "squash-local",
         "up",
         "tag",
+        "wk",
         "status",
         "push-all",
         "pull-all",
@@ -78,6 +79,16 @@ fn diff_help_documents_the_last_flag() {
         .success()
         .stdout(contains("--last"))
         .stdout(contains("last N commits"));
+}
+
+#[test]
+fn diff_help_documents_the_merge_flag() {
+    git_tools()
+        .args(["diff", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("-m, --merge"))
+        .stdout(contains("BASE...HEAD"));
 }
 
 #[test]
@@ -254,4 +265,14 @@ fn ls_alias_routes_to_status_help() {
         .success()
         .stdout(contains("--repos-file"))
         .stdout(contains("--json"));
+}
+
+#[test]
+fn wk_help_documents_worktree_commands() {
+    git_tools()
+        .args(["wk", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("base"))
+        .stdout(contains("ls"));
 }

@@ -13,6 +13,7 @@ pub mod squash_local;
 pub mod squash_preview;
 pub mod sync;
 pub mod tag;
+pub mod worktree;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {

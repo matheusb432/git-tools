@@ -6,7 +6,7 @@ A small Rust CLI for git workflow previews and local-history housekeeping. Insta
 
 Per-repo:
 
-- `diff` — render an HTML diff of the current repo: unpushed work (the default), a base commit, an exact `<start>..<end>` range, or the last N commits (`-l N`).
+- `diff` — render an HTML diff of the current repo: unpushed work (the default), a base commit, an exact `<start>..<end>` range, the last N commits (`-l N`), or a three-dot merge preview (`-m/--merge <base>`).
 - `squash-preview` / `merge-diff` — render HTML previews of a subrepo's unpushed work or a three-dot merge diff against a base branch.
 - `diff subrepos` — render one tabbed HTML diff for every git repo under the current directory.
 - `squash-local` — squash all unpushed local commits into one (`--dry` to preview).

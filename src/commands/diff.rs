@@ -39,13 +39,14 @@ pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View
     let branch = git::current_branch(top)?;
     let repo_name = repo_name(top);
 
-    let (base_ref, io_ranges, view_ranges) = match target {
+    let (base_ref, io_ranges, view_ranges, fallback_to_main) = match target {
         DiffTarget::Range(range) => {
             verify_exact_range(top, range)?;
             (
                 range.clone(),
                 ranges(range, Mode::ExactRange),
                 ranges(range, Mode::ExactRange),
+                false,
             )
         }
         DiffTarget::Base(base) => {
@@ -55,14 +56,30 @@ pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View
                 short.clone(),
                 ranges(base, Mode::Hash),
                 ranges(&short, Mode::Hash),
+                false,
+            )
+        }
+        DiffTarget::Merge(base) => {
+            git::verify_commit(top, base)?;
+            (
+                base.clone(),
+                ranges(base, Mode::Merge),
+                ranges(base, Mode::Merge),
+                false,
             )
         }
         DiffTarget::Unpushed => {
-            let upstream = git::upstream(top)?;
+            let base = unpushed_or_main_base(top)?;
+            let mode = if base.is_upstream {
+                Mode::Unpushed
+            } else {
+                Mode::Hash
+            };
             (
-                upstream.clone(),
-                ranges(&upstream, Mode::Unpushed),
-                ranges(&upstream, Mode::Unpushed),
+                base.ref_name.clone(),
+                ranges(&base.ref_name, mode),
+                ranges(&base.ref_name, mode),
+                !base.is_upstream,
             )
         }
         DiffTarget::Last(count) => {
@@ -73,6 +90,7 @@ pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View
                 range.clone(),
                 ranges(&range, Mode::ExactRange),
                 ranges(&range, Mode::ExactRange),
+                false,
             )
         }
     };
@@ -107,6 +125,8 @@ pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View
     let summary = match target {
         DiffTarget::Range(_) => base_ref.clone(),
         DiffTarget::Base(_) => format!("{base_ref}..working"),
+        DiffTarget::Merge(_) => format!("to merge into {base_ref}"),
+        DiffTarget::Unpushed if fallback_to_main => format!("{base_ref}..working"),
         DiffTarget::Unpushed => legacy_unpushed_commit_label(view.commits.len()),
         DiffTarget::Last(count) => format!(
             "last {}",
@@ -114,6 +134,28 @@ pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View
         ),
     };
     Ok((view, summary))
+}
+
+struct DiffBase {
+    ref_name: String,
+    is_upstream: bool,
+}
+
+fn unpushed_or_main_base(top: &str) -> anyhow::Result<DiffBase> {
+    match git::upstream(top) {
+        Ok(upstream) => Ok(DiffBase {
+            ref_name: upstream,
+            is_upstream: true,
+        }),
+        Err(upstream_error) => {
+            git::verify_commit(top, "main").map_err(|_| upstream_error)?;
+            eprintln!("diff-preview: no upstream; falling back to main");
+            Ok(DiffBase {
+                ref_name: "main".to_string(),
+                is_upstream: false,
+            })
+        }
+    }
 }
 
 fn verify_exact_range(repo: impl AsRef<Path>, range: &str) -> anyhow::Result<()> {

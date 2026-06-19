@@ -2,7 +2,7 @@
 
 use crate::cli::{
     Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
-    ManagedReadArgs, TagCommand,
+    ManagedReadArgs, TagCommand, WorktreeCommand,
 };
 use crate::commands::managed::{ManagedExit, ManagedOptions, ManagedRun};
 use crate::commands::squash_local::{SquashResult, Status, StdGitRunner, invoke_squash_local};
@@ -74,21 +74,23 @@ fn dispatch(command: Command) -> ExitCode {
         Command::SquashPreview { repo, monorepo } => {
             html_exit(commands::squash_preview::run(repo, monorepo))
         }
-        Command::Diff(args) => match args.command {
-            Some(DiffCommand::Subrepos(subrepos)) => {
-                html_exit(commands::diff_subrepos::run_scan(".", subrepos.last))
+        Command::Diff(args) => {
+            match args.command {
+                Some(DiffCommand::Subrepos(subrepos)) => html_exit(
+                    commands::diff_subrepos::run_scan(".", subrepos.last, subrepos.worktrees),
+                ),
+                None => match diff_invocation(args.target) {
+                    DiffInvocation::Single(target) => html_exit(commands::diff::run(&target)),
+                    DiffInvocation::ManagedAll {
+                        repos_file,
+                        home_dir,
+                    } => {
+                        let options = managed_diff_options(repos_file, home_dir);
+                        html_exit(commands::diff_subrepos::run_managed_all(".", &options))
+                    }
+                },
             }
-            None => match diff_invocation(args.target) {
-                DiffInvocation::Single(target) => html_exit(commands::diff::run(&target)),
-                DiffInvocation::ManagedAll {
-                    repos_file,
-                    home_dir,
-                } => {
-                    let options = managed_diff_options(repos_file, home_dir);
-                    html_exit(commands::diff_subrepos::run_managed_all(".", &options))
-                }
-            },
-        },
+        }
         Command::MergeDiff {
             repo,
             monorepo,
@@ -102,6 +104,7 @@ fn dispatch(command: Command) -> ExitCode {
         }
         Command::Up { message, yes } => run_up(&message, yes),
         Command::Tag(args) => run_tag(args.command, args.commits),
+        Command::Wk(args) => run_worktree(args.command),
         Command::Status(args) => {
             managed_exit(commands::managed::run_status(&managed_read_options(args)))
         }
@@ -118,6 +121,29 @@ fn dispatch(command: Command) -> ExitCode {
             managed,
             message_for_all,
         ))),
+    }
+}
+
+fn run_worktree(command: WorktreeCommand) -> ExitCode {
+    use crate::commands::worktree;
+
+    let runner = StdGitRunner;
+    let result = match command {
+        WorktreeCommand::Base => worktree::base(&runner, std::path::Path::new(".")),
+        WorktreeCommand::Ls => worktree::list(&runner, std::path::Path::new(".")),
+    };
+
+    match result.status {
+        worktree::Status::Listed => {
+            if !result.detail.is_empty() {
+                println!("{}", result.detail);
+            }
+            ExitCode::Ok
+        }
+        worktree::Status::Fail => {
+            eprintln!("wk: {}", result.detail);
+            ExitCode::Internal
+        }
     }
 }
 
@@ -145,6 +171,8 @@ fn diff_target(args: DiffTargetArgs) -> DiffTarget {
     // ? `-l N` wins via clap conflict guard; `target` is None whenever `last` is Some.
     if args.unpushed {
         DiffTarget::Unpushed
+    } else if let Some(base) = args.merge {
+        DiffTarget::Merge(base)
     } else {
         match args.last {
             Some(count) => DiffTarget::Last(count),

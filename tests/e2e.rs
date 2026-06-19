@@ -315,6 +315,25 @@ fn diff_unpushed_flag_writes_artifact() {
 }
 
 #[test]
+fn diff_without_upstream_falls_back_to_main() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.git(&["checkout", "-b", "feature/local"]);
+    repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+
+    repo.run(&["diff"])
+        .assert()
+        .success()
+        .stdout(contains("diff-preview: main..working"))
+        .stdout(contains("wrote"))
+        .stderr(contains("falling back to main"));
+    assert_html(
+        &repo.repo.join(".artifacts/diff-preview-repo.html"),
+        "feature/local",
+    );
+}
+
+#[test]
 fn diff_base_commit_form_writes_artifact() {
     let repo = Repo::new();
     let base = repo.commit("a.txt", "base\n", "chore: base");
@@ -340,6 +359,30 @@ fn diff_exact_range_form_writes_artifact() {
         .success()
         .stdout(contains("diff-preview:"));
     assert!(repo.repo.join(".artifacts/diff-preview-repo.html").exists());
+}
+
+#[test]
+fn diff_merge_flag_writes_three_dot_merge_preview() {
+    let repo = Repo::new();
+    repo.commit("shared.txt", "base\n", "chore: base");
+    repo.git(&["checkout", "-b", "feature"]);
+    repo.commit("feature.txt", "feature\n", "feat: branch file");
+    repo.git(&["checkout", "main"]);
+    repo.commit("main.txt", "main\n", "feat: main file");
+    repo.git(&["checkout", "feature"]);
+
+    repo.run(&["diff", "--merge", "main"])
+        .assert()
+        .success()
+        .stdout(contains("diff-preview: to merge into main"))
+        .stdout(contains("wrote"));
+
+    let html =
+        std::fs::read_to_string(repo.repo.join(".artifacts/diff-preview-repo.html")).unwrap();
+    assert!(html.contains("git diff main...HEAD"));
+    assert!(html.contains("feat: branch file"));
+    assert!(html.contains("feature.txt"));
+    assert!(!html.contains("main.txt"));
 }
 
 #[test]
@@ -435,6 +478,60 @@ fn diff_outside_a_git_repo_errors() {
         .assert()
         .code(1)
         .stderr(contains("not a git repo"));
+}
+
+// --- wk --------------------------------------------------------------------
+
+#[test]
+fn wk_base_prints_the_primary_worktree_path() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    let linked = repo.root.join("feature-wt");
+    repo.git(&[
+        "worktree",
+        "add",
+        "-b",
+        "feature/wk",
+        linked.to_str().unwrap(),
+    ]);
+
+    Command::cargo_bin("git-tools")
+        .unwrap()
+        .args(["wk", "base"])
+        .current_dir(&linked)
+        .assert()
+        .success()
+        .stdout(contains(repo.repo.to_str().unwrap()))
+        .stdout(contains("feature-wt").not());
+}
+
+#[test]
+fn wk_ls_lists_worktrees_as_a_readable_table() {
+    let repo = Repo::new();
+    let head = repo.commit("a.txt", "base\n", "chore: base");
+    let linked = repo.root.join("feature-wt");
+    repo.git(&[
+        "worktree",
+        "add",
+        "-b",
+        "feature/wk",
+        linked.to_str().unwrap(),
+    ]);
+
+    repo.run(&["wk", "ls"])
+        .assert()
+        .success()
+        .stdout(contains("PATH"))
+        .stdout(contains("BRANCH"))
+        .stdout(contains("HEAD"))
+        .stdout(contains("STATE"))
+        .stdout(contains(repo.repo.to_str().unwrap()))
+        .stdout(contains(linked.to_str().unwrap()))
+        .stdout(contains("main"))
+        .stdout(contains("feature/wk"))
+        .stdout(contains(&head[..7]))
+        .stdout(contains("primary"))
+        .stdout(contains("linked"));
 }
 
 // --- up --------------------------------------------------------------------
@@ -795,6 +892,55 @@ fn diff_subrepos_nested_last_writes_one_tabbed_artifact() {
     assert!(html.contains("api"));
     assert!(html.contains("web"));
     assert!(html.contains("diff-preview"));
+}
+
+#[test]
+fn diff_subrepos_skips_nested_worktrees_by_default_and_includes_with_flag() {
+    let repos = NestedRepos::new(&["api", "web"]);
+    git_in(
+        &repos.repos[0],
+        &["worktree", "add", "-b", "feature", ".worktrees/feature"],
+    );
+
+    repos
+        .run(&["diff", "subrepos", "-l"])
+        .assert()
+        .success()
+        .stdout(contains("diff subrepos: 2 repo(s)"));
+
+    repos
+        .run(&["diff", "subrepos", "-l", "--worktrees"])
+        .assert()
+        .success()
+        .stdout(contains("diff subrepos: 3 repo(s)"));
+}
+
+#[test]
+fn diff_subrepos_without_upstreams_falls_back_to_main() {
+    let repos = NestedRepos::new(&["api", "web"]);
+    for repo in &repos.repos {
+        git_in(repo, &["reset", "--hard", "HEAD~1"]);
+        git_in(repo, &["checkout", "-b", "feature/local"]);
+        commit_in(
+            repo,
+            "README.md",
+            "base\nlocal branch\n",
+            "feat: local branch",
+        );
+    }
+
+    repos
+        .run(&["diff", "subrepos"])
+        .assert()
+        .success()
+        .stdout(contains("diff subrepos: 2 repo(s)"))
+        .stdout(contains("wrote"));
+
+    let html = std::fs::read_to_string(repos.artifact()).unwrap();
+    assert_eq!(html.matches(r#"<button class="tab"#).count(), 2);
+    assert!(html.contains("feature/local"));
+    assert!(html.contains("main"));
+    assert!(html.contains("feat: local branch"));
 }
 
 #[test]
