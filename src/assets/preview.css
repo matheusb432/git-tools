@@ -47,8 +47,9 @@
   .branchline{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2)}
   .branchline .ref-branch{color:var(--acc)} .branchline .ref-up{color:var(--ink-3)} .branchline .arr{color:var(--ink-3)}
   .spacer{flex:1}
-  .foldall{font:inherit;font-size:12px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:6px 10px;cursor:pointer;transition:.13s}
-  .foldall:hover{color:var(--ink);border-color:var(--acc-line)}
+  .foldall,.view-toggle{font:inherit;font-size:12px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:6px 10px;cursor:pointer;transition:.13s}
+  .foldall:hover,.view-toggle:hover,.view-toggle.active{color:var(--ink);border-color:var(--acc-line)}
+  .view-toggle.active{background:var(--acc-soft)}
 
   /* === left: file tree (sticky) === */
   .tree{grid-column:1;grid-row:2;overflow:auto;border-right:1px solid var(--line);background:var(--surface);padding:13px}
@@ -89,11 +90,11 @@
   details.file.status-deleted>summary{background:color-mix(in srgb,var(--del-bg) 34%,var(--surface-2))}
   details.file>summary .path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
   .copies{display:flex;gap:5px;flex:none} .filestat{flex:none;font-size:12.5px}
-  .diff{overflow-x:auto;font-size:14px;line-height:1.6}
+  .diff{overflow-x:hidden;font-size:14px;line-height:1.6}
   /* engine diff rows: dl/ln/code · mapped onto the comp's add/del/ctx/hunk look */
-  .dl{display:grid;grid-template-columns:44px 44px 1fr;align-items:start;white-space:pre}
+  .dl{display:grid;grid-template-columns:44px 44px minmax(0,1fr);align-items:start;white-space:normal}
   .dl .ln{user-select:none;text-align:right;padding:0 8px;color:var(--ink-3);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
-  .dl code{padding:0 12px;white-space:pre;background:none;border:0;font-size:14px;color:var(--code)}
+  .dl code{min-width:0;padding:0 12px;white-space:pre-wrap;overflow-wrap:anywhere;background:none;border:0;font-size:14px;color:var(--code)}
   .dl-add{background:var(--add-bg)} .dl-add .ln{background:var(--add-gut);color:var(--add)} .dl-add code{color:var(--add-ink)}
   .dl-del{background:var(--del-bg)} .dl-del .ln{background:var(--del-gut);color:var(--del)} .dl-del code{color:var(--del-ink)}
   .dl-ctx code{color:var(--ink-2)}
@@ -113,17 +114,15 @@
   .cline:hover{background:var(--surface-2)} .cline.has:hover{box-shadow:inset 2px 0 0 var(--acc)}
   .cline:focus-visible{outline:1px solid var(--acc);outline-offset:1px}
   .cline.active{box-shadow:inset 2px 0 0 var(--acc)} .cline.active .sha{background:var(--acc);color:var(--bg)}
-  /* timeline bead = the commit-filter toggle: an oversized transparent hit target with a
-     centered 9px dot sitting on the timeline line at the card's left edge. */
-  .bead{position:absolute;left:-15px;top:7px;width:18px;height:18px;padding:0;border:0;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  /* timeline bead = a visual marker; the whole commit card owns filtering. */
+  .bead{position:absolute;left:-15px;top:7px;width:18px;height:18px;padding:0;border:0;background:transparent;pointer-events:none;display:flex;align-items:center;justify-content:center}
   .bead::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--bg);border:2px solid var(--line-2);box-shadow:0 0 0 3px var(--surface);transition:.12s}
-  .bead:hover::before{border-color:var(--acc)}
-  .bead[aria-pressed="true"]::before{background:var(--acc);border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
-  .bead:focus-visible{outline:1px solid var(--acc);outline-offset:1px;border-radius:50%}
+  .cline:hover .bead::before{border-color:var(--acc)}
+  .cline.active .bead::before{background:var(--acc);border-color:var(--acc);box-shadow:0 0 0 3px var(--acc-soft)}
   .cline .top{display:flex;align-items:center;gap:7px;margin-bottom:3px}
   /* non-emoji "notes" mark: three short accent lines */
   .notes-ico{width:12px;height:10px;flex:none;background:repeating-linear-gradient(var(--acc),var(--acc) 2px,transparent 2px,transparent 4px);opacity:.85}
-  .cline .sha{font-size:12px;color:var(--acc);background:var(--acc-soft);border:1px solid var(--acc-line);padding:2px 7px;border-radius:var(--r-sm);transition:.13s}
+  .cline .sha{font:inherit;font-size:12px;color:var(--acc);background:var(--acc-soft);border:1px solid var(--acc-line);padding:2px 7px;border-radius:var(--r-sm);transition:.13s;cursor:pointer}
   .cline:hover .sha{background:var(--acc);color:var(--bg)}
   .cline.copied .sha{background:var(--add);border-color:var(--add);color:var(--bg)}
   .cline.copied .sha::after{content:" \2713"}
@@ -165,7 +164,7 @@
   @media print{
     body{background:#fff;color:#111;height:auto}
     .layout{display:block;height:auto}
-    .tree,.shelf,.keybar,.foldall,.search,theme-switch,[popover]{display:none!important}
+    .tree,.shelf,.keybar,.foldall,.view-toggle,.search,theme-switch,[popover]{display:none!important}
     .titlebar{background:#f2f2f2;border-color:#bbb}
     .brand .repo b,.brand .kind{color:#111}
     .main{overflow:visible;padding:0}

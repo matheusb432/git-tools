@@ -9,6 +9,7 @@ pub struct FileDiff {
     pub added: u32,
     pub removed: u32,
     pub lines: Vec<String>,
+    pub full_lines: Option<Vec<String>>,
     pub commits: Vec<String>,
 }
 
@@ -168,6 +169,7 @@ mod tests {
             added: 0,
             removed: 0,
             lines: Vec::new(),
+            full_lines: None,
             commits: Vec::new(),
         }
     }

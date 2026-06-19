@@ -117,7 +117,7 @@ class CopyButton extends LitElement {
     if (!file) {
       return '';
     }
-    const rows = file.querySelectorAll('.diff .dl-add, .diff .dl-ctx');
+    const rows = file.querySelectorAll('.diff:not([hidden]) .dl-add, .diff:not([hidden]) .dl-ctx');
     const out = [];
     rows.forEach((row) => {
       const code = row.querySelector('code');

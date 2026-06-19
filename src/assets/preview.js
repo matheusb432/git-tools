@@ -28,6 +28,7 @@
     var treeBody = root.querySelector('.tree-body');
     var filterInput = root.querySelector('.search input');
     var foldAll = root.querySelector('.foldall');
+    var viewToggle = root.querySelector('.view-toggle');
     var activeSha = null;
     var filterText = '';
     function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -53,6 +54,43 @@
       var anyOpen = fileEls.some(function(el){ return el.open; });
       fileEls.forEach(function(el){ el.open = !anyOpen; });
     });
+
+    function setFullMode(on){
+      fileEls.forEach(function(el){
+        var compact = el.querySelector('.diff-compact');
+        var full = el.querySelector('.diff-full');
+        if (!compact) return;
+        if (!full) {
+          compact.hidden = false;
+          return;
+        }
+        compact.hidden = on;
+        full.hidden = !on;
+      });
+      if (viewToggle) {
+        viewToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+        viewToggle.classList.toggle('active', on);
+      }
+    }
+
+    if (viewToggle) viewToggle.addEventListener('click', function(){
+      setFullMode(viewToggle.getAttribute('aria-pressed') !== 'true');
+    });
+
+    function bindHorizontalWheel(scroller){
+      scroller.addEventListener('wheel', function(e){
+        var max = scroller.scrollWidth - scroller.clientWidth;
+        if (max <= 0 || e.ctrlKey) return;
+        e.stopPropagation();
+        e.preventDefault();
+        var delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+        if (!delta) return;
+        var next = Math.max(0, Math.min(max, scroller.scrollLeft + delta));
+        if (next === scroller.scrollLeft) return;
+        scroller.scrollLeft = next;
+      }, { passive: false });
+    }
+    [].forEach.call(root.querySelectorAll('.diff'), bindHorizontalWheel);
 
     // ---- file tree: fold visible files into a nested, collapsible tree.
     // ! Follow DOM/server order (already tree-sorted in render) — DON'T re-sort, so the
@@ -120,30 +158,30 @@
       });
     }
 
-    // ---- commit shelf cards: card body click copies the hash only; the timeline bead is a
-    // separate <button> toggle for the commit filter; hover a card WITH notes shows its native
-    // popover (top-layer escapes the shelf scroll clip). ----
+    // ---- commit shelf cards: card click filters files; hash tag click copies the hash;
+    // hover a card WITH notes shows its native popover (top-layer escapes the shelf scroll clip). ----
     function syncBeads(){
       clineEls.forEach(function(c){
         var on = activeSha === c.getAttribute('data-sha');
         c.classList.toggle('active', on);
-        var b = c.querySelector('.bead');
-        if (b) b.setAttribute('aria-pressed', on ? 'true' : 'false');
       });
     }
     clineEls.forEach(function(c){
       var sha = c.getAttribute('data-sha');
       c.addEventListener('click', function(){
-        copyText(sha);
-        c.classList.add('copied'); setTimeout(function(){ c.classList.remove('copied'); }, 900);
-      });
-      c.addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); c.click(); } });
-
-      var bead = c.querySelector('.bead');
-      if (bead) bead.addEventListener('click', function(e){
-        e.stopPropagation();
         activeSha = (activeSha === sha) ? null : sha;
         applyFilter();
+      });
+      c.addEventListener('keydown', function(e){
+        if (e.target.closest && e.target.closest('.sha')) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); c.click(); }
+      });
+
+      var hashCopy = c.querySelector('.sha');
+      if (hashCopy) hashCopy.addEventListener('click', function(e){
+        e.stopPropagation();
+        copyText(sha);
+        c.classList.add('copied'); setTimeout(function(){ c.classList.remove('copied'); }, 900);
       });
 
       var popId = c.getAttribute('data-pop');
@@ -193,6 +231,7 @@
     });
 
     buildTree();
+    setFullMode(false);
   }
   [].forEach.call(document.querySelectorAll('.layout'), initView);
 })();

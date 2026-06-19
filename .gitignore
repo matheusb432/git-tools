@@ -7,3 +7,7 @@
 # ShellSpec coverage / report output
 /coverage
 /report
+
+
+/.worktrees/**
+!/.worktrees/.gitkeep

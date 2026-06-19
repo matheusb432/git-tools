@@ -371,6 +371,36 @@ fn diff_bare_last_diffs_the_last_commit() {
 }
 
 #[test]
+fn diff_artifact_embeds_full_file_context_for_modified_files() {
+    let repo = Repo::new();
+    let middle = "middle that stays hidden in compact diff";
+    let base_contents = format!(
+        "one\n{}\nlast\n",
+        (0..20)
+            .map(|i| if i == 10 {
+                middle.to_string()
+            } else {
+                format!("filler-{i}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    let changed_contents = base_contents
+        .replacen("one", "ONE", 1)
+        .replacen("last", "LAST", 1);
+    let base = repo.commit("src/lib.rs", &base_contents, "chore: base");
+    repo.commit("src/lib.rs", &changed_contents, "feat: touch distant lines");
+
+    repo.run(&["diff", &base]).assert().success();
+
+    let html =
+        std::fs::read_to_string(repo.repo.join(".artifacts/diff-preview-repo.html")).unwrap();
+    assert!(html.contains(r#"class="view-toggle""#));
+    assert!(html.contains(r#"class="diff diff-full" hidden"#));
+    assert!(html.contains("middle that stays hidden in compact diff"));
+}
+
+#[test]
 fn diff_last_beyond_history_errors() {
     let repo = Repo::new();
     repo.commit("a.txt", "1\n", "chore: one");

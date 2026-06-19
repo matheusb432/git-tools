@@ -4,7 +4,7 @@ use crate::cli::DiffTarget;
 use crate::commands::{
     Mode, legacy_count_label, legacy_unpushed_commit_label, output_file, ranges, repo_name,
 };
-use crate::diff::parse_diff;
+use crate::diff::{attach_full_context, full_context_args, parse_diff};
 use crate::git;
 use crate::model::View;
 use crate::open::open_file;
@@ -79,6 +79,13 @@ pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View
 
     let commits = git::log_commits(top, &io_ranges.log_range)?;
     let mut files = parse_diff(&git::diff_raw(top, &io_ranges.diff_args)?);
+    attach_full_context(
+        &mut files,
+        parse_diff(&git::diff_raw(
+            top,
+            &full_context_args(&io_ranges.diff_args),
+        )?),
+    );
     crate::model::sort_files_tree_order(&mut files);
     let file_commits = git::file_commit_map(top, &io_ranges.log_range)?;
     git::attach_commits(&mut files, &file_commits);

@@ -125,6 +125,7 @@ fn view_body(view: &View) -> Markup {
                 }
                 div.spacer {}
                 button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
+                button type="button" class="view-toggle" aria-pressed="false" title="Show full-file diffs" { "Full file" }
                 theme-switch {}
             }
             aside.tree aria-label="Changed files tree" {
@@ -147,7 +148,7 @@ fn view_body(view: &View) -> Markup {
             aside.shelf aria-label="Commits in range" {
                 div.shelf-head {
                     h3 { (view.commits_label) }
-                    p.hint { span.dot {} "click card = copy hash · bead = filter to commit · hover = notes" }
+                    p.hint { span.dot {} "click card = filter files · hash = copy · hover = notes" }
                 }
                 (commit_rows(view))
             }
@@ -326,10 +327,10 @@ fn file_commits(file: &FileDiff) -> String {
     file.commits.join(" ")
 }
 
-// Right-hand commit shelf cards. The card body copies its sha on click; the timeline `bead`
-// is a separate toggle button driving the commit filter. A card with a body also gets a
-// distinct `notes-ico` glyph + a `data-pop` pointer to its sibling [popover] (emitted by
-// commit_popovers). The always-visible body `pre` of the old terminal layout is gone.
+// Right-hand commit shelf cards. The card filters files by commit; the hash tag copies its sha.
+// A card with a body also gets a distinct `notes-ico` glyph + a `data-pop` pointer to its sibling
+// [popover] (emitted by commit_popovers). The always-visible body `pre` of the old terminal layout
+// is gone.
 fn commit_rows(view: &View) -> Markup {
     if view.commits.is_empty() {
         return html! { div.empty { "no commits in range" } };
@@ -341,12 +342,10 @@ fn commit_rows(view: &View) -> Markup {
             div class=(if has_notes { "cline has" } else { "cline" })
                 data-sha=(commit.sha)
                 data-pop=[has_notes.then(|| format!("pop-{}", commit.sha))]
-                role="button" tabindex="0" title="click to copy hash" {
-                button.bead type="button" aria-pressed="false"
-                    aria-label="show only this commit's files"
-                    title="show only this commit's files" {}
+                role="button" tabindex="0" title="show only this commit's files" {
+                span.bead aria-hidden="true" {}
                 div.top {
-                    code.sha { (commit.sha) }
+                    button.sha type="button" title="copy hash" { (commit.sha) }
                     @if has_notes {
                         span.notes-ico aria-hidden="true" title="has extended notes" {}
                     }
@@ -393,7 +392,10 @@ fn file_blocks(view: &View) -> Markup {
                     }
                     span.filestat { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
                 }
-                div.diff { (PreEscaped(render_diff_lines(&file.lines))) }
+                div class="diff diff-compact" { (PreEscaped(render_diff_lines(&file.lines))) }
+                @if let Some(full_lines) = &file.full_lines {
+                    div class="diff diff-full" hidden { (PreEscaped(render_diff_lines(full_lines))) }
+                }
             }
         }
     }
@@ -468,6 +470,14 @@ mod tests {
                     "+new".to_string(),
                     "+extra".to_string(),
                 ],
+                full_lines: Some(vec![
+                    "@@ -1,4 +1,5 @@".to_string(),
+                    "-old".to_string(),
+                    "+new".to_string(),
+                    "+extra".to_string(),
+                    " middle".to_string(),
+                    " end".to_string(),
+                ]),
                 commits: vec!["abc123def".to_string()],
             }],
             title: "diff".to_string(),
@@ -530,17 +540,36 @@ mod tests {
         // commit-filter feature: files carry data-commits
         assert!(html.contains(r#"data-commits="abc123def""#));
 
-        // commit card body copies the hash only; its title says so
-        assert!(html.contains(r#"title="click to copy hash""#));
-        // the timeline bead is a real focusable toggle button for the commit filter
-        assert!(html.contains(r#"<button class="bead" type="button" aria-pressed="false""#));
-        assert!(html.contains(r#"aria-label="show only this commit's files""#));
+        // commit card body filters by commit; the hash tag copies the hash.
+        assert!(html.contains(r#"title="show only this commit's files""#));
+        assert!(html.contains(r#"<button class="sha" type="button" title="copy hash""#));
+        // the timeline bead is a visual marker, not a separate click target.
+        assert!(html.contains(r#"<span class="bead" aria-hidden="true"></span>"#));
+        assert!(!html.contains(r#"<button class="bead""#));
         // notes are flagged by a distinct, non-emoji notes indicator (not the bead)
         assert!(html.contains(r#"<span class="notes-ico" aria-hidden="true""#));
 
         // offline: no network resources anywhere
         assert!(!html.contains("http://"));
         assert!(!html.contains("https://"));
+    }
+
+    #[test]
+    fn commit_shelf_click_contract_focuses_card_and_copies_hash_tag() {
+        let html = build_html(&sample_view());
+
+        assert!(html.contains(r#"title="show only this commit's files""#));
+        assert!(html.contains(r#"<button class="sha" type="button" title="copy hash""#));
+        assert!(html.contains(r#"<span class="bead" aria-hidden="true"></span>"#));
+        assert!(!html.contains(r#"<button class="bead""#));
+        assert!(!html.contains(r#"title="click to copy hash""#));
+
+        assert!(PREVIEW_JS.contains("activeSha = (activeSha === sha) ? null : sha;"));
+        assert!(PREVIEW_JS.contains("var hashCopy = c.querySelector('.sha');"));
+        assert!(PREVIEW_JS.contains("hashCopy.addEventListener('click'"));
+        assert!(PREVIEW_JS.contains("e.stopPropagation();"));
+        assert!(PREVIEW_JS.contains("if (e.target.closest && e.target.closest('.sha')) return;"));
+        assert!(!PREVIEW_JS.contains("bead.addEventListener('click'"));
     }
 
     #[test]
@@ -608,6 +637,48 @@ mod tests {
     }
 
     #[test]
+    fn build_html_renders_global_full_file_toggle_and_alternate_panes() {
+        let html = build_html(&sample_view());
+
+        assert!(html.contains(r#"class="view-toggle""#));
+        assert!(html.contains(r#"aria-pressed="false""#));
+        assert!(html.contains(r#"class="diff diff-compact""#));
+        assert!(html.contains(r#"class="diff diff-full" hidden"#));
+    }
+
+    #[test]
+    fn preview_js_side_scrolls_file_diff_wheel_events() {
+        assert!(PREVIEW_JS.contains("bindHorizontalWheel"));
+        assert!(PREVIEW_JS.contains("addEventListener('wheel'"));
+        assert!(PREVIEW_JS.contains("scrollLeft"));
+        assert!(PREVIEW_JS.contains("preventDefault"));
+    }
+
+    #[test]
+    fn preview_js_traps_wheel_events_in_horizontally_scrollable_diffs() {
+        assert!(PREVIEW_JS.contains(
+            "if (max <= 0 || e.ctrlKey) return;\n        e.stopPropagation();\n        e.preventDefault();"
+        ));
+    }
+
+    #[test]
+    fn preview_css_wraps_diff_code_inside_fixed_line_number_gutters() {
+        assert!(PREVIEW_CSS.contains(".diff{overflow-x:hidden"));
+        assert!(PREVIEW_CSS.contains("grid-template-columns:44px 44px minmax(0,1fr)"));
+        assert!(PREVIEW_CSS.contains(".dl{display:grid"));
+        assert!(PREVIEW_CSS.contains("white-space:normal"));
+        assert!(PREVIEW_CSS.contains(".dl code{"));
+        assert!(PREVIEW_CSS.contains("white-space:pre-wrap"));
+        assert!(PREVIEW_CSS.contains("overflow-wrap:anywhere"));
+        assert!(PREVIEW_CSS.contains("min-width:0"));
+    }
+
+    #[test]
+    fn copy_code_reads_only_the_visible_diff_pane() {
+        assert!(COMPONENTS_JS.contains(".diff:not([hidden])"));
+    }
+
+    #[test]
     fn build_html_marks_file_status_for_sidebar_tree() {
         let mut view = sample_view();
         view.files = vec![
@@ -622,6 +693,7 @@ mod tests {
                     "@@ -0,0 +1 @@".to_string(),
                     "+hello".to_string(),
                 ],
+                full_lines: None,
                 commits: vec!["abc123def".to_string()],
             },
             FileDiff {
@@ -635,6 +707,7 @@ mod tests {
                     "@@ -1 +0,0 @@".to_string(),
                     "-bye".to_string(),
                 ],
+                full_lines: None,
                 commits: vec!["abc123def".to_string()],
             },
             FileDiff {
@@ -646,6 +719,7 @@ mod tests {
                     "rename from src/old-name.rs".to_string(),
                     "rename to src/new-name.rs".to_string(),
                 ],
+                full_lines: None,
                 commits: vec!["abc123def".to_string()],
             },
         ];
@@ -747,6 +821,14 @@ mod tests {
                     "+new".to_string(),
                     "+extra".to_string(),
                 ],
+                full_lines: Some(vec![
+                    "@@ -1,4 +1,5 @@".to_string(),
+                    "-old".to_string(),
+                    "+new".to_string(),
+                    "+extra".to_string(),
+                    " middle".to_string(),
+                    " end".to_string(),
+                ]),
                 commits: vec!["abc123def".to_string()],
             }],
             title: "diff".to_string(),
