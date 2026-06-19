@@ -203,7 +203,7 @@
       pop.addEventListener('mouseenter', function(){ clearTimeout(t); }); pop.addEventListener('mouseleave', hide);
     });
 
-    // ---- keyboard (scoped): / focus filter, j/k next/prev file, c fold all ----
+    // ---- keyboard (scoped): / focus filter, j/k next/prev file, alt+shift+c fold all ----
     var curFile = -1;
     function focusFile(i){
       var visible = fileEls.filter(function(el){ return !el.hidden; });
@@ -224,10 +224,12 @@
         if (e.key === 'Escape') e.target.blur();
         return;
       }
-      if (e.key === '/') { e.preventDefault(); if (filterInput) filterInput.focus(); }
+      // ! alt+shift+c folds all (e.code is layout-independent); plain c is left free so
+      // ! ctrl+c copies a selection without collapsing every file.
+      if (e.altKey && e.shiftKey && e.code === 'KeyC') { e.preventDefault(); if (foldAll) foldAll.click(); }
+      else if (e.key === '/') { e.preventDefault(); if (filterInput) filterInput.focus(); }
       else if (e.key === 'j') { e.preventDefault(); focusFile(curFile + 1); }
       else if (e.key === 'k') { e.preventDefault(); focusFile(curFile - 1); }
-      else if (e.key === 'c') { e.preventDefault(); if (foldAll) foldAll.click(); }
     });
 
     buildTree();

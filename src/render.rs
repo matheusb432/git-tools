@@ -159,7 +159,7 @@ fn view_body(view: &View) -> Markup {
                 div.spacer {}
                 span.key { kbd { "j" } " " kbd { "k" } " file" }
                 span.key { kbd { "/" } " filter" }
-                span.key { kbd { "c" } " fold all" }
+                span.key { kbd { "alt+shift+c" } " fold all" }
             }
             (commit_popovers(view))
         }
@@ -392,9 +392,14 @@ fn file_blocks(view: &View) -> Markup {
                     }
                     span.filestat { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
                 }
-                div class="diff diff-compact" { (PreEscaped(render_diff_lines(&file.lines))) }
-                @if let Some(full_lines) = &file.full_lines {
-                    div class="diff diff-full" hidden { (PreEscaped(render_diff_lines(full_lines))) }
+                // ! Diff rows live in their own body so content-visibility virtualizes the
+                // ! heavy content here while the summary stays sticky against `.main` (size
+                // ! containment on `details.file` itself would trap the sticky in the box).
+                div class="filebody" {
+                    div class="diff diff-compact" { (PreEscaped(render_diff_lines(&file.lines))) }
+                    @if let Some(full_lines) = &file.full_lines {
+                        div class="diff diff-full" hidden { (PreEscaped(render_diff_lines(full_lines))) }
+                    }
                 }
             }
         }
