@@ -65,13 +65,15 @@ pub enum Command {
         dry: bool,
     },
     /// Stage all changes, commit, and push the current repo (prompts for confirmation first).
-    Sync {
+    Up {
         /// Commit message for the staged changes.
         message: String,
         /// Skip the confirmation prompt (for non-interactive use, e.g. a justfile recipe).
         #[arg(short = 'y', long = "yes")]
         yes: bool,
     },
+    /// List tags, show tag commits, or push tags.
+    Tag(TagArgs),
     /// Show branch, unpushed commits, and pending changes for every managed repo.
     #[command(visible_alias = "ls")]
     Status(ManagedReadArgs),
@@ -103,6 +105,37 @@ pub struct DiffArgs {
 pub enum DiffCommand {
     /// Render one tabbed HTML diff for every git repo under the current directory.
     Subrepos(DiffSubreposScanArgs),
+}
+
+/// Arguments for `tag`.
+#[derive(Debug, Args)]
+pub struct TagArgs {
+    #[command(subcommand)]
+    pub command: Option<TagCommand>,
+    /// Show the commit each tag points at.
+    #[arg(short = 'c', long = "commits")]
+    pub commits: bool,
+}
+
+/// Nested commands under `tag`.
+#[derive(Debug, Subcommand)]
+pub enum TagCommand {
+    /// List local tags and whether each is already known on origin.
+    Ls,
+    /// Create an annotated tag.
+    Add {
+        /// Tag name to create.
+        tag: String,
+        /// Annotated tag message.
+        message: String,
+    },
+    /// Push local tags, or create one annotated tag and push it.
+    Up {
+        /// Optional tag name to create before pushing.
+        tag: Option<String>,
+        /// Annotated tag message when creating a tag.
+        message: Option<String>,
+    },
 }
 
 /// Target flags for the root `diff` command.
@@ -362,22 +395,129 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_routes_sync_with_message() {
-        let cli = Cli::parse_args(&["sync".into(), "save work".into()]).unwrap();
+    fn parse_args_routes_up_with_message() {
+        let cli = Cli::parse_args(&["up".into(), "save work".into()]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Sync { message, yes } if message == "save work" && !yes
+            Command::Up { message, yes } if message == "save work" && !yes
         ));
     }
 
     #[test]
-    fn parse_args_sync_yes_flag_sets_bypass() {
-        let cli = Cli::parse_args(&["sync".into(), "save work".into(), "--yes".into()]).unwrap();
-        assert!(matches!(cli.command, Command::Sync { yes, .. } if yes));
+    fn parse_args_up_yes_flag_sets_bypass() {
+        let cli = Cli::parse_args(&["up".into(), "save work".into(), "--yes".into()]).unwrap();
+        assert!(matches!(cli.command, Command::Up { yes, .. } if yes));
     }
 
     #[test]
-    fn parse_args_sync_requires_a_message() {
-        assert!(Cli::parse_args(&["sync".into()]).is_err());
+    fn parse_args_up_requires_a_message() {
+        assert!(Cli::parse_args(&["up".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_rejects_legacy_sync_command() {
+        assert!(Cli::parse_args(&["sync".into(), "save work".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_routes_tag_list_by_default() {
+        let cli = Cli::parse_args(&["tag".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: None,
+                commits: false
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_tag_commits_flag() {
+        let cli = Cli::parse_args(&["tag".into(), "--commits".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: None,
+                commits: true
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_tag_commits_short_flag() {
+        let cli = Cli::parse_args(&["tag".into(), "-c".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: None,
+                commits: true
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_tag_up_subcommand() {
+        let cli = Cli::parse_args(&["tag".into(), "up".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: Some(TagCommand::Up {
+                    tag: None,
+                    message: None
+                }),
+                commits: false
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_tag_ls_subcommand() {
+        let cli = Cli::parse_args(&["tag".into(), "ls".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: Some(TagCommand::Ls),
+                commits: false
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_tag_add_subcommand() {
+        let cli = Cli::parse_args(&[
+            "tag".into(),
+            "add".into(),
+            "v1.2.0".into(),
+            "release notes".into(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: Some(TagCommand::Add { tag, message }),
+                commits: false
+            }) if tag == "v1.2.0" && message == "release notes"
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_tag_up_create_form() {
+        let cli = Cli::parse_args(&[
+            "tag".into(),
+            "up".into(),
+            "v1.2.0".into(),
+            "release notes".into(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: Some(TagCommand::Up {
+                    tag: Some(tag),
+                    message: Some(message),
+                }),
+                commits: false
+            }) if tag == "v1.2.0" && message == "release notes"
+        ));
     }
 }

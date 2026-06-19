@@ -10,7 +10,8 @@ Per-repo:
 - `squash-preview` / `merge-diff` — render HTML previews of a subrepo's unpushed work or a three-dot merge diff against a base branch.
 - `diff subrepos` — render one tabbed HTML diff for every git repo under the current directory.
 - `squash-local` — squash all unpushed local commits into one (`--dry` to preview).
-- `sync` — stage, commit, and push the current repo (confirms first; `-y` to skip).
+- `up` — stage, commit, and push the current repo (confirms first; `-y` to skip).
+- `tag` — list tags with fetched origin status, create annotated tags with `tag add <tag> <message>`, show tag commits with `-c`/`--commits`, or create-and-push with `tag up <tag> <message>`.
 
 Across a set of managed repos (declared in a tab-separated `local-path<TAB>git-remote` manifest):
 

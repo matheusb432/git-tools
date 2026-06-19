@@ -7,6 +7,7 @@
 //! *current* behavior instead — one Rust test per scenario the harness fixtures covered.
 
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 use std::path::{Path, PathBuf};
 use std::process::Command as Git;
@@ -436,19 +437,19 @@ fn diff_outside_a_git_repo_errors() {
         .stderr(contains("not a git repo"));
 }
 
-// --- sync ------------------------------------------------------------------
+// --- up --------------------------------------------------------------------
 
 #[test]
-fn sync_with_yes_commits_and_pushes_dirty_repo() {
+fn up_with_yes_commits_and_pushes_dirty_repo() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
     std::fs::write(repo.repo.join("a.txt"), "base\nlocal\n").unwrap();
 
-    repo.run(&["sync", "save work", "--yes"])
+    repo.run(&["up", "save work", "--yes"])
         .assert()
         .success()
-        .stdout(contains("sync — review before pushing"))
+        .stdout(contains("up — review before pushing"))
         .stdout(contains("main"))
         .stdout(contains("origin"))
         .stdout(contains("staged, committed, and pushed"));
@@ -462,13 +463,13 @@ fn sync_with_yes_commits_and_pushes_dirty_repo() {
 }
 
 #[test]
-fn sync_with_yes_pushes_clean_but_unpushed_commits() {
+fn up_with_yes_pushes_clean_but_unpushed_commits() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
     repo.commit("a.txt", "base\nlocal\n", "feat: already committed");
 
-    repo.run(&["sync", "ignored message", "--yes"])
+    repo.run(&["up", "ignored message", "--yes"])
         .assert()
         .success()
         .stdout(contains("nothing to commit; pushed"));
@@ -477,26 +478,26 @@ fn sync_with_yes_pushes_clean_but_unpushed_commits() {
 }
 
 #[test]
-fn sync_noops_when_clean_and_up_to_date() {
+fn up_noops_when_clean_and_up_to_date() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
 
-    repo.run(&["sync", "nothing to do", "--yes"])
+    repo.run(&["up", "nothing to do", "--yes"])
         .assert()
         .success()
         .stdout(contains("already up to date"));
 }
 
 #[test]
-fn sync_without_yes_refuses_in_noninteractive_shell() {
+fn up_without_yes_refuses_in_noninteractive_shell() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
     std::fs::write(repo.repo.join("a.txt"), "base\nlocal\n").unwrap();
 
     // assert_cmd runs without a TTY: the gate must refuse rather than auto-push.
-    repo.run(&["sync", "save work"])
+    repo.run(&["up", "save work"])
         .assert()
         .code(2)
         .stderr(contains("pass --yes"));
@@ -510,15 +511,184 @@ fn sync_without_yes_refuses_in_noninteractive_shell() {
 }
 
 #[test]
-fn sync_outside_a_git_repo_errors() {
+fn up_outside_a_git_repo_errors() {
     let tmp = tempfile::tempdir().unwrap();
     Command::cargo_bin("git-tools")
         .unwrap()
-        .args(["sync", "save work", "--yes"])
+        .args(["up", "save work", "--yes"])
         .current_dir(tmp.path())
         .assert()
         .code(1)
         .stderr(contains("not a git repo"));
+}
+
+// --- tag -------------------------------------------------------------------
+
+#[test]
+fn tag_lists_all_tags_by_default() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.git(&["tag", "v1.0.0"]);
+    repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+    repo.git(&["tag", "v1.1.0"]);
+
+    repo.run(&["tag"])
+        .assert()
+        .success()
+        .stdout(contains("v1.0.0"))
+        .stdout(contains("v1.1.0"));
+}
+
+#[test]
+fn tag_ls_marks_fetched_remote_tags() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.git(&["tag", "v1.0.0"]);
+    repo.git(&["push", "origin", "refs/tags/v1.0.0:refs/tags/v1.0.0"]);
+    repo.git(&["fetch", "origin", "+refs/tags/*:refs/remotes/origin/tags/*"]);
+    repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+    repo.git(&["tag", "v1.1.0"]);
+
+    repo.run(&["tag", "ls"])
+        .assert()
+        .success()
+        .stdout(contains("v1.0.0 [remote]"))
+        .stdout(contains("v1.1.0 [local]"));
+}
+
+#[test]
+fn tag_commits_lists_tags_with_target_commits() {
+    let repo = Repo::new();
+    let first = repo.commit("a.txt", "base\n", "chore: base");
+    repo.git(&["tag", "v1.0.0"]);
+    let second = repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+    repo.git(&["tag", "v1.1.0"]);
+
+    repo.run(&["tag", "--commits"])
+        .assert()
+        .success()
+        .stdout(contains(&first[..7]))
+        .stdout(contains("v1.0.0"))
+        .stdout(contains(&second[..7]))
+        .stdout(contains("v1.1.0"));
+}
+
+#[test]
+fn tag_commits_peels_annotated_tags_to_commits() {
+    let repo = Repo::new();
+    let commit = repo.commit("a.txt", "base\n", "chore: base");
+    repo.git(&["tag", "-a", "v1.0.0", "-m", "release"]);
+    let tag_object = repo.git(&["rev-parse", "v1.0.0"]);
+
+    repo.run(&["tag", "--commits"])
+        .assert()
+        .success()
+        .stdout(contains(&commit[..7]))
+        .stdout(predicates::str::contains(&tag_object[..7]).not());
+}
+
+#[test]
+fn tag_add_creates_annotated_tag() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+
+    repo.run(&["tag", "add", "v1.2.0", "release notes"])
+        .assert()
+        .success()
+        .stdout(contains("created tag v1.2.0"));
+
+    let tag_type = repo.git(&["cat-file", "-t", "v1.2.0"]);
+    let tag_text = repo.git(&["cat-file", "-p", "v1.2.0"]);
+    assert_eq!(tag_type, "tag");
+    assert!(tag_text.contains("release notes"));
+}
+
+#[test]
+fn tag_up_pushes_tags_to_origin() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.git(&["tag", "v1.0.0"]);
+
+    repo.run(&["tag", "up"])
+        .assert()
+        .success()
+        .stdout(contains("pushed 1 tag: v1.0.0"));
+
+    let tags = repo.git(&["ls-remote", "--tags", "origin"]);
+    assert!(tags.contains("refs/tags/v1.0.0"));
+}
+
+#[test]
+fn tag_up_with_tag_and_message_creates_and_pushes_tag() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.git(&["tag", "v1.1.0"]);
+
+    repo.run(&["tag", "up", "v1.2.0", "release notes"])
+        .assert()
+        .success()
+        .stdout(contains("created tag v1.2.0"))
+        .stdout(contains("pushed 1 tag: v1.2.0"))
+        .stdout(contains("v1.1.0").not());
+
+    let tag_type = repo.git(&["cat-file", "-t", "v1.2.0"]);
+    let tag_text = repo.git(&["cat-file", "-p", "v1.2.0"]);
+    let tags = repo.git(&["ls-remote", "--tags", "origin"]);
+    assert_eq!(tag_type, "tag");
+    assert!(tag_text.contains("release notes"));
+    assert!(tags.contains("refs/tags/v1.2.0"));
+    assert!(!tags.contains("refs/tags/v1.1.0"));
+
+    repo.run(&["tag", "up"])
+        .assert()
+        .success()
+        .stdout(contains("pushed 1 tag: v1.1.0"));
+}
+
+#[test]
+fn tag_up_skips_when_fetched_remote_tags_are_current() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.git(&["tag", "v1.0.0"]);
+    repo.git(&["push", "origin", "refs/tags/v1.0.0:refs/tags/v1.0.0"]);
+    repo.git(&["fetch", "origin", "+refs/tags/*:refs/remotes/origin/tags/*"]);
+
+    repo.run(&["tag", "up"])
+        .assert()
+        .success()
+        .stdout(contains("tags already up to date"))
+        .stdout(contains("pushed tags").not());
+}
+
+#[test]
+fn tag_up_pushes_only_tags_missing_from_fetched_remote_tags() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.git(&["tag", "v1.0.0"]);
+    repo.git(&["push", "origin", "refs/tags/v1.0.0:refs/tags/v1.0.0"]);
+    repo.git(&["fetch", "origin", "+refs/tags/*:refs/remotes/origin/tags/*"]);
+    repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+    repo.git(&["tag", "v1.1.0"]);
+
+    repo.run(&["tag", "up"])
+        .assert()
+        .success()
+        .stdout(contains("pushed 1 tag: v1.1.0"))
+        .stdout(contains("v1.0.0").not());
+
+    let tags = repo.git(&["ls-remote", "--tags", "origin"]);
+    assert!(tags.contains("refs/tags/v1.0.0"));
+    assert!(tags.contains("refs/tags/v1.1.0"));
+
+    repo.run(&["tag", "up"])
+        .assert()
+        .success()
+        .stdout(contains("tags already up to date"));
 }
 
 // --- managed status --------------------------------------------------------

@@ -72,7 +72,7 @@ pub fn confirmation(target: &SyncTarget) -> String {
         format!("{} ({})", target.remote, target.remote_url)
     };
     format!(
-        "sync — review before pushing:\n  repo:   {} ({})\n  branch: {}\n  remote: {}",
+        "up — review before pushing:\n  repo:   {} ({})\n  branch: {}\n  remote: {}",
         target.name, target.top, target.branch, remote
     )
 }

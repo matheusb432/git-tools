@@ -2,7 +2,7 @@
 
 use crate::cli::{
     Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
-    ManagedReadArgs,
+    ManagedReadArgs, TagCommand,
 };
 use crate::commands::managed::{ManagedExit, ManagedOptions, ManagedRun};
 use crate::commands::squash_local::{SquashResult, Status, StdGitRunner, invoke_squash_local};
@@ -100,7 +100,8 @@ fn dispatch(command: Command) -> ExitCode {
             print_squash_local_result(&result, &message);
             squash_local_exit_code(result.status)
         }
-        Command::Sync { message, yes } => run_sync(&message, yes),
+        Command::Up { message, yes } => run_up(&message, yes),
+        Command::Tag(args) => run_tag(args.command, args.commits),
         Command::Status(args) => {
             managed_exit(commands::managed::run_status(&managed_read_options(args)))
         }
@@ -164,21 +165,21 @@ fn managed_diff_options(repos_file: Option<String>, home_dir: Option<String>) ->
     }
 }
 
-/// Orchestrates `sync`: plan read-only, show the confirmation block, gate on `--yes`/TTY,
+/// Orchestrates `up`: plan read-only, show the confirmation block, gate on `--yes`/TTY,
 /// then stage+commit+push. The interactive prompt is the only side effect kept out of
 /// [`commands::sync`] so the logic stays unit-testable.
-fn run_sync(message: &str, yes: bool) -> ExitCode {
+fn run_up(message: &str, yes: bool) -> ExitCode {
     use crate::commands::sync;
 
     if message.trim().is_empty() {
-        eprintln!("sync: a non-empty commit message is required");
+        eprintln!("up: a non-empty commit message is required");
         return ExitCode::Usage;
     }
 
     let runner = StdGitRunner;
     let target = match sync::plan(&runner, std::path::Path::new(".")) {
         sync::Plan::Refused(detail) => {
-            eprintln!("sync: {detail}");
+            eprintln!("up: {detail}");
             return ExitCode::Internal;
         }
         sync::Plan::Ready(target) => target,
@@ -188,11 +189,11 @@ fn run_sync(message: &str, yes: bool) -> ExitCode {
 
     match sync::gate(yes, is_interactive()) {
         sync::Gate::RefuseNonInteractive => {
-            eprintln!("sync: non-interactive shell; pass --yes to confirm the push");
+            eprintln!("up: non-interactive shell; pass --yes to confirm the push");
             return ExitCode::Usage;
         }
         sync::Gate::Confirm if !prompt_confirmation() => {
-            eprintln!("sync: aborted — nothing committed or pushed");
+            eprintln!("up: aborted — nothing committed or pushed");
             return ExitCode::Ok;
         }
         sync::Gate::Confirm | sync::Gate::Proceed => {}
@@ -201,11 +202,48 @@ fn run_sync(message: &str, yes: bool) -> ExitCode {
     let result = sync::apply(&runner, &target, message);
     match result.status {
         sync::Status::Synced | sync::Status::Noop => {
-            println!("sync: {}", result.detail);
+            println!("up: {}", result.detail);
             ExitCode::Ok
         }
         sync::Status::Fail | sync::Status::Refused => {
-            eprintln!("sync: {}", result.detail);
+            eprintln!("up: {}", result.detail);
+            ExitCode::Internal
+        }
+    }
+}
+
+fn run_tag(command: Option<TagCommand>, commits: bool) -> ExitCode {
+    use crate::commands::tag;
+
+    let runner = StdGitRunner;
+    let result = match command {
+        Some(TagCommand::Add { tag, message }) => {
+            tag::add(&runner, std::path::Path::new("."), &tag, &message)
+        }
+        Some(TagCommand::Up {
+            tag: Some(tag),
+            message: Some(message),
+        }) => tag::add_and_push(&runner, std::path::Path::new("."), &tag, &message),
+        Some(TagCommand::Up {
+            tag: None,
+            message: None,
+        }) => tag::push(&runner, std::path::Path::new(".")),
+        Some(TagCommand::Up { .. }) => {
+            eprintln!("tag: tag up requires both <tag> and <message> when creating a tag");
+            return ExitCode::Usage;
+        }
+        Some(TagCommand::Ls) | None => tag::list(&runner, std::path::Path::new("."), commits),
+    };
+
+    match result.status {
+        tag::Status::Created | tag::Status::Listed | tag::Status::Noop | tag::Status::Pushed => {
+            if !result.detail.is_empty() {
+                println!("{}", result.detail);
+            }
+            ExitCode::Ok
+        }
+        tag::Status::Fail => {
+            eprintln!("tag: {}", result.detail);
             ExitCode::Internal
         }
     }

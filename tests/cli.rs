@@ -18,7 +18,8 @@ fn top_level_help_lists_every_subcommand() {
         "diff",
         "merge-diff",
         "squash-local",
-        "sync",
+        "up",
+        "tag",
         "status",
         "push-all",
         "pull-all",
@@ -150,9 +151,9 @@ fn squash_local_without_message_is_usage_error_exit_2() {
 }
 
 #[test]
-fn sync_help_documents_the_yes_flag() {
+fn up_help_documents_the_yes_flag() {
     git_tools()
-        .args(["sync", "--help"])
+        .args(["up", "--help"])
         .assert()
         .success()
         .stdout(contains("--yes"))
@@ -160,18 +161,48 @@ fn sync_help_documents_the_yes_flag() {
 }
 
 #[test]
-fn sync_without_message_is_usage_error_exit_2() {
-    git_tools().arg("sync").assert().code(2);
+fn sync_is_no_longer_a_public_subcommand() {
+    git_tools()
+        .arg("sync")
+        .assert()
+        .code(2)
+        .stderr(contains("unrecognized subcommand"));
 }
 
 #[test]
-fn sync_empty_message_is_usage_error_exit_2() {
+fn up_without_message_is_usage_error_exit_2() {
+    git_tools().arg("up").assert().code(2);
+}
+
+#[test]
+fn up_empty_message_is_usage_error_exit_2() {
     // Guarded before any git runs, so this is safe to assert from the crate dir.
     git_tools()
-        .args(["sync", ""])
+        .args(["up", ""])
         .assert()
         .code(2)
         .stderr(contains("non-empty commit message"));
+}
+
+#[test]
+fn tag_help_documents_modes() {
+    git_tools()
+        .args(["tag", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--commits"))
+        .stdout(contains("add"))
+        .stdout(contains("ls"))
+        .stdout(contains("up"));
+}
+
+#[test]
+fn tag_up_create_form_requires_message() {
+    git_tools()
+        .args(["tag", "up", "v1.2.0"])
+        .assert()
+        .code(2)
+        .stderr(contains("requires both <tag> and <message>"));
 }
 
 #[test]
