@@ -1,8 +1,11 @@
 //! Data model for the diff-preview rendering pipeline.
 //! Data shapes flowing through the diff-preview rendering pipeline.
 
-/// One changed file: its path, +/- counts, raw diff lines, and the short shas
-/// of the commits that touched it (drives the commit filter).
+use std::collections::HashMap;
+
+/// One changed file: its path, +/- counts, raw diff lines, the short shas of the
+/// commits that touched it (drives the file filter), and per-line ownership
+/// (drives the per-commit line highlight).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileDiff {
     pub path: String,
@@ -11,6 +14,16 @@ pub struct FileDiff {
     pub lines: Vec<String>,
     pub full_lines: Option<Vec<String>>,
     pub commits: Vec<String>,
+    pub owners: LineOwners,
+}
+
+/// Per-line commit ownership for one file, keyed by absolute line number:
+/// `added` by new-side line, `deleted` by old-side line. The same maps serve
+/// both the compact and full-file panes — changed rows keep absolute numbers.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LineOwners {
+    pub added: HashMap<u32, String>,
+    pub deleted: HashMap<u32, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,6 +144,15 @@ pub struct View {
     pub theme: Option<String>,
 }
 
+impl View {
+    /// Whether the preview would show nothing: no commits in range and no changed
+    /// files. Rendering this case produces a blank artifact that reads as a bug, so
+    /// callers warn and skip the render instead.
+    pub fn is_empty(&self) -> bool {
+        self.commits.is_empty() && self.files.is_empty()
+    }
+}
+
 /// Reorders changed files into directory-tree order: at each directory level,
 /// subdirectories come before files, both sorted alphabetically (depth-first).
 /// This is the single source of truth for file order; the sidebar follows it.
@@ -171,7 +193,14 @@ mod tests {
             lines: Vec::new(),
             full_lines: None,
             commits: Vec::new(),
+            owners: LineOwners::default(),
         }
+    }
+
+    #[test]
+    fn line_owners_default_is_empty() {
+        let owners = LineOwners::default();
+        assert!(owners.added.is_empty() && owners.deleted.is_empty());
     }
 
     #[test]

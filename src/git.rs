@@ -92,6 +92,45 @@ pub fn diff_raw(repo: impl AsRef<Path>, args: &[String]) -> anyhow::Result<Strin
     run_git(repo, &args)
 }
 
+// ! Range-bounded forward blame of the tip: new-side line -> last commit that touched it.
+pub fn blame_forward(
+    repo: impl AsRef<Path>,
+    base: &str,
+    tip: &str,
+    path: &str,
+) -> anyhow::Result<String> {
+    run_git(
+        repo,
+        &["blame", "--porcelain", &format!("{base}..{tip}"), "--", path],
+    )
+}
+
+// ! Working-tree blame for hash mode (diff is base -> worktree): aligns with worktree
+// ! line numbers; uncommitted lines come back as the all-zero sha (out of range).
+pub fn blame_forward_worktree(repo: impl AsRef<Path>, path: &str) -> anyhow::Result<String> {
+    run_git(repo, &["blame", "--porcelain", "--", path])
+}
+
+// ! Reverse blame over the range: each deleted base line carries `previous <sha>` = its deleter.
+pub fn blame_reverse(
+    repo: impl AsRef<Path>,
+    base: &str,
+    tip: &str,
+    path: &str,
+) -> anyhow::Result<String> {
+    run_git(
+        repo,
+        &[
+            "blame",
+            "--reverse",
+            "--porcelain",
+            &format!("{base}..{tip}"),
+            "--",
+            path,
+        ],
+    )
+}
+
 fn no_upstream_error(git_stderr: &str) -> anyhow::Error {
     legacy_script_error(
         git_stderr,

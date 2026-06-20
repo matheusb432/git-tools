@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use crate::commands::{Mode, output_file, plural, ranges, repo_name};
-use crate::diff::{attach_full_context, full_context_args, parse_diff};
 use crate::git;
 use crate::model::View;
 use crate::open::open_file;
@@ -24,14 +23,8 @@ pub fn run(
 
     git::verify_commit(&top, base)?;
     let ranges = ranges(base, Mode::Merge);
-    let commits = git::log_commits(&top, &ranges.log_range)?;
-    let mut files = parse_diff(&git::diff_raw(&top, &ranges.diff_args)?);
-    attach_full_context(
-        &mut files,
-        parse_diff(&git::diff_raw(&top, &full_context_args(&ranges.diff_args))?),
-    );
-    let file_commits = git::file_commit_map(&top, &ranges.log_range)?;
-    git::attach_commits(&mut files, &file_commits);
+    let crate::diff::DiffData { commits, files } =
+        crate::diff::assemble(&top, &ranges.diff_args, &ranges.diff_range, &ranges.log_range)?;
 
     let view = View {
         repo_name: repo_name.clone(),

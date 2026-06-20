@@ -315,6 +315,37 @@ fn diff_unpushed_flag_writes_artifact() {
 }
 
 #[test]
+fn diff_with_no_commits_or_changes_warns_and_skips_render() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream(); // HEAD == @{u}: no unpushed commits, clean tree -> nothing to diff
+
+    repo.run(&["diff"])
+        .assert()
+        .success()
+        .stderr(contains("nothing to show"));
+    assert!(
+        !repo.repo.join(".artifacts/diff-preview-repo.html").exists(),
+        "empty diff must not write an artifact"
+    );
+}
+
+#[test]
+fn diff_empty_range_warns_and_skips_render() {
+    let repo = Repo::new();
+    let head = repo.commit("a.txt", "base\n", "chore: base");
+
+    repo.run(&["diff", &format!("{head}..{head}")])
+        .assert()
+        .success()
+        .stderr(contains("nothing to show"));
+    assert!(
+        !repo.repo.join(".artifacts/diff-preview-repo.html").exists(),
+        "empty range must not write an artifact"
+    );
+}
+
+#[test]
 fn diff_without_upstream_falls_back_to_main() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");

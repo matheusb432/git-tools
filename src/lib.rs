@@ -7,6 +7,7 @@ use crate::cli::{
 use crate::commands::managed::{ManagedExit, ManagedOptions, ManagedRun};
 use crate::commands::squash_local::{SquashResult, Status, StdGitRunner, invoke_squash_local};
 
+pub mod attribution;
 pub mod cli;
 pub mod commands;
 mod comment_syntax;
@@ -81,7 +82,7 @@ fn dispatch(command: Command) -> ExitCode {
                     commands::diff_subrepos::run_scan(".", subrepos.last, subrepos.worktrees),
                 ),
                 None => match diff_invocation(args.target) {
-                    DiffInvocation::Single(target) => html_exit(commands::diff::run(&target)),
+                    DiffInvocation::Single(target) => diff_exit(commands::diff::run(&target)),
                     DiffInvocation::ManagedAll {
                         repos_file,
                         home_dir,
@@ -343,6 +344,18 @@ fn is_interactive() -> bool {
 
 fn stdout_is_terminal() -> bool {
     std::io::IsTerminal::is_terminal(&std::io::stdout())
+}
+
+/// Like [`html_exit`], but for the single `diff` path: an empty range is a clean
+/// no-op (the command already warned), not a failure.
+fn diff_exit(result: anyhow::Result<commands::diff::DiffOutcome>) -> ExitCode {
+    match result {
+        Ok(_) => ExitCode::Ok,
+        Err(error) => {
+            eprintln!("{}", html_error_text(&error));
+            ExitCode::Internal
+        }
+    }
 }
 
 fn html_exit(result: anyhow::Result<std::path::PathBuf>) -> ExitCode {

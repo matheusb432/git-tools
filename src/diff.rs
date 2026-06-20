@@ -1,6 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
-use crate::model::{FileDiff, FileStatus};
+use crate::attribution::{self, NewSide};
+use crate::git;
+use crate::model::{Commit, FileDiff, FileStatus, LineOwners};
 
 pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
     if raw.trim().is_empty() {
@@ -24,6 +27,7 @@ pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
                 lines: Vec::new(),
                 full_lines: None,
                 commits: Vec::new(),
+                owners: LineOwners::default(),
             });
             continue;
         }
@@ -66,6 +70,52 @@ pub fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
             file.full_lines = Some(full_lines);
         }
     }
+}
+
+/// The assembled diff data for one preview: commits in range and changed files
+/// (with per-line owners attached).
+pub struct DiffData {
+    pub commits: Vec<Commit>,
+    pub files: Vec<FileDiff>,
+}
+
+/// The shared diff generator: log + diff + full-context + file-commit map +
+/// per-line attribution. Takes range primitives so it stays decoupled from
+/// `commands::Ranges`. Does NOT sort files — callers order as they always have.
+pub fn assemble(
+    repo: impl AsRef<Path>,
+    diff_args: &[String],
+    diff_range: &str,
+    log_range: &str,
+) -> anyhow::Result<DiffData> {
+    let repo = repo.as_ref();
+    let commits = git::log_commits(repo, log_range)?;
+    let mut files = parse_diff(&git::diff_raw(repo, diff_args)?);
+    attach_full_context(
+        &mut files,
+        parse_diff(&git::diff_raw(repo, &full_context_args(diff_args))?),
+    );
+    let file_commits = git::file_commit_map(repo, log_range)?;
+    git::attach_commits(&mut files, &file_commits);
+
+    let (base, new_side) = blame_targets(diff_range, log_range);
+    let in_range: HashSet<String> = commits.iter().map(|commit| commit.sha.clone()).collect();
+    attribution::attribute(repo, &base, &new_side, &in_range, &mut files);
+
+    Ok(DiffData { commits, files })
+}
+
+// ! log_range is always two-dot `base..tip`; diff_range lacking `..` (hash mode) means the
+// ! new side is the working tree, not a commit.
+fn blame_targets(diff_range: &str, log_range: &str) -> (String, NewSide) {
+    let base = log_range.split("..").next().unwrap_or(log_range).to_string();
+    let tip = log_range.rsplit("..").next().unwrap_or("HEAD").to_string();
+    let new_side = if diff_range.contains("..") {
+        NewSide::Commit(tip)
+    } else {
+        NewSide::WorkTree
+    };
+    (base, new_side)
 }
 
 pub fn full_context_args(args: &[String]) -> Vec<String> {
@@ -160,6 +210,25 @@ index 000..333\n\
                 .is_some_and(|lines| { lines.iter().any(|line| line == "middle") })
         );
         assert!(files[1].full_lines.is_none());
+    }
+
+    #[test]
+    fn blame_targets_picks_base_tip_and_new_side() {
+        let (base, side) = blame_targets("origin/main..HEAD", "origin/main..HEAD");
+        assert_eq!(base, "origin/main");
+        assert!(matches!(side, NewSide::Commit(ref tip) if tip == "HEAD"));
+
+        let (base, side) = blame_targets("main...HEAD", "main..HEAD"); // merge mode
+        assert_eq!(base, "main");
+        assert!(matches!(side, NewSide::Commit(ref tip) if tip == "HEAD"));
+
+        let (base, side) = blame_targets("abc123", "abc123..HEAD"); // hash mode -> worktree
+        assert_eq!(base, "abc123");
+        assert!(matches!(side, NewSide::WorkTree));
+
+        let (base, side) = blame_targets("a1..b2", "a1..b2"); // exact range
+        assert_eq!(base, "a1");
+        assert!(matches!(side, NewSide::Commit(ref tip) if tip == "b2"));
     }
 
     #[test]

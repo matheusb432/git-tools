@@ -1,4 +1,4 @@
-use crate::model::{FileDiff, View};
+use crate::model::{FileDiff, LineOwners, View};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 const PREVIEW_CSS: &str = include_str!("assets/preview.css");
@@ -43,7 +43,7 @@ pub fn slug(s: &str) -> String {
     format!("f-{body}")
 }
 
-pub fn render_diff_lines(lines: &[String]) -> String {
+pub fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
     let mut old_no = 0u32;
     let mut new_no = 0u32;
     let mut rows = String::new();
@@ -73,14 +73,16 @@ pub fn render_diff_lines(lines: &[String]) -> String {
 
         if raw.starts_with('+') && !raw.starts_with("+++") {
             rows.push_str(&format!(
-                r#"<div class="dl dl-add"><span class="ln"></span><span class="ln">{}</span><code>{}</code></div>"#,
+                r#"<div class="dl dl-add"{}><span class="ln"></span><span class="ln">{}</span><code>{}</code></div>"#,
+                commit_attr(owners.added.get(&new_no)),
                 new_no,
                 html_or_nbsp(raw)
             ));
             new_no += 1;
         } else if raw.starts_with('-') && !raw.starts_with("---") {
             rows.push_str(&format!(
-                r#"<div class="dl dl-del"><span class="ln">{}</span><span class="ln"></span><code>{}</code></div>"#,
+                r#"<div class="dl dl-del"{}><span class="ln">{}</span><span class="ln"></span><code>{}</code></div>"#,
+                commit_attr(owners.deleted.get(&old_no)),
                 old_no,
                 html_or_nbsp(raw)
             ));
@@ -149,7 +151,7 @@ fn view_body(view: &View) -> Markup {
             aside.shelf aria-label="Commits in range" {
                 div.shelf-head {
                     h3 { (view.commits_label) }
-                    p.hint { span.dot {} "click card = filter files · hash = copy · hover = notes" }
+                    p.hint { span.dot {} "click card = focus commit · hash = copy · hover = notes" }
                 }
                 (commit_rows(view))
             }
@@ -288,6 +290,12 @@ fn is_meta_line(raw: &str) -> bool {
         || raw.starts_with('\\')
 }
 
+// ! Short shas are [0-9a-f]{9} (no HTML metacharacters), so no escaping is needed.
+fn commit_attr(sha: Option<&String>) -> String {
+    sha.map(|sha| format!(r#" data-commit="{sha}""#))
+        .unwrap_or_default()
+}
+
 fn html_or_nbsp(raw: &str) -> String {
     let escaped = escape_html(raw);
     if escaped.is_empty() {
@@ -343,7 +351,7 @@ fn commit_rows(view: &View) -> Markup {
             div class=(if has_notes { "cline has" } else { "cline" })
                 data-sha=(commit.sha)
                 data-pop=[has_notes.then(|| format!("pop-{}", commit.sha))]
-                role="button" tabindex="0" title="show only this commit's files" {
+                role="button" tabindex="0" title="focus this commit's changes" {
                 span.bead aria-hidden="true" {}
                 div.top {
                     button.sha type="button" title="copy hash" { (commit.sha) }
@@ -398,9 +406,9 @@ fn file_blocks(view: &View) -> Markup {
                 // ! heavy content here while the summary stays sticky against `.main` (size
                 // ! containment on `details.file` itself would trap the sticky in the box).
                 div class="filebody" {
-                    div class="diff diff-compact" { (PreEscaped(render_diff_lines(&file.lines))) }
+                    div class="diff diff-compact" { (PreEscaped(render_diff_lines(&file.lines, &file.owners))) }
                     @if let Some(full_lines) = &file.full_lines {
-                        div class="diff diff-full" hidden { (PreEscaped(render_diff_lines(full_lines))) }
+                        div class="diff diff-full" hidden { (PreEscaped(render_diff_lines(full_lines, &file.owners))) }
                     }
                 }
             }
@@ -430,13 +438,16 @@ mod tests {
 
     #[test]
     fn render_diff_lines_classifies_rows_and_tracks_gutter_numbers() {
-        let html = render_diff_lines(&[
-            "index 111..222 100644".to_string(),
-            "@@ -3,2 +7,2 @@".to_string(),
-            " keep".to_string(),
-            "-old".to_string(),
-            "+new".to_string(),
-        ]);
+        let html = render_diff_lines(
+            &[
+                "index 111..222 100644".to_string(),
+                "@@ -3,2 +7,2 @@".to_string(),
+                " keep".to_string(),
+                "-old".to_string(),
+                "+new".to_string(),
+            ],
+            &LineOwners::default(),
+        );
 
         assert!(html.contains(r#"<div class="dl dl-meta"><span class="ln"></span><span class="ln"></span><code>index 111..222 100644</code></div>"#));
         assert!(html.contains(r#"<div class="dl dl-hunk"><span class="ln"></span><span class="ln"></span><code>@@ -3,2 +7,2 @@</code></div>"#));
@@ -446,8 +457,28 @@ mod tests {
     }
 
     #[test]
+    fn render_diff_lines_tags_rows_with_owning_commit() {
+        let mut owners = crate::model::LineOwners::default();
+        owners.added.insert(8, "abc123def".to_string());
+        owners.deleted.insert(4, "fff000aaa".to_string());
+        let html = render_diff_lines(
+            &[
+                "@@ -3,2 +7,2 @@".to_string(),
+                " keep".to_string(),
+                "-old".to_string(),
+                "+new".to_string(),
+            ],
+            &owners,
+        );
+        assert!(html.contains(r#"<div class="dl dl-del" data-commit="fff000aaa">"#));
+        assert!(html.contains(r#"<div class="dl dl-add" data-commit="abc123def">"#));
+        // context rows carry no owner attribute
+        assert!(html.contains(r#"<div class="dl dl-ctx"><span"#));
+    }
+
+    #[test]
     fn render_diff_lines_does_not_treat_malformed_headers_as_hunks() {
-        let html = render_diff_lines(&["@@ -1, +2 @@".to_string()]);
+        let html = render_diff_lines(&["@@ -1, +2 @@".to_string()], &LineOwners::default());
 
         assert!(!html.contains("dl-hunk"));
         assert!(html.contains(r#"<div class="dl dl-ctx"><span class="ln">0</span><span class="ln">0</span><code>@@ -1, +2 @@</code></div>"#));
@@ -486,6 +517,7 @@ mod tests {
                     " end".to_string(),
                 ]),
                 commits: vec!["abc123def".to_string()],
+                owners: crate::model::LineOwners::default(),
             }],
             title: "diff".to_string(),
             cmd: Cmd {
@@ -548,7 +580,7 @@ mod tests {
         assert!(html.contains(r#"data-commits="abc123def""#));
 
         // commit card body filters by commit; the hash tag copies the hash.
-        assert!(html.contains(r#"title="show only this commit's files""#));
+        assert!(html.contains(r#"title="focus this commit's changes""#));
         assert!(html.contains(r#"<button class="sha" type="button" title="copy hash""#));
         // the timeline bead is a visual marker, not a separate click target.
         assert!(html.contains(r#"<span class="bead" aria-hidden="true"></span>"#));
@@ -565,7 +597,7 @@ mod tests {
     fn commit_shelf_click_contract_focuses_card_and_copies_hash_tag() {
         let html = build_html(&sample_view());
 
-        assert!(html.contains(r#"title="show only this commit's files""#));
+        assert!(html.contains(r#"title="focus this commit's changes""#));
         assert!(html.contains(r#"<button class="sha" type="button" title="copy hash""#));
         assert!(html.contains(r#"<span class="bead" aria-hidden="true"></span>"#));
         assert!(!html.contains(r#"<button class="bead""#));
@@ -577,6 +609,18 @@ mod tests {
         assert!(PREVIEW_JS.contains("e.stopPropagation();"));
         assert!(PREVIEW_JS.contains("if (e.target.closest && e.target.closest('.sha')) return;"));
         assert!(!PREVIEW_JS.contains("bead.addEventListener('click'"));
+    }
+
+    #[test]
+    fn commit_focus_highlight_is_wired() {
+        // the renderer ships the per-commit focus machinery offline
+        assert!(PREVIEW_JS.contains("root.classList.toggle('commit-focus'"));
+        assert!(PREVIEW_JS.contains(".dl-add[data-commit],.dl-del[data-commit]"));
+        assert!(PREVIEW_JS.contains("classList.add('owned')"));
+        assert!(PREVIEW_JS.contains("syncOwned();"));
+        assert!(PREVIEW_CSS.contains(".commit-focus .dl.owned{opacity:1}"));
+        assert!(PREVIEW_CSS.contains("inset 3px 0 0 var(--acc)"));
+        assert!(PREVIEW_CSS.contains("prefers-reduced-motion"));
     }
 
     #[test]
@@ -714,6 +758,7 @@ mod tests {
                 ],
                 full_lines: None,
                 commits: vec!["abc123def".to_string()],
+                owners: crate::model::LineOwners::default(),
             },
             FileDiff {
                 path: "src/gone.rs".to_string(),
@@ -728,6 +773,7 @@ mod tests {
                 ],
                 full_lines: None,
                 commits: vec!["abc123def".to_string()],
+                owners: crate::model::LineOwners::default(),
             },
             FileDiff {
                 path: "src/new-name.rs".to_string(),
@@ -740,6 +786,7 @@ mod tests {
                 ],
                 full_lines: None,
                 commits: vec!["abc123def".to_string()],
+                owners: crate::model::LineOwners::default(),
             },
         ];
 
@@ -849,6 +896,7 @@ mod tests {
                     " end".to_string(),
                 ]),
                 commits: vec!["abc123def".to_string()],
+                owners: crate::model::LineOwners::default(),
             }],
             title: "diff".to_string(),
             cmd: Cmd {

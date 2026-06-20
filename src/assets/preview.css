@@ -103,6 +103,11 @@
   .dl-ctx code{color:var(--ink-2)}
   .dl-hunk{background:var(--sunk)} .dl-hunk code{color:var(--ink-3);font-weight:600}
   .dl-meta{opacity:.6} .dl-meta code{color:var(--ink-3)}
+  /* === per-commit focus: dim the diff, lift only the selected commit's own rows === */
+  .commit-focus .dl{opacity:.34;transition:opacity .14s}
+  .commit-focus .dl.owned{opacity:1}
+  .commit-focus .dl-add.owned,.commit-focus .dl-del.owned{box-shadow:inset 3px 0 0 var(--acc)}
+  @media (prefers-reduced-motion:reduce){.commit-focus .dl{transition:none}}
   .diff::-webkit-scrollbar{height:10px} .diff::-webkit-scrollbar-track{background:var(--surface)}
   .diff::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:2px solid var(--surface)}
   details.file.flash{outline:1px solid var(--acc);outline-offset:-1px}

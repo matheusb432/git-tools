@@ -25,6 +25,8 @@
   function initView(root){
     var fileEls = [].slice.call(root.querySelectorAll('details.file'));
     var clineEls = [].slice.call(root.querySelectorAll('.cline[data-sha]'));
+    var dlEls = [].slice.call(root.querySelectorAll('.dl-add[data-commit],.dl-del[data-commit]'));
+    var ownedRows = [];
     var treeBody = root.querySelector('.tree-body');
     var filterInput = root.querySelector('.search input');
     var foldAll = root.querySelector('.foldall');
@@ -42,6 +44,7 @@
         el.hidden = byCommit || !matchesFilter(el);
       });
       syncBeads();
+      syncOwned();
       buildTree();
     }
 
@@ -174,6 +177,18 @@
         var on = activeSha === c.getAttribute('data-sha');
         c.classList.toggle('active', on);
       });
+    }
+    // ! Focus the selected commit's own rows: dim the diff (.commit-focus) and lift only the
+    // ! rows whose data-commit matches activeSha. Touches just the matching rows, not a re-scan.
+    function syncOwned(){
+      ownedRows.forEach(function(r){ r.classList.remove('owned'); });
+      ownedRows = [];
+      if (activeSha) {
+        dlEls.forEach(function(r){
+          if (r.getAttribute('data-commit') === activeSha) { r.classList.add('owned'); ownedRows.push(r); }
+        });
+      }
+      root.classList.toggle('commit-focus', !!activeSha);
     }
     clineEls.forEach(function(c){
       var sha = c.getAttribute('data-sha');

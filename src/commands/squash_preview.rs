@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use crate::commands::{
     Mode, legacy_count_label, legacy_unpushed_commit_label, output_file, ranges, repo_name,
 };
-use crate::diff::{attach_full_context, full_context_args, parse_diff};
 use crate::git;
 use crate::model::{Cmd, Foot, View};
 use crate::open::open_file;
@@ -16,14 +15,8 @@ pub fn run(repo: impl AsRef<Path>, monorepo: impl AsRef<Path>) -> anyhow::Result
     let repo_name = repo_name(&top);
     let ranges = ranges(&upstream, Mode::Unpushed);
 
-    let commits = git::log_commits(&top, &ranges.log_range)?;
-    let mut files = parse_diff(&git::diff_raw(&top, &ranges.diff_args)?);
-    attach_full_context(
-        &mut files,
-        parse_diff(&git::diff_raw(&top, &full_context_args(&ranges.diff_args))?),
-    );
-    let file_commits = git::file_commit_map(&top, &ranges.log_range)?;
-    git::attach_commits(&mut files, &file_commits);
+    let crate::diff::DiffData { commits, files } =
+        crate::diff::assemble(&top, &ranges.diff_args, &ranges.diff_range, &ranges.log_range)?;
 
     let view = View {
         repo_name: repo_name.clone(),

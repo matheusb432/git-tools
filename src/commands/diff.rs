@@ -4,13 +4,19 @@ use crate::cli::DiffTarget;
 use crate::commands::{
     Mode, legacy_count_label, legacy_unpushed_commit_label, output_file, ranges, repo_name,
 };
-use crate::diff::{attach_full_context, full_context_args, parse_diff};
 use crate::git;
 use crate::model::View;
 use crate::open::open_file;
 use crate::render::build_html;
 
-pub fn run(target: &DiffTarget) -> anyhow::Result<PathBuf> {
+/// Outcome of a single `diff` invocation: either an artifact was written, or the
+/// range was empty and we deliberately skipped rendering a blank preview.
+pub enum DiffOutcome {
+    Rendered(PathBuf),
+    Empty,
+}
+
+pub fn run(target: &DiffTarget) -> anyhow::Result<DiffOutcome> {
     let top = git::top_level(".")?;
     render(&top, &top, target)
 }
@@ -19,8 +25,16 @@ pub(crate) fn render(
     top: &str,
     monorepo: impl AsRef<Path>,
     target: &DiffTarget,
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<DiffOutcome> {
     let (view, summary) = build_view(top, target)?;
+
+    // ! An empty preview (no commits, no changes) renders as a blank page that reads as a
+    // ! bug; warn and skip the render instead of writing a misleading artifact.
+    if view.is_empty() {
+        eprintln!("diff-preview: {summary} — nothing to show (no commits or changes); skipping");
+        return Ok(DiffOutcome::Empty);
+    }
+
     let file_count = view.files.len();
     let repo_name = view.repo_name.clone();
     let html = build_html(&view);
@@ -32,7 +46,7 @@ pub(crate) fn render(
     );
     println!("wrote {}", out_file.display());
     open_file(&out_file);
-    Ok(out_file)
+    Ok(DiffOutcome::Rendered(out_file))
 }
 
 pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View, String)> {
@@ -95,18 +109,13 @@ pub(crate) fn build_view(top: &str, target: &DiffTarget) -> anyhow::Result<(View
         }
     };
 
-    let commits = git::log_commits(top, &io_ranges.log_range)?;
-    let mut files = parse_diff(&git::diff_raw(top, &io_ranges.diff_args)?);
-    attach_full_context(
-        &mut files,
-        parse_diff(&git::diff_raw(
-            top,
-            &full_context_args(&io_ranges.diff_args),
-        )?),
-    );
+    let crate::diff::DiffData { commits, mut files } = crate::diff::assemble(
+        top,
+        &io_ranges.diff_args,
+        &io_ranges.diff_range,
+        &io_ranges.log_range,
+    )?;
     crate::model::sort_files_tree_order(&mut files);
-    let file_commits = git::file_commit_map(top, &io_ranges.log_range)?;
-    git::attach_commits(&mut files, &file_commits);
 
     let view = View {
         repo_name: repo_name.clone(),
