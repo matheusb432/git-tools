@@ -112,6 +112,8 @@ class CopyButton extends LitElement {
 
   // ! Walk up to this button's own details.file, read its already-rendered diff rows, and
   // ! rebuild paste-ready source: keep added/context rows, drop their leading marker char.
+  // ! When the view's context toggle is on, prepend a commented "path, lines" header whose
+  // ! leader (// or #) the renderer picked from the file extension (data-comment).
   fileCode() {
     const file = this.closest('details.file');
     if (!file) {
@@ -119,6 +121,8 @@ class CopyButton extends LitElement {
     }
     const rows = file.querySelectorAll('.diff:not([hidden]) .dl-add, .diff:not([hidden]) .dl-ctx');
     const out = [];
+    let firstLine = null;
+    let lastLine = null;
     rows.forEach((row) => {
       const code = row.querySelector('code');
       if (!code) {
@@ -127,8 +131,29 @@ class CopyButton extends LitElement {
       const text = code.textContent;
       // strip the single leading marker: '+' for adds, ' ' for context
       out.push(text.length && (text[0] === '+' || text[0] === ' ') ? text.slice(1) : text);
+      // new-side line number is the 2nd .ln span (1st is the old side)
+      const lns = row.querySelectorAll('.ln');
+      const n = lns.length > 1 ? parseInt(lns[1].textContent, 10) : NaN;
+      if (!Number.isNaN(n)) {
+        if (firstLine === null) {
+          firstLine = n;
+        }
+        lastLine = n;
+      }
     });
-    return out.join('\n');
+    const code = out.join('\n');
+    const layout = this.closest('.layout');
+    const contextOn = !layout || layout.classList.contains('copy-ctx');
+    if (!contextOn || !out.length) {
+      return code;
+    }
+    const leader = file.getAttribute('data-comment') || '//';
+    const path = file.getAttribute('data-path') || '';
+    let header = `${leader} * ${path}`;
+    if (firstLine !== null) {
+      header += `, lines: ${firstLine}..${lastLine}`;
+    }
+    return `${header}\n${code}`;
   }
 
   onClick() {

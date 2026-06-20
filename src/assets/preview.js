@@ -77,6 +77,15 @@
       setFullMode(viewToggle.getAttribute('aria-pressed') !== 'true');
     });
 
+    // ! Context toggle drives the `.copy-ctx` class on this view's root; the copy-button
+    // ! reads that class at click time to decide whether to prepend the path/lines header.
+    var ctxToggle = root.querySelector('.ctx-toggle');
+    if (ctxToggle) ctxToggle.addEventListener('click', function(){
+      var on = root.classList.toggle('copy-ctx');
+      ctxToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+      ctxToggle.classList.toggle('active', on);
+    });
+
     function bindHorizontalWheel(scroller){
       scroller.addEventListener('wheel', function(e){
         var max = scroller.scrollWidth - scroller.clientWidth;
@@ -236,4 +245,58 @@
     setFullMode(false);
   }
   [].forEach.call(document.querySelectorAll('.layout'), initView);
+
+  // ! Singleton fade toast appended once to <body>; re-triggering restarts the timer.
+  var toastEl = null;
+  var toastTimer = null;
+  function showToast(msg){
+    if (!toastEl) {
+      toastEl = document.createElement('div');
+      toastEl.className = 'gtl-toast';
+      document.body.appendChild(toastEl);
+    }
+    toastEl.textContent = msg;
+    void toastEl.offsetWidth; // reflow so the transition re-runs on rapid copies
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 1600);
+  }
+
+  // ! Intercept native copy (ctrl+c / context menu) of a selection inside a diff: rebuild the
+  // ! selected add/context rows as clean source (markers stripped, gutter is user-select:none)
+  // ! and prepend the same commented "path, lines" header the copy button uses, so snippets
+  // ! paste elsewhere already labelled. Selection granularity is whole lines. Bails to the
+  // ! native copy for empty selections, selections outside a single diff file, selections that
+  // ! touch no code rows, or when that view's context toggle is off.
+  document.addEventListener('copy', function(e){
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount || !sel.containsNode) return;
+    var node = sel.getRangeAt(0).commonAncestorContainer;
+    var el = node.nodeType === 1 ? node : node.parentElement;
+    var file = el && el.closest ? el.closest('details.file') : null;
+    if (!file) return;
+    var layout = file.closest('.layout');
+    if (layout && !layout.classList.contains('copy-ctx')) return;
+    var rows = file.querySelectorAll('.diff:not([hidden]) .dl-add, .diff:not([hidden]) .dl-ctx');
+    var out = [];
+    var first = null;
+    var last = null;
+    [].forEach.call(rows, function(row){
+      if (!sel.containsNode(row, true)) return;
+      var code = row.querySelector('code');
+      if (!code) return;
+      var text = code.textContent;
+      out.push(text.length && (text[0] === '+' || text[0] === ' ') ? text.slice(1) : text);
+      var lns = row.querySelectorAll('.ln');
+      var n = lns.length > 1 ? parseInt(lns[1].textContent, 10) : NaN;
+      if (!isNaN(n)) { if (first === null) first = n; last = n; }
+    });
+    if (!out.length || !e.clipboardData) return;
+    var leader = file.getAttribute('data-comment') || '//';
+    var path = file.getAttribute('data-path') || '';
+    var header = leader + ' * ' + path + (first !== null ? ', lines: ' + first + '..' + last : '');
+    e.clipboardData.setData('text/plain', header + '\n' + out.join('\n'));
+    e.preventDefault();
+    showToast(first !== null ? 'Copied with context · lines ' + first + '..' + last : 'Copied with context');
+  });
 })();

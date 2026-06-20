@@ -112,7 +112,7 @@ fn view_body(view: &View) -> Markup {
     let file_count = view.files.len();
 
     html! {
-        div.layout {
+        div.layout.copy-ctx {
             header.titlebar {
                 div.brand {
                     span.repo { "~/" b { (view.repo_name) } }
@@ -126,6 +126,7 @@ fn view_body(view: &View) -> Markup {
                 div.spacer {}
                 button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
                 button type="button" class="view-toggle" aria-pressed="false" title="Show full-file diffs" { "Full file" }
+                button type="button" class="ctx-toggle active" aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
                 theme-switch {}
             }
             aside.tree aria-label="Changed files tree" {
@@ -376,6 +377,7 @@ fn file_blocks(view: &View) -> Markup {
                 id=(slug(&file.path))
                 class=(format!("file {}", status.css_class()))
                 data-path=(file.path)
+                data-comment=(crate::comment_syntax::comment_leader(&file.path))
                 data-commits=(file_commits(file))
                 data-status=(status.key())
                 data-status-code=(status.code())
@@ -639,6 +641,18 @@ mod tests {
         assert!(html.contains(r#"<copy-button value="/home/user/api/src/a b.rs" label="abs">"#));
         // copy-code-without-markers reads its own file's rendered rows at click time
         assert!(html.contains(r#"<copy-button mode="code""#));
+    }
+
+    #[test]
+    fn build_html_wires_copy_context_toggle_and_per_file_comment_leader() {
+        let html = build_html(&sample_view());
+
+        // context-on by default: the root carries the class the copy-button reads at click time
+        assert!(html.contains(r#"class="layout copy-ctx""#));
+        // header toggle starts active/pressed
+        assert!(html.contains(r#"class="ctx-toggle active" aria-pressed="true""#));
+        // the .rs file advertises the // comment leader for the pasteable header
+        assert!(html.contains(r#"data-comment="//""#));
     }
 
     #[test]

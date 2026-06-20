@@ -47,9 +47,9 @@
   .branchline{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2)}
   .branchline .ref-branch{color:var(--acc)} .branchline .ref-up{color:var(--ink-3)} .branchline .arr{color:var(--ink-3)}
   .spacer{flex:1}
-  .foldall,.view-toggle{font:inherit;font-size:12px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:6px 10px;cursor:pointer;transition:.13s}
-  .foldall:hover,.view-toggle:hover,.view-toggle.active{color:var(--ink);border-color:var(--acc-line)}
-  .view-toggle.active{background:var(--acc-soft)}
+  .foldall,.view-toggle,.ctx-toggle{font:inherit;font-size:12px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:6px 10px;cursor:pointer;transition:.13s}
+  .foldall:hover,.view-toggle:hover,.view-toggle.active,.ctx-toggle:hover,.ctx-toggle.active{color:var(--ink);border-color:var(--acc-line)}
+  .view-toggle.active,.ctx-toggle.active{background:var(--acc-soft)}
 
   /* === left: file tree (sticky) === */
   .tree{grid-column:1;grid-row:2;overflow:auto;border-right:1px solid var(--line);background:var(--surface);padding:13px}
@@ -147,6 +147,11 @@
   .keybar .key{flex:none}
   .keybar kbd{font-size:11px;font-family:var(--mono);background:var(--sunk);border:1px solid var(--line-2);border-bottom-width:2px;border-radius:var(--r-sm);padding:1px 6px;color:var(--ink-2)}
 
+  /* === copy toast === */
+  .gtl-toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,12px);z-index:50;display:flex;align-items:center;gap:8px;padding:9px 14px;font-size:12.5px;color:var(--ink);background:var(--surface);border:1px solid var(--acc-line);border-radius:var(--r);box-shadow:0 10px 30px rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s}
+  .gtl-toast::before{content:"\2713";color:var(--add);font-weight:700}
+  .gtl-toast.show{opacity:1;transform:translate(-50%,0)}
+
   @media (min-width:1600px) and (min-height:900px){
     :root{--tree-col:320px;--shelf-col:304px;--main-pad-x:28px}
   }
@@ -167,7 +172,7 @@
   @media print{
     body{background:#fff;color:#111;height:auto}
     .layout{display:block;height:auto}
-    .tree,.shelf,.keybar,.foldall,.view-toggle,.search,theme-switch,[popover]{display:none!important}
+    .tree,.shelf,.keybar,.foldall,.view-toggle,.ctx-toggle,.search,theme-switch,[popover],.gtl-toast{display:none!important}
     .titlebar{background:#f2f2f2;border-color:#bbb}
     .brand .repo b,.brand .kind{color:#111}
     .main{overflow:visible;padding:0}
