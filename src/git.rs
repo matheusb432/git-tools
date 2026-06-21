@@ -66,7 +66,7 @@ pub fn log_commits(repo: impl AsRef<Path>, range: &str) -> anyhow::Result<Vec<Co
         &[
             "log",
             "--date=format:%Y-%m-%d %H:%M",
-            "--format=%H%x1f%s%x1f%b%x1f%ad%x1f%aI%x1e",
+            "--format=%H%x1f%s%x1f%b%x1f%ad%x1f%aI%x1f%P%x1e",
             range,
         ],
     )?;
@@ -85,6 +85,31 @@ pub fn attach_commits(files: &mut [FileDiff], map: &HashMap<String, Vec<String>>
     for file in files {
         file.commits = map.get(&file.path).cloned().unwrap_or_default();
     }
+}
+
+// ! A merge is dead under blame (no line is attributed to it). Map it to the commits it
+// ! brought into the previewed range: reachable from the merge, not from its first parent,
+// ! and not from the base. `^<base>` prunes the walk to the range (a merge of `main` into
+// ! the branch returns nothing — it introduces nothing to the preview).
+pub fn merge_members(
+    repo: impl AsRef<Path>,
+    merge: &str,
+    base: &str,
+) -> anyhow::Result<Vec<String>> {
+    let exclude_parent = format!("^{merge}^1");
+    let exclude_base = format!("^{base}");
+    let raw = run_git(repo, &["rev-list", merge, &exclude_parent, &exclude_base])?;
+    Ok(parse_rev_list(&raw, merge))
+}
+
+fn parse_rev_list(raw: &str, merge: &str) -> Vec<String> {
+    let merge_short: String = merge.chars().take(9).collect();
+    raw.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| line.chars().take(9).collect::<String>())
+        .filter(|sha| *sha != merge_short)
+        .collect()
 }
 
 pub fn diff_raw(repo: impl AsRef<Path>, args: &[String]) -> anyhow::Result<String> {
@@ -161,6 +186,13 @@ pub fn parse_commit_log(raw: &str) -> Vec<Commit> {
                 body: fields.next().unwrap_or("").to_string(),
                 date: fields.next().unwrap_or("").to_string(),
                 iso: fields.next().unwrap_or("").to_string(),
+                parents: fields
+                    .next()
+                    .unwrap_or("")
+                    .split_whitespace()
+                    .map(|sha| sha.chars().take(9).collect())
+                    .collect(),
+                members: Vec::new(),
             }
         })
         .collect()
@@ -245,6 +277,75 @@ mod tests {
 
         assert_eq!(map.len(), 1);
         assert_eq!(map.get("path.txt"), Some(&vec!["111111111".to_string()]));
+    }
+
+    #[test]
+    fn parse_commit_log_reads_parents_and_flags_merge() {
+        // record fields: sha · subject · body · date · iso · parents(space-sep)
+        let raw = concat!(
+            "merge12345678\x1fMerge branch 'sub'\x1f\x1f2026-06-08 13:45\x1f2026-06-08T13:45:00-03:00\x1faaaaaaaaa111 bbbbbbbbb222\x1e",
+            "plain98765432\x1ffeat: x\x1f\x1f2026-06-09 09:10\x1f2026-06-09T09:10:00-03:00\x1faaaaaaaaa111\x1e",
+        );
+
+        let commits = parse_commit_log(raw);
+
+        assert_eq!(commits[0].parents, vec!["aaaaaaaaa".to_string(), "bbbbbbbbb".to_string()]);
+        assert!(commits[0].is_merge());
+        assert_eq!(commits[1].parents, vec!["aaaaaaaaa".to_string()]);
+        assert!(!commits[1].is_merge());
+    }
+
+    #[test]
+    fn parse_rev_list_drops_the_merge_sha_and_shortens() {
+        // rev-list lists the merge first, then its brought-in commits (full shas)
+        let raw = "3c1a73a5acf40d58\n9386250ddffff00\nb74d1fcfeaaaa11\n";
+        let members = parse_rev_list(raw, "3c1a73a5a");
+        assert_eq!(members, vec!["9386250dd".to_string(), "b74d1fcfe".to_string()]);
+    }
+
+    #[test]
+    fn merge_members_returns_in_range_brought_in_commits_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        let g = |args: &[&str]| {
+            assert!(
+                std::process::Command::new("git").arg("-C").arg(d).args(args).status().unwrap().success(),
+                "git {args:?} failed"
+            );
+        };
+        g(&["init", "-q"]);
+        g(&["config", "user.email", "t@t"]);
+        g(&["config", "user.name", "t"]);
+        std::fs::write(d.join("base.txt"), "base\n").unwrap();
+        g(&["add", "."]);
+        g(&["commit", "-qm", "base"]);
+        g(&["branch", "-M", "main"]); // base ref = main, cross-version safe
+        g(&["checkout", "-q", "-b", "feature"]);
+        std::fs::write(d.join("a.txt"), "a\n").unwrap();
+        g(&["add", "."]);
+        g(&["commit", "-qm", "feat a"]);
+        g(&["checkout", "-q", "-b", "sub"]);
+        std::fs::write(d.join("b.txt"), "b\n").unwrap();
+        g(&["add", "."]);
+        g(&["commit", "-qm", "sub b"]);
+        g(&["checkout", "-q", "feature"]);
+        g(&["merge", "-q", "--no-ff", "sub", "-m", "Merge branch 'sub'"]);
+
+        let merge = run_git(d, &["rev-parse", "--short=9", "HEAD"]).unwrap().trim().to_string();
+        let sub_b = run_git(d, &["rev-parse", "--short=9", "HEAD^2"]).unwrap().trim().to_string();
+
+        // brought into main..HEAD by the merge = sub b only (feat a is the first parent)
+        assert_eq!(merge_members(d, &merge, "main").unwrap(), vec![sub_b]);
+
+        // merging main INTO feature is base-reachable -> zero members within range
+        g(&["checkout", "-q", "main"]);
+        std::fs::write(d.join("m.txt"), "m\n").unwrap();
+        g(&["add", "."]);
+        g(&["commit", "-qm", "main moves"]);
+        g(&["checkout", "-q", "feature"]);
+        g(&["merge", "-q", "--no-ff", "main", "-m", "Merge branch 'main'"]);
+        let merge_of_main = run_git(d, &["rev-parse", "--short=9", "HEAD"]).unwrap().trim().to_string();
+        assert!(merge_members(d, &merge_of_main, "main").unwrap().is_empty());
     }
 
     #[test]

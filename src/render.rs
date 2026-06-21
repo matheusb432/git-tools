@@ -296,6 +296,11 @@ fn commit_attr(sha: Option<&String>) -> String {
         .unwrap_or_default()
 }
 
+// ! Serialize a merge's brought-in commits for the focus set; non-merge / empty -> no attribute.
+fn merge_members_attr(commit: &crate::model::Commit) -> Option<String> {
+    (commit.is_merge() && !commit.members.is_empty()).then(|| commit.members.join(" "))
+}
+
 fn html_or_nbsp(raw: &str) -> String {
     let escaped = escape_html(raw);
     if escaped.is_empty() {
@@ -350,6 +355,7 @@ fn commit_rows(view: &View) -> Markup {
             @let has_notes = !commit.body.trim().is_empty();
             div class=(if has_notes { "cline has" } else { "cline" })
                 data-sha=(commit.sha)
+                data-members=[merge_members_attr(commit)]
                 data-pop=[has_notes.then(|| format!("pop-{}", commit.sha))]
                 role="button" tabindex="0" title="focus this commit's changes" {
                 span.bead aria-hidden="true" {}
@@ -357,6 +363,11 @@ fn commit_rows(view: &View) -> Markup {
                     button.sha type="button" title="copy hash" { (commit.sha) }
                     @if has_notes {
                         span.notes-ico aria-hidden="true" title="has extended notes" {}
+                    }
+                    @if commit.is_merge() && !commit.members.is_empty() {
+                        span.merge-pill title="commits this merge brought in — focus to highlight them" {
+                            "merge · " (commit.members.len())
+                        }
                     }
                     @if !commit.date.is_empty() {
                         @if commit.iso.is_empty() {
@@ -497,6 +508,8 @@ mod tests {
                 body: String::new(),
                 date: String::new(),
                 iso: String::new(),
+                parents: Vec::new(),
+                members: Vec::new(),
             }],
             files: vec![FileDiff {
                 path: "src/a b.rs".to_string(),
@@ -603,12 +616,21 @@ mod tests {
         assert!(!html.contains(r#"<button class="bead""#));
         assert!(!html.contains(r#"title="click to copy hash""#));
 
-        assert!(PREVIEW_JS.contains("activeSha = (activeSha === sha) ? null : sha;"));
+        assert!(PREVIEW_JS.contains("if (activeSha === sha) { activeSha = null; activeSet = null; }"));
+        assert!(PREVIEW_JS.contains("activeSet = members.length ? members : [sha];"));
         assert!(PREVIEW_JS.contains("var hashCopy = c.querySelector('.sha');"));
         assert!(PREVIEW_JS.contains("hashCopy.addEventListener('click'"));
         assert!(PREVIEW_JS.contains("e.stopPropagation();"));
         assert!(PREVIEW_JS.contains("if (e.target.closest && e.target.closest('.sha')) return;"));
         assert!(!PREVIEW_JS.contains("bead.addEventListener('click'"));
+    }
+
+    #[test]
+    fn merge_focus_drives_a_member_set() {
+        assert!(PREVIEW_JS.contains("var activeSet = null;"));
+        assert!(PREVIEW_JS.contains("c.getAttribute('data-members')"));
+        assert!(PREVIEW_JS.contains("activeSet.indexOf(c.getAttribute('data-sha')) !== -1"));
+        assert!(PREVIEW_JS.contains("activeSet.indexOf(r.getAttribute('data-commit')) !== -1"));
     }
 
     #[test]
@@ -864,6 +886,60 @@ mod tests {
         assert!(html.contains("content-visibility:auto"));
     }
 
+    #[test]
+    fn commit_rows_marks_a_merge_card_with_members_and_pill() {
+        let mut view = sample_view();
+        view.commits = vec![
+            Commit {
+                sha: "merge1234".to_string(),
+                subject: "Merge branch 'sub'".to_string(),
+                body: String::new(),
+                date: String::new(),
+                iso: String::new(),
+                parents: vec!["p1aaaaaaa".to_string(), "p2bbbbbbb".to_string()],
+                members: vec!["aaa111aaa".to_string(), "bbb222bbb".to_string()],
+            },
+            Commit {
+                sha: "plain5678".to_string(),
+                subject: "feat: x".to_string(),
+                body: String::new(),
+                date: String::new(),
+                iso: String::new(),
+                parents: vec!["p1aaaaaaa".to_string()],
+                members: Vec::new(),
+            },
+        ];
+
+        let html = build_html(&view);
+
+        assert!(html.contains(r#"data-members="aaa111aaa bbb222bbb""#));
+        assert!(html.contains("merge · 2"));
+        // exactly one card is a merge: no pill / no data-members leaks onto the plain card
+        assert_eq!(html.matches("merge · ").count(), 1);
+        assert_eq!(html.matches("data-members=").count(), 1);
+        // the styling shipped
+        assert!(PREVIEW_CSS.contains(".cline .merge-pill{"));
+    }
+
+    #[test]
+    fn commit_rows_skips_pill_for_a_merge_with_no_in_range_members() {
+        let mut view = sample_view();
+        view.commits = vec![Commit {
+            sha: "merge1234".to_string(),
+            subject: "Merge branch 'main'".to_string(),
+            body: String::new(),
+            date: String::new(),
+            iso: String::new(),
+            parents: vec!["p1aaaaaaa".to_string(), "p2bbbbbbb".to_string()],
+            members: Vec::new(), // base-bounded walk found nothing in range
+        }];
+
+        let html = build_html(&view);
+
+        assert!(!html.contains("merge · "));
+        assert!(!html.contains("data-members="));
+    }
+
     fn sample_view() -> View {
         View {
             repo_name: "api".to_string(),
@@ -876,6 +952,8 @@ mod tests {
                 body: "extended notes".to_string(),
                 date: String::new(),
                 iso: String::new(),
+                parents: Vec::new(),
+                members: Vec::new(),
             }],
             files: vec![FileDiff {
                 path: "src/a b.rs".to_string(),

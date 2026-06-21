@@ -32,6 +32,7 @@
     var foldAll = root.querySelector('.foldall');
     var viewToggle = root.querySelector('.view-toggle');
     var activeSha = null;
+    var activeSet = null;
     var filterText = '';
     function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
     function shasOf(el){ return (el.getAttribute('data-commits')||'').split(' ').filter(Boolean); }
@@ -40,7 +41,7 @@
     // ---- commit filter + name filter: a file shows only if it survives both ----
     function applyFilter(){
       fileEls.forEach(function(el){
-        var byCommit = !!activeSha && shasOf(el).indexOf(activeSha) === -1;
+        var byCommit = !!activeSet && !shasOf(el).some(function(s){ return activeSet.indexOf(s) !== -1; });
         el.hidden = byCommit || !matchesFilter(el);
       });
       syncBeads();
@@ -174,26 +175,31 @@
     // hover a card WITH notes shows its native popover (top-layer escapes the shelf scroll clip). ----
     function syncBeads(){
       clineEls.forEach(function(c){
-        var on = activeSha === c.getAttribute('data-sha');
+        var on = !!activeSet && activeSet.indexOf(c.getAttribute('data-sha')) !== -1;
         c.classList.toggle('active', on);
       });
     }
     // ! Focus the selected commit's own rows: dim the diff (.commit-focus) and lift only the
-    // ! rows whose data-commit matches activeSha. Touches just the matching rows, not a re-scan.
+    // ! rows whose data-commit is in activeSet. Touches just the matching rows, not a re-scan.
     function syncOwned(){
       ownedRows.forEach(function(r){ r.classList.remove('owned'); });
       ownedRows = [];
-      if (activeSha) {
+      if (activeSet) {
         dlEls.forEach(function(r){
-          if (r.getAttribute('data-commit') === activeSha) { r.classList.add('owned'); ownedRows.push(r); }
+          if (activeSet.indexOf(r.getAttribute('data-commit')) !== -1) { r.classList.add('owned'); ownedRows.push(r); }
         });
       }
-      root.classList.toggle('commit-focus', !!activeSha);
+      root.classList.toggle('commit-focus', !!activeSet);
     }
     clineEls.forEach(function(c){
       var sha = c.getAttribute('data-sha');
       c.addEventListener('click', function(){
-        activeSha = (activeSha === sha) ? null : sha;
+        if (activeSha === sha) { activeSha = null; activeSet = null; }
+        else {
+          activeSha = sha;
+          var members = (c.getAttribute('data-members') || '').split(' ').filter(Boolean);
+          activeSet = members.length ? members : [sha];
+        }
         applyFilter();
       });
       c.addEventListener('keydown', function(e){
