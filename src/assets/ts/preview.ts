@@ -78,6 +78,26 @@ export function isShaTarget(target: { closest?: (s: string) => unknown } | null)
   return !!(target && target.closest && target.closest(".sha"));
 }
 
+export function toggleLongLine(btn: Element): void {
+  const row = btn.closest(".dl-long");
+  if (!row) return;
+  const on = row.classList.toggle("expanded");
+  btn.setAttribute("aria-expanded", on ? "true" : "false");
+}
+
+// * Opens `target` then schedules `land` in the next animation frame so a collapsed
+// * content-visibility giant is materialized before scrollLandOn runs its correction loop.
+export function navigateToFile(
+  target: HTMLDetailsElement,
+  scroller: HTMLElement,
+  opts: { raf?: (cb: FrameRequestCallback) => number; land?: (t: HTMLDetailsElement, s: HTMLElement) => void; stickyTop?: number },
+): void {
+  const raf = opts.raf ?? ((cb) => requestAnimationFrame(cb));
+  const land = opts.land ?? ((t, s) => scrollLandOn(t, s, { stickyTop: opts.stickyTop ?? 0 }));
+  target.open = true;
+  raf(() => land(target, scroller));
+}
+
 export function initView(root: HTMLElement): void {
   // ! Scope every view to its own .layout root: the tabbed (diff subrepos) view inlines one
   // ! .layout per panel in a single document, so document.querySelector would only ever wire
@@ -109,11 +129,9 @@ export function initView(root: HTMLElement): void {
 
   // ---- single helper used by both tree-leaf click and focusFile keyboard nav ----
   function openAndScrollTo(t: HTMLDetailsElement): void {
-    t.open = true;
     const summaryEl = t.querySelector<HTMLElement>("summary");
     const stickyTop = summaryEl ? summaryEl.offsetHeight : 0;
-    const raf = (cb: FrameRequestCallback): number => requestAnimationFrame(cb);
-    raf(() => scrollLandOn(t, mainScroller, { stickyTop, raf }));
+    navigateToFile(t, mainScroller, { stickyTop });
     t.classList.add("flash");
     setTimeout(() => { t.classList.remove("flash"); }, 1200);
     markCurrent(t);
@@ -363,12 +381,12 @@ export function initView(root: HTMLElement): void {
     else if (e.key === "k") { e.preventDefault(); focusFile(curFile - 1); }
   });
 
+  root.querySelectorAll(".ln-more").forEach((b) => b.addEventListener("click", () => toggleLongLine(b)));
+
   buildTree();
   setFullMode(false);
 }
 
-// ! Pure helper: compute the next (activeSha, activeSet) after a card click, so the
-// ! toggle/merge logic can be unit-tested without a DOM. Returns null for both when toggling off.
 // * Builds the <li class="tnode tfile status-..."> leaf for the file tree.
 // * Pure: no event listeners, no closures. renderNode wires the click after.
 // * Covered by bun test src/assets/ts (buildFileLeaf in wheel.test.ts).
@@ -395,6 +413,8 @@ export function buildFileLeaf(
   return li;
 }
 
+// ! Pure helper: compute the next (activeSha, activeSet) after a card click, so the
+// ! toggle/merge logic can be unit-tested without a DOM. Returns null for both when toggling off.
 export function resolveActiveSet(
   clickedSha: string,
   membersAttr: string,

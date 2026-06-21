@@ -98,6 +98,11 @@
   .dl{display:grid;grid-template-columns:44px 44px minmax(0,1fr);align-items:start;white-space:normal}
   .dl .ln{user-select:none;text-align:right;padding:0 8px;color:var(--ink-3);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
   .dl code{min-width:0;padding:0 12px;white-space:pre-wrap;overflow-wrap:anywhere;background:none;border:0;font-size:14px;color:var(--code)}
+  .dl-long code.long{display:flex;gap:8px;align-items:baseline}
+  .dl-long .code-text{flex:1;min-width:0;white-space:pre;overflow:hidden;text-overflow:ellipsis}
+  .dl-long.expanded .code-text{overflow-x:auto;text-overflow:clip}
+  .ln-more{flex:none;font:inherit;font-size:11px;color:var(--acc);background:var(--acc-soft);border:1px solid var(--acc-line);border-radius:var(--r-sm);padding:0 6px;cursor:pointer;user-select:none}
+  .ln-more:hover{color:var(--bg);background:var(--acc)}
   .dl-add{background:var(--add-bg)} .dl-add .ln{background:var(--add-gut);color:var(--add)} .dl-add code{color:var(--add-ink)}
   .dl-del{background:var(--del-bg)} .dl-del .ln{background:var(--del-gut);color:var(--del)} .dl-del code{color:var(--del-ink)}
   .dl-ctx code{color:var(--ink-2)}

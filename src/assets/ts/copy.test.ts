@@ -76,8 +76,9 @@ function makeFileStub(rowsHtml: string, attrs: Record<string, string> = {}): obj
 
   return {
     querySelectorAll: (sel: string): object[] => {
-      // Match .diff:not([hidden]) .dl-add, .diff:not([hidden]) .dl-ctx
-      if (sel.includes("dl-add") || sel.includes("dl-ctx")) return rowEls;
+      // Match .diff:not([hidden]) .dl-add, .diff:not([hidden]) .dl-ctx — require the
+      // :not([hidden]) guard so dropping it in production (copying hidden panes) fails here.
+      if (sel.includes(":not([hidden])") && (sel.includes("dl-add") || sel.includes("dl-ctx"))) return rowEls;
       return [];
     },
     closest: (sel: string): object | null => sel === ".layout" ? layoutEl : null,

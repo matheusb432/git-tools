@@ -1,6 +1,10 @@
 use crate::model::{FileDiff, LineOwners, View};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
+const MAX_LINE_COLS: usize = 2000;
+const GIANT_FILE_CHARS: usize = 250_000;
+const ROW_PX: usize = 22;
+
 const PREVIEW_CSS: &str = include_str!("assets/preview.css");
 const PREVIEW_BUNDLE: &str = include_str!("assets/generated/preview.js");
 
@@ -41,9 +45,11 @@ pub fn slug(s: &str) -> String {
 }
 
 pub fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
+    use std::fmt::Write;
+
     let mut old_no = 0u32;
     let mut new_no = 0u32;
-    let mut rows = String::new();
+    let mut rows = String::with_capacity(lines.iter().map(String::len).sum::<usize>() * 2);
 
     for raw in lines {
         if raw.is_empty() {
@@ -51,46 +57,57 @@ pub fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
         }
 
         if is_meta_line(raw) {
-            rows.push_str(&format!(
+            let _ = write!(
+                rows,
                 r#"<div class="dl dl-meta"><span class="ln"></span><span class="ln"></span><code>{}</code></div>"#,
                 html_or_nbsp(raw)
-            ));
+            );
             continue;
         }
 
         if let Some((old_start, new_start)) = hunk_starts(raw) {
             old_no = old_start;
             new_no = new_start;
-            rows.push_str(&format!(
+            let _ = write!(
+                rows,
                 r#"<div class="dl dl-hunk"><span class="ln"></span><span class="ln"></span><code>{}</code></div>"#,
                 escape_html(raw)
-            ));
+            );
             continue;
         }
 
         if raw.starts_with('+') && !raw.starts_with("+++") {
-            rows.push_str(&format!(
-                r#"<div class="dl dl-add"{}><span class="ln"></span><span class="ln">{}</span><code>{}</code></div>"#,
+            let long = long_len(raw);
+            let _ = write!(
+                rows,
+                r#"<div class="dl dl-add{}"{}><span class="ln"></span><span class="ln">{}</span>{}</div>"#,
+                if long.is_some() { " dl-long" } else { "" },
                 commit_attr(owners.added.get(&new_no)),
                 new_no,
-                html_or_nbsp(raw)
-            ));
+                code_cell(raw, long),
+            );
             new_no += 1;
         } else if raw.starts_with('-') && !raw.starts_with("---") {
-            rows.push_str(&format!(
-                r#"<div class="dl dl-del"{}><span class="ln">{}</span><span class="ln"></span><code>{}</code></div>"#,
+            let long = long_len(raw);
+            let _ = write!(
+                rows,
+                r#"<div class="dl dl-del{}"{}><span class="ln">{}</span><span class="ln"></span>{}</div>"#,
+                if long.is_some() { " dl-long" } else { "" },
                 commit_attr(owners.deleted.get(&old_no)),
                 old_no,
-                html_or_nbsp(raw)
-            ));
+                code_cell(raw, long),
+            );
             old_no += 1;
         } else {
-            rows.push_str(&format!(
-                r#"<div class="dl dl-ctx"><span class="ln">{}</span><span class="ln">{}</span><code>{}</code></div>"#,
+            let long = long_len(raw);
+            let _ = write!(
+                rows,
+                r#"<div class="dl dl-ctx{}"><span class="ln">{}</span><span class="ln">{}</span>{}</div>"#,
+                if long.is_some() { " dl-long" } else { "" },
                 old_no,
                 new_no,
-                html_or_nbsp(raw)
-            ));
+                code_cell(raw, long),
+            );
             old_no += 1;
             new_no += 1;
         }
@@ -291,6 +308,28 @@ fn html_or_nbsp(raw: &str) -> String {
     }
 }
 
+// ! Char length excluding the leading diff marker; `Some(len)` only when the line is long enough
+// ! to need taming (see code_cell). Computed once per row and shared by the row class and the
+// ! code cell so the O(n) char count isn't walked twice on the very lines the freeze fix targets.
+fn long_len(raw: &str) -> Option<usize> {
+    let marker = matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')) as usize;
+    let len = raw.chars().count().saturating_sub(marker);
+    (len > MAX_LINE_COLS).then_some(len)
+}
+
+// ! Long lines (e.g. base64 data URIs) would force char-by-char wrap layout and freeze the
+// ! page. Tame them: full text stays in `.code-text` (copy-safe) but renders clipped/no-wrap,
+// ! with an expander that reveals horizontal scroll. `long` is the precomputed Some(len).
+fn code_cell(raw: &str, long: Option<usize>) -> String {
+    let body = html_or_nbsp(raw);
+    let Some(len) = long else {
+        return format!("<code>{body}</code>");
+    };
+    format!(
+        r#"<code class="long"><span class="code-text">{body}</span><button class="ln-more" type="button" aria-expanded="false">⋯ {len} chars</button></code>"#
+    )
+}
+
 fn hunk_starts(raw: &str) -> Option<(u32, u32)> {
     let rest = raw.strip_prefix("@@ -")?;
     let (old_part, rest) = rest.split_once(" +")?;
@@ -373,7 +412,10 @@ fn file_blocks(view: &View) -> Markup {
         @for file in &view.files {
             @let absolute = format!("{}/{}", view.repo_root, file.path);
             @let status = file.status();
-            details open
+            @let giant = file.lines.iter().map(String::len).sum::<usize>() > GIANT_FILE_CHARS;
+            @let rows = file.lines.iter().filter(|l| !l.is_empty()).count();
+            @let intrinsic = format!("contain-intrinsic-size:auto {}px", rows * ROW_PX);
+            details open[!giant]
                 id=(slug(&file.path))
                 class=(format!("file {}", status.css_class()))
                 data-path=(file.path)
@@ -397,7 +439,7 @@ fn file_blocks(view: &View) -> Markup {
                 // ! Diff rows live in their own body so content-visibility virtualizes the
                 // ! heavy content here while the summary stays sticky against `.main` (size
                 // ! containment on `details.file` itself would trap the sticky in the box).
-                div class="filebody" {
+                div class="filebody" style=(intrinsic) {
                     div class="diff diff-compact" { (PreEscaped(render_diff_lines(&file.lines, &file.owners))) }
                     @if let Some(full_lines) = &file.full_lines {
                         div class="diff diff-full" hidden { (PreEscaped(render_diff_lines(full_lines, &file.owners))) }
@@ -466,6 +508,28 @@ mod tests {
         assert!(html.contains(r#"<div class="dl dl-add" data-commit="abc123def">"#));
         // context rows carry no owner attribute
         assert!(html.contains(r#"<div class="dl dl-ctx"><span"#));
+    }
+
+    #[test]
+    fn preview_css_tames_long_lines_without_wrap() {
+        assert!(PREVIEW_CSS.contains(".dl-long .code-text{flex:1;min-width:0;white-space:pre"));
+        assert!(PREVIEW_CSS.contains(".dl-long.expanded .code-text{overflow-x:auto"));
+    }
+
+    #[test]
+    fn render_diff_lines_tames_overlong_lines() {
+        let long = format!("+{}", "a".repeat(MAX_LINE_COLS + 5));
+        let html = render_diff_lines(&["@@ -0,0 +1 @@".to_string(), long], &LineOwners::default());
+        assert!(html.contains(r#"class="dl dl-add dl-long""#));
+        assert!(html.contains(r#"<span class="code-text">"#));
+        assert!(html.contains(&format!(r#"<button class="ln-more" type="button" aria-expanded="false">⋯ {} chars</button>"#, MAX_LINE_COLS + 5)));
+    }
+
+    #[test]
+    fn render_diff_lines_leaves_normal_lines_untamed() {
+        let html = render_diff_lines(&["@@ -0,0 +1 @@".to_string(), "+short".to_string()], &LineOwners::default());
+        assert!(!html.contains("dl-long"));
+        assert!(!html.contains("code-text"));
     }
 
     #[test]
@@ -877,6 +941,39 @@ mod tests {
 
         assert!(!html.contains("merge · "));
         assert!(!html.contains("data-members="));
+    }
+
+    #[test]
+    fn file_blocks_collapses_giant_files() {
+        let mut view = sample_view();
+        let huge = "+".to_string() + &"x".repeat(GIANT_FILE_CHARS);
+        view.files[0].lines = vec!["@@ -0,0 +1 @@".to_string(), huge];
+        view.files[0].full_lines = None;
+        let html = build_html(&view);
+        // the giant file's <details> renders WITHOUT `open` (Maud emits `open` before `id`)
+        assert!(html.contains(r#"<details id="f-src-a-b-rs""#));
+        assert!(!html.contains(r#"<details open id="f-src-a-b-rs""#));
+    }
+
+    #[test]
+    fn file_blocks_emits_per_file_intrinsic_size() {
+        let html = build_html(&sample_view());
+        // sample file renders 4 rows -> 4 * ROW_PX
+        assert!(html.contains(&format!("contain-intrinsic-size:auto {}px", 4 * ROW_PX)));
+    }
+
+    #[test]
+    fn content_visibility_stays_in_css_not_inline_so_print_override_wins() {
+        let html = build_html(&sample_view());
+        // content-visibility must NOT be inline (an inline style out-specifies the @media print override)
+        assert!(!html.contains(r#"style="content-visibility"#));
+        // the old inline pattern must not appear (CSS rule contains this substring but not as an inline style)
+        assert!(!html.contains(r#"style="content-visibility:auto;contain-intrinsic-size"#));
+        // it still lives in the stylesheet, and the print override is present
+        assert!(html.contains("content-visibility:auto"));     // base CSS rule
+        assert!(html.contains("content-visibility:visible"));  // @media print override
+        // per-file intrinsic-size is still emitted inline
+        assert!(html.contains(&format!("contain-intrinsic-size:auto {}px", 4 * ROW_PX)));
     }
 
     fn sample_view() -> View {
