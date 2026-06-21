@@ -60,6 +60,29 @@ fmt:
 fmt-check:
     if command -v taplo >/dev/null 2>&1; then taplo fmt --check; else echo "taplo not installed; skipping"; fi
 
+# Bundle src/assets/ts -> src/assets/generated/preview.js (committed). Needs bun.
+# NODE_ENV=production forces lit's production build (no dev URLs in string literals).
+[group('build')]
+build-js:
+    if command -v bun >/dev/null 2>&1; then \
+      NODE_ENV=production bun build src/assets/ts/index.ts --outfile src/assets/generated/preview.js --format=iife --minify --target=browser; \
+      echo "built src/assets/generated/preview.js"; \
+    else echo "bun not installed; skipping build-js (commit generated/ unchanged)" >&2; fi
+
+# Run the TypeScript unit tests. Needs bun.
+# --isolate gives each test file a fresh module registry so Lit's module-level init
+# (which reads globalThis.document) can't be polluted by stubs from sibling tests.
+[group('quality')]
+test-js:
+    if command -v bun >/dev/null 2>&1; then bun test --isolate src/assets/ts; else echo "bun not installed; skipping test-js" >&2; fi
+
+# Fail if the committed bundle drifts from its TS source.
+_js-drift-guard:
+    if command -v bun >/dev/null 2>&1; then \
+      just build-js >/dev/null; \
+      git diff --exit-code -- src/assets/generated/ || { echo "generated/ is stale — run 'just build-js' and commit" >&2; exit 1; }; \
+    else echo "bun absent; skipping js drift guard" >&2; fi
+
 # One-time repo setup: link .claude/skills -> .agents/skills so Claude Code sees cross-agent skills.
 bootstrap:
     mkdir -p .claude

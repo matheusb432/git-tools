@@ -2,15 +2,12 @@ use crate::model::{FileDiff, LineOwners, View};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 const PREVIEW_CSS: &str = include_str!("assets/preview.css");
-const PREVIEW_JS: &str = include_str!("assets/preview.js");
-const LIT_JS: &str = include_str!("assets/lit-all.min.js");
-const COMPONENTS_JS: &str = include_str!("assets/components.js");
+const PREVIEW_BUNDLE: &str = include_str!("assets/generated/preview.js");
 
-// ! Head boot: silence Lit's all-in-one bundle console notice (irrelevant for a local file://
-// ! artifact) and set the saved theme before paint to avoid a flash of the default palette.
-// ! IIFE-wrapped so `t` never leaks to global scope: a leaked global redeclares the minified
-// ! Lit bundle's top-level `const t=globalThis,...`, a SyntaxError that aborts the whole bundle.
-const THEME_BOOT_JS: &str = "(function(){globalThis.litDisableBundleWarning=true;try{var t=localStorage.getItem('gtl-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}})();";
+// ! Head boot: restore the saved theme before paint to avoid a flash of the default palette.
+// ! IIFE-wrapped so `t` never leaks to global scope: a leaked var could clobber a minified
+// ! bundle's single-letter globals.
+const THEME_BOOT_JS: &str = "(function(){try{var t=localStorage.getItem('gtl-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}})();";
 
 pub fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -207,9 +204,7 @@ pub fn build_html(view: &View) -> String {
             }
             body {
                 (view_body(view))
-                script { (PreEscaped(LIT_JS)) }
-                script { (PreEscaped(COMPONENTS_JS)) }
-                script { (PreEscaped(PREVIEW_JS)) }
+                script { (PreEscaped(PREVIEW_BUNDLE)) }
             }
         }
     }
@@ -217,22 +212,11 @@ pub fn build_html(view: &View) -> String {
 }
 
 pub fn build_tabbed_html(title: &str, views: &[View]) -> String {
-    // ? tab strip css/js stay inline; panels reuse the externalized preview.{css,js} chrome
+    // ? tab strip CSS stays inline; tab logic is in the bundle (tabbed.ts, guarded to no-op without .tabs)
     const TABBED_CSS: &str = r#"  .tabs{position:sticky;top:0;z-index:60;display:flex;gap:6px;align-items:center;overflow-x:auto;padding:10px 12px;background:var(--surface-2);border-bottom:1px solid var(--line)}
   .tab{flex:none;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
   .tab:hover{color:var(--ink);border-color:var(--acc-line)} .tab.active{color:var(--acc);border-color:var(--acc-line)}
   .panel[hidden]{display:none}"#;
-    const TABBED_JS: &str = r#"(function(){
-  var tabs = [].slice.call(document.querySelectorAll('.tabs .tab'));
-  var panels = [].slice.call(document.querySelectorAll('.panel'));
-  tabs.forEach(function(tab){
-    tab.addEventListener('click', function(){
-      var index = tab.getAttribute('data-tab');
-      tabs.forEach(function(t){ var active = t === tab; t.classList.toggle('active', active); t.setAttribute('aria-selected', String(active)); });
-      panels.forEach(function(panel){ panel.hidden = panel.id !== 'panel-' + index; });
-    });
-  });
-})();"#;
 
     let default_theme = views.first().and_then(|v| v.theme.as_deref());
     html! {
@@ -266,10 +250,7 @@ pub fn build_tabbed_html(title: &str, views: &[View]) -> String {
                         (view_body(view))
                     }
                 }
-                script { (PreEscaped(LIT_JS)) }
-                script { (PreEscaped(COMPONENTS_JS)) }
-                script { (PreEscaped(PREVIEW_JS)) }
-                script { (PreEscaped(TABBED_JS)) }
+                script { (PreEscaped(PREVIEW_BUNDLE)) }
             }
         }
     }
@@ -608,6 +589,8 @@ mod tests {
 
     #[test]
     fn commit_shelf_click_contract_focuses_card_and_copies_hash_tag() {
+        // ! JS behavior: sha-guard predicate (isShaTarget) covered by bun wheel.test.ts.
+        // ! copyText + stopPropagation wiring is event-listener-only and not extracted.
         let html = build_html(&sample_view());
 
         assert!(html.contains(r#"title="focus this commit's changes""#));
@@ -615,31 +598,12 @@ mod tests {
         assert!(html.contains(r#"<span class="bead" aria-hidden="true"></span>"#));
         assert!(!html.contains(r#"<button class="bead""#));
         assert!(!html.contains(r#"title="click to copy hash""#));
-
-        assert!(PREVIEW_JS.contains("if (activeSha === sha) { activeSha = null; activeSet = null; }"));
-        assert!(PREVIEW_JS.contains("activeSet = members.length ? members : [sha];"));
-        assert!(PREVIEW_JS.contains("var hashCopy = c.querySelector('.sha');"));
-        assert!(PREVIEW_JS.contains("hashCopy.addEventListener('click'"));
-        assert!(PREVIEW_JS.contains("e.stopPropagation();"));
-        assert!(PREVIEW_JS.contains("if (e.target.closest && e.target.closest('.sha')) return;"));
-        assert!(!PREVIEW_JS.contains("bead.addEventListener('click'"));
-    }
-
-    #[test]
-    fn merge_focus_drives_a_member_set() {
-        assert!(PREVIEW_JS.contains("var activeSet = null;"));
-        assert!(PREVIEW_JS.contains("c.getAttribute('data-members')"));
-        assert!(PREVIEW_JS.contains("activeSet.indexOf(c.getAttribute('data-sha')) !== -1"));
-        assert!(PREVIEW_JS.contains("activeSet.indexOf(r.getAttribute('data-commit')) !== -1"));
     }
 
     #[test]
     fn commit_focus_highlight_is_wired() {
-        // the renderer ships the per-commit focus machinery offline
-        assert!(PREVIEW_JS.contains("root.classList.toggle('commit-focus'"));
-        assert!(PREVIEW_JS.contains(".dl-add[data-commit],.dl-del[data-commit]"));
-        assert!(PREVIEW_JS.contains("classList.add('owned')"));
-        assert!(PREVIEW_JS.contains("syncOwned();"));
+        // ! JS behavior: resolveActiveSet (toggle/member-set) covered by bun preview.test.ts.
+        // ! owned-row DOM mutation is event-listener-only and not extracted.
         assert!(PREVIEW_CSS.contains(".commit-focus .dl.owned{opacity:1}"));
         assert!(PREVIEW_CSS.contains("inset 3px 0 0 var(--acc)"));
         assert!(PREVIEW_CSS.contains("prefers-reduced-motion"));
@@ -692,7 +656,6 @@ mod tests {
 
         assert!(html.contains("customElements"));
         assert!(html.contains("<theme-switch"));
-        assert!(html.contains("globalThis.Lit"));
         assert!(!html.contains("http://"));
         assert!(!html.contains("https://"));
     }
@@ -732,21 +695,6 @@ mod tests {
     }
 
     #[test]
-    fn preview_js_side_scrolls_file_diff_wheel_events() {
-        assert!(PREVIEW_JS.contains("bindHorizontalWheel"));
-        assert!(PREVIEW_JS.contains("addEventListener('wheel'"));
-        assert!(PREVIEW_JS.contains("scrollLeft"));
-        assert!(PREVIEW_JS.contains("preventDefault"));
-    }
-
-    #[test]
-    fn preview_js_traps_wheel_events_in_horizontally_scrollable_diffs() {
-        assert!(PREVIEW_JS.contains(
-            "if (max <= 0 || e.ctrlKey) return;\n        e.stopPropagation();\n        e.preventDefault();"
-        ));
-    }
-
-    #[test]
     fn preview_css_wraps_diff_code_inside_fixed_line_number_gutters() {
         assert!(PREVIEW_CSS.contains(".diff{overflow-x:hidden"));
         assert!(PREVIEW_CSS.contains("grid-template-columns:44px 44px minmax(0,1fr)"));
@@ -756,11 +704,6 @@ mod tests {
         assert!(PREVIEW_CSS.contains("white-space:pre-wrap"));
         assert!(PREVIEW_CSS.contains("overflow-wrap:anywhere"));
         assert!(PREVIEW_CSS.contains("min-width:0"));
-    }
-
-    #[test]
-    fn copy_code_reads_only_the_visible_diff_pane() {
-        assert!(COMPONENTS_JS.contains(".diff:not([hidden])"));
     }
 
     #[test]
@@ -828,12 +771,8 @@ mod tests {
 
     #[test]
     fn file_status_indicators_stay_compact_trailing_and_discreet() {
-        assert!(PREVIEW_JS.contains("li.className = 'tnode tfile status-' + f.status;"));
-        assert!(
-            PREVIEW_JS.contains("label.appendChild(name);\n        label.appendChild(status);")
-        );
-        assert!(!PREVIEW_JS.contains("label.appendChild(icon);"));
-
+        // ! JS behavior: buildFileLeaf (li class, [name,status] child order, no icon) covered
+        // ! by bun wheel.test.ts. Horizontal-wheel scroll math covered by computeWheelScroll there.
         assert!(PREVIEW_CSS.contains(".tfile.status-added>.tlabel"));
         assert!(PREVIEW_CSS.contains(".tfile.status-deleted>.tlabel"));
         assert!(
