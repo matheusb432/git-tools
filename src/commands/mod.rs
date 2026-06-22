@@ -155,11 +155,29 @@ pub(crate) fn store_artifact(meta: &ArtifactMeta, html: &str) -> anyhow::Result<
     Ok(gtl_store::place(&store_root, &repo_id, html, &sidecar)?.path)
 }
 
-/// Open an artifact according to the user's `viewer` config.
+/// Open an artifact according to the user's `viewer` config. `app` spawns the
+/// desktop viewer detached on the `diff://` url; if the app or a display is
+/// missing it degrades to the browser. Best-effort — never fails the command.
 pub(crate) fn open_artifact(path: &Path) {
-    match crate::config::load().viewer {
-        crate::config::Viewer::Browser => gtl_platform::open_in_browser(path),
-        crate::config::Viewer::None => {}
+    use crate::viewer::{diff_url_from_path, is_no_open, resolve_viewer_action, resolve_viewer_bin, ViewerAction};
+    let has_display =
+        std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let no_open = is_no_open(std::env::var("GIT_TOOLS_NO_OPEN").ok().as_deref());
+    let action = resolve_viewer_action(crate::config::load().diff.viewer, has_display, no_open);
+    match action {
+        ViewerAction::Nothing => {}
+        ViewerAction::Browser => gtl_platform::open_in_browser(path),
+        ViewerAction::SpawnApp => {
+            match (resolve_viewer_bin(), diff_url_from_path(path)) {
+                (Some(bin), Some(url)) => {
+                    if gtl_platform::spawn_detached(&bin, &[url.as_str()]).is_err() {
+                        gtl_platform::open_in_browser(path); // spawn failed → browser
+                    }
+                }
+                // Viewer not installed or unparseable path → browser fallback.
+                _ => gtl_platform::open_in_browser(path),
+            }
+        }
     }
 }
 

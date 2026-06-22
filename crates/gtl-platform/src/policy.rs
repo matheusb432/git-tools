@@ -20,6 +20,24 @@ pub fn opener_command(os: Os, is_wsl: bool, path: &str) -> OpenerCommand {
     }
 }
 
+/// How a child is detached from the launching process, per OS family. The
+/// effectful applier in `<os>/spawn.rs` turns this into a real spawn flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DetachStrategy {
+    /// Unix: own process group (`process_group(0)`) + null stdio.
+    Unix,
+    /// Windows: `DETACHED_PROCESS | CREATE_NO_WINDOW` (wired in Phase 3).
+    Windows,
+}
+
+/// Decide the detach strategy for an OS. Pure; total over every `Os`.
+pub fn detach_strategy(os: Os) -> DetachStrategy {
+    match os {
+        Os::Windows => DetachStrategy::Windows,
+        Os::Linux | Os::Macos => DetachStrategy::Unix,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,5 +72,16 @@ mod tests {
         let c = opener_command(Os::Windows, true, "x.html");
         assert_eq!(c.program, "explorer.exe");
         assert_eq!(c.args, vec!["x.html"]);
+    }
+
+    #[test]
+    fn detach_strategy_is_unix_for_linux_and_macos() {
+        assert_eq!(detach_strategy(Os::Linux), DetachStrategy::Unix);
+        assert_eq!(detach_strategy(Os::Macos), DetachStrategy::Unix);
+    }
+
+    #[test]
+    fn detach_strategy_is_windows_for_windows() {
+        assert_eq!(detach_strategy(Os::Windows), DetachStrategy::Windows);
     }
 }

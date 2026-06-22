@@ -8,20 +8,28 @@ use serde::Deserialize;
 /// Theme values the renderer knows how to honour; anything else resolves to `None`.
 const KNOWN_THEMES: &[&str] = &["dark", "light", "hearth"];
 
-/// Where a rendered diff is opened. `None` writes to the store and opens nothing.
+/// Where a rendered diff is opened. `App` spawns the desktop viewer; `Browser`
+/// opens from the store in the OS browser; `None` opens nothing. Default `App`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Viewer {
     #[default]
+    App,
     Browser,
     None,
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct DiffConfig {
+    #[serde(default)]
+    pub viewer: Viewer,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub struct GtlConfig {
     pub theme: Option<String>,
     #[serde(default)]
-    pub viewer: Viewer,
+    pub diff: DiffConfig,
 }
 
 /// Parse + validate a config from raw TOML. Pure: a parse error or an unknown/missing
@@ -166,18 +174,26 @@ mod tests {
     }
 
     #[test]
-    fn from_toml_reads_viewer_browser() {
-        assert_eq!(from_toml("viewer = \"browser\"").viewer, Viewer::Browser);
+    fn from_toml_reads_viewer_app_and_browser() {
+        assert_eq!(from_toml("[diff]\nviewer = \"app\"").diff.viewer, Viewer::App);
+        assert_eq!(from_toml("[diff]\nviewer = \"browser\"").diff.viewer, Viewer::Browser);
     }
 
     #[test]
-    fn from_toml_defaults_viewer_to_browser() {
-        // ! P1 default is `browser` (opening from the store); P2 flips it to `app`.
-        assert_eq!(from_toml("").viewer, Viewer::Browser);
+    fn from_toml_defaults_viewer_to_app() {
+        // ! P2 flips the default from browser to app (the launch path now exists).
+        assert_eq!(from_toml("").diff.viewer, Viewer::App);
     }
 
     #[test]
-    fn from_toml_unknown_viewer_falls_back_to_default() {
-        assert_eq!(from_toml("viewer = \"bogus\"").viewer, Viewer::Browser);
+    fn from_toml_unknown_viewer_falls_back_to_default_app() {
+        assert_eq!(from_toml("[diff]\nviewer = \"bogus\"").diff.viewer, Viewer::App);
+    }
+
+    #[test]
+    fn from_toml_flat_viewer_is_ignored() {
+        // A flat top-level `viewer` key must NOT be honoured — the schema is nested.
+        // Users who set it without a `[diff]` header stay on the default (App).
+        assert_eq!(from_toml("viewer = \"browser\"").diff.viewer, Viewer::App);
     }
 }

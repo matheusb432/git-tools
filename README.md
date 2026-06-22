@@ -34,7 +34,23 @@ Previews are written to a central, app-owned store — **never into the repo bei
 
 `<repo-id>` is derived from the repo's root commit (stable across clone/move/rename). Set `GIT_TOOLS_DATA_DIR` to override the store root.
 
-Rendering is **idempotent**: an identical diff reuses its existing artifact (addressed by content hash), and re-running on the same committed range skips re-rendering entirely. After writing, the preview opens in your default browser; control this with the `diff.viewer` config key (`browser` — the default — or `none` to write without opening), or set `GIT_TOOLS_NO_OPEN=1` for a one-off. The config file lives at `~/.config/git-tools/config.toml` (override with `XDG_CONFIG_HOME` or `GIT_TOOLS_CONFIG`).
+Rendering is **idempotent**: an identical diff reuses its existing artifact (addressed by content hash), and re-running on the same committed range skips re-rendering entirely.
+
+After writing, the preview opens in the `gtl-viewer` desktop app (the default). `gtl-viewer` is a tray-resident Tauri window with a tab strip — each `gtl diff` opens or focuses a tab; the history panel lets you reopen past diffs grouped by repo. Control this behaviour with the `diff.viewer` config key:
+
+| Value | Behaviour |
+|---|---|
+| `app` | Open in the `gtl-viewer` desktop app (default). Falls back to the browser automatically when no display is available (`$DISPLAY`/`$WAYLAND_DISPLAY` both absent), so `gtl diff` always succeeds in headless/CI environments. |
+| `browser` | Open the artifact file directly in the OS default browser. |
+| `none` | Write the artifact without opening anything (path is printed). |
+
+Set `GIT_TOOLS_NO_OPEN=1` to suppress opening for a single run regardless of the config. The config file lives at `~/.config/git-tools/config.toml` (override with `XDG_CONFIG_HOME` or `GIT_TOOLS_CONFIG`).
+
+```toml
+# ~/.config/git-tools/config.toml
+[diff]
+viewer = "app"    # app | browser | none
+```
 
 Run `git-tools --help` (or `gtl --help`) for the full reference.
 

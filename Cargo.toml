@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/gtl-platform", "crates/gtl-store"]
+members = ["crates/gtl-platform", "crates/gtl-store", "crates/desktop"]
 
 [package]
 name = "git-tools"

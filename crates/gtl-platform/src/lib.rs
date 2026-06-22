@@ -6,6 +6,32 @@ use std::process::{Command, Stdio};
 pub mod paths;
 pub mod policy;
 
+// OS backend selection (ADR-0003): folders named by `target_os`; siblings added
+// per OS. Phase 3 adds `#[cfg(windows)] #[path = "windows/mod.rs"] mod sys;` and
+// narrows the stub guard below.
+#[cfg(target_os = "linux")]
+#[path = "linux/mod.rs"]
+mod sys;
+
+#[cfg(not(target_os = "linux"))]
+mod sys {
+    //! Stub for OSes without an effectful backend yet (macOS dev, pre-P3 Windows).
+    //! The CLI degrades to the browser path when this returns `Unsupported`.
+    use std::path::Path;
+    pub fn spawn_detached(_program: &Path, _args: &[&str]) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "detached viewer spawn is not implemented for this OS",
+        ))
+    }
+}
+
+/// Spawn `program args…` detached (fire-and-forget). Delegates to the cfg-selected
+/// OS backend; best-effort daemon launch for the desktop viewer. See ADR-0003.
+pub fn spawn_detached(program: &Path, args: &[&str]) -> std::io::Result<()> {
+    sys::spawn_detached(program, args)
+}
+
 /// The operating systems the tool targets. Windows/macOS are not yet wired for
 /// every effect, but the type exists so policy decisions are total today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

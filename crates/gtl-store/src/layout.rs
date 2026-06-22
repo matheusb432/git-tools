@@ -82,18 +82,16 @@ pub fn lookup_by_range(
 }
 
 /// All sidecars across all repos, for the viewer's history.
-pub fn list_history(store_root: &Path) -> anyhow::Result<Vec<Sidecar>> {
+/// Each entry pairs the sidecar with its content hash (the filename stem), so
+/// callers can build `diff://` URLs without re-reading the filesystem.
+pub fn list_history_with_hash(store_root: &Path) -> anyhow::Result<Vec<(String, Sidecar)>> {
     let diffs = store_root.join("diffs");
     let mut all = Vec::new();
     let Ok(repos) = fs::read_dir(&diffs) else { return Ok(all) };
     for repo in repos.flatten() {
-        all.extend(read_sidecars(&repo.path())?);
+        all.extend(read_sidecars_paired(&repo.path())?);
     }
     Ok(all)
-}
-
-fn read_sidecars(dir: &Path) -> anyhow::Result<Vec<Sidecar>> {
-    Ok(read_sidecars_paired(dir)?.into_iter().map(|(_, sc)| sc).collect())
 }
 
 fn read_sidecars_paired(dir: &Path) -> anyhow::Result<Vec<(String, Sidecar)>> {
@@ -179,10 +177,20 @@ mod tests {
     }
 
     #[test]
-    fn list_history_collects_across_repos() {
+    fn list_history_with_hash_collects_across_repos() {
         let tmp = tempfile::tempdir().unwrap();
         place(tmp.path(), "repoAAAA", "<a/>", &sidecar(DiffKind::TwoDot, "a", "b")).unwrap();
         place(tmp.path(), "repoBBBB", "<b/>", &sidecar(DiffKind::ThreeDot, "c", "d")).unwrap();
-        assert_eq!(list_history(tmp.path()).unwrap().len(), 2);
+        assert_eq!(list_history_with_hash(tmp.path()).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn list_history_with_hash_pairs_stem_to_sidecar() {
+        let tmp = tempfile::tempdir().unwrap();
+        let placed = place(tmp.path(), "repoAAAA", "<a/>", &sidecar(DiffKind::TwoDot, "a", "b")).unwrap();
+        let stem = placed.path.file_stem().unwrap().to_str().unwrap().to_string();
+        let got = list_history_with_hash(tmp.path()).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].0, stem);
     }
 }

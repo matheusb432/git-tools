@@ -127,6 +127,14 @@ main() {
       act=$(install_cli_binary "$src" "$bindir")
       printf 'git-tools %s -> %s\n' "$act" "$bindir/$(basename "$src")"
       printf 'gtl %s -> %s\n' "$act" "$bindir/$(cli_alias_name)"
+      local viewer_src="$repo/target/release/gtl-viewer$(cli_exe_suffix)"
+      if [ -f "$viewer_src" ]; then
+        local viewer_act
+        viewer_act=$(copy_if_changed "$viewer_src" "$bindir/gtl-viewer$(cli_exe_suffix)")
+        printf 'gtl-viewer %s -> %s\n' "$viewer_act" "$bindir/gtl-viewer$(cli_exe_suffix)"
+      else
+        printf 'gtl-viewer not built (viewer is optional; browser fallback active)\n' >&2
+      fi
       ;;
     uninstall)
       local result
@@ -135,6 +143,11 @@ main() {
         printf 'removed %s\n' "$bindir/$(cli_bin_name)"
       else
         printf 'nothing to remove at %s\n' "$bindir/$(cli_bin_name)"
+      fi
+      local viewer_dst="$bindir/gtl-viewer$(cli_exe_suffix)"
+      if [ -e "$viewer_dst" ]; then
+        rm -f "$viewer_dst"
+        printf 'removed %s\n' "$viewer_dst"
       fi
       if [ "$remove_config" = 1 ]; then
         local cfg flag=''
