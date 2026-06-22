@@ -6,7 +6,6 @@ use anyhow::Context;
 use crate::cli::DiffTarget;
 use crate::commands::managed::{self, ManagedOptions};
 use crate::git;
-use crate::open::open_file;
 use crate::render::build_tabbed_html;
 
 pub fn run_scan(
@@ -31,11 +30,21 @@ pub fn run_scan(
     }
 
     let html = build_tabbed_html("diff-preview subrepos", &views);
-    let out_file = super::output_file(&root, "diff-preview-subrepos.html", &html)?;
+    let meta = super::ArtifactMeta {
+        repo_root: root.to_string_lossy().to_string(),
+        repo_name: "subrepos".to_string(),
+        kind: gtl_store::DiffKind::WorkTree,
+        base_sha: String::new(),
+        head_sha: String::new(),
+        range_label: String::new(),
+        head_committed_at: String::new(),
+        title: "diff-preview subrepos".to_string(),
+    };
+    let out_file = super::store_artifact(&meta, &html)?;
 
     println!("diff subrepos: {} repo(s)", views.len());
     println!("wrote {}", out_file.display());
-    open_file(&out_file);
+    super::open_artifact(&out_file);
     Ok(out_file)
 }
 
@@ -59,11 +68,21 @@ pub fn run_managed_all(
     }
 
     let html = build_tabbed_html("diff-preview all", &views);
-    let out_file = super::output_file(&root, "diff-preview-all.html", &html)?;
+    let meta = super::ArtifactMeta {
+        repo_root: root.to_string_lossy().to_string(),
+        repo_name: "all".to_string(),
+        kind: gtl_store::DiffKind::WorkTree,
+        base_sha: String::new(),
+        head_sha: String::new(),
+        range_label: String::new(),
+        head_committed_at: String::new(),
+        title: "diff-preview all".to_string(),
+    };
+    let out_file = super::store_artifact(&meta, &html)?;
 
     println!("diff-all: {} repo(s)", views.len());
     println!("wrote {}", out_file.display());
-    open_file(&out_file);
+    super::open_artifact(&out_file);
     Ok(out_file)
 }
 

@@ -1,14 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use crate::commands::{
-    Mode, legacy_count_label, legacy_unpushed_commit_label, output_file, ranges, repo_name,
-};
+use crate::commands::{Mode, legacy_count_label, legacy_unpushed_commit_label, ranges, repo_name};
 use crate::git;
 use crate::model::{Cmd, Foot, View};
-use crate::open::open_file;
 use crate::render::build_html;
 
-pub fn run(repo: impl AsRef<Path>, monorepo: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+pub fn run(repo: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
     let top = git::top_level(repo)?;
     let upstream = git::upstream(&top)?;
     let branch = git::current_branch(&top)?;
@@ -42,7 +39,20 @@ pub fn run(repo: impl AsRef<Path>, monorepo: impl AsRef<Path>) -> anyhow::Result
     let commit_count = view.commits.len();
     let file_count = view.files.len();
     let html = build_html(&view);
-    let out_file = output_file(monorepo, &format!("squash-preview-{repo_name}.html"), &html)?;
+
+    let meta = super::ArtifactMeta {
+        repo_root: top.to_string(),
+        repo_name: repo_name.clone(),
+        // ! WorkTree by design: squash-preview is base→working-tree, not a commit range,
+        // ! so it is intentionally excluded from range-dedup in the store.
+        kind: gtl_store::DiffKind::WorkTree,
+        base_sha: String::new(),
+        head_sha: crate::git::resolve_sha(&top, "HEAD").unwrap_or_default(),
+        range_label: ranges.log_range.clone(),
+        head_committed_at: crate::git::committed_at(&top, "HEAD"),
+        title: "squash-preview".to_string(),
+    };
+    let out_file = super::store_artifact(&meta, &html)?;
 
     println!(
         "squash-preview: {}, {}",
@@ -50,7 +60,7 @@ pub fn run(repo: impl AsRef<Path>, monorepo: impl AsRef<Path>) -> anyhow::Result
         legacy_count_label(file_count, "file")
     );
     println!("wrote {}", out_file.display());
-    open_file(&out_file);
+    super::open_artifact(&out_file);
     Ok(out_file)
 }
 

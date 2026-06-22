@@ -1,12 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use crate::cli::DiffTarget;
-use crate::commands::{
-    Mode, legacy_count_label, legacy_unpushed_commit_label, output_file, ranges, repo_name,
-};
+use crate::commands::{Mode, legacy_count_label, legacy_unpushed_commit_label, ranges, repo_name};
 use crate::git;
 use crate::model::View;
-use crate::open::open_file;
 use crate::render::build_html;
 
 /// Outcome of a single `diff` invocation: either an artifact was written, or the
@@ -18,34 +15,55 @@ pub enum DiffOutcome {
 
 pub fn run(target: &DiffTarget) -> anyhow::Result<DiffOutcome> {
     let top = git::top_level(".")?;
-    render(&top, &top, target)
+    render(&top, target)
 }
 
-pub(crate) fn render(
-    top: &str,
-    monorepo: impl AsRef<Path>,
-    target: &DiffTarget,
-) -> anyhow::Result<DiffOutcome> {
-    let (view, summary) = build_view(top, target)?;
+// ! base = text before `..`/`...`; for worktree mode (no `..`) the whole string is the base.
+fn range_base(range: &str) -> &str {
+    range.split("..").next().unwrap_or(range).trim_end_matches('.')
+}
 
-    // ! An empty preview (no commits, no changes) renders as a blank page that reads as a
-    // ! bug; warn and skip the render instead of writing a misleading artifact.
+// ! head = text after the last `..`; worktree mode has no commit head ⇒ sentinel.
+fn head_sha_for(top: &str, range: &str) -> String {
+    if range.contains("..") {
+        let tip = range.rsplit("..").next().unwrap_or("HEAD");
+        crate::git::resolve_sha(top, tip).unwrap_or_default()
+    } else {
+        "WORKTREE".to_string()
+    }
+}
+
+pub(crate) fn render(top: &str, target: &DiffTarget) -> anyhow::Result<DiffOutcome> {
+    // ! Fast-path: pure commit ranges are fully determined by resolved shas, so a
+    // ! prior identical artifact can be reused without the expensive assemble.
+    if let Some(hit) = range_fast_path(top, target)? {
+        println!("diff-preview: reusing {}", hit.display());
+        super::open_artifact(&hit);
+        return Ok(DiffOutcome::Rendered(hit));
+    }
+    let (view, summary) = build_view(top, target)?;
     if view.is_empty() {
         eprintln!("diff-preview: {summary} — nothing to show (no commits or changes); skipping");
         return Ok(DiffOutcome::Empty);
     }
-
     let file_count = view.files.len();
-    let repo_name = view.repo_name.clone();
     let html = build_html(&view);
-    let out_file = output_file(monorepo, &format!("diff-preview-{repo_name}.html"), &html)?;
 
-    println!(
-        "diff-preview: {summary}, {}",
-        legacy_count_label(file_count, "file")
-    );
+    let meta = super::ArtifactMeta {
+        repo_root: top.to_string(),
+        repo_name: view.repo_name.clone(),
+        kind: gtl_store::DiffKind::from_diff_range(&view.cmd.range),
+        base_sha: crate::git::resolve_sha(top, range_base(&view.cmd.range)).unwrap_or_default(),
+        head_sha: head_sha_for(top, &view.cmd.range),
+        range_label: view.cmd.range.clone(),
+        head_committed_at: crate::git::committed_at(top, "HEAD"),
+        title: view.title.clone(),
+    };
+    let out_file = super::store_artifact(&meta, &html)?;
+
+    println!("diff-preview: {summary}, {}", legacy_count_label(file_count, "file"));
     println!("wrote {}", out_file.display());
-    open_file(&out_file);
+    super::open_artifact(&out_file);
     Ok(DiffOutcome::Rendered(out_file))
 }
 
@@ -165,6 +183,43 @@ fn unpushed_or_main_base(top: &str) -> anyhow::Result<DiffBase> {
             })
         }
     }
+}
+
+fn range_fast_path(top: &str, target: &DiffTarget) -> anyhow::Result<Option<PathBuf>> {
+    let Some((kind, base_sha, head_sha)) = resolved_range(top, target) else {
+        return Ok(None); // worktree mode or unresolved ⇒ no fast-path
+    };
+    let canonical = std::fs::canonicalize(top).unwrap_or_else(|_| PathBuf::from(top));
+    let repo_id = gtl_store::repo_id(crate::git::root_commit(top).as_deref(), &canonical);
+    let store_root = gtl_platform::paths::store_root()?;
+    gtl_store::lookup_by_range(&store_root, &repo_id, kind, &base_sha, &head_sha)
+}
+
+// ! Returns (kind, base_sha, head_sha) only for pure commit ranges; None for
+// ! worktree (Hash) mode. Mirrors build_view's range selection but skips assemble.
+fn resolved_range(top: &str, target: &DiffTarget) -> Option<(gtl_store::DiffKind, String, String)> {
+    let diff_range = match target {
+        DiffTarget::Range(r) => crate::commands::ranges(r, crate::commands::Mode::ExactRange).diff_range,
+        DiffTarget::Last(n) => {
+            crate::commands::ranges(&format!("HEAD~{n}..HEAD"), crate::commands::Mode::ExactRange).diff_range
+        }
+        DiffTarget::Merge(b) => crate::commands::ranges(b, crate::commands::Mode::Merge).diff_range,
+        DiffTarget::Unpushed => {
+            let base = unpushed_or_main_base(top).ok()?;
+            if !base.is_upstream {
+                return None; // falls back to Hash (worktree) mode
+            }
+            crate::commands::ranges(&base.ref_name, crate::commands::Mode::Unpushed).diff_range
+        }
+        DiffTarget::Base(_) => return None, // Hash mode ⇒ worktree
+    };
+    let kind = gtl_store::DiffKind::from_diff_range(&diff_range);
+    if kind == gtl_store::DiffKind::WorkTree {
+        return None;
+    }
+    let base = crate::git::resolve_sha(top, range_base(&diff_range)).ok()?;
+    let head = crate::git::resolve_sha(top, diff_range.rsplit("..").next()?).ok()?;
+    Some((kind, base, head))
 }
 
 fn verify_exact_range(repo: impl AsRef<Path>, range: &str) -> anyhow::Result<()> {

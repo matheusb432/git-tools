@@ -34,7 +34,7 @@ pub enum Command {
         /// Subrepo working tree to preview.
         #[arg(long)]
         repo: String,
-        /// Monorepo root the preview is written under (`.artifacts/`).
+        /// Monorepo root used to resolve the subrepo path (preview is written to the central store).
         #[arg(long)]
         monorepo: String,
     },
@@ -45,7 +45,7 @@ pub enum Command {
         /// Subrepo working tree to preview.
         #[arg(long)]
         repo: String,
-        /// Monorepo root the preview is written under (`.artifacts/`).
+        /// Monorepo root used to resolve the subrepo path (preview is written to the central store).
         #[arg(long)]
         monorepo: String,
         /// Base branch to merge into (default: main).

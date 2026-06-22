@@ -8,9 +8,20 @@ use serde::Deserialize;
 /// Theme values the renderer knows how to honour; anything else resolves to `None`.
 const KNOWN_THEMES: &[&str] = &["dark", "light", "hearth"];
 
+/// Where a rendered diff is opened. `None` writes to the store and opens nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Viewer {
+    #[default]
+    Browser,
+    None,
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct GtlConfig {
     pub theme: Option<String>,
+    #[serde(default)]
+    pub viewer: Viewer,
 }
 
 /// Parse + validate a config from raw TOML. Pure: a parse error or an unknown/missing
@@ -152,5 +163,21 @@ mod tests {
     #[test]
     fn config_path_all_none_is_none() {
         assert_eq!(config_path_from(None, None, None), None);
+    }
+
+    #[test]
+    fn from_toml_reads_viewer_browser() {
+        assert_eq!(from_toml("viewer = \"browser\"").viewer, Viewer::Browser);
+    }
+
+    #[test]
+    fn from_toml_defaults_viewer_to_browser() {
+        // ! P1 default is `browser` (opening from the store); P2 flips it to `app`.
+        assert_eq!(from_toml("").viewer, Viewer::Browser);
+    }
+
+    #[test]
+    fn from_toml_unknown_viewer_falls_back_to_default() {
+        assert_eq!(from_toml("viewer = \"bogus\"").viewer, Viewer::Browser);
     }
 }

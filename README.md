@@ -23,6 +23,19 @@ The managed manifest is resolved from `--repos-file`, then the `GIT_TOOLS_MANAGE
 
 Every HTML preview is a single self-contained **offline** file (opens from `file://`, no network): fast on large diffs (offscreen file blocks are deferred via CSS `content-visibility`), theme-switchable, and with per-file copy buttons for the relative path, the absolute path, and the code with diff `+`/`-` markers stripped.
 
+## Where previews are saved
+
+Previews are written to a central, app-owned store — **never into the repo being diffed**, so they can't be accidentally committed or pollute repos that don't gitignore them. The default location is your platform data dir (`~/.local/share/git-tools/diffs/` on Linux, `%LOCALAPPDATA%\git-tools\diffs\` on Windows), laid out as:
+
+```
+<data-dir>/diffs/<repo-id>/<content-hash>.html   # the self-contained preview
+<data-dir>/diffs/<repo-id>/<content-hash>.json   # sidecar metadata (repo, range, timestamps)
+```
+
+`<repo-id>` is derived from the repo's root commit (stable across clone/move/rename). Set `GIT_TOOLS_DATA_DIR` to override the store root.
+
+Rendering is **idempotent**: an identical diff reuses its existing artifact (addressed by content hash), and re-running on the same committed range skips re-rendering entirely. After writing, the preview opens in your default browser; control this with the `diff.viewer` config key (`browser` — the default — or `none` to write without opening), or set `GIT_TOOLS_NO_OPEN=1` for a one-off. The config file lives at `~/.config/git-tools/config.toml` (override with `XDG_CONFIG_HOME` or `GIT_TOOLS_CONFIG`).
+
 Run `git-tools --help` (or `gtl --help`) for the full reference.
 
 ## Build

@@ -156,6 +156,25 @@ pub fn blame_reverse(
     )
 }
 
+/// The repo's oldest root-commit sha (lexicographically smallest when several
+/// roots exist), or `None` for a repo with no commits. Stable repo identity.
+pub fn root_commit(repo: impl AsRef<Path>) -> Option<String> {
+    let out = run_git(repo, &["rev-list", "--max-parents=0", "HEAD"]).ok()?;
+    out.lines().map(str::trim).filter(|l| !l.is_empty()).min().map(str::to_string)
+}
+
+/// Resolve a revision to its full 40-char sha.
+pub fn resolve_sha(repo: impl AsRef<Path>, rev: &str) -> anyhow::Result<String> {
+    Ok(run_git(repo, &["rev-parse", rev])?.trim().to_string())
+}
+
+/// The committer date of `rev` as a strict ISO-8601 string (empty on failure).
+pub fn committed_at(repo: impl AsRef<Path>, rev: &str) -> String {
+    run_git(repo, &["show", "-s", "--format=%cI", rev])
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
 fn no_upstream_error(git_stderr: &str) -> anyhow::Error {
     legacy_script_error(
         git_stderr,
@@ -364,5 +383,24 @@ mod tests {
             error.to_string(),
             "fatal: Needed a single revision\nnot a commit: nope"
         );
+    }
+
+    #[test]
+    fn root_commit_returns_oldest_root_sha() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        let g = |args: &[&str]| {
+            assert!(std::process::Command::new("git").arg("-C").arg(d).args(args).status().unwrap().success());
+        };
+        g(&["init", "-q"]);
+        g(&["config", "user.email", "t@t"]);
+        g(&["config", "user.name", "t"]);
+        std::fs::write(d.join("a.txt"), "a\n").unwrap();
+        g(&["add", "."]);
+        g(&["commit", "-qm", "first"]);
+        let root = root_commit(d.to_str().unwrap()).unwrap();
+        assert_eq!(root.len(), 40);
+        let head = resolve_sha(d.to_str().unwrap(), "HEAD").unwrap();
+        assert_eq!(root, head); // single commit ⇒ root == HEAD
     }
 }

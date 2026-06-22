@@ -15,7 +15,6 @@ pub mod config;
 pub mod diff;
 pub mod git;
 pub mod model;
-pub mod open;
 pub mod render;
 
 /// Process exit codes. Stable contract every caller (and justfile shim) depends on.
@@ -73,8 +72,8 @@ fn render_clap_error(error: &clap::Error) -> ExitCode {
 
 fn dispatch(command: Command) -> ExitCode {
     match command {
-        Command::SquashPreview { repo, monorepo } => {
-            html_exit(commands::squash_preview::run(repo, monorepo))
+        Command::SquashPreview { repo, monorepo: _ } => {
+            html_exit(commands::squash_preview::run(repo))
         }
         Command::Diff(args) => {
             match args.command {
@@ -95,9 +94,9 @@ fn dispatch(command: Command) -> ExitCode {
         }
         Command::MergeDiff {
             repo,
-            monorepo,
+            monorepo: _,
             base,
-        } => html_exit(commands::merge_diff::run(repo, monorepo, base.as_deref())),
+        } => html_exit(commands::merge_diff::run(repo, base.as_deref())),
         Command::SquashLocal { repo, message, dry } => {
             let runner = StdGitRunner;
             let result = invoke_squash_local(&runner, repo, Some(&message), dry);

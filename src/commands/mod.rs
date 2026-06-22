@@ -1,7 +1,4 @@
-use std::fs;
 use std::path::{Path, PathBuf};
-
-use anyhow::Context;
 
 use crate::model::{Cmd, Foot};
 
@@ -122,14 +119,48 @@ fn repo_name(top: impl AsRef<Path>) -> String {
         .to_string()
 }
 
-fn output_file(monorepo: impl AsRef<Path>, name: &str, html: &str) -> anyhow::Result<PathBuf> {
-    let out_dir = monorepo.as_ref().join(".artifacts");
-    fs::create_dir_all(&out_dir)
-        .with_context(|| format!("failed to create {}", out_dir.display()))?;
-    let out_file = out_dir.join(name);
-    fs::write(&out_file, html)
-        .with_context(|| format!("failed to write {}", out_file.display()))?;
-    Ok(out_file)
+/// Everything the store needs to record one rendered artifact.
+pub struct ArtifactMeta {
+    pub repo_root: String,
+    pub repo_name: String,
+    pub kind: gtl_store::DiffKind,
+    pub base_sha: String,
+    pub head_sha: String,
+    pub range_label: String,
+    pub head_committed_at: String,
+    pub title: String,
+}
+
+/// Place a rendered artifact in the central store (never the repo). Returns the
+/// artifact path. Idempotent on identical content.
+pub(crate) fn store_artifact(meta: &ArtifactMeta, html: &str) -> anyhow::Result<PathBuf> {
+    let store_root = gtl_platform::paths::store_root()?;
+    let canonical = std::fs::canonicalize(&meta.repo_root)
+        .unwrap_or_else(|_| PathBuf::from(&meta.repo_root));
+    let root_commit = crate::git::root_commit(&meta.repo_root);
+    let repo_id = gtl_store::repo_id(root_commit.as_deref(), &canonical);
+    let sidecar = gtl_store::Sidecar {
+        repo_id: repo_id.clone(),
+        repo_name: meta.repo_name.clone(),
+        repo_root: meta.repo_root.clone(),
+        kind: meta.kind,
+        base_sha: meta.base_sha.clone(),
+        head_sha: meta.head_sha.clone(),
+        range_label: meta.range_label.clone(),
+        head_committed_at: meta.head_committed_at.clone(),
+        generated_at: jiff::Timestamp::now().to_string(),
+        title: meta.title.clone(),
+        byte_size: html.len() as u64,
+    };
+    Ok(gtl_store::place(&store_root, &repo_id, html, &sidecar)?.path)
+}
+
+/// Open an artifact according to the user's `viewer` config.
+pub(crate) fn open_artifact(path: &Path) {
+    match crate::config::load().viewer {
+        crate::config::Viewer::Browser => gtl_platform::open_in_browser(path),
+        crate::config::Viewer::None => {}
+    }
 }
 
 fn plural(n: usize) -> &'static str {

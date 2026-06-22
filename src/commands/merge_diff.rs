@@ -1,18 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use crate::commands::{Mode, output_file, plural, ranges, repo_name};
+use crate::commands::{Mode, plural, ranges, repo_name};
 use crate::git;
 use crate::model::View;
-use crate::open::open_file;
 use crate::render::build_html;
 
 pub const DEFAULT_BASE: &str = "main";
 
-pub fn run(
-    repo: impl AsRef<Path>,
-    monorepo: impl AsRef<Path>,
-    base: Option<&str>,
-) -> anyhow::Result<PathBuf> {
+pub fn run(repo: impl AsRef<Path>, base: Option<&str>) -> anyhow::Result<PathBuf> {
     let top = git::top_level(repo)?;
     let branch = git::current_branch(&top)?;
     let repo_name = repo_name(&top);
@@ -43,7 +38,18 @@ pub fn run(
     let commit_count = view.commits.len();
     let file_count = view.files.len();
     let html = build_html(&view);
-    let out_file = output_file(monorepo, &format!("merge-diff-{repo_name}.html"), &html)?;
+
+    let meta = super::ArtifactMeta {
+        repo_root: top.to_string(),
+        repo_name: repo_name.clone(),
+        kind: gtl_store::DiffKind::from_diff_range(&ranges.diff_range),
+        base_sha: crate::git::resolve_sha(&top, base).unwrap_or_default(),
+        head_sha: crate::git::resolve_sha(&top, "HEAD").unwrap_or_default(),
+        range_label: ranges.diff_range.clone(),
+        head_committed_at: crate::git::committed_at(&top, "HEAD"),
+        title: "merge-diff".to_string(),
+    };
+    let out_file = super::store_artifact(&meta, &html)?;
 
     println!(
         "merge-diff: {commit_count} commit{} to merge into {base}, {file_count} file{}",
@@ -51,6 +57,6 @@ pub fn run(
         plural(file_count)
     );
     println!("wrote {}", out_file.display());
-    open_file(&out_file);
+    super::open_artifact(&out_file);
     Ok(out_file)
 }
