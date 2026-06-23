@@ -91,7 +91,15 @@ test("extractCopyText reads .code-text (not the expander label) and strips marke
     `<row code="+const x = 1" lns="0,12"/>`,
     { "data-comment": "//", "data-path": "src/a.ts", "copy-ctx": "true" },
   );
-  expect(extractCopyText(file as Element)).toBe("// * src/a.ts, lines: 12..12\nconst x = 1");
+  expect(extractCopyText(file as Element)).toBe("// * src/a.ts, lines: 12\nconst x = 1");
+});
+
+test("extractCopyText collapses a single-line marker to one line number, keeps the range for spans", () => {
+  const multi = makeFileStub(
+    `<row code="+const x = 1" lns="0,12"/><row code="+const y = 2" lns="0,13"/>`,
+    { "data-comment": "//", "data-path": "src/a.ts", "copy-ctx": "true" },
+  );
+  expect(extractCopyText(multi as Element)).toBe("// * src/a.ts, lines: 12..13\nconst x = 1\nconst y = 2");
 });
 
 test("extractCopyText prefers .code-text over code when a long line is split-clipped", () => {

@@ -17,7 +17,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 directories = "6"
+gtl-platform = { path = "../gtl-platform" }
 gtl-store = { path = "../gtl-store" }
+raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"

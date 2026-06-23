@@ -883,7 +883,9 @@ name = "desktop"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "gtl-platform",
  "gtl-store",
+ "raw-window-handle",
  "serde",
  "serde_json",
  "tauri",
@@ -1661,6 +1663,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "directories",
+ "x11-dl",
 ]
 
 [[package]]

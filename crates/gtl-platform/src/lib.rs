@@ -24,12 +24,21 @@ mod sys {
             "detached viewer spawn is not implemented for this OS",
         ))
     }
+    pub fn activate_window(_xid: u64) {}
 }
 
 /// Spawn `program args…` detached (fire-and-forget). Delegates to the cfg-selected
 /// OS backend; best-effort daemon launch for the desktop viewer. See ADR-0003.
 pub fn spawn_detached(program: &Path, args: &[&str]) -> std::io::Result<()> {
     sys::spawn_detached(program, args)
+}
+
+/// Raises and focuses the native window `xid`, even over a focused fullscreen
+/// window. Best-effort and silent on failure; a no-op on OSes/sessions without
+/// an EWMH-style activation primitive (see the Linux backend). The window must
+/// already be mapped — callers that just un-hid it should defer slightly.
+pub fn activate_window(xid: u64) {
+    sys::activate_window(xid)
 }
 
 /// The operating systems the tool targets. Windows/macOS are not yet wired for

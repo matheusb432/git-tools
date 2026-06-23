@@ -10,6 +10,41 @@ use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, WindowEvent};
 use tauri::http::{Response, StatusCode};
 
+/// Brings the main window to the foreground — even over a focused fullscreen app.
+///
+/// `set_focus` alone is enough when no other window is fullscreen, but under
+/// mutter/GNOME a `gtk_window_present` is demoted to a taskbar flash when a
+/// fullscreen peer (e.g. a fullscreen terminal) holds focus. So we also send an
+/// EWMH pager-sourced `_NET_ACTIVE_WINDOW` via the PAL, which bypasses
+/// focus-stealing-prevention. That message only lands on a *mapped* window, and
+/// `show()` is processed by the GTK loop only after this callback returns — so
+/// we defer the activation on a worker thread (the PAL opens its own X display,
+/// so this is thread-safe) and retry a few times to outlast the map latency.
+fn focus_main(window: &tauri::WebviewWindow) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    if let Some(xid) = window_xid(window) {
+        std::thread::spawn(move || {
+            for _ in 0..3 {
+                std::thread::sleep(std::time::Duration::from_millis(60));
+                gtl_platform::activate_window(xid);
+            }
+        });
+    }
+}
+
+/// Returns the native X11 window id of `window` when this is an X11 session, or
+/// `None` on Wayland/Windows/macOS, where `activate_window` is a no-op anyway.
+fn window_xid(window: &tauri::WebviewWindow) -> Option<u64> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match window.window_handle().ok()?.as_raw() {
+        RawWindowHandle::Xlib(h) => Some(h.window),
+        RawWindowHandle::Xcb(h) => Some(h.window.get() as u64),
+        _ => None,
+    }
+}
+
 /// Frontend pulls queued diff refs on mount (cold-start + any that arrived first).
 #[tauri::command]
 fn drain_pending_diffs(state: tauri::State<'_, PendingDiffs>) -> Vec<String> {
@@ -36,8 +71,7 @@ pub fn run() {
                 let _ = app.emit("open-diff", diff_ref);
             }
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-                let _ = win.set_focus();
+                focus_main(&win);
             }
         }))
         .invoke_handler(tauri::generate_handler![drain_pending_diffs, list_history])
@@ -61,8 +95,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(w) = app.get_webview_window("main") {
-                            let _ = w.show();
-                            let _ = w.set_focus();
+                            focus_main(&w);
                         }
                     }
                     "quit" => app.exit(0),

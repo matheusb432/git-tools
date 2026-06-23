@@ -51,10 +51,11 @@ document.addEventListener("copy", (e: ClipboardEvent) => {
   if (!out.length || !e.clipboardData) return;
   const leader = file.getAttribute("data-comment") || "//";
   const path = file.getAttribute("data-path") || "";
-  const header = `${leader} * ${path}` + (first !== null ? `, lines: ${first}..${last}` : "");
+  const range = first === last ? `${first}` : `${first}..${last}`;
+  const header = `${leader} * ${path}` + (first !== null ? `, lines: ${range}` : "");
   e.clipboardData.setData("text/plain", `${header}\n${out.join("\n")}`);
   e.preventDefault();
-  showToast(first !== null ? `Copied with context · lines ${first}..${last}` : "Copied with context");
+  showToast(first !== null ? `Copied with context · lines ${range}` : "Copied with context");
 });
 
 // * Returns clamped next scrollLeft, or null to bail (ctrlKey zoom, no overflow, zero delta, already there).

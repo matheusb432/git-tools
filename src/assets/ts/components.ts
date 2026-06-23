@@ -71,7 +71,9 @@ export function extractCopyText(file: Element): string {
   const leader = file.getAttribute("data-comment") || "//";
   const path = file.getAttribute("data-path") || "";
   let header = `${leader} * ${path}`;
-  if (firstLine !== null) header += `, lines: ${firstLine}..${lastLine}`;
+  if (firstLine !== null) {
+    header += `, lines: ${firstLine === lastLine ? firstLine : `${firstLine}..${lastLine}`}`;
+  }
   return `${header}\n${code}`;
 }
 
