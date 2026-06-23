@@ -72,7 +72,7 @@ pub fn add(runner: &impl GitRunner, repo: &Path, tag: &str, message: &str) -> Ta
         }
         Ok(output) => TagResult::new(
             Status::Fail,
-            format!("git tag add failed for {tag} (exit {})", output.exit_code),
+            output.fail_detail(&format!("git tag add failed for {tag}")),
         ),
         Err(error) => TagResult::new(Status::Fail, error.to_string()),
     }
@@ -149,10 +149,7 @@ fn push_tags(runner: &impl GitRunner, repo: &Path, pending: &[&TagRef]) -> TagRe
                 format!("pushed {} {noun}: {names}", pending.len()),
             )
         }
-        Ok(output) => TagResult::new(
-            Status::Fail,
-            format!("git push tags failed (exit {})", output.exit_code),
-        ),
+        Ok(output) => TagResult::new(Status::Fail, output.fail_detail("git push tags failed")),
         Err(error) => TagResult::new(Status::Fail, error.to_string()),
     }
 }
@@ -161,10 +158,7 @@ fn track_pushed_tag(runner: &impl GitRunner, repo: &Path, tag: &TagRef) -> Resul
     let remote_ref = format!("refs/remotes/origin/tags/{}", tag.name);
     match runner.run(repo, &["update-ref", &remote_ref, &tag.object]) {
         Ok(output) if output.exit_code == 0 => Ok(()),
-        Ok(output) => Err(format!(
-            "git update-ref failed for {} (exit {})",
-            tag.name, output.exit_code
-        )),
+        Ok(output) => Err(output.fail_detail(&format!("git update-ref failed for {}", tag.name))),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -233,10 +227,7 @@ fn load_refs(
 ) -> Result<BTreeMap<String, TagRef>, String> {
     match runner.run(repo, args) {
         Ok(output) if output.exit_code == 0 => Ok(parse_refs(&output.stdout)),
-        Ok(output) => Err(format!(
-            "git for-each-ref failed (exit {})",
-            output.exit_code
-        )),
+        Ok(output) => Err(output.fail_detail("git for-each-ref failed")),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -294,6 +285,7 @@ mod tests {
         fn ok(stdout: &str) -> GitOutput {
             GitOutput {
                 stdout: stdout.to_string(),
+                stderr: String::new(),
                 exit_code: 0,
             }
         }
@@ -301,6 +293,7 @@ mod tests {
         fn exit(exit_code: i32) -> GitOutput {
             GitOutput {
                 stdout: String::new(),
+                stderr: String::new(),
                 exit_code,
             }
         }

@@ -2,7 +2,7 @@
 
 use crate::cli::{
     Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
-    ManagedReadArgs, TagCommand, WorktreeCommand,
+    ManagedReadArgs, SwArgs, TagCommand, WorktreeCommand,
 };
 use crate::commands::managed::{ManagedExit, ManagedOptions, ManagedRun};
 use crate::commands::squash_local::{SquashResult, Status, StdGitRunner, invoke_squash_local};
@@ -105,6 +105,7 @@ fn dispatch(command: Command) -> ExitCode {
             squash_local_exit_code(result.status)
         }
         Command::Up { message, yes } => run_up(&message, yes),
+        Command::Sw(args) => run_sw(args),
         Command::Tag(args) => run_tag(args.command, args.commits),
         Command::Wk(args) => run_worktree(args.command),
         Command::Status(args) => {
@@ -237,6 +238,74 @@ fn run_up(message: &str, yes: bool) -> ExitCode {
         }
         sync::Status::Fail | sync::Status::Refused => {
             eprintln!("up: {}", result.detail);
+            ExitCode::Internal
+        }
+    }
+}
+
+/// Orchestrates `sw`: pick the flow from flags, run the plan read-only, then apply.
+/// All git work is local; refusals go to stderr (exit 1), logs to stdout (exit 0).
+fn run_sw(args: SwArgs) -> ExitCode {
+    use crate::commands::sw;
+
+    let runner = StdGitRunner;
+    let onto = args.onto.as_deref().unwrap_or("main");
+    let repo = std::path::Path::new(".");
+
+    if args.revert {
+        return match sw::plan_revert(&runner, repo, onto) {
+            sw::RevertPlan::Refused(detail) => {
+                eprintln!("sw: {detail}");
+                ExitCode::Internal
+            }
+            sw::RevertPlan::Ready(target) => finish_sw(sw::apply_revert(&runner, &target)),
+        };
+    }
+
+    if args.rebase {
+        let target = match sw::plan_rebase(&runner, repo, onto) {
+            sw::RebasePlan::Refused(detail) => {
+                eprintln!("sw: {detail}");
+                return ExitCode::Internal;
+            }
+            sw::RebasePlan::Noop(detail) => {
+                println!("{detail}");
+                return ExitCode::Ok;
+            }
+            sw::RebasePlan::Ready(target) => target,
+        };
+        let code = finish_sw(sw::apply_rebase(&runner, &target));
+        if code == ExitCode::Ok && args.diff {
+            return diff_exit(commands::diff::run(&DiffTarget::Unpushed));
+        }
+        return code;
+    }
+
+    match sw::plan_switch(&runner, repo, onto) {
+        sw::SwitchPlan::Refused(detail) => {
+            eprintln!("sw: {detail}");
+            ExitCode::Internal
+        }
+        sw::SwitchPlan::AlreadyThere(onto) => {
+            println!("already on '{onto}'");
+            ExitCode::Ok
+        }
+        sw::SwitchPlan::Ready { top, onto, from } => {
+            finish_sw(sw::apply_switch(&runner, std::path::Path::new(&top), &onto, &from))
+        }
+    }
+}
+
+/// Print an applied `sw` result and map its status to an exit code.
+fn finish_sw(result: crate::commands::sw::SwResult) -> ExitCode {
+    use crate::commands::sw::Status;
+    match result.status {
+        Status::Ok | Status::Noop => {
+            println!("{}", result.detail);
+            ExitCode::Ok
+        }
+        Status::Refused | Status::Fail => {
+            eprintln!("sw: {}", result.detail);
             ExitCode::Internal
         }
     }

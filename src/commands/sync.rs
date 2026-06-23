@@ -168,7 +168,7 @@ fn succeeds(runner: &impl GitRunner, repo: &Path, args: &[&str]) -> bool {
 fn push(runner: &impl GitRunner, repo: &Path, target: &SyncTarget) -> Result<(), String> {
     match runner.run(repo, &["push", &target.remote, &target.branch]) {
         Ok(output) if output.exit_code == 0 => Ok(()),
-        Ok(output) => Err(format!("push failed (exit {})", output.exit_code)),
+        Ok(output) => Err(output.fail_detail("push failed")),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -212,6 +212,7 @@ mod tests {
         fn ok(stdout: &str) -> GitOutput {
             GitOutput {
                 stdout: stdout.to_string(),
+                stderr: String::new(),
                 exit_code: 0,
             }
         }
@@ -219,6 +220,7 @@ mod tests {
         fn exit(stdout: &str, exit_code: i32) -> GitOutput {
             GitOutput {
                 stdout: stdout.to_string(),
+                stderr: String::new(),
                 exit_code,
             }
         }

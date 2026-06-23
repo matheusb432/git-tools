@@ -6,12 +6,34 @@ use anyhow::Context;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitOutput {
     pub stdout: String,
+    /// git's stderr (where it writes diagnostics on failure). Empty unless captured.
+    pub stderr: String,
     pub exit_code: i32,
 }
 
 impl GitOutput {
     fn success(&self) -> bool {
         self.exit_code == 0
+    }
+
+    /// git's own diagnostic — stderr (where it writes errors) if present, else stdout —
+    /// trimmed. Empty when git said nothing.
+    pub fn diagnostic(&self) -> &str {
+        let stderr = self.stderr.trim();
+        if stderr.is_empty() {
+            self.stdout.trim()
+        } else {
+            stderr
+        }
+    }
+
+    /// A failure detail: `context` plus git's own message when it gave one, otherwise
+    /// `context (exit N)`. Lets every command surface git's real reason uniformly.
+    pub fn fail_detail(&self, context: &str) -> String {
+        match self.diagnostic() {
+            said if !said.is_empty() => format!("{context}: {said}"),
+            _ => format!("{context} (exit {})", self.exit_code),
+        }
     }
 }
 
@@ -33,6 +55,7 @@ impl GitRunner for StdGitRunner {
 
         Ok(GitOutput {
             stdout: String::from_utf8(output.stdout).context("git stdout was not valid UTF-8")?,
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             exit_code: output.status.code().unwrap_or(1),
         })
     }
@@ -298,7 +321,7 @@ mod tests {
 
     use anyhow::anyhow;
 
-    use super::{GitOutput, GitRunner, SquashResult, Status, invoke_squash_local};
+    use super::{invoke_squash_local, GitOutput, GitRunner, SquashResult, Status};
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct Call {
@@ -328,6 +351,7 @@ mod tests {
         fn ok(stdout: &str) -> Scripted {
             Scripted::Output(GitOutput {
                 stdout: stdout.to_string(),
+                stderr: String::new(),
                 exit_code: 0,
             })
         }
@@ -335,6 +359,7 @@ mod tests {
         fn exit(stdout: &str, exit_code: i32) -> Scripted {
             Scripted::Output(GitOutput {
                 stdout: stdout.to_string(),
+                stderr: String::new(),
                 exit_code,
             })
         }

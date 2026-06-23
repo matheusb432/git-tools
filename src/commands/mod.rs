@@ -8,6 +8,7 @@ pub mod managed;
 pub mod merge_diff;
 pub mod squash_local;
 pub mod squash_preview;
+pub mod sw;
 pub mod sync;
 pub mod tag;
 pub mod worktree;
@@ -135,8 +136,8 @@ pub struct ArtifactMeta {
 /// artifact path. Idempotent on identical content.
 pub(crate) fn store_artifact(meta: &ArtifactMeta, html: &str) -> anyhow::Result<PathBuf> {
     let store_root = gtl_platform::paths::store_root()?;
-    let canonical = std::fs::canonicalize(&meta.repo_root)
-        .unwrap_or_else(|_| PathBuf::from(&meta.repo_root));
+    let canonical =
+        std::fs::canonicalize(&meta.repo_root).unwrap_or_else(|_| PathBuf::from(&meta.repo_root));
     let root_commit = crate::git::root_commit(&meta.repo_root);
     let repo_id = gtl_store::repo_id(root_commit.as_deref(), &canonical);
     let sidecar = gtl_store::Sidecar {
@@ -159,7 +160,9 @@ pub(crate) fn store_artifact(meta: &ArtifactMeta, html: &str) -> anyhow::Result<
 /// desktop viewer detached on the `diff://` url; if the app or a display is
 /// missing it degrades to the browser. Best-effort — never fails the command.
 pub(crate) fn open_artifact(path: &Path) {
-    use crate::viewer::{diff_url_from_path, is_no_open, resolve_viewer_action, resolve_viewer_bin, ViewerAction};
+    use crate::viewer::{
+        ViewerAction, diff_url_from_path, is_no_open, resolve_viewer_action, resolve_viewer_bin,
+    };
     let has_display =
         std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some();
     let no_open = is_no_open(std::env::var("GIT_TOOLS_NO_OPEN").ok().as_deref());

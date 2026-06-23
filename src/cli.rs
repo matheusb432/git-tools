@@ -76,6 +76,8 @@ pub enum Command {
     Tag(TagArgs),
     /// Inspect git worktrees.
     Wk(WorktreeArgs),
+    /// Switch to the main branch; with `--rebase`, fast-forward it onto the current branch's commits.
+    Sw(SwArgs),
     /// Show branch, unpushed commits, and pending changes for every managed repo.
     #[command(visible_alias = "ls")]
     Status(ManagedReadArgs),
@@ -219,6 +221,23 @@ pub enum ColorChoice {
     Always,
     /// Never emit ANSI color codes.
     Never,
+}
+
+/// Arguments for `sw`.
+#[derive(Debug, Args)]
+pub struct SwArgs {
+    /// Fast-forward the target branch onto the current branch's commits after switching.
+    #[arg(long, conflicts_with = "revert")]
+    pub rebase: bool,
+    /// Branch to switch to / fast-forward onto / revert (default: main).
+    #[arg(long)]
+    pub onto: Option<String>,
+    /// After rebasing, render an HTML diff of the now-unpushed commits (requires --rebase).
+    #[arg(short = 'd', long = "diff", requires = "rebase")]
+    pub diff: bool,
+    /// Undo the last `sw --rebase`: reset the target branch and switch back to the previous branch.
+    #[arg(short = 'r', long = "revert")]
+    pub revert: bool,
 }
 
 /// Flags shared by the managed-repo fan-out commands (`push-all`, `pull-all`, `commit-all`).
@@ -590,6 +609,55 @@ mod tests {
                 }),
                 commits: false
             }) if tag == "v1.2.0" && message == "release notes"
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_sw_switch_only_by_default() {
+        let cli = Cli::parse_args(&["sw".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Sw(SwArgs {
+                rebase: false,
+                revert: false,
+                diff: false,
+                onto: None
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_sw_rebase_with_onto() {
+        let cli = Cli::parse_args(&[
+            "sw".into(),
+            "--rebase".into(),
+            "--onto".into(),
+            "trunk".into(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Sw(SwArgs { rebase: true, onto: Some(onto), .. }) if onto == "trunk"
+        ));
+    }
+
+    #[test]
+    fn parse_args_sw_diff_requires_rebase() {
+        assert!(Cli::parse_args(&["sw".into(), "--diff".into()]).is_err());
+        assert!(Cli::parse_args(&["sw".into(), "--rebase".into(), "-d".into()]).is_ok());
+    }
+
+    #[test]
+    fn parse_args_sw_rebase_conflicts_with_revert() {
+        assert!(Cli::parse_args(&["sw".into(), "--rebase".into(), "--revert".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_routes_sw_revert() {
+        let cli = Cli::parse_args(&["sw".into(), "-r".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Sw(SwArgs { revert: true, .. })
         ));
     }
 }
