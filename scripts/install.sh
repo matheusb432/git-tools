@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# Install / uninstall the git-tools binary and the `gtl` alias on PATH. Idempotent;
-# destructive config removal refuses non-interactively unless --force. Linux-first; runs
-# on Windows under a POSIX shell (Git Bash / MSYS2). No PowerShell.
+# Place / remove the prebuilt git-tools CLI (+ `gtl` alias) and the gtl-viewer desktop binary
+# on PATH. Builds are owned by the justfile (`just cli build` / `just desktop build`); this
+# script only copies the already-built artifacts to PATH. Idempotent; destructive config
+# removal refuses non-interactively unless --force. Linux-first; runs on Windows under a POSIX
+# shell (Git Bash / MSYS2). No PowerShell.
+#
+# Actions: install-cli (CLI only) | install-viewer (viewer only) | install (both) | uninstall.
 #
 # Library functions are sourced by spec/install_spec.sh — keep them side-effect-free on
 # load (no top-level `set`/work); main() runs only on direct execution.
@@ -37,12 +41,25 @@ copy_if_changed() {
       printf 'unchanged'
       return 0
     fi
-    cp -f "$src" "$dst"
+    _atomic_replace "$src" "$dst"
     printf 'updated'
     return 0
   fi
-  cp -f "$src" "$dst"
+  _atomic_replace "$src" "$dst"
   printf 'installed'
+}
+
+# Replace $2 with $1 atomically: copy to a temp file in the destination dir, then mv over
+# the target. mv onto a busy executable swaps the inode instead of writing in place, so an
+# in-place update of a running binary (e.g. the keep-warm gtl-viewer tray app) does not fail
+# with "Text file busy". Preserves the installed | updated | unchanged reporting contract,
+# since copy_if_changed still decides the action; this only changes how the bytes land.
+_atomic_replace() {
+  local src=$1 dst=$2 tmp
+  tmp=$(mktemp "$(dirname "$dst")/.$(basename "$dst").XXXXXX")
+  cp -f "$src" "$tmp"
+  chmod +x "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$dst"
 }
 
 # Install source exe $1 plus the gtl alias into bindir $2. Echoes the combined action
@@ -59,6 +76,14 @@ install_cli_binary() {
   else
     printf 'unchanged'
   fi
+}
+
+# Install the desktop viewer exe $1 into bindir $2 via atomic replace. Echoes the action
+# (installed | updated | unchanged), so a warm tray viewer can be updated in place.
+install_viewer_binary() {
+  local src=$1 bindir=$2
+  mkdir -p "$bindir"
+  copy_if_changed "$src" "$bindir/$(basename "$src")"
 }
 
 # Remove the binary + gtl alias from bindir $1. Echoes: removed | nothing.
@@ -104,9 +129,37 @@ remove_cli_config() {
 
 # --- orchestration (runs only on direct execution) -------------------------
 
+# Copy the prebuilt CLI engine (git-tools + gtl alias) from target/release onto PATH.
+# The build is owned by the `just cli build` recipe; this only places the bytes.
+_main_install_cli() {
+  local repo=$1 bindir=$2 src act
+  src="$repo/target/release/$(cli_bin_name)"
+  [ -f "$src" ] || {
+    printf 'git-tools not built at %s — run `just cli build` first\n' "$src" >&2
+    exit 1
+  }
+  act=$(install_cli_binary "$src" "$bindir")
+  printf 'git-tools %s -> %s\n' "$act" "$bindir/$(basename "$src")"
+  printf 'gtl %s -> %s\n' "$act" "$bindir/$(cli_alias_name)"
+}
+
+# Copy the prebuilt desktop viewer from target/release onto PATH (atomic, warm-tray safe).
+# The build is owned by the `just desktop build` recipe; this only places the bytes. Skips
+# gracefully when the viewer is absent (header-less machine: browser fallback active).
+_main_install_viewer() {
+  local repo=$1 bindir=$2 viewer_src viewer_act
+  viewer_src="$repo/target/release/gtl-viewer$(cli_exe_suffix)"
+  if [ -f "$viewer_src" ]; then
+    viewer_act=$(install_viewer_binary "$viewer_src" "$bindir")
+    printf 'gtl-viewer %s -> %s\n' "$viewer_act" "$bindir/gtl-viewer$(cli_exe_suffix)"
+  else
+    printf 'gtl-viewer not built (viewer is optional; browser fallback active)\n' >&2
+  fi
+}
+
 main() {
   set -euo pipefail
-  local action=${1:-} remove_config=0 force=0 arg repo src bindir
+  local action=${1:-} remove_config=0 force=0 arg repo bindir
   shift || true
   for arg in "$@"; do
     case "$arg" in
@@ -117,24 +170,17 @@ main() {
 
   repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
   bindir=$(cli_bindir)
-  src="$repo/target/release/$(cli_bin_name)"
 
   case "$action" in
+    install-cli)
+      _main_install_cli "$repo" "$bindir"
+      ;;
+    install-viewer)
+      _main_install_viewer "$repo" "$bindir"
+      ;;
     install)
-      printf 'Building release binary...\n'
-      cargo build --release --manifest-path "$repo/Cargo.toml"
-      local act
-      act=$(install_cli_binary "$src" "$bindir")
-      printf 'git-tools %s -> %s\n' "$act" "$bindir/$(basename "$src")"
-      printf 'gtl %s -> %s\n' "$act" "$bindir/$(cli_alias_name)"
-      local viewer_src="$repo/target/release/gtl-viewer$(cli_exe_suffix)"
-      if [ -f "$viewer_src" ]; then
-        local viewer_act
-        viewer_act=$(copy_if_changed "$viewer_src" "$bindir/gtl-viewer$(cli_exe_suffix)")
-        printf 'gtl-viewer %s -> %s\n' "$viewer_act" "$bindir/gtl-viewer$(cli_exe_suffix)"
-      else
-        printf 'gtl-viewer not built (viewer is optional; browser fallback active)\n' >&2
-      fi
+      _main_install_cli "$repo" "$bindir"
+      _main_install_viewer "$repo" "$bindir"
       ;;
     uninstall)
       local result
@@ -158,7 +204,7 @@ main() {
       fi
       ;;
     *)
-      printf 'usage: install.sh install | uninstall [--remove-config] [--force]\n' >&2
+      printf 'usage: install.sh install | install-cli | install-viewer | uninstall [--remove-config] [--force]\n' >&2
       exit 2
       ;;
   esac

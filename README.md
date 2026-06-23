@@ -57,17 +57,25 @@ Run `git-tools --help` (or `gtl --help`) for the full reference.
 ## Build
 
 ```sh
-just build      # cargo build --release -> target/release/git-tools[.exe]
+just build          # build both: CLI engine (+ diff bundle) and the desktop viewer
+just cli build      # only the CLI engine -> target/release/git-tools[.exe]
+just desktop build  # only the gtl-viewer Tauri binary (skipped without webkit2gtk-4.1 headers)
 ```
 
 `just` recipes use bash, so on Windows run them from Git Bash (the `set windows-shell` directive points `just` at bash there).
 
 ## Install
 
+The CLI engine (`git-tools` + `gtl` alias) and the desktop viewer (`gtl-viewer`) are independent artifacts with parallel verbs:
+
 ```sh
-just install    # build + place the binary and the gtl alias on PATH (~/.local/bin)
+just update          # build + install both (CLI engine and desktop viewer)
+just cli update      # build + install only the CLI engine (git-tools + gtl)
+just desktop update  # build + install only the desktop viewer (gtl-viewer)
+just install         # place both prebuilt artifacts on PATH (~/.local/bin)
+just uninstall       # remove the binaries and the gtl alias
 ```
 
-`just install` / `just uninstall` / `just update` wrap `scripts/install.sh`, which works on Linux and on Windows via Git Bash (it handles the `.exe` suffix under MSYS). On Ubuntu, `./install-git-tools.sh` additionally ensures `~/.local/bin` is on your `PATH`.
+These wrap `scripts/install.sh`, which works on Linux and on Windows via Git Bash (it handles the `.exe` suffix under MSYS). The viewer is copied via an atomic `mv`, so `just desktop update` refreshes the running tray app in place without a "Text file busy" failure. On Ubuntu, `./install-git-tools.sh` additionally ensures `~/.local/bin` is on your `PATH`.
 
 Override the install directory with `GIT_TOOLS_BINDIR` if you do not want `~/.local/bin`.

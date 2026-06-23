@@ -44,6 +44,30 @@ Describe 'install.sh'
     End
   End
 
+  Describe 'install_viewer_binary'
+    It 'installs the viewer binary into the target bindir'
+      When call install_viewer_binary "$src" "$bindir"
+      The output should equal 'installed'
+      The path "$bindir/git-tools" should be exist
+    End
+
+    It 'reports updated when the viewer bytes change'
+      install_viewer_binary "$src" "$bindir" >/dev/null
+      printf 'v2' >"$src"
+      When call install_viewer_binary "$src" "$bindir"
+      The output should equal 'updated'
+      The contents of file "$bindir/git-tools" should equal 'v2'
+    End
+
+    It 'replaces the target atomically (no leftover temp files)'
+      install_viewer_binary "$src" "$bindir" >/dev/null
+      printf 'v2' >"$src"
+      install_viewer_binary "$src" "$bindir" >/dev/null
+      When run find "$bindir" -maxdepth 1 -name '.git-tools.*'
+      The output should equal ''
+    End
+  End
+
   Describe 'uninstall_cli_binary'
     It 'removes the installed binary'
       install_cli_binary "$src" "$bindir" >/dev/null
