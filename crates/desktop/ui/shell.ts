@@ -1,6 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import type { TemplateResult } from "lit";
+import { closeTabState, type Tab } from "./tab-state";
 
 type HistoryEntry = {
   readonly repo_id: string;
@@ -12,7 +13,6 @@ type HistoryEntry = {
   readonly content_hash: string;
   readonly url: string;
 };
-type Tab = { readonly url: string; readonly label: string };
 
 // ---------------------------------------------------------------------------
 // Tauri IPC boundary — validated once here; downstream code trusts the types.
@@ -48,7 +48,7 @@ function tauriGlobal(): TauriGlobal {
 
 @customElement("gtl-shell")
 export class GtlShell extends LitElement {
-  static styles = css`
+  static override styles = css`
     :host {
       display: grid;
       grid-template-rows: auto 1fr;
@@ -73,7 +73,11 @@ export class GtlShell extends LitElement {
       border-bottom: 1px solid #2d2d2d;
     }
     .tab {
-      padding: 7px 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      padding: 7px 8px 7px 14px;
       color: #9d9d9d;
       background: #232323;
       border-radius: 7px 7px 0 0;
@@ -85,6 +89,29 @@ export class GtlShell extends LitElement {
     }
     .tab:hover { color: #d4d4d4; }
     .tab[active] { background: #1e1e1e; color: #fff; box-shadow: inset 0 2px 0 #569cd6; }
+    .tab-label {
+      max-width: 22ch;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tab-close {
+      display: grid;
+      place-items: center;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      color: #858585;
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+      line-height: 1;
+    }
+    .tab-close:hover {
+      color: #fff;
+      background: #3a3d3f;
+    }
     .tab.history { margin-left: auto; font-family: inherit; font-weight: 600; }
     iframe { border: 0; width: 100%; height: 100%; background: #1e1e1e; }
     .panel { padding: 18px 22px; overflow: auto; }
@@ -125,7 +152,7 @@ export class GtlShell extends LitElement {
 
   private _unlisten: (() => void) | undefined;
 
-  connectedCallback(): void {
+  override connectedCallback(): void {
     super.connectedCallback();
     const { core, event } = tauriGlobal();
     // Drain cold-start / early-arriving diffs, then live-listen for forwards.
@@ -141,7 +168,7 @@ export class GtlShell extends LitElement {
       .catch(console.error);
   }
 
-  disconnectedCallback(): void {
+  override disconnectedCallback(): void {
     super.disconnectedCallback();
     this._unlisten?.();
     this._unlisten = undefined;
@@ -151,16 +178,37 @@ export class GtlShell extends LitElement {
     return url.replace("diff://", "").slice(0, 12);
   }
 
-  private openTab(url: string): void {
+  private openTab(url: string, label = this.labelFor(url)): void {
     const existing = this.tabs.findIndex((t) => t.url === url);
     if (existing >= 0) {
+      const tab = this.tabs[existing];
+      if (tab !== undefined && tab.label !== label) {
+        this.tabs = this.tabs.map((t, i) => (i === existing ? { ...t, label } : t));
+      }
       this.active = existing;
       this.showHistory = false;
       return;
     }
-    this.tabs = [...this.tabs, { url, label: this.labelFor(url) }];
+    this.tabs = [...this.tabs, { url, label }];
     this.active = this.tabs.length - 1;
     this.showHistory = false;
+  }
+
+  private closeTab(index: number): void {
+    const next = closeTabState(
+      { tabs: this.tabs, active: this.active, showHistory: this.showHistory },
+      index
+    );
+    this.tabs = [...next.tabs];
+    this.active = next.active;
+    this.showHistory = next.showHistory;
+  }
+
+  private historyTabLabel(entry: HistoryEntry): string {
+    const title = entry.title.trim();
+    return title !== "" && title !== "diff" && title !== "merge-diff"
+      ? title
+      : this.labelFor(entry.url);
   }
 
   private async openHistory(): Promise<void> {
@@ -169,7 +217,7 @@ export class GtlShell extends LitElement {
     this.showHistory = true;
   }
 
-  render(): TemplateResult {
+  override render(): TemplateResult {
     return html`
       <div class="tabs">
         ${this.tabs.map(
@@ -181,8 +229,21 @@ export class GtlShell extends LitElement {
                 this.active = i;
                 this.showHistory = false;
               }}
+              title=${t.label}
             >
-              ${t.label}
+              <span class="tab-label">${t.label}</span>
+              <button
+                class="tab-close"
+                type="button"
+                aria-label=${`Close ${t.label}`}
+                title="Close tab"
+                @click=${(event: MouseEvent) => {
+                  event.stopPropagation();
+                  this.closeTab(i);
+                }}
+              >
+                ×
+              </button>
             </div>
           `
         )}
@@ -224,7 +285,7 @@ export class GtlShell extends LitElement {
           <div class="repo">${repo}</div>
           ${rows.map(
             (r) => html`
-              <div class="row" @click=${() => this.openTab(r.url)}>
+              <div class="row" @click=${() => this.openTab(r.url, this.historyTabLabel(r))}>
                 ${r.title} · <small>${r.range_label} · ${r.head_committed_at}</small>
               </div>
             `

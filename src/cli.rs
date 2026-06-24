@@ -5,6 +5,15 @@ use std::num::NonZeroU32;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
+fn non_empty_name(value: &str) -> Result<String, String> {
+    let name = value.trim();
+    if name.is_empty() {
+        Err("name must not be blank".to_string())
+    } else {
+        Ok(name.to_string())
+    }
+}
+
 /// git-tools — render git workflow HTML previews and squash local commits.
 #[derive(Debug, Parser)]
 #[command(name = "git-tools", version, about, long_about = None, arg_required_else_help = true)]
@@ -176,6 +185,9 @@ pub struct DiffTargetArgs {
     /// Diff what merging HEAD into BASE would introduce (`BASE...HEAD`).
     #[arg(short = 'm', long = "merge", value_name = "BASE", conflicts_with_all = ["target", "last", "unpushed", "all"])]
     pub merge: Option<String>,
+    /// Name the generated diff in the viewer history label.
+    #[arg(short = 'n', long = "name", value_name = "NAME", value_parser = non_empty_name)]
+    pub name: Option<String>,
     /// Path to the managed-repos manifest (overrides the default lookup).
     #[arg(long, requires = "all")]
     pub repos_file: Option<String>,
@@ -417,6 +429,26 @@ mod tests {
                 },
             }) if base == "main"
         ));
+    }
+
+    #[test]
+    fn parse_args_diff_name_trims_and_sets_history_label() {
+        let cli = Cli::parse_args(&["diff".into(), "-n".into(), "  eod  ".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                target: DiffTargetArgs {
+                    name: Some(name),
+                    ..
+                },
+                ..
+            }) if name == "eod"
+        ));
+    }
+
+    #[test]
+    fn parse_args_diff_rejects_blank_name() {
+        assert!(Cli::parse_args(&["diff".into(), "--name".into(), "  ".into()]).is_err());
     }
 
     #[test]

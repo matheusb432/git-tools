@@ -82,7 +82,9 @@ fn dispatch(command: Command) -> ExitCode {
                     commands::diff_subrepos::run_scan(".", subrepos.last, subrepos.worktrees),
                 ),
                 None => match diff_invocation(args.target) {
-                    DiffInvocation::Single(target) => diff_exit(commands::diff::run(&target)),
+                    DiffInvocation::Single { target, name } => {
+                        diff_exit(commands::diff::run(&target, name.as_deref()))
+                    }
                     DiffInvocation::ManagedAll {
                         repos_file,
                         home_dir,
@@ -152,7 +154,10 @@ fn run_worktree(command: WorktreeCommand) -> ExitCode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum DiffInvocation {
-    Single(DiffTarget),
+    Single {
+        target: DiffTarget,
+        name: Option<String>,
+    },
     ManagedAll {
         repos_file: Option<String>,
         home_dir: Option<String>,
@@ -167,7 +172,11 @@ fn diff_invocation(args: DiffTargetArgs) -> DiffInvocation {
         };
     }
 
-    DiffInvocation::Single(diff_target(args))
+    let name = args.name.clone();
+    DiffInvocation::Single {
+        target: diff_target(args),
+        name,
+    }
 }
 
 fn diff_target(args: DiffTargetArgs) -> DiffTarget {
@@ -283,7 +292,7 @@ fn run_sw(args: SwArgs) -> ExitCode {
         };
         let code = finish_sw(sw::apply_rebase(&runner, &target));
         if code == ExitCode::Ok && args.diff {
-            return diff_exit(commands::diff::run(&DiffTarget::Unpushed));
+            return diff_exit(commands::diff::run(&DiffTarget::Unpushed, None));
         }
         return code;
     }
@@ -297,9 +306,12 @@ fn run_sw(args: SwArgs) -> ExitCode {
             println!("already on '{onto}'");
             ExitCode::Ok
         }
-        sw::SwitchPlan::Ready { top, onto, from } => {
-            finish_sw(sw::apply_switch(&runner, std::path::Path::new(&top), &onto, &from))
-        }
+        sw::SwitchPlan::Ready { top, onto, from } => finish_sw(sw::apply_switch(
+            &runner,
+            std::path::Path::new(&top),
+            &onto,
+            &from,
+        )),
     }
 }
 

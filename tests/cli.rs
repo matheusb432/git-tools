@@ -132,6 +132,21 @@ fn diff_help_documents_the_all_flag_and_managed_overrides() {
 }
 
 #[test]
+fn diff_help_documents_the_name_flag() {
+    git_tools()
+        .args(["diff", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("-n, --name"))
+        .stdout(contains("history label"));
+}
+
+#[test]
+fn diff_blank_name_is_usage_error_exit_2() {
+    git_tools().args(["diff", "--name", "   "]).assert().code(2);
+}
+
+#[test]
 fn diff_last_zero_is_usage_error_exit_2() {
     git_tools().args(["diff", "-l", "0"]).assert().code(2);
 }

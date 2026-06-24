@@ -13,14 +13,18 @@ pub enum DiffOutcome {
     Empty,
 }
 
-pub fn run(target: &DiffTarget) -> anyhow::Result<DiffOutcome> {
+pub fn run(target: &DiffTarget, name: Option<&str>) -> anyhow::Result<DiffOutcome> {
     let top = git::top_level(".")?;
-    render(&top, target)
+    render(&top, target, name)
 }
 
 // ! base = text before `..`/`...`; for worktree mode (no `..`) the whole string is the base.
 fn range_base(range: &str) -> &str {
-    range.split("..").next().unwrap_or(range).trim_end_matches('.')
+    range
+        .split("..")
+        .next()
+        .unwrap_or(range)
+        .trim_end_matches('.')
 }
 
 // ! head = text after the last `..`; worktree mode has no commit head ⇒ sentinel.
@@ -33,15 +37,24 @@ fn head_sha_for(top: &str, range: &str) -> String {
     }
 }
 
-pub(crate) fn render(top: &str, target: &DiffTarget) -> anyhow::Result<DiffOutcome> {
+pub(crate) fn render(
+    top: &str,
+    target: &DiffTarget,
+    name: Option<&str>,
+) -> anyhow::Result<DiffOutcome> {
     // ! Fast-path: pure commit ranges are fully determined by resolved shas, so a
     // ! prior identical artifact can be reused without the expensive assemble.
-    if let Some(hit) = range_fast_path(top, target)? {
-        println!("diff-preview: reusing {}", hit.display());
-        super::open_artifact(&hit);
-        return Ok(DiffOutcome::Rendered(hit));
+    if name.is_none() {
+        if let Some(hit) = range_fast_path(top, target)? {
+            println!("diff-preview: reusing {}", hit.display());
+            super::open_artifact(&hit);
+            return Ok(DiffOutcome::Rendered(hit));
+        }
     }
-    let (view, summary) = build_view(top, target)?;
+    let (mut view, summary) = build_view(top, target)?;
+    if let Some(name) = name {
+        view.title = name.to_string();
+    }
     if view.is_empty() {
         eprintln!("diff-preview: {summary} — nothing to show (no commits or changes); skipping");
         return Ok(DiffOutcome::Empty);
@@ -61,7 +74,10 @@ pub(crate) fn render(top: &str, target: &DiffTarget) -> anyhow::Result<DiffOutco
     };
     let out_file = super::store_artifact(&meta, &html)?;
 
-    println!("diff-preview: {summary}, {}", legacy_count_label(file_count, "file"));
+    println!(
+        "diff-preview: {summary}, {}",
+        legacy_count_label(file_count, "file")
+    );
     println!("wrote {}", out_file.display());
     super::open_artifact(&out_file);
     Ok(DiffOutcome::Rendered(out_file))
@@ -199,9 +215,15 @@ fn range_fast_path(top: &str, target: &DiffTarget) -> anyhow::Result<Option<Path
 // ! worktree (Hash) mode. Mirrors build_view's range selection but skips assemble.
 fn resolved_range(top: &str, target: &DiffTarget) -> Option<(gtl_store::DiffKind, String, String)> {
     let diff_range = match target {
-        DiffTarget::Range(r) => crate::commands::ranges(r, crate::commands::Mode::ExactRange).diff_range,
+        DiffTarget::Range(r) => {
+            crate::commands::ranges(r, crate::commands::Mode::ExactRange).diff_range
+        }
         DiffTarget::Last(n) => {
-            crate::commands::ranges(&format!("HEAD~{n}..HEAD"), crate::commands::Mode::ExactRange).diff_range
+            crate::commands::ranges(
+                &format!("HEAD~{n}..HEAD"),
+                crate::commands::Mode::ExactRange,
+            )
+            .diff_range
         }
         DiffTarget::Merge(b) => crate::commands::ranges(b, crate::commands::Mode::Merge).diff_range,
         DiffTarget::Unpushed => {
