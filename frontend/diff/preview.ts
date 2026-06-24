@@ -1,5 +1,5 @@
-import { copyText } from "./clipboard";
-import { scrollLandOn } from "./scroll";
+import { copyText } from "../core/clipboard";
+import { scrollLandOn } from "../core/scroll";
 
 // ! Singleton fade toast appended once to <body>; re-triggering restarts the timer.
 let toastEl: HTMLElement | null = null;
@@ -74,7 +74,7 @@ export function computeWheelScroll(
 
 // * Returns true when the event target is (or is inside) the .sha copy button, so
 // * the card's keydown/click handler can bail before re-focusing the card.
-// * Covered by bun test src/assets/ts (isShaTarget in wheel.test.ts).
+// * Covered by bun test frontend/diff (isShaTarget in wheel.test.ts).
 export function isShaTarget(target: { closest?: (s: string) => unknown } | null): boolean {
   return !!(target && target.closest && target.closest(".sha"));
 }
@@ -390,7 +390,7 @@ export function initView(root: HTMLElement): void {
 
 // * Builds the <li class="tnode tfile status-..."> leaf for the file tree.
 // * Pure: no event listeners, no closures. renderNode wires the click after.
-// * Covered by bun test src/assets/ts (buildFileLeaf in wheel.test.ts).
+// * Covered by bun test frontend/diff (buildFileLeaf in wheel.test.ts).
 export function buildFileLeaf(
   doc: Document,
   file: { name: string; status: string; statusCode: string; statusLabel: string; el: { id: string } },

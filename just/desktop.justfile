@@ -30,10 +30,10 @@ build-viewer-ui:
     #!/usr/bin/env bash
     set -euo pipefail
     if command -v bun >/dev/null 2>&1; then
-      bun install --cwd crates/desktop/ui lit >/dev/null 2>&1 || true
+      bun install --cwd frontend/viewer lit >/dev/null 2>&1 || true
       mkdir -p crates/desktop/dist
-      cp crates/desktop/ui/index.html crates/desktop/dist/index.html
-      NODE_ENV=production bun build crates/desktop/ui/shell.ts \
+      cp frontend/viewer/index.html crates/desktop/dist/index.html
+      NODE_ENV=production bun build frontend/viewer/shell.ts \
         --outfile crates/desktop/dist/shell.js --format=iife --minify --target=browser
       echo "built crates/desktop/dist/shell.js"
     else echo "bun not installed; skipping build-viewer-ui" >&2; fi

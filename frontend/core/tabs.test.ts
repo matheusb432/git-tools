@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { closeTabState, type TabState } from "../tab-state";
+import { closeTabState, type TabState } from "./tabs";
 
 const state: TabState = {
   tabs: [

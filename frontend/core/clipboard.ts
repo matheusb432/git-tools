@@ -7,16 +7,16 @@ export function copyText(text: string): Promise<boolean> {
 
 function execCopy(text: string): boolean {
   try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
     const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
+    document.body.removeChild(textarea);
     return ok;
-  } catch (e) {
+  } catch (_error) {
     return false;
   }
 }

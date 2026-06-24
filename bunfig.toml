@@ -1,2 +1,2 @@
 [test]
-preload = ["./src/assets/ts/dom-stub.ts"]
+preload = ["./frontend/test/dom-stub.ts"]

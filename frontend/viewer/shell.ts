@@ -1,7 +1,7 @@
 import { LitElement, html, css } from "lit";
 import { customElement, state } from "lit/decorators.js";
 import type { TemplateResult } from "lit";
-import { closeTabState, type Tab } from "./tab-state";
+import { closeTabState, type Tab } from "../core/tabs";
 
 type HistoryEntry = {
   readonly repo_id: string;

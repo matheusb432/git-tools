@@ -1,4 +1,4 @@
-import "./dom-stub"; // ensure globalThis.document exists before any imports
+import "../test/dom-stub"; // ensure globalThis.document exists before any imports
 import { expect, test, describe } from "bun:test";
 import { computeWheelScroll, isShaTarget, buildFileLeaf } from "./preview";
 

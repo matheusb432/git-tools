@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { extractCopyText } from "./components";
+import { extractCopyText } from "./copy";
 
 // Row descriptor parsed from a minimal XML-like mini-DSL:
 //   <row code="+const x = 1" lns="0,12"/>          → normal row; code is raw marker+text

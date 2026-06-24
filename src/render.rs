@@ -6,8 +6,8 @@ const MAX_LINE_COLS: usize = 2000;
 const GIANT_FILE_CHARS: usize = 250_000;
 const ROW_PX: usize = 22;
 
-const PREVIEW_CSS: &str = include_str!("assets/preview.css");
-const PREVIEW_BUNDLE: &str = include_str!("assets/generated/preview.js");
+const PREVIEW_CSS: &str = include_str!("embedded/preview.css");
+const PREVIEW_BUNDLE: &str = include_str!("embedded/generated/preview.js");
 
 // ! Head boot: restore the saved theme before paint to avoid a flash of the default palette.
 // ! IIFE-wrapped so `t` never leaks to global scope: a leaked var could clobber a minified

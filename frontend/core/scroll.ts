@@ -1,9 +1,13 @@
-// ! Land scroll exactly on `target`: content-visibility boxes realize their true height
-// ! mid-scroll, shifting the target — so re-measure each frame and re-align until stable.
+export type ScrollLandOptions = {
+  readonly stickyTop: number;
+  readonly raf?: (cb: FrameRequestCallback) => number;
+  readonly maxFrames?: number;
+};
+
 export function scrollLandOn(
   target: HTMLElement,
   scroller: HTMLElement,
-  opts: { stickyTop: number; raf?: (cb: FrameRequestCallback) => number; maxFrames?: number },
+  opts: ScrollLandOptions,
 ): void {
   const raf = opts.raf ?? ((cb) => requestAnimationFrame(cb));
   const maxFrames = opts.maxFrames ?? 12;

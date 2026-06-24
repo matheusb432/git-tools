@@ -21,11 +21,7 @@ export function closeTabState(state: TabState, index: number): TabState {
 }
 
 function nextActiveIndex(active: number, closed: number, remaining: number): number {
-  if (closed < active) {
-    return active - 1;
-  }
-  if (closed === active) {
-    return Math.min(closed, remaining - 1);
-  }
+  if (closed < active) return active - 1;
+  if (closed === active) return Math.min(closed, remaining - 1);
   return Math.min(active, remaining - 1);
 }

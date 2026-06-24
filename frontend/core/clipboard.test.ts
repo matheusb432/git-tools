@@ -4,13 +4,13 @@ import { copyText } from "./clipboard";
 test("copyText resolves true via execCommand fallback when clipboard API absent", async () => {
   // @ts-expect-error stub
   globalThis.navigator = {};
-  const created: any[] = [];
+  const created: unknown[] = [];
   // @ts-expect-error stub
   globalThis.document = {
-    createElement: () => { const el: any = { style: {}, select() {} }; created.push(el); return el; },
+    createElement: () => { const el = { value: "", style: {}, select() {} }; created.push(el); return el; },
     body: { appendChild() {}, removeChild() {} },
     execCommand: () => true,
   };
   expect(await copyText("hi")).toBe(true);
-  expect(created[0].value).toBe("hi");
+  expect((created[0] as { value: string }).value).toBe("hi");
 });

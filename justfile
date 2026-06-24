@@ -74,7 +74,7 @@ _js-drift-guard:
     if command -v bun >/dev/null 2>&1; then \
       just cli build-js >/dev/null; \
       just desktop build-viewer-ui >/dev/null; \
-      git diff --exit-code -- src/assets/generated/ || { echo "generated/ is stale — run 'just cli build-js' and commit" >&2; exit 1; }; \
+      git diff --exit-code -- src/embedded/generated/ || { echo "src/embedded/generated/ is stale — run 'just cli build-js' and commit" >&2; exit 1; }; \
       git diff --exit-code -- crates/desktop/dist/ || { echo "crates/desktop/dist/ is stale — run 'just desktop build-viewer-ui' and commit" >&2; exit 1; }; \
     else echo "bun absent; skipping js drift guard" >&2; fi
 

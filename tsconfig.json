@@ -4,6 +4,11 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
@@ -12,5 +17,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/assets/ts"]
+  "include": ["frontend/**/*.ts", "frontend/**/*.svelte"]
 }
