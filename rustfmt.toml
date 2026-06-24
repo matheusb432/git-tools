@@ -1,4 +1,4 @@
-# Stable rustfmt config. Defaults otherwise; only edition (matches every crate)
-# and LF endings (Linux-first, matches the repo's Unix line endings) are pinned.
+# Shared rustfmt config, synced into every Rust repo by `sample_project repos sync-rustfmt`.
+# Defaults otherwise; only edition (now uniform fleet-wide) and LF endings (Linux-first) are pinned.
 edition = "2024"
 newline_style = "Unix"
