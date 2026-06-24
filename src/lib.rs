@@ -216,18 +216,25 @@ fn run_up(message: &str, yes: bool) -> ExitCode {
         sync::Plan::Ready(target) => target,
     };
 
-    println!("{}", sync::confirmation(&target));
+    println!("{}", sync::confirmation(&target, message));
 
     match sync::gate(yes, is_interactive()) {
         sync::Gate::RefuseNonInteractive => {
             eprintln!("up: non-interactive shell; pass --yes to confirm the push");
             return ExitCode::Usage;
         }
-        sync::Gate::Confirm if !prompt_confirmation() => {
-            eprintln!("up: aborted — nothing committed or pushed");
-            return ExitCode::Ok;
-        }
-        sync::Gate::Confirm | sync::Gate::Proceed => {}
+        sync::Gate::Confirm => match prompt_confirmation() {
+            Ok(sync::Answer::Yes) => {}
+            Ok(sync::Answer::No) => {
+                eprintln!("up: aborted — nothing committed or pushed");
+                return ExitCode::Ok;
+            }
+            Err(err) => {
+                eprintln!("up: {err} — nothing committed or pushed");
+                return ExitCode::Usage;
+            }
+        },
+        sync::Gate::Proceed => {}
     }
 
     let result = sync::apply(&runner, &target, message);
@@ -348,17 +355,21 @@ fn run_tag(command: Option<TagCommand>, commits: bool) -> ExitCode {
     }
 }
 
-/// Prompts on stdout and reads a yes/no answer from stdin; anything but `y`/`yes` is a no.
-fn prompt_confirmation() -> bool {
+/// Prompts on stdout and reads an answer from stdin. Defaults to yes: an empty
+/// answer (just Enter) proceeds, `y`/`yes` proceeds, `n`/`no` aborts, and any
+/// other reply is an [`sync::AnswerErr`] — never a silent yes or no. A read
+/// failure is treated as a refusal (`Answer::No`) so unreadable stdin never pushes.
+fn prompt_confirmation() -> crate::commands::sync::AnswerResult {
+    use crate::commands::sync::{Answer, parse_answer};
     use std::io::Write;
 
-    print!("Proceed? [y/N] ");
+    print!("Proceed? [Y/n] ");
     let _ = std::io::stdout().flush();
     let mut input = String::new();
     if std::io::stdin().read_line(&mut input).is_err() {
-        return false;
+        return Ok(Answer::No);
     }
-    matches!(input.trim().to_ascii_lowercase().as_str(), "y" | "yes")
+    parse_answer(&input)
 }
 
 /// Builds the [`ManagedOptions`] for a read-only managed command from its parsed flags.

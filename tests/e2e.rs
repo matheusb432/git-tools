@@ -623,9 +623,11 @@ fn up_with_yes_commits_and_pushes_dirty_repo() {
     repo.run(&["up", "save work", "--yes"])
         .assert()
         .success()
-        .stdout(contains("up — review before pushing"))
+        .stdout(contains("up — review before committing & pushing"))
+        .stdout(contains("message: save work"))
         .stdout(contains("main"))
         .stdout(contains("origin"))
+        .stdout(contains("commit 1 change(s)"))
         .stdout(contains("staged, committed, and pushed"));
 
     assert_eq!(

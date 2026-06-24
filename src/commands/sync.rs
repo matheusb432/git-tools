@@ -10,6 +10,20 @@ pub struct SyncTarget {
     pub branch: String,
     pub remote: String,
     pub remote_url: String,
+    pub pending: Pending,
+}
+
+/// Read-only snapshot of what `up` will sweep up, for the confirmation block.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Pending {
+    /// Distinct working-tree paths with any change (staged, unstaged, or untracked).
+    pub changed: usize,
+    /// Paths with staged (already-prepared) changes in the index.
+    pub staged: usize,
+    /// Paths with unstaged or untracked (unprepared) changes `git add -A` will stage.
+    pub unprepared: usize,
+    /// Commits already ahead of the upstream (`@{u}..HEAD`).
+    pub ahead: usize,
 }
 
 /// Outcome of the read-only planning pass.
@@ -31,6 +45,28 @@ pub enum Gate {
     /// Non-interactive shell without `--yes`: refuse rather than auto-push.
     RefuseNonInteractive,
 }
+
+/// A recognized answer to the interactive confirmation prompt. Unrecognized
+/// input is the error half of [`AnswerResult`], not a variant here — so callers
+/// can only branch on real yes/no, never on an "invalid" pseudo-answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Answer {
+    /// Empty/whitespace (the default) or an explicit `y`/`yes`.
+    Yes,
+    /// An explicit `n`/`no`.
+    No,
+}
+
+/// Why a confirmation reply could not be read as a yes/no answer.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AnswerErr {
+    /// The reply was neither yes nor no; holds the offending input (trimmed).
+    #[error("unrecognized answer {0:?} (expected y/yes or n/no)")]
+    Invalid(String),
+}
+
+/// The result of parsing a confirmation reply: a yes/no [`Answer`] or [`AnswerErr`].
+pub type AnswerResult = Result<Answer, AnswerErr>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -65,16 +101,65 @@ pub fn gate(yes: bool, interactive: bool) -> Gate {
     }
 }
 
-pub fn confirmation(target: &SyncTarget) -> String {
+/// Parses a confirmation reply. Empty/whitespace defaults to yes; `y`/`yes` is
+/// yes and `n`/`no` is no (case-insensitive, trimmed); anything else is an
+/// [`AnswerErr::Invalid`] so a typo or unexpected word never silently proceeds
+/// or aborts.
+pub fn parse_answer(input: &str) -> AnswerResult {
+    let trimmed = input.trim();
+    match trimmed.to_ascii_lowercase().as_str() {
+        "" | "y" | "yes" => Ok(Answer::Yes),
+        "n" | "no" => Ok(Answer::No),
+        _ => Err(AnswerErr::Invalid(trimmed.to_string())),
+    }
+}
+
+/// Builds the review block printed before `up` stages, commits, and pushes.
+/// Spells out every side effect — what gets staged, what is wrapped into the
+/// commit, and where it lands — so the user confirms an action, not just a repo.
+pub fn confirmation(target: &SyncTarget, message: &str) -> String {
     let remote = if target.remote_url.is_empty() {
         target.remote.clone()
     } else {
         format!("{} ({})", target.remote, target.remote_url)
     };
-    format!(
-        "up — review before pushing:\n  repo:   {} ({})\n  branch: {}\n  remote: {}",
-        target.name, target.top, target.branch, remote
-    )
+    let dest = format!("{}/{}", target.remote, target.branch);
+    let Pending {
+        changed,
+        staged,
+        unprepared,
+        ahead,
+    } = target.pending;
+
+    let mut out = format!(
+        "up — review before committing & pushing:\n  repo:    {} ({})\n  branch:  {}\n  remote:  {}\n  message: {}\n\nup will:",
+        target.name, target.top, target.branch, remote, message
+    );
+
+    if changed > 0 {
+        if unprepared > 0 {
+            out.push_str(&format!(
+                "\n  • stage {unprepared} unprepared change(s) with `git add -A`"
+            ));
+        }
+        let staged_note = if staged > 0 {
+            format!(" ({staged} already staged)")
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "\n  • commit {changed} change(s){staged_note} as a single commit"
+        ));
+        out.push_str(&format!("\n  • push {} commit(s) to {dest}", ahead + 1));
+    } else if ahead > 0 {
+        out.push_str(&format!(
+            "\n  • nothing to commit; push {ahead} unpushed commit(s) to {dest}"
+        ));
+    } else {
+        out.push_str("\n  • nothing to commit or push — already up to date");
+    }
+
+    out
 }
 
 pub fn plan(runner: &impl GitRunner, repo: &Path) -> Plan {
@@ -105,13 +190,57 @@ pub fn plan(runner: &impl GitRunner, repo: &Path) -> Plan {
     // ? remote url is for the prompt only; an unset url must not block the sync.
     let remote_url = capture(runner, top_path, &["remote", "get-url", &remote]).unwrap_or_default();
 
+    let porcelain = match runner.run(top_path, &["status", "--porcelain"]) {
+        Ok(output) if output.exit_code == 0 => output.stdout,
+        _ => return Plan::Refused("git status failed".to_string()),
+    };
+    let (changed, staged, unprepared) = classify(&porcelain);
+    // ? ahead is for the prompt only; treat a probe failure as zero rather than refusing.
+    let ahead = capture(runner, top_path, &["rev-list", "--count", "@{u}..HEAD"])
+        .and_then(|count| count.parse::<usize>().ok())
+        .unwrap_or(0);
+
     Plan::Ready(SyncTarget {
         name: repo_name(&top),
         top,
         branch,
         remote,
         remote_url,
+        pending: Pending {
+            changed,
+            staged,
+            unprepared,
+            ahead,
+        },
     })
+}
+
+/// Counts porcelain-v1 lines into (changed paths, staged paths, unprepared paths).
+/// A path may be both staged and unprepared (index change plus later edits), so the
+/// two columns can sum past `changed`; `changed` is the distinct-path total.
+fn classify(porcelain: &str) -> (usize, usize, usize) {
+    let mut changed = 0;
+    let mut staged = 0;
+    let mut unprepared = 0;
+    for line in porcelain.lines() {
+        let bytes = line.as_bytes();
+        if bytes.len() < 2 {
+            continue;
+        }
+        changed += 1;
+        let (index, worktree) = (bytes[0], bytes[1]);
+        if index == b'?' && worktree == b'?' {
+            unprepared += 1;
+            continue;
+        }
+        if index != b' ' {
+            staged += 1;
+        }
+        if worktree != b' ' {
+            unprepared += 1;
+        }
+    }
+    (changed, staged, unprepared)
 }
 
 pub fn apply(runner: &impl GitRunner, target: &SyncTarget, message: &str) -> SyncResult {
@@ -251,6 +380,12 @@ mod tests {
             branch: "main".to_string(),
             remote: "origin".to_string(),
             remote_url: "git@github.com:me/repo-a.git".to_string(),
+            pending: Pending {
+                changed: 2,
+                staged: 0,
+                unprepared: 2,
+                ahead: 2,
+            },
         }
     }
 
@@ -272,11 +407,48 @@ mod tests {
         assert_eq!(gate(false, false), Gate::RefuseNonInteractive);
     }
 
+    // --- parse_answer -------------------------------------------------------
+
+    #[test]
+    fn parse_answer_defaults_empty_and_whitespace_to_yes() {
+        assert_eq!(parse_answer(""), Ok(Answer::Yes));
+        assert_eq!(parse_answer("\n"), Ok(Answer::Yes));
+        assert_eq!(parse_answer("   \t "), Ok(Answer::Yes));
+    }
+
+    #[test]
+    fn parse_answer_accepts_explicit_yes_and_no_case_insensitively() {
+        for yes in ["y", "Y", "yes", "YES", " Yes "] {
+            assert_eq!(parse_answer(yes), Ok(Answer::Yes), "{yes:?}");
+        }
+        for no in ["n", "N", "no", "NO", " No "] {
+            assert_eq!(parse_answer(no), Ok(Answer::No), "{no:?}");
+        }
+    }
+
+    #[test]
+    fn parse_answer_rejects_anything_else_as_invalid() {
+        for other in ["please don't", "nope", "yse", "maybe", "ok", "1"] {
+            assert_eq!(
+                parse_answer(other),
+                Err(AnswerErr::Invalid(other.to_string())),
+                "{other:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_answer_error_names_the_offending_input() {
+        let message = AnswerErr::Invalid("maybe".to_string()).to_string();
+        assert!(message.contains("maybe"), "{message}");
+        assert!(message.contains("y/yes or n/no"), "{message}");
+    }
+
     // --- confirmation -------------------------------------------------------
 
     #[test]
-    fn confirmation_names_repo_branch_and_remote() {
-        let text = confirmation(&target());
+    fn confirmation_names_repo_branch_remote_and_message() {
+        let text = confirmation(&target(), "save work");
         assert!(text.contains("repo-a"), "names the repo");
         assert!(text.contains("/home/me/work/repo-a"), "shows the path");
         assert!(text.contains("main"), "names the branch");
@@ -285,15 +457,67 @@ mod tests {
             text.contains("git@github.com:me/repo-a.git"),
             "shows the remote url"
         );
+        assert!(text.contains("save work"), "shows the commit message");
     }
 
     #[test]
     fn confirmation_omits_empty_remote_url_parens() {
         let mut t = target();
         t.remote_url = String::new();
-        let text = confirmation(&t);
+        let text = confirmation(&t, "save work");
         assert!(text.contains("origin"));
-        assert!(!text.contains("()"), "no empty parens when url is unknown");
+        // The "up will:" plan also uses parens for the staged note, so scope the
+        // assertion to the remote line.
+        let remote_line = text
+            .lines()
+            .find(|line| line.trim_start().starts_with("remote:"))
+            .expect("has a remote line");
+        assert!(
+            !remote_line.contains("()"),
+            "no empty parens when url is unknown"
+        );
+    }
+
+    #[test]
+    fn confirmation_spells_out_stage_commit_push_for_a_dirty_repo() {
+        let mut t = target();
+        t.pending = Pending {
+            changed: 3,
+            staged: 1,
+            unprepared: 2,
+            ahead: 1,
+        };
+        let text = confirmation(&t, "save work");
+        assert!(text.contains("stage 2 unprepared change(s)"), "{text}");
+        assert!(
+            text.contains("commit 3 change(s) (1 already staged) as a single commit"),
+            "{text}"
+        );
+        assert!(text.contains("push 2 commit(s) to origin/main"), "{text}");
+    }
+
+    #[test]
+    fn confirmation_clean_but_ahead_says_push_only() {
+        let mut t = target();
+        t.pending = Pending {
+            changed: 0,
+            staged: 0,
+            unprepared: 0,
+            ahead: 3,
+        };
+        let text = confirmation(&t, "ignored");
+        assert!(
+            text.contains("nothing to commit; push 3 unpushed commit(s) to origin/main"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn confirmation_clean_and_up_to_date_says_nothing_to_do() {
+        let mut t = target();
+        t.pending = Pending::default();
+        let text = confirmation(&t, "ignored");
+        assert!(text.contains("already up to date"), "{text}");
     }
 
     // --- plan ---------------------------------------------------------------
@@ -333,15 +557,24 @@ mod tests {
     }
 
     #[test]
-    fn plan_ready_collects_branch_remote_and_url() {
+    fn plan_ready_collects_branch_remote_url_and_pending() {
         let runner = FakeRunner::new(vec![
             FakeRunner::ok("/home/me/work/repo-a\n"),
             FakeRunner::ok("main\n"),
             FakeRunner::ok("origin\n"),
             FakeRunner::ok("git@github.com:me/repo-a.git\n"),
+            FakeRunner::ok(" M a.txt\n?? b.txt\n"), // status --porcelain: 2 unprepared
+            FakeRunner::ok("2\n"),                  // rev-list --count @{u}..HEAD
         ]);
         let plan = plan(&runner, Path::new("."));
         assert_eq!(plan, Plan::Ready(target()));
+    }
+
+    #[test]
+    fn classify_splits_staged_from_unprepared() {
+        // staged-only, unstaged-only, staged+unstaged, untracked.
+        let porcelain = "M  a.txt\n M b.txt\nMM c.txt\n?? d.txt\n";
+        assert_eq!(classify(porcelain), (4, 2, 3));
     }
 
     // --- apply --------------------------------------------------------------
