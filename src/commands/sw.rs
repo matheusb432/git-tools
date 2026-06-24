@@ -1,7 +1,9 @@
 use std::path::Path;
 
-use crate::commands::squash_local::{GitOutput, GitRunner};
-use crate::git;
+use crate::{
+    commands::squash_local::{GitOutput, GitRunner},
+    git,
+};
 
 /// Status of an applied `sw` flow. Maps to exit codes in `lib.rs` dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +45,8 @@ pub enum SwitchPlan {
     AlreadyThere(String),
 }
 
-// ? Unlike sync::capture, empty stdout on a clean exit is a valid value (onto_exists checks the exit code only).
+// ? Unlike sync::capture, empty stdout on a clean exit is a valid value (onto_exists checks the
+// exit code only).
 /// Runs git and returns trimmed stdout on a clean exit, else `None`.
 fn capture(runner: &impl GitRunner, repo: &Path, args: &[&str]) -> Option<String> {
     match runner.run(repo, args) {
@@ -320,8 +323,7 @@ fn rebase_log(target: &RebaseTarget, commits: &[crate::model::Commit]) -> String
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::path::Path;
+    use std::{cell::RefCell, path::Path};
 
     use super::*;
     use crate::commands::squash_local::GitOutput;
@@ -455,7 +457,8 @@ mod tests {
             FakeRunner::ok("feat/x\n"),          // abbrev-ref HEAD
             FakeRunner::ok("refs/heads/main\n"), // verify refs/heads/main
             FakeRunner::ok(""),                  // status --porcelain (clean)
-            FakeRunner::ok(""), // merge-base --is-ancestor main feat/x (exit 0 = ancestor)
+            FakeRunner::ok(""),                  /* merge-base --is-ancestor main feat/x (exit 0
+                                                  * = ancestor) */
             FakeRunner::ok("3\n"), // rev-list --count main..feat/x (ahead)
         ]);
         let plan = plan_rebase(&runner, Path::new("."), "main");

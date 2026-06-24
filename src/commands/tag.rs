@@ -1,5 +1,4 @@
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use crate::commands::squash_local::GitRunner;
 
@@ -257,8 +256,10 @@ fn parse_refs(stdout: &str) -> BTreeMap<String, TagRef> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::path::{Path, PathBuf};
+    use std::{
+        cell::RefCell,
+        path::{Path, PathBuf},
+    };
 
     use super::*;
     use crate::commands::squash_local::GitOutput;

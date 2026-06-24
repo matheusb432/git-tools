@@ -5,10 +5,12 @@ mod history;
 mod protocol;
 
 use diffs::{PendingDiffs, diff_ref_from_argv};
-use tauri::http::{Response, StatusCode};
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
-use tauri::{Emitter, Manager, WindowEvent};
+use tauri::{
+    Emitter, Manager, WindowEvent,
+    http::{Response, StatusCode},
+    menu::{Menu, MenuItem},
+    tray::TrayIconBuilder,
+};
 
 /// Brings the main window to the foreground — even over a focused fullscreen app.
 ///
@@ -146,8 +148,9 @@ fn serve_diff(request: &tauri::http::Request<Vec<u8>>) -> Response<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::Mutex;
+
+    use super::*;
 
     /// Guards tests that mutate `GIT_TOOLS_DATA_DIR` (process-global env var).
     static ENV_LOCK: Mutex<()> = Mutex::new(());

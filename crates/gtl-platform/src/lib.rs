@@ -1,7 +1,9 @@
 //! Platform abstraction layer (PAL): the single home of OS-specific behavior.
 //! See ADR-0003. No `#[cfg(target_os/...)]` may live outside this crate.
-use std::path::Path;
-use std::process::{Command, Stdio};
+use std::{
+    path::Path,
+    process::{Command, Stdio},
+};
 
 pub mod paths;
 pub mod policy;

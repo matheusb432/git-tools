@@ -6,8 +6,10 @@
 //! shas inside the previewed range are kept, so an unattributable row is left
 //! bare rather than mis-assigned.
 
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use crate::model::FileDiff;
 
@@ -105,11 +107,10 @@ fn parse_reverse(raw: &str, in_range: &HashSet<String>) -> HashMap<u32, String> 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use std::{path::Path, process::Command};
 
+    use super::*;
     use crate::model::{FileDiff, LineOwners};
-    use std::path::Path;
-    use std::process::Command;
 
     fn set(shas: &[&str]) -> HashSet<String> {
         shas.iter().map(|s| s.to_string()).collect()

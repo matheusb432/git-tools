@@ -57,14 +57,16 @@ test: _preflight _require-shellspec
 _require-shellspec:
     command -v shellspec >/dev/null 2>&1 || { echo "shellspec not found — install per AGENTS.md" >&2; exit 1; }
 
-# Format all TOML with taplo (no-op if taplo is absent).
+# Format Rust with the pinned nightly rustfmt and all TOML with taplo (no-op if taplo is absent).
 [group('quality')]
 fmt:
+    cargo +"$(cat .rustfmt-nightly)" fmt
     if command -v taplo >/dev/null 2>&1; then taplo fmt; else echo "taplo not installed; skipping"; fi
 
-# Check TOML formatting without writing.
+# Check Rust + TOML formatting without writing.
 [group('quality')]
 fmt-check:
+    cargo +"$(cat .rustfmt-nightly)" fmt --check
     if command -v taplo >/dev/null 2>&1; then taplo fmt --check; else echo "taplo not installed; skipping"; fi
 
 # Fail if the committed bundles drift from their TS sources (preview bundle + viewer shell).

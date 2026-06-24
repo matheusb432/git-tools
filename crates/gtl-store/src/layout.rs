@@ -1,13 +1,17 @@
 //! On-disk store layout: `<root>/diffs/<repo_id>/<content-hash>.{html,json}`.
 //! Writes are temp-file + atomic rename, so concurrent runs never corrupt state.
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use anyhow::Context;
 
-use crate::id::content_hash;
-use crate::meta::{DiffKind, Sidecar};
+use crate::{
+    id::content_hash,
+    meta::{DiffKind, Sidecar},
+};
 
 /// Result of placing an artifact: where it landed and whether it already existed.
 #[derive(Debug, Clone, PartialEq, Eq)]

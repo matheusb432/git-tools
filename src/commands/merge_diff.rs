@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use crate::commands::{Mode, plural, ranges, repo_name};
-use crate::git;
-use crate::model::View;
-use crate::render::build_html;
+use crate::{
+    commands::{Mode, plural, ranges, repo_name},
+    git,
+    model::View,
+    render::build_html,
+};
 
 pub const DEFAULT_BASE: &str = "main";
 

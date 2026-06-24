@@ -1,5 +1,6 @@
-use crate::model::{FileDiff, LineOwners, View};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
+
+use crate::model::{FileDiff, LineOwners, View};
 
 const MAX_LINE_COLS: usize = 2000;
 const GIANT_FILE_CHARS: usize = 250_000;
@@ -229,7 +230,8 @@ pub fn build_html(view: &View) -> String {
 }
 
 pub fn build_tabbed_html(title: &str, views: &[View]) -> String {
-    // ? tab strip CSS stays inline; tab logic is in the bundle (tabbed.ts, guarded to no-op without .tabs)
+    // ? tab strip CSS stays inline; tab logic is in the bundle (tabbed.ts, guarded to no-op without
+    // .tabs)
     const TABBED_CSS: &str = r#"  .tabs{position:sticky;top:0;z-index:60;display:flex;gap:6px;align-items:center;overflow-x:auto;padding:10px 12px;background:var(--surface-2);border-bottom:1px solid var(--line)}
   .tab{flex:none;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
   .tab:hover{color:var(--ink);border-color:var(--acc-line)} .tab.active{color:var(--acc);border-color:var(--acc-line)}
@@ -971,9 +973,11 @@ mod tests {
     #[test]
     fn content_visibility_stays_in_css_not_inline_so_print_override_wins() {
         let html = build_html(&sample_view());
-        // content-visibility must NOT be inline (an inline style out-specifies the @media print override)
+        // content-visibility must NOT be inline (an inline style out-specifies the @media print
+        // override)
         assert!(!html.contains(r#"style="content-visibility"#));
-        // the old inline pattern must not appear (CSS rule contains this substring but not as an inline style)
+        // the old inline pattern must not appear (CSS rule contains this substring but not as an
+        // inline style)
         assert!(!html.contains(r#"style="content-visibility:auto;contain-intrinsic-size"#));
         // it still lives in the stylesheet, and the print override is present
         assert!(html.contains("content-visibility:auto")); // base CSS rule

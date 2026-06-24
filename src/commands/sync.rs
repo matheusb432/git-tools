@@ -313,8 +313,10 @@ fn repo_name(top: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::path::{Path, PathBuf};
+    use std::{
+        cell::RefCell,
+        path::{Path, PathBuf},
+    };
 
     use super::*;
     use crate::commands::squash_local::GitOutput;

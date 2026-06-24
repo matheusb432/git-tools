@@ -3,8 +3,7 @@
 //! surface (subcommand list, flags, and the 0/1/2 exit-code contract).
 
 use assert_cmd::Command;
-use predicates::prelude::PredicateBooleanExt;
-use predicates::str::contains;
+use predicates::{prelude::PredicateBooleanExt, str::contains};
 
 fn git_tools() -> Command {
     Command::cargo_bin("git-tools").unwrap()

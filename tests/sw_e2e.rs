@@ -2,10 +2,10 @@
 //! `main`, run the built binary against it, and assert exit code, stdout/stderr, and the
 //! resulting ref topology. Local-only — no network.
 
+use std::{path::Path, process::Command as Git};
+
 use assert_cmd::Command;
 use predicates::str::contains;
-use std::path::Path;
-use std::process::Command as Git;
 use tempfile::TempDir;
 
 /// Run a git command in `repo`, asserting success.

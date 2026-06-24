@@ -1,8 +1,7 @@
 //! Security posture tripwire (ADR-0002 / tauri-app-config): the viewer must never
 //! grant filesystem or shell capabilities — store access goes through the scoped
 //! `diff://` scheme only (ADR-0004).
-use std::fs;
-use std::path::Path;
+use std::{fs, path::Path};
 
 #[test]
 fn capability_allowlist_grants_no_fs_or_shell() {

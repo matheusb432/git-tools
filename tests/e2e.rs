@@ -6,11 +6,13 @@
 //! surface has since moved on (lean `diff` + `diff subrepos`, GTL-0002), so these pin
 //! *current* behavior instead — one Rust test per scenario the harness fixtures covered.
 
+use std::{
+    path::{Path, PathBuf},
+    process::Command as Git,
+};
+
 use assert_cmd::Command;
-use predicates::prelude::PredicateBooleanExt;
-use predicates::str::contains;
-use std::path::{Path, PathBuf};
-use std::process::Command as Git;
+use predicates::{prelude::PredicateBooleanExt, str::contains};
 use tempfile::TempDir;
 
 /// A throwaway git repo with an isolated central store.

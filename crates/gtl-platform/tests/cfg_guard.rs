@@ -1,6 +1,8 @@
 //! Guards ADR-0003: every OS `#[cfg]` must live inside the gtl-platform crate.
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 const OS_CFG_NEEDLES: &[&str] = &[
     "cfg(target_os",

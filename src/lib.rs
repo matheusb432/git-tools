@@ -1,11 +1,15 @@
 //! git-tools - CLI entry point: clap parsing + a machine-readable exit-code contract.
 
-use crate::cli::{
-    Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
-    ManagedReadArgs, StatusArgs, SwArgs, TagCommand, WorktreeCommand,
+use crate::{
+    cli::{
+        Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
+        ManagedReadArgs, StatusArgs, SwArgs, TagCommand, WorktreeCommand,
+    },
+    commands::{
+        managed::{ManagedExit, ManagedOptions, ManagedRun},
+        squash_local::{SquashResult, Status, StdGitRunner, invoke_squash_local},
+    },
 };
-use crate::commands::managed::{ManagedExit, ManagedOptions, ManagedRun};
-use crate::commands::squash_local::{SquashResult, Status, StdGitRunner, invoke_squash_local};
 
 pub mod attribution;
 pub mod cli;
@@ -373,8 +377,9 @@ fn run_tag(command: Option<TagCommand>, commits: bool) -> ExitCode {
 /// other reply is an [`sync::AnswerErr`] — never a silent yes or no. A read
 /// failure is treated as a refusal (`Answer::No`) so unreadable stdin never pushes.
 fn prompt_confirmation() -> crate::commands::sync::AnswerResult {
-    use crate::commands::sync::{Answer, parse_answer};
     use std::io::Write;
+
+    use crate::commands::sync::{Answer, parse_answer};
 
     print!("Proceed? [Y/n] ");
     let _ = std::io::stdout().flush();

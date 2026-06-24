@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use crate::commands::{Mode, legacy_count_label, legacy_unpushed_commit_label, ranges, repo_name};
-use crate::git;
-use crate::model::{Cmd, Foot, View};
-use crate::render::build_html;
+use crate::{
+    commands::{Mode, legacy_count_label, legacy_unpushed_commit_label, ranges, repo_name},
+    git,
+    model::{Cmd, Foot, View},
+    render::build_html,
+};
 
 pub fn run(repo: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
     let top = git::top_level(repo)?;

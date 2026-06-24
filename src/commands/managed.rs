@@ -1,5 +1,7 @@
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::{Context, anyhow};
 use serde::{Deserialize, Serialize};
@@ -1097,10 +1099,13 @@ fn parse_hex_channel(color: &str, channel: &str) -> anyhow::Result<u8> {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        path::Path,
+        process::Command,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
     use super::*;
-    use std::path::Path;
-    use std::process::Command;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn parses_toml_manifest_with_comments_and_missing_remote() {

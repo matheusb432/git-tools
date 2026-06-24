@@ -1,13 +1,19 @@
-use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
+use std::{
+    num::NonZeroU32,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Context;
 
-use crate::cli::DiffTarget;
-use crate::commands::discover::{discover_git_repos, repo_label};
-use crate::commands::managed::{self, ManagedOptions};
-use crate::git;
-use crate::render::build_tabbed_html;
+use crate::{
+    cli::DiffTarget,
+    commands::{
+        discover::{discover_git_repos, repo_label},
+        managed::{self, ManagedOptions},
+    },
+    git,
+    render::build_tabbed_html,
+};
 
 pub fn run_scan(
     root: impl AsRef<Path>,

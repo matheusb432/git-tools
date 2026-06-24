@@ -1,9 +1,13 @@
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
-use crate::attribution::{self, NewSide};
-use crate::git;
-use crate::model::{Commit, FileDiff, FileStatus, LineOwners};
+use crate::{
+    attribution::{self, NewSide},
+    git,
+    model::{Commit, FileDiff, FileStatus, LineOwners},
+};
 
 pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
     if raw.trim().is_empty() {

@@ -43,7 +43,8 @@ pub enum Command {
         /// Subrepo working tree to preview.
         #[arg(long)]
         repo: String,
-        /// Monorepo root used to resolve the subrepo path (preview is written to the central store).
+        /// Monorepo root used to resolve the subrepo path (preview is written to the central
+        /// store).
         #[arg(long)]
         monorepo: String,
     },
@@ -54,7 +55,8 @@ pub enum Command {
         /// Subrepo working tree to preview.
         #[arg(long)]
         repo: String,
-        /// Monorepo root used to resolve the subrepo path (preview is written to the central store).
+        /// Monorepo root used to resolve the subrepo path (preview is written to the central
+        /// store).
         #[arg(long)]
         monorepo: String,
         /// Base branch to merge into (default: main).
@@ -85,12 +87,15 @@ pub enum Command {
     Tag(TagArgs),
     /// Inspect git worktrees.
     Wk(WorktreeArgs),
-    /// Switch to the main branch; with `--rebase`, fast-forward it onto the current branch's commits.
+    /// Switch to the main branch; with `--rebase`, fast-forward it onto the current branch's
+    /// commits.
     Sw(SwArgs),
-    /// Show git status for the current repo; `--all` fans out over managed repos, `-r` recurses into nested subrepos.
+    /// Show git status for the current repo; `--all` fans out over managed repos, `-r` recurses
+    /// into nested subrepos.
     #[command(visible_alias = "s")]
     Status(StatusArgs),
-    /// Show branch, unpushed commits, and pending changes for every managed repo (same as `status --all`).
+    /// Show branch, unpushed commits, and pending changes for every managed repo (same as `status
+    /// --all`).
     Ls(ManagedReadArgs),
     /// Push every managed repo that has unpushed commits.
     PushAll(ManagedArgs),
@@ -215,7 +220,8 @@ pub struct StatusArgs {
     /// Report every managed repo from the manifest (the manifest-wide view; same as `ls`).
     #[arg(long, conflicts_with = "recursive")]
     pub all: bool,
-    /// Report the current repo plus any nested subrepos under the current directory (linked worktrees are skipped).
+    /// Report the current repo plus any nested subrepos under the current directory (linked
+    /// worktrees are skipped).
     #[arg(short = 'r', long)]
     pub recursive: bool,
     #[command(flatten)]
@@ -262,7 +268,8 @@ pub struct SwArgs {
     /// After rebasing, render an HTML diff of the now-unpushed commits (requires --rebase).
     #[arg(short = 'd', long = "diff", requires = "rebase")]
     pub diff: bool,
-    /// Undo the last `sw --rebase`: reset the target branch and switch back to the previous branch.
+    /// Undo the last `sw --rebase`: reset the target branch and switch back to the previous
+    /// branch.
     #[arg(short = 'r', long = "revert")]
     pub revert: bool,
 }

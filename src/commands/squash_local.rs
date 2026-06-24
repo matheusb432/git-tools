@@ -1,5 +1,4 @@
-use std::path::Path;
-use std::process::Command;
+use std::{path::Path, process::Command};
 
 use anyhow::Context;
 
@@ -316,8 +315,10 @@ fn lines(raw: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::path::{Path, PathBuf};
+    use std::{
+        cell::RefCell,
+        path::{Path, PathBuf},
+    };
 
     use anyhow::anyhow;
 

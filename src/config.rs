@@ -89,9 +89,11 @@ pub fn load() -> GtlConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::io::Write;
+
     use tempfile::NamedTempFile;
+
+    use super::*;
 
     #[test]
     fn from_toml_accepts_known_theme() {

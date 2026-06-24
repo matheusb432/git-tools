@@ -1,7 +1,8 @@
 //! History view DTO: maps store sidecars to frontend rows, newest-first.
+use std::path::Path;
+
 use gtl_store::Sidecar;
 use serde::Serialize;
-use std::path::Path;
 
 /// One history row for the frontend. `url` is the tab's `diff://` source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

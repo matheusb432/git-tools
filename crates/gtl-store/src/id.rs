@@ -30,8 +30,9 @@ pub fn content_hash(html: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     #[test]
     fn content_hash_is_stable_and_distinct() {

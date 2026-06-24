@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 
-use crate::cli::DiffTarget;
-use crate::commands::{Mode, legacy_count_label, legacy_unpushed_commit_label, ranges, repo_name};
-use crate::git;
-use crate::model::View;
-use crate::render::build_html;
+use crate::{
+    cli::DiffTarget,
+    commands::{Mode, legacy_count_label, legacy_unpushed_commit_label, ranges, repo_name},
+    git,
+    model::View,
+    render::build_html,
+};
 
 /// Outcome of a single `diff` invocation: either an artifact was written, or the
 /// range was empty and we deliberately skipped rendering a blank preview.

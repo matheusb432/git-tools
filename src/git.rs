@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-use std::path::Path;
-use std::process::Command;
+use std::{collections::HashMap, path::Path, process::Command};
 
 use anyhow::{Context, anyhow};
 

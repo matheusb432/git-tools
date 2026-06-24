@@ -89,8 +89,9 @@ pub(super) fn repo_label(root: &Path, repo: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
+
+    use super::*;
 
     fn make_repo(dir: &Path) {
         fs::create_dir_all(dir.join(".git")).unwrap();
