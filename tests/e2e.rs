@@ -330,9 +330,20 @@ fn diff_unpushed_writes_artifact() {
     assert!(stdout.contains("wrote"), "stdout: {stdout}");
 
     let artifact = artifact_from_stdout(&stdout);
-    assert!(artifact.exists(), "artifact must exist at {}", artifact.display());
-    assert!(artifact.starts_with(&repo.store_dir), "artifact must be under store dir, got {}", artifact.display());
-    assert!(!repo.repo.join(".artifacts").exists(), "no .artifacts in repo");
+    assert!(
+        artifact.exists(),
+        "artifact must exist at {}",
+        artifact.display()
+    );
+    assert!(
+        artifact.starts_with(&repo.store_dir),
+        "artifact must be under store dir, got {}",
+        artifact.display()
+    );
+    assert!(
+        !repo.repo.join(".artifacts").exists(),
+        "no .artifacts in repo"
+    );
 }
 
 #[test]
@@ -349,7 +360,10 @@ fn diff_unpushed_flag_writes_artifact() {
 
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists());
-    assert!(!repo.repo.join(".artifacts").exists(), "no .artifacts in repo");
+    assert!(
+        !repo.repo.join(".artifacts").exists(),
+        "no .artifacts in repo"
+    );
 }
 
 #[test]
@@ -393,12 +407,18 @@ fn diff_without_upstream_falls_back_to_main() {
     let cmd = repo.run(&["diff"]);
     let (stdout, stderr) = run_success(cmd);
     assert!(stderr.contains("falling back to main"), "stderr: {stderr}");
-    assert!(stdout.contains("diff-preview: main..working"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("diff-preview: main..working"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("wrote"), "stdout: {stdout}");
 
     let artifact = artifact_from_stdout(&stdout);
     assert_html(&artifact, "feature/local");
-    assert!(!repo.repo.join(".artifacts").exists(), "no .artifacts in repo");
+    assert!(
+        !repo.repo.join(".artifacts").exists(),
+        "no .artifacts in repo"
+    );
 }
 
 #[test]
@@ -414,7 +434,10 @@ fn diff_base_commit_form_writes_artifact() {
 
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists());
-    assert!(!repo.repo.join(".artifacts").exists(), "no .artifacts in repo");
+    assert!(
+        !repo.repo.join(".artifacts").exists(),
+        "no .artifacts in repo"
+    );
 }
 
 #[test]
@@ -430,7 +453,10 @@ fn diff_exact_range_form_writes_artifact() {
 
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists());
-    assert!(!repo.repo.join(".artifacts").exists(), "no .artifacts in repo");
+    assert!(
+        !repo.repo.join(".artifacts").exists(),
+        "no .artifacts in repo"
+    );
 }
 
 #[test]
@@ -445,7 +471,10 @@ fn diff_merge_flag_writes_three_dot_merge_preview() {
 
     let cmd = repo.run(&["diff", "--merge", "main"]);
     let (stdout, _) = run_success(cmd);
-    assert!(stdout.contains("diff-preview: to merge into main"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("diff-preview: to merge into main"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("wrote"), "stdout: {stdout}");
 
     let artifact = artifact_from_stdout(&stdout);
@@ -454,7 +483,10 @@ fn diff_merge_flag_writes_three_dot_merge_preview() {
     assert!(html.contains("feat: branch file"));
     assert!(html.contains("feature.txt"));
     assert!(!html.contains("main.txt"));
-    assert!(!repo.repo.join(".artifacts").exists(), "no .artifacts in repo");
+    assert!(
+        !repo.repo.join(".artifacts").exists(),
+        "no .artifacts in repo"
+    );
 }
 
 #[test]
@@ -467,11 +499,17 @@ fn diff_last_n_commits_writes_artifact() {
     // `-l 2` diffs HEAD~2..HEAD: the last two commits.
     let cmd = repo.run(&["diff", "-l", "2"]);
     let (stdout, _) = run_success(cmd);
-    assert!(stdout.contains("diff-preview: last 2 commit(s)"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("diff-preview: last 2 commit(s)"),
+        "stdout: {stdout}"
+    );
 
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists());
-    assert!(!repo.repo.join(".artifacts").exists(), "no .artifacts in repo");
+    assert!(
+        !repo.repo.join(".artifacts").exists(),
+        "no .artifacts in repo"
+    );
 }
 
 #[test]
@@ -483,11 +521,17 @@ fn diff_bare_last_diffs_the_last_commit() {
     // Bare `-l` defaults to the last commit only.
     let cmd = repo.run(&["diff", "-l"]);
     let (stdout, _) = run_success(cmd);
-    assert!(stdout.contains("diff-preview: last 1 commit(s)"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("diff-preview: last 1 commit(s)"),
+        "stdout: {stdout}"
+    );
 
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists());
-    assert!(!repo.repo.join(".artifacts").exists(), "no .artifacts in repo");
+    assert!(
+        !repo.repo.join(".artifacts").exists(),
+        "no .artifacts in repo"
+    );
 }
 
 #[test]
@@ -877,13 +921,18 @@ fn status_lists_managed_repos_with_compact_ahead_dirty_and_untracked_symbols() {
     repo.commit("a.txt", "base\nlocal\n", "feat: local work");
     std::fs::write(repo.repo.join("a.txt"), "base\nlocal\ndirty\n").unwrap();
     std::fs::write(repo.repo.join("scratch.txt"), "untracked\n").unwrap();
-    let manifest = repo.root.join("repos.txt");
-    std::fs::write(&manifest, "repo\t\nmissing\t\n").unwrap();
+    let manifest = repo.root.join("repos.toml");
+    std::fs::write(
+        &manifest,
+        "[[repo]]\npath = \"repo\"\nremote = \"\"\n\n[[repo]]\npath = \"missing\"\nremote = \"\"\n",
+    )
+    .unwrap();
 
     Command::cargo_bin("git-tools")
         .unwrap()
         .args([
             "status",
+            "--all",
             "--repos-file",
             manifest.to_str().unwrap(),
             "--home-dir",
@@ -903,13 +952,14 @@ fn status_color_always_bolds_brackets_and_marks_dirty_symbols_red() {
     repo.commit("a.txt", "base\nlocal\n", "feat: local work");
     std::fs::write(repo.repo.join("a.txt"), "base\nlocal\ndirty\n").unwrap();
     std::fs::write(repo.repo.join("scratch.txt"), "untracked\n").unwrap();
-    let manifest = repo.root.join("repos.txt");
-    std::fs::write(&manifest, "repo\t\n").unwrap();
+    let manifest = repo.root.join("repos.toml");
+    std::fs::write(&manifest, "[[repo]]\npath = \"repo\"\nremote = \"\"\n").unwrap();
 
     Command::cargo_bin("git-tools")
         .unwrap()
         .args([
             "status",
+            "--all",
             "--color",
             "always",
             "--repos-file",
@@ -929,8 +979,8 @@ fn status_color_always_bolds_brackets_and_marks_clean_checkmark_green() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
-    let manifest = repo.root.join("repos.txt");
-    std::fs::write(&manifest, "repo\t\n").unwrap();
+    let manifest = repo.root.join("repos.toml");
+    std::fs::write(&manifest, "[[repo]]\npath = \"repo\"\nremote = \"\"\n").unwrap();
 
     Command::cargo_bin("git-tools")
         .unwrap()
@@ -950,6 +1000,42 @@ fn status_color_always_bolds_brackets_and_marks_clean_checkmark_green() {
         ));
 }
 
+#[test]
+fn status_default_reports_only_the_current_repo() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+
+    // No --repos-file: the default scope is the current repo, never the manifest.
+    repo.run(&["status"])
+        .assert()
+        .success()
+        .stdout(contains("repo main [⇡1]"));
+}
+
+#[test]
+fn status_recursive_lists_nested_subrepos() {
+    let repos = NestedRepos::new(&["api", "web"]);
+
+    repos
+        .run(&["status", "-r"])
+        .assert()
+        .success()
+        .stdout(contains("api main"))
+        .stdout(contains("web main"));
+}
+
+#[test]
+fn status_rejects_all_combined_with_recursive() {
+    let repo = Repo::new();
+
+    repo.run(&["status", "--all", "-r"])
+        .assert()
+        .failure()
+        .stderr(contains("cannot be used with"));
+}
+
 // --- diff subrepos ---------------------------------------------------------
 
 #[test]
@@ -958,7 +1044,10 @@ fn diff_subrepos_nested_last_writes_one_tabbed_artifact() {
 
     let cmd = repos.run(&["diff", "subrepos", "-l"]);
     let (stdout, _) = run_success(cmd);
-    assert!(stdout.contains("diff subrepos: 2 repo(s)"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("diff subrepos: 2 repo(s)"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("wrote"), "stdout: {stdout}");
 
     let artifact = artifact_from_stdout(&stdout);
@@ -1009,7 +1098,10 @@ fn diff_subrepos_without_upstreams_falls_back_to_main() {
 
     let cmd = repos.run(&["diff", "subrepos"]);
     let (stdout, _) = run_success(cmd);
-    assert!(stdout.contains("diff subrepos: 2 repo(s)"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("diff subrepos: 2 repo(s)"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("wrote"), "stdout: {stdout}");
 
     let artifact = artifact_from_stdout(&stdout);
@@ -1033,8 +1125,12 @@ fn diff_all_writes_one_tabbed_artifact_for_managed_unpushed_repos() {
             "feat: queued work",
         );
     }
-    let manifest = repos.root.join("repos.txt");
-    std::fs::write(&manifest, "api\t\nweb\t\n").unwrap();
+    let manifest = repos.root.join("repos.toml");
+    std::fs::write(
+        &manifest,
+        "[[repo]]\npath = \"api\"\nremote = \"\"\n\n[[repo]]\npath = \"web\"\nremote = \"\"\n",
+    )
+    .unwrap();
 
     let cmd = repos.run(&[
         "diff",
@@ -1082,7 +1178,10 @@ fn merge_diff_against_base_branch_writes_artifact() {
 
     let artifact = artifact_from_stdout(&stdout);
     assert_html(&artifact, "feature");
-    assert!(!repo.monorepo.join(".artifacts").exists(), "no .artifacts in monorepo");
+    assert!(
+        !repo.monorepo.join(".artifacts").exists(),
+        "no .artifacts in monorepo"
+    );
 }
 
 // --- squash-local ----------------------------------------------------------

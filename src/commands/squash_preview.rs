@@ -12,8 +12,12 @@ pub fn run(repo: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
     let repo_name = repo_name(&top);
     let ranges = ranges(&upstream, Mode::Unpushed);
 
-    let crate::diff::DiffData { commits, files } =
-        crate::diff::assemble(&top, &ranges.diff_args, &ranges.diff_range, &ranges.log_range)?;
+    let crate::diff::DiffData { commits, files } = crate::diff::assemble(
+        &top,
+        &ranges.diff_args,
+        &ranges.diff_range,
+        &ranges.log_range,
+    )?;
 
     let view = View {
         repo_name: repo_name.clone(),

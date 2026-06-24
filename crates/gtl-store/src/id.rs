@@ -35,8 +35,14 @@ mod tests {
 
     #[test]
     fn content_hash_is_stable_and_distinct() {
-        assert_eq!(content_hash("<html>a</html>"), content_hash("<html>a</html>"));
-        assert_ne!(content_hash("<html>a</html>"), content_hash("<html>b</html>"));
+        assert_eq!(
+            content_hash("<html>a</html>"),
+            content_hash("<html>a</html>")
+        );
+        assert_ne!(
+            content_hash("<html>a</html>"),
+            content_hash("<html>b</html>")
+        );
         assert_eq!(content_hash("x").len(), 16);
     }
 
@@ -45,7 +51,10 @@ mod tests {
         let from_sha = repo_id(Some("abc123"), &PathBuf::from("/tmp/repo"));
         let from_path = repo_id(None, &PathBuf::from("/tmp/repo"));
         assert_ne!(from_sha, from_path);
-        assert_eq!(from_sha, repo_id(Some("abc123"), &PathBuf::from("/elsewhere")));
+        assert_eq!(
+            from_sha,
+            repo_id(Some("abc123"), &PathBuf::from("/elsewhere"))
+        );
     }
 
     #[test]

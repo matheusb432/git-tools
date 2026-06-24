@@ -126,7 +126,13 @@ pub fn blame_forward(
 ) -> anyhow::Result<String> {
     run_git(
         repo,
-        &["blame", "--porcelain", &format!("{base}..{tip}"), "--", path],
+        &[
+            "blame",
+            "--porcelain",
+            &format!("{base}..{tip}"),
+            "--",
+            path,
+        ],
     )
 }
 
@@ -160,7 +166,11 @@ pub fn blame_reverse(
 /// roots exist), or `None` for a repo with no commits. Stable repo identity.
 pub fn root_commit(repo: impl AsRef<Path>) -> Option<String> {
     let out = run_git(repo, &["rev-list", "--max-parents=0", "HEAD"]).ok()?;
-    out.lines().map(str::trim).filter(|l| !l.is_empty()).min().map(str::to_string)
+    out.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .min()
+        .map(str::to_string)
 }
 
 /// Resolve a revision to its full 40-char sha.
@@ -308,7 +318,10 @@ mod tests {
 
         let commits = parse_commit_log(raw);
 
-        assert_eq!(commits[0].parents, vec!["aaaaaaaaa".to_string(), "bbbbbbbbb".to_string()]);
+        assert_eq!(
+            commits[0].parents,
+            vec!["aaaaaaaaa".to_string(), "bbbbbbbbb".to_string()]
+        );
         assert!(commits[0].is_merge());
         assert_eq!(commits[1].parents, vec!["aaaaaaaaa".to_string()]);
         assert!(!commits[1].is_merge());
@@ -319,7 +332,10 @@ mod tests {
         // rev-list lists the merge first, then its brought-in commits (full shas)
         let raw = "3c1a73a5acf40d58\n9386250ddffff00\nb74d1fcfeaaaa11\n";
         let members = parse_rev_list(raw, "3c1a73a5a");
-        assert_eq!(members, vec!["9386250dd".to_string(), "b74d1fcfe".to_string()]);
+        assert_eq!(
+            members,
+            vec!["9386250dd".to_string(), "b74d1fcfe".to_string()]
+        );
     }
 
     #[test]
@@ -328,7 +344,13 @@ mod tests {
         let d = tmp.path();
         let g = |args: &[&str]| {
             assert!(
-                std::process::Command::new("git").arg("-C").arg(d).args(args).status().unwrap().success(),
+                std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(d)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success(),
                 "git {args:?} failed"
             );
         };
@@ -350,8 +372,14 @@ mod tests {
         g(&["checkout", "-q", "feature"]);
         g(&["merge", "-q", "--no-ff", "sub", "-m", "Merge branch 'sub'"]);
 
-        let merge = run_git(d, &["rev-parse", "--short=9", "HEAD"]).unwrap().trim().to_string();
-        let sub_b = run_git(d, &["rev-parse", "--short=9", "HEAD^2"]).unwrap().trim().to_string();
+        let merge = run_git(d, &["rev-parse", "--short=9", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
+        let sub_b = run_git(d, &["rev-parse", "--short=9", "HEAD^2"])
+            .unwrap()
+            .trim()
+            .to_string();
 
         // brought into main..HEAD by the merge = sub b only (feat a is the first parent)
         assert_eq!(merge_members(d, &merge, "main").unwrap(), vec![sub_b]);
@@ -362,8 +390,18 @@ mod tests {
         g(&["add", "."]);
         g(&["commit", "-qm", "main moves"]);
         g(&["checkout", "-q", "feature"]);
-        g(&["merge", "-q", "--no-ff", "main", "-m", "Merge branch 'main'"]);
-        let merge_of_main = run_git(d, &["rev-parse", "--short=9", "HEAD"]).unwrap().trim().to_string();
+        g(&[
+            "merge",
+            "-q",
+            "--no-ff",
+            "main",
+            "-m",
+            "Merge branch 'main'",
+        ]);
+        let merge_of_main = run_git(d, &["rev-parse", "--short=9", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
         assert!(merge_members(d, &merge_of_main, "main").unwrap().is_empty());
     }
 
@@ -390,7 +428,15 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let d = tmp.path();
         let g = |args: &[&str]| {
-            assert!(std::process::Command::new("git").arg("-C").arg(d).args(args).status().unwrap().success());
+            assert!(
+                std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(d)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
         };
         g(&["init", "-q"]);
         g(&["config", "user.email", "t@t"]);

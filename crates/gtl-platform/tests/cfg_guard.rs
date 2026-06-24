@@ -3,16 +3,24 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const OS_CFG_NEEDLES: &[&str] = &[
-    "cfg(target_os", "cfg(windows", "cfg(unix", "cfg(target_family",
+    "cfg(target_os",
+    "cfg(windows",
+    "cfg(unix",
+    "cfg(target_family",
 ];
 
 fn workspace_root() -> PathBuf {
     // CARGO_MANIFEST_DIR = .../crates/gtl-platform → up two levels to the root.
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap()
 }
 
 fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
@@ -34,8 +42,8 @@ fn no_os_cfg_outside_pal() {
     let mut files = Vec::new();
     // Root src/ + every crate's src/; PAL files are excluded below by starts_with(&pal).
     collect_rs(&root.join("src"), &mut files);
-    let crate_entries = fs::read_dir(root.join("crates"))
-        .expect("crates/ must be readable for the PAL cfg guard");
+    let crate_entries =
+        fs::read_dir(root.join("crates")).expect("crates/ must be readable for the PAL cfg guard");
     for entry in crate_entries.flatten() {
         let member_src = entry.path().join("src");
         if member_src.is_dir() {
@@ -48,7 +56,9 @@ fn no_os_cfg_outside_pal() {
         if file.starts_with(&pal) {
             continue;
         }
-        let Ok(text) = fs::read_to_string(&file) else { continue };
+        let Ok(text) = fs::read_to_string(&file) else {
+            continue;
+        };
         if OS_CFG_NEEDLES.iter().any(|needle| text.contains(needle)) {
             offenders.push(file);
         }

@@ -4,6 +4,7 @@ use crate::model::{Cmd, Foot};
 
 pub mod diff;
 pub mod diff_subrepos;
+mod discover;
 pub mod managed;
 pub mod merge_diff;
 pub mod squash_local;

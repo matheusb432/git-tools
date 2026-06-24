@@ -522,12 +522,18 @@ mod tests {
         let html = render_diff_lines(&["@@ -0,0 +1 @@".to_string(), long], &LineOwners::default());
         assert!(html.contains(r#"class="dl dl-add dl-long""#));
         assert!(html.contains(r#"<span class="code-text">"#));
-        assert!(html.contains(&format!(r#"<button class="ln-more" type="button" aria-expanded="false">⋯ {} chars</button>"#, MAX_LINE_COLS + 5)));
+        assert!(html.contains(&format!(
+            r#"<button class="ln-more" type="button" aria-expanded="false">⋯ {} chars</button>"#,
+            MAX_LINE_COLS + 5
+        )));
     }
 
     #[test]
     fn render_diff_lines_leaves_normal_lines_untamed() {
-        let html = render_diff_lines(&["@@ -0,0 +1 @@".to_string(), "+short".to_string()], &LineOwners::default());
+        let html = render_diff_lines(
+            &["@@ -0,0 +1 @@".to_string(), "+short".to_string()],
+            &LineOwners::default(),
+        );
         assert!(!html.contains("dl-long"));
         assert!(!html.contains("code-text"));
     }
@@ -970,8 +976,8 @@ mod tests {
         // the old inline pattern must not appear (CSS rule contains this substring but not as an inline style)
         assert!(!html.contains(r#"style="content-visibility:auto;contain-intrinsic-size"#));
         // it still lives in the stylesheet, and the print override is present
-        assert!(html.contains("content-visibility:auto"));     // base CSS rule
-        assert!(html.contains("content-visibility:visible"));  // @media print override
+        assert!(html.contains("content-visibility:auto")); // base CSS rule
+        assert!(html.contains("content-visibility:visible")); // @media print override
         // per-file intrinsic-size is still emitted inline
         assert!(html.contains(&format!("contain-intrinsic-size:auto {}px", 4 * ROW_PX)));
     }

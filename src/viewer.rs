@@ -75,20 +75,38 @@ mod tests {
 
     #[test]
     fn app_spawns_with_display_and_falls_back_without() {
-        assert_eq!(resolve_viewer_action(Viewer::App, true, false), ViewerAction::SpawnApp);
-        assert_eq!(resolve_viewer_action(Viewer::App, false, false), ViewerAction::Browser);
+        assert_eq!(
+            resolve_viewer_action(Viewer::App, true, false),
+            ViewerAction::SpawnApp
+        );
+        assert_eq!(
+            resolve_viewer_action(Viewer::App, false, false),
+            ViewerAction::Browser
+        );
     }
 
     #[test]
     fn browser_and_none_ignore_display() {
-        assert_eq!(resolve_viewer_action(Viewer::Browser, false, false), ViewerAction::Browser);
-        assert_eq!(resolve_viewer_action(Viewer::None, true, false), ViewerAction::Nothing);
+        assert_eq!(
+            resolve_viewer_action(Viewer::Browser, false, false),
+            ViewerAction::Browser
+        );
+        assert_eq!(
+            resolve_viewer_action(Viewer::None, true, false),
+            ViewerAction::Nothing
+        );
     }
 
     #[test]
     fn no_open_wins_over_app_and_browser() {
-        assert_eq!(resolve_viewer_action(Viewer::App, true, true), ViewerAction::Nothing);
-        assert_eq!(resolve_viewer_action(Viewer::Browser, true, true), ViewerAction::Nothing);
+        assert_eq!(
+            resolve_viewer_action(Viewer::App, true, true),
+            ViewerAction::Nothing
+        );
+        assert_eq!(
+            resolve_viewer_action(Viewer::Browser, true, true),
+            ViewerAction::Nothing
+        );
     }
 
     #[test]

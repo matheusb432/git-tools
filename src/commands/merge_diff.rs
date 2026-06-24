@@ -18,8 +18,12 @@ pub fn run(repo: impl AsRef<Path>, base: Option<&str>) -> anyhow::Result<PathBuf
 
     git::verify_commit(&top, base)?;
     let ranges = ranges(base, Mode::Merge);
-    let crate::diff::DiffData { commits, files } =
-        crate::diff::assemble(&top, &ranges.diff_args, &ranges.diff_range, &ranges.log_range)?;
+    let crate::diff::DiffData { commits, files } = crate::diff::assemble(
+        &top,
+        &ranges.diff_args,
+        &ranges.diff_range,
+        &ranges.log_range,
+    )?;
 
     let view = View {
         repo_name: repo_name.clone(),

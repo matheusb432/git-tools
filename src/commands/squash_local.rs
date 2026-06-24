@@ -321,7 +321,7 @@ mod tests {
 
     use anyhow::anyhow;
 
-    use super::{invoke_squash_local, GitOutput, GitRunner, SquashResult, Status};
+    use super::{GitOutput, GitRunner, SquashResult, Status, invoke_squash_local};
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct Call {

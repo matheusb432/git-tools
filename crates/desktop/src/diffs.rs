@@ -35,7 +35,10 @@ mod tests {
             "diff://abc/def".to_string(),
             "diff://second/one".to_string(),
         ];
-        assert_eq!(diff_ref_from_argv(&argv), Some("diff://abc/def".to_string()));
+        assert_eq!(
+            diff_ref_from_argv(&argv),
+            Some("diff://abc/def".to_string())
+        );
     }
 
     #[test]
@@ -48,7 +51,10 @@ mod tests {
         let q = PendingDiffs::default();
         q.push("diff://a/1".into());
         q.push("diff://b/2".into());
-        assert_eq!(q.drain(), vec!["diff://a/1".to_string(), "diff://b/2".to_string()]);
+        assert_eq!(
+            q.drain(),
+            vec!["diff://a/1".to_string(), "diff://b/2".to_string()]
+        );
         assert!(q.drain().is_empty());
     }
 }

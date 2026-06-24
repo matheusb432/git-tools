@@ -2,7 +2,7 @@
 
 use crate::cli::{
     Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
-    ManagedReadArgs, SwArgs, TagCommand, WorktreeCommand,
+    ManagedReadArgs, StatusArgs, SwArgs, TagCommand, WorktreeCommand,
 };
 use crate::commands::managed::{ManagedExit, ManagedOptions, ManagedRun};
 use crate::commands::squash_local::{SquashResult, Status, StdGitRunner, invoke_squash_local};
@@ -110,7 +110,8 @@ fn dispatch(command: Command) -> ExitCode {
         Command::Sw(args) => run_sw(args),
         Command::Tag(args) => run_tag(args.command, args.commits),
         Command::Wk(args) => run_worktree(args.command),
-        Command::Status(args) => {
+        Command::Status(args) => managed_exit(run_status(args)),
+        Command::Ls(args) => {
             managed_exit(commands::managed::run_status(&managed_read_options(args)))
         }
         Command::PushAll(args) => managed_exit(commands::managed::run_push_all(&managed_options(
@@ -382,6 +383,24 @@ fn prompt_confirmation() -> crate::commands::sync::AnswerResult {
         return Ok(Answer::No);
     }
     parse_answer(&input)
+}
+
+/// Dispatches `status` by scope: `--all` ⇒ managed manifest, `-r` ⇒ recursive scan of
+/// the current directory, default ⇒ the current repo alone.
+fn run_status(args: StatusArgs) -> ManagedRun<commands::managed::StatusResult> {
+    let StatusArgs {
+        all,
+        recursive,
+        read,
+    } = args;
+    let options = managed_read_options(read);
+    if all {
+        commands::managed::run_status(&options)
+    } else if recursive {
+        commands::managed::run_status_recursive(std::path::Path::new("."), &options)
+    } else {
+        commands::managed::run_status_current(std::path::Path::new("."), &options)
+    }
 }
 
 /// Builds the [`ManagedOptions`] for a read-only managed command from its parsed flags.

@@ -163,7 +163,13 @@ mod tests {
             owners: LineOwners::default(),
         }];
         let in_range = set(&[&c1, &c2]);
-        attribute(d, &base, &NewSide::Commit("HEAD".to_string()), &in_range, &mut files);
+        attribute(
+            d,
+            &base,
+            &NewSide::Commit("HEAD".to_string()),
+            &in_range,
+            &mut files,
+        );
 
         assert_eq!(files[0].owners.added.get(&3), Some(&c1)); // ADD at new line 3 -> c1
         assert_eq!(files[0].owners.deleted.get(&4), Some(&c2)); // base line 4 (L4) -> c2

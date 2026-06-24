@@ -117,7 +117,11 @@ pub fn assemble(
 // ! log_range is always two-dot `base..tip`; diff_range lacking `..` (hash mode) means the
 // ! new side is the working tree, not a commit.
 fn blame_targets(diff_range: &str, log_range: &str) -> (String, NewSide) {
-    let base = log_range.split("..").next().unwrap_or(log_range).to_string();
+    let base = log_range
+        .split("..")
+        .next()
+        .unwrap_or(log_range)
+        .to_string();
     let tip = log_range.rsplit("..").next().unwrap_or("HEAD").to_string();
     let new_side = if diff_range.contains("..") {
         NewSide::Commit(tip)
@@ -256,7 +260,13 @@ index 000..333\n\
         let d = tmp.path();
         let g = |args: &[&str]| {
             assert!(
-                std::process::Command::new("git").arg("-C").arg(d).args(args).status().unwrap().success(),
+                std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(d)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success(),
                 "git {args:?} failed"
             );
         };
@@ -286,12 +296,25 @@ index 000..333\n\
         )
         .unwrap();
 
-        let merge = data.commits.iter().find(|c| c.is_merge()).expect("a merge commit");
+        let merge = data
+            .commits
+            .iter()
+            .find(|c| c.is_merge())
+            .expect("a merge commit");
         let sub_b = data.commits.iter().find(|c| c.subject == "sub b").unwrap();
         let feat_a = data.commits.iter().find(|c| c.subject == "feat a").unwrap();
 
-        assert!(merge.members.contains(&sub_b.sha), "merge lists its brought-in commit");
-        assert!(!merge.members.contains(&feat_a.sha), "first-parent commit is not a member");
-        assert!(feat_a.members.is_empty(), "a non-merge commit has no members");
+        assert!(
+            merge.members.contains(&sub_b.sha),
+            "merge lists its brought-in commit"
+        );
+        assert!(
+            !merge.members.contains(&feat_a.sha),
+            "first-parent commit is not a member"
+        );
+        assert!(
+            feat_a.members.is_empty(),
+            "a non-merge commit has no members"
+        );
     }
 }

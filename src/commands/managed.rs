@@ -4,6 +4,8 @@ use std::process::Command;
 use anyhow::{Context, anyhow};
 use serde::{Deserialize, Serialize};
 
+use crate::commands::discover::{discover_git_repos, repo_label};
+
 const STATUS_COLORS_TOML: &str = include_str!("../../config/status-colors.toml");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,26 +95,35 @@ pub struct StatusResult {
     pub detail: String,
 }
 
+/// The `repos.toml` document: an array of `[[repo]]` tables. Only `path` + `remote` are
+/// read here; sample_project owns the other fields (`code`/`slug`/`color`).
+#[derive(Deserialize)]
+struct Manifest {
+    #[serde(default)]
+    repo: Vec<RepoEntry>,
+}
+
+#[derive(Deserialize)]
+struct RepoEntry {
+    path: String,
+    #[serde(default)]
+    remote: String,
+}
+
 pub fn parse_manifest(raw: &str, home_dir: &Path) -> anyhow::Result<Vec<ManagedRepo>> {
+    let manifest: Manifest =
+        toml::from_str(raw).context("parsing managed-repos manifest (repos.toml)")?;
     let mut repos = Vec::new();
 
-    for line in raw.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        let mut parts = trimmed.split('\t');
-        let local = parts.next().unwrap_or("").trim();
+    for entry in manifest.repo {
+        let local = entry.path.trim();
         if local.is_empty() {
             continue;
         }
-        let remote = parts.next().unwrap_or("").trim();
-
         repos.push(ManagedRepo {
             name: local.to_string(),
             path: home_dir.join(local),
-            remote: remote.to_string(),
+            remote: entry.remote.trim().to_string(),
         });
     }
 
@@ -171,7 +182,7 @@ fn resolve_repos_file_from_sources(
     let home_hint = home_dir
         .map(home_default_repos_file)
         .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "$HOME/self/sample_project/config/provisioning/linux/repos.txt".into());
+        .unwrap_or_else(|| "$HOME/self/sample_project/config/provisioning/linux/repos.toml".into());
     Err(anyhow!(
         "managed-repos manifest not found; pass --repos-file, set GIT_TOOLS_MANAGED_REPOS_FILE, run from a sample_project checkout, or install sample_project at {home_hint}"
     ))
@@ -183,7 +194,7 @@ fn find_upward_config(start: &Path) -> Option<PathBuf> {
             .join("config")
             .join("provisioning")
             .join("linux")
-            .join("repos.txt");
+            .join("repos.toml");
         if candidate.exists() {
             return Some(candidate);
         }
@@ -198,7 +209,7 @@ fn home_default_repos_file(home_dir: &Path) -> PathBuf {
         .join("config")
         .join("provisioning")
         .join("linux")
-        .join("repos.txt")
+        .join("repos.toml")
 }
 
 pub fn load_repos(options: &ManagedOptions) -> anyhow::Result<Vec<ManagedRepo>> {
@@ -358,6 +369,78 @@ pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
             stdout: String::new(),
             stderr: format!("{error:#}"),
         },
+    }
+}
+
+/// Status of the single repo that contains `dir` (resolved via `git rev-parse
+/// --show-toplevel`, so it works from any subdirectory). Fails (exit 2) when `dir`
+/// is not inside a git repo.
+pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<StatusResult> {
+    let top = match crate::git::top_level(dir) {
+        Ok(top) => PathBuf::from(top),
+        Err(error) => return status_fail(format!("status: {error:#}")),
+    };
+    let repo = ManagedRepo {
+        name: super::repo_name(&top),
+        path: top,
+        remote: String::new(),
+    };
+    status_run(vec![status_one(&repo)], options)
+}
+
+/// Status of the repo at `root` plus every nested subrepo beneath it. Linked
+/// worktrees (and their subtrees) are skipped — they mirror a repo already
+/// reported elsewhere. Fails (exit 2) when no git repo is found under `root`.
+pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun<StatusResult> {
+    let root = match std::fs::canonicalize(root) {
+        Ok(root) => root,
+        Err(error) => {
+            return status_fail(format!(
+                "status: failed to resolve {}: {error}",
+                root.display()
+            ));
+        }
+    };
+    let repos = match discover_git_repos(&root, false) {
+        Ok(repos) => repos,
+        Err(error) => return status_fail(format!("status: {error:#}")),
+    };
+    if repos.is_empty() {
+        return status_fail(format!(
+            "status: no git repos found under {}",
+            root.display()
+        ));
+    }
+
+    let results = repos
+        .iter()
+        .map(|path| {
+            status_one(&ManagedRepo {
+                name: repo_label(&root, path),
+                path: path.clone(),
+                remote: String::new(),
+            })
+        })
+        .collect::<Vec<_>>();
+    status_run(results, options)
+}
+
+fn status_run(results: Vec<StatusResult>, options: &ManagedOptions) -> ManagedRun<StatusResult> {
+    let stdout = format_status(options.json, options.color, &results);
+    ManagedRun {
+        exit: ManagedExit::Clean,
+        results,
+        stdout,
+        stderr: String::new(),
+    }
+}
+
+fn status_fail(message: String) -> ManagedRun<StatusResult> {
+    ManagedRun {
+        exit: ManagedExit::Fail,
+        results: Vec::new(),
+        stdout: String::new(),
+        stderr: message,
     }
 }
 
@@ -1020,9 +1103,11 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn parses_manifest_with_comments_blanks_and_missing_remote() {
+    fn parses_toml_manifest_with_comments_and_missing_remote() {
         let repos = parse_manifest(
-            "# comment\nself/repo-b\thttps://example.invalid/cfg.git\n\n tools/git-tools\t\n",
+            "# comment\n\
+             [[repo]]\npath = \"self/repo-b\"\nremote = \"https://example.invalid/cfg.git\"\ncode = \"CFG\"\n\n\
+             [[repo]]\npath = \"tools/git-tools\"\n",
             Path::new("/home/me"),
         )
         .unwrap();
@@ -1043,10 +1128,10 @@ mod tests {
         let cwd = fixture.root.join("workspace").join("repo");
         let upward = fixture
             .root
-            .join("workspace/config/provisioning/linux/repos.txt");
+            .join("workspace/config/provisioning/linux/repos.toml");
         let home_default = fixture
             .home
-            .join("self/sample_project/config/provisioning/linux/repos.txt");
+            .join("self/sample_project/config/provisioning/linux/repos.toml");
         touch(&explicit);
         touch(&env_file);
         touch(&upward);
@@ -1079,7 +1164,7 @@ mod tests {
         let cwd = fixture.root.join("elsewhere").join("repo");
         let home_default = fixture
             .home
-            .join("self/sample_project/config/provisioning/linux/repos.txt");
+            .join("self/sample_project/config/provisioning/linux/repos.toml");
         touch(&home_default);
 
         assert_eq!(
@@ -1279,6 +1364,124 @@ mod tests {
         );
     }
 
+    fn read_opts() -> ManagedOptions {
+        ManagedOptions {
+            repos_file: None,
+            home_dir: None,
+            dry: false,
+            json: false,
+            color: false,
+            message_for_all: None,
+            interactive: false,
+        }
+    }
+
+    #[test]
+    fn status_current_reports_the_repo_at_the_given_dir() {
+        let fixture = ManagedFixture::new("status-current");
+        let repo = fixture.init_repo("repo");
+
+        let run = run_status_current(&repo, &read_opts());
+
+        assert_eq!(run.exit, ManagedExit::Clean);
+        assert_eq!(run.results.len(), 1);
+        assert_eq!(run.results[0].name, "repo");
+        assert!(run.results[0].present);
+    }
+
+    #[test]
+    fn status_current_resolves_repo_from_a_nested_subdirectory() {
+        let fixture = ManagedFixture::new("status-current-subdir");
+        let repo = fixture.init_repo("repo");
+        let nested = repo.join("a/b");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        let run = run_status_current(&nested, &read_opts());
+
+        assert_eq!(run.exit, ManagedExit::Clean);
+        assert_eq!(run.results[0].name, "repo");
+    }
+
+    #[test]
+    fn status_current_fails_outside_a_git_repo() {
+        let fixture = ManagedFixture::new("status-current-norepo");
+        let plain = fixture.root.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+
+        let run = run_status_current(&plain, &read_opts());
+
+        assert_eq!(run.exit, ManagedExit::Fail);
+        assert!(run.results.is_empty());
+        assert!(
+            run.stderr.contains("not a git repo"),
+            "stderr: {}",
+            run.stderr
+        );
+    }
+
+    #[test]
+    fn status_recursive_reports_current_repo_and_nested_subrepos() {
+        let fixture = ManagedFixture::new("status-recursive");
+        let root = fixture.init_repo("root");
+        fixture.init_repo("root/libs/inner");
+
+        let run = run_status_recursive(&root, &read_opts());
+
+        assert_eq!(run.exit, ManagedExit::Clean);
+        let names: Vec<&str> = run
+            .results
+            .iter()
+            .map(|result| result.name.as_str())
+            .collect();
+        assert!(names.contains(&"root"), "names: {names:?}");
+        assert!(names.contains(&"libs/inner"), "names: {names:?}");
+    }
+
+    #[test]
+    fn status_recursive_skips_linked_worktrees() {
+        let fixture = ManagedFixture::new("status-recursive-worktrees");
+        let root = fixture.init_repo("root");
+        fixture.init_repo("root/libs/inner");
+        // A linked worktree: `.git` is a file pointing into the repo's worktrees dir.
+        let wt = root.join(".worktrees/feature");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(
+            wt.join(".git"),
+            "gitdir: /abs/root/.git/worktrees/feature\n",
+        )
+        .unwrap();
+
+        let run = run_status_recursive(&root, &read_opts());
+
+        let names: Vec<&str> = run
+            .results
+            .iter()
+            .map(|result| result.name.as_str())
+            .collect();
+        assert!(names.contains(&"root"), "names: {names:?}");
+        assert!(names.contains(&"libs/inner"), "names: {names:?}");
+        assert!(
+            !names.iter().any(|name| name.contains(".worktrees")),
+            "linked worktrees should be skipped, names: {names:?}"
+        );
+    }
+
+    #[test]
+    fn status_recursive_fails_when_no_repo_found() {
+        let fixture = ManagedFixture::new("status-recursive-empty");
+        let empty = fixture.root.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+
+        let run = run_status_recursive(&empty, &read_opts());
+
+        assert_eq!(run.exit, ManagedExit::Fail);
+        assert!(
+            run.stderr.contains("no git repos found"),
+            "stderr: {}",
+            run.stderr
+        );
+    }
+
     struct ManagedFixture {
         root: std::path::PathBuf,
         home: std::path::PathBuf,
@@ -1294,7 +1497,7 @@ mod tests {
             let root = std::env::temp_dir().join(format!("git-tools-{name}-{unique}"));
             let home = root.join("home");
             std::fs::create_dir_all(&home).unwrap();
-            let manifest = root.join("repos.txt");
+            let manifest = root.join("repos.toml");
             Self {
                 root,
                 home,
@@ -1350,7 +1553,9 @@ mod tests {
         fn write_manifest(&self, entries: &[(&str, &str)]) {
             let text = entries
                 .iter()
-                .map(|(path, remote)| format!("{path}\t{remote}\n"))
+                .map(|(path, remote)| {
+                    format!("[[repo]]\npath = \"{path}\"\nremote = \"{remote}\"\n\n")
+                })
                 .collect::<String>();
             std::fs::write(&self.manifest, text).unwrap();
         }

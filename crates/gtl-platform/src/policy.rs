@@ -12,11 +12,20 @@ pub struct OpenerCommand {
 /// `explorer.exe`; macOS uses `open`; everything else uses `xdg-open`.
 pub fn opener_command(os: Os, is_wsl: bool, path: &str) -> OpenerCommand {
     if is_wsl || os == Os::Windows {
-        return OpenerCommand { program: "explorer.exe".into(), args: vec![path.into()] };
+        return OpenerCommand {
+            program: "explorer.exe".into(),
+            args: vec![path.into()],
+        };
     }
     match os {
-        Os::Macos => OpenerCommand { program: "open".into(), args: vec![path.into()] },
-        _ => OpenerCommand { program: "xdg-open".into(), args: vec![path.into()] },
+        Os::Macos => OpenerCommand {
+            program: "open".into(),
+            args: vec![path.into()],
+        },
+        _ => OpenerCommand {
+            program: "xdg-open".into(),
+            args: vec![path.into()],
+        },
     }
 }
 
@@ -63,7 +72,10 @@ mod tests {
 
     #[test]
     fn linux_uses_xdg_open() {
-        assert_eq!(opener_command(Os::Linux, false, "o.html").program, "xdg-open");
+        assert_eq!(
+            opener_command(Os::Linux, false, "o.html").program,
+            "xdg-open"
+        );
     }
 
     #[test]

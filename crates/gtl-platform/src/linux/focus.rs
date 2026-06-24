@@ -37,11 +37,8 @@ pub fn activate_window(xid: u64) {
         }
         let screen = (lib.XDefaultScreen)(display);
         let root = (lib.XRootWindow)(display, screen);
-        let net_active_window = (lib.XInternAtom)(
-            display,
-            c"_NET_ACTIVE_WINDOW".as_ptr(),
-            xlib::False,
-        );
+        let net_active_window =
+            (lib.XInternAtom)(display, c"_NET_ACTIVE_WINDOW".as_ptr(), xlib::False);
 
         let mut event: xlib::XEvent = std::mem::zeroed();
         let msg = &mut event.client_message;

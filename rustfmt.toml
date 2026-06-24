@@ -1,0 +1,4 @@
+# Stable rustfmt config. Defaults otherwise; only edition (matches every crate)
+# and LF endings (Linux-first, matches the repo's Unix line endings) are pinned.
+edition = "2024"
+newline_style = "Unix"

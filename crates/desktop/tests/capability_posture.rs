@@ -6,10 +6,9 @@ use std::path::Path;
 
 #[test]
 fn capability_allowlist_grants_no_fs_or_shell() {
-    let cap = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json"),
-    )
-    .expect("capabilities/default.json must exist");
+    let cap =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("capabilities/default.json"))
+            .expect("capabilities/default.json must exist");
     let json: serde_json::Value = serde_json::from_str(&cap).expect("valid JSON");
     let perms = json["permissions"].as_array().expect("permissions array");
     for p in perms {
@@ -23,10 +22,8 @@ fn capability_allowlist_grants_no_fs_or_shell() {
 
 #[test]
 fn csp_is_null_for_offline_own_content() {
-    let conf = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"),
-    )
-    .expect("tauri.conf.json must exist");
+    let conf = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"))
+        .expect("tauri.conf.json must exist");
     let json: serde_json::Value = serde_json::from_str(&conf).expect("valid JSON");
     assert!(
         json["app"]["security"]["csp"].is_null(),

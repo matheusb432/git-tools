@@ -4,11 +4,11 @@ mod diffs;
 mod history;
 mod protocol;
 
-use diffs::{diff_ref_from_argv, PendingDiffs};
+use diffs::{PendingDiffs, diff_ref_from_argv};
+use tauri::http::{Response, StatusCode};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, WindowEvent};
-use tauri::http::{Response, StatusCode};
 
 /// Brings the main window to the foreground — even over a focused fullscreen app.
 ///
@@ -80,9 +80,7 @@ pub fn run() {
         })
         .setup(|app| {
             // Cold-start argv → queue (frontend drains it on mount).
-            if let Some(diff_ref) =
-                diff_ref_from_argv(&std::env::args().collect::<Vec<_>>())
-            {
+            if let Some(diff_ref) = diff_ref_from_argv(&std::env::args().collect::<Vec<_>>()) {
                 app.state::<PendingDiffs>().push(diff_ref);
             }
             // Tray: Show / Quit. Quit is the only real exit (keep-warm lifecycle).
@@ -130,7 +128,9 @@ fn serve_diff(request: &tauri::http::Request<Vec<u8>>) -> Response<Vec<u8>> {
     let uri = request.uri();
     let repo_id = uri.host().unwrap_or_default();
     let hash = uri.path().trim_start_matches('/').trim_end_matches(".html");
-    let Some(root) = protocol::store_root() else { return not_found() };
+    let Some(root) = protocol::store_root() else {
+        return not_found();
+    };
     let Some(path) = protocol::resolve_diff_uri(&root, repo_id, hash) else {
         return not_found();
     };
@@ -183,7 +183,9 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK, "happy path: expected 200");
         assert_eq!(resp.body(), content, "happy path: body mismatch");
         assert_eq!(
-            resp.headers().get("Content-Type").and_then(|v| v.to_str().ok()),
+            resp.headers()
+                .get("Content-Type")
+                .and_then(|v| v.to_str().ok()),
             Some("text/html; charset=utf-8"),
             "happy path: wrong Content-Type"
         );
@@ -191,17 +193,29 @@ mod tests {
         // --- Missing file: valid-shape ids but no file on disk ---
         let req = make_request(&format!("diff://{REPO}/aabbccddeeff0011"));
         let resp = serve_diff(&req);
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "missing file: expected 404");
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "missing file: expected 404"
+        );
 
         // --- Multi-segment path attack: trailing segments make hash non-token-shaped ---
         let req = make_request(&format!("diff://{REPO}/{HASH}/extra/segment"));
         let resp = serve_diff(&req);
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "multi-segment: expected 404");
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "multi-segment: expected 404"
+        );
 
         // --- Empty path: diff://<repo>/ ---
         let req = make_request(&format!("diff://{REPO}/"));
         let resp = serve_diff(&req);
-        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "empty path: expected 404");
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "empty path: expected 404"
+        );
 
         // SAFETY: guarded by ENV_LOCK; no other thread touches this var concurrently.
         unsafe { std::env::remove_var("GIT_TOOLS_DATA_DIR") };

@@ -175,8 +175,14 @@ mod tests {
 
     #[test]
     fn from_toml_reads_viewer_app_and_browser() {
-        assert_eq!(from_toml("[diff]\nviewer = \"app\"").diff.viewer, Viewer::App);
-        assert_eq!(from_toml("[diff]\nviewer = \"browser\"").diff.viewer, Viewer::Browser);
+        assert_eq!(
+            from_toml("[diff]\nviewer = \"app\"").diff.viewer,
+            Viewer::App
+        );
+        assert_eq!(
+            from_toml("[diff]\nviewer = \"browser\"").diff.viewer,
+            Viewer::Browser
+        );
     }
 
     #[test]
@@ -187,7 +193,10 @@ mod tests {
 
     #[test]
     fn from_toml_unknown_viewer_falls_back_to_default_app() {
-        assert_eq!(from_toml("[diff]\nviewer = \"bogus\"").diff.viewer, Viewer::App);
+        assert_eq!(
+            from_toml("[diff]\nviewer = \"bogus\"").diff.viewer,
+            Viewer::App
+        );
     }
 
     #[test]

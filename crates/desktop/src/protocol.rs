@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 /// A store id/hash is 16 lowercase hex chars (see `gtl_store::id`). Reject anything
 /// else so `..`, separators, and absolute paths can never reach the filesystem.
 fn is_store_token(s: &str) -> bool {
-    s.len() == 16 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+    s.len() == 16
+        && s.bytes()
+            .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
 }
 
 /// Resolve a `diff://` request to a store `.html` path, or `None` if the request
@@ -43,7 +45,10 @@ mod tests {
     #[test]
     fn resolves_a_valid_id_and_hash() {
         let got = resolve_diff_uri(Path::new("/store"), ID, HASH).unwrap();
-        assert_eq!(got, PathBuf::from("/store/diffs/0123456789abcdef/fedcba9876543210.html"));
+        assert_eq!(
+            got,
+            PathBuf::from("/store/diffs/0123456789abcdef/fedcba9876543210.html")
+        );
     }
 
     #[test]

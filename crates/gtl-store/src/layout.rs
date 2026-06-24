@@ -35,11 +35,20 @@ pub fn place(
     let json_path = dir.join(format!("{hash}.json"));
     // Reuse only when BOTH files exist; if the sidecar was lost, (re)write both.
     if html_path.exists() && json_path.exists() {
-        return Ok(Placed { path: html_path, reused: true });
+        return Ok(Placed {
+            path: html_path,
+            reused: true,
+        });
     }
     atomic_write(&html_path, html.as_bytes())?;
-    atomic_write(&json_path, serde_json::to_string_pretty(sidecar)?.as_bytes())?;
-    Ok(Placed { path: html_path, reused: false })
+    atomic_write(
+        &json_path,
+        serde_json::to_string_pretty(sidecar)?.as_bytes(),
+    )?;
+    Ok(Placed {
+        path: html_path,
+        reused: false,
+    })
 }
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -56,7 +65,8 @@ fn atomic_write(final_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     );
     let tmp = final_path.with_file_name(unique);
     fs::write(&tmp, bytes).with_context(|| format!("write {}", tmp.display()))?;
-    fs::rename(&tmp, final_path).with_context(|| format!("rename into {}", final_path.display()))?;
+    fs::rename(&tmp, final_path)
+        .with_context(|| format!("rename into {}", final_path.display()))?;
     Ok(())
 }
 
@@ -87,7 +97,9 @@ pub fn lookup_by_range(
 pub fn list_history_with_hash(store_root: &Path) -> anyhow::Result<Vec<(String, Sidecar)>> {
     let diffs = store_root.join("diffs");
     let mut all = Vec::new();
-    let Ok(repos) = fs::read_dir(&diffs) else { return Ok(all) };
+    let Ok(repos) = fs::read_dir(&diffs) else {
+        return Ok(all);
+    };
     for repo in repos.flatten() {
         all.extend(read_sidecars_paired(&repo.path())?);
     }
@@ -96,12 +108,20 @@ pub fn list_history_with_hash(store_root: &Path) -> anyhow::Result<Vec<(String, 
 
 fn read_sidecars_paired(dir: &Path) -> anyhow::Result<Vec<(String, Sidecar)>> {
     let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(dir) else { return Ok(out) };
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Ok(out);
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "json") {
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
-            let Ok(text) = fs::read_to_string(&path) else { continue };
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
             if let Ok(sc) = serde_json::from_str::<Sidecar>(&text) {
                 out.push((stem, sc));
             }
@@ -164,31 +184,61 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let sc = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
         place(tmp.path(), "repo0000", "<html>x</html>", &sc).unwrap();
-        let hit = lookup_by_range(tmp.path(), "repo0000", DiffKind::TwoDot, "aaaa", "bbbb").unwrap();
+        let hit =
+            lookup_by_range(tmp.path(), "repo0000", DiffKind::TwoDot, "aaaa", "bbbb").unwrap();
         assert!(hit.is_some());
-        let miss = lookup_by_range(tmp.path(), "repo0000", DiffKind::TwoDot, "aaaa", "cccc").unwrap();
+        let miss =
+            lookup_by_range(tmp.path(), "repo0000", DiffKind::TwoDot, "aaaa", "cccc").unwrap();
         assert!(miss.is_none());
     }
 
     #[test]
     fn worktree_is_never_range_addressable() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(lookup_by_range(tmp.path(), "r", DiffKind::WorkTree, "a", "b").unwrap().is_none());
+        assert!(
+            lookup_by_range(tmp.path(), "r", DiffKind::WorkTree, "a", "b")
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
     fn list_history_with_hash_collects_across_repos() {
         let tmp = tempfile::tempdir().unwrap();
-        place(tmp.path(), "repoAAAA", "<a/>", &sidecar(DiffKind::TwoDot, "a", "b")).unwrap();
-        place(tmp.path(), "repoBBBB", "<b/>", &sidecar(DiffKind::ThreeDot, "c", "d")).unwrap();
+        place(
+            tmp.path(),
+            "repoAAAA",
+            "<a/>",
+            &sidecar(DiffKind::TwoDot, "a", "b"),
+        )
+        .unwrap();
+        place(
+            tmp.path(),
+            "repoBBBB",
+            "<b/>",
+            &sidecar(DiffKind::ThreeDot, "c", "d"),
+        )
+        .unwrap();
         assert_eq!(list_history_with_hash(tmp.path()).unwrap().len(), 2);
     }
 
     #[test]
     fn list_history_with_hash_pairs_stem_to_sidecar() {
         let tmp = tempfile::tempdir().unwrap();
-        let placed = place(tmp.path(), "repoAAAA", "<a/>", &sidecar(DiffKind::TwoDot, "a", "b")).unwrap();
-        let stem = placed.path.file_stem().unwrap().to_str().unwrap().to_string();
+        let placed = place(
+            tmp.path(),
+            "repoAAAA",
+            "<a/>",
+            &sidecar(DiffKind::TwoDot, "a", "b"),
+        )
+        .unwrap();
+        let stem = placed
+            .path
+            .file_stem()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
         let got = list_history_with_hash(tmp.path()).unwrap();
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].0, stem);

@@ -183,7 +183,7 @@ pub fn plan_rebase(runner: &impl GitRunner, repo: &Path, onto: &str) -> RebasePl
     let range = format!("{onto}..{feature}");
     match count_range(runner, top, &range) {
         Some(0) => {
-            return RebasePlan::Noop(format!("'{onto}' already up to date with '{feature}'"))
+            return RebasePlan::Noop(format!("'{onto}' already up to date with '{feature}'"));
         }
         None => return RebasePlan::Refused("git rev-list failed".to_string()),
         Some(_) => {}
@@ -576,9 +576,11 @@ mod tests {
             runner.arg_lists(),
             vec![vec!["switch", "main"], vec!["merge", "--ff-only", "feat/x"]]
         );
-        assert!(result
-            .detail
-            .starts_with("switched to 'main' from 'feat/x'"));
+        assert!(
+            result
+                .detail
+                .starts_with("switched to 'main' from 'feat/x'")
+        );
     }
 
     #[test]

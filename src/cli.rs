@@ -87,9 +87,11 @@ pub enum Command {
     Wk(WorktreeArgs),
     /// Switch to the main branch; with `--rebase`, fast-forward it onto the current branch's commits.
     Sw(SwArgs),
-    /// Show branch, unpushed commits, and pending changes for every managed repo.
-    #[command(visible_alias = "ls")]
-    Status(ManagedReadArgs),
+    /// Show git status for the current repo; `--all` fans out over managed repos, `-r` recurses into nested subrepos.
+    #[command(visible_alias = "s")]
+    Status(StatusArgs),
+    /// Show branch, unpushed commits, and pending changes for every managed repo (same as `status --all`).
+    Ls(ManagedReadArgs),
     /// Push every managed repo that has unpushed commits.
     PushAll(ManagedArgs),
     /// Pull every managed repo.
@@ -207,7 +209,20 @@ pub struct DiffSubreposScanArgs {
     pub worktrees: bool,
 }
 
-/// Flags shared by read-only managed-repo commands (`status`/`ls`).
+/// Arguments for `status`. Default scope is the current repo; `--all` and `-r` widen it.
+#[derive(Debug, Args)]
+pub struct StatusArgs {
+    /// Report every managed repo from the manifest (the manifest-wide view; same as `ls`).
+    #[arg(long, conflicts_with = "recursive")]
+    pub all: bool,
+    /// Report the current repo plus any nested subrepos under the current directory (linked worktrees are skipped).
+    #[arg(short = 'r', long)]
+    pub recursive: bool,
+    #[command(flatten)]
+    pub read: ManagedReadArgs,
+}
+
+/// Flags shared by read-only managed-repo commands (`status --all`/`ls`).
 #[derive(Debug, Args)]
 pub struct ManagedReadArgs {
     /// Emit machine-readable JSON instead of human text.
@@ -356,6 +371,65 @@ mod tests {
     }
 
     #[test]
+    fn parse_args_status_defaults_to_current_repo() {
+        let cli = Cli::parse_args(&["status".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Status(StatusArgs {
+                all: false,
+                recursive: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_status_all_and_recursive_flags() {
+        let cli = Cli::parse_args(&["status".into(), "--all".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Status(StatusArgs { all: true, .. })
+        ));
+
+        let cli = Cli::parse_args(&["status".into(), "-r".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Status(StatusArgs {
+                recursive: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_status_all_conflicts_with_recursive() {
+        let err = Cli::parse_args(&["status".into(), "--all".into(), "-r".into()])
+            .expect_err("--all and --recursive are mutually exclusive");
+        assert!(
+            err.to_string().contains("cannot be used with"),
+            "error: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_args_ls_is_its_own_managed_command() {
+        let cli = Cli::parse_args(&["ls".into()]).unwrap();
+        assert!(matches!(cli.command, Command::Ls(_)));
+    }
+
+    #[test]
+    fn parse_args_s_is_a_status_shorthand() {
+        let cli = Cli::parse_args(&["s".into(), "-r".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Status(StatusArgs {
+                recursive: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn parse_args_accepts_dash_prefixed_squash_message() {
         // A commit message can begin with `-`; allow_hyphen_values keeps it a value, not a flag.
         let cli = Cli::parse_args(&[
@@ -473,7 +547,7 @@ mod tests {
             "diff".into(),
             "--all".into(),
             "--repos-file".into(),
-            "repos.txt".into(),
+            "repos.toml".into(),
             "--home-dir".into(),
             "/tmp/home".into(),
         ])
@@ -490,7 +564,7 @@ mod tests {
                     last: None,
                     ..
                 },
-            }) if repos_file == "repos.txt" && home_dir == "/tmp/home"
+            }) if repos_file == "repos.toml" && home_dir == "/tmp/home"
         ));
     }
 
