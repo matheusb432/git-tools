@@ -24,16 +24,14 @@ install:
 [group('desktop')]
 update: build install
 
-# Bundle the viewer Lit shell -> crates/desktop/dist (committed). Needs bun.
+# Bundle the viewer Svelte shell -> crates/desktop/dist (committed). Needs bun.
 [group('desktop')]
 build-viewer-ui:
     #!/usr/bin/env bash
     set -euo pipefail
     if command -v bun >/dev/null 2>&1; then
-      bun install --cwd frontend/viewer lit >/dev/null 2>&1 || true
       mkdir -p crates/desktop/dist
       cp frontend/viewer/index.html crates/desktop/dist/index.html
-      NODE_ENV=production bun build frontend/viewer/shell.ts \
-        --outfile crates/desktop/dist/shell.js --format=iife --minify --target=browser
+      NODE_ENV=production bunx vite build --config frontend/viewer/vite.config.mjs
       echo "built crates/desktop/dist/shell.js"
     else echo "bun not installed; skipping build-viewer-ui" >&2; fi

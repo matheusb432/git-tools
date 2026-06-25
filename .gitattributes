@@ -18,3 +18,4 @@
 # Generated bundles: minifiers embed literal whitespace in template strings;
 # suppress trailing-whitespace warnings that are false positives on these files.
 src/embedded/generated/*.js -whitespace
+crates/desktop/dist/shell.js -whitespace
