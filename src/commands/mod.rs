@@ -7,6 +7,7 @@ pub mod diff_subrepos;
 mod discover;
 pub mod managed;
 pub mod merge_diff;
+pub mod prune;
 pub mod squash_local;
 pub mod squash_preview;
 pub mod sw;

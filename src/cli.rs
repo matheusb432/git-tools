@@ -94,6 +94,8 @@ pub enum Command {
     /// into nested subrepos.
     #[command(visible_alias = "s")]
     Status(StatusArgs),
+    /// Delete local branches whose commits are already merged into main.
+    Prune(PruneArgs),
     /// Show branch, unpushed commits, and pending changes for every managed repo (same as `status
     /// --all`).
     Ls(ManagedReadArgs),
@@ -272,6 +274,29 @@ pub struct SwArgs {
     /// branch.
     #[arg(short = 'r', long = "revert")]
     pub revert: bool,
+}
+
+/// Arguments for `prune`.
+#[derive(Debug, Args)]
+pub struct PruneArgs {
+    /// Integration branch that branches must be merged into to qualify (default: main).
+    #[arg(long)]
+    pub onto: Option<String>,
+    /// Actually delete (skip the prompt; required to delete in a non-interactive shell).
+    #[arg(short = 'y', long = "yes")]
+    pub yes: bool,
+    /// Prune every managed repo from the manifest instead of the current repo.
+    #[arg(long)]
+    pub all: bool,
+    /// Emit machine-readable JSON instead of human text (with `--all`).
+    #[arg(long, requires = "all")]
+    pub json: bool,
+    /// Path to the managed-repos manifest (overrides the default lookup).
+    #[arg(long, requires = "all")]
+    pub repos_file: Option<String>,
+    /// Home directory used to resolve managed-repo paths (overrides `$HOME`).
+    #[arg(long, requires = "all")]
+    pub home_dir: Option<String>,
 }
 
 /// Flags shared by the managed-repo fan-out commands (`push-all`, `pull-all`, `commit-all`).
@@ -723,6 +748,38 @@ mod tests {
                 commits: false
             }) if tag == "v1.2.0" && message == "release notes"
         ));
+    }
+
+    #[test]
+    fn parse_args_routes_prune_defaults() {
+        let cli = Cli::parse_args(&["prune".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Prune(PruneArgs {
+                onto: None,
+                yes: false,
+                all: false,
+                json: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_prune_yes_and_onto() {
+        let cli =
+            Cli::parse_args(&["prune".into(), "-y".into(), "--onto".into(), "trunk".into()])
+                .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Prune(PruneArgs { yes: true, onto: Some(o), .. }) if o == "trunk"
+        ));
+    }
+
+    #[test]
+    fn parse_args_prune_json_requires_all() {
+        assert!(Cli::parse_args(&["prune".into(), "--json".into()]).is_err());
+        assert!(Cli::parse_args(&["prune".into(), "--all".into(), "--json".into()]).is_ok());
     }
 
     #[test]

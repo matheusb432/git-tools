@@ -3,7 +3,7 @@
 use crate::{
     cli::{
         Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
-        ManagedReadArgs, StatusArgs, SwArgs, TagCommand, WorktreeCommand,
+        ManagedReadArgs, PruneArgs, StatusArgs, SwArgs, TagCommand, WorktreeCommand,
     },
     commands::{
         managed::{ManagedExit, ManagedOptions, ManagedRun},
@@ -112,6 +112,7 @@ fn dispatch(command: Command) -> ExitCode {
         }
         Command::Up { message, yes } => run_up(&message, yes),
         Command::Sw(args) => run_sw(args),
+        Command::Prune(args) => run_prune(args),
         Command::Tag(args) => run_tag(args.command, args.commits),
         Command::Wk(args) => run_worktree(args.command),
         Command::Status(args) => managed_exit(run_status(args)),
@@ -335,6 +336,83 @@ fn finish_sw(result: crate::commands::sw::SwResult) -> ExitCode {
     }
 }
 
+/// Orchestrates `prune`: `--all` fans out over managed repos (preview unless `-y`); the
+/// single-repo path plans read-only, shows the will-delete block, gates on `-y`/TTY like
+/// `up`, then deletes. All git work is local; refusals → stderr, logs → stdout.
+fn run_prune(args: PruneArgs) -> ExitCode {
+    use crate::commands::prune;
+
+    let onto = args.onto.as_deref().unwrap_or("main");
+
+    if args.all {
+        let options = ManagedOptions {
+            repos_file: args.repos_file.map(Into::into),
+            home_dir: args.home_dir.map(Into::into),
+            dry: !args.yes,
+            json: args.json,
+            color: false,
+            message_for_all: None,
+            interactive: is_interactive(),
+        };
+        return managed_exit(commands::managed::run_prune_all(onto, &options));
+    }
+
+    let runner = StdGitRunner;
+    let repo = std::path::Path::new(".");
+
+    let (top, branches) = match prune::plan(&runner, repo, onto) {
+        prune::PrunePlan::Refused(detail) => {
+            eprintln!("prune: {detail}");
+            return ExitCode::Internal;
+        }
+        prune::PrunePlan::Nothing(detail) => {
+            println!("{detail}");
+            return ExitCode::Ok;
+        }
+        prune::PrunePlan::Ready { top, branches, .. } => (top, branches),
+    };
+
+    println!(
+        "will delete {} branch(es) merged into '{onto}':",
+        branches.len()
+    );
+    for branch in &branches {
+        println!("  {}  {}", branch.name, branch.sha);
+    }
+
+    use crate::commands::sync;
+    match sync::gate(args.yes, is_interactive()) {
+        sync::Gate::RefuseNonInteractive => {
+            eprintln!("prune: non-interactive shell; pass --yes to confirm the deletion");
+            return ExitCode::Usage;
+        }
+        sync::Gate::Confirm => match prompt_confirmation() {
+            Ok(sync::Answer::Yes) => {}
+            Ok(sync::Answer::No) => {
+                println!("prune: aborted — nothing deleted");
+                return ExitCode::Ok;
+            }
+            Err(err) => {
+                eprintln!("prune: {err} — nothing deleted");
+                return ExitCode::Usage;
+            }
+        },
+        sync::Gate::Proceed => {}
+    }
+
+    let result = prune::apply(&runner, std::path::Path::new(&top), &branches);
+    match result.status {
+        prune::Status::Ok => {
+            println!("{}", result.detail);
+            ExitCode::Ok
+        }
+        prune::Status::Partial | prune::Status::Fail => {
+            eprintln!("prune: {}", result.detail);
+            ExitCode::Internal
+        }
+    }
+}
+
 fn run_tag(command: Option<TagCommand>, commits: bool) -> ExitCode {
     use crate::commands::tag;
 
@@ -553,6 +631,11 @@ mod tests {
             run(&["commit-all".into(), "--message-for-all".into(), "".into()]),
             ExitCode::Usage
         );
+    }
+
+    #[test]
+    fn prune_help_exits_ok() {
+        assert_eq!(run(&["prune".into(), "--help".into()]), ExitCode::Ok);
     }
 
     #[test]
