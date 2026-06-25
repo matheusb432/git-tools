@@ -10,6 +10,7 @@ use clap::Parser;
 mod cli;
 mod icon;
 mod proc;
+mod ship;
 
 fn main() {
     if let Err(e) = run(cli::Cli::parse()) {
@@ -24,6 +25,7 @@ fn run(cli: cli::Cli) -> Result<()> {
         cli::Command::Bootstrap => bootstrap(),
         cli::Command::Check { verbose } => check(verbose),
         cli::Command::GenIcon => icon::run(),
+        cli::Command::Ship { smoke } => ship::run(smoke),
     }
 }
 

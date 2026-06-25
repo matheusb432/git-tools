@@ -19,6 +19,8 @@ anyhow = "1"
 tiny-skia = "0.12"
 image = { version = "0.25", default-features = false, features = ["png"] }
 ico = "0.5"
+# PATH probe for the `ship` preflight (no `sh -c` interpolation; cross-platform).
+which = "8.0.4"
 
 [dev-dependencies]
 assert_cmd = "2"

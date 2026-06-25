@@ -64,6 +64,15 @@ just desktop build  # only the gtl-viewer Tauri binary (skipped without webkit2g
 
 `just` recipes use bash, so on Windows run them from Git Bash (the `set windows-shell` directive points `just` at bash there).
 
+To produce **Windows 11 release binaries from a Linux host** (no Windows machine needed for the build itself), cross-compile with [`cargo-xwin`](https://github.com/rust-cross/cargo-xwin):
+
+```sh
+just ship          # cross-build both Win11 exes -> target/x86_64-pc-windows-msvc/release/{git-tools,gtl-viewer}.exe
+just ship --smoke  # fast debug-profile linkage check (not a shippable)
+```
+
+This needs `cargo-xwin` and the `x86_64-pc-windows-msvc` rustup target; the verb's preflight prints the install command if either is missing. A cross-build proves the project *links* for Windows — WebView2 rendering, file dialogs, and the `%LOCALAPPDATA%` store path are certified separately on a real Win11 machine via `just win-release-checklist` (the host/release split).
+
 ## Install
 
 The CLI engine (`git-tools` + `gtl` alias) and the desktop viewer (`gtl-viewer`) are independent artifacts with parallel verbs:

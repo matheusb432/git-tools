@@ -40,15 +40,3 @@ build-viewer-ui:
 [group('desktop')]
 gen-icon:
     cargo run --quiet -p xtask -- gen-icon
-
-# Cross-build the Win11 viewer exe from this Linux host via cargo-xwin (custom-protocol is
-# mandatory — else the exe serves devUrl and dies with ERR_CONNECTION_REFUSED). Non-authoritative:
-# proves linkage, not runtime. -> target/x86_64-pc-windows-msvc/release/gtl-viewer.exe
-[group('desktop')]
-win-build: build-viewer-ui
-    #!/usr/bin/env bash
-    set -euo pipefail
-    source scripts/win-preflight.sh
-    gtl_win_preflight
-    cargo xwin build --release -p desktop --features custom-protocol --target x86_64-pc-windows-msvc
-    echo "built target/x86_64-pc-windows-msvc/release/gtl-viewer.exe"

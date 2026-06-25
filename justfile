@@ -78,25 +78,12 @@ _js-drift-guard:
       git diff --exit-code -- crates/desktop/dist/ || { echo "crates/desktop/dist/ is stale — run 'just desktop build-viewer-ui' and commit" >&2; exit 1; }; \
     else echo "bun absent; skipping js drift guard" >&2; fi
 
-# ============ windows cross-build (host/release split — see Phase 3 spec) ============
+# ============ windows cross-build (host/release split — see specs) ============
 
-# Cross-build both Win11 exes (CLI + viewer) from this Linux host. Non-authoritative: proves
-# linkage, not runtime — certify on real Win11 with `just win-release-checklist`.
+# Cross-build both Win11 release exes (CLI + viewer) from this Linux host via the xtask `ship` verb; `--smoke` = fast debug linkage check (runtime is certified separately on real Win11 — see `win-release-checklist`).
 [group('windows')]
-win-build:
-    just cli win-build
-    just desktop win-build
-
-# Fast debug-profile cross-compile of both binaries — a linkage drift check, not a shippable.
-[group('windows')]
-win-compile-smoke:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    source scripts/win-preflight.sh
-    gtl_win_preflight
-    cargo xwin build -p git-tools --target x86_64-pc-windows-msvc
-    cargo xwin build -p desktop --features custom-protocol --target x86_64-pc-windows-msvc
-    echo "win-compile-smoke OK (debug; non-authoritative linkage check)"
+ship *args:
+    cargo run --quiet -p xtask -- ship {{ args }}
 
 # Print the manual Win11 runtime-certification checklist (run on a real Windows box/VM).
 [group('windows')]

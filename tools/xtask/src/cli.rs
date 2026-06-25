@@ -35,4 +35,12 @@ pub enum Command {
     /// Ports the retired Python generator; the multi-res `.ico` is required by tauri-build on
     /// Windows.
     GenIcon,
+    /// Cross-build the Win11 shippables (CLI + viewer) from this Linux host via cargo-xwin.
+    /// `--smoke` is a fast debug-profile linkage check; the default is the release ship + verify.
+    Ship {
+        /// Debug-profile compile-smoke of both binaries — a non-authoritative linkage drift
+        /// check (no artifact verify), not a shippable.
+        #[arg(long)]
+        smoke: bool,
+    },
 }

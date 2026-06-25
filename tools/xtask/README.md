@@ -1,10 +1,18 @@
 # xtask
 
-`xtask` is this repo's **embedded dev/release automation harness** (the cargo-xtask pattern, ADR-0010). It is a workspace member built on demand and **never installed** — invoked only through this repo's own justfile as `cargo run -p xtask -- <verb>`.
+`xtask` is this repo's **embedded dev/release automation harness** (the cargo-xtask pattern). It is a workspace member built on demand and **never installed** — invoked only through this repo's own justfile as `cargo run -p xtask -- <verb>`.
+
+## Verbs
+
+| Verb | What it does | Justfile entry |
+|---|---|---|
+| `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (ported from the retired `generate_icon.py`; the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |
+| `ship [--smoke]` | Cross-build both Win11 release exes (CLI + viewer) from a Linux host via `cargo-xwin`, with a host-testable preflight; `--smoke` is a fast debug-profile linkage drift check (no artifact verify). | `just ship` / `just ship --smoke` |
+| `bootstrap` / `check` | Scaffold stubs — placeholders for future post-toolchain bring-up / read-only verbs. | — |
 
 ## Why this is not a `new-rust-cli`
 
-This is the embedded kind, not an installable tool. It deliberately ships **no install shim, no scoop manifest, no `install` recipe, and no global-shim runbook** — those are forbidden for embedded automation crates (ADR-0010). If you need a tool on PATH / shared across repos, scaffold with `just repos new-rust-cli` instead.
+This is the embedded kind, not an installable tool. It deliberately ships **no install shim, no scoop manifest, no `install` recipe, and no global-shim runbook** — those are forbidden for embedded automation crates. If you need a tool on PATH / shared across repos, scaffold with `just repos new-rust-cli` instead.
 
 ## Layout
 
@@ -20,7 +28,7 @@ This is the embedded kind, not an installable tool. It deliberately ships **no i
 See `justfile.snippet`:
 
 1. Add `tools/xtask` (or wherever it lives) to the host workspace's root `Cargo.toml` `members`.
-2. Add the one-line forwarder recipes (`bootstrap`, `check`, …) to the host justfile.
+2. Add the one-line forwarder recipes (`gen-icon`, `ship`, …) to the host justfile.
 
 ## Adding a verb
 
@@ -29,6 +37,6 @@ Add an arm to `cli::Command` (its doc comment is the `--help` text), a handler, 
 ## Build & test
 
 ```bash
-cargo run -p xtask -- check     # run a verb
-cargo test -p xtask             # arg-surface + unit tests
+cargo run -p xtask -- gen-icon     # run a verb (or: ship --smoke)
+cargo test -p xtask                # arg-surface + unit tests
 ```

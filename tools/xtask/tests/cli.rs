@@ -15,7 +15,8 @@ fn help_lists_the_verb_surface() {
         .success()
         .stdout(predicates::str::contains("bootstrap"))
         .stdout(predicates::str::contains("check"))
-        .stdout(predicates::str::contains("gen-icon"));
+        .stdout(predicates::str::contains("gen-icon"))
+        .stdout(predicates::str::contains("ship"));
 }
 
 #[test]
@@ -44,6 +45,16 @@ fn check_exposes_its_flags() {
         .assert()
         .success()
         .stdout(predicates::str::contains("--verbose"));
+}
+
+#[test]
+fn ship_exposes_its_smoke_flag() {
+    Command::cargo_bin("xtask")
+        .unwrap()
+        .args(["ship", "--help"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("--smoke"));
 }
 
 #[test]

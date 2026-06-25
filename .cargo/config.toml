@@ -4,8 +4,8 @@
 # this the exe imports VCRUNTIME140.dll / VCRUNTIME140_1.dll, which are NOT part of
 # base Windows and fail to load on a fresh box.
 #
-# Scope: applies only to the x86_64-pc-windows-msvc target (both `just win-build`
-# and `just win-compile-smoke`), so the compile smoke links exactly like the
+# Scope: applies only to the x86_64-pc-windows-msvc target (both `just ship`
+# and `just ship --smoke`), so the compile smoke links exactly like the
 # shippable. Native Linux builds (the host target) are unaffected.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]

@@ -35,15 +35,3 @@ build-js:
 [group('cli')]
 test-js:
     if command -v bun >/dev/null 2>&1; then bun test --isolate frontend/diff; else echo "bun not installed; skipping test-js" >&2; fi
-
-# Cross-build the Win11 CLI exe from this Linux host via cargo-xwin. Non-authoritative: proves
-# linkage, not runtime — certify on real Win11 with `just win-release-checklist`.
-# -> target/x86_64-pc-windows-msvc/release/git-tools.exe
-[group('cli')]
-win-build: build-js
-    #!/usr/bin/env bash
-    set -euo pipefail
-    source scripts/win-preflight.sh
-    gtl_win_preflight
-    cargo xwin build --release -p git-tools --target x86_64-pc-windows-msvc
-    echo "built target/x86_64-pc-windows-msvc/release/git-tools.exe"
