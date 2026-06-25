@@ -8,6 +8,7 @@ use anyhow::Result;
 use clap::Parser;
 
 mod cli;
+mod icon;
 mod proc;
 
 fn main() {
@@ -22,6 +23,7 @@ fn run(cli: cli::Cli) -> Result<()> {
     match cli.command {
         cli::Command::Bootstrap => bootstrap(),
         cli::Command::Check { verbose } => check(verbose),
+        cli::Command::GenIcon => icon::run(),
     }
 }
 

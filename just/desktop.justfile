@@ -36,6 +36,11 @@ build-viewer-ui:
       echo "built crates/desktop/dist/shell.js"
     else echo "bun not installed; skipping build-viewer-ui" >&2; fi
 
+# Render the viewer icon assets (icon.png + multi-res icon.ico) via the Rust xtask generator.
+[group('desktop')]
+gen-icon:
+    cargo run --quiet -p xtask -- gen-icon
+
 # Cross-build the Win11 viewer exe from this Linux host via cargo-xwin (custom-protocol is
 # mandatory — else the exe serves devUrl and dies with ERR_CONNECTION_REFUSED). Non-authoritative:
 # proves linkage, not runtime. -> target/x86_64-pc-windows-msvc/release/gtl-viewer.exe

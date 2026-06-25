@@ -14,7 +14,8 @@ fn help_lists_the_verb_surface() {
         .assert()
         .success()
         .stdout(predicates::str::contains("bootstrap"))
-        .stdout(predicates::str::contains("check"));
+        .stdout(predicates::str::contains("check"))
+        .stdout(predicates::str::contains("gen-icon"));
 }
 
 #[test]
@@ -22,6 +23,15 @@ fn bootstrap_is_a_known_verb() {
     Command::cargo_bin("xtask")
         .unwrap()
         .args(["bootstrap", "--help"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn gen_icon_is_a_known_verb() {
+    Command::cargo_bin("xtask")
+        .unwrap()
+        .args(["gen-icon", "--help"])
         .assert()
         .success();
 }

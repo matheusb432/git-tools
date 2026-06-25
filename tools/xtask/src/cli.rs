@@ -31,4 +31,8 @@ pub enum Command {
         // #[arg(long, conflicts_with = "e2e")]
         // all: bool,
     },
+    /// Render the gtl-viewer icon assets (`crates/desktop/icons/icon.{png,ico}`) from code.
+    /// Ports the retired Python generator; the multi-res `.ico` is required by tauri-build on
+    /// Windows.
+    GenIcon,
 }

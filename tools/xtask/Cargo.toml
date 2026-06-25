@@ -14,6 +14,11 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
+# Icon generation (`gen-icon` verb): render with tiny-skia (analytic AA), resize/encode PNG via
+# image, pack the multi-res .ico via ico. Dev-only — this crate is never shipped or installed.
+tiny-skia = "0.12"
+image = { version = "0.25", default-features = false, features = ["png"] }
+ico = "0.5"
 
 [dev-dependencies]
 assert_cmd = "2"
