@@ -27,8 +27,6 @@
     --del:#DB6650; --del-bg:rgba(215,90,70,.12); --del-gut:rgba(215,90,70,.20); --del-ink:#EC9384;
     --code:#c8bca9; color-scheme:dark;
   }
-  /* mask Lit custom-element upgrade flash until components are defined */
-  :not(:defined){visibility:hidden}
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{
@@ -50,6 +48,21 @@
   .foldall,.view-toggle,.ctx-toggle{font:inherit;font-size:12px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:6px 10px;cursor:pointer;transition:.13s}
   .foldall:hover,.view-toggle:hover,.view-toggle.active,.ctx-toggle:hover,.ctx-toggle.active{color:var(--ink);border-color:var(--acc-line)}
   .view-toggle.active,.ctx-toggle.active{background:var(--acc-soft)}
+  .theme-control{display:inline-flex;align-items:center;gap:6px}
+  .theme-control span{color:var(--ink-2);font-size:11px;letter-spacing:.04em}
+  .theme-select{
+    font:inherit;font-size:11px;color:var(--ink);background:var(--surface-2);
+    border:1px solid var(--line-2);border-radius:4px;padding:2px 6px;cursor:pointer;
+  }
+  .theme-select:hover{border-color:var(--acc-line)}
+  .copy-button{
+    font:inherit;font-size:10px;letter-spacing:.04em;color:var(--acc);
+    background:var(--acc-soft);border:1px solid var(--acc-line);border-radius:4px;
+    padding:1px 6px;cursor:pointer;
+  }
+  .copy-button:hover{color:var(--bg);background:var(--acc);border-color:var(--acc)}
+  .copy-button[data-state="ok"]{color:var(--bg);background:var(--add);border-color:var(--add)}
+  .copy-button[data-state="err"]{color:var(--bg);background:var(--del);border-color:var(--del)}
 
   /* === left: file tree (sticky) === */
   .tree{grid-column:1;grid-row:2;overflow:auto;border-right:1px solid var(--line);background:var(--surface);padding:13px}
@@ -184,7 +197,7 @@
   @media print{
     body{background:#fff;color:#111;height:auto}
     .layout{display:block;height:auto}
-    .tree,.shelf,.keybar,.foldall,.view-toggle,.ctx-toggle,.search,theme-switch,[popover],.gtl-toast{display:none!important}
+    .tree,.shelf,.keybar,.foldall,.view-toggle,.ctx-toggle,.search,.theme-control,.copies,[popover],.gtl-toast{display:none!important}
     .titlebar{background:#f2f2f2;border-color:#bbb}
     .brand .repo b,.brand .kind{color:#111}
     .main{overflow:visible;padding:0}

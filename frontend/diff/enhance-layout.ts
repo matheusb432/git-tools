@@ -1,5 +1,10 @@
 import { copyText } from "../core/clipboard";
+import { keyboardCommand } from "../core/keyboard";
 import { scrollLandOn } from "../core/scroll";
+import { isShaTarget, resolveActiveSet } from "./commit-focus";
+import { buildFileLeaf } from "./file-tree";
+import { toggleLongLine } from "./long-lines";
+import { computeWheelScroll } from "./wheel";
 
 // ! Singleton fade toast appended once to <body>; re-triggering restarts the timer.
 let toastEl: HTMLElement | null = null;
@@ -58,34 +63,6 @@ document.addEventListener("copy", (e: ClipboardEvent) => {
   showToast(first !== null ? `Copied with context · lines ${range}` : "Copied with context");
 });
 
-// * Returns clamped next scrollLeft, or null to bail (ctrlKey zoom, no overflow, zero delta, already there).
-export function computeWheelScroll(
-  scroller: { scrollWidth: number; clientWidth: number; scrollLeft: number },
-  e: { deltaX: number; deltaY: number; ctrlKey: boolean },
-): number | null {
-  const max = scroller.scrollWidth - scroller.clientWidth;
-  if (max <= 0 || e.ctrlKey) return null;
-  const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-  if (!delta) return null;
-  const next = Math.max(0, Math.min(max, scroller.scrollLeft + delta));
-  if (next === scroller.scrollLeft) return null;
-  return next;
-}
-
-// * Returns true when the event target is (or is inside) the .sha copy button, so
-// * the card's keydown/click handler can bail before re-focusing the card.
-// * Covered by bun test frontend/diff (isShaTarget in wheel.test.ts).
-export function isShaTarget(target: { closest?: (s: string) => unknown } | null): boolean {
-  return !!(target && target.closest && target.closest(".sha"));
-}
-
-export function toggleLongLine(btn: Element): void {
-  const row = btn.closest(".dl-long");
-  if (!row) return;
-  const on = row.classList.toggle("expanded");
-  btn.setAttribute("aria-expanded", on ? "true" : "false");
-}
-
 // * Opens `target` then schedules `land` in the next animation frame so a collapsed
 // * content-visibility giant is materialized before scrollLandOn runs its correction loop.
 export function navigateToFile(
@@ -99,7 +76,7 @@ export function navigateToFile(
   raf(() => land(target, scroller));
 }
 
-export function initView(root: HTMLElement): void {
+export function enhanceLayout(root: HTMLElement): void {
   // ! Scope every view to its own .layout root: the tabbed (diff subrepos) view inlines one
   // ! .layout per panel in a single document, so document.querySelector would only ever wire
   // ! the first panel. Querying within `root` keeps each tab independently interactive.
@@ -303,12 +280,7 @@ export function initView(root: HTMLElement): void {
   clineEls.forEach((c) => {
     const sha = c.getAttribute("data-sha") ?? "";
     c.addEventListener("click", () => {
-      if (activeSha === sha) { activeSha = null; activeSet = null; }
-      else {
-        activeSha = sha;
-        const members = (c.getAttribute("data-members") || "").split(" ").filter(Boolean);
-        activeSet = members.length ? members : [sha];
-      }
+      ({ sha: activeSha, set: activeSet } = resolveActiveSet(sha, c.getAttribute("data-members") || "", activeSha));
       applyFilter();
     });
     c.addEventListener("keydown", (ev) => {
@@ -369,59 +341,28 @@ export function initView(root: HTMLElement): void {
     const e = ev as KeyboardEvent;
     const panel = root.closest<HTMLElement>(".panel");
     if (panel && panel.hidden) return;
-    const tag = ((e.target as Element | null)?.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") {
-      if (e.key === "Escape") (e.target as HTMLElement).blur();
+    const command = keyboardCommand(e);
+    if (command === "blur-input") {
+      (e.target as HTMLElement).blur();
       return;
     }
-    // ! alt+shift+c folds all (e.code is layout-independent); plain c is left free so
-    // ! ctrl+c copies a selection without collapsing every file.
-    if (e.altKey && e.shiftKey && e.code === "KeyC") { e.preventDefault(); foldAll?.click(); }
-    else if (e.key === "/") { e.preventDefault(); filterInput?.focus(); }
-    else if (e.key === "j") { e.preventDefault(); focusFile(curFile + 1); }
-    else if (e.key === "k") { e.preventDefault(); focusFile(curFile - 1); }
+    if (command === "fold-all") {
+      e.preventDefault();
+      foldAll?.click();
+    } else if (command === "focus-filter") {
+      e.preventDefault();
+      filterInput?.focus();
+    } else if (command === "next-file") {
+      e.preventDefault();
+      focusFile(curFile + 1);
+    } else if (command === "previous-file") {
+      e.preventDefault();
+      focusFile(curFile - 1);
+    }
   });
 
   root.querySelectorAll(".ln-more").forEach((b) => b.addEventListener("click", () => toggleLongLine(b)));
 
   buildTree();
   setFullMode(false);
-}
-
-// * Builds the <li class="tnode tfile status-..."> leaf for the file tree.
-// * Pure: no event listeners, no closures. renderNode wires the click after.
-// * Covered by bun test frontend/diff (buildFileLeaf in wheel.test.ts).
-export function buildFileLeaf(
-  doc: Document,
-  file: { name: string; status: string; statusCode: string; statusLabel: string; el: { id: string } },
-): HTMLElement {
-  const li = doc.createElement("li");
-  li.className = `tnode tfile status-${file.status}`;
-  li.setAttribute("data-target", file.el.id);
-  const label = doc.createElement("div");
-  label.className = "tlabel";
-  const name = doc.createElement("span");
-  name.className = "tname";
-  name.textContent = file.name;
-  const status = doc.createElement("span");
-  status.className = `tstatus status-${file.status}`;
-  status.textContent = file.statusCode;
-  status.title = file.statusLabel;
-  status.setAttribute("aria-label", file.statusLabel);
-  label.appendChild(name);
-  label.appendChild(status);
-  li.appendChild(label);
-  return li;
-}
-
-// ! Pure helper: compute the next (activeSha, activeSet) after a card click, so the
-// ! toggle/merge logic can be unit-tested without a DOM. Returns null for both when toggling off.
-export function resolveActiveSet(
-  clickedSha: string,
-  membersAttr: string,
-  activeSha: string | null,
-): { sha: string | null; set: string[] | null } {
-  if (activeSha === clickedSha) return { sha: null, set: null };
-  const members = membersAttr.split(" ").filter(Boolean);
-  return { sha: clickedSha, set: members.length ? members : [clickedSha] };
 }

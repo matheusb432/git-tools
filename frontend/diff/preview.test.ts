@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { navigateToFile, resolveActiveSet, toggleLongLine } from "./preview";
+import { navigateToFile } from "./enhance-layout";
+import { resolveActiveSet } from "./commit-focus";
+import { toggleLongLine } from "./long-lines";
 
 // JS behavior contracts migrated from deleted Rust PREVIEW_JS.contains tests.
 // Covered here so bun test owns the JS logic while cargo test stays bun-free.
@@ -36,7 +38,7 @@ test("navigateToFile opens the target (materializing a collapsed giant) before l
 });
 
 test("toggleLongLine flips expanded + aria on the owning row", () => {
-  const row: any = { classList: { _on: false, toggle(c: string) { this._on = !this._on; return this._on; } } };
+  const row: any = { classList: { _on: false, toggle(_c: string) { this._on = !this._on; return this._on; } } };
   const btn: any = { closest: (sel: string) => (sel === ".dl-long" ? row : null), setAttribute(k: string, v: string) { this[k] = v; } };
   toggleLongLine(btn);
   expect(row.classList._on).toBe(true);

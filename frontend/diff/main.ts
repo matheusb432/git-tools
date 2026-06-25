@@ -1,6 +1,8 @@
-import "./components"; // registers custom elements (side-effect import)
-import { initView } from "./preview";
+import { mount } from "svelte";
+import App from "./App.svelte";
 import { initTabs } from "./tabbed";
 
-[].forEach.call(document.querySelectorAll(".layout"), (root: Element) => initView(root as HTMLElement));
+document.querySelectorAll<HTMLElement>(".layout").forEach((root) => {
+  mount(App, { target: root, props: { root } });
+});
 initTabs();

@@ -1,6 +1,8 @@
 import "../test/dom-stub"; // ensure globalThis.document exists before any imports
 import { expect, test, describe } from "bun:test";
-import { computeWheelScroll, isShaTarget, buildFileLeaf } from "./preview";
+import { computeWheelScroll } from "./wheel";
+import { isShaTarget } from "./commit-focus";
+import { buildFileLeaf } from "./file-tree";
 
 // ---------------------------------------------------------------------------
 // Gap 1: computeWheelScroll
@@ -115,7 +117,7 @@ describe("buildFileLeaf", () => {
         querySelector(sel: string): HTMLElement | null {
           // depth-first search through children
           for (const child of this.children) {
-            const c = child as typeof el;
+            const c = child as unknown as typeof el;
             if (sel === `.tlabel` && c.className === "tlabel") return child;
             const found = c.querySelector(sel);
             if (found) return found;

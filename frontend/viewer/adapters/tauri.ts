@@ -12,6 +12,9 @@ export function tauriGlobal(): TauriGlobal {
   if (typeof core?.["invoke"] !== "function" || typeof event?.["listen"] !== "function") {
     throw new Error("__TAURI__ is not available; gtl-viewer must run inside a Tauri webview");
   }
+  // invoke/listen were validated as functions above; the generic <T>/<P> types are the
+  // runtime IPC contract — callers pass <unknown> and validate payloads downstream
+  // (drainPendingDiffs / listHistory / isHistoryEntry).
   return {
     core: { invoke: <T>(command: string) => Promise.resolve((core["invoke"] as (command: string) => Promise<T>)(command)) },
     event: {

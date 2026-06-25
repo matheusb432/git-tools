@@ -144,7 +144,14 @@ fn view_body(view: &View) -> Markup {
                 button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
                 button type="button" class="view-toggle" aria-pressed="false" title="Show full-file diffs" { "Full file" }
                 button type="button" class="ctx-toggle active" aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
-                theme-switch {}
+                label.theme-control {
+                    span { "theme" }
+                    select class="theme-select" aria-label="Theme" {
+                        option value="dark" { "dark" }
+                        option value="light" { "light" }
+                        option value="hearth" { "hearth" }
+                    }
+                }
             }
             aside.tree aria-label="Changed files tree" {
                 div.search {
@@ -430,11 +437,11 @@ fn file_blocks(view: &View) -> Markup {
                     span.path { (file.path) }
                     span class=(format!("status-badge {}", status.css_class())) title=(status.label()) aria-label=(status.label()) { (status.code()) }
                     span.copies {
-                        copy-button value=(file.path) label="path" {}
-                        copy-button value=(absolute) label="abs" {}
+                        button type="button" class="copy-button" data-copy-value=(file.path) data-copy-label="path" { "path" }
+                        button type="button" class="copy-button" data-copy-value=(absolute) data-copy-label="abs" { "abs" }
                         // ! mode="code" carries no payload: the button reads its own file's
                         // ! already-rendered diff rows at click time (no per-file content dupe).
-                        copy-button mode="code" label="code" {}
+                        button type="button" class="copy-button" data-copy-mode="code" data-copy-label="code" { "code" }
                     }
                     span.filestat { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
                 }
@@ -456,6 +463,21 @@ fn file_blocks(view: &View) -> Markup {
 mod tests {
     use super::*;
     use crate::model::{Cmd, Commit, FileDiff, Foot, View};
+
+    /// Returns true if `html` contains any http(s):// URL that is not an inert
+    /// Svelte runtime error-message literal (`https://svelte.dev/e/<code>`),
+    /// which never triggers a network load. Enforces the offline-artifact contract.
+    fn has_disallowed_external_url(html: &str) -> bool {
+        html.match_indices("://").any(|(sep, _)| {
+            let scheme_ok = html[..sep].ends_with("http") || html[..sep].ends_with("https");
+            if !scheme_ok {
+                return false;
+            }
+            // start of the scheme
+            let start = html[..sep].rfind(|c: char| !c.is_ascii_alphabetic()).map_or(0, |i| i + 1);
+            !html[start..].starts_with("https://svelte.dev/e/")
+        })
+    }
 
     #[test]
     fn escape_html_escapes_metacharacters() {
@@ -602,8 +624,7 @@ mod tests {
         let html = build_html(&view);
 
         assert!(html.starts_with("<!DOCTYPE html>"));
-        assert!(!html.contains("http://"));
-        assert!(!html.contains("https://"));
+        assert!(!has_disallowed_external_url(&html), "artifact must not reference any external http(s) resource");
         assert!(html.contains("api"));
         assert!(html.contains("origin/main..HEAD"));
         assert!(html.contains("src/a b.rs"));
@@ -628,9 +649,9 @@ mod tests {
         assert!(html.contains("content-visibility:auto"));
         assert!(html.contains("@media print"));
 
-        // vendored Lit components stay in place
-        assert!(html.contains("<theme-switch"));
-        assert!(html.contains("<copy-button"));
+        // native controls replace Lit custom elements
+        assert!(html.contains(r#"class="theme-select""#));
+        assert!(html.contains(r#"class="copy-button""#));
 
         // engine diff classes are styled (render_diff_lines emits these, untouched)
         assert!(html.contains(".dl-add"));
@@ -654,9 +675,8 @@ mod tests {
         // notes are flagged by a distinct, non-emoji notes indicator (not the bead)
         assert!(html.contains(r#"<span class="notes-ico" aria-hidden="true""#));
 
-        // offline: no network resources anywhere
-        assert!(!html.contains("http://"));
-        assert!(!html.contains("https://"));
+        // offline: no external resource loads (CDN scripts, stylesheets, fetches)
+        assert!(!has_disallowed_external_url(&html), "artifact must not reference any external http(s) resource");
     }
 
     #[test]
@@ -723,25 +743,24 @@ mod tests {
     }
 
     #[test]
-    fn build_html_boots_lit_and_theme_switch_offline() {
+    fn build_html_theme_select_is_offline() {
         let html = build_html(&sample_view());
 
-        assert!(html.contains("customElements"));
-        assert!(html.contains("<theme-switch"));
-        assert!(!html.contains("http://"));
-        assert!(!html.contains("https://"));
+        assert!(html.contains(r#"class="theme-select""#));
+        // no external resource loads (CDN scripts, stylesheets, fetches)
+        assert!(!has_disallowed_external_url(&html), "artifact must not reference any external http(s) resource");
     }
 
     #[test]
     fn build_html_file_block_carries_copy_buttons() {
         let html = build_html(&sample_view());
 
-        // relative path copy button
-        assert!(html.contains(r#"<copy-button value="src/a b.rs" label="path">"#));
+        // relative path copy button: data-copy-value attribute
+        assert!(html.contains(r#"data-copy-value="src/a b.rs" data-copy-label="path""#));
         // absolute path copy button: repo_root + "/" + path (POSIX join)
-        assert!(html.contains(r#"<copy-button value="/home/user/api/src/a b.rs" label="abs">"#));
+        assert!(html.contains(r#"data-copy-value="/home/user/api/src/a b.rs" data-copy-label="abs""#));
         // copy-code-without-markers reads its own file's rendered rows at click time
-        assert!(html.contains(r#"<copy-button mode="code""#));
+        assert!(html.contains(r#"data-copy-mode="code""#));
     }
 
     #[test]
@@ -884,9 +903,9 @@ mod tests {
 
         let html = build_html(&view);
 
-        // both relative and absolute copy-button values stay Maud-escaped
-        assert!(html.contains(r#"value="src/&lt;x&gt;&amp;&quot;.rs" label="path""#));
-        assert!(html.contains(r#"value="/tmp/&lt;r&gt;/src/&lt;x&gt;&amp;&quot;.rs" label="abs""#));
+        // both relative and absolute data-copy-value attributes stay Maud-escaped
+        assert!(html.contains(r#"data-copy-value="src/&lt;x&gt;&amp;&quot;.rs" data-copy-label="path""#));
+        assert!(html.contains(r#"data-copy-value="/tmp/&lt;r&gt;/src/&lt;x&gt;&amp;&quot;.rs" data-copy-label="abs""#));
         assert!(!html.contains("<x>"));
     }
 

@@ -4,6 +4,8 @@ export type ScrollLandOptions = {
   readonly maxFrames?: number;
 };
 
+// ! Land scroll exactly on `target`: content-visibility boxes realize their true height
+// ! mid-scroll, shifting the target — so re-measure each frame and re-align until stable.
 export function scrollLandOn(
   target: HTMLElement,
   scroller: HTMLElement,

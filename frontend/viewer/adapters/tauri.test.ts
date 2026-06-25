@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { drainPendingDiffs, listHistory } from "./tauri";
+import { drainPendingDiffs, listHistory, tauriGlobal } from "./tauri";
+
+test("tauriGlobal throws when __TAURI__ is absent", () => {
+  (globalThis.window as unknown as Record<string, unknown>) = {};
+  expect(() => tauriGlobal()).toThrow("__TAURI__ is not available");
+});
 
 test("drainPendingDiffs drops non-string payload items", async () => {
   (globalThis.window as unknown as Record<string, unknown>) = {
