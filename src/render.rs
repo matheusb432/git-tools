@@ -474,7 +474,9 @@ mod tests {
                 return false;
             }
             // start of the scheme
-            let start = html[..sep].rfind(|c: char| !c.is_ascii_alphabetic()).map_or(0, |i| i + 1);
+            let start = html[..sep]
+                .rfind(|c: char| !c.is_ascii_alphabetic())
+                .map_or(0, |i| i + 1);
             !html[start..].starts_with("https://svelte.dev/e/")
         })
     }
@@ -624,7 +626,10 @@ mod tests {
         let html = build_html(&view);
 
         assert!(html.starts_with("<!DOCTYPE html>"));
-        assert!(!has_disallowed_external_url(&html), "artifact must not reference any external http(s) resource");
+        assert!(
+            !has_disallowed_external_url(&html),
+            "artifact must not reference any external http(s) resource"
+        );
         assert!(html.contains("api"));
         assert!(html.contains("origin/main..HEAD"));
         assert!(html.contains("src/a b.rs"));
@@ -676,7 +681,10 @@ mod tests {
         assert!(html.contains(r#"<span class="notes-ico" aria-hidden="true""#));
 
         // offline: no external resource loads (CDN scripts, stylesheets, fetches)
-        assert!(!has_disallowed_external_url(&html), "artifact must not reference any external http(s) resource");
+        assert!(
+            !has_disallowed_external_url(&html),
+            "artifact must not reference any external http(s) resource"
+        );
     }
 
     #[test]
@@ -748,7 +756,10 @@ mod tests {
 
         assert!(html.contains(r#"class="theme-select""#));
         // no external resource loads (CDN scripts, stylesheets, fetches)
-        assert!(!has_disallowed_external_url(&html), "artifact must not reference any external http(s) resource");
+        assert!(
+            !has_disallowed_external_url(&html),
+            "artifact must not reference any external http(s) resource"
+        );
     }
 
     #[test]
@@ -758,7 +769,9 @@ mod tests {
         // relative path copy button: data-copy-value attribute
         assert!(html.contains(r#"data-copy-value="src/a b.rs" data-copy-label="path""#));
         // absolute path copy button: repo_root + "/" + path (POSIX join)
-        assert!(html.contains(r#"data-copy-value="/home/user/api/src/a b.rs" data-copy-label="abs""#));
+        assert!(
+            html.contains(r#"data-copy-value="/home/user/api/src/a b.rs" data-copy-label="abs""#)
+        );
         // copy-code-without-markers reads its own file's rendered rows at click time
         assert!(html.contains(r#"data-copy-mode="code""#));
     }
@@ -904,8 +917,14 @@ mod tests {
         let html = build_html(&view);
 
         // both relative and absolute data-copy-value attributes stay Maud-escaped
-        assert!(html.contains(r#"data-copy-value="src/&lt;x&gt;&amp;&quot;.rs" data-copy-label="path""#));
-        assert!(html.contains(r#"data-copy-value="/tmp/&lt;r&gt;/src/&lt;x&gt;&amp;&quot;.rs" data-copy-label="abs""#));
+        assert!(
+            html.contains(
+                r#"data-copy-value="src/&lt;x&gt;&amp;&quot;.rs" data-copy-label="path""#
+            )
+        );
+        assert!(html.contains(
+            r#"data-copy-value="/tmp/&lt;r&gt;/src/&lt;x&gt;&amp;&quot;.rs" data-copy-label="abs""#
+        ));
         assert!(!html.contains("<x>"));
     }
 

@@ -8,17 +8,21 @@ use std::{
 pub mod paths;
 pub mod policy;
 
-// OS backend selection (ADR-0003): folders named by `target_os`; siblings added
-// per OS. Phase 3 adds `#[cfg(windows)] #[path = "windows/mod.rs"] mod sys;` and
-// narrows the stub guard below.
+// OS backend selection (ADR-0003): folders named by `target_os`; one sibling per
+// OS, existing arms untouched. Linux + Windows have effectful backends; other OSes
+// (macOS dev) fall through to the stub and degrade to the browser path.
 #[cfg(target_os = "linux")]
 #[path = "linux/mod.rs"]
 mod sys;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+#[path = "windows/mod.rs"]
+mod sys;
+
+#[cfg(not(any(target_os = "linux", windows)))]
 mod sys {
-    //! Stub for OSes without an effectful backend yet (macOS dev, pre-P3 Windows).
-    //! The CLI degrades to the browser path when this returns `Unsupported`.
+    //! Stub for OSes without an effectful backend (macOS dev). The CLI degrades to
+    //! the browser path when `spawn_detached` returns `Unsupported`.
     use std::path::Path;
     pub fn spawn_detached(_program: &Path, _args: &[&str]) -> std::io::Result<()> {
         Err(std::io::Error::new(

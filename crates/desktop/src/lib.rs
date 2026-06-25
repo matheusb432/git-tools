@@ -41,7 +41,10 @@ fn focus_main(window: &tauri::WebviewWindow) {
 fn window_xid(window: &tauri::WebviewWindow) -> Option<u64> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match window.window_handle().ok()?.as_raw() {
-        RawWindowHandle::Xlib(h) => Some(h.window),
+        // ! `XlibWindowHandle::window` is `c_ulong` — u64 on Linux but u32 on Windows (LLP64),
+        // ! so this `.into()` is a real cross-platform widening, not the no-op it looks like here.
+        #[allow(clippy::useless_conversion)]
+        RawWindowHandle::Xlib(h) => Some(h.window.into()),
         RawWindowHandle::Xcb(h) => Some(h.window.get() as u64),
         _ => None,
     }

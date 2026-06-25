@@ -6,7 +6,7 @@ code lines -- red removed, green added -- with a +/- gutter. Drawn at 4x
 supersampling and downsampled with Lanczos for crisp antialiased edges.
 
 Requires Pillow (`pip install --user pillow`). Run:
-    python3 generate_icon.py            # writes icon.png (1024x1024) next to this script
+    python3 generate_icon.py            # writes icon.png (1024x1024) + icon.ico (multi-res)
 """
 from __future__ import annotations
 import os
@@ -103,9 +103,16 @@ def main() -> None:
     row(342, GREEN, 180, "+")
 
     out = img.resize((FINAL, FINAL), Image.LANCZOS)
-    dest = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
+    here = os.path.dirname(os.path.abspath(__file__))
+    dest = os.path.join(here, "icon.png")
     out.save(dest)
     print(f"wrote {dest} ({FINAL}x{FINAL})")
+
+    # Windows resource/app icon: a multi-resolution .ico embedded into the exe by tauri-build when
+    # (cross-)building for windows-msvc. Without it the Windows build fails the resource-compile step.
+    ico_dest = os.path.join(here, "icon.ico")
+    out.save(ico_dest, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+    print(f"wrote {ico_dest} (.ico multi-res)")
 
 
 if __name__ == "__main__":
