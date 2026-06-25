@@ -3,7 +3,8 @@
 use crate::{
     cli::{
         Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
-        ManagedReadArgs, PruneArgs, StatusArgs, SwArgs, TagCommand, WorktreeCommand,
+        ManagedReadArgs, PruneArgs, StatusArgs, SwArgs, TagCommand, UpArgs, UpCommand,
+        WorktreeCommand,
     },
     commands::{
         managed::{ManagedExit, ManagedOptions, ManagedRun},
@@ -110,7 +111,11 @@ fn dispatch(command: Command) -> ExitCode {
             print_squash_local_result(&result, &message);
             squash_local_exit_code(result.status)
         }
-        Command::Up { message, yes } => run_up(&message, yes),
+        Command::Up(UpArgs {
+            command: Some(UpCommand::Subrepos(sub)),
+            ..
+        }) => run_up_subrepos(sub.yes),
+        Command::Up(UpArgs { message, yes, .. }) => run_up(message.as_deref().unwrap_or(""), yes),
         Command::Sw(args) => run_sw(args),
         Command::Prune(args) => run_prune(args),
         Command::Tag(args) => run_tag(args.command, args.commits),
@@ -260,6 +265,64 @@ fn run_up(message: &str, yes: bool) -> ExitCode {
         }
         sync::Status::Fail | sync::Status::Refused => {
             eprintln!("up: {}", result.detail);
+            ExitCode::Internal
+        }
+    }
+}
+
+/// Orchestrates `up subrepos`: discover every repo under the current directory, show the
+/// confirmation listing each repo's push destination, gate on `--yes`/TTY like `up`, then
+/// push. Discovery and the resolved destinations are read-only and local — no fetch. The
+/// interactive prompt is the only side effect kept out of [`commands::up_subrepos`].
+fn run_up_subrepos(yes: bool) -> ExitCode {
+    use crate::commands::{sync, up_subrepos};
+
+    let runner = StdGitRunner;
+    // Canonicalize first (like `diff subrepos`) so repo labels read off real path segments
+    // — the root repo is named for its directory, not the bare ".".
+    let root = std::fs::canonicalize(".").unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    let targets = match up_subrepos::plan(&runner, &root) {
+        Ok(up_subrepos::SubreposPlan::Ready(targets)) => targets,
+        Ok(up_subrepos::SubreposPlan::Refused(detail)) => {
+            eprintln!("up subrepos: {detail}");
+            return ExitCode::Internal;
+        }
+        Err(error) => {
+            eprintln!("up subrepos: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+
+    println!("{}", up_subrepos::confirmation(&root, &targets));
+
+    match sync::gate(yes, is_interactive()) {
+        sync::Gate::RefuseNonInteractive => {
+            eprintln!("up subrepos: non-interactive shell; pass --yes to confirm the push");
+            return ExitCode::Usage;
+        }
+        sync::Gate::Confirm => match prompt_confirmation() {
+            Ok(sync::Answer::Yes) => {}
+            Ok(sync::Answer::No) => {
+                println!("up subrepos: aborted — nothing pushed");
+                return ExitCode::Ok;
+            }
+            Err(err) => {
+                eprintln!("up subrepos: {err} — nothing pushed");
+                return ExitCode::Usage;
+            }
+        },
+        sync::Gate::Proceed => {}
+    }
+
+    let result = up_subrepos::apply(&runner, &targets);
+    match result.status {
+        up_subrepos::Status::Ok => {
+            println!("{}", result.detail);
+            ExitCode::Ok
+        }
+        up_subrepos::Status::Partial | up_subrepos::Status::Fail => {
+            eprintln!("{}", result.detail);
             ExitCode::Internal
         }
     }

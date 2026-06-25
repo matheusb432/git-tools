@@ -76,13 +76,7 @@ pub enum Command {
         dry: bool,
     },
     /// Stage all changes, commit, and push the current repo (prompts for confirmation first).
-    Up {
-        /// Commit message for the staged changes.
-        message: String,
-        /// Skip the confirmation prompt (for non-interactive use, e.g. a justfile recipe).
-        #[arg(short = 'y', long = "yes")]
-        yes: bool,
-    },
+    Up(UpArgs),
     /// List tags, show tag commits, or push tags.
     Tag(TagArgs),
     /// Inspect git worktrees.
@@ -127,6 +121,34 @@ pub struct DiffArgs {
 pub enum DiffCommand {
     /// Render one tabbed HTML diff for every git repo under the current directory.
     Subrepos(DiffSubreposScanArgs),
+}
+
+/// Arguments for the root `up` command and its nested subcommands.
+#[derive(Debug, Args)]
+pub struct UpArgs {
+    #[command(subcommand)]
+    pub command: Option<UpCommand>,
+    /// Commit message for the staged changes (required unless a subcommand is given).
+    #[arg(allow_hyphen_values = true)]
+    pub message: Option<String>,
+    /// Skip the confirmation prompt (for non-interactive use, e.g. a justfile recipe).
+    #[arg(short = 'y', long = "yes")]
+    pub yes: bool,
+}
+
+/// Nested commands under `up`.
+#[derive(Debug, Subcommand)]
+pub enum UpCommand {
+    /// Push every git repo under the current directory to its upstream (confirms first).
+    Subrepos(UpSubreposArgs),
+}
+
+/// Flags for `up subrepos`.
+#[derive(Debug, Args)]
+pub struct UpSubreposArgs {
+    /// Skip the confirmation prompt (for non-interactive use, e.g. a justfile recipe).
+    #[arg(short = 'y', long = "yes")]
+    pub yes: bool,
 }
 
 /// Arguments for `tag`.
@@ -628,19 +650,55 @@ mod tests {
         let cli = Cli::parse_args(&["up".into(), "save work".into()]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Up { message, yes } if message == "save work" && !yes
+            Command::Up(UpArgs { command: None, message: Some(message), yes })
+                if message == "save work" && !yes
         ));
     }
 
     #[test]
     fn parse_args_up_yes_flag_sets_bypass() {
         let cli = Cli::parse_args(&["up".into(), "save work".into(), "--yes".into()]).unwrap();
-        assert!(matches!(cli.command, Command::Up { yes, .. } if yes));
+        assert!(matches!(cli.command, Command::Up(UpArgs { yes, .. }) if yes));
     }
 
     #[test]
-    fn parse_args_up_requires_a_message() {
-        assert!(Cli::parse_args(&["up".into()]).is_err());
+    fn parse_args_up_without_message_parses_but_message_is_none() {
+        // `up` requires a message at runtime (run() → Usage); clap leaves it None so the
+        // `up subrepos` subcommand can coexist with the bare-message form.
+        let cli = Cli::parse_args(&["up".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Up(UpArgs {
+                command: None,
+                message: None,
+                yes: false
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_up_subrepos_subcommand() {
+        let cli = Cli::parse_args(&["up".into(), "subrepos".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Up(UpArgs {
+                command: Some(UpCommand::Subrepos(UpSubreposArgs { yes: false })),
+                message: None,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_up_subrepos_yes_flag_sets_bypass() {
+        let cli = Cli::parse_args(&["up".into(), "subrepos".into(), "-y".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Up(UpArgs {
+                command: Some(UpCommand::Subrepos(UpSubreposArgs { yes: true })),
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -767,9 +825,8 @@ mod tests {
 
     #[test]
     fn parse_args_prune_yes_and_onto() {
-        let cli =
-            Cli::parse_args(&["prune".into(), "-y".into(), "--onto".into(), "trunk".into()])
-                .unwrap();
+        let cli = Cli::parse_args(&["prune".into(), "-y".into(), "--onto".into(), "trunk".into()])
+            .unwrap();
         assert!(matches!(
             cli.command,
             Command::Prune(PruneArgs { yes: true, onto: Some(o), .. }) if o == "trunk"

@@ -13,6 +13,7 @@ pub mod squash_preview;
 pub mod sw;
 pub mod sync;
 pub mod tag;
+pub mod up_subrepos;
 pub mod worktree;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
