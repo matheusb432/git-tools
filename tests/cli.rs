@@ -100,6 +100,55 @@ fn diff_help_lists_the_subrepos_subcommand() {
 }
 
 #[test]
+fn diff_help_documents_set_theme() {
+    git_tools()
+        .args(["diff", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--set-theme"));
+}
+
+#[test]
+fn diff_set_theme_writes_config_and_exits_zero() {
+    // Points the config at a not-yet-existing path to prove the writer creates parents.
+    // No git repo needed: persisting the theme is a pure config write.
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("nested").join("config.toml");
+    git_tools()
+        .args(["diff", "--set-theme", "hearth"])
+        .env("GIT_TOOLS_CONFIG", &config)
+        .assert()
+        .success()
+        .stdout(contains("hearth"));
+    let written = std::fs::read_to_string(&config).expect("config written");
+    assert!(written.contains("theme = \"hearth\""), "got: {written}");
+}
+
+#[test]
+fn diff_set_theme_preserves_existing_config_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("config.toml");
+    std::fs::write(&config, "[diff]\nviewer = \"browser\"\n").unwrap();
+    git_tools()
+        .args(["diff", "--set-theme", "light"])
+        .env("GIT_TOOLS_CONFIG", &config)
+        .assert()
+        .success();
+    let written = std::fs::read_to_string(&config).unwrap();
+    assert!(written.contains("theme = \"light\""), "got: {written}");
+    assert!(written.contains("viewer = \"browser\""), "got: {written}");
+}
+
+#[test]
+fn diff_set_theme_rejects_unknown_value_exit_2() {
+    git_tools()
+        .args(["diff", "--set-theme", "neon"])
+        .assert()
+        .code(2)
+        .stderr(contains("error"));
+}
+
+#[test]
 fn diff_subrepos_help_documents_the_last_flag() {
     git_tools()
         .args(["diff", "subrepos", "--help"])

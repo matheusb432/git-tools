@@ -225,6 +225,34 @@ pub struct DiffTargetArgs {
     /// Home directory used to resolve managed-repo paths (overrides `$HOME`).
     #[arg(long, requires = "all")]
     pub home_dir: Option<String>,
+    /// Persist the diff-preview theme to the user config and exit without rendering.
+    /// The same `theme` key stays editable by hand in the config TOML.
+    #[arg(
+        long,
+        value_name = "THEME",
+        conflicts_with_all = ["all", "unpushed", "target", "last", "merge", "name", "repos_file", "home_dir"],
+    )]
+    pub set_theme: Option<Theme>,
+}
+
+/// Diff-preview color theme persisted to the user config by `diff --set-theme`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "lower")]
+pub enum Theme {
+    Dark,
+    Light,
+    Hearth,
+}
+
+impl Theme {
+    /// The config-file string for this theme (matches `config::KNOWN_THEMES`).
+    pub fn as_config_str(self) -> &'static str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+            Self::Hearth => "hearth",
+        }
+    }
 }
 
 /// Flags for `diff subrepos`.
@@ -577,6 +605,39 @@ mod tests {
     #[test]
     fn parse_args_diff_rejects_blank_name() {
         assert!(Cli::parse_args(&["diff".into(), "--name".into(), "  ".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_diff_set_theme_accepts_known_value() {
+        let cli = Cli::parse_args(&["diff".into(), "--set-theme".into(), "hearth".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                target: DiffTargetArgs {
+                    set_theme: Some(Theme::Hearth),
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_diff_set_theme_rejects_unknown_value() {
+        assert!(Cli::parse_args(&["diff".into(), "--set-theme".into(), "bogus".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_diff_set_theme_conflicts_with_a_target() {
+        assert!(
+            Cli::parse_args(&[
+                "diff".into(),
+                "abc123".into(),
+                "--set-theme".into(),
+                "dark".into()
+            ])
+            .is_err()
+        );
     }
 
     #[test]

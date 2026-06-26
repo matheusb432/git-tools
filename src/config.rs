@@ -1,8 +1,9 @@
 //! User TOML config for the diff renderer. A bad/missing config must never break
 //! rendering, so every failure path degrades to [`GtlConfig::default`].
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use anyhow::{Context, Result};
 use serde::Deserialize;
 
 /// Theme values the renderer knows how to honour; anything else resolves to `None`.
@@ -85,6 +86,40 @@ fn config_path() -> Option<PathBuf> {
 /// Load the effective user config from the environment.
 pub fn load() -> GtlConfig {
     load_from(config_path())
+}
+
+/// Set the `theme` key in `raw` TOML, preserving every other key, formatting, and
+/// comment. Unlike the reader, a corrupt config is an error here — we refuse to
+/// clobber a file we cannot parse.
+fn set_theme_in_toml(raw: &str, theme: &str) -> Result<String> {
+    let mut doc = raw
+        .parse::<toml_edit::DocumentMut>()
+        .context("parse existing config TOML")?;
+    doc["theme"] = toml_edit::value(theme);
+    Ok(doc.to_string())
+}
+
+/// Write `theme` into the config file at `path`, creating it (and any missing
+/// parent directories) while preserving any existing content.
+fn save_theme_to(path: &Path, theme: &str) -> Result<()> {
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let updated = set_theme_in_toml(&existing, theme)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create config directory {}", parent.display()))?;
+    }
+    std::fs::write(path, updated).with_context(|| format!("write config {}", path.display()))?;
+    Ok(())
+}
+
+/// Persist `theme` into the user config, resolving the path from the environment.
+/// Returns the path written so the caller can report it.
+pub fn save_theme(theme: &str) -> Result<PathBuf> {
+    let path = config_path().context(
+        "could not resolve a config path (no GIT_TOOLS_CONFIG, XDG_CONFIG_HOME, or HOME)",
+    )?;
+    save_theme_to(&path, theme)?;
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -206,5 +241,57 @@ mod tests {
         // A flat top-level `viewer` key must NOT be honoured — the schema is nested.
         // Users who set it without a `[diff]` header stay on the default (App).
         assert_eq!(from_toml("viewer = \"browser\"").diff.viewer, Viewer::App);
+    }
+
+    #[test]
+    fn set_theme_in_toml_writes_into_empty_config() {
+        assert_eq!(set_theme_in_toml("", "dark").unwrap(), "theme = \"dark\"\n");
+    }
+
+    #[test]
+    fn set_theme_in_toml_overwrites_existing_theme() {
+        let updated = set_theme_in_toml("theme = \"light\"\n", "hearth").unwrap();
+        assert_eq!(updated, "theme = \"hearth\"\n");
+    }
+
+    #[test]
+    fn set_theme_in_toml_preserves_other_keys_and_comments() {
+        let raw = "# my config\ntheme = \"light\"\n\n[diff]\nviewer = \"browser\" # keep me\n";
+        let updated = set_theme_in_toml(raw, "dark").unwrap();
+        assert!(
+            updated.contains("# my config"),
+            "comment dropped: {updated}"
+        );
+        assert!(
+            updated.contains("theme = \"dark\""),
+            "theme not set: {updated}"
+        );
+        assert!(
+            updated.contains("viewer = \"browser\" # keep me"),
+            "viewer/comment dropped: {updated}"
+        );
+    }
+
+    #[test]
+    fn set_theme_in_toml_rejects_unparseable_config() {
+        assert!(set_theme_in_toml("not valid toml {{{", "dark").is_err());
+    }
+
+    #[test]
+    fn save_theme_to_creates_file_that_round_trips_through_load() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("git-tools").join("config.toml");
+        save_theme_to(&path, "hearth").expect("save theme");
+        assert_eq!(load_from(Some(path)).theme.as_deref(), Some("hearth"));
+    }
+
+    #[test]
+    fn save_theme_to_preserves_an_existing_viewer_setting() {
+        let mut file = NamedTempFile::new().expect("create temp config");
+        write!(file, "[diff]\nviewer = \"browser\"\n").expect("seed config");
+        save_theme_to(file.path(), "light").expect("save theme");
+        let config = load_from(Some(file.path().to_path_buf()));
+        assert_eq!(config.theme.as_deref(), Some("light"));
+        assert_eq!(config.diff.viewer, Viewer::Browser);
     }
 }

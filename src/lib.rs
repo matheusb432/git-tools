@@ -3,7 +3,7 @@
 use crate::{
     cli::{
         Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
-        ManagedReadArgs, PruneArgs, StatusArgs, SwArgs, TagCommand, UpArgs, UpCommand,
+        ManagedReadArgs, PruneArgs, StatusArgs, SwArgs, TagCommand, Theme, UpArgs, UpCommand,
         WorktreeCommand,
     },
     commands::{
@@ -82,6 +82,9 @@ fn dispatch(command: Command) -> ExitCode {
             html_exit(commands::squash_preview::run(repo))
         }
         Command::Diff(args) => {
+            if let Some(theme) = args.target.set_theme {
+                return run_set_theme(theme);
+            }
             match args.command {
                 Some(DiffCommand::Subrepos(subrepos)) => diff_exit(
                     commands::diff_subrepos::run_scan(".", subrepos.last, subrepos.worktrees),
@@ -137,6 +140,24 @@ fn dispatch(command: Command) -> ExitCode {
             managed,
             message_for_all,
         ))),
+    }
+}
+
+/// Persist the diff-preview theme to the user config and exit (no rendering).
+fn run_set_theme(theme: Theme) -> ExitCode {
+    match config::save_theme(theme.as_config_str()) {
+        Ok(path) => {
+            println!(
+                "diff-preview theme set to \"{}\" in {}",
+                theme.as_config_str(),
+                path.display()
+            );
+            ExitCode::Ok
+        }
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            ExitCode::Internal
+        }
     }
 }
 
