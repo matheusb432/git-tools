@@ -8,6 +8,7 @@ use anyhow::Context;
 use crate::{
     cli::DiffTarget,
     commands::{
+        diff::DiffOutcome,
         discover::{discover_git_repos, repo_label},
         managed::{self, ManagedOptions},
     },
@@ -19,7 +20,7 @@ pub fn run_scan(
     root: impl AsRef<Path>,
     last: Option<NonZeroU32>,
     include_worktrees: bool,
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<DiffOutcome> {
     let root = std::fs::canonicalize(root.as_ref())
         .with_context(|| format!("failed to resolve {}", root.as_ref().display()))?;
     let repos = discover_git_repos(&root, include_worktrees)?;
@@ -27,13 +28,34 @@ pub fn run_scan(
         anyhow::bail!("diff subrepos: no git repos found under {}", root.display());
     }
 
+    // Build a view per repo, but keep only the ones with something to show — an empty
+    // range (no commits or changes) would render a blank tab that reads as a bug, exactly
+    // the case single-repo `diff` already skips. Skipped repos are reported to the terminal
+    // so the empty result is visible; only relevant repos reach the template.
     let target = last.map_or(DiffTarget::Unpushed, DiffTarget::Last);
     let mut views = Vec::with_capacity(repos.len());
+    let mut skipped = 0usize;
     for repo in &repos {
         let top = git::top_level(repo)?;
-        let (mut view, _) = super::diff::build_view(&top, &target)?;
-        view.repo_name = repo_label(&root, Path::new(&top));
-        views.push(view);
+        let label = repo_label(&root, Path::new(&top));
+        match super::diff::build_view(&top, &target) {
+            Ok((mut view, _)) if !view.is_empty() => {
+                view.repo_name = label;
+                views.push(view);
+            }
+            // Empty range (nothing to preview), or a repo whose view can't be built — either
+            // way it has nothing to show. Skipped repos are summarized below, not listed
+            // one-by-one, so a tree full of up-to-date repos stays quiet.
+            Ok(_) | Err(_) => skipped += 1,
+        }
+    }
+
+    if views.is_empty() {
+        eprintln!(
+            "diff subrepos: nothing to show across {} repo(s); no preview written",
+            repos.len()
+        );
+        return Ok(DiffOutcome::Empty);
     }
 
     let html = build_tabbed_html("diff-preview subrepos", &views);
@@ -50,9 +72,12 @@ pub fn run_scan(
     let out_file = super::store_artifact(&meta, &html)?;
 
     println!("diff subrepos: {} repo(s)", views.len());
+    if skipped > 0 {
+        eprintln!("diff subrepos: skipped {skipped} repo(s) with nothing to show");
+    }
     println!("wrote {}", out_file.display());
     super::open_artifact(&out_file);
-    Ok(out_file)
+    Ok(DiffOutcome::Rendered(out_file))
 }
 
 pub fn run_managed_all(

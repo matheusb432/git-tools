@@ -83,7 +83,7 @@ fn dispatch(command: Command) -> ExitCode {
         }
         Command::Diff(args) => {
             match args.command {
-                Some(DiffCommand::Subrepos(subrepos)) => html_exit(
+                Some(DiffCommand::Subrepos(subrepos)) => diff_exit(
                     commands::diff_subrepos::run_scan(".", subrepos.last, subrepos.worktrees),
                 ),
                 None => match diff_invocation(args.target) {

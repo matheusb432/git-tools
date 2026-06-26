@@ -173,7 +173,10 @@ pub fn apply(runner: &impl GitRunner, top: &Path, branches: &[Branch]) -> PruneR
 
     let mut detail = format!("deleted {} branch{}.", deleted.len(), plural(deleted.len()));
     for branch in &deleted {
-        detail.push_str(&format!("\nrecover: git branch {} {}", branch.name, branch.sha));
+        detail.push_str(&format!(
+            "\nrecover: git branch {} {}",
+            branch.name, branch.sha
+        ));
     }
     for branch in &failed {
         detail.push_str(&format!("\nfailed: {} — {}", branch.name, branch.reason));

@@ -1115,6 +1115,62 @@ fn diff_subrepos_without_upstreams_falls_back_to_main() {
 }
 
 #[test]
+fn diff_subrepos_skips_repos_with_nothing_to_show() {
+    let repos = NestedRepos::new(&["api", "web"]);
+    // api: up to date with its upstream — nothing unpushed, so it has nothing to show.
+    add_upstream_for(&repos.repos[0], &repos.root.join("api.git"));
+    // web: one commit ahead of its upstream — real unpushed work to preview.
+    add_upstream_for(&repos.repos[1], &repos.root.join("web.git"));
+    commit_in(
+        &repos.repos[1],
+        "README.md",
+        "base\nlocal\nweb unpushed\n",
+        "feat: queued work",
+    );
+
+    let (stdout, stderr) = run_success(repos.run(&["diff", "subrepos"]));
+
+    // Only the repo with work is rendered; the empty one is reported, not tabbed.
+    assert!(
+        stdout.contains("diff subrepos: 1 repo(s)"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stderr.contains("skipped 1 repo(s) with nothing to show"),
+        "skip summary missing from stderr: {stderr}"
+    );
+
+    let artifact = artifact_from_stdout(&stdout);
+    let html = std::fs::read_to_string(&artifact).unwrap();
+    assert_eq!(
+        html.matches(r#"<button class="tab"#).count(),
+        1,
+        "only the non-empty repo should have a tab"
+    );
+    assert!(html.contains("feat: queued work"), "renders web's work");
+}
+
+#[test]
+fn diff_subrepos_all_empty_writes_no_preview() {
+    let repos = NestedRepos::new(&["api", "web"]);
+    // Both repos are up to date with their upstreams — nothing to show anywhere.
+    add_upstream_for(&repos.repos[0], &repos.root.join("api.git"));
+    add_upstream_for(&repos.repos[1], &repos.root.join("web.git"));
+
+    let (stdout, stderr) = run_success(repos.run(&["diff", "subrepos"]));
+
+    // No artifact is written, and the empty result is surfaced in the terminal.
+    assert!(
+        !stdout.contains("wrote "),
+        "no preview should be written: {stdout}"
+    );
+    assert!(
+        stderr.contains("nothing to show across 2 repo(s)"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
 fn diff_all_writes_one_tabbed_artifact_for_managed_unpushed_repos() {
     let repos = NestedRepos::new(&["api", "web"]);
     for repo in &repos.repos {

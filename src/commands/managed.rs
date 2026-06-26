@@ -488,10 +488,7 @@ pub fn format_prune(onto: &str, dry: bool, json: bool, results: &[PruneRepoResul
 
     let verb = if dry { "dry prune" } else { "prune" };
     let mut out = format!("{verb} (merged into '{onto}')\n\n");
-    out.push_str(&format!(
-        "{:<30} {:<10} {}\n",
-        "REPO", "BRANCHES", "DETAIL"
-    ));
+    out.push_str(&format!("{:<30} {:<10} {}\n", "REPO", "BRANCHES", "DETAIL"));
     for result in results {
         let count = if result.failed.is_empty() {
             result.deleted.len().to_string()

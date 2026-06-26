@@ -44,10 +44,16 @@ fn setup() -> (TempDir, std::path::PathBuf) {
     git(&repo, &["config", "user.name", "E2E Bot"]);
     git(&repo, &["config", "user.email", "e2e@example.invalid"]);
     git(&repo, &["config", "commit.gpgsign", "false"]);
-    git(&repo, &["commit", "-q", "--allow-empty", "-m", "chore: base"]);
+    git(
+        &repo,
+        &["commit", "-q", "--allow-empty", "-m", "chore: base"],
+    );
 
     git(&repo, &["switch", "-qc", "feat/merged"]);
-    git(&repo, &["commit", "-q", "--allow-empty", "-m", "feat: done"]);
+    git(
+        &repo,
+        &["commit", "-q", "--allow-empty", "-m", "feat: done"],
+    );
     git(&repo, &["switch", "-q", "main"]);
     git(&repo, &["merge", "-q", "--ff-only", "feat/merged"]);
 
