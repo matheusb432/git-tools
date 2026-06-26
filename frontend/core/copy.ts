@@ -1,5 +1,11 @@
 export function extractCopyText(file: Element): string {
-  const rows = file.querySelectorAll(".diff:not([hidden]) .dl-add, .diff:not([hidden]) .dl-ctx");
+  // ! Copy the whole file's changes from the unified pane regardless of the on-screen layout
+  // ! (the split panes lay the same lines across two columns). Honour the full-file toggle.
+  const full = document.documentElement.dataset["diffFull"] === "on";
+  const unified =
+    (full ? file.querySelector(".diff-unified.diff-full") : null) ??
+    file.querySelector(".diff-unified.diff-compact");
+  const rows = unified ? Array.from(unified.querySelectorAll(".dl-add, .dl-ctx")) : [];
   const out: string[] = [];
   let firstLine: number | null = null;
   let lastLine: number | null = null;

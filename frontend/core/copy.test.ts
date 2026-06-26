@@ -74,13 +74,17 @@ function makeFileStub(rowsHtml: string, attrs: Record<string, string> = {}): obj
     },
   };
 
+  // The unified pane holds the canonical .dl-add/.dl-ctx rows; copy reads it regardless of
+  // the on-screen layout. Returning it only for the .diff-unified selectors guards against a
+  // regression that copied from the split panes (which carry no such rows).
+  const unifiedEl = {
+    querySelectorAll: (sel: string): object[] =>
+      sel.includes("dl-add") || sel.includes("dl-ctx") ? rowEls : [],
+  };
+
   return {
-    querySelectorAll: (sel: string): object[] => {
-      // Match .diff:not([hidden]) .dl-add, .diff:not([hidden]) .dl-ctx — require the
-      // :not([hidden]) guard so dropping it in production (copying hidden panes) fails here.
-      if (sel.includes(":not([hidden])") && (sel.includes("dl-add") || sel.includes("dl-ctx"))) return rowEls;
-      return [];
-    },
+    querySelector: (sel: string): object | null =>
+      sel === ".diff-unified.diff-compact" || sel === ".diff-unified.diff-full" ? unifiedEl : null,
     closest: (sel: string): object | null => sel === ".layout" ? layoutEl : null,
     getAttribute: (name: string): string | null => attrs[name] ?? null,
   };

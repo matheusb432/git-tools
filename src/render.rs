@@ -9,10 +9,10 @@ const ROW_PX: usize = 22;
 const PREVIEW_CSS: &str = include_str!("embedded/preview.css");
 const PREVIEW_BUNDLE: &str = include_str!("embedded/generated/preview.js");
 
-// ! Head boot: restore the saved theme before paint to avoid a flash of the default palette.
-// ! IIFE-wrapped so `t` never leaks to global scope: a leaked var could clobber a minified
-// ! bundle's single-letter globals.
-const THEME_BOOT_JS: &str = "(function(){try{var t=localStorage.getItem('gtl-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}})();";
+// ! Head boot: restore the saved theme and diff layout before paint to avoid a flash of the
+// ! default palette / a split→unified flip. IIFE-wrapped so the locals never leak to global
+// ! scope: a leaked var could clobber a minified bundle's single-letter globals.
+const THEME_BOOT_JS: &str = "(function(){try{var d=document.documentElement.dataset;var t=localStorage.getItem('gtl-theme');if(t)d.theme=t;var l=localStorage.getItem('gtl-diff-layout');if(l==='unified')d.diffLayout='unified';}catch(e){}})();";
 
 pub fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -142,6 +142,7 @@ fn view_body(view: &View) -> Markup {
                 }
                 div.spacer {}
                 button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
+                button type="button" class="layout-toggle active" aria-pressed="true" title="Side-by-side / unified diff" { "Side by side" }
                 button type="button" class="view-toggle" aria-pressed="false" title="Show full-file diffs" { "Full file" }
                 button type="button" class="ctx-toggle active" aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
                 label.theme-control {
@@ -326,17 +327,142 @@ fn long_len(raw: &str) -> Option<usize> {
     (len > MAX_LINE_COLS).then_some(len)
 }
 
+// ! Inner content of a `<code>` cell: the bare body, or — for a tamed long line — the copy-safe
+// ! `.code-text` span plus the expander button. Shared by the unified `code_cell` and the
+// ! side-by-side `split_code` so the long-line taming lives in exactly one place.
+fn code_inner(raw: &str, long: Option<usize>) -> String {
+    let body = html_or_nbsp(raw);
+    match long {
+        None => body,
+        Some(len) => format!(
+            r#"<span class="code-text">{body}</span><button class="ln-more" type="button" aria-expanded="false">⋯ {len} chars</button>"#
+        ),
+    }
+}
+
 // ! Long lines (e.g. base64 data URIs) would force char-by-char wrap layout and freeze the
 // ! page. Tame them: full text stays in `.code-text` (copy-safe) but renders clipped/no-wrap,
 // ! with an expander that reveals horizontal scroll. `long` is the precomputed Some(len).
 fn code_cell(raw: &str, long: Option<usize>) -> String {
-    let body = html_or_nbsp(raw);
-    let Some(len) = long else {
-        return format!("<code>{body}</code>");
+    let inner = code_inner(raw, long);
+    if long.is_some() {
+        format!(r#"<code class="long">{inner}</code>"#)
+    } else {
+        format!("<code>{inner}</code>")
+    }
+}
+
+// ! One side of a side-by-side row: a `<code>` carrying the change color (`side` is
+// ! `sp-del`/`sp-add`/`sp-ctx`) and, for changed lines, the owning-commit attribute that
+// ! drives the per-commit focus highlight. Long lines reuse `code_inner`'s taming.
+fn split_code(raw: &str, long: Option<usize>, side: &str, commit: Option<&String>) -> String {
+    let inner = code_inner(raw, long);
+    let attr = commit_attr(commit);
+    if long.is_some() {
+        format!(r#"<code class="sp {side} long"{attr}>{inner}</code>"#)
+    } else {
+        format!(r#"<code class="sp {side}"{attr}>{inner}</code>"#)
+    }
+}
+
+// ! An empty side of a side-by-side row — no line on this pane, so a blank gutter and a
+// ! filler cell that CSS shades to mark the gap (VS Code's "no corresponding line").
+const SPLIT_PAD: &str = r#"<span class="ln"></span><code class="sp sp-pad"></code>"#;
+
+// Side-by-side (VS Code-style) counterpart of `render_diff_lines`: the same parsed diff laid
+// out as old | new panes. Within a hunk, a run of deletions is paired index-wise with the
+// following run of additions (the shorter side padded), context lines mirror on both panes,
+// and meta/hunk headers span the full width. Same gutter-number tracking and owner tagging.
+pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
+    use std::fmt::Write;
+
+    let mut old_no = 0u32;
+    let mut new_no = 0u32;
+    let mut rows = String::with_capacity(lines.iter().map(String::len).sum::<usize>() * 3);
+    // Buffered change runs: (gutter number, raw line). Flushed (paired) at any non-+/- line.
+    let mut dels: Vec<(u32, &String)> = Vec::new();
+    let mut adds: Vec<(u32, &String)> = Vec::new();
+
+    let flush = |rows: &mut String, dels: &mut Vec<(u32, &String)>, adds: &mut Vec<(u32, &String)>| {
+        for i in 0..dels.len().max(adds.len()) {
+            rows.push_str(r#"<div class="dl">"#);
+            match dels.get(i) {
+                Some((no, raw)) => {
+                    let _ = write!(
+                        rows,
+                        r#"<span class="ln">{no}</span>{}"#,
+                        split_code(raw, long_len(raw), "sp-del", owners.deleted.get(no)),
+                    );
+                }
+                None => rows.push_str(SPLIT_PAD),
+            }
+            match adds.get(i) {
+                Some((no, raw)) => {
+                    let _ = write!(
+                        rows,
+                        r#"<span class="ln">{no}</span>{}"#,
+                        split_code(raw, long_len(raw), "sp-add", owners.added.get(no)),
+                    );
+                }
+                None => rows.push_str(SPLIT_PAD),
+            }
+            rows.push_str("</div>");
+        }
+        dels.clear();
+        adds.clear();
     };
-    format!(
-        r#"<code class="long"><span class="code-text">{body}</span><button class="ln-more" type="button" aria-expanded="false">⋯ {len} chars</button></code>"#
-    )
+
+    for raw in lines {
+        if raw.is_empty() {
+            continue;
+        }
+
+        if is_meta_line(raw) {
+            flush(&mut rows, &mut dels, &mut adds);
+            let _ = write!(
+                rows,
+                r#"<div class="dl dl-meta"><code>{}</code></div>"#,
+                html_or_nbsp(raw)
+            );
+            continue;
+        }
+
+        if let Some((old_start, new_start)) = hunk_starts(raw) {
+            flush(&mut rows, &mut dels, &mut adds);
+            old_no = old_start;
+            new_no = new_start;
+            let _ = write!(
+                rows,
+                r#"<div class="dl dl-hunk"><code>{}</code></div>"#,
+                escape_html(raw)
+            );
+            continue;
+        }
+
+        if raw.starts_with('+') && !raw.starts_with("+++") {
+            adds.push((new_no, raw));
+            new_no += 1;
+        } else if raw.starts_with('-') && !raw.starts_with("---") {
+            dels.push((old_no, raw));
+            old_no += 1;
+        } else {
+            flush(&mut rows, &mut dels, &mut adds);
+            let long = long_len(raw);
+            let _ = write!(
+                rows,
+                r#"<div class="dl"><span class="ln">{}</span>{}<span class="ln">{}</span>{}</div>"#,
+                old_no,
+                split_code(raw, long, "sp-ctx", None),
+                new_no,
+                split_code(raw, long, "sp-ctx", None),
+            );
+            old_no += 1;
+            new_no += 1;
+        }
+    }
+    flush(&mut rows, &mut dels, &mut adds);
+
+    rows
 }
 
 fn hunk_starts(raw: &str) -> Option<(u32, u32)> {
@@ -448,10 +574,14 @@ fn file_blocks(view: &View) -> Markup {
                 // ! Diff rows live in their own body so content-visibility virtualizes the
                 // ! heavy content here while the summary stays sticky against `.main` (size
                 // ! containment on `details.file` itself would trap the sticky in the box).
+                // ! Four diff renderings; one is revealed by CSS from the <html> data-diff-layout
+                // ! (split is the default) / data-diff-full attributes — no `hidden` plumbing.
                 div class="filebody" style=(intrinsic) {
-                    div class="diff diff-compact" { (PreEscaped(render_diff_lines(&file.lines, &file.owners))) }
+                    div class="diff diff-split diff-compact" { (PreEscaped(render_diff_split(&file.lines, &file.owners))) }
+                    div class="diff diff-unified diff-compact" { (PreEscaped(render_diff_lines(&file.lines, &file.owners))) }
                     @if let Some(full_lines) = &file.full_lines {
-                        div class="diff diff-full" hidden { (PreEscaped(render_diff_lines(full_lines, &file.owners))) }
+                        div class="diff diff-split diff-full" { (PreEscaped(render_diff_split(full_lines, &file.owners))) }
+                        div class="diff diff-unified diff-full" { (PreEscaped(render_diff_lines(full_lines, &file.owners))) }
                     }
                 }
             }
@@ -537,9 +667,104 @@ mod tests {
     }
 
     #[test]
+    fn render_diff_split_pairs_changes_and_mirrors_context() {
+        let html = render_diff_split(
+            &[
+                "index 111..222 100644".to_string(),
+                "@@ -3,2 +7,2 @@".to_string(),
+                " keep".to_string(),
+                "-old".to_string(),
+                "+new".to_string(),
+            ],
+            &LineOwners::default(),
+        );
+
+        // meta + hunk headers span the full width (single cell, no gutters)
+        assert!(html.contains(r#"<div class="dl dl-meta"><code>index 111..222 100644</code></div>"#));
+        assert!(html.contains(r#"<div class="dl dl-hunk"><code>@@ -3,2 +7,2 @@</code></div>"#));
+        // a context line mirrors onto both panes with each pane's gutter number
+        assert!(html.contains(r#"<div class="dl"><span class="ln">3</span><code class="sp sp-ctx"> keep</code><span class="ln">7</span><code class="sp sp-ctx"> keep</code></div>"#));
+        // a deletion pairs with the following addition on one row: old pane | new pane
+        assert!(html.contains(r#"<div class="dl"><span class="ln">4</span><code class="sp sp-del">-old</code><span class="ln">8</span><code class="sp sp-add">+new</code></div>"#));
+    }
+
+    #[test]
+    fn render_diff_split_pads_the_shorter_change_run() {
+        let html = render_diff_split(
+            &[
+                "@@ -1,2 +1,1 @@".to_string(),
+                "-a".to_string(),
+                "-b".to_string(),
+                "+c".to_string(),
+            ],
+            &LineOwners::default(),
+        );
+
+        // first deletion pairs with the lone addition
+        assert!(html.contains(r#"<div class="dl"><span class="ln">1</span><code class="sp sp-del">-a</code><span class="ln">1</span><code class="sp sp-add">+c</code></div>"#));
+        // the surplus deletion gets a blank, shaded filler on the new pane
+        assert!(html.contains(r#"<div class="dl"><span class="ln">2</span><code class="sp sp-del">-b</code><span class="ln"></span><code class="sp sp-pad"></code></div>"#));
+    }
+
+    #[test]
+    fn render_diff_split_tags_sides_with_owning_commit() {
+        let mut owners = crate::model::LineOwners::default();
+        owners.added.insert(8, "abc123def".to_string());
+        owners.deleted.insert(4, "fff000aaa".to_string());
+        let html = render_diff_split(
+            &[
+                "@@ -3,2 +7,2 @@".to_string(),
+                " keep".to_string(),
+                "-old".to_string(),
+                "+new".to_string(),
+            ],
+            &owners,
+        );
+
+        assert!(html.contains(r#"<code class="sp sp-del" data-commit="fff000aaa">-old</code>"#));
+        assert!(html.contains(r#"<code class="sp sp-add" data-commit="abc123def">+new</code>"#));
+        // context sides carry no owner attribute
+        assert!(html.contains(r#"<code class="sp sp-ctx"> keep</code>"#));
+    }
+
+    #[test]
+    fn render_diff_split_tames_overlong_lines() {
+        let long = format!("+{}", "a".repeat(MAX_LINE_COLS + 5));
+        let html = render_diff_split(&["@@ -0,0 +1 @@".to_string(), long], &LineOwners::default());
+        assert!(html.contains(r#"<code class="sp sp-add long">"#));
+        assert!(html.contains(r#"<span class="code-text">"#));
+        assert!(html.contains(&format!(
+            r#"<button class="ln-more" type="button" aria-expanded="false">⋯ {} chars</button>"#,
+            MAX_LINE_COLS + 5
+        )));
+    }
+
+    #[test]
+    fn preview_css_drives_split_default_and_breakpoint_fallback() {
+        // base: every pane hidden until a rule reveals exactly one
+        assert!(PREVIEW_CSS.contains(".filebody .diff{display:none}"));
+        // split is the default pane above the breakpoint (no data-diff-layout attr)
+        assert!(PREVIEW_CSS.contains("@media (min-width:1025px)"));
+        assert!(PREVIEW_CSS.contains(
+            r#"html:not([data-diff-layout="unified"]):not([data-diff-full="on"]) .diff-split.diff-compact{display:block}"#
+        ));
+        // unified is shown when the attr flips
+        assert!(PREVIEW_CSS.contains(
+            r#"html[data-diff-layout="unified"]:not([data-diff-full="on"]) .diff-unified.diff-compact{display:block}"#
+        ));
+        // narrow screens force the combined pane and hide the layout toggle
+        assert!(PREVIEW_CSS.contains(".layout-toggle{display:none}"));
+        // four-column split grid + the per-pane change colors
+        assert!(PREVIEW_CSS
+            .contains(".diff-split .dl{grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr)"));
+        assert!(PREVIEW_CSS.contains(".diff-split .sp-add{background:var(--add-bg)"));
+        assert!(PREVIEW_CSS.contains(".diff-split .sp-del{background:var(--del-bg)"));
+    }
+
+    #[test]
     fn preview_css_tames_long_lines_without_wrap() {
-        assert!(PREVIEW_CSS.contains(".dl-long .code-text{flex:1;min-width:0;white-space:pre"));
-        assert!(PREVIEW_CSS.contains(".dl-long.expanded .code-text{overflow-x:auto"));
+        assert!(PREVIEW_CSS.contains(".dl-long .code-text,.diff-split code.long .code-text{flex:1;min-width:0;white-space:pre"));
+        assert!(PREVIEW_CSS.contains(".dl-long.expanded .code-text,.diff-split code.long.expanded .code-text{overflow-x:auto"));
     }
 
     #[test]
@@ -704,7 +929,8 @@ mod tests {
     fn commit_focus_highlight_is_wired() {
         // ! JS behavior: resolveActiveSet (toggle/member-set) covered by bun preview.test.ts.
         // ! owned-row DOM mutation is event-listener-only and not extracted.
-        assert!(PREVIEW_CSS.contains(".commit-focus .dl.owned{opacity:1}"));
+        assert!(PREVIEW_CSS.contains(".commit-focus .diff-unified .dl.owned{opacity:1}"));
+        assert!(PREVIEW_CSS.contains(".commit-focus .diff-split .sp.owned{opacity:1"));
         assert!(PREVIEW_CSS.contains("inset 3px 0 0 var(--acc)"));
         assert!(PREVIEW_CSS.contains("prefers-reduced-motion"));
     }
@@ -789,13 +1015,20 @@ mod tests {
     }
 
     #[test]
-    fn build_html_renders_global_full_file_toggle_and_alternate_panes() {
+    fn build_html_renders_layout_and_full_file_toggles_with_all_four_panes() {
         let html = build_html(&sample_view());
 
-        assert!(html.contains(r#"class="view-toggle""#));
-        assert!(html.contains(r#"aria-pressed="false""#));
-        assert!(html.contains(r#"class="diff diff-compact""#));
-        assert!(html.contains(r#"class="diff diff-full" hidden"#));
+        // both header toggles: side-by-side is the default (pressed), full file is not
+        assert!(html.contains(r#"class="layout-toggle active" aria-pressed="true""#));
+        assert!(html.contains(r#"class="view-toggle" aria-pressed="false""#));
+        // all four diff renderings ship; CSS reveals one (no `hidden` plumbing)
+        assert!(html.contains(r#"class="diff diff-split diff-compact""#));
+        assert!(html.contains(r#"class="diff diff-unified diff-compact""#));
+        assert!(html.contains(r#"class="diff diff-split diff-full""#));
+        assert!(html.contains(r#"class="diff diff-unified diff-full""#));
+        // visibility is CSS-driven now; the diff blocks carry no `hidden` attribute
+        assert!(!html.contains(r#"diff-full" hidden"#));
+        assert!(!html.contains(r#"diff-compact" hidden"#));
     }
 
     #[test]

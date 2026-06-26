@@ -45,9 +45,9 @@
   .branchline{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2)}
   .branchline .ref-branch{color:var(--acc)} .branchline .ref-up{color:var(--ink-3)} .branchline .arr{color:var(--ink-3)}
   .spacer{flex:1}
-  .foldall,.view-toggle,.ctx-toggle{font:inherit;font-size:12px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:6px 10px;cursor:pointer;transition:.13s}
-  .foldall:hover,.view-toggle:hover,.view-toggle.active,.ctx-toggle:hover,.ctx-toggle.active{color:var(--ink);border-color:var(--acc-line)}
-  .view-toggle.active,.ctx-toggle.active{background:var(--acc-soft)}
+  .foldall,.layout-toggle,.view-toggle,.ctx-toggle{font:inherit;font-size:12px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:6px 10px;cursor:pointer;transition:.13s}
+  .foldall:hover,.layout-toggle:hover,.layout-toggle.active,.view-toggle:hover,.view-toggle.active,.ctx-toggle:hover,.ctx-toggle.active{color:var(--ink);border-color:var(--acc-line)}
+  .layout-toggle.active,.view-toggle.active,.ctx-toggle.active{background:var(--acc-soft)}
   .theme-control{display:inline-flex;align-items:center;gap:6px}
   .theme-control span{color:var(--ink-2);font-size:11px;letter-spacing:.04em}
   .theme-select{
@@ -107,13 +107,25 @@
   details.file>summary .path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
   .copies{display:flex;gap:5px;flex:none} .filestat{flex:none;font-size:12.5px}
   .diff{overflow-x:hidden;font-size:14px;line-height:1.6}
+  /* === which of the four panes shows: split (default) vs unified · compact vs full ===
+     driven by the <html> data-diff-layout / data-diff-full attributes; :has() falls back
+     to the compact pane for files that ship no full-file rendering. */
+  .filebody .diff{display:none}
+  html[data-diff-layout="unified"]:not([data-diff-full="on"]) .diff-unified.diff-compact{display:block}
+  html[data-diff-layout="unified"][data-diff-full="on"] .diff-unified.diff-full{display:block}
+  html[data-diff-layout="unified"][data-diff-full="on"] .filebody:not(:has(.diff-unified.diff-full)) .diff-unified.diff-compact{display:block}
+  @media (min-width:1025px){
+    html:not([data-diff-layout="unified"]):not([data-diff-full="on"]) .diff-split.diff-compact{display:block}
+    html:not([data-diff-layout="unified"])[data-diff-full="on"] .diff-split.diff-full{display:block}
+    html:not([data-diff-layout="unified"])[data-diff-full="on"] .filebody:not(:has(.diff-split.diff-full)) .diff-split.diff-compact{display:block}
+  }
   /* engine diff rows: dl/ln/code · mapped onto the comp's add/del/ctx/hunk look */
   .dl{display:grid;grid-template-columns:44px 44px minmax(0,1fr);align-items:start;white-space:normal}
   .dl .ln{user-select:none;text-align:right;padding:0 8px;color:var(--ink-3);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
   .dl code{min-width:0;padding:0 12px;white-space:pre-wrap;overflow-wrap:anywhere;background:none;border:0;font-size:14px;color:var(--code)}
-  .dl-long code.long{display:flex;gap:8px;align-items:baseline}
-  .dl-long .code-text{flex:1;min-width:0;white-space:pre;overflow:hidden;text-overflow:ellipsis}
-  .dl-long.expanded .code-text{overflow-x:auto;text-overflow:clip}
+  .dl-long code.long,.diff-split code.long{display:flex;gap:8px;align-items:baseline}
+  .dl-long .code-text,.diff-split code.long .code-text{flex:1;min-width:0;white-space:pre;overflow:hidden;text-overflow:ellipsis}
+  .dl-long.expanded .code-text,.diff-split code.long.expanded .code-text{overflow-x:auto;text-overflow:clip}
   .ln-more{flex:none;font:inherit;font-size:11px;color:var(--acc);background:var(--acc-soft);border:1px solid var(--acc-line);border-radius:var(--r-sm);padding:0 6px;cursor:pointer;user-select:none}
   .ln-more:hover{color:var(--bg);background:var(--acc)}
   .dl-add{background:var(--add-bg)} .dl-add .ln{background:var(--add-gut);color:var(--add)} .dl-add code{color:var(--add-ink)}
@@ -121,11 +133,25 @@
   .dl-ctx code{color:var(--ink-2)}
   .dl-hunk{background:var(--sunk)} .dl-hunk code{color:var(--ink-3);font-weight:600}
   .dl-meta{opacity:.6} .dl-meta code{color:var(--ink-3)}
-  /* === per-commit focus: dim the diff, lift only the selected commit's own rows === */
-  .commit-focus .dl{opacity:.34;transition:opacity .14s}
-  .commit-focus .dl.owned{opacity:1}
-  .commit-focus .dl-add.owned,.commit-focus .dl-del.owned{box-shadow:inset 3px 0 0 var(--acc)}
-  @media (prefers-reduced-motion:reduce){.commit-focus .dl{transition:none}}
+  /* === side-by-side panes: old | new, paired changes, mirrored context ===
+     rows stay .dl; .diff-split overrides the grid to four columns and the change
+     color moves from the row onto each pane's .sp code cell. */
+  .diff-split .dl{grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr);align-items:stretch}
+  .diff-split .dl-meta,.diff-split .dl-hunk{grid-template-columns:minmax(0,1fr)}
+  .diff-split .dl>:nth-child(3){border-left:1px solid var(--line)}
+  .diff-split .sp-del{background:var(--del-bg);color:var(--del-ink)}
+  .diff-split .sp-add{background:var(--add-bg);color:var(--add-ink)}
+  .diff-split .sp-ctx{color:var(--ink-2)}
+  .diff-split .sp-pad{background:var(--sunk)}
+  /* === per-commit focus: dim the diff, lift only the selected commit's own rows ===
+     unified dims whole rows; split dims the .sp cells (row-level opacity would clip the
+     owned cell's lift), so a half-owned paired row lights only its owning pane. */
+  .commit-focus .diff-unified .dl{opacity:.34;transition:opacity .14s}
+  .commit-focus .diff-unified .dl.owned{opacity:1}
+  .commit-focus .diff-unified .dl-add.owned,.commit-focus .diff-unified .dl-del.owned{box-shadow:inset 3px 0 0 var(--acc)}
+  .commit-focus .diff-split .sp{opacity:.34;transition:opacity .14s}
+  .commit-focus .diff-split .sp.owned{opacity:1;box-shadow:inset 3px 0 0 var(--acc)}
+  @media (prefers-reduced-motion:reduce){.commit-focus .dl,.commit-focus .sp{transition:none}}
   .diff::-webkit-scrollbar{height:10px} .diff::-webkit-scrollbar-track{background:var(--surface)}
   .diff::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:2px solid var(--surface)}
   details.file.flash{outline:1px solid var(--acc);outline-offset:-1px}
@@ -192,16 +218,26 @@
     .layout{grid-template-columns:var(--tree-col) minmax(0,1fr) var(--shelf-col)}
     .titlebar{gap:10px;padding:10px 12px;flex-wrap:wrap}
     .branchline{order:3;width:100%}
+    /* too narrow for two code columns: force the combined (unified) pane, hide the toggle */
+    .layout-toggle{display:none}
+    html:not([data-diff-full="on"]) .diff-unified.diff-compact{display:block}
+    html[data-diff-full="on"] .diff-unified.diff-full{display:block}
+    html[data-diff-full="on"] .filebody:not(:has(.diff-unified.diff-full)) .diff-unified.diff-compact{display:block}
   }
 
   @media print{
     body{background:#fff;color:#111;height:auto}
     .layout{display:block;height:auto}
-    .tree,.shelf,.keybar,.foldall,.view-toggle,.ctx-toggle,.search,.theme-control,.copies,[popover],.gtl-toast{display:none!important}
+    .tree,.shelf,.keybar,.foldall,.layout-toggle,.view-toggle,.ctx-toggle,.search,.theme-control,.copies,[popover],.gtl-toast{display:none!important}
     .titlebar{background:#f2f2f2;border-color:#bbb}
     .brand .repo b,.brand .kind{color:#111}
     .main{overflow:visible;padding:0}
     details.file{break-inside:avoid}details.file[hidden]{display:block}
     .filebody{content-visibility:visible;overflow:visible}
     .dl code{color:#111}details.file>summary{position:static;background:#f2f2f2}
+    /* print the combined pane regardless of on-screen layout (split is too wide for paper) */
+    .filebody .diff{display:none!important}
+    .diff-unified.diff-compact{display:block!important}
+    html[data-diff-full="on"] .diff-unified.diff-compact{display:none!important}
+    html[data-diff-full="on"] .filebody:has(.diff-unified.diff-full) .diff-unified.diff-full{display:block!important}
   }

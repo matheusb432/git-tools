@@ -38,7 +38,11 @@ document.addEventListener("copy", (e: ClipboardEvent) => {
   if (!file) return;
   const layout = file.closest(".layout");
   if (layout && !layout.classList.contains("copy-ctx")) return;
-  const rows = file.querySelectorAll(".diff:not([hidden]) .dl-add, .diff:not([hidden]) .dl-ctx");
+  // ! Read rows from the pane the selection sits in (visibility is CSS-driven now, so
+  // ! `:not([hidden])` no longer marks the live one). Split panes carry no .dl-add rows, so a
+  // ! selection there yields nothing and we fall through to the browser's native copy.
+  const diffBlock = el?.closest ? el.closest(".diff") : null;
+  const rows = diffBlock ? Array.from(diffBlock.querySelectorAll(".dl-add, .dl-ctx")) : [];
   const out: string[] = [];
   let first: number | null = null;
   let last: number | null = null;
@@ -82,12 +86,14 @@ export function enhanceLayout(root: HTMLElement): void {
   // ! the first panel. Querying within `root` keeps each tab independently interactive.
   const fileEls = Array.from(root.querySelectorAll<HTMLDetailsElement>("details.file"));
   const clineEls = Array.from(root.querySelectorAll<HTMLElement>(".cline[data-sha]"));
-  const dlEls = Array.from(root.querySelectorAll<HTMLElement>(".dl-add[data-commit],.dl-del[data-commit]"));
+  const dlEls = Array.from(root.querySelectorAll<HTMLElement>(".dl-add[data-commit],.dl-del[data-commit],.sp[data-commit]"));
   let ownedRows: HTMLElement[] = [];
   const treeBody = root.querySelector<HTMLElement>(".tree-body");
   const filterInput = root.querySelector<HTMLInputElement>(".search input");
   const foldAll = root.querySelector<HTMLElement>(".foldall");
   const viewToggle = root.querySelector<HTMLElement>(".view-toggle");
+  const layoutToggle = root.querySelector<HTMLElement>(".layout-toggle");
+  const docEl = document.documentElement;
   let activeSha: string | null = null;
   let activeSet: string[] | null = null;
   let filterText = "";
@@ -136,26 +142,38 @@ export function enhanceLayout(root: HTMLElement): void {
     fileEls.forEach((el) => { el.open = !anyOpen; });
   });
 
-  function setFullMode(on: boolean): void {
-    fileEls.forEach((el) => {
-      const compact = el.querySelector<HTMLElement>(".diff-compact");
-      const full = el.querySelector<HTMLElement>(".diff-full");
-      if (!compact) return;
-      if (!full) {
-        compact.hidden = false;
-        return;
-      }
-      compact.hidden = on;
-      full.hidden = !on;
+  // ! Layout (split vs unified) and full-file mode are global view preferences on the <html>
+  // ! data-attrs (like the theme): CSS reveals the right pane, and the choice is shared across
+  // ! tabbed panels. Layout persists per-device; full-file resets each artifact.
+  function syncToggles(): void {
+    const full = docEl.dataset["diffFull"] === "on";
+    const split = docEl.dataset["diffLayout"] !== "unified";
+    document.querySelectorAll<HTMLElement>(".view-toggle").forEach((b) => {
+      b.setAttribute("aria-pressed", full ? "true" : "false");
+      b.classList.toggle("active", full);
     });
-    if (viewToggle) {
-      viewToggle.setAttribute("aria-pressed", on ? "true" : "false");
-      viewToggle.classList.toggle("active", on);
-    }
+    document.querySelectorAll<HTMLElement>(".layout-toggle").forEach((b) => {
+      b.setAttribute("aria-pressed", split ? "true" : "false");
+      b.classList.toggle("active", split);
+    });
   }
 
   if (viewToggle) viewToggle.addEventListener("click", () => {
-    setFullMode(viewToggle.getAttribute("aria-pressed") !== "true");
+    if (docEl.dataset["diffFull"] === "on") delete docEl.dataset["diffFull"];
+    else docEl.dataset["diffFull"] = "on";
+    syncToggles();
+  });
+
+  if (layoutToggle) layoutToggle.addEventListener("click", () => {
+    const split = docEl.dataset["diffLayout"] === "unified"; // currently unified -> switch to split
+    if (split) delete docEl.dataset["diffLayout"];
+    else docEl.dataset["diffLayout"] = "unified";
+    try {
+      localStorage.setItem("gtl-diff-layout", split ? "split" : "unified");
+    } catch {
+      /* storage unavailable (private mode / file://) — the in-page toggle still works */
+    }
+    syncToggles();
   });
 
   // ! Context toggle drives the `.copy-ctx` class on this view's root; the copy-button
@@ -364,5 +382,5 @@ export function enhanceLayout(root: HTMLElement): void {
   root.querySelectorAll(".ln-more").forEach((b) => b.addEventListener("click", () => toggleLongLine(b)));
 
   buildTree();
-  setFullMode(false);
+  syncToggles();
 }

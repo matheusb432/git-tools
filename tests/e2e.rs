@@ -563,7 +563,7 @@ fn diff_artifact_embeds_full_file_context_for_modified_files() {
     let artifact = artifact_from_stdout(&stdout);
     let html = std::fs::read_to_string(&artifact).unwrap();
     assert!(html.contains(r#"class="view-toggle""#));
-    assert!(html.contains(r#"class="diff diff-full" hidden"#));
+    assert!(html.contains(r#"class="diff diff-unified diff-full""#));
     assert!(html.contains("middle that stays hidden in compact diff"));
 }
 
