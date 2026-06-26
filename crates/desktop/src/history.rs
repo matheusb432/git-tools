@@ -14,11 +14,25 @@ pub struct HistoryEntry {
     pub head_committed_at: String,
     pub generated_at: String,
     pub content_hash: String,
+    pub kind: String,
+    pub byte_size: u64,
     pub url: String,
+}
+
+/// Stable short tag for a `DiffKind`, for the history-row badge.
+fn kind_tag(kind: gtl_store::DiffKind) -> String {
+    match kind {
+        gtl_store::DiffKind::TwoDot => "2-dot",
+        gtl_store::DiffKind::ThreeDot => "3-dot",
+        gtl_store::DiffKind::WorkTree => "worktree",
+    }
+    .to_string()
 }
 
 pub(crate) fn to_entry(content_hash: String, s: Sidecar) -> HistoryEntry {
     let url = format!("diff://{}/{}", s.repo_id, content_hash);
+    let kind = kind_tag(s.kind);
+    let byte_size = s.byte_size;
     HistoryEntry {
         repo_id: s.repo_id,
         repo_name: s.repo_name,
@@ -27,6 +41,8 @@ pub(crate) fn to_entry(content_hash: String, s: Sidecar) -> HistoryEntry {
         head_committed_at: s.head_committed_at,
         generated_at: s.generated_at,
         content_hash,
+        kind,
+        byte_size,
         url,
     }
 }
@@ -60,6 +76,8 @@ mod tests {
             head_committed_at: committed.into(),
             generated_at: generated.into(),
             content_hash: "h".into(),
+            kind: "3-dot".into(),
+            byte_size: 0,
             url: "diff://r/h".into(),
         }
     }
@@ -94,5 +112,27 @@ mod tests {
             },
         );
         assert_eq!(e.url, "diff://0123456789abcdef/fedcba9876543210");
+    }
+
+    #[test]
+    fn entry_exposes_kind_tag_and_byte_size() {
+        let e = to_entry(
+            "fedcba9876543210".into(),
+            gtl_store::Sidecar {
+                repo_id: "0123456789abcdef".into(),
+                repo_name: "n".into(),
+                repo_root: "/r".into(),
+                kind: gtl_store::DiffKind::ThreeDot,
+                base_sha: "a".into(),
+                head_sha: "b".into(),
+                range_label: "main...HEAD".into(),
+                head_committed_at: "t".into(),
+                generated_at: "t".into(),
+                title: "t".into(),
+                byte_size: 4096,
+            },
+        );
+        assert_eq!(e.kind, "3-dot");
+        assert_eq!(e.byte_size, 4096);
     }
 }

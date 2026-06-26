@@ -1,0 +1,19 @@
+@import "tailwindcss";
+@import "@fontsource/inter/index.css";
+
+@theme {
+  --color-background: #0F172A;
+  --color-surface: #1E293B;
+  --color-muted: #272F42;
+  --color-foreground: #F8FAFC;
+  --color-foreground-muted: #94A3B8;
+  --color-border: #334155;
+  --color-border-strong: #475569;
+  --color-accent: #22C55E;
+  --color-destructive: #EF4444;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html, body, #app { height: 100%; margin: 0; }
+body { background: var(--color-background); color: var(--color-foreground); font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }

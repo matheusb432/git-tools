@@ -1,28 +1,20 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+const viewerRoot = dirname(fileURLToPath(import.meta.url));
+const repoRoot = resolve(viewerRoot, "../..");
 
 export default defineConfig({
-  root,
-  plugins: [svelte({ emitCss: false })],
+  root: viewerRoot,
+  base: "./",
+  plugins: [tailwindcss(), svelte()],
+  resolve: { alias: { "@": viewerRoot } },
   build: {
     target: "es2021",
-    minify: true,
-    emptyOutDir: false,
-    outDir: resolve(root, "crates/desktop/dist"),
-    lib: {
-      entry: resolve(root, "frontend/viewer/main.ts"),
-      name: "GtlViewerShell",
-      formats: ["iife"],
-      fileName: () => "shell.js",
-    },
-    rollupOptions: {
-      output: {
-        inlineDynamicImports: true,
-      },
-    },
+    outDir: resolve(repoRoot, "crates/desktop/dist"),
+    emptyOutDir: true,
   },
 });
