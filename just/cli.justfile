@@ -28,7 +28,7 @@ build-js:
       echo "built src/embedded/generated/preview.js"; \
     else echo "bun not installed; skipping build-js (commit embedded/generated unchanged)" >&2; fi
 
-# Run the TypeScript unit tests for the diff artifact frontend. Needs bun.
+# Run the TypeScript unit tests for the diff and viewer frontends. Needs bun.
 [group('cli')]
 test-js:
-    if command -v bun >/dev/null 2>&1; then bun test --isolate frontend/diff; else echo "bun not installed; skipping test-js" >&2; fi
+    if command -v bun >/dev/null 2>&1; then bun test --isolate frontend/diff frontend/viewer; else echo "bun not installed; skipping test-js" >&2; fi

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, ChevronDown, MoreHorizontal, History, Trash2, Search } from "lucide-svelte";
+  import { X, ChevronDown, MoreHorizontal, History, Trash2, Search } from "@lucide/svelte";
   import * as DropdownMenu from "@/shared/ui/dropdown-menu";
   import * as ContextMenu from "@/shared/ui/context-menu";
   import { cn } from "@/shared/lib/utils";
