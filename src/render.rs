@@ -383,34 +383,35 @@ pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
     let mut dels: Vec<(u32, &String)> = Vec::new();
     let mut adds: Vec<(u32, &String)> = Vec::new();
 
-    let flush = |rows: &mut String, dels: &mut Vec<(u32, &String)>, adds: &mut Vec<(u32, &String)>| {
-        for i in 0..dels.len().max(adds.len()) {
-            rows.push_str(r#"<div class="dl">"#);
-            match dels.get(i) {
-                Some((no, raw)) => {
-                    let _ = write!(
-                        rows,
-                        r#"<span class="ln">{no}</span>{}"#,
-                        split_code(raw, long_len(raw), "sp-del", owners.deleted.get(no)),
-                    );
+    let flush =
+        |rows: &mut String, dels: &mut Vec<(u32, &String)>, adds: &mut Vec<(u32, &String)>| {
+            for i in 0..dels.len().max(adds.len()) {
+                rows.push_str(r#"<div class="dl">"#);
+                match dels.get(i) {
+                    Some((no, raw)) => {
+                        let _ = write!(
+                            rows,
+                            r#"<span class="ln">{no}</span>{}"#,
+                            split_code(raw, long_len(raw), "sp-del", owners.deleted.get(no)),
+                        );
+                    }
+                    None => rows.push_str(SPLIT_PAD),
                 }
-                None => rows.push_str(SPLIT_PAD),
-            }
-            match adds.get(i) {
-                Some((no, raw)) => {
-                    let _ = write!(
-                        rows,
-                        r#"<span class="ln">{no}</span>{}"#,
-                        split_code(raw, long_len(raw), "sp-add", owners.added.get(no)),
-                    );
+                match adds.get(i) {
+                    Some((no, raw)) => {
+                        let _ = write!(
+                            rows,
+                            r#"<span class="ln">{no}</span>{}"#,
+                            split_code(raw, long_len(raw), "sp-add", owners.added.get(no)),
+                        );
+                    }
+                    None => rows.push_str(SPLIT_PAD),
                 }
-                None => rows.push_str(SPLIT_PAD),
+                rows.push_str("</div>");
             }
-            rows.push_str("</div>");
-        }
-        dels.clear();
-        adds.clear();
-    };
+            dels.clear();
+            adds.clear();
+        };
 
     for raw in lines {
         if raw.is_empty() {
@@ -680,7 +681,9 @@ mod tests {
         );
 
         // meta + hunk headers span the full width (single cell, no gutters)
-        assert!(html.contains(r#"<div class="dl dl-meta"><code>index 111..222 100644</code></div>"#));
+        assert!(
+            html.contains(r#"<div class="dl dl-meta"><code>index 111..222 100644</code></div>"#)
+        );
         assert!(html.contains(r#"<div class="dl dl-hunk"><code>@@ -3,2 +7,2 @@</code></div>"#));
         // a context line mirrors onto both panes with each pane's gutter number
         assert!(html.contains(r#"<div class="dl"><span class="ln">3</span><code class="sp sp-ctx"> keep</code><span class="ln">7</span><code class="sp sp-ctx"> keep</code></div>"#));
@@ -755,8 +758,9 @@ mod tests {
         // narrow screens force the combined pane and hide the layout toggle
         assert!(PREVIEW_CSS.contains(".layout-toggle{display:none}"));
         // four-column split grid + the per-pane change colors
-        assert!(PREVIEW_CSS
-            .contains(".diff-split .dl{grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr)"));
+        assert!(PREVIEW_CSS.contains(
+            ".diff-split .dl{grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr)"
+        ));
         assert!(PREVIEW_CSS.contains(".diff-split .sp-add{background:var(--add-bg)"));
         assert!(PREVIEW_CSS.contains(".diff-split .sp-del{background:var(--del-bg)"));
     }
@@ -764,7 +768,9 @@ mod tests {
     #[test]
     fn preview_css_tames_long_lines_without_wrap() {
         assert!(PREVIEW_CSS.contains(".dl-long .code-text,.diff-split code.long .code-text{flex:1;min-width:0;white-space:pre"));
-        assert!(PREVIEW_CSS.contains(".dl-long.expanded .code-text,.diff-split code.long.expanded .code-text{overflow-x:auto"));
+        assert!(PREVIEW_CSS.contains(
+            ".dl-long.expanded .code-text,.diff-split code.long.expanded .code-text{overflow-x:auto"
+        ));
     }
 
     #[test]

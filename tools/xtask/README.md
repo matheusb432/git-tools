@@ -5,7 +5,7 @@
 ## Verbs
 
 | Verb | What it does | Justfile entry |
-|---|---|---|
+| -- | -- | -- |
 | `bootstrap` | Full post-toolchain bring-up: link `.claude/skills` (via the PAL symlink primitive), build + install both artifacts, ensure `~/.local/bin` is on PATH. Migrates `install-git-tools.sh` + the old skills-link recipe. | `just bootstrap` |
 | `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias) and/or the viewer on PATH (idempotent byte-compare → installed/updated/unchanged; atomic replace is warm-tray-safe). Migrates `scripts/install.sh`. | `just install` / `just cli install` / `just desktop install` |
 | `uninstall [--remove-config] [--force]` | Remove the installed binaries + alias; optionally delete repo-local config (guarded). | `just uninstall` |

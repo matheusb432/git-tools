@@ -39,7 +39,7 @@ Rendering is **idempotent**: an identical diff reuses its existing artifact (add
 After writing, the preview opens in the `gtl-viewer` desktop app (the default). `gtl-viewer` is a tray-resident Tauri window with a tab strip — each `gtl diff` opens or focuses a tab; the history panel lets you reopen past diffs grouped by repo. Control this behaviour with the `diff.viewer` config key:
 
 | Value | Behaviour |
-|---|---|
+| -- | -- |
 | `app` | Open in the `gtl-viewer` desktop app (default). Falls back to the browser automatically when no display is available (`$DISPLAY`/`$WAYLAND_DISPLAY` both absent), so `gtl diff` always succeeds in headless/CI environments. |
 | `browser` | Open the artifact file directly in the OS default browser. |
 | `none` | Write the artifact without opening anything (path is printed). |

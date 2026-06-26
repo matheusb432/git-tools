@@ -13,7 +13,7 @@
 
 use std::process::Command;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
 /// Run `program args…`, returning an error tagged with `label` if it exits non-zero.
 pub fn run(label: &str, program: &str, args: &[&str]) -> Result<()> {
@@ -31,6 +31,15 @@ pub fn run_in(label: &str, dir: &str, program: &str, args: &[&str]) -> Result<()
         bail!("{label} failed (exit {})", status.code().unwrap_or(-1));
     }
     Ok(())
+}
+
+/// Run `program args…` and capture stdout as UTF-8; error on non-zero exit.
+pub fn capture(label: &str, program: &str, args: &[&str]) -> Result<String> {
+    let out = Command::new(program).args(args).output()?;
+    if !out.status.success() {
+        bail!("{label} failed (exit {})", out.status.code().unwrap_or(-1));
+    }
+    String::from_utf8(out.stdout).context("non-UTF-8 output")
 }
 
 /// Emit the parsed contract line on stdout (keep this byte-stable — consumers grep it).
