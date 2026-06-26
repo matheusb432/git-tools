@@ -7,10 +7,15 @@
 use anyhow::Result;
 use clap::Parser;
 
+mod bootstrap;
 mod cli;
+mod drift;
+mod fmt;
 mod icon;
+mod install;
 mod proc;
 mod ship;
+mod testing;
 
 fn main() {
     if let Err(e) = run(cli::Cli::parse()) {
@@ -22,29 +27,16 @@ fn main() {
 /// Dispatch one parsed verb to its handler.
 fn run(cli: cli::Cli) -> Result<()> {
     match cli.command {
-        cli::Command::Bootstrap => bootstrap(),
-        cli::Command::Check { verbose } => check(verbose),
+        cli::Command::Bootstrap => bootstrap::run(),
+        cli::Command::Install { target } => install::run_install(target),
+        cli::Command::Uninstall {
+            remove_config,
+            force,
+        } => install::run_uninstall(remove_config, force),
+        cli::Command::Test { verbose, all } => testing::run(verbose, all),
+        cli::Command::Fmt { check } => fmt::run(check),
+        cli::Command::DriftCheck => drift::run(),
         cli::Command::GenIcon => icon::run(),
         cli::Command::Ship { smoke } => ship::run(smoke),
     }
-}
-
-/// One-time dev-host setup that runs *after* the toolchain exists (deps, installs, links).
-/// The toolchain install itself stays in `bootstrap.sh` (chicken-and-egg — see that file).
-fn bootstrap() -> Result<()> {
-    // TODO: replace with the real bring-up steps (e.g. `npm install`, fixtures, links).
-    proc::run("noop", "true", &[])?;
-    proc::result("bootstrap", "PASS");
-    Ok(())
-}
-
-/// Example read-only verb. Replace with a real one (e.g. `test`/`up`/`ship`); model
-/// mutually-exclusive flags with clap's `conflicts_with`, not a runtime guard.
-fn check(verbose: bool) -> Result<()> {
-    if verbose {
-        eprintln!("running check (verbose)…");
-    }
-    proc::run("check", "true", &[])?;
-    proc::result("check", "PASS");
-    Ok(())
 }

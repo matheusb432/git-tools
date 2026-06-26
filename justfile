@@ -39,7 +39,7 @@ update:
 # Remove the installed binary/alias + viewer. Add --remove-config to also delete git-tools.toml/secrets (confirms).
 [group('build')]
 uninstall *args:
-    bash "scripts/install.sh" uninstall {{ args }}
+    cargo run --quiet -p xtask -- uninstall {{ args }}
 
 # Build only if the binary is missing (preflight for run recipes).
 _preflight:
@@ -47,36 +47,25 @@ _preflight:
 
 # ============ quality ============
 
-# cargo tests + the install ShellSpec suite.
+# cargo tests (terse). --verbose streams output; --all also runs the bun frontend tests.
 [group('quality')]
-test: _preflight _require-shellspec
-    cargo test
-    shellspec
-
-# Fail loud with a fix hint when ShellSpec is not on PATH.
-_require-shellspec:
-    command -v shellspec >/dev/null 2>&1 || { echo "shellspec not found — install per AGENTS.md" >&2; exit 1; }
+test *args:
+    cargo run --quiet -p xtask -- test {{ args }}
 
 # Format Rust with the pinned nightly rustfmt and all TOML with taplo (no-op if taplo is absent).
 [group('quality')]
 fmt:
-    cargo +"$(cat .rustfmt-nightly)" fmt
-    if command -v taplo >/dev/null 2>&1; then taplo fmt; else echo "taplo not installed; skipping"; fi
+    cargo run --quiet -p xtask -- fmt
 
 # Check Rust + TOML formatting without writing.
 [group('quality')]
 fmt-check:
-    cargo +"$(cat .rustfmt-nightly)" fmt --check
-    if command -v taplo >/dev/null 2>&1; then taplo fmt --check; else echo "taplo not installed; skipping"; fi
+    cargo run --quiet -p xtask -- fmt --check
 
-# Fail if the committed bundles drift from their TS sources (preview bundle + viewer shell).
-_js-drift-guard:
-    if command -v bun >/dev/null 2>&1; then \
-      just cli build-js >/dev/null; \
-      just desktop build-viewer-ui >/dev/null; \
-      git diff --exit-code -- src/embedded/generated/ || { echo "src/embedded/generated/ is stale — run 'just cli build-js' and commit" >&2; exit 1; }; \
-      git diff --exit-code -- crates/desktop/dist/ || { echo "crates/desktop/dist/ is stale — run 'just desktop build-viewer-ui' and commit" >&2; exit 1; }; \
-    else echo "bun absent; skipping js drift guard" >&2; fi
+# Rebuild the committed JS bundles and fail if they drift from their TS sources (CI/pre-commit gate).
+[group('quality')]
+drift-check:
+    cargo run --quiet -p xtask -- drift-check
 
 # ============ windows cross-build (host/release split — see specs) ============
 
@@ -110,8 +99,6 @@ win-release-checklist:
     All seven green => Windows runtime certified for this build.
     EOF
 
-# One-time repo setup: link .claude/skills -> .agents/skills so Claude Code sees cross-agent skills.
+# Full dev-host bring-up: link skills, build + install both artifacts, ensure ~/.local/bin on PATH (fresh machine: `sh tools/xtask/bootstrap.sh`).
 bootstrap:
-    mkdir -p .claude
-    ln -sfn ../.agents/skills .claude/skills
-    @echo "linked .claude/skills -> .agents/skills"
+    cargo run --quiet -p xtask -- bootstrap

@@ -52,12 +52,12 @@ pub fn diff_url_from_path(path: &Path) -> Option<String> {
 /// `None` if neither exists (caller degrades to the browser path).
 pub fn resolve_viewer_bin() -> Option<PathBuf> {
     let name = format!("gtl-viewer{}", std::env::consts::EXE_SUFFIX);
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let sibling = dir.join(&name);
-            if sibling.is_file() {
-                return Some(sibling);
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let sibling = dir.join(&name);
+        if sibling.is_file() {
+            return Some(sibling);
         }
     }
     // PATH fallback: rely on the OS resolver by returning the bare name if any

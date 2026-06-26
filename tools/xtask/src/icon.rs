@@ -140,7 +140,7 @@ fn sx(v: f32) -> f32 {
 fn rrect(rect: Rect, radius: f32) -> Option<tiny_skia::Path> {
     let (l, t, r, b) = rect;
     let rad = radius.min((r - l) / 2.0).min((b - t) / 2.0);
-    let c = rad * 0.552_284_75; // cubic control offset for a near-circular corner
+    let c = rad * 0.552_284_8; // cubic control offset for a near-circular corner
     let mut pb = PathBuilder::new();
     pb.move_to(l + rad, t);
     pb.line_to(r - rad, t);

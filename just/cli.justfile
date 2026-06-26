@@ -2,9 +2,6 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 set windows-shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 set working-directory := '..'
 
-[private]
-_install := 'scripts/install.sh'
-
 _default:
     @just --list cli
 
@@ -16,7 +13,7 @@ build: build-js
 # Place the prebuilt git-tools binary + gtl alias on PATH (~/.local/bin). Build first with `just cli build`.
 [group('cli')]
 install:
-    bash "{{ _install }}" install-cli
+    cargo run --quiet -p xtask -- install --target cli
 
 # Build + install the CLI engine only (git-tools + gtl). Leaves the desktop viewer untouched.
 [group('cli')]

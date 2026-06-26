@@ -75,13 +75,12 @@ pub fn run(smoke: bool) -> Result<()> {
     }
 
     // 2. frontend bundles (release only — smoke uses the committed bundles for speed)
-    if !smoke {
-        if proc::run("frontend-cli", "just", &["cli", "build-js"]).is_err()
-            || proc::run("frontend-viewer", "just", &["desktop", "build-viewer-ui"]).is_err()
-        {
-            proc::result_fail_step("ship", "frontend");
-            bail!("ship frontend bundle build failed");
-        }
+    if !smoke
+        && (proc::run("frontend-cli", "just", &["cli", "build-js"]).is_err()
+            || proc::run("frontend-viewer", "just", &["desktop", "build-viewer-ui"]).is_err())
+    {
+        proc::result_fail_step("ship", "frontend");
+        bail!("ship frontend bundle build failed");
     }
 
     // 3. cross-build both packages

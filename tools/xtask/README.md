@@ -6,9 +6,14 @@
 
 | Verb | What it does | Justfile entry |
 |---|---|---|
-| `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (ported from the retired `generate_icon.py`; the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |
+| `bootstrap` | Full post-toolchain bring-up: link `.claude/skills` (via the PAL symlink primitive), build + install both artifacts, ensure `~/.local/bin` is on PATH. Migrates `install-git-tools.sh` + the old skills-link recipe. | `just bootstrap` |
+| `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias) and/or the viewer on PATH (idempotent byte-compare → installed/updated/unchanged; atomic replace is warm-tray-safe). Migrates `scripts/install.sh`. | `just install` / `just cli install` / `just desktop install` |
+| `uninstall [--remove-config] [--force]` | Remove the installed binaries + alias; optionally delete repo-local config (guarded). | `just uninstall` |
+| `test [--verbose] [--all]` | `cargo test` (terse); `--verbose` streams; `--all` adds the bun frontend tests. Migrates `just test`. | `just test` |
+| `fmt [--check]` | Pinned-nightly `cargo fmt` (toolchain from `.rustfmt-nightly`) + taplo. Migrates `just fmt` / `just fmt-check`. | `just fmt` / `just fmt-check` |
+| `drift-check` | Rebuild the committed JS bundles and fail if they drift from their TS sources (CI/pre-commit gate). | `just drift-check` |
+| `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |
 | `ship [--smoke]` | Cross-build both Win11 release exes (CLI + viewer) from a Linux host via `cargo-xwin`, with a host-testable preflight; `--smoke` is a fast debug-profile linkage drift check (no artifact verify). | `just ship` / `just ship --smoke` |
-| `bootstrap` / `check` | Scaffold stubs — placeholders for future post-toolchain bring-up / read-only verbs. | — |
 
 ## Why this is not a `new-rust-cli`
 
@@ -16,10 +21,11 @@ This is the embedded kind, not an installable tool. It deliberately ships **no i
 
 ## Layout
 
-- `Cargo.toml` — lean workspace-member crate, `publish = false`, clap + anyhow (+ `assert_cmd`/`predicates`/`tempfile` dev-deps).
+- `Cargo.toml` — lean workspace-member crate, `publish = false`, clap + anyhow + `which` + `gtl-platform` (+ `assert_cmd`/`predicates`/`tempfile` dev-deps).
 - `src/main.rs` — thin entrypoint: parse argv, dispatch one verb, map any `Err` to a nonzero exit.
 - `src/cli.rs` — the clap-derive `Subcommand` verb surface; doc comments are the `--help` SSOT.
 - `src/proc.rs` — shared child-process `run`/`run_in` + the `RESULT scope=… status=…` contract helpers.
+- `src/{bootstrap,install,testing,fmt,drift,icon,ship}.rs` — one verb per module: pure helpers (unit-tested) + thin glue.
 - `tests/cli.rs` — `assert_cmd` arg-surface tests.
 - `bootstrap.sh` — the one POSIX-shell seam: installs the Rust toolchain, then `exec`s `cargo run -p xtask -- bootstrap`.
 

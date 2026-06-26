@@ -2,7 +2,7 @@
 //! so they are the single source of truth for the verb documentation (ADR-0002). Add each
 //! new automation verb here as a `Command` arm; let clap validate, don't hand-roll guards.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 /// xtask — this repo's embedded dev/release automation (xtask).
 #[derive(Parser)]
@@ -17,20 +17,51 @@ pub struct Cli {
 /// `conflicts_with` (see the commented `--all` example), never a runtime `if a && b`.
 #[derive(Subcommand)]
 pub enum Command {
-    /// One-time dev-host setup that runs *after* the toolchain exists (deps, installs, links).
-    /// The toolchain install itself stays in `bootstrap.sh` — see that file.
+    /// Full post-toolchain dev-host bring-up: link `.claude/skills`, build + install both
+    /// artifacts, ensure `~/.local/bin` is on PATH. Migrates `install-git-tools.sh` + the old
+    /// skills-link recipe. The toolchain install itself stays in `bootstrap.sh` — see that file.
     Bootstrap,
-    /// Example read-only verb. Replace with real ones (`test`/`up`/`ship`/…). `--verbose`
-    /// streams full tool logs instead of the terse default.
-    Check {
-        /// Stream full tool logs live instead of the terse default.
+    /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias) and/or the desktop viewer on
+    /// PATH. Builds are owned by the justfile; this only copies the already-built artifacts.
+    /// Migrates `scripts/install.sh`.
+    Install {
+        /// Which artifact(s) to place: `cli`, `viewer`, or `both` (default).
+        #[arg(long, value_enum, default_value_t = InstallTarget::Both)]
+        target: InstallTarget,
+    },
+    /// Remove the installed CLI binary + `gtl` alias and the desktop viewer from PATH.
+    /// Migrates `scripts/install.sh uninstall`.
+    Uninstall {
+        /// Also delete repo-local git-tools.toml / git-tools.secrets.toml (refused
+        /// non-interactively unless `--force`).
+        #[arg(long)]
+        remove_config: bool,
+        /// Proceed with the destructive config delete without prompting.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Format Rust with the pinned-nightly rustfmt (toolchain from `.rustfmt-nightly`) and all
+    /// TOML with taplo (skipped when absent). `--check` verifies without writing. Migrates
+    /// `just fmt` / `just fmt-check`.
+    Fmt {
+        /// Verify formatting without writing (exits non-zero on drift).
+        #[arg(long)]
+        check: bool,
+    },
+    /// Run the test suite: `cargo test`, terse by default. `--verbose` streams full output;
+    /// `--all` also runs the bun frontend unit tests. Migrates `just test`.
+    Test {
+        /// Stream full test output (`cargo test -- --nocapture`) instead of the terse default.
         #[arg(long)]
         verbose: bool,
-        // Example of a mutually-exclusive flag — uncomment when a real verb needs it:
-        // /// Run the full suite (mutually exclusive with `--e2e`).
-        // #[arg(long, conflicts_with = "e2e")]
-        // all: bool,
+        /// Also run the bun frontend unit tests (`just cli test-js`).
+        #[arg(long)]
+        all: bool,
     },
+    /// Rebuild the committed frontend bundles and fail if they drift from their TS sources
+    /// (`src/embedded/generated` + `crates/desktop/dist`). Skips when bun is absent. Migrates
+    /// the `_js-drift-guard` recipe — a CI/pre-commit gate.
+    DriftCheck,
     /// Render the gtl-viewer icon assets (`crates/desktop/icons/icon.{png,ico}`) from code.
     /// Ports the retired Python generator; the multi-res `.ico` is required by tauri-build on
     /// Windows.
@@ -43,4 +74,12 @@ pub enum Command {
         #[arg(long)]
         smoke: bool,
     },
+}
+
+/// Which artifact(s) `install` places. `both` covers the CLI engine and the desktop viewer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum InstallTarget {
+    Cli,
+    Viewer,
+    Both,
 }

@@ -21,6 +21,9 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 ico = "0.5"
 # PATH probe for the `ship` preflight (no `sh -c` interpolation; cross-platform).
 which = "8.0.4"
+# Cross-platform directory symlink for the `bootstrap` skills-link. The OS `#[cfg]` lives in the
+# PAL (ADR-0003), so the bootstrap verb stays cfg-free.
+gtl-platform = { path = "../../crates/gtl-platform" }
 
 [dev-dependencies]
 assert_cmd = "2"

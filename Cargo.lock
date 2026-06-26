@@ -1683,6 +1683,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "directories",
+ "tempfile",
  "x11-dl",
 ]
 
@@ -5455,6 +5456,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "gtl-platform",
  "ico",
  "image",
  "predicates",

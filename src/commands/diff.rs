@@ -46,12 +46,12 @@ pub(crate) fn render(
 ) -> anyhow::Result<DiffOutcome> {
     // ! Fast-path: pure commit ranges are fully determined by resolved shas, so a
     // ! prior identical artifact can be reused without the expensive assemble.
-    if name.is_none() {
-        if let Some(hit) = range_fast_path(top, target)? {
-            println!("diff-preview: reusing {}", hit.display());
-            super::open_artifact(&hit);
-            return Ok(DiffOutcome::Rendered(hit));
-        }
+    if name.is_none()
+        && let Some(hit) = range_fast_path(top, target)?
+    {
+        println!("diff-preview: reusing {}", hit.display());
+        super::open_artifact(&hit);
+        return Ok(DiffOutcome::Rendered(hit));
     }
     let (mut view, summary) = build_view(top, target)?;
     if let Some(name) = name {

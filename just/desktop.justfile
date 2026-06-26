@@ -2,9 +2,6 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 set windows-shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 set working-directory := '..'
 
-[private]
-_install := 'scripts/install.sh'
-
 _default:
     @just --list desktop
 
@@ -15,10 +12,10 @@ build: build-viewer-ui
       cargo build --release -p desktop --features custom-protocol; \
     else echo "webkit2gtk-4.1 headers absent — skipping gtl-viewer build (CLI-only mode; browser fallback active)" >&2; fi
 
-# Place the prebuilt gtl-viewer binary on PATH via atomic mv (warm-tray safe). Build first with `just desktop build`.
+# Place the prebuilt gtl-viewer binary on PATH via atomic replace (warm-tray safe). Build first with `just desktop build`.
 [group('desktop')]
 install:
-    bash "{{ _install }}" install-viewer
+    cargo run --quiet -p xtask -- install --target viewer
 
 # Build + install the desktop viewer only (gtl-viewer). Leaves the CLI engine untouched.
 [group('desktop')]

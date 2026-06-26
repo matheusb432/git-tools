@@ -84,6 +84,27 @@ pub fn open_in_browser(path: &Path) {
         .spawn();
 }
 
+/// Create a directory symlink at `link` pointing to `original`, replacing any existing
+/// `link` first (idempotent — mirrors `ln -sfn`). The OS `#[cfg]` for the symlink syscall
+/// lives here, in the PAL, and nowhere else (ADR-0003): Unix uses `std::os::unix::fs::symlink`,
+/// Windows uses `std::os::windows::fs::symlink_dir`. `original` is written through verbatim, so
+/// a relative path produces a relative link.
+pub fn symlink_dir(original: &Path, link: &Path) -> std::io::Result<()> {
+    // Remove a prior link (file-symlink on Unix, dir-symlink on Windows) so a re-run replaces it.
+    let _ = std::fs::remove_file(link).or_else(|_| std::fs::remove_dir(link));
+    symlink_dir_impl(original, link)
+}
+
+#[cfg(unix)]
+fn symlink_dir_impl(original: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(original, link)
+}
+
+#[cfg(windows)]
+fn symlink_dir_impl(original: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_dir(original, link)
+}
+
 fn no_open_requested(value: Option<&str>) -> bool {
     matches!(
         value.map(str::trim),
@@ -101,5 +122,21 @@ mod tests {
         assert!(no_open_requested(Some("true")));
         assert!(!no_open_requested(Some("0")));
         assert!(!no_open_requested(None));
+    }
+
+    #[test]
+    fn symlink_dir_links_and_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("real");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("f.txt"), b"hi").unwrap();
+        let link = tmp.path().join("link");
+
+        symlink_dir(&target, &link).unwrap();
+        assert_eq!(std::fs::read(link.join("f.txt")).unwrap(), b"hi");
+
+        // `ln -sfn` semantics: re-linking an existing link replaces it, no error.
+        symlink_dir(&target, &link).unwrap();
+        assert_eq!(std::fs::read(link.join("f.txt")).unwrap(), b"hi");
     }
 }
