@@ -17,6 +17,8 @@ use anyhow::{Context, Result, bail};
 
 use crate::cli::InstallTarget;
 
+mod linux_desktop;
+
 // --- placement contract ----------------------------------------------------
 
 /// What placing one file did: was it new, changed, or already current? The lowercased
@@ -223,11 +225,12 @@ fn install_cli(repo: &Path, bindir: &Path) -> Result<()> {
 fn install_viewer(repo: &Path, bindir: &Path) -> Result<()> {
     let src = repo.join("target").join("release").join(viewer_bin_name());
     if src.is_file() {
+        let dst = bindir.join(viewer_bin_name());
         let act = install_viewer_binary(&src, bindir)?;
-        println!(
-            "gtl-viewer {act} -> {}",
-            bindir.join(viewer_bin_name()).display()
-        );
+        println!("gtl-viewer {act} -> {}", dst.display());
+        if let Some(path) = linux_desktop::install(repo, &dst)? {
+            println!("gtl-viewer desktop entry -> {}", path.display());
+        }
     } else {
         eprintln!("gtl-viewer not built (viewer is optional; browser fallback active)");
     }
@@ -248,6 +251,9 @@ pub fn run_uninstall(remove_config: bool, force: bool) -> Result<()> {
     if viewer.exists() {
         fs::remove_file(&viewer)?;
         println!("removed {}", viewer.display());
+    }
+    for path in linux_desktop::uninstall()? {
+        println!("removed {}", path.display());
     }
     if remove_config {
         let cwd = env::current_dir()?;
