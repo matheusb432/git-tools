@@ -129,6 +129,13 @@ struct RepoEntry {
     path: String,
     #[serde(default)]
     remote: String,
+    #[serde(default = "default_true")]
+    managed: bool,
+}
+
+/// serde default for `RepoEntry::managed` — repos are in-scope unless they opt out (CFG-0185).
+fn default_true() -> bool {
+    true
 }
 
 pub fn parse_manifest(raw: &str, home_dir: &Path) -> anyhow::Result<Vec<ManagedRepo>> {
@@ -139,6 +146,9 @@ pub fn parse_manifest(raw: &str, home_dir: &Path) -> anyhow::Result<Vec<ManagedR
     for entry in manifest.repo {
         let local = entry.path.trim();
         if local.is_empty() {
+            continue;
+        }
+        if !entry.managed {
             continue;
         }
         repos.push(ManagedRepo {
@@ -1507,6 +1517,16 @@ mod tests {
             git_out(&origin, &["rev-parse", "refs/heads/main"]),
             remote_before
         );
+    }
+
+    #[test]
+    fn parse_manifest_skips_paused_repos() {
+        let home = Path::new("/home/u");
+        let raw = "[[repo]]\npath='self/cfg'\nremote='git@x:c.git'\n\
+                   [[repo]]\npath='work/sample_project'\nremote='git@x:i.git'\nmanaged=false\n";
+        let repos = parse_manifest(raw, home).unwrap();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].name, "self/cfg");
     }
 
     fn read_opts() -> ManagedOptions {
