@@ -164,7 +164,8 @@ pub struct TagArgs {
 /// Nested commands under `tag`.
 #[derive(Debug, Subcommand)]
 pub enum TagCommand {
-    /// List local tags and whether each is already known on origin.
+    /// List local tags, whether each is already known on origin, and each
+    /// annotated tag's message (first line).
     Ls,
     /// Create an annotated tag.
     Add {
@@ -174,11 +175,21 @@ pub enum TagCommand {
         message: String,
     },
     /// Push local tags, or create one annotated tag and push it.
+    ///
+    /// With `--label`, also attach a lightweight label tag to the same commit
+    /// (`git tag <label> <tag>^{}`) — two refs, one commit, no duplicated message.
+    /// Aliased as `update` for the "label an existing tag" form
+    /// (e.g. `tag update v0.1.0 -l base-template`).
+    #[command(visible_alias = "update")]
     Up {
-        /// Optional tag name to create before pushing.
+        /// Optional tag name to create (or, with `--label`, the existing tag to label) before
+        /// pushing.
         tag: Option<String>,
         /// Annotated tag message when creating a tag.
         message: Option<String>,
+        /// Lightweight label tag to point at the same commit as `tag`.
+        #[arg(short = 'l', long = "label")]
+        label: Option<String>,
     },
 }
 
@@ -811,7 +822,8 @@ mod tests {
             Command::Tag(TagArgs {
                 command: Some(TagCommand::Up {
                     tag: None,
-                    message: None
+                    message: None,
+                    label: None
                 }),
                 commits: false
             })
@@ -863,9 +875,57 @@ mod tests {
                 command: Some(TagCommand::Up {
                     tag: Some(tag),
                     message: Some(message),
+                    label: None,
                 }),
                 commits: false
             }) if tag == "v1.2.0" && message == "release notes"
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_tag_up_with_label() {
+        let cli = Cli::parse_args(&[
+            "tag".into(),
+            "up".into(),
+            "v0.1.0".into(),
+            "msg".into(),
+            "-l".into(),
+            "base-template".into(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: Some(TagCommand::Up {
+                    tag: Some(tag),
+                    message: Some(message),
+                    label: Some(label),
+                }),
+                commits: false
+            }) if tag == "v0.1.0" && message == "msg" && label == "base-template"
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_tag_update_alias_label_only() {
+        let cli = Cli::parse_args(&[
+            "tag".into(),
+            "update".into(),
+            "v0.1.0".into(),
+            "--label".into(),
+            "base-template".into(),
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Tag(TagArgs {
+                command: Some(TagCommand::Up {
+                    tag: Some(tag),
+                    message: None,
+                    label: Some(label),
+                }),
+                commits: false
+            }) if tag == "v0.1.0" && label == "base-template"
         ));
     }
 

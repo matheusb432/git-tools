@@ -10,9 +10,9 @@ const PREVIEW_CSS: &str = include_str!("embedded/preview.css");
 const PREVIEW_BUNDLE: &str = include_str!("embedded/generated/preview.js");
 
 // ! Head boot: restore the saved theme and diff layout before paint to avoid a flash of the
-// ! default palette / a split→unified flip. IIFE-wrapped so the locals never leak to global
+// ! default palette / a unified→split flip. IIFE-wrapped so the locals never leak to global
 // ! scope: a leaked var could clobber a minified bundle's single-letter globals.
-const THEME_BOOT_JS: &str = "(function(){try{var d=document.documentElement.dataset;var t=localStorage.getItem('gtl-theme');if(t)d.theme=t;var l=localStorage.getItem('gtl-diff-layout');if(l==='unified')d.diffLayout='unified';}catch(e){}})();";
+const THEME_BOOT_JS: &str = "(function(){try{var d=document.documentElement.dataset;var t=localStorage.getItem('gtl-theme');if(t)d.theme=t;var l=localStorage.getItem('gtl-diff-layout');if(l==='split')d.diffLayout='split';else if(l==='unified')delete d.diffLayout;}catch(e){}})();";
 
 pub fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -142,7 +142,7 @@ fn view_body(view: &View) -> Markup {
                 }
                 div.spacer {}
                 button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
-                button type="button" class="layout-toggle active" aria-pressed="true" title="Side-by-side / unified diff" { "Side by side" }
+                button type="button" class="layout-toggle" aria-pressed="false" title="Side-by-side / unified diff" { "Side by side" }
                 button type="button" class="view-toggle" aria-pressed="false" title="Show full-file diffs" { "Full file" }
                 button type="button" class="ctx-toggle active" aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
                 label.theme-control {
@@ -576,7 +576,7 @@ fn file_blocks(view: &View) -> Markup {
                 // ! heavy content here while the summary stays sticky against `.main` (size
                 // ! containment on `details.file` itself would trap the sticky in the box).
                 // ! Four diff renderings; one is revealed by CSS from the <html> data-diff-layout
-                // ! (split is the default) / data-diff-full attributes — no `hidden` plumbing.
+                // ! (unified is the default) / data-diff-full attributes — no `hidden` plumbing.
                 div class="filebody" style=(intrinsic) {
                     div class="diff diff-split diff-compact" { (PreEscaped(render_diff_split(&file.lines, &file.owners))) }
                     div class="diff diff-unified diff-compact" { (PreEscaped(render_diff_lines(&file.lines, &file.owners))) }
@@ -746,14 +746,14 @@ mod tests {
     fn preview_css_drives_split_default_and_breakpoint_fallback() {
         // base: every pane hidden until a rule reveals exactly one
         assert!(PREVIEW_CSS.contains(".filebody .diff{display:none}"));
-        // split is the default pane above the breakpoint (no data-diff-layout attr)
+        // unified is the default pane above the breakpoint (no data-diff-layout attr)
         assert!(PREVIEW_CSS.contains("@media (min-width:1025px)"));
         assert!(PREVIEW_CSS.contains(
-            r#"html:not([data-diff-layout="unified"]):not([data-diff-full="on"]) .diff-split.diff-compact{display:block}"#
+            r#"html:not([data-diff-layout="split"]):not([data-diff-full="on"]) .diff-unified.diff-compact{display:block}"#
         ));
-        // unified is shown when the attr flips
+        // split is shown when the attr flips
         assert!(PREVIEW_CSS.contains(
-            r#"html[data-diff-layout="unified"]:not([data-diff-full="on"]) .diff-unified.diff-compact{display:block}"#
+            r#"html[data-diff-layout="split"]:not([data-diff-full="on"]) .diff-split.diff-compact{display:block}"#
         ));
         // narrow screens force the combined pane and hide the layout toggle
         assert!(PREVIEW_CSS.contains(".layout-toggle{display:none}"));
@@ -1021,11 +1021,13 @@ mod tests {
     }
 
     #[test]
-    fn build_html_renders_layout_and_full_file_toggles_with_all_four_panes() {
+    fn build_html_defaults_to_unified_layout_and_ships_all_four_panes() {
         let html = build_html(&sample_view());
 
-        // both header toggles: side-by-side is the default (pressed), full file is not
-        assert!(html.contains(r#"class="layout-toggle active" aria-pressed="true""#));
+        // both header toggles: unified is the default, full file is not
+        assert!(html.contains(r#"<html lang="en""#));
+        assert!(!html.contains(r#"<html lang="en" data-diff-layout="#));
+        assert!(html.contains(r#"class="layout-toggle" aria-pressed="false""#));
         assert!(html.contains(r#"class="view-toggle" aria-pressed="false""#));
         // all four diff renderings ship; CSS reveals one (no `hidden` plumbing)
         assert!(html.contains(r#"class="diff diff-split diff-compact""#));
@@ -1035,6 +1037,11 @@ mod tests {
         // visibility is CSS-driven now; the diff blocks carry no `hidden` attribute
         assert!(!html.contains(r#"diff-full" hidden"#));
         assert!(!html.contains(r#"diff-compact" hidden"#));
+    }
+
+    #[test]
+    fn layout_boot_script_preserves_saved_split_preference() {
+        assert!(THEME_BOOT_JS.contains("if(l==='split')d.diffLayout='split';"));
     }
 
     #[test]

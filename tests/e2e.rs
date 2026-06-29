@@ -780,6 +780,27 @@ fn tag_ls_marks_fetched_remote_tags() {
 }
 
 #[test]
+fn tag_ls_shows_annotated_tag_message_first_line() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.git(&[
+        "tag",
+        "-a",
+        "v1.0.0",
+        "-m",
+        "ship release\n\nbody line ignored",
+    ]);
+    repo.git(&["tag", "lightweight"]);
+
+    repo.run(&["tag", "ls"])
+        .assert()
+        .success()
+        .stdout(contains("v1.0.0 [local]  ship release"))
+        .stdout(contains("body line ignored").not())
+        .stdout(contains("lightweight [local]"));
+}
+
+#[test]
 fn tag_commits_lists_tags_with_target_commits() {
     let repo = Repo::new();
     let first = repo.commit("a.txt", "base\n", "chore: base");

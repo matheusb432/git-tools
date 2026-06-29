@@ -508,11 +508,28 @@ fn run_tag(command: Option<TagCommand>, commits: bool) -> ExitCode {
         Some(TagCommand::Up {
             tag: Some(tag),
             message: Some(message),
-        }) => tag::add_and_push(&runner, std::path::Path::new("."), &tag, &message),
+            label,
+        }) => tag::add_and_push(
+            &runner,
+            std::path::Path::new("."),
+            &tag,
+            &message,
+            label.as_deref(),
+        ),
+        Some(TagCommand::Up {
+            tag: Some(tag),
+            message: None,
+            label: Some(label),
+        }) => tag::label_tag(&runner, std::path::Path::new("."), &tag, &label),
         Some(TagCommand::Up {
             tag: None,
             message: None,
+            label: None,
         }) => tag::push(&runner, std::path::Path::new(".")),
+        Some(TagCommand::Up { tag: None, .. }) => {
+            eprintln!("tag: tag up --label requires a <tag> to label");
+            return ExitCode::Usage;
+        }
         Some(TagCommand::Up { .. }) => {
             eprintln!("tag: tag up requires both <tag> and <message> when creating a tag");
             return ExitCode::Usage;

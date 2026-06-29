@@ -147,7 +147,7 @@ export function enhanceLayout(root: HTMLElement): void {
   // ! tabbed panels. Layout persists per-device; full-file resets each artifact.
   function syncToggles(): void {
     const full = docEl.dataset["diffFull"] === "on";
-    const split = docEl.dataset["diffLayout"] !== "unified";
+    const split = docEl.dataset["diffLayout"] === "split";
     document.querySelectorAll<HTMLElement>(".view-toggle").forEach((b) => {
       b.setAttribute("aria-pressed", full ? "true" : "false");
       b.classList.toggle("active", full);
@@ -165,9 +165,9 @@ export function enhanceLayout(root: HTMLElement): void {
   });
 
   if (layoutToggle) layoutToggle.addEventListener("click", () => {
-    const split = docEl.dataset["diffLayout"] === "unified"; // currently unified -> switch to split
-    if (split) delete docEl.dataset["diffLayout"];
-    else docEl.dataset["diffLayout"] = "unified";
+    const split = docEl.dataset["diffLayout"] !== "split"; // currently unified -> switch to split
+    if (split) docEl.dataset["diffLayout"] = "split";
+    else delete docEl.dataset["diffLayout"];
     try {
       localStorage.setItem("gtl-diff-layout", split ? "split" : "unified");
     } catch {

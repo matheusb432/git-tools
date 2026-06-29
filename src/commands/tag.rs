@@ -2,10 +2,8 @@ use std::{collections::BTreeMap, path::Path};
 
 use crate::commands::squash_local::GitRunner;
 
-const LOCAL_TAG_FORMAT_ARG: &str =
-    "--format=%(objectname)\t%(*objectname:short)\t%(refname:strip=2)";
-const REMOTE_TAG_FORMAT_ARG: &str =
-    "--format=%(objectname)\t%(*objectname:short)\t%(refname:strip=4)";
+const LOCAL_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=2)\t%(contents:lines=1)";
+const REMOTE_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=4)\t%(contents:lines=1)";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
@@ -37,24 +35,107 @@ pub fn list(runner: &impl GitRunner, repo: &Path, commits: bool) -> TagResult {
         Err(detail) => return TagResult::new(Status::Fail, detail),
     };
 
-    let lines = refs
-        .local
-        .values()
-        .map(|tag| {
-            let state = if refs.is_remote(tag) {
-                "remote"
-            } else {
-                "local"
-            };
-            if commits {
-                format!("{} {} [{state}]", tag.commit_short(), tag.name)
-            } else {
-                format!("{} [{state}]", tag.name)
-            }
-        })
-        .collect::<Vec<_>>();
+    let mut lines = Vec::new();
+    for group in group_by_commit(refs.local.values()) {
+        match group.as_slice() {
+            [single] => lines.push(render_tag(&refs, single, commits)),
+            many => match classify_group(many) {
+                TagGroup::Canonical(canonical) => {
+                    lines.push(render_tag(&refs, canonical, commits));
+                    for label in many.iter().filter(|tag| tag.name != canonical.name) {
+                        lines.push(render_label(&refs, label));
+                    }
+                }
+                TagGroup::MoreThanOneTagHasMessage | TagGroup::AllLabels => {
+                    lines.push(render_commit_header(many[0]));
+                    for tag in many {
+                        lines.push(render_label(&refs, tag));
+                    }
+                }
+            },
+        }
+    }
 
     TagResult::new(Status::Listed, lines.join("\n"))
+}
+
+/// How the tags sharing one commit relate: which (if any) is the canonical,
+/// message-bearing tag the others nest under as lightweight labels.
+#[derive(Debug, PartialEq, Eq)]
+enum TagGroup<'a> {
+    /// Exactly one tag carries a message; the rest nest under it as labels.
+    Canonical(&'a TagRef),
+    /// More than one tag carries a message, so no single canonical tag exists —
+    /// nest them all under the commit (pseudocode's `MoreThanOneTagHasMessage`).
+    MoreThanOneTagHasMessage,
+    /// No tag carries a message; every tag is a lightweight label under the commit.
+    AllLabels,
+}
+
+/// Classifies a group of two-or-more tags pointing at one commit. Only one tag
+/// may carry a message for the others to read as its labels.
+fn classify_group<'a>(group: &[&'a TagRef]) -> TagGroup<'a> {
+    let mut with_message = group.iter().copied().filter(|tag| tag.has_message());
+    match (with_message.next(), with_message.next()) {
+        (Some(canonical), None) => TagGroup::Canonical(canonical),
+        (Some(_), Some(_)) => TagGroup::MoreThanOneTagHasMessage,
+        (None, _) => TagGroup::AllLabels,
+    }
+}
+
+/// Buckets tags by the commit they resolve to, preserving first-seen order.
+fn group_by_commit<'a>(tags: impl Iterator<Item = &'a TagRef>) -> Vec<Vec<&'a TagRef>> {
+    let mut groups: Vec<Vec<&'a TagRef>> = Vec::new();
+    for tag in tags {
+        match groups
+            .iter_mut()
+            .find(|group| group[0].commit_id() == tag.commit_id())
+        {
+            Some(group) => group.push(tag),
+            None => groups.push(vec![tag]),
+        }
+    }
+    groups
+}
+
+fn ref_state(refs: &TagRefs, tag: &TagRef) -> &'static str {
+    if refs.is_remote(tag) {
+        "remote"
+    } else {
+        "local"
+    }
+}
+
+fn render_tag(refs: &TagRefs, tag: &TagRef, commits: bool) -> String {
+    let state = ref_state(refs, tag);
+    let message = message_suffix(tag);
+    if commits {
+        format!("{} {} [{state}]{message}", tag.commit_short(), tag.name)
+    } else {
+        format!("{} [{state}]{message}", tag.name)
+    }
+}
+
+fn render_label(refs: &TagRefs, tag: &TagRef) -> String {
+    format!(
+        "  - {} [{}]{}",
+        tag.name,
+        ref_state(refs, tag),
+        message_suffix(tag)
+    )
+}
+
+/// Trailing `  <first message line>` for a message-bearing (annotated) tag, or
+/// empty for a lightweight tag — its underlying commit subject is not its own.
+fn message_suffix(tag: &TagRef) -> String {
+    match tag.message_subject() {
+        Some(subject) => format!("  {subject}"),
+        None => String::new(),
+    }
+}
+
+fn render_commit_header(tag: &TagRef) -> String {
+    tag.commit_short()
 }
 
 pub fn add(runner: &impl GitRunner, repo: &Path, tag: &str, message: &str) -> TagResult {
@@ -77,31 +158,102 @@ pub fn add(runner: &impl GitRunner, repo: &Path, tag: &str, message: &str) -> Ta
     }
 }
 
-pub fn add_and_push(runner: &impl GitRunner, repo: &Path, tag: &str, message: &str) -> TagResult {
+pub fn add_and_push(
+    runner: &impl GitRunner,
+    repo: &Path,
+    tag: &str,
+    message: &str,
+    label: Option<&str>,
+) -> TagResult {
     let created = add(runner, repo, tag, message);
     if created.status == Status::Fail {
         return created;
     }
 
+    let mut names = vec![tag];
+    let mut detail = created.detail;
+    if let Some(label) = label {
+        match create_label_tag(runner, repo, tag, label) {
+            Ok(()) => {
+                names.push(label);
+                detail = format!("{detail}\ncreated tag {label}");
+            }
+            Err(failure) => return TagResult::new(Status::Fail, failure),
+        }
+    }
+
+    push_created(runner, repo, &names, detail)
+}
+
+/// Attach a lightweight label tag to an existing tag's commit, then push it.
+///
+/// Backs `tag update <tag> -l <label>`: the canonical (message-bearing) tag
+/// already exists, so this only adds the second ref and pushes it.
+pub fn label_tag(runner: &impl GitRunner, repo: &Path, tag: &str, label: &str) -> TagResult {
+    if tag.trim().is_empty() {
+        return TagResult::new(Status::Fail, "tag name is required");
+    }
+    if label.trim().is_empty() {
+        return TagResult::new(Status::Fail, "label is required");
+    }
+
+    if let Err(failure) = create_label_tag(runner, repo, tag, label) {
+        return TagResult::new(Status::Fail, failure);
+    }
+
+    push_created(runner, repo, &[label], format!("created tag {label}"))
+}
+
+/// Creates a lightweight label tag pointing at `target`'s commit
+/// (`git tag <label> <target>^{}` — two refs to one commit, no duplicated message).
+fn create_label_tag(
+    runner: &impl GitRunner,
+    repo: &Path,
+    target: &str,
+    label: &str,
+) -> Result<(), String> {
+    let peeled = format!("{target}^{{}}");
+    match runner.run(repo, &["tag", label, &peeled]) {
+        Ok(output) if output.exit_code == 0 => Ok(()),
+        Ok(output) => Err(output.fail_detail(&format!("git tag label failed for {label}"))),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Pushes the just-created tags named in `names` that are not yet on origin,
+/// prefixing the push line with `created_detail`.
+fn push_created(
+    runner: &impl GitRunner,
+    repo: &Path,
+    names: &[&str],
+    created_detail: String,
+) -> TagResult {
     let refs = match tag_refs(runner, repo) {
         Ok(refs) => refs,
         Err(detail) => return TagResult::new(Status::Fail, detail),
     };
-    let Some(tag_ref) = refs.local.get(tag) else {
-        return TagResult::new(Status::Fail, format!("created tag {tag} was not found"));
-    };
 
-    let pushed = if refs.is_remote(tag_ref) {
-        TagResult::new(Status::Noop, "tags already up to date")
-    } else {
-        push_tags(runner, repo, &[tag_ref])
-    };
+    let mut pending = Vec::new();
+    for name in names {
+        let Some(tag_ref) = refs.local.get(*name) else {
+            return TagResult::new(Status::Fail, format!("created tag {name} was not found"));
+        };
+        if !refs.is_remote(tag_ref) {
+            pending.push(tag_ref);
+        }
+    }
+
+    if pending.is_empty() {
+        return TagResult::new(Status::Noop, created_detail);
+    }
+
+    let pushed = push_tags(runner, repo, &pending);
     match pushed.status {
         Status::Pushed => TagResult::new(
             Status::Pushed,
-            format!("{}\n{}", created.detail, pushed.detail),
+            format!("{created_detail}\n{}", pushed.detail),
         ),
-        Status::Noop => TagResult::new(Status::Noop, created.detail),
+        Status::Noop => TagResult::new(Status::Noop, created_detail),
         Status::Fail => pushed,
         Status::Created | Status::Listed => pushed,
     }
@@ -165,8 +317,13 @@ fn track_pushed_tag(runner: &impl GitRunner, repo: &Path, tag: &TagRef) -> Resul
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TagRef {
     object: String,
+    commit: String,
     peeled_short: String,
     name: String,
+    /// First line of the annotated tag's message (`%(contents:lines=1)`). For a
+    /// lightweight tag this is the underlying commit's subject, so it is only
+    /// surfaced for message-bearing tags (see [`TagRef::message_subject`]).
+    message: String,
 }
 
 impl TagRef {
@@ -176,6 +333,32 @@ impl TagRef {
         } else {
             self.peeled_short.clone()
         }
+    }
+
+    /// Full commit this tag resolves to: the peeled commit for an annotated tag,
+    /// or the object itself for a lightweight tag.
+    fn commit_id(&self) -> &str {
+        if self.commit.is_empty() {
+            &self.object
+        } else {
+            &self.commit
+        }
+    }
+
+    /// An annotated tag carries a message (and peels to a separate commit object);
+    /// a lightweight tag does not.
+    fn has_message(&self) -> bool {
+        !self.commit.is_empty()
+    }
+
+    /// First line of this tag's own message, or `None` for a lightweight tag (which
+    /// has no message of its own) or an annotated tag with an empty subject.
+    fn message_subject(&self) -> Option<&str> {
+        if !self.has_message() {
+            return None;
+        }
+        let subject = self.message.trim();
+        (!subject.is_empty()).then_some(subject)
     }
 }
 
@@ -235,10 +418,12 @@ fn parse_refs(stdout: &str) -> BTreeMap<String, TagRef> {
     stdout
         .lines()
         .filter_map(|line| {
-            let mut fields = line.splitn(3, '\t');
+            let mut fields = line.splitn(5, '\t');
             let object = fields.next()?.to_string();
+            let commit = fields.next()?.to_string();
             let peeled_short = fields.next()?.to_string();
             let name = fields.next()?.to_string();
+            let message = fields.next().unwrap_or_default().to_string();
             if object.is_empty() || name.is_empty() {
                 return None;
             }
@@ -246,8 +431,10 @@ fn parse_refs(stdout: &str) -> BTreeMap<String, TagRef> {
                 name.clone(),
                 TagRef {
                     object,
+                    commit,
                     peeled_short,
                     name,
+                    message,
                 },
             ))
         })
@@ -321,8 +508,8 @@ mod tests {
     #[test]
     fn list_tags_uses_plain_tag_list() {
         let runner = FakeRunner::new(vec![
-            FakeRunner::ok("aaa\t\tv1.0.0\nbbb\t\tv1.1.0\n"),
-            FakeRunner::ok("aaa\t\tv1.0.0\n"),
+            FakeRunner::ok("aaa\t\t\tv1.0.0\nbbb\t\t\tv1.1.0\n"),
+            FakeRunner::ok("aaa\t\t\tv1.0.0\n"),
         ]);
 
         let result = list(&runner, Path::new("."), false);
@@ -345,14 +532,14 @@ mod tests {
     #[test]
     fn list_tags_with_commits_uses_format() {
         let runner = FakeRunner::new(vec![
-            FakeRunner::ok("aaa\tabc1234\tv1.0.0\n"),
-            FakeRunner::ok("aaa\tabc1234\tv1.0.0\n"),
+            FakeRunner::ok("aaa\tabc1234def\tabc1234\tv1.0.0\tship it\n"),
+            FakeRunner::ok("aaa\tabc1234def\tabc1234\tv1.0.0\tship it\n"),
         ]);
 
         let result = list(&runner, Path::new("."), true);
 
         assert_eq!(result.status, Status::Listed);
-        assert_eq!(result.detail, "abc1234 v1.0.0 [remote]");
+        assert_eq!(result.detail, "abc1234 v1.0.0 [remote]  ship it");
         assert_eq!(
             runner.arg_lists(),
             vec![
@@ -369,8 +556,8 @@ mod tests {
     #[test]
     fn push_tags_skips_when_all_tags_are_already_tracked() {
         let runner = FakeRunner::new(vec![
-            FakeRunner::ok("aaa\t\tv1.0.0\n"),
-            FakeRunner::ok("aaa\t\tv1.0.0\n"),
+            FakeRunner::ok("aaa\t\t\tv1.0.0\n"),
+            FakeRunner::ok("aaa\t\t\tv1.0.0\n"),
         ]);
 
         let result = push(&runner, Path::new("."));
@@ -391,8 +578,8 @@ mod tests {
     #[test]
     fn push_tags_pushes_only_untracked_tags() {
         let runner = FakeRunner::new(vec![
-            FakeRunner::ok("aaa\t\tv1.0.0\nbbb\t\tv1.1.0\n"),
-            FakeRunner::ok("aaa\t\tv1.0.0\n"),
+            FakeRunner::ok("aaa\t\t\tv1.0.0\nbbb\t\t\tv1.1.0\n"),
+            FakeRunner::ok("aaa\t\t\tv1.0.0\n"),
             FakeRunner::ok(""),
             FakeRunner::ok(""),
             FakeRunner::ok(""),
@@ -443,14 +630,14 @@ mod tests {
     fn add_and_push_tag_creates_then_pushes() {
         let runner = FakeRunner::new(vec![
             FakeRunner::ok(""),
-            FakeRunner::ok("aaa\t\tv1.0.0\nbbb\t\tv1.1.0\nccc\t\tv1.2.0\n"),
-            FakeRunner::ok("aaa\t\tv1.0.0\n"),
+            FakeRunner::ok("aaa\t\t\tv1.0.0\nbbb\t\t\tv1.1.0\nccc\t\t\tv1.2.0\n"),
+            FakeRunner::ok("aaa\t\t\tv1.0.0\n"),
             FakeRunner::ok(""),
             FakeRunner::ok(""),
             FakeRunner::ok(""),
         ]);
 
-        let result = add_and_push(&runner, Path::new("."), "v1.2.0", "release notes");
+        let result = add_and_push(&runner, Path::new("."), "v1.2.0", "release notes", None);
 
         assert_eq!(
             result,
@@ -475,6 +662,217 @@ mod tests {
                 "refs/tags/v1.2.0:refs/tags/v1.2.0".to_string(),
             ])
         );
+    }
+
+    #[test]
+    fn add_and_push_with_label_creates_both_refs_and_pushes_them() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok(""), // tag -a v0.1.0
+            FakeRunner::ok(""), // tag base-template v0.1.0^{}
+            // local refs: annotated v0.1.0 + lightweight label, same commit ccc
+            FakeRunner::ok("t01\tccc\tccc\tv0.1.0\nccc\t\t\tbase-template\n"),
+            FakeRunner::ok(""), // remote refs (none)
+            FakeRunner::ok(""), // push
+            FakeRunner::ok(""), // update-ref v0.1.0
+            FakeRunner::ok(""), // update-ref base-template
+        ]);
+
+        let result = add_and_push(
+            &runner,
+            Path::new("."),
+            "v0.1.0",
+            "base template",
+            Some("base-template"),
+        );
+
+        assert_eq!(result.status, Status::Pushed);
+        assert_eq!(
+            result.detail,
+            "created tag v0.1.0\ncreated tag base-template\npushed 2 tags: v0.1.0, base-template"
+        );
+        let calls = runner.arg_lists();
+        assert_eq!(
+            calls.get(1),
+            Some(&vec![
+                "tag".to_string(),
+                "base-template".to_string(),
+                "v0.1.0^{}".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn label_tag_labels_existing_tag_and_pushes_only_the_label() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok(""), // tag base-template v0.1.0^{}
+            // v0.1.0 already on remote; only the new label is pending
+            FakeRunner::ok("t01\tccc\tccc\tv0.1.0\nccc\t\t\tbase-template\n"),
+            FakeRunner::ok("t01\tccc\tccc\tv0.1.0\n"),
+            FakeRunner::ok(""), // push
+            FakeRunner::ok(""), // update-ref base-template
+        ]);
+
+        let result = label_tag(&runner, Path::new("."), "v0.1.0", "base-template");
+
+        assert_eq!(
+            result,
+            TagResult::new(
+                Status::Pushed,
+                "created tag base-template\npushed 1 tag: base-template"
+            )
+        );
+        let calls = runner.arg_lists();
+        assert_eq!(
+            calls.first(),
+            Some(&vec![
+                "tag".to_string(),
+                "base-template".to_string(),
+                "v0.1.0^{}".to_string(),
+            ])
+        );
+        assert_eq!(
+            calls.get(3),
+            Some(&vec![
+                "push".to_string(),
+                "origin".to_string(),
+                "refs/tags/base-template:refs/tags/base-template".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn list_nests_label_under_its_canonical_tag() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok("t01\tccc\tccc\tv0.1.0\nccc\t\t\tbase-template\n"),
+            FakeRunner::ok(""),
+        ]);
+
+        let result = list(&runner, Path::new("."), false);
+
+        assert_eq!(result.status, Status::Listed);
+        assert_eq!(result.detail, "v0.1.0 [local]\n  - base-template [local]");
+    }
+
+    #[test]
+    fn list_nests_all_labels_under_commit_when_none_has_a_message() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok("abcdef1\t\t\tlabel-a\nabcdef1\t\t\tlabel-b\n"),
+            FakeRunner::ok(""),
+        ]);
+
+        let result = list(&runner, Path::new("."), false);
+
+        assert_eq!(
+            result.detail,
+            "abcdef1\n  - label-a [local]\n  - label-b [local]"
+        );
+    }
+
+    #[test]
+    fn list_nests_all_under_commit_when_more_than_one_tag_has_a_message() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok("t01\tccccccc\tccccccc\tv0.1.0\nt02\tccccccc\tccccccc\tv0.2.0\n"),
+            FakeRunner::ok(""),
+        ]);
+
+        let result = list(&runner, Path::new("."), false);
+
+        assert_eq!(
+            result.detail,
+            "ccccccc\n  - v0.1.0 [local]\n  - v0.2.0 [local]"
+        );
+    }
+
+    #[test]
+    fn list_shows_annotated_tag_message_first_line() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok("d69\t48bf864\t48bf864\tv1.0.0\trelease one\n"),
+            FakeRunner::ok(""),
+        ]);
+
+        let result = list(&runner, Path::new("."), false);
+
+        assert_eq!(result.detail, "v1.0.0 [local]  release one");
+    }
+
+    #[test]
+    fn list_omits_message_for_lightweight_tag() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok("abcdef1\t\t\tlabel-a\tunderlying commit subject\n"),
+            FakeRunner::ok(""),
+        ]);
+
+        let result = list(&runner, Path::new("."), false);
+
+        assert_eq!(result.detail, "label-a [local]");
+    }
+
+    #[test]
+    fn list_canonical_shows_message_label_stays_bare() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok(
+                "t01\tccc\tccc\tv0.1.0\tbase template\nccc\t\t\tbase-template\tcommit subj\n",
+            ),
+            FakeRunner::ok(""),
+        ]);
+
+        let result = list(&runner, Path::new("."), false);
+
+        assert_eq!(
+            result.detail,
+            "v0.1.0 [local]  base template\n  - base-template [local]"
+        );
+    }
+
+    #[test]
+    fn list_more_than_one_message_shows_each_subject_under_commit() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok(
+                "t01\tccccccc\tccccccc\tv0.1.0\tfirst subject\nt02\tccccccc\tccccccc\tv0.2.0\tsecond subject\n",
+            ),
+            FakeRunner::ok(""),
+        ]);
+
+        let result = list(&runner, Path::new("."), false);
+
+        assert_eq!(
+            result.detail,
+            "ccccccc\n  - v0.1.0 [local]  first subject\n  - v0.2.0 [local]  second subject"
+        );
+    }
+
+    #[test]
+    fn classify_group_distinguishes_canonical_ambiguous_and_label_only() {
+        let annotated = |name: &str| TagRef {
+            object: format!("obj-{name}"),
+            commit: "ccc".to_string(),
+            peeled_short: "ccc".to_string(),
+            name: name.to_string(),
+            message: format!("message for {name}"),
+        };
+        let lightweight = |name: &str| TagRef {
+            object: "ccc".to_string(),
+            commit: String::new(),
+            peeled_short: String::new(),
+            name: name.to_string(),
+            message: String::new(),
+        };
+
+        let canonical = annotated("v0.1.0");
+        let label = lightweight("base-template");
+        assert_eq!(
+            classify_group(&[&canonical, &label]),
+            TagGroup::Canonical(&canonical)
+        );
+
+        let other = annotated("v0.2.0");
+        assert_eq!(
+            classify_group(&[&canonical, &other]),
+            TagGroup::MoreThanOneTagHasMessage
+        );
+
+        let label_b = lightweight("dev");
+        assert_eq!(classify_group(&[&label, &label_b]), TagGroup::AllLabels);
     }
 
     #[test]

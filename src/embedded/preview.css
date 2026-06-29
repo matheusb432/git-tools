@@ -107,17 +107,17 @@
   details.file>summary .path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
   .copies{display:flex;gap:5px;flex:none} .filestat{flex:none;font-size:12.5px}
   .diff{overflow-x:hidden;font-size:14px;line-height:1.6}
-  /* === which of the four panes shows: split (default) vs unified · compact vs full ===
+  /* === which of the four panes shows: unified (default) vs split · compact vs full ===
      driven by the <html> data-diff-layout / data-diff-full attributes; :has() falls back
      to the compact pane for files that ship no full-file rendering. */
   .filebody .diff{display:none}
-  html[data-diff-layout="unified"]:not([data-diff-full="on"]) .diff-unified.diff-compact{display:block}
-  html[data-diff-layout="unified"][data-diff-full="on"] .diff-unified.diff-full{display:block}
-  html[data-diff-layout="unified"][data-diff-full="on"] .filebody:not(:has(.diff-unified.diff-full)) .diff-unified.diff-compact{display:block}
+  html:not([data-diff-layout="split"]):not([data-diff-full="on"]) .diff-unified.diff-compact{display:block}
+  html:not([data-diff-layout="split"])[data-diff-full="on"] .diff-unified.diff-full{display:block}
+  html:not([data-diff-layout="split"])[data-diff-full="on"] .filebody:not(:has(.diff-unified.diff-full)) .diff-unified.diff-compact{display:block}
   @media (min-width:1025px){
-    html:not([data-diff-layout="unified"]):not([data-diff-full="on"]) .diff-split.diff-compact{display:block}
-    html:not([data-diff-layout="unified"])[data-diff-full="on"] .diff-split.diff-full{display:block}
-    html:not([data-diff-layout="unified"])[data-diff-full="on"] .filebody:not(:has(.diff-split.diff-full)) .diff-split.diff-compact{display:block}
+    html[data-diff-layout="split"]:not([data-diff-full="on"]) .diff-split.diff-compact{display:block}
+    html[data-diff-layout="split"][data-diff-full="on"] .diff-split.diff-full{display:block}
+    html[data-diff-layout="split"][data-diff-full="on"] .filebody:not(:has(.diff-split.diff-full)) .diff-split.diff-compact{display:block}
   }
   /* engine diff rows: dl/ln/code · mapped onto the comp's add/del/ctx/hunk look */
   .dl{display:grid;grid-template-columns:44px 44px minmax(0,1fr);align-items:start;white-space:normal}
