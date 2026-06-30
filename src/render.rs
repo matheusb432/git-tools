@@ -1,6 +1,9 @@
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
-use crate::model::{FileDiff, LineOwners, View};
+use crate::{
+    intraline::{LineSpans, Span, changed_spans},
+    model::{FileDiff, LineOwners, View},
+};
 
 const MAX_LINE_COLS: usize = 2000;
 const GIANT_FILE_CHARS: usize = 250_000;
@@ -15,10 +18,23 @@ const PREVIEW_BUNDLE: &str = include_str!("embedded/generated/preview.js");
 const THEME_BOOT_JS: &str = "(function(){try{var d=document.documentElement.dataset;var t=localStorage.getItem('gtl-theme');if(t)d.theme=t;var l=localStorage.getItem('gtl-diff-layout');if(l==='split')d.diffLayout='split';else if(l==='unified')delete d.diffLayout;}catch(e){}})();";
 
 pub fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        push_escaped(&mut out, ch);
+    }
+    out
+}
+
+// ! Single source of the HTML escape mapping, char by char, so the intra-line span renderer
+// ! can interleave `<span>` markers between escaped chars without re-escaping whole substrings.
+fn push_escaped(out: &mut String, ch: char) {
+    match ch {
+        '&' => out.push_str("&amp;"),
+        '<' => out.push_str("&lt;"),
+        '>' => out.push_str("&gt;"),
+        '"' => out.push_str("&quot;"),
+        _ => out.push(ch),
+    }
 }
 
 pub fn slug(s: &str) -> String {
@@ -354,15 +370,62 @@ fn code_cell(raw: &str, long: Option<usize>) -> String {
 
 // ! One side of a side-by-side row: a `<code>` carrying the change color (`side` is
 // ! `sp-del`/`sp-add`/`sp-ctx`) and, for changed lines, the owning-commit attribute that
-// ! drives the per-commit focus highlight. Long lines reuse `code_inner`'s taming.
-fn split_code(raw: &str, long: Option<usize>, side: &str, commit: Option<&String>) -> String {
-    let inner = code_inner(raw, long);
+// ! drives the per-commit focus highlight. Long lines reuse `code_inner`'s taming; a paired
+// ! changed line with `spans` gets its differing chars wrapped (the intra-line highlight).
+fn split_code(
+    raw: &str,
+    long: Option<usize>,
+    side: &str,
+    commit: Option<&String>,
+    spans: &[Span],
+) -> String {
+    let inner = if long.is_some() {
+        code_inner(raw, long)
+    } else if spans.is_empty() {
+        html_or_nbsp(raw)
+    } else {
+        mark_spans(raw, spans)
+    };
     let attr = commit_attr(commit);
     if long.is_some() {
         format!(r#"<code class="sp {side} long"{attr}>{inner}</code>"#)
     } else {
         format!(r#"<code class="sp {side}"{attr}>{inner}</code>"#)
     }
+}
+
+// ! A changed line body with its leading diff marker (a single ASCII +/-) stripped, ready for
+// ! intra-line diffing; the marker byte is a valid char boundary so the 1.. slice is safe.
+fn line_body(raw: &str) -> &str {
+    raw.get(1..).unwrap_or("")
+}
+
+// ! Escape a changed line body char by char, wrapping the `spans` (char-index ranges into the
+// ! body, i.e. after the leading +/- marker) in `.ciw` so CSS can paint the VS Code-style
+// ! intra-line highlight. The marker char is ASCII +/- (never escaped) and is never wrapped.
+fn mark_spans(raw: &str, spans: &[Span]) -> String {
+    let mut out = String::with_capacity(raw.len() + spans.len() * 26);
+    let mut chars = raw.chars();
+    if let Some(marker) = chars.next() {
+        out.push(marker);
+    }
+
+    let mut open = false;
+    for (i, ch) in chars.enumerate() {
+        let inside = spans.iter().any(|span| i >= span.start && i < span.end);
+        if inside && !open {
+            out.push_str(r#"<span class="ciw">"#);
+            open = true;
+        } else if !inside && open {
+            out.push_str("</span>");
+            open = false;
+        }
+        push_escaped(&mut out, ch);
+    }
+    if open {
+        out.push_str("</span>");
+    }
+    out
 }
 
 // ! An empty side of a side-by-side row — no line on this pane, so a blank gutter and a
@@ -386,23 +449,49 @@ pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
     let flush =
         |rows: &mut String, dels: &mut Vec<(u32, &String)>, adds: &mut Vec<(u32, &String)>| {
             for i in 0..dels.len().max(adds.len()) {
+                let del = dels.get(i).copied();
+                let add = adds.get(i).copied();
+                // ! Intra-line highlight only where a deletion and an addition pair up on the
+                // ! same row and both are short enough to word-diff; unpaired or long lines fall
+                // ! back to empty spans (no marks).
+                let spans = match (del, add) {
+                    (Some((_, draw)), Some((_, araw)))
+                        if long_len(draw).is_none() && long_len(araw).is_none() =>
+                    {
+                        changed_spans(line_body(draw), line_body(araw))
+                    }
+                    _ => LineSpans::default(),
+                };
+
                 rows.push_str(r#"<div class="dl">"#);
-                match dels.get(i) {
+                match del {
                     Some((no, raw)) => {
                         let _ = write!(
                             rows,
                             r#"<span class="ln">{no}</span>{}"#,
-                            split_code(raw, long_len(raw), "sp-del", owners.deleted.get(no)),
+                            split_code(
+                                raw,
+                                long_len(raw),
+                                "sp-del",
+                                owners.deleted.get(&no),
+                                &spans.old
+                            ),
                         );
                     }
                     None => rows.push_str(SPLIT_PAD),
                 }
-                match adds.get(i) {
+                match add {
                     Some((no, raw)) => {
                         let _ = write!(
                             rows,
                             r#"<span class="ln">{no}</span>{}"#,
-                            split_code(raw, long_len(raw), "sp-add", owners.added.get(no)),
+                            split_code(
+                                raw,
+                                long_len(raw),
+                                "sp-add",
+                                owners.added.get(&no),
+                                &spans.new
+                            ),
                         );
                     }
                     None => rows.push_str(SPLIT_PAD),
@@ -453,9 +542,9 @@ pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
                 rows,
                 r#"<div class="dl"><span class="ln">{}</span>{}<span class="ln">{}</span>{}</div>"#,
                 old_no,
-                split_code(raw, long, "sp-ctx", None),
+                split_code(raw, long, "sp-ctx", None, &[]),
                 new_no,
-                split_code(raw, long, "sp-ctx", None),
+                split_code(raw, long, "sp-ctx", None, &[]),
             );
             old_no += 1;
             new_no += 1;
@@ -740,6 +829,92 @@ mod tests {
             r#"<button class="ln-more" type="button" aria-expanded="false">⋯ {} chars</button>"#,
             MAX_LINE_COLS + 5
         )));
+    }
+
+    #[test]
+    fn render_diff_split_marks_intra_line_word_changes_on_both_panes() {
+        let html = render_diff_split(
+            &[
+                "@@ -1,1 +1,1 @@".to_string(),
+                "-let x = 1;".to_string(),
+                "+let x = 2;".to_string(),
+            ],
+            &LineOwners::default(),
+        );
+
+        // only the differing char is wrapped; the shared prefix/suffix stay bare
+        assert!(
+            html.contains(r#"<code class="sp sp-del">-let x = <span class="ciw">1</span>;</code>"#)
+        );
+        assert!(
+            html.contains(r#"<code class="sp sp-add">+let x = <span class="ciw">2</span>;</code>"#)
+        );
+    }
+
+    #[test]
+    fn render_diff_split_leaves_fully_rewritten_pairs_unmarked() {
+        let html = render_diff_split(
+            &[
+                "@@ -1,1 +1,1 @@".to_string(),
+                "-old".to_string(),
+                "+new".to_string(),
+            ],
+            &LineOwners::default(),
+        );
+
+        // no shared run -> the line color already conveys the change, no intra-line marks
+        assert!(!html.contains("ciw"));
+        assert!(html.contains(r#"<code class="sp sp-del">-old</code>"#));
+        assert!(html.contains(r#"<code class="sp sp-add">+new</code>"#));
+    }
+
+    #[test]
+    fn render_diff_split_skips_intra_line_marks_on_unpaired_lines() {
+        // a lone addition (no deletion to pair with) is wholly new -> no intra-line marks
+        let html = render_diff_split(
+            &["@@ -0,0 +1 @@".to_string(), "+brandnew".to_string()],
+            &LineOwners::default(),
+        );
+
+        assert!(!html.contains("ciw"));
+    }
+
+    #[test]
+    fn render_diff_split_skips_intra_line_marks_on_long_lines() {
+        let del = format!("-{}x", "a".repeat(MAX_LINE_COLS + 5));
+        let add = format!("+{}y", "a".repeat(MAX_LINE_COLS + 5));
+        let html = render_diff_split(
+            &["@@ -1,1 +1,1 @@".to_string(), del, add],
+            &LineOwners::default(),
+        );
+
+        // long lines are tamed, not word-diffed (a word-diff over base64 would be pointless)
+        assert!(!html.contains("ciw"));
+        assert!(html.contains(r#"<code class="sp sp-del long">"#));
+        assert!(html.contains(r#"<code class="sp sp-add long">"#));
+    }
+
+    #[test]
+    fn render_diff_split_marks_escape_user_controlled_chars() {
+        let html = render_diff_split(
+            &[
+                "@@ -1,1 +1,1 @@".to_string(),
+                "-a<b>&1".to_string(),
+                "-".to_string(),
+                "+a<b>&2".to_string(),
+            ],
+            &LineOwners::default(),
+        );
+
+        // the marked char stays escaped inside the span; no raw `<b>` leaks
+        assert!(html.contains(r#"a&lt;b&gt;&amp;<span class="ciw">1</span>"#));
+        assert!(!html.contains("<b>"));
+    }
+
+    #[test]
+    fn preview_css_styles_intra_line_word_spans() {
+        assert!(PREVIEW_CSS.contains(".diff-split .sp-del .ciw{"));
+        assert!(PREVIEW_CSS.contains(".diff-split .sp-add .ciw{"));
     }
 
     #[test]

@@ -19,6 +19,7 @@ mod comment_syntax;
 pub mod config;
 pub mod diff;
 pub mod git;
+pub mod intraline;
 pub mod model;
 pub mod render;
 pub mod viewer;

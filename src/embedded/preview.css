@@ -143,6 +143,10 @@
   .diff-split .sp-add{background:var(--add-bg);color:var(--add-ink)}
   .diff-split .sp-ctx{color:var(--ink-2)}
   .diff-split .sp-pad{background:var(--sunk)}
+  /* intra-line (word-level) highlight: a stronger wash on just the changed chars within an
+     already line-colored pane — the VS Code inline-diff look, themed off the change accents */
+  .diff-split .sp-del .ciw{background:color-mix(in srgb,var(--del) 34%,transparent);border-radius:2px}
+  .diff-split .sp-add .ciw{background:color-mix(in srgb,var(--add) 34%,transparent);border-radius:2px}
   /* === per-commit focus: dim the diff, lift only the selected commit's own rows ===
      unified dims whole rows; split dims the .sp cells (row-level opacity would clip the
      owned cell's lift), so a half-owned paired row lights only its owning pane. */
