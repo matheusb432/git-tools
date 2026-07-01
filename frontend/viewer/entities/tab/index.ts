@@ -1,1 +1,1 @@
-export { closeAllTabs, closeOthers, closeTabState, type Tab, type TabState } from "./model/tab";
+export { closeAllTabs, closeOthers, closeTabState, sortTabsByTime, type Tab, type TabState } from "./model/tab";

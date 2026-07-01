@@ -1,4 +1,9 @@
-export type Tab = { readonly url: string; readonly label: string };
+export type Tab = { readonly url: string; readonly label: string; readonly committedAt: string };
+
+/** Most recently committed diff first. Stable sort keeps ties in their prior relative order. */
+export function sortTabsByTime(tabs: readonly Tab[]): readonly Tab[] {
+  return [...tabs].sort((a, b) => (a.committedAt < b.committedAt ? 1 : a.committedAt > b.committedAt ? -1 : 0));
+}
 
 export type TabState = {
   readonly tabs: readonly Tab[];

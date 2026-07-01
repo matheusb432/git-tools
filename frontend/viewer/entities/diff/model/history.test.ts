@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { groupHistoryByRepo, historyTabLabel, labelMap } from "./history";
+import { groupHistoryByRepo, historyTabLabel, labelMap, timestampMap } from "./history";
 import type { HistoryEntry } from "@/shared/api";
 
 function entry(over: Partial<HistoryEntry>): HistoryEntry {
@@ -32,4 +32,8 @@ test("label uses the name, else the hash fallback", () => {
 test("labelMap maps url -> resolved label", () => {
   const m = labelMap([entry({ title: "eod", url: "diff://r/a" })], hash);
   expect(m.get("diff://r/a")).toBe("eod");
+});
+test("timestampMap maps url -> head_committed_at", () => {
+  const m = timestampMap([entry({ url: "diff://r/a", head_committed_at: "2026-01-01T00:00:00Z" })]);
+  expect(m.get("diff://r/a")).toBe("2026-01-01T00:00:00Z");
 });

@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 import { splitTabs } from "./fit";
 
-const tabs = (n: number) => Array.from({ length: n }, (_, i) => ({ url: `u${i}`, label: `t${i}` }));
+const tabs = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({ url: `u${i}`, label: `t${i}`, committedAt: "2026-01-01T00:00:00Z" }));
 
 test("all fit -> no overflow", () => {
   const r = splitTabs(tabs(3), 0, 1000, 160, 200);

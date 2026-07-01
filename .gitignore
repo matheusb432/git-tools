@@ -12,6 +12,8 @@
 /.worktrees/**
 !/.worktrees/.gitkeep
 
+node_modules/
+
 # >>> CFG: shared ignored artifacts
 # superpowers audit artifacts
 .superpowers/
@@ -49,5 +51,4 @@ id_ed25519.*
 
 /.worktrees/**
 !/.worktrees/.gitkeep
-node_modules/
 # <<< CFG: shared ignored artifacts

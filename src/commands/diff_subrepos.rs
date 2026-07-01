@@ -58,7 +58,8 @@ pub fn run_scan(
         return Ok(DiffOutcome::Empty);
     }
 
-    let html = build_tabbed_html("diff-preview subrepos", &views);
+    let title = dated_title("diff-preview subrepos");
+    let html = build_tabbed_html(&title, &views);
     let meta = super::ArtifactMeta {
         repo_root: root.to_string_lossy().to_string(),
         repo_name: "subrepos".to_string(),
@@ -67,7 +68,7 @@ pub fn run_scan(
         head_sha: String::new(),
         range_label: String::new(),
         head_committed_at: String::new(),
-        title: "diff-preview subrepos".to_string(),
+        title,
     };
     let out_file = super::store_artifact(&meta, &html)?;
 
@@ -99,7 +100,8 @@ pub fn run_managed_all(
         views.push(view);
     }
 
-    let html = build_tabbed_html("diff-preview all", &views);
+    let title = dated_title("diff-preview all");
+    let html = build_tabbed_html(&title, &views);
     let meta = super::ArtifactMeta {
         repo_root: root.to_string_lossy().to_string(),
         repo_name: "all".to_string(),
@@ -108,7 +110,7 @@ pub fn run_managed_all(
         head_sha: String::new(),
         range_label: String::new(),
         head_committed_at: String::new(),
-        title: "diff-preview all".to_string(),
+        title,
     };
     let out_file = super::store_artifact(&meta, &html)?;
 
@@ -121,4 +123,30 @@ pub fn run_managed_all(
 fn unpushed_count(repo: &Path) -> anyhow::Result<usize> {
     let raw = git::run_git(repo, &["rev-list", "--count", "@{u}..HEAD"])?;
     Ok(raw.trim().parse().unwrap_or(0))
+}
+
+/// Prefixes a static template label with today's UTC date so repeated runs of
+/// `diff subrepos` / `diff-all` produce distinguishable history-panel titles
+/// instead of all sharing one generic label.
+fn dated_title(label: &str) -> String {
+    let date = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::UTC).date();
+    format!("{date} {label}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dated_title_prefixes_label_with_yyyy_mm_dd() {
+        let title = dated_title("diff-preview subrepos");
+
+        let (date, label) = title.split_once(' ').expect("title has a date prefix");
+        assert_eq!(date.len(), 10);
+        assert!(date.chars().enumerate().all(|(i, c)| match i {
+            4 | 7 => c == '-',
+            _ => c.is_ascii_digit(),
+        }));
+        assert_eq!(label, "diff-preview subrepos");
+    }
 }

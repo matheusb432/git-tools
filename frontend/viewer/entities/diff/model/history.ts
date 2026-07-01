@@ -24,3 +24,10 @@ export function labelMap(entries: readonly HistoryEntry[], fallback: (url: strin
   for (const e of entries) map.set(e.url, historyTabLabel(e, fallback));
   return map;
 }
+
+/** url -> `head_committed_at`, for ordering live-opened tabs by underlying diff recency. */
+export function timestampMap(entries: readonly HistoryEntry[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const e of entries) map.set(e.url, e.head_committed_at);
+  return map;
+}

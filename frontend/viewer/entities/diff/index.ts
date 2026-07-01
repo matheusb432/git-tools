@@ -1,1 +1,1 @@
-export { groupHistoryByRepo, historyTabLabel, labelMap, type HistoryEntry } from "./model/history";
+export { groupHistoryByRepo, historyTabLabel, labelMap, timestampMap, type HistoryEntry } from "./model/history";
