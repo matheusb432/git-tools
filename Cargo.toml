@@ -14,7 +14,7 @@ members = [
   "shared/cqrs-core",
   "shared/cqrs-macros",
   "shared/gtl-platform",
-  "tools/xtask",
+  "xtask",
 ]
 # Everything except `desktop`, which needs webkit2gtk headers and stays opt-in
 # via `-p desktop` (matching the pre-virtualization behavior of bare cargo).
@@ -31,7 +31,7 @@ default-members = [
   "shared/cqrs-core",
   "shared/cqrs-macros",
   "shared/gtl-platform",
-  "tools/xtask",
+  "xtask",
 ]
 
 [profile.release]

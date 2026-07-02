@@ -99,6 +99,6 @@ win-release-checklist:
     All seven green => Windows runtime certified for this build.
     EOF
 
-# Full dev-host bring-up: link skills, build + install both artifacts, ensure ~/.local/bin on PATH (fresh machine: `sh tools/xtask/bootstrap.sh`).
+# Full dev-host bring-up: link skills, build + install both artifacts, ensure ~/.local/bin on PATH (fresh machine: `sh xtask/bootstrap.sh`).
 bootstrap:
     cargo run --quiet -p xtask -- bootstrap

@@ -108,6 +108,8 @@ pub trait ArtifactStore: Send + Sync {
 pub trait HtmlRenderer: Send + Sync {
     /// The complete `file://`-ready HTML for `view`.
     fn build_html(&self, view: &View) -> String;
+    /// Renders several views as one tab-stripped document (diff-subrepos / diff --all).
+    fn build_tabbed_html(&self, title: &str, views: &[View]) -> String;
 }
 
 /// A source of the current time as an ISO-8601 string.

@@ -1,4 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use contracts::{
+    diffs::DiffTargetDto,
+    envelope::{Note, NoteLevel},
+};
+
+use crate::cli::DiffTarget;
 
 pub mod daemon_ctl;
 pub mod diff;
@@ -15,9 +22,6 @@ pub mod tag;
 pub mod up_subrepos;
 pub mod worktree;
 
-pub use application::ports::ArtifactMeta;
-pub use domain::diffs::{Mode, Ranges, ranges};
-
 fn repo_name(top: impl AsRef<Path>) -> String {
     top.as_ref()
         .file_name()
@@ -25,18 +29,6 @@ fn repo_name(top: impl AsRef<Path>) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or("repo")
         .to_string()
-}
-
-/// Place a rendered artifact in the central store (never the repo) via the
-/// [`ArtifactStore`](application::ports::ArtifactStore) adapter. Returns the
-/// artifact path. Idempotent on identical content.
-pub(crate) fn store_artifact(meta: &ArtifactMeta, html: &str) -> anyhow::Result<PathBuf> {
-    use application::ports::ArtifactStore;
-
-    let store_root = gtl_platform::paths::store_root()?;
-    Ok(infra::artifact_store::StoreArtifacts
-        .place(&store_root, meta, html)?
-        .path)
 }
 
 /// Open an artifact according to the user's `viewer` config. `app` spawns the
@@ -67,22 +59,10 @@ pub(crate) fn open_artifact(path: &Path) {
     }
 }
 
-/// Print a slice's [`Note`](application::shared::notes::Note)s: `Info` to stdout,
-/// `Warn` to stderr, text verbatim.
-pub(crate) fn print_notes(notes: &[application::shared::notes::Note]) {
-    for note in notes {
-        match note.level {
-            application::shared::notes::NoteLevel::Info => println!("{}", note.text),
-            application::shared::notes::NoteLevel::Warn => eprintln!("{}", note.text),
-        }
-    }
-}
-
 /// Print a daemon envelope's wire [`Note`](contracts::envelope::Note)s: `Info` to
 /// stdout, `Warn` to stderr, verbatim. `Error` notes are skipped — the caller
 /// turns them into the returned error so the exit path prints them once.
 pub(crate) fn print_wire_notes(notes: &[contracts::envelope::Note]) {
-    use contracts::envelope::NoteLevel;
     for note in notes {
         match note.level {
             NoteLevel::Info => println!("{}", note.text),
@@ -92,26 +72,81 @@ pub(crate) fn print_wire_notes(notes: &[contracts::envelope::Note]) {
     }
 }
 
-fn plural(n: usize) -> &'static str {
-    if n == 1 { "" } else { "s" }
+/// The CLI's exit path prints `{err:#}` to stderr — hand it the service-composed
+/// error text so output stays byte-identical to the pre-daemon local path.
+pub(crate) fn error_text(notes: &[Note]) -> String {
+    notes
+        .iter()
+        .rev()
+        .find(|n| n.level == NoteLevel::Error)
+        .map_or_else(
+            || "daemon reported an error".to_string(),
+            |n| n.text.clone(),
+        )
 }
 
-fn legacy_count_label(count: usize, noun: &str) -> String {
-    format!("{count} {noun}(s)")
-}
-
-fn legacy_unpushed_commit_label(count: usize) -> String {
-    format!("{count} unpushed commit(s)")
+/// Map a [`DiffTarget`] onto its wire DTO.
+pub(crate) fn to_target_dto(target: &DiffTarget) -> DiffTargetDto {
+    match target {
+        DiffTarget::Unpushed => DiffTargetDto::Unpushed,
+        DiffTarget::Base(rev) => DiffTargetDto::Base { rev: rev.clone() },
+        DiffTarget::Range(range) => DiffTargetDto::Range {
+            range: range.clone(),
+        },
+        DiffTarget::Merge(base) => DiffTargetDto::Merge { base: base.clone() },
+        DiffTarget::Last(count) => DiffTargetDto::Last { count: count.get() },
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroU32;
+
     use super::*;
 
     #[test]
-    fn legacy_count_label_keeps_node_literal_plural_marker() {
-        assert_eq!(legacy_count_label(1, "file"), "1 file(s)");
-        assert_eq!(legacy_count_label(2, "commit"), "2 commit(s)");
-        assert_eq!(legacy_unpushed_commit_label(1), "1 unpushed commit(s)");
+    fn to_target_dto_maps_every_variant() {
+        assert_eq!(
+            to_target_dto(&DiffTarget::Unpushed),
+            DiffTargetDto::Unpushed
+        );
+        assert_eq!(
+            to_target_dto(&DiffTarget::Base("abc".into())),
+            DiffTargetDto::Base { rev: "abc".into() }
+        );
+        assert_eq!(
+            to_target_dto(&DiffTarget::Range("a..b".into())),
+            DiffTargetDto::Range {
+                range: "a..b".into()
+            }
+        );
+        assert_eq!(
+            to_target_dto(&DiffTarget::Merge("main".into())),
+            DiffTargetDto::Merge {
+                base: "main".into()
+            }
+        );
+        assert_eq!(
+            to_target_dto(&DiffTarget::Last(NonZeroU32::new(3).unwrap())),
+            DiffTargetDto::Last { count: 3 }
+        );
+    }
+
+    #[test]
+    fn error_text_finds_the_last_error_note() {
+        assert_eq!(
+            error_text(&[
+                Note {
+                    level: NoteLevel::Info,
+                    text: "info".into(),
+                },
+                Note {
+                    level: NoteLevel::Error,
+                    text: "boom".into(),
+                },
+            ]),
+            "boom"
+        );
+        assert_eq!(error_text(&[]), "daemon reported an error");
     }
 }

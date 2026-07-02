@@ -232,13 +232,12 @@ mod tests {
 
     #[test]
     fn real_repo_is_clean() {
-        // CARGO_MANIFEST_DIR = tools/xtask/; its grandparent is the workspace root where
-        // crates/ and shared/ live (unlike the template, this xtask is nested under tools/).
-        // Anchoring here (not ".") makes the test actually scan crates/* regardless of test CWD.
+        // CARGO_MANIFEST_DIR = xtask/; its parent is the workspace root where crates/ and
+        // shared/ live. Anchoring here (not ".") makes the test actually scan crates/*
+        // regardless of test CWD.
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .and_then(Path::parent)
-            .expect("tools/xtask/ must have a grandparent (the workspace root)");
+            .expect("xtask/ must have a parent (the workspace root)");
         let v = collect_violations(workspace_root).unwrap();
         assert!(
             v.is_empty(),

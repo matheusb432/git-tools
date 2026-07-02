@@ -1,10 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Context as _;
-use contracts::{
-    diffs::{DiffTargetDto, RenderDiffRequest},
-    envelope::{NoteLevel, Outcome},
-};
+use contracts::{diffs::RenderDiffRequest, envelope::Outcome};
 
 use crate::{cli::DiffTarget, client::Backend};
 
@@ -32,7 +29,7 @@ pub(crate) fn run_with(
         store_root: gtl_platform::paths::store_root()?
             .to_string_lossy()
             .into_owned(),
-        target: to_target_dto(target),
+        target: super::to_target_dto(target),
         name: name.map(str::to_string),
         theme: crate::config::load().theme,
     };
@@ -46,74 +43,18 @@ pub(crate) fn run_with(
             Ok(DiffOutcome::Rendered(artifact))
         }
         Outcome::Empty => Ok(DiffOutcome::Empty),
-        Outcome::Error => {
-            // The CLI's exit path prints `{err:#}` to stderr — hand it the
-            // service-composed error text so output stays byte-identical.
-            let text = envelope
-                .notes
-                .iter()
-                .rev()
-                .find(|n| n.level == NoteLevel::Error)
-                .map_or_else(
-                    || "daemon reported an error".to_string(),
-                    |n| n.text.clone(),
-                );
-            Err(anyhow::anyhow!(text))
-        }
-    }
-}
-
-/// Map a [`DiffTarget`] onto its wire DTO.
-fn to_target_dto(target: &DiffTarget) -> DiffTargetDto {
-    match target {
-        DiffTarget::Unpushed => DiffTargetDto::Unpushed,
-        DiffTarget::Base(rev) => DiffTargetDto::Base { rev: rev.clone() },
-        DiffTarget::Range(range) => DiffTargetDto::Range {
-            range: range.clone(),
-        },
-        DiffTarget::Merge(base) => DiffTargetDto::Merge { base: base.clone() },
-        DiffTarget::Last(count) => DiffTargetDto::Last { count: count.get() },
+        Outcome::Error => Err(anyhow::anyhow!(super::error_text(&envelope.notes))),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::num::NonZeroU32;
-
     use contracts::{
         diffs::RenderDiffData,
-        envelope::{Envelope, Note, Outcome},
+        envelope::{Envelope, Note, NoteLevel, Outcome},
     };
 
     use super::*;
-
-    #[test]
-    fn to_target_dto_maps_every_variant() {
-        assert_eq!(
-            to_target_dto(&DiffTarget::Unpushed),
-            DiffTargetDto::Unpushed
-        );
-        assert_eq!(
-            to_target_dto(&DiffTarget::Base("abc".into())),
-            DiffTargetDto::Base { rev: "abc".into() }
-        );
-        assert_eq!(
-            to_target_dto(&DiffTarget::Range("a..b".into())),
-            DiffTargetDto::Range {
-                range: "a..b".into()
-            }
-        );
-        assert_eq!(
-            to_target_dto(&DiffTarget::Merge("main".into())),
-            DiffTargetDto::Merge {
-                base: "main".into()
-            }
-        );
-        assert_eq!(
-            to_target_dto(&DiffTarget::Last(NonZeroU32::new(3).unwrap())),
-            DiffTargetDto::Last { count: 3 }
-        );
-    }
 
     struct FakeBackend(Envelope<RenderDiffData>);
 

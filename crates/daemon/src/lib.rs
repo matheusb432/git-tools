@@ -11,7 +11,11 @@ use std::{
     time::Duration,
 };
 
-use application::diffs::render_diff::RenderDiffHandler;
+use application::diffs::{
+    render_diff::RenderDiffHandler, render_diff_all::RenderDiffAllHandler,
+    render_diff_subrepos::RenderDiffSubreposHandler, render_merge_diff::RenderMergeDiffHandler,
+    render_squash_preview::RenderSquashPreviewHandler,
+};
 use infra::{
     artifact_store::StoreArtifacts, clock::SystemClock, diff_source::GitDiffSource,
     html_renderer::MaudRenderer,
@@ -70,6 +74,30 @@ pub async fn run() -> anyhow::Result<()> {
 
     let mediator = DaemonMediator {
         render_diff: RenderDiffHandler {
+            source: GitDiffSource,
+            store: StoreArtifacts,
+            renderer: MaudRenderer,
+            clock: SystemClock,
+        },
+        render_merge_diff: RenderMergeDiffHandler {
+            source: GitDiffSource,
+            store: StoreArtifacts,
+            renderer: MaudRenderer,
+            clock: SystemClock,
+        },
+        render_squash_preview: RenderSquashPreviewHandler {
+            source: GitDiffSource,
+            store: StoreArtifacts,
+            renderer: MaudRenderer,
+            clock: SystemClock,
+        },
+        render_diff_subrepos: RenderDiffSubreposHandler {
+            source: GitDiffSource,
+            store: StoreArtifacts,
+            renderer: MaudRenderer,
+            clock: SystemClock,
+        },
+        render_diff_all: RenderDiffAllHandler {
             source: GitDiffSource,
             store: StoreArtifacts,
             renderer: MaudRenderer,

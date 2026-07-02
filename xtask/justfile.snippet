@@ -3,14 +3,14 @@
 #
 # 1. Add the crate to the host workspace's root `Cargo.toml`:
 #        [workspace]
-#        members = [ ..., "tools/xtask" ]
+#        members = [ ..., "xtask" ]
 #
 # 2. Add one-line forwarder recipes — recipe bodies stay thin; logic lives in the verbs.
 #    Mirror these into the host's per-domain `just/<domain>.justfile` modules as they grow.
 
 # One-time dev-host setup: installs the toolchain (bootstrap.sh) then runs the Rust bootstrap verb.
 bootstrap *args:
-    sh tools/xtask/bootstrap.sh {{ args }}
+    sh xtask/bootstrap.sh {{ args }}
 
 # Example automation verb forwarder — one per real verb (test / fmt / ship / …).
 test *args:

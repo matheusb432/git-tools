@@ -258,6 +258,9 @@ impl application::ports::HtmlRenderer for MaudRenderer {
     fn build_html(&self, view: &View) -> String {
         build_html(view)
     }
+    fn build_tabbed_html(&self, title: &str, views: &[View]) -> String {
+        build_tabbed_html(title, views)
+    }
 }
 
 pub fn build_tabbed_html(title: &str, views: &[View]) -> String {

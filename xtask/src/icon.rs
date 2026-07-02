@@ -57,7 +57,7 @@ pub fn run() -> Result<()> {
 
 /// `crates/desktop/icons/`, resolved from this crate's source so the verb works from any CWD.
 fn icons_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/desktop/icons")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/desktop/icons")
 }
 
 /// Draw the full icon into a `RENDER`-square premultiplied canvas.

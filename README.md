@@ -85,6 +85,6 @@ just install         # place both prebuilt artifacts on PATH (~/.local/bin)
 just uninstall       # remove the binaries and the gtl alias
 ```
 
-These drive the xtask `install` verb, which works on Linux and on Windows via Git Bash (it handles the `.exe` suffix via `std::env::consts::EXE_SUFFIX`). The viewer is copied via an atomic replace, so `just desktop update` refreshes the running tray app in place without a "Text file busy" failure. For a fresh machine, `sh tools/xtask/bootstrap.sh` installs the Rust toolchain then runs the full bring-up (`just bootstrap`): build, install, and ensure `~/.local/bin` is on your `PATH`.
+These drive the xtask `install` verb, which works on Linux and on Windows via Git Bash (it handles the `.exe` suffix via `std::env::consts::EXE_SUFFIX`). The viewer is copied via an atomic replace, so `just desktop update` refreshes the running tray app in place without a "Text file busy" failure. For a fresh machine, `sh xtask/bootstrap.sh` installs the Rust toolchain then runs the full bring-up (`just bootstrap`): build, install, and ensure `~/.local/bin` is on your `PATH`.
 
 Override the install directory with `GIT_TOOLS_BINDIR` if you do not want `~/.local/bin`.

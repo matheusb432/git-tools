@@ -9,21 +9,75 @@ use std::{
 
 use anyhow::Context as _;
 use contracts::{
-    diffs::{RenderDiffData, RenderDiffRequest},
+    diffs::{
+        RenderDiffAllRequest, RenderDiffData, RenderDiffRequest, RenderDiffSubreposRequest,
+        RenderMergeDiffRequest, RenderSquashPreviewRequest,
+    },
     envelope::Envelope,
 };
 use serde::Deserialize;
 
-/// The swap-later seam: `gtl diff` renders through whatever backend it is handed.
-/// The production impl talks to the resident daemon over localhost HTTP; tests
-/// substitute an in-memory fake.
+/// The swap-later seam: `gtl diff` and its siblings render through whatever
+/// backend they are handed. The production impl talks to the resident daemon
+/// over localhost HTTP; tests substitute an in-memory fake that only overrides
+/// the method(s) it exercises.
 pub trait Backend {
     /// Render a diff preview, returning the service-composed wire envelope.
     ///
     /// # Errors
     /// Returns an error only on transport/parse failure — an error *outcome* is
     /// carried inside the returned [`Envelope`], not as `Err`.
-    fn render_diff(&self, req: &RenderDiffRequest) -> anyhow::Result<Envelope<RenderDiffData>>;
+    fn render_diff(&self, _req: &RenderDiffRequest) -> anyhow::Result<Envelope<RenderDiffData>> {
+        unimplemented!("render_diff")
+    }
+
+    /// Render a merge-diff preview, returning the service-composed wire envelope.
+    ///
+    /// # Errors
+    /// Returns an error only on transport/parse failure — an error *outcome* is
+    /// carried inside the returned [`Envelope`], not as `Err`.
+    fn render_merge_diff(
+        &self,
+        _req: &RenderMergeDiffRequest,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        unimplemented!("render_merge_diff")
+    }
+
+    /// Render a squash-preview artifact, returning the service-composed wire envelope.
+    ///
+    /// # Errors
+    /// Returns an error only on transport/parse failure — an error *outcome* is
+    /// carried inside the returned [`Envelope`], not as `Err`.
+    fn render_squash_preview(
+        &self,
+        _req: &RenderSquashPreviewRequest,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        unimplemented!("render_squash_preview")
+    }
+
+    /// Render a diff-subrepos artifact, returning the service-composed wire envelope.
+    ///
+    /// # Errors
+    /// Returns an error only on transport/parse failure — an error *outcome* is
+    /// carried inside the returned [`Envelope`], not as `Err`.
+    fn render_diff_subrepos(
+        &self,
+        _req: &RenderDiffSubreposRequest,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        unimplemented!("render_diff_subrepos")
+    }
+
+    /// Render a diff-all artifact, returning the service-composed wire envelope.
+    ///
+    /// # Errors
+    /// Returns an error only on transport/parse failure — an error *outcome* is
+    /// carried inside the returned [`Envelope`], not as `Err`.
+    fn render_diff_all(
+        &self,
+        _req: &RenderDiffAllRequest,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        unimplemented!("render_diff_all")
+    }
 }
 
 /// The `/health` identity payload, deserialized from a running daemon.
@@ -136,6 +190,70 @@ impl Backend for HttpBackend {
         let response = self
             .http
             .post(format!("{}/diffs/render", self.base_url))
+            .json(req)
+            .send()
+            .context("daemon request failed")?;
+        // 400/500 carry error envelopes — deserialize the body for any status.
+        response
+            .json::<Envelope<RenderDiffData>>()
+            .context("daemon request failed")
+    }
+
+    fn render_merge_diff(
+        &self,
+        req: &RenderMergeDiffRequest,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        let response = self
+            .http
+            .post(format!("{}/diffs/merge", self.base_url))
+            .json(req)
+            .send()
+            .context("daemon request failed")?;
+        // 400/500 carry error envelopes — deserialize the body for any status.
+        response
+            .json::<Envelope<RenderDiffData>>()
+            .context("daemon request failed")
+    }
+
+    fn render_squash_preview(
+        &self,
+        req: &RenderSquashPreviewRequest,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        let response = self
+            .http
+            .post(format!("{}/diffs/squash-preview", self.base_url))
+            .json(req)
+            .send()
+            .context("daemon request failed")?;
+        // 400/500 carry error envelopes — deserialize the body for any status.
+        response
+            .json::<Envelope<RenderDiffData>>()
+            .context("daemon request failed")
+    }
+
+    fn render_diff_subrepos(
+        &self,
+        req: &RenderDiffSubreposRequest,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        let response = self
+            .http
+            .post(format!("{}/diffs/subrepos", self.base_url))
+            .json(req)
+            .send()
+            .context("daemon request failed")?;
+        // 400/500 carry error envelopes — deserialize the body for any status.
+        response
+            .json::<Envelope<RenderDiffData>>()
+            .context("daemon request failed")
+    }
+
+    fn render_diff_all(
+        &self,
+        req: &RenderDiffAllRequest,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        let response = self
+            .http
+            .post(format!("{}/diffs/all", self.base_url))
             .json(req)
             .send()
             .context("daemon request failed")?;

@@ -57,7 +57,7 @@ mod tests {
 
     #[test]
     fn shell_scripts_use_hash() {
-        assert_eq!(comment_leader("tools/xtask/bootstrap.sh"), "#");
+        assert_eq!(comment_leader("xtask/bootstrap.sh"), "#");
     }
 
     #[test]

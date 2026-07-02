@@ -12,7 +12,13 @@ use std::sync::{
 };
 
 use application::{
-    diffs::render_diff::{RenderDiff, RenderDiffHandler},
+    diffs::{
+        render_diff::{RenderDiff, RenderDiffHandler},
+        render_diff_all::{RenderDiffAll, RenderDiffAllHandler},
+        render_diff_subrepos::{RenderDiffSubrepos, RenderDiffSubreposHandler},
+        render_merge_diff::{RenderMergeDiff, RenderMergeDiffHandler},
+        render_squash_preview::{RenderSquashPreview, RenderSquashPreviewHandler},
+    },
     ports::{ArtifactStore, Clock, DiffSource, HtmlRenderer},
 };
 use axum::{
@@ -41,6 +47,18 @@ where
     /// Render handler for `POST /diffs/render`.
     #[handles(RenderDiff)]
     pub render_diff: RenderDiffHandler<S, A, R, C>,
+    /// Render handler for `POST /diffs/merge`.
+    #[handles(RenderMergeDiff)]
+    pub render_merge_diff: RenderMergeDiffHandler<S, A, R, C>,
+    /// Render handler for `POST /diffs/squash-preview`.
+    #[handles(RenderSquashPreview)]
+    pub render_squash_preview: RenderSquashPreviewHandler<S, A, R, C>,
+    /// Render handler for `POST /diffs/subrepos`.
+    #[handles(RenderDiffSubrepos)]
+    pub render_diff_subrepos: RenderDiffSubreposHandler<S, A, R, C>,
+    /// Render handler for `POST /diffs/all`.
+    #[handles(RenderDiffAll)]
+    pub render_diff_all: RenderDiffAllHandler<S, A, R, C>,
 }
 
 /// Cross-cutting daemon state: identity for the handshake, the shutdown
@@ -113,7 +131,7 @@ where
 /// Builds the fully-wired daemon router for a given [`AppState`].
 ///
 /// The `/health` and `/shutdown` handlers extract only `State<Arc<Shared>>`, so they stay
-/// non-generic; only `/diffs/render` is monomorphized on the mediator type.
+/// non-generic; every `/diffs/*` route is monomorphized on the mediator type.
 pub fn router<S, A, R, C>(state: AppState<S, A, R, C>) -> Router
 where
     S: DiffSource + Clone + Send + Sync + 'static,
@@ -129,6 +147,22 @@ where
         .route(
             "/diffs/render",
             post(endpoints::diffs::render::handle::<DaemonMediator<S, A, R, C>>),
+        )
+        .route(
+            "/diffs/merge",
+            post(endpoints::diffs::merge::handle::<DaemonMediator<S, A, R, C>>),
+        )
+        .route(
+            "/diffs/squash-preview",
+            post(endpoints::diffs::squash_preview::handle::<DaemonMediator<S, A, R, C>>),
+        )
+        .route(
+            "/diffs/subrepos",
+            post(endpoints::diffs::subrepos::handle::<DaemonMediator<S, A, R, C>>),
+        )
+        .route(
+            "/diffs/all",
+            post(endpoints::diffs::all::handle::<DaemonMediator<S, A, R, C>>),
         );
     routes.with_state(state)
 }

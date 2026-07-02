@@ -24,6 +24,18 @@ pub struct FakeDiffSource {
     pub known_revs: Vec<String>,
     pub shas: HashMap<String, String>,
     pub committed_at: String,
+    /// Per-repo overrides for `commits`/`diff_output`, keyed by the `top` path
+    /// `build_view` is called with -- lets one scripted source produce different
+    /// results (e.g. one repo empty, one not) across a single `render_batch` call,
+    /// which otherwise can only script one outcome for every repo.
+    pub per_repo: HashMap<String, RepoOverride>,
+}
+
+/// See [`FakeDiffSource::per_repo`].
+#[derive(Debug, Default, Clone)]
+pub struct RepoOverride {
+    pub commits: Vec<Commit>,
+    pub diff_output: String,
 }
 
 impl DiffSource for FakeDiffSource {
@@ -50,8 +62,12 @@ impl DiffSource for FakeDiffSource {
     fn short_ref(&self, _repo: &Path, rev: &str) -> anyhow::Result<String> {
         Ok(rev.to_string())
     }
-    fn log_commits(&self, _repo: &Path, _range: &str) -> anyhow::Result<Vec<Commit>> {
-        Ok(self.commits.clone())
+    fn log_commits(&self, repo: &Path, _range: &str) -> anyhow::Result<Vec<Commit>> {
+        Ok(self
+            .per_repo
+            .get(&repo.to_string_lossy().into_owned())
+            .map(|o| o.commits.clone())
+            .unwrap_or_else(|| self.commits.clone()))
     }
     fn file_commit_map(
         &self,
@@ -68,16 +84,19 @@ impl DiffSource for FakeDiffSource {
     ) -> anyhow::Result<Vec<String>> {
         Ok(vec![])
     }
-    fn diff_raw(&self, _repo: &Path, args: &[String]) -> anyhow::Result<String> {
+    fn diff_raw(&self, repo: &Path, args: &[String]) -> anyhow::Result<String> {
         // Full-context re-runs carry the -U flag added by `full_context_args`.
         if args
             .iter()
             .any(|a| a.starts_with("--unified") || a.starts_with("-U"))
         {
-            Ok(self.full_diff_output.clone())
-        } else {
-            Ok(self.diff_output.clone())
+            return Ok(self.full_diff_output.clone());
         }
+        Ok(self
+            .per_repo
+            .get(&repo.to_string_lossy().into_owned())
+            .map(|o| o.diff_output.clone())
+            .unwrap_or_else(|| self.diff_output.clone()))
     }
     fn blame_forward(&self, _r: &Path, _b: &str, _t: &str, _p: &str) -> anyhow::Result<String> {
         Ok(String::new())
@@ -151,6 +170,9 @@ pub struct StubRenderer;
 impl HtmlRenderer for StubRenderer {
     fn build_html(&self, view: &domain::diffs::View) -> String {
         format!("<html><title>{}</title></html>", view.title)
+    }
+    fn build_tabbed_html(&self, title: &str, views: &[domain::diffs::View]) -> String {
+        format!("<html><title>{title}</title>{} views</html>", views.len())
     }
 }
 

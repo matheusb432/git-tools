@@ -32,6 +32,50 @@ pub struct RenderDiffData {
     pub reused: bool,
 }
 
+/// A reference to a repository (top-level path and label).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepoRefDto {
+    pub top: String,
+    pub label: String,
+}
+
+/// A request to render a merge-diff preview artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderMergeDiffRequest {
+    pub cwd: String,
+    pub store_root: String,
+    #[serde(default)]
+    pub base: Option<String>,
+}
+
+/// A request to render a squash-preview artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderSquashPreviewRequest {
+    pub cwd: String,
+    pub store_root: String,
+}
+
+/// A request to render a diff-subrepos artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderDiffSubreposRequest {
+    pub store_root: String,
+    pub root: String,
+    pub target: DiffTargetDto,
+    pub repos: Vec<RepoRefDto>,
+    #[serde(default)]
+    pub theme: Option<String>,
+}
+
+/// A request to render a diff-all artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenderDiffAllRequest {
+    pub store_root: String,
+    pub root: String,
+    pub repos: Vec<RepoRefDto>,
+    #[serde(default)]
+    pub theme: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,6 +172,128 @@ mod tests {
 
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: RenderDiffData = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_repo_ref_dto_roundtrip() {
+        let original = RepoRefDto {
+            top: "/home/user/repo".to_string(),
+            label: "main-repo".to_string(),
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: RepoRefDto = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_render_merge_diff_request_roundtrip() {
+        let original = RenderMergeDiffRequest {
+            cwd: "/home/user/repo".to_string(),
+            store_root: "/home/user/.local/share/git-tools".to_string(),
+            base: Some("main".to_string()),
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: RenderMergeDiffRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_render_merge_diff_request_without_optional_fields() {
+        let original = RenderMergeDiffRequest {
+            cwd: "/home/user/repo".to_string(),
+            store_root: "/home/user/.local/share/git-tools".to_string(),
+            base: None,
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: RenderMergeDiffRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_render_squash_preview_request_roundtrip() {
+        let original = RenderSquashPreviewRequest {
+            cwd: "/home/user/repo".to_string(),
+            store_root: "/home/user/.local/share/git-tools".to_string(),
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: RenderSquashPreviewRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_render_diff_subrepos_request_roundtrip() {
+        let original = RenderDiffSubreposRequest {
+            store_root: "/home/user/.local/share/git-tools".to_string(),
+            root: "/home/user/workspace".to_string(),
+            target: DiffTargetDto::Base {
+                rev: "main".to_string(),
+            },
+            repos: vec![
+                RepoRefDto {
+                    top: "/home/user/workspace/repo1".to_string(),
+                    label: "repo1".to_string(),
+                },
+                RepoRefDto {
+                    top: "/home/user/workspace/repo2".to_string(),
+                    label: "repo2".to_string(),
+                },
+            ],
+            theme: Some("dark".to_string()),
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: RenderDiffSubreposRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_render_diff_subrepos_request_without_optional_fields() {
+        let original = RenderDiffSubreposRequest {
+            store_root: "/home/user/.local/share/git-tools".to_string(),
+            root: "/home/user/workspace".to_string(),
+            target: DiffTargetDto::Unpushed,
+            repos: vec![],
+            theme: None,
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: RenderDiffSubreposRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_render_diff_all_request_roundtrip() {
+        let original = RenderDiffAllRequest {
+            store_root: "/home/user/.local/share/git-tools".to_string(),
+            root: "/home/user/workspace".to_string(),
+            repos: vec![RepoRefDto {
+                top: "/home/user/workspace/repo1".to_string(),
+                label: "repo1".to_string(),
+            }],
+            theme: Some("light".to_string()),
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: RenderDiffAllRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_render_diff_all_request_without_optional_fields() {
+        let original = RenderDiffAllRequest {
+            store_root: "/home/user/.local/share/git-tools".to_string(),
+            root: "/home/user/workspace".to_string(),
+            repos: vec![],
+            theme: None,
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: RenderDiffAllRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized);
     }
 }

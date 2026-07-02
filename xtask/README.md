@@ -35,7 +35,7 @@ This is the embedded kind, not an installable tool. It deliberately ships **no i
 
 See `justfile.snippet`:
 
-1. Add `tools/xtask` (or wherever it lives) to the host workspace's root `Cargo.toml` `members`.
+1. Add `xtask` (or wherever it lives) to the host workspace's root `Cargo.toml` `members`.
 2. Add the one-line forwarder recipes (`gen-icon`, `ship`, …) to the host justfile.
 
 ## Adding a verb

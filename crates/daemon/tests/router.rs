@@ -5,7 +5,11 @@
 use std::sync::{Arc, atomic::AtomicU64};
 
 use application::{
-    diffs::render_diff::RenderDiffHandler,
+    diffs::{
+        render_diff::RenderDiffHandler, render_diff_all::RenderDiffAllHandler,
+        render_diff_subrepos::RenderDiffSubreposHandler, render_merge_diff::RenderMergeDiffHandler,
+        render_squash_preview::RenderSquashPreviewHandler,
+    },
     testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
 };
 use axum::{
@@ -47,6 +51,30 @@ fn app_with(source: FakeDiffSource) -> Fakes {
     });
     let mediator = DaemonMediator {
         render_diff: RenderDiffHandler {
+            source: source.clone(),
+            store: InMemoryArtifactStore::default(),
+            renderer: StubRenderer,
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        render_merge_diff: RenderMergeDiffHandler {
+            source: source.clone(),
+            store: InMemoryArtifactStore::default(),
+            renderer: StubRenderer,
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        render_squash_preview: RenderSquashPreviewHandler {
+            source: source.clone(),
+            store: InMemoryArtifactStore::default(),
+            renderer: StubRenderer,
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        render_diff_subrepos: RenderDiffSubreposHandler {
+            source: source.clone(),
+            store: InMemoryArtifactStore::default(),
+            renderer: StubRenderer,
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        render_diff_all: RenderDiffAllHandler {
             source,
             store: InMemoryArtifactStore::default(),
             renderer: StubRenderer,
@@ -204,4 +232,118 @@ async fn render_happy_path_is_a_200_ok_envelope_with_artifact_and_notes() {
             .any(|n| n["text"].as_str().unwrap().contains("diff-preview:")),
         "notes must carry the diff-preview summary line: {notes:?}"
     );
+}
+
+/// A scripted happy-path source for the merge-diff endpoint: unlike
+/// [`happy_source`], `render_merge_diff` calls `verify_commit` against the
+/// (default) base, so `known_revs` must list it.
+fn merge_happy_source() -> FakeDiffSource {
+    FakeDiffSource {
+        top_level: Some("/repo".into()),
+        branch: "feature".into(),
+        known_revs: vec!["main".into()],
+        commits: vec![domain::diffs::Commit {
+            sha: "abc1234".into(),
+            subject: "feat: work".into(),
+            ..Default::default()
+        }],
+        diff_output: SINGLE_FILE_DIFF.into(),
+        committed_at: "2026-07-02".into(),
+        ..Default::default()
+    }
+}
+
+async fn post(app: Router, uri: &str, body: &str) -> axum::response::Response {
+    app.oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn merge_happy_path_is_a_200_ok_envelope_with_artifact() {
+    let (app, _rx, _shared) = app_with(merge_happy_source());
+    let body = r#"{"cwd":"/repo","store_root":"/store"}"#;
+
+    let response = post(app, "/diffs/merge", body).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "ok");
+    assert!(
+        !json["data"]["artifact"].as_str().unwrap().is_empty(),
+        "artifact path must be non-empty"
+    );
+}
+
+#[tokio::test]
+async fn squash_preview_happy_path_is_a_200_ok_envelope_with_artifact() {
+    let (app, _rx, _shared) = app_with(happy_source());
+    let body = r#"{"cwd":"/repo","store_root":"/store"}"#;
+
+    let response = post(app, "/diffs/squash-preview", body).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "ok");
+    assert!(
+        !json["data"]["artifact"].as_str().unwrap().is_empty(),
+        "artifact path must be non-empty"
+    );
+}
+
+#[tokio::test]
+async fn all_happy_path_is_a_200_ok_envelope_with_artifact() {
+    let (app, _rx, _shared) = app_with(happy_source());
+    let body = r#"{"store_root":"/store","root":"/scan-root","repos":[{"top":"/repo-a","label":"repo-a"}]}"#;
+
+    let response = post(app, "/diffs/all", body).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "ok");
+    assert!(
+        !json["data"]["artifact"].as_str().unwrap().is_empty(),
+        "artifact path must be non-empty"
+    );
+}
+
+#[tokio::test]
+async fn subrepos_happy_path_is_a_200_ok_envelope_with_artifact() {
+    let (app, _rx, _shared) = app_with(happy_source());
+    let body = r#"{"store_root":"/store","root":"/scan-root","target":{"kind":"unpushed"},"repos":[{"top":"/repo-a","label":"repo-a"}]}"#;
+
+    let response = post(app, "/diffs/subrepos", body).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "ok");
+    assert!(
+        !json["data"]["artifact"].as_str().unwrap().is_empty(),
+        "artifact path must be non-empty"
+    );
+}
+
+#[tokio::test]
+async fn subrepos_with_nothing_to_show_is_a_200_empty_envelope() {
+    // Every field defaults empty: no commits, no diff — every repo's view is
+    // empty, so the batch skips it and nothing gets rendered.
+    let (app, _rx, _shared) = app_with(FakeDiffSource {
+        upstream: Some("origin/main".into()),
+        ..Default::default()
+    });
+    let body = r#"{"store_root":"/store","root":"/scan-root","target":{"kind":"unpushed"},"repos":[{"top":"/repo-a","label":"repo-a"}]}"#;
+
+    let response = post(app, "/diffs/subrepos", body).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "empty");
+    assert!(json["data"].is_null());
 }

@@ -18,18 +18,8 @@ pub mod commands;
 pub mod config;
 pub mod viewer;
 
-/// Shim onto the relocated diff engine (`application::diffs::util`): call sites
-/// keep using `crate::diff::assemble` / `crate::diff::DiffData`.
-pub(crate) mod diff {
-    pub use application::diffs::util::*;
-}
-
 pub(crate) mod model {
-    pub use domain::diffs::{Cmd, Commit, Foot, View};
-}
-
-pub(crate) mod render {
-    pub use infra::html_renderer::*;
+    pub use domain::diffs::Commit;
 }
 
 pub(crate) mod git {

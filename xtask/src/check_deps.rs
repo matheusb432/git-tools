@@ -323,12 +323,11 @@ mod tests {
 
     #[test]
     fn real_workspace_has_no_dependency_violations() {
-        // CARGO_MANIFEST_DIR = tools/xtask/; its grandparent is the workspace root where
-        // crates/ and shared/ live.
+        // CARGO_MANIFEST_DIR = xtask/; its parent is the workspace root where crates/ and
+        // shared/ live.
         let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .and_then(Path::parent)
-            .expect("tools/xtask/ must have a grandparent (the workspace root)");
+            .expect("xtask/ must have a parent (the workspace root)");
         let v = collect_violations(workspace_root).unwrap();
         assert!(
             v.is_empty(),
