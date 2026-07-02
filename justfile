@@ -30,7 +30,7 @@ install:
     just cli install
     just desktop install
 
-# Build + install everything: the CLI engine (git-tools + gtl) and the desktop viewer (gtl-viewer).
+# Build + install everything: the CLI engine (git-tools + gtl + gtl-daemon) and the desktop viewer (gtl-viewer).
 [group('build')]
 update:
     just cli update
@@ -43,7 +43,7 @@ uninstall *args:
 
 # Build only if the binary is missing (preflight for run recipes).
 _preflight:
-    test -x "{{ _bin }}" || cargo build --release -p cli
+    test -x "{{ _bin }}" || cargo build --release -p cli -p daemon
 
 # ============ quality ============
 
@@ -69,7 +69,7 @@ drift-check:
 
 # ============ windows cross-build (host/release split — see specs) ============
 
-# Cross-build both Win11 release exes (CLI + viewer) from this Linux host via the xtask `ship` verb; `--smoke` = fast debug linkage check (runtime is certified separately on real Win11 — see `win-release-checklist`).
+# Cross-build all three Win11 release exes (CLI + gtl-daemon + viewer) from this Linux host via the xtask `ship` verb; `--smoke` = fast debug linkage check (runtime is certified separately on real Win11 — see `win-release-checklist`).
 [group('windows')]
 ship *args:
     cargo run --quiet -p xtask -- ship {{ args }}

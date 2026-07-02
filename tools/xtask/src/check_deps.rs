@@ -9,6 +9,11 @@
 //!    (`infra`, `daemon`, `cli`, `desktop`) nor on framework/adapter dependencies (`axum`,
 //!    `reqwest`, `maud`, `sqlx`, `gtl-platform`). `contracts` additionally must not depend on
 //!    `domain` or `application` (wire DTOs only).
+//!
+//! Both rules are applied to every dependency table a manifest can declare: `[dependencies]`,
+//! `[dev-dependencies]`, `[build-dependencies]`, and each `[target.<cfg>.{dependencies,
+//! dev-dependencies,build-dependencies}]` — a violation hiding behind a `cfg(...)` or dev-only
+//! table is still a violation.
 
 use std::path::Path;
 
@@ -49,6 +54,40 @@ const CORE_BANNED: [&str; 9] = [
 ];
 const CORE_CRATES: [&str; 3] = ["domain", "application", "contracts"];
 const CONTRACTS_EXTRA_BANNED: [&str; 2] = ["domain", "application"];
+
+/// The three dependency-table names a manifest (or a `[target.<cfg>]` sub-table) can declare.
+const DEP_TABLE_KEYS: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
+
+/// Every dependency table in a manifest: the top-level `[dependencies]` /
+/// `[dev-dependencies]` / `[build-dependencies]`, plus the same three tables nested under
+/// each `[target.<cfg>]` entry. A violation must not be able to hide behind a `cfg(...)` or
+/// a dev/build-only table, so callers apply the same rules to every table returned here.
+fn iter_dependency_tables(manifest: &toml::Value) -> Vec<(String, &toml::Table)> {
+    let mut tables = Vec::new();
+
+    for key in DEP_TABLE_KEYS {
+        if let Some(table) = manifest.get(key).and_then(toml::Value::as_table) {
+            tables.push((key.to_string(), table));
+        }
+    }
+
+    if let Some(targets) = manifest.get("target").and_then(toml::Value::as_table) {
+        let mut cfgs: Vec<&String> = targets.keys().collect();
+        cfgs.sort();
+        for cfg in cfgs {
+            let Some(cfg_table) = targets[cfg].as_table() else {
+                continue;
+            };
+            for key in DEP_TABLE_KEYS {
+                if let Some(table) = cfg_table.get(key).and_then(toml::Value::as_table) {
+                    tables.push((format!("target.{cfg}.{key}"), table));
+                }
+            }
+        }
+    }
+
+    tables
+}
 
 /// Whether a shared crate's relative `path` dependency resolves into the workspace's
 /// top-level `crates/` directory. Lexical only — dep paths in scanned manifests are
@@ -95,39 +134,38 @@ fn scan_member_dir(member_dir: &Path, is_shared: bool, violations: &mut Vec<Stri
             .with_context(|| format!("reading {}", manifest_path.display()))?;
         let manifest: toml::Value = toml::from_str(&manifest_str)
             .with_context(|| format!("parsing {}", manifest_path.display()))?;
-        let Some(deps) = manifest.get("dependencies").and_then(toml::Value::as_table) else {
-            continue;
-        };
 
-        for (dep_name, dep_value) in deps {
-            let path_dep = dep_value.get("path").and_then(toml::Value::as_str);
-            if is_shared {
-                // Rule 1: shared/* never depends on an app crate.
-                if path_dep.is_some_and(path_enters_crates) {
-                    violations.push(format!(
-                        "[rule 1: shared stays app-agnostic] {} depends on app crate `{dep_name}`",
-                        manifest_path.display(),
-                    ));
-                }
-            } else if CORE_CRATES.contains(&crate_name.as_str()) {
-                // Rule 2: core crates never depend outward.
-                let effective_name = dep_value
-                    .get("package")
-                    .and_then(toml::Value::as_str)
-                    .unwrap_or(dep_name);
-                let banned = CORE_BANNED.contains(&effective_name)
-                    || (crate_name == "contracts"
-                        && CONTRACTS_EXTRA_BANNED.contains(&effective_name));
-                if banned {
-                    let offender = if effective_name == dep_name {
-                        dep_name.clone()
-                    } else {
-                        format!("{dep_name} (package = \"{effective_name}\")")
-                    };
-                    violations.push(format!(
-                        "[rule 2: dependencies point inward] {} depends on `{offender}`",
-                        manifest_path.display(),
-                    ));
+        for (table_name, deps) in iter_dependency_tables(&manifest) {
+            for (dep_name, dep_value) in deps {
+                let path_dep = dep_value.get("path").and_then(toml::Value::as_str);
+                if is_shared {
+                    // Rule 1: shared/* never depends on an app crate.
+                    if path_dep.is_some_and(path_enters_crates) {
+                        violations.push(format!(
+                            "[rule 1: shared stays app-agnostic] {} [{table_name}] depends on app crate `{dep_name}`",
+                            manifest_path.display(),
+                        ));
+                    }
+                } else if CORE_CRATES.contains(&crate_name.as_str()) {
+                    // Rule 2: core crates never depend outward.
+                    let effective_name = dep_value
+                        .get("package")
+                        .and_then(toml::Value::as_str)
+                        .unwrap_or(dep_name);
+                    let banned = CORE_BANNED.contains(&effective_name)
+                        || (crate_name == "contracts"
+                            && CONTRACTS_EXTRA_BANNED.contains(&effective_name));
+                    if banned {
+                        let offender = if effective_name == dep_name {
+                            dep_name.clone()
+                        } else {
+                            format!("{dep_name} (package = \"{effective_name}\")")
+                        };
+                        violations.push(format!(
+                            "[rule 2: dependencies point inward] {} [{table_name}] depends on `{offender}`",
+                            manifest_path.display(),
+                        ));
+                    }
                 }
             }
         }
@@ -253,5 +291,49 @@ mod tests {
         );
         let v = collect_violations(dir.path()).unwrap();
         assert!(v.iter().any(|s| s.contains("axum")), "violations: {v:?}");
+    }
+
+    #[test]
+    fn core_crate_depending_on_framework_via_dev_dependencies_is_a_violation() {
+        let dir = TempDir::new().unwrap();
+        manifest(
+            dir.path(),
+            "crates/domain",
+            "[package]\nname = \"domain\"\n[dependencies]\nserde = \"1\"\n[dev-dependencies]\naxum = \"0.8\"\n",
+        );
+        let v = collect_violations(dir.path()).unwrap();
+        assert!(v.iter().any(|s| s.contains("axum")), "violations: {v:?}");
+    }
+
+    #[test]
+    fn shared_crate_depending_on_app_crate_via_target_cfg_dependencies_is_a_violation() {
+        let dir = TempDir::new().unwrap();
+        manifest(
+            dir.path(),
+            "shared/bootstrap",
+            "[package]\nname = \"bootstrap\"\n[dependencies]\nanyhow = \"1\"\n[target.'cfg(unix)'.dependencies]\napplication = { path = \"../../crates/application\" }\n",
+        );
+        let v = collect_violations(dir.path()).unwrap();
+        assert!(
+            v.iter()
+                .any(|s| s.contains("shared/bootstrap") && s.contains("application")),
+            "violations: {v:?}"
+        );
+    }
+
+    #[test]
+    fn real_workspace_has_no_dependency_violations() {
+        // CARGO_MANIFEST_DIR = tools/xtask/; its grandparent is the workspace root where
+        // crates/ and shared/ live.
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("tools/xtask/ must have a grandparent (the workspace root)");
+        let v = collect_violations(workspace_root).unwrap();
+        assert!(
+            v.is_empty(),
+            "the real workspace has check-deps violations:\n{}",
+            v.join("\n")
+        );
     }
 }

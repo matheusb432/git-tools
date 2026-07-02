@@ -1,0 +1,15 @@
+[package]
+name = "e2e"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+anyhow = "1"
+assert_cmd = "2"
+infra = { path = "../infra" }
+predicates = "3"
+serde_json = "1"
+tempfile = "3"

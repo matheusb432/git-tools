@@ -15,6 +15,8 @@ use assert_cmd::Command;
 use predicates::{prelude::PredicateBooleanExt, str::contains};
 use tempfile::TempDir;
 
+mod common;
+
 /// A throwaway git repo with an isolated central store.
 struct Repo {
     _tmp: TempDir,
@@ -71,11 +73,14 @@ impl NestedRepos {
     }
 
     fn run(&self, args: &[&str]) -> Command {
+        common::ensure_daemon_built();
         let mut cmd = Command::cargo_bin("git-tools").unwrap();
         cmd.args(args)
             .current_dir(&self.root)
             .env("GIT_TOOLS_NO_OPEN", "1")
-            .env("GIT_TOOLS_DATA_DIR", &self.store_dir);
+            .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
+            // Diff commands spawn a per-store daemon; a short idle timeout reaps it.
+            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2");
         cmd
     }
 }
@@ -215,11 +220,14 @@ impl Repo {
 
     /// A `git-tools` invocation in the repo with browser-open and store location set.
     fn run(&self, args: &[&str]) -> Command {
+        common::ensure_daemon_built();
         let mut cmd = Command::cargo_bin("git-tools").unwrap();
         cmd.args(args)
             .current_dir(&self.repo)
             .env("GIT_TOOLS_NO_OPEN", "1")
-            .env("GIT_TOOLS_DATA_DIR", &self.store_dir);
+            .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
+            // Diff commands spawn a per-store daemon; a short idle timeout reaps it.
+            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2");
         cmd
     }
 
@@ -592,12 +600,16 @@ fn diff_unknown_commit_errors() {
 
 #[test]
 fn diff_outside_a_git_repo_errors() {
+    common::ensure_daemon_built();
     let tmp = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
     Command::cargo_bin("git-tools")
         .unwrap()
         .arg("diff")
         .current_dir(tmp.path())
         .env("GIT_TOOLS_NO_OPEN", "1")
+        .env("GIT_TOOLS_DATA_DIR", store.path())
+        .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
         .assert()
         .code(1)
         .stderr(contains("not a git repo"));

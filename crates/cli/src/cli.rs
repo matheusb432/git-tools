@@ -105,6 +105,24 @@ pub enum Command {
         #[arg(long)]
         message_for_all: Option<String>,
     },
+    /// Control the resident gtl-daemon.
+    Daemon(DaemonArgs),
+}
+
+/// Arguments for `daemon`.
+#[derive(Debug, Args)]
+pub struct DaemonArgs {
+    #[command(subcommand)]
+    pub command: DaemonCommand,
+}
+
+/// Nested commands under `daemon`.
+#[derive(Debug, Subcommand)]
+pub enum DaemonCommand {
+    /// Report whether the daemon is running (port, pid, version).
+    Status,
+    /// Ask the daemon to exit.
+    Stop,
 }
 
 /// Arguments for the root `diff` command and its nested subcommands.

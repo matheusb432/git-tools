@@ -1,7 +1,7 @@
-//! `xtask ship` — cross-build the Win11 shippables (CLI + viewer) from this Linux host via
-//! cargo-xwin. Migrates `scripts/win-preflight.sh` + the `win-build`/`win-compile-smoke` recipes.
-//! Stages run side-effect-free-first and emit the `RESULT scope=ship …` contract; a cross-build
-//! proves linkage, NOT runtime (host/release split — certify on real Win11).
+//! `xtask ship` — cross-build the Win11 shippables (CLI + viewer + gtl-daemon) from this Linux
+//! host via cargo-xwin. Migrates `scripts/win-preflight.sh` + the `win-build`/`win-compile-smoke`
+//! recipes. Stages run side-effect-free-first and emit the `RESULT scope=ship …` contract; a
+//! cross-build proves linkage, NOT runtime (host/release split — certify on real Win11).
 
 use std::{path::Path, process::Command};
 
@@ -83,11 +83,15 @@ pub fn run(smoke: bool) -> Result<()> {
         bail!("ship frontend bundle build failed");
     }
 
-    // 3. cross-build both packages
+    // 3. cross-build all three packages
     let profile: &[&str] = if smoke { &[] } else { &["--release"] };
     let mut cli_args = vec!["xwin", "build"];
     cli_args.extend_from_slice(profile);
     cli_args.extend_from_slice(&["-p", "cli", "--target", WIN_TARGET]);
+
+    let mut daemon_args = vec!["xwin", "build"];
+    daemon_args.extend_from_slice(profile);
+    daemon_args.extend_from_slice(&["-p", "daemon", "--target", WIN_TARGET]);
 
     let mut viewer_args = vec!["xwin", "build"];
     viewer_args.extend_from_slice(profile);
@@ -101,6 +105,7 @@ pub fn run(smoke: bool) -> Result<()> {
     ]);
 
     if proc::run("cross-build-cli", "cargo", &cli_args).is_err()
+        || proc::run("cross-build-daemon", "cargo", &daemon_args).is_err()
         || proc::run("cross-build-viewer", "cargo", &viewer_args).is_err()
     {
         proc::result_fail_step("ship", "cross-build");
@@ -109,7 +114,7 @@ pub fn run(smoke: bool) -> Result<()> {
 
     // 4. verify artifacts (release only)
     if !smoke {
-        for exe in ["git-tools.exe", "gtl-viewer.exe"] {
+        for exe in ["git-tools.exe", "gtl-daemon.exe", "gtl-viewer.exe"] {
             let path = Path::new("target")
                 .join(WIN_TARGET)
                 .join("release")

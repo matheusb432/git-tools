@@ -251,6 +251,7 @@ pub fn build_html(view: &View) -> String {
 }
 
 /// The Maud-backed [`HtmlRenderer`](application::ports::HtmlRenderer) adapter.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MaudRenderer;
 
 impl application::ports::HtmlRenderer for MaudRenderer {

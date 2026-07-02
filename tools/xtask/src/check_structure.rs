@@ -56,10 +56,11 @@ pub(crate) fn run(root: Option<&Path>) -> Result<()> {
 /// app-agnostic `shared/*` crates. Both buckets obey the same three rules.
 const MEMBER_DIRS: [&str; 2] = ["crates", "shared"];
 
-/// Crates exempt from the layout rules while they are still legacy-shaped.
-/// Shrink this list as migration phases land — new architecture crates
-/// (`domain`, `contracts`, `application`, `infra`, `daemon`) are never added.
-const EXEMPT_CRATES: [&str; 1] = ["cli"];
+/// Crates exempt from rule 1 (max folder depth) while they are still legacy-shaped —
+/// rules 2 and 3 still apply. Shrink this list as migration phases land — new
+/// architecture crates (`domain`, `contracts`, `application`, `infra`, `daemon`) are
+/// never added.
+const DEPTH_EXEMPT_CRATES: [&str; 1] = ["cli"];
 
 /// Collect every violation under `root/{crates,shared}/*/src`.
 fn collect_violations(root: &Path) -> Result<Vec<String>> {
@@ -86,14 +87,12 @@ fn collect_member_violations(member_dir: &Path, violations: &mut Vec<String>) ->
 
     for entry in entries {
         let crate_name = entry.file_name();
-        if EXEMPT_CRATES.iter().any(|e| crate_name == *e) {
-            continue;
-        }
+        let skip_depth_rule = DEPTH_EXEMPT_CRATES.iter().any(|e| crate_name == *e);
         let src = entry.path().join("src");
         if !src.is_dir() {
             continue;
         }
-        walk_dirs(&src, 0, violations)?;
+        walk_dirs(&src, 0, skip_depth_rule, violations)?;
     }
 
     Ok(())
@@ -103,8 +102,14 @@ fn collect_member_violations(member_dir: &Path, violations: &mut Vec<String>) ->
 /// sub-directory.
 ///
 /// `current` is the directory currently being iterated; `depth` is how many directory components
-/// separate `current` from `src/` (0 = items directly inside `src/`).
-fn walk_dirs(current: &Path, depth: usize, violations: &mut Vec<String>) -> Result<()> {
+/// separate `current` from `src/` (0 = items directly inside `src/`). `skip_depth_rule` exempts a
+/// legacy crate (see [`DEPTH_EXEMPT_CRATES`]) from rule 1 only — rules 2 and 3 still apply.
+fn walk_dirs(
+    current: &Path,
+    depth: usize,
+    skip_depth_rule: bool,
+    violations: &mut Vec<String>,
+) -> Result<()> {
     let mut entries: Vec<_> = std::fs::read_dir(current)
         .with_context(|| format!("reading {}", current.display()))?
         .collect::<Result<_, _>>()?;
@@ -121,7 +126,7 @@ fn walk_dirs(current: &Path, depth: usize, violations: &mut Vec<String>) -> Resu
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         // Rule 1: max folder depth 2 under src/.
-        if child_depth > 2 {
+        if !skip_depth_rule && child_depth > 2 {
             violations.push(format!(
                 "[rule 1: max depth 2] {} — depth {} under src/ (max is 2)",
                 path.display(),
@@ -146,7 +151,7 @@ fn walk_dirs(current: &Path, depth: usize, violations: &mut Vec<String>) -> Resu
             ));
         }
 
-        walk_dirs(&path, child_depth, violations)?;
+        walk_dirs(&path, child_depth, skip_depth_rule, violations)?;
     }
 
     Ok(())
@@ -259,5 +264,14 @@ mod tests {
         );
         let v = collect_violations(dir.path()).unwrap();
         assert!(v.iter().any(|s| s.contains("rule 1")), "violations: {v:?}");
+    }
+
+    #[test]
+    fn exempt_cli_crate_still_violates_rule_3() {
+        // cli is exempt from rule 1 (max depth) only — a services/ dir must still be caught.
+        let dir = TempDir::new().unwrap();
+        seed(dir.path(), "crates/cli/src/services/foo.rs");
+        let v = collect_violations(dir.path()).unwrap();
+        assert!(v.iter().any(|s| s.contains("rule 3")), "violations: {v:?}");
     }
 }

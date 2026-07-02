@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+pub mod daemon_ctl;
 pub mod diff;
 pub mod diff_subrepos;
 mod discover;
@@ -73,6 +74,20 @@ pub(crate) fn print_notes(notes: &[application::shared::notes::Note]) {
         match note.level {
             application::shared::notes::NoteLevel::Info => println!("{}", note.text),
             application::shared::notes::NoteLevel::Warn => eprintln!("{}", note.text),
+        }
+    }
+}
+
+/// Print a daemon envelope's wire [`Note`](contracts::envelope::Note)s: `Info` to
+/// stdout, `Warn` to stderr, verbatim. `Error` notes are skipped — the caller
+/// turns them into the returned error so the exit path prints them once.
+pub(crate) fn print_wire_notes(notes: &[contracts::envelope::Note]) {
+    use contracts::envelope::NoteLevel;
+    for note in notes {
+        match note.level {
+            NoteLevel::Info => println!("{}", note.text),
+            NoteLevel::Warn => eprintln!("{}", note.text),
+            NoteLevel::Error => {}
         }
     }
 }

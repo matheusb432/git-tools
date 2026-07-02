@@ -7,13 +7,15 @@
 | Verb | What it does | Justfile entry |
 | -- | -- | -- |
 | `bootstrap` | Full post-toolchain bring-up: link `.claude/skills` (via the PAL symlink primitive), build + install both artifacts, ensure `~/.local/bin` is on PATH. Migrates `install-git-tools.sh` + the old skills-link recipe. | `just bootstrap` |
-| `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias) and/or the viewer on PATH (idempotent byte-compare → installed/updated/unchanged; atomic replace is warm-tray-safe). Migrates `scripts/install.sh`. | `just install` / `just cli install` / `just desktop install` |
-| `uninstall [--remove-config] [--force]` | Remove the installed binaries + alias; optionally delete repo-local config (guarded). | `just uninstall` |
+| `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the viewer on PATH (idempotent byte-compare → installed/updated/unchanged; atomic replace is warm-tray-safe). Migrates `scripts/install.sh`. | `just install` / `just cli install` / `just desktop install` |
+| `uninstall [--remove-config] [--force]` | Remove the installed binaries + alias + `gtl-daemon`; optionally delete repo-local config (guarded). | `just uninstall` |
 | `test [--verbose] [--all]` | `cargo test` (terse); `--verbose` streams; `--all` adds the bun frontend tests. Migrates `just test`. | `just test` |
-| `fmt [--check]` | Pinned-nightly `cargo fmt` (toolchain from `.rustfmt-nightly`) + taplo. Migrates `just fmt` / `just fmt-check`. | `just fmt` / `just fmt-check` |
+| `fmt [--check]` | Pinned-nightly `cargo fmt` (toolchain from `.rustfmt-nightly`) + taplo. `--check` additionally runs the `check-structure` and `check-deps` architecture lints. Migrates `just fmt` / `just fmt-check`. | `just fmt` / `just fmt-check` |
+| `check-structure` | Mechanical layout lint over `crates/*/src` and `shared/*/src`: max dir depth 2, no nested `errors/`/`events/` dirs, no `services/` dir. Only wired into `fmt --check`; no standalone justfile entry. | (via `just fmt-check`) |
+| `check-deps` | Dependency-direction lint over every `crates/*/Cargo.toml` and `shared/*/Cargo.toml` dependency table (`dependencies`, `dev-dependencies`, `build-dependencies`, and their `target.<cfg>` forms): `shared/*` never depends on an app crate, and the core crates (`domain`, `application`, `contracts`) never depend outward. Only wired into `fmt --check`; no standalone justfile entry. | (via `just fmt-check`) |
 | `drift-check` | Rebuild the committed JS bundles and fail if they drift from their TS sources (CI/pre-commit gate). | `just drift-check` |
 | `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |
-| `ship [--smoke]` | Cross-build both Win11 release exes (CLI + viewer) from a Linux host via `cargo-xwin`, with a host-testable preflight; `--smoke` is a fast debug-profile linkage drift check (no artifact verify). | `just ship` / `just ship --smoke` |
+| `ship [--smoke]` | Cross-build the three Win11 release exes (CLI + gtl-daemon + viewer) from a Linux host via `cargo-xwin`, with a host-testable preflight; `--smoke` is a fast debug-profile linkage drift check (no artifact verify). | `just ship` / `just ship --smoke` |
 
 ## Why this is not a `new-rust-cli`
 

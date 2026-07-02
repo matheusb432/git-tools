@@ -1,8 +1,11 @@
 //! `xtask install` / `xtask uninstall` — place or remove the prebuilt git-tools CLI (+ the
-//! `gtl` alias) and the gtl-viewer desktop binary on PATH. Migrates `scripts/install.sh`: the
-//! build is owned by the justfile (`just cli build` / `just desktop build`); these verbs only
-//! copy the already-built artifacts. Idempotent; the destructive config removal refuses
-//! non-interactively unless `--force`.
+//! `gtl` alias + the resident `gtl-daemon`) and the gtl-viewer desktop binary on PATH. Migrates
+//! `scripts/install.sh`: the build is owned by the justfile (`just cli build` / `just desktop
+//! build`); these verbs only copy the already-built artifacts. Idempotent; the destructive
+//! config removal refuses non-interactively unless `--force`. `gtl-daemon` may be running
+//! during `just update` — placed via the same atomic replace as the viewer, so the swap never
+//! fails with "Text file busy"; the client's exe-identity handshake restarts it on the next
+//! CLI invocation.
 //!
 //! Pure placement helpers (byte-compare, atomic replace, the installed|updated|unchanged
 //! contract) are unit-tested with `tempfile`; the thin glue that resolves repo root / bindir
@@ -87,6 +90,10 @@ fn viewer_bin_name() -> String {
     format!("gtl-viewer{}", exe_suffix())
 }
 
+fn daemon_bin_name() -> String {
+    format!("gtl-daemon{}", exe_suffix())
+}
+
 fn file_name(path: &Path) -> &str {
     path.file_name()
         .and_then(|n| n.to_str())
@@ -136,11 +143,26 @@ pub fn install_cli_binary(src: &Path, bindir: &Path) -> io::Result<Action> {
     Ok(primary.louder(alias))
 }
 
+/// Install exe `src` into `bindir` via atomic replace, so a warm running process (the tray
+/// viewer or the resident daemon) can be updated in place without "Text file busy". Shared by
+/// `install_viewer_binary` and `install_daemon_binary`, which differ only in which binary they
+/// place. Echoes the action.
+fn install_binary_atomic(src: &Path, bindir: &Path) -> io::Result<Action> {
+    fs::create_dir_all(bindir)?;
+    copy_if_changed(src, &bindir.join(file_name(src)))
+}
+
 /// Install the desktop viewer exe `src` into `bindir` via atomic replace, so a warm tray viewer
 /// can be updated in place. Echoes the action.
 pub fn install_viewer_binary(src: &Path, bindir: &Path) -> io::Result<Action> {
-    fs::create_dir_all(bindir)?;
-    copy_if_changed(src, &bindir.join(file_name(src)))
+    install_binary_atomic(src, bindir)
+}
+
+/// Install the `gtl-daemon` exe `src` into `bindir` via atomic replace, so a resident daemon can
+/// be updated while running — the client's exe-identity handshake restarts it on the next CLI
+/// invocation. Echoes the action.
+pub fn install_daemon_binary(src: &Path, bindir: &Path) -> io::Result<Action> {
+    install_binary_atomic(src, bindir)
 }
 
 /// Remove the CLI binary + `gtl` alias from `bindir`.
@@ -219,6 +241,19 @@ fn install_cli(repo: &Path, bindir: &Path) -> Result<()> {
         bindir.join(cli_bin_name()).display()
     );
     println!("gtl {act} -> {}", bindir.join(cli_alias_name()).display());
+
+    let daemon_src = repo.join("target").join("release").join(daemon_bin_name());
+    if !daemon_src.is_file() {
+        bail!(
+            "gtl-daemon not built at {} — run `just cli build` first",
+            daemon_src.display()
+        );
+    }
+    let daemon_act = install_daemon_binary(&daemon_src, bindir)?;
+    println!(
+        "gtl-daemon {daemon_act} -> {}",
+        bindir.join(daemon_bin_name()).display()
+    );
     Ok(())
 }
 
@@ -246,6 +281,11 @@ pub fn run_uninstall(remove_config: bool, force: bool) -> Result<()> {
             "nothing to remove at {}",
             bindir.join(cli_bin_name()).display()
         ),
+    }
+    let daemon = bindir.join(daemon_bin_name());
+    if daemon.exists() {
+        fs::remove_file(&daemon)?;
+        println!("removed {}", daemon.display());
     }
     let viewer = bindir.join(viewer_bin_name());
     if viewer.exists() {
@@ -290,9 +330,18 @@ mod tests {
     /// A temp bindir + a `git-tools` source file holding `bytes`. Both TempDir guards are
     /// returned so they auto-clean on drop; `src` is the source path, `bindir` the target dir.
     fn fixture(bytes: &[u8]) -> (tempfile::TempDir, tempfile::TempDir, PathBuf, PathBuf) {
+        fixture_named("git-tools", bytes)
+    }
+
+    /// Like `fixture`, but the source file is named `name` — lets a test prove the *right*
+    /// file name lands in `bindir` (e.g. the daemon binary), not just that bytes copy correctly.
+    fn fixture_named(
+        name: &str,
+        bytes: &[u8],
+    ) -> (tempfile::TempDir, tempfile::TempDir, PathBuf, PathBuf) {
         let bindir = tempfile::tempdir().unwrap();
         let srcdir = tempfile::tempdir().unwrap();
-        let src = srcdir.path().join("git-tools");
+        let src = srcdir.path().join(name);
         fs::write(&src, bytes).unwrap();
         let bindir_path = bindir.path().to_path_buf();
         (bindir, srcdir, src, bindir_path)
@@ -342,6 +391,23 @@ mod tests {
             Action::Updated
         );
         assert_eq!(fs::read(bindir.join("git-tools")).unwrap(), b"v2");
+    }
+
+    #[test]
+    fn install_daemon_binary_places_the_daemon_exe_name() {
+        let (_bin, _srcdir, src, bindir) = fixture_named(&daemon_bin_name(), b"v1");
+        assert_eq!(
+            install_daemon_binary(&src, &bindir).unwrap(),
+            Action::Installed
+        );
+        assert!(bindir.join(daemon_bin_name()).exists());
+        assert!(!bindir.join("git-tools").exists());
+        fs::write(&src, b"v2").unwrap();
+        assert_eq!(
+            install_daemon_binary(&src, &bindir).unwrap(),
+            Action::Updated
+        );
+        assert_eq!(fs::read(bindir.join(daemon_bin_name())).unwrap(), b"v2");
     }
 
     #[test]

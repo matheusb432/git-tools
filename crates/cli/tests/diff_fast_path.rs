@@ -1,5 +1,7 @@
 use std::{fs, path::Path, process::Command};
 
+mod common;
+
 fn tiny_repo() -> tempfile::TempDir {
     let repo = tempfile::tempdir().unwrap();
     let g = |args: &[&str]| {
@@ -27,11 +29,13 @@ fn tiny_repo() -> tempfile::TempDir {
 }
 
 fn run_diff(repo: &tempfile::TempDir, store: &tempfile::TempDir, args: &[&str]) -> String {
+    common::ensure_daemon_built();
     let stdout = assert_cmd::Command::cargo_bin("git-tools")
         .unwrap()
         .current_dir(repo.path())
         .env("GIT_TOOLS_DATA_DIR", store.path())
         .env("GIT_TOOLS_NO_OPEN", "1")
+        .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
         .args(args)
         .assert()
         .success()
@@ -49,7 +53,10 @@ fn collect_json_paths(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_json_paths(&path, out);
-        } else if path.extension().is_some_and(|ext| ext == "json") {
+        } else if path.extension().is_some_and(|ext| ext == "json")
+            // The daemon's `<store_root>/daemon.json` port file is not a sidecar.
+            && path.file_name().is_some_and(|name| name != "daemon.json")
+        {
             out.push(path);
         }
     }

@@ -21,16 +21,16 @@ pub enum Command {
     /// artifacts, ensure `~/.local/bin` is on PATH. Migrates `install-git-tools.sh` + the old
     /// skills-link recipe. The toolchain install itself stays in `bootstrap.sh` — see that file.
     Bootstrap,
-    /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias) and/or the desktop viewer on
-    /// PATH. Builds are owned by the justfile; this only copies the already-built artifacts.
-    /// Migrates `scripts/install.sh`.
+    /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the
+    /// desktop viewer on PATH. Builds are owned by the justfile; this only copies the
+    /// already-built artifacts. Migrates `scripts/install.sh`.
     Install {
         /// Which artifact(s) to place: `cli`, `viewer`, or `both` (default).
         #[arg(long, value_enum, default_value_t = InstallTarget::Both)]
         target: InstallTarget,
     },
-    /// Remove the installed CLI binary + `gtl` alias and the desktop viewer from PATH.
-    /// Migrates `scripts/install.sh uninstall`.
+    /// Remove the installed CLI binary + `gtl` alias + `gtl-daemon` and the desktop viewer from
+    /// PATH. Migrates `scripts/install.sh uninstall`.
     Uninstall {
         /// Also delete repo-local git-tools.toml / git-tools.secrets.toml (refused
         /// non-interactively unless `--force`).
@@ -72,10 +72,11 @@ pub enum Command {
     /// Ports the retired Python generator; the multi-res `.ico` is required by tauri-build on
     /// Windows.
     GenIcon,
-    /// Cross-build the Win11 shippables (CLI + viewer) from this Linux host via cargo-xwin.
-    /// `--smoke` is a fast debug-profile linkage check; the default is the release ship + verify.
+    /// Cross-build the Win11 shippables (CLI + viewer + gtl-daemon) from this Linux host via
+    /// cargo-xwin. `--smoke` is a fast debug-profile linkage check; the default is the release
+    /// ship + verify.
     Ship {
-        /// Debug-profile compile-smoke of both binaries — a non-authoritative linkage drift
+        /// Debug-profile compile-smoke of all three binaries — a non-authoritative linkage drift
         /// check (no artifact verify), not a shippable.
         #[arg(long)]
         smoke: bool,

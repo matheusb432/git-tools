@@ -6,6 +6,7 @@ use application::ports::DiffSource;
 use domain::diffs::Commit;
 
 /// Real git access for the diff engine. Every method shells out via `git_capture`.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct GitDiffSource;
 
 impl DiffSource for GitDiffSource {

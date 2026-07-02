@@ -2,9 +2,9 @@
 
 use crate::{
     cli::{
-        Cli, ColorChoice, Command, DiffCommand, DiffTarget, DiffTargetArgs, ManagedArgs,
-        ManagedReadArgs, PruneArgs, StatusArgs, SwArgs, TagCommand, Theme, UpArgs, UpCommand,
-        WorktreeCommand,
+        Cli, ColorChoice, Command, DaemonArgs, DaemonCommand, DiffCommand, DiffTarget,
+        DiffTargetArgs, ManagedArgs, ManagedReadArgs, PruneArgs, StatusArgs, SwArgs, TagCommand,
+        Theme, UpArgs, UpCommand, WorktreeCommand,
     },
     commands::{
         managed::{ManagedExit, ManagedOptions, ManagedRun},
@@ -13,6 +13,7 @@ use crate::{
 };
 
 pub mod cli;
+pub mod client;
 pub mod commands;
 pub mod config;
 pub mod viewer;
@@ -152,6 +153,25 @@ fn dispatch(command: Command) -> ExitCode {
             managed,
             message_for_all,
         ))),
+        Command::Daemon(DaemonArgs { command }) => run_daemon_ctl(command),
+    }
+}
+
+/// Dispatch `daemon status|stop`. Both verbs exit 0 whether or not a daemon is
+/// running; a transport failure escalates to the internal-error exit path.
+fn run_daemon_ctl(command: DaemonCommand) -> ExitCode {
+    use crate::commands::daemon_ctl;
+
+    let result = match command {
+        DaemonCommand::Status => daemon_ctl::status(),
+        DaemonCommand::Stop => daemon_ctl::stop(),
+    };
+    match result {
+        Ok(()) => ExitCode::Ok,
+        Err(error) => {
+            eprintln!("{}", html_error_text(&error));
+            ExitCode::Internal
+        }
     }
 }
 

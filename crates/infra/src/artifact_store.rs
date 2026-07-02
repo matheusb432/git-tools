@@ -11,6 +11,7 @@ use domain::diffs::DiffKind;
 
 /// The default store adapter: places artifacts into and looks them up out of the
 /// on-disk content-addressed store.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct StoreArtifacts;
 
 impl ArtifactStore for StoreArtifacts {
