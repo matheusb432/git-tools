@@ -1,9 +1,6 @@
+use application::diffs::intraline::{LineSpans, Span, changed_spans};
+use domain::diffs::{FileDiff, LineOwners, View};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
-
-use crate::{
-    intraline::{LineSpans, Span, changed_spans},
-    model::{FileDiff, LineOwners, View},
-};
 
 const MAX_LINE_COLS: usize = 2000;
 const GIANT_FILE_CHARS: usize = 250_000;
@@ -253,6 +250,15 @@ pub fn build_html(view: &View) -> String {
     .into_string()
 }
 
+/// The Maud-backed [`HtmlRenderer`](application::ports::HtmlRenderer) adapter.
+pub struct MaudRenderer;
+
+impl application::ports::HtmlRenderer for MaudRenderer {
+    fn build_html(&self, view: &View) -> String {
+        build_html(view)
+    }
+}
+
 pub fn build_tabbed_html(title: &str, views: &[View]) -> String {
     // ? tab strip CSS stays inline; tab logic is in the bundle (tabbed.ts, guarded to no-op without
     // .tabs)
@@ -321,7 +327,7 @@ fn commit_attr(sha: Option<&String>) -> String {
 }
 
 // ! Serialize a merge's brought-in commits for the focus set; non-merge / empty -> no attribute.
-fn merge_members_attr(commit: &crate::model::Commit) -> Option<String> {
+fn merge_members_attr(commit: &domain::diffs::Commit) -> Option<String> {
     (commit.is_merge() && !commit.members.is_empty()).then(|| commit.members.join(" "))
 }
 
@@ -681,8 +687,9 @@ fn file_blocks(view: &View) -> Markup {
 
 #[cfg(test)]
 mod tests {
+    use domain::diffs::{Cmd, Commit, FileDiff, Foot, View};
+
     use super::*;
-    use crate::model::{Cmd, Commit, FileDiff, Foot, View};
 
     /// Returns true if `html` contains any http(s):// URL that is not an inert
     /// Svelte runtime error-message literal (`https://svelte.dev/e/<code>`),
@@ -738,7 +745,7 @@ mod tests {
 
     #[test]
     fn render_diff_lines_tags_rows_with_owning_commit() {
-        let mut owners = crate::model::LineOwners::default();
+        let mut owners = domain::diffs::LineOwners::default();
         owners.added.insert(8, "abc123def".to_string());
         owners.deleted.insert(4, "fff000aaa".to_string());
         let html = render_diff_lines(
@@ -800,7 +807,7 @@ mod tests {
 
     #[test]
     fn render_diff_split_tags_sides_with_owning_commit() {
-        let mut owners = crate::model::LineOwners::default();
+        let mut owners = domain::diffs::LineOwners::default();
         owners.added.insert(8, "abc123def".to_string());
         owners.deleted.insert(4, "fff000aaa".to_string());
         let html = render_diff_split(
@@ -1013,7 +1020,7 @@ mod tests {
                     " end".to_string(),
                 ]),
                 commits: vec!["abc123def".to_string()],
-                owners: crate::model::LineOwners::default(),
+                owners: domain::diffs::LineOwners::default(),
             }],
             title: "diff".to_string(),
             cmd: Cmd {
@@ -1248,7 +1255,7 @@ mod tests {
                 ],
                 full_lines: None,
                 commits: vec!["abc123def".to_string()],
-                owners: crate::model::LineOwners::default(),
+                owners: domain::diffs::LineOwners::default(),
             },
             FileDiff {
                 path: "src/gone.rs".to_string(),
@@ -1263,7 +1270,7 @@ mod tests {
                 ],
                 full_lines: None,
                 commits: vec!["abc123def".to_string()],
-                owners: crate::model::LineOwners::default(),
+                owners: domain::diffs::LineOwners::default(),
             },
             FileDiff {
                 path: "src/new-name.rs".to_string(),
@@ -1276,7 +1283,7 @@ mod tests {
                 ],
                 full_lines: None,
                 commits: vec!["abc123def".to_string()],
-                owners: crate::model::LineOwners::default(),
+                owners: domain::diffs::LineOwners::default(),
             },
         ];
 
@@ -1479,7 +1486,7 @@ mod tests {
                     " end".to_string(),
                 ]),
                 commits: vec!["abc123def".to_string()],
-                owners: crate::model::LineOwners::default(),
+                owners: domain::diffs::LineOwners::default(),
             }],
             title: "diff".to_string(),
             cmd: Cmd {

@@ -59,7 +59,7 @@ pub enum Command {
         all: bool,
     },
     /// Rebuild the committed frontend bundles and fail if they drift from their TS sources
-    /// (`crates/cli/src/embedded/generated` + `crates/desktop/dist`). Skips when bun is absent.
+    /// (`crates/infra/src/embedded/generated` + `crates/desktop/dist`). Skips when bun is absent.
     /// Migrates the `_js-drift-guard` recipe — a CI/pre-commit gate.
     DriftCheck,
     /// Mechanical architecture lint: walks `crates/*/src` and `shared/*/src` and exits 3 on

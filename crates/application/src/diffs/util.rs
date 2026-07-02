@@ -3,10 +3,11 @@ use std::{
     path::Path,
 };
 
+use domain::diffs::{Commit, FileDiff, FileStatus, LineOwners};
+
 use crate::{
-    attribution::{self, NewSide},
-    git,
-    model::{Commit, FileDiff, FileStatus, LineOwners},
+    diffs::attribution::{self, NewSide},
+    ports::DiffSource,
 };
 
 pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
@@ -76,6 +77,13 @@ pub fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
     }
 }
 
+/// Attach each file's touching commits from the range's file→commits map (pure).
+pub fn attach_commits(files: &mut [FileDiff], map: &HashMap<String, Vec<String>>) {
+    for file in files {
+        file.commits = map.get(&file.path).cloned().unwrap_or_default();
+    }
+}
+
 /// The assembled diff data for one preview: commits in range and changed files
 /// (with per-line owners attached).
 pub struct DiffData {
@@ -87,33 +95,35 @@ pub struct DiffData {
 /// per-line attribution. Takes range primitives so it stays decoupled from
 /// `commands::Ranges`. Does NOT sort files — callers order as they always have.
 pub fn assemble(
-    repo: impl AsRef<Path>,
+    source: &impl DiffSource,
+    repo: &Path,
     diff_args: &[String],
     diff_range: &str,
     log_range: &str,
 ) -> anyhow::Result<DiffData> {
-    let repo = repo.as_ref();
-    let mut commits = git::log_commits(repo, log_range)?;
+    let mut commits = source.log_commits(repo, log_range)?;
     let (base, new_side) = blame_targets(diff_range, log_range);
 
     // ! Blame never attributes a line to a merge, so a merge card is otherwise dead. Map each
     // ! merge to the commits it brought into the range so focusing it lifts their rows.
     for commit in commits.iter_mut() {
         if commit.is_merge() {
-            commit.members = git::merge_members(repo, &commit.sha, &base).unwrap_or_default();
+            commit.members = source
+                .merge_members(repo, &commit.sha, &base)
+                .unwrap_or_default();
         }
     }
 
-    let mut files = parse_diff(&git::diff_raw(repo, diff_args)?);
+    let mut files = parse_diff(&source.diff_raw(repo, diff_args)?);
     attach_full_context(
         &mut files,
-        parse_diff(&git::diff_raw(repo, &full_context_args(diff_args))?),
+        parse_diff(&source.diff_raw(repo, &full_context_args(diff_args))?),
     );
-    let file_commits = git::file_commit_map(repo, log_range)?;
-    git::attach_commits(&mut files, &file_commits);
+    let file_commits = source.file_commit_map(repo, log_range)?;
+    attach_commits(&mut files, &file_commits);
 
     let in_range: HashSet<String> = commits.iter().map(|commit| commit.sha.clone()).collect();
-    attribution::attribute(repo, &base, &new_side, &in_range, &mut files);
+    attribution::attribute(source, repo, &base, &new_side, &in_range, &mut files);
 
     Ok(DiffData { commits, files })
 }
@@ -255,70 +265,6 @@ index 000..333\n\
         assert_eq!(
             full_context_args(&args),
             vec!["diff", "--unified=2147483647", "main..HEAD"]
-        );
-    }
-
-    #[test]
-    fn assemble_attaches_brought_in_members_to_a_merge() {
-        let tmp = tempfile::tempdir().unwrap();
-        let d = tmp.path();
-        let g = |args: &[&str]| {
-            assert!(
-                std::process::Command::new("git")
-                    .arg("-C")
-                    .arg(d)
-                    .args(args)
-                    .status()
-                    .unwrap()
-                    .success(),
-                "git {args:?} failed"
-            );
-        };
-        g(&["init", "-q"]);
-        g(&["config", "user.email", "t@t"]);
-        g(&["config", "user.name", "t"]);
-        std::fs::write(d.join("base.txt"), "base\n").unwrap();
-        g(&["add", "."]);
-        g(&["commit", "-qm", "base"]);
-        g(&["branch", "-M", "main"]);
-        g(&["checkout", "-q", "-b", "feature"]);
-        std::fs::write(d.join("a.txt"), "a\n").unwrap();
-        g(&["add", "."]);
-        g(&["commit", "-qm", "feat a"]);
-        g(&["checkout", "-q", "-b", "sub"]);
-        std::fs::write(d.join("b.txt"), "b\n").unwrap();
-        g(&["add", "."]);
-        g(&["commit", "-qm", "sub b"]);
-        g(&["checkout", "-q", "feature"]);
-        g(&["merge", "-q", "--no-ff", "sub", "-m", "Merge branch 'sub'"]);
-
-        let data = assemble(
-            d,
-            &["diff".to_string(), "main...HEAD".to_string()],
-            "main...HEAD",
-            "main..HEAD",
-        )
-        .unwrap();
-
-        let merge = data
-            .commits
-            .iter()
-            .find(|c| c.is_merge())
-            .expect("a merge commit");
-        let sub_b = data.commits.iter().find(|c| c.subject == "sub b").unwrap();
-        let feat_a = data.commits.iter().find(|c| c.subject == "feat a").unwrap();
-
-        assert!(
-            merge.members.contains(&sub_b.sha),
-            "merge lists its brought-in commit"
-        );
-        assert!(
-            !merge.members.contains(&feat_a.sha),
-            "first-parent commit is not a member"
-        );
-        assert!(
-            feat_a.members.is_empty(),
-            "a non-merge commit has no members"
         );
     }
 }

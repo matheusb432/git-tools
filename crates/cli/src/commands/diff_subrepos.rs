@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::Context;
+use application::ports::Clock;
 
 use crate::{
     cli::DiffTarget,
@@ -38,7 +39,16 @@ pub fn run_scan(
     for repo in &repos {
         let top = git::top_level(repo)?;
         let label = repo_label(&root, Path::new(&top));
-        match super::diff::build_view(&top, &target) {
+        let mut notes = Vec::new();
+        let built = application::diffs::render_diff::build_view(
+            &infra::diff_source::GitDiffSource,
+            &top,
+            &target,
+            crate::config::load().theme,
+            &mut notes,
+        );
+        super::print_notes(&notes);
+        match built {
             Ok((mut view, _)) if !view.is_empty() => {
                 view.repo_name = label;
                 views.push(view);
@@ -61,13 +71,14 @@ pub fn run_scan(
     let title = dated_title("diff-preview subrepos");
     let html = build_tabbed_html(&title, &views);
     let meta = super::ArtifactMeta {
-        repo_root: root.to_string_lossy().to_string(),
+        repo_root: root.clone(),
         repo_name: "subrepos".to_string(),
         kind: infra::store::DiffKind::WorkTree,
         base_sha: String::new(),
         head_sha: String::new(),
         range_label: String::new(),
         head_committed_at: String::new(),
+        generated_at: infra::clock::SystemClock.now_iso(),
         title,
     };
     let out_file = super::store_artifact(&meta, &html)?;
@@ -95,7 +106,16 @@ pub fn run_managed_all(
             continue;
         }
         let top = git::top_level(&repo.path)?;
-        let (mut view, _) = super::diff::build_view(&top, &DiffTarget::Unpushed)?;
+        let mut notes = Vec::new();
+        let built = application::diffs::render_diff::build_view(
+            &infra::diff_source::GitDiffSource,
+            &top,
+            &DiffTarget::Unpushed,
+            crate::config::load().theme,
+            &mut notes,
+        );
+        super::print_notes(&notes);
+        let (mut view, _) = built?;
         view.repo_name = repo.name.clone();
         views.push(view);
     }
@@ -103,13 +123,14 @@ pub fn run_managed_all(
     let title = dated_title("diff-preview all");
     let html = build_tabbed_html(&title, &views);
     let meta = super::ArtifactMeta {
-        repo_root: root.to_string_lossy().to_string(),
+        repo_root: root.clone(),
         repo_name: "all".to_string(),
         kind: infra::store::DiffKind::WorkTree,
         base_sha: String::new(),
         head_sha: String::new(),
         range_label: String::new(),
         head_committed_at: String::new(),
+        generated_at: infra::clock::SystemClock.now_iso(),
         title,
     };
     let out_file = super::store_artifact(&meta, &html)?;

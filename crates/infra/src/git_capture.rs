@@ -1,8 +1,7 @@
 use std::{collections::HashMap, path::Path, process::Command};
 
 use anyhow::{Context, anyhow};
-
-use crate::model::{Commit, FileDiff};
+use domain::diffs::Commit;
 
 pub fn run_git(repo: impl AsRef<Path>, args: &[&str]) -> anyhow::Result<String> {
     let output = Command::new("git")
@@ -77,12 +76,6 @@ pub fn file_commit_map(
 ) -> anyhow::Result<HashMap<String, Vec<String>>> {
     let raw = run_git(repo, &["log", "--name-only", "--format=%x1e%H", range])?;
     Ok(parse_file_commit_map(&raw))
-}
-
-pub fn attach_commits(files: &mut [FileDiff], map: &HashMap<String, Vec<String>>) {
-    for file in files {
-        file.commits = map.get(&file.path).cloned().unwrap_or_default();
-    }
 }
 
 // ! A merge is dead under blame (no line is attributed to it). Map it to the commits it

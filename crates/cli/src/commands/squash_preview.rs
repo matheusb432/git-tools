@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use application::ports::Clock;
+
 use crate::{
     commands::{Mode, legacy_count_label, legacy_unpushed_commit_label, ranges, repo_name},
     git,
@@ -15,7 +17,8 @@ pub fn run(repo: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
     let ranges = ranges(&upstream, Mode::Unpushed);
 
     let crate::diff::DiffData { commits, files } = crate::diff::assemble(
-        &top,
+        &infra::diff_source::GitDiffSource,
+        Path::new(&top),
         &ranges.diff_args,
         &ranges.diff_range,
         &ranges.log_range,
@@ -47,7 +50,7 @@ pub fn run(repo: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
     let html = build_html(&view);
 
     let meta = super::ArtifactMeta {
-        repo_root: top.to_string(),
+        repo_root: PathBuf::from(&top),
         repo_name: repo_name.clone(),
         // ! WorkTree by design: squash-preview is base→working-tree, not a commit range,
         // ! so it is intentionally excluded from range-dedup in the store.
@@ -56,6 +59,7 @@ pub fn run(repo: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
         head_sha: crate::git::resolve_sha(&top, "HEAD").unwrap_or_default(),
         range_label: ranges.log_range.clone(),
         head_committed_at: crate::git::committed_at(&top, "HEAD"),
+        generated_at: infra::clock::SystemClock.now_iso(),
         title: "squash-preview".to_string(),
     };
     let out_file = super::store_artifact(&meta, &html)?;

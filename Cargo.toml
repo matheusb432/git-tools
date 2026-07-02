@@ -1,8 +1,11 @@
 [workspace]
 resolver = "3"
 members = [
+  "crates/application",
   "crates/cli",
+  "crates/contracts",
   "crates/desktop",
+  "crates/domain",
   "crates/infra",
   "shared/cqrs",
   "shared/cqrs-core",
@@ -13,7 +16,10 @@ members = [
 # Everything except `desktop`, which needs webkit2gtk headers and stays opt-in
 # via `-p desktop` (matching the pre-virtualization behavior of bare cargo).
 default-members = [
+  "crates/application",
   "crates/cli",
+  "crates/contracts",
+  "crates/domain",
   "crates/infra",
   "shared/cqrs",
   "shared/cqrs-core",

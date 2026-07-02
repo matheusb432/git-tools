@@ -12,17 +12,28 @@ use crate::{
     },
 };
 
-pub mod attribution;
 pub mod cli;
 pub mod commands;
-mod comment_syntax;
 pub mod config;
-pub mod diff;
-pub mod git;
-pub mod intraline;
-pub mod model;
-pub mod render;
 pub mod viewer;
+
+/// Shim onto the relocated diff engine (`application::diffs::util`): call sites
+/// keep using `crate::diff::assemble` / `crate::diff::DiffData`.
+pub(crate) mod diff {
+    pub use application::diffs::util::*;
+}
+
+pub(crate) mod model {
+    pub use domain::diffs::{Cmd, Commit, Foot, View};
+}
+
+pub(crate) mod render {
+    pub use infra::html_renderer::*;
+}
+
+pub(crate) mod git {
+    pub use infra::git_capture::*;
+}
 
 /// Process exit codes. Stable contract every caller (and justfile shim) depends on.
 /// Extend with command-specific codes as the tool grows (keep 0/1/2 stable).

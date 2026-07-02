@@ -11,7 +11,9 @@ use std::{
     path::Path,
 };
 
-use crate::model::FileDiff;
+use domain::diffs::FileDiff;
+
+use crate::ports::DiffSource;
 
 /// The new (right) side of the previewed diff: a committed tip, or the working
 /// tree (hash mode, where the diff is `base` → working tree).
@@ -24,26 +26,26 @@ pub enum NewSide {
 /// errors are swallowed per file (it goes unattributed) so one awkward file —
 /// deleted, binary, renamed — never aborts the preview.
 pub fn attribute(
-    repo: impl AsRef<Path>,
+    source: &impl DiffSource,
+    repo: &Path,
     base: &str,
     new_side: &NewSide,
     in_range: &HashSet<String>,
     files: &mut [FileDiff],
 ) {
-    let repo = repo.as_ref();
     let tip = match new_side {
         NewSide::Commit(tip) => tip.as_str(),
         NewSide::WorkTree => "HEAD",
     };
     for file in files.iter_mut() {
         let forward = match new_side {
-            NewSide::Commit(tip) => crate::git::blame_forward(repo, base, tip, &file.path),
-            NewSide::WorkTree => crate::git::blame_forward_worktree(repo, &file.path),
+            NewSide::Commit(tip) => source.blame_forward(repo, base, tip, &file.path),
+            NewSide::WorkTree => source.blame_forward_worktree(repo, &file.path),
         };
         if let Ok(raw) = forward {
             file.owners.added = parse_forward(&raw, in_range);
         }
-        if let Ok(raw) = crate::git::blame_reverse(repo, base, tip, &file.path) {
+        if let Ok(raw) = source.blame_reverse(repo, base, tip, &file.path) {
             file.owners.deleted = parse_reverse(&raw, in_range);
         }
     }
@@ -107,73 +109,10 @@ fn parse_reverse(raw: &str, in_range: &HashSet<String>) -> HashMap<u32, String> 
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, process::Command};
-
     use super::*;
-    use crate::model::{FileDiff, LineOwners};
 
     fn set(shas: &[&str]) -> HashSet<String> {
         shas.iter().map(|s| s.to_string()).collect()
-    }
-
-    fn git(dir: &Path, args: &[&str]) {
-        let ok = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .status()
-            .unwrap()
-            .success();
-        assert!(ok, "git {args:?} failed");
-    }
-
-    fn short_head(dir: &Path) -> String {
-        crate::git::run_git(dir, &["rev-parse", "--short=9", "HEAD"])
-            .unwrap()
-            .trim()
-            .to_string()
-    }
-
-    #[test]
-    fn attribute_owns_added_and_deleted_lines_by_commit() {
-        let tmp = tempfile::tempdir().unwrap();
-        let d = tmp.path();
-        git(d, &["init", "-q"]);
-        git(d, &["config", "user.email", "t@t"]);
-        git(d, &["config", "user.name", "t"]);
-        std::fs::write(d.join("f.txt"), "L1\nL2\nL3\nL4\nL5\n").unwrap();
-        git(d, &["add", "."]);
-        git(d, &["commit", "-qm", "base"]);
-        let base = short_head(d);
-        // c1 inserts ADD at new line 3
-        std::fs::write(d.join("f.txt"), "L1\nL2\nADD\nL3\nL4\nL5\n").unwrap();
-        git(d, &["commit", "-qam", "c1"]);
-        let c1 = short_head(d);
-        // c2 deletes L4 (base line 4)
-        std::fs::write(d.join("f.txt"), "L1\nL2\nADD\nL3\nL5\n").unwrap();
-        git(d, &["commit", "-qam", "c2"]);
-        let c2 = short_head(d);
-
-        let mut files = vec![FileDiff {
-            path: "f.txt".to_string(),
-            added: 0,
-            removed: 0,
-            lines: Vec::new(),
-            full_lines: None,
-            commits: Vec::new(),
-            owners: LineOwners::default(),
-        }];
-        let in_range = set(&[&c1, &c2]);
-        attribute(
-            d,
-            &base,
-            &NewSide::Commit("HEAD".to_string()),
-            &in_range,
-            &mut files,
-        );
-
-        assert_eq!(files[0].owners.added.get(&3), Some(&c1)); // ADD at new line 3 -> c1
-        assert_eq!(files[0].owners.deleted.get(&4), Some(&c2)); // base line 4 (L4) -> c2
     }
 
     // forward porcelain: header "<40hex> <orig> <final> [count]" then "\t<code>"

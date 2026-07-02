@@ -98,6 +98,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "application"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cqrs",
+ "domain",
+ "similar",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "arrayref"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -613,16 +624,16 @@ name = "cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "application",
  "assert_cmd",
  "clap",
+ "domain",
  "gtl-platform",
  "infra",
  "jiff",
- "maud",
  "predicates",
  "serde",
  "serde_json",
- "similar",
  "tempfile",
  "thiserror 2.0.18",
  "toml 1.1.2+spec-1.1.0",
@@ -660,6 +671,14 @@ name = "const-oid"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
+
+[[package]]
+name = "contracts"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "cookie"
@@ -1078,6 +1097,13 @@ dependencies = [
  "precomputed-hash",
  "selectors",
  "tendril",
+]
+
+[[package]]
+name = "domain"
+version = "0.1.0"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -2062,6 +2088,10 @@ name = "infra"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "application",
+ "domain",
+ "jiff",
+ "maud",
  "serde",
  "serde_json",
  "sha2 0.11.0",
