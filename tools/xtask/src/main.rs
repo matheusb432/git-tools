@@ -8,6 +8,8 @@ use anyhow::Result;
 use clap::Parser;
 
 mod bootstrap;
+mod check_deps;
+mod check_structure;
 mod cli;
 mod drift;
 mod fmt;
@@ -36,6 +38,8 @@ fn run(cli: cli::Cli) -> Result<()> {
         cli::Command::Test { verbose, all } => testing::run(verbose, all),
         cli::Command::Fmt { check } => fmt::run(check),
         cli::Command::DriftCheck => drift::run(),
+        cli::Command::CheckStructure => check_structure::run(None),
+        cli::Command::CheckDeps => check_deps::run(None),
         cli::Command::GenIcon => icon::run(),
         cli::Command::Ship { smoke } => ship::run(smoke),
     }

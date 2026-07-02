@@ -23,7 +23,9 @@ ico = "0.5"
 which = "8.0.4"
 # Cross-platform directory symlink for the `bootstrap` skills-link. The OS `#[cfg]` lives in the
 # PAL (ADR-0003), so the bootstrap verb stays cfg-free.
-gtl-platform = { path = "../../crates/gtl-platform" }
+gtl-platform = { path = "../../shared/gtl-platform" }
+# TOML parsing for `check-deps` verb.
+toml = "1"
 
 [dev-dependencies]
 assert_cmd = "2"

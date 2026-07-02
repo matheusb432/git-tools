@@ -1,0 +1,5 @@
+error: at most one #[request(...)] attribute is allowed
+ --> tests/ui/request_duplicate_attr.rs:7:1
+  |
+7 | #[request(response = (), error = std::io::Error)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

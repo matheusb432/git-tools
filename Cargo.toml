@@ -1,44 +1,26 @@
 [workspace]
+resolver = "3"
 members = [
-  "crates/gtl-platform",
-  "crates/gtl-store",
+  "crates/cli",
   "crates/desktop",
+  "crates/infra",
+  "shared/cqrs",
+  "shared/cqrs-core",
+  "shared/cqrs-macros",
+  "shared/gtl-platform",
   "tools/xtask",
 ]
-
-[package]
-name = "git-tools"
-version = "0.1.0"
-edition = "2024"
-publish = false
-
-[[bin]]
-name = "git-tools"
-path = "src/main.rs"
-
-[lib]
-name = "git_tools"
-path = "src/lib.rs"
-
-[dependencies]
-anyhow = "1"
-clap = { version = "4", features = ["derive"] }
-gtl-platform = { path = "crates/gtl-platform" }
-gtl-store = { path = "crates/gtl-store" }
-jiff = { version = "0.2", default-features = false, features = ["std"] }
-maud = "0.27"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-similar = "3.1.1"
-thiserror = "2.0.18"
-toml = "1.1.2"
-toml_edit = "0.25.12"
-walkdir = "2.5.0"
-
-[dev-dependencies]
-assert_cmd = "2"
-predicates = "3"
-tempfile = "3"
+# Everything except `desktop`, which needs webkit2gtk headers and stays opt-in
+# via `-p desktop` (matching the pre-virtualization behavior of bare cargo).
+default-members = [
+  "crates/cli",
+  "crates/infra",
+  "shared/cqrs",
+  "shared/cqrs-core",
+  "shared/cqrs-macros",
+  "shared/gtl-platform",
+  "tools/xtask",
+]
 
 [profile.release]
 strip = true

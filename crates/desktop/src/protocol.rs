@@ -2,7 +2,7 @@
 //! sandbox: only shape-valid ids/hashes resolving under `<store>/diffs` are served.
 use std::path::{Path, PathBuf};
 
-/// A store id/hash is 16 lowercase hex chars (see `gtl_store::id`). Reject anything
+/// A store id/hash is 16 lowercase hex chars (see `infra::store::id`). Reject anything
 /// else so `..`, separators, and absolute paths can never reach the filesystem.
 fn is_store_token(s: &str) -> bool {
     s.len() == 16

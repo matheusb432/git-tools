@@ -1,7 +1,7 @@
 //! History view DTO: maps store sidecars to frontend rows, newest-first.
 use std::path::Path;
 
-use gtl_store::Sidecar;
+use infra::store::Sidecar;
 use serde::Serialize;
 
 /// One history row for the frontend. `url` is the tab's `diff://` source.
@@ -20,11 +20,11 @@ pub struct HistoryEntry {
 }
 
 /// Stable short tag for a `DiffKind`, for the history-row badge.
-fn kind_tag(kind: gtl_store::DiffKind) -> String {
+fn kind_tag(kind: infra::store::DiffKind) -> String {
     match kind {
-        gtl_store::DiffKind::TwoDot => "2-dot",
-        gtl_store::DiffKind::ThreeDot => "3-dot",
-        gtl_store::DiffKind::WorkTree => "worktree",
+        infra::store::DiffKind::TwoDot => "2-dot",
+        infra::store::DiffKind::ThreeDot => "3-dot",
+        infra::store::DiffKind::WorkTree => "worktree",
     }
     .to_string()
 }
@@ -59,7 +59,7 @@ pub fn sort_entries(mut entries: Vec<HistoryEntry>) -> Vec<HistoryEntry> {
 
 /// Read the store and return sorted history rows. Errors collapse to empty.
 pub fn entries_from_store(store_root: &Path) -> Vec<HistoryEntry> {
-    let paired = gtl_store::list_history_with_hash(store_root).unwrap_or_default();
+    let paired = infra::store::list_history_with_hash(store_root).unwrap_or_default();
     sort_entries(paired.into_iter().map(|(h, s)| to_entry(h, s)).collect())
 }
 
@@ -97,11 +97,11 @@ mod tests {
     fn url_is_built_from_repo_id_and_hash() {
         let e = to_entry(
             "fedcba9876543210".into(),
-            gtl_store::Sidecar {
+            infra::store::Sidecar {
                 repo_id: "0123456789abcdef".into(),
                 repo_name: "n".into(),
                 repo_root: "/r".into(),
-                kind: gtl_store::DiffKind::TwoDot,
+                kind: infra::store::DiffKind::TwoDot,
                 base_sha: "a".into(),
                 head_sha: "b".into(),
                 range_label: "x".into(),
@@ -118,11 +118,11 @@ mod tests {
     fn entry_exposes_kind_tag_and_byte_size() {
         let e = to_entry(
             "fedcba9876543210".into(),
-            gtl_store::Sidecar {
+            infra::store::Sidecar {
                 repo_id: "0123456789abcdef".into(),
                 repo_name: "n".into(),
                 repo_root: "/r".into(),
-                kind: gtl_store::DiffKind::ThreeDot,
+                kind: infra::store::DiffKind::ThreeDot,
                 base_sha: "a".into(),
                 head_sha: "b".into(),
                 range_label: "main...HEAD".into(),

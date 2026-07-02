@@ -12,7 +12,7 @@ export default defineConfig({
     target: "es2021",
     minify: true,
     emptyOutDir: false,
-    outDir: resolve(root, "src/embedded/generated"),
+    outDir: resolve(root, "crates/cli/src/embedded/generated"),
     lib: {
       entry: resolve(root, "frontend/diff/main.ts"),
       name: "GtlDiffPreview",

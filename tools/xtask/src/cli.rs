@@ -59,9 +59,15 @@ pub enum Command {
         all: bool,
     },
     /// Rebuild the committed frontend bundles and fail if they drift from their TS sources
-    /// (`src/embedded/generated` + `crates/desktop/dist`). Skips when bun is absent. Migrates
-    /// the `_js-drift-guard` recipe — a CI/pre-commit gate.
+    /// (`crates/cli/src/embedded/generated` + `crates/desktop/dist`). Skips when bun is absent.
+    /// Migrates the `_js-drift-guard` recipe — a CI/pre-commit gate.
     DriftCheck,
+    /// Mechanical architecture lint: walks `crates/*/src` and `shared/*/src` and exits 3 on
+    /// layout violations (max dir depth 2, flat feature folders, no `services/` dir).
+    CheckStructure,
+    /// Dependency-direction lint: exits 3 when `shared/*` depends on app crates or a core
+    /// crate (`domain`/`application`/`contracts`) depends on outer crates/frameworks.
+    CheckDeps,
     /// Render the gtl-viewer icon assets (`crates/desktop/icons/icon.{png,ico}`) from code.
     /// Ports the retired Python generator; the multi-res `.ico` is required by tauri-build on
     /// Windows.

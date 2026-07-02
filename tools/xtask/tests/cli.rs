@@ -80,6 +80,24 @@ fn drift_check_is_a_known_verb() {
 }
 
 #[test]
+fn check_deps_is_a_known_verb() {
+    Command::cargo_bin("xtask")
+        .unwrap()
+        .args(["check-deps", "--help"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn check_structure_is_a_known_verb() {
+    Command::cargo_bin("xtask")
+        .unwrap()
+        .args(["check-structure", "--help"])
+        .assert()
+        .success();
+}
+
+#[test]
 fn fmt_exposes_its_check_flag() {
     Command::cargo_bin("xtask")
         .unwrap()

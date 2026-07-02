@@ -1,0 +1,13 @@
+# Vendored from sample_project @ f39a5f9 (2026-07-01); one-time fork, expected to diverge.
+[package]
+name = "cqrs"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+derive = ["dep:cqrs-macros"]
+
+[dependencies]
+cqrs-core = { path = "../cqrs-core" }
+cqrs-macros = { path = "../cqrs-macros", optional = true }

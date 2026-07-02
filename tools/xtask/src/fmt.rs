@@ -3,6 +3,7 @@
 //! (stable `cargo fmt` silently skips this repo's nightly-only rustfmt.toml keys, so the
 //! `+toolchain` token is mandatory — see rust-style). taplo is optional: skipped with a message
 //! when absent. Markdown files come from `git ls-files` so gitignored paths are never formatted.
+//! `--check` also runs the check-structure and check-deps architecture lints.
 
 use std::{env, fs};
 
@@ -97,6 +98,11 @@ pub fn run(check: bool) -> Result<()> {
         }
         let args_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         proc::run("mdformat", "uvx", &args_refs)?;
+    }
+
+    if check {
+        crate::check_structure::run(None)?;
+        crate::check_deps::run(None)?;
     }
 
     Ok(())

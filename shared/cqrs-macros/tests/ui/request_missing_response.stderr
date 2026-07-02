@@ -1,0 +1,5 @@
+error: derive(Request) requires #[request(response = ..., error = ...)]: missing `response`
+ --> tests/ui/request_missing_response.rs:7:8
+  |
+7 | struct Broken;
+  |        ^^^^^^

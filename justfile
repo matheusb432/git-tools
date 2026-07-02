@@ -43,7 +43,7 @@ uninstall *args:
 
 # Build only if the binary is missing (preflight for run recipes).
 _preflight:
-    test -x "{{ _bin }}" || cargo build --release
+    test -x "{{ _bin }}" || cargo build --release -p cli
 
 # ============ quality ============
 
@@ -57,7 +57,7 @@ test *args:
 fmt:
     cargo run --quiet -p xtask -- fmt
 
-# Check Rust + TOML formatting without writing.
+# Check Rust + TOML formatting without writing, then run the architecture lints (check-structure + check-deps; exit 3 on violation).
 [group('quality')]
 fmt-check:
     cargo run --quiet -p xtask -- fmt --check

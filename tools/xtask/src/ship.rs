@@ -87,7 +87,7 @@ pub fn run(smoke: bool) -> Result<()> {
     let profile: &[&str] = if smoke { &[] } else { &["--release"] };
     let mut cli_args = vec!["xwin", "build"];
     cli_args.extend_from_slice(profile);
-    cli_args.extend_from_slice(&["-p", "git-tools", "--target", WIN_TARGET]);
+    cli_args.extend_from_slice(&["-p", "cli", "--target", WIN_TARGET]);
 
     let mut viewer_args = vec!["xwin", "build"];
     viewer_args.extend_from_slice(profile);

@@ -12,7 +12,7 @@ use crate::proc;
 
 /// The committed bundle dirs and the recipe that regenerates each, paired for the stale hint.
 const BUNDLES: &[(&str, &str)] = &[
-    ("src/embedded/generated/", "just cli build-js"),
+    ("crates/cli/src/embedded/generated/", "just cli build-js"),
     ("crates/desktop/dist/", "just desktop build-viewer-ui"),
 ];
 

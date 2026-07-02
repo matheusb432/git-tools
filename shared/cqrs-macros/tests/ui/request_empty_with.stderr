@@ -1,0 +1,5 @@
+error: with(...) requires at least one behavior path
+ --> tests/ui/request_empty_with.rs:6:50
+  |
+6 | #[request(response = (), error = std::io::Error, with())]
+  |                                                  ^^^^^^
