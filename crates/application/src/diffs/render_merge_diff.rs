@@ -18,7 +18,7 @@ pub const DEFAULT_BASE: &str = "main";
 
 /// Render the merge-diff of the current branch into `base` (default `main`)
 /// under `store_root`, resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrs::Request)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
 #[request(response = RenderMergeDiffResponse, error = RenderMergeDiffError)]
 pub struct RenderMergeDiff {
     pub cwd: PathBuf,
@@ -51,18 +51,12 @@ pub struct RenderMergeDiffHandler<S: DiffSource, A: ArtifactStore, R: HtmlRender
 }
 
 impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
-    RenderMergeDiffHandler<S, A, R, C>
+    cqrsy::RequestHandler<RenderMergeDiff> for RenderMergeDiffHandler<S, A, R, C>
 {
-    /// Synchronous core — the daemon's async handler and the cli's in-process
-    /// path both delegate here.
-    pub fn execute(
+    async fn handle(
         &self,
-        req: &RenderMergeDiff,
+        req: RenderMergeDiff,
     ) -> Result<RenderMergeDiffResponse, RenderMergeDiffError> {
-        Ok(self.render(req)?)
-    }
-
-    fn render(&self, req: &RenderMergeDiff) -> anyhow::Result<RenderMergeDiffResponse> {
         let top = self.source.top_level(&req.cwd)?;
         let branch = self.source.current_branch(Path::new(&top))?;
         let repo_name = repo_name(&top);
@@ -136,17 +130,6 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
     }
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
-    cqrs::RequestHandler<RenderMergeDiff> for RenderMergeDiffHandler<S, A, R, C>
-{
-    async fn handle(
-        &self,
-        req: RenderMergeDiff,
-    ) -> Result<RenderMergeDiffResponse, RenderMergeDiffError> {
-        self.execute(&req)
-    }
-}
-
 fn repo_name(top: &str) -> String {
     Path::new(top)
         .file_name()
@@ -164,6 +147,7 @@ fn plural(n: usize) -> &'static str {
 mod tests {
     use std::path::PathBuf;
 
+    use cqrsy::dispatch_sync;
     use domain::diffs::Commit;
 
     use super::{RenderMergeDiff, RenderMergeDiffError, RenderMergeDiffHandler};
@@ -222,9 +206,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = handler
-            .execute(&req("/repo", None))
-            .expect("render succeeds");
+        let response = dispatch_sync(&(), &handler, req("/repo", None)).expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -256,9 +238,8 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = handler
-            .execute(&req("/repo", Some("   ")))
-            .expect("render succeeds");
+        let response =
+            dispatch_sync(&(), &handler, req("/repo", Some("   "))).expect("render succeeds");
 
         assert_eq!(
             response.notes[0],
@@ -276,8 +257,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let error = handler
-            .execute(&req("/repo", Some("nope")))
+        let error = dispatch_sync(&(), &handler, req("/repo", Some("nope")))
             .expect_err("unknown base errors");
 
         let RenderMergeDiffError::Unexpected(err) = error;

@@ -215,10 +215,10 @@ mod tests {
 
     #[test]
     fn shared_member_dir_is_also_scanned() {
-        // The relocated cqrs/bootstrap crates live under shared/, not crates/ — the lint must
-        // reach them too. A depth-3 dir under a shared/ crate is a rule-1 violation.
+        // The bootstrap crate lives under shared/, not crates/ — the lint must reach it too.
+        // A depth-3 dir under a shared/ crate is a rule-1 violation.
         let dir = TempDir::new().unwrap();
-        seed(dir.path(), "shared/cqrs/src/a/b/c/f.rs");
+        seed(dir.path(), "shared/bootstrap/src/a/b/c/f.rs");
         let v = collect_violations(dir.path()).unwrap();
         assert!(v.iter().any(|s| s.contains("rule 1")), "violations: {v:?}");
     }

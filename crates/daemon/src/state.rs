@@ -1,7 +1,7 @@
 //! Shared daemon state and the route table.
 //!
 //! [`DaemonMediator`] owns one handler instance per operation and, via
-//! `#[derive(cqrs::Mediator)]`, implements `RequestHandler<R>` for every `#[handles(R)]` field —
+//! `#[derive(cqrsy::Mediator)]`, implements `Dispatcher<R>` for every `#[handles(R)]` field —
 //! dispatch by type, monomorphized, no `dyn`. [`AppState`] bundles the mediator with the
 //! cross-cutting [`Shared`] state; the two hand-written `FromRef` impls bridge `AppState` to the
 //! extractors each endpoint asks for.
@@ -26,15 +26,15 @@ use axum::{
     extract::FromRef,
     routing::{get, post},
 };
-use cqrs::Mediator;
+use cqrsy::Mediator;
 use tokio::sync::watch;
 
 use crate::{endpoints, lifecycle::ExeIdentity};
 
 /// The daemon's dispatch facade — one handler field per operation.
 ///
-/// `#[derive(cqrs::Mediator)]` implements `RequestHandler<RenderDiff>` for this struct, forwarding
-/// to the `render_diff` field. Endpoints bound to `RequestHandler<RenderDiff>` dispatch through the
+/// `#[derive(cqrsy::Mediator)]` implements `Dispatcher<RenderDiff>` for this struct, forwarding
+/// to the `render_diff` field. Endpoints bound to `Dispatcher<RenderDiff>` dispatch through the
 /// facade without naming the field.
 #[derive(Clone, Mediator)]
 pub struct DaemonMediator<S, A, R, C>

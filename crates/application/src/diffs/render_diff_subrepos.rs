@@ -1,8 +1,9 @@
 //! The `render_diff_subrepos` vertical slice: render every discovered repo into
 //! one tabbed artifact, skipping repos whose view is empty (or errors) and
 //! reporting the skip count. Repo *discovery* stays cli-side (filesystem
-//! walking, not a port); the cli's `gtl diff subrepos` calls this in-process
-//! with the already-discovered [`RepoRef`]s.
+//! walking, not a port); the cli's `gtl diff subrepos` sends the
+//! already-discovered [`RepoRef`]s to the resident daemon over HTTP, which
+//! dispatches this request through the daemon mediator.
 
 use std::path::PathBuf;
 
@@ -15,7 +16,7 @@ use crate::{
 };
 
 /// Render a tabbed diff preview across `repos` under `store_root`.
-#[derive(Debug, Clone, PartialEq, cqrs::Request)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
 #[request(response = RenderDiffSubreposResponse, error = RenderDiffSubreposError)]
 pub struct RenderDiffSubrepos {
     pub store_root: PathBuf,
@@ -59,18 +60,12 @@ pub struct RenderDiffSubreposHandler<S: DiffSource, A: ArtifactStore, R: HtmlRen
 }
 
 impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
-    RenderDiffSubreposHandler<S, A, R, C>
+    cqrsy::RequestHandler<RenderDiffSubrepos> for RenderDiffSubreposHandler<S, A, R, C>
 {
-    /// Synchronous core — the daemon's async handler and the cli's in-process
-    /// path both delegate here.
-    pub fn execute(
+    async fn handle(
         &self,
-        req: &RenderDiffSubrepos,
+        req: RenderDiffSubrepos,
     ) -> Result<RenderDiffSubreposResponse, RenderDiffSubreposError> {
-        Ok(self.render(req)?)
-    }
-
-    fn render(&self, req: &RenderDiffSubrepos) -> anyhow::Result<RenderDiffSubreposResponse> {
         let mut notes = Vec::new();
         let batch = render_batch(
             &self.source,
@@ -128,21 +123,11 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
     }
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
-    cqrs::RequestHandler<RenderDiffSubrepos> for RenderDiffSubreposHandler<S, A, R, C>
-{
-    async fn handle(
-        &self,
-        req: RenderDiffSubrepos,
-    ) -> Result<RenderDiffSubreposResponse, RenderDiffSubreposError> {
-        self.execute(&req)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
+    use cqrsy::dispatch_sync;
     use domain::diffs::{Commit, DiffTarget};
 
     use super::{
@@ -207,7 +192,7 @@ mod tests {
             label: "repo-a".into(),
         }];
 
-        let response = handler.execute(&req(repos)).expect("render succeeds");
+        let response = dispatch_sync(&(), &handler, req(repos)).expect("render succeeds");
 
         assert_eq!(
             response.outcome,
@@ -243,7 +228,7 @@ mod tests {
             label: "repo-a".into(),
         }];
 
-        let response = handler.execute(&req(repos)).expect("render succeeds");
+        let response = dispatch_sync(&(), &handler, req(repos)).expect("render succeeds");
 
         assert_eq!(response.outcome, RenderDiffSubreposOutcome::Empty);
         assert_eq!(

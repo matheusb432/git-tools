@@ -1,11 +1,11 @@
 //! The `render_diff` vertical slice: resolve a [`DiffTarget`] into a rendered,
 //! stored artifact (or an "empty, skipped" outcome), carrying every user-facing
 //! message out as [`Note`]s. The cli's `gtl diff` and `diff-subrepos` call this
-//! in-process; a future daemon dispatches it through [`cqrs::RequestHandler`].
+//! in-process; a future daemon dispatches it through [`cqrsy::RequestHandler`].
 
 use std::path::{Path, PathBuf};
 
-use cqrs::RequestHandler;
+use cqrsy::RequestHandler;
 use domain::diffs::{DiffKind, DiffTarget, Mode, View, ranges, sort_files_tree_order};
 
 use crate::{
@@ -15,7 +15,7 @@ use crate::{
 };
 
 /// Render a diff preview for `target` under `store_root`, resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrs::Request)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
 #[request(response = RenderDiffResponse, error = RenderDiffError)]
 pub struct RenderDiff {
     pub cwd: PathBuf,
@@ -58,13 +58,67 @@ pub struct RenderDiffHandler<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C
 }
 
 impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> RenderDiffHandler<S, A, R, C> {
-    /// Synchronous core — the daemon's async handler and the cli's in-process
-    /// path both delegate here.
-    pub fn execute(&self, req: &RenderDiff) -> Result<RenderDiffResponse, RenderDiffError> {
-        Ok(self.render(req)?)
+    fn range_fast_path(
+        &self,
+        top: &str,
+        store_root: &Path,
+        target: &DiffTarget,
+    ) -> anyhow::Result<Option<PathBuf>> {
+        let Some((kind, base_sha, head_sha)) = self.resolved_range(top, target) else {
+            return Ok(None); // worktree mode or unresolved ⇒ no fast-path
+        };
+        self.store
+            .lookup_by_range(store_root, Path::new(top), kind, &base_sha, &head_sha)
     }
 
-    fn render(&self, req: &RenderDiff) -> anyhow::Result<RenderDiffResponse> {
+    // ! Returns (kind, base_sha, head_sha) only for pure commit ranges; None for
+    // ! worktree (Hash) mode. Mirrors build_view's range selection but skips assemble.
+    fn resolved_range(&self, top: &str, target: &DiffTarget) -> Option<(DiffKind, String, String)> {
+        let repo = Path::new(top);
+        let diff_range = match target {
+            DiffTarget::Range(r) => ranges(r, Mode::ExactRange).diff_range,
+            DiffTarget::Last(n) => ranges(&format!("HEAD~{n}..HEAD"), Mode::ExactRange).diff_range,
+            DiffTarget::Merge(b) => ranges(b, Mode::Merge).diff_range,
+            DiffTarget::Unpushed => {
+                // No upstream ⇒ build_view falls back to Hash (worktree) mode; not fast-path
+                // eligible, and the fallback warning is emitted there (once), not here.
+                let upstream = self.source.upstream(repo).ok()?;
+                ranges(&upstream, Mode::Unpushed).diff_range
+            }
+            DiffTarget::Base(_) => return None, // Hash mode ⇒ worktree
+        };
+        let kind = DiffKind::from_diff_range(&diff_range);
+        if kind == DiffKind::WorkTree {
+            return None;
+        }
+        let base = self
+            .source
+            .resolve_sha(repo, range_base(&diff_range))
+            .ok()?;
+        let head = self
+            .source
+            .resolve_sha(repo, diff_range.rsplit("..").next()?)
+            .ok()?;
+        Some((kind, base, head))
+    }
+
+    // ! head = text after the last `..`; worktree mode has no commit head ⇒ sentinel.
+    fn head_sha_for(&self, top: &str, range: &str) -> String {
+        if range.contains("..") {
+            let tip = range.rsplit("..").next().unwrap_or("HEAD");
+            self.source
+                .resolve_sha(Path::new(top), tip)
+                .unwrap_or_default()
+        } else {
+            "WORKTREE".to_string()
+        }
+    }
+}
+
+impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> RequestHandler<RenderDiff>
+    for RenderDiffHandler<S, A, R, C>
+{
+    async fn handle(&self, req: RenderDiff) -> Result<RenderDiffResponse, RenderDiffError> {
         let mut notes = Vec::new();
         let top = self.source.top_level(&req.cwd)?;
 
@@ -137,70 +191,6 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> RenderDiffHandl
             },
             notes,
         })
-    }
-
-    fn range_fast_path(
-        &self,
-        top: &str,
-        store_root: &Path,
-        target: &DiffTarget,
-    ) -> anyhow::Result<Option<PathBuf>> {
-        let Some((kind, base_sha, head_sha)) = self.resolved_range(top, target) else {
-            return Ok(None); // worktree mode or unresolved ⇒ no fast-path
-        };
-        self.store
-            .lookup_by_range(store_root, Path::new(top), kind, &base_sha, &head_sha)
-    }
-
-    // ! Returns (kind, base_sha, head_sha) only for pure commit ranges; None for
-    // ! worktree (Hash) mode. Mirrors build_view's range selection but skips assemble.
-    fn resolved_range(&self, top: &str, target: &DiffTarget) -> Option<(DiffKind, String, String)> {
-        let repo = Path::new(top);
-        let diff_range = match target {
-            DiffTarget::Range(r) => ranges(r, Mode::ExactRange).diff_range,
-            DiffTarget::Last(n) => ranges(&format!("HEAD~{n}..HEAD"), Mode::ExactRange).diff_range,
-            DiffTarget::Merge(b) => ranges(b, Mode::Merge).diff_range,
-            DiffTarget::Unpushed => {
-                // No upstream ⇒ build_view falls back to Hash (worktree) mode; not fast-path
-                // eligible, and the fallback warning is emitted there (once), not here.
-                let upstream = self.source.upstream(repo).ok()?;
-                ranges(&upstream, Mode::Unpushed).diff_range
-            }
-            DiffTarget::Base(_) => return None, // Hash mode ⇒ worktree
-        };
-        let kind = DiffKind::from_diff_range(&diff_range);
-        if kind == DiffKind::WorkTree {
-            return None;
-        }
-        let base = self
-            .source
-            .resolve_sha(repo, range_base(&diff_range))
-            .ok()?;
-        let head = self
-            .source
-            .resolve_sha(repo, diff_range.rsplit("..").next()?)
-            .ok()?;
-        Some((kind, base, head))
-    }
-
-    // ! head = text after the last `..`; worktree mode has no commit head ⇒ sentinel.
-    fn head_sha_for(&self, top: &str, range: &str) -> String {
-        if range.contains("..") {
-            let tip = range.rsplit("..").next().unwrap_or("HEAD");
-            self.source
-                .resolve_sha(Path::new(top), tip)
-                .unwrap_or_default()
-        } else {
-            "WORKTREE".to_string()
-        }
-    }
-}
-
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> RequestHandler<RenderDiff>
-    for RenderDiffHandler<S, A, R, C>
-{
-    async fn handle(&self, req: RenderDiff) -> Result<RenderDiffResponse, RenderDiffError> {
-        self.execute(&req)
     }
 }
 
@@ -386,6 +376,7 @@ fn legacy_unpushed_commit_label(count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
+    use cqrsy::dispatch_sync;
     use domain::diffs::{Commit, DiffKind, DiffTarget};
 
     use super::{RenderDiff, RenderDiffError, RenderDiffHandler, RenderDiffOutcome};
@@ -446,8 +437,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = handler
-            .execute(&req("/repo", DiffTarget::Unpushed))
+        let response = dispatch_sync(&(), &handler, req("/repo", DiffTarget::Unpushed))
             .expect("render succeeds");
 
         assert_eq!(
@@ -482,8 +472,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = handler
-            .execute(&req("/repo", DiffTarget::Unpushed))
+        let response = dispatch_sync(&(), &handler, req("/repo", DiffTarget::Unpushed))
             .expect("render succeeds");
 
         assert_eq!(response.outcome, RenderDiffOutcome::Empty);
@@ -516,9 +505,12 @@ index 111..222 100644\n\
             PathBuf::from("/store/existing.html"),
         );
 
-        let response = handler
-            .execute(&req("/repo", DiffTarget::Range("a..b".into())))
-            .expect("render succeeds");
+        let response = dispatch_sync(
+            &(),
+            &handler,
+            req("/repo", DiffTarget::Range("a..b".into())),
+        )
+        .expect("render succeeds");
 
         assert_eq!(
             response.outcome,
@@ -559,7 +551,7 @@ index 111..222 100644\n\
 
         let mut request = req("/repo", DiffTarget::Range("a..b".into()));
         request.name = Some("custom".into());
-        let response = handler.execute(&request).expect("render succeeds");
+        let response = dispatch_sync(&(), &handler, request).expect("render succeeds");
 
         assert!(matches!(
             response.outcome,
@@ -583,8 +575,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = handler
-            .execute(&req("/repo", DiffTarget::Unpushed))
+        let response = dispatch_sync(&(), &handler, req("/repo", DiffTarget::Unpushed))
             .expect("render succeeds");
 
         assert!(matches!(
@@ -611,8 +602,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let error = handler
-            .execute(&req("/repo", DiffTarget::Base("nope".into())))
+        let error = dispatch_sync(&(), &handler, req("/repo", DiffTarget::Base("nope".into())))
             .expect_err("unknown base errors");
 
         let RenderDiffError::Unexpected(err) = error;

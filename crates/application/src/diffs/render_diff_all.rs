@@ -16,7 +16,7 @@ use crate::{
 
 /// Render a tabbed diff preview across every repo in `repos` (already filtered
 /// by the caller to upstream-present + unpushed > 0) under `store_root`.
-#[derive(Debug, Clone, PartialEq, cqrs::Request)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
 #[request(response = RenderDiffAllResponse, error = RenderDiffAllError)]
 pub struct RenderDiffAll {
     pub store_root: PathBuf,
@@ -50,17 +50,13 @@ pub struct RenderDiffAllHandler<S: DiffSource, A: ArtifactStore, R: HtmlRenderer
     pub clock: C,
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> RenderDiffAllHandler<S, A, R, C> {
-    /// Synchronous core -- the daemon's async handler and the cli's in-process
-    /// path both delegate here.
-    pub fn execute(
+impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
+    cqrsy::RequestHandler<RenderDiffAll> for RenderDiffAllHandler<S, A, R, C>
+{
+    async fn handle(
         &self,
-        req: &RenderDiffAll,
+        req: RenderDiffAll,
     ) -> Result<RenderDiffAllResponse, RenderDiffAllError> {
-        Ok(self.render(req)?)
-    }
-
-    fn render(&self, req: &RenderDiffAll) -> anyhow::Result<RenderDiffAllResponse> {
         let mut notes = Vec::new();
         let batch = render_batch(
             &self.source,
@@ -99,21 +95,11 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> RenderDiffAllHa
     }
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrs::RequestHandler<RenderDiffAll>
-    for RenderDiffAllHandler<S, A, R, C>
-{
-    async fn handle(
-        &self,
-        req: RenderDiffAll,
-    ) -> Result<RenderDiffAllResponse, RenderDiffAllError> {
-        self.execute(&req)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
+    use cqrsy::dispatch_sync;
     use domain::diffs::{Commit, DiffKind};
 
     use super::{RenderDiffAll, RenderDiffAllHandler, RepoRef};
@@ -180,7 +166,7 @@ mod tests {
             },
         ];
 
-        let response = handler.execute(&req(repos)).expect("render succeeds");
+        let response = dispatch_sync(&(), &handler, req(repos)).expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -213,7 +199,7 @@ mod tests {
             label: "repo".into(),
         }];
 
-        let result = handler.execute(&req(repos));
+        let result = dispatch_sync(&(), &handler, req(repos));
 
         assert!(result.is_err());
         assert!(handler.store.placed.lock().unwrap().is_empty());

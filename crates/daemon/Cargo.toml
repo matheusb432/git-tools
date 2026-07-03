@@ -14,7 +14,9 @@ application = { path = "../application" }
 axum = "0.8"
 bootstrap = { path = "../../shared/bootstrap" }
 contracts = { path = "../contracts" }
-cqrs = { path = "../../shared/cqrs", features = ["derive"] }
+cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.1.0", features = [
+  "derive",
+] }
 domain = { path = "../domain" }
 gtl-platform = { path = "../../shared/gtl-platform" }
 infra = { path = "../infra" }
@@ -36,3 +38,6 @@ application = { path = "../application", features = ["testing"] }
 http-body-util = "0.1"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

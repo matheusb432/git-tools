@@ -8,7 +8,7 @@ use contracts::{
     diffs::{RenderDiffAllRequest, RenderDiffData},
     envelope::Envelope,
 };
-use cqrs::RequestHandler;
+use cqrsy::Dispatcher;
 
 use crate::state::Shared;
 
@@ -22,18 +22,13 @@ pub async fn handle<H>(
     Json(dto): Json<RenderDiffAllRequest>,
 ) -> (StatusCode, Json<Envelope<RenderDiffData>>)
 where
-    H: RequestHandler<RenderDiffAll> + Clone + Send + Sync + 'static,
+    H: Dispatcher<RenderDiffAll> + Clone + Send + Sync + 'static,
 {
-    shared.touch();
-    let req = super::to_all_request(dto);
-    // The diff engine shells out to git synchronously — run it on the blocking
-    // pool so worker threads stay free.
-    let rt = tokio::runtime::Handle::current();
-    let joined = tokio::task::spawn_blocking(move || rt.block_on(handler.handle(req))).await;
-    let envelope = match joined {
-        Ok(Ok(resp)) => return (StatusCode::OK, Json(super::to_all_envelope(resp))),
-        Ok(Err(e)) => super::error_envelope(format!("{e:#}")),
-        Err(e) => super::error_envelope(format!("daemon task panicked: {e}")),
-    };
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(envelope))
+    super::run(
+        handler,
+        shared,
+        Ok(super::to_all_request(dto)),
+        super::to_all_envelope,
+    )
+    .await
 }

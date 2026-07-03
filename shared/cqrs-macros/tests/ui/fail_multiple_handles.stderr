@@ -1,5 +1,0 @@
-error: unexpected token
- --> tests/ui/fail_multiple_handles.rs:9:16
-  |
-9 |     #[handles(A, B)]
-  |                ^

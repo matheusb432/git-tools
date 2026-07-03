@@ -1,5 +1,5 @@
 //! Application core (Ports & Adapters "inside"): port traits + vertical
-//! slices per feature. Depends only on `domain` and the cqrs trio.
+//! slices per feature. Depends only on `domain` and `cqrsy`.
 
 pub mod diffs;
 pub mod ports;

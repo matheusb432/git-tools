@@ -2,7 +2,7 @@
 //!
 //! This is a **leaf** crate: it depends only on the async runtime and observability stack
 //! (`tokio`, `tracing`, `tracing-subscriber`, `anyhow`) and on **none** of the hexagon's crates
-//! (`domain`, `application`, `infra`, `cqrs`, `contracts`). It carries no business logic and no
+//! (`domain`, `application`, `infra`, `cqrsy`, `contracts`). It carries no business logic and no
 //! adapters — only the boot plumbing every process root would otherwise copy verbatim:
 //! environment parsing, tracing init, and the graceful-shutdown signal future.
 //!

@@ -194,12 +194,12 @@ mod tests {
         manifest(
             dir.path(),
             "crates/application",
-            "[package]\nname = \"application\"\n[dependencies]\ncqrs = { path = \"../../shared/cqrs\" }\ndomain = { path = \"../domain\" }\n",
+            "[package]\nname = \"application\"\n[dependencies]\nbootstrap = { path = \"../../shared/bootstrap\" }\ndomain = { path = \"../domain\" }\n",
         );
         manifest(
             dir.path(),
-            "shared/cqrs",
-            "[package]\nname = \"cqrs\"\n[dependencies]\nserde = \"1\"\n",
+            "shared/bootstrap",
+            "[package]\nname = \"bootstrap\"\n[dependencies]\nserde = \"1\"\n",
         );
         let v = collect_violations(dir.path()).unwrap();
         assert!(v.is_empty(), "unexpected violations: {v:?}");

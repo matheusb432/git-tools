@@ -3,7 +3,8 @@
 //! (stable `cargo fmt` silently skips this repo's nightly-only rustfmt.toml keys, so the
 //! `+toolchain` token is mandatory — see rust-style). taplo is optional: skipped with a message
 //! when absent. Markdown files come from `git ls-files` so gitignored paths are never formatted.
-//! `--check` also runs the check-structure and check-deps architecture lints.
+//! `--check` also runs the check-structure and check-deps architecture lints, plus a clippy pass
+//! enforcing the cqrsy `disallowed_methods` gate (see `clippy.toml` / `[workspace.lints.clippy]`).
 
 use std::{env, fs};
 
@@ -103,6 +104,23 @@ pub fn run(check: bool) -> Result<()> {
     if check {
         crate::check_structure::run(None)?;
         crate::check_deps::run(None)?;
+        // Clippy gate — the cqrsy disallowed_methods seam (deny-level in [workspace.lints])
+        // is enforced here. `--exclude desktop` skips the optional Tauri viewer crate, which
+        // requires webkit2gtk-4.1 system headers not present on all machines; desktop has no
+        // cqrsy dependency, so this drops no `disallowed_methods` coverage. No `-D warnings`:
+        // the deny-lint already errors on a violating call, and blanket-denying warnings would
+        // trip on unrelated pre-existing lint debt.
+        proc::run(
+            "clippy",
+            "cargo",
+            &[
+                "clippy",
+                "--workspace",
+                "--exclude",
+                "desktop",
+                "--all-targets",
+            ],
+        )?;
     }
 
     Ok(())

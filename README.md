@@ -19,7 +19,7 @@ Across a set of managed repos (declared in a `repos.toml` manifest of `[[repo]]`
 - `status` (alias `ls`) — branch, unpushed commits, and pending changes for every repo (`--json` for machine output).
 - `push-all` / `pull-all` / `commit-all` — fan out push, pull, or commit across the set.
 
-The managed manifest is resolved from `--repos-file`, then the `GIT_TOOLS_MANAGED_REPOS_FILE` environment variable, then an upward search for `config/provisioning/linux/repos.toml` from the current directory, then `$HOME/self/sample_project/config/provisioning/linux/repos.toml`.
+The managed manifest is resolved from `--repos-file`, then the `GIT_TOOLS_MANAGED_REPOS_FILE` environment variable, then an upward search for `repos.toml` from the current directory, then `$HOME/self/sample_project/repos.toml`.
 
 Every HTML preview is a single self-contained **offline** file (opens from `file://`, no network): fast on large diffs (offscreen file blocks are deferred via CSS `content-visibility`), theme-switchable, and with per-file copy buttons for the relative path, the absolute path, and the code with diff `+`/`-` markers stripped.
 

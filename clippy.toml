@@ -1,0 +1,3 @@
+disallowed-methods = [
+  { path = "cqrsy_core::RequestHandler::handle", reason = "implementation-only seam — dispatch through a cqrsy::Dispatcher (or cqrsy::dispatch/dispatch_sync for bespoke wiring and tests)" },
+]

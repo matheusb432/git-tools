@@ -10,9 +10,6 @@ members = [
   "crates/e2e",
   "crates/infra",
   "shared/bootstrap",
-  "shared/cqrs",
-  "shared/cqrs-core",
-  "shared/cqrs-macros",
   "shared/gtl-platform",
   "xtask",
 ]
@@ -27,12 +24,12 @@ default-members = [
   "crates/e2e",
   "crates/infra",
   "shared/bootstrap",
-  "shared/cqrs",
-  "shared/cqrs-core",
-  "shared/cqrs-macros",
   "shared/gtl-platform",
   "xtask",
 ]
 
 [profile.release]
 strip = true
+
+[workspace.lints.clippy]
+disallowed_methods = "deny"

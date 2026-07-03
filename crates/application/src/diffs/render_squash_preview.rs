@@ -17,7 +17,7 @@ use crate::{
 /// Render the squash-preview of the current branch's unpushed commits (base is
 /// always the configured upstream) under `store_root`, resolving the repo from
 /// `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrs::Request)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
 #[request(response = RenderSquashPreviewResponse, error = RenderSquashPreviewError)]
 pub struct RenderSquashPreview {
     pub cwd: PathBuf,
@@ -49,18 +49,12 @@ pub struct RenderSquashPreviewHandler<S: DiffSource, A: ArtifactStore, R: HtmlRe
 }
 
 impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
-    RenderSquashPreviewHandler<S, A, R, C>
+    cqrsy::RequestHandler<RenderSquashPreview> for RenderSquashPreviewHandler<S, A, R, C>
 {
-    /// Synchronous core — the daemon's async handler and the cli's in-process
-    /// path both delegate here.
-    pub fn execute(
+    async fn handle(
         &self,
-        req: &RenderSquashPreview,
+        req: RenderSquashPreview,
     ) -> Result<RenderSquashPreviewResponse, RenderSquashPreviewError> {
-        Ok(self.render(req)?)
-    }
-
-    fn render(&self, req: &RenderSquashPreview) -> anyhow::Result<RenderSquashPreviewResponse> {
         let top = self.source.top_level(&req.cwd)?;
         let upstream = self.source.upstream(Path::new(&top))?;
         let branch = self.source.current_branch(Path::new(&top))?;
@@ -132,17 +126,6 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
     }
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
-    cqrs::RequestHandler<RenderSquashPreview> for RenderSquashPreviewHandler<S, A, R, C>
-{
-    async fn handle(
-        &self,
-        req: RenderSquashPreview,
-    ) -> Result<RenderSquashPreviewResponse, RenderSquashPreviewError> {
-        self.execute(&req)
-    }
-}
-
 fn repo_name(top: &str) -> String {
     Path::new(top)
         .file_name()
@@ -164,6 +147,7 @@ fn collapse_note(commit_count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
+    use cqrsy::dispatch_sync;
     use domain::diffs::Commit;
 
     use super::{RenderSquashPreview, RenderSquashPreviewError, RenderSquashPreviewHandler};
@@ -222,7 +206,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = handler.execute(&req("/repo")).expect("render succeeds");
+        let response = dispatch_sync(&(), &handler, req("/repo")).expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -251,9 +235,8 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let error = handler
-            .execute(&req("/repo"))
-            .expect_err("missing upstream errors");
+        let error =
+            dispatch_sync(&(), &handler, req("/repo")).expect_err("missing upstream errors");
 
         let RenderSquashPreviewError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "no upstream");

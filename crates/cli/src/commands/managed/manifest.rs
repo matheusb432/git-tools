@@ -104,7 +104,7 @@ fn resolve_repos_file_from_sources(
     let home_hint = home_dir
         .map(home_default_repos_file)
         .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "$HOME/self/sample_project/config/provisioning/linux/repos.toml".into());
+        .unwrap_or_else(|| "$HOME/self/sample_project/repos.toml".into());
     Err(anyhow!(
         "managed-repos manifest not found; pass --repos-file, set GIT_TOOLS_MANAGED_REPOS_FILE, run from a sample_project checkout, or install sample_project at {home_hint}"
     ))
@@ -112,11 +112,7 @@ fn resolve_repos_file_from_sources(
 
 fn find_upward_config(start: &Path) -> Option<PathBuf> {
     for dir in start.ancestors() {
-        let candidate = dir
-            .join("config")
-            .join("provisioning")
-            .join("linux")
-            .join("repos.toml");
+        let candidate = dir.join("repos.toml");
         if candidate.exists() {
             return Some(candidate);
         }
@@ -128,9 +124,6 @@ fn home_default_repos_file(home_dir: &Path) -> PathBuf {
     home_dir
         .join("self")
         .join("sample_project")
-        .join("config")
-        .join("provisioning")
-        .join("linux")
         .join("repos.toml")
 }
 
@@ -173,12 +166,8 @@ mod tests {
         let explicit = fixture.root.join("explicit.txt");
         let env_file = fixture.root.join("env.txt");
         let cwd = fixture.root.join("workspace").join("repo");
-        let upward = fixture
-            .root
-            .join("workspace/config/provisioning/linux/repos.toml");
-        let home_default = fixture
-            .home
-            .join("self/sample_project/config/provisioning/linux/repos.toml");
+        let upward = fixture.root.join("workspace/repos.toml");
+        let home_default = fixture.home.join("self/sample_project/repos.toml");
         touch(&explicit);
         touch(&env_file);
         touch(&upward);
@@ -209,9 +198,7 @@ mod tests {
     fn resolve_repos_file_uses_home_default_after_upward_search_misses() {
         let fixture = ManagedFixture::new("resolve-home-default");
         let cwd = fixture.root.join("elsewhere").join("repo");
-        let home_default = fixture
-            .home
-            .join("self/sample_project/config/provisioning/linux/repos.toml");
+        let home_default = fixture.home.join("self/sample_project/repos.toml");
         touch(&home_default);
 
         assert_eq!(
