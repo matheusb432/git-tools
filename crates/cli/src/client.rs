@@ -14,6 +14,7 @@ use contracts::{
         RenderMergeDiffRequest, RenderSquashPreviewRequest,
     },
     envelope::Envelope,
+    managed::{PullAllRequest, PushAllRequest, SyncData},
 };
 use serde::Deserialize;
 
@@ -77,6 +78,24 @@ pub trait Backend {
         _req: &RenderDiffAllRequest,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
         unimplemented!("render_diff_all")
+    }
+
+    /// Push every managed repo, returning the service-composed wire envelope.
+    ///
+    /// # Errors
+    /// Returns an error only on transport/parse failure — an error *outcome* is
+    /// carried inside the returned [`Envelope`], not as `Err`.
+    fn push_all(&self, _req: &PushAllRequest) -> anyhow::Result<Envelope<SyncData>> {
+        unimplemented!("push_all")
+    }
+
+    /// Pull every managed repo, returning the service-composed wire envelope.
+    ///
+    /// # Errors
+    /// Returns an error only on transport/parse failure — an error *outcome* is
+    /// carried inside the returned [`Envelope`], not as `Err`.
+    fn pull_all(&self, _req: &PullAllRequest) -> anyhow::Result<Envelope<SyncData>> {
+        unimplemented!("pull_all")
     }
 }
 
@@ -260,6 +279,30 @@ impl Backend for HttpBackend {
         // 400/500 carry error envelopes — deserialize the body for any status.
         response
             .json::<Envelope<RenderDiffData>>()
+            .context("daemon request failed")
+    }
+
+    fn push_all(&self, req: &PushAllRequest) -> anyhow::Result<Envelope<SyncData>> {
+        let response = self
+            .http
+            .post(format!("{}/managed/push-all", self.base_url))
+            .json(req)
+            .send()
+            .context("daemon request failed")?;
+        response
+            .json::<Envelope<SyncData>>()
+            .context("daemon request failed")
+    }
+
+    fn pull_all(&self, req: &PullAllRequest) -> anyhow::Result<Envelope<SyncData>> {
+        let response = self
+            .http
+            .post(format!("{}/managed/pull-all", self.base_url))
+            .json(req)
+            .send()
+            .context("daemon request failed")?;
+        response
+            .json::<Envelope<SyncData>>()
             .context("daemon request failed")
     }
 }

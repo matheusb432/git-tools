@@ -7,9 +7,15 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use domain::diffs::{Commit, DiffKind};
+use domain::{
+    diffs::{Commit, DiffKind},
+    managed::ManagedRepo,
+};
 
-use crate::ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, PlacedArtifact};
+use crate::ports::{
+    ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, LedgerEntry, ManagedManifest,
+    PlacedArtifact, PushLedger, RemoteSync, SyncOutput,
+};
 
 /// Scripted `DiffSource`: every field is what the corresponding method returns.
 #[derive(Debug, Default, Clone)]
@@ -184,4 +190,102 @@ impl Clock for FixedClock {
     fn now_iso(&self) -> String {
         self.0.clone()
     }
+}
+
+/// Scripted `RemoteSync`: every field is what the corresponding method returns.
+/// Single-scripted (no per-repo map) — every existing push/pull test scripts one
+/// repo's worth of git responses, matching `push_pull.rs`'s existing test style.
+#[derive(Debug, Default, Clone)]
+pub struct FakeRemoteSync {
+    pub present: bool,
+    pub branch: String,
+    pub has_remote: bool,
+    pub push_result: SyncOutput,
+    pub fetch_result: SyncOutput,
+    pub upstream: Option<String>,
+    pub verify_ref: bool,
+    pub rev_list_count: usize,
+    pub rev_list_left_right: (usize, usize),
+    pub merge_result: SyncOutput,
+}
+
+impl RemoteSync for FakeRemoteSync {
+    fn repo_present(&self, _repo: &Path) -> bool {
+        self.present
+    }
+    async fn current_branch(&self, _repo: &Path) -> anyhow::Result<String> {
+        Ok(self.branch.clone())
+    }
+    async fn has_remote(&self, _repo: &Path, _remote: &str) -> anyhow::Result<bool> {
+        Ok(self.has_remote)
+    }
+    async fn push(
+        &self,
+        _repo: &Path,
+        _remote: &str,
+        _branch: &str,
+        _dry: bool,
+    ) -> anyhow::Result<SyncOutput> {
+        Ok(self.push_result.clone())
+    }
+    async fn fetch(&self, _repo: &Path, _remote: &str) -> anyhow::Result<SyncOutput> {
+        Ok(self.fetch_result.clone())
+    }
+    async fn upstream_ref(&self, _repo: &Path) -> anyhow::Result<Option<String>> {
+        Ok(self.upstream.clone())
+    }
+    async fn verify_ref(&self, _repo: &Path, _remote_ref: &str) -> anyhow::Result<bool> {
+        Ok(self.verify_ref)
+    }
+    async fn rev_list_count(&self, _repo: &Path, _range: &str) -> anyhow::Result<usize> {
+        Ok(self.rev_list_count)
+    }
+    async fn rev_list_left_right(
+        &self,
+        _repo: &Path,
+        _range: &str,
+    ) -> anyhow::Result<(usize, usize)> {
+        Ok(self.rev_list_left_right)
+    }
+    async fn merge_ff_only(&self, _repo: &Path, _remote_ref: &str) -> anyhow::Result<SyncOutput> {
+        Ok(self.merge_result.clone())
+    }
+}
+
+/// Scripted `ManagedManifest`: returns `repos` verbatim, or fails with `error`'s
+/// text if set (manifest-parse-failure path).
+#[derive(Debug, Default, Clone)]
+pub struct FakeManagedManifest {
+    pub repos: Vec<ManagedRepo>,
+    pub error: Option<String>,
+}
+
+impl ManagedManifest for FakeManagedManifest {
+    async fn load(&self, _repos_file: &Path, _home_dir: &Path) -> anyhow::Result<Vec<ManagedRepo>> {
+        if let Some(message) = &self.error {
+            anyhow::bail!("{message}");
+        }
+        Ok(self.repos.clone())
+    }
+}
+
+/// Recording `PushLedger`: `record` calls are captured for assertions;
+/// `last_known` answers from the `known` script (defaults to `None`).
+#[derive(Debug, Default, Clone)]
+pub struct FakePushLedger {
+    pub recorded: Arc<Mutex<Vec<(String, usize, String)>>>,
+    pub known: HashMap<String, LedgerEntry>,
+}
+
+impl PushLedger for FakePushLedger {
+    async fn record(&self, repo_name: &str, ahead: usize, checked_at: &str) {
+        self.recorded
+            .lock()
+            .unwrap()
+            .push((repo_name.to_string(), ahead, checked_at.to_string()));
+    }
+    async fn last_known(&self, repo_name: &str) -> Option<LedgerEntry> {
+        self.known.get(repo_name).cloned()
+    }
+    async fn refresh(&self) {}
 }

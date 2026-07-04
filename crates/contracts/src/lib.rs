@@ -4,3 +4,4 @@
 
 pub mod diffs;
 pub mod envelope;
+pub mod managed;

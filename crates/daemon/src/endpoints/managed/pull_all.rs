@@ -1,0 +1,32 @@
+//! `POST /managed/pull-all`. Same shape as `push_all::handle`.
+
+use std::sync::Arc;
+
+use application::managed::pull_all::PullAll;
+use axum::{Json, extract::State, http::StatusCode};
+use contracts::{
+    envelope::Envelope,
+    managed::{PullAllRequest, SyncData},
+};
+use cqrsy::Dispatcher;
+
+use crate::state::Shared;
+
+pub async fn handle<H>(
+    State(handler): State<H>,
+    State(shared): State<Arc<Shared>>,
+    Json(dto): Json<PullAllRequest>,
+) -> (StatusCode, Json<Envelope<SyncData>>)
+where
+    H: Dispatcher<PullAll> + Clone + Send + Sync + 'static,
+{
+    shared.touch();
+    let req = super::to_pull_all_request(dto);
+    match handler.dispatch(req).await {
+        Ok(resp) => (StatusCode::OK, Json(super::to_pull_all_envelope(resp))),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(super::error_envelope(format!("{e:#}"))),
+        ),
+    }
+}

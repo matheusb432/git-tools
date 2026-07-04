@@ -11,14 +11,18 @@ use std::{
     time::Duration,
 };
 
-use application::diffs::{
-    render_diff::RenderDiffHandler, render_diff_all::RenderDiffAllHandler,
-    render_diff_subrepos::RenderDiffSubreposHandler, render_merge_diff::RenderMergeDiffHandler,
-    render_squash_preview::RenderSquashPreviewHandler,
+use application::{
+    diffs::{
+        render_diff::RenderDiffHandler, render_diff_all::RenderDiffAllHandler,
+        render_diff_subrepos::RenderDiffSubreposHandler, render_merge_diff::RenderMergeDiffHandler,
+        render_squash_preview::RenderSquashPreviewHandler,
+    },
+    managed::{pull_all::PullAllHandler, push_all::PushAllHandler},
 };
 use infra::{
     artifact_store::StoreArtifacts, clock::SystemClock, diff_source::GitDiffSource,
-    html_renderer::MaudRenderer,
+    html_renderer::MaudRenderer, managed_manifest::TokioManagedManifest,
+    push_ledger::NoOpPushLedger, remote_sync::TokioRemoteSync,
 };
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
@@ -72,6 +76,10 @@ pub async fn run() -> anyhow::Result<()> {
         spawn_idle_watch(shared.clone(), idle_secs);
     }
 
+    let ledger = NoOpPushLedger;
+    let ledger_refresh_secs: u64 = bootstrap::parse_env_or("GIT_TOOLS_LEDGER_REFRESH_SECS", 0)?;
+    spawn_ledger_refresh(ledger.clone(), ledger_refresh_secs);
+
     let mediator = DaemonMediator {
         render_diff: RenderDiffHandler {
             source: GitDiffSource,
@@ -102,6 +110,16 @@ pub async fn run() -> anyhow::Result<()> {
             store: StoreArtifacts,
             renderer: MaudRenderer,
             clock: SystemClock,
+        },
+        push_all: PushAllHandler {
+            remote: TokioRemoteSync,
+            manifest: TokioManagedManifest,
+            ledger,
+            clock: SystemClock,
+        },
+        pull_all: PullAllHandler {
+            remote: TokioRemoteSync,
+            manifest: TokioManagedManifest,
         },
     };
     let app = state::router(AppState { mediator, shared });
@@ -147,6 +165,23 @@ async fn probe_health(port: u16) -> anyhow::Result<ExeIdentity> {
         .map(|(_, body)| body.trim())
         .ok_or_else(|| anyhow::anyhow!("malformed health response"))?;
     Ok(serde_json::from_str(body)?)
+}
+
+/// Spawns a ticker that calls `ledger.refresh()` every `refresh_secs` seconds.
+/// `0` disables it (default) — mirrors `spawn_idle_watch`'s `> 0` gate. A no-op
+/// today (the shipped `NoOpPushLedger`), but proves the daemon can host a
+/// periodic job wired to the push-ledger seam.
+fn spawn_ledger_refresh(ledger: impl application::ports::PushLedger + 'static, refresh_secs: u64) {
+    if refresh_secs == 0 {
+        return;
+    }
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(refresh_secs));
+        loop {
+            ticker.tick().await;
+            ledger.refresh().await;
+        }
+    });
 }
 
 /// Spawn a 1-second ticker that triggers shutdown once no request has arrived

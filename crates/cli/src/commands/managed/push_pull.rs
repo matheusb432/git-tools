@@ -1,8 +1,13 @@
-//! Fanning `push`/`pull` out across every managed repo.
+//! Fanning `push`/`pull` out across every managed repo via the daemon.
 
+use contracts::{
+    envelope::{Envelope, NoteLevel, Outcome},
+    managed::{PullAllRequest, PushAllRequest, RepoSyncResultDto, SyncData, SyncExitDto},
+};
 use serde::Serialize;
 
-use super::{ManagedExit, ManagedOptions, ManagedRepo, ManagedRun, git_capture::git_capture};
+use super::{ManagedExit, ManagedOptions, ManagedRun, manifest::resolve_manifest_location};
+use crate::client::{Backend, HttpBackend};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "PascalCase")]
@@ -13,295 +18,79 @@ pub struct PushPullResult {
     pub detail: String,
 }
 
-fn push_pull_exit_code(statuses: &[&str]) -> ManagedExit {
-    if statuses.contains(&"fail") {
-        return ManagedExit::Fail;
+impl From<RepoSyncResultDto> for PushPullResult {
+    fn from(dto: RepoSyncResultDto) -> Self {
+        Self {
+            name: dto.name,
+            branch: dto.branch,
+            status: dto.status,
+            detail: dto.detail,
+        }
     }
-    if statuses.contains(&"warn") {
-        return ManagedExit::Warn;
+}
+
+fn exit_from_dto(exit: SyncExitDto) -> ManagedExit {
+    match exit {
+        SyncExitDto::Clean => ManagedExit::Clean,
+        SyncExitDto::Warn => ManagedExit::Warn,
+        SyncExitDto::Fail => ManagedExit::Fail,
     }
-    ManagedExit::Clean
 }
 
 pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
-    match super::manifest::load_repos(options) {
-        Ok(repos) => {
-            let results = repos
-                .iter()
-                .map(|repo| push_one(repo, options.dry))
-                .collect::<Vec<_>>();
-            let statuses = results
-                .iter()
-                .map(|result| result.status.as_str())
-                .collect::<Vec<_>>();
-            let exit = push_pull_exit_code(&statuses);
-            let stdout = format_push_pull("push", options.dry, options.json, &results);
-            ManagedRun {
-                exit,
-                results,
-                stdout,
-                stderr: String::new(),
-            }
-        }
-        Err(error) => ManagedRun {
-            exit: ManagedExit::Fail,
-            results: Vec::new(),
-            stdout: String::new(),
-            stderr: format!("{error:#}"),
-        },
+    match HttpBackend::ensure_daemon() {
+        Ok(backend) => run_push_all_with(&backend, options),
+        Err(error) => manifest_error(error),
+    }
+}
+
+pub(crate) fn run_push_all_with(
+    backend: &impl Backend,
+    options: &ManagedOptions,
+) -> ManagedRun<PushPullResult> {
+    let (repos_file, home_dir) = match resolve_manifest_location(options) {
+        Ok(location) => location,
+        Err(error) => return manifest_error(error),
+    };
+    let req = PushAllRequest {
+        repos_file: repos_file.to_string_lossy().into_owned(),
+        home_dir: home_dir.to_string_lossy().into_owned(),
+        dry: options.dry,
+    };
+    match backend.push_all(&req) {
+        Ok(envelope) => finish("push", options, envelope),
+        Err(error) => manifest_error(error),
     }
 }
 
 pub fn run_pull_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
-    match super::manifest::load_repos(options) {
-        Ok(repos) => {
-            let results = repos
-                .iter()
-                .map(|repo| pull_one(repo, options.dry))
-                .collect::<Vec<_>>();
-            let statuses = results
-                .iter()
-                .map(|result| result.status.as_str())
-                .collect::<Vec<_>>();
-            let exit = push_pull_exit_code(&statuses);
-            let stdout = format_push_pull("pull", options.dry, options.json, &results);
-            ManagedRun {
-                exit,
-                results,
-                stdout,
-                stderr: String::new(),
-            }
-        }
-        Err(error) => ManagedRun {
-            exit: ManagedExit::Fail,
-            results: Vec::new(),
-            stdout: String::new(),
-            stderr: format!("{error:#}"),
-        },
+    match HttpBackend::ensure_daemon() {
+        Ok(backend) => run_pull_all_with(&backend, options),
+        Err(error) => manifest_error(error),
     }
 }
 
-fn push_one(repo: &ManagedRepo, dry: bool) -> PushPullResult {
-    let mut result = push_pull_result(repo, "", "", "");
-    if !repo.path.join(".git").exists() {
-        result.status = "skip".to_string();
-        result.detail = "not present on this machine".to_string();
-        return result;
-    }
-
-    let branch = match git_capture(&repo.path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
-        Ok(output) if output.success() => output.stdout.trim().to_string(),
-        _ => String::new(),
+pub(crate) fn run_pull_all_with(
+    backend: &impl Backend,
+    options: &ManagedOptions,
+) -> ManagedRun<PushPullResult> {
+    let (repos_file, home_dir) = match resolve_manifest_location(options) {
+        Ok(location) => location,
+        Err(error) => return manifest_error(error),
     };
-    result.branch = branch.clone();
-    if branch.is_empty() || branch == "HEAD" {
-        result.status = "warn".to_string();
-        result.detail = "detached HEAD - nothing to push".to_string();
-        return result;
-    }
-
-    match git_capture(&repo.path, &["remote", "get-url", "origin"]) {
-        Ok(output) if output.success() => {}
-        _ => {
-            result.status = "warn".to_string();
-            result.detail = "no 'origin' remote".to_string();
-            return result;
-        }
-    }
-
-    // Reuse the `gtl ls` sync check: a branch tracking an upstream with no unpushed commits
-    // (`@{u}..HEAD == 0`) is already synced, so skip the network push entirely. Push-all then
-    // scales with the repos that actually have work to push, not the manifest's length. A
-    // branch with no upstream falls through to the push below (unchanged behavior).
-    if let Some((_, 0)) = super::status::upstream_ahead(&repo.path) {
-        result.status = "up-to-date".to_string();
-        result.detail = "up to date (already synced)".to_string();
-        return result;
-    }
-
-    let mut args = vec!["push", "origin", branch.as_str()];
-    if dry {
-        args.push("--dry-run");
-    }
-    match git_capture(&repo.path, &args) {
-        Ok(output) if output.success() => {
-            let combined = output.combined();
-            if combined.contains("Everything up-to-date") {
-                result.status = "up-to-date".to_string();
-                result.detail = "up to date".to_string();
-            } else {
-                result.status = if dry { "would-push" } else { "pushed" }.to_string();
-                result.detail = last_non_empty_line(&combined)
-                    .unwrap_or("up to date")
-                    .to_string();
-            }
-        }
-        Ok(output) => {
-            result.status = "fail".to_string();
-            let combined = output.combined();
-            result.detail = push_failure_detail(&combined);
-        }
-        Err(error) => {
-            result.status = "fail".to_string();
-            result.detail = error.to_string();
-        }
-    }
-    result
-}
-
-fn pull_one(repo: &ManagedRepo, dry: bool) -> PushPullResult {
-    let mut result = push_pull_result(repo, "", "", "");
-    if !repo.path.join(".git").exists() {
-        result.status = "skip".to_string();
-        result.detail = "not present on this machine".to_string();
-        return result;
-    }
-
-    let branch = match git_capture(&repo.path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
-        Ok(output) if output.success() => output.stdout.trim().to_string(),
-        _ => String::new(),
+    let req = PullAllRequest {
+        repos_file: repos_file.to_string_lossy().into_owned(),
+        home_dir: home_dir.to_string_lossy().into_owned(),
+        dry: options.dry,
     };
-    result.branch = branch.clone();
-    if branch.is_empty() || branch == "HEAD" {
-        result.status = "warn".to_string();
-        result.detail = "detached HEAD - nothing to pull onto".to_string();
-        return result;
-    }
-
-    match git_capture(&repo.path, &["remote", "get-url", "origin"]) {
-        Ok(output) if output.success() => {}
-        _ => {
-            result.status = "warn".to_string();
-            result.detail = "no 'origin' remote".to_string();
-            return result;
-        }
-    }
-
-    match git_capture(&repo.path, &["fetch", "origin"]) {
-        Ok(output) if output.success() => {}
-        Ok(output) => {
-            result.status = "fail".to_string();
-            result.detail = format!(
-                "fetch failed: {}",
-                last_non_empty_line(&output.combined()).unwrap_or("fetch failed")
-            );
-            return result;
-        }
-        Err(error) => {
-            result.status = "fail".to_string();
-            result.detail = format!("fetch failed: {error}");
-            return result;
-        }
-    }
-
-    let remote_branch = format!("refs/remotes/origin/{branch}");
-    match git_capture(
-        &repo.path,
-        &["rev-parse", "--verify", "--quiet", &remote_branch],
-    ) {
-        Ok(output) if output.success() => {}
-        _ => {
-            result.status = "warn".to_string();
-            result.detail = format!("no '{branch}' branch on origin");
-            return result;
-        }
-    }
-
-    let range = format!("origin/{branch}...{branch}");
-    let counts = match git_capture(&repo.path, &["rev-list", "--count", "--left-right", &range]) {
-        Ok(output) if output.success() => output.stdout,
-        _ => {
-            result.status = "fail".to_string();
-            result.detail = "rev-list failed".to_string();
-            return result;
-        }
-    };
-    let mut parts = counts.split_whitespace();
-    let behind = parts
-        .next()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-    let ahead = parts
-        .next()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(0);
-
-    if behind == 0 {
-        result.status = "up-to-date".to_string();
-        result.detail = if ahead > 0 {
-            format!("up to date (local ahead by {ahead} - push pending)")
-        } else {
-            "up to date".to_string()
-        };
-        return result;
-    }
-    if ahead > 0 {
-        result.status = "fail".to_string();
-        result.detail = format!("diverged (ahead {ahead}, behind {behind}) - resolve manually");
-        return result;
-    }
-    if dry {
-        result.status = "would-pull".to_string();
-        result.detail = format!("behind by {behind} - fast-forward");
-        return result;
-    }
-
-    let merge_ref = format!("origin/{branch}");
-    match git_capture(&repo.path, &["merge", "--ff-only", &merge_ref]) {
-        Ok(output) if output.success() => {
-            result.status = "pulled".to_string();
-            result.detail = format!(
-                "fast-forwarded {behind} commit{}",
-                if behind == 1 { "" } else { "s" }
-            );
-        }
-        Ok(output) => {
-            result.status = "fail".to_string();
-            let combined = output.combined();
-            result.detail = combined
-                .lines()
-                .find(|line| line.starts_with("error:") || line.starts_with("fatal:"))
-                .map(str::trim)
-                .unwrap_or("ff merge failed")
-                .to_string();
-        }
-        Err(error) => {
-            result.status = "fail".to_string();
-            result.detail = error.to_string();
-        }
-    }
-    result
-}
-
-fn push_pull_result(
-    repo: &ManagedRepo,
-    branch: &str,
-    status: &str,
-    detail: &str,
-) -> PushPullResult {
-    PushPullResult {
-        name: repo.name.clone(),
-        branch: branch.to_string(),
-        status: status.to_string(),
-        detail: detail.to_string(),
+    match backend.pull_all(&req) {
+        Ok(envelope) => finish("pull", options, envelope),
+        Err(error) => manifest_error(error),
     }
 }
 
-fn push_failure_detail(output: &str) -> String {
-    output
-        .lines()
-        .find(|line| {
-            let trimmed = line.trim_start();
-            trimmed.starts_with("!")
-                || trimmed.starts_with("error:")
-                || trimmed.starts_with("fatal:")
-        })
-        .map(str::trim)
-        .or_else(|| last_non_empty_line(output))
-        .unwrap_or("push failed")
-        .to_string()
-}
-
+/// Still used by `commit.rs`'s own git-output parsing — kept here (not moved during this
+/// task's daemon rewire) since that module's local git logic is untouched by this plan.
 pub(super) fn last_non_empty_line(output: &str) -> Option<&str> {
     output
         .lines()
@@ -310,7 +99,53 @@ pub(super) fn last_non_empty_line(output: &str) -> Option<&str> {
         .find(|line| !line.is_empty())
 }
 
-fn format_push_pull(label: &str, dry: bool, json: bool, results: &[PushPullResult]) -> String {
+fn manifest_error<T>(error: anyhow::Error) -> ManagedRun<T> {
+    ManagedRun {
+        exit: ManagedExit::Fail,
+        results: Vec::new(),
+        stdout: String::new(),
+        stderr: format!("{error:#}"),
+    }
+}
+
+fn finish(
+    label: &str,
+    options: &ManagedOptions,
+    envelope: Envelope<SyncData>,
+) -> ManagedRun<PushPullResult> {
+    if envelope.outcome == Outcome::Error {
+        let text = envelope
+            .notes
+            .iter()
+            .rev()
+            .find(|n| n.level == NoteLevel::Error)
+            .map_or_else(
+                || "daemon reported an error".to_string(),
+                |n| n.text.clone(),
+            );
+        return manifest_error(anyhow::anyhow!(text));
+    }
+    let Some(data) = envelope.data else {
+        return manifest_error(anyhow::anyhow!("daemon returned ok without data"));
+    };
+    let results: Vec<PushPullResult> = data.results.into_iter().map(PushPullResult::from).collect();
+    let exit = exit_from_dto(data.exit);
+    let stdout = format_push_pull(label, options.dry, options.json, &results, exit);
+    ManagedRun {
+        exit,
+        results,
+        stdout,
+        stderr: String::new(),
+    }
+}
+
+fn format_push_pull(
+    label: &str,
+    dry: bool,
+    json: bool,
+    results: &[PushPullResult],
+    exit: ManagedExit,
+) -> String {
     if json {
         return serde_json::to_string_pretty(results).unwrap_or_else(|_| "[]".to_string());
     }
@@ -336,21 +171,11 @@ fn format_push_pull(label: &str, dry: bool, json: bool, results: &[PushPullResul
             result.name, result.branch, result.status, result.detail
         ));
     }
-    let fail = results
-        .iter()
-        .filter(|result| result.status == "fail")
-        .count();
-    let warn = results
-        .iter()
-        .filter(|result| result.status == "warn")
-        .count();
-    let statuses = results
-        .iter()
-        .map(|result| result.status.as_str())
-        .collect::<Vec<_>>();
+    let fail = results.iter().filter(|r| r.status == "fail").count();
+    let warn = results.iter().filter(|r| r.status == "warn").count();
     out.push_str(&format!(
         "\nexit {}  -  {} repos: {} fail, {} warn",
-        push_pull_exit_code(&statuses).code(),
+        exit.code(),
         results.len(),
         fail,
         warn
@@ -360,159 +185,168 @@ fn format_push_pull(label: &str, dry: bool, json: bool, results: &[PushPullResul
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
+    use contracts::{
+        envelope::{Envelope, Note, NoteLevel, Outcome},
+        managed::{PullAllRequest, PushAllRequest, RepoSyncResultDto, SyncData, SyncExitDto},
+    };
+
     use super::*;
-    use crate::commands::managed::test_support::{ManagedFixture, git, git_out};
+    use crate::{client::Backend, commands::managed::test_support::ManagedFixture};
 
-    #[test]
-    fn push_and_pull_exit_codes_preserve_fail_warn_clean_precedence() {
-        assert_eq!(
-            push_pull_exit_code(&["skip", "up-to-date"]),
-            ManagedExit::Clean
-        );
-        assert_eq!(
-            push_pull_exit_code(&["warn", "up-to-date"]),
-            ManagedExit::Warn
-        );
-        assert_eq!(push_pull_exit_code(&["warn", "fail"]), ManagedExit::Fail);
+    /// Guards tests that mutate `HOME` (process-global env var). `resolve_repos_file`'s
+    /// home-default fallback reads real ambient `HOME` directly — it has no seam for
+    /// `ManagedOptions::home_dir` — so a "manifest unresolvable" test must pin `HOME` to a
+    /// directory with no `self/sample_project/repos.toml`, or it silently finds whatever
+    /// real manifest the *running machine* happens to have at that default location.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// RAII guard: pins `HOME` for the guarded test, restoring the prior value on drop
+    /// (even on panic/assertion failure) so later tests see the real environment again.
+    struct HomeOverride {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous: Option<std::ffi::OsString>,
     }
 
-    #[test]
-    fn pull_all_dry_reports_would_pull_without_moving_head() {
-        let fixture = ManagedFixture::new("pull-dry");
-        let (origin, seed) = fixture.origin_with_seed();
-        let local = fixture.clone_repo(&origin, "repo");
-        fixture.write_manifest(&[("repo", "")]);
-        fixture.write_file_in(&seed, "remote.txt", "new\n");
-        git(&seed, &["add", "-A"]);
-        git(&seed, &["commit", "-m", "remote change"]);
-        git(&seed, &["push", "origin", "main"]);
-        let before = git_out(&local, &["rev-parse", "HEAD"]);
+    impl HomeOverride {
+        fn set(value: &std::path::Path) -> Self {
+            let lock = ENV_LOCK
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let previous = std::env::var_os("HOME");
+            // SAFETY: guarded by ENV_LOCK; no other thread touches HOME concurrently.
+            unsafe { std::env::set_var("HOME", value) };
+            Self {
+                _lock: lock,
+                previous,
+            }
+        }
+    }
 
-        let run = run_pull_all(&ManagedOptions {
+    impl Drop for HomeOverride {
+        fn drop(&mut self) {
+            // SAFETY: guarded by ENV_LOCK; no other thread touches HOME concurrently.
+            match &self.previous {
+                Some(value) => unsafe { std::env::set_var("HOME", value) },
+                None => unsafe { std::env::remove_var("HOME") },
+            }
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeBackend {
+        push_response: Option<Envelope<SyncData>>,
+        pull_response: Option<Envelope<SyncData>>,
+    }
+
+    impl Backend for FakeBackend {
+        fn push_all(&self, _req: &PushAllRequest) -> anyhow::Result<Envelope<SyncData>> {
+            Ok(self.push_response.clone().expect("push_response scripted"))
+        }
+        fn pull_all(&self, _req: &PullAllRequest) -> anyhow::Result<Envelope<SyncData>> {
+            Ok(self.pull_response.clone().expect("pull_response scripted"))
+        }
+    }
+
+    fn ok_envelope(status: &str, exit: SyncExitDto) -> Envelope<SyncData> {
+        Envelope {
+            outcome: Outcome::Ok,
+            notes: Vec::new(),
+            data: Some(SyncData {
+                results: vec![RepoSyncResultDto {
+                    name: "repo".into(),
+                    branch: "main".into(),
+                    status: status.into(),
+                    detail: "detail".into(),
+                }],
+                exit,
+            }),
+        }
+    }
+
+    fn options(fixture: &ManagedFixture, dry: bool, json: bool) -> ManagedOptions {
+        ManagedOptions {
             repos_file: Some(fixture.manifest.clone()),
             home_dir: Some(fixture.home.clone()),
-            dry: true,
-            json: false,
+            dry,
+            json,
             color: false,
             message_for_all: None,
             interactive: false,
-        });
-
-        assert_eq!(run.exit, ManagedExit::Clean);
-        assert_eq!(run.results[0].status, "would-pull");
-        assert_eq!(git_out(&local, &["rev-parse", "HEAD"]), before);
+        }
     }
 
     #[test]
-    fn pull_all_fails_divergence_without_merging() {
-        let fixture = ManagedFixture::new("pull-diverged");
-        let (origin, seed) = fixture.origin_with_seed();
-        let local = fixture.clone_repo(&origin, "repo");
+    fn run_push_all_with_maps_the_envelope_into_a_managed_run() {
+        let fixture = ManagedFixture::new("push-thin");
         fixture.write_manifest(&[("repo", "")]);
-        fixture.write_file_in(&seed, "remote.txt", "remote\n");
-        git(&seed, &["add", "-A"]);
-        git(&seed, &["commit", "-m", "remote change"]);
-        git(&seed, &["push", "origin", "main"]);
-        fixture.write_file_in(&local, "local.txt", "local\n");
-        git(&local, &["add", "-A"]);
-        git(&local, &["commit", "-m", "local change"]);
-        let before = git_out(&local, &["rev-parse", "HEAD"]);
+        let backend = FakeBackend {
+            push_response: Some(ok_envelope("pushed", SyncExitDto::Clean)),
+            ..Default::default()
+        };
 
-        let run = run_pull_all(&ManagedOptions {
-            repos_file: Some(fixture.manifest.clone()),
-            home_dir: Some(fixture.home.clone()),
-            dry: false,
-            json: false,
-            color: false,
-            message_for_all: None,
-            interactive: false,
-        });
-
-        assert_eq!(run.exit, ManagedExit::Fail);
-        assert_eq!(run.results[0].status, "fail");
-        assert_eq!(git_out(&local, &["rev-parse", "HEAD"]), before);
-    }
-
-    #[test]
-    fn push_all_skips_synced_repos_without_touching_the_remote() {
-        let fixture = ManagedFixture::new("push-synced");
-        let (origin, _seed) = fixture.origin_with_seed();
-        let _local = fixture.clone_repo(&origin, "repo"); // synced with origin/main
-        fixture.write_manifest(&[("repo", "")]);
-        // Delete the remote entirely: any real `git push` would now fail. Only a plan-time
-        // synced-skip — the local `@{u}..HEAD == 0` check `gtl ls` uses — avoids the network.
-        std::fs::remove_dir_all(&origin).unwrap();
-
-        let run = run_push_all(&ManagedOptions {
-            repos_file: Some(fixture.manifest.clone()),
-            home_dir: Some(fixture.home.clone()),
-            dry: false,
-            json: false,
-            color: false,
-            message_for_all: None,
-            interactive: false,
-        });
-
-        assert_eq!(run.exit, ManagedExit::Clean);
-        assert_eq!(run.results[0].status, "up-to-date");
-    }
-
-    #[test]
-    fn push_all_still_pushes_repos_with_unpushed_commits() {
-        let fixture = ManagedFixture::new("push-ahead");
-        let (origin, _seed) = fixture.origin_with_seed();
-        let local = fixture.clone_repo(&origin, "repo");
-        fixture.write_manifest(&[("repo", "")]);
-        fixture.write_file_in(&local, "local.txt", "local\n");
-        git(&local, &["add", "-A"]);
-        git(&local, &["commit", "-m", "local change"]);
-        let local_head = git_out(&local, &["rev-parse", "HEAD"]);
-
-        let run = run_push_all(&ManagedOptions {
-            repos_file: Some(fixture.manifest.clone()),
-            home_dir: Some(fixture.home.clone()),
-            dry: false,
-            json: false,
-            color: false,
-            message_for_all: None,
-            interactive: false,
-        });
+        let run = run_push_all_with(&backend, &options(&fixture, false, false));
 
         assert_eq!(run.exit, ManagedExit::Clean);
         assert_eq!(run.results[0].status, "pushed");
-        assert_eq!(
-            git_out(&origin, &["rev-parse", "refs/heads/main"]),
-            local_head,
-            "the remote advanced to the local HEAD"
-        );
+        assert!(run.stdout.contains("push -> repo"));
+        assert!(run.stdout.contains("REPO"));
     }
 
     #[test]
-    fn push_all_dry_reports_would_push_without_moving_remote() {
-        let fixture = ManagedFixture::new("push-dry");
-        let (origin, _seed) = fixture.origin_with_seed();
-        let local = fixture.clone_repo(&origin, "repo");
+    fn run_pull_all_with_json_mode_prints_the_pascal_case_array() {
+        let fixture = ManagedFixture::new("pull-thin-json");
         fixture.write_manifest(&[("repo", "")]);
-        let remote_before = git_out(&origin, &["rev-parse", "refs/heads/main"]);
-        fixture.write_file_in(&local, "local.txt", "local\n");
-        git(&local, &["add", "-A"]);
-        git(&local, &["commit", "-m", "local change"]);
+        let backend = FakeBackend {
+            pull_response: Some(ok_envelope("pulled", SyncExitDto::Warn)),
+            ..Default::default()
+        };
 
-        let run = run_push_all(&ManagedOptions {
-            repos_file: Some(fixture.manifest.clone()),
-            home_dir: Some(fixture.home.clone()),
-            dry: true,
-            json: false,
-            color: false,
-            message_for_all: None,
-            interactive: false,
-        });
+        let run = run_pull_all_with(&backend, &options(&fixture, false, true));
 
-        assert_eq!(run.exit, ManagedExit::Clean);
-        assert_eq!(run.results[0].status, "would-push");
-        assert_eq!(
-            git_out(&origin, &["rev-parse", "refs/heads/main"]),
-            remote_before
-        );
+        assert_eq!(run.exit, ManagedExit::Warn);
+        assert!(run.stdout.contains("\"Name\": \"repo\""));
+        assert!(run.stdout.contains("\"Status\": \"pulled\""));
+    }
+
+    #[test]
+    fn a_daemon_error_outcome_becomes_stderr_and_a_fail_exit() {
+        let fixture = ManagedFixture::new("push-error-outcome");
+        fixture.write_manifest(&[("repo", "")]);
+        let backend = FakeBackend {
+            push_response: Some(Envelope {
+                outcome: Outcome::Error,
+                notes: vec![Note {
+                    level: NoteLevel::Error,
+                    text: "manifest exploded".into(),
+                }],
+                data: None,
+            }),
+            ..Default::default()
+        };
+
+        let run = run_push_all_with(&backend, &options(&fixture, false, false));
+
+        assert_eq!(run.exit, ManagedExit::Fail);
+        assert_eq!(run.stderr, "manifest exploded");
+    }
+
+    #[test]
+    fn an_unresolvable_manifest_never_reaches_the_backend() {
+        let fixture = ManagedFixture::new("push-no-manifest");
+        let nowhere = fixture.root.join("nowhere");
+        let mut options = options(&fixture, false, false);
+        options.repos_file = None;
+        options.home_dir = Some(nowhere.clone());
+        let backend = FakeBackend::default();
+        // Pin real HOME to the same empty dir: `resolve_repos_file`'s home-default
+        // fallback reads ambient HOME directly, not `options.home_dir`.
+        let _home = HomeOverride::set(&nowhere);
+
+        let run = run_push_all_with(&backend, &options);
+
+        assert_eq!(run.exit, ManagedExit::Fail);
+        assert!(run.stderr.contains("managed-repos manifest not found"));
     }
 }

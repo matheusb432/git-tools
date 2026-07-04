@@ -13,8 +13,12 @@ cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.1.0", features 
   "derive",
 ] }
 domain = { path = "../domain" }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 similar = "3.1.1"
 thiserror = "2.0.18"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
 
 [lints]
 workspace = true

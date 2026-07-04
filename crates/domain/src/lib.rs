@@ -3,3 +3,4 @@
 //! docs/planning/specs/2026-07-02-pragmatic-backend-architecture.md).
 
 pub mod diffs;
+pub mod managed;

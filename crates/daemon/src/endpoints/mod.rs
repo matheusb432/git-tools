@@ -2,4 +2,5 @@
 
 pub mod diffs;
 pub mod health;
+pub mod managed;
 pub mod shutdown;

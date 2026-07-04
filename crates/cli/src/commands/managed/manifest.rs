@@ -162,6 +162,18 @@ pub fn load_repos(options: &ManagedOptions) -> anyhow::Result<Vec<ManagedRepo>> 
     parse_manifest(&raw, &home_dir)
 }
 
+/// Resolves *which* manifest file and home dir to use, without reading or
+/// parsing it — that parsing now happens server-side via the `ManagedManifest`
+/// port. Kept CLI-side because resolution depends on the caller's shell cwd
+/// (env var, upward search, `sample_project`, home-dir default).
+pub(crate) fn resolve_manifest_location(
+    options: &ManagedOptions,
+) -> anyhow::Result<(PathBuf, PathBuf)> {
+    let repos_file = resolve_repos_file(options.repos_file.as_deref())?;
+    let home_dir = resolve_home_dir(options.home_dir.as_deref());
+    Ok((repos_file, home_dir))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;

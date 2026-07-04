@@ -2,6 +2,7 @@
 //! slices per feature. Depends only on `domain` and `cqrsy`.
 
 pub mod diffs;
+pub mod managed;
 pub mod ports;
 pub mod shared;
 

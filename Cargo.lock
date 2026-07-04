@@ -104,8 +104,10 @@ dependencies = [
  "anyhow",
  "cqrsy",
  "domain",
+ "futures-util",
  "similar",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]
@@ -2198,6 +2200,8 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "tempfile",
+ "tokio",
+ "toml 1.1.2+spec-1.1.0",
 ]
 
 [[package]]

@@ -19,7 +19,13 @@ use application::{
         render_merge_diff::{RenderMergeDiff, RenderMergeDiffHandler},
         render_squash_preview::{RenderSquashPreview, RenderSquashPreviewHandler},
     },
-    ports::{ArtifactStore, Clock, DiffSource, HtmlRenderer},
+    managed::{
+        pull_all::{PullAll, PullAllHandler},
+        push_all::{PushAll, PushAllHandler},
+    },
+    ports::{
+        ArtifactStore, Clock, DiffSource, HtmlRenderer, ManagedManifest, PushLedger, RemoteSync,
+    },
 };
 use axum::{
     Router,
@@ -37,12 +43,15 @@ use crate::{endpoints, lifecycle::ExeIdentity};
 /// to the `render_diff` field. Endpoints bound to `Dispatcher<RenderDiff>` dispatch through the
 /// facade without naming the field.
 #[derive(Clone, Mediator)]
-pub struct DaemonMediator<S, A, R, C>
+pub struct DaemonMediator<S, A, R, C, RS, ML, PL>
 where
     S: DiffSource + Clone + Send + Sync + 'static,
     A: ArtifactStore + Clone + Send + Sync + 'static,
     R: HtmlRenderer + Clone + Send + Sync + 'static,
     C: Clock + Clone + Send + Sync + 'static,
+    RS: RemoteSync + Clone + Send + Sync + 'static,
+    ML: ManagedManifest + Clone + Send + Sync + 'static,
+    PL: PushLedger + Clone + Send + Sync + 'static,
 {
     /// Render handler for `POST /diffs/render`.
     #[handles(RenderDiff)]
@@ -59,6 +68,12 @@ where
     /// Render handler for `POST /diffs/all`.
     #[handles(RenderDiffAll)]
     pub render_diff_all: RenderDiffAllHandler<S, A, R, C>,
+    /// Handler for `POST /managed/push-all`.
+    #[handles(PushAll)]
+    pub push_all: PushAllHandler<RS, ML, PL, C>,
+    /// Handler for `POST /managed/pull-all`.
+    #[handles(PullAll)]
+    pub pull_all: PullAllHandler<RS, ML>,
 }
 
 /// Cross-cutting daemon state: identity for the handshake, the shutdown
@@ -93,37 +108,47 @@ pub fn now_ms() -> u64 {
 
 /// Dependency bundle injected into handlers via axum's `State`/`FromRef` extractors.
 #[derive(Clone)]
-pub struct AppState<S, A, R, C>
+pub struct AppState<S, A, R, C, RS, ML, PL>
 where
     S: DiffSource + Clone + Send + Sync + 'static,
     A: ArtifactStore + Clone + Send + Sync + 'static,
     R: HtmlRenderer + Clone + Send + Sync + 'static,
     C: Clock + Clone + Send + Sync + 'static,
+    RS: RemoteSync + Clone + Send + Sync + 'static,
+    ML: ManagedManifest + Clone + Send + Sync + 'static,
+    PL: PushLedger + Clone + Send + Sync + 'static,
 {
-    pub mediator: DaemonMediator<S, A, R, C>,
+    pub mediator: DaemonMediator<S, A, R, C, RS, ML, PL>,
     pub shared: Arc<Shared>,
 }
 
-impl<S, A, R, C> FromRef<AppState<S, A, R, C>> for DaemonMediator<S, A, R, C>
+impl<S, A, R, C, RS, ML, PL> FromRef<AppState<S, A, R, C, RS, ML, PL>>
+    for DaemonMediator<S, A, R, C, RS, ML, PL>
 where
     S: DiffSource + Clone + Send + Sync + 'static,
     A: ArtifactStore + Clone + Send + Sync + 'static,
     R: HtmlRenderer + Clone + Send + Sync + 'static,
     C: Clock + Clone + Send + Sync + 'static,
+    RS: RemoteSync + Clone + Send + Sync + 'static,
+    ML: ManagedManifest + Clone + Send + Sync + 'static,
+    PL: PushLedger + Clone + Send + Sync + 'static,
 {
-    fn from_ref(s: &AppState<S, A, R, C>) -> Self {
+    fn from_ref(s: &AppState<S, A, R, C, RS, ML, PL>) -> Self {
         s.mediator.clone()
     }
 }
 
-impl<S, A, R, C> FromRef<AppState<S, A, R, C>> for Arc<Shared>
+impl<S, A, R, C, RS, ML, PL> FromRef<AppState<S, A, R, C, RS, ML, PL>> for Arc<Shared>
 where
     S: DiffSource + Clone + Send + Sync + 'static,
     A: ArtifactStore + Clone + Send + Sync + 'static,
     R: HtmlRenderer + Clone + Send + Sync + 'static,
     C: Clock + Clone + Send + Sync + 'static,
+    RS: RemoteSync + Clone + Send + Sync + 'static,
+    ML: ManagedManifest + Clone + Send + Sync + 'static,
+    PL: PushLedger + Clone + Send + Sync + 'static,
 {
-    fn from_ref(s: &AppState<S, A, R, C>) -> Self {
+    fn from_ref(s: &AppState<S, A, R, C, RS, ML, PL>) -> Self {
         s.shared.clone()
     }
 }
@@ -132,37 +157,50 @@ where
 ///
 /// The `/health` and `/shutdown` handlers extract only `State<Arc<Shared>>`, so they stay
 /// non-generic; every `/diffs/*` route is monomorphized on the mediator type.
-pub fn router<S, A, R, C>(state: AppState<S, A, R, C>) -> Router
+pub fn router<S, A, R, C, RS, ML, PL>(state: AppState<S, A, R, C, RS, ML, PL>) -> Router
 where
     S: DiffSource + Clone + Send + Sync + 'static,
     A: ArtifactStore + Clone + Send + Sync + 'static,
     R: HtmlRenderer + Clone + Send + Sync + 'static,
     C: Clock + Clone + Send + Sync + 'static,
+    RS: RemoteSync + Clone + Send + Sync + 'static,
+    ML: ManagedManifest + Clone + Send + Sync + 'static,
+    PL: PushLedger + Clone + Send + Sync + 'static,
 {
     // Explicit `Router<AppState<..>>` fixes S up front so axum can resolve the `FromRef` bounds
     // while routes are chained.
-    let routes: Router<AppState<S, A, R, C>> = Router::new()
+    let routes: Router<AppState<S, A, R, C, RS, ML, PL>> = Router::new()
         .route("/health", get(endpoints::health::handle))
         .route("/shutdown", post(endpoints::shutdown::handle))
         .route(
             "/diffs/render",
-            post(endpoints::diffs::render::handle::<DaemonMediator<S, A, R, C>>),
+            post(endpoints::diffs::render::handle::<DaemonMediator<S, A, R, C, RS, ML, PL>>),
         )
         .route(
             "/diffs/merge",
-            post(endpoints::diffs::merge::handle::<DaemonMediator<S, A, R, C>>),
+            post(endpoints::diffs::merge::handle::<DaemonMediator<S, A, R, C, RS, ML, PL>>),
         )
         .route(
             "/diffs/squash-preview",
-            post(endpoints::diffs::squash_preview::handle::<DaemonMediator<S, A, R, C>>),
+            post(
+                endpoints::diffs::squash_preview::handle::<DaemonMediator<S, A, R, C, RS, ML, PL>>,
+            ),
         )
         .route(
             "/diffs/subrepos",
-            post(endpoints::diffs::subrepos::handle::<DaemonMediator<S, A, R, C>>),
+            post(endpoints::diffs::subrepos::handle::<DaemonMediator<S, A, R, C, RS, ML, PL>>),
         )
         .route(
             "/diffs/all",
-            post(endpoints::diffs::all::handle::<DaemonMediator<S, A, R, C>>),
+            post(endpoints::diffs::all::handle::<DaemonMediator<S, A, R, C, RS, ML, PL>>),
+        )
+        .route(
+            "/managed/push-all",
+            post(endpoints::managed::push_all::handle::<DaemonMediator<S, A, R, C, RS, ML, PL>>),
+        )
+        .route(
+            "/managed/pull-all",
+            post(endpoints::managed::pull_all::handle::<DaemonMediator<S, A, R, C, RS, ML, PL>>),
         );
     routes.with_state(state)
 }

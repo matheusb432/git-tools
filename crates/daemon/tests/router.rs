@@ -10,7 +10,11 @@ use application::{
         render_diff_subrepos::RenderDiffSubreposHandler, render_merge_diff::RenderMergeDiffHandler,
         render_squash_preview::RenderSquashPreviewHandler,
     },
-    testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
+    managed::{pull_all::PullAllHandler, push_all::PushAllHandler},
+    testing::{
+        FakeDiffSource, FakeManagedManifest, FakePushLedger, FakeRemoteSync, FixedClock,
+        InMemoryArtifactStore, StubRenderer,
+    },
 };
 use axum::{
     Router,
@@ -80,6 +84,81 @@ fn app_with(source: FakeDiffSource) -> Fakes {
             renderer: StubRenderer,
             clock: FixedClock("2026-07-02T00:00:00Z".into()),
         },
+        push_all: PushAllHandler {
+            remote: FakeRemoteSync::default(),
+            manifest: FakeManagedManifest {
+                repos: Vec::new(),
+                error: None,
+            },
+            ledger: FakePushLedger::default(),
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        pull_all: PullAllHandler {
+            remote: FakeRemoteSync::default(),
+            manifest: FakeManagedManifest {
+                repos: Vec::new(),
+                error: None,
+            },
+        },
+    };
+    let router = daemon::state::router(AppState {
+        mediator,
+        shared: shared.clone(),
+    });
+    (router, shutdown_rx, shared)
+}
+
+fn app_with_managed(remote: FakeRemoteSync, manifest: FakeManagedManifest) -> Fakes {
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let shared = Arc::new(Shared {
+        identity: ExeIdentity {
+            exe_len: 4242,
+            exe_modified_ms: 111,
+        },
+        version: "9.9.9",
+        pid: 4242,
+        shutdown_tx,
+        last_activity_ms: AtomicU64::new(now_ms()),
+    });
+    let source = FakeDiffSource::default();
+    let mediator = DaemonMediator {
+        render_diff: RenderDiffHandler {
+            source: source.clone(),
+            store: InMemoryArtifactStore::default(),
+            renderer: StubRenderer,
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        render_merge_diff: RenderMergeDiffHandler {
+            source: source.clone(),
+            store: InMemoryArtifactStore::default(),
+            renderer: StubRenderer,
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        render_squash_preview: RenderSquashPreviewHandler {
+            source: source.clone(),
+            store: InMemoryArtifactStore::default(),
+            renderer: StubRenderer,
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        render_diff_subrepos: RenderDiffSubreposHandler {
+            source: source.clone(),
+            store: InMemoryArtifactStore::default(),
+            renderer: StubRenderer,
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        render_diff_all: RenderDiffAllHandler {
+            source,
+            store: InMemoryArtifactStore::default(),
+            renderer: StubRenderer,
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        push_all: PushAllHandler {
+            remote: remote.clone(),
+            manifest: manifest.clone(),
+            ledger: FakePushLedger::default(),
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
+        pull_all: PullAllHandler { remote, manifest },
     };
     let router = daemon::state::router(AppState {
         mediator,
@@ -346,4 +425,58 @@ async fn subrepos_with_nothing_to_show_is_a_200_empty_envelope() {
     let json = body_json(response).await;
     assert_eq!(json["outcome"], "empty");
     assert!(json["data"].is_null());
+}
+
+#[tokio::test]
+async fn managed_push_all_happy_path_is_a_200_ok_envelope_with_one_result() {
+    let manifest = FakeManagedManifest {
+        repos: vec![domain::managed::ManagedRepo {
+            name: "repo".into(),
+            path: "/repos/repo".into(),
+            remote: String::new(),
+        }],
+        error: None,
+    };
+    let remote = FakeRemoteSync {
+        present: false, // "skip" path — no real subprocess needed for a router test
+        ..Default::default()
+    };
+    let (app, _rx, _shared) = app_with_managed(remote, manifest);
+    let body = r#"{"repos_file":"/repos.toml","home_dir":"/home","dry":false}"#;
+
+    let response = post(app, "/managed/push-all", body).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "ok");
+    let results = json["data"]["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["Status"], "skip");
+}
+
+#[tokio::test]
+async fn managed_pull_all_happy_path_is_a_200_ok_envelope_with_one_result() {
+    let manifest = FakeManagedManifest {
+        repos: vec![domain::managed::ManagedRepo {
+            name: "repo".into(),
+            path: "/repos/repo".into(),
+            remote: String::new(),
+        }],
+        error: None,
+    };
+    let remote = FakeRemoteSync {
+        present: false,
+        ..Default::default()
+    };
+    let (app, _rx, _shared) = app_with_managed(remote, manifest);
+    let body = r#"{"repos_file":"/repos.toml","home_dir":"/home","dry":false}"#;
+
+    let response = post(app, "/managed/pull-all", body).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "ok");
+    let results = json["data"]["results"].as_array().unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0]["Status"], "skip");
 }

@@ -4,10 +4,14 @@
 
 use std::{
     collections::HashMap,
+    future::Future,
     path::{Path, PathBuf},
 };
 
-use domain::diffs::{Commit, DiffKind, View};
+use domain::{
+    diffs::{Commit, DiffKind, View},
+    managed::ManagedRepo,
+};
 
 /// Everything the store needs to record one rendered artifact. `generated_at` is
 /// supplied by the caller (via [`Clock`]) so placement stays deterministic in tests.
@@ -116,4 +120,107 @@ pub trait HtmlRenderer: Send + Sync {
 pub trait Clock: Send + Sync {
     /// The current instant as a strict ISO-8601 timestamp string.
     fn now_iso(&self) -> String;
+}
+
+/// One captured git subprocess result: exit success plus combined stdout+stderr.
+/// Mirrors the CLI's retired `managed::git_capture::GitCapture::{success, combined}`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SyncOutput {
+    pub success: bool,
+    pub combined: String,
+}
+
+/// Async git remote operations behind push-all/pull-all. Every method mirrors exactly
+/// one git invocation the CLI's retired `push_pull.rs` shelled out to; fallback rules
+/// (empty branch on failure, treat a rev-list error as zero, etc.) stay in the
+/// `managed` slices, not here — same split as [`DiffSource`].
+pub trait RemoteSync: Send + Sync {
+    /// Whether `repo`'s `.git` directory exists on this machine (pure fs check).
+    fn repo_present(&self, repo: &Path) -> bool;
+    /// `git rev-parse --abbrev-ref HEAD`.
+    fn current_branch(&self, repo: &Path) -> impl Future<Output = anyhow::Result<String>> + Send;
+    /// `git remote get-url <remote>`; `Ok(true)` iff it resolves.
+    fn has_remote(
+        &self,
+        repo: &Path,
+        remote: &str,
+    ) -> impl Future<Output = anyhow::Result<bool>> + Send;
+    /// `git push <remote> <branch> [--dry-run]`.
+    fn push(
+        &self,
+        repo: &Path,
+        remote: &str,
+        branch: &str,
+        dry: bool,
+    ) -> impl Future<Output = anyhow::Result<SyncOutput>> + Send;
+    /// `git fetch <remote>`.
+    fn fetch(
+        &self,
+        repo: &Path,
+        remote: &str,
+    ) -> impl Future<Output = anyhow::Result<SyncOutput>> + Send;
+    /// `git rev-parse --abbrev-ref --symbolic-full-name @{u}`; `Ok(None)` if no upstream.
+    fn upstream_ref(
+        &self,
+        repo: &Path,
+    ) -> impl Future<Output = anyhow::Result<Option<String>>> + Send;
+    /// `git rev-parse --verify --quiet <remote_ref>`; `Ok(true)` iff it resolves.
+    fn verify_ref(
+        &self,
+        repo: &Path,
+        remote_ref: &str,
+    ) -> impl Future<Output = anyhow::Result<bool>> + Send;
+    /// `git rev-list --count <range>`.
+    fn rev_list_count(
+        &self,
+        repo: &Path,
+        range: &str,
+    ) -> impl Future<Output = anyhow::Result<usize>> + Send;
+    /// `git rev-list --count --left-right <range>` -> `(behind, ahead)`.
+    fn rev_list_left_right(
+        &self,
+        repo: &Path,
+        range: &str,
+    ) -> impl Future<Output = anyhow::Result<(usize, usize)>> + Send;
+    /// `git merge --ff-only <remote_ref>`.
+    fn merge_ff_only(
+        &self,
+        repo: &Path,
+        remote_ref: &str,
+    ) -> impl Future<Output = anyhow::Result<SyncOutput>> + Send;
+}
+
+/// Parses an already-resolved manifest file into the managed repo list. *Where*
+/// the file lives (env var, upward search, `sample_project`, home-dir default) stays a
+/// CLI concern — it depends on the caller's shell cwd, same reasoning as
+/// merge-diff's cwd-absolute-resolution rule.
+pub trait ManagedManifest: Send + Sync {
+    fn load(
+        &self,
+        repos_file: &Path,
+        home_dir: &Path,
+    ) -> impl Future<Output = anyhow::Result<Vec<ManagedRepo>>> + Send;
+}
+
+/// One recorded push-ledger fact: the ahead-count observed and when.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LedgerEntry {
+    pub ahead: usize,
+    pub checked_at: String,
+}
+
+/// The push-ledger seam. No real storage yet — `record`/`refresh` are no-ops and
+/// `last_known` always answers `None` behind the shipped adapter; a future effort
+/// gives this a real backing store and teaches `push_all` to consult `last_known`
+/// to skip already-synced repos without a network round trip.
+pub trait PushLedger: Send + Sync {
+    fn record(
+        &self,
+        repo_name: &str,
+        ahead: usize,
+        checked_at: &str,
+    ) -> impl Future<Output = ()> + Send;
+    fn last_known(&self, repo_name: &str) -> impl Future<Output = Option<LedgerEntry>> + Send;
+    /// Periodic refresh hook the daemon's background worker calls.
+    fn refresh(&self) -> impl Future<Output = ()> + Send;
 }

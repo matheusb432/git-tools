@@ -41,40 +41,6 @@ impl ManagedFixture {
         repo
     }
 
-    pub(super) fn origin_with_seed(&self) -> (PathBuf, PathBuf) {
-        let origin = self.root.join("origin.git");
-        cmd(
-            "git",
-            &[
-                "init",
-                "--bare",
-                "--initial-branch=main",
-                origin.to_str().unwrap(),
-            ],
-        );
-        let seed = self.root.join("seed");
-        cmd(
-            "git",
-            &["clone", origin.to_str().unwrap(), seed.to_str().unwrap()],
-        );
-        configure_repo(&seed);
-        self.write_file_in(&seed, "README.md", "base\n");
-        git(&seed, &["add", "-A"]);
-        git(&seed, &["commit", "-m", "base"]);
-        git(&seed, &["push", "-u", "origin", "main"]);
-        (origin, seed)
-    }
-
-    pub(super) fn clone_repo(&self, origin: &Path, name: &str) -> PathBuf {
-        let repo = self.home.join(name);
-        cmd(
-            "git",
-            &["clone", origin.to_str().unwrap(), repo.to_str().unwrap()],
-        );
-        configure_repo(&repo);
-        repo
-    }
-
     pub(super) fn write_manifest(&self, entries: &[(&str, &str)]) {
         let text = entries
             .iter()
