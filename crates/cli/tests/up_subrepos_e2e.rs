@@ -93,6 +93,9 @@ fn up_subrepos_yes_pushes_root_and_nested_repos() {
         .assert()
         .success()
         .stdout(contains("pushed 3 repo(s)"))
+        // The already-synced repo is spotted at plan time (local `@{u}..HEAD` == 0) and
+        // reported as synced in the confirmation — never pushed over the network.
+        .stdout(contains("already synced"))
         .stdout(contains("already up to date"));
 
     // Every remote now matches its repo's HEAD — the unpushed commits landed.

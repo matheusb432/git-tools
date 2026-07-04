@@ -109,6 +109,16 @@ fn push_one(repo: &ManagedRepo, dry: bool) -> PushPullResult {
         }
     }
 
+    // Reuse the `gtl ls` sync check: a branch tracking an upstream with no unpushed commits
+    // (`@{u}..HEAD == 0`) is already synced, so skip the network push entirely. Push-all then
+    // scales with the repos that actually have work to push, not the manifest's length. A
+    // branch with no upstream falls through to the push below (unchanged behavior).
+    if let Some((_, 0)) = super::status::upstream_ahead(&repo.path) {
+        result.status = "up-to-date".to_string();
+        result.detail = "up to date (already synced)".to_string();
+        return result;
+    }
+
     let mut args = vec!["push", "origin", branch.as_str()];
     if dry {
         args.push("--dry-run");
@@ -421,6 +431,60 @@ mod tests {
         assert_eq!(run.exit, ManagedExit::Fail);
         assert_eq!(run.results[0].status, "fail");
         assert_eq!(git_out(&local, &["rev-parse", "HEAD"]), before);
+    }
+
+    #[test]
+    fn push_all_skips_synced_repos_without_touching_the_remote() {
+        let fixture = ManagedFixture::new("push-synced");
+        let (origin, _seed) = fixture.origin_with_seed();
+        let _local = fixture.clone_repo(&origin, "repo"); // synced with origin/main
+        fixture.write_manifest(&[("repo", "")]);
+        // Delete the remote entirely: any real `git push` would now fail. Only a plan-time
+        // synced-skip — the local `@{u}..HEAD == 0` check `gtl ls` uses — avoids the network.
+        std::fs::remove_dir_all(&origin).unwrap();
+
+        let run = run_push_all(&ManagedOptions {
+            repos_file: Some(fixture.manifest.clone()),
+            home_dir: Some(fixture.home.clone()),
+            dry: false,
+            json: false,
+            color: false,
+            message_for_all: None,
+            interactive: false,
+        });
+
+        assert_eq!(run.exit, ManagedExit::Clean);
+        assert_eq!(run.results[0].status, "up-to-date");
+    }
+
+    #[test]
+    fn push_all_still_pushes_repos_with_unpushed_commits() {
+        let fixture = ManagedFixture::new("push-ahead");
+        let (origin, _seed) = fixture.origin_with_seed();
+        let local = fixture.clone_repo(&origin, "repo");
+        fixture.write_manifest(&[("repo", "")]);
+        fixture.write_file_in(&local, "local.txt", "local\n");
+        git(&local, &["add", "-A"]);
+        git(&local, &["commit", "-m", "local change"]);
+        let local_head = git_out(&local, &["rev-parse", "HEAD"]);
+
+        let run = run_push_all(&ManagedOptions {
+            repos_file: Some(fixture.manifest.clone()),
+            home_dir: Some(fixture.home.clone()),
+            dry: false,
+            json: false,
+            color: false,
+            message_for_all: None,
+            interactive: false,
+        });
+
+        assert_eq!(run.exit, ManagedExit::Clean);
+        assert_eq!(run.results[0].status, "pushed");
+        assert_eq!(
+            git_out(&origin, &["rev-parse", "refs/heads/main"]),
+            local_head,
+            "the remote advanced to the local HEAD"
+        );
     }
 
     #[test]

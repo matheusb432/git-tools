@@ -2,10 +2,13 @@
 //!
 //! The sibling of [`crate::commands::diff_subrepos`] for pushing: discover every repo under
 //! a root (reusing [`crate::commands::discover`]), resolve each one's push destination from
-//! *local* config only (no fetch), confirm, then push. A repo with no upstream — or a
+//! *local* refs only (no fetch), confirm, then push. A repo with no upstream — or a
 //! detached HEAD — carries a [`Dest::Skip`] reason instead of a push target, so an
 //! un-pushable repo is unrepresentable as a push and is reported, never silently dropped.
-//! Plan/apply split mirrors [`crate::commands::prune`].
+//! A branch already synced with its upstream (the local `@{u}..HEAD` count is `0`, the same
+//! check `gtl ls` reports) becomes a [`Dest::Synced`], so the flow scales with repos that
+//! actually have unpushed commits — synced repos never reach the network. Plan/apply split
+//! mirrors [`crate::commands::prune`].
 
 use std::path::{Path, PathBuf};
 
@@ -14,12 +17,16 @@ use crate::commands::{
     squash_local::{GitOutput, GitRunner},
 };
 
-/// Where a discovered repo's current branch would be pushed, resolved from local config.
-/// Either a concrete branch→remote push, or a reason the repo is skipped — never both.
+/// Where a discovered repo's current branch would be pushed, resolved from local refs.
+/// A concrete branch→remote push, an already-synced branch with nothing to push, or a
+/// reason the repo is skipped — exactly one, never a combination.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Dest {
-    /// The current branch and the remote its upstream tracks.
+    /// The current branch has unpushed commits and the remote its upstream tracks.
     Push { branch: String, remote: String },
+    /// The branch has an upstream but no unpushed commits (`@{u}..HEAD` is empty), so a
+    /// push would be a network no-op — the same "already synced" state `gtl ls` reports.
+    Synced { branch: String, remote: String },
     /// The repo cannot be pushed (no upstream, or detached HEAD); the string says why.
     Skip { reason: String },
 }
@@ -91,7 +98,8 @@ fn capture(runner: &impl GitRunner, repo: &Path, args: &[&str]) -> Option<String
 }
 
 /// Resolves one repo's push destination from local refs only — never fetches. A detached
-/// HEAD or a branch with no `branch.<name>.remote` becomes a [`Dest::Skip`].
+/// HEAD or a branch with no `branch.<name>.remote` becomes a [`Dest::Skip`]; a branch with
+/// no unpushed commits becomes a [`Dest::Synced`] so the push is skipped entirely.
 pub fn inspect(runner: &impl GitRunner, path: &Path, label: String) -> RepoTarget {
     let dest = match capture(runner, path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
         Some(branch) if branch != "HEAD" => {
@@ -100,6 +108,7 @@ pub fn inspect(runner: &impl GitRunner, path: &Path, label: String) -> RepoTarge
                 path,
                 &["config", &format!("branch.{branch}.remote")],
             ) {
+                Some(remote) if is_synced(runner, path) => Dest::Synced { branch, remote },
                 Some(remote) => Dest::Push { branch, remote },
                 None => Dest::Skip {
                     reason: "no upstream tracking branch".to_string(),
@@ -115,6 +124,16 @@ pub fn inspect(runner: &impl GitRunner, path: &Path, label: String) -> RepoTarge
         label,
         dest,
     }
+}
+
+/// Whether the current branch has no unpushed commits — the local `@{u}..HEAD` count is
+/// exactly `0`. This mirrors the ahead-count `gtl ls`/`status` and the sibling `diff
+/// subrepos` use to spot synced repos, and stays purely local (no fetch). An unavailable
+/// count (e.g. no `@{u}` merge ref) is never read as synced — we fall back to pushing.
+fn is_synced(runner: &impl GitRunner, path: &Path) -> bool {
+    capture(runner, path, &["rev-list", "--count", "@{u}..HEAD"])
+        .and_then(|count| count.parse::<usize>().ok())
+        == Some(0)
 }
 
 /// Discovers every git repo under `root` and resolves each one's push destination.
@@ -150,6 +169,12 @@ pub fn confirmation(root: &Path, targets: &[RepoTarget]) -> String {
         match &target.dest {
             Dest::Push { branch, remote } => {
                 out.push_str(&format!("\n  {}  ({branch} → {remote})", target.label));
+            }
+            Dest::Synced { branch, remote } => {
+                out.push_str(&format!(
+                    "\n  {}  ({branch} → {remote}, already synced)",
+                    target.label
+                ));
             }
             Dest::Skip { reason } => {
                 out.push_str(&format!("\n  {}  (skip — {reason})", target.label));
@@ -209,6 +234,7 @@ pub fn apply(runner: &impl GitRunner, targets: &[RepoTarget]) -> PushAllResult {
 fn push_one(runner: &impl GitRunner, target: &RepoTarget) -> RepoOutcome {
     let (branch, remote) = match &target.dest {
         Dest::Skip { reason } => return RepoOutcome::Skipped(reason.clone()),
+        Dest::Synced { .. } => return RepoOutcome::UpToDate,
         Dest::Push { branch, remote } => (branch, remote),
     };
 
@@ -296,8 +322,12 @@ mod tests {
     // --- inspect ------------------------------------------------------------
 
     #[test]
-    fn inspect_resolves_branch_and_remote() {
-        let runner = FakeRunner::new(vec![FakeRunner::ok("main\n"), FakeRunner::ok("origin\n")]);
+    fn inspect_resolves_push_when_branch_is_ahead() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok("main\n"),
+            FakeRunner::ok("origin\n"),
+            FakeRunner::ok("2\n"), // rev-list --count @{u}..HEAD — two unpushed commits
+        ]);
         let target = inspect(&runner, Path::new("/repos/api"), "api".into());
         assert_eq!(
             target.dest,
@@ -311,7 +341,44 @@ mod tests {
             vec![
                 vec!["rev-parse", "--abbrev-ref", "HEAD"],
                 vec!["config", "branch.main.remote"],
+                vec!["rev-list", "--count", "@{u}..HEAD"],
             ]
+        );
+    }
+
+    #[test]
+    fn inspect_marks_synced_when_no_unpushed_commits() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok("main\n"),
+            FakeRunner::ok("origin\n"),
+            FakeRunner::ok("0\n"), // rev-list --count @{u}..HEAD — nothing to push
+        ]);
+        let target = inspect(&runner, Path::new("/repos/api"), "api".into());
+        assert_eq!(
+            target.dest,
+            Dest::Synced {
+                branch: "main".into(),
+                remote: "origin".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn inspect_pushes_when_ahead_count_is_unavailable() {
+        // A failed `rev-list --count` must never read as "0 / already synced" — fall back to
+        // attempting the push, exactly as the sibling checks do (sw, diff subrepos).
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok("main\n"),
+            FakeRunner::ok("origin\n"),
+            FakeRunner::exit_err("", 1),
+        ]);
+        let target = inspect(&runner, Path::new("/repos/api"), "api".into());
+        assert_eq!(
+            target.dest,
+            Dest::Push {
+                branch: "main".into(),
+                remote: "origin".into(),
+            }
         );
     }
 
@@ -358,6 +425,23 @@ mod tests {
         assert!(text.contains("api  (main → origin)"), "{text}");
         assert!(
             text.contains("web  (skip — no upstream tracking branch)"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn confirmation_marks_already_synced_repos() {
+        let targets = vec![RepoTarget {
+            path: PathBuf::from("/repos/api"),
+            label: "api".into(),
+            dest: Dest::Synced {
+                branch: "main".into(),
+                remote: "origin".into(),
+            },
+        }];
+        let text = confirmation(Path::new("/repos"), &targets);
+        assert!(
+            text.contains("api  (main → origin, already synced)"),
             "{text}"
         );
     }
@@ -417,6 +501,26 @@ mod tests {
         assert!(
             runner.arg_lists().is_empty(),
             "skipped repos never call git"
+        );
+    }
+
+    #[test]
+    fn apply_reports_synced_targets_as_up_to_date_without_calling_git() {
+        let runner = FakeRunner::new(vec![]);
+        let targets = vec![RepoTarget {
+            path: PathBuf::from("/repos/api"),
+            label: "api".into(),
+            dest: Dest::Synced {
+                branch: "main".into(),
+                remote: "origin".into(),
+            },
+        }];
+        let result = apply(&runner, &targets);
+        assert_eq!(result.status, Status::Ok);
+        assert_eq!(result.reports[0].outcome, RepoOutcome::UpToDate);
+        assert!(
+            runner.arg_lists().is_empty(),
+            "already-synced repos never call git"
         );
     }
 

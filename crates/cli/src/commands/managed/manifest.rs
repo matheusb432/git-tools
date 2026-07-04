@@ -1,6 +1,9 @@
 //! Loading and resolving the `repos.toml` managed-repos manifest.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::{Context, anyhow};
 use serde::Deserialize;
@@ -69,6 +72,7 @@ fn resolve_repos_file(override_file: Option<&Path>) -> anyhow::Result<PathBuf> {
         env_file.as_deref(),
         &current_dir,
         home_dir.as_deref(),
+        || sample_project_manifest_path("sample_project"),
     )
 }
 
@@ -84,6 +88,7 @@ fn resolve_repos_file_from_sources(
     env_file: Option<&Path>,
     current_dir: &Path,
     home_dir: Option<&Path>,
+    sample_project_manifest: impl FnOnce() -> Option<PathBuf>,
 ) -> anyhow::Result<PathBuf> {
     if let Some(file) = override_file {
         return Ok(file.to_path_buf());
@@ -93,6 +98,9 @@ fn resolve_repos_file_from_sources(
     }
     if let Some(found) = find_upward_config(current_dir) {
         return Ok(found);
+    }
+    if let Some(file) = sample_project_manifest() {
+        return Ok(file);
     }
     if let Some(home_dir) = home_dir {
         let candidate = home_default_repos_file(home_dir);
@@ -125,6 +133,25 @@ fn home_default_repos_file(home_dir: &Path) -> PathBuf {
         .join("self")
         .join("sample_project")
         .join("repos.toml")
+}
+
+/// Best-effort: asks `sample_project repos manifest-path` for the fleet's resolved manifest
+/// location, so a sample_project relocation doesn't also require updating the literal in
+/// `home_default_repos_file` below. Returns `None` on any failure (binary missing,
+/// non-zero exit, unreadable output, or a printed path that doesn't exist) — this is
+/// always a soft preference, never a hard dependency; `home_default_repos_file` remains
+/// the true offline last resort for a fresh clone where `sample_project` isn't installed yet.
+pub fn sample_project_manifest_path(binary: &str) -> Option<PathBuf> {
+    let output = Command::new(binary)
+        .args(["repos", "manifest-path"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let path = PathBuf::from(text.trim());
+    path.exists().then_some(path)
 }
 
 pub fn load_repos(options: &ManagedOptions) -> anyhow::Result<Vec<ManagedRepo>> {
@@ -179,17 +206,25 @@ mod tests {
                 Some(&env_file),
                 &cwd,
                 Some(&fixture.home),
+                || None,
             )
             .unwrap(),
             explicit
         );
         assert_eq!(
-            resolve_repos_file_from_sources(None, Some(&env_file), &cwd, Some(&fixture.home))
-                .unwrap(),
+            resolve_repos_file_from_sources(
+                None,
+                Some(&env_file),
+                &cwd,
+                Some(&fixture.home),
+                || None
+            )
+            .unwrap(),
             env_file
         );
         assert_eq!(
-            resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home)).unwrap(),
+            resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home), || None)
+                .unwrap(),
             upward
         );
     }
@@ -202,7 +237,8 @@ mod tests {
         touch(&home_default);
 
         assert_eq!(
-            resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home)).unwrap(),
+            resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home), || None)
+                .unwrap(),
             home_default
         );
     }
@@ -212,7 +248,7 @@ mod tests {
         let fixture = ManagedFixture::new("resolve-missing");
         let cwd = fixture.root.join("elsewhere").join("repo");
 
-        let err = resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home))
+        let err = resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home), || None)
             .expect_err("no manifest should be resolvable");
         let message = err.to_string();
         assert!(
@@ -220,6 +256,24 @@ mod tests {
                 && message.contains("GIT_TOOLS_MANAGED_REPOS_FILE")
                 && message.contains("self/sample_project"),
             "error should point at supported manifest sources, got: {message}"
+        );
+    }
+
+    #[test]
+    fn resolve_repos_file_from_sources_prefers_sample_project_manifest_over_home_default() {
+        let fixture = ManagedFixture::new("resolve-prefers-sample_project");
+        let cwd = fixture.root.join("elsewhere").join("repo");
+        let home_default = fixture.home.join("self/sample_project/repos.toml");
+        let sample_project_answer = fixture.root.join("live/repos.toml");
+        touch(&home_default);
+        touch(&sample_project_answer);
+
+        assert_eq!(
+            resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home), || Some(
+                sample_project_answer.clone()
+            ))
+            .unwrap(),
+            sample_project_answer
         );
     }
 

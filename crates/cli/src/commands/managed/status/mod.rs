@@ -161,24 +161,15 @@ fn status_one(repo: &ManagedRepo) -> StatusResult {
         result.branch = "detached".to_string();
         parts.push("detached".to_string());
     } else {
-        result.upstream = match git_capture(
-            &repo.path,
-            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-        ) {
-            Ok(output) if output.success() => output.stdout.trim().to_string(),
-            _ => String::new(),
-        };
-
-        if result.upstream.is_empty() {
-            parts.push("no-upstream".to_string());
-        } else {
-            result.ahead = match git_capture(&repo.path, &["rev-list", "--count", "@{u}..HEAD"]) {
-                Ok(output) if output.success() => output.stdout.trim().parse().unwrap_or(0),
-                _ => 0,
-            };
-            if result.ahead > 0 {
-                parts.push(format!("⇡{}", result.ahead));
+        match upstream_ahead(&repo.path) {
+            Some((upstream, ahead)) => {
+                result.upstream = upstream;
+                result.ahead = ahead;
+                if ahead > 0 {
+                    parts.push(format!("⇡{ahead}"));
+                }
             }
+            None => parts.push("no-upstream".to_string()),
         }
     }
 
@@ -206,6 +197,27 @@ fn status_one(repo: &ManagedRepo) -> StatusResult {
         "pending".to_string()
     };
     result
+}
+
+/// The current branch's upstream tracking ref and how many commits it is ahead of that ref
+/// (`@{u}..HEAD`) — the two sync facts `gtl ls`/`status` report. `None` when the branch has
+/// no upstream. Purely local (no fetch); shared with `push-all` so it skips repos already
+/// synced with their remote instead of pushing every one.
+pub(in crate::commands::managed) fn upstream_ahead(repo: &Path) -> Option<(String, usize)> {
+    let upstream = match git_capture(
+        repo,
+        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    ) {
+        Ok(output) if output.success() && !output.stdout.trim().is_empty() => {
+            output.stdout.trim().to_string()
+        }
+        _ => return None,
+    };
+    let ahead = match git_capture(repo, &["rev-list", "--count", "@{u}..HEAD"]) {
+        Ok(output) if output.success() => output.stdout.trim().parse().unwrap_or(0),
+        _ => 0,
+    };
+    Some((upstream, ahead))
 }
 
 fn format_status(json: bool, color: bool, results: &[StatusResult]) -> String {
