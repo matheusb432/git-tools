@@ -4,6 +4,11 @@ mod diffs;
 mod history;
 mod protocol;
 
+use application::{
+    history::list::{ListHistory, ListHistoryHandler},
+    ports::ArtifactStore,
+};
+use cqrsy::Dispatcher;
 use diffs::{PendingDiffs, diff_ref_from_argv};
 use tauri::{
     Emitter, Manager, WindowEvent,
@@ -11,6 +16,15 @@ use tauri::{
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
 };
+
+/// Desktop's in-process dispatch facade — one handler field per operation.
+/// `#[derive(cqrsy::Mediator)]` implements `Dispatcher<ListHistory>`, forwarding
+/// to the `list_history` field, exactly like `DaemonMediator` in `crates/daemon`.
+#[derive(Clone, cqrsy::Mediator)]
+struct DesktopMediator<A: ArtifactStore + Clone + Send + Sync + 'static> {
+    #[handles(ListHistory)]
+    list_history: ListHistoryHandler<A>,
+}
 
 /// Brings the main window to the foreground — even over a focused fullscreen app.
 ///
@@ -58,16 +72,26 @@ fn drain_pending_diffs(state: tauri::State<'_, PendingDiffs>) -> Vec<String> {
 
 /// Return all stored diff previews sorted newest-first, for the history panel.
 #[tauri::command]
-fn list_history() -> Vec<history::HistoryEntry> {
-    match protocol::store_root() {
-        Some(root) => history::entries_from_store(&root),
-        None => Vec::new(),
-    }
+fn list_history(
+    state: tauri::State<'_, DesktopMediator<infra::artifact_store::StoreArtifacts>>,
+) -> Vec<history::HistoryEntry> {
+    let Some(store_root) = protocol::store_root() else {
+        return Vec::new();
+    };
+    state
+        .dispatch_sync(ListHistory { store_root })
+        .map(|resp| resp.entries.into_iter().map(history::to_entry).collect())
+        .unwrap_or_default()
 }
 
 /// Build and run the Tauri application. Called by `main.rs`.
 pub fn run() {
     tauri::Builder::default()
+        .manage(DesktopMediator {
+            list_history: ListHistoryHandler {
+                store: infra::artifact_store::StoreArtifacts,
+            },
+        })
         .manage(PendingDiffs::default())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // Second launch: queue its diff, raise the window, tell the frontend.
@@ -225,5 +249,42 @@ mod tests {
 
         // SAFETY: guarded by ENV_LOCK; no other thread touches this var concurrently.
         unsafe { std::env::remove_var("GIT_TOOLS_DATA_DIR") };
+    }
+
+    #[test]
+    fn desktop_mediator_dispatches_list_history_end_to_end() {
+        use application::{
+            history::list::ListHistory, ports::HistoryRecord, testing::InMemoryArtifactStore,
+        };
+        use domain::diffs::DiffKind;
+
+        let record = HistoryRecord {
+            repo_id: "repo1".into(),
+            repo_name: "n".into(),
+            title: "t".into(),
+            range_label: "x".into(),
+            head_committed_at: "2026-01-01T00:00:00Z".into(),
+            generated_at: "2026-01-01T00:00:00Z".into(),
+            content_hash: "h".into(),
+            kind: DiffKind::TwoDot,
+            byte_size: 0,
+        };
+        let mediator = DesktopMediator {
+            list_history: ListHistoryHandler {
+                store: InMemoryArtifactStore {
+                    history: vec![record.clone()],
+                    ..Default::default()
+                },
+            },
+        };
+
+        let response = mediator
+            .dispatch_sync(ListHistory {
+                store_root: "/store".into(),
+            })
+            .expect("dispatch succeeds");
+
+        assert_eq!(response.entries.len(), 1);
+        assert_eq!(response.entries[0].repo_id, "repo1");
     }
 }

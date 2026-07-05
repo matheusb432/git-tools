@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use application::ports::{ArtifactMeta, ArtifactStore, PlacedArtifact};
+use application::ports::{ArtifactMeta, ArtifactStore, HistoryRecord, PlacedArtifact};
 use domain::diffs::DiffKind;
 
 /// The default store adapter: places artifacts into and looks them up out of the
@@ -60,5 +60,58 @@ impl ArtifactStore for StoreArtifacts {
             &canonical,
         );
         crate::store::lookup_by_range(store_root, &repo_id, kind, base_sha, head_sha)
+    }
+
+    fn list_history(&self, store_root: &Path) -> anyhow::Result<Vec<HistoryRecord>> {
+        let sidecars = crate::store::list_history_with_hash(store_root)?;
+        Ok(sidecars
+            .into_iter()
+            .map(|(content_hash, sidecar)| HistoryRecord {
+                repo_id: sidecar.repo_id,
+                repo_name: sidecar.repo_name,
+                title: sidecar.title,
+                range_label: sidecar.range_label,
+                head_committed_at: sidecar.head_committed_at,
+                generated_at: sidecar.generated_at,
+                content_hash,
+                kind: sidecar.kind,
+                byte_size: sidecar.byte_size,
+            })
+            .collect())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::Sidecar;
+
+    #[test]
+    fn list_history_reads_back_placed_sidecars() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = Sidecar {
+            repo_id: "repo123".into(),
+            repo_name: "git-tools".into(),
+            repo_root: "/r".into(),
+            kind: DiffKind::TwoDot,
+            base_sha: "aaa".into(),
+            head_sha: "bbb".into(),
+            range_label: "main..HEAD".into(),
+            head_committed_at: "2026-07-03T00:00:00Z".into(),
+            generated_at: "2026-07-03T00:01:00Z".into(),
+            title: "diff".into(),
+            byte_size: 42,
+        };
+        let placed = crate::store::place(dir.path(), "repo123", "<html></html>", &sidecar).unwrap();
+        let expected_hash = placed.path.file_stem().unwrap().to_str().unwrap();
+
+        let entries = StoreArtifacts.list_history(dir.path()).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content_hash, expected_hash);
+        assert_eq!(entries[0].repo_id, "repo123");
+        assert_eq!(entries[0].repo_name, "git-tools");
+        assert_eq!(entries[0].kind, DiffKind::TwoDot);
+        assert_eq!(entries[0].byte_size, 42);
     }
 }

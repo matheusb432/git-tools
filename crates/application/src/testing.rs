@@ -13,8 +13,8 @@ use domain::{
 };
 
 use crate::ports::{
-    ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, LedgerEntry, ManagedManifest,
-    PlacedArtifact, PushLedger, RemoteSync, SyncOutput,
+    ArtifactMeta, ArtifactStore, Clock, DiffSource, HistoryRecord, HtmlRenderer, LedgerEntry,
+    ManagedManifest, PlacedArtifact, PushLedger, RemoteSync, SyncOutput,
 };
 
 /// Scripted `DiffSource`: every field is what the corresponding method returns.
@@ -134,6 +134,7 @@ impl DiffSource for FakeDiffSource {
 pub struct InMemoryArtifactStore {
     pub placed: Arc<Mutex<Vec<(ArtifactMeta, String)>>>,
     pub range_hits: Arc<Mutex<HashMap<(DiffKind, String, String), PathBuf>>>,
+    pub history: Vec<HistoryRecord>,
 }
 
 impl ArtifactStore for InMemoryArtifactStore {
@@ -166,6 +167,9 @@ impl ArtifactStore for InMemoryArtifactStore {
             .unwrap()
             .get(&(kind, base_sha.to_string(), head_sha.to_string()))
             .cloned())
+    }
+    fn list_history(&self, _store_root: &Path) -> anyhow::Result<Vec<HistoryRecord>> {
+        Ok(self.history.clone())
     }
 }
 

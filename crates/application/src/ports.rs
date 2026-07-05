@@ -35,6 +35,21 @@ pub struct PlacedArtifact {
     pub reused: bool,
 }
 
+/// One row from the content-addressed store's history listing — the port-facing
+/// mirror of infra's private `Sidecar`, same reasoning as `ArtifactMeta`/`place`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryRecord {
+    pub repo_id: String,
+    pub repo_name: String,
+    pub title: String,
+    pub range_label: String,
+    pub head_committed_at: String,
+    pub generated_at: String,
+    pub content_hash: String,
+    pub kind: DiffKind,
+    pub byte_size: u64,
+}
+
 /// Read-only git access for the diff engine. Every method shells out to git in the
 /// real adapter; the fake scripts each return value.
 pub trait DiffSource: Send + Sync {
@@ -106,6 +121,9 @@ pub trait ArtifactStore: Send + Sync {
         base_sha: &str,
         head_sha: &str,
     ) -> anyhow::Result<Option<PathBuf>>;
+    /// Every recorded artifact under `store_root`, across all repos, unordered
+    /// (the `history/list` handler owns sort order).
+    fn list_history(&self, store_root: &Path) -> anyhow::Result<Vec<HistoryRecord>>;
 }
 
 /// Renders a diff [`View`] to a self-contained HTML document.

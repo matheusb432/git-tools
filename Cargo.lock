@@ -1053,7 +1053,10 @@ dependencies = [
 name = "desktop"
 version = "0.1.0"
 dependencies = [
+ "application",
+ "cqrsy",
  "directories",
+ "domain",
  "gtl-platform",
  "infra",
  "raw-window-handle",

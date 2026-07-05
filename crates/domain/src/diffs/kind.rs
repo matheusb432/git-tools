@@ -12,7 +12,7 @@ pub enum DiffKind {
 
 impl DiffKind {
     /// Classify from a diff-range string: `...` ⇒ three-dot, `..` ⇒ two-dot,
-    /// neither ⇒ working tree (matches `crate::diff::blame_targets`).
+    /// neither ⇒ working tree (matches `application::diffs::util::blame_targets`).
     pub fn from_diff_range(diff_range: &str) -> DiffKind {
         if diff_range.contains("...") {
             DiffKind::ThreeDot

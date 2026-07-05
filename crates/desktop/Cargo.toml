@@ -16,7 +16,12 @@ path = "src/lib.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+application = { path = "../application" }
+cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.1.0", features = [
+  "derive",
+] }
 directories = "6"
+domain = { path = "../domain" }
 gtl-platform = { path = "../../shared/gtl-platform" }
 infra = { path = "../infra" }
 raw-window-handle = "0.6"
@@ -32,6 +37,7 @@ tauri-plugin-single-instance = "2"
 custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
+application = { path = "../application", features = ["testing"] }
 serde_json = "1"
 tempfile = "3"
 

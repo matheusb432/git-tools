@@ -36,7 +36,7 @@ Previews are written to a central, app-owned store — **never into the repo bei
 
 Rendering is **idempotent**: an identical diff reuses its existing artifact (addressed by content hash), and re-running on the same committed range skips re-rendering entirely.
 
-After writing, the preview opens in the `gtl-viewer` desktop app (the default). `gtl-viewer` is a tray-resident Tauri window with a tab strip — each `gtl diff` opens or focuses a tab; the history panel lets you reopen past diffs grouped by repo. Control this behaviour with the `diff.viewer` config key:
+After writing, the preview opens in the `gtl-viewer` desktop app (the default). `gtl-viewer` is a tray-resident Tauri window with a tab strip — each `gtl diff` opens or focuses a tab; the history panel lists every past diff across all repos, sorted newest-first, so you can reopen any of them. Control this behaviour with the `diff.viewer` config key:
 
 | Value | Behaviour |
 | -- | -- |
@@ -57,17 +57,19 @@ Run `git-tools --help` (or `gtl --help`) for the full reference.
 ## Build
 
 ```sh
-just build          # build both: CLI engine (+ diff bundle) and the desktop viewer
-just cli build      # only the CLI engine -> target/release/git-tools[.exe]
+just build          # build both: CLI engine (+ diff bundle + gtl-daemon) and the desktop viewer
+just cli build      # only the CLI engine -> target/release/{git-tools,gtl-daemon}[.exe]
 just desktop build  # only the gtl-viewer Tauri binary (skipped without webkit2gtk-4.1 headers)
 ```
+
+`gtl diff`/`merge-diff`/`squash-preview`/`push-all`/`pull-all` execute by talking to a resident `gtl-daemon` process on `127.0.0.1`; the CLI autostarts it on first use and restarts it on a version mismatch (e.g. after `just update`). `gtl daemon status` / `gtl daemon stop` inspect and terminate it directly — most users never need to.
 
 `just` recipes use bash, so on Windows run them from Git Bash (the `set windows-shell` directive points `just` at bash there).
 
 To produce **Windows 11 release binaries from a Linux host** (no Windows machine needed for the build itself), cross-compile with [`cargo-xwin`](https://github.com/rust-cross/cargo-xwin):
 
 ```sh
-just ship          # cross-build both Win11 exes -> target/x86_64-pc-windows-msvc/release/{git-tools,gtl-viewer}.exe
+just ship          # cross-build all three Win11 exes -> target/x86_64-pc-windows-msvc/release/{git-tools,gtl-daemon,gtl-viewer}.exe
 just ship --smoke  # fast debug-profile linkage check (not a shippable)
 ```
 
@@ -78,13 +80,13 @@ This needs `cargo-xwin` and the `x86_64-pc-windows-msvc` rustup target; the verb
 The CLI engine (`git-tools` + `gtl` alias) and the desktop viewer (`gtl-viewer`) are independent artifacts with parallel verbs:
 
 ```sh
-just update          # build + install both (CLI engine and desktop viewer)
-just cli update      # build + install only the CLI engine (git-tools + gtl)
+just update          # build + install both (CLI engine + gtl-daemon, and desktop viewer)
+just cli update      # build + install only the CLI engine (git-tools + gtl + gtl-daemon)
 just desktop update  # build + install only the desktop viewer (gtl-viewer)
-just install         # place both prebuilt artifacts on PATH (~/.local/bin)
+just install         # place all prebuilt artifacts on PATH (~/.local/bin)
 just uninstall       # remove the binaries and the gtl alias
 ```
 
-These drive the xtask `install` verb, which works on Linux and on Windows via Git Bash (it handles the `.exe` suffix via `std::env::consts::EXE_SUFFIX`). The viewer is copied via an atomic replace, so `just desktop update` refreshes the running tray app in place without a "Text file busy" failure. For a fresh machine, `sh xtask/bootstrap.sh` installs the Rust toolchain then runs the full bring-up (`just bootstrap`): build, install, and ensure `~/.local/bin` is on your `PATH`.
+These drive the xtask `install` verb, which works on Linux and on Windows via Git Bash (it handles the `.exe` suffix via `std::env::consts::EXE_SUFFIX`). The viewer and `gtl-daemon` are copied via an atomic replace, so updating refreshes them in place — safe even while the tray app or a resident daemon is running — without a "Text file busy" failure. For a fresh machine, `sh xtask/bootstrap.sh` installs the Rust toolchain then runs the full bring-up (`just bootstrap`): build, install, and ensure `~/.local/bin` is on your `PATH`.
 
 Override the install directory with `GIT_TOOLS_BINDIR` if you do not want `~/.local/bin`.

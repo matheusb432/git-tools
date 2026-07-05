@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { groupHistoryByRepo, historyTabLabel, labelMap, timestampMap } from "./history";
+import { historyTabLabel, labelMap, timestampMap } from "./history";
 import type { HistoryEntry } from "@/shared/api";
 
 function entry(over: Partial<HistoryEntry>): HistoryEntry {
@@ -11,19 +11,6 @@ function entry(over: Partial<HistoryEntry>): HistoryEntry {
 }
 const hash = (url: string) => url.split("/").pop()?.slice(0, 12) || "";
 
-test("groups by repo_name, preserving order", () => {
-  const g = groupHistoryByRepo([
-    entry({ repo_name: "git-tools", url: "diff://r/a" }),
-    entry({ repo_name: "sample_project", url: "diff://r/b" }),
-    entry({ repo_name: "git-tools", url: "diff://r/c" }),
-  ]);
-  expect([...g.keys()]).toEqual(["git-tools", "sample_project"]);
-  expect(g.get("git-tools")!.length).toBe(2);
-});
-test("falls back to repo_id when repo_name empty", () => {
-  const g = groupHistoryByRepo([entry({ repo_name: "", repo_id: "abc" })]);
-  expect([...g.keys()]).toEqual(["abc"]);
-});
 test("label uses the name, else the hash fallback", () => {
   expect(historyTabLabel(entry({ title: "eod" }), hash)).toBe("eod");
   expect(historyTabLabel(entry({ title: "diff", url: "diff://r/a5eb82f1c2d3aa" }), hash)).toBe("a5eb82f1c2d3");
