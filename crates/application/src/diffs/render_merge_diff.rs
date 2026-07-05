@@ -18,8 +18,8 @@ pub const DEFAULT_BASE: &str = "main";
 
 /// Render the merge-diff of the current branch into `base` (default `main`)
 /// under `store_root`, resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
-#[request(response = RenderMergeDiffResponse, error = RenderMergeDiffError)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
+#[command(out = RenderMergeDiffResponse, err = RenderMergeDiffError)]
 pub struct RenderMergeDiff {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
@@ -50,8 +50,8 @@ pub struct RenderMergeDiffHandler<S: DiffSource, A: ArtifactStore, R: HtmlRender
     pub clock: C,
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
-    cqrsy::RequestHandler<RenderMergeDiff> for RenderMergeDiffHandler<S, A, R, C>
+impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<RenderMergeDiff>
+    for RenderMergeDiffHandler<S, A, R, C>
 {
     async fn handle(
         &self,
@@ -147,7 +147,7 @@ fn plural(n: usize) -> &'static str {
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::dispatch_sync;
+    use cqrsy::send_now;
     use domain::diffs::Commit;
 
     use super::{RenderMergeDiff, RenderMergeDiffError, RenderMergeDiffHandler};
@@ -206,7 +206,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = dispatch_sync(&(), &handler, req("/repo", None)).expect("render succeeds");
+        let response = send_now(&(), &handler, req("/repo", None)).expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -238,8 +238,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response =
-            dispatch_sync(&(), &handler, req("/repo", Some("   "))).expect("render succeeds");
+        let response = send_now(&(), &handler, req("/repo", Some("   "))).expect("render succeeds");
 
         assert_eq!(
             response.notes[0],
@@ -257,8 +256,8 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let error = dispatch_sync(&(), &handler, req("/repo", Some("nope")))
-            .expect_err("unknown base errors");
+        let error =
+            send_now(&(), &handler, req("/repo", Some("nope"))).expect_err("unknown base errors");
 
         let RenderMergeDiffError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "unknown revision nope");

@@ -30,7 +30,7 @@ use contracts::{
     },
     envelope::{Envelope, Note, NoteLevel, Outcome},
 };
-use cqrsy::{Dispatcher, Request};
+use cqrsy::{Handle, Request, Sender};
 use domain::diffs::DiffTarget;
 
 use crate::state::Shared;
@@ -41,12 +41,12 @@ pub(crate) async fn run<H, R>(
     handler: H,
     shared: Arc<Shared>,
     req: anyhow::Result<R>,
-    project: impl FnOnce(R::Response) -> Envelope<RenderDiffData> + Send + 'static,
+    project: impl FnOnce(R::Output) -> Envelope<RenderDiffData> + Send + 'static,
 ) -> (StatusCode, Json<Envelope<RenderDiffData>>)
 where
-    H: Dispatcher<R> + Clone + Send + Sync + 'static,
+    H: Sender<R> + Handle,
     R: Request + Send + 'static,
-    R::Response: Send + 'static,
+    R::Output: Send + 'static,
     R::Error: std::fmt::Display + Send + 'static,
 {
     shared.touch();
@@ -60,7 +60,7 @@ where
         }
     };
     // The diff engine shells out to git synchronously — run it on the blocking pool.
-    let joined = tokio::task::spawn_blocking(move || handler.dispatch_sync(req)).await;
+    let joined = tokio::task::spawn_blocking(move || handler.send_now(req)).await;
     match joined {
         Ok(Ok(resp)) => (StatusCode::OK, Json(project(resp))),
         Ok(Err(e)) => (

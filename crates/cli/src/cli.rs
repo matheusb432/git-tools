@@ -981,4 +981,40 @@ mod tests {
             Command::Sw(SwArgs { revert: true, .. })
         ));
     }
+
+    /// Durable guard for "every public verb is exposed via `--help`". clap renders help
+    /// from the derive, so the only way a working verb disappears from help is a hidden
+    /// subcommand (`hide`) or a hidden alias (`alias` instead of `visible_alias`) — e.g.
+    /// `tag update` silently dropping out of `tag --help`. This walks the whole command
+    /// tree and fails on either, so the exposure can't drift on memory alone.
+    #[test]
+    fn every_command_and_alias_is_visible_in_help() {
+        use clap::CommandFactory;
+
+        fn assert_all_visible(cmd: &clap::Command, path: &str) {
+            let here = if path.is_empty() {
+                cmd.get_name().to_string()
+            } else {
+                format!("{path} {}", cmd.get_name())
+            };
+
+            let hidden_aliases: Vec<&str> = cmd.get_aliases().collect();
+            assert!(
+                hidden_aliases.is_empty(),
+                "`{here}` has hidden alias(es) {hidden_aliases:?}; use `visible_alias` \
+                 so the verb shows in `--help`",
+            );
+
+            for sub in cmd.get_subcommands() {
+                assert!(
+                    !sub.is_hide_set(),
+                    "`{here} {}` is hidden from `--help`; every public command must be listed",
+                    sub.get_name(),
+                );
+                assert_all_visible(sub, &here);
+            }
+        }
+
+        assert_all_visible(&Cli::command(), "");
+    }
 }

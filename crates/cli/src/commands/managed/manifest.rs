@@ -112,7 +112,7 @@ fn resolve_repos_file_from_sources(
     let home_hint = home_dir
         .map(home_default_repos_file)
         .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "$HOME/self/sample_project/repos.toml".into());
+        .unwrap_or_else(|| "$HOME/tools/sample_project/repos.toml".into());
     Err(anyhow!(
         "managed-repos manifest not found; pass --repos-file, set GIT_TOOLS_MANAGED_REPOS_FILE, run from a sample_project checkout, or install sample_project at {home_hint}"
     ))
@@ -130,7 +130,7 @@ fn find_upward_config(start: &Path) -> Option<PathBuf> {
 
 fn home_default_repos_file(home_dir: &Path) -> PathBuf {
     home_dir
-        .join("self")
+        .join("tools")
         .join("sample_project")
         .join("repos.toml")
 }
@@ -206,7 +206,7 @@ mod tests {
         let env_file = fixture.root.join("env.txt");
         let cwd = fixture.root.join("workspace").join("repo");
         let upward = fixture.root.join("workspace/repos.toml");
-        let home_default = fixture.home.join("self/sample_project/repos.toml");
+        let home_default = fixture.home.join("tools/sample_project/repos.toml");
         touch(&explicit);
         touch(&env_file);
         touch(&upward);
@@ -245,7 +245,7 @@ mod tests {
     fn resolve_repos_file_uses_home_default_after_upward_search_misses() {
         let fixture = ManagedFixture::new("resolve-home-default");
         let cwd = fixture.root.join("elsewhere").join("repo");
-        let home_default = fixture.home.join("self/sample_project/repos.toml");
+        let home_default = fixture.home.join("tools/sample_project/repos.toml");
         touch(&home_default);
 
         assert_eq!(
@@ -266,7 +266,7 @@ mod tests {
         assert!(
             message.contains("--repos-file")
                 && message.contains("GIT_TOOLS_MANAGED_REPOS_FILE")
-                && message.contains("self/sample_project"),
+                && message.contains("tools/sample_project"),
             "error should point at supported manifest sources, got: {message}"
         );
     }
@@ -275,7 +275,7 @@ mod tests {
     fn resolve_repos_file_from_sources_prefers_sample_project_manifest_over_home_default() {
         let fixture = ManagedFixture::new("resolve-prefers-sample_project");
         let cwd = fixture.root.join("elsewhere").join("repo");
-        let home_default = fixture.home.join("self/sample_project/repos.toml");
+        let home_default = fixture.home.join("tools/sample_project/repos.toml");
         let sample_project_answer = fixture.root.join("live/repos.toml");
         touch(&home_default);
         touch(&sample_project_answer);

@@ -17,8 +17,8 @@ use crate::{
 /// Render the squash-preview of the current branch's unpushed commits (base is
 /// always the configured upstream) under `store_root`, resolving the repo from
 /// `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
-#[request(response = RenderSquashPreviewResponse, error = RenderSquashPreviewError)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
+#[command(out = RenderSquashPreviewResponse, err = RenderSquashPreviewError)]
 pub struct RenderSquashPreview {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
@@ -48,8 +48,8 @@ pub struct RenderSquashPreviewHandler<S: DiffSource, A: ArtifactStore, R: HtmlRe
     pub clock: C,
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
-    cqrsy::RequestHandler<RenderSquashPreview> for RenderSquashPreviewHandler<S, A, R, C>
+impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<RenderSquashPreview>
+    for RenderSquashPreviewHandler<S, A, R, C>
 {
     async fn handle(
         &self,
@@ -147,7 +147,7 @@ fn collapse_note(commit_count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::dispatch_sync;
+    use cqrsy::send_now;
     use domain::diffs::Commit;
 
     use super::{RenderSquashPreview, RenderSquashPreviewError, RenderSquashPreviewHandler};
@@ -206,7 +206,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = dispatch_sync(&(), &handler, req("/repo")).expect("render succeeds");
+        let response = send_now(&(), &handler, req("/repo")).expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -235,8 +235,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let error =
-            dispatch_sync(&(), &handler, req("/repo")).expect_err("missing upstream errors");
+        let error = send_now(&(), &handler, req("/repo")).expect_err("missing upstream errors");
 
         let RenderSquashPreviewError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "no upstream");

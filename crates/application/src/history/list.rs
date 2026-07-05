@@ -4,12 +4,12 @@
 
 use std::path::PathBuf;
 
-use cqrsy::RequestHandler;
+use cqrsy::Handler;
 
 use crate::ports::{ArtifactStore, HistoryRecord};
 
-#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
-#[request(response = ListHistoryResponse, error = ListHistoryError)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Query)]
+#[query(out = ListHistoryResponse, err = ListHistoryError)]
 pub struct ListHistory {
     pub store_root: PathBuf,
 }
@@ -30,7 +30,7 @@ pub struct ListHistoryHandler<A: ArtifactStore> {
     pub store: A,
 }
 
-impl<A: ArtifactStore> RequestHandler<ListHistory> for ListHistoryHandler<A> {
+impl<A: ArtifactStore> Handler<ListHistory> for ListHistoryHandler<A> {
     async fn handle(&self, req: ListHistory) -> Result<ListHistoryResponse, ListHistoryError> {
         let mut entries = self.store.list_history(&req.store_root)?;
         // `diff subrepos`/`diff all` span multiple repos, so they carry no single
@@ -54,7 +54,7 @@ impl<A: ArtifactStore> RequestHandler<ListHistory> for ListHistoryHandler<A> {
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::dispatch_sync;
+    use cqrsy::send_now;
 
     use super::*;
     use crate::{ports::HistoryRecord, testing::InMemoryArtifactStore};
@@ -91,7 +91,7 @@ mod tests {
         };
         let handler = ListHistoryHandler { store };
 
-        let response = dispatch_sync(&(), &handler, req()).expect("list succeeds");
+        let response = send_now(&(), &handler, req()).expect("list succeeds");
 
         assert_eq!(response.entries[0].repo_id, "c"); // tie broken by generated desc
         assert_eq!(response.entries[2].repo_id, "a");
@@ -111,7 +111,7 @@ mod tests {
         };
         let handler = ListHistoryHandler { store };
 
-        let response = dispatch_sync(&(), &handler, req()).expect("list succeeds");
+        let response = send_now(&(), &handler, req()).expect("list succeeds");
 
         assert_eq!(response.entries[0].repo_id, "fresh-multi-repo");
         assert_eq!(response.entries[1].repo_id, "old-commit");
@@ -123,7 +123,7 @@ mod tests {
             store: InMemoryArtifactStore::default(),
         };
 
-        let response = dispatch_sync(&(), &handler, req()).expect("list succeeds");
+        let response = send_now(&(), &handler, req()).expect("list succeeds");
 
         assert!(response.entries.is_empty());
     }

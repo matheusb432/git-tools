@@ -8,7 +8,7 @@ use contracts::{
     diffs::{RenderDiffData, RenderSquashPreviewRequest},
     envelope::Envelope,
 };
-use cqrsy::Dispatcher;
+use cqrsy::{Handle, Sender};
 
 use crate::state::Shared;
 
@@ -22,7 +22,7 @@ pub async fn handle<H>(
     Json(dto): Json<RenderSquashPreviewRequest>,
 ) -> (StatusCode, Json<Envelope<RenderDiffData>>)
 where
-    H: Dispatcher<RenderSquashPreview> + Clone + Send + Sync + 'static,
+    H: Sender<RenderSquashPreview> + Handle,
 {
     super::run(
         handler,

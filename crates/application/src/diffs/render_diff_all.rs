@@ -16,8 +16,8 @@ use crate::{
 
 /// Render a tabbed diff preview across every repo in `repos` (already filtered
 /// by the caller to upstream-present + unpushed > 0) under `store_root`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
-#[request(response = RenderDiffAllResponse, error = RenderDiffAllError)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
+#[command(out = RenderDiffAllResponse, err = RenderDiffAllError)]
 pub struct RenderDiffAll {
     pub store_root: PathBuf,
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
@@ -50,8 +50,8 @@ pub struct RenderDiffAllHandler<S: DiffSource, A: ArtifactStore, R: HtmlRenderer
     pub clock: C,
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
-    cqrsy::RequestHandler<RenderDiffAll> for RenderDiffAllHandler<S, A, R, C>
+impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<RenderDiffAll>
+    for RenderDiffAllHandler<S, A, R, C>
 {
     async fn handle(
         &self,
@@ -99,7 +99,7 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock>
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::dispatch_sync;
+    use cqrsy::send_now;
     use domain::diffs::{Commit, DiffKind};
 
     use super::{RenderDiffAll, RenderDiffAllHandler, RepoRef};
@@ -166,7 +166,7 @@ mod tests {
             },
         ];
 
-        let response = dispatch_sync(&(), &handler, req(repos)).expect("render succeeds");
+        let response = send_now(&(), &handler, req(repos)).expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -199,7 +199,7 @@ mod tests {
             label: "repo".into(),
         }];
 
-        let result = dispatch_sync(&(), &handler, req(repos));
+        let result = send_now(&(), &handler, req(repos));
 
         assert!(result.is_err());
         assert!(handler.store.placed.lock().unwrap().is_empty());

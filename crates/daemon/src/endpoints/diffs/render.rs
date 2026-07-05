@@ -9,7 +9,7 @@ use contracts::{
     diffs::{RenderDiffData, RenderDiffRequest},
     envelope::Envelope,
 };
-use cqrsy::Dispatcher;
+use cqrsy::{Handle, Sender};
 
 use crate::state::Shared;
 
@@ -24,7 +24,7 @@ pub async fn handle<H>(
     Json(dto): Json<RenderDiffRequest>,
 ) -> (StatusCode, Json<Envelope<RenderDiffData>>)
 where
-    H: Dispatcher<RenderDiff> + Clone + Send + Sync + 'static,
+    H: Sender<RenderDiff> + Handle,
 {
     super::run(handler, shared, super::to_request(dto), super::to_envelope).await
 }

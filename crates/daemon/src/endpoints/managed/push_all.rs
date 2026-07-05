@@ -9,7 +9,7 @@ use contracts::{
     envelope::Envelope,
     managed::{PushAllRequest, SyncData},
 };
-use cqrsy::Dispatcher;
+use cqrsy::{Handle, Sender};
 
 use crate::state::Shared;
 
@@ -19,11 +19,11 @@ pub async fn handle<H>(
     Json(dto): Json<PushAllRequest>,
 ) -> (StatusCode, Json<Envelope<SyncData>>)
 where
-    H: Dispatcher<PushAll> + Clone + Send + Sync + 'static,
+    H: Sender<PushAll> + Handle,
 {
     shared.touch();
     let req = super::to_push_all_request(dto);
-    match handler.dispatch(req).await {
+    match handler.send(req).await {
         Ok(resp) => (StatusCode::OK, Json(super::to_push_all_envelope(resp))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

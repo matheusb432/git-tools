@@ -8,7 +8,7 @@ use application::{
     history::list::{ListHistory, ListHistoryHandler},
     ports::ArtifactStore,
 };
-use cqrsy::Dispatcher;
+use cqrsy::Sender;
 use diffs::{PendingDiffs, diff_ref_from_argv};
 use tauri::{
     Emitter, Manager, WindowEvent,
@@ -18,7 +18,7 @@ use tauri::{
 };
 
 /// Desktop's in-process dispatch facade — one handler field per operation.
-/// `#[derive(cqrsy::Mediator)]` implements `Dispatcher<ListHistory>`, forwarding
+/// `#[derive(cqrsy::Mediator)]` implements `Sender<ListHistory>`, forwarding
 /// to the `list_history` field, exactly like `DaemonMediator` in `crates/daemon`.
 #[derive(Clone, cqrsy::Mediator)]
 struct DesktopMediator<A: ArtifactStore + Clone + Send + Sync + 'static> {
@@ -79,7 +79,7 @@ fn list_history(
         return Vec::new();
     };
     state
-        .dispatch_sync(ListHistory { store_root })
+        .send_now(ListHistory { store_root })
         .map(|resp| resp.entries.into_iter().map(history::to_entry).collect())
         .unwrap_or_default()
 }
@@ -279,7 +279,7 @@ mod tests {
         };
 
         let response = mediator
-            .dispatch_sync(ListHistory {
+            .send_now(ListHistory {
                 store_root: "/store".into(),
             })
             .expect("dispatch succeeds");

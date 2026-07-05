@@ -816,8 +816,8 @@ dependencies = [
 
 [[package]]
 name = "cqrsy"
-version = "0.1.0"
-source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.1.0#8f3cebd12c361d34ccdae6c4a6b4558414816e76"
+version = "0.3.0"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.3.0#a6ec57886bf6dc7405a32011c146bc6d510eb1eb"
 dependencies = [
  "cqrsy-core",
  "cqrsy-macros",
@@ -825,13 +825,13 @@ dependencies = [
 
 [[package]]
 name = "cqrsy-core"
-version = "0.1.0"
-source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.1.0#8f3cebd12c361d34ccdae6c4a6b4558414816e76"
+version = "0.3.0"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.3.0#a6ec57886bf6dc7405a32011c146bc6d510eb1eb"
 
 [[package]]
 name = "cqrsy-macros"
-version = "0.1.0"
-source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.1.0#8f3cebd12c361d34ccdae6c4a6b4558414816e76"
+version = "0.3.0"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.3.0#a6ec57886bf6dc7405a32011c146bc6d510eb1eb"
 dependencies = [
  "proc-macro2",
  "quote",

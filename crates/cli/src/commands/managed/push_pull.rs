@@ -198,7 +198,7 @@ mod tests {
     /// Guards tests that mutate `HOME` (process-global env var). `resolve_repos_file`'s
     /// home-default fallback reads real ambient `HOME` directly — it has no seam for
     /// `ManagedOptions::home_dir` — so a "manifest unresolvable" test must pin `HOME` to a
-    /// directory with no `self/sample_project/repos.toml`, or it silently finds whatever
+    /// directory with no `tools/sample_project/repos.toml`, or it silently finds whatever
     /// real manifest the *running machine* happens to have at that default location.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 

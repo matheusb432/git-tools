@@ -1,11 +1,11 @@
 //! The `render_diff` vertical slice: resolve a [`DiffTarget`] into a rendered,
 //! stored artifact (or an "empty, skipped" outcome), carrying every user-facing
 //! message out as [`Note`]s. The cli's `gtl diff` and `diff-subrepos` call this
-//! in-process; a future daemon dispatches it through [`cqrsy::RequestHandler`].
+//! in-process; a future daemon dispatches it through [`cqrsy::Handler`].
 
 use std::path::{Path, PathBuf};
 
-use cqrsy::RequestHandler;
+use cqrsy::Handler;
 use domain::diffs::{DiffKind, DiffTarget, Mode, View, ranges, sort_files_tree_order};
 
 use crate::{
@@ -15,8 +15,8 @@ use crate::{
 };
 
 /// Render a diff preview for `target` under `store_root`, resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
-#[request(response = RenderDiffResponse, error = RenderDiffError)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
+#[command(out = RenderDiffResponse, err = RenderDiffError)]
 pub struct RenderDiff {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
@@ -115,7 +115,7 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> RenderDiffHandl
     }
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> RequestHandler<RenderDiff>
+impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> Handler<RenderDiff>
     for RenderDiffHandler<S, A, R, C>
 {
     async fn handle(&self, req: RenderDiff) -> Result<RenderDiffResponse, RenderDiffError> {
@@ -376,7 +376,7 @@ fn legacy_unpushed_commit_label(count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::dispatch_sync;
+    use cqrsy::send_now;
     use domain::diffs::{Commit, DiffKind, DiffTarget};
 
     use super::{RenderDiff, RenderDiffError, RenderDiffHandler, RenderDiffOutcome};
@@ -437,8 +437,8 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = dispatch_sync(&(), &handler, req("/repo", DiffTarget::Unpushed))
-            .expect("render succeeds");
+        let response =
+            send_now(&(), &handler, req("/repo", DiffTarget::Unpushed)).expect("render succeeds");
 
         assert_eq!(
             response.outcome,
@@ -472,8 +472,8 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = dispatch_sync(&(), &handler, req("/repo", DiffTarget::Unpushed))
-            .expect("render succeeds");
+        let response =
+            send_now(&(), &handler, req("/repo", DiffTarget::Unpushed)).expect("render succeeds");
 
         assert_eq!(response.outcome, RenderDiffOutcome::Empty);
         assert_eq!(
@@ -505,7 +505,7 @@ index 111..222 100644\n\
             PathBuf::from("/store/existing.html"),
         );
 
-        let response = dispatch_sync(
+        let response = send_now(
             &(),
             &handler,
             req("/repo", DiffTarget::Range("a..b".into())),
@@ -551,7 +551,7 @@ index 111..222 100644\n\
 
         let mut request = req("/repo", DiffTarget::Range("a..b".into()));
         request.name = Some("custom".into());
-        let response = dispatch_sync(&(), &handler, request).expect("render succeeds");
+        let response = send_now(&(), &handler, request).expect("render succeeds");
 
         assert!(matches!(
             response.outcome,
@@ -575,8 +575,8 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = dispatch_sync(&(), &handler, req("/repo", DiffTarget::Unpushed))
-            .expect("render succeeds");
+        let response =
+            send_now(&(), &handler, req("/repo", DiffTarget::Unpushed)).expect("render succeeds");
 
         assert!(matches!(
             response.outcome,
@@ -602,7 +602,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let error = dispatch_sync(&(), &handler, req("/repo", DiffTarget::Base("nope".into())))
+        let error = send_now(&(), &handler, req("/repo", DiffTarget::Base("nope".into())))
             .expect_err("unknown base errors");
 
         let RenderDiffError::Unexpected(err) = error;

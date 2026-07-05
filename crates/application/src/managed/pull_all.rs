@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use cqrsy::RequestHandler;
+use cqrsy::Handler;
 use domain::managed::ManagedRepo;
 
 use crate::{
@@ -12,8 +12,8 @@ use crate::{
     ports::{ManagedManifest, RemoteSync},
 };
 
-#[derive(Debug, Clone, PartialEq, cqrsy::Request)]
-#[request(response = PullAllResponse, error = PullAllError)]
+#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
+#[command(out = PullAllResponse, err = PullAllError)]
 pub struct PullAll {
     pub repos_file: PathBuf,
     pub home_dir: PathBuf,
@@ -38,7 +38,7 @@ pub struct PullAllHandler<RS: RemoteSync, ML: ManagedManifest> {
     pub manifest: ML,
 }
 
-impl<RS: RemoteSync, ML: ManagedManifest> RequestHandler<PullAll> for PullAllHandler<RS, ML> {
+impl<RS: RemoteSync, ML: ManagedManifest> Handler<PullAll> for PullAllHandler<RS, ML> {
     async fn handle(&self, req: PullAll) -> Result<PullAllResponse, PullAllError> {
         let repos = self.manifest.load(&req.repos_file, &req.home_dir).await?;
         let results = futures_util::future::join_all(
@@ -134,7 +134,7 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::dispatch_sync;
+    use cqrsy::send_now;
     use domain::managed::ManagedRepo;
 
     use super::*;
@@ -195,7 +195,7 @@ mod tests {
         let mut request = req();
         request.dry = true;
 
-        let response = dispatch_sync(&(), &handler, request).expect("pull succeeds");
+        let response = send_now(&(), &handler, request).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, "would-pull");
         assert_eq!(response.results[0].detail, "behind by 3 - fast-forward");
@@ -211,7 +211,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = dispatch_sync(&(), &handler, req()).expect("pull succeeds");
+        let response = send_now(&(), &handler, req()).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, "fail");
         assert_eq!(
@@ -231,7 +231,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = dispatch_sync(&(), &handler, req()).expect("pull succeeds");
+        let response = send_now(&(), &handler, req()).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, "up-to-date");
         assert_eq!(
@@ -254,7 +254,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = dispatch_sync(&(), &handler, req()).expect("pull succeeds");
+        let response = send_now(&(), &handler, req()).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, "pulled");
         assert_eq!(response.results[0].detail, "fast-forwarded 1 commit");
@@ -273,7 +273,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = dispatch_sync(&(), &handler, req()).expect("pull succeeds");
+        let response = send_now(&(), &handler, req()).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, "fail");
         assert_eq!(
@@ -292,7 +292,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = dispatch_sync(&(), &handler, req()).expect("pull succeeds");
+        let response = send_now(&(), &handler, req()).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, "warn");
         assert_eq!(response.results[0].detail, "no 'main' branch on origin");

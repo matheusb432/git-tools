@@ -8,7 +8,7 @@ use contracts::{
     envelope::Envelope,
     managed::{PullAllRequest, SyncData},
 };
-use cqrsy::Dispatcher;
+use cqrsy::{Handle, Sender};
 
 use crate::state::Shared;
 
@@ -18,11 +18,11 @@ pub async fn handle<H>(
     Json(dto): Json<PullAllRequest>,
 ) -> (StatusCode, Json<Envelope<SyncData>>)
 where
-    H: Dispatcher<PullAll> + Clone + Send + Sync + 'static,
+    H: Sender<PullAll> + Handle,
 {
     shared.touch();
     let req = super::to_pull_all_request(dto);
-    match handler.dispatch(req).await {
+    match handler.send(req).await {
         Ok(resp) => (StatusCode::OK, Json(super::to_pull_all_envelope(resp))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
