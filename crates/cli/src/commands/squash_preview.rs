@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Context as _;
-use contracts::{diffs::RenderSquashPreviewRequest, envelope::Outcome};
+use contracts::diffs::RenderSquashPreviewRequest;
 
 use crate::client::Backend;
 
@@ -23,17 +22,7 @@ pub(crate) fn run_with(backend: &impl Backend, repo: impl AsRef<Path>) -> anyhow
             .to_string_lossy()
             .into_owned(),
     };
-    let envelope = backend.render_squash_preview(&req)?;
-    super::print_wire_notes(&envelope.notes);
-    match envelope.outcome {
-        Outcome::Ok => {
-            let data = envelope.data.context("daemon returned ok without data")?;
-            let artifact = PathBuf::from(data.artifact);
-            super::open_artifact(&artifact);
-            Ok(artifact)
-        }
-        _ => Err(anyhow::anyhow!(super::error_text(&envelope.notes))),
-    }
+    super::finish_single_render(backend.render_squash_preview(&req)?)
 }
 
 #[cfg(test)]
@@ -66,9 +55,8 @@ mod tests {
             }],
             data: None,
         });
-        let err = match run_with(&backend, ".") {
-            Err(err) => err,
-            Ok(_) => panic!("error outcome must map to Err"),
+        let Err(err) = run_with(&backend, ".") else {
+            panic!("error outcome must map to Err")
         };
         assert_eq!(format!("{err:#}"), "not a git repo");
     }

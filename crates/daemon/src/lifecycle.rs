@@ -22,9 +22,9 @@ pub fn port_file_path(store_root: &Path) -> PathBuf {
 ///
 /// # Errors
 /// Returns an error if the directory cannot be created or the file cannot be written.
-pub fn write_port_file(store_root: &Path, entry: &PortFile) -> anyhow::Result<()> {
+pub fn write_port_file(store_root: &Path, entry: PortFile) -> anyhow::Result<()> {
     std::fs::create_dir_all(store_root)?;
-    let json = serde_json::to_string(entry)?;
+    let json = serde_json::to_string(&entry)?;
     std::fs::write(port_file_path(store_root), json)?;
     Ok(())
 }
@@ -60,8 +60,7 @@ impl ExeIdentity {
         let modified = meta.modified()?;
         let ms = modified
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-            .unwrap_or(0);
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
         Ok(Self {
             exe_len: meta.len(),
             exe_modified_ms: ms,
@@ -80,7 +79,7 @@ mod tests {
             port: 4321,
             pid: 99,
         };
-        write_port_file(dir.path(), &entry).unwrap();
+        write_port_file(dir.path(), entry).unwrap();
         assert_eq!(read_port_file(dir.path()), Some(entry));
     }
 
@@ -93,7 +92,7 @@ mod tests {
     #[test]
     fn remove_port_file_if_own_leaves_a_file_naming_a_different_pid() {
         let dir = tempfile::tempdir().unwrap();
-        write_port_file(dir.path(), &PortFile { port: 1, pid: 42 }).unwrap();
+        write_port_file(dir.path(), PortFile { port: 1, pid: 42 }).unwrap();
 
         // A different pid must not remove another daemon's file.
         remove_port_file_if_own(dir.path(), 7);

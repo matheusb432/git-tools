@@ -104,12 +104,11 @@ pub fn run(check: bool) -> Result<()> {
     if check {
         crate::check_structure::run(None)?;
         crate::check_deps::run(None)?;
-        // Clippy gate — the cqrsy disallowed_methods seam (deny-level in [workspace.lints])
-        // is enforced here. `--exclude desktop` skips the optional Tauri viewer crate, which
+        // Clippy gate — denies on any warning (`-D warnings`) so the fleet-wide pedantic policy
+        // (plus the cqrsy `disallowed_methods` deny-lint in [workspace.lints]) is enforced here
+        // too. `--exclude desktop` is retained ONLY because that optional Tauri viewer crate
         // requires webkit2gtk-4.1 system headers not present on all machines; desktop has no
-        // cqrsy dependency, so this drops no `disallowed_methods` coverage. No `-D warnings`:
-        // the deny-lint already errors on a violating call, and blanket-denying warnings would
-        // trip on unrelated pre-existing lint debt.
+        // cqrsy dependency, so excluding it drops no `disallowed_methods` coverage.
         proc::run(
             "clippy",
             "cargo",
@@ -119,6 +118,9 @@ pub fn run(check: bool) -> Result<()> {
                 "--exclude",
                 "desktop",
                 "--all-targets",
+                "--",
+                "-D",
+                "warnings",
             ],
         )?;
     }

@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::Context as _;
-use contracts::{diffs::RenderMergeDiffRequest, envelope::Outcome};
+use contracts::diffs::RenderMergeDiffRequest;
 
 use crate::client::Backend;
 
@@ -28,17 +27,7 @@ pub(crate) fn run_with(
             .into_owned(),
         base: base.map(str::to_string),
     };
-    let envelope = backend.render_merge_diff(&req)?;
-    super::print_wire_notes(&envelope.notes);
-    match envelope.outcome {
-        Outcome::Ok => {
-            let data = envelope.data.context("daemon returned ok without data")?;
-            let artifact = PathBuf::from(data.artifact);
-            super::open_artifact(&artifact);
-            Ok(artifact)
-        }
-        _ => Err(anyhow::anyhow!(super::error_text(&envelope.notes))),
-    }
+    super::finish_single_render(backend.render_merge_diff(&req)?)
 }
 
 #[cfg(test)]
@@ -71,9 +60,8 @@ mod tests {
             }],
             data: None,
         });
-        let err = match run_with(&backend, ".", None) {
-            Err(err) => err,
-            Ok(_) => panic!("error outcome must map to Err"),
+        let Err(err) = run_with(&backend, ".", None) else {
+            panic!("error outcome must map to Err")
         };
         assert_eq!(format!("{err:#}"), "not a git repo");
     }

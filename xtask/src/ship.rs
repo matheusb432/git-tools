@@ -10,7 +10,7 @@ use anyhow::{Result, bail};
 use crate::proc;
 
 /// The Windows cross-target. `--features custom-protocol` is required for the viewer (else the
-/// exe serves devUrl and fails with ERR_CONNECTION_REFUSED).
+/// exe serves devUrl and fails with `ERR_CONNECTION_REFUSED`).
 const WIN_TARGET: &str = "x86_64-pc-windows-msvc";
 
 /// Whether the Linux→Windows cross toolchain is ready, plus fix-hint lines when not.
@@ -51,12 +51,11 @@ fn target_installed(triple: &str) -> bool {
     Command::new("rustup")
         .args(["target", "list", "--installed"])
         .output()
-        .map(|o| {
+        .is_ok_and(|o| {
             String::from_utf8_lossy(&o.stdout)
                 .lines()
                 .any(|l| l.trim() == triple)
         })
-        .unwrap_or(false)
 }
 
 /// Cross-build the Win11 shippables. `smoke` = fast debug linkage check (committed bundles, no
@@ -119,7 +118,7 @@ pub fn run(smoke: bool) -> Result<()> {
                 .join(WIN_TARGET)
                 .join("release")
                 .join(exe);
-            let bytes = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            let bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
             if bytes == 0 {
                 proc::result_fail_step("ship", "verify");
                 bail!("ship verify: {} is missing or empty", path.display());

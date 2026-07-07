@@ -22,7 +22,7 @@ struct Repo {
     _tmp: TempDir,
     _store: TempDir,
     root: PathBuf,
-    repo: PathBuf,
+    subrepo: PathBuf,
     monorepo: PathBuf,
     store_dir: PathBuf,
 }
@@ -153,7 +153,7 @@ impl Repo {
             _tmp: tmp,
             _store: store,
             root,
-            repo,
+            subrepo: repo,
             monorepo,
             store_dir,
         };
@@ -169,7 +169,7 @@ impl Repo {
     fn git(&self, args: &[&str]) -> String {
         let out = Git::new("git")
             .arg("-C")
-            .arg(&self.repo)
+            .arg(&self.subrepo)
             .args(args)
             .output()
             .unwrap();
@@ -183,7 +183,7 @@ impl Repo {
 
     /// Writes `file` then commits it with a fixed date; returns the new full SHA.
     fn commit(&self, file: &str, contents: &str, message: &str) -> String {
-        let path = self.repo.join(file);
+        let path = self.subrepo.join(file);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
@@ -191,7 +191,7 @@ impl Repo {
         self.git(&["add", "-A"]);
         let out = Git::new("git")
             .arg("-C")
-            .arg(&self.repo)
+            .arg(&self.subrepo)
             .args(["commit", "-m", message])
             .env("GIT_AUTHOR_DATE", "2026-01-01T12:00:00")
             .env("GIT_COMMITTER_DATE", "2026-01-01T12:00:00")
@@ -223,7 +223,7 @@ impl Repo {
         common::ensure_daemon_built();
         let mut cmd = Command::cargo_bin("git-tools").unwrap();
         cmd.args(args)
-            .current_dir(&self.repo)
+            .current_dir(&self.subrepo)
             .env("GIT_TOOLS_NO_OPEN", "1")
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
             // Diff commands spawn a per-store daemon; a short idle timeout reaps it.
@@ -239,7 +239,7 @@ impl Repo {
     }
 
     fn repo_arg(&self) -> &str {
-        self.repo.to_str().unwrap()
+        self.subrepo.to_str().unwrap()
     }
     fn monorepo_arg(&self) -> &str {
         self.monorepo.to_str().unwrap()
@@ -302,7 +302,7 @@ fn squash_preview_reports_unpushed_and_writes_artifact() {
     assert_html(&artifact, "main");
     // Verify nothing was written into the repo itself
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "artifacts must not land in the repo"
     );
 }
@@ -351,7 +351,7 @@ fn diff_unpushed_writes_artifact() {
         artifact.display()
     );
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "no .artifacts in repo"
     );
 }
@@ -371,7 +371,7 @@ fn diff_unpushed_flag_writes_artifact() {
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists());
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "no .artifacts in repo"
     );
 }
@@ -387,7 +387,7 @@ fn diff_with_no_commits_or_changes_warns_and_skips_render() {
         .success()
         .stderr(contains("nothing to show"));
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "empty diff must not write an artifact"
     );
 }
@@ -402,7 +402,7 @@ fn diff_empty_range_warns_and_skips_render() {
         .success()
         .stderr(contains("nothing to show"));
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "empty range must not write an artifact"
     );
 }
@@ -426,7 +426,7 @@ fn diff_without_upstream_falls_back_to_main() {
     let artifact = artifact_from_stdout(&stdout);
     assert_html(&artifact, "feature/local");
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "no .artifacts in repo"
     );
 }
@@ -445,7 +445,7 @@ fn diff_base_commit_form_writes_artifact() {
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists());
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "no .artifacts in repo"
     );
 }
@@ -464,7 +464,7 @@ fn diff_exact_range_form_writes_artifact() {
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists());
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "no .artifacts in repo"
     );
 }
@@ -494,7 +494,7 @@ fn diff_merge_flag_writes_three_dot_merge_preview() {
     assert!(html.contains("feature.txt"));
     assert!(!html.contains("main.txt"));
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "no .artifacts in repo"
     );
 }
@@ -517,7 +517,7 @@ fn diff_last_n_commits_writes_artifact() {
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists());
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "no .artifacts in repo"
     );
 }
@@ -539,7 +539,7 @@ fn diff_bare_last_diffs_the_last_commit() {
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists());
     assert!(
-        !repo.repo.join(".artifacts").exists(),
+        !repo.subrepo.join(".artifacts").exists(),
         "no .artifacts in repo"
     );
 }
@@ -636,7 +636,7 @@ fn wk_base_prints_the_primary_worktree_path() {
         .current_dir(&linked)
         .assert()
         .success()
-        .stdout(contains(repo.repo.to_str().unwrap()))
+        .stdout(contains(repo.subrepo.to_str().unwrap()))
         .stdout(contains("feature-wt").not());
 }
 
@@ -660,7 +660,7 @@ fn wk_ls_lists_worktrees_as_a_readable_table() {
         .stdout(contains("BRANCH"))
         .stdout(contains("HEAD"))
         .stdout(contains("STATE"))
-        .stdout(contains(repo.repo.to_str().unwrap()))
+        .stdout(contains(repo.subrepo.to_str().unwrap()))
         .stdout(contains(linked.to_str().unwrap()))
         .stdout(contains("main"))
         .stdout(contains("feature/wk"))
@@ -676,7 +676,7 @@ fn up_with_yes_commits_and_pushes_dirty_repo() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
-    std::fs::write(repo.repo.join("a.txt"), "base\nlocal\n").unwrap();
+    std::fs::write(repo.subrepo.join("a.txt"), "base\nlocal\n").unwrap();
 
     repo.run(&["up", "save work", "--yes"])
         .assert()
@@ -728,7 +728,7 @@ fn up_without_yes_refuses_in_noninteractive_shell() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
-    std::fs::write(repo.repo.join("a.txt"), "base\nlocal\n").unwrap();
+    std::fs::write(repo.subrepo.join("a.txt"), "base\nlocal\n").unwrap();
 
     // assert_cmd runs without a TTY: the gate must refuse rather than auto-push.
     repo.run(&["up", "save work"])
@@ -954,8 +954,8 @@ fn status_lists_managed_repos_with_compact_ahead_dirty_and_untracked_symbols() {
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
     repo.commit("a.txt", "base\nlocal\n", "feat: local work");
-    std::fs::write(repo.repo.join("a.txt"), "base\nlocal\ndirty\n").unwrap();
-    std::fs::write(repo.repo.join("scratch.txt"), "untracked\n").unwrap();
+    std::fs::write(repo.subrepo.join("a.txt"), "base\nlocal\ndirty\n").unwrap();
+    std::fs::write(repo.subrepo.join("scratch.txt"), "untracked\n").unwrap();
     let manifest = repo.root.join("repos.toml");
     std::fs::write(
         &manifest,
@@ -985,8 +985,8 @@ fn status_color_always_bolds_brackets_and_marks_dirty_symbols_red() {
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
     repo.commit("a.txt", "base\nlocal\n", "feat: local work");
-    std::fs::write(repo.repo.join("a.txt"), "base\nlocal\ndirty\n").unwrap();
-    std::fs::write(repo.repo.join("scratch.txt"), "untracked\n").unwrap();
+    std::fs::write(repo.subrepo.join("a.txt"), "base\nlocal\ndirty\n").unwrap();
+    std::fs::write(repo.subrepo.join("scratch.txt"), "untracked\n").unwrap();
     let manifest = repo.root.join("repos.toml");
     std::fs::write(&manifest, "[[repo]]\npath = \"repo\"\nremote = \"\"\n").unwrap();
 

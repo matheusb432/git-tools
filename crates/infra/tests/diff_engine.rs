@@ -119,7 +119,8 @@ fn attribute_owns_added_and_deleted_lines_by_commit() {
         commits: Vec::new(),
         owners: LineOwners::default(),
     }];
-    let in_range = [c1.clone(), c2.clone()].into_iter().collect();
+    let in_range: std::collections::HashSet<String> =
+        [c1.clone(), c2.clone()].into_iter().collect();
     attribute(
         &GitDiffSource,
         d,

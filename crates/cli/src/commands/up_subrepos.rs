@@ -10,11 +10,14 @@
 //! actually have unpushed commits — synced repos never reach the network. Plan/apply split
 //! mirrors [`crate::commands::prune`].
 
-use std::path::{Path, PathBuf};
+use std::{
+    fmt::Write as _,
+    path::{Path, PathBuf},
+};
 
 use crate::commands::{
     discover::{discover_git_repos, repo_label},
-    squash_local::{GitOutput, GitRunner},
+    git_runner::{GitOutput, GitRunner},
 };
 
 /// Where a discovered repo's current branch would be pushed, resolved from local refs.
@@ -168,16 +171,17 @@ pub fn confirmation(root: &Path, targets: &[RepoTarget]) -> String {
     for target in targets {
         match &target.dest {
             Dest::Push { branch, remote } => {
-                out.push_str(&format!("\n  {}  ({branch} → {remote})", target.label));
+                let _ = write!(out, "\n  {}  ({branch} → {remote})", target.label);
             }
             Dest::Synced { branch, remote } => {
-                out.push_str(&format!(
+                let _ = write!(
+                    out,
                     "\n  {}  ({branch} → {remote}, already synced)",
                     target.label
-                ));
+                );
             }
             Dest::Skip { reason } => {
-                out.push_str(&format!("\n  {}  (skip — {reason})", target.label));
+                let _ = write!(out, "\n  {}  (skip — {reason})", target.label);
             }
         }
     }
@@ -303,7 +307,7 @@ mod tests {
         fn run(&self, _repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
             self.calls
                 .borrow_mut()
-                .push(args.iter().map(|a| a.to_string()).collect());
+                .push(args.iter().map(std::string::ToString::to_string).collect());
             Ok(self.results.borrow_mut().remove(0))
         }
     }

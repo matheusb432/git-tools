@@ -1,6 +1,6 @@
 //! Fanning `prune` out across every managed repo.
 
-use std::path::Path;
+use std::{fmt::Write as _, path::Path};
 
 use serde::Serialize;
 
@@ -31,7 +31,7 @@ pub struct PruneRepoResult {
 pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRepoResult> {
     match super::manifest::load_repos(options) {
         Ok(repos) => {
-            let runner = crate::commands::squash_local::StdGitRunner;
+            let runner = crate::commands::git_runner::StdGitRunner;
             let results = repos
                 .iter()
                 .map(|repo| prune_one(&runner, repo, onto, options.dry))
@@ -59,7 +59,7 @@ pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRe
 }
 
 fn prune_one(
-    runner: &impl crate::commands::squash_local::GitRunner,
+    runner: &impl crate::commands::git_runner::GitRunner,
     repo: &ManagedRepo,
     onto: &str,
     dry: bool,
@@ -120,28 +120,30 @@ fn format_prune(onto: &str, dry: bool, json: bool, results: &[PruneRepoResult]) 
 
     let verb = if dry { "dry prune" } else { "prune" };
     let mut out = format!("{verb} (merged into '{onto}')\n\n");
-    out.push_str(&format!("{:<30} {:<10} {}\n", "REPO", "BRANCHES", "DETAIL"));
+    let _ = writeln!(out, "{:<30} {:<10} DETAIL", "REPO", "BRANCHES");
     for result in results {
         let count = if result.failed.is_empty() {
             result.deleted.len().to_string()
         } else {
             format!("{}!{}", result.deleted.len(), result.failed.len())
         };
-        out.push_str(&format!(
-            "{:<30} {:<10} {}\n",
+        let _ = writeln!(
+            out,
+            "{:<30} {:<10} {}",
             result.name,
             count,
             result.detail.lines().next().unwrap_or("")
-        ));
+        );
     }
     let deleted: usize = results.iter().map(|result| result.deleted.len()).sum();
     let failed: usize = results.iter().map(|result| result.failed.len()).sum();
-    out.push_str(&format!(
+    let _ = write!(
+        out,
         "\n{} repos: {} {}, {} failed",
         results.len(),
         deleted,
         if dry { "to delete" } else { "deleted" },
         failed
-    ));
+    );
     out
 }

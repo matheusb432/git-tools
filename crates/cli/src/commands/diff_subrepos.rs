@@ -67,7 +67,9 @@ pub(crate) fn run_scan_with(
     match envelope.outcome {
         Outcome::Ok => {
             let data = envelope.data.context("daemon returned ok without data")?;
-            Ok(DiffOutcome::Rendered(PathBuf::from(data.artifact)))
+            let artifact = PathBuf::from(data.artifact);
+            super::open_artifact(&artifact);
+            Ok(DiffOutcome::Rendered(artifact))
         }
         Outcome::Empty => Ok(DiffOutcome::Empty),
         Outcome::Error => Err(anyhow::anyhow!(super::error_text(&envelope.notes))),
@@ -120,7 +122,9 @@ pub(crate) fn run_managed_all_with(
     match envelope.outcome {
         Outcome::Ok => {
             let data = envelope.data.context("daemon returned ok without data")?;
-            Ok(PathBuf::from(data.artifact))
+            let artifact = PathBuf::from(data.artifact);
+            super::open_artifact(&artifact);
+            Ok(artifact)
         }
         _ => Err(anyhow::anyhow!(super::error_text(&envelope.notes))),
     }

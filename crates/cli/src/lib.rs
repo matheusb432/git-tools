@@ -7,8 +7,9 @@ use crate::{
         Theme, UpArgs, UpCommand, WorktreeCommand,
     },
     commands::{
+        git_runner::StdGitRunner,
         managed::{ManagedExit, ManagedOptions, ManagedRun},
-        squash_local::{SquashResult, Status, StdGitRunner, invoke_squash_local},
+        squash_local::{SquashResult, Status, invoke_squash_local},
     },
 };
 
@@ -122,47 +123,41 @@ fn dispatch(command: Command) -> ExitCode {
             ..
         }) => run_up_subrepos(sub.yes),
         Command::Up(UpArgs { message, yes, .. }) => run_up(message.as_deref().unwrap_or(""), yes),
-        Command::Sw(args) => run_sw(args),
+        Command::Sw(args) => run_sw(&args),
         Command::Prune(args) => run_prune(args),
         Command::Tag(args) => run_tag(args.command, args.commits),
-        Command::Wk(args) => run_worktree(args.command),
-        Command::Status(args) => managed_exit(run_status(args)),
+        Command::Wk(args) => run_worktree(&args.command),
+        Command::Status(args) => managed_exit(&run_status(args)),
         Command::Ls(args) => {
-            managed_exit(commands::managed::run_status(&managed_read_options(args)))
+            managed_exit(&commands::managed::run_status(&managed_read_options(args)))
         }
-        Command::PushAll(args) => managed_exit(commands::managed::run_push_all(&managed_options(
+        Command::PushAll(args) => managed_exit(&commands::managed::run_push_all(&managed_options(
             args, None,
         ))),
-        Command::PullAll(args) => managed_exit(commands::managed::run_pull_all(&managed_options(
+        Command::PullAll(args) => managed_exit(&commands::managed::run_pull_all(&managed_options(
             args, None,
         ))),
         Command::CommitAll {
             managed,
             message_for_all,
-        } => managed_exit(commands::managed::run_commit_all(&managed_options(
+        } => managed_exit(&commands::managed::run_commit_all(&managed_options(
             managed,
             message_for_all,
         ))),
-        Command::Daemon(DaemonArgs { command }) => run_daemon_ctl(command),
+        Command::Daemon(DaemonArgs { command }) => run_daemon_ctl(&command),
     }
 }
 
 /// Dispatch `daemon status|stop`. Both verbs exit 0 whether or not a daemon is
-/// running; a transport failure escalates to the internal-error exit path.
-fn run_daemon_ctl(command: DaemonCommand) -> ExitCode {
+/// running.
+fn run_daemon_ctl(command: &DaemonCommand) -> ExitCode {
     use crate::commands::daemon_ctl;
 
-    let result = match command {
+    match command {
         DaemonCommand::Status => daemon_ctl::status(),
         DaemonCommand::Stop => daemon_ctl::stop(),
-    };
-    match result {
-        Ok(()) => ExitCode::Ok,
-        Err(error) => {
-            eprintln!("{}", html_error_text(&error));
-            ExitCode::Internal
-        }
     }
+    ExitCode::Ok
 }
 
 /// Persist the diff-preview theme to the user config and exit (no rendering).
@@ -183,7 +178,7 @@ fn run_set_theme(theme: Theme) -> ExitCode {
     }
 }
 
-fn run_worktree(command: WorktreeCommand) -> ExitCode {
+fn run_worktree(command: &WorktreeCommand) -> ExitCode {
     use crate::commands::worktree;
 
     let runner = StdGitRunner;
@@ -373,7 +368,7 @@ fn run_up_subrepos(yes: bool) -> ExitCode {
 
 /// Orchestrates `sw`: pick the flow from flags, run the plan read-only, then apply.
 /// All git work is local; refusals go to stderr (exit 1), logs to stdout (exit 0).
-fn run_sw(args: SwArgs) -> ExitCode {
+fn run_sw(args: &SwArgs) -> ExitCode {
     use crate::commands::sw;
 
     let runner = StdGitRunner;
@@ -386,7 +381,7 @@ fn run_sw(args: SwArgs) -> ExitCode {
                 eprintln!("sw: {detail}");
                 ExitCode::Internal
             }
-            sw::RevertPlan::Ready(target) => finish_sw(sw::apply_revert(&runner, &target)),
+            sw::RevertPlan::Ready(target) => finish_sw(&sw::apply_revert(&runner, &target)),
         };
     }
 
@@ -402,7 +397,7 @@ fn run_sw(args: SwArgs) -> ExitCode {
             }
             sw::RebasePlan::Ready(target) => target,
         };
-        let code = finish_sw(sw::apply_rebase(&runner, &target));
+        let code = finish_sw(&sw::apply_rebase(&runner, &target));
         if code == ExitCode::Ok && args.diff {
             return diff_exit(commands::diff::run(&DiffTarget::Unpushed, None));
         }
@@ -418,7 +413,7 @@ fn run_sw(args: SwArgs) -> ExitCode {
             println!("already on '{onto}'");
             ExitCode::Ok
         }
-        sw::SwitchPlan::Ready { top, onto, from } => finish_sw(sw::apply_switch(
+        sw::SwitchPlan::Ready { top, onto, from } => finish_sw(&sw::apply_switch(
             &runner,
             std::path::Path::new(&top),
             &onto,
@@ -428,7 +423,7 @@ fn run_sw(args: SwArgs) -> ExitCode {
 }
 
 /// Print an applied `sw` result and map its status to an exit code.
-fn finish_sw(result: crate::commands::sw::SwResult) -> ExitCode {
+fn finish_sw(result: &crate::commands::sw::SwResult) -> ExitCode {
     use crate::commands::sw::Status;
     match result.status {
         Status::Ok | Status::Noop => {
@@ -446,7 +441,7 @@ fn finish_sw(result: crate::commands::sw::SwResult) -> ExitCode {
 /// single-repo path plans read-only, shows the will-delete block, gates on `-y`/TTY like
 /// `up`, then deletes. All git work is local; refusals → stderr, logs → stdout.
 fn run_prune(args: PruneArgs) -> ExitCode {
-    use crate::commands::prune;
+    use crate::commands::{prune, sync};
 
     let onto = args.onto.as_deref().unwrap_or("main");
 
@@ -460,7 +455,7 @@ fn run_prune(args: PruneArgs) -> ExitCode {
             message_for_all: None,
             interactive: is_interactive(),
         };
-        return managed_exit(commands::managed::run_prune_all(onto, &options));
+        return managed_exit(&commands::managed::run_prune_all(onto, &options));
     }
 
     let runner = StdGitRunner;
@@ -486,7 +481,6 @@ fn run_prune(args: PruneArgs) -> ExitCode {
         println!("  {}  {}", branch.name, branch.sha);
     }
 
-    use crate::commands::sync;
     match sync::gate(args.yes, is_interactive()) {
         sync::Gate::RefuseNonInteractive => {
             eprintln!("prune: non-interactive shell; pass --yes to confirm the deletion");
@@ -641,7 +635,7 @@ fn managed_options(args: ManagedArgs, message_for_all: Option<String>) -> Manage
     }
 }
 
-fn managed_exit<T>(run: ManagedRun<T>) -> ExitCode {
+fn managed_exit<T>(run: &ManagedRun<T>) -> ExitCode {
     if !run.stdout.is_empty() {
         println!("{}", run.stdout);
     }
@@ -693,8 +687,7 @@ fn print_squash_local_result(result: &SquashResult, message: &str) {
     let stream = squash_local_output_stream(result.status);
     match result.status {
         Status::Refused => print_squash_local_line(stream, &format!("refused: {}", result.detail)),
-        Status::Fail => print_squash_local_line(stream, &result.detail),
-        Status::Noop => print_squash_local_line(stream, &result.detail),
+        Status::Fail | Status::Noop => print_squash_local_line(stream, &result.detail),
         Status::WouldSquash => {
             print_squash_local_line(
                 stream,
@@ -751,7 +744,11 @@ mod tests {
     #[test]
     fn blank_commit_all_message_is_usage() {
         assert_eq!(
-            run(&["commit-all".into(), "--message-for-all".into(), "".into()]),
+            run(&[
+                "commit-all".into(),
+                "--message-for-all".into(),
+                String::new()
+            ]),
             ExitCode::Usage
         );
     }

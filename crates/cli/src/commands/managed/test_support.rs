@@ -44,17 +44,19 @@ impl ManagedFixture {
     pub(super) fn write_manifest(&self, entries: &[(&str, &str)]) {
         let text = entries
             .iter()
-            .map(|(path, remote)| format!("[[repo]]\npath = \"{path}\"\nremote = \"{remote}\"\n\n"))
-            .collect::<String>();
+            .fold(String::new(), |mut out, (path, remote)| {
+                use std::fmt::Write as _;
+                let _ = write!(
+                    out,
+                    "[[repo]]\npath = \"{path}\"\nremote = \"{remote}\"\n\n"
+                );
+                out
+            });
         std::fs::write(&self.manifest, text).unwrap();
     }
 
     pub(super) fn write_file(&self, relative: &str, text: &str) {
-        self.write_file_in(&self.home, relative, text);
-    }
-
-    pub(super) fn write_file_in(&self, root: &Path, relative: &str, text: &str) {
-        let path = root.join(relative);
+        let path = self.home.join(relative);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }

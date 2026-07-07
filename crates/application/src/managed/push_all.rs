@@ -7,7 +7,7 @@ use cqrsy::Handler;
 use domain::managed::ManagedRepo;
 
 use crate::{
-    managed::service::{self, Preflight, RepoSyncResult, SyncExit},
+    managed::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
     ports::{Clock, ManagedManifest, PushLedger, RemoteSync},
 };
 
@@ -70,12 +70,17 @@ async fn push_one(
     let ahead = synced_ahead(remote, repo).await;
     if ahead == Some(0) {
         ledger.record(&repo.name, 0, &clock.now_iso()).await;
-        return service::result(repo, &branch, "up-to-date", "up to date (already synced)");
+        return service::result(
+            repo,
+            &branch,
+            SyncStatus::UpToDate,
+            "up to date (already synced)",
+        );
     }
 
     let outcome = match remote.push(&repo.path, "origin", &branch, dry).await {
         Ok(outcome) => outcome,
-        Err(error) => return service::result(repo, &branch, "fail", &error.to_string()),
+        Err(error) => return service::result(repo, &branch, SyncStatus::Fail, &error.to_string()),
     };
     ledger
         .record(&repo.name, ahead.unwrap_or(0), &clock.now_iso())
@@ -85,14 +90,18 @@ async fn push_one(
         return service::result(
             repo,
             &branch,
-            "fail",
+            SyncStatus::Fail,
             &push_failure_detail(&outcome.combined),
         );
     }
     if outcome.combined.contains("Everything up-to-date") {
-        return service::result(repo, &branch, "up-to-date", "up to date");
+        return service::result(repo, &branch, SyncStatus::UpToDate, "up to date");
     }
-    let status = if dry { "would-push" } else { "pushed" };
+    let status = if dry {
+        SyncStatus::WouldPush
+    } else {
+        SyncStatus::Pushed
+    };
     let detail = service::last_non_empty_line(&outcome.combined).unwrap_or("up to date");
     service::result(repo, &branch, status, detail)
 }
@@ -180,7 +189,7 @@ mod tests {
         let response = send_now(&(), &handler, req()).expect("push succeeds");
 
         assert_eq!(response.results.len(), 1);
-        assert_eq!(response.results[0].status, "up-to-date");
+        assert_eq!(response.results[0].status, SyncStatus::UpToDate);
         assert_eq!(response.results[0].detail, "up to date (already synced)");
         assert_eq!(response.exit, SyncExit::Clean);
     }
@@ -205,7 +214,7 @@ mod tests {
 
         let response = send_now(&(), &handler, req()).expect("push succeeds");
 
-        assert_eq!(response.results[0].status, "pushed");
+        assert_eq!(response.results[0].status, SyncStatus::Pushed);
         assert_eq!(response.results[0].detail, "abc..def  main -> main");
         assert_eq!(response.exit, SyncExit::Clean);
     }
@@ -231,7 +240,7 @@ mod tests {
 
         let response = send_now(&(), &handler, request).expect("push succeeds");
 
-        assert_eq!(response.results[0].status, "would-push");
+        assert_eq!(response.results[0].status, SyncStatus::WouldPush);
     }
 
     #[test]
@@ -254,7 +263,7 @@ mod tests {
 
         let response = send_now(&(), &handler, req()).expect("push succeeds");
 
-        assert_eq!(response.results[0].status, "fail");
+        assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
             response.results[0].detail,
             "! [rejected]  main -> main (fetch first)"
@@ -275,7 +284,7 @@ mod tests {
 
         let response = send_now(&(), &handler, req()).expect("push succeeds");
 
-        assert_eq!(response.results[0].status, "warn");
+        assert_eq!(response.results[0].status, SyncStatus::Warn);
         assert_eq!(
             response.results[0].detail,
             "detached HEAD - nothing to push"

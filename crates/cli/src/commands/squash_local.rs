@@ -1,64 +1,6 @@
-use std::{path::Path, process::Command};
+use std::path::Path;
 
-use anyhow::Context;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GitOutput {
-    pub stdout: String,
-    /// git's stderr (where it writes diagnostics on failure). Empty unless captured.
-    pub stderr: String,
-    pub exit_code: i32,
-}
-
-impl GitOutput {
-    fn success(&self) -> bool {
-        self.exit_code == 0
-    }
-
-    /// git's own diagnostic — stderr (where it writes errors) if present, else stdout —
-    /// trimmed. Empty when git said nothing.
-    pub fn diagnostic(&self) -> &str {
-        let stderr = self.stderr.trim();
-        if stderr.is_empty() {
-            self.stdout.trim()
-        } else {
-            stderr
-        }
-    }
-
-    /// A failure detail: `context` plus git's own message when it gave one, otherwise
-    /// `context (exit N)`. Lets every command surface git's real reason uniformly.
-    pub fn fail_detail(&self, context: &str) -> String {
-        match self.diagnostic() {
-            said if !said.is_empty() => format!("{context}: {said}"),
-            _ => format!("{context} (exit {})", self.exit_code),
-        }
-    }
-}
-
-pub trait GitRunner {
-    fn run(&self, repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput>;
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct StdGitRunner;
-
-impl GitRunner for StdGitRunner {
-    fn run(&self, repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(repo)
-            .args(args)
-            .output()
-            .with_context(|| format!("failed to run git in {}", repo.display()))?;
-
-        Ok(GitOutput {
-            stdout: String::from_utf8(output.stdout).context("git stdout was not valid UTF-8")?,
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            exit_code: output.status.code().unwrap_or(1),
-        })
-    }
-}
+use crate::commands::git_runner::{GitOutput, GitRunner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -120,9 +62,8 @@ pub fn invoke_squash_local(
         }
     };
 
-    let message = match message.filter(|message| !message.is_empty()) {
-        Some(message) => message,
-        None => return SquashResult::new(Status::Refused, "commit message is required"),
+    let Some(message) = message.filter(|message| !message.is_empty()) else {
+        return SquashResult::new(Status::Refused, "commit message is required");
     };
 
     let range = format!("{upstream}..HEAD");
@@ -191,6 +132,23 @@ pub fn invoke_squash_local(
         };
     }
 
+    collapse(runner, top_path, &upstream, message, count, commits)
+}
+
+/// The destructive phase: soft-reset to `upstream`, recommit as one, byte-verify the
+/// tree against the pre-squash HEAD, restoring the old HEAD on any failure.
+#[expect(
+    clippy::too_many_lines,
+    reason = "a linear four-step git sequence whose bulk is per-step recovery mapping; splitting further would scatter the restore logic"
+)]
+fn collapse(
+    runner: &impl GitRunner,
+    top_path: &Path,
+    upstream: &str,
+    message: &str,
+    count: usize,
+    commits: Vec<String>,
+) -> SquashResult {
     let pre = match run_git(runner, top_path, &["rev-parse", "HEAD"]) {
         Ok(output) if output.success() && !output.stdout.trim().is_empty() => {
             output.stdout.trim().to_string()
@@ -214,7 +172,7 @@ pub fn invoke_squash_local(
         }
     };
 
-    match run_git(runner, top_path, &["reset", "--soft", &upstream]) {
+    match run_git(runner, top_path, &["reset", "--soft", upstream]) {
         Ok(output) if output.success() => {}
         Ok(output) => {
             return SquashResult {
@@ -378,7 +336,7 @@ mod tests {
         fn run(&self, repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
             self.calls.borrow_mut().push(Call {
                 repo: repo.to_path_buf(),
-                args: args.iter().map(|arg| arg.to_string()).collect(),
+                args: args.iter().map(std::string::ToString::to_string).collect(),
             });
             match self.results.borrow_mut().remove(0) {
                 Scripted::Output(output) => Ok(output),
@@ -396,7 +354,7 @@ mod tests {
     }
 
     fn assert_result(
-        result: SquashResult,
+        result: &SquashResult,
         status: Status,
         count: usize,
         commits: &[&str],
@@ -416,7 +374,7 @@ mod tests {
 
         let result = invoke_squash_local(&runner, "C:/repo", Some("collapse"), false);
 
-        assert_result(result, Status::Refused, 0, &[], "", "not a git repo");
+        assert_result(&result, Status::Refused, 0, &[], "", "not a git repo");
         assert_eq!(
             runner.calls(),
             vec![Call {
@@ -433,7 +391,7 @@ mod tests {
         let result = invoke_squash_local(&runner, "C:/repo", Some("collapse"), false);
 
         assert_result(
-            result,
+            &result,
             Status::Refused,
             0,
             &[],
@@ -452,7 +410,7 @@ mod tests {
         let result = invoke_squash_local(&runner, "C:/repo", None, false);
 
         assert_result(
-            result,
+            &result,
             Status::Refused,
             0,
             &[],
@@ -469,7 +427,7 @@ mod tests {
         let result = invoke_squash_local(&runner, "C:/repo", Some("collapse"), false);
 
         assert_result(
-            result,
+            &result,
             Status::Noop,
             0,
             &[],
@@ -487,7 +445,7 @@ mod tests {
         let result = invoke_squash_local(&runner, "C:/repo", Some("collapse"), false);
 
         assert_result(
-            result,
+            &result,
             Status::Noop,
             1,
             &["abc1234 one commit"],
@@ -505,7 +463,7 @@ mod tests {
         let result = invoke_squash_local(&runner, "C:/repo", Some("collapse"), true);
 
         assert_result(
-            result,
+            &result,
             Status::WouldSquash,
             2,
             &["abc1234 first", "fed5678 second"],
@@ -529,7 +487,7 @@ mod tests {
         let result = invoke_squash_local(&runner, "C:/repo", Some("collapse"), false);
 
         assert_result(
-            result,
+            &result,
             Status::Squashed,
             3,
             &["abc1234 first", "fed5678 second", "987abcd third"],
@@ -571,7 +529,7 @@ mod tests {
         let result = invoke_squash_local(&runner, "C:/repo", Some("collapse"), false);
 
         assert_result(
-            result,
+            &result,
             Status::Fail,
             2,
             &["abc1234 first", "fed5678 second"],
@@ -599,7 +557,7 @@ mod tests {
         let result = invoke_squash_local(&runner, "C:/repo", Some("collapse"), false);
 
         assert_result(
-            result,
+            &result,
             Status::Fail,
             2,
             &["abc1234 first", "fed5678 second"],
@@ -631,7 +589,7 @@ mod tests {
         let result = invoke_squash_local(&runner, "C:/repo", Some("collapse"), false);
 
         assert_result(
-            result,
+            &result,
             Status::Fail,
             2,
             &["abc1234 first", "fed5678 second"],
@@ -660,7 +618,7 @@ mod tests {
         let result = invoke_squash_local(&runner, "C:/repo", Some("collapse"), false);
 
         assert_result(
-            result,
+            &result,
             Status::Fail,
             2,
             &["abc1234 first", "fed5678 second"],

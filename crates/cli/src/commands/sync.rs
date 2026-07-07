@@ -1,6 +1,6 @@
-use std::path::Path;
+use std::{fmt::Write as _, path::Path};
 
-use crate::commands::squash_local::GitRunner;
+use crate::commands::git_runner::GitRunner;
 
 /// What a `sync` will push, gathered read-only for the confirmation prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,23 +138,26 @@ pub fn confirmation(target: &SyncTarget, message: &str) -> String {
 
     if changed > 0 {
         if unprepared > 0 {
-            out.push_str(&format!(
+            let _ = write!(
+                out,
                 "\n  • stage {unprepared} unprepared change(s) with `git add -A`"
-            ));
+            );
         }
         let staged_note = if staged > 0 {
             format!(" ({staged} already staged)")
         } else {
             String::new()
         };
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "\n  • commit {changed} change(s){staged_note} as a single commit"
-        ));
-        out.push_str(&format!("\n  • push {} commit(s) to {dest}", ahead + 1));
+        );
+        let _ = write!(out, "\n  • push {} commit(s) to {dest}", ahead + 1);
     } else if ahead > 0 {
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             "\n  • nothing to commit; push {ahead} unpushed commit(s) to {dest}"
-        ));
+        );
     } else {
         out.push_str("\n  • nothing to commit or push — already up to date");
     }
@@ -163,9 +166,8 @@ pub fn confirmation(target: &SyncTarget, message: &str) -> String {
 }
 
 pub fn plan(runner: &impl GitRunner, repo: &Path) -> Plan {
-    let top = match capture(runner, repo, &["rev-parse", "--show-toplevel"]) {
-        Some(top) => top,
-        None => return Plan::Refused("not a git repo".to_string()),
+    let Some(top) = capture(runner, repo, &["rev-parse", "--show-toplevel"]) else {
+        return Plan::Refused("not a git repo".to_string());
     };
     let top_path = Path::new(&top);
 
@@ -174,17 +176,14 @@ pub fn plan(runner: &impl GitRunner, repo: &Path) -> Plan {
         _ => return Plan::Refused("detached HEAD — checkout a branch first".to_string()),
     };
 
-    let remote = match capture(
+    let Some(remote) = capture(
         runner,
         top_path,
         &["config", &format!("branch.{branch}.remote")],
-    ) {
-        Some(remote) => remote,
-        None => {
-            return Plan::Refused(format!(
-                "no upstream tracking branch (run: git push -u origin {branch})"
-            ));
-        }
+    ) else {
+        return Plan::Refused(format!(
+            "no upstream tracking branch (run: git push -u origin {branch})"
+        ));
     };
 
     // ? remote url is for the prompt only; an unset url must not block the sync.
@@ -319,7 +318,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::commands::squash_local::GitOutput;
+    use crate::commands::git_runner::GitOutput;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct Call {
@@ -369,7 +368,7 @@ mod tests {
         fn run(&self, repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
             self.calls.borrow_mut().push(Call {
                 repo: repo.to_path_buf(),
-                args: args.iter().map(|arg| arg.to_string()).collect(),
+                args: args.iter().map(std::string::ToString::to_string).collect(),
             });
             Ok(self.results.borrow_mut().remove(0))
         }

@@ -61,7 +61,7 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<
         let batch = render_batch(
             &self.source,
             &DiffTarget::Unpushed,
-            req.theme.clone(),
+            req.theme.as_deref(),
             &req.repos,
             false,
             &mut notes,

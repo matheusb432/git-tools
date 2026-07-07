@@ -72,8 +72,7 @@ impl DiffSource for FakeDiffSource {
         Ok(self
             .per_repo
             .get(&repo.to_string_lossy().into_owned())
-            .map(|o| o.commits.clone())
-            .unwrap_or_else(|| self.commits.clone()))
+            .map_or_else(|| self.commits.clone(), |o| o.commits.clone()))
     }
     fn file_commit_map(
         &self,
@@ -101,8 +100,7 @@ impl DiffSource for FakeDiffSource {
         Ok(self
             .per_repo
             .get(&repo.to_string_lossy().into_owned())
-            .map(|o| o.diff_output.clone())
-            .unwrap_or_else(|| self.diff_output.clone()))
+            .map_or_else(|| self.diff_output.clone(), |o| o.diff_output.clone()))
     }
     fn blame_forward(&self, _r: &Path, _b: &str, _t: &str, _p: &str) -> anyhow::Result<String> {
         Ok(String::new())
@@ -130,10 +128,13 @@ impl DiffSource for FakeDiffSource {
 
 /// Recording `ArtifactStore`: `place` records and returns a deterministic path;
 /// `lookup_by_range` answers from the `range_hits` script.
+/// Scripted range-lookup hits keyed by `(kind, base_sha, head_sha)`.
+pub type RangeHits = Arc<Mutex<HashMap<(DiffKind, String, String), PathBuf>>>;
+
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryArtifactStore {
     pub placed: Arc<Mutex<Vec<(ArtifactMeta, String)>>>,
-    pub range_hits: Arc<Mutex<HashMap<(DiffKind, String, String), PathBuf>>>,
+    pub range_hits: RangeHits,
     pub history: Vec<HistoryRecord>,
 }
 

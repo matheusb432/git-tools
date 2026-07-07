@@ -1,5 +1,5 @@
-//! The diffs feature: engine utilities and the render_diff/render_diff_all/
-//! render_merge_diff/render_squash_preview/render_diff_subrepos slices.
+//! The diffs feature: engine utilities and the `render_diff/render_diff_all`/
+//! `render_merge_diff/render_squash_preview/render_diff_subrepos` slices.
 
 pub mod attribution;
 pub mod batch;

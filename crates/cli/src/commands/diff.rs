@@ -77,9 +77,8 @@ mod tests {
             }],
             data: None,
         });
-        let err = match run_with(&backend, &DiffTarget::Unpushed, None) {
-            Err(err) => err,
-            Ok(_) => panic!("error outcome must map to Err"),
+        let Err(err) = run_with(&backend, &DiffTarget::Unpushed, None) else {
+            panic!("error outcome must map to Err")
         };
         assert_eq!(format!("{err:#}"), "not a git repo");
     }

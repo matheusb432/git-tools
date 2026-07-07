@@ -8,7 +8,7 @@ use cqrsy::Handler;
 use domain::managed::ManagedRepo;
 
 use crate::{
-    managed::service::{self, Preflight, RepoSyncResult, SyncExit},
+    managed::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
     ports::{ManagedManifest, RemoteSync},
 };
 
@@ -66,10 +66,15 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
                 "fetch failed: {}",
                 service::last_non_empty_line(&outcome.combined).unwrap_or("fetch failed")
             );
-            return service::result(repo, &branch, "fail", &detail);
+            return service::result(repo, &branch, SyncStatus::Fail, &detail);
         }
         Err(error) => {
-            return service::result(repo, &branch, "fail", &format!("fetch failed: {error}"));
+            return service::result(
+                repo,
+                &branch,
+                SyncStatus::Fail,
+                &format!("fetch failed: {error}"),
+            );
         }
     }
 
@@ -80,16 +85,15 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
             return service::result(
                 repo,
                 &branch,
-                "warn",
+                SyncStatus::Warn,
                 &format!("no '{branch}' branch on origin"),
             );
         }
     }
 
     let range = format!("origin/{branch}...{branch}");
-    let (behind, ahead) = match remote.rev_list_left_right(&repo.path, &range).await {
-        Ok(counts) => counts,
-        Err(_) => return service::result(repo, &branch, "fail", "rev-list failed"),
+    let Ok((behind, ahead)) = remote.rev_list_left_right(&repo.path, &range).await else {
+        return service::result(repo, &branch, SyncStatus::Fail, "rev-list failed");
     };
 
     if behind == 0 {
@@ -98,15 +102,15 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
         } else {
             "up to date".to_string()
         };
-        return service::result(repo, &branch, "up-to-date", &detail);
+        return service::result(repo, &branch, SyncStatus::UpToDate, &detail);
     }
     if ahead > 0 {
         let detail = format!("diverged (ahead {ahead}, behind {behind}) - resolve manually");
-        return service::result(repo, &branch, "fail", &detail);
+        return service::result(repo, &branch, SyncStatus::Fail, &detail);
     }
     if dry {
         let detail = format!("behind by {behind} - fast-forward");
-        return service::result(repo, &branch, "would-pull", &detail);
+        return service::result(repo, &branch, SyncStatus::WouldPull, &detail);
     }
 
     let merge_ref = format!("origin/{branch}");
@@ -116,19 +120,18 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
                 "fast-forwarded {behind} commit{}",
                 if behind == 1 { "" } else { "s" }
             );
-            service::result(repo, &branch, "pulled", &detail)
+            service::result(repo, &branch, SyncStatus::Pulled, &detail)
         }
         Ok(outcome) => {
             let detail = outcome
                 .combined
                 .lines()
                 .find(|line| line.starts_with("error:") || line.starts_with("fatal:"))
-                .map(str::trim)
-                .unwrap_or("ff merge failed")
+                .map_or("ff merge failed", str::trim)
                 .to_string();
-            service::result(repo, &branch, "fail", &detail)
+            service::result(repo, &branch, SyncStatus::Fail, &detail)
         }
-        Err(error) => service::result(repo, &branch, "fail", &error.to_string()),
+        Err(error) => service::result(repo, &branch, SyncStatus::Fail, &error.to_string()),
     }
 }
 
@@ -197,7 +200,7 @@ mod tests {
 
         let response = send_now(&(), &handler, request).expect("pull succeeds");
 
-        assert_eq!(response.results[0].status, "would-pull");
+        assert_eq!(response.results[0].status, SyncStatus::WouldPull);
         assert_eq!(response.results[0].detail, "behind by 3 - fast-forward");
     }
 
@@ -213,7 +216,7 @@ mod tests {
 
         let response = send_now(&(), &handler, req()).expect("pull succeeds");
 
-        assert_eq!(response.results[0].status, "fail");
+        assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
             response.results[0].detail,
             "diverged (ahead 1, behind 2) - resolve manually"
@@ -233,7 +236,7 @@ mod tests {
 
         let response = send_now(&(), &handler, req()).expect("pull succeeds");
 
-        assert_eq!(response.results[0].status, "up-to-date");
+        assert_eq!(response.results[0].status, SyncStatus::UpToDate);
         assert_eq!(
             response.results[0].detail,
             "up to date (local ahead by 2 - push pending)"
@@ -256,7 +259,7 @@ mod tests {
 
         let response = send_now(&(), &handler, req()).expect("pull succeeds");
 
-        assert_eq!(response.results[0].status, "pulled");
+        assert_eq!(response.results[0].status, SyncStatus::Pulled);
         assert_eq!(response.results[0].detail, "fast-forwarded 1 commit");
     }
 
@@ -275,7 +278,7 @@ mod tests {
 
         let response = send_now(&(), &handler, req()).expect("pull succeeds");
 
-        assert_eq!(response.results[0].status, "fail");
+        assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
             response.results[0].detail,
             "fetch failed: fatal: unable to access origin"
@@ -294,7 +297,7 @@ mod tests {
 
         let response = send_now(&(), &handler, req()).expect("pull succeeds");
 
-        assert_eq!(response.results[0].status, "warn");
+        assert_eq!(response.results[0].status, SyncStatus::Warn);
         assert_eq!(response.results[0].detail, "no 'main' branch on origin");
     }
 }

@@ -93,12 +93,18 @@ pub fn merge_members(
     Ok(parse_rev_list(&raw, merge))
 }
 
+/// Abbreviate a sha to the 9-char width this tool uses everywhere (matches the
+/// `--short=9` git invocations); tolerates already-short input.
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(9).collect()
+}
+
 fn parse_rev_list(raw: &str, merge: &str) -> Vec<String> {
-    let merge_short: String = merge.chars().take(9).collect();
+    let merge_short = short_sha(merge);
     raw.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .map(|line| line.chars().take(9).collect::<String>())
+        .map(short_sha)
         .filter(|sha| *sha != merge_short)
         .collect()
 }
@@ -201,7 +207,7 @@ pub fn parse_commit_log(raw: &str) -> Vec<Commit> {
         .map(|record| {
             let mut fields = record.split('\x1f');
             Commit {
-                sha: fields.next().unwrap_or("").chars().take(9).collect(),
+                sha: short_sha(fields.next().unwrap_or("")),
                 subject: fields.next().unwrap_or("").to_string(),
                 body: fields.next().unwrap_or("").to_string(),
                 date: fields.next().unwrap_or("").to_string(),
@@ -210,7 +216,7 @@ pub fn parse_commit_log(raw: &str) -> Vec<Commit> {
                     .next()
                     .unwrap_or("")
                     .split_whitespace()
-                    .map(|sha| sha.chars().take(9).collect())
+                    .map(short_sha)
                     .collect(),
                 members: Vec::new(),
             }
@@ -223,12 +229,7 @@ pub fn parse_file_commit_map(raw: &str) -> HashMap<String, Vec<String>> {
 
     for record in raw.split('\x1e').map(str::trim).filter(|s| !s.is_empty()) {
         let mut lines = record.split('\n');
-        let short = lines
-            .next()
-            .unwrap_or("")
-            .chars()
-            .take(9)
-            .collect::<String>();
+        let short = short_sha(lines.next().unwrap_or(""));
 
         for path in lines.map(str::trim).filter(|path| !path.is_empty()) {
             map.entry(path.to_string()).or_default().push(short.clone());

@@ -1,8 +1,9 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use anyhow::Context as _;
 use contracts::{
-    diffs::DiffTargetDto,
-    envelope::{Note, NoteLevel},
+    diffs::{DiffTargetDto, RenderDiffData},
+    envelope::{Envelope, Note, NoteLevel, Outcome},
 };
 
 use crate::cli::DiffTarget;
@@ -11,6 +12,7 @@ pub mod daemon_ctl;
 pub mod diff;
 pub mod diff_subrepos;
 mod discover;
+pub mod git_runner;
 pub mod managed;
 pub mod merge_diff;
 pub mod prune;
@@ -83,6 +85,23 @@ pub(crate) fn error_text(notes: &[Note]) -> String {
             || "daemon reported an error".to_string(),
             |n| n.text.clone(),
         )
+}
+
+/// Finish a single-artifact render: print the envelope's wire notes, then on a
+/// successful outcome open the artifact and return its path; any non-`Ok` outcome
+/// becomes the service-composed error. Shared by `merge-diff` and `squash-preview`,
+/// whose success path is identical (both auto-open the freshly written artifact).
+pub(crate) fn finish_single_render(envelope: Envelope<RenderDiffData>) -> anyhow::Result<PathBuf> {
+    print_wire_notes(&envelope.notes);
+    match envelope.outcome {
+        Outcome::Ok => {
+            let data = envelope.data.context("daemon returned ok without data")?;
+            let artifact = PathBuf::from(data.artifact);
+            open_artifact(&artifact);
+            Ok(artifact)
+        }
+        _ => Err(anyhow::anyhow!(error_text(&envelope.notes))),
+    }
 }
 
 /// Map a [`DiffTarget`] onto its wire DTO.

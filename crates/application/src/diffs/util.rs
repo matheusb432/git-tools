@@ -78,7 +78,10 @@ pub fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
 }
 
 /// Attach each file's touching commits from the range's file→commits map (pure).
-pub fn attach_commits(files: &mut [FileDiff], map: &HashMap<String, Vec<String>>) {
+pub fn attach_commits<S: std::hash::BuildHasher>(
+    files: &mut [FileDiff],
+    map: &HashMap<String, Vec<String>, S>,
+) {
     for file in files {
         file.commits = map.get(&file.path).cloned().unwrap_or_default();
     }
@@ -106,7 +109,7 @@ pub fn assemble(
 
     // ! Blame never attributes a line to a merge, so a merge card is otherwise dead. Map each
     // ! merge to the commits it brought into the range so focusing it lifts their rows.
-    for commit in commits.iter_mut() {
+    for commit in &mut commits {
         if commit.is_merge() {
             commit.members = source
                 .merge_members(repo, &commit.sha, &base)
@@ -143,6 +146,17 @@ fn blame_targets(diff_range: &str, log_range: &str) -> (String, NewSide) {
         NewSide::WorkTree
     };
     (base, new_side)
+}
+
+/// The repo's display name: the last path component of its git top-level, falling
+/// back to `"repo"` when the path has no usable final component.
+pub(crate) fn repo_name(top: &str) -> String {
+    Path::new(top)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("repo")
+        .to_string()
 }
 
 pub fn full_context_args(args: &[String]) -> Vec<String> {

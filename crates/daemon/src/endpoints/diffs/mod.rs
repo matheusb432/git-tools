@@ -193,7 +193,7 @@ pub(crate) fn error_envelope(text: String) -> Envelope<RenderDiffData> {
 
 /// Shared by every response shaped `{artifact, reused, notes}`.
 fn ok_envelope(
-    artifact: std::path::PathBuf,
+    artifact: &std::path::Path,
     reused: bool,
     notes: &[app_notes::Note],
 ) -> Envelope<RenderDiffData> {
@@ -208,18 +208,18 @@ fn ok_envelope(
 }
 
 /// Project a successful application response onto the wire envelope.
-pub(crate) fn to_merge_envelope(resp: RenderMergeDiffResponse) -> Envelope<RenderDiffData> {
-    ok_envelope(resp.artifact, resp.reused, &resp.notes)
+pub(crate) fn to_merge_envelope(resp: &RenderMergeDiffResponse) -> Envelope<RenderDiffData> {
+    ok_envelope(&resp.artifact, resp.reused, &resp.notes)
 }
 
 /// Project a successful application response onto the wire envelope.
-pub(crate) fn to_squash_envelope(resp: RenderSquashPreviewResponse) -> Envelope<RenderDiffData> {
-    ok_envelope(resp.artifact, resp.reused, &resp.notes)
+pub(crate) fn to_squash_envelope(resp: &RenderSquashPreviewResponse) -> Envelope<RenderDiffData> {
+    ok_envelope(&resp.artifact, resp.reused, &resp.notes)
 }
 
 /// Project a successful application response onto the wire envelope.
-pub(crate) fn to_all_envelope(resp: RenderDiffAllResponse) -> Envelope<RenderDiffData> {
-    ok_envelope(resp.artifact, resp.reused, &resp.notes)
+pub(crate) fn to_all_envelope(resp: &RenderDiffAllResponse) -> Envelope<RenderDiffData> {
+    ok_envelope(&resp.artifact, resp.reused, &resp.notes)
 }
 
 /// Project a successful application response onto the wire envelope.

@@ -16,7 +16,7 @@ use contracts::{
     envelope::Envelope,
     managed::{PullAllRequest, PushAllRequest, SyncData},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// The swap-later seam: `gtl diff` and its siblings render through whatever
 /// backend they are handed. The production impl talks to the resident daemon
@@ -142,7 +142,7 @@ impl HttpBackend {
     /// Returns an error only when a daemon cannot be brought up (spawn failure or
     /// a 5 s startup timeout) or the HTTP client cannot be built.
     pub fn ensure_daemon() -> anyhow::Result<Self> {
-        let bin = daemon_bin()?;
+        let bin = daemon_bin();
         let pre = read_port_file();
 
         if let Some(port) = pinned_port() {
@@ -202,143 +202,88 @@ impl HttpBackend {
             http,
         })
     }
+
+    /// POST `req` as JSON to `path` and parse the response body as `Res`. A 400/500
+    /// carries an error envelope, so the body is deserialized regardless of status.
+    fn post_json<Req: Serialize, Res: DeserializeOwned>(
+        &self,
+        path: &str,
+        req: &Req,
+    ) -> anyhow::Result<Res> {
+        self.http
+            .post(format!("{}{path}", self.base_url))
+            .json(req)
+            .send()
+            .context("daemon request failed")?
+            .json::<Res>()
+            .context("daemon request failed")
+    }
 }
 
 impl Backend for HttpBackend {
     fn render_diff(&self, req: &RenderDiffRequest) -> anyhow::Result<Envelope<RenderDiffData>> {
-        let response = self
-            .http
-            .post(format!("{}/diffs/render", self.base_url))
-            .json(req)
-            .send()
-            .context("daemon request failed")?;
-        // 400/500 carry error envelopes — deserialize the body for any status.
-        response
-            .json::<Envelope<RenderDiffData>>()
-            .context("daemon request failed")
+        self.post_json("/diffs/render", req)
     }
 
     fn render_merge_diff(
         &self,
         req: &RenderMergeDiffRequest,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
-        let response = self
-            .http
-            .post(format!("{}/diffs/merge", self.base_url))
-            .json(req)
-            .send()
-            .context("daemon request failed")?;
-        // 400/500 carry error envelopes — deserialize the body for any status.
-        response
-            .json::<Envelope<RenderDiffData>>()
-            .context("daemon request failed")
+        self.post_json("/diffs/merge", req)
     }
 
     fn render_squash_preview(
         &self,
         req: &RenderSquashPreviewRequest,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
-        let response = self
-            .http
-            .post(format!("{}/diffs/squash-preview", self.base_url))
-            .json(req)
-            .send()
-            .context("daemon request failed")?;
-        // 400/500 carry error envelopes — deserialize the body for any status.
-        response
-            .json::<Envelope<RenderDiffData>>()
-            .context("daemon request failed")
+        self.post_json("/diffs/squash-preview", req)
     }
 
     fn render_diff_subrepos(
         &self,
         req: &RenderDiffSubreposRequest,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
-        let response = self
-            .http
-            .post(format!("{}/diffs/subrepos", self.base_url))
-            .json(req)
-            .send()
-            .context("daemon request failed")?;
-        // 400/500 carry error envelopes — deserialize the body for any status.
-        response
-            .json::<Envelope<RenderDiffData>>()
-            .context("daemon request failed")
+        self.post_json("/diffs/subrepos", req)
     }
 
     fn render_diff_all(
         &self,
         req: &RenderDiffAllRequest,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
-        let response = self
-            .http
-            .post(format!("{}/diffs/all", self.base_url))
-            .json(req)
-            .send()
-            .context("daemon request failed")?;
-        // 400/500 carry error envelopes — deserialize the body for any status.
-        response
-            .json::<Envelope<RenderDiffData>>()
-            .context("daemon request failed")
+        self.post_json("/diffs/all", req)
     }
 
     fn push_all(&self, req: &PushAllRequest) -> anyhow::Result<Envelope<SyncData>> {
-        let response = self
-            .http
-            .post(format!("{}/managed/push-all", self.base_url))
-            .json(req)
-            .send()
-            .context("daemon request failed")?;
-        response
-            .json::<Envelope<SyncData>>()
-            .context("daemon request failed")
+        self.post_json("/managed/push-all", req)
     }
 
     fn pull_all(&self, req: &PullAllRequest) -> anyhow::Result<Envelope<SyncData>> {
-        let response = self
-            .http
-            .post(format!("{}/managed/pull-all", self.base_url))
-            .json(req)
-            .send()
-            .context("daemon request failed")?;
-        response
-            .json::<Envelope<SyncData>>()
-            .context("daemon request failed")
+        self.post_json("/managed/pull-all", req)
     }
 }
 
 /// Report a running daemon's identity, or `None` when nothing answers.
-///
-/// # Errors
-/// Never fails today; the `Result` leaves room for a future transport error path.
-pub fn daemon_status() -> anyhow::Result<Option<DaemonStatus>> {
-    let Some(pf) = read_port_file() else {
-        return Ok(None);
-    };
-    let Some(health) = health(pf.port, HEALTH_TIMEOUT) else {
-        return Ok(None);
-    };
-    Ok(Some(DaemonStatus {
+pub fn daemon_status() -> Option<DaemonStatus> {
+    let pf = read_port_file()?;
+    let health = health(pf.port, HEALTH_TIMEOUT)?;
+    Some(DaemonStatus {
         port: pf.port,
         pid: health.pid,
         version: health.version,
-    }))
+    })
 }
 
-/// Ask a running daemon to exit; `Ok(false)` when nothing was running.
-///
-/// # Errors
-/// Never fails today; the `Result` leaves room for a future transport error path.
-pub fn daemon_stop() -> anyhow::Result<bool> {
+/// Ask a running daemon to exit; `false` when nothing was running.
+pub fn daemon_stop() -> bool {
     let Some(pf) = read_port_file() else {
-        return Ok(false);
+        return false;
     };
     if health(pf.port, HEALTH_TIMEOUT).is_none() {
-        return Ok(false);
+        return false;
     }
     shutdown(pf.port);
     wait_until_dead(pf.port, STOP_BUDGET);
-    Ok(true)
+    true
 }
 
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
@@ -355,17 +300,17 @@ fn pinned_port() -> Option<u16> {
 
 /// The daemon binary: `gtl-daemon` next to the running CLI exe, else the bare
 /// name for the OS PATH resolver (mirrors `viewer::resolve_viewer_bin`).
-fn daemon_bin() -> anyhow::Result<PathBuf> {
+fn daemon_bin() -> PathBuf {
     let name = format!("gtl-daemon{}", std::env::consts::EXE_SUFFIX);
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
         let sibling = dir.join(&name);
         if sibling.is_file() {
-            return Ok(sibling);
+            return sibling;
         }
     }
-    Ok(PathBuf::from(name))
+    PathBuf::from(name)
 }
 
 /// Read `<store_root>/daemon.json`, `None` when absent or malformed.
@@ -399,8 +344,7 @@ fn identity_matches(health: &Health, bin: &Path) -> bool {
         .modified()
         .ok()
         .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
-        .unwrap_or(0);
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
     meta.len() == health.exe_len && modified_ms == health.exe_modified_ms
 }
 
@@ -437,12 +381,14 @@ mod tests {
         let path = dir.path().join("gtl-daemon-fake");
         std::fs::write(&path, b"0123456789").unwrap();
         let meta = std::fs::metadata(&path).unwrap();
-        let ms = meta
-            .modified()
-            .unwrap()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+        let ms = u64::try_from(
+            meta.modified()
+                .unwrap()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .expect("mtime in ms fits u64 for eons");
 
         let health = Health {
             pid: 1,
@@ -479,7 +425,7 @@ mod tests {
 
     #[test]
     fn daemon_bin_name_uses_the_platform_exe_suffix() {
-        let bin = daemon_bin().unwrap();
+        let bin = daemon_bin();
         let name = bin.file_name().unwrap().to_str().unwrap();
         assert_eq!(name, format!("gtl-daemon{}", std::env::consts::EXE_SUFFIX));
     }

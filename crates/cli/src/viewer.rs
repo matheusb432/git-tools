@@ -24,20 +24,19 @@ pub fn resolve_viewer_action(viewer: Viewer, has_display: bool, no_open: bool) -
     }
     match viewer {
         Viewer::None => ViewerAction::Nothing,
-        Viewer::Browser => ViewerAction::Browser,
         Viewer::App if has_display => ViewerAction::SpawnApp,
-        Viewer::App => ViewerAction::Browser,
+        Viewer::Browser | Viewer::App => ViewerAction::Browser,
     }
 }
 
-/// Returns true if the given env-var value is a truthy NO_OPEN sentinel
+/// Returns true if the given env-var value is a truthy `NO_OPEN` sentinel
 /// (`1 | true | TRUE | yes | YES`, after trimming). Mirrors gtl-platform's
 /// `no_open_requested` but kept local to avoid a cross-crate dep for a
 /// pure predicate.
 pub(crate) fn is_no_open(value: Option<&str>) -> bool {
     matches!(
         value.map(str::trim),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
     )
 }
 

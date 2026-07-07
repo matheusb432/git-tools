@@ -33,8 +33,7 @@ fn git_clean(dir: &str) -> bool {
     Command::new("git")
         .args(["diff", "--quiet", "--", dir])
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .is_ok_and(|s| s.success())
 }
 
 /// Rebuild the bundles via the existing bun recipes, then diff the committed output.

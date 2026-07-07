@@ -42,13 +42,16 @@ impl ManagedExit {
         match self {
             ManagedExit::Clean => 0,
             ManagedExit::Warn => 1,
-            ManagedExit::Fail => 2,
-            ManagedExit::Usage => 2,
+            ManagedExit::Fail | ManagedExit::Usage => 2,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent CLI flags mirrored from argv, not a disguised state machine"
+)]
 pub struct ManagedOptions {
     pub repos_file: Option<PathBuf>,
     pub home_dir: Option<PathBuf>,

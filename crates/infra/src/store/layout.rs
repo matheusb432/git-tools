@@ -82,38 +82,38 @@ pub fn lookup_by_range(
     kind: DiffKind,
     base_sha: &str,
     head_sha: &str,
-) -> anyhow::Result<Option<PathBuf>> {
+) -> Option<PathBuf> {
     if kind == DiffKind::WorkTree {
-        return Ok(None);
+        return None;
     }
     let dir = repo_dir(store_root, repo_id);
-    for (stem, sidecar) in read_sidecars_paired(&dir)? {
+    for (stem, sidecar) in read_sidecars_paired(&dir) {
         if sidecar.kind == kind && sidecar.base_sha == base_sha && sidecar.head_sha == head_sha {
-            return Ok(Some(dir.join(format!("{stem}.html"))));
+            return Some(dir.join(format!("{stem}.html")));
         }
     }
-    Ok(None)
+    None
 }
 
 /// All sidecars across all repos, for the viewer's history.
 /// Each entry pairs the sidecar with its content hash (the filename stem), so
 /// callers can build `diff://` URLs without re-reading the filesystem.
-pub fn list_history_with_hash(store_root: &Path) -> anyhow::Result<Vec<(String, Sidecar)>> {
+pub fn list_history_with_hash(store_root: &Path) -> Vec<(String, Sidecar)> {
     let diffs = store_root.join("diffs");
     let mut all = Vec::new();
     let Ok(repos) = fs::read_dir(&diffs) else {
-        return Ok(all);
+        return all;
     };
     for repo in repos.flatten() {
-        all.extend(read_sidecars_paired(&repo.path())?);
+        all.extend(read_sidecars_paired(&repo.path()));
     }
-    Ok(all)
+    all
 }
 
-fn read_sidecars_paired(dir: &Path) -> anyhow::Result<Vec<(String, Sidecar)>> {
+fn read_sidecars_paired(dir: &Path) -> Vec<(String, Sidecar)> {
     let mut out = Vec::new();
     let Ok(entries) = fs::read_dir(dir) else {
-        return Ok(out);
+        return out;
     };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -131,7 +131,7 @@ fn read_sidecars_paired(dir: &Path) -> anyhow::Result<Vec<(String, Sidecar)>> {
             }
         }
     }
-    Ok(out)
+    out
 }
 
 #[cfg(test)]
@@ -188,22 +188,16 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let sc = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
         place(tmp.path(), "repo0000", "<html>x</html>", &sc).unwrap();
-        let hit =
-            lookup_by_range(tmp.path(), "repo0000", DiffKind::TwoDot, "aaaa", "bbbb").unwrap();
+        let hit = lookup_by_range(tmp.path(), "repo0000", DiffKind::TwoDot, "aaaa", "bbbb");
         assert!(hit.is_some());
-        let miss =
-            lookup_by_range(tmp.path(), "repo0000", DiffKind::TwoDot, "aaaa", "cccc").unwrap();
+        let miss = lookup_by_range(tmp.path(), "repo0000", DiffKind::TwoDot, "aaaa", "cccc");
         assert!(miss.is_none());
     }
 
     #[test]
     fn worktree_is_never_range_addressable() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(
-            lookup_by_range(tmp.path(), "r", DiffKind::WorkTree, "a", "b")
-                .unwrap()
-                .is_none()
-        );
+        assert!(lookup_by_range(tmp.path(), "r", DiffKind::WorkTree, "a", "b").is_none());
     }
 
     #[test]
@@ -223,7 +217,7 @@ mod tests {
             &sidecar(DiffKind::ThreeDot, "c", "d"),
         )
         .unwrap();
-        assert_eq!(list_history_with_hash(tmp.path()).unwrap().len(), 2);
+        assert_eq!(list_history_with_hash(tmp.path()).len(), 2);
     }
 
     #[test]
@@ -243,7 +237,7 @@ mod tests {
             .to_str()
             .unwrap()
             .to_string();
-        let got = list_history_with_hash(tmp.path()).unwrap();
+        let got = list_history_with_hash(tmp.path());
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].0, stem);
     }

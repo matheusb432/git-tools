@@ -59,19 +59,27 @@ fn window_xid(window: &tauri::WebviewWindow) -> Option<u64> {
         // ! so this `.into()` is a real cross-platform widening, not the no-op it looks like here.
         #[allow(clippy::useless_conversion)]
         RawWindowHandle::Xlib(h) => Some(h.window.into()),
-        RawWindowHandle::Xcb(h) => Some(h.window.get() as u64),
+        RawWindowHandle::Xcb(h) => Some(u64::from(h.window.get())),
         _ => None,
     }
 }
 
 /// Frontend pulls queued diff refs on mount (cold-start + any that arrived first).
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri's #[command] extractors must be taken by value"
+)]
 fn drain_pending_diffs(state: tauri::State<'_, PendingDiffs>) -> Vec<String> {
     state.drain()
 }
 
 /// Return all stored diff previews sorted newest-first, for the history panel.
 #[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri's #[command] extractors must be taken by value"
+)]
 fn list_history(
     state: tauri::State<'_, DesktopMediator<infra::artifact_store::StoreArtifacts>>,
 ) -> Vec<history::HistoryEntry> {
@@ -85,6 +93,10 @@ fn list_history(
 }
 
 /// Build and run the Tauri application. Called by `main.rs`.
+///
+/// # Panics
+/// Panics when the Tauri runtime fails to build or start (no display, broken
+/// webview install) — fatal for a desktop app, so it surfaces as a crash.
 pub fn run() {
     tauri::Builder::default()
         .manage(DesktopMediator {

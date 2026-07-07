@@ -9,7 +9,7 @@ use cqrsy::Handler;
 use domain::diffs::{DiffKind, DiffTarget, Mode, View, ranges, sort_files_tree_order};
 
 use crate::{
-    diffs::util::{DiffData, assemble},
+    diffs::util::{DiffData, assemble, repo_name},
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
@@ -148,7 +148,7 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> Handler<RenderD
             &mut notes,
         )?;
         if let Some(name) = &req.name {
-            view.title = name.clone();
+            view.title.clone_from(name);
         }
         if view.is_empty() {
             notes.push(Note::warn(format!(
@@ -353,15 +353,6 @@ fn range_base(range: &str) -> &str {
         .next()
         .unwrap_or(range)
         .trim_end_matches('.')
-}
-
-fn repo_name(top: &str) -> String {
-    Path::new(top)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("repo")
-        .to_string()
 }
 
 fn legacy_count_label(count: usize, noun: &str) -> String {

@@ -25,7 +25,7 @@ mod linux_desktop;
 // --- placement contract ----------------------------------------------------
 
 /// What placing one file did: was it new, changed, or already current? The lowercased
-/// `Display` is the `installed|updated|unchanged` string the ShellSpec suite asserted.
+/// `Display` is the `installed|updated|unchanged` string the `ShellSpec` suite asserted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Installed,
@@ -37,7 +37,7 @@ impl Action {
     /// Combine two placements into the louder one: updated > installed > unchanged. Mirrors the
     /// shell's combined reporting when a binary and its alias land in one call.
     fn louder(self, other: Action) -> Action {
-        use Action::*;
+        use Action::{Installed, Unchanged, Updated};
         match (self, other) {
             (Updated, _) | (_, Updated) => Updated,
             (Installed, _) | (_, Installed) => Installed,
@@ -327,7 +327,7 @@ fn confirm_config_delete(path: &Path) -> bool {
 mod tests {
     use super::*;
 
-    /// A temp bindir + a `git-tools` source file holding `bytes`. Both TempDir guards are
+    /// A temp bindir + a `git-tools` source file holding `bytes`. Both `TempDir` guards are
     /// returned so they auto-clean on drop; `src` is the source path, `bindir` the target dir.
     fn fixture(bytes: &[u8]) -> (tempfile::TempDir, tempfile::TempDir, PathBuf, PathBuf) {
         fixture_named("git-tools", bytes)

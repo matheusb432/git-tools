@@ -266,10 +266,10 @@ impl application::ports::HtmlRenderer for MaudRenderer {
 pub fn build_tabbed_html(title: &str, views: &[View]) -> String {
     // ? tab strip CSS stays inline; tab logic is in the bundle (tabbed.ts, guarded to no-op without
     // .tabs)
-    const TABBED_CSS: &str = r#"  .tabs{position:sticky;top:0;z-index:60;display:flex;gap:6px;align-items:center;overflow-x:auto;padding:10px 12px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+    const TABBED_CSS: &str = r"  .tabs{position:sticky;top:0;z-index:60;display:flex;gap:6px;align-items:center;overflow-x:auto;padding:10px 12px;background:var(--surface-2);border-bottom:1px solid var(--line)}
   .tab{flex:none;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 10px;font:inherit;cursor:pointer}
   .tab:hover{color:var(--ink);border-color:var(--acc-line)} .tab.active{color:var(--acc);border-color:var(--acc-line)}
-  .panel[hidden]{display:none}"#;
+  .panel[hidden]{display:none}";
 
     let default_theme = views.first().and_then(|v| v.theme.as_deref());
     html! {
@@ -348,7 +348,7 @@ fn html_or_nbsp(raw: &str) -> String {
 // ! to need taming (see code_cell). Computed once per row and shared by the row class and the
 // ! code cell so the O(n) char count isn't walked twice on the very lines the freeze fix targets.
 fn long_len(raw: &str) -> Option<usize> {
-    let marker = matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')) as usize;
+    let marker = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
     let len = raw.chars().count().saturating_sub(marker);
     (len > MAX_LINE_COLS).then_some(len)
 }
@@ -458,58 +458,7 @@ pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
 
     let flush =
         |rows: &mut String, dels: &mut Vec<(u32, &String)>, adds: &mut Vec<(u32, &String)>| {
-            for i in 0..dels.len().max(adds.len()) {
-                let del = dels.get(i).copied();
-                let add = adds.get(i).copied();
-                // ! Intra-line highlight only where a deletion and an addition pair up on the
-                // ! same row and both are short enough to word-diff; unpaired or long lines fall
-                // ! back to empty spans (no marks).
-                let spans = match (del, add) {
-                    (Some((_, draw)), Some((_, araw)))
-                        if long_len(draw).is_none() && long_len(araw).is_none() =>
-                    {
-                        changed_spans(line_body(draw), line_body(araw))
-                    }
-                    _ => LineSpans::default(),
-                };
-
-                rows.push_str(r#"<div class="dl">"#);
-                match del {
-                    Some((no, raw)) => {
-                        let _ = write!(
-                            rows,
-                            r#"<span class="ln">{no}</span>{}"#,
-                            split_code(
-                                raw,
-                                long_len(raw),
-                                "sp-del",
-                                owners.deleted.get(&no),
-                                &spans.old
-                            ),
-                        );
-                    }
-                    None => rows.push_str(SPLIT_PAD),
-                }
-                match add {
-                    Some((no, raw)) => {
-                        let _ = write!(
-                            rows,
-                            r#"<span class="ln">{no}</span>{}"#,
-                            split_code(
-                                raw,
-                                long_len(raw),
-                                "sp-add",
-                                owners.added.get(&no),
-                                &spans.new
-                            ),
-                        );
-                    }
-                    None => rows.push_str(SPLIT_PAD),
-                }
-                rows.push_str("</div>");
-            }
-            dels.clear();
-            adds.clear();
+            flush_split_runs(rows, dels, adds, owners);
         };
 
     for raw in lines {
@@ -563,6 +512,70 @@ pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
     flush(&mut rows, &mut dels, &mut adds);
 
     rows
+}
+
+/// Emit the buffered deletion/addition runs as index-paired side-by-side rows
+/// (the shorter side padded), then clear both buffers.
+fn flush_split_runs(
+    rows: &mut String,
+    dels: &mut Vec<(u32, &String)>,
+    adds: &mut Vec<(u32, &String)>,
+    owners: &LineOwners,
+) {
+    use std::fmt::Write;
+
+    for i in 0..dels.len().max(adds.len()) {
+        let del = dels.get(i).copied();
+        let add = adds.get(i).copied();
+        // ! Intra-line highlight only where a deletion and an addition pair up on the
+        // ! same row and both are short enough to word-diff; unpaired or long lines fall
+        // ! back to empty spans (no marks).
+        let spans = match (del, add) {
+            (Some((_, draw)), Some((_, araw)))
+                if long_len(draw).is_none() && long_len(araw).is_none() =>
+            {
+                changed_spans(line_body(draw), line_body(araw))
+            }
+            _ => LineSpans::default(),
+        };
+
+        rows.push_str(r#"<div class="dl">"#);
+        match del {
+            Some((no, raw)) => {
+                let _ = write!(
+                    rows,
+                    r#"<span class="ln">{no}</span>{}"#,
+                    split_code(
+                        raw,
+                        long_len(raw),
+                        "sp-del",
+                        owners.deleted.get(&no),
+                        &spans.old
+                    ),
+                );
+            }
+            None => rows.push_str(SPLIT_PAD),
+        }
+        match add {
+            Some((no, raw)) => {
+                let _ = write!(
+                    rows,
+                    r#"<span class="ln">{no}</span>{}"#,
+                    split_code(
+                        raw,
+                        long_len(raw),
+                        "sp-add",
+                        owners.added.get(&no),
+                        &spans.new
+                    ),
+                );
+            }
+            None => rows.push_str(SPLIT_PAD),
+        }
+        rows.push_str("</div>");
+    }
+    dels.clear();
+    adds.clear();
 }
 
 fn hunk_starts(raw: &str) -> Option<(u32, u32)> {

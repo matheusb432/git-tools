@@ -44,7 +44,7 @@ pub fn spawn_detached(program: &Path, args: &[&str]) -> std::io::Result<()> {
 /// an EWMH-style activation primitive (see the Linux backend). The window must
 /// already be mapped — callers that just un-hid it should defer slightly.
 pub fn activate_window(xid: u64) {
-    sys::activate_window(xid)
+    sys::activate_window(xid);
 }
 
 /// The operating systems the tool targets. Windows/macOS are not yet wired for
@@ -108,7 +108,7 @@ fn symlink_dir_impl(original: &Path, link: &Path) -> std::io::Result<()> {
 fn no_open_requested(value: Option<&str>) -> bool {
     matches!(
         value.map(str::trim),
-        Some("1") | Some("true") | Some("TRUE") | Some("yes") | Some("YES")
+        Some("1" | "true" | "TRUE" | "yes" | "YES")
     )
 }
 

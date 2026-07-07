@@ -24,11 +24,8 @@ pub async fn handle<H>(
 where
     H: Sender<RenderDiffAll> + Handle,
 {
-    super::run(
-        handler,
-        shared,
-        Ok(super::to_all_request(dto)),
-        super::to_all_envelope,
-    )
+    super::run(handler, shared, Ok(super::to_all_request(dto)), |resp| {
+        super::to_all_envelope(&resp)
+    })
     .await
 }

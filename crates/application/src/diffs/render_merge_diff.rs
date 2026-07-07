@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use domain::diffs::{DiffKind, Mode, View, ranges};
 
 use crate::{
-    diffs::util::{DiffData, assemble},
+    diffs::util::{DiffData, assemble, repo_name},
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
@@ -128,15 +128,6 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<
             notes,
         })
     }
-}
-
-fn repo_name(top: &str) -> String {
-    Path::new(top)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("repo")
-        .to_string()
 }
 
 fn plural(n: usize) -> &'static str {

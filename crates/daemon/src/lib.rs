@@ -60,7 +60,7 @@ pub async fn run() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     let bound = listener.local_addr()?.port();
     let pid = std::process::id();
-    lifecycle::write_port_file(&store_root, &PortFile { port: bound, pid })?;
+    lifecycle::write_port_file(&store_root, PortFile { port: bound, pid })?;
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let shared = Arc::new(Shared {
@@ -78,7 +78,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     let ledger = NoOpPushLedger;
     let ledger_refresh_secs: u64 = bootstrap::parse_env_or("GIT_TOOLS_LEDGER_REFRESH_SECS", 0)?;
-    spawn_ledger_refresh(ledger.clone(), ledger_refresh_secs);
+    spawn_ledger_refresh(ledger, ledger_refresh_secs);
 
     let mediator = DaemonMediator {
         render_diff: RenderDiffHandler {

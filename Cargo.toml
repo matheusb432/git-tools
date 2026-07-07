@@ -31,5 +31,26 @@ default-members = [
 [profile.release]
 strip = true
 
+# Fleet clippy policy — synced from sample_project `templates/clippy-lints.toml` (edit there, then
+# `just repos sync-clippy`; local edits here are overwritten). `all = warn` + `correctness = deny`
+# restate clippy's defaults explicitly — the real policy delta is `pedantic = warn`. Group levels
+# sit at low priority so individual lint overrides (priority 0) win. Under a `-D warnings`
+# fmt-check gate everything below is fatal anyway; warn-vs-deny only shapes local `cargo clippy`
+# output. Configurable-lint tuning lives in `clippy.toml`. Formatter-neutral style on purpose (no
+# key alignment, comments above keys, not trailing) so a repo's TOML formatter (taplo) can't
+# fight the sync.
 [workspace.lints.clippy]
+all = { level = "warn", priority = -2 }
+pedantic = { level = "warn", priority = -2 }
+# Stays fatal despite `all = warn`.
+correctness = { level = "deny", priority = -1 }
+# No-op unless the repo-owned clippy.toml disallows something; deny keeps seam gates (e.g. the
+# cqrsy implementation-only handle methods that git-tools disallows) hard errors in local runs,
+# not just under the `-D warnings` fmt gate.
 disallowed_methods = "deny"
+# --- the only blanket opt-outs; anything else gets a narrow, reason-tagged local allow ---
+# `must_use_candidate` is heuristic and over-flags; real "ignored value" safety is rustc's
+# `unused_must_use` (already a hard error under `-D warnings`).
+must_use_candidate = "allow"
+# Fleet-uniform for now; selective per-crate opt-in is a later effort.
+missing_errors_doc = "allow"

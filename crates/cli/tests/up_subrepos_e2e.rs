@@ -32,7 +32,11 @@ fn rev(dir: &Path, r: &str) -> String {
         .args(["rev-parse", r])
         .output()
         .unwrap();
-    assert!(out.status.success(), "rev-parse {r} failed in {dir:?}");
+    assert!(
+        out.status.success(),
+        "rev-parse {r} failed in {}",
+        dir.display()
+    );
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 

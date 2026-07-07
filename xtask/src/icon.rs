@@ -23,6 +23,10 @@ type Rect = (f32, f32, f32, f32);
 const DESIGN: f32 = 512.0;
 const RENDER: u32 = 2048;
 const FINAL: u32 = 1024;
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "RENDER = 2048 is exactly representable in f32"
+)]
 const K: f32 = RENDER as f32 / DESIGN; // design → canvas scale (4×)
 
 const GREEN: Rgb = (34, 197, 94);
@@ -70,13 +74,13 @@ fn render() -> Result<Pixmap> {
     fill(
         &mut pixmap,
         &tile,
-        gradient(t, b, SLATE_TOP, 255, SLATE_BOT, 255),
+        &gradient(t, b, SLATE_TOP, 255, SLATE_BOT, 255),
     );
     // Sheen: white ~10% at the top, fading to nothing by mid-tile.
     fill(
         &mut pixmap,
         &tile,
-        gradient(t, t + (b - t) * 0.5, WHITE, 26, WHITE, 0),
+        &gradient(t, t + (b - t) * 0.5, WHITE, 26, WHITE, 0),
     );
     stroke(&mut pixmap, &tile, BORDER, 140, sx(2.0));
 
@@ -137,6 +141,10 @@ fn sx(v: f32) -> f32 {
 }
 
 /// A rounded-rectangle path (canvas coords); corners are cubic approximations of circular arcs.
+#[expect(
+    clippy::many_single_char_names,
+    reason = "geometry: l/t/r/b/c keep the cubic-arc formulas readable"
+)]
 fn rrect(rect: Rect, radius: f32) -> Option<tiny_skia::Path> {
     let (l, t, r, b) = rect;
     let rad = radius.min((r - l) / 2.0).min((b - t) / 2.0);
@@ -182,17 +190,17 @@ fn solid_paint(color: Rgb, a: u8) -> Paint<'static> {
     paint
 }
 
-fn fill(pixmap: &mut Pixmap, path: &tiny_skia::Path, paint: Paint) {
-    pixmap.fill_path(path, &paint, FillRule::Winding, Transform::identity(), None);
+fn fill(pixmap: &mut Pixmap, path: &tiny_skia::Path, paint: &Paint) {
+    pixmap.fill_path(path, paint, FillRule::Winding, Transform::identity(), None);
 }
 
 /// Fill a rounded rect given in *design* coords with a solid color and blend mode.
 fn solid(pixmap: &mut Pixmap, rect: Rect, radius: f32, color: Rgb, a: u8, blend: BlendMode) {
-    let (l, t, r, b) = rect;
-    if let Some(path) = rrect((sx(l), sx(t), sx(r), sx(b)), sx(radius)) {
+    let (left, top, right, bottom) = rect;
+    if let Some(path) = rrect((sx(left), sx(top), sx(right), sx(bottom)), sx(radius)) {
         let mut paint = solid_paint(color, a);
         paint.blend_mode = blend;
-        fill(pixmap, &path, paint);
+        fill(pixmap, &path, &paint);
     }
 }
 
@@ -214,9 +222,10 @@ fn to_rgba_image(pixmap: &Pixmap) -> image::RgbaImage {
     let mut img = image::RgbaImage::new(w, h);
     for (i, px) in pixmap.pixels().iter().enumerate() {
         let c = px.demultiply();
+        let i = u32::try_from(i).expect("canvas pixel count fits u32");
         img.put_pixel(
-            i as u32 % w,
-            i as u32 / w,
+            i % w,
+            i / w,
             image::Rgba([c.red(), c.green(), c.blue(), c.alpha()]),
         );
     }

@@ -3,9 +3,9 @@
 //! candidates with `git for-each-ref --merged <onto>` and delete with `git branch -D`,
 //! gated by that ancestor query. Plan/apply split mirrors [`crate::commands::sw`].
 
-use std::path::Path;
+use std::{fmt::Write as _, path::Path};
 
-use crate::commands::squash_local::{GitOutput, GitRunner};
+use crate::commands::git_runner::{GitRunner, capture, onto_exists};
 
 /// One prunable branch and the short sha it points at (captured for the recovery hint).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,30 +57,6 @@ pub struct PruneResult {
     pub failed: Vec<FailedBranch>,
 }
 
-/// Runs git and returns trimmed stdout on a clean exit, else `None`.
-fn capture(runner: &impl GitRunner, repo: &Path, args: &[&str]) -> Option<String> {
-    match runner.run(repo, args) {
-        Ok(out) if out.exit_code == 0 => Some(out.stdout.trim().to_string()),
-        _ => None,
-    }
-}
-
-/// True when `<onto>` exists as a local branch.
-fn onto_exists(runner: &impl GitRunner, repo: &Path, onto: &str) -> bool {
-    matches!(
-        runner.run(repo, &["rev-parse", "--verify", &format!("refs/heads/{onto}")]),
-        Ok(out) if out.exit_code == 0
-    )
-}
-
-/// git's own message ([`GitOutput::diagnostic`]) if it gave one, else a generic line.
-fn git_error(out: &GitOutput) -> String {
-    match out.diagnostic() {
-        said if !said.is_empty() => said.to_string(),
-        _ => format!("git command failed (exit {})", out.exit_code),
-    }
-}
-
 /// Plans the prune: resolve the repo, ensure `<onto>` exists, then list every local
 /// branch merged into `<onto>` minus `<onto>` itself and the current branch.
 pub fn plan(runner: &impl GitRunner, repo: &Path, onto: &str) -> PrunePlan {
@@ -102,7 +78,7 @@ pub fn plan(runner: &impl GitRunner, repo: &Path, onto: &str) -> PrunePlan {
         return PrunePlan::Refused(format!("no '{onto}' branch (use --onto <branch>)"));
     }
 
-    let listing = match capture(
+    let Some(listing) = capture(
         runner,
         top_path,
         &[
@@ -112,9 +88,8 @@ pub fn plan(runner: &impl GitRunner, repo: &Path, onto: &str) -> PrunePlan {
             "--format=%(refname:short) %(objectname:short)",
             "refs/heads/",
         ],
-    ) {
-        Some(listing) => listing,
-        None => return PrunePlan::Refused("git for-each-ref failed".to_string()),
+    ) else {
+        return PrunePlan::Refused("git for-each-ref failed".to_string());
     };
 
     let branches: Vec<Branch> = listing
@@ -156,7 +131,7 @@ pub fn apply(runner: &impl GitRunner, top: &Path, branches: &[Branch]) -> PruneR
             Ok(out) if out.exit_code == 0 => deleted.push(branch.clone()),
             Ok(out) => failed.push(FailedBranch {
                 name: branch.name.clone(),
-                reason: git_error(&out),
+                reason: out.error_line(),
             }),
             Err(error) => failed.push(FailedBranch {
                 name: branch.name.clone(),
@@ -173,13 +148,14 @@ pub fn apply(runner: &impl GitRunner, top: &Path, branches: &[Branch]) -> PruneR
 
     let mut detail = format!("deleted {} branch{}.", deleted.len(), plural(deleted.len()));
     for branch in &deleted {
-        detail.push_str(&format!(
+        let _ = write!(
+            detail,
             "\nrecover: git branch {} {}",
             branch.name, branch.sha
-        ));
+        );
     }
     for branch in &failed {
-        detail.push_str(&format!("\nfailed: {} — {}", branch.name, branch.reason));
+        let _ = write!(detail, "\nfailed: {} — {}", branch.name, branch.reason);
     }
 
     PruneResult {
@@ -199,7 +175,7 @@ mod tests {
     use std::{cell::RefCell, path::Path};
 
     use super::*;
-    use crate::commands::squash_local::GitOutput;
+    use crate::commands::git_runner::GitOutput;
 
     struct FakeRunner {
         calls: RefCell<Vec<Vec<String>>>,
@@ -241,7 +217,7 @@ mod tests {
         fn run(&self, _repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
             self.calls
                 .borrow_mut()
-                .push(args.iter().map(|a| a.to_string()).collect());
+                .push(args.iter().map(std::string::ToString::to_string).collect());
             Ok(self.results.borrow_mut().remove(0))
         }
     }

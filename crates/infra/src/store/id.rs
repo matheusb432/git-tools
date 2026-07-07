@@ -1,5 +1,5 @@
 //! Stable identities for the store: a repo id and an artifact content hash.
-use std::path::Path;
+use std::{fmt::Write as _, path::Path};
 
 use sha2::{Digest, Sha256};
 
@@ -8,7 +8,7 @@ fn short_sha256(input: &str) -> String {
     let digest = Sha256::digest(input.as_bytes());
     let mut out = String::with_capacity(16);
     for byte in &digest[..8] {
-        out.push_str(&format!("{byte:02x}"));
+        let _ = write!(out, "{byte:02x}");
     }
     out
 }

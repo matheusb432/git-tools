@@ -53,7 +53,7 @@ pub fn activate_window(xid: u64) {
         msg.data.set_long(2, 0); // requestor's currently active window: none
 
         let mask = xlib::SubstructureRedirectMask | xlib::SubstructureNotifyMask;
-        (lib.XSendEvent)(display, root, xlib::False, mask, &mut event);
+        (lib.XSendEvent)(display, root, xlib::False, mask, &raw mut event);
         (lib.XFlush)(display);
         (lib.XCloseDisplay)(display);
     }

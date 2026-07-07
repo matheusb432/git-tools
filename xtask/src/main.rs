@@ -20,27 +20,27 @@ mod ship;
 mod testing;
 
 fn main() {
-    if let Err(e) = run(cli::Cli::parse()) {
+    if let Err(e) = run(&cli::Cli::parse()) {
         eprintln!("Error: {e:#}");
         std::process::exit(1);
     }
 }
 
 /// Dispatch one parsed verb to its handler.
-fn run(cli: cli::Cli) -> Result<()> {
-    match cli.command {
+fn run(cli: &cli::Cli) -> Result<()> {
+    match &cli.command {
         cli::Command::Bootstrap => bootstrap::run(),
-        cli::Command::Install { target } => install::run_install(target),
+        cli::Command::Install { target } => install::run_install(*target),
         cli::Command::Uninstall {
             remove_config,
             force,
-        } => install::run_uninstall(remove_config, force),
-        cli::Command::Test { verbose, all } => testing::run(verbose, all),
-        cli::Command::Fmt { check } => fmt::run(check),
+        } => install::run_uninstall(*remove_config, *force),
+        cli::Command::Test { verbose, all } => testing::run(*verbose, *all),
+        cli::Command::Fmt { check } => fmt::run(*check),
         cli::Command::DriftCheck => drift::run(),
         cli::Command::CheckStructure => check_structure::run(None),
         cli::Command::CheckDeps => check_deps::run(None),
         cli::Command::GenIcon => icon::run(),
-        cli::Command::Ship { smoke } => ship::run(smoke),
+        cli::Command::Ship { smoke } => ship::run(*smoke),
     }
 }

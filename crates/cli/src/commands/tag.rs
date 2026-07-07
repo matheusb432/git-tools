@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, path::Path};
 
-use crate::commands::squash_local::GitRunner;
+use crate::commands::git_runner::GitRunner;
 
 const LOCAL_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=2)\t%(contents:lines=1)";
 const REMOTE_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=4)\t%(contents:lines=1)";
@@ -254,8 +254,7 @@ fn push_created(
             format!("{created_detail}\n{}", pushed.detail),
         ),
         Status::Noop => TagResult::new(Status::Noop, created_detail),
-        Status::Fail => pushed,
-        Status::Created | Status::Listed => pushed,
+        Status::Fail | Status::Created | Status::Listed => pushed,
     }
 }
 
@@ -449,7 +448,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::commands::squash_local::GitOutput;
+    use crate::commands::git_runner::GitOutput;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct Call {
@@ -499,7 +498,7 @@ mod tests {
         fn run(&self, repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
             self.calls.borrow_mut().push(Call {
                 repo: repo.to_path_buf(),
-                args: args.iter().map(|arg| arg.to_string()).collect(),
+                args: args.iter().map(std::string::ToString::to_string).collect(),
             });
             Ok(self.results.borrow_mut().remove(0))
         }

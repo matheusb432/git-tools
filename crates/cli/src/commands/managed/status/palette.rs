@@ -35,6 +35,10 @@ impl StatusColorPalette {
 }
 
 #[derive(Debug, Deserialize)]
+#[expect(
+    clippy::struct_field_names,
+    reason = "field names mirror the TOML keys of config/status-colors.toml verbatim"
+)]
 struct StatusColorPaletteToml {
     brackets_color: String,
     ahead_arrow_color: String,

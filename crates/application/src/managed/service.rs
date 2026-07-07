@@ -10,8 +10,48 @@ use crate::ports::RemoteSync;
 pub struct RepoSyncResult {
     pub name: String,
     pub branch: String,
-    pub status: String,
+    pub status: SyncStatus,
     pub detail: String,
+}
+
+/// The outcome classification for one repo's push/pull. Replaces the former
+/// stringly-typed status so [`classify_exit`] and every call site are checked
+/// against the closed set. [`SyncStatus::as_wire`] is the exact token the
+/// `--json` output and the status table have always emitted — keep it byte-stable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncStatus {
+    /// Repo is not present on this machine; nothing was attempted.
+    Skip,
+    /// Already in sync with the remote.
+    UpToDate,
+    /// New commits were pushed.
+    Pushed,
+    /// Commits that a real run would push (dry-run).
+    WouldPush,
+    /// Local was fast-forwarded to match the remote.
+    Pulled,
+    /// A fast-forward a real run would perform (dry-run).
+    WouldPull,
+    /// A non-fatal problem (detached HEAD, no remote, missing branch).
+    Warn,
+    /// The operation failed.
+    Fail,
+}
+
+impl SyncStatus {
+    /// The stable wire/display token for this status.
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Self::Skip => "skip",
+            Self::UpToDate => "up-to-date",
+            Self::Pushed => "pushed",
+            Self::WouldPush => "would-push",
+            Self::Pulled => "pulled",
+            Self::WouldPull => "would-pull",
+            Self::Warn => "warn",
+            Self::Fail => "fail",
+        }
+    }
 }
 
 /// The aggregate exit classification across every repo's result. Ported from
@@ -27,23 +67,22 @@ pub enum SyncExit {
 pub(crate) fn result(
     repo: &ManagedRepo,
     branch: &str,
-    status: &str,
+    status: SyncStatus,
     detail: &str,
 ) -> RepoSyncResult {
     RepoSyncResult {
         name: repo.name.clone(),
         branch: branch.to_string(),
-        status: status.to_string(),
+        status,
         detail: detail.to_string(),
     }
 }
 
 pub(crate) fn classify_exit(results: &[RepoSyncResult]) -> SyncExit {
-    let statuses: Vec<&str> = results.iter().map(|r| r.status.as_str()).collect();
-    if statuses.contains(&"fail") {
+    if results.iter().any(|r| r.status == SyncStatus::Fail) {
         return SyncExit::Fail;
     }
-    if statuses.contains(&"warn") {
+    if results.iter().any(|r| r.status == SyncStatus::Warn) {
         return SyncExit::Warn;
     }
     SyncExit::Clean
@@ -71,15 +110,25 @@ pub(crate) async fn preflight(
     detached_detail: &str,
 ) -> Preflight {
     if !remote.repo_present(&repo.path) {
-        return Preflight::Done(result(repo, "", "skip", "not present on this machine"));
+        return Preflight::Done(result(
+            repo,
+            "",
+            SyncStatus::Skip,
+            "not present on this machine",
+        ));
     }
     let branch = remote.current_branch(&repo.path).await.unwrap_or_default();
     if branch.is_empty() || branch == "HEAD" {
-        return Preflight::Done(result(repo, &branch, "warn", detached_detail));
+        return Preflight::Done(result(repo, &branch, SyncStatus::Warn, detached_detail));
     }
     match remote.has_remote(&repo.path, "origin").await {
         Ok(true) => Preflight::Ready { branch },
-        _ => Preflight::Done(result(repo, &branch, "warn", "no 'origin' remote")),
+        _ => Preflight::Done(result(
+            repo,
+            &branch,
+            SyncStatus::Warn,
+            "no 'origin' remote",
+        )),
     }
 }
 
@@ -99,18 +148,32 @@ mod tests {
     }
 
     #[test]
+    fn sync_status_wire_tokens_are_byte_stable() {
+        // These tokens are the JSON `--json` contract and the status-table column;
+        // changing one is a breaking output change, so pin every variant.
+        assert_eq!(SyncStatus::Skip.as_wire(), "skip");
+        assert_eq!(SyncStatus::UpToDate.as_wire(), "up-to-date");
+        assert_eq!(SyncStatus::Pushed.as_wire(), "pushed");
+        assert_eq!(SyncStatus::WouldPush.as_wire(), "would-push");
+        assert_eq!(SyncStatus::Pulled.as_wire(), "pulled");
+        assert_eq!(SyncStatus::WouldPull.as_wire(), "would-pull");
+        assert_eq!(SyncStatus::Warn.as_wire(), "warn");
+        assert_eq!(SyncStatus::Fail.as_wire(), "fail");
+    }
+
+    #[test]
     fn classify_exit_precedence_is_fail_then_warn_then_clean() {
         let clean = vec![
-            result(&repo(), "main", "skip", ""),
-            result(&repo(), "main", "up-to-date", ""),
+            result(&repo(), "main", SyncStatus::Skip, ""),
+            result(&repo(), "main", SyncStatus::UpToDate, ""),
         ];
         let warn = vec![
-            result(&repo(), "main", "warn", ""),
-            result(&repo(), "main", "up-to-date", ""),
+            result(&repo(), "main", SyncStatus::Warn, ""),
+            result(&repo(), "main", SyncStatus::UpToDate, ""),
         ];
         let fail = vec![
-            result(&repo(), "main", "warn", ""),
-            result(&repo(), "main", "fail", ""),
+            result(&repo(), "main", SyncStatus::Warn, ""),
+            result(&repo(), "main", SyncStatus::Fail, ""),
         ];
         assert_eq!(classify_exit(&clean), SyncExit::Clean);
         assert_eq!(classify_exit(&warn), SyncExit::Warn);
@@ -132,7 +195,7 @@ mod tests {
         let outcome = preflight(&remote, &repo(), "detached").await;
         match outcome {
             Preflight::Done(r) => {
-                assert_eq!(r.status, "skip");
+                assert_eq!(r.status, SyncStatus::Skip);
                 assert_eq!(r.detail, "not present on this machine");
             }
             Preflight::Ready { .. } => panic!("expected Done"),
@@ -149,7 +212,7 @@ mod tests {
         let outcome = preflight(&remote, &repo(), "detached HEAD - nothing to push").await;
         match outcome {
             Preflight::Done(r) => {
-                assert_eq!(r.status, "warn");
+                assert_eq!(r.status, SyncStatus::Warn);
                 assert_eq!(r.detail, "detached HEAD - nothing to push");
             }
             Preflight::Ready { .. } => panic!("expected Done"),
@@ -167,7 +230,7 @@ mod tests {
         let outcome = preflight(&remote, &repo(), "detached").await;
         match outcome {
             Preflight::Done(r) => {
-                assert_eq!(r.status, "warn");
+                assert_eq!(r.status, SyncStatus::Warn);
                 assert_eq!(r.detail, "no 'origin' remote");
             }
             Preflight::Ready { .. } => panic!("expected Done"),

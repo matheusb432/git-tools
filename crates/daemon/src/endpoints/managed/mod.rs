@@ -41,7 +41,7 @@ fn to_result_dto(result: RepoSyncResult) -> RepoSyncResultDto {
     RepoSyncResultDto {
         name: result.name,
         branch: result.branch,
-        status: result.status,
+        status: result.status.as_wire().to_string(),
         detail: result.detail,
     }
 }

@@ -1,4 +1,4 @@
-//! `xtask test [--verbose] [--all]` — run the test suite. Migrates `just test` (the ShellSpec
+//! `xtask test [--verbose] [--all]` — run the test suite. Migrates `just test` (the `ShellSpec`
 //! install suite it used to also run is retired; its coverage is now `cargo test` Rust tests).
 //! Terse by default (`cargo test --quiet`); `--verbose` streams full output; `--all` additionally
 //! runs the bun frontend unit tests (`just cli test-js`) — the bun build/test stays bun, this only

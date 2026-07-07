@@ -25,12 +25,12 @@ pub enum NewSide {
 /// Fill each file's `owners` from git blame, keeping only in-range shas. Blame
 /// errors are swallowed per file (it goes unattributed) so one awkward file —
 /// deleted, binary, renamed — never aborts the preview.
-pub fn attribute(
+pub fn attribute<S: std::hash::BuildHasher>(
     source: &impl DiffSource,
     repo: &Path,
     base: &str,
     new_side: &NewSide,
-    in_range: &HashSet<String>,
+    in_range: &HashSet<String, S>,
     files: &mut [FileDiff],
 ) {
     let tip = match new_side {
@@ -66,7 +66,10 @@ fn header(line: &str) -> Option<(String, u32, bool)> {
     Some((sha.chars().take(9).collect(), final_no, has_count))
 }
 
-fn parse_forward(raw: &str, in_range: &HashSet<String>) -> HashMap<u32, String> {
+fn parse_forward<S: std::hash::BuildHasher>(
+    raw: &str,
+    in_range: &HashSet<String, S>,
+) -> HashMap<u32, String> {
     let mut map = HashMap::new();
     for line in raw.lines() {
         if let Some((sha, final_no, _)) = header(line)
@@ -78,7 +81,10 @@ fn parse_forward(raw: &str, in_range: &HashSet<String>) -> HashMap<u32, String> 
     map
 }
 
-fn parse_reverse(raw: &str, in_range: &HashSet<String>) -> HashMap<u32, String> {
+fn parse_reverse<S: std::hash::BuildHasher>(
+    raw: &str,
+    in_range: &HashSet<String, S>,
+) -> HashMap<u32, String> {
     let mut map = HashMap::new();
     // ! Porcelain emits a commit's metadata (incl. `previous`) ONCE, on its first group; later
     // ! groups of the same sha carry only an abbreviated header. So key the deleter by sha, not
@@ -112,7 +118,7 @@ mod tests {
     use super::*;
 
     fn set(shas: &[&str]) -> HashSet<String> {
-        shas.iter().map(|s| s.to_string()).collect()
+        shas.iter().map(std::string::ToString::to_string).collect()
     }
 
     // forward porcelain: header "<40hex> <orig> <final> [count]" then "\t<code>"

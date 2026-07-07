@@ -1,5 +1,7 @@
 //! Fanning `push`/`pull` out across every managed repo via the daemon.
 
+use std::fmt::Write as _;
+
 use contracts::{
     envelope::{Envelope, NoteLevel, Outcome},
     managed::{PullAllRequest, PushAllRequest, RepoSyncResultDto, SyncData, SyncExitDto},
@@ -40,7 +42,7 @@ fn exit_from_dto(exit: SyncExitDto) -> ManagedExit {
 pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
     match HttpBackend::ensure_daemon() {
         Ok(backend) => run_push_all_with(&backend, options),
-        Err(error) => manifest_error(error),
+        Err(error) => manifest_error(&error),
     }
 }
 
@@ -50,7 +52,7 @@ pub(crate) fn run_push_all_with(
 ) -> ManagedRun<PushPullResult> {
     let (repos_file, home_dir) = match resolve_manifest_location(options) {
         Ok(location) => location,
-        Err(error) => return manifest_error(error),
+        Err(error) => return manifest_error(&error),
     };
     let req = PushAllRequest {
         repos_file: repos_file.to_string_lossy().into_owned(),
@@ -59,14 +61,14 @@ pub(crate) fn run_push_all_with(
     };
     match backend.push_all(&req) {
         Ok(envelope) => finish("push", options, envelope),
-        Err(error) => manifest_error(error),
+        Err(error) => manifest_error(&error),
     }
 }
 
 pub fn run_pull_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
     match HttpBackend::ensure_daemon() {
         Ok(backend) => run_pull_all_with(&backend, options),
-        Err(error) => manifest_error(error),
+        Err(error) => manifest_error(&error),
     }
 }
 
@@ -76,7 +78,7 @@ pub(crate) fn run_pull_all_with(
 ) -> ManagedRun<PushPullResult> {
     let (repos_file, home_dir) = match resolve_manifest_location(options) {
         Ok(location) => location,
-        Err(error) => return manifest_error(error),
+        Err(error) => return manifest_error(&error),
     };
     let req = PullAllRequest {
         repos_file: repos_file.to_string_lossy().into_owned(),
@@ -85,7 +87,7 @@ pub(crate) fn run_pull_all_with(
     };
     match backend.pull_all(&req) {
         Ok(envelope) => finish("pull", options, envelope),
-        Err(error) => manifest_error(error),
+        Err(error) => manifest_error(&error),
     }
 }
 
@@ -99,7 +101,7 @@ pub(super) fn last_non_empty_line(output: &str) -> Option<&str> {
         .find(|line| !line.is_empty())
 }
 
-fn manifest_error<T>(error: anyhow::Error) -> ManagedRun<T> {
+fn manifest_error<T>(error: &anyhow::Error) -> ManagedRun<T> {
     ManagedRun {
         exit: ManagedExit::Fail,
         results: Vec::new(),
@@ -123,10 +125,10 @@ fn finish(
                 || "daemon reported an error".to_string(),
                 |n| n.text.clone(),
             );
-        return manifest_error(anyhow::anyhow!(text));
+        return manifest_error(&anyhow::anyhow!(text));
     }
     let Some(data) = envelope.data else {
-        return manifest_error(anyhow::anyhow!("daemon returned ok without data"));
+        return manifest_error(&anyhow::anyhow!("daemon returned ok without data"));
     };
     let results: Vec<PushPullResult> = data.results.into_iter().map(PushPullResult::from).collect();
     let exit = exit_from_dto(data.exit);
@@ -158,28 +160,31 @@ fn format_push_pull(
             label.to_string()
         };
         let arrow = if label == "pull" { "<-" } else { "->" };
-        out.push_str(&format!("{verb} {arrow} {}\n", result.name));
+        let _ = writeln!(out, "{verb} {arrow} {}", result.name);
     }
     out.push('\n');
-    out.push_str(&format!(
-        "{:<30} {:<18} {:<12} {}\n",
-        "REPO", "BRANCH", "STATUS", "DETAIL"
-    ));
+    let _ = writeln!(
+        out,
+        "{:<30} {:<18} {:<12} DETAIL",
+        "REPO", "BRANCH", "STATUS"
+    );
     for result in results {
-        out.push_str(&format!(
-            "{:<30} {:<18} {:<12} {}\n",
+        let _ = writeln!(
+            out,
+            "{:<30} {:<18} {:<12} {}",
             result.name, result.branch, result.status, result.detail
-        ));
+        );
     }
     let fail = results.iter().filter(|r| r.status == "fail").count();
     let warn = results.iter().filter(|r| r.status == "warn").count();
-    out.push_str(&format!(
+    let _ = write!(
+        out,
         "\nexit {}  -  {} repos: {} fail, {} warn",
         exit.code(),
         results.len(),
         fail,
         warn
-    ));
+    );
     out
 }
 

@@ -167,7 +167,7 @@ fn app_with_managed(remote: FakeRemoteSync, manifest: FakeManagedManifest) -> Fa
     (router, shutdown_rx, shared)
 }
 
-/// A scripted happy-path diff source (mirrors the render_diff slice's happy test).
+/// A scripted happy-path diff source (mirrors the `render_diff` slice's happy test).
 fn happy_source() -> FakeDiffSource {
     FakeDiffSource {
         top_level: Some("/repo".into()),

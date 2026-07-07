@@ -33,7 +33,7 @@ pub(crate) struct BatchBuild {
 pub(crate) fn render_batch(
     source: &impl DiffSource,
     target: &DiffTarget,
-    theme: Option<String>,
+    theme: Option<&str>,
     repos: &[RepoRef],
     skip_empty: bool,
     notes: &mut Vec<Note>,
@@ -41,18 +41,18 @@ pub(crate) fn render_batch(
     let mut views = Vec::with_capacity(repos.len());
     let mut skipped = 0usize;
     for repo in repos {
-        let built = build_view(source, &repo.top, target, theme.clone(), notes);
+        let built = build_view(source, &repo.top, target, theme.map(String::from), notes);
         if skip_empty {
             match built {
                 Ok((mut view, _)) if !view.is_empty() => {
-                    view.repo_name = repo.label.clone();
+                    view.repo_name.clone_from(&repo.label);
                     views.push(view);
                 }
                 Ok(_) | Err(_) => skipped += 1,
             }
         } else {
             let (mut view, _) = built?;
-            view.repo_name = repo.label.clone();
+            view.repo_name.clone_from(&repo.label);
             views.push(view);
         }
     }
@@ -194,7 +194,7 @@ mod tests {
 
         assert_eq!(batch.views.len(), repos.len());
         assert_eq!(batch.skipped, 0);
-        assert!(batch.views.iter().all(|v| v.is_empty()));
+        assert!(batch.views.iter().all(domain::diffs::View::is_empty));
     }
 
     #[test]

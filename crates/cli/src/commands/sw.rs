@@ -1,7 +1,7 @@
-use std::path::Path;
+use std::{fmt::Write as _, path::Path};
 
 use crate::{
-    commands::squash_local::{GitOutput, GitRunner},
+    commands::git_runner::{GitRunner, capture, onto_exists},
     git,
 };
 
@@ -45,24 +45,6 @@ pub enum SwitchPlan {
     AlreadyThere(String),
 }
 
-// ? Unlike sync::capture, empty stdout on a clean exit is a valid value (onto_exists checks the
-// exit code only).
-/// Runs git and returns trimmed stdout on a clean exit, else `None`.
-fn capture(runner: &impl GitRunner, repo: &Path, args: &[&str]) -> Option<String> {
-    match runner.run(repo, args) {
-        Ok(out) if out.exit_code == 0 => Some(out.stdout.trim().to_string()),
-        _ => None,
-    }
-}
-
-/// True when `<onto>` exists as a local branch.
-fn onto_exists(runner: &impl GitRunner, repo: &Path, onto: &str) -> bool {
-    matches!(
-        runner.run(repo, &["rev-parse", "--verify", &format!("refs/heads/{onto}")]),
-        Ok(out) if out.exit_code == 0
-    )
-}
-
 pub fn plan_switch(runner: &impl GitRunner, repo: &Path, onto: &str) -> SwitchPlan {
     let top_str = match capture(runner, repo, &["rev-parse", "--show-toplevel"]) {
         Some(top) if !top.is_empty() => top,
@@ -70,9 +52,8 @@ pub fn plan_switch(runner: &impl GitRunner, repo: &Path, onto: &str) -> SwitchPl
     };
     let top_path = Path::new(&top_str);
 
-    let branch = match capture(runner, top_path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
-        Some(branch) => branch,
-        None => return SwitchPlan::Refused("not a git repo".to_string()),
+    let Some(branch) = capture(runner, top_path, &["rev-parse", "--abbrev-ref", "HEAD"]) else {
+        return SwitchPlan::Refused("not a git repo".to_string());
     };
     if branch == onto {
         return SwitchPlan::AlreadyThere(onto.to_string());
@@ -92,18 +73,8 @@ pub fn apply_switch(runner: &impl GitRunner, top: &Path, onto: &str, from: &str)
         Ok(out) if out.exit_code == 0 => {
             SwResult::new(Status::Ok, format!("switched to '{onto}' from '{from}'"))
         }
-        Ok(out) => SwResult::new(Status::Fail, git_error(&out)),
+        Ok(out) => SwResult::new(Status::Fail, out.error_line()),
         Err(error) => SwResult::new(Status::Fail, error.to_string()),
-    }
-}
-
-/// git's own message ([`GitOutput::diagnostic`]) if it gave one, else a generic line.
-/// Shared by every `apply_*` flow (switch, merge, branch), so the fallback names no
-/// specific git subcommand.
-fn git_error(out: &GitOutput) -> String {
-    match out.diagnostic() {
-        said if !said.is_empty() => said.to_string(),
-        _ => format!("git command failed (exit {})", out.exit_code),
     }
 }
 
@@ -202,7 +173,7 @@ pub fn apply_rebase(runner: &impl GitRunner, target: &RebaseTarget) -> SwResult 
     let top = Path::new(&target.top);
     match runner.run(top, &["switch", &target.onto]) {
         Ok(out) if out.exit_code == 0 => {}
-        Ok(out) => return SwResult::new(Status::Fail, git_error(&out)),
+        Ok(out) => return SwResult::new(Status::Fail, out.error_line()),
         Err(error) => return SwResult::new(Status::Fail, error.to_string()),
     }
     // ! Capture the promoted commits BEFORE the fast-forward — afterwards `onto` points at
@@ -210,7 +181,7 @@ pub fn apply_rebase(runner: &impl GitRunner, target: &RebaseTarget) -> SwResult 
     let commits = git::log_commits(&target.top, &target.range()).unwrap_or_default();
     match runner.run(top, &["merge", "--ff-only", &target.feature]) {
         Ok(out) if out.exit_code == 0 => SwResult::new(Status::Ok, rebase_log(target, &commits)),
-        Ok(out) => SwResult::new(Status::Fail, git_error(&out)),
+        Ok(out) => SwResult::new(Status::Fail, out.error_line()),
         Err(error) => SwResult::new(Status::Fail, error.to_string()),
     }
 }
@@ -289,7 +260,7 @@ pub fn apply_revert(runner: &impl GitRunner, target: &RevertTarget) -> SwResult 
     let top = Path::new(&target.top);
     match runner.run(top, &["switch", "-"]) {
         Ok(out) if out.exit_code == 0 => {}
-        Ok(out) => return SwResult::new(Status::Fail, git_error(&out)),
+        Ok(out) => return SwResult::new(Status::Fail, out.error_line()),
         Err(error) => return SwResult::new(Status::Fail, error.to_string()),
     }
     match runner.run(top, &["branch", "-f", &target.onto, &target.prior_sha]) {
@@ -300,7 +271,7 @@ pub fn apply_revert(runner: &impl GitRunner, target: &RevertTarget) -> SwResult 
                 target.onto, &target.prior_sha
             ),
         ),
-        Ok(out) => SwResult::new(Status::Fail, git_error(&out)),
+        Ok(out) => SwResult::new(Status::Fail, out.error_line()),
         Err(error) => SwResult::new(Status::Fail, error.to_string()),
     }
 }
@@ -316,7 +287,7 @@ fn rebase_log(target: &RebaseTarget, commits: &[crate::model::Commit]) -> String
         commits.len()
     );
     for c in commits {
-        out.push_str(&format!("\n  {}  {}", c.sha, c.subject));
+        let _ = write!(out, "\n  {}  {}", c.sha, c.subject);
     }
     out
 }
@@ -326,7 +297,7 @@ mod tests {
     use std::{cell::RefCell, path::Path};
 
     use super::*;
-    use crate::commands::squash_local::GitOutput;
+    use crate::commands::git_runner::GitOutput;
 
     struct FakeRunner {
         calls: RefCell<Vec<Vec<String>>>,
@@ -368,7 +339,7 @@ mod tests {
         fn run(&self, _repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
             self.calls
                 .borrow_mut()
-                .push(args.iter().map(|a| a.to_string()).collect());
+                .push(args.iter().map(std::string::ToString::to_string).collect());
             Ok(self.results.borrow_mut().remove(0))
         }
     }
@@ -426,7 +397,7 @@ mod tests {
 
     #[test]
     fn apply_switch_fails_surfaces_git_error() {
-        // git writes its real diagnostic to stderr; git_error must surface it.
+        // git writes its real diagnostic to stderr; error_line must surface it.
         let runner = FakeRunner::new(vec![FakeRunner::exit_err(
             "error: Your local changes would be overwritten",
             1,
@@ -434,20 +405,6 @@ mod tests {
         let result = apply_switch(&runner, Path::new("."), "main", "feat/x");
         assert_eq!(result.status, Status::Fail);
         assert!(result.detail.contains("local changes would be overwritten"));
-    }
-
-    #[test]
-    fn git_error_falls_back_to_stdout_then_generic() {
-        // stderr empty but stdout has a message -> use stdout.
-        assert_eq!(
-            git_error(&FakeRunner::exit("some stdout note", 3)),
-            "some stdout note"
-        );
-        // both empty -> generic line with the exit code.
-        assert_eq!(
-            git_error(&FakeRunner::exit("", 5)),
-            "git command failed (exit 5)"
-        );
     }
 
     #[test]

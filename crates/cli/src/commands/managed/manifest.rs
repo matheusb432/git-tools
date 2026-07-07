@@ -109,10 +109,10 @@ fn resolve_repos_file_from_sources(
         }
     }
 
-    let home_hint = home_dir
-        .map(home_default_repos_file)
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "$HOME/tools/sample_project/repos.toml".into());
+    let home_hint = home_dir.map(home_default_repos_file).map_or_else(
+        || "$HOME/tools/sample_project/repos.toml".into(),
+        |path| path.display().to_string(),
+    );
     Err(anyhow!(
         "managed-repos manifest not found; pass --repos-file, set GIT_TOOLS_MANAGED_REPOS_FILE, run from a sample_project checkout, or install sample_project at {home_hint}"
     ))
@@ -129,10 +129,7 @@ fn find_upward_config(start: &Path) -> Option<PathBuf> {
 }
 
 fn home_default_repos_file(home_dir: &Path) -> PathBuf {
-    home_dir
-        .join("tools")
-        .join("sample_project")
-        .join("repos.toml")
+    home_dir.join("tools").join("sample_project").join("repos.toml")
 }
 
 /// Best-effort: asks `sample_project repos manifest-path` for the fleet's resolved manifest

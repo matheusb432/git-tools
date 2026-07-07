@@ -30,8 +30,8 @@ impl Cli {
     /// Returns the [`clap::Error`] for a usage problem, or the help/version request that
     /// clap models as an error (the caller maps that to a success exit).
     pub fn parse_args(args: &[String]) -> Result<Self, clap::Error> {
-        let argv = std::iter::once(String::from("git-tools")).chain(args.iter().cloned());
-        Self::try_parse_from(argv)
+        let full_argv = std::iter::once(String::from("git-tools")).chain(args.iter().cloned());
+        Self::try_parse_from(full_argv)
     }
 }
 

@@ -59,11 +59,13 @@ impl ArtifactStore for StoreArtifacts {
             crate::git_capture::root_commit(repo_root).as_deref(),
             &canonical,
         );
-        crate::store::lookup_by_range(store_root, &repo_id, kind, base_sha, head_sha)
+        Ok(crate::store::lookup_by_range(
+            store_root, &repo_id, kind, base_sha, head_sha,
+        ))
     }
 
     fn list_history(&self, store_root: &Path) -> anyhow::Result<Vec<HistoryRecord>> {
-        let sidecars = crate::store::list_history_with_hash(store_root)?;
+        let sidecars = crate::store::list_history_with_hash(store_root);
         Ok(sidecars
             .into_iter()
             .map(|(content_hash, sidecar)| HistoryRecord {

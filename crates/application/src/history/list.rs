@@ -32,7 +32,6 @@ pub struct ListHistoryHandler<A: ArtifactStore> {
 
 impl<A: ArtifactStore> Handler<ListHistory> for ListHistoryHandler<A> {
     async fn handle(&self, req: ListHistory) -> Result<ListHistoryResponse, ListHistoryError> {
-        let mut entries = self.store.list_history(&req.store_root)?;
         // `diff subrepos`/`diff all` span multiple repos, so they carry no single
         // head commit — `head_committed_at` is empty. Fall back to `generated_at`
         // for those so they sort by actual recency instead of always trailing.
@@ -43,6 +42,8 @@ impl<A: ArtifactStore> Handler<ListHistory> for ListHistoryHandler<A> {
                 &r.head_committed_at
             }
         }
+
+        let mut entries = self.store.list_history(&req.store_root)?;
         entries.sort_by(|a, b| {
             recency(b)
                 .cmp(recency(a))

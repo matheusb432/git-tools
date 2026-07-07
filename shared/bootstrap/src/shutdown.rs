@@ -10,10 +10,8 @@
 ///
 /// The `io::Result<()>` output lets callers that need it observe a handler error;
 /// `axum::serve(..).with_graceful_shutdown` callers can discard the result.
-pub fn shutdown_signal() -> impl std::future::Future<Output = std::io::Result<()>> {
-    async {
-        let result = tokio::signal::ctrl_c().await;
-        tracing::info!("shutdown signal received (SIGINT)");
-        result
-    }
+pub async fn shutdown_signal() -> std::io::Result<()> {
+    let result = tokio::signal::ctrl_c().await;
+    tracing::info!("shutdown signal received (SIGINT)");
+    result
 }

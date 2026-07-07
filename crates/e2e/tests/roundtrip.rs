@@ -169,7 +169,7 @@ fn artifact_from_stdout(stdout: &str) -> PathBuf {
 fn only_repo_diffs_dir(store_dir: &Path) -> PathBuf {
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(store_dir.join("diffs"))
         .expect("diffs/ must exist after a render")
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .map(|e| e.path())
         .collect();
     assert_eq!(
@@ -215,13 +215,13 @@ fn cli_autostarts_the_daemon_renders_and_stops() {
     let repo_dir = only_repo_diffs_dir(&fixture.store_dir);
     let html_files: Vec<PathBuf> = std::fs::read_dir(&repo_dir)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "html"))
         .collect();
     let json_files: Vec<PathBuf> = std::fs::read_dir(&repo_dir)
         .unwrap()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "json"))
         .collect();
