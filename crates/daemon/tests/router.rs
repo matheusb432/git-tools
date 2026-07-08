@@ -10,10 +10,12 @@ use application::{
         render_diff_subrepos::RenderDiffSubreposHandler, render_merge_diff::RenderMergeDiffHandler,
         render_squash_preview::RenderSquashPreviewHandler,
     },
+    live_views::save::SaveLiveViewHandler,
     managed::{pull_all::PullAllHandler, push_all::PushAllHandler},
+    ports::RepoProbeResult,
     testing::{
-        FakeDiffSource, FakeManagedManifest, FakePushLedger, FakeRemoteSync, FixedClock,
-        InMemoryArtifactStore, StubRenderer,
+        FakeDiffSource, FakeManagedManifest, FakePushLedger, FakeRemoteSync, FakeRepoProbe,
+        FixedClock, InMemoryAppStateStore, InMemoryArtifactStore, StubRenderer,
     },
 };
 use axum::{
@@ -42,6 +44,12 @@ index 111..222 100644\n\
 type Fakes = (Router, watch::Receiver<bool>, Arc<Shared>);
 
 fn app_with(source: FakeDiffSource) -> Fakes {
+    app_with_probe(source, FakeRepoProbe::default())
+}
+
+/// Like [`app_with`], but with a scripted [`FakeRepoProbe`] for tests that drive
+/// `/live-views/save`.
+fn app_with_probe(source: FakeDiffSource, probe: FakeRepoProbe) -> Fakes {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     let shared = Arc::new(Shared {
         identity: ExeIdentity {
@@ -99,6 +107,11 @@ fn app_with(source: FakeDiffSource) -> Fakes {
                 repos: Vec::new(),
                 error: None,
             },
+        },
+        save_live_view: SaveLiveViewHandler {
+            probe,
+            store: InMemoryAppStateStore::default(),
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
         },
     };
     let router = daemon::state::router(AppState {
@@ -159,6 +172,11 @@ fn app_with_managed(remote: FakeRemoteSync, manifest: FakeManagedManifest) -> Fa
             clock: FixedClock("2026-07-02T00:00:00Z".into()),
         },
         pull_all: PullAllHandler { remote, manifest },
+        save_live_view: SaveLiveViewHandler {
+            probe: FakeRepoProbe::default(),
+            store: InMemoryAppStateStore::default(),
+            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        },
     };
     let router = daemon::state::router(AppState {
         mediator,
@@ -479,4 +497,54 @@ async fn managed_pull_all_happy_path_is_a_200_ok_envelope_with_one_result() {
     let results = json["data"]["results"].as_array().unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["Status"], "skip");
+}
+
+#[tokio::test]
+async fn live_view_save_happy_path_is_a_200_ok_envelope() {
+    let probe = FakeRepoProbe {
+        result: RepoProbeResult::Repo {
+            top_level: "/repos/gt".into(),
+        },
+    };
+    let (app, _rx, _shared) = app_with_probe(FakeDiffSource::default(), probe);
+    let body = r#"{"data_root":"/data","path":"/repos/gt"}"#;
+
+    let response = post(app, "/live-views/save", body).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "ok");
+    assert_eq!(json["data"]["source_kind"], "LocalRepo");
+    assert_eq!(json["data"]["display_name"], "gt");
+    assert_eq!(json["data"]["already_saved"], false);
+}
+
+#[tokio::test]
+async fn live_view_save_rejection_is_a_200_error_envelope_with_the_exact_message() {
+    let probe = FakeRepoProbe {
+        result: RepoProbeResult::NotFound,
+    };
+    let (app, _rx, _shared) = app_with_probe(FakeDiffSource::default(), probe);
+    let body = r#"{"data_root":"/data","path":"/gone"}"#;
+
+    let response = post(app, "/live-views/save", body).await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "error");
+    assert!(json["data"].is_null());
+    assert_eq!(json["notes"][0]["level"], "warn");
+    assert_eq!(
+        json["notes"][0]["text"],
+        "The git repo's directory at `/gone` was not found."
+    );
+}
+
+#[tokio::test]
+async fn live_view_save_with_a_malformed_body_is_a_400() {
+    let (app, _rx, _shared) = app_with(FakeDiffSource::default());
+
+    let response = post(app, "/live-views/save", "not json").await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }

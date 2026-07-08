@@ -29,6 +29,20 @@ fn ensure_binaries_built() {
     });
 }
 
+/// Absolute path of a workspace-built debug binary. Explicit because this
+/// crate drives sibling-crate binaries: `CARGO_BIN_EXE_*` is never set for
+/// them, and `assert_cmd`'s current-exe inference breaks under a shared
+/// cargo `build-dir` (final binaries still land in `./target/debug`).
+fn workspace_bin(name: &str) -> PathBuf {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("workspace root");
+    root.join("target")
+        .join("debug")
+        .join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
+}
+
 /// A throwaway git repo with one unpushed commit, and an isolated store dir.
 struct Fixture {
     _tmp: TempDir,
@@ -119,7 +133,7 @@ impl Fixture {
     /// that only this test's explicit `daemon stop` ends the daemon.
     fn run(&self, args: &[&str]) -> Command {
         ensure_binaries_built();
-        let mut cmd = Command::cargo_bin("git-tools").unwrap();
+        let mut cmd = Command::new(workspace_bin("git-tools"));
         cmd.args(args)
             .current_dir(&self.repo)
             .env("GIT_TOOLS_NO_OPEN", "1")

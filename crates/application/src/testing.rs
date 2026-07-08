@@ -13,8 +13,9 @@ use domain::{
 };
 
 use crate::ports::{
-    ArtifactMeta, ArtifactStore, Clock, DiffSource, HistoryRecord, HtmlRenderer, LedgerEntry,
-    ManagedManifest, PlacedArtifact, PushLedger, RemoteSync, SyncOutput,
+    AppStateStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HistoryRecord, HtmlRenderer,
+    LedgerEntry, LiveViewRecord, ManagedManifest, PlacedArtifact, PushLedger, RecentRenderRecord,
+    RemoteSync, RepoProbe, RepoProbeResult, SyncOutput,
 };
 
 /// Scripted `DiffSource`: every field is what the corresponding method returns.
@@ -293,4 +294,81 @@ impl PushLedger for FakePushLedger {
         self.known.get(repo_name).cloned()
     }
     async fn refresh(&self) {}
+}
+
+/// Recording `AppStateStore`: plain in-memory maps behind `Arc<Mutex<...>>`
+/// so tests keep a handle after moving the fake into a handler.
+#[derive(Debug, Default, Clone)]
+pub struct InMemoryAppStateStore {
+    pub live_views: Arc<Mutex<Vec<LiveViewRecord>>>,
+    pub settings: Arc<Mutex<HashMap<String, String>>>,
+    pub renders: Arc<Mutex<Vec<RecentRenderRecord>>>,
+}
+
+impl AppStateStore for InMemoryAppStateStore {
+    fn save_live_view(&self, _data_root: &Path, record: &LiveViewRecord) -> anyhow::Result<bool> {
+        let mut views = self.live_views.lock().unwrap();
+        if let Some(existing) = views
+            .iter_mut()
+            .find(|v| v.source_kind == record.source_kind && v.source_value == record.source_value)
+        {
+            existing.display_name.clone_from(&record.display_name);
+            return Ok(true);
+        }
+        views.push(record.clone());
+        Ok(false)
+    }
+    fn list_live_views(&self, _data_root: &Path) -> anyhow::Result<Vec<LiveViewRecord>> {
+        Ok(self.live_views.lock().unwrap().clone())
+    }
+    fn remove_live_view(
+        &self,
+        _data_root: &Path,
+        source_kind: &str,
+        source_value: &str,
+    ) -> anyhow::Result<bool> {
+        let mut views = self.live_views.lock().unwrap();
+        let before = views.len();
+        views.retain(|v| !(v.source_kind == source_kind && v.source_value == source_value));
+        Ok(views.len() != before)
+    }
+    fn get_setting(&self, _data_root: &Path, key: &str) -> anyhow::Result<Option<String>> {
+        Ok(self.settings.lock().unwrap().get(key).cloned())
+    }
+    fn set_setting(&self, _data_root: &Path, key: &str, value: &str) -> anyhow::Result<()> {
+        self.settings
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), value.to_string());
+        Ok(())
+    }
+    fn record_render(&self, _data_root: &Path, record: &RecentRenderRecord) -> anyhow::Result<()> {
+        self.renders.lock().unwrap().push(record.clone());
+        Ok(())
+    }
+    fn list_recent_renders(&self, _data_root: &Path) -> anyhow::Result<Vec<RecentRenderRecord>> {
+        let mut renders = self.renders.lock().unwrap().clone();
+        renders.reverse();
+        Ok(renders)
+    }
+}
+
+/// Scripted `RepoProbe`: answers every probe with the configured result.
+#[derive(Debug, Clone)]
+pub struct FakeRepoProbe {
+    pub result: RepoProbeResult,
+}
+
+impl Default for FakeRepoProbe {
+    fn default() -> Self {
+        Self {
+            result: RepoProbeResult::NotFound,
+        }
+    }
+}
+
+impl RepoProbe for FakeRepoProbe {
+    fn probe(&self, _dir: &Path) -> anyhow::Result<RepoProbeResult> {
+        Ok(self.result.clone())
+    }
 }

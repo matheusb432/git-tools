@@ -26,5 +26,5 @@ pub async fn handle<H>(
 where
     H: Sender<RenderDiff> + Handle,
 {
-    super::run(handler, shared, super::to_request(dto), super::to_envelope).await
+    crate::endpoints::run(handler, shared, super::to_request(dto), super::to_envelope).await
 }

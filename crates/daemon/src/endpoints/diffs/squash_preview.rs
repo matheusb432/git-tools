@@ -24,7 +24,7 @@ pub async fn handle<H>(
 where
     H: Sender<RenderSquashPreview> + Handle,
 {
-    super::run(handler, shared, Ok(super::to_squash_request(dto)), |resp| {
+    crate::endpoints::run(handler, shared, Ok(super::to_squash_request(dto)), |resp| {
         super::to_squash_envelope(&resp)
     })
     .await

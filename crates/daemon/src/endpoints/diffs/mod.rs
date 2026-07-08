@@ -7,8 +7,6 @@ pub mod render;
 pub mod squash_preview;
 pub mod subrepos;
 
-use std::sync::Arc;
-
 use application::{
     diffs::{
         batch::RepoRef,
@@ -22,7 +20,6 @@ use application::{
     },
     shared::notes as app_notes,
 };
-use axum::{Json, http::StatusCode};
 use contracts::{
     diffs::{
         DiffTargetDto, RenderDiffAllRequest, RenderDiffData, RenderDiffRequest,
@@ -30,49 +27,7 @@ use contracts::{
     },
     envelope::{Envelope, Note, NoteLevel, Outcome},
 };
-use cqrsy::{Handle, Request, Sender};
 use domain::diffs::DiffTarget;
-
-use crate::state::Shared;
-
-/// Shared endpoint body for every `/diffs/*` route: touch, map-error → 400, run the
-/// handler off the async pool, then project the response (or 500 on failure).
-pub(crate) async fn run<H, R>(
-    handler: H,
-    shared: Arc<Shared>,
-    req: anyhow::Result<R>,
-    project: impl FnOnce(R::Output) -> Envelope<RenderDiffData> + Send + 'static,
-) -> (StatusCode, Json<Envelope<RenderDiffData>>)
-where
-    H: Sender<R> + Handle,
-    R: Request + Send + 'static,
-    R::Output: Send + 'static,
-    R::Error: std::fmt::Display + Send + 'static,
-{
-    shared.touch();
-    let req = match req {
-        Ok(req) => req,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(error_envelope(format!("{e:#}"))),
-            );
-        }
-    };
-    // The diff engine shells out to git synchronously — run it on the blocking pool.
-    let joined = tokio::task::spawn_blocking(move || handler.send_now(req)).await;
-    match joined {
-        Ok(Ok(resp)) => (StatusCode::OK, Json(project(resp))),
-        Ok(Err(e)) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(error_envelope(format!("{e:#}"))),
-        ),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(error_envelope(format!("daemon task panicked: {e}"))),
-        ),
-    }
-}
 
 /// Map the wire request DTO onto the application request.
 ///
@@ -176,18 +131,6 @@ pub(crate) fn to_envelope(resp: RenderDiffResponse) -> Envelope<RenderDiffData> 
             notes,
             data: None,
         },
-    }
-}
-
-/// Build an error envelope carrying a single `Error`-level note.
-pub(crate) fn error_envelope(text: String) -> Envelope<RenderDiffData> {
-    Envelope {
-        outcome: Outcome::Error,
-        notes: vec![Note {
-            level: NoteLevel::Error,
-            text,
-        }],
-        data: None,
     }
 }
 

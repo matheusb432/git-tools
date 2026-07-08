@@ -50,6 +50,41 @@ pub struct HistoryRecord {
     pub byte_size: u64,
 }
 
+/// One saved live view, keyed by its adapter-shaped source identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveViewRecord {
+    pub source_kind: String,
+    pub source_value: String,
+    pub display_name: String,
+    pub created_at: String,
+    pub last_opened_at: Option<String>,
+}
+
+/// One recorded render recipe (app history), never a diff payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentRenderRecord {
+    pub recipe_json: String,
+    pub title: String,
+    pub repo_name: String,
+    pub kind: String,
+    pub range_label: String,
+    pub rendered_at: String,
+}
+
+/// Cap on retained `recent_renders` rows; the adapter prunes past it on insert.
+pub const RECENT_RENDERS_CAP: usize = 500;
+
+/// What probing a directory for a git repository found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepoProbeResult {
+    /// A repo, with its canonical top-level path.
+    Repo { top_level: PathBuf },
+    /// The directory does not exist.
+    NotFound,
+    /// The directory exists but is not inside a git work tree.
+    NotAGitRepo,
+}
+
 /// Read-only git access for the diff engine. Every method shells out to git in the
 /// real adapter; the fake scripts each return value.
 pub trait DiffSource: Send + Sync {
@@ -138,6 +173,41 @@ pub trait HtmlRenderer: Send + Sync {
 pub trait Clock: Send + Sync {
     /// The current instant as a strict ISO-8601 timestamp string.
     fn now_iso(&self) -> String;
+}
+
+/// Filesystem/git probe behind live-view validation.
+pub trait RepoProbe: Send + Sync {
+    /// Classify `dir`; errors only on unexpected I/O failures, never on the
+    /// three expected outcomes (those are values).
+    fn probe(&self, dir: &Path) -> anyhow::Result<RepoProbeResult>;
+}
+
+/// The app-state store: saved live views, settings, and the recent-render log.
+/// One `SQLite` file under `data_root` in the real adapter; every method opens,
+/// migrates, and closes per call so callers stay hermetic (the `ArtifactStore`
+/// per-call `store_root` pattern).
+pub trait AppStateStore: Send + Sync {
+    /// Upsert by `(source_kind, source_value)`: a new row keeps `record` as-is;
+    /// an existing row keeps its `created_at`/`last_opened_at` and takes only
+    /// the new `display_name`. Returns `true` when the view already existed.
+    fn save_live_view(&self, data_root: &Path, record: &LiveViewRecord) -> anyhow::Result<bool>;
+    /// Every saved live view, oldest first (creation order).
+    fn list_live_views(&self, data_root: &Path) -> anyhow::Result<Vec<LiveViewRecord>>;
+    /// Delete by identity; `true` when a row was actually removed.
+    fn remove_live_view(
+        &self,
+        data_root: &Path,
+        source_kind: &str,
+        source_value: &str,
+    ) -> anyhow::Result<bool>;
+    /// The stored value for `key`, or `None` when unset.
+    fn get_setting(&self, data_root: &Path, key: &str) -> anyhow::Result<Option<String>>;
+    /// Upsert `key` to `value`.
+    fn set_setting(&self, data_root: &Path, key: &str, value: &str) -> anyhow::Result<()>;
+    /// Append one render record, pruning the log past [`RECENT_RENDERS_CAP`].
+    fn record_render(&self, data_root: &Path, record: &RecentRenderRecord) -> anyhow::Result<()>;
+    /// Recorded renders, newest first.
+    fn list_recent_renders(&self, data_root: &Path) -> anyhow::Result<Vec<RecentRenderRecord>>;
 }
 
 /// One captured git subprocess result: exit success plus combined stdout+stderr.

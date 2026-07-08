@@ -24,7 +24,7 @@ pub async fn handle<H>(
 where
     H: Sender<RenderMergeDiff> + Handle,
 {
-    super::run(handler, shared, Ok(super::to_merge_request(dto)), |resp| {
+    crate::endpoints::run(handler, shared, Ok(super::to_merge_request(dto)), |resp| {
         super::to_merge_envelope(&resp)
     })
     .await

@@ -3,8 +3,10 @@
 
 pub mod diffs;
 pub mod history;
+pub mod live_views;
 pub mod managed;
 pub mod ports;
+pub mod settings;
 pub mod shared;
 
 #[cfg(any(test, feature = "testing"))]

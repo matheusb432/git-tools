@@ -17,12 +17,14 @@ use application::{
         render_diff_subrepos::RenderDiffSubreposHandler, render_merge_diff::RenderMergeDiffHandler,
         render_squash_preview::RenderSquashPreviewHandler,
     },
+    live_views::save::SaveLiveViewHandler,
     managed::{pull_all::PullAllHandler, push_all::PushAllHandler},
 };
 use infra::{
-    artifact_store::StoreArtifacts, clock::SystemClock, diff_source::GitDiffSource,
-    html_renderer::MaudRenderer, managed_manifest::TokioManagedManifest,
-    push_ledger::NoOpPushLedger, remote_sync::TokioRemoteSync,
+    app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
+    diff_source::GitDiffSource, html_renderer::MaudRenderer,
+    managed_manifest::TokioManagedManifest, push_ledger::NoOpPushLedger,
+    remote_sync::TokioRemoteSync, repo_probe::GitRepoProbe,
 };
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
@@ -120,6 +122,11 @@ pub async fn run() -> anyhow::Result<()> {
         pull_all: PullAllHandler {
             remote: TokioRemoteSync,
             manifest: TokioManagedManifest,
+        },
+        save_live_view: SaveLiveViewHandler {
+            probe: GitRepoProbe,
+            store: SqliteAppState,
+            clock: SystemClock,
         },
     };
     let app = state::router(AppState { mediator, shared });

@@ -9,7 +9,7 @@ use application::managed::{
     service::{RepoSyncResult, SyncExit},
 };
 use contracts::{
-    envelope::{Envelope, Note, NoteLevel, Outcome},
+    envelope::{Envelope, Outcome},
     managed::{PullAllRequest, PushAllRequest, RepoSyncResultDto, SyncData, SyncExitDto},
 };
 
@@ -63,15 +63,4 @@ pub(crate) fn to_push_all_envelope(resp: PushAllResponse) -> Envelope<SyncData> 
 
 pub(crate) fn to_pull_all_envelope(resp: PullAllResponse) -> Envelope<SyncData> {
     ok_envelope(resp.results, resp.exit)
-}
-
-pub(crate) fn error_envelope(text: String) -> Envelope<SyncData> {
-    Envelope {
-        outcome: Outcome::Error,
-        notes: vec![Note {
-            level: NoteLevel::Error,
-            text,
-        }],
-        data: None,
-    }
 }

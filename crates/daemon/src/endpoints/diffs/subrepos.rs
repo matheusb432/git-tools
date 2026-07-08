@@ -25,7 +25,7 @@ pub async fn handle<H>(
 where
     H: Sender<RenderDiffSubrepos> + Handle,
 {
-    super::run(
+    crate::endpoints::run(
         handler,
         shared,
         super::to_subrepos_request(dto),

@@ -4,4 +4,5 @@
 
 pub mod diffs;
 pub mod envelope;
+pub mod live_views;
 pub mod managed;

@@ -26,7 +26,7 @@ where
         Ok(resp) => (StatusCode::OK, Json(super::to_pull_all_envelope(resp))),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(super::error_envelope(format!("{e:#}"))),
+            Json(crate::endpoints::error_envelope(format!("{e:#}"))),
         ),
     }
 }
