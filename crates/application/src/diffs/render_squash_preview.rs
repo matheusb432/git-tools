@@ -55,58 +55,25 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<
         &self,
         req: RenderSquashPreview,
     ) -> Result<RenderSquashPreviewResponse, RenderSquashPreviewError> {
-        let top = self.source.top_level(&req.cwd)?;
-        let upstream = self.source.upstream(Path::new(&top))?;
-        let branch = self.source.current_branch(Path::new(&top))?;
-        let repo_name = repo_name(&top);
-        let ranges = ranges(&upstream, Mode::Unpushed);
-
-        let DiffData { commits, files } = assemble(
-            &self.source,
-            Path::new(&top),
-            &ranges.diff_args,
-            &ranges.diff_range,
-            &ranges.log_range,
-        )?;
-
-        let view = View {
-            repo_name: repo_name.clone(),
-            repo_root: top.clone(),
-            branch,
-            upstream: upstream.clone(),
-            title: "squash-preview".to_string(),
-            cmd: Cmd {
-                lead: "git log ".to_string(),
-                range: ranges.log_range.clone(),
-                trail: " --stat".to_string(),
-            },
-            commits_label: "# commits — collapse into 1".to_string(),
-            foot: Foot {
-                cmd: "squash-local".to_string(),
-                note: collapse_note(commits.len()),
-            },
-            commits,
-            files,
-            theme: None,
-        };
-
+        let built = build_squash_view(&self.source, &req.cwd)?;
+        let view = built.view;
         let commit_count = view.commits.len();
         let file_count = view.files.len();
         let html = self.renderer.build_html(&view);
 
         let meta = ArtifactMeta {
-            repo_root: PathBuf::from(&top),
-            repo_name: repo_name.clone(),
+            repo_root: PathBuf::from(&built.top),
+            repo_name: view.repo_name.clone(),
             // ! WorkTree by design: squash-preview is base→working-tree, not a commit range,
             // ! so it is intentionally excluded from range-dedup in the store.
             kind: DiffKind::WorkTree,
             base_sha: String::new(),
             head_sha: self
                 .source
-                .resolve_sha(Path::new(&top), "HEAD")
+                .resolve_sha(Path::new(&built.top), "HEAD")
                 .unwrap_or_default(),
-            range_label: ranges.log_range.clone(),
-            head_committed_at: self.source.committed_at(Path::new(&top), "HEAD"),
+            range_label: built.log_range.clone(),
+            head_committed_at: self.source.committed_at(Path::new(&built.top), "HEAD"),
             generated_at: self.clock.now_iso(),
             title: "squash-preview".to_string(),
         };
@@ -124,6 +91,61 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<
             notes,
         })
     }
+}
+
+/// The computed squash-preview view plus the facts the artifact path still needs.
+pub(crate) struct SquashViewBuild {
+    pub view: View,
+    pub top: String,
+    pub log_range: String,
+}
+
+/// Shared with `compute_squash_preview`: builds the squash-preview [`View`]
+/// for the repo at `cwd` (base is always the configured upstream). No HTML,
+/// no store.
+pub(crate) fn build_squash_view(
+    source: &impl DiffSource,
+    cwd: &Path,
+) -> anyhow::Result<SquashViewBuild> {
+    let top = source.top_level(cwd)?;
+    let upstream = source.upstream(Path::new(&top))?;
+    let branch = source.current_branch(Path::new(&top))?;
+    let repo_name = repo_name(&top);
+    let ranges = ranges(&upstream, Mode::Unpushed);
+
+    let DiffData { commits, files } = assemble(
+        source,
+        Path::new(&top),
+        &ranges.diff_args,
+        &ranges.diff_range,
+        &ranges.log_range,
+    )?;
+
+    let view = View {
+        repo_name,
+        repo_root: top.clone(),
+        branch,
+        upstream,
+        title: "squash-preview".to_string(),
+        cmd: Cmd {
+            lead: "git log ".to_string(),
+            range: ranges.log_range.clone(),
+            trail: " --stat".to_string(),
+        },
+        commits_label: "# commits — collapse into 1".to_string(),
+        foot: Foot {
+            cmd: "squash-local".to_string(),
+            note: collapse_note(commits.len()),
+        },
+        commits,
+        files,
+        theme: None,
+    };
+    Ok(SquashViewBuild {
+        view,
+        top,
+        log_range: ranges.log_range,
+    })
 }
 
 fn collapse_note(commit_count: usize) -> String {

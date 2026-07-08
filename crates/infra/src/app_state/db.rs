@@ -47,6 +47,43 @@ pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", true)?;
     conn.busy_timeout(Duration::from_secs(5))?;
-    MIGRATIONS.to_latest(&mut conn)?;
+    // ! Fresh-file race: daemon and viewer can both open a brand-new gtl.db and
+    // ! both attempt migration v1; the loser errors ("table already exists" /
+    // ! SQLITE_BUSY). Its retry re-reads user_version, sees the winner's bump,
+    // ! and no-ops. A genuine migration failure fails both attempts and surfaces.
+    if MIGRATIONS.to_latest(&mut conn).is_err() {
+        MIGRATIONS.to_latest(&mut conn)?;
+    }
     Ok(conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two processes (daemon + viewer) can open a fresh db concurrently; both
+    /// must succeed. Deterministically hitting the migration race is not
+    /// possible from a test, but this pins the contract the retry guard serves.
+    #[test]
+    fn concurrent_first_open_both_succeed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let root = root.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    open_app_db(&root).map(|_| ())
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle
+                .join()
+                .expect("no panic")
+                .expect("open must survive the fresh-file race");
+        }
+    }
 }

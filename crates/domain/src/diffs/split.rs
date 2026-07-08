@@ -5,7 +5,7 @@
 
 use super::{
     intraline::{LineSpans, Span, changed_spans},
-    rows::{MAX_LINE_COLS, Row, RowKind},
+    rows::{Row, RowKind, line_body, long_line_len},
 };
 
 /// One side of a paired side-by-side row.
@@ -36,17 +36,6 @@ pub enum SplitRow {
         old: Option<SplitCell>,
         new: Option<SplitCell>,
     },
-}
-
-/// A changed line body with its leading diff marker stripped, ready for
-/// intra-line diffing.
-pub fn line_body(raw: &str) -> &str {
-    raw.get(1..).unwrap_or("")
-}
-
-fn is_long(raw: &str) -> bool {
-    let marker = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
-    raw.chars().count().saturating_sub(marker) > MAX_LINE_COLS
 }
 
 /// Pair structured rows into side-by-side rows.
@@ -95,7 +84,9 @@ fn flush_pairs(out: &mut Vec<SplitRow>, dels: &mut Vec<&Row>, adds: &mut Vec<&Ro
         let add = adds.get(i).copied();
 
         let spans = match (del, add) {
-            (Some(d), Some(a)) if !is_long(&d.text) && !is_long(&a.text) => {
+            (Some(d), Some(a))
+                if long_line_len(&d.text).is_none() && long_line_len(&a.text).is_none() =>
+            {
                 changed_spans(line_body(&d.text), line_body(&a.text))
             }
             _ => LineSpans::default(),
@@ -123,7 +114,7 @@ fn flush_pairs(out: &mut Vec<SplitRow>, dels: &mut Vec<&Row>, adds: &mut Vec<&Ro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diffs::{LineOwners, derive_rows};
+    use crate::diffs::{LineOwners, MAX_LINE_COLS, derive_rows};
 
     fn split(raw: &[&str]) -> Vec<SplitRow> {
         let lines: Vec<String> = raw.iter().map(ToString::to_string).collect();
@@ -246,11 +237,5 @@ mod tests {
     fn trailing_runs_flush_at_end_of_input() {
         let rows = split(&["@@ -1 +1 @@", "-a", "+b"]);
         assert_eq!(rows.len(), 2, "hunk + one pair");
-    }
-
-    #[test]
-    fn line_body_strips_the_marker() {
-        assert_eq!(line_body("-old"), "old");
-        assert_eq!(line_body(""), "");
     }
 }

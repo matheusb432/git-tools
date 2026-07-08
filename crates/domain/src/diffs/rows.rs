@@ -121,6 +121,22 @@ pub fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
     rows
 }
 
+/// A changed line body with its leading diff marker stripped, ready for
+/// intra-line diffing or marker-free presentation.
+pub fn line_body(raw: &str) -> &str {
+    raw.get(1..).unwrap_or("")
+}
+
+/// The char count of `raw` (leading `+`/`-`/space marker excluded) when the
+/// line is "long" (beyond [`MAX_LINE_COLS`]), else `None`. The single long-line
+/// rule shared by every renderer: Maud's long-line taming, the split pane's
+/// intra-line exemption, and the native viewer's row DTOs.
+pub fn long_line_len(raw: &str) -> Option<usize> {
+    let marker = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
+    let len = raw.chars().count().saturating_sub(marker);
+    (len > MAX_LINE_COLS).then_some(len)
+}
+
 /// Parse `@@ -a[,b] +c[,d] @@ …` into the two start line numbers.
 fn hunk_starts(raw: &str) -> Option<(u32, u32)> {
     let rest = raw.strip_prefix("@@ -")?;
@@ -248,6 +264,30 @@ mod tests {
             let rows = derive_rows(&lines(&[raw]), &LineOwners::default());
             assert_eq!(rows[0].kind, RowKind::Meta, "{raw} must be meta");
         }
+    }
+
+    #[test]
+    fn long_line_len_excludes_the_leading_marker() {
+        let at_limit = format!("+{}", "a".repeat(MAX_LINE_COLS));
+        assert_eq!(
+            long_line_len(&at_limit),
+            None,
+            "exactly MAX cols is not long"
+        );
+        let over = format!("+{}", "a".repeat(MAX_LINE_COLS + 1));
+        assert_eq!(long_line_len(&over), Some(MAX_LINE_COLS + 1));
+    }
+
+    #[test]
+    fn long_line_len_counts_all_chars_without_a_marker() {
+        let raw = "x".repeat(MAX_LINE_COLS + 1);
+        assert_eq!(long_line_len(&raw), Some(MAX_LINE_COLS + 1));
+    }
+
+    #[test]
+    fn line_body_strips_the_marker() {
+        assert_eq!(line_body("-old"), "old");
+        assert_eq!(line_body(""), "");
     }
 
     #[test]

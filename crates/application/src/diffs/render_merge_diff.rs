@@ -50,6 +50,60 @@ pub struct RenderMergeDiffHandler<S: DiffSource, A: ArtifactStore, R: HtmlRender
     pub clock: C,
 }
 
+/// The computed merge view plus the range facts the artifact path still needs.
+pub(crate) struct MergeViewBuild {
+    pub view: View,
+    pub top: String,
+    pub base: String,
+    pub diff_range: String,
+}
+
+/// Shared with `compute_merge_diff`: builds the merge [`View`] for the repo at
+/// `cwd` into `base` (default [`DEFAULT_BASE`]). No HTML, no store.
+pub(crate) fn build_merge_view(
+    source: &impl DiffSource,
+    cwd: &Path,
+    base: Option<&str>,
+) -> anyhow::Result<MergeViewBuild> {
+    let top = source.top_level(cwd)?;
+    let branch = source.current_branch(Path::new(&top))?;
+    let repo_name = repo_name(&top);
+    let base = base
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .unwrap_or(DEFAULT_BASE);
+
+    source.verify_commit(Path::new(&top), base)?;
+    let ranges = ranges(base, Mode::Merge);
+    let DiffData { commits, files } = assemble(
+        source,
+        Path::new(&top),
+        &ranges.diff_args,
+        &ranges.diff_range,
+        &ranges.log_range,
+    )?;
+
+    let view = View {
+        repo_name,
+        repo_root: top.clone(),
+        branch,
+        upstream: base.to_string(),
+        title: ranges.title,
+        cmd: ranges.cmd,
+        commits_label: ranges.commits_label,
+        foot: ranges.foot,
+        commits,
+        files,
+        theme: None,
+    };
+    Ok(MergeViewBuild {
+        view,
+        top,
+        base: base.to_string(),
+        diff_range: ranges.diff_range,
+    })
+}
+
 impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<RenderMergeDiff>
     for RenderMergeDiffHandler<S, A, R, C>
 {
@@ -57,58 +111,26 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<
         &self,
         req: RenderMergeDiff,
     ) -> Result<RenderMergeDiffResponse, RenderMergeDiffError> {
-        let top = self.source.top_level(&req.cwd)?;
-        let branch = self.source.current_branch(Path::new(&top))?;
-        let repo_name = repo_name(&top);
-        let base = req
-            .base
-            .as_deref()
-            .map(str::trim)
-            .filter(|b| !b.is_empty())
-            .unwrap_or(DEFAULT_BASE);
-
-        self.source.verify_commit(Path::new(&top), base)?;
-        let ranges = ranges(base, Mode::Merge);
-        let DiffData { commits, files } = assemble(
-            &self.source,
-            Path::new(&top),
-            &ranges.diff_args,
-            &ranges.diff_range,
-            &ranges.log_range,
-        )?;
-
-        let view = View {
-            repo_name: repo_name.clone(),
-            repo_root: top.clone(),
-            branch,
-            upstream: base.to_string(),
-            title: ranges.title,
-            cmd: ranges.cmd,
-            commits_label: ranges.commits_label,
-            foot: ranges.foot,
-            commits,
-            files,
-            theme: None,
-        };
-
+        let built = build_merge_view(&self.source, &req.cwd, req.base.as_deref())?;
+        let view = built.view;
         let commit_count = view.commits.len();
         let file_count = view.files.len();
         let html = self.renderer.build_html(&view);
 
         let meta = ArtifactMeta {
-            repo_root: PathBuf::from(&top),
-            repo_name: repo_name.clone(),
-            kind: DiffKind::from_diff_range(&ranges.diff_range),
+            repo_root: PathBuf::from(&built.top),
+            repo_name: view.repo_name.clone(),
+            kind: DiffKind::from_diff_range(&built.diff_range),
             base_sha: self
                 .source
-                .resolve_sha(Path::new(&top), base)
+                .resolve_sha(Path::new(&built.top), &built.base)
                 .unwrap_or_default(),
             head_sha: self
                 .source
-                .resolve_sha(Path::new(&top), "HEAD")
+                .resolve_sha(Path::new(&built.top), "HEAD")
                 .unwrap_or_default(),
-            range_label: ranges.diff_range.clone(),
-            head_committed_at: self.source.committed_at(Path::new(&top), "HEAD"),
+            range_label: built.diff_range.clone(),
+            head_committed_at: self.source.committed_at(Path::new(&built.top), "HEAD"),
             generated_at: self.clock.now_iso(),
             title: "merge-diff".to_string(),
         };
@@ -116,8 +138,9 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<
 
         let notes = vec![
             Note::info(format!(
-                "merge-diff: {commit_count} commit{} to merge into {base}, {file_count} file{}",
+                "merge-diff: {commit_count} commit{} to merge into {}, {file_count} file{}",
                 plural(commit_count),
+                built.base,
                 plural(file_count),
             )),
             Note::info(format!("wrote {}", placed.path.display())),

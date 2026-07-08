@@ -1,15 +1,40 @@
 //! gtl-viewer: the Tauri diff viewer. Hosts the store's self-contained HTML
 //! artifacts as browser-style tabs over a scoped `diff://` scheme (ADR-0004).
+mod commands;
 mod diffs;
 mod history;
 mod protocol;
+mod recipe;
+mod tabs;
+mod view_dto;
 
 use application::{
-    history::list::{ListHistory, ListHistoryHandler},
-    ports::ArtifactStore,
+    diffs::{
+        compute_diff::{ComputeDiff, ComputeDiffHandler},
+        compute_merge_diff::{ComputeMergeDiff, ComputeMergeDiffHandler},
+        compute_squash_preview::{ComputeSquashPreview, ComputeSquashPreviewHandler},
+    },
+    history::{
+        list::{ListHistory, ListHistoryHandler},
+        record_render::{RecordRender, RecordRenderHandler},
+    },
+    live_views::{
+        list::{ListLiveViews, ListLiveViewsHandler},
+        remove::{RemoveLiveView, RemoveLiveViewHandler},
+        save::{SaveLiveView, SaveLiveViewHandler},
+    },
+    ports::{AppStateStore, ArtifactStore, Clock, DiffSource, RepoProbe},
+    settings::{
+        get::{GetSetting, GetSettingHandler},
+        set::{SetSetting, SetSettingHandler},
+    },
 };
 use cqrsy::Sender;
 use diffs::{PendingDiffs, diff_ref_from_argv};
+use infra::{
+    app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
+    diff_source::GitDiffSource, repo_probe::GitRepoProbe,
+};
 use tauri::{
     Emitter, Manager, WindowEvent,
     http::{Response, StatusCode},
@@ -18,12 +43,82 @@ use tauri::{
 };
 
 /// Desktop's in-process dispatch facade — one handler field per operation.
-/// `#[derive(cqrsy::Mediator)]` implements `Sender<ListHistory>`, forwarding
-/// to the `list_history` field, exactly like `DaemonMediator` in `crates/daemon`.
+/// `#[derive(cqrsy::Mediator)]` implements `Sender<R>` per `#[handles(R)]`
+/// field, exactly like `DaemonMediator` in `crates/daemon`. The compute slices
+/// are the app render path (structured views, no HTML/store); the daemon stays
+/// the boundary for the CLI-facing render paths.
 #[derive(Clone, cqrsy::Mediator)]
-struct DesktopMediator<A: ArtifactStore + Clone + Send + Sync + 'static> {
+pub(crate) struct DesktopMediator<S, A, C, P, AS>
+where
+    S: DiffSource + Clone + Send + Sync + 'static,
+    A: ArtifactStore + Clone + Send + Sync + 'static,
+    C: Clock + Clone + Send + Sync + 'static,
+    P: RepoProbe + Clone + Send + Sync + 'static,
+    AS: AppStateStore + Clone + Send + Sync + 'static,
+{
     #[handles(ListHistory)]
-    list_history: ListHistoryHandler<A>,
+    pub list_history: ListHistoryHandler<A>,
+    #[handles(ComputeDiff)]
+    pub compute_diff: ComputeDiffHandler<S>,
+    #[handles(ComputeMergeDiff)]
+    pub compute_merge_diff: ComputeMergeDiffHandler<S>,
+    #[handles(ComputeSquashPreview)]
+    pub compute_squash_preview: ComputeSquashPreviewHandler<S>,
+    #[handles(ListLiveViews)]
+    pub list_live_views: ListLiveViewsHandler<AS>,
+    #[handles(SaveLiveView)]
+    pub save_live_view: SaveLiveViewHandler<P, AS, C>,
+    #[handles(RemoveLiveView)]
+    pub remove_live_view: RemoveLiveViewHandler<AS>,
+    #[handles(GetSetting)]
+    pub get_setting: GetSettingHandler<AS>,
+    #[handles(SetSetting)]
+    pub set_setting: SetSettingHandler<AS>,
+    #[handles(RecordRender)]
+    pub record_render: RecordRenderHandler<AS, C>,
+}
+
+/// The production wiring: real adapters end to end (the daemon's adapters plus
+/// the `SQLite` app-state store).
+pub(crate) type WiredMediator =
+    DesktopMediator<GitDiffSource, StoreArtifacts, SystemClock, GitRepoProbe, SqliteAppState>;
+
+fn wired_mediator() -> WiredMediator {
+    DesktopMediator {
+        list_history: ListHistoryHandler {
+            store: StoreArtifacts,
+        },
+        compute_diff: ComputeDiffHandler {
+            source: GitDiffSource,
+        },
+        compute_merge_diff: ComputeMergeDiffHandler {
+            source: GitDiffSource,
+        },
+        compute_squash_preview: ComputeSquashPreviewHandler {
+            source: GitDiffSource,
+        },
+        list_live_views: ListLiveViewsHandler {
+            store: SqliteAppState,
+        },
+        save_live_view: SaveLiveViewHandler {
+            probe: GitRepoProbe,
+            store: SqliteAppState,
+            clock: SystemClock,
+        },
+        remove_live_view: RemoveLiveViewHandler {
+            store: SqliteAppState,
+        },
+        get_setting: GetSettingHandler {
+            store: SqliteAppState,
+        },
+        set_setting: SetSettingHandler {
+            store: SqliteAppState,
+        },
+        record_render: RecordRenderHandler {
+            store: SqliteAppState,
+            clock: SystemClock,
+        },
+    }
 }
 
 /// Brings the main window to the foreground — even over a focused fullscreen app.
@@ -80,9 +175,7 @@ fn drain_pending_diffs(state: tauri::State<'_, PendingDiffs>) -> Vec<String> {
     clippy::needless_pass_by_value,
     reason = "tauri's #[command] extractors must be taken by value"
 )]
-fn list_history(
-    state: tauri::State<'_, DesktopMediator<infra::artifact_store::StoreArtifacts>>,
-) -> Vec<history::HistoryEntry> {
+fn list_history(state: tauri::State<'_, WiredMediator>) -> Vec<history::HistoryEntry> {
     let Some(store_root) = protocol::store_root() else {
         return Vec::new();
     };
@@ -99,11 +192,8 @@ fn list_history(
 /// webview install) — fatal for a desktop app, so it surfaces as a crash.
 pub fn run() {
     tauri::Builder::default()
-        .manage(DesktopMediator {
-            list_history: ListHistoryHandler {
-                store: infra::artifact_store::StoreArtifacts,
-            },
-        })
+        .manage(wired_mediator())
+        .manage(tabs::RenderedTabs::default())
         .manage(PendingDiffs::default())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // Second launch: queue its diff, raise the window, tell the frontend.
@@ -115,7 +205,20 @@ pub fn run() {
                 focus_main(&win);
             }
         }))
-        .invoke_handler(tauri::generate_handler![drain_pending_diffs, list_history])
+        .invoke_handler(tauri::generate_handler![
+            drain_pending_diffs,
+            list_history,
+            commands::tabs::open_recipe,
+            commands::tabs::tab_meta,
+            commands::tabs::file_rows,
+            commands::tabs::refresh_tab,
+            commands::tabs::close_tab,
+            commands::app_state::list_live_views,
+            commands::app_state::save_live_view,
+            commands::app_state::remove_live_view,
+            commands::app_state::get_setting,
+            commands::app_state::set_setting,
+        ])
         .register_asynchronous_uri_scheme_protocol("diff", |_ctx, request, responder| {
             responder.respond(serve_diff(&request));
         })
@@ -182,6 +285,92 @@ fn serve_diff(request: &tauri::http::Request<Vec<u8>>) -> Response<Vec<u8>> {
             .body(bytes)
             .expect("html response builds"),
         Err(_) => not_found(),
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use application::testing::{
+        FakeDiffSource, FakeRepoProbe, FixedClock, InMemoryAppStateStore, InMemoryArtifactStore,
+    };
+
+    use super::*;
+
+    pub(crate) type FakeMediator = DesktopMediator<
+        FakeDiffSource,
+        InMemoryArtifactStore,
+        FixedClock,
+        FakeRepoProbe,
+        InMemoryAppStateStore,
+    >;
+
+    pub(crate) fn fake_mediator(source: FakeDiffSource) -> FakeMediator {
+        fake_mediator_parts(
+            source,
+            InMemoryArtifactStore::default(),
+            InMemoryAppStateStore::default(),
+            FakeRepoProbe::default(),
+        )
+    }
+
+    pub(crate) fn fake_mediator_with(
+        source: FakeDiffSource,
+        store: InMemoryArtifactStore,
+        app_state: InMemoryAppStateStore,
+    ) -> FakeMediator {
+        fake_mediator_parts(source, store, app_state, FakeRepoProbe::default())
+    }
+
+    pub(crate) fn fake_mediator_with_probe(
+        source: FakeDiffSource,
+        probe: FakeRepoProbe,
+    ) -> FakeMediator {
+        fake_mediator_parts(
+            source,
+            InMemoryArtifactStore::default(),
+            InMemoryAppStateStore::default(),
+            probe,
+        )
+    }
+
+    fn fake_mediator_parts(
+        source: FakeDiffSource,
+        store: InMemoryArtifactStore,
+        app_state: InMemoryAppStateStore,
+        probe: FakeRepoProbe,
+    ) -> FakeMediator {
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
+        DesktopMediator {
+            list_history: ListHistoryHandler { store },
+            compute_diff: ComputeDiffHandler {
+                source: source.clone(),
+            },
+            compute_merge_diff: ComputeMergeDiffHandler {
+                source: source.clone(),
+            },
+            compute_squash_preview: ComputeSquashPreviewHandler { source },
+            list_live_views: ListLiveViewsHandler {
+                store: app_state.clone(),
+            },
+            save_live_view: SaveLiveViewHandler {
+                probe,
+                store: app_state.clone(),
+                clock: clock.clone(),
+            },
+            remove_live_view: RemoveLiveViewHandler {
+                store: app_state.clone(),
+            },
+            get_setting: GetSettingHandler {
+                store: app_state.clone(),
+            },
+            set_setting: SetSettingHandler {
+                store: app_state.clone(),
+            },
+            record_render: RecordRenderHandler {
+                store: app_state,
+                clock,
+            },
+        }
     }
 }
 
@@ -266,7 +455,8 @@ mod tests {
     #[test]
     fn desktop_mediator_dispatches_list_history_end_to_end() {
         use application::{
-            history::list::ListHistory, ports::HistoryRecord, testing::InMemoryArtifactStore,
+            ports::HistoryRecord,
+            testing::{FakeDiffSource, InMemoryArtifactStore},
         };
         use domain::diffs::DiffKind;
 
@@ -281,14 +471,14 @@ mod tests {
             kind: DiffKind::TwoDot,
             byte_size: 0,
         };
-        let mediator = DesktopMediator {
-            list_history: ListHistoryHandler {
-                store: InMemoryArtifactStore {
-                    history: vec![record.clone()],
-                    ..Default::default()
-                },
+        let mediator = test_support::fake_mediator_with(
+            FakeDiffSource::default(),
+            InMemoryArtifactStore {
+                history: vec![record.clone()],
+                ..Default::default()
             },
-        };
+            application::testing::InMemoryAppStateStore::default(),
+        );
 
         let response = mediator
             .send_now(ListHistory {
@@ -298,5 +488,33 @@ mod tests {
 
         assert_eq!(response.entries.len(), 1);
         assert_eq!(response.entries[0].repo_id, "repo1");
+    }
+
+    #[test]
+    fn desktop_mediator_dispatches_compute_diff_end_to_end() {
+        use application::testing::FakeDiffSource;
+
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![domain::diffs::Commit {
+                sha: "abc1234".into(),
+                subject: "feat: work".into(),
+                ..Default::default()
+            }],
+            diff_output: "diff --git a/f.txt b/f.txt\n@@ -1 +1 @@\n-a\n+b\n".into(),
+            ..Default::default()
+        };
+        let mediator = test_support::fake_mediator(source);
+
+        let response = mediator
+            .send_now(ComputeDiff {
+                cwd: "/repo".into(),
+                target: domain::diffs::DiffTarget::Unpushed,
+            })
+            .expect("dispatch succeeds");
+
+        assert_eq!(response.view.files.len(), 1);
     }
 }

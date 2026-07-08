@@ -1,4 +1,4 @@
-use domain::diffs::{FileDiff, LineOwners, RowKind, Span, SplitRow, View};
+use domain::diffs::{FileDiff, LineOwners, RowKind, Span, SplitRow, View, long_line_len};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 const GIANT_FILE_CHARS: usize = 250_000;
@@ -78,7 +78,7 @@ pub fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
                 );
             }
             RowKind::Add => {
-                let long = long_len(&row.text);
+                let long = long_line_len(&row.text);
                 let _ = write!(
                     rows,
                     r#"<div class="dl dl-add{}"{}><span class="ln"></span><span class="ln">{}</span>{}</div>"#,
@@ -89,7 +89,7 @@ pub fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
                 );
             }
             RowKind::Del => {
-                let long = long_len(&row.text);
+                let long = long_line_len(&row.text);
                 let _ = write!(
                     rows,
                     r#"<div class="dl dl-del{}"{}><span class="ln">{}</span><span class="ln"></span>{}</div>"#,
@@ -100,7 +100,7 @@ pub fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
                 );
             }
             RowKind::Context => {
-                let long = long_len(&row.text);
+                let long = long_line_len(&row.text);
                 let _ = write!(
                     rows,
                     r#"<div class="dl dl-ctx{}"><span class="ln">{}</span><span class="ln">{}</span>{}</div>"#,
@@ -316,15 +316,6 @@ fn html_or_nbsp(raw: &str) -> String {
     }
 }
 
-// ! Char length excluding the leading diff marker; `Some(len)` only when the line is long enough
-// ! to need taming (see code_cell). Computed once per row and shared by the row class and the
-// ! code cell so the O(n) char count isn't walked twice on the very lines the freeze fix targets.
-fn long_len(raw: &str) -> Option<usize> {
-    let marker = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
-    let len = raw.chars().count().saturating_sub(marker);
-    (len > domain::diffs::MAX_LINE_COLS).then_some(len)
-}
-
 // ! Inner content of a `<code>` cell: the bare body, or — for a tamed long line — the copy-safe
 // ! `.code-text` span plus the expander button. Shared by the unified `code_cell` and the
 // ! side-by-side `split_code` so the long-line taming lives in exactly one place.
@@ -438,7 +429,7 @@ pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
                 new_no,
                 text,
             } => {
-                let long = long_len(&text);
+                let long = long_line_len(&text);
                 let _ = write!(
                     rows,
                     r#"<div class="dl"><span class="ln">{}</span>{}<span class="ln">{}</span>{}</div>"#,
@@ -458,7 +449,7 @@ pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
                             cell.no,
                             split_code(
                                 &cell.text,
-                                long_len(&cell.text),
+                                long_line_len(&cell.text),
                                 "sp-del",
                                 cell.owner.as_ref(),
                                 &cell.spans
@@ -475,7 +466,7 @@ pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
                             cell.no,
                             split_code(
                                 &cell.text,
-                                long_len(&cell.text),
+                                long_line_len(&cell.text),
                                 "sp-add",
                                 cell.owner.as_ref(),
                                 &cell.spans
