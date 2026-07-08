@@ -1,6 +1,10 @@
-import type { Tab } from "@/entities/tab";
+import type { ViewerTab } from "@/entities/diff-tab";
 
-export type FitResult = { visible: Tab[]; overflow: Tab[] };
+export type FitResult = { visible: ViewerTab[]; overflow: ViewerTab[] };
+
+export function viewerTabKey(tab: ViewerTab): string {
+  return tab.kind === "artifact" ? `artifact:${tab.url}` : `native:${tab.localId}`;
+}
 
 /**
  * Decide which tabs fit. `reserved` covers the overflow trigger + right-side
@@ -8,7 +12,7 @@ export type FitResult = { visible: Tab[]; overflow: Tab[] };
  * overflow, it replaces the last visible slot and the displaced tab overflows.
  */
 export function splitTabs(
-  tabs: readonly Tab[],
+  tabs: readonly ViewerTab[],
   activeIndex: number,
   containerWidth: number,
   tabMinWidth: number,
@@ -17,8 +21,8 @@ export function splitTabs(
   const capacity = Math.max(1, Math.floor((containerWidth - reserved) / tabMinWidth));
   if (tabs.length <= capacity) return { visible: [...tabs], overflow: [] };
 
-  const visible = tabs.slice(0, capacity) as Tab[];
-  const overflow = tabs.slice(capacity) as Tab[];
+  const visible = tabs.slice(0, capacity) as ViewerTab[];
+  const overflow = tabs.slice(capacity) as ViewerTab[];
   if (activeIndex >= capacity) {
     const displaced = visible[capacity - 1]!;
     visible[capacity - 1] = tabs[activeIndex]!;

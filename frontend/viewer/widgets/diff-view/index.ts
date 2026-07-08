@@ -1,0 +1,20 @@
+export { default as DiffView } from "./ui/DiffView.svelte";
+export {
+  clearCommitFocus,
+  copySplitRows,
+  copyUnifiedRows,
+  createDiffViewState,
+  focusCommit,
+  fullFromSetting,
+  layoutFromSetting,
+  nextFileIndex,
+  setFilterText,
+  setLayout,
+  settingFromFull,
+  settingFromLayout,
+  toggleCommitFocus,
+  toggleFull,
+  toggleLayout,
+  type DiffLayout,
+  type DiffViewState,
+} from "./model/diff-view";

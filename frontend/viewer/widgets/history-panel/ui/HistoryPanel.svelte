@@ -4,6 +4,10 @@
   import { historyTabLabel, type HistoryEntry } from "@/entities/diff";
   import { relativeTime } from "@/shared/lib/time";
   import { formatBytes } from "@/shared/lib/format";
+  import { Badge } from "@/shared/ui/badge";
+  import { Button } from "@/shared/ui/button";
+  import * as InputGroup from "@/shared/ui/input-group";
+  import { TEST_IDS } from "@/shared/testids";
   import { filterHistory } from "../model/filter";
 
   type Props = { history: HistoryEntry[]; now: Date; onOpen: (url: string, label: string) => void };
@@ -35,15 +39,18 @@
   const recencyOf = (row: HistoryEntry) => row.head_committed_at || row.generated_at;
 </script>
 
-<div class="overflow-auto px-6 py-5 h-full">
-  <div class="flex items-center gap-2.5 w-full px-3.5 py-2.5 mb-4 rounded-[10px] bg-surface border border-border text-foreground-muted focus-within:border-accent">
-    <Search class="size-4" />
-    <input
-      class="w-full bg-transparent text-sm outline-none placeholder:text-foreground-muted"
-      placeholder="Search diffs by name, repo, or range…"
+<div data-testid={TEST_IDS.historyPanel.root} class="h-full overflow-auto px-6 py-5">
+  <InputGroup.Root class="mb-4 h-10 max-w-xl">
+    <InputGroup.Input
+      placeholder="Search diffs by name, repo, or range..."
       bind:value={query}
+      aria-label="Search diff history"
+      data-testid={TEST_IDS.historyPanel.search}
     />
-  </div>
+    <InputGroup.Addon>
+      <Search class="text-foreground-muted" />
+    </InputGroup.Addon>
+  </InputGroup.Root>
 
   {#if rows.length > 0}
     <div class={cn("grid gap-3 px-3.5 py-2 mb-1 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted border-b border-border", gridCols)}>
@@ -56,15 +63,11 @@
     </div>
 
     {#each rows as row (row.url)}
-      <div
-        role="button"
-        tabindex="0"
+      <Button
+        data-testid={TEST_IDS.historyPanel.row}
+        variant="ghost"
         class={cn("grid gap-3 items-center px-3.5 py-2.5 rounded-[9px] border border-transparent cursor-pointer hover:bg-muted hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent", gridCols)}
         onclick={() => onOpen(row.url, historyTabLabel(row, fallback))}
-        onkeydown={(e) => {
-          if (e.key === " ") e.preventDefault();
-          if (e.key === "Enter" || e.key === " ") onOpen(row.url, historyTabLabel(row, fallback));
-        }}
       >
         <span
           class={cn(
@@ -78,15 +81,15 @@
         <span class="text-xs text-foreground-muted truncate" title={row.repo_name || row.repo_id}>
           {row.repo_name || row.repo_id}
         </span>
-        <span class={cn("w-fit text-[11px] font-semibold px-2.5 py-0.5 rounded-full border", badgeClass(row.kind))}>
+        <Badge variant="outline" class={cn("w-fit text-[11px]", badgeClass(row.kind))}>
           {row.kind}
-        </span>
+        </Badge>
         <span class="font-mono text-xs text-foreground-muted truncate">{row.range_label}</span>
         <span class="font-mono text-xs text-foreground-muted text-right">{formatBytes(row.byte_size)}</span>
         <span class="flex items-center gap-1.5 text-[12.5px] text-foreground-muted" title={recencyOf(row)}>
           <Clock class="size-3.5" />{relativeTime(recencyOf(row), now)}
         </span>
-      </div>
+      </Button>
     {/each}
   {:else}
     <p class="text-center text-foreground-muted text-sm mt-12">{query ? `No diffs match "${query}".` : "No history yet."}</p>

@@ -25,3 +25,9 @@ test("matches on range label", () => {
   const all = [entry({ range_label: "main...HEAD" }), entry({ range_label: "main..HEAD" })];
   expect(filterHistory(all, "...").length).toBe(1);
 });
+
+test("trims surrounding query whitespace", () => {
+  const all = [entry({ repo_name: "git-tools" }), entry({ repo_name: "sample_project" })];
+  const [first] = filterHistory(all, "  sample_project  ");
+  expect(first?.repo_name).toBe("sample_project");
+});

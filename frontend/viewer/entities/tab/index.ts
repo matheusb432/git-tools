@@ -1,1 +1,15 @@
-export { closeAllTabs, closeOthers, closeTabState, sortTabsByTime, type Tab, type TabState } from "./model/tab";
+export {
+  applyOpenedNativeTab,
+  closeAllTabs,
+  closeOthers,
+  closeTabState,
+  closeAllViewerTabs,
+  closeOtherViewerTabs,
+  closeViewerTabState,
+  sortTabsByTime,
+  sortViewerTabsByTime,
+  type ApplyOpenedNativeTabResult,
+  type Tab,
+  type TabState,
+  type ViewerTabState,
+} from "./model/tab";

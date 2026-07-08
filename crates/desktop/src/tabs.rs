@@ -46,6 +46,47 @@ struct RenderedTab {
     panes: HashMap<PaneKey, PaneRows>,
 }
 
+impl RenderedTab {
+    fn ensure_row_panes(&mut self, file_idx: usize, full: bool) -> Result<(), String> {
+        let unified_key = PaneKey {
+            file_idx,
+            layout: Layout::Unified,
+            full,
+        };
+        let split_key = PaneKey {
+            file_idx,
+            layout: Layout::Split,
+            full,
+        };
+        if self.panes.contains_key(&unified_key) && self.panes.contains_key(&split_key) {
+            return Ok(());
+        }
+
+        let file = self
+            .view
+            .files
+            .get(file_idx)
+            .ok_or_else(|| format!("file index {file_idx} out of range"))?;
+        // ! full falls back to compact when no full-context lines were
+        // ! computed for this file — same policy as the Maud renderer.
+        let base = if full {
+            file.full_rows().unwrap_or_else(|| file.rows())
+        } else {
+            file.rows()
+        };
+
+        if !self.panes.contains_key(&split_key) {
+            self.panes
+                .insert(split_key, PaneRows::Split(split_rows(&base)));
+        }
+        if !self.panes.contains_key(&unified_key) {
+            self.panes.insert(unified_key, PaneRows::Unified(base));
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Default)]
 struct TabsInner {
     next_id: u64,
@@ -150,30 +191,14 @@ impl RenderedTabs {
             .tabs
             .get_mut(&tab_id)
             .ok_or_else(|| format!("unknown tab {tab_id}"))?;
-        let file = tab
-            .view
-            .files
-            .get(file_idx)
-            .ok_or_else(|| format!("file index {file_idx} out of range"))?;
 
         let key = PaneKey {
             file_idx,
             layout,
             full,
         };
-        let pane = tab.panes.entry(key).or_insert_with(|| {
-            // ! full falls back to compact when no full-context lines were
-            // ! computed for this file — same policy as the Maud renderer.
-            let base = if full {
-                file.full_rows().unwrap_or_else(|| file.rows())
-            } else {
-                file.rows()
-            };
-            match layout {
-                Layout::Unified => PaneRows::Unified(base),
-                Layout::Split => PaneRows::Split(split_rows(&base)),
-            }
-        });
+        tab.ensure_row_panes(file_idx, full)?;
+        let pane = tab.panes.get(&key).expect("row panes were just warmed");
         Ok(match pane {
             PaneRows::Unified(rows) => RowsPage {
                 total: rows.len(),
@@ -280,6 +305,29 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!((rows[0].kind, rows[0].text.as_str()), ("context", "keep"));
         assert_eq!((rows[1].kind, rows[1].text.as_str()), ("del", "old"));
+    }
+
+    #[test]
+    fn rows_page_warms_sibling_layout_for_fast_toggles() {
+        let tabs = RenderedTabs::default();
+        let id = tabs.upsert(recipe("/repos/gt"), "b1".into(), view("t"));
+
+        let _ = tabs
+            .rows_page(id, 0, Layout::Unified, false, 0, 2)
+            .expect("unified page succeeds");
+
+        let inner = tabs.0.lock().expect("tabs lock");
+        let tab = inner.tabs.get(&id).expect("tab exists");
+        assert!(tab.panes.contains_key(&PaneKey {
+            file_idx: 0,
+            layout: Layout::Unified,
+            full: false,
+        }));
+        assert!(tab.panes.contains_key(&PaneKey {
+            file_idx: 0,
+            layout: Layout::Split,
+            full: false,
+        }));
     }
 
     #[test]

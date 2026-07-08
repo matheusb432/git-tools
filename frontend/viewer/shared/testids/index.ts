@@ -1,0 +1,27 @@
+export const TEST_IDS = {
+  tabs: {
+    strip: "tabs.strip",
+    tab: "tabs.tab",
+    nativeBadge: "tabs.native-badge",
+    historyButton: "tabs.history-button",
+  },
+  diffView: {
+    root: "diff-view.root",
+    toolbar: "diff-view.toolbar",
+    layoutToggle: "diff-view.layout-toggle",
+    fullToggle: "diff-view.full-toggle",
+    filter: "diff-view.filter",
+    refresh: "diff-view.refresh",
+    fileTree: "diff-view.file-tree",
+    commitShelf: "diff-view.commit-shelf",
+    content: "diff-view.content",
+    filePanel: "diff-view.file-panel",
+    rowWindow: "diff-view.row-window",
+    row: "diff-view.row",
+  },
+  historyPanel: {
+    root: "history-panel.root",
+    search: "history-panel.search",
+    row: "history-panel.row",
+  },
+} as const;
