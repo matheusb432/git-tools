@@ -1,6 +1,7 @@
 import type { RowsPage } from "@/shared/api";
 
 export type RowPageKey = string;
+export const ROW_PAGE_CACHE_MAX_PAGES = 8;
 
 export type RowPageKeyParts = {
   readonly tabId: number;
@@ -54,7 +55,13 @@ export function getRows(cache: RowPageCache, key: RowPageKey): RowsPage | undefi
 
 export function putRows(cache: RowPageCache, key: RowPageKey, rows: RowsPage): RowPageCache {
   const next = new Map(cache);
+  next.delete(key);
   next.set(key, rows);
+  while (next.size > ROW_PAGE_CACHE_MAX_PAGES) {
+    const oldest = next.keys().next().value;
+    if (oldest === undefined) break;
+    next.delete(oldest);
+  }
   return next;
 }
 

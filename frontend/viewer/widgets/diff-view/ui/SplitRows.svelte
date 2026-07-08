@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SplitCell, SplitRow, Span } from "@/shared/api";
+  import type { SplitRow, Span } from "@/shared/api";
   import { Button } from "@/shared/ui/button";
   import { TEST_IDS } from "@/shared/testids";
   import { splitBaseRowKey, splitEachKey, splitLongRowKey, splitMarker } from "../model/row-render";
@@ -46,6 +46,13 @@
   function lineNumber(value: number | null): string {
     return value === null ? "" : `${value}`;
   }
+
+  function pairSides(row: Extract<SplitRow, { kind: "pair" }>) {
+    return [
+      { side: "old" as const, cell: row.old },
+      { side: "new" as const, cell: row.new },
+    ];
+  }
 </script>
 
 {#each rows as row, index (splitEachKey(baseIndex + index, row))}
@@ -57,7 +64,7 @@
       class="grid grid-cols-[28px_minmax(0,1fr)] items-start gap-x-3 border-b border-border/70 px-3 py-1.5 font-mono text-[12.5px] leading-5"
     >
       <div class="pt-0.5 text-center text-sm font-semibold text-foreground-muted">@</div>
-      <div class="whitespace-pre-wrap break-words text-foreground">{row.text}</div>
+      <div class="break-words whitespace-pre-wrap text-foreground">{row.text}</div>
     </div>
   {:else if row.kind === "context"}
     {@const expanded = isExpanded(baseKey, row.long_len)}
@@ -66,8 +73,10 @@
       class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-px border-b border-border/70 bg-border/70"
     >
       {#each [row.old_no, row.new_no] as no, sideIndex (`${baseKey}:${sideIndex}`)}
-        <div class="grid min-h-[22px] grid-cols-[28px_56px_88px_minmax(0,1fr)] gap-x-3 bg-surface px-3 py-1.5 font-mono text-[12.5px] leading-5">
-          <div class="pt-0.5 text-center text-sm font-semibold text-foreground-muted"> </div>
+        <div
+          class="grid min-h-[22px] grid-cols-[28px_56px_88px_minmax(0,1fr)] gap-x-3 bg-surface px-3 py-1.5 font-mono text-[12.5px] leading-5"
+        >
+          <div class="pt-0.5 text-center text-sm font-semibold text-foreground-muted"></div>
           <div class="truncate text-right text-foreground-muted">{lineNumber(no)}</div>
           <div class="truncate text-xs text-foreground-muted"></div>
           <div class="min-w-0">
@@ -80,9 +89,14 @@
               </div>
             {:else}
               <div class="flex items-start gap-2">
-                <span class="min-w-0 flex-1 whitespace-pre-wrap break-words text-foreground">{row.text}</span>
+                <span class="min-w-0 flex-1 break-words whitespace-pre-wrap text-foreground">{row.text}</span>
                 {#if row.long_len !== null}
-                  <Button variant="ghost" size="sm" class="h-6 px-2 text-[11px]" onclick={() => onToggleLongRow(baseKey)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-6 px-2 text-[11px]"
+                    onclick={() => onToggleLongRow(baseKey)}
+                  >
                     Collapse
                   </Button>
                 {/if}
@@ -97,13 +111,19 @@
       data-testid={TEST_IDS.diffView.row}
       class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-px border-b border-border/70 bg-border/70"
     >
-      {#each [{ side: "old", cell: row.old }, { side: "new", cell: row.new }] as sideRow (`${baseKey}:${sideRow.side}`)}
+      {#each pairSides(row) as sideRow (`${baseKey}:${sideRow.side}`)}
         {@const longKey = splitLongRowKey(rowIndex, sideRow.side)}
         {@const expanded = isExpanded(longKey, sideRow.cell?.long_len ?? null)}
-        <div class="grid min-h-[22px] grid-cols-[28px_56px_88px_minmax(0,1fr)] gap-x-3 bg-surface px-3 py-1.5 font-mono text-[12.5px] leading-5">
-          <div class="pt-0.5 text-center text-sm font-semibold text-foreground-muted">{splitMarker(sideRow.side, sideRow.cell)}</div>
+        <div
+          class="grid min-h-[22px] grid-cols-[28px_56px_88px_minmax(0,1fr)] gap-x-3 bg-surface px-3 py-1.5 font-mono text-[12.5px] leading-5"
+        >
+          <div class="pt-0.5 text-center text-sm font-semibold text-foreground-muted">
+            {splitMarker(sideRow.side, sideRow.cell)}
+          </div>
           <div class="truncate text-right text-foreground-muted">{lineNumber(sideRow.cell?.no ?? null)}</div>
-          <div class="truncate text-xs text-foreground-muted" title={sideRow.cell?.owner ?? ""}>{sideRow.cell?.owner ?? ""}</div>
+          <div class="truncate text-xs text-foreground-muted" title={sideRow.cell?.owner ?? ""}>
+            {sideRow.cell?.owner ?? ""}
+          </div>
 
           <div class="min-w-0">
             {#if sideRow.cell === null}
@@ -117,7 +137,7 @@
               </div>
             {:else}
               <div class="flex items-start gap-2">
-                <span class="min-w-0 flex-1 whitespace-pre-wrap break-words text-foreground">
+                <span class="min-w-0 flex-1 break-words whitespace-pre-wrap text-foreground">
                   {#each cellSegments(sideRow.cell.text, sideRow.cell.spans) as segment (`${longKey}:${segment.text}:${segment.changed}`)}
                     {#if segment.changed}
                       <mark class="rounded-sm bg-accent/20 px-0.5 text-foreground">{segment.text}</mark>
@@ -127,7 +147,12 @@
                   {/each}
                 </span>
                 {#if sideRow.cell.long_len !== null}
-                  <Button variant="ghost" size="sm" class="h-6 px-2 text-[11px]" onclick={() => onToggleLongRow(longKey)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-6 px-2 text-[11px]"
+                    onclick={() => onToggleLongRow(longKey)}
+                  >
                     Collapse
                   </Button>
                 {/if}

@@ -10,7 +10,9 @@ export function initTabs(): void {
         t.classList.toggle("active", active);
         t.setAttribute("aria-selected", String(active));
       });
-      panels.forEach((panel) => { panel.hidden = panel.id !== `panel-${index}`; });
+      panels.forEach((panel) => {
+        panel.hidden = panel.id !== `panel-${index}`;
+      });
     });
   });
 }

@@ -27,19 +27,44 @@ test("toggling the same sha clears focus", () => {
 test("navigateToFile opens the target (materializing a collapsed giant) before landing", () => {
   let opened = false;
   let landed = false;
-  const target: any = { set open(v: boolean) { opened = v; }, get open() { return opened; } };
+  const target: any = {
+    set open(v: boolean) {
+      opened = v;
+    },
+    get open() {
+      return opened;
+    },
+  };
   const scroller: any = {};
   navigateToFile(target, scroller, {
-    raf: (cb: any) => { cb(0); return 0; },
-    land: () => { landed = opened; }, // assert open happened first
+    raf: (cb: any) => {
+      cb(0);
+      return 0;
+    },
+    land: () => {
+      landed = opened;
+    }, // assert open happened first
   });
   expect(opened).toBe(true);
   expect(landed).toBe(true);
 });
 
 test("toggleLongLine flips expanded + aria on the owning row", () => {
-  const row: any = { classList: { _on: false, toggle(_c: string) { this._on = !this._on; return this._on; } } };
-  const btn: any = { closest: (sel: string) => (sel === ".dl-long" ? row : null), setAttribute(k: string, v: string) { this[k] = v; } };
+  const row: any = {
+    classList: {
+      _on: false,
+      toggle(_c: string) {
+        this._on = !this._on;
+        return this._on;
+      },
+    },
+  };
+  const btn: any = {
+    closest: (sel: string) => (sel === ".dl-long" ? row : null),
+    setAttribute(k: string, v: string) {
+      this[k] = v;
+    },
+  };
   toggleLongLine(btn);
   expect(row.classList._on).toBe(true);
   expect(btn["aria-expanded"]).toBe("true");

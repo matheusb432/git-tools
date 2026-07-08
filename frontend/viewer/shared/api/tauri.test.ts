@@ -18,9 +18,16 @@ import {
 } from "./tauri";
 
 const valid = {
-  repo_id: "r", repo_name: "n", title: "t", range_label: "x",
-  head_committed_at: "t", generated_at: "t", content_hash: "h",
-  kind: "3-dot", byte_size: 4096, url: "diff://r/h",
+  repo_id: "r",
+  repo_name: "n",
+  title: "t",
+  range_label: "x",
+  head_committed_at: "t",
+  generated_at: "t",
+  content_hash: "h",
+  kind: "3-dot",
+  byte_size: 4096,
+  url: "diff://r/h",
 };
 
 const meta = {
@@ -38,24 +45,28 @@ const meta = {
   foot_cmd: "git diff",
   foot_note: "",
   is_empty: false,
-  commits: [{
-    sha: "abc1234",
-    subject: "feat: work",
-    body: "body",
-    date: "today",
-    iso: "2026-07-08T00:00:00Z",
-    parents: ["p1"],
-    members: [],
-    is_merge: false,
-  }],
-  files: [{
-    path: "src/main.rs",
-    status: "modified",
-    added: 2,
-    removed: 1,
-    commits: ["abc1234"],
-    has_full: true,
-  }],
+  commits: [
+    {
+      sha: "abc1234",
+      subject: "feat: work",
+      body: "body",
+      date: "today",
+      iso: "2026-07-08T00:00:00Z",
+      parents: ["p1"],
+      members: [],
+      is_merge: false,
+    },
+  ],
+  files: [
+    {
+      path: "src/main.rs",
+      status: "modified",
+      added: 2,
+      removed: 1,
+      commits: ["abc1234"],
+      has_full: true,
+    },
+  ],
 };
 
 const recipe: Recipe = {
@@ -67,7 +78,7 @@ test("accepts a complete entry", () => {
   expect(isHistoryEntry(valid)).toBe(true);
 });
 test("rejects when kind missing", () => {
-  const { kind, ...rest } = valid;
+  const { kind: _kind, ...rest } = valid;
   expect(isHistoryEntry(rest)).toBe(false);
 });
 test("rejects when byte_size is not a number", () => {
@@ -135,21 +146,22 @@ test("listHistory drops malformed rows", async () => {
   (globalThis.window as unknown as Record<string, unknown>) = {
     __TAURI__: {
       core: {
-        invoke: () => Promise.resolve([
-          {
-            repo_id: "repo",
-            repo_name: "repo",
-            title: "review",
-            range_label: "main..topic",
-            head_committed_at: "2026-06-24T00:00:00Z",
-            generated_at: "2026-06-24T00:00:00Z",
-            content_hash: "hash",
-            kind: "2-dot",
-            byte_size: 1234,
-            url: "diff://repo/hash",
-          },
-          { repo_id: "broken" },
-        ]),
+        invoke: () =>
+          Promise.resolve([
+            {
+              repo_id: "repo",
+              repo_name: "repo",
+              title: "review",
+              range_label: "main..topic",
+              head_committed_at: "2026-06-24T00:00:00Z",
+              generated_at: "2026-06-24T00:00:00Z",
+              content_hash: "hash",
+              kind: "2-dot",
+              byte_size: 1234,
+              url: "diff://repo/hash",
+            },
+            { repo_id: "broken" },
+          ]),
       },
       event: { listen: () => Promise.resolve(() => undefined) },
     },
@@ -199,7 +211,8 @@ test("native wrappers reject malformed payloads", async () => {
     __TAURI__: {
       core: {
         invoke: (command: string) => {
-          if (command === "open_recipe") return Promise.resolve({ tab_id: 7, meta: { ...meta, files: [{ path: "x" }] } });
+          if (command === "open_recipe")
+            return Promise.resolve({ tab_id: 7, meta: { ...meta, files: [{ path: "x" }] } });
           if (command === "tab_meta") return Promise.resolve({ ...meta, files: [{ path: "x" }] });
           if (command === "file_rows") {
             return Promise.resolve({

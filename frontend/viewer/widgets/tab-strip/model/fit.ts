@@ -1,10 +1,8 @@
-import type { ViewerTab } from "@/entities/diff-tab";
+import { viewerTabKey, type ViewerTab } from "@/entities/diff-tab";
 
 export type FitResult = { visible: ViewerTab[]; overflow: ViewerTab[] };
 
-export function viewerTabKey(tab: ViewerTab): string {
-  return tab.kind === "artifact" ? `artifact:${tab.url}` : `native:${tab.localId}`;
-}
+export { viewerTabKey };
 
 /**
  * Decide which tabs fit. `reserved` covers the overflow trigger + right-side

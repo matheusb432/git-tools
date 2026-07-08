@@ -3,9 +3,17 @@ import { filterHistory } from "./filter";
 import type { HistoryEntry } from "@/entities/diff";
 
 const entry = (over: Partial<HistoryEntry>): HistoryEntry => ({
-  repo_id: "r", repo_name: "git-tools", title: "eod", range_label: "main...HEAD",
-  head_committed_at: "t", generated_at: "t", content_hash: "h", kind: "3-dot",
-  byte_size: 0, url: "diff://r/h", ...over,
+  repo_id: "r",
+  repo_name: "git-tools",
+  title: "eod",
+  range_label: "main...HEAD",
+  head_committed_at: "t",
+  generated_at: "t",
+  content_hash: "h",
+  kind: "3-dot",
+  byte_size: 0,
+  url: "diff://r/h",
+  ...over,
 });
 
 test("empty query returns all", () => {

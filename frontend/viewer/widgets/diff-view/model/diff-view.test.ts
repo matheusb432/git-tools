@@ -3,17 +3,26 @@ import { emptyRowPageCache, putRows, rowPageKey } from "@/entities/diff-tab";
 import type { UnifiedRow } from "@/shared/api";
 import {
   activePaneKey,
+  activePanelFileIndexes,
+  allFilePanelsCollapsed,
   clearCommitFocus,
+  copyPageAccumulatorFromCache,
   copyUnifiedRows,
   createDiffViewState,
+  expandFilePanel,
+  filePanelIsExpanded,
   focusCommit,
   fullFromSetting,
   layoutFromSetting,
+  missingCopyPageRequestsForAccumulator,
   missingCopyPageRequests,
   nextFileIndex,
   orderedCopyPages,
+  orderedCopyPagesFromAccumulator,
+  putCopyPageInAccumulator,
   settingFromFull,
   settingFromLayout,
+  toggleAllFilePanels,
   toggleLayout,
 } from "./diff-view";
 
@@ -116,4 +125,54 @@ test("missing copy page requests include only gaps for the selected file", () =>
       total: 200,
     }),
   ).toEqual([{ pageStart: 80, pageSize: 80 }]);
+});
+
+test("active panel rendering is limited to the selected visible file", () => {
+  expect(activePanelFileIndexes({ visibleFileIndexes: [0, 1, 2], activeFileIdx: 1 })).toEqual([1]);
+  expect(activePanelFileIndexes({ visibleFileIndexes: [0, 1, 2], activeFileIdx: null })).toEqual([0]);
+  expect(activePanelFileIndexes({ visibleFileIndexes: [], activeFileIdx: null })).toEqual([]);
+});
+
+test("fold-all collapses visible file panels and selected file expansion is explicit", () => {
+  const folded = toggleAllFilePanels({ collapsedFileIdxs: new Set<number>() }, [0, 1, 2]);
+
+  expect(allFilePanelsCollapsed(folded, [0, 1, 2])).toBe(true);
+  expect(filePanelIsExpanded(folded, 1)).toBe(false);
+
+  const selectedExpanded = expandFilePanel(folded, 1);
+  expect(filePanelIsExpanded(selectedExpanded, 1)).toBe(true);
+  expect(filePanelIsExpanded(selectedExpanded, 2)).toBe(false);
+});
+
+test("fold-all toggles back to expanded when every visible file is collapsed", () => {
+  const folded = { collapsedFileIdxs: new Set([0, 1]) };
+  const expanded = toggleAllFilePanels(folded, [0, 1]);
+
+  expect(allFilePanelsCollapsed(expanded, [0, 1])).toBe(false);
+  expect(filePanelIsExpanded(expanded, 0)).toBe(true);
+  expect(filePanelIsExpanded(expanded, 1)).toBe(true);
+});
+
+test("copy page accumulator can fill all selected-file gaps without mutating row cache", () => {
+  const cache = putRows(
+    emptyRowPageCache(),
+    rowPageKey({ tabId: 7, fileIdx: 0, layout: "unified", full: false, pageStart: 0, pageSize: 80 }),
+    { total: 240, layout: "unified", rows: [] },
+  );
+  const accumulator = copyPageAccumulatorFromCache({
+    rowPageCache: cache,
+    tabId: 7,
+    fileIdx: 0,
+    layout: "unified",
+    full: false,
+  });
+  const filled = putCopyPageInAccumulator(
+    putCopyPageInAccumulator(accumulator, 80, { total: 240, layout: "unified", rows: [] }),
+    160,
+    { total: 240, layout: "unified", rows: [] },
+  );
+
+  expect(cache.size).toBe(1);
+  expect(missingCopyPageRequestsForAccumulator({ pages: filled, pageSize: 80, total: 240 })).toEqual([]);
+  expect(orderedCopyPagesFromAccumulator(filled)).toHaveLength(3);
 });

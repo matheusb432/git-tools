@@ -10,7 +10,12 @@
   import { Skeleton } from "@/shared/ui/skeleton";
   import { TEST_IDS } from "@/shared/testids";
   import { activePaneKey, type DiffLayout } from "../model/diff-view";
-  import { filePanelBodyState, panePageErrorEntries, retryablePanePageRequests, siblingLayout } from "../model/row-render";
+  import {
+    filePanelBodyState,
+    panePageErrorEntries,
+    retryablePanePageRequests,
+    siblingLayout,
+  } from "../model/row-render";
   import RowWindow from "./RowWindow.svelte";
 
   const PAGE_SIZE = 80;
@@ -29,6 +34,8 @@
     readonly layout: DiffLayout;
     readonly full: boolean;
     readonly selected: boolean;
+    readonly expanded: boolean;
+    readonly onToggleExpanded: () => void;
     readonly rowCache: RowPageCache;
     readonly updateRowCache: UpdateRowCache;
   };
@@ -48,6 +55,8 @@
     layout,
     full,
     selected,
+    expanded,
+    onToggleExpanded,
     rowCache,
     updateRowCache,
   }: Props = $props();
@@ -55,13 +64,14 @@
   let expandedLongRows = $state.raw<ReadonlySet<string>>(new Set<string>());
   let loadingKeys = $state.raw<RowPageLoadingSet>(new Set<string>());
   let pageErrors = $state.raw<RowPageErrorMap>(new Map<string, string>());
-  let rowWindowHandle = $state<{ readonly scrollToIndex: (index: number) => void; readonly measure: () => void } | null>(null);
+  let rowWindowHandle = $state<{
+    readonly scrollToIndex: (index: number) => void;
+    readonly measure: () => void;
+  } | null>(null);
 
   const paneKey = $derived(activePaneKey({ tabId, fileIdx, layout, full }));
   const panePrefix = $derived(`${paneKey}:`);
-  const firstPageCacheKey = $derived(
-    rowPageKey({ tabId, fileIdx, layout, full, pageStart: 0, pageSize: PAGE_SIZE }),
-  );
+  const firstPageCacheKey = $derived(rowPageKey({ tabId, fileIdx, layout, full, pageStart: 0, pageSize: PAGE_SIZE }));
 
   const firstPage = $derived(getRows(rowCache, firstPageCacheKey));
   const totalRows = $derived(firstPage?.total ?? 0);
@@ -113,6 +123,19 @@
     rowWindowHandle?.measure();
   }
 
+  async function prefetchSiblingFirstPage(pageStart: number, pageSize: number): Promise<void> {
+    const sibling = siblingLayout(layout);
+    const siblingKey = rowPageKey({ tabId, fileIdx, layout: sibling, full, pageStart, pageSize });
+    if (getRows(rowCache, siblingKey) !== undefined) return;
+
+    try {
+      const siblingPage = await fileRows({ tabId, fileIdx, layout: sibling, full, start: pageStart, count: pageSize });
+      updateRowCache((cache) => putRows(cache, siblingKey, siblingPage));
+    } catch {
+      // Background prefetch must never block or replace the visible pane.
+    }
+  }
+
   async function requestPage(pageStart: number, pageSize: number): Promise<void> {
     const key = rowPageKey({ tabId, fileIdx, layout, full, pageStart, pageSize });
     if (getRows(rowCache, key) !== undefined || loadingKeys.has(key)) return;
@@ -122,20 +145,10 @@
 
     try {
       const page = await fileRows({ tabId, fileIdx, layout, full, start: pageStart, count: pageSize });
-      if (pageStart === 0) {
-        const sibling = siblingLayout(layout);
-        const siblingKey = rowPageKey({ tabId, fileIdx, layout: sibling, full, pageStart, pageSize });
-        if (getRows(rowCache, siblingKey) === undefined) {
-          try {
-            const siblingPage = await fileRows({ tabId, fileIdx, layout: sibling, full, start: pageStart, count: pageSize });
-            updateRowCache((cache) => putRows(putRows(cache, key, page), siblingKey, siblingPage));
-            return;
-          } catch {
-            // Background prefetch must never hide the currently requested page.
-          }
-        }
-      }
       updateRowCache((cache) => putRows(cache, key, page));
+      if (pageStart === 0) {
+        void prefetchSiblingFirstPage(pageStart, pageSize);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to load diff rows.";
       setError(key, message);
@@ -164,30 +177,34 @@
     rowWindowHandle?.scrollToIndex(0);
   }
 
-  $effect(() => {
-    paneKey;
+  function resetPaneState(_paneKey: string): void {
     expandedLongRows = new Set<string>();
     loadingKeys = new Set<string>();
     pageErrors = new Map<string, string>();
-  });
+  }
 
-  $effect(() => {
-    paneKey;
+  function ensureFirstPageLoaded(_paneKey: string): void {
+    if (!expanded) return;
     if (firstPage !== undefined) return;
     untrack(() => {
       if (!loadingKeys.has(firstPageCacheKey)) {
         void requestPage(0, PAGE_SIZE);
       }
     });
+  }
+
+  $effect(() => {
+    resetPaneState(paneKey);
+  });
+
+  $effect(() => {
+    ensureFirstPageLoaded(paneKey);
   });
 </script>
 
 <section
   data-testid={TEST_IDS.diffView.filePanel}
-  class={cn(
-    "rounded-lg border",
-    selected ? "border-accent/40 bg-surface/65" : "border-border bg-surface/40",
-  )}
+  class={cn("rounded-lg border", selected ? "border-accent/40 bg-surface/65" : "border-border bg-surface/40")}
 >
   <div class="flex flex-wrap items-start justify-between gap-3 border-b border-border/80 px-4 py-4">
     <div class="min-w-0">
@@ -208,42 +225,51 @@
       </div>
     </div>
 
-    <Button variant="ghost" size="sm" onclick={scrollToTop}>Top</Button>
+    <div class="flex items-center gap-2">
+      {#if expanded}
+        <Button variant="ghost" size="sm" onclick={scrollToTop}>Top</Button>
+      {/if}
+      <Button variant="outline" size="sm" onclick={onToggleExpanded}>
+        {expanded ? "Collapse" : "Expand"}
+      </Button>
+    </div>
   </div>
 
-  {#if hasAnyError}
-    <div class="px-4 pt-4">
+  {#if expanded}
+    {#if hasAnyError}
+      <div class="px-4 pt-4">
         <Alert.Root variant="destructive">
-        <AlertTriangle />
-        <Alert.Title>Could not load some diff rows</Alert.Title>
-        <Alert.Description>{activePageErrors[0]?.[1] ?? "Unable to load diff rows."}</Alert.Description>
-        <Alert.Action>
-          <Button variant="destructive" size="sm" onclick={retryErrors}>Retry</Button>
-        </Alert.Action>
-      </Alert.Root>
-    </div>
-  {/if}
+          <AlertTriangle />
+          <Alert.Title>Could not load some diff rows</Alert.Title>
+          <Alert.Description>{activePageErrors[0]?.[1] ?? "Unable to load diff rows."}</Alert.Description>
+          <Alert.Action>
+            <Button variant="destructive" size="sm" onclick={retryErrors}>Retry</Button>
+          </Alert.Action>
+        </Alert.Root>
+      </div>
+    {/if}
 
-  {#if bodyState === "loading"}
-    <div class="space-y-2 px-4 py-4">
-      <Skeleton class="h-[22px] w-full rounded-md" />
-      <Skeleton class="h-[22px] w-full rounded-md" />
-      <Skeleton class="h-[22px] w-[92%] rounded-md" />
-      <Skeleton class="h-[22px] w-[86%] rounded-md" />
-    </div>
-  {:else if bodyState === "empty"}
-    <div class="px-4 py-5 text-sm text-foreground-muted">No diff rows are available for this file.</div>
-  {:else if bodyState === "rows"}
-    <div class="h-[200px] min-h-0">
-      <RowWindow
-        bind:handle={rowWindowHandle}
-        {layout}
-        total={totalRows}
-        {rowsByIndex}
-        expandedLongRows={expandedLongRows}
-        onToggleLongRow={toggleLongRow}
-        onRange={handleVisibleRange}
-      />
-    </div>
+    {#if bodyState === "loading"}
+      <div class="space-y-2 px-4 py-4">
+        <Skeleton class="h-[22px] w-full rounded-md" />
+        <Skeleton class="h-[22px] w-full rounded-md" />
+        <Skeleton class="h-[22px] w-[92%] rounded-md" />
+        <Skeleton class="h-[22px] w-[86%] rounded-md" />
+      </div>
+    {:else if bodyState === "empty"}
+      <div class="px-4 py-5 text-sm text-foreground-muted">No diff rows are available for this file.</div>
+    {:else if bodyState === "rows"}
+      <div class="h-[200px] min-h-0">
+        <RowWindow
+          bind:handle={rowWindowHandle}
+          {layout}
+          total={totalRows}
+          {rowsByIndex}
+          {expandedLongRows}
+          onToggleLongRow={toggleLongRow}
+          onRange={handleVisibleRange}
+        />
+      </div>
+    {/if}
   {/if}
 </section>

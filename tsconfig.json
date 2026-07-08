@@ -14,6 +14,10 @@
     "noFallthroughCasesInSwitch": true,
     "lib": ["ES2021", "DOM", "DOM.Iterable"],
     "types": ["bun-types"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["frontend/viewer/*"]
+    },
     "skipLibCheck": true,
     "noEmit": true
   },

@@ -4,9 +4,17 @@ import type { HistoryEntry } from "@/shared/api";
 
 function entry(over: Partial<HistoryEntry>): HistoryEntry {
   return {
-    repo_id: "r", repo_name: "git-tools", title: "diff", range_label: "main...HEAD",
-    head_committed_at: "t", generated_at: "t", content_hash: "h",
-    kind: "3-dot", byte_size: 0, url: "diff://r/h", ...over,
+    repo_id: "r",
+    repo_name: "git-tools",
+    title: "diff",
+    range_label: "main...HEAD",
+    head_committed_at: "t",
+    generated_at: "t",
+    content_hash: "h",
+    kind: "3-dot",
+    byte_size: 0,
+    url: "diff://r/h",
+    ...over,
   };
 }
 const hash = (url: string) => url.split("/").pop()?.slice(0, 12) || "";

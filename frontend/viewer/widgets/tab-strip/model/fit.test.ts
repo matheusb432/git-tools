@@ -42,6 +42,11 @@ const native = (n: number) =>
 
 const tabs = (n: number): ViewerTab[] => Array.from({ length: n }, (_, i) => artifact(i));
 
+function artifactLabel(tab: ViewerTab): string {
+  if (tab.kind !== "artifact") throw new Error(`expected artifact tab, got ${tab.kind}`);
+  return tab.label;
+}
+
 test("all fit -> no overflow", () => {
   const r = splitTabs(tabs(3), 0, 1000, 160, 200);
   expect(r.visible.length).toBe(3);
@@ -52,19 +57,19 @@ test("overflow split keeps capacity visible", () => {
   const r = splitTabs(tabs(9), 0, 900, 160, 200);
   expect(r.visible.length).toBe(4);
   expect(r.overflow.length).toBe(5);
-  expect(r.visible.map((t) => t.label)).toEqual(["t0", "t1", "t2", "t3"]);
+  expect(r.visible.map(artifactLabel)).toEqual(["t0", "t1", "t2", "t3"]);
 });
 test("active in overflow range is pulled into the last visible slot", () => {
   const r = splitTabs(tabs(9), 7, 900, 160, 200);
-  expect(r.visible.map((t) => t.label)).toEqual(["t0", "t1", "t2", "t7"]);
-  expect(r.overflow.map((t) => t.label)).toContain("t3");
-  expect(r.overflow.map((t) => t.label)).not.toContain("t7");
+  expect(r.visible.map(artifactLabel)).toEqual(["t0", "t1", "t2", "t7"]);
+  expect(r.overflow.map(artifactLabel)).toContain("t3");
+  expect(r.overflow.map(artifactLabel)).not.toContain("t7");
   expect(r.visible.length).toBe(4);
 });
 test("at least one visible even in a tiny container", () => {
   const r = splitTabs(tabs(5), 4, 100, 160, 200);
   expect(r.visible.length).toBe(1);
-  expect(r.visible[0]!.label).toBe("t4");
+  expect(artifactLabel(r.visible[0]!)).toBe("t4");
 });
 
 test("viewerTabKey distinguishes artifact and native tabs", () => {

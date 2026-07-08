@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { Copy, Filter, FoldVertical, Maximize2, Minimize2, RefreshCw, Rows3, SplitSquareVertical } from "@lucide/svelte";
+  import {
+    Copy,
+    Filter,
+    FoldVertical,
+    Maximize2,
+    Minimize2,
+    RefreshCw,
+    Rows3,
+    SplitSquareVertical,
+  } from "@lucide/svelte";
   import type { TabMeta } from "@/shared/api";
   import { Badge } from "@/shared/ui/badge";
   import { Button } from "@/shared/ui/button";
@@ -15,14 +24,30 @@
     readonly filterText: string;
     readonly refreshing: boolean;
     readonly canCopy: boolean;
+    readonly allFilesFolded: boolean;
     readonly onSetLayout: (layout: DiffLayout) => void;
     readonly onToggleFull: () => void;
+    readonly onToggleAllFilesFolded: () => void;
     readonly onFilterTextChange: (value: string) => void;
     readonly onRefresh: () => void | Promise<void>;
     readonly onCopyVisible: () => void | Promise<void>;
   };
 
-  let { meta, layout, full, filterText, refreshing, canCopy, onSetLayout, onToggleFull, onFilterTextChange, onRefresh, onCopyVisible }: Props = $props();
+  let {
+    meta,
+    layout,
+    full,
+    filterText,
+    refreshing,
+    canCopy,
+    allFilesFolded,
+    onSetLayout,
+    onToggleFull,
+    onToggleAllFilesFolded,
+    onFilterTextChange,
+    onRefresh,
+    onCopyVisible,
+  }: Props = $props();
 
   function handleLayoutChange(value: string): void {
     if (value === "unified" || value === "split") onSetLayout(value);
@@ -37,10 +62,7 @@
   }
 </script>
 
-<div
-  data-testid={TEST_IDS.diffView.toolbar}
-  class="flex flex-wrap items-center gap-3 border-b border-border px-5 py-3"
->
+<div data-testid={TEST_IDS.diffView.toolbar} class="flex flex-wrap items-center gap-3 border-b border-border px-5 py-3">
   <div class="min-w-0 flex-1">
     <div class="flex flex-wrap items-center gap-2">
       <h1 class="truncate text-sm font-semibold">{meta.title || meta.repo_name || "Native diff"}</h1>
@@ -49,7 +71,10 @@
         <Badge variant="secondary">Refreshing</Badge>
       {/if}
     </div>
-    <p class="mt-1 truncate font-mono text-xs text-foreground-muted" title={`${meta.cmd_lead}${meta.cmd_range}${meta.cmd_trail}`}>
+    <p
+      class="mt-1 truncate font-mono text-xs text-foreground-muted"
+      title={`${meta.cmd_lead}${meta.cmd_range}${meta.cmd_trail}`}
+    >
       <span>{meta.cmd_lead}</span><span class="text-foreground">{meta.cmd_range}</span><span>{meta.cmd_trail}</span>
     </p>
   </div>
@@ -64,11 +89,21 @@
       onValueChange={handleLayoutChange}
       aria-label="Choose diff layout"
     >
-      <ToggleGroup.Item value="unified" aria-label="Unified layout" title="Unified layout">
+      <ToggleGroup.Item
+        data-testid={TEST_IDS.diffView.layoutUnified}
+        value="unified"
+        aria-label="Unified layout"
+        title="Unified layout"
+      >
         <Rows3 data-icon="inline-start" />
         Unified
       </ToggleGroup.Item>
-      <ToggleGroup.Item value="split" aria-label="Split layout" title="Split layout">
+      <ToggleGroup.Item
+        data-testid={TEST_IDS.diffView.layoutSplit}
+        value="split"
+        aria-label="Split layout"
+        title="Split layout"
+      >
         <SplitSquareVertical data-icon="inline-start" />
         Split
       </ToggleGroup.Item>
@@ -83,19 +118,35 @@
       onValueChange={handleDensityChange}
       aria-label="Choose row density"
     >
-      <ToggleGroup.Item value="compact" aria-label="Compact diff rows" title="Compact diff rows">
+      <ToggleGroup.Item
+        data-testid={TEST_IDS.diffView.densityCompact}
+        value="compact"
+        aria-label="Compact diff rows"
+        title="Compact diff rows"
+      >
         <Minimize2 data-icon="inline-start" />
         Compact
       </ToggleGroup.Item>
-      <ToggleGroup.Item value="full" aria-label="Full diff rows" title="Full diff rows">
+      <ToggleGroup.Item
+        data-testid={TEST_IDS.diffView.densityFull}
+        value="full"
+        aria-label="Full diff rows"
+        title="Full diff rows"
+      >
         <Maximize2 data-icon="inline-start" />
         Full
       </ToggleGroup.Item>
     </ToggleGroup.Root>
 
-    <Button variant="outline" size="sm" disabled title="Folded row groups land in Task 4">
+    <Button
+      variant="outline"
+      size="sm"
+      onclick={onToggleAllFilesFolded}
+      aria-pressed={allFilesFolded}
+      title={allFilesFolded ? "Expand file sections" : "Fold file sections"}
+    >
       <FoldVertical data-icon="inline-start" />
-      Fold all
+      {allFilesFolded ? "Expand all" : "Fold all"}
     </Button>
 
     <InputGroup.Root class="h-8 w-[260px]" data-testid={TEST_IDS.diffView.filter}>

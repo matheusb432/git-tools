@@ -29,7 +29,9 @@
 
   const fit = $derived(splitTabs(tabs, active, stripWidth, TAB_MIN, RESERVED));
   const overflowFiltered = $derived(
-    query.trim() === "" ? fit.overflow : fit.overflow.filter((t) => tabLabel(t).toLowerCase().includes(query.toLowerCase())),
+    query.trim() === ""
+      ? fit.overflow
+      : fit.overflow.filter((t) => tabLabel(t).toLowerCase().includes(query.toLowerCase())),
   );
   const indexOf = (t: ViewerTab) => tabs.indexOf(t);
 
@@ -59,7 +61,7 @@
 
 <div
   data-testid={TEST_IDS.tabs.strip}
-  class="flex items-end gap-1 bg-surface px-2.5 pt-2 border-b border-border"
+  class="flex items-end gap-1 border-b border-border bg-surface px-2.5 pt-2"
   bind:clientWidth={stripWidth}
 >
   {#each fit.visible as tab (viewerTabKey(tab))}
@@ -74,14 +76,21 @@
           role="tab"
           tabindex="0"
           aria-selected={isActive}
-          title={tab.kind === "native" ? nativeTitle(tab) ?? label : label}
+          title={tab.kind === "native" ? (nativeTitle(tab) ?? label) : label}
           class={cn(
-            "group flex items-center gap-2 max-w-[190px] min-w-0 rounded-t-lg pl-3.5 pr-1 py-2 text-[13px] cursor-pointer text-foreground-muted bg-muted transition-colors hover:text-foreground",
+            "group flex max-w-[190px] min-w-0 cursor-pointer items-center gap-2 rounded-t-lg bg-muted py-2 pr-1 pl-3.5 text-[13px] text-foreground-muted transition-colors hover:text-foreground",
             isActive && "bg-background text-foreground shadow-[inset_0_2px_0_var(--color-accent)]",
           )}
           onclick={() => onActivate(i)}
-          onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") onActivate(i); }}
-          onmousedown={(e) => { if (e.button === 1) { e.preventDefault(); onClose(i); } }}
+          onkeydown={(e) => {
+            if (e.key === "Enter" || e.key === " ") onActivate(i);
+          }}
+          onmousedown={(e) => {
+            if (e.button === 1) {
+              e.preventDefault();
+              onClose(i);
+            }
+          }}
         >
           <span class="truncate">{label}</span>
           {#if badge !== null}
@@ -100,10 +109,13 @@
             aria-label={`Close ${label}`}
             title="Close tab"
             class={cn(
-              "text-foreground-muted opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-destructive motion-safe:transition-opacity",
+              "text-foreground-muted opacity-0 group-hover:opacity-100 hover:text-destructive focus-visible:opacity-100 motion-safe:transition-opacity",
               isActive && "opacity-100",
             )}
-            onclick={(e) => { e.stopPropagation(); onClose(i); }}
+            onclick={(e) => {
+              e.stopPropagation();
+              onClose(i);
+            }}
           >
             <X />
           </Button>
@@ -162,10 +174,7 @@
       data-testid={TEST_IDS.tabs.historyButton}
       variant={showHistory ? "secondary" : "ghost"}
       size="sm"
-      class={cn(
-        "text-foreground-muted hover:text-foreground",
-        showHistory && "text-accent",
-      )}
+      class={cn("text-foreground-muted hover:text-foreground", showHistory && "text-accent")}
       onclick={onOpenHistory}
     >
       <History data-icon="inline-start" />

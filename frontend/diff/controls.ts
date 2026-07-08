@@ -8,9 +8,11 @@ export function enhanceControls(root: HTMLElement): void {
   enhanceTheme(root);
   root.querySelectorAll<HTMLButtonElement>(".copy-button").forEach((button) => {
     button.addEventListener("click", () => {
-      void copyButtonPayload(button).then((payload) => copyText(payload)).then((ok) => {
-        setCopyState(button, ok ? "ok" : "err");
-      });
+      void copyButtonPayload(button)
+        .then((payload) => copyText(payload))
+        .then((ok) => {
+          setCopyState(button, ok ? "ok" : "err");
+        });
     });
   });
 }
@@ -41,7 +43,7 @@ async function copyButtonPayload(button: HTMLButtonElement): Promise<string> {
 
 function setCopyState(button: HTMLButtonElement, state: CopyState): void {
   button.dataset["state"] = state;
-  button.textContent = state === "ok" ? "copied" : state === "err" ? "failed" : button.dataset["copyLabel"] ?? "copy";
+  button.textContent = state === "ok" ? "copied" : state === "err" ? "failed" : (button.dataset["copyLabel"] ?? "copy");
   setTimeout(() => {
     button.dataset["state"] = "";
     button.textContent = button.dataset["copyLabel"] ?? "copy";

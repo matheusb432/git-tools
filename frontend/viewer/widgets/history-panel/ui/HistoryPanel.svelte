@@ -27,9 +27,11 @@
   // "3-dot" → sky, "2-dot" → violet, "worktree" → muted (default).
   // There is no "merge" kind; DiffKind is exactly TwoDot | ThreeDot | WorkTree.
   const badgeClass = (kind: string) =>
-    kind === "3-dot" ? "text-sky-300 border-sky-300/35"
-    : kind === "2-dot" ? "text-violet-300 border-violet-300/35"
-    : "text-foreground-muted border-border-strong";
+    kind === "3-dot"
+      ? "text-sky-300 border-sky-300/35"
+      : kind === "2-dot"
+        ? "text-violet-300 border-violet-300/35"
+        : "text-foreground-muted border-border-strong";
 
   const gridCols = "grid-cols-[minmax(0,1fr)_140px_84px_150px_72px_108px]";
 
@@ -53,7 +55,12 @@
   </InputGroup.Root>
 
   {#if rows.length > 0}
-    <div class={cn("grid gap-3 px-3.5 py-2 mb-1 text-[11px] font-semibold uppercase tracking-wider text-foreground-muted border-b border-border", gridCols)}>
+    <div
+      class={cn(
+        "mb-1 grid gap-3 border-b border-border px-3.5 py-2 text-[11px] font-semibold tracking-wider text-foreground-muted uppercase",
+        gridCols,
+      )}
+    >
       <span>Diff</span>
       <span>Repo</span>
       <span>Kind</span>
@@ -66,32 +73,37 @@
       <Button
         data-testid={TEST_IDS.historyPanel.row}
         variant="ghost"
-        class={cn("grid gap-3 items-center px-3.5 py-2.5 rounded-[9px] border border-transparent cursor-pointer hover:bg-muted hover:border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent", gridCols)}
+        class={cn(
+          "grid cursor-pointer items-center gap-3 rounded-[9px] border border-transparent px-3.5 py-2.5 hover:border-border hover:bg-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none",
+          gridCols,
+        )}
         onclick={() => onOpen(row.url, historyTabLabel(row, fallback))}
       >
         <span
           class={cn(
-            "text-sm font-medium min-w-0 truncate",
+            "min-w-0 truncate text-sm font-medium",
             (row.title.trim() === "" || row.title === "diff" || row.title === "merge-diff") &&
-              "text-foreground-muted font-mono font-normal",
+              "font-mono font-normal text-foreground-muted",
           )}
         >
           {historyTabLabel(row, fallback)}
         </span>
-        <span class="text-xs text-foreground-muted truncate" title={row.repo_name || row.repo_id}>
+        <span class="truncate text-xs text-foreground-muted" title={row.repo_name || row.repo_id}>
           {row.repo_name || row.repo_id}
         </span>
         <Badge variant="outline" class={cn("w-fit text-[11px]", badgeClass(row.kind))}>
           {row.kind}
         </Badge>
-        <span class="font-mono text-xs text-foreground-muted truncate">{row.range_label}</span>
-        <span class="font-mono text-xs text-foreground-muted text-right">{formatBytes(row.byte_size)}</span>
+        <span class="truncate font-mono text-xs text-foreground-muted">{row.range_label}</span>
+        <span class="text-right font-mono text-xs text-foreground-muted">{formatBytes(row.byte_size)}</span>
         <span class="flex items-center gap-1.5 text-[12.5px] text-foreground-muted" title={recencyOf(row)}>
           <Clock class="size-3.5" />{relativeTime(recencyOf(row), now)}
         </span>
       </Button>
     {/each}
   {:else}
-    <p class="text-center text-foreground-muted text-sm mt-12">{query ? `No diffs match "${query}".` : "No history yet."}</p>
+    <p class="mt-12 text-center text-sm text-foreground-muted">
+      {query ? `No diffs match "${query}".` : "No history yet."}
+    </p>
   {/if}
 </div>

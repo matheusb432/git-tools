@@ -81,6 +81,17 @@ pub enum Command {
         #[arg(long)]
         smoke: bool,
     },
+    /// Run the hermetic native diff UI performance harness through tauri-driver. `--evidence`
+    /// keeps timings/DOM counts/environment JSON plus screenshots under `.artifacts/e2e`.
+    NativePerf {
+        /// Keep timing JSON, DOM counts, environment details, and screenshots under
+        /// `.artifacts/e2e/{success,fail}`.
+        #[arg(long)]
+        evidence: bool,
+        /// Run the smoke variant used by the local verification step.
+        #[arg(long)]
+        smoke: bool,
+    },
 }
 
 /// Which artifact(s) `install` places. `both` covers the CLI engine and the desktop viewer.
@@ -89,4 +100,23 @@ pub enum InstallTarget {
     Cli,
     Viewer,
     Both,
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, Command};
+
+    #[test]
+    fn native_perf_accepts_evidence_and_smoke_flags() {
+        let cli = Cli::try_parse_from(["xtask", "native-perf", "--evidence", "--smoke"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::NativePerf {
+                evidence: true,
+                smoke: true
+            }
+        ));
+    }
 }

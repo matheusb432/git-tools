@@ -27,10 +27,7 @@
   }
 </script>
 
-<section
-  data-testid={TEST_IDS.diffView.commitShelf}
-  class="border-b border-border px-5 py-3"
->
+<section data-testid={TEST_IDS.diffView.commitShelf} class="border-b border-border px-5 py-3">
   <div class="mb-3 flex items-center justify-between gap-2">
     <div class="flex items-center gap-2">
       <h2 class="text-sm font-semibold">Commits</h2>
@@ -52,7 +49,7 @@
       {#each commits as commit (commit.sha)}
         <article
           class={cn(
-            "min-w-[280px] max-w-[320px] rounded-lg border px-3 py-3 text-left transition-colors",
+            "max-w-[320px] min-w-[280px] rounded-lg border px-3 py-3 text-left transition-colors",
             focusedCommits.has(commit.sha) ? "border-accent/40 bg-muted" : "border-border bg-surface/60",
           )}
         >
@@ -99,7 +96,7 @@
                   <Popover.Content class="w-80" align="end">
                     <div class="space-y-2">
                       <p class="font-mono text-xs text-foreground-muted">{commit.sha}</p>
-                      <p class="whitespace-pre-wrap text-sm text-foreground">{commit.body}</p>
+                      <p class="text-sm whitespace-pre-wrap text-foreground">{commit.body}</p>
                     </div>
                   </Popover.Content>
                 </Popover.Root>
@@ -110,7 +107,7 @@
                 size="icon-xs"
                 aria-label={`Copy commit hash ${shortSha(commit.sha)}`}
                 title="Copy commit hash"
-                onclick={async (event) => {
+                onclick={async () => {
                   await copyText(commit.sha);
                 }}
               >

@@ -3,14 +3,6 @@
   import { DiffView } from "@/widgets/diff-view";
   import { TabStrip } from "@/widgets/tab-strip";
   import { HistoryPanel } from "@/widgets/history-panel";
-  import {
-    applyOpenedNativeTab,
-    closeAllViewerTabs,
-    closeOtherViewerTabs,
-    closeViewerTabState,
-    sortViewerTabsByTime,
-    type ViewerTabState,
-  } from "@/entities/tab";
   import { labelMap, timestampMap, type HistoryEntry } from "@/entities/diff";
   import {
     closeNativeTab,
@@ -23,28 +15,32 @@
   } from "@/shared/api";
   import {
     beginNativeTabRetry,
+    applyOpenedNativeTab,
+    closeAllViewerTabs,
+    closeOtherViewerTabs,
+    closeViewerTabState,
     nativeRefreshSucceeded,
     nativeOpeningTab,
     nativeTabError,
+    sortViewerTabsByTime,
+    viewerTabKey,
     type ArtifactTab,
     type NativeTab,
     type ViewerTab,
+    type ViewerTabState,
   } from "@/entities/diff-tab";
-  import { TEST_IDS } from "@/shared/testids";
 
   type ViewerTestApi = {
     openNativeRecipe: (recipe: Recipe, batchId?: string) => Promise<void>;
     activateNativeRepo: (repoName: string) => Promise<boolean>;
     snapshot: () => {
       readonly active: number;
-      readonly activeTab:
-        | {
-            readonly kind: ViewerTab["kind"];
-            readonly tabId?: number | null;
-            readonly lifecycle?: NativeTab["lifecycle"]["state"];
-            readonly repoName?: string | null;
-          }
-        | null;
+      readonly activeTab: {
+        readonly kind: ViewerTab["kind"];
+        readonly tabId?: number | null;
+        readonly lifecycle?: NativeTab["lifecycle"]["state"];
+        readonly repoName?: string | null;
+      } | null;
       readonly showHistory: boolean;
       readonly shellError: string | null;
       readonly browserErrors: readonly string[];
@@ -76,7 +72,6 @@
   // Extract the content-hash segment (last path component) so every unnamed diff
   // in the same repo gets a distinct 12-char prefix rather than reusing the repo_id.
   const hashLabel = (url: string) => url.split("/").pop()?.slice(0, 12) ?? url;
-  const tabKey = (tab: ViewerTab) => (tab.kind === "artifact" ? `artifact:${tab.url}` : `native:${tab.localId}`);
   const nativeViewKey = (tab: Extract<ViewerTab, { kind: "native" }>) =>
     `${tab.localId}:${tab.batchId}:${tab.tabId ?? "opening"}`;
 
@@ -94,7 +89,7 @@
   // relabel/retime can reorder the strip without stealing the user's focus.
   function applyTabs(next: readonly ViewerTab[], focusKey: string): void {
     tabs = [...sortViewerTabsByTime(next)];
-    const i = tabs.findIndex((tab) => tabKey(tab) === focusKey);
+    const i = tabs.findIndex((tab) => viewerTabKey(tab) === focusKey);
     active = i >= 0 ? i : Math.min(active, Math.max(tabs.length - 1, 0));
   }
 
@@ -104,11 +99,13 @@
     const committedAt = timestamps.get(url) ?? existing?.committedAt ?? new Date().toISOString();
 
     if (existing === undefined || existing.label !== resolvedLabel || existing.committedAt !== committedAt) {
-      const next =
+      const next: readonly ViewerTab[] =
         existing === undefined
           ? [...tabs, { kind: "artifact", url, label: resolvedLabel, committedAt }]
           : tabs.map((tab) =>
-              tab.kind === "artifact" && tab.url === url ? { kind: "artifact", url, label: resolvedLabel, committedAt } : tab,
+              tab.kind === "artifact" && tab.url === url
+                ? { kind: "artifact", url, label: resolvedLabel, committedAt }
+                : tab,
             );
       applyTabs(next, `artifact:${url}`);
     } else {
@@ -126,9 +123,10 @@
         const current = tabs.find((tab): tab is ArtifactTab => tab.kind === "artifact" && tab.url === url);
         if (
           current !== undefined &&
-          ((found !== undefined && current.label !== found) || (foundTime !== undefined && current.committedAt !== foundTime))
+          ((found !== undefined && current.label !== found) ||
+            (foundTime !== undefined && current.committedAt !== foundTime))
         ) {
-          const focusKey = activeTab === undefined ? `artifact:${url}` : tabKey(activeTab);
+          const focusKey = activeTab === undefined ? `artifact:${url}` : viewerTabKey(activeTab);
           applyTabs(
             tabs.map((tab) =>
               tab.kind === "artifact" && tab.url === url
@@ -159,7 +157,10 @@
     if (changed) applyTabs(next, focusKey);
   }
 
-  async function resolveOpenedNativeTab(localId: string, opened: Awaited<ReturnType<typeof openRecipe>>): Promise<void> {
+  async function resolveOpenedNativeTab(
+    localId: string,
+    opened: Awaited<ReturnType<typeof openRecipe>>,
+  ): Promise<void> {
     const { next, openedTabIdToClose } = applyOpenedNativeTab({ tabs, active, showHistory }, localId, opened);
     apply(next);
     if (openedTabIdToClose !== null) {
@@ -172,9 +173,7 @@
   }
 
   async function closeNativeTabs(tabsToClose: readonly ViewerTab[]): Promise<void> {
-    const nativeIds = tabsToClose
-      .filter((tab): tab is Extract<ViewerTab, { kind: "native" }> => tab.kind === "native" && tab.tabId !== null)
-      .map((tab) => tab.tabId);
+    const nativeIds = tabsToClose.flatMap((tab) => (tab.kind === "native" && tab.tabId !== null ? [tab.tabId] : []));
 
     if (nativeIds.length === 0) return;
 
@@ -194,7 +193,7 @@
   async function handleCloseOthers(index: number): Promise<void> {
     const keep = tabs[index];
     if (keep === undefined) return;
-    const toClose = tabs.filter((tab, tabIndex) => tabIndex !== index);
+    const toClose = tabs.filter((_, tabIndex) => tabIndex !== index);
     apply(closeOtherViewerTabs({ tabs, active, showHistory }, index));
     await closeNativeTabs(toClose);
   }
@@ -216,10 +215,10 @@
     }
   }
 
-  async function openNativeRecipe(recipe: Recipe, batchId = crypto.randomUUID()): Promise<void> {
+  async function openNativeRecipe(recipe: Recipe, batchId: string = crypto.randomUUID()): Promise<void> {
     const localId = crypto.randomUUID();
     const opening = nativeOpeningTab(localId, recipe, batchId);
-    applyTabs([...tabs, opening], tabKey(opening));
+    applyTabs([...tabs, opening], viewerTabKey(opening));
     showHistory = false;
     shellError = null;
     flushSync();
@@ -262,7 +261,8 @@
         replaceNativeTab(tab.localId, (current) => nativeRefreshSucceeded(current, meta));
       }
     } catch (e) {
-      const message = e instanceof Error ? e.message : retry.kind === "open" ? "Failed to open diff" : "Failed to refresh diff";
+      const message =
+        e instanceof Error ? e.message : retry.kind === "open" ? "Failed to open diff" : "Failed to refresh diff";
       replaceNativeTab(tab.localId, (current) => nativeTabError(current, message));
     }
   }
@@ -294,9 +294,9 @@
               tabId: tab.tabId,
               batchId: tab.batchId,
               lifecycle: tab.lifecycle.state,
-              error: tab.lifecycle.state === "error" ? tab.lifecycle.message : undefined,
               repoName: tab.meta?.repo_name ?? null,
               fileCount: tab.meta?.files.length ?? null,
+              ...(tab.lifecycle.state === "error" ? { error: tab.lifecycle.message } : {}),
             },
       ),
     };
@@ -304,7 +304,9 @@
 
   onMount(() => {
     const recordError = (value: unknown): void => {
-      browserErrors.push(value instanceof Error ? `${value.name}: ${value.message}\n${value.stack ?? ""}` : String(value));
+      browserErrors.push(
+        value instanceof Error ? `${value.name}: ${value.message}\n${value.stack ?? ""}` : String(value),
+      );
     };
     const handleError = (event: ErrorEvent): void => recordError(event.error ?? event.message);
     const handleRejection = (event: PromiseRejectionEvent): void => recordError(event.reason);
@@ -319,13 +321,21 @@
       snapshot: snapshotViewerState,
     };
 
-    refreshHistory().catch(() => { /* history is best-effort; tabs still work */ });
+    refreshHistory().catch(() => {
+      /* history is best-effort; tabs still work */
+    });
     drainPendingDiffs()
       .then((urls) => urls.forEach((u) => openTab(u)))
-      .catch((e: unknown) => { shellError = e instanceof Error ? e.message : "Failed to drain pending diffs"; });
+      .catch((e: unknown) => {
+        shellError = e instanceof Error ? e.message : "Failed to drain pending diffs";
+      });
     listenOpenDiff((u) => openTab(u))
-      .then((stop) => { unlisten = stop; })
-      .catch((e: unknown) => { shellError = e instanceof Error ? e.message : "Failed to subscribe to diff events"; });
+      .then((stop) => {
+        unlisten = stop;
+      })
+      .catch((e: unknown) => {
+        shellError = e instanceof Error ? e.message : "Failed to subscribe to diff events";
+      });
     return () => {
       if (testWindow.__GTL_VIEWER_TEST__?.openNativeRecipe === openNativeRecipe) {
         delete testWindow.__GTL_VIEWER_TEST__;
@@ -338,10 +348,15 @@
   });
 </script>
 
-<div class="grid grid-rows-[auto_1fr] h-full bg-background text-foreground">
+<div class="grid h-full grid-rows-[auto_1fr] bg-background text-foreground">
   <TabStrip
-    {tabs} {active} {showHistory}
-    onActivate={(i) => { active = i; showHistory = false; }}
+    {tabs}
+    {active}
+    {showHistory}
+    onActivate={(i) => {
+      active = i;
+      showHistory = false;
+    }}
     onClose={handleClose}
     onCloseOthers={handleCloseOthers}
     onCloseAll={handleCloseAll}
@@ -354,20 +369,13 @@
     <HistoryPanel {history} {now} onOpen={openTab} />
   {:else if activeTab?.kind === "native"}
     {#key nativeViewKey(activeTab)}
-      <DiffView
-        tab={activeTab}
-        onRefresh={handleRefreshNativeTab}
-        onClose={() => {
-          const index = tabs.findIndex((tab) => tab.kind === "native" && tab.localId === activeTab.localId);
-          if (index >= 0) void handleClose(index);
-        }}
-      />
+      <DiffView tab={activeTab} onRefresh={handleRefreshNativeTab} />
     {/key}
   {:else if activeTab?.kind === "artifact"}
-    <iframe src={activeTab.url} title="diff preview" class="w-full h-full border-0 bg-background"></iframe>
+    <iframe src={activeTab.url} title="diff preview" class="h-full w-full border-0 bg-background"></iframe>
   {:else}
-    <div class="grid place-items-center text-foreground-muted text-sm">
-      No diff open. Run <code class="mx-1.5 font-mono bg-muted px-1.5 py-0.5 rounded">gtl diff</code> or pick from History.
+    <div class="grid place-items-center text-sm text-foreground-muted">
+      No diff open. Run <code class="mx-1.5 rounded bg-muted px-1.5 py-0.5 font-mono">gtl diff</code> or pick from History.
     </div>
   {/if}
 </div>

@@ -1,0 +1,9 @@
+{
+  "name": "native-perf",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fixtures": "bun run ./src/fixtures.ts",
+    "test": "wdio run ./wdio.conf.ts"
+  }
+}

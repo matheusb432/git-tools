@@ -20,7 +20,9 @@ function showToast(msg: string): void {
   void toastEl.offsetWidth; // reflow so the transition re-runs on rapid copies
   toastEl.classList.add("show");
   if (toastTimer !== null) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toastEl?.classList.remove("show"); }, 1600);
+  toastTimer = setTimeout(() => {
+    toastEl?.classList.remove("show");
+  }, 1600);
 }
 
 // ! Intercept native copy (ctrl+c / context menu) of a selection inside a diff: rebuild the
@@ -55,7 +57,10 @@ document.addEventListener("copy", (e: ClipboardEvent) => {
     out.push(text.length && (text[0] === "+" || text[0] === " ") ? text.slice(1) : text);
     const lns = row.querySelectorAll(".ln");
     const n = lns.length > 1 ? parseInt(lns[1]?.textContent ?? "", 10) : NaN;
-    if (!Number.isNaN(n)) { if (first === null) first = n; last = n; }
+    if (!Number.isNaN(n)) {
+      if (first === null) first = n;
+      last = n;
+    }
   });
   if (!out.length || !e.clipboardData) return;
   const leader = file.getAttribute("data-comment") || "//";
@@ -72,7 +77,11 @@ document.addEventListener("copy", (e: ClipboardEvent) => {
 export function navigateToFile(
   target: HTMLDetailsElement,
   scroller: HTMLElement,
-  opts: { raf?: (cb: FrameRequestCallback) => number; land?: (t: HTMLDetailsElement, s: HTMLElement) => void; stickyTop?: number },
+  opts: {
+    raf?: (cb: FrameRequestCallback) => number;
+    land?: (t: HTMLDetailsElement, s: HTMLElement) => void;
+    stickyTop?: number;
+  },
 ): void {
   const raf = opts.raf ?? ((cb) => requestAnimationFrame(cb));
   const land = opts.land ?? ((t, s) => scrollLandOn(t, s, { stickyTop: opts.stickyTop ?? 0 }));
@@ -86,7 +95,9 @@ export function enhanceLayout(root: HTMLElement): void {
   // ! the first panel. Querying within `root` keeps each tab independently interactive.
   const fileEls = Array.from(root.querySelectorAll<HTMLDetailsElement>("details.file"));
   const clineEls = Array.from(root.querySelectorAll<HTMLElement>(".cline[data-sha]"));
-  const dlEls = Array.from(root.querySelectorAll<HTMLElement>(".dl-add[data-commit],.dl-del[data-commit],.sp[data-commit]"));
+  const dlEls = Array.from(
+    root.querySelectorAll<HTMLElement>(".dl-add[data-commit],.dl-del[data-commit],.sp[data-commit]"),
+  );
   let ownedRows: HTMLElement[] = [];
   const treeBody = root.querySelector<HTMLElement>(".tree-body");
   const filterInput = root.querySelector<HTMLInputElement>(".search input");
@@ -117,7 +128,9 @@ export function enhanceLayout(root: HTMLElement): void {
     const stickyTop = summaryEl ? summaryEl.offsetHeight : 0;
     navigateToFile(t, mainScroller, { stickyTop });
     t.classList.add("flash");
-    setTimeout(() => { t.classList.remove("flash"); }, 1200);
+    setTimeout(() => {
+      t.classList.remove("flash");
+    }, 1200);
     markCurrent(t);
   }
 
@@ -132,15 +145,19 @@ export function enhanceLayout(root: HTMLElement): void {
     buildTree();
   }
 
-  if (filterInput) filterInput.addEventListener("input", () => {
-    filterText = filterInput.value.trim().toLowerCase();
-    applyFilter();
-  });
+  if (filterInput)
+    filterInput.addEventListener("input", () => {
+      filterText = filterInput.value.trim().toLowerCase();
+      applyFilter();
+    });
 
-  if (foldAll) foldAll.addEventListener("click", () => {
-    const anyOpen = fileEls.some((el) => el.open);
-    fileEls.forEach((el) => { el.open = !anyOpen; });
-  });
+  if (foldAll)
+    foldAll.addEventListener("click", () => {
+      const anyOpen = fileEls.some((el) => el.open);
+      fileEls.forEach((el) => {
+        el.open = !anyOpen;
+      });
+    });
 
   // ! Layout (split vs unified) and full-file mode are global view preferences on the <html>
   // ! data-attrs (like the theme): CSS reveals the right pane, and the choice is shared across
@@ -158,43 +175,50 @@ export function enhanceLayout(root: HTMLElement): void {
     });
   }
 
-  if (viewToggle) viewToggle.addEventListener("click", () => {
-    if (docEl.dataset["diffFull"] === "on") delete docEl.dataset["diffFull"];
-    else docEl.dataset["diffFull"] = "on";
-    syncToggles();
-  });
+  if (viewToggle)
+    viewToggle.addEventListener("click", () => {
+      if (docEl.dataset["diffFull"] === "on") delete docEl.dataset["diffFull"];
+      else docEl.dataset["diffFull"] = "on";
+      syncToggles();
+    });
 
-  if (layoutToggle) layoutToggle.addEventListener("click", () => {
-    const split = docEl.dataset["diffLayout"] !== "split"; // currently unified -> switch to split
-    if (split) docEl.dataset["diffLayout"] = "split";
-    else delete docEl.dataset["diffLayout"];
-    try {
-      localStorage.setItem("gtl-diff-layout", split ? "split" : "unified");
-    } catch {
-      /* storage unavailable (private mode / file://) — the in-page toggle still works */
-    }
-    syncToggles();
-  });
+  if (layoutToggle)
+    layoutToggle.addEventListener("click", () => {
+      const split = docEl.dataset["diffLayout"] !== "split"; // currently unified -> switch to split
+      if (split) docEl.dataset["diffLayout"] = "split";
+      else delete docEl.dataset["diffLayout"];
+      try {
+        localStorage.setItem("gtl-diff-layout", split ? "split" : "unified");
+      } catch {
+        /* storage unavailable (private mode / file://) — the in-page toggle still works */
+      }
+      syncToggles();
+    });
 
   // ! Context toggle drives the `.copy-ctx` class on this view's root; the copy-button
   // ! reads that class at click time to decide whether to prepend the path/lines header.
   const ctxToggle = root.querySelector<HTMLElement>(".ctx-toggle");
-  if (ctxToggle) ctxToggle.addEventListener("click", () => {
-    const on = root.classList.toggle("copy-ctx");
-    ctxToggle.setAttribute("aria-pressed", on ? "true" : "false");
-    ctxToggle.classList.toggle("active", on);
-  });
+  if (ctxToggle)
+    ctxToggle.addEventListener("click", () => {
+      const on = root.classList.toggle("copy-ctx");
+      ctxToggle.setAttribute("aria-pressed", on ? "true" : "false");
+      ctxToggle.classList.toggle("active", on);
+    });
 
   function bindHorizontalWheel(scroller: Element): void {
-    scroller.addEventListener("wheel", (ev) => {
-      const e = ev as WheelEvent;
-      const el = scroller as HTMLElement;
-      const next = computeWheelScroll(el, e);
-      if (next === null) return;
-      e.stopPropagation();
-      e.preventDefault();
-      el.scrollLeft = next;
-    }, { passive: false });
+    scroller.addEventListener(
+      "wheel",
+      (ev) => {
+        const e = ev as WheelEvent;
+        const el = scroller as HTMLElement;
+        const next = computeWheelScroll(el, e);
+        if (next === null) return;
+        e.stopPropagation();
+        e.preventDefault();
+        el.scrollLeft = next;
+      },
+      { passive: false },
+    );
   }
   root.querySelectorAll(".diff").forEach(bindHorizontalWheel);
 
@@ -248,7 +272,9 @@ export function enhanceLayout(root: HTMLElement): void {
       const label = document.createElement("div");
       label.className = "tlabel";
       label.innerHTML = `<span class="tcaret"></span><span class="tname">${esc(name)}</span>`;
-      label.addEventListener("click", () => { li.classList.toggle("open"); });
+      label.addEventListener("click", () => {
+        li.classList.toggle("open");
+      });
       li.appendChild(label);
       li.appendChild(renderNode(node.dirs[name] as TreeNode));
       ul.appendChild(li);
@@ -256,7 +282,9 @@ export function enhanceLayout(root: HTMLElement): void {
     node.files.forEach((f) => {
       const li = buildFileLeaf(document, f);
       const label = li.querySelector<HTMLElement>(".tlabel")!;
-      label.addEventListener("click", () => { openAndScrollTo(f.el); });
+      label.addEventListener("click", () => {
+        openAndScrollTo(f.el);
+      });
       ul.appendChild(li);
     });
     return ul;
@@ -282,7 +310,9 @@ export function enhanceLayout(root: HTMLElement): void {
   // ! Focus the selected commit's own rows: dim the diff (.commit-focus) and lift only the
   // ! rows whose data-commit is in activeSet. Touches just the matching rows, not a re-scan.
   function syncOwned(): void {
-    ownedRows.forEach((r) => { r.classList.remove("owned"); });
+    ownedRows.forEach((r) => {
+      r.classList.remove("owned");
+    });
     ownedRows = [];
     if (activeSet) {
       dlEls.forEach((r) => {
@@ -304,16 +334,22 @@ export function enhanceLayout(root: HTMLElement): void {
     c.addEventListener("keydown", (ev) => {
       const e = ev as KeyboardEvent;
       if (isShaTarget(e.target as Element | null)) return;
-      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); c.click(); }
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        c.click();
+      }
     });
 
     const hashCopy = c.querySelector<HTMLElement>(".sha");
-    if (hashCopy) hashCopy.addEventListener("click", (e) => {
-      e.stopPropagation();
-      copyText(sha);
-      c.classList.add("copied");
-      setTimeout(() => { c.classList.remove("copied"); }, 900);
-    });
+    if (hashCopy)
+      hashCopy.addEventListener("click", (e) => {
+        e.stopPropagation();
+        copyText(sha);
+        c.classList.add("copied");
+        setTimeout(() => {
+          c.classList.remove("copied");
+        }, 900);
+      });
 
     const popId = c.getAttribute("data-pop");
     if (!popId) return;
@@ -337,7 +373,9 @@ export function enhanceLayout(root: HTMLElement): void {
     }
     c.addEventListener("mouseenter", show);
     c.addEventListener("mouseleave", hide);
-    pop.addEventListener("mouseenter", () => { clearTimeout(t); });
+    pop.addEventListener("mouseenter", () => {
+      clearTimeout(t);
+    });
     pop.addEventListener("mouseleave", hide);
   });
 

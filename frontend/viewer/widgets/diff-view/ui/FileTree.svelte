@@ -50,10 +50,7 @@
   }
 </script>
 
-<aside
-  data-testid={TEST_IDS.diffView.fileTree}
-  class="flex min-h-0 flex-col border-r border-border bg-surface/50"
->
+<aside data-testid={TEST_IDS.diffView.fileTree} class="flex min-h-0 flex-col border-r border-border bg-surface/50">
   <div class="border-b border-border px-4 py-3">
     <div class="flex items-center justify-between gap-2">
       <h2 class="text-sm font-semibold">Files</h2>
@@ -70,7 +67,7 @@
             role="button"
             tabindex="0"
             class={cn(
-              "rounded-lg border border-transparent px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent hover:border-border hover:bg-muted/70",
+              "rounded-lg border border-transparent px-3 py-2 text-left transition-colors hover:border-border hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none",
               selectedFileIdx === row.fileIdx && "border-accent/40 bg-muted text-foreground",
             )}
             onclick={() => handleActivate(row.fileIdx)}

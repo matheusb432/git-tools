@@ -10,6 +10,10 @@ export type DiffViewState = {
   readonly focusedCommits: ReadonlySet<string>;
 };
 
+export type FilePanelFoldState = {
+  readonly collapsedFileIdxs: ReadonlySet<number>;
+};
+
 export type ActivePaneKeyArgs = {
   readonly tabId: number;
   readonly fileIdx: number;
@@ -40,6 +44,13 @@ export type OrderedCopyPage = {
   readonly pageStart: number;
   readonly pageSize: number;
   readonly page: RowsPage;
+};
+
+export type CopyPageAccumulator = ReadonlyMap<number, RowsPage>;
+
+export type ActivePanelFileIndexArgs = {
+  readonly visibleFileIndexes: readonly number[];
+  readonly activeFileIdx: number | null;
 };
 
 export function layoutFromSetting(value: string | null): DiffLayout {
@@ -113,7 +124,50 @@ export function activePaneKey({ tabId, fileIdx, layout, full }: ActivePaneKeyArg
   return `${tabId}:${fileIdx}:${layout}:${full ? "full" : "compact"}`;
 }
 
-export function orderedCopyPages({ rowPageCache, tabId, fileIdx, layout, full }: CopyPageArgs): readonly OrderedCopyPage[] {
+export function activePanelFileIndexes({
+  visibleFileIndexes,
+  activeFileIdx,
+}: ActivePanelFileIndexArgs): readonly number[] {
+  if (visibleFileIndexes.length === 0) return [];
+  if (activeFileIdx !== null && visibleFileIndexes.includes(activeFileIdx)) return [activeFileIdx];
+  return [visibleFileIndexes[0]!];
+}
+
+export function filePanelIsExpanded(state: FilePanelFoldState, fileIdx: number): boolean {
+  return !state.collapsedFileIdxs.has(fileIdx);
+}
+
+export function allFilePanelsCollapsed(state: FilePanelFoldState, visibleFileIndexes: readonly number[]): boolean {
+  return visibleFileIndexes.length > 0 && visibleFileIndexes.every((fileIdx) => state.collapsedFileIdxs.has(fileIdx));
+}
+
+export function toggleAllFilePanels(
+  state: FilePanelFoldState,
+  visibleFileIndexes: readonly number[],
+): FilePanelFoldState {
+  if (allFilePanelsCollapsed(state, visibleFileIndexes)) {
+    const collapsedFileIdxs = new Set(state.collapsedFileIdxs);
+    for (const fileIdx of visibleFileIndexes) collapsedFileIdxs.delete(fileIdx);
+    return { collapsedFileIdxs };
+  }
+
+  return { collapsedFileIdxs: new Set([...state.collapsedFileIdxs, ...visibleFileIndexes]) };
+}
+
+export function expandFilePanel(state: FilePanelFoldState, fileIdx: number): FilePanelFoldState {
+  if (!state.collapsedFileIdxs.has(fileIdx)) return state;
+  const collapsedFileIdxs = new Set(state.collapsedFileIdxs);
+  collapsedFileIdxs.delete(fileIdx);
+  return { collapsedFileIdxs };
+}
+
+export function orderedCopyPages({
+  rowPageCache,
+  tabId,
+  fileIdx,
+  layout,
+  full,
+}: CopyPageArgs): readonly OrderedCopyPage[] {
   const prefix = `${activePaneKey({ tabId, fileIdx, layout, full })}:`;
 
   return [...rowPageCache.entries()]
@@ -128,6 +182,49 @@ export function orderedCopyPages({ rowPageCache, tabId, fileIdx, layout, full }:
     })
     .filter((page) => Number.isFinite(page.pageStart) && Number.isFinite(page.pageSize))
     .sort((left, right) => left.pageStart - right.pageStart);
+}
+
+export function copyPageAccumulatorFromCache(args: CopyPageArgs): CopyPageAccumulator {
+  const pages = new Map<number, RowsPage>();
+  for (const page of orderedCopyPages(args)) {
+    pages.set(page.pageStart, page.page);
+  }
+  return pages;
+}
+
+export function putCopyPageInAccumulator(
+  accumulator: CopyPageAccumulator,
+  pageStart: number,
+  page: RowsPage,
+): CopyPageAccumulator {
+  const next = new Map(accumulator);
+  next.set(pageStart, page);
+  return next;
+}
+
+export function orderedCopyPagesFromAccumulator(accumulator: CopyPageAccumulator): readonly RowsPage[] {
+  return [...accumulator.entries()].sort(([left], [right]) => left - right).map(([, page]) => page);
+}
+
+export function missingCopyPageRequestsForAccumulator({
+  pages,
+  pageSize,
+  total,
+}: {
+  readonly pages: CopyPageAccumulator;
+  readonly pageSize: number;
+  readonly total: number;
+}): readonly RowPageRequest[] {
+  const normalizedPageSize = Math.max(1, Math.trunc(pageSize));
+  const requests: RowPageRequest[] = [];
+
+  for (let pageStart = 0; pageStart < total; pageStart += normalizedPageSize) {
+    if (!pages.has(pageStart)) {
+      requests.push({ pageStart, pageSize: normalizedPageSize });
+    }
+  }
+
+  return requests;
 }
 
 export function missingCopyPageRequests({

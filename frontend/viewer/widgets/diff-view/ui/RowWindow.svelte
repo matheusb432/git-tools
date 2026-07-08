@@ -81,11 +81,15 @@
   const virtualItems = $derived($virtualizer.getVirtualItems());
   const totalSize = $derived($virtualizer.getTotalSize());
 
-  function measureRow(node: HTMLDivElement): { update: () => void } {
-    $virtualizer.measureElement(node);
+  function measureRow(node: HTMLDivElement, expandedCount: number): { update: (nextExpandedCount: number) => void } {
+    if (expandedCount > 0) {
+      $virtualizer.measureElement(node);
+    }
     return {
-      update() {
-        $virtualizer.measureElement(node);
+      update(nextExpandedCount: number) {
+        if (nextExpandedCount > 0) {
+          $virtualizer.measureElement(node);
+        }
       },
     };
   }
@@ -112,9 +116,9 @@
   <div class="relative w-full" style={`height: ${totalSize}px;`}>
     {#each virtualItems as item (item.key)}
       <div
-        use:measureRow
+        use:measureRow={expandedLongRows.size}
         data-index={item.index}
-        class="absolute left-0 top-0 w-full"
+        class="absolute top-0 left-0 w-full"
         style={`transform: translateY(${item.start}px);`}
       >
         {#if layout === "unified"}

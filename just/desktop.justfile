@@ -35,3 +35,8 @@ build-viewer-ui:
 [group('desktop')]
 gen-icon:
     cargo run --quiet -p xtask -- gen-icon
+
+# Run the hermetic native diff UI perf harness through tauri-driver. Pass --evidence to keep timing JSON/screenshots/traces.
+[group('desktop')]
+native-perf *args:
+    cargo run --quiet -p xtask -- native-perf {{ args }}

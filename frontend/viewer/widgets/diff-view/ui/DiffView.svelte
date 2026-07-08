@@ -1,11 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { AlertTriangle, RefreshCw } from "@lucide/svelte";
-  import { emptyRowPageCache, invalidateTabRows, putRows, rowPageKey, type RowPageCache } from "@/entities/diff-tab";
+  import { emptyRowPageCache, invalidateTabRows, type RowPageCache } from "@/entities/diff-tab";
   import type { NativeTab } from "@/entities/diff-tab";
   import { filterFiles } from "@/entities/diff-tab";
   import { fileRows, getSetting, setSetting, type RowsPage, type SplitRow, type UnifiedRow } from "@/shared/api";
-  import { cn } from "@/shared/lib/utils";
   import * as Alert from "@/shared/ui/alert";
   import { Badge } from "@/shared/ui/badge";
   import { Button } from "@/shared/ui/button";
@@ -13,20 +12,29 @@
   import { TEST_IDS } from "@/shared/testids";
   import {
     clearCommitFocus,
+    activePanelFileIndexes,
+    allFilePanelsCollapsed,
+    copyPageAccumulatorFromCache,
     copySplitRows,
     copyUnifiedRows,
     createDiffViewState,
+    expandFilePanel,
+    filePanelIsExpanded,
     fullFromSetting,
     layoutFromSetting,
-    missingCopyPageRequests,
+    missingCopyPageRequestsForAccumulator,
     nextFileIndex,
-    orderedCopyPages,
+    orderedCopyPagesFromAccumulator,
+    putCopyPageInAccumulator,
     setFilterText,
     setLayout,
     settingFromFull,
     settingFromLayout,
+    toggleAllFilePanels,
     toggleCommitFocus,
     toggleFull,
+    type DiffViewState,
+    type FilePanelFoldState,
     type DiffLayout,
   } from "../model/diff-view";
   import CommitShelf from "./CommitShelf.svelte";
@@ -37,7 +45,6 @@
   type DiffViewProps = {
     readonly tab: NativeTab;
     readonly onRefresh: (tab: NativeTab) => Promise<void>;
-    readonly onClose: (tab: NativeTab) => void;
   };
 
   type VisibleFile = {
@@ -50,12 +57,13 @@
     readonly commits: readonly string[];
   };
 
-  let { tab, onRefresh, onClose }: DiffViewProps = $props();
+  let { tab, onRefresh }: DiffViewProps = $props();
 
-  let state = $state(createDiffViewState());
+  let viewState = $state<DiffViewState>(createDiffViewState());
   let selectedFileIdx = $state<number | null>(null);
   let contentRef = $state<HTMLElement | null>(null);
   let rowPageCache = $state.raw<RowPageCache>(emptyRowPageCache());
+  let foldState = $state.raw<FilePanelFoldState>({ collapsedFileIdxs: new Set<number>() });
   let cacheBatchId = $state<string | null>(null);
   let cacheTabId = $state<number | null>(null);
   let settingsWarning = $state<string | null>(null);
@@ -66,7 +74,7 @@
   const visibleFiles = $derived<VisibleFile[]>(
     meta === null
       ? []
-      : filterFiles(meta.files, state.filterText, state.focusedCommits).map((file) => ({
+      : filterFiles(meta.files, viewState.filterText, viewState.focusedCommits).map((file) => ({
           fileIdx: meta.files.indexOf(file),
           path: file.path,
           status: file.status,
@@ -84,6 +92,10 @@
     }
     return visibleFiles[0]?.fileIdx ?? null;
   });
+  const visibleFileIndexes = $derived(visibleFiles.map((file) => file.fileIdx));
+  const activePanelIndexes = $derived(activePanelFileIndexes({ visibleFileIndexes, activeFileIdx }));
+  const activePanelFiles = $derived(visibleFiles.filter((file) => activePanelIndexes.includes(file.fileIdx)));
+  const allFilesFolded = $derived(allFilePanelsCollapsed(foldState, visibleFileIndexes));
 
   function persistLayout(layout: DiffLayout): void {
     void setSetting("diff.layout", settingFromLayout(layout))
@@ -110,29 +122,30 @@
   }
 
   function handleSetLayout(layout: DiffLayout): void {
-    state = setLayout(state, layout);
+    viewState = setLayout(viewState, layout);
     persistLayout(layout);
   }
 
   function handleToggleFull(): void {
-    state = toggleFull(state);
-    persistFull(state.full);
+    viewState = toggleFull(viewState);
+    persistFull(viewState.full);
   }
 
   function handleFilterTextChange(value: string): void {
-    state = setFilterText(state, value);
+    viewState = setFilterText(viewState, value);
   }
 
   function handleToggleCommitFocus(sha: string): void {
-    state = toggleCommitFocus(state, sha);
+    viewState = toggleCommitFocus(viewState, sha);
   }
 
   function handleClearCommitFocus(): void {
-    state = clearCommitFocus(state);
+    viewState = clearCommitFocus(viewState);
   }
 
   function handleSelectFile(fileIdx: number): void {
     selectedFileIdx = fileIdx;
+    foldState = expandFilePanel(foldState, fileIdx);
   }
 
   function updateRowCache(updater: (cache: RowPageCache) => RowPageCache): void {
@@ -144,12 +157,14 @@
   }
 
   function handleScrollToFile(fileIdx: number): void {
-    const target = contentRef?.querySelector<HTMLElement>(`#${CSS.escape(sectionId(fileIdx))}`);
-    target?.scrollIntoView({ block: "start", behavior: "smooth" });
+    void tick().then(() => {
+      const target = contentRef?.querySelector<HTMLElement>(`#${CSS.escape(sectionId(fileIdx))}`);
+      target?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
   }
 
   function copyTextForPages(pages: readonly RowsPage[]): string | null {
-    if (state.layout === "unified") {
+    if (viewState.layout === "unified") {
       const rows: UnifiedRow[] = [];
       for (const page of pages) {
         if (page.layout === "unified") rows.push(...page.rows);
@@ -164,18 +179,15 @@
     return rows.length > 0 ? copySplitRows(rows) : null;
   }
 
-  async function fetchCopyPage(
-    args: {
-      readonly tabId: number;
-      readonly fileIdx: number;
-      readonly layout: DiffLayout;
-      readonly full: boolean;
-      readonly pageStart: number;
-      readonly pageSize: number;
-    },
-    cache: RowPageCache,
-  ): Promise<{ readonly page: RowsPage; readonly cache: RowPageCache }> {
-    const page = await fileRows({
+  async function fetchCopyPage(args: {
+    readonly tabId: number;
+    readonly fileIdx: number;
+    readonly layout: DiffLayout;
+    readonly full: boolean;
+    readonly pageStart: number;
+    readonly pageSize: number;
+  }): Promise<RowsPage> {
+    return fileRows({
       tabId: args.tabId,
       fileIdx: args.fileIdx,
       layout: args.layout,
@@ -183,17 +195,6 @@
       start: args.pageStart,
       count: args.pageSize,
     });
-    const key = rowPageKey({
-      tabId: args.tabId,
-      fileIdx: args.fileIdx,
-      layout: args.layout,
-      full: args.full,
-      pageStart: args.pageStart,
-      pageSize: args.pageSize,
-    });
-    const nextCache = putRows(cache, key, page);
-    updateRowCache((currentCache) => putRows(currentCache, key, page));
-    return { page, cache: nextCache };
   }
 
   async function activeFileRowsText(): Promise<string | null> {
@@ -202,37 +203,32 @@
     const copyTarget = {
       tabId: tab.tabId,
       fileIdx: activeFileIdx,
-      layout: state.layout,
-      full: state.full,
+      layout: viewState.layout,
+      full: viewState.full,
     };
 
-    let cacheSnapshot = rowPageCache;
-    let pages = orderedCopyPages({ rowPageCache: cacheSnapshot, ...copyTarget });
-    let firstPage = pages.find((page) => page.pageStart === 0)?.page;
+    let pages = copyPageAccumulatorFromCache({ rowPageCache, ...copyTarget });
+    let firstPage = pages.get(0);
 
     if (firstPage === undefined) {
-      const fetched = await fetchCopyPage({ ...copyTarget, pageStart: 0, pageSize: COPY_PAGE_SIZE }, cacheSnapshot);
-      cacheSnapshot = fetched.cache;
-      firstPage = fetched.page;
-      pages = orderedCopyPages({ rowPageCache: cacheSnapshot, ...copyTarget });
+      firstPage = await fetchCopyPage({ ...copyTarget, pageStart: 0, pageSize: COPY_PAGE_SIZE });
+      pages = putCopyPageInAccumulator(pages, 0, firstPage);
     }
 
-    const missingPages = missingCopyPageRequests({
-      rowPageCache: cacheSnapshot,
-      ...copyTarget,
+    const missingPages = missingCopyPageRequestsForAccumulator({
+      pages,
       pageSize: COPY_PAGE_SIZE,
       total: firstPage.total,
     });
 
     if (missingPages.length > 0) {
       for (const page of missingPages) {
-        const fetched = await fetchCopyPage({ ...copyTarget, pageStart: page.pageStart, pageSize: page.pageSize }, cacheSnapshot);
-        cacheSnapshot = fetched.cache;
+        const fetched = await fetchCopyPage({ ...copyTarget, pageStart: page.pageStart, pageSize: page.pageSize });
+        pages = putCopyPageInAccumulator(pages, page.pageStart, fetched);
       }
-      pages = orderedCopyPages({ rowPageCache: cacheSnapshot, ...copyTarget });
     }
 
-    return copyTextForPages(pages.map((page) => page.page));
+    return copyTextForPages(orderedCopyPagesFromAccumulator(pages));
   }
 
   function selectedVisibleText(): string | null {
@@ -264,15 +260,34 @@
 
   function moveSelection(direction: "previous" | "next"): void {
     if (visibleFiles.length === 0) return;
-    const current = activeFileIdx === null ? 0 : Math.max(0, visibleFiles.findIndex((file) => file.fileIdx === activeFileIdx));
+    const current =
+      activeFileIdx === null
+        ? 0
+        : Math.max(
+            0,
+            visibleFiles.findIndex((file) => file.fileIdx === activeFileIdx),
+          );
     const next = visibleFiles[nextFileIndex({ current, direction, total: visibleFiles.length })];
     if (next === undefined) return;
     selectedFileIdx = next.fileIdx;
+    foldState = expandFilePanel(foldState, next.fileIdx);
     handleScrollToFile(next.fileIdx);
   }
 
+  function handleToggleAllFilesFolded(): void {
+    foldState = toggleAllFilePanels(foldState, visibleFileIndexes);
+  }
+
+  function handleToggleFilePanel(fileIdx: number): void {
+    const collapsedFileIdxs = new Set(foldState.collapsedFileIdxs);
+    if (collapsedFileIdxs.has(fileIdx)) collapsedFileIdxs.delete(fileIdx);
+    else collapsedFileIdxs.add(fileIdx);
+    foldState = { collapsedFileIdxs };
+  }
+
   function handleKeydown(event: KeyboardEvent): void {
-    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target)) return;
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || isEditableTarget(event.target))
+      return;
 
     switch (event.key) {
       case "j":
@@ -287,11 +302,11 @@
         return;
       case "u":
         event.preventDefault();
-        if (state.layout !== "unified") handleSetLayout("unified");
+        if (viewState.layout !== "unified") handleSetLayout("unified");
         return;
       case "s":
         event.preventDefault();
-        if (state.layout !== "split") handleSetLayout("split");
+        if (viewState.layout !== "split") handleSetLayout("split");
         return;
       case "f":
         event.preventDefault();
@@ -319,8 +334,8 @@
   onMount(() => {
     void Promise.all([getSetting("diff.layout"), getSetting("diff.full")])
       .then(([layout, full]) => {
-        state = {
-          ...state,
+        viewState = {
+          ...viewState,
           layout: layoutFromSetting(layout),
           full: fullFromSetting(full),
         };
@@ -371,13 +386,15 @@
 
     <DiffToolbar
       {meta}
-      layout={state.layout}
-      full={state.full}
-      filterText={state.filterText}
+      layout={viewState.layout}
+      full={viewState.full}
+      filterText={viewState.filterText}
       refreshing={tab.lifecycle.state === "refreshing"}
       canCopy={activeFileIdx !== null}
+      {allFilesFolded}
       onSetLayout={handleSetLayout}
       onToggleFull={handleToggleFull}
+      onToggleAllFilesFolded={handleToggleAllFilesFolded}
       onFilterTextChange={handleFilterTextChange}
       onRefresh={() => onRefresh(tab)}
       onCopyVisible={copyCurrentRows}
@@ -401,7 +418,7 @@
 
     <CommitShelf
       commits={meta.commits}
-      focusedCommits={state.focusedCommits}
+      focusedCommits={viewState.focusedCommits}
       onToggleCommitFocus={handleToggleCommitFocus}
       onClearFocus={handleClearCommitFocus}
     />
@@ -409,39 +426,32 @@
     <div class="grid min-h-0 flex-1 lg:grid-cols-[300px_minmax(0,1fr)]">
       <FileTree
         {meta}
-        filterText={state.filterText}
-        focusedCommits={state.focusedCommits}
+        filterText={viewState.filterText}
+        focusedCommits={viewState.focusedCommits}
         selectedFileIdx={activeFileIdx}
         onSelectFile={handleSelectFile}
         onScrollToFile={handleScrollToFile}
       />
 
-      <section
-        data-testid={TEST_IDS.diffView.content}
-        bind:this={contentRef}
-        class="min-h-0 overflow-auto px-5 py-4"
-      >
+      <section data-testid={TEST_IDS.diffView.content} bind:this={contentRef} class="min-h-0 overflow-auto px-5 py-4">
         <div class="mb-4 flex items-center justify-between gap-2">
           <div>
             <h2 class="text-sm font-semibold">Files in view</h2>
             <p class="mt-1 text-xs text-foreground-muted">
-              {meta.foot_note || "Task 4 will replace these headers with paged diff rows."}
+              {meta.foot_note || "Select a file to inspect its paged diff rows."}
             </p>
           </div>
           <div class="flex items-center gap-2">
             <Badge variant="outline">{visibleFiles.length} files</Badge>
-            <Badge variant={state.layout === "split" ? "secondary" : "outline"}>{state.layout}</Badge>
-            <Badge variant={state.full ? "secondary" : "outline"}>{state.full ? "full" : "compact"}</Badge>
+            <Badge variant={viewState.layout === "split" ? "secondary" : "outline"}>{viewState.layout}</Badge>
+            <Badge variant={viewState.full ? "secondary" : "outline"}>{viewState.full ? "full" : "compact"}</Badge>
           </div>
         </div>
 
-        {#if visibleFiles.length > 0}
+        {#if activePanelFiles.length > 0}
           <div class="flex flex-col gap-3">
-            {#each visibleFiles as file (file.fileIdx)}
-              <section
-                id={sectionId(file.fileIdx)}
-                class="scroll-mt-4"
-              >
+            {#each activePanelFiles as file (file.fileIdx)}
+              <section id={sectionId(file.fileIdx)} class="scroll-mt-4">
                 {#if tab.tabId !== null}
                   <FileDiffPanel
                     tabId={tab.tabId}
@@ -452,9 +462,11 @@
                     removed={file.removed}
                     hasFull={file.hasFull}
                     commits={file.commits}
-                    layout={state.layout}
-                    full={state.full}
+                    layout={viewState.layout}
+                    full={viewState.full}
                     selected={activeFileIdx === file.fileIdx}
+                    expanded={filePanelIsExpanded(foldState, file.fileIdx)}
+                    onToggleExpanded={() => handleToggleFilePanel(file.fileIdx)}
                     rowCache={rowPageCache}
                     {updateRowCache}
                   />

@@ -24,24 +24,28 @@ const meta: TabMeta = {
   foot_cmd: "git diff",
   foot_note: "",
   is_empty: false,
-  commits: [{
-    sha: "abc1234",
-    subject: "feat: work",
-    body: "body",
-    date: "today",
-    iso: "2026-07-08T00:00:00Z",
-    parents: ["p1"],
-    members: [],
-    is_merge: false,
-  }],
-  files: [{
-    path: "src/main.rs",
-    status: "modified",
-    added: 2,
-    removed: 1,
-    commits: ["abc1234"],
-    has_full: true,
-  }],
+  commits: [
+    {
+      sha: "abc1234",
+      subject: "feat: work",
+      body: "body",
+      date: "today",
+      iso: "2026-07-08T00:00:00Z",
+      parents: ["p1"],
+      members: [],
+      is_merge: false,
+    },
+  ],
+  files: [
+    {
+      path: "src/main.rs",
+      status: "modified",
+      added: 2,
+      removed: 1,
+      commits: ["abc1234"],
+      has_full: true,
+    },
+  ],
 };
 
 const recipe: Recipe = {
@@ -63,7 +67,7 @@ test("refresh keeps stale metadata visible until replacement arrives", () => {
   expect(refreshing.lifecycle.state).toBe("refreshing");
   expect(refreshing.meta).toBe(meta);
   const replaced = nativeRefreshSucceeded(refreshing, { ...meta, batch_id: "batch-2" });
-  expect(replaced.meta.batch_id).toBe("batch-2");
+  expect(replaced.meta?.batch_id).toBe("batch-2");
   expect(replaced.freshness.state).toBe("fresh");
 });
 

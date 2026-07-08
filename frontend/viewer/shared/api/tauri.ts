@@ -145,7 +145,12 @@ export function tauriGlobal(): TauriGlobal {
     },
     event: {
       listen: <P>(name: string, handler: (e: { readonly payload: P }) => void) =>
-        Promise.resolve((event["listen"] as (n: string, h: (e: { readonly payload: P }) => void) => Promise<() => void>)(name, handler)),
+        Promise.resolve(
+          (event["listen"] as (n: string, h: (e: { readonly payload: P }) => void) => Promise<() => void>)(
+            name,
+            handler,
+          ),
+        ),
     },
   };
 }
@@ -306,10 +311,7 @@ function isSplitRow(value: unknown): value is SplitRow {
         (typeof row["long_len"] === "number" || row["long_len"] === null)
       );
     case "pair":
-      return (
-        (row["old"] === null || isSplitCell(row["old"])) &&
-        (row["new"] === null || isSplitCell(row["new"]))
-      );
+      return (row["old"] === null || isSplitCell(row["old"])) && (row["new"] === null || isSplitCell(row["new"]));
     default:
       return false;
   }

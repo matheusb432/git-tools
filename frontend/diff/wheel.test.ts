@@ -111,9 +111,15 @@ describe("buildFileLeaf", () => {
         title: "",
         children: [],
         attrs: {},
-        appendChild(c: HTMLElement) { this.children.push(c); },
-        setAttribute(k: string, v: string) { this.attrs[k] = v; },
-        getAttribute(k: string) { return this.attrs[k] ?? null; },
+        appendChild(c: HTMLElement) {
+          this.children.push(c);
+        },
+        setAttribute(k: string, v: string) {
+          this.attrs[k] = v;
+        },
+        getAttribute(k: string) {
+          return this.attrs[k] ?? null;
+        },
         querySelector(sel: string): HTMLElement | null {
           // depth-first search through children
           for (const child of this.children) {
@@ -153,7 +159,7 @@ describe("buildFileLeaf", () => {
     const label = li.children[0]!; // first child is .tlabel
     expect(label.className).toBe("tlabel");
     expect(label.children.length).toBe(2);
-    expect(label.children[0]!.className).toContain("tname");   // name first
+    expect(label.children[0]!.className).toContain("tname"); // name first
     expect(label.children[1]!.className).toContain("tstatus"); // status trailing
   });
 
