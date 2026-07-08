@@ -3,7 +3,6 @@
 
 pub mod attribution;
 pub mod batch;
-pub mod intraline;
 pub mod render_diff;
 pub mod render_diff_all;
 pub mod render_diff_subrepos;

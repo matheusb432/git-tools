@@ -1,8 +1,6 @@
-use application::diffs::intraline::{LineSpans, Span, changed_spans};
-use domain::diffs::{FileDiff, LineOwners, View};
+use domain::diffs::{FileDiff, LineOwners, RowKind, Span, SplitRow, View};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
-const MAX_LINE_COLS: usize = 2000;
 const GIANT_FILE_CHARS: usize = 250_000;
 const ROW_PX: usize = 22;
 
@@ -61,69 +59,57 @@ pub fn slug(s: &str) -> String {
 pub fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
     use std::fmt::Write;
 
-    let mut old_no = 0u32;
-    let mut new_no = 0u32;
     let mut rows = String::with_capacity(lines.iter().map(String::len).sum::<usize>() * 2);
 
-    for raw in lines {
-        if raw.is_empty() {
-            continue;
-        }
-
-        if is_meta_line(raw) {
-            let _ = write!(
-                rows,
-                r#"<div class="dl dl-meta"><span class="ln"></span><span class="ln"></span><code>{}</code></div>"#,
-                html_or_nbsp(raw)
-            );
-            continue;
-        }
-
-        if let Some((old_start, new_start)) = hunk_starts(raw) {
-            old_no = old_start;
-            new_no = new_start;
-            let _ = write!(
-                rows,
-                r#"<div class="dl dl-hunk"><span class="ln"></span><span class="ln"></span><code>{}</code></div>"#,
-                escape_html(raw)
-            );
-            continue;
-        }
-
-        if raw.starts_with('+') && !raw.starts_with("+++") {
-            let long = long_len(raw);
-            let _ = write!(
-                rows,
-                r#"<div class="dl dl-add{}"{}><span class="ln"></span><span class="ln">{}</span>{}</div>"#,
-                if long.is_some() { " dl-long" } else { "" },
-                commit_attr(owners.added.get(&new_no)),
-                new_no,
-                code_cell(raw, long),
-            );
-            new_no += 1;
-        } else if raw.starts_with('-') && !raw.starts_with("---") {
-            let long = long_len(raw);
-            let _ = write!(
-                rows,
-                r#"<div class="dl dl-del{}"{}><span class="ln">{}</span><span class="ln"></span>{}</div>"#,
-                if long.is_some() { " dl-long" } else { "" },
-                commit_attr(owners.deleted.get(&old_no)),
-                old_no,
-                code_cell(raw, long),
-            );
-            old_no += 1;
-        } else {
-            let long = long_len(raw);
-            let _ = write!(
-                rows,
-                r#"<div class="dl dl-ctx{}"><span class="ln">{}</span><span class="ln">{}</span>{}</div>"#,
-                if long.is_some() { " dl-long" } else { "" },
-                old_no,
-                new_no,
-                code_cell(raw, long),
-            );
-            old_no += 1;
-            new_no += 1;
+    for row in domain::diffs::derive_rows(lines, owners) {
+        match row.kind {
+            RowKind::Meta => {
+                let _ = write!(
+                    rows,
+                    r#"<div class="dl dl-meta"><span class="ln"></span><span class="ln"></span><code>{}</code></div>"#,
+                    html_or_nbsp(&row.text)
+                );
+            }
+            RowKind::Hunk => {
+                let _ = write!(
+                    rows,
+                    r#"<div class="dl dl-hunk"><span class="ln"></span><span class="ln"></span><code>{}</code></div>"#,
+                    escape_html(&row.text)
+                );
+            }
+            RowKind::Add => {
+                let long = long_len(&row.text);
+                let _ = write!(
+                    rows,
+                    r#"<div class="dl dl-add{}"{}><span class="ln"></span><span class="ln">{}</span>{}</div>"#,
+                    if long.is_some() { " dl-long" } else { "" },
+                    commit_attr(row.owner.as_ref()),
+                    row.new_no.unwrap_or(0),
+                    code_cell(&row.text, long),
+                );
+            }
+            RowKind::Del => {
+                let long = long_len(&row.text);
+                let _ = write!(
+                    rows,
+                    r#"<div class="dl dl-del{}"{}><span class="ln">{}</span><span class="ln"></span>{}</div>"#,
+                    if long.is_some() { " dl-long" } else { "" },
+                    commit_attr(row.owner.as_ref()),
+                    row.old_no.unwrap_or(0),
+                    code_cell(&row.text, long),
+                );
+            }
+            RowKind::Context => {
+                let long = long_len(&row.text);
+                let _ = write!(
+                    rows,
+                    r#"<div class="dl dl-ctx{}"><span class="ln">{}</span><span class="ln">{}</span>{}</div>"#,
+                    if long.is_some() { " dl-long" } else { "" },
+                    row.old_no.unwrap_or(0),
+                    row.new_no.unwrap_or(0),
+                    code_cell(&row.text, long),
+                );
+            }
         }
     }
 
@@ -310,20 +296,6 @@ pub fn build_tabbed_html(title: &str, views: &[View]) -> String {
     .into_string()
 }
 
-fn is_meta_line(raw: &str) -> bool {
-    raw.starts_with("index ")
-        || raw.starts_with("--- ")
-        || raw.starts_with("+++ ")
-        || raw.starts_with("new file")
-        || raw.starts_with("deleted file")
-        || raw.starts_with("old mode")
-        || raw.starts_with("new mode")
-        || raw.starts_with("similarity ")
-        || raw.starts_with("rename ")
-        || raw.starts_with("Binary ")
-        || raw.starts_with('\\')
-}
-
 // ! Short shas are [0-9a-f]{9} (no HTML metacharacters), so no escaping is needed.
 fn commit_attr(sha: Option<&String>) -> String {
     sha.map(|sha| format!(r#" data-commit="{sha}""#))
@@ -350,7 +322,7 @@ fn html_or_nbsp(raw: &str) -> String {
 fn long_len(raw: &str) -> Option<usize> {
     let marker = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
     let len = raw.chars().count().saturating_sub(marker);
-    (len > MAX_LINE_COLS).then_some(len)
+    (len > domain::diffs::MAX_LINE_COLS).then_some(len)
 }
 
 // ! Inner content of a `<code>` cell: the bare body, or — for a tamed long line — the copy-safe
@@ -404,12 +376,6 @@ fn split_code(
     }
 }
 
-// ! A changed line body with its leading diff marker (a single ASCII +/-) stripped, ready for
-// ! intra-line diffing; the marker byte is a valid char boundary so the 1.. slice is safe.
-fn line_body(raw: &str) -> &str {
-    raw.get(1..).unwrap_or("")
-}
-
 // ! Escape a changed line body char by char, wrapping the `spans` (char-index ranges into the
 // ! body, i.e. after the leading +/- marker) in `.ciw` so CSS can paint the VS Code-style
 // ! intra-line highlight. The marker char is ASCII +/- (never escaped) and is never wrapped.
@@ -449,156 +415,81 @@ const SPLIT_PAD: &str = r#"<span class="ln"></span><code class="sp sp-pad"></cod
 pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
     use std::fmt::Write;
 
-    let mut old_no = 0u32;
-    let mut new_no = 0u32;
     let mut rows = String::with_capacity(lines.iter().map(String::len).sum::<usize>() * 3);
-    // Buffered change runs: (gutter number, raw line). Flushed (paired) at any non-+/- line.
-    let mut dels: Vec<(u32, &String)> = Vec::new();
-    let mut adds: Vec<(u32, &String)> = Vec::new();
 
-    let flush =
-        |rows: &mut String, dels: &mut Vec<(u32, &String)>, adds: &mut Vec<(u32, &String)>| {
-            flush_split_runs(rows, dels, adds, owners);
-        };
-
-    for raw in lines {
-        if raw.is_empty() {
-            continue;
-        }
-
-        if is_meta_line(raw) {
-            flush(&mut rows, &mut dels, &mut adds);
-            let _ = write!(
-                rows,
-                r#"<div class="dl dl-meta"><code>{}</code></div>"#,
-                html_or_nbsp(raw)
-            );
-            continue;
-        }
-
-        if let Some((old_start, new_start)) = hunk_starts(raw) {
-            flush(&mut rows, &mut dels, &mut adds);
-            old_no = old_start;
-            new_no = new_start;
-            let _ = write!(
-                rows,
-                r#"<div class="dl dl-hunk"><code>{}</code></div>"#,
-                escape_html(raw)
-            );
-            continue;
-        }
-
-        if raw.starts_with('+') && !raw.starts_with("+++") {
-            adds.push((new_no, raw));
-            new_no += 1;
-        } else if raw.starts_with('-') && !raw.starts_with("---") {
-            dels.push((old_no, raw));
-            old_no += 1;
-        } else {
-            flush(&mut rows, &mut dels, &mut adds);
-            let long = long_len(raw);
-            let _ = write!(
-                rows,
-                r#"<div class="dl"><span class="ln">{}</span>{}<span class="ln">{}</span>{}</div>"#,
+    for row in domain::diffs::split_rows(&domain::diffs::derive_rows(lines, owners)) {
+        match row {
+            SplitRow::Meta { text } => {
+                let _ = write!(
+                    rows,
+                    r#"<div class="dl dl-meta"><code>{}</code></div>"#,
+                    html_or_nbsp(&text)
+                );
+            }
+            SplitRow::Hunk { text } => {
+                let _ = write!(
+                    rows,
+                    r#"<div class="dl dl-hunk"><code>{}</code></div>"#,
+                    escape_html(&text)
+                );
+            }
+            SplitRow::Context {
                 old_no,
-                split_code(raw, long, "sp-ctx", None, &[]),
                 new_no,
-                split_code(raw, long, "sp-ctx", None, &[]),
-            );
-            old_no += 1;
-            new_no += 1;
+                text,
+            } => {
+                let long = long_len(&text);
+                let _ = write!(
+                    rows,
+                    r#"<div class="dl"><span class="ln">{}</span>{}<span class="ln">{}</span>{}</div>"#,
+                    old_no,
+                    split_code(&text, long, "sp-ctx", None, &[]),
+                    new_no,
+                    split_code(&text, long, "sp-ctx", None, &[]),
+                );
+            }
+            SplitRow::Pair { old, new } => {
+                rows.push_str(r#"<div class="dl">"#);
+                match &old {
+                    Some(cell) => {
+                        let _ = write!(
+                            rows,
+                            r#"<span class="ln">{}</span>{}"#,
+                            cell.no,
+                            split_code(
+                                &cell.text,
+                                long_len(&cell.text),
+                                "sp-del",
+                                cell.owner.as_ref(),
+                                &cell.spans
+                            ),
+                        );
+                    }
+                    None => rows.push_str(SPLIT_PAD),
+                }
+                match &new {
+                    Some(cell) => {
+                        let _ = write!(
+                            rows,
+                            r#"<span class="ln">{}</span>{}"#,
+                            cell.no,
+                            split_code(
+                                &cell.text,
+                                long_len(&cell.text),
+                                "sp-add",
+                                cell.owner.as_ref(),
+                                &cell.spans
+                            ),
+                        );
+                    }
+                    None => rows.push_str(SPLIT_PAD),
+                }
+                rows.push_str("</div>");
+            }
         }
     }
-    flush(&mut rows, &mut dels, &mut adds);
 
     rows
-}
-
-/// Emit the buffered deletion/addition runs as index-paired side-by-side rows
-/// (the shorter side padded), then clear both buffers.
-fn flush_split_runs(
-    rows: &mut String,
-    dels: &mut Vec<(u32, &String)>,
-    adds: &mut Vec<(u32, &String)>,
-    owners: &LineOwners,
-) {
-    use std::fmt::Write;
-
-    for i in 0..dels.len().max(adds.len()) {
-        let del = dels.get(i).copied();
-        let add = adds.get(i).copied();
-        // ! Intra-line highlight only where a deletion and an addition pair up on the
-        // ! same row and both are short enough to word-diff; unpaired or long lines fall
-        // ! back to empty spans (no marks).
-        let spans = match (del, add) {
-            (Some((_, draw)), Some((_, araw)))
-                if long_len(draw).is_none() && long_len(araw).is_none() =>
-            {
-                changed_spans(line_body(draw), line_body(araw))
-            }
-            _ => LineSpans::default(),
-        };
-
-        rows.push_str(r#"<div class="dl">"#);
-        match del {
-            Some((no, raw)) => {
-                let _ = write!(
-                    rows,
-                    r#"<span class="ln">{no}</span>{}"#,
-                    split_code(
-                        raw,
-                        long_len(raw),
-                        "sp-del",
-                        owners.deleted.get(&no),
-                        &spans.old
-                    ),
-                );
-            }
-            None => rows.push_str(SPLIT_PAD),
-        }
-        match add {
-            Some((no, raw)) => {
-                let _ = write!(
-                    rows,
-                    r#"<span class="ln">{no}</span>{}"#,
-                    split_code(
-                        raw,
-                        long_len(raw),
-                        "sp-add",
-                        owners.added.get(&no),
-                        &spans.new
-                    ),
-                );
-            }
-            None => rows.push_str(SPLIT_PAD),
-        }
-        rows.push_str("</div>");
-    }
-    dels.clear();
-    adds.clear();
-}
-
-fn hunk_starts(raw: &str) -> Option<(u32, u32)> {
-    let rest = raw.strip_prefix("@@ -")?;
-    let (old_part, rest) = rest.split_once(" +")?;
-    let (new_part, _) = rest.split_once(" @@")?;
-    Some((parse_hunk_range(old_part)?, parse_hunk_range(new_part)?))
-}
-
-fn parse_hunk_range(s: &str) -> Option<u32> {
-    let (start, len) = match s.split_once(',') {
-        Some((start, len)) => (start, Some(len)),
-        None => (s, None),
-    };
-
-    if start.is_empty()
-        || !start.chars().all(|ch| ch.is_ascii_digit())
-        || len.is_some_and(|value| value.is_empty() || !value.chars().all(|ch| ch.is_ascii_digit()))
-    {
-        return None;
-    }
-
-    start.parse().ok()
 }
 
 fn plural(n: usize) -> &'static str {
@@ -704,7 +595,7 @@ fn file_blocks(view: &View) -> Markup {
 
 #[cfg(test)]
 mod tests {
-    use domain::diffs::{Cmd, Commit, FileDiff, Foot, View};
+    use domain::diffs::{Cmd, Commit, FileDiff, Foot, MAX_LINE_COLS, View};
 
     use super::*;
 

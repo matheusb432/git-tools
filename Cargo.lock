@@ -105,7 +105,6 @@ dependencies = [
  "cqrsy",
  "domain",
  "futures-util",
- "similar",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -1191,6 +1190,7 @@ name = "domain"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "similar",
 ]
 
 [[package]]

@@ -2,14 +2,20 @@
 
 mod commit;
 mod file;
+mod intraline;
 mod kind;
 mod range;
+mod rows;
+mod split;
 mod target;
 mod view;
 
 pub use commit::Commit;
 pub use file::{FileDiff, FileStatus, LineOwners};
+pub use intraline::{LineSpans, Span, changed_spans};
 pub use kind::DiffKind;
 pub use range::{Mode, Ranges, ranges};
+pub use rows::{MAX_LINE_COLS, Row, RowKind, derive_rows, is_meta_line};
+pub use split::{SplitCell, SplitRow, line_body, split_rows};
 pub use target::DiffTarget;
 pub use view::{Cmd, Foot, View, sort_files_tree_order};
