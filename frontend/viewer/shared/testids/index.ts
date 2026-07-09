@@ -3,7 +3,7 @@ export const TEST_IDS = {
     strip: "tabs.strip",
     tab: "tabs.tab",
     nativeBadge: "tabs.native-badge",
-    historyButton: "tabs.history-button",
+    freshDot: "tabs.fresh-dot",
   },
   diffView: {
     root: "diff-view.root",
@@ -22,10 +22,10 @@ export const TEST_IDS = {
     filePanel: "diff-view.file-panel",
     rowWindow: "diff-view.row-window",
     row: "diff-view.row",
+    brokenSource: "diff-view.broken-source",
   },
-  historyPanel: {
-    root: "history-panel.root",
-    search: "history-panel.search",
-    row: "history-panel.row",
+  toast: {
+    root: "toast.root",
+    item: "toast.item",
   },
 } as const;

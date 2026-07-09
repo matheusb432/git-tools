@@ -1,34 +1,25 @@
 import { expect, test } from "bun:test";
 import {
+  type OpenRecipes,
   type Recipe,
-  drainPendingDiffs,
+  drainPendingRecipes,
   closeNativeTab,
   fileRows,
   getSetting,
-  isHistoryEntry,
   isOpenedTab,
+  isOpenRecipes,
+  isRecipe,
   isRowsPage,
+  isSourceProbe,
   isTabMeta,
-  listHistory,
+  listenOpenRecipe,
   openRecipe,
+  probeSource,
   refreshTab,
   setSetting,
   tabMeta,
   tauriGlobal,
 } from "./tauri";
-
-const valid = {
-  repo_id: "r",
-  repo_name: "n",
-  title: "t",
-  range_label: "x",
-  head_committed_at: "t",
-  generated_at: "t",
-  content_hash: "h",
-  kind: "3-dot",
-  byte_size: 4096,
-  url: "diff://r/h",
-};
 
 const meta = {
   tab_id: 7,
@@ -74,21 +65,6 @@ const recipe: Recipe = {
   op: { op: "diff", target: { target: "unpushed" } },
 };
 
-test("accepts a complete entry", () => {
-  expect(isHistoryEntry(valid)).toBe(true);
-});
-test("rejects when kind missing", () => {
-  const { kind: _kind, ...rest } = valid;
-  expect(isHistoryEntry(rest)).toBe(false);
-});
-test("rejects when byte_size is not a number", () => {
-  expect(isHistoryEntry({ ...valid, byte_size: "4096" })).toBe(false);
-});
-test("rejects non-objects", () => {
-  expect(isHistoryEntry(null)).toBe(false);
-  expect(isHistoryEntry("x")).toBe(false);
-});
-
 test("accepts native tab metadata and opened tab payloads", () => {
   expect(isTabMeta(meta)).toBe(true);
   expect(isOpenedTab({ tab_id: 7, meta })).toBe(true);
@@ -130,43 +106,6 @@ test("rejects unknown unified row kinds", () => {
 test("tauriGlobal throws when __TAURI__ is absent", () => {
   (globalThis.window as unknown as Record<string, unknown>) = {};
   expect(() => tauriGlobal()).toThrow("__TAURI__ is not available");
-});
-
-test("drainPendingDiffs drops non-string payload items", async () => {
-  (globalThis.window as unknown as Record<string, unknown>) = {
-    __TAURI__: {
-      core: { invoke: () => Promise.resolve(["diff://repo/a", 7, null]) },
-      event: { listen: () => Promise.resolve(() => undefined) },
-    },
-  };
-  expect(await drainPendingDiffs()).toEqual(["diff://repo/a"]);
-});
-
-test("listHistory drops malformed rows", async () => {
-  (globalThis.window as unknown as Record<string, unknown>) = {
-    __TAURI__: {
-      core: {
-        invoke: () =>
-          Promise.resolve([
-            {
-              repo_id: "repo",
-              repo_name: "repo",
-              title: "review",
-              range_label: "main..topic",
-              head_committed_at: "2026-06-24T00:00:00Z",
-              generated_at: "2026-06-24T00:00:00Z",
-              content_hash: "hash",
-              kind: "2-dot",
-              byte_size: 1234,
-              url: "diff://repo/hash",
-            },
-            { repo_id: "broken" },
-          ]),
-      },
-      event: { listen: () => Promise.resolve(() => undefined) },
-    },
-  };
-  expect(await listHistory()).toHaveLength(1);
 });
 
 test("native wrappers invoke exact Tauri command names and args", async () => {
@@ -237,6 +176,106 @@ test("native wrappers reject malformed payloads", async () => {
   );
   await expect(refreshTab(7)).rejects.toThrow("Malformed refresh_tab response");
   await expect(closeNativeTab(7)).rejects.toThrow("Malformed close_tab response");
+});
+
+test("isSourceProbe accepts ok and well-formed broken payloads, rejects the rest", () => {
+  expect(isSourceProbe({ outcome: "ok" })).toBe(true);
+  expect(isSourceProbe({ outcome: "broken", code: "DirNotFound", reason: "gone" })).toBe(true);
+  expect(isSourceProbe({ outcome: "broken", code: "DirNotFound" })).toBe(false);
+  expect(isSourceProbe({ outcome: "unknown" })).toBe(false);
+  expect(isSourceProbe(null)).toBe(false);
+});
+
+test("probeSource invokes probe_source with the source kind and value", async () => {
+  const calls: Array<{ command: string; args: unknown }> = [];
+  (globalThis.window as unknown as Record<string, unknown>) = {
+    __TAURI__: {
+      core: {
+        invoke: (command: string, args: unknown) => {
+          calls.push({ command, args });
+          return Promise.resolve({ outcome: "broken", code: "DirNotFound", reason: "gone" });
+        },
+      },
+      event: { listen: () => Promise.resolve(() => undefined) },
+    },
+  };
+
+  const result = await probeSource("LocalRepo", "/gone");
+
+  expect(calls).toEqual([{ command: "probe_source", args: { sourceKind: "LocalRepo", sourceValue: "/gone" } }]);
+  expect(result).toEqual({ outcome: "broken", code: "DirNotFound", reason: "gone" });
+});
+
+test("probeSource rejects a malformed payload", async () => {
+  (globalThis.window as unknown as Record<string, unknown>) = {
+    __TAURI__: {
+      core: { invoke: () => Promise.resolve({ outcome: "broken" }) },
+      event: { listen: () => Promise.resolve(() => undefined) },
+    },
+  };
+
+  await expect(probeSource("LocalRepo", "/gone")).rejects.toThrow("Malformed probe_source response");
+});
+
+test("isRecipe accepts a well-formed recipe, rejects malformed ones", () => {
+  expect(isRecipe(recipe)).toBe(true);
+  expect(isRecipe({ source: recipe.source, op: { op: "unknown" } })).toBe(false);
+  expect(isRecipe({ source: { kind: "GithubRepo", value: "o/r" }, op: recipe.op })).toBe(false);
+  expect(isRecipe(null)).toBe(false);
+});
+
+test("isOpenRecipes accepts a batch keyed by the wire's snake_case batch_id", () => {
+  expect(isOpenRecipes({ batch_id: "batch-1", recipes: [recipe] })).toBe(true);
+  expect(isOpenRecipes({ batch_id: "batch-1", recipes: [] })).toBe(true);
+});
+
+test("isOpenRecipes rejects a missing/non-array recipes field or a malformed recipe", () => {
+  expect(isOpenRecipes({ batch_id: "batch-1" })).toBe(false);
+  expect(isOpenRecipes({ batch_id: "batch-1", recipes: "nope" })).toBe(false);
+  expect(isOpenRecipes({ batch_id: "batch-1", recipes: [{ source: recipe.source, op: { op: "bogus" } }] })).toBe(
+    false,
+  );
+  expect(isOpenRecipes({ recipes: [recipe] })).toBe(false);
+  expect(isOpenRecipes(null)).toBe(false);
+});
+
+test("drainPendingRecipes maps the wire's batch_id onto batchId and drops malformed batches", async () => {
+  (globalThis.window as unknown as Record<string, unknown>) = {
+    __TAURI__: {
+      core: {
+        invoke: () =>
+          Promise.resolve([
+            { batch_id: "batch-1", recipes: [recipe] },
+            { batch_id: "batch-2", recipes: "not-an-array" },
+          ]),
+      },
+      event: { listen: () => Promise.resolve(() => undefined) },
+    },
+  };
+
+  expect(await drainPendingRecipes()).toEqual([{ batchId: "batch-1", recipes: [recipe] }]);
+});
+
+test("listenOpenRecipe subscribes to open-recipe and maps batch_id onto batchId", async () => {
+  const calls: Array<{ event: string }> = [];
+  const received: OpenRecipes[] = [];
+  (globalThis.window as unknown as Record<string, unknown>) = {
+    __TAURI__: {
+      core: { invoke: () => Promise.resolve(undefined) },
+      event: {
+        listen: (event: string, handler: (e: { payload: unknown }) => void) => {
+          calls.push({ event });
+          handler({ payload: { batch_id: "batch-9", recipes: [recipe] } });
+          return Promise.resolve(() => undefined);
+        },
+      },
+    },
+  };
+
+  await listenOpenRecipe((batch) => received.push(batch));
+
+  expect(calls).toEqual([{ event: "open-recipe" }]);
+  expect(received).toEqual([{ batchId: "batch-9", recipes: [recipe] }]);
 });
 
 test("closeNativeTab invokes close_tab with the tab id", async () => {

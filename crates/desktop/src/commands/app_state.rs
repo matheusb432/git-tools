@@ -7,6 +7,7 @@ use std::path::Path;
 use application::{
     live_views::{
         list::ListLiveViews,
+        probe::{ProbeOutcome, ProbeSource},
         remove::RemoveLiveView,
         save::{SaveLiveView, SaveLiveViewOutcome},
     },
@@ -91,6 +92,54 @@ pub(crate) async fn save_live_view(
     tauri::async_runtime::spawn_blocking(move || save_live_view_inner(&mediator, &data_root, path))
         .await
         .map_err(|err| err.to_string())?
+}
+
+/// What probing a live-view source found, typed for the frontend.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "outcome", rename_all = "kebab-case")]
+pub(crate) enum SourceProbeDto {
+    Ok,
+    Broken { code: &'static str, reason: String },
+}
+
+pub(crate) fn probe_source_inner<M>(
+    mediator: &M,
+    data_root: &Path,
+    source_kind: String,
+    source_value: String,
+) -> Result<SourceProbeDto, String>
+where
+    M: Sender<ProbeSource> + Handle,
+{
+    let response = mediator
+        .send_now(ProbeSource {
+            data_root: data_root.to_path_buf(),
+            source_kind,
+            source_value,
+        })
+        .map_err(|err| format!("{err:#}"))?;
+    Ok(match response.outcome {
+        ProbeOutcome::Ok => SourceProbeDto::Ok,
+        ProbeOutcome::Broken { rejection } => SourceProbeDto::Broken {
+            code: rejection.code(),
+            reason: rejection.to_string(),
+        },
+    })
+}
+
+#[tauri::command]
+pub(crate) async fn probe_source(
+    mediator: tauri::State<'_, crate::WiredMediator>,
+    source_kind: String,
+    source_value: String,
+) -> Result<SourceProbeDto, String> {
+    let mediator = mediator.inner().clone();
+    let data_root = super::data_root()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        probe_source_inner(&mediator, &data_root, source_kind, source_value)
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
@@ -221,5 +270,49 @@ mod tests {
         assert_eq!(view.source_kind, "LocalRepo");
         assert_eq!(view.source_value, "/repos/gt");
         assert_eq!(view.display_name, "gt");
+    }
+
+    #[test]
+    fn probe_reports_broken_for_a_missing_directory() {
+        // FakeRepoProbe::default() answers NotFound.
+        let mediator = crate::test_support::fake_mediator(FakeDiffSource::default());
+
+        let dto = probe_source_inner(
+            &mediator,
+            Path::new("/data"),
+            "LocalRepo".into(),
+            "/gone".into(),
+        )
+        .expect("probe resolves");
+
+        assert_eq!(
+            dto,
+            SourceProbeDto::Broken {
+                code: "DirNotFound",
+                reason: "The git repo's directory at `/gone` was not found.".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn probe_reports_ok_for_a_valid_repo() {
+        let mediator = crate::test_support::fake_mediator_with_probe(
+            FakeDiffSource::default(),
+            FakeRepoProbe {
+                result: RepoProbeResult::Repo {
+                    top_level: "/repos/gt".into(),
+                },
+            },
+        );
+
+        let dto = probe_source_inner(
+            &mediator,
+            Path::new("/data"),
+            "LocalRepo".into(),
+            "/repos/gt".into(),
+        )
+        .expect("probe resolves");
+
+        assert_eq!(dto, SourceProbeDto::Ok);
     }
 }

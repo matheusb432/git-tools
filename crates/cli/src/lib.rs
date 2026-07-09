@@ -2,9 +2,9 @@
 
 use crate::{
     cli::{
-        Cli, ColorChoice, Command, CommitArgs, DaemonArgs, DaemonCommand, DiffTarget,
-        DiffTargetArgs, ManagedArgs, ManagedReadArgs, PruneArgs, PushArgs, StatusArgs, SwArgs,
-        TagCommand, Theme, WorktreeCommand,
+        Cli, ColorChoice, Command, CommitArgs, DaemonArgs, DaemonCommand, DiffSub, DiffTarget,
+        DiffTargetArgs, LiveArgs, ManagedArgs, ManagedReadArgs, MergeArgs, PruneArgs, PushArgs,
+        SquashArgs, StatusArgs, SwArgs, TagCommand, Theme, WorktreeCommand,
     },
     commands::{
         git_runner::StdGitRunner,
@@ -17,6 +17,8 @@ pub mod cli;
 pub mod client;
 pub mod commands;
 pub mod config;
+pub mod preprocess;
+pub mod recipe;
 pub mod viewer;
 
 pub(crate) mod model {
@@ -59,7 +61,8 @@ fn squash_local_output_stream(status: Status) -> OutputStream {
 
 /// Route argv (already stripped of argv[0]) to an [`ExitCode`].
 pub fn run(args: &[String]) -> ExitCode {
-    match Cli::parse_args(args) {
+    let args = preprocess::normalize(args.to_vec());
+    match Cli::parse_args(&args) {
         Ok(cli) => dispatch(cli.command),
         Err(error) => render_clap_error(&error),
     }
@@ -82,38 +85,43 @@ fn render_clap_error(error: &clap::Error) -> ExitCode {
 
 fn dispatch(command: Command) -> ExitCode {
     match command {
-        Command::SquashPreview { repo, monorepo: _ } => {
-            html_exit(commands::squash_preview::run(repo))
-        }
-        Command::Diff(args) => {
-            if let Some(theme) = args.target.set_theme {
-                return run_set_theme(theme);
+        Command::Diff(args) => match args.sub {
+            Some(DiffSub::Merge(MergeArgs { repo, base, raw })) => {
+                diff_exit(commands::merge_diff::run(repo, base.as_deref(), raw))
             }
-            if args.target.recursive {
-                return diff_exit(commands::diff_subrepos::run_scan(
-                    ".",
-                    args.target.last,
-                    args.target.worktrees,
-                ));
+            Some(DiffSub::Squash(SquashArgs { repo, raw })) => {
+                diff_exit(commands::squash_preview::run(repo, raw))
             }
-            match diff_invocation(args.target) {
-                DiffInvocation::Single { target, name } => {
-                    diff_exit(commands::diff::run(&target, name.as_deref()))
+            Some(DiffSub::Live(LiveArgs { path })) => {
+                diff_live_exit(commands::diff_live::run(path))
+            }
+            None => {
+                let raw = args.raw;
+                if let Some(theme) = args.target.set_theme {
+                    return run_set_theme(theme);
                 }
-                DiffInvocation::ManagedAll {
-                    repos_file,
-                    home_dir,
-                } => {
-                    let options = managed_diff_options(repos_file, home_dir);
-                    html_exit(commands::diff_subrepos::run_managed_all(".", &options))
+                if args.target.recursive {
+                    return diff_exit(commands::diff_subrepos::run_scan(
+                        ".",
+                        args.target.last,
+                        args.target.worktrees,
+                        raw,
+                    ));
+                }
+                match diff_invocation(args.target) {
+                    DiffInvocation::Single { target, name } => {
+                        diff_exit(commands::diff::run(&target, name.as_deref(), raw))
+                    }
+                    DiffInvocation::ManagedAll {
+                        repos_file,
+                        home_dir,
+                    } => {
+                        let options = managed_diff_options(repos_file, home_dir);
+                        diff_exit(commands::diff_subrepos::run_managed_all(".", &options, raw))
+                    }
                 }
             }
-        }
-        Command::MergeDiff {
-            repo,
-            monorepo: _,
-            base,
-        } => html_exit(commands::merge_diff::run(repo, base.as_deref())),
+        },
         Command::SquashLocal { repo, message, dry } => {
             let runner = StdGitRunner;
             let result = invoke_squash_local(&runner, repo, Some(&message), dry);
@@ -614,7 +622,7 @@ fn run_sw(args: &SwArgs) -> ExitCode {
         };
         let code = finish_sw(&sw::apply_rebase(&runner, &target));
         if code == ExitCode::Ok && args.diff {
-            return diff_exit(commands::diff::run(&DiffTarget::Unpushed, None));
+            return diff_exit(commands::diff::run(&DiffTarget::Unpushed, None, false));
         }
         return code;
     }
@@ -872,19 +880,11 @@ fn stdout_is_terminal() -> bool {
     std::io::IsTerminal::is_terminal(&std::io::stdout())
 }
 
-/// Like [`html_exit`], but for the single `diff` path: an empty range is a clean
-/// no-op (the command already warned), not a failure.
+/// Map a [`commands::diff::DiffOutcome`] result to an [`ExitCode`]: any `Ok` variant
+/// (rendered, forwarded to the viewer, or a clean empty-range no-op) is a success.
+/// Shared by every render path that produces a `DiffOutcome` — `diff`, `diff -r`,
+/// `diff --all`, `diff merge`, and `diff squash`.
 fn diff_exit(result: anyhow::Result<commands::diff::DiffOutcome>) -> ExitCode {
-    match result {
-        Ok(_) => ExitCode::Ok,
-        Err(error) => {
-            eprintln!("{}", html_error_text(&error));
-            ExitCode::Internal
-        }
-    }
-}
-
-fn html_exit(result: anyhow::Result<std::path::PathBuf>) -> ExitCode {
     match result {
         Ok(_) => ExitCode::Ok,
         Err(error) => {
@@ -896,6 +896,19 @@ fn html_exit(result: anyhow::Result<std::path::PathBuf>) -> ExitCode {
 
 fn html_error_text(error: &anyhow::Error) -> String {
     format!("{error:#}")
+}
+
+/// Map a `diff live` result to an [`ExitCode`]: success (a save, or a clean
+/// no-managed-repos-unpushed no-op) is `Ok`; a validation rejection or transport
+/// failure prints the daemon's own message and exits `Internal`.
+fn diff_live_exit(result: anyhow::Result<()>) -> ExitCode {
+    match result {
+        Ok(()) => ExitCode::Ok,
+        Err(error) => {
+            eprintln!("{}", html_error_text(&error));
+            ExitCode::Internal
+        }
+    }
 }
 
 fn print_squash_local_result(result: &SquashResult, message: &str) {
@@ -966,7 +979,20 @@ mod tests {
 
     #[test]
     fn ls_exits_ok() {
-        assert_eq!(run(&["ls".into()]), ExitCode::Ok);
+        // Hermetic: point at an empty manifest via `--repos-file` so this never reads the
+        // real `$HOME` manifest or touches the developer's actual repos (an empty
+        // `[[repo]]` array parses to zero managed repos, which is a Clean status run).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repos_file = dir.path().join("repos.toml");
+        std::fs::write(&repos_file, "").expect("write empty manifest");
+
+        let exit = run(&[
+            "ls".into(),
+            "--repos-file".into(),
+            repos_file.display().to_string(),
+        ]);
+
+        assert_eq!(exit, ExitCode::Ok);
     }
 
     #[test]

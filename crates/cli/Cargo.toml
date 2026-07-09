@@ -19,6 +19,7 @@ clap = { version = "4", features = ["derive"] }
 contracts = { path = "../contracts" }
 domain = { path = "../domain" }
 gtl-platform = { path = "../../shared/gtl-platform" }
+gtl-recipe = { path = "../../shared/gtl-recipe" }
 infra = { path = "../infra" }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 reqwest = { version = "0.13", default-features = false, features = [
@@ -30,6 +31,7 @@ serde_json = "1"
 thiserror = "2.0.18"
 toml = "1.1.2"
 toml_edit = "0.25.12"
+uuid = { version = "1", features = ["v4"] }
 walkdir = "2.5.0"
 
 [dev-dependencies]

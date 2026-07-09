@@ -14,6 +14,7 @@ use contracts::{
         RenderMergeDiffRequest, RenderSquashPreviewRequest,
     },
     envelope::Envelope,
+    live_views::{SaveLiveViewData, SaveLiveViewRequest},
     managed::{PullAllRequest, PushAllRequest, SyncData},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -96,6 +97,18 @@ pub trait Backend {
     /// carried inside the returned [`Envelope`], not as `Err`.
     fn pull_all(&self, _req: &PullAllRequest) -> anyhow::Result<Envelope<SyncData>> {
         unimplemented!("pull_all")
+    }
+
+    /// Validate + persist a live-view source, returning the service-composed wire envelope.
+    ///
+    /// # Errors
+    /// Returns an error only on transport/parse failure — a rejection is carried inside the
+    /// returned [`Envelope`], not as `Err`.
+    fn save_live_view(
+        &self,
+        _req: &SaveLiveViewRequest,
+    ) -> anyhow::Result<Envelope<SaveLiveViewData>> {
+        unimplemented!("save_live_view")
     }
 }
 
@@ -259,6 +272,13 @@ impl Backend for HttpBackend {
 
     fn pull_all(&self, req: &PullAllRequest) -> anyhow::Result<Envelope<SyncData>> {
         self.post_json("/managed/pull-all", req)
+    }
+
+    fn save_live_view(
+        &self,
+        req: &SaveLiveViewRequest,
+    ) -> anyhow::Result<Envelope<SaveLiveViewData>> {
+        self.post_json("/live-views/save", req)
     }
 }
 

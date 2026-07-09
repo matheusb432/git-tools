@@ -1,4 +1,4 @@
-import type { Recipe } from "../../../frontend/viewer/shared/api/index";
+import type { OpenRecipes, Recipe } from "../../../frontend/viewer/shared/api/index";
 import { selectors } from "./handles";
 
 export type OpenMetrics = {
@@ -15,15 +15,24 @@ type OpenOutcome =
 type ViewerTestApi = {
   readonly openNativeRecipe: (recipe: Recipe, batchId?: string) => Promise<void>;
   readonly activateNativeRepo: (repoName: string) => Promise<boolean>;
+  readonly announceBatch: (count: number, commandLabel: string) => void;
+  readonly openRecipeBatch: (batch: OpenRecipes) => Promise<void>;
+  readonly activateLiveTabBySource: (sourceValue: string) => boolean;
   readonly snapshot: () => ViewerSnapshot;
 };
 
 export type ViewerSnapshot = {
   readonly active: number;
-  readonly showHistory: boolean;
+  readonly activeTab: {
+    readonly kind: "native";
+    readonly tabId?: number | null;
+    readonly lifecycle?: "opening" | "ready" | "refreshing" | "error";
+    readonly repoName?: string | null;
+  } | null;
   readonly shellError: string | null;
+  readonly browserErrors: readonly string[];
   readonly tabs: readonly {
-    readonly kind: "artifact" | "native";
+    readonly kind: "native";
     readonly localId?: string;
     readonly tabId?: number | null;
     readonly batchId?: string;
@@ -31,7 +40,10 @@ export type ViewerSnapshot = {
     readonly error?: string;
     readonly repoName?: string | null;
     readonly fileCount?: number | null;
+    readonly live?: boolean;
+    readonly source?: { readonly kind: string; readonly value: string } | null;
   }[];
+  readonly toasts: readonly { readonly id: number; readonly message: string }[];
 };
 
 declare global {
@@ -187,6 +199,39 @@ export async function activateNativeRepo(repoName: string): Promise<void> {
       .then((activated) => done(activated ? null : `Could not find native tab for ${name}`))
       .catch((error: unknown) => done(error instanceof Error ? error.message : String(error)));
   }, repoName);
+
+  if (typeof result === "string" && result !== "") {
+    throw new Error(result);
+  }
+}
+
+/** Drives the real `--all`/`subrepos` batch-open path (freshness marking + toast) for `batch`. */
+export async function openRecipeBatch(batch: OpenRecipes): Promise<void> {
+  const result = await browser.executeAsync((batchValue: OpenRecipes, done: (result: string | null) => void) => {
+    const api = window.__GTL_VIEWER_TEST__;
+    if (api === undefined) {
+      done("window.__GTL_VIEWER_TEST__.openRecipeBatch is unavailable");
+      return;
+    }
+
+    api.openRecipeBatch(batchValue)
+      .then(() => done(null))
+      .catch((error: unknown) => done(error instanceof Error ? error.message : String(error)));
+  }, batch);
+
+  if (typeof result === "string" && result !== "") {
+    throw new Error(result);
+  }
+}
+
+/** Focuses a restored live tab by its saved source path (see `activateLiveTabBySource` in
+ * `App.svelte` for why `activateNativeRepo` cannot reach an uncomputed live tab). */
+export async function activateLiveTabBySource(sourceValue: string): Promise<void> {
+  const result = await browser.execute((value: string) => {
+    const api = window.__GTL_VIEWER_TEST__;
+    if (api === undefined) return "window.__GTL_VIEWER_TEST__.activateLiveTabBySource is unavailable";
+    return api.activateLiveTabBySource(value) ? null : `Could not find a live tab for source ${value}`;
+  }, sourceValue);
 
   if (typeof result === "string" && result !== "") {
     throw new Error(result);

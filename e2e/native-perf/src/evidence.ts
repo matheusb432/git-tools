@@ -215,8 +215,11 @@ export async function flushEvidence(capabilities: unknown): Promise<void> {
   const dir = ensureArtifactDir();
   if (dir === null) return;
 
-  writeJson(join(dir, "timings.json"), timings);
-  writeJson(join(dir, "dom-counts.json"), domCounts);
+  // ! Each spec file runs in its own WDIO session (separate process, fresh
+  // ! module state) but shares one artifact dir; a session that recorded no
+  // ! timings/dom-counts must not clobber another session's data with `[]`.
+  if (timings.length > 0) writeJson(join(dir, "timings.json"), timings);
+  if (domCounts.length > 0) writeJson(join(dir, "dom-counts.json"), domCounts);
 
   const userAgent = await browser.execute(() => navigator.userAgent);
   writeJson(

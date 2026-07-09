@@ -138,7 +138,12 @@ impl Fixture {
             .current_dir(&self.repo)
             .env("GIT_TOOLS_NO_OPEN", "1")
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
-            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "30");
+            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "30")
+            // This suite pins the daemon/store round trip directly (autostart, sidecar
+            // reuse); simulate headless so `diff`'s default degrades to that path
+            // without needing `--raw` (Phase 5, Task 1.6).
+            .env_remove("DISPLAY")
+            .env_remove("WAYLAND_DISPLAY");
         cmd
     }
 

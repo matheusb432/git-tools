@@ -11,6 +11,7 @@ members = [
   "crates/infra",
   "shared/bootstrap",
   "shared/gtl-platform",
+  "shared/gtl-recipe",
   "xtask",
 ]
 # Everything except `desktop`, which needs webkit2gtk headers and stays opt-in
@@ -25,6 +26,7 @@ default-members = [
   "crates/infra",
   "shared/bootstrap",
   "shared/gtl-platform",
+  "shared/gtl-recipe",
   "xtask",
 ]
 

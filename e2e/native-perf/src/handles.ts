@@ -7,7 +7,7 @@ function byTestId(testId: string): string {
 export const selectors = {
   tabs: byTestId(TEST_IDS.tabs.tab),
   tabsStrip: byTestId(TEST_IDS.tabs.strip),
-  historyPanel: byTestId(TEST_IDS.historyPanel.root),
+  freshDot: byTestId(TEST_IDS.tabs.freshDot),
   diffRoot: byTestId(TEST_IDS.diffView.root),
   fileTree: byTestId(TEST_IDS.diffView.fileTree),
   row: byTestId(TEST_IDS.diffView.row),
@@ -19,6 +19,9 @@ export const selectors = {
   unifiedLayoutButton: byTestId(TEST_IDS.diffView.layoutUnified),
   compactButton: byTestId(TEST_IDS.diffView.densityCompact),
   fullButton: byTestId(TEST_IDS.diffView.densityFull),
+  brokenSource: byTestId(TEST_IDS.diffView.brokenSource),
+  toastRoot: byTestId(TEST_IDS.toast.root),
+  toastItem: byTestId(TEST_IDS.toast.item),
 } as const;
 
 export async function selectorText(selector: string): Promise<string> {

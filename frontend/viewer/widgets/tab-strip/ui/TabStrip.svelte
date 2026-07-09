@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, ChevronDown, MoreHorizontal, History, Trash2, Search } from "@lucide/svelte";
+  import { X, ChevronDown, MoreHorizontal, Trash2, Search } from "@lucide/svelte";
   import * as DropdownMenu from "@/shared/ui/dropdown-menu";
   import * as ContextMenu from "@/shared/ui/context-menu";
   import * as InputGroup from "@/shared/ui/input-group";
@@ -13,14 +13,12 @@
   type Props = {
     tabs: ViewerTab[];
     active: number;
-    showHistory: boolean;
     onActivate: (i: number) => void | Promise<void>;
     onClose: (i: number) => void | Promise<void>;
     onCloseOthers: (i: number) => void | Promise<void>;
     onCloseAll: () => void | Promise<void>;
-    onOpenHistory: () => void | Promise<void>;
   };
-  let { tabs, active, showHistory, onActivate, onClose, onCloseOthers, onCloseAll, onOpenHistory }: Props = $props();
+  let { tabs, active, onActivate, onClose, onCloseOthers, onCloseAll }: Props = $props();
 
   const TAB_MIN = 120;
   const RESERVED = 220;
@@ -36,11 +34,10 @@
   const indexOf = (t: ViewerTab) => tabs.indexOf(t);
 
   function tabLabel(tab: ViewerTab): string {
-    return tab.kind === "artifact" ? tab.label : tab.meta?.title || tab.meta?.repo_name || "Opening diff";
+    return tab.meta?.title || tab.meta?.repo_name || "Opening diff";
   }
 
   function tabBadge(tab: ViewerTab): { text: string; variant: "secondary" | "outline" | "destructive" } | null {
-    if (tab.kind === "artifact") return null;
     switch (tab.lifecycle.state) {
       case "opening":
         return { text: "Opening", variant: "secondary" };
@@ -66,7 +63,7 @@
 >
   {#each fit.visible as tab (viewerTabKey(tab))}
     {@const i = indexOf(tab)}
-    {@const isActive = !showHistory && i === active}
+    {@const isActive = i === active}
     {@const label = tabLabel(tab)}
     {@const badge = tabBadge(tab)}
     <ContextMenu.Root>
@@ -76,7 +73,7 @@
           role="tab"
           tabindex="0"
           aria-selected={isActive}
-          title={tab.kind === "native" ? (nativeTitle(tab) ?? label) : label}
+          title={nativeTitle(tab) ?? label}
           class={cn(
             "group flex max-w-[190px] min-w-0 cursor-pointer items-center gap-2 rounded-t-lg bg-muted py-2 pr-1 pl-3.5 text-[13px] text-foreground-muted transition-colors hover:text-foreground",
             isActive && "bg-background text-foreground shadow-[inset_0_2px_0_var(--color-accent)]",
@@ -92,13 +89,20 @@
             }
           }}
         >
+          {#if tab.isNew === true}
+            <span
+              data-testid={TEST_IDS.tabs.freshDot}
+              class="size-1.5 shrink-0 rounded-full bg-accent"
+              aria-hidden="true"
+            ></span>
+          {/if}
           <span class="truncate">{label}</span>
           {#if badge !== null}
             <Badge
               data-testid={TEST_IDS.tabs.nativeBadge}
               variant={badge.variant}
               class="shrink-0"
-              title={tab.kind === "native" && tab.lifecycle.state === "error" ? tab.lifecycle.message : badge.text}
+              title={tab.lifecycle.state === "error" ? tab.lifecycle.message : badge.text}
             >
               {badge.text}
             </Badge>
@@ -170,15 +174,5 @@
         Close all
       </Button>
     {/if}
-    <Button
-      data-testid={TEST_IDS.tabs.historyButton}
-      variant={showHistory ? "secondary" : "ghost"}
-      size="sm"
-      class={cn("text-foreground-muted hover:text-foreground", showHistory && "text-accent")}
-      onclick={onOpenHistory}
-    >
-      <History data-icon="inline-start" />
-      History
-    </Button>
   </div>
 </div>

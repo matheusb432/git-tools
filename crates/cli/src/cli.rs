@@ -46,33 +46,10 @@ impl Cli {
 /// Top-level subcommands; each maps to one [`crate::commands`] entry point.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Render a squash preview of a subrepo's unpushed work against its monorepo.
-    SquashPreview {
-        /// Subrepo working tree to preview.
-        #[arg(long)]
-        repo: String,
-        /// Monorepo root used to resolve the subrepo path (preview is written to the central
-        /// store).
-        #[arg(long)]
-        monorepo: String,
-    },
-    /// Render an HTML diff of the current repo, all managed repos with `--all`, or nested
-    /// subrepos with `-r`.
+    /// Diff the current repo (all managed repos with `--all`, nested subrepos with `-r`),
+    /// rendered natively in the app; `--raw` renders HTML to the browser instead.
     #[command(visible_alias = "d")]
     Diff(DiffArgs),
-    /// Render a merge preview (three-dot diff) of a subrepo against a base branch.
-    MergeDiff {
-        /// Subrepo working tree to preview.
-        #[arg(long)]
-        repo: String,
-        /// Monorepo root used to resolve the subrepo path (preview is written to the central
-        /// store).
-        #[arg(long)]
-        monorepo: String,
-        /// Base branch to merge into (default: main).
-        #[arg(long)]
-        base: Option<String>,
-    },
     /// Squash all unpushed local commits into a single commit.
     SquashLocal {
         /// New commit message for the squashed commit.
@@ -129,9 +106,61 @@ pub enum DaemonCommand {
 
 /// Arguments for the root `diff` command and its nested subcommands.
 #[derive(Debug, Args)]
+#[command(args_conflicts_with_subcommands = true)]
 pub struct DiffArgs {
+    #[command(subcommand)]
+    pub sub: Option<DiffSub>,
+    /// Render via the browser/Maud path instead of the app.
+    #[arg(long)]
+    pub raw: bool,
     #[command(flatten)]
     pub target: DiffTargetArgs,
+}
+
+/// Nested commands under `diff`.
+#[derive(Debug, Subcommand)]
+pub enum DiffSub {
+    /// Render a merge preview (three-dot diff) of a repo against a base branch.
+    Merge(MergeArgs),
+    /// Render a squash preview of a repo's unpushed work as a single commit.
+    Squash(SquashArgs),
+    /// Save + open a persisted live view of unpushed work in a managed repo.
+    Live(LiveArgs),
+}
+
+/// Arguments for `diff merge`.
+#[derive(Debug, Args)]
+pub struct MergeArgs {
+    /// Subrepo working tree to preview.
+    #[arg(long)]
+    pub repo: String,
+    /// Base branch to merge into (default: main).
+    #[arg(long)]
+    pub base: Option<String>,
+    /// Render via the browser/Maud path instead of the app.
+    #[arg(long)]
+    pub raw: bool,
+}
+
+/// Arguments for `diff squash`.
+#[derive(Debug, Args)]
+pub struct SquashArgs {
+    /// Subrepo working tree to preview.
+    #[arg(long)]
+    pub repo: String,
+    /// Render via the browser/Maud path instead of the app.
+    #[arg(long)]
+    pub raw: bool,
+}
+
+/// Arguments for `diff live`. No `--raw`: a live view only ever renders through
+/// the app (there is no store-artifact/browser path for it).
+#[derive(Debug, Args)]
+pub struct LiveArgs {
+    /// Repo to save + open a live view for (default: every managed repo with
+    /// unpushed commits).
+    #[arg(long)]
+    pub path: Option<String>,
 }
 
 /// Arguments for `push`.
@@ -457,19 +486,84 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_args_routes_canonical_subcommands() {
+    fn parse_args_routes_diff_squash_subcommand() {
+        let cli = Cli::parse_args(&["diff".into(), "squash".into(), "--repo".into(), "r".into()])
+            .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                sub: Some(DiffSub::Squash(SquashArgs { repo, .. })),
+                ..
+            }) if repo == "r"
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_diff_live_subcommand() {
+        let cli =
+            Cli::parse_args(&["diff".into(), "live".into(), "--path".into(), "p".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                sub: Some(DiffSub::Live(LiveArgs { path: Some(path) })),
+                ..
+            }) if path == "p"
+        ));
+    }
+
+    #[test]
+    fn parse_args_diff_live_has_no_path_by_default() {
+        let cli = Cli::parse_args(&["diff".into(), "live".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                sub: Some(DiffSub::Live(LiveArgs { path: None })),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_diff_live_rejects_raw() {
+        // `LiveArgs` has no `--raw` field: a live view has no store-artifact/browser
+        // path of its own, so passing `--raw` to the subcommand itself is a usage error.
+        assert!(Cli::parse_args(&["diff".into(), "live".into(), "--raw".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_routes_diff_merge_subcommand() {
         let cli = Cli::parse_args(&[
-            "squash-preview".into(),
+            "diff".into(),
+            "merge".into(),
             "--repo".into(),
             "r".into(),
-            "--monorepo".into(),
-            "m".into(),
+            "--base".into(),
+            "trunk".into(),
         ])
         .unwrap();
         assert!(matches!(
             cli.command,
-            Command::SquashPreview { repo, monorepo } if repo == "r" && monorepo == "m"
+            Command::Diff(DiffArgs {
+                sub: Some(DiffSub::Merge(MergeArgs { repo, base: Some(base), .. })),
+                ..
+            }) if repo == "r" && base == "trunk"
         ));
+    }
+
+    #[test]
+    fn parse_args_diff_sub_conflicts_with_target_flags() {
+        // `args_conflicts_with_subcommands`: a target flag and a nested subcommand
+        // can't both be present.
+        assert!(
+            Cli::parse_args(&[
+                "diff".into(),
+                "-r".into(),
+                "merge".into(),
+                "--repo".into(),
+                "r".into(),
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -536,7 +630,7 @@ mod tests {
     fn parse_args_ls_aliases_status_all() {
         let cli = Cli::parse_args(&["ls".into()]).unwrap();
 
-        assert!(matches!(cli.command, Command::Ls(LsArgs { .. })))
+        assert!(matches!(cli.command, Command::Ls(LsArgs { .. })));
     }
 
     #[test]
@@ -598,8 +692,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_rejects_retired_ls_command() {
-        assert!(Cli::parse_args(&["ls".into()]).is_err());
+    fn parse_args_ls_is_status_all_alias() {
+        let cli = Cli::parse_args(&["ls".into()]).unwrap();
+        let Command::Ls(ls_args) = cli.command else {
+            panic!("expected Command::Ls, got {:?}", cli.command);
+        };
+
+        let status_args = StatusArgs::from(ls_args);
+        assert!(status_args.all);
+        assert!(!status_args.recursive);
     }
 
     #[test]
@@ -652,6 +753,7 @@ mod tests {
                     last: Some(n),
                     ..
                 },
+                ..
             }) if n.get() == 5
         ));
     }
@@ -667,6 +769,7 @@ mod tests {
                     last: Some(n),
                     ..
                 },
+                ..
             }) if n.get() == 1
         ));
     }
@@ -682,6 +785,7 @@ mod tests {
                     last: Some(n),
                     ..
                 },
+                ..
             }) if n.get() == 1
         ));
     }
@@ -740,6 +844,7 @@ mod tests {
                     last: None,
                     ..
                 },
+                ..
             }) if base == "main"
         ));
     }
@@ -824,6 +929,7 @@ mod tests {
                     last: None,
                     ..
                 },
+                ..
             }) if repos_file == "repos.toml" && home_dir == "/tmp/home"
         ));
     }

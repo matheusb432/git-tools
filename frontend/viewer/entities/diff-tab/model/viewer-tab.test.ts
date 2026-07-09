@@ -8,7 +8,6 @@ import {
   nativeOpeningTab,
   nativeReadyTab,
   sortViewerTabsByTime,
-  type ArtifactTab,
   type ViewerTabState,
 } from "..";
 
@@ -46,12 +45,6 @@ const meta: TabMeta = {
   files: [],
 };
 
-const artifact = (label: string, committedAt: string): ArtifactTab => ({
-  kind: "artifact",
-  url: `diff://repo/${label}`,
-  label,
-  committedAt,
-});
 const native = (localId: string, batchId = "batch-1") =>
   nativeReadyTab(nativeOpeningTab(localId, recipe, batchId), {
     tab_id: 7,
@@ -60,34 +53,30 @@ const native = (localId: string, batchId = "batch-1") =>
 const viewerState = (tabs: ViewerTabState["tabs"], active: number): ViewerTabState => ({
   tabs,
   active,
-  showHistory: false,
 });
 
 test("closing a native tab keeps active index valid", () => {
-  const state = closeViewerTabState(viewerState([artifact("a", "2026-07-07T00:00:00Z"), native("local-1")], 1), 1);
-  expect(state.tabs).toEqual([artifact("a", "2026-07-07T00:00:00Z")]);
+  const state = closeViewerTabState(viewerState([native("local-1"), native("local-2")], 1), 1);
+  expect(state.tabs).toEqual([native("local-1")]);
   expect(state.active).toBe(0);
 });
 
 test("closeOtherViewerTabs keeps only the selected native tab", () => {
   const kept = native("local-2");
-  const state = closeOtherViewerTabs(
-    viewerState([artifact("a", "2026-07-07T00:00:00Z"), kept, artifact("b", "2026-07-06T00:00:00Z")], 0),
-    1,
-  );
+  const state = closeOtherViewerTabs(viewerState([native("local-1"), kept, native("local-3")], 0), 1);
   expect(state.tabs).toEqual([kept]);
   expect(state.active).toBe(0);
 });
 
-test("closeAllViewerTabs empties mixed tabs", () => {
-  const state = closeAllViewerTabs(viewerState([artifact("a", "2026-07-07T00:00:00Z"), native("local-1")], 1));
+test("closeAllViewerTabs empties every tab", () => {
+  const state = closeAllViewerTabs(viewerState([native("local-1"), native("local-2")], 1));
   expect(state.tabs).toEqual([]);
   expect(state.active).toBe(0);
 });
 
 test("applyOpenedNativeTab closes backend tabs that resolve after the opening shell was closed", () => {
   const opened = { tab_id: 11, meta: { ...meta, tab_id: 11 } };
-  const state = viewerState([artifact("a", "2026-07-07T00:00:00Z")], 0);
+  const state = viewerState([native("local-0")], 0);
 
   expect(applyOpenedNativeTab(state, "local-1", opened)).toEqual({
     next: state,
@@ -95,9 +84,18 @@ test("applyOpenedNativeTab closes backend tabs that resolve after the opening sh
   });
 });
 
-test("sortViewerTabsByTime orders artifact tabs by committedAt and native tabs by latest commit iso", () => {
-  const olderArtifact = artifact("artifact-a", "2026-07-07T00:00:00Z");
-  const newerArtifact = artifact("artifact-b", "2026-07-08T12:00:00Z");
+test("applyOpenedNativeTab drops a stale tab that shares the newly resolved tab_id", () => {
+  const stale = native("local-1", "batch-1");
+  const opening = nativeOpeningTab("local-2", recipe, "batch-2");
+  const state = viewerState([stale, opening], 1);
+
+  const { next } = applyOpenedNativeTab(state, "local-2", { tab_id: 7, meta: { ...meta, batch_id: "batch-2" } });
+
+  expect(next.tabs).toHaveLength(1);
+  expect(next.tabs[0]).toMatchObject({ kind: "native", localId: "local-2", tabId: 7, batchId: "batch-2" });
+});
+
+test("sortViewerTabsByTime orders native tabs by latest commit iso", () => {
   const newerNative = native("local-1", "batch-2");
   const olderNative = nativeReadyTab(nativeOpeningTab("local-2", recipe, "batch-0"), {
     tab_id: 8,
@@ -109,13 +107,11 @@ test("sortViewerTabsByTime orders artifact tabs by committedAt and native tabs b
     },
   });
 
-  const sorted = sortViewerTabsByTime([olderArtifact, olderNative, newerNative, newerArtifact]);
-  expect(sorted).toEqual([newerArtifact, newerNative, olderArtifact, olderNative]);
+  const sorted = sortViewerTabsByTime([olderNative, newerNative]);
+  expect(sorted).toEqual([newerNative, olderNative]);
 });
 
 test("sortViewerTabsByTime falls back to batchId and stays stable on ties", () => {
-  const artifactA = artifact("artifact-a", "2026-07-08T00:00:00Z");
-  const artifactB = artifact("artifact-b", "2026-07-08T00:00:00Z");
   const nativeA = nativeReadyTab(nativeOpeningTab("local-a", recipe, "2026-07-08T00:00:00Z"), {
     tab_id: 9,
     meta: { ...meta, tab_id: 9, batch_id: "2026-07-08T00:00:00Z", commits: [] },
@@ -125,6 +121,6 @@ test("sortViewerTabsByTime falls back to batchId and stays stable on ties", () =
     meta: { ...meta, tab_id: 10, batch_id: "2026-07-08T00:00:00Z", commits: [] },
   });
 
-  const sorted = sortViewerTabsByTime([artifactA, artifactB, nativeA, nativeB]);
-  expect(sorted).toEqual([artifactA, artifactB, nativeA, nativeB]);
+  const sorted = sortViewerTabsByTime([nativeA, nativeB]);
+  expect(sorted).toEqual([nativeA, nativeB]);
 });

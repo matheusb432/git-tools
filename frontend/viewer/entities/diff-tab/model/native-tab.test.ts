@@ -1,12 +1,15 @@
-import { expect, test } from "bun:test";
+import { expect, it, test } from "bun:test";
 import type { Recipe, TabMeta } from "@/shared/api";
 import {
   beginNativeTabRetry,
+  clearTabFreshness,
+  markBatchFresh,
   nativeOpeningTab,
   nativeReadyTab,
   nativeRefreshingTab,
   nativeRefreshSucceeded,
   nativeTabError,
+  type NativeTab,
 } from "./native-tab";
 
 const meta: TabMeta = {
@@ -69,6 +72,22 @@ test("refresh keeps stale metadata visible until replacement arrives", () => {
   const replaced = nativeRefreshSucceeded(refreshing, { ...meta, batch_id: "batch-2" });
   expect(replaced.meta?.batch_id).toBe("batch-2");
   expect(replaced.freshness.state).toBe("fresh");
+});
+
+function nativeReady(repoName: string, batchId: string): NativeTab {
+  return nativeReadyTab(nativeOpeningTab(`local-${repoName}`, recipe, batchId), {
+    tab_id: 1,
+    meta: { ...meta, batch_id: batchId, repo_name: repoName },
+  });
+}
+
+it("marks only the latest batch fresh, clears on focus", () => {
+  const tabs = [nativeReady("A", "B1"), nativeReady("B", "B2"), nativeReady("C", "B2")];
+  const marked = markBatchFresh(tabs, "B2");
+  expect(marked.map((t) => t.isNew)).toEqual([false, true, true]);
+  const cleared = clearTabFreshness(marked, 1);
+  expect(cleared[1]!.isNew).toBe(false);
+  expect(cleared[2]!.isNew).toBe(true);
 });
 
 test("retrying an initial-open error tab re-enters opening and requests a reopen", () => {

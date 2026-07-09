@@ -36,6 +36,11 @@ fn run_diff(repo: &tempfile::TempDir, store: &tempfile::TempDir, args: &[&str]) 
         .env("GIT_TOOLS_DATA_DIR", store.path())
         .env("GIT_TOOLS_NO_OPEN", "1")
         .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
+        // This suite pins the daemon/store fast-path directly (reuse, sidecar naming);
+        // simulate headless so `diff`'s default degrades to that path without needing
+        // `--raw` sprinkled through every call (Phase 5, Task 1.6).
+        .env_remove("DISPLAY")
+        .env_remove("WAYLAND_DISPLAY")
         .args(args)
         .assert()
         .success()

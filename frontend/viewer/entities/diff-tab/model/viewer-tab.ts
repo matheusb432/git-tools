@@ -4,7 +4,6 @@ import { nativeReadyTab, type ViewerTab } from "./native-tab";
 export type ViewerTabState = {
   readonly tabs: readonly ViewerTab[];
   readonly active: number;
-  readonly showHistory: boolean;
 };
 
 export type ApplyOpenedNativeTabResult = {
@@ -13,7 +12,7 @@ export type ApplyOpenedNativeTabResult = {
 };
 
 export function viewerTabKey(tab: ViewerTab): string {
-  return tab.kind === "artifact" ? `artifact:${tab.url}` : `native:${tab.localId}`;
+  return `native:${tab.localId}`;
 }
 
 /** Most recently updated viewer tab first. Stable sort keeps ties in their prior relative order. */
@@ -33,18 +32,18 @@ export function sortViewerTabsByTime(tabs: readonly ViewerTab[]): readonly Viewe
 export function closeViewerTabState(state: ViewerTabState, index: number): ViewerTabState {
   if (index < 0 || index >= state.tabs.length) return state;
   const tabs = state.tabs.filter((_, i) => i !== index);
-  if (tabs.length === 0) return { tabs, active: 0, showHistory: state.showHistory };
-  return { tabs, active: nextActiveIndex(state.active, index, tabs.length), showHistory: state.showHistory };
+  if (tabs.length === 0) return { tabs, active: 0 };
+  return { tabs, active: nextActiveIndex(state.active, index, tabs.length) };
 }
 
-export function closeAllViewerTabs(state: ViewerTabState): ViewerTabState {
-  return { tabs: [], active: 0, showHistory: state.showHistory };
+export function closeAllViewerTabs(_state: ViewerTabState): ViewerTabState {
+  return { tabs: [], active: 0 };
 }
 
 export function closeOtherViewerTabs(state: ViewerTabState, keep: number): ViewerTabState {
   const kept = state.tabs[keep];
   if (kept === undefined) return state;
-  return { tabs: [kept], active: 0, showHistory: state.showHistory };
+  return { tabs: [kept], active: 0 };
 }
 
 export function applyOpenedNativeTab(
@@ -54,8 +53,15 @@ export function applyOpenedNativeTab(
 ): ApplyOpenedNativeTabResult {
   const focusKey = `native:${localId}`;
   let found = false;
+  // The backend dedupes by recipe/source identity: reopening an already-open source
+  // resolves to that same `tab_id` under a fresh `localId`. Drop any other native tab
+  // still carrying that `tab_id` here so the strip never shows two entries for one
+  // backend tab — the surviving entry is this call's, with the fresh batch id it resolved.
+  const survivors = state.tabs.filter(
+    (tab) => tab.kind !== "native" || tab.tabId !== opened.tab_id || tab.localId === localId,
+  );
   const nextTabs = sortViewerTabsByTime(
-    state.tabs.map((tab) => {
+    survivors.map((tab) => {
       if (tab.kind !== "native" || tab.localId !== localId) return tab;
       found = true;
       return nativeReadyTab(tab, opened);
@@ -71,7 +77,6 @@ export function applyOpenedNativeTab(
     next: {
       tabs: nextTabs,
       active: active >= 0 ? active : Math.min(state.active, Math.max(nextTabs.length - 1, 0)),
-      showHistory: state.showHistory,
     },
     openedTabIdToClose: null,
   };
@@ -84,6 +89,5 @@ function nextActiveIndex(active: number, closed: number, remaining: number): num
 }
 
 function viewerTabSortKey(tab: ViewerTab): string {
-  if (tab.kind === "artifact") return tab.committedAt;
   return tab.meta?.commits[0]?.iso ?? tab.batchId;
 }

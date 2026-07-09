@@ -693,6 +693,7 @@ dependencies = [
  "contracts",
  "domain",
  "gtl-platform",
+ "gtl-recipe",
  "infra",
  "jiff",
  "predicates",
@@ -703,6 +704,7 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 1.1.2+spec-1.1.0",
  "toml_edit 0.25.12+spec-1.1.0",
+ "uuid",
  "walkdir",
 ]
 
@@ -1054,9 +1056,9 @@ version = "0.1.0"
 dependencies = [
  "application",
  "cqrsy",
- "directories",
  "domain",
  "gtl-platform",
+ "gtl-recipe",
  "infra",
  "raw-window-handle",
  "serde",
@@ -1064,7 +1066,6 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
- "tempfile",
 ]
 
 [[package]]
@@ -1853,6 +1854,15 @@ dependencies = [
  "directories",
  "tempfile",
  "x11-dl",
+]
+
+[[package]]
+name = "gtl-recipe"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

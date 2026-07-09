@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { AlertTriangle, RefreshCw } from "@lucide/svelte";
-  import { emptyRowPageCache, invalidateTabRows, type RowPageCache } from "@/entities/diff-tab";
-  import type { NativeTab } from "@/entities/diff-tab";
+  import { emptyRowPageCache, invalidateTabRows, isLiveTab, type RowPageCache } from "@/entities/diff-tab";
+  import type { BrokenSourceCode, NativeTab } from "@/entities/diff-tab";
   import { filterFiles } from "@/entities/diff-tab";
   import { fileRows, getSetting, setSetting, type RowsPage, type SplitRow, type UnifiedRow } from "@/shared/api";
   import * as Alert from "@/shared/ui/alert";
@@ -71,6 +71,7 @@
   const COPY_PAGE_SIZE = 80;
 
   const meta = $derived(tab.meta);
+  const brokenSource = $derived(isLiveTab(tab) ? (tab.brokenSource ?? null) : null);
   const visibleFiles = $derived<VisibleFile[]>(
     meta === null
       ? []
@@ -155,6 +156,11 @@
   function sectionId(fileIdx: number): string {
     return `diff-view-${tab.localId}-${fileIdx}`;
   }
+
+  const BROKEN_SOURCE_TITLES: Record<BrokenSourceCode, string> = {
+    DirNotFound: "The git repo's directory was not found.",
+    DirNotGitRepo: "This directory is not a git repository.",
+  };
 
   function handleScrollToFile(fileIdx: number): void {
     void tick().then(() => {
@@ -350,7 +356,15 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div data-testid={TEST_IDS.diffView.root} class="flex h-full min-h-0 flex-col bg-background">
-  {#if tab.lifecycle.state === "error" && meta === null}
+  {#if brokenSource !== null}
+    <div class="p-5" data-testid={TEST_IDS.diffView.brokenSource}>
+      <Alert.Root variant="destructive" class="max-w-2xl">
+        <AlertTriangle />
+        <Alert.Title>{BROKEN_SOURCE_TITLES[brokenSource.code]}</Alert.Title>
+        <Alert.Description>{brokenSource.reason}</Alert.Description>
+      </Alert.Root>
+    </div>
+  {:else if tab.lifecycle.state === "error" && meta === null}
     <div class="p-5">
       <Alert.Root variant="destructive" class="max-w-2xl">
         <AlertTriangle />

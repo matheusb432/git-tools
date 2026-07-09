@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "fixtures": "bun run ./src/fixtures.ts",
+    "fixtures": "bun run ./src/fixtures.ts && bun run ./src/seed.ts",
     "test": "wdio run ./wdio.conf.ts"
   }
 }

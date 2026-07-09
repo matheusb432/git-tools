@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Recipe, TabMeta } from "@/shared/api";
-import type { ArtifactTab, ViewerTab } from "@/entities/diff-tab";
+import type { ViewerTab } from "@/entities/diff-tab";
 import { nativeOpeningTab, nativeReadyTab } from "@/entities/diff-tab";
 import { splitTabs, viewerTabKey } from "./fit";
 
@@ -27,24 +27,16 @@ const meta: TabMeta = {
   files: [],
 };
 
-const artifact = (n: number): ArtifactTab => ({
-  kind: "artifact",
-  url: `diff://repo/${n}`,
-  label: `t${n}`,
-  committedAt: "2026-01-01T00:00:00Z",
-});
-
 const native = (n: number) =>
   nativeReadyTab(nativeOpeningTab(`local-${n}`, recipe, `batch-${n}`), {
     tab_id: 100 + n,
-    meta: { ...meta, tab_id: 100 + n, batch_id: `batch-${n}` },
+    meta: { ...meta, title: `t${n}`, tab_id: 100 + n, batch_id: `batch-${n}` },
   });
 
-const tabs = (n: number): ViewerTab[] => Array.from({ length: n }, (_, i) => artifact(i));
+const tabs = (n: number): ViewerTab[] => Array.from({ length: n }, (_, i) => native(i));
 
-function artifactLabel(tab: ViewerTab): string {
-  if (tab.kind !== "artifact") throw new Error(`expected artifact tab, got ${tab.kind}`);
-  return tab.label;
+function tabTitle(tab: ViewerTab): string {
+  return tab.meta?.title ?? "";
 }
 
 test("all fit -> no overflow", () => {
@@ -57,34 +49,33 @@ test("overflow split keeps capacity visible", () => {
   const r = splitTabs(tabs(9), 0, 900, 160, 200);
   expect(r.visible.length).toBe(4);
   expect(r.overflow.length).toBe(5);
-  expect(r.visible.map(artifactLabel)).toEqual(["t0", "t1", "t2", "t3"]);
+  expect(r.visible.map(tabTitle)).toEqual(["t0", "t1", "t2", "t3"]);
 });
 test("active in overflow range is pulled into the last visible slot", () => {
   const r = splitTabs(tabs(9), 7, 900, 160, 200);
-  expect(r.visible.map(artifactLabel)).toEqual(["t0", "t1", "t2", "t7"]);
-  expect(r.overflow.map(artifactLabel)).toContain("t3");
-  expect(r.overflow.map(artifactLabel)).not.toContain("t7");
+  expect(r.visible.map(tabTitle)).toEqual(["t0", "t1", "t2", "t7"]);
+  expect(r.overflow.map(tabTitle)).toContain("t3");
+  expect(r.overflow.map(tabTitle)).not.toContain("t7");
   expect(r.visible.length).toBe(4);
 });
 test("at least one visible even in a tiny container", () => {
   const r = splitTabs(tabs(5), 4, 100, 160, 200);
   expect(r.visible.length).toBe(1);
-  expect(artifactLabel(r.visible[0]!)).toBe("t4");
+  expect(tabTitle(r.visible[0]!)).toBe("t4");
 });
 
-test("viewerTabKey distinguishes artifact and native tabs", () => {
-  expect(viewerTabKey(artifact(1))).toBe("artifact:diff://repo/1");
+test("viewerTabKey keys a tab by its stable localId", () => {
   expect(viewerTabKey(native(2))).toBe("native:local-2");
 });
 
-test("active native tab pulled into visible keeps its stable native key", () => {
-  const mixedTabs: ViewerTab[] = [artifact(0), artifact(1), artifact(2), artifact(3), native(9)];
+test("active tab pulled into visible keeps its stable native key", () => {
+  const mixedTabs: ViewerTab[] = [native(0), native(1), native(2), native(3), native(9)];
   const r = splitTabs(mixedTabs, 4, 900, 160, 200);
   expect(r.visible.map(viewerTabKey)).toEqual([
-    "artifact:diff://repo/0",
-    "artifact:diff://repo/1",
-    "artifact:diff://repo/2",
+    "native:local-0",
+    "native:local-1",
+    "native:local-2",
     "native:local-9",
   ]);
-  expect(r.overflow.map(viewerTabKey)).toContain("artifact:diff://repo/3");
+  expect(r.overflow.map(viewerTabKey)).toContain("native:local-3");
 });

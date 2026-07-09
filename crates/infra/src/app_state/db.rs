@@ -39,20 +39,55 @@ CREATE TABLE recent_renders (
 const MIGRATIONS_SLICE: &[M<'_>] = &[M::up(SCHEMA_V1)];
 const MIGRATIONS: Migrations<'_> = Migrations::from_slice(MIGRATIONS_SLICE);
 
+/// Init-sequence retry ceiling: bounded well under the 5s `busy_timeout` so a
+/// genuinely failing pragma/migration still surfaces promptly.
+const INIT_RETRY_ATTEMPTS: u32 = 8;
+/// Backoff between init retries, linear in the attempt number (50ms, 100ms,
+/// ..., 350ms), for a worst-case total wait of ~1.4s.
+const INIT_RETRY_BACKOFF: Duration = Duration::from_millis(50);
+
 /// Open (creating if needed) the app-state db under `data_root`, apply the
 /// connection pragmas, and migrate to the latest schema version.
 pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
     std::fs::create_dir_all(data_root)?;
     let mut conn = Connection::open(data_root.join("gtl.db"))?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
-    conn.pragma_update(None, "foreign_keys", true)?;
+    // ! busy_timeout first: every subsequent locking step (the WAL switch,
+    // ! the migration) must respect it from the start.
     conn.busy_timeout(Duration::from_secs(5))?;
-    // ! Fresh-file race: daemon and viewer can both open a brand-new gtl.db and
-    // ! both attempt migration v1; the loser errors ("table already exists" /
-    // ! SQLITE_BUSY). Its retry re-reads user_version, sees the winner's bump,
-    // ! and no-ops. A genuine migration failure fails both attempts and surfaces.
-    if MIGRATIONS.to_latest(&mut conn).is_err() {
-        MIGRATIONS.to_latest(&mut conn)?;
+
+    // ! Fresh-file race: daemon and viewer can both open a brand-new gtl.db
+    // ! and both attempt the WAL switch and migration v1 concurrently. SQLite
+    // ! does not run the busy_timeout retry loop for the journal_mode=WAL
+    // ! transition on a fresh file, so the loser can get an immediate
+    // ! SQLITE_BUSY ("database is locked") right there, and even past that
+    // ! point the migration can see "table already exists" if the winner
+    // ! hasn't committed yet. Retry the whole init sequence with backoff: the
+    // ! pragmas are idempotent and to_latest no-ops once the loser re-reads
+    // ! the winner's committed user_version. Only the final attempt's error
+    // ! propagates; a genuine failure keeps failing every attempt.
+    let mut last_err = None;
+    for attempt in 1..=INIT_RETRY_ATTEMPTS {
+        let outcome: anyhow::Result<()> = (|| {
+            conn.pragma_update(None, "journal_mode", "WAL")?;
+            conn.pragma_update(None, "foreign_keys", true)?;
+            MIGRATIONS.to_latest(&mut conn)?;
+            Ok(())
+        })();
+        match outcome {
+            Ok(()) => {
+                last_err = None;
+                break;
+            }
+            Err(err) => {
+                last_err = Some(err);
+                if attempt < INIT_RETRY_ATTEMPTS {
+                    std::thread::sleep(INIT_RETRY_BACKOFF * attempt);
+                }
+            }
+        }
+    }
+    if let Some(err) = last_err {
+        return Err(err);
     }
     Ok(conn)
 }

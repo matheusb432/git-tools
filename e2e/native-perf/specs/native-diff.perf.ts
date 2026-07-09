@@ -15,6 +15,24 @@ import {
   waitForVisibleRows,
 } from "../src/timing";
 
+/** On cold start `restoreOnMount` auto-computes the first restored live tab, and that background
+ * compute focuses that tab when it settles — a one-time focus-steal (see the same guard in
+ * `native-diff.functional.ts`). This spec's fixture seed always includes the healthy live view
+ * (shared `seed.ts`), so its own cold start races that steal too — wait for it to settle before
+ * any timed interaction, or the steal can land mid-measurement and blow a gate or a focus wait. */
+async function waitForLiveTabSettled(sourceValue: string, timeoutMs = 20_000): Promise<void> {
+  await browser.waitUntil(
+    async () => {
+      const snapshot = await viewerSnapshot();
+      const tab = snapshot.tabs.find(
+        (candidate) => candidate.kind === "native" && candidate.live === true && candidate.source?.value === sourceValue,
+      );
+      return tab !== undefined && (tab.lifecycle === "ready" || tab.lifecycle === "error");
+    },
+    { timeout: timeoutMs, interval: 50, timeoutMsg: `live tab for source ${sourceValue} never settled its compute` },
+  );
+}
+
 const manifest = loadFixtureManifest();
 
 function fixture(name: FixtureEntry["name"]): FixtureEntry {
@@ -72,6 +90,9 @@ describe("native diff perf harness", () => {
     const many = fixture("many-files");
 
     await $(selectors.tabsStrip).waitForDisplayed({ timeout: 30_000 });
+    // Let the cold-start restore of the healthy live view finish its one-time auto-compute (and
+    // the focus-steal that rides it) before the timed interactions below.
+    await waitForLiveTabSettled(manifest.liveViews.healthy.sourceValue);
 
     const openMetrics = await openNativeRecipeMeasured(small.recipe, "perf-small");
     await waitForRows();

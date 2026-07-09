@@ -12,14 +12,29 @@ use application::{
     history::record_render::RecordRender,
 };
 use cqrsy::{Handle, Sender};
-use domain::diffs::View;
+use domain::diffs::{DiffTarget, View};
 use serde::Serialize;
 
 use crate::{
-    recipe::{Recipe, RecipeOp},
+    recipe::{Recipe, RecipeOp, RecipeTarget},
     tabs::{Layout, RenderedTabs, RowsPage},
     view_dto::TabMeta,
 };
+
+/// Map the app-agnostic [`RecipeTarget`] DTO onto the domain [`DiffTarget`].
+///
+/// Lives here (not in `gtl-recipe`) so the shared recipe crate stays free of a
+/// `domain` dependency: this crate owns both types, so a plain `match` is legal
+/// where an orphan-rule `From` impl in `gtl-recipe` would not be.
+fn diff_target(target: &RecipeTarget) -> DiffTarget {
+    match target {
+        RecipeTarget::Unpushed => DiffTarget::Unpushed,
+        RecipeTarget::Base { rev } => DiffTarget::Base(rev.clone()),
+        RecipeTarget::Range { range } => DiffTarget::Range(range.clone()),
+        RecipeTarget::Merge { base } => DiffTarget::Merge(base.clone()),
+        RecipeTarget::Last { count } => DiffTarget::Last(*count),
+    }
+}
 
 /// What `open_recipe` answers: the (possibly reused) tab and its fresh meta.
 #[derive(Debug, Serialize)]
@@ -38,7 +53,7 @@ where
         RecipeOp::Diff { target } => mediator
             .send_now(ComputeDiff {
                 cwd,
-                target: target.clone().into(),
+                target: diff_target(target),
             })
             .map(|response| response.view)
             .map_err(|err| format!("{err:#}")),
@@ -178,7 +193,7 @@ pub(crate) async fn close_tab(
 
 #[cfg(test)]
 mod tests {
-    use application::testing::{FakeDiffSource, InMemoryAppStateStore, InMemoryArtifactStore};
+    use application::testing::{FakeDiffSource, InMemoryAppStateStore};
 
     use super::*;
     use crate::recipe::{RecipeSource, RecipeTarget};
@@ -220,11 +235,7 @@ index 111..222 100644\n\
     #[test]
     fn open_records_history_and_returns_the_tab_meta() {
         let app_state = InMemoryAppStateStore::default();
-        let mediator = crate::test_support::fake_mediator_with(
-            diff_source(),
-            InMemoryArtifactStore::default(),
-            app_state.clone(),
-        );
+        let mediator = crate::test_support::fake_mediator_with(diff_source(), app_state.clone());
         let tabs = RenderedTabs::default();
 
         let opened = open_recipe_inner(
@@ -313,7 +324,6 @@ index 111..222 100644\n\
         let app_state = InMemoryAppStateStore::default();
         let mediator = crate::test_support::fake_mediator_with(
             FakeDiffSource::default(), // top_level: None → "not a git repository"
-            InMemoryArtifactStore::default(),
             app_state.clone(),
         );
         let tabs = RenderedTabs::default();

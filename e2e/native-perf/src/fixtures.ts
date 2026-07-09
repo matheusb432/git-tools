@@ -17,9 +17,24 @@ export type FixtureEntry = {
   readonly recipe: Recipe;
 };
 
+/** One saved-source identity for a functional-spec live-view fixture. */
+export type LiveViewFixture = {
+  readonly sourceKind: "LocalRepo";
+  readonly sourceValue: string;
+  readonly displayName: string;
+};
+
+export type LiveViewFixtures = {
+  /** A real temp git repo with unpushed local commits and no remote — probes/computes fine. */
+  readonly healthy: LiveViewFixture;
+  /** A source path that is never created on disk — probes as `DirNotFound`. */
+  readonly broken: LiveViewFixture;
+};
+
 export type FixtureManifest = {
   readonly generatedAt: string;
   readonly fixtures: readonly FixtureEntry[];
+  readonly liveViews: LiveViewFixtures;
 };
 
 function requiredEnv(name: string): string {
@@ -150,6 +165,26 @@ function buildManyFilesFixture(root: string): FixtureEntry {
   };
 }
 
+/** A live-view healthy source: a real repo with a second local commit (unpushed, no remote
+ * configured) plus a source path that is deliberately never created on disk (broken). */
+function buildLiveViewFixtures(root: string): LiveViewFixtures {
+  const healthyRoot = join(root, "live-view-repo");
+  initRepo(healthyRoot);
+  writeRepoFile(healthyRoot, "README.md", "hello\n");
+  commitAll(healthyRoot, "base");
+  writeRepoFile(healthyRoot, "README.md", "hello\nunpushed work\n");
+  commitAll(healthyRoot, "unpushed work");
+
+  return {
+    healthy: { sourceKind: "LocalRepo", sourceValue: healthyRoot, displayName: "live-view-repo" },
+    broken: {
+      sourceKind: "LocalRepo",
+      sourceValue: join(root, "missing-live-repo"),
+      displayName: "missing-live-repo",
+    },
+  };
+}
+
 export function manifestPath(fixtureRoot: string): string {
   return join(resolve(fixtureRoot), MANIFEST_NAME);
 }
@@ -166,6 +201,7 @@ export function buildFixtures(fixtureRoot: string): FixtureManifest {
       buildLargeFileFixture(root),
       buildManyFilesFixture(root),
     ],
+    liveViews: buildLiveViewFixtures(root),
   };
 
   writeFileSync(manifestPath(root), JSON.stringify(manifest, null, 2), "utf8");
@@ -195,12 +231,27 @@ function isFixtureEntry(value: unknown): value is FixtureEntry {
   );
 }
 
+function isLiveViewFixture(value: unknown): value is LiveViewFixture {
+  if (!isObjectRecord(value)) return false;
+  return (
+    value.sourceKind === "LocalRepo" &&
+    typeof value.sourceValue === "string" &&
+    typeof value.displayName === "string"
+  );
+}
+
+function isLiveViewFixtures(value: unknown): value is LiveViewFixtures {
+  if (!isObjectRecord(value)) return false;
+  return isLiveViewFixture(value.healthy) && isLiveViewFixture(value.broken);
+}
+
 function isFixtureManifest(value: unknown): value is FixtureManifest {
   if (!isObjectRecord(value)) return false;
   return (
     typeof value.generatedAt === "string" &&
     Array.isArray(value.fixtures) &&
-    value.fixtures.every(isFixtureEntry)
+    value.fixtures.every(isFixtureEntry) &&
+    isLiveViewFixtures(value.liveViews)
   );
 }
 

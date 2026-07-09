@@ -1,32 +1,15 @@
-//! Pure viewer-launch decisions for the CLI, plus binary/url resolution. The
-//! effectful launch lives in `commands::open_artifact`.
-use std::path::{Path, PathBuf};
+//! Viewer/display predicates shared by the CLI's render paths, plus the viewer
+//! binary resolver. The effectful launch lives in `commands::open_artifact`
+//! (browser-only — `--raw` and the headless degrade) and `commands::forward_recipes`
+//! (the default app path).
+use std::path::PathBuf;
 
-use crate::config::Viewer;
-
-/// What the CLI should do with a freshly stored artifact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ViewerAction {
-    /// Spawn the desktop app on the `diff://` url.
-    SpawnApp,
-    /// Open the artifact file in the OS browser (from the store).
-    Browser,
-    /// Do nothing (path already printed).
-    Nothing,
-}
-
-/// Decide the launch action. `no_open` (i.e. `GIT_TOOLS_NO_OPEN` is truthy) is
-/// highest precedence — always `Nothing`. Otherwise `app` needs a display;
-/// without one it degrades to the browser path (best-effort). Pure.
-pub fn resolve_viewer_action(viewer: Viewer, has_display: bool, no_open: bool) -> ViewerAction {
-    if no_open {
-        return ViewerAction::Nothing;
-    }
-    match viewer {
-        Viewer::None => ViewerAction::Nothing,
-        Viewer::App if has_display => ViewerAction::SpawnApp,
-        Viewer::Browser | Viewer::App => ViewerAction::Browser,
-    }
+/// Whether a display server is available (`DISPLAY` or `WAYLAND_DISPLAY` set,
+/// non-empty presence — the *value* doesn't matter). Shared by the `--raw`/headless
+/// routing decision (`commands::diff`, `commands::diff_subrepos`) and by
+/// `open_artifact`'s degrade path.
+pub fn has_display() -> bool {
+    std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
 /// Returns true if the given env-var value is a truthy `NO_OPEN` sentinel
@@ -38,13 +21,6 @@ pub(crate) fn is_no_open(value: Option<&str>) -> bool {
         value.map(str::trim),
         Some("1" | "true" | "TRUE" | "yes" | "YES")
     )
-}
-
-/// `<store>/diffs/<repo-id>/<hash>.html` → `diff://<repo-id>/<hash>`. Pure.
-pub fn diff_url_from_path(path: &Path) -> Option<String> {
-    let hash = path.file_stem()?.to_str()?;
-    let repo_id = path.parent()?.file_name()?.to_str()?;
-    Some(format!("diff://{repo_id}/{hash}"))
 }
 
 /// The viewer binary: `gtl-viewer` next to the running CLI exe, else on PATH.
@@ -73,42 +49,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn app_spawns_with_display_and_falls_back_without() {
-        assert_eq!(
-            resolve_viewer_action(Viewer::App, true, false),
-            ViewerAction::SpawnApp
-        );
-        assert_eq!(
-            resolve_viewer_action(Viewer::App, false, false),
-            ViewerAction::Browser
-        );
-    }
-
-    #[test]
-    fn browser_and_none_ignore_display() {
-        assert_eq!(
-            resolve_viewer_action(Viewer::Browser, false, false),
-            ViewerAction::Browser
-        );
-        assert_eq!(
-            resolve_viewer_action(Viewer::None, true, false),
-            ViewerAction::Nothing
-        );
-    }
-
-    #[test]
-    fn no_open_wins_over_app_and_browser() {
-        assert_eq!(
-            resolve_viewer_action(Viewer::App, true, true),
-            ViewerAction::Nothing
-        );
-        assert_eq!(
-            resolve_viewer_action(Viewer::Browser, true, true),
-            ViewerAction::Nothing
-        );
-    }
-
-    #[test]
     fn is_no_open_accepts_truthy_values() {
         assert!(is_no_open(Some("1")));
         assert!(is_no_open(Some("true")));
@@ -118,14 +58,5 @@ mod tests {
         assert!(!is_no_open(Some("0")));
         assert!(!is_no_open(Some("false")));
         assert!(!is_no_open(None));
-    }
-
-    #[test]
-    fn builds_diff_url_from_store_path() {
-        let p = Path::new("/store/diffs/0123456789abcdef/fedcba9876543210.html");
-        assert_eq!(
-            diff_url_from_path(p).as_deref(),
-            Some("diff://0123456789abcdef/fedcba9876543210")
-        );
     }
 }

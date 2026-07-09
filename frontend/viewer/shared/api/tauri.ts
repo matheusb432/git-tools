@@ -1,16 +1,3 @@
-export type HistoryEntry = {
-  readonly repo_id: string;
-  readonly repo_name: string;
-  readonly title: string;
-  readonly range_label: string;
-  readonly head_committed_at: string;
-  readonly generated_at: string;
-  readonly content_hash: string;
-  readonly kind: string;
-  readonly byte_size: number;
-  readonly url: string;
-};
-
 export type RecipeSource = { readonly kind: "LocalRepo"; readonly value: string };
 export type RecipeTarget =
   | { readonly target: "unpushed" }
@@ -25,6 +12,15 @@ export type RecipeOp =
 export type Recipe = {
   readonly source: RecipeSource;
   readonly op: RecipeOp;
+};
+
+/** A named batch of recipes to open together, mirroring `gtl_recipe::OpenRecipes`. The wire
+ * payload (event/invoke JSON) carries the Rust struct's literal snake_case `batch_id` field —
+ * command/event payloads are plain `serde_json`, with no camelCase IPC conversion — so
+ * `isOpenRecipes`/`toOpenRecipes` map it onto this camelCase shape at the boundary. */
+export type OpenRecipes = {
+  readonly batchId: string;
+  readonly recipes: readonly Recipe[];
 };
 
 export type Commit = {
@@ -70,6 +66,18 @@ export type OpenedTab = {
   readonly tab_id: number;
   readonly meta: TabMeta;
 };
+
+export type LiveViewDto = {
+  readonly source_kind: string;
+  readonly source_value: string;
+  readonly display_name: string;
+  readonly created_at: string;
+  readonly last_opened_at: string | null;
+};
+
+export type SourceProbe =
+  | { readonly outcome: "ok" }
+  | { readonly outcome: "broken"; readonly code: string; readonly reason: string };
 
 export type UnifiedRowKind = "meta" | "hunk" | "context" | "add" | "del";
 
@@ -155,37 +163,48 @@ export function tauriGlobal(): TauriGlobal {
   };
 }
 
-export async function drainPendingDiffs(): Promise<string[]> {
-  const urls = await tauriGlobal().core.invoke<unknown>("drain_pending_diffs");
-  return Array.isArray(urls) ? urls.filter((u): u is string => typeof u === "string") : [];
+export async function drainPendingRecipes(): Promise<OpenRecipes[]> {
+  const rows = await tauriGlobal().core.invoke<unknown>("drain_pending_recipes");
+  return Array.isArray(rows) ? rows.filter(isOpenRecipes).map(toOpenRecipes) : [];
 }
 
-export function listenOpenDiff(handler: (url: string) => void): Promise<() => void> {
-  return tauriGlobal().event.listen<unknown>("open-diff", (e) => {
-    if (typeof e.payload === "string") handler(e.payload);
+export function listenOpenRecipe(handler: (batch: OpenRecipes) => void): Promise<() => void> {
+  return tauriGlobal().event.listen<unknown>("open-recipe", (e) => {
+    if (isOpenRecipes(e.payload)) handler(toOpenRecipes(e.payload));
   });
 }
 
-export async function listHistory(): Promise<HistoryEntry[]> {
-  const rows = await tauriGlobal().core.invoke<unknown>("list_history");
-  return Array.isArray(rows) ? rows.filter(isHistoryEntry) : [];
-}
-
-export function isHistoryEntry(value: unknown): value is HistoryEntry {
+export function isLiveViewDto(value: unknown): value is LiveViewDto {
   const row = record(value);
   if (row === undefined) return false;
   return (
-    typeof row["repo_id"] === "string" &&
-    typeof row["repo_name"] === "string" &&
-    typeof row["title"] === "string" &&
-    typeof row["range_label"] === "string" &&
-    typeof row["head_committed_at"] === "string" &&
-    typeof row["generated_at"] === "string" &&
-    typeof row["content_hash"] === "string" &&
-    typeof row["kind"] === "string" &&
-    typeof row["byte_size"] === "number" &&
-    typeof row["url"] === "string"
+    typeof row["source_kind"] === "string" &&
+    typeof row["source_value"] === "string" &&
+    typeof row["display_name"] === "string" &&
+    typeof row["created_at"] === "string" &&
+    isStringOrNull(row["last_opened_at"])
   );
+}
+
+export async function listLiveViews(): Promise<LiveViewDto[]> {
+  const rows = await tauriGlobal().core.invoke<unknown>("list_live_views");
+  return Array.isArray(rows) ? rows.filter(isLiveViewDto) : [];
+}
+
+export function isSourceProbe(value: unknown): value is SourceProbe {
+  const row = record(value);
+  if (row === undefined) return false;
+  if (row["outcome"] === "ok") return true;
+  if (row["outcome"] === "broken") {
+    return typeof row["code"] === "string" && typeof row["reason"] === "string";
+  }
+  return false;
+}
+
+/** Probes a live-view source's directory before computing it, so a broken source
+ * (missing dir / not a git repo) surfaces as a typed state instead of a failed diff. */
+export async function probeSource(sourceKind: string, sourceValue: string): Promise<SourceProbe> {
+  return invokeChecked("probe_source", isSourceProbe, { sourceKind, sourceValue });
 }
 
 function isStringArray(value: unknown): value is readonly string[] {
@@ -337,6 +356,65 @@ async function invokeChecked<T>(
   const payload = await tauriGlobal().core.invoke<unknown>(command, args);
   if (!guard(payload)) throw new Error(`Malformed ${command} response`);
   return payload;
+}
+
+function isRecipeSource(value: unknown): value is RecipeSource {
+  const row = record(value);
+  return row !== undefined && row["kind"] === "LocalRepo" && typeof row["value"] === "string";
+}
+
+function isRecipeTarget(value: unknown): value is RecipeTarget {
+  const row = record(value);
+  if (row === undefined) return false;
+  switch (row["target"]) {
+    case "unpushed":
+      return true;
+    case "base":
+      return typeof row["rev"] === "string";
+    case "range":
+      return typeof row["range"] === "string";
+    case "merge":
+      return typeof row["base"] === "string";
+    case "last":
+      return typeof row["count"] === "number";
+    default:
+      return false;
+  }
+}
+
+function isRecipeOp(value: unknown): value is RecipeOp {
+  const row = record(value);
+  if (row === undefined) return false;
+  switch (row["op"]) {
+    case "diff":
+      return isRecipeTarget(row["target"]);
+    case "merge-diff":
+      return isStringOrNull(row["base"]);
+    case "squash-preview":
+      return true;
+    default:
+      return false;
+  }
+}
+
+export function isRecipe(value: unknown): value is Recipe {
+  const row = record(value);
+  if (row === undefined) return false;
+  return isRecipeSource(row["source"]) && isRecipeOp(row["op"]);
+}
+
+/** Validates the raw wire payload — the Rust struct's literal snake_case `batch_id` field,
+ * with each recipe checked via {@link isRecipe} — ahead of the {@link toOpenRecipes} mapping. */
+export function isOpenRecipes(
+  value: unknown,
+): value is { readonly batch_id: string; readonly recipes: readonly Recipe[] } {
+  const row = record(value);
+  if (row === undefined) return false;
+  return typeof row["batch_id"] === "string" && Array.isArray(row["recipes"]) && row["recipes"].every(isRecipe);
+}
+
+function toOpenRecipes(payload: { readonly batch_id: string; readonly recipes: readonly Recipe[] }): OpenRecipes {
+  return { batchId: payload.batch_id, recipes: payload.recipes };
 }
 
 export async function openRecipe(recipe: Recipe, batchId: string): Promise<OpenedTab> {

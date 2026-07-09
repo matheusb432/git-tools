@@ -13,9 +13,7 @@ fn git_tools() -> Command {
 fn top_level_help_lists_every_subcommand() {
     let mut assert = git_tools().arg("--help").assert().success();
     for sub in [
-        "squash-preview",
         "diff",
-        "merge-diff",
         "squash-local",
         "push",
         "pull",
@@ -23,6 +21,7 @@ fn top_level_help_lists_every_subcommand() {
         "tag",
         "wk",
         "status",
+        "ls",
     ] {
         assert = assert.stdout(contains(sub));
     }
@@ -31,7 +30,8 @@ fn top_level_help_lists_every_subcommand() {
         "\n  push-all ",
         "\n  pull-all ",
         "\n  commit-all ",
-        "\n  ls ",
+        "\n  merge-diff ",
+        "\n  squash-preview ",
     ] {
         assert = assert.stdout(contains(retired).not());
     }
@@ -82,7 +82,6 @@ fn retired_commands_are_usage_errors() {
         &["push-all"],
         &["pull-all"],
         &["commit-all"],
-        &["ls"],
     ] {
         git_tools()
             .args(args)
@@ -336,13 +335,34 @@ fn squash_local_help_lists_repo_and_dry() {
 }
 
 #[test]
-fn merge_diff_help_notes_the_default_base() {
+fn diff_merge_help_notes_the_default_base() {
+    git_tools()
+        .args(["diff", "merge", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--base"))
+        .stdout(contains("default: main"));
+}
+
+#[test]
+fn legacy_merge_diff_invocation_still_works_via_shim() {
+    // The migration bridge in `preprocess::normalize` rewrites the old top-level
+    // `merge-diff` invocation onto `diff merge --help` before clap parses it.
     git_tools()
         .args(["merge-diff", "--help"])
         .assert()
         .success()
         .stdout(contains("--base"))
         .stdout(contains("default: main"));
+}
+
+#[test]
+fn legacy_squash_preview_invocation_still_works_via_shim() {
+    git_tools()
+        .args(["squash-preview", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--repo"));
 }
 
 #[test]

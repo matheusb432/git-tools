@@ -1,6 +1,6 @@
 //! Security posture tripwire (ADR-0002 / tauri-app-config): the viewer must never
-//! grant filesystem or shell capabilities — store access goes through the scoped
-//! `diff://` scheme only (ADR-0004).
+//! grant filesystem or shell capabilities — it renders only native recipe tabs
+//! computed in-process through the mediator, with no raw-HTML artifact surface.
 use std::{fs, path::Path};
 
 #[test]

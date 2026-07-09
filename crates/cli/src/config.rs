@@ -9,28 +9,9 @@ use serde::Deserialize;
 /// Theme values the renderer knows how to honour; anything else resolves to `None`.
 const KNOWN_THEMES: &[&str] = &["dark", "light", "hearth"];
 
-/// Where a rendered diff is opened. `App` spawns the desktop viewer; `Browser`
-/// opens from the store in the OS browser; `None` opens nothing. Default `App`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Viewer {
-    #[default]
-    App,
-    Browser,
-    None,
-}
-
-#[derive(Debug, Default, Deserialize)]
-pub struct DiffConfig {
-    #[serde(default)]
-    pub viewer: Viewer,
-}
-
 #[derive(Debug, Default, Deserialize)]
 pub struct GtlConfig {
     pub theme: Option<String>,
-    #[serde(default)]
-    pub diff: DiffConfig,
 }
 
 /// Parse + validate a config from raw TOML. Pure: a parse error or an unknown/missing
@@ -211,39 +192,6 @@ mod tests {
     }
 
     #[test]
-    fn from_toml_reads_viewer_app_and_browser() {
-        assert_eq!(
-            from_toml("[diff]\nviewer = \"app\"").diff.viewer,
-            Viewer::App
-        );
-        assert_eq!(
-            from_toml("[diff]\nviewer = \"browser\"").diff.viewer,
-            Viewer::Browser
-        );
-    }
-
-    #[test]
-    fn from_toml_defaults_viewer_to_app() {
-        // ! P2 flips the default from browser to app (the launch path now exists).
-        assert_eq!(from_toml("").diff.viewer, Viewer::App);
-    }
-
-    #[test]
-    fn from_toml_unknown_viewer_falls_back_to_default_app() {
-        assert_eq!(
-            from_toml("[diff]\nviewer = \"bogus\"").diff.viewer,
-            Viewer::App
-        );
-    }
-
-    #[test]
-    fn from_toml_flat_viewer_is_ignored() {
-        // A flat top-level `viewer` key must NOT be honoured — the schema is nested.
-        // Users who set it without a `[diff]` header stay on the default (App).
-        assert_eq!(from_toml("viewer = \"browser\"").diff.viewer, Viewer::App);
-    }
-
-    #[test]
     fn set_theme_in_toml_writes_into_empty_config() {
         assert_eq!(set_theme_in_toml("", "dark").unwrap(), "theme = \"dark\"\n");
     }
@@ -290,8 +238,23 @@ mod tests {
         let mut file = NamedTempFile::new().expect("create temp config");
         write!(file, "[diff]\nviewer = \"browser\"\n").expect("seed config");
         save_theme_to(file.path(), "light").expect("save theme");
-        let config = load_from(Some(file.path().to_path_buf()));
-        assert_eq!(config.theme.as_deref(), Some("light"));
-        assert_eq!(config.diff.viewer, Viewer::Browser);
+        assert_eq!(
+            load_from(Some(file.path().to_path_buf())).theme.as_deref(),
+            Some("light")
+        );
+        let raw = std::fs::read_to_string(file.path()).expect("read back config");
+        assert!(
+            raw.contains("viewer = \"browser\""),
+            "stale diff.viewer key dropped: {raw}"
+        );
+    }
+
+    #[test]
+    fn from_toml_ignores_a_stale_diff_viewer_key() {
+        // `diff.viewer` was retired (app is the default renderer, `--raw` is the
+        // explicit browser path); a leftover key from an older config must be
+        // silently ignored rather than erroring or losing the theme.
+        let config = from_toml("theme = \"dark\"\n[diff]\nviewer = \"app\"");
+        assert_eq!(config.theme.as_deref(), Some("dark"));
     }
 }

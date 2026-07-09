@@ -80,7 +80,13 @@ impl NestedRepos {
             .env("GIT_TOOLS_NO_OPEN", "1")
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
             // Diff commands spawn a per-store daemon; a short idle timeout reaps it.
-            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2");
+            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
+            // This suite pins the daemon/store/browser path directly (artifacts,
+            // sidecars, wire-note text); simulate headless so `diff`'s default degrades
+            // to that path without needing `--raw` sprinkled through every call
+            // (Phase 5, Task 1.6).
+            .env_remove("DISPLAY")
+            .env_remove("WAYLAND_DISPLAY");
         cmd
     }
 }
@@ -227,7 +233,13 @@ impl Repo {
             .env("GIT_TOOLS_NO_OPEN", "1")
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
             // Diff commands spawn a per-store daemon; a short idle timeout reaps it.
-            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2");
+            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
+            // This suite pins the daemon/store/browser path directly (artifacts,
+            // sidecars, wire-note text); simulate headless so `diff`'s default degrades
+            // to that path without needing `--raw` sprinkled through every call
+            // (Phase 5, Task 1.6).
+            .env_remove("DISPLAY")
+            .env_remove("WAYLAND_DISPLAY");
         cmd
     }
 

@@ -1,11 +1,5 @@
 import type { OpenedTab, Recipe, TabMeta } from "@/shared/api";
-
-export type ArtifactTab = {
-  readonly kind: "artifact";
-  readonly url: string;
-  readonly label: string;
-  readonly committedAt: string;
-};
+import type { LiveTab } from "./live-tab";
 
 export type NativeTabLifecycle =
   | { readonly state: "opening" }
@@ -24,9 +18,11 @@ export type NativeTab = {
   readonly meta: TabMeta | null;
   readonly lifecycle: NativeTabLifecycle;
   readonly freshness: NativeTabFreshness;
+  /** True while this tab belongs to the latest opened batch and hasn't been focused yet. */
+  readonly isNew?: boolean;
 };
 
-export type ViewerTab = ArtifactTab | NativeTab;
+export type ViewerTab = NativeTab | LiveTab;
 export type NativeTabRetryPlan =
   | { readonly kind: "open"; readonly tab: NativeTab }
   | { readonly kind: "refresh"; readonly tab: NativeTab; readonly tabId: number };
@@ -79,6 +75,16 @@ export function nativeTabError(tab: NativeTab, message: string): NativeTab {
     ...tab,
     lifecycle: { state: "error", message },
   };
+}
+
+/** Flags every tab from `batchId` as new; clears the cue on every other tab. */
+export function markBatchFresh(tabs: readonly ViewerTab[], batchId: string): ViewerTab[] {
+  return tabs.map((tab) => ({ ...tab, isNew: tab.kind === "native" && tab.batchId === batchId }));
+}
+
+/** Clears the "new" cue on the tab at `index` (called when that tab is focused). */
+export function clearTabFreshness(tabs: readonly ViewerTab[], index: number): ViewerTab[] {
+  return tabs.map((tab, i) => (i === index ? { ...tab, isNew: false } : tab));
 }
 
 export function beginNativeTabRetry(tab: NativeTab): NativeTabRetryPlan | null {
