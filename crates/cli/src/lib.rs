@@ -2,9 +2,9 @@
 
 use crate::{
     cli::{
-        Cli, ColorChoice, Command, DaemonArgs, DaemonCommand, DiffCommand, DiffTarget,
-        DiffTargetArgs, ManagedArgs, ManagedReadArgs, PruneArgs, StatusArgs, SwArgs, TagCommand,
-        Theme, UpArgs, UpCommand, WorktreeCommand,
+        Cli, ColorChoice, Command, CommitArgs, DaemonArgs, DaemonCommand, DiffTarget,
+        DiffTargetArgs, ManagedArgs, ManagedReadArgs, PruneArgs, PushArgs, StatusArgs, SwArgs,
+        TagCommand, Theme, WorktreeCommand,
     },
     commands::{
         git_runner::StdGitRunner,
@@ -89,22 +89,24 @@ fn dispatch(command: Command) -> ExitCode {
             if let Some(theme) = args.target.set_theme {
                 return run_set_theme(theme);
             }
-            match args.command {
-                Some(DiffCommand::Subrepos(subrepos)) => diff_exit(
-                    commands::diff_subrepos::run_scan(".", subrepos.last, subrepos.worktrees),
-                ),
-                None => match diff_invocation(args.target) {
-                    DiffInvocation::Single { target, name } => {
-                        diff_exit(commands::diff::run(&target, name.as_deref()))
-                    }
-                    DiffInvocation::ManagedAll {
-                        repos_file,
-                        home_dir,
-                    } => {
-                        let options = managed_diff_options(repos_file, home_dir);
-                        html_exit(commands::diff_subrepos::run_managed_all(".", &options))
-                    }
-                },
+            if args.target.recursive {
+                return diff_exit(commands::diff_subrepos::run_scan(
+                    ".",
+                    args.target.last,
+                    args.target.worktrees,
+                ));
+            }
+            match diff_invocation(args.target) {
+                DiffInvocation::Single { target, name } => {
+                    diff_exit(commands::diff::run(&target, name.as_deref()))
+                }
+                DiffInvocation::ManagedAll {
+                    repos_file,
+                    home_dir,
+                } => {
+                    let options = managed_diff_options(repos_file, home_dir);
+                    html_exit(commands::diff_subrepos::run_managed_all(".", &options))
+                }
             }
         }
         Command::MergeDiff {
@@ -118,33 +120,75 @@ fn dispatch(command: Command) -> ExitCode {
             print_squash_local_result(&result, &message);
             squash_local_exit_code(result.status)
         }
-        Command::Up(UpArgs {
-            command: Some(UpCommand::Subrepos(sub)),
+        Command::Push(PushArgs {
+            all: false,
+            recursive: false,
+            message: Some(message),
+            yes,
             ..
-        }) => run_up_subrepos(sub.yes),
-        Command::Up(UpArgs { message, yes, .. }) => run_up(message.as_deref().unwrap_or(""), yes),
+        }) => run_push_with_message(&message, yes),
+        Command::Push(PushArgs {
+            all: false,
+            recursive: false,
+            message: None,
+            yes,
+            ..
+        }) => run_push_current(None, yes),
+        Command::Push(PushArgs {
+            all: false,
+            recursive: true,
+            yes,
+            ..
+        }) => run_push_subrepos(yes),
+        Command::Push(args) => run_push_managed(args),
+        Command::Pull(args) => managed_exit(&commands::managed::run_pull_all(&managed_options(
+            args.managed,
+            None,
+        ))),
+        Command::Commit(args) => run_commit(args),
         Command::Sw(args) => run_sw(&args),
         Command::Prune(args) => run_prune(args),
         Command::Tag(args) => run_tag(args.command, args.commits),
         Command::Wk(args) => run_worktree(&args.command),
         Command::Status(args) => managed_exit(&run_status(args)),
-        Command::Ls(args) => {
-            managed_exit(&commands::managed::run_status(&managed_read_options(args)))
-        }
-        Command::PushAll(args) => managed_exit(&commands::managed::run_push_all(&managed_options(
-            args, None,
-        ))),
-        Command::PullAll(args) => managed_exit(&commands::managed::run_pull_all(&managed_options(
-            args, None,
-        ))),
-        Command::CommitAll {
-            managed,
-            message_for_all,
-        } => managed_exit(&commands::managed::run_commit_all(&managed_options(
-            managed,
-            message_for_all,
-        ))),
+        Command::Ls(args) => managed_exit(&run_status(args.into())),
         Command::Daemon(DaemonArgs { command }) => run_daemon_ctl(&command),
+    }
+}
+
+fn run_commit(args: CommitArgs) -> ExitCode {
+    match args {
+        CommitArgs {
+            all: false,
+            message: Some(message),
+            yes,
+            ..
+        } => run_commit_current(&message, yes),
+        CommitArgs {
+            all: false,
+            message: None,
+            ..
+        } => {
+            eprintln!("commit: a non-empty commit message is required");
+            ExitCode::Usage
+        }
+        CommitArgs {
+            all: true,
+            message,
+            dry,
+            json,
+            repos_file,
+            home_dir,
+            ..
+        } => managed_exit(&commands::managed::run_commit_all(&managed_options(
+            ManagedArgs {
+                dry,
+                json,
+                repos_file,
+                home_dir,
+            },
+            message,
+        ))),
     }
 }
 
@@ -242,6 +286,46 @@ fn diff_target(args: DiffTargetArgs) -> DiffTarget {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ManagedPushStep {
+    Commit(ManagedOptions),
+    Push(ManagedOptions),
+}
+
+fn managed_push_steps(args: PushArgs) -> Vec<ManagedPushStep> {
+    let managed = ManagedArgs {
+        dry: args.dry,
+        json: args.json,
+        repos_file: args.repos_file,
+        home_dir: args.home_dir,
+    };
+    let push_options = managed_options(managed.clone(), None);
+    match args.message {
+        Some(message) => vec![
+            ManagedPushStep::Commit(managed_options(managed, Some(message))),
+            ManagedPushStep::Push(push_options),
+        ],
+        None => vec![ManagedPushStep::Push(push_options)],
+    }
+}
+
+fn run_push_managed(args: PushArgs) -> ExitCode {
+    for step in managed_push_steps(args) {
+        match step {
+            ManagedPushStep::Commit(options) => {
+                let exit = managed_exit(&commands::managed::run_commit_all(&options));
+                if exit != ExitCode::Ok {
+                    return exit;
+                }
+            }
+            ManagedPushStep::Push(options) => {
+                return managed_exit(&commands::managed::run_push_all(&options));
+            }
+        }
+    }
+    ExitCode::Ok
+}
+
 fn managed_diff_options(repos_file: Option<String>, home_dir: Option<String>) -> ManagedOptions {
     ManagedOptions {
         repos_file: repos_file.map(Into::into),
@@ -254,41 +338,41 @@ fn managed_diff_options(repos_file: Option<String>, home_dir: Option<String>) ->
     }
 }
 
-/// Orchestrates `up`: plan read-only, show the confirmation block, gate on `--yes`/TTY,
-/// then stage+commit+push. The interactive prompt is the only side effect kept out of
-/// [`commands::sync`] so the logic stays unit-testable.
-fn run_up(message: &str, yes: bool) -> ExitCode {
+/// Orchestrates `push "<message>"`: plan read-only, show the confirmation block, gate on
+/// `--yes`/TTY, then stage+commit+push. The interactive prompt is the only side effect kept
+/// out of [`commands::sync`] so the logic stays unit-testable.
+fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
     use crate::commands::sync;
 
     if message.trim().is_empty() {
-        eprintln!("up: a non-empty commit message is required");
+        eprintln!("push: a non-empty commit message is required");
         return ExitCode::Usage;
     }
 
     let runner = StdGitRunner;
     let target = match sync::plan(&runner, std::path::Path::new(".")) {
         sync::Plan::Refused(detail) => {
-            eprintln!("up: {detail}");
+            eprintln!("push: {detail}");
             return ExitCode::Internal;
         }
         sync::Plan::Ready(target) => target,
     };
 
-    println!("{}", sync::confirmation(&target, message));
+    println!("{}", sync::confirmation("push", &target, message));
 
     match sync::gate(yes, is_interactive()) {
         sync::Gate::RefuseNonInteractive => {
-            eprintln!("up: non-interactive shell; pass --yes to confirm the push");
+            eprintln!("push: non-interactive shell; pass --yes to confirm the push");
             return ExitCode::Usage;
         }
         sync::Gate::Confirm => match prompt_confirmation() {
             Ok(sync::Answer::Yes) => {}
             Ok(sync::Answer::No) => {
-                eprintln!("up: aborted — nothing committed or pushed");
+                eprintln!("push: aborted — nothing committed or pushed");
                 return ExitCode::Ok;
             }
             Err(err) => {
-                eprintln!("up: {err} — nothing committed or pushed");
+                eprintln!("push: {err} — nothing committed or pushed");
                 return ExitCode::Usage;
             }
         },
@@ -298,36 +382,167 @@ fn run_up(message: &str, yes: bool) -> ExitCode {
     let result = sync::apply(&runner, &target, message);
     match result.status {
         sync::Status::Synced | sync::Status::Noop => {
-            println!("up: {}", result.detail);
+            println!("push: {}", result.detail);
             ExitCode::Ok
         }
         sync::Status::Fail | sync::Status::Refused => {
-            eprintln!("up: {}", result.detail);
+            eprintln!("push: {}", result.detail);
             ExitCode::Internal
         }
     }
 }
 
-/// Orchestrates `up subrepos`: discover every repo under the current directory, show the
-/// confirmation listing each repo's push destination, gate on `--yes`/TTY like `up`, then
+/// Orchestrates current-repo `push`: optionally stage+commit first when a message is supplied,
+/// otherwise push existing commits only.
+fn run_push_current(message: Option<&str>, yes: bool) -> ExitCode {
+    use crate::commands::sync;
+
+    if let Some(message) = message
+        && message.trim().is_empty()
+    {
+        eprintln!("push: a non-empty commit message is required");
+        return ExitCode::Usage;
+    }
+
+    let runner = StdGitRunner;
+    let target = match sync::plan(&runner, std::path::Path::new(".")) {
+        sync::Plan::Refused(detail) => {
+            eprintln!("push: {detail}");
+            return ExitCode::Internal;
+        }
+        sync::Plan::Ready(target) => target,
+    };
+
+    match message {
+        Some(message) => println!("{}", sync::confirmation("push", &target, message)),
+        None => println!("{}", sync::push_confirmation(&target)),
+    }
+
+    match sync::gate(yes, is_interactive()) {
+        sync::Gate::RefuseNonInteractive => {
+            eprintln!("push: non-interactive shell; pass --yes to confirm the push");
+            return ExitCode::Usage;
+        }
+        sync::Gate::Confirm => match prompt_confirmation() {
+            Ok(sync::Answer::Yes) => {}
+            Ok(sync::Answer::No) => {
+                eprintln!("{}", push_confirmation_outcome(message, false, None));
+                return ExitCode::Ok;
+            }
+            Err(err) => {
+                eprintln!(
+                    "{}",
+                    push_confirmation_outcome(message, true, Some(&err.to_string()))
+                );
+                return ExitCode::Usage;
+            }
+        },
+        sync::Gate::Proceed => {}
+    }
+
+    let result = match message {
+        Some(message) => sync::apply(&runner, &target, message),
+        None => sync::push_existing(&runner, &target),
+    };
+
+    match result.status {
+        sync::Status::Synced | sync::Status::Noop => {
+            println!("push: {}", result.detail);
+            ExitCode::Ok
+        }
+        sync::Status::Fail | sync::Status::Refused => {
+            eprintln!("push: {}", result.detail);
+            ExitCode::Internal
+        }
+    }
+}
+
+fn push_confirmation_outcome(message: Option<&str>, invalid: bool, detail: Option<&str>) -> String {
+    match (message, invalid, detail) {
+        (None, false, _) => "push: aborted — nothing pushed".to_string(),
+        (None, true, Some(detail)) => format!("push: {detail} — nothing pushed"),
+        (Some(_), false, _) => "push: aborted — nothing committed or pushed".to_string(),
+        (Some(_), true, Some(detail)) => {
+            format!("push: {detail} — nothing committed or pushed")
+        }
+        (_, true, None) => "push: invalid confirmation response — nothing pushed".to_string(),
+    }
+}
+
+/// Orchestrates current-repo `commit`: review, gate, then stage all changes and create one commit
+/// without pushing.
+fn run_commit_current(message: &str, yes: bool) -> ExitCode {
+    use crate::commands::sync;
+
+    if message.trim().is_empty() {
+        eprintln!("commit: a non-empty commit message is required");
+        return ExitCode::Usage;
+    }
+
+    let runner = StdGitRunner;
+    let target = match sync::plan_local_commit(&runner, std::path::Path::new(".")) {
+        sync::LocalCommitPlan::Refused(detail) => {
+            eprintln!("commit: {detail}");
+            return ExitCode::Internal;
+        }
+        sync::LocalCommitPlan::Ready(target) => target,
+    };
+
+    println!("{}", sync::commit_confirmation(&target, message));
+
+    match sync::gate(yes, is_interactive()) {
+        sync::Gate::RefuseNonInteractive => {
+            eprintln!("commit: non-interactive shell; pass --yes to confirm the commit");
+            return ExitCode::Usage;
+        }
+        sync::Gate::Confirm => match prompt_confirmation() {
+            Ok(sync::Answer::Yes) => {}
+            Ok(sync::Answer::No) => {
+                eprintln!("commit: aborted — nothing committed");
+                return ExitCode::Usage;
+            }
+            Err(err) => {
+                eprintln!("commit: {err} — nothing committed");
+                return ExitCode::Usage;
+            }
+        },
+        sync::Gate::Proceed => {}
+    }
+
+    let result = sync::commit_local(&runner, &target, message);
+    match result.status {
+        sync::Status::Synced | sync::Status::Noop => {
+            println!("commit: {}", result.detail);
+            ExitCode::Ok
+        }
+        sync::Status::Fail | sync::Status::Refused => {
+            eprintln!("commit: {}", result.detail);
+            ExitCode::Internal
+        }
+    }
+}
+
+/// Orchestrates recursive `push -r`: discover every repo under the current directory, show the
+/// confirmation listing each repo's push destination, gate on `--yes`/TTY like
+/// `push "<message>"`, then
 /// push. Discovery and the resolved destinations are read-only and local — no fetch. The
 /// interactive prompt is the only side effect kept out of [`commands::up_subrepos`].
-fn run_up_subrepos(yes: bool) -> ExitCode {
+fn run_push_subrepos(yes: bool) -> ExitCode {
     use crate::commands::{sync, up_subrepos};
 
     let runner = StdGitRunner;
-    // Canonicalize first (like `diff subrepos`) so repo labels read off real path segments
+    // Canonicalize first (like `diff -r`) so repo labels read off real path segments
     // — the root repo is named for its directory, not the bare ".".
     let root = std::fs::canonicalize(".").unwrap_or_else(|_| std::path::PathBuf::from("."));
 
     let targets = match up_subrepos::plan(&runner, &root) {
         Ok(up_subrepos::SubreposPlan::Ready(targets)) => targets,
         Ok(up_subrepos::SubreposPlan::Refused(detail)) => {
-            eprintln!("up subrepos: {detail}");
+            eprintln!("push -r: {detail}");
             return ExitCode::Internal;
         }
         Err(error) => {
-            eprintln!("up subrepos: {error:#}");
+            eprintln!("push -r: {error:#}");
             return ExitCode::Internal;
         }
     };
@@ -336,17 +551,17 @@ fn run_up_subrepos(yes: bool) -> ExitCode {
 
     match sync::gate(yes, is_interactive()) {
         sync::Gate::RefuseNonInteractive => {
-            eprintln!("up subrepos: non-interactive shell; pass --yes to confirm the push");
+            eprintln!("push -r: non-interactive shell; pass --yes to confirm the push");
             return ExitCode::Usage;
         }
         sync::Gate::Confirm => match prompt_confirmation() {
             Ok(sync::Answer::Yes) => {}
             Ok(sync::Answer::No) => {
-                println!("up subrepos: aborted — nothing pushed");
+                println!("push -r: aborted — nothing pushed");
                 return ExitCode::Ok;
             }
             Err(err) => {
-                eprintln!("up subrepos: {err} — nothing pushed");
+                eprintln!("push -r: {err} — nothing pushed");
                 return ExitCode::Usage;
             }
         },
@@ -439,7 +654,7 @@ fn finish_sw(result: &crate::commands::sw::SwResult) -> ExitCode {
 
 /// Orchestrates `prune`: `--all` fans out over managed repos (preview unless `-y`); the
 /// single-repo path plans read-only, shows the will-delete block, gates on `-y`/TTY like
-/// `up`, then deletes. All git work is local; refusals → stderr, logs → stdout.
+/// `push "<message>"`, then deletes. All git work is local; refusals → stderr, logs → stdout.
 fn run_prune(args: PruneArgs) -> ExitCode {
     use crate::commands::{prune, sync};
 
@@ -742,20 +957,82 @@ mod tests {
     }
 
     #[test]
-    fn blank_commit_all_message_is_usage() {
+    fn blank_managed_commit_message_is_usage() {
         assert_eq!(
-            run(&[
-                "commit-all".into(),
-                "--message-for-all".into(),
-                String::new()
-            ]),
+            run(&["commit".into(), "--all".into(), String::new()]),
             ExitCode::Usage
         );
     }
 
     #[test]
+    fn ls_exits_ok() {
+        assert_eq!(run(&["ls".into()]), ExitCode::Ok);
+    }
+
+    #[test]
+    fn managed_push_without_message_has_only_push_step() {
+        let steps = managed_push_steps(PushArgs {
+            message: None,
+            all: true,
+            recursive: false,
+            dry: false,
+            json: false,
+            repos_file: Some("repos.toml".to_string()),
+            home_dir: Some("/tmp/home".to_string()),
+            yes: false,
+        });
+
+        assert!(matches!(
+            steps.as_slice(),
+            [ManagedPushStep::Push(options)]
+                if options.message_for_all.is_none()
+                    && options.repos_file.as_deref() == Some(std::path::Path::new("repos.toml"))
+                    && options.home_dir.as_deref() == Some(std::path::Path::new("/tmp/home"))
+        ));
+    }
+
+    #[test]
+    fn managed_push_with_message_commits_then_pushes() {
+        let steps = managed_push_steps(PushArgs {
+            message: Some("save work".to_string()),
+            all: true,
+            recursive: false,
+            dry: false,
+            json: true,
+            repos_file: Some("repos.toml".to_string()),
+            home_dir: Some("/tmp/home".to_string()),
+            yes: false,
+        });
+
+        assert!(matches!(
+            steps.as_slice(),
+            [ManagedPushStep::Commit(commit), ManagedPushStep::Push(push)]
+                if commit.message_for_all.as_deref() == Some("save work")
+                    && push.message_for_all.is_none()
+                    && commit.json
+                    && push.json
+        ));
+    }
+
+    #[test]
     fn prune_help_exits_ok() {
         assert_eq!(run(&["prune".into(), "--help".into()]), ExitCode::Ok);
+    }
+
+    #[test]
+    fn push_confirmation_outcome_uses_push_only_copy_without_message() {
+        assert_eq!(
+            push_confirmation_outcome(None, false, None),
+            "push: aborted — nothing pushed"
+        );
+        assert_eq!(
+            push_confirmation_outcome(None, true, Some("unrecognized answer")),
+            "push: unrecognized answer — nothing pushed"
+        );
+        assert_eq!(
+            push_confirmation_outcome(Some("save work"), false, None),
+            "push: aborted — nothing committed or pushed"
+        );
     }
 
     #[test]

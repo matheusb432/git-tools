@@ -13,7 +13,16 @@ pub struct SyncTarget {
     pub pending: Pending,
 }
 
-/// Read-only snapshot of what `up` will sweep up, for the confirmation block.
+/// What a local-only commit will touch, gathered read-only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalCommitTarget {
+    pub name: String,
+    pub top: String,
+    pub branch: String,
+    pub pending: Pending,
+}
+
+/// Read-only snapshot of what `push "<message>"` will sweep up, for the confirmation block.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Pending {
     /// Distinct working-tree paths with any change (staged, unstaged, or untracked).
@@ -33,6 +42,15 @@ pub enum Plan {
     Refused(String),
     /// Ready to confirm and apply.
     Ready(SyncTarget),
+}
+
+/// Outcome of the read-only planning pass for local-only commits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalCommitPlan {
+    /// Cannot commit locally; the string explains why (printed to stderr, exit 1).
+    Refused(String),
+    /// Ready to stage and commit.
+    Ready(LocalCommitTarget),
 }
 
 /// Whether the push needs an interactive confirmation, given the `--yes` flag and TTY state.
@@ -114,10 +132,10 @@ pub fn parse_answer(input: &str) -> AnswerResult {
     }
 }
 
-/// Builds the review block printed before `up` stages, commits, and pushes.
+/// Builds the review block printed before the current-repo stage/commit/push flow runs.
 /// Spells out every side effect — what gets staged, what is wrapped into the
 /// commit, and where it lands — so the user confirms an action, not just a repo.
-pub fn confirmation(target: &SyncTarget, message: &str) -> String {
+pub fn confirmation(command: &str, target: &SyncTarget, message: &str) -> String {
     let remote = if target.remote_url.is_empty() {
         target.remote.clone()
     } else {
@@ -132,7 +150,7 @@ pub fn confirmation(target: &SyncTarget, message: &str) -> String {
     } = target.pending;
 
     let mut out = format!(
-        "up — review before committing & pushing:\n  repo:    {} ({})\n  branch:  {}\n  remote:  {}\n  message: {}\n\nup will:",
+        "{command} — review before committing & pushing:\n  repo:    {} ({})\n  branch:  {}\n  remote:  {}\n  message: {}\n\n{command} will:",
         target.name, target.top, target.branch, remote, message
     );
 
@@ -160,6 +178,75 @@ pub fn confirmation(target: &SyncTarget, message: &str) -> String {
         );
     } else {
         out.push_str("\n  • nothing to commit or push — already up to date");
+    }
+
+    out
+}
+
+/// Builds the review block printed before a plain current-repo `push`.
+/// This copy is intentionally push-only: it never implies staging or committing.
+pub fn push_confirmation(target: &SyncTarget) -> String {
+    let remote = if target.remote_url.is_empty() {
+        target.remote.clone()
+    } else {
+        format!("{} ({})", target.remote, target.remote_url)
+    };
+    let dest = format!("{}/{}", target.remote, target.branch);
+    let Pending { changed, ahead, .. } = target.pending;
+
+    let mut out = format!(
+        "push — review before pushing:\n  repo:    {} ({})\n  branch:  {}\n  remote:  {}\n\npush will:",
+        target.name, target.top, target.branch, remote
+    );
+
+    if changed > 0 {
+        let _ = write!(
+            out,
+            "\n  • refuse to push while {changed} uncommitted change(s) are present"
+        );
+        out.push_str("\n  • push only existing commits; it will not stage or create a commit");
+    } else if ahead > 0 {
+        let _ = write!(out, "\n  • push {ahead} unpushed commit(s) to {dest}");
+    } else {
+        out.push_str("\n  • nothing to push — already up to date");
+    }
+
+    out
+}
+
+/// Builds the review block printed before the current-repo local commit flow runs.
+pub fn commit_confirmation(target: &LocalCommitTarget, message: &str) -> String {
+    let Pending {
+        changed,
+        staged,
+        unprepared,
+        ahead: _,
+    } = target.pending;
+
+    let mut out = format!(
+        "commit — review before committing:\n  repo:    {} ({})\n  branch:  {}\n  message: {}\n\ncommit will:",
+        target.name, target.top, target.branch, message
+    );
+
+    if changed > 0 {
+        if unprepared > 0 {
+            let _ = write!(
+                out,
+                "\n  • stage {unprepared} unprepared change(s) with `git add -A`"
+            );
+        }
+        let staged_note = if staged > 0 {
+            format!(" ({staged} already staged)")
+        } else {
+            String::new()
+        };
+        let _ = write!(
+            out,
+            "\n  • commit {changed} change(s){staged_note} as a single commit"
+        );
+        out.push_str("\n  • leave the commit local; it will not push");
+    } else {
+        out.push_str("\n  • nothing to commit — working tree clean");
     }
 
     out
@@ -210,6 +297,38 @@ pub fn plan(runner: &impl GitRunner, repo: &Path) -> Plan {
             staged,
             unprepared,
             ahead,
+        },
+    })
+}
+
+pub fn plan_local_commit(runner: &impl GitRunner, repo: &Path) -> LocalCommitPlan {
+    let Some(top) = capture(runner, repo, &["rev-parse", "--show-toplevel"]) else {
+        return LocalCommitPlan::Refused("not a git repo".to_string());
+    };
+    let top_path = Path::new(&top);
+
+    let branch = match capture(runner, top_path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+        Some(branch) if branch != "HEAD" => branch,
+        _ => {
+            return LocalCommitPlan::Refused("detached HEAD — checkout a branch first".to_string());
+        }
+    };
+
+    let porcelain = match runner.run(top_path, &["status", "--porcelain"]) {
+        Ok(output) if output.exit_code == 0 => output.stdout,
+        _ => return LocalCommitPlan::Refused("git status failed".to_string()),
+    };
+    let (changed, staged, unprepared) = classify(&porcelain);
+
+    LocalCommitPlan::Ready(LocalCommitTarget {
+        name: repo_name(&top),
+        top,
+        branch,
+        pending: Pending {
+            changed,
+            staged,
+            unprepared,
+            ahead: 0,
         },
     })
 }
@@ -277,6 +396,57 @@ pub fn apply(runner: &impl GitRunner, target: &SyncTarget, message: &str) -> Syn
         Ok(()) => SyncResult::new(Status::Synced, "staged, committed, and pushed"),
         Err(detail) => SyncResult::new(Status::Fail, detail),
     }
+}
+
+pub fn push_existing(runner: &impl GitRunner, target: &SyncTarget) -> SyncResult {
+    let top = Path::new(&target.top);
+    let dirty = match runner.run(top, &["status", "--porcelain"]) {
+        Ok(output) if output.exit_code == 0 => !output.stdout.trim().is_empty(),
+        _ => return SyncResult::new(Status::Fail, "git status failed"),
+    };
+    if dirty {
+        return SyncResult::new(Status::Refused, "working tree has uncommitted changes");
+    }
+    let ahead = match capture(runner, top, &["rev-list", "--count", "@{u}..HEAD"]) {
+        Some(count) => count.parse::<usize>().unwrap_or(0),
+        None => return SyncResult::new(Status::Fail, "rev-list failed"),
+    };
+    if ahead == 0 {
+        return SyncResult::new(Status::Noop, "already up to date");
+    }
+    match push(runner, top, target) {
+        Ok(()) => SyncResult::new(Status::Synced, format!("pushed {ahead} commit(s)")),
+        Err(detail) => SyncResult::new(Status::Fail, detail),
+    }
+}
+
+pub fn commit_only(runner: &impl GitRunner, target: &SyncTarget, message: &str) -> SyncResult {
+    commit_at(runner, Path::new(&target.top), message)
+}
+
+pub fn commit_local(
+    runner: &impl GitRunner,
+    target: &LocalCommitTarget,
+    message: &str,
+) -> SyncResult {
+    commit_at(runner, Path::new(&target.top), message)
+}
+
+fn commit_at(runner: &impl GitRunner, top: &Path, message: &str) -> SyncResult {
+    let dirty = match runner.run(top, &["status", "--porcelain"]) {
+        Ok(output) if output.exit_code == 0 => !output.stdout.trim().is_empty(),
+        _ => return SyncResult::new(Status::Fail, "git status failed"),
+    };
+    if !dirty {
+        return SyncResult::new(Status::Noop, "nothing to commit");
+    }
+    if !succeeds(runner, top, &["add", "-A"]) {
+        return SyncResult::new(Status::Fail, "git add failed");
+    }
+    if !succeeds(runner, top, &["commit", "-m", message]) {
+        return SyncResult::new(Status::Fail, "git commit failed");
+    }
+    SyncResult::new(Status::Synced, "staged and committed")
 }
 
 /// Runs git and returns trimmed stdout on a clean exit with non-empty output, else `None`.
@@ -390,6 +560,20 @@ mod tests {
         }
     }
 
+    fn local_commit_target() -> LocalCommitTarget {
+        LocalCommitTarget {
+            name: "repo-a".to_string(),
+            top: "/home/me/work/repo-a".to_string(),
+            branch: "main".to_string(),
+            pending: Pending {
+                changed: 3,
+                staged: 1,
+                unprepared: 2,
+                ahead: 0,
+            },
+        }
+    }
+
     // --- gate ---------------------------------------------------------------
 
     #[test]
@@ -449,7 +633,7 @@ mod tests {
 
     #[test]
     fn confirmation_names_repo_branch_remote_and_message() {
-        let text = confirmation(&target(), "save work");
+        let text = confirmation("push", &target(), "save work");
         assert!(text.contains("repo-a"), "names the repo");
         assert!(text.contains("/home/me/work/repo-a"), "shows the path");
         assert!(text.contains("main"), "names the branch");
@@ -465,9 +649,9 @@ mod tests {
     fn confirmation_omits_empty_remote_url_parens() {
         let mut t = target();
         t.remote_url = String::new();
-        let text = confirmation(&t, "save work");
+        let text = confirmation("push", &t, "save work");
         assert!(text.contains("origin"));
-        // The "up will:" plan also uses parens for the staged note, so scope the
+        // The `push will:` plan also uses parens for the staged note, so scope the
         // assertion to the remote line.
         let remote_line = text
             .lines()
@@ -488,7 +672,7 @@ mod tests {
             unprepared: 2,
             ahead: 1,
         };
-        let text = confirmation(&t, "save work");
+        let text = confirmation("push", &t, "save work");
         assert!(text.contains("stage 2 unprepared change(s)"), "{text}");
         assert!(
             text.contains("commit 3 change(s) (1 already staged) as a single commit"),
@@ -506,7 +690,7 @@ mod tests {
             unprepared: 0,
             ahead: 3,
         };
-        let text = confirmation(&t, "ignored");
+        let text = confirmation("push", &t, "ignored");
         assert!(
             text.contains("nothing to commit; push 3 unpushed commit(s) to origin/main"),
             "{text}"
@@ -517,8 +701,45 @@ mod tests {
     fn confirmation_clean_and_up_to_date_says_nothing_to_do() {
         let mut t = target();
         t.pending = Pending::default();
-        let text = confirmation(&t, "ignored");
+        let text = confirmation("push", &t, "ignored");
         assert!(text.contains("already up to date"), "{text}");
+    }
+
+    #[test]
+    fn push_only_confirmation_omits_message_and_commit_language() {
+        let mut t = target();
+        t.pending = Pending {
+            changed: 0,
+            staged: 0,
+            unprepared: 0,
+            ahead: 3,
+        };
+
+        let text = push_confirmation(&t);
+
+        assert!(!text.contains("message:"), "{text}");
+        assert!(!text.contains("committing & pushing"), "{text}");
+        assert!(!text.contains("commit "), "{text}");
+        assert!(text.contains("review before pushing"), "{text}");
+        assert!(
+            text.contains("push 3 unpushed commit(s) to origin/main"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn commit_confirmation_spells_out_local_only_commit() {
+        let text = commit_confirmation(&local_commit_target(), "save work");
+
+        assert!(text.contains("review before committing"), "{text}");
+        assert!(text.contains("save work"), "{text}");
+        assert!(text.contains("stage 2 unprepared change(s)"), "{text}");
+        assert!(
+            text.contains("commit 3 change(s) (1 already staged) as a single commit"),
+            "{text}"
+        );
+        assert!(text.contains("leave the commit local"), "{text}");
+        assert!(!text.contains("push "), "{text}");
     }
 
     // --- plan ---------------------------------------------------------------
@@ -635,6 +856,48 @@ mod tests {
                 vec!["rev-list", "--count", "@{u}..HEAD"],
             ],
             "no push when clean and up to date"
+        );
+    }
+
+    #[test]
+    fn push_existing_pushes_ahead_clean_repo_without_commit() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok(""),
+            FakeRunner::ok("2\n"),
+            FakeRunner::ok(""),
+        ]);
+        let target = target();
+
+        let result = push_existing(&runner, &target);
+
+        assert_eq!(result.status, Status::Synced);
+        assert_eq!(result.detail, "pushed 2 commit(s)");
+        let calls = runner.calls();
+        assert!(
+            calls
+                .iter()
+                .all(|call| call.args.first().map(String::as_str) != Some("commit"))
+        );
+    }
+
+    #[test]
+    fn commit_only_stages_and_commits_dirty_repo_without_push() {
+        let runner = FakeRunner::new(vec![
+            FakeRunner::ok(" M file.txt\n"),
+            FakeRunner::ok(""),
+            FakeRunner::ok(""),
+        ]);
+        let target = target();
+
+        let result = commit_only(&runner, &target, "save work");
+
+        assert_eq!(result.status, Status::Synced);
+        assert_eq!(result.detail, "staged and committed");
+        let calls = runner.calls();
+        assert!(
+            calls
+                .iter()
+                .all(|call| call.args.first().map(String::as_str) != Some("push"))
         );
     }
 

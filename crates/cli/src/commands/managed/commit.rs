@@ -1,4 +1,4 @@
-//! Fanning `commit-all` out across every managed repo.
+//! Fanning `commit --all` out across every managed repo.
 
 use std::fmt::{self, Write as _};
 
@@ -10,7 +10,7 @@ use super::{
     push_pull::last_non_empty_line, working_tree,
 };
 
-/// What `commit-all` did with one repo. Replaces the former stringly-typed
+/// What `commit --all` did with one repo. Replaces the former stringly-typed
 /// `action` so [`commit_exit_code`] and every call site are checked against the
 /// closed set. [`CommitAction::as_wire`] is the exact token the `--json` output
 /// and the action table have always emitted — keep it byte-stable.
@@ -88,7 +88,7 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
             exit: ManagedExit::Usage,
             results: Vec::new(),
             stdout: String::new(),
-            stderr: "commit-all: --message-for-all requires a non-empty message".to_string(),
+            stderr: "commit --all requires a non-empty message".to_string(),
         };
     }
 
@@ -97,8 +97,7 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
             exit: ManagedExit::Usage,
             results: Vec::new(),
             stdout: String::new(),
-            stderr: "commit-all: non-interactive shell; pass --dry or --message-for-all \"msg\""
-                .to_string(),
+            stderr: "commit --all requires a message unless --dry is used".to_string(),
         };
     }
 

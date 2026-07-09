@@ -34,17 +34,17 @@ pub fn run(evidence: bool, smoke: bool) -> Result<()> {
             tempfile::tempdir().context("failed to create isolated GIT_TOOLS_DATA_DIR")?;
         let fixture_root =
             tempfile::tempdir().context("failed to create isolated native perf fixture root")?;
-        let envs = command_env(
-            &repo_root,
-            &tauri_driver,
-            &viewer_binary,
-            data_dir.path(),
-            fixture_root.path(),
-            evidence_paths.as_ref(),
-            git_metadata.as_ref(),
+        let envs = command_env(NativePerfCommandEnv {
+            repo_root: &repo_root,
+            tauri_driver: &tauri_driver,
+            viewer_binary: &viewer_binary,
+            data_dir: data_dir.path(),
+            fixture_root: fixture_root.path(),
+            evidence_paths: evidence_paths.as_ref(),
+            git_metadata: git_metadata.as_ref(),
             evidence,
             smoke,
-        );
+        });
 
         run_package_command(
             &repo_root,
@@ -185,57 +185,60 @@ fn finalize_with_evidence(
     result
 }
 
-fn command_env(
-    repo_root: &Path,
-    tauri_driver: &Path,
-    viewer_binary: &Path,
-    data_dir: &Path,
-    fixture_root: &Path,
-    evidence_paths: Option<&EvidencePaths>,
-    git_metadata: Option<&GitMetadata>,
+#[derive(Clone, Copy)]
+struct NativePerfCommandEnv<'a> {
+    repo_root: &'a Path,
+    tauri_driver: &'a Path,
+    viewer_binary: &'a Path,
+    data_dir: &'a Path,
+    fixture_root: &'a Path,
+    evidence_paths: Option<&'a EvidencePaths>,
+    git_metadata: Option<&'a GitMetadata>,
     evidence: bool,
     smoke: bool,
-) -> BTreeMap<&'static str, String> {
+}
+
+fn command_env(input: NativePerfCommandEnv<'_>) -> BTreeMap<&'static str, String> {
     let mut envs = BTreeMap::from([
         (
             "GIT_TOOLS_DATA_DIR",
-            data_dir.to_string_lossy().into_owned(),
+            input.data_dir.to_string_lossy().into_owned(),
         ),
         (
             "GTL_NATIVE_PERF_FIXTURE_ROOT",
-            fixture_root.to_string_lossy().into_owned(),
+            input.fixture_root.to_string_lossy().into_owned(),
         ),
         (
             "GTL_NATIVE_PERF_REPO_ROOT",
-            repo_root.to_string_lossy().into_owned(),
+            input.repo_root.to_string_lossy().into_owned(),
         ),
         (
             "GTL_NATIVE_PERF_TAURI_DRIVER",
-            tauri_driver.to_string_lossy().into_owned(),
+            input.tauri_driver.to_string_lossy().into_owned(),
         ),
         (
             "GTL_NATIVE_PERF_APP_BINARY",
-            viewer_binary.to_string_lossy().into_owned(),
+            input.viewer_binary.to_string_lossy().into_owned(),
         ),
     ]);
 
-    if let Some(paths) = evidence_paths {
+    if let Some(paths) = input.evidence_paths {
         envs.insert(
             "GTL_NATIVE_PERF_ARTIFACT_DIR",
             paths.success_dir.to_string_lossy().into_owned(),
         );
     }
-    if let Some(metadata) = git_metadata {
+    if let Some(metadata) = input.git_metadata {
         envs.insert("GTL_NATIVE_PERF_GIT_COMMIT", metadata.commit.clone());
         if let Some(branch) = &metadata.branch {
             envs.insert("GTL_NATIVE_PERF_GIT_BRANCH", branch.clone());
         }
         envs.insert("GTL_NATIVE_PERF_GIT_DIRTY", metadata.dirty.to_string());
     }
-    if evidence {
+    if input.evidence {
         envs.insert("GTL_NATIVE_PERF_EVIDENCE", "1".to_string());
     }
-    if smoke {
+    if input.smoke {
         envs.insert("GTL_NATIVE_PERF_SMOKE", "1".to_string());
     }
 
@@ -464,20 +467,20 @@ mod tests {
     #[test]
     fn native_perf_env_sets_requested_mode_flags() {
         let repo_root = Path::new("/repo");
-        let envs = command_env(
+        let envs = command_env(NativePerfCommandEnv {
             repo_root,
-            Path::new("/tooling/tauri-driver"),
-            Path::new("/repo/target/release/gtl-viewer"),
-            Path::new("/tmp/data"),
-            Path::new("/tmp/fixtures"),
-            Some(&EvidencePaths {
+            tauri_driver: Path::new("/tooling/tauri-driver"),
+            viewer_binary: Path::new("/repo/target/release/gtl-viewer"),
+            data_dir: Path::new("/tmp/data"),
+            fixture_root: Path::new("/tmp/fixtures"),
+            evidence_paths: Some(&EvidencePaths {
                 success_dir: repo_root.join(SUCCESS_DIR),
                 fail_dir: repo_root.join(FAIL_DIR),
             }),
-            None,
-            true,
-            true,
-        );
+            git_metadata: None,
+            evidence: true,
+            smoke: true,
+        });
 
         assert_eq!(envs.get("GTL_NATIVE_PERF_EVIDENCE"), Some(&"1".to_string()));
         assert_eq!(envs.get("GTL_NATIVE_PERF_SMOKE"), Some(&"1".to_string()));
@@ -550,17 +553,17 @@ mod tests {
     #[test]
     fn native_perf_command_env_leaves_driver_port_selection_to_wdio() {
         let repo_root = Path::new("/repo");
-        let envs = command_env(
+        let envs = command_env(NativePerfCommandEnv {
             repo_root,
-            Path::new("/tooling/tauri-driver"),
-            Path::new("/repo/target/release/gtl-viewer"),
-            Path::new("/tmp/data"),
-            Path::new("/tmp/fixtures"),
-            None,
-            None,
-            false,
-            false,
-        );
+            tauri_driver: Path::new("/tooling/tauri-driver"),
+            viewer_binary: Path::new("/repo/target/release/gtl-viewer"),
+            data_dir: Path::new("/tmp/data"),
+            fixture_root: Path::new("/tmp/fixtures"),
+            evidence_paths: None,
+            git_metadata: None,
+            evidence: false,
+            smoke: false,
+        });
 
         assert!(!envs.contains_key("GTL_NATIVE_PERF_TAURI_DRIVER_PORT"));
         assert!(!envs.contains_key("GTL_NATIVE_PERF_NATIVE_DRIVER_PORT"));
@@ -569,21 +572,21 @@ mod tests {
     #[test]
     fn native_perf_command_env_includes_source_revision_identity() {
         let repo_root = Path::new("/repo");
-        let envs = command_env(
+        let envs = command_env(NativePerfCommandEnv {
             repo_root,
-            Path::new("/tooling/tauri-driver"),
-            Path::new("/repo/target/release/gtl-viewer"),
-            Path::new("/tmp/data"),
-            Path::new("/tmp/fixtures"),
-            None,
-            Some(&GitMetadata {
+            tauri_driver: Path::new("/tooling/tauri-driver"),
+            viewer_binary: Path::new("/repo/target/release/gtl-viewer"),
+            data_dir: Path::new("/tmp/data"),
+            fixture_root: Path::new("/tmp/fixtures"),
+            evidence_paths: None,
+            git_metadata: Some(&GitMetadata {
                 commit: "abc123".to_string(),
                 branch: Some("main".to_string()),
                 dirty: true,
             }),
-            false,
-            false,
-        );
+            evidence: false,
+            smoke: false,
+        });
 
         assert_eq!(
             envs.get("GTL_NATIVE_PERF_GIT_COMMIT"),

@@ -32,7 +32,7 @@ pub struct ListHistoryHandler<A: ArtifactStore> {
 
 impl<A: ArtifactStore> Handler<ListHistory> for ListHistoryHandler<A> {
     async fn handle(&self, req: ListHistory) -> Result<ListHistoryResponse, ListHistoryError> {
-        // `diff subrepos`/`diff all` span multiple repos, so they carry no single
+        // `diff -r`/`diff --all` span multiple repos, so they carry no single
         // head commit — `head_committed_at` is empty. Fall back to `generated_at`
         // for those so they sort by actual recency instead of always trailing.
         fn recency(r: &HistoryRecord) -> &str {
@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn falls_back_to_generated_at_when_head_committed_at_is_empty() {
-        // `diff subrepos`/`diff all` have no single head commit, so they carry an
+        // `diff -r`/`diff --all` have no single head commit, so they carry an
         // empty `head_committed_at`. Without a fallback they'd always sort last,
         // regardless of how recently they were generated.
         let store = InMemoryArtifactStore {

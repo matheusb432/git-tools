@@ -3,7 +3,7 @@
 //!
 //! These replace the PowerShell conformance harness. That harness froze the legacy Node/PS
 //! originals as goldens to prove the Rust port matched them; the port is done and the diff
-//! surface has since moved on (lean `diff` + `diff subrepos`, GTL-0002), so these pin
+//! surface has since moved on (lean `diff` + `diff -r`, GTL-0002), so these pin
 //! *current* behavior instead — one Rust test per scenario the harness fixtures covered.
 
 use std::{
@@ -669,19 +669,26 @@ fn wk_ls_lists_worktrees_as_a_readable_table() {
         .stdout(contains("linked"));
 }
 
-// --- up --------------------------------------------------------------------
+// --- push / commit ----------------------------------------------------------
 
 #[test]
-fn up_with_yes_commits_and_pushes_dirty_repo() {
+fn bare_pull_is_usage_error() {
+    let repo = Repo::new();
+
+    repo.run(&["pull"]).assert().code(2);
+}
+
+#[test]
+fn push_stages_commits_and_pushes_dirty_repo() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
     std::fs::write(repo.subrepo.join("a.txt"), "base\nlocal\n").unwrap();
 
-    repo.run(&["up", "save work", "--yes"])
+    repo.run(&["push", "save work", "--yes"])
         .assert()
         .success()
-        .stdout(contains("up — review before committing & pushing"))
+        .stdout(contains("push — review before committing & pushing"))
         .stdout(contains("message: save work"))
         .stdout(contains("main"))
         .stdout(contains("origin"))
@@ -697,41 +704,43 @@ fn up_with_yes_commits_and_pushes_dirty_repo() {
 }
 
 #[test]
-fn up_with_yes_pushes_clean_but_unpushed_commits() {
+fn push_without_message_pushes_existing_commits() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
     repo.commit("a.txt", "base\nlocal\n", "feat: already committed");
 
-    repo.run(&["up", "ignored message", "--yes"])
+    repo.run(&["push", "--yes"])
         .assert()
         .success()
-        .stdout(contains("nothing to commit; pushed"));
+        .stdout(contains("review before pushing"))
+        .stdout(contains("push 1 unpushed commit(s) to origin/main"))
+        .stdout(contains("push: pushed 1 commit(s)"));
 
     assert_eq!(repo.unpushed_count(), 0);
 }
 
 #[test]
-fn up_noops_when_clean_and_up_to_date() {
+fn push_noops_when_clean_and_up_to_date() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
 
-    repo.run(&["up", "nothing to do", "--yes"])
+    repo.run(&["push", "--yes"])
         .assert()
         .success()
         .stdout(contains("already up to date"));
 }
 
 #[test]
-fn up_without_yes_refuses_in_noninteractive_shell() {
+fn push_without_yes_refuses_in_noninteractive_shell() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
     std::fs::write(repo.subrepo.join("a.txt"), "base\nlocal\n").unwrap();
 
     // assert_cmd runs without a TTY: the gate must refuse rather than auto-push.
-    repo.run(&["up", "save work"])
+    repo.run(&["push", "save work"])
         .assert()
         .code(2)
         .stderr(contains("pass --yes"));
@@ -745,15 +754,82 @@ fn up_without_yes_refuses_in_noninteractive_shell() {
 }
 
 #[test]
-fn up_outside_a_git_repo_errors() {
+fn commit_without_yes_refuses_in_noninteractive_shell() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    std::fs::write(repo.subrepo.join("a.txt"), "base\nlocal\n").unwrap();
+
+    repo.run(&["commit", "save work"])
+        .assert()
+        .code(2)
+        .stderr(contains("pass --yes"));
+
+    assert_ne!(
+        repo.git(&["status", "--porcelain"]),
+        "",
+        "nothing was committed; the tree is still dirty"
+    );
+}
+
+#[test]
+fn push_outside_a_git_repo_errors() {
     let tmp = tempfile::tempdir().unwrap();
     Command::cargo_bin("git-tools")
         .unwrap()
-        .args(["up", "save work", "--yes"])
+        .args(["push", "save work", "--yes"])
         .current_dir(tmp.path())
         .assert()
         .code(1)
         .stderr(contains("not a git repo"));
+}
+
+#[test]
+fn commit_stages_and_commits_without_pushing() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    let remote = repo.root.join("origin.git");
+    let remote_head_before = git_in(&repo.subrepo, &["rev-parse", "@{u}"]);
+    std::fs::write(repo.subrepo.join("a.txt"), "base\nlocal\n").unwrap();
+
+    repo.run(&["commit", "save work", "--yes"])
+        .assert()
+        .success()
+        .stdout(contains("commit — review before committing"))
+        .stdout(contains("commit: staged and committed"));
+
+    assert_eq!(
+        repo.git(&["status", "--porcelain"]),
+        "",
+        "tree is clean after commit"
+    );
+    assert_eq!(repo.unpushed_count(), 1, "the commit remains local");
+    assert_eq!(repo.git(&["log", "-1", "--pretty=%s"]), "save work");
+    let remote_head_after = git_in(Path::new(&remote), &["rev-parse", "refs/heads/main"]);
+    assert_eq!(
+        remote_head_after, remote_head_before,
+        "remote did not advance"
+    );
+}
+
+#[test]
+fn commit_stages_and_commits_without_upstream_tracking_branch() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    std::fs::write(repo.subrepo.join("a.txt"), "base\nlocal\n").unwrap();
+
+    repo.run(&["commit", "save work", "--yes"])
+        .assert()
+        .success()
+        .stdout(contains("commit — review before committing"))
+        .stdout(contains("commit: staged and committed"));
+
+    assert_eq!(
+        repo.git(&["status", "--porcelain"]),
+        "",
+        "tree is clean after commit"
+    );
+    assert_eq!(repo.git(&["log", "-1", "--pretty=%s"]), "save work");
 }
 
 // --- tag -------------------------------------------------------------------
@@ -1020,7 +1096,8 @@ fn status_color_always_bolds_brackets_and_marks_clean_checkmark_green() {
     Command::cargo_bin("git-tools")
         .unwrap()
         .args([
-            "ls",
+            "status",
+            "--all",
             "--color",
             "always",
             "--repos-file",
@@ -1033,6 +1110,33 @@ fn status_color_always_bolds_brackets_and_marks_clean_checkmark_green() {
         .stdout(contains(
             "repo main \u{1b}[1m\u{1b}[38;2;242;133;0m[\u{1b}[39m\u{1b}[38;2;46;204;113m✓\u{1b}[39m\u{1b}[38;2;242;133;0m]\u{1b}[39m\u{1b}[0m",
         ));
+}
+
+#[test]
+fn commit_all_dry_accepts_missing_message() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    std::fs::write(repo.subrepo.join("a.txt"), "base\nlocal\n").unwrap();
+    let manifest = repo.root.join("repos.toml");
+    std::fs::write(&manifest, "[[repo]]\npath = \"repo\"\nremote = \"\"\n").unwrap();
+    let head_before = repo.git(&["rev-parse", "HEAD"]);
+
+    Command::cargo_bin("git-tools")
+        .unwrap()
+        .args([
+            "commit",
+            "--all",
+            "--dry",
+            "--repos-file",
+            manifest.to_str().unwrap(),
+            "--home-dir",
+            repo.root.to_str().unwrap(),
+        ])
+        .assert()
+        .code(1)
+        .stdout(contains("would-commit"));
+
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), head_before);
 }
 
 #[test]
@@ -1071,18 +1175,15 @@ fn status_rejects_all_combined_with_recursive() {
         .stderr(contains("cannot be used with"));
 }
 
-// --- diff subrepos ---------------------------------------------------------
+// --- diff -r ---------------------------------------------------------------
 
 #[test]
-fn diff_subrepos_nested_last_writes_one_tabbed_artifact() {
+fn diff_recursive_nested_last_writes_one_tabbed_artifact() {
     let repos = NestedRepos::new(&["api", "web"]);
 
-    let cmd = repos.run(&["diff", "subrepos", "-l"]);
+    let cmd = repos.run(&["diff", "-r", "-l"]);
     let (stdout, _) = run_success(cmd);
-    assert!(
-        stdout.contains("diff subrepos: 2 repo(s)"),
-        "stdout: {stdout}"
-    );
+    assert!(stdout.contains("diff -r: 2 repo(s)"), "stdout: {stdout}");
     assert!(stdout.contains("wrote"), "stdout: {stdout}");
 
     let artifact = artifact_from_stdout(&stdout);
@@ -1097,7 +1198,7 @@ fn diff_subrepos_nested_last_writes_one_tabbed_artifact() {
 }
 
 #[test]
-fn diff_subrepos_skips_nested_worktrees_by_default_and_includes_with_flag() {
+fn diff_recursive_skips_nested_worktrees_by_default_and_includes_with_flag() {
     let repos = NestedRepos::new(&["api", "web"]);
     git_in(
         &repos.repos[0],
@@ -1105,20 +1206,20 @@ fn diff_subrepos_skips_nested_worktrees_by_default_and_includes_with_flag() {
     );
 
     repos
-        .run(&["diff", "subrepos", "-l"])
+        .run(&["diff", "-r", "-l"])
         .assert()
         .success()
-        .stdout(contains("diff subrepos: 2 repo(s)"));
+        .stdout(contains("diff -r: 2 repo(s)"));
 
     repos
-        .run(&["diff", "subrepos", "-l", "--worktrees"])
+        .run(&["diff", "-r", "-l", "--worktrees"])
         .assert()
         .success()
-        .stdout(contains("diff subrepos: 3 repo(s)"));
+        .stdout(contains("diff -r: 3 repo(s)"));
 }
 
 #[test]
-fn diff_subrepos_without_upstreams_falls_back_to_main() {
+fn diff_recursive_without_upstreams_falls_back_to_main() {
     let repos = NestedRepos::new(&["api", "web"]);
     for repo in &repos.repos {
         git_in(repo, &["reset", "--hard", "HEAD~1"]);
@@ -1131,12 +1232,9 @@ fn diff_subrepos_without_upstreams_falls_back_to_main() {
         );
     }
 
-    let cmd = repos.run(&["diff", "subrepos"]);
+    let cmd = repos.run(&["diff", "-r"]);
     let (stdout, _) = run_success(cmd);
-    assert!(
-        stdout.contains("diff subrepos: 2 repo(s)"),
-        "stdout: {stdout}"
-    );
+    assert!(stdout.contains("diff -r: 2 repo(s)"), "stdout: {stdout}");
     assert!(stdout.contains("wrote"), "stdout: {stdout}");
 
     let artifact = artifact_from_stdout(&stdout);
@@ -1148,7 +1246,7 @@ fn diff_subrepos_without_upstreams_falls_back_to_main() {
 }
 
 #[test]
-fn diff_subrepos_skips_repos_with_nothing_to_show() {
+fn diff_recursive_skips_repos_with_nothing_to_show() {
     let repos = NestedRepos::new(&["api", "web"]);
     // api: up to date with its upstream — nothing unpushed, so it has nothing to show.
     add_upstream_for(&repos.repos[0], &repos.root.join("api.git"));
@@ -1161,13 +1259,10 @@ fn diff_subrepos_skips_repos_with_nothing_to_show() {
         "feat: queued work",
     );
 
-    let (stdout, stderr) = run_success(repos.run(&["diff", "subrepos"]));
+    let (stdout, stderr) = run_success(repos.run(&["diff", "-r"]));
 
     // Only the repo with work is rendered; the empty one is reported, not tabbed.
-    assert!(
-        stdout.contains("diff subrepos: 1 repo(s)"),
-        "stdout: {stdout}"
-    );
+    assert!(stdout.contains("diff -r: 1 repo(s)"), "stdout: {stdout}");
     assert!(
         stderr.contains("skipped 1 repo(s) with nothing to show"),
         "skip summary missing from stderr: {stderr}"
@@ -1184,13 +1279,13 @@ fn diff_subrepos_skips_repos_with_nothing_to_show() {
 }
 
 #[test]
-fn diff_subrepos_all_empty_writes_no_preview() {
+fn diff_recursive_all_empty_writes_no_preview() {
     let repos = NestedRepos::new(&["api", "web"]);
     // Both repos are up to date with their upstreams — nothing to show anywhere.
     add_upstream_for(&repos.repos[0], &repos.root.join("api.git"));
     add_upstream_for(&repos.repos[1], &repos.root.join("web.git"));
 
-    let (stdout, stderr) = run_success(repos.run(&["diff", "subrepos"]));
+    let (stdout, stderr) = run_success(repos.run(&["diff", "-r"]));
 
     // No artifact is written, and the empty result is surfaced in the terminal.
     assert!(

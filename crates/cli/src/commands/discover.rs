@@ -1,6 +1,6 @@
 //! Filesystem discovery of git repositories under a root directory.
 //!
-//! A focused, diff-agnostic concern shared by `diff subrepos` and recursive `status`:
+//! A focused, diff-agnostic concern shared by `diff -r` and recursive `status`:
 //! walk a tree, collect real repos, and (optionally) skip linked worktrees.
 
 use std::path::{Path, PathBuf};

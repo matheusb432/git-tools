@@ -1,4 +1,4 @@
-//! `up subrepos` — push every git repo under the current directory to its upstream.
+//! Recursive `push -r` support — push every git repo under the current directory to its upstream.
 //!
 //! The sibling of [`crate::commands::diff_subrepos`] for pushing: discover every repo under
 //! a root (reusing [`crate::commands::discover`]), resolve each one's push destination from
@@ -6,7 +6,7 @@
 //! detached HEAD — carries a [`Dest::Skip`] reason instead of a push target, so an
 //! un-pushable repo is unrepresentable as a push and is reported, never silently dropped.
 //! A branch already synced with its upstream (the local `@{u}..HEAD` count is `0`, the same
-//! check `gtl ls` reports) becomes a [`Dest::Synced`], so the flow scales with repos that
+//! check `gtl status --all` reports) becomes a [`Dest::Synced`], so the flow scales with repos that
 //! actually have unpushed commits — synced repos never reach the network. Plan/apply split
 //! mirrors [`crate::commands::prune`].
 
@@ -28,7 +28,7 @@ pub enum Dest {
     /// The current branch has unpushed commits and the remote its upstream tracks.
     Push { branch: String, remote: String },
     /// The branch has an upstream but no unpushed commits (`@{u}..HEAD` is empty), so a
-    /// push would be a network no-op — the same "already synced" state `gtl ls` reports.
+    /// push would be a network no-op — the same "already synced" state `gtl status --all` reports.
     Synced { branch: String, remote: String },
     /// The repo cannot be pushed (no upstream, or detached HEAD); the string says why.
     Skip { reason: String },
@@ -42,7 +42,7 @@ pub struct RepoTarget {
     pub dest: Dest,
 }
 
-/// Read-only plan for the `up subrepos` flow.
+/// Read-only plan for the recursive `push -r` flow.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubreposPlan {
     /// Nothing to do; the string explains why (stderr, exit 1).
@@ -71,7 +71,7 @@ pub struct RepoReport {
     pub outcome: RepoOutcome,
 }
 
-/// Overall outcome of an applied `up subrepos`.
+/// Overall outcome of an applied recursive `push -r`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     /// No repo failed (some may have been skipped or already current).
@@ -130,8 +130,8 @@ pub fn inspect(runner: &impl GitRunner, path: &Path, label: String) -> RepoTarge
 }
 
 /// Whether the current branch has no unpushed commits — the local `@{u}..HEAD` count is
-/// exactly `0`. This mirrors the ahead-count `gtl ls`/`status` and the sibling `diff
-/// subrepos` use to spot synced repos, and stays purely local (no fetch). An unavailable
+/// exactly `0`. This mirrors the ahead-count `gtl status --all` reports and the sibling
+/// `diff -r` uses to spot synced repos, and stays purely local (no fetch). An unavailable
 /// count (e.g. no `@{u}` merge ref) is never read as synced — we fall back to pushing.
 fn is_synced(runner: &impl GitRunner, path: &Path) -> bool {
     capture(runner, path, &["rev-list", "--count", "@{u}..HEAD"])
@@ -164,7 +164,7 @@ pub fn plan(runner: &impl GitRunner, root: &Path) -> anyhow::Result<SubreposPlan
 /// exact set, not just a count.
 pub fn confirmation(root: &Path, targets: &[RepoTarget]) -> String {
     let mut out = format!(
-        "up subrepos — push {} repo(s) under {}:",
+        "push -r — push {} repo(s) under {}:",
         targets.len(),
         root.display()
     );
@@ -370,7 +370,7 @@ mod tests {
     #[test]
     fn inspect_pushes_when_ahead_count_is_unavailable() {
         // A failed `rev-list --count` must never read as "0 / already synced" — fall back to
-        // attempting the push, exactly as the sibling checks do (sw, diff subrepos).
+        // attempting the push, exactly as the sibling checks do (`sw`, `diff -r`).
         let runner = FakeRunner::new(vec![
             FakeRunner::ok("main\n"),
             FakeRunner::ok("origin\n"),

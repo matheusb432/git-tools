@@ -200,8 +200,8 @@ fn status_one(repo: &ManagedRepo) -> StatusResult {
 }
 
 /// The current branch's upstream tracking ref and how many commits it is ahead of that ref
-/// (`@{u}..HEAD`) — the two sync facts `gtl ls`/`status` report. `None` when the branch has
-/// no upstream. Purely local (no fetch); shared with `push-all` so it skips repos already
+/// (`@{u}..HEAD`) — the two sync facts `gtl status --all` reports. `None` when the branch has
+/// no upstream. Purely local (no fetch); shared with `push --all` so it skips repos already
 /// synced with their remote instead of pushing every one.
 pub(in crate::commands::managed) fn upstream_ahead(repo: &Path) -> Option<(String, usize)> {
     let upstream = match git_capture(

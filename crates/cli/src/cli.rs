@@ -14,6 +14,14 @@ fn non_empty_name(value: &str) -> Result<String, String> {
     }
 }
 
+fn diff_target(value: &str) -> Result<String, String> {
+    if value == "subrepos" {
+        Err("`diff subrepos` was retired; use `diff -r`".to_string())
+    } else {
+        Ok(value.to_string())
+    }
+}
+
 /// git-tools — render git workflow HTML previews and squash local commits.
 #[derive(Debug, Parser)]
 #[command(name = "git-tools", version, about, long_about = None, arg_required_else_help = true)]
@@ -48,7 +56,9 @@ pub enum Command {
         #[arg(long)]
         monorepo: String,
     },
-    /// Render an HTML diff of the current repo, or all managed repos with `--all`.
+    /// Render an HTML diff of the current repo, all managed repos with `--all`, or nested
+    /// subrepos with `-r`.
+    #[command(visible_alias = "d")]
     Diff(DiffArgs),
     /// Render a merge preview (three-dot diff) of a subrepo against a base branch.
     MergeDiff {
@@ -75,8 +85,13 @@ pub enum Command {
         #[arg(long)]
         dry: bool,
     },
-    /// Stage all changes, commit, and push the current repo (prompts for confirmation first).
-    Up(UpArgs),
+    /// Push existing commits, or stage all changes, commit with MESSAGE, and push.
+    #[command(visible_alias = "p")]
+    Push(PushArgs),
+    /// Pull every managed repo from the manifest.
+    Pull(PullArgs),
+    /// Stage all changes and commit them, without pushing.
+    Commit(CommitArgs),
     /// List tags, show tag commits, or push tags.
     Tag(TagArgs),
     /// Inspect git worktrees.
@@ -88,23 +103,10 @@ pub enum Command {
     /// into nested subrepos.
     #[command(visible_alias = "s")]
     Status(StatusArgs),
+    /// Aliases `status --all`
+    Ls(LsArgs),
     /// Delete local branches whose commits are already merged into main.
     Prune(PruneArgs),
-    /// Show branch, unpushed commits, and pending changes for every managed repo (same as `status
-    /// --all`).
-    Ls(ManagedReadArgs),
-    /// Push every managed repo that has unpushed commits.
-    PushAll(ManagedArgs),
-    /// Pull every managed repo.
-    PullAll(ManagedArgs),
-    /// Commit pending changes across every managed repo.
-    CommitAll {
-        #[command(flatten)]
-        managed: ManagedArgs,
-        /// Commit message to apply to every repo with pending changes.
-        #[arg(long)]
-        message_for_all: Option<String>,
-    },
     /// Control the resident gtl-daemon.
     Daemon(DaemonArgs),
 }
@@ -128,45 +130,81 @@ pub enum DaemonCommand {
 /// Arguments for the root `diff` command and its nested subcommands.
 #[derive(Debug, Args)]
 pub struct DiffArgs {
-    #[command(subcommand)]
-    pub command: Option<DiffCommand>,
     #[command(flatten)]
     pub target: DiffTargetArgs,
 }
 
-/// Nested commands under `diff`.
-#[derive(Debug, Subcommand)]
-pub enum DiffCommand {
-    /// Render one tabbed HTML diff for every git repo under the current directory.
-    Subrepos(DiffSubreposScanArgs),
-}
-
-/// Arguments for the root `up` command and its nested subcommands.
+/// Arguments for `push`.
 #[derive(Debug, Args)]
-pub struct UpArgs {
-    #[command(subcommand)]
-    pub command: Option<UpCommand>,
-    /// Commit message for the staged changes (required unless a subcommand is given).
-    #[arg(allow_hyphen_values = true)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent clap flags mirrored from argv, not a disguised state machine"
+)]
+pub struct PushArgs {
+    /// Commit message. When present, changes are staged and committed before pushing.
+    #[arg(allow_hyphen_values = true, conflicts_with = "recursive")]
     pub message: Option<String>,
-    /// Skip the confirmation prompt (for non-interactive use, e.g. a justfile recipe).
+    /// Operate on every managed repo from the manifest.
+    #[arg(long, conflicts_with = "recursive")]
+    pub all: bool,
+    /// Operate on the current repo plus nested subrepos under the current directory.
+    #[arg(short = 'r', long, conflicts_with = "all")]
+    pub recursive: bool,
+    /// Preview managed push actions without pushing.
+    #[arg(long, requires = "all")]
+    pub dry: bool,
+    /// Emit machine-readable JSON for managed output.
+    #[arg(long, requires = "all")]
+    pub json: bool,
+    /// Path to the managed-repos manifest.
+    #[arg(long, requires = "all")]
+    pub repos_file: Option<String>,
+    /// Home directory used to resolve managed-repo paths.
+    #[arg(long, requires = "all")]
+    pub home_dir: Option<String>,
+    /// Skip confirmation where the selected push mode supports it.
     #[arg(short = 'y', long = "yes")]
     pub yes: bool,
 }
 
-/// Nested commands under `up`.
-#[derive(Debug, Subcommand)]
-pub enum UpCommand {
-    /// Push every git repo under the current directory to its upstream (confirms first).
-    Subrepos(UpSubreposArgs),
-}
-
-/// Flags for `up subrepos`.
+/// Arguments for `commit`.
 #[derive(Debug, Args)]
-pub struct UpSubreposArgs {
-    /// Skip the confirmation prompt (for non-interactive use, e.g. a justfile recipe).
-    #[arg(short = 'y', long = "yes")]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent clap flags mirrored from argv, not a disguised state machine"
+)]
+pub struct CommitArgs {
+    /// Commit message.
+    #[arg(allow_hyphen_values = true, required_unless_present = "all")]
+    pub message: Option<String>,
+    /// Operate on every managed repo from the manifest.
+    #[arg(long)]
+    pub all: bool,
+    /// Preview managed commit actions without committing.
+    #[arg(long, requires = "all")]
+    pub dry: bool,
+    /// Emit machine-readable JSON for managed output.
+    #[arg(long, requires = "all")]
+    pub json: bool,
+    /// Path to the managed-repos manifest.
+    #[arg(long, requires = "all")]
+    pub repos_file: Option<String>,
+    /// Home directory used to resolve managed-repo paths.
+    #[arg(long, requires = "all")]
+    pub home_dir: Option<String>,
+    /// Skip confirmation where the selected commit mode supports it.
+    #[arg(short = 'y', long = "yes", conflicts_with = "all")]
     pub yes: bool,
+}
+
+/// Arguments for `pull`.
+#[derive(Debug, Args)]
+pub struct PullArgs {
+    /// Pull every managed repo from the manifest.
+    #[arg(long, required = true)]
+    pub all: bool,
+    #[command(flatten)]
+    pub managed: ManagedArgs,
 }
 
 /// Arguments for `tag`.
@@ -229,23 +267,35 @@ pub enum WorktreeCommand {
 
 /// Target flags for the root `diff` command.
 #[derive(Debug, Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent clap flags mirrored from argv, not a disguised state machine"
+)]
 pub struct DiffTargetArgs {
     /// Render one tabbed HTML diff for all managed repos with unpushed commits.
-    #[arg(long, conflicts_with_all = ["target", "last", "unpushed"])]
+    #[arg(long, conflicts_with_all = ["target", "last", "unpushed", "recursive"])]
     pub all: bool,
     /// Diff unpushed work (`@{u}..HEAD`); this is also the default when no target is supplied.
-    #[arg(long, conflicts_with_all = ["target", "last"])]
+    #[arg(long, conflicts_with_all = ["target", "last", "recursive"])]
     pub unpushed: bool,
     /// Base commit, a `<start>..<end>` range, or empty/omitted for unpushed work.
-    #[arg(conflicts_with = "last")]
+    #[arg(conflicts_with_all = ["last", "recursive"], value_parser = diff_target)]
     pub target: Option<String>,
     /// Diff the last N commits (`HEAD~N..HEAD`); bare `-l` diffs the last commit.
     #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
     pub last: Option<NonZeroU32>,
+    /// Render one tabbed HTML diff for every git repo under the current directory.
+    #[arg(short = 'r', long = "recursive", conflicts_with_all = ["all", "target", "merge", "name"])]
+    pub recursive: bool,
+    /// Include nested linked worktrees in a recursive diff scan.
+    #[arg(short = 'w', long = "worktrees", requires = "recursive")]
+    pub worktrees: bool,
     /// Diff what merging HEAD into BASE would introduce (`BASE...HEAD`).
-    #[arg(short = 'm', long = "merge", value_name = "BASE", conflicts_with_all = ["target", "last", "unpushed", "all"])]
+    #[arg(short = 'm', long = "merge", value_name = "BASE", conflicts_with_all = ["target", "last", "unpushed", "all", "recursive"])]
     pub merge: Option<String>,
     /// Name the generated diff in the viewer history label.
+    ///
+    /// Only valid for the single-repo diff modes.
     #[arg(short = 'n', long = "name", value_name = "NAME", value_parser = non_empty_name)]
     pub name: Option<String>,
     /// Path to the managed-repos manifest (overrides the default lookup).
@@ -259,7 +309,7 @@ pub struct DiffTargetArgs {
     #[arg(
         long,
         value_name = "THEME",
-        conflicts_with_all = ["all", "unpushed", "target", "last", "merge", "name", "repos_file", "home_dir"],
+        conflicts_with_all = ["all", "unpushed", "target", "last", "recursive", "worktrees", "merge", "name", "repos_file", "home_dir"],
     )]
     pub set_theme: Option<Theme>,
 }
@@ -284,21 +334,10 @@ impl Theme {
     }
 }
 
-/// Flags for `diff subrepos`.
-#[derive(Debug, Args)]
-pub struct DiffSubreposScanArgs {
-    /// Diff the last N commits in every discovered repo; bare `-l` diffs the last commit.
-    #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
-    pub last: Option<NonZeroU32>,
-    /// Include nested linked worktrees (e.g. `.worktrees/<name>`); skipped by default.
-    #[arg(short = 'w', long = "worktrees", visible_alias = "wk")]
-    pub worktrees: bool,
-}
-
 /// Arguments for `status`. Default scope is the current repo; `--all` and `-r` widen it.
 #[derive(Debug, Args)]
 pub struct StatusArgs {
-    /// Report every managed repo from the manifest (the manifest-wide view; same as `ls`).
+    /// Report every managed repo from the manifest.
     #[arg(long, conflicts_with = "recursive")]
     pub all: bool,
     /// Report the current repo plus any nested subrepos under the current directory (linked
@@ -309,7 +348,23 @@ pub struct StatusArgs {
     pub read: ManagedReadArgs,
 }
 
-/// Flags shared by read-only managed-repo commands (`status --all`/`ls`).
+#[derive(Debug, Args)]
+pub struct LsArgs {
+    #[command(flatten)]
+    pub read: ManagedReadArgs,
+}
+
+impl From<LsArgs> for StatusArgs {
+    fn from(value: LsArgs) -> Self {
+        Self {
+            all: true,
+            recursive: false,
+            read: value.read,
+        }
+    }
+}
+
+/// Flags shared by read-only managed-repo status output.
 #[derive(Debug, Args)]
 pub struct ManagedReadArgs {
     /// Emit machine-readable JSON instead of human text.
@@ -378,8 +433,8 @@ pub struct PruneArgs {
     pub home_dir: Option<String>,
 }
 
-/// Flags shared by the managed-repo fan-out commands (`push-all`, `pull-all`, `commit-all`).
-#[derive(Debug, Args)]
+/// Flags shared by the managed-repo fan-out commands (`push --all`, `pull --all`, `commit --all`).
+#[derive(Debug, Clone, Args)]
 pub struct ManagedArgs {
     /// Preview actions without performing them.
     #[arg(long)]
@@ -478,9 +533,73 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_ls_is_its_own_managed_command() {
+    fn parse_args_ls_aliases_status_all() {
         let cli = Cli::parse_args(&["ls".into()]).unwrap();
-        assert!(matches!(cli.command, Command::Ls(_)));
+
+        assert!(matches!(cli.command, Command::Ls(LsArgs { .. })))
+    }
+
+    #[test]
+    fn parse_args_routes_managed_push_pull_and_commit() {
+        let cli = Cli::parse_args(&["push".into(), "--all".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Push(PushArgs {
+                all: true,
+                message: None,
+                ..
+            })
+        ));
+
+        let cli = Cli::parse_args(&["push".into(), "--all".into(), "save work".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Push(PushArgs {
+                all: true,
+                message: Some(message),
+                ..
+            }) if message == "save work"
+        ));
+
+        let cli = Cli::parse_args(&["pull".into(), "--all".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Pull(PullArgs {
+                all: true,
+                managed: ManagedArgs { dry: false, .. }
+            })
+        ));
+
+        let cli = Cli::parse_args(&["commit".into(), "--all".into(), "save work".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Commit(CommitArgs {
+                all: true,
+                message: Some(message),
+                ..
+            }) if message == "save work"
+        ));
+
+        let cli = Cli::parse_args(&["commit".into(), "--all".into(), "--dry".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Commit(CommitArgs {
+                all: true,
+                message: None,
+                dry: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_bare_pull_is_usage() {
+        assert!(Cli::parse_args(&["pull".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_rejects_retired_ls_command() {
+        assert!(Cli::parse_args(&["ls".into()]).is_err());
     }
 
     #[test]
@@ -528,7 +647,6 @@ mod tests {
         assert!(matches!(
             cli.command,
             Command::Diff(DiffArgs {
-                command: None,
                 target: DiffTargetArgs {
                     target: None,
                     last: Some(n),
@@ -544,7 +662,6 @@ mod tests {
         assert!(matches!(
             cli.command,
             Command::Diff(DiffArgs {
-                command: None,
                 target: DiffTargetArgs {
                     target: None,
                     last: Some(n),
@@ -555,12 +672,68 @@ mod tests {
     }
 
     #[test]
+    fn parse_args_diff_recursive_routes_to_subrepo_scan() {
+        let cli = Cli::parse_args(&["diff".into(), "-r".into(), "-l".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                target: DiffTargetArgs {
+                    recursive: true,
+                    last: Some(n),
+                    ..
+                },
+            }) if n.get() == 1
+        ));
+    }
+
+    #[test]
+    fn parse_args_d_is_a_diff_shorthand() {
+        let cli = Cli::parse_args(&["d".into(), "-r".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                target: DiffTargetArgs {
+                    recursive: true,
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_diff_recursive_conflicts_with_all_and_target() {
+        assert!(Cli::parse_args(&["diff".into(), "-r".into(), "--all".into()]).is_err());
+        assert!(Cli::parse_args(&["diff".into(), "-r".into(), "abc123".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_diff_recursive_accepts_worktrees_flag() {
+        let cli = Cli::parse_args(&["diff".into(), "-r".into(), "--worktrees".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Diff(DiffArgs {
+                target: DiffTargetArgs {
+                    recursive: true,
+                    worktrees: true,
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn parse_args_diff_recursive_rejects_worktrees_alias() {
+        assert!(Cli::parse_args(&["diff".into(), "-r".into(), "--wk".into()]).is_err());
+    }
+
+    #[test]
     fn parse_args_diff_merge_sets_base() {
         let cli = Cli::parse_args(&["diff".into(), "-m".into(), "main".into()]).unwrap();
         assert!(matches!(
             cli.command,
             Command::Diff(DiffArgs {
-                command: None,
                 target: DiffTargetArgs {
                     merge: Some(base),
                     target: None,
@@ -625,19 +798,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_diff_subrepos_bare_last_defaults_to_one() {
-        let cli = Cli::parse_args(&["diff".into(), "subrepos".into(), "-l".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                command: Some(DiffCommand::Subrepos(DiffSubreposScanArgs { last: Some(n), .. })),
-                target: DiffTargetArgs {
-                    target: None,
-                    last: None,
-                    ..
-                },
-            }) if n.get() == 1
-        ));
+    fn parse_args_rejects_retired_diff_subrepos_command() {
+        assert!(Cli::parse_args(&["diff".into(), "subrepos".into(), "-l".into()]).is_err());
     }
 
     #[test]
@@ -654,7 +816,6 @@ mod tests {
         assert!(matches!(
             cli.command,
             Command::Diff(DiffArgs {
-                command: None,
                 target: DiffTargetArgs {
                     all: true,
                     repos_file: Some(repos_file),
@@ -691,58 +852,62 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_routes_up_with_message() {
-        let cli = Cli::parse_args(&["up".into(), "save work".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Up(UpArgs { command: None, message: Some(message), yes })
-                if message == "save work" && !yes
-        ));
+    fn parse_args_rejects_retired_up_command() {
+        assert!(Cli::parse_args(&["up".into(), "save work".into()]).is_err());
+        assert!(Cli::parse_args(&["up".into()]).is_err());
+        assert!(Cli::parse_args(&["up".into(), "subrepos".into(), "-y".into()]).is_err());
     }
 
     #[test]
-    fn parse_args_up_yes_flag_sets_bypass() {
-        let cli = Cli::parse_args(&["up".into(), "save work".into(), "--yes".into()]).unwrap();
-        assert!(matches!(cli.command, Command::Up(UpArgs { yes, .. }) if yes));
-    }
-
-    #[test]
-    fn parse_args_up_without_message_parses_but_message_is_none() {
-        // `up` requires a message at runtime (run() → Usage); clap leaves it None so the
-        // `up subrepos` subcommand can coexist with the bare-message form.
-        let cli = Cli::parse_args(&["up".into()]).unwrap();
+    fn parse_args_routes_plain_push_and_push_message() {
+        let cli = Cli::parse_args(&["push".into()]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Up(UpArgs {
-                command: None,
+            Command::Push(PushArgs {
                 message: None,
-                yes: false
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_up_subrepos_subcommand() {
-        let cli = Cli::parse_args(&["up".into(), "subrepos".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Up(UpArgs {
-                command: Some(UpCommand::Subrepos(UpSubreposArgs { yes: false })),
-                message: None,
+                all: false,
+                recursive: false,
                 ..
             })
         ));
+
+        let cli = Cli::parse_args(&["p".into(), "save work".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Push(PushArgs {
+                message: Some(message),
+                ..
+            }) if message == "save work"
+        ));
     }
 
     #[test]
-    fn parse_args_up_subrepos_yes_flag_sets_bypass() {
-        let cli = Cli::parse_args(&["up".into(), "subrepos".into(), "-y".into()]).unwrap();
+    fn parse_args_push_recursive_rejects_message() {
+        assert!(Cli::parse_args(&["push".into(), "-r".into(), "save work".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_routes_current_repo_commit_message() {
+        let cli = Cli::parse_args(&["commit".into(), "save work".into()]).unwrap();
         assert!(matches!(
             cli.command,
-            Command::Up(UpArgs {
-                command: Some(UpCommand::Subrepos(UpSubreposArgs { yes: true })),
+            Command::Commit(CommitArgs {
+                message: Some(message),
+                all: false,
+                yes: false,
                 ..
-            })
+            }) if message == "save work"
+        ));
+
+        let cli = Cli::parse_args(&["commit".into(), "save work".into(), "--yes".into()]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Commit(CommitArgs {
+                message: Some(message),
+                all: false,
+                yes: true,
+                ..
+            }) if message == "save work"
         ));
     }
 

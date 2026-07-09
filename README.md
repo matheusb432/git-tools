@@ -8,16 +8,17 @@ Per-repo:
 
 - `diff` — render an HTML diff of the current repo: unpushed work (the default), a base commit, an exact `<start>..<end>` range, the last N commits (`-l N`), or a three-dot merge preview (`-m/--merge <base>`).
 - `squash-preview` / `merge-diff` — render HTML previews of a subrepo's unpushed work or a three-dot merge diff against a base branch.
-- `diff subrepos` — render one tabbed HTML diff for every git repo under the current directory.
+- `diff -r` — render one tabbed HTML diff for every git repo under the current directory.
 - `squash-local` — squash all unpushed local commits into one (`--dry` to preview).
-- `up` — stage, commit, and push the current repo (confirms first; `-y` to skip).
+- `push` — push existing commits; with a message, stage all changes, commit, and push the current repo (confirms first; `-y` to skip).
+- `commit` — stage all changes and commit the current repo without pushing.
 - `tag` — list tags with fetched origin status, create annotated tags with `tag add <tag> <message>`, show tag commits with `-c`/`--commits`, or create-and-push with `tag up <tag> <message>`.
 
 Across a set of managed repos (declared in a `repos.toml` manifest of `[[repo]]` tables with `path` + `remote`):
 
 - `diff --all` — render one tabbed HTML preview of unpushed commits across every managed repo that has them.
-- `status` (alias `ls`) — branch, unpushed commits, and pending changes for every repo (`--json` for machine output).
-- `push-all` / `pull-all` / `commit-all` — fan out push, pull, or commit across the set.
+- `status --all` — branch, unpushed commits, and pending changes for every repo (`--json` for machine output).
+- `push --all` / `pull --all` / `commit --all` — fan out push, pull, or commit across the set.
 
 The managed manifest is resolved from `--repos-file`, then the `GIT_TOOLS_MANAGED_REPOS_FILE` environment variable, then an upward search for `repos.toml` from the current directory, then `$HOME/tools/sample_project/repos.toml`.
 
@@ -62,7 +63,7 @@ just cli build      # only the CLI engine -> target/release/{git-tools,gtl-daemo
 just desktop build  # only the gtl-viewer Tauri binary (skipped without webkit2gtk-4.1 headers)
 ```
 
-`gtl diff`/`merge-diff`/`squash-preview`/`push-all`/`pull-all` execute by talking to a resident `gtl-daemon` process on `127.0.0.1`; the CLI autostarts it on first use and restarts it on a version mismatch (e.g. after `just update`). `gtl daemon status` / `gtl daemon stop` inspect and terminate it directly — most users never need to.
+`gtl diff`/`merge-diff`/`squash-preview`/`push --all`/`pull --all` execute by talking to a resident `gtl-daemon` process on `127.0.0.1`; the CLI autostarts it on first use and restarts it on a version mismatch (e.g. after `just update`). `gtl daemon status` / `gtl daemon stop` inspect and terminate it directly — most users never need to.
 
 `just` recipes use bash, so on Windows run them from Git Bash (the `set windows-shell` directive points `just` at bash there).
 

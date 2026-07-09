@@ -17,15 +17,23 @@ fn top_level_help_lists_every_subcommand() {
         "diff",
         "merge-diff",
         "squash-local",
-        "up",
+        "push",
+        "pull",
+        "commit",
         "tag",
         "wk",
         "status",
-        "push-all",
-        "pull-all",
-        "commit-all",
     ] {
         assert = assert.stdout(contains(sub));
+    }
+    for retired in [
+        "\n  up ",
+        "\n  push-all ",
+        "\n  pull-all ",
+        "\n  commit-all ",
+        "\n  ls ",
+    ] {
+        assert = assert.stdout(contains(retired).not());
     }
 }
 
@@ -66,6 +74,25 @@ fn unknown_command_is_usage_error_exit_2() {
 }
 
 #[test]
+fn retired_commands_are_usage_errors() {
+    for args in [
+        &["up"][..],
+        &["up", "save work"],
+        &["diff", "subrepos"],
+        &["push-all"],
+        &["pull-all"],
+        &["commit-all"],
+        &["ls"],
+    ] {
+        git_tools()
+            .args(args)
+            .assert()
+            .code(2)
+            .stderr(contains("error"));
+    }
+}
+
+#[test]
 fn lean_diff_rejects_explicit_flags_exit_2() {
     git_tools().args(["diff", "--repo", "r"]).assert().code(2);
 }
@@ -81,6 +108,16 @@ fn diff_help_documents_the_last_flag() {
 }
 
 #[test]
+fn diff_help_documents_recursive_scope() {
+    git_tools()
+        .args(["diff", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("-r, --recursive"))
+        .stdout(contains("nested subrepos"));
+}
+
+#[test]
 fn diff_help_documents_the_merge_flag() {
     git_tools()
         .args(["diff", "--help"])
@@ -91,12 +128,13 @@ fn diff_help_documents_the_merge_flag() {
 }
 
 #[test]
-fn diff_help_lists_the_subrepos_subcommand() {
+fn d_alias_routes_to_diff_help() {
     git_tools()
-        .args(["diff", "--help"])
+        .args(["d", "--help"])
         .assert()
         .success()
-        .stdout(contains("subrepos"));
+        .stdout(contains("--recursive"))
+        .stdout(contains("--all"));
 }
 
 #[test]
@@ -146,16 +184,6 @@ fn diff_set_theme_rejects_unknown_value_exit_2() {
         .assert()
         .code(2)
         .stderr(contains("error"));
-}
-
-#[test]
-fn diff_subrepos_help_documents_the_last_flag() {
-    git_tools()
-        .args(["diff", "subrepos", "--help"])
-        .assert()
-        .success()
-        .stdout(contains("--last"))
-        .stdout(contains("last N commits"));
 }
 
 #[test]
@@ -225,13 +253,36 @@ fn squash_local_without_message_is_usage_error_exit_2() {
 }
 
 #[test]
-fn up_help_documents_the_yes_flag() {
+fn push_help_documents_message_and_scope() {
     git_tools()
-        .args(["up", "--help"])
+        .args(["push", "--help"])
         .assert()
         .success()
-        .stdout(contains("--yes"))
-        .stdout(contains("push"));
+        .stdout(contains("Commit message"))
+        .stdout(contains("--all"))
+        .stdout(contains("--recursive"))
+        .stdout(contains("--yes"));
+}
+
+#[test]
+fn p_alias_routes_to_push_help() {
+    git_tools()
+        .args(["p", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--recursive"))
+        .stdout(contains("--all"));
+}
+
+#[test]
+fn commit_help_documents_message() {
+    git_tools()
+        .args(["commit", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("Commit message"))
+        .stdout(contains("--all"))
+        .stdout(contains("--yes"));
 }
 
 #[test]
@@ -244,15 +295,10 @@ fn sync_is_no_longer_a_public_subcommand() {
 }
 
 #[test]
-fn up_without_message_is_usage_error_exit_2() {
-    git_tools().arg("up").assert().code(2);
-}
-
-#[test]
-fn up_empty_message_is_usage_error_exit_2() {
+fn push_empty_message_is_usage_error_exit_2() {
     // Guarded before any git runs, so this is safe to assert from the crate dir.
     git_tools()
-        .args(["up", ""])
+        .args(["push", ""])
         .assert()
         .code(2)
         .stderr(contains("non-empty commit message"));
@@ -300,12 +346,27 @@ fn merge_diff_help_notes_the_default_base() {
 }
 
 #[test]
-fn commit_all_help_lists_message_for_all() {
+fn managed_verbs_document_all_scope() {
     git_tools()
-        .args(["commit-all", "--help"])
+        .args(["push", "--help"])
         .assert()
         .success()
-        .stdout(contains("--message-for-all"));
+        .stdout(contains("--all"));
+    git_tools()
+        .args(["pull", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--all"));
+    git_tools()
+        .args(["commit", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--all"));
+}
+
+#[test]
+fn bare_pull_is_usage_error_exit_2() {
+    git_tools().arg("pull").assert().code(2);
 }
 
 #[test]
@@ -318,16 +379,6 @@ fn status_help_lists_managed_repo_flags() {
         .stdout(contains("--home-dir"))
         .stdout(contains("--json"))
         .stdout(contains("--color"));
-}
-
-#[test]
-fn ls_alias_routes_to_status_help() {
-    git_tools()
-        .args(["ls", "--help"])
-        .assert()
-        .success()
-        .stdout(contains("--repos-file"))
-        .stdout(contains("--json"));
 }
 
 #[test]

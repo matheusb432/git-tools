@@ -218,7 +218,7 @@ pub struct SyncOutput {
     pub combined: String,
 }
 
-/// Async git remote operations behind push-all/pull-all. Every method mirrors exactly
+/// Async git remote operations behind `push --all`/`pull --all`. Every method mirrors exactly
 /// one git invocation the CLI's retired `push_pull.rs` shelled out to; fallback rules
 /// (empty branch on failure, treat a rev-list error as zero, etc.) stay in the
 /// `managed` slices, not here — same split as [`DiffSource`].

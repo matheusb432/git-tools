@@ -1,7 +1,7 @@
 //! The `render_diff_subrepos` vertical slice: render every discovered repo into
 //! one tabbed artifact, skipping repos whose view is empty (or errors) and
 //! reporting the skip count. Repo *discovery* stays cli-side (filesystem
-//! walking, not a port); the cli's `gtl diff subrepos` sends the
+//! walking, not a port); the cli's `gtl diff -r` sends the
 //! already-discovered [`RepoRef`]s to the resident daemon over HTTP, which
 //! dispatches this request through the daemon mediator.
 
@@ -43,7 +43,7 @@ pub enum RenderDiffSubreposOutcome {
     Empty,
 }
 
-/// Everything that can go wrong rendering diff-subrepos.
+/// Everything that can go wrong rendering recursive multi-repo diff previews.
 #[derive(Debug, thiserror::Error)]
 pub enum RenderDiffSubreposError {
     #[error(transparent)]
@@ -78,7 +78,7 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<
 
         if batch.views.is_empty() {
             notes.push(Note::warn(format!(
-                "diff subrepos: nothing to show across {} repo(s); no preview written",
+                "diff -r: nothing to show across {} repo(s); no preview written",
                 req.repos.len()
             )));
             return Ok(RenderDiffSubreposResponse {
@@ -103,12 +103,12 @@ impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<
         let placed = self.store.place(&req.store_root, &meta, &html)?;
 
         notes.push(Note::info(format!(
-            "diff subrepos: {} repo(s)",
+            "diff -r: {} repo(s)",
             batch.views.len()
         )));
         if batch.skipped > 0 {
             notes.push(Note::warn(format!(
-                "diff subrepos: skipped {} repo(s) with nothing to show",
+                "diff -r: skipped {} repo(s) with nothing to show",
                 batch.skipped
             )));
         }
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(
             response.notes,
             vec![
-                Note::info("diff subrepos: 1 repo(s)"),
+                Note::info("diff -r: 1 repo(s)"),
                 Note::info("wrote /store/diffs/fake/artifact.html"),
             ]
         );
@@ -234,7 +234,7 @@ mod tests {
         assert_eq!(
             response.notes,
             vec![Note::warn(
-                "diff subrepos: nothing to show across 1 repo(s); no preview written"
+                "diff -r: nothing to show across 1 repo(s); no preview written"
             )]
         );
         assert!(handler.store.placed.lock().unwrap().is_empty());

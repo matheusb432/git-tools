@@ -1,4 +1,4 @@
-//! End-to-end tests for `gtl up subrepos`: build a real tree of repos (the root plus
+//! End-to-end tests for recursive `gtl push -r`: build a real tree of repos (the root plus
 //! nested ones under a subfolder), each wired to a bare upstream, run the built binary, and
 //! assert exit code, stdout, and that each remote advanced. Local-only — bare remotes on
 //! disk, no network.
@@ -48,7 +48,7 @@ fn config_identity(repo: &Path) {
 
 /// Create a repo at `path` on `main`, wired to a fresh bare upstream under `remotes/`, with
 /// `main` tracking `origin/main`. Returns the bare remote's path. With `ahead`, the repo
-/// gets one extra commit not yet on the remote (so `up subrepos` has something to push).
+/// gets one extra commit not yet on the remote (so `push -r` has something to push).
 fn repo_with_upstream(remotes: &Path, path: &Path, key: &str, ahead: bool) -> std::path::PathBuf {
     let remote = remotes.join(format!("{key}.git"));
     git(remotes, &["init", "-q", "--bare", remote.to_str().unwrap()]);
@@ -79,7 +79,7 @@ fn gtl(repo: &Path) -> Command {
 }
 
 #[test]
-fn up_subrepos_yes_pushes_root_and_nested_repos() {
+fn push_recursive_yes_pushes_root_and_nested_repos() {
     let tmp = TempDir::new().unwrap();
     let remotes = tmp.path().join("remotes");
     std::fs::create_dir_all(&remotes).unwrap();
@@ -93,7 +93,7 @@ fn up_subrepos_yes_pushes_root_and_nested_repos() {
     let web_remote = repo_with_upstream(&remotes, &web, "web", false); // already up to date
 
     gtl(&work)
-        .args(["up", "subrepos", "-y"])
+        .args(["push", "-r", "-y"])
         .assert()
         .success()
         .stdout(contains("pushed 3 repo(s)"))
@@ -109,7 +109,7 @@ fn up_subrepos_yes_pushes_root_and_nested_repos() {
 }
 
 #[test]
-fn up_subrepos_lists_repos_in_confirmation_before_pushing() {
+fn push_recursive_lists_repos_in_confirmation_before_pushing() {
     let tmp = TempDir::new().unwrap();
     let remotes = tmp.path().join("remotes");
     std::fs::create_dir_all(&remotes).unwrap();
@@ -118,7 +118,7 @@ fn up_subrepos_lists_repos_in_confirmation_before_pushing() {
     repo_with_upstream(&remotes, &work.join("bar/api"), "api", true);
 
     gtl(&work)
-        .args(["up", "subrepos", "-y"])
+        .args(["push", "-r", "-y"])
         .assert()
         .success()
         // The review block names the destination of each discovered repo.
@@ -127,7 +127,7 @@ fn up_subrepos_lists_repos_in_confirmation_before_pushing() {
 }
 
 #[test]
-fn up_subrepos_skips_a_repo_without_an_upstream_without_failing() {
+fn push_recursive_skips_a_repo_without_an_upstream_without_failing() {
     let tmp = TempDir::new().unwrap();
     let remotes = tmp.path().join("remotes");
     std::fs::create_dir_all(&remotes).unwrap();
@@ -145,14 +145,14 @@ fn up_subrepos_skips_a_repo_without_an_upstream_without_failing() {
     );
 
     gtl(&work)
-        .args(["up", "subrepos", "-y"])
+        .args(["push", "-r", "-y"])
         .assert()
         .success()
         .stdout(contains("skipped — no upstream tracking branch"));
 }
 
 #[test]
-fn up_subrepos_non_interactive_without_yes_refuses() {
+fn push_recursive_non_interactive_without_yes_refuses() {
     let tmp = TempDir::new().unwrap();
     let remotes = tmp.path().join("remotes");
     std::fs::create_dir_all(&remotes).unwrap();
@@ -161,11 +161,11 @@ fn up_subrepos_non_interactive_without_yes_refuses() {
     let before = rev(&root_remote, "main");
 
     gtl(&work)
-        .args(["up", "subrepos"])
+        .args(["push", "-r"])
         .assert()
         .failure()
         .code(2)
-        .stderr(contains("non-interactive shell; pass --yes"));
+        .stderr(contains("push -r: non-interactive shell; pass --yes"));
 
     assert_eq!(
         rev(&root_remote, "main"),

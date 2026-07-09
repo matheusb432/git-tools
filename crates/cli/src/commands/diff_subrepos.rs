@@ -42,7 +42,7 @@ pub(crate) fn run_scan_with(
         .with_context(|| format!("failed to resolve {}", root.as_ref().display()))?;
     let repos = discover_git_repos(&root, include_worktrees)?;
     if repos.is_empty() {
-        anyhow::bail!("diff subrepos: no git repos found under {}", root.display());
+        anyhow::bail!("diff -r: no git repos found under {}", root.display());
     }
     let repo_refs = repos
         .iter()
