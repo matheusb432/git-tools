@@ -447,5 +447,5 @@ export async function getSetting(key: string): Promise<string | null> {
 
 export async function setSetting(key: string, value: string): Promise<void> {
   const payload = await tauriGlobal().core.invoke<unknown>("set_setting", { key, value });
-  if (payload !== undefined) throw new Error("Malformed set_setting response");
+  if (payload !== undefined && payload !== null) throw new Error("Malformed set_setting response");
 }

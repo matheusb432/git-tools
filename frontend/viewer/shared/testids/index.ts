@@ -7,6 +7,8 @@ export const TEST_IDS = {
   },
   diffView: {
     root: "diff-view.root",
+    titlebar: "diff-view.titlebar",
+    keybar: "diff-view.keybar",
     toolbar: "diff-view.toolbar",
     layoutToggle: "diff-view.layout-toggle",
     layoutUnified: "diff-view.layout-unified",
@@ -19,6 +21,8 @@ export const TEST_IDS = {
     fileTree: "diff-view.file-tree",
     commitShelf: "diff-view.commit-shelf",
     content: "diff-view.content",
+    fileList: "diff-view.file-list",
+    filePanelMount: "diff-view.file-panel-mount",
     filePanel: "diff-view.file-panel",
     rowWindow: "diff-view.row-window",
     row: "diff-view.row",

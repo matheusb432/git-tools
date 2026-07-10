@@ -1,18 +1,16 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
   import { AlertTriangle, RefreshCw } from "@lucide/svelte";
   import { emptyRowPageCache, invalidateTabRows, isLiveTab, type RowPageCache } from "@/entities/diff-tab";
   import type { BrokenSourceCode, NativeTab } from "@/entities/diff-tab";
   import { filterFiles } from "@/entities/diff-tab";
   import { fileRows, getSetting, setSetting, type RowsPage, type SplitRow, type UnifiedRow } from "@/shared/api";
   import * as Alert from "@/shared/ui/alert";
-  import { Badge } from "@/shared/ui/badge";
   import { Button } from "@/shared/ui/button";
   import { Skeleton } from "@/shared/ui/skeleton";
   import { TEST_IDS } from "@/shared/testids";
   import {
     clearCommitFocus,
-    activePanelFileIndexes,
     allFilePanelsCollapsed,
     copyPageAccumulatorFromCache,
     copySplitRows,
@@ -38,9 +36,11 @@
     type DiffLayout,
   } from "../model/diff-view";
   import CommitShelf from "./CommitShelf.svelte";
+  import DiffKeybar from "./DiffKeybar.svelte";
   import DiffToolbar from "./DiffToolbar.svelte";
-  import FileDiffPanel from "./FileDiffPanel.svelte";
   import FileTree from "./FileTree.svelte";
+  import VirtualFileList from "./VirtualFileList.svelte";
+  import type { VirtualFileListHandle } from "./VirtualFileList.svelte";
 
   type DiffViewProps = {
     readonly tab: NativeTab;
@@ -67,6 +67,7 @@
   let cacheBatchId = $state<string | null>(null);
   let cacheTabId = $state<number | null>(null);
   let settingsWarning = $state<string | null>(null);
+  let fileListHandle = $state<VirtualFileListHandle | null>(null);
 
   const COPY_PAGE_SIZE = 80;
 
@@ -94,8 +95,6 @@
     return visibleFiles[0]?.fileIdx ?? null;
   });
   const visibleFileIndexes = $derived(visibleFiles.map((file) => file.fileIdx));
-  const activePanelIndexes = $derived(activePanelFileIndexes({ visibleFileIndexes, activeFileIdx }));
-  const activePanelFiles = $derived(visibleFiles.filter((file) => activePanelIndexes.includes(file.fileIdx)));
   const allFilesFolded = $derived(allFilePanelsCollapsed(foldState, visibleFileIndexes));
 
   function persistLayout(layout: DiffLayout): void {
@@ -153,20 +152,13 @@
     rowPageCache = updater(rowPageCache);
   }
 
-  function sectionId(fileIdx: number): string {
-    return `diff-view-${tab.localId}-${fileIdx}`;
-  }
-
   const BROKEN_SOURCE_TITLES: Record<BrokenSourceCode, string> = {
     DirNotFound: "The git repo's directory was not found.",
     DirNotGitRepo: "This directory is not a git repository.",
   };
 
   function handleScrollToFile(fileIdx: number): void {
-    void tick().then(() => {
-      const target = contentRef?.querySelector<HTMLElement>(`#${CSS.escape(sectionId(fileIdx))}`);
-      target?.scrollIntoView({ block: "start", behavior: "smooth" });
-    });
+    fileListHandle?.scrollToFile(fileIdx);
   }
 
   function copyTextForPages(pages: readonly RowsPage[]): string | null {
@@ -239,6 +231,8 @@
 
   function selectedVisibleText(): string | null {
     if (contentRef === null) return null;
+    const fileList = contentRef.querySelector<HTMLElement>(`[data-testid="${TEST_IDS.diffView.fileList}"]`);
+    if (fileList === null) return null;
     const selection = window.getSelection();
     if (selection === null || selection.isCollapsed) return null;
     const text = selection.toString();
@@ -246,7 +240,7 @@
     const anchorNode = selection.anchorNode;
     const focusNode = selection.focusNode;
     if (anchorNode === null || focusNode === null) return null;
-    if (!contentRef.contains(anchorNode) || !contentRef.contains(focusNode)) return null;
+    if (!fileList.contains(anchorNode) || !fileList.contains(focusNode)) return null;
     return text;
   }
 
@@ -355,7 +349,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div data-testid={TEST_IDS.diffView.root} class="flex h-full min-h-0 flex-col bg-background">
+<div bind:this={contentRef} class="flex h-full min-h-0 flex-col bg-background">
   {#if brokenSource !== null}
     <div class="p-5" data-testid={TEST_IDS.diffView.brokenSource}>
       <Alert.Root variant="destructive" class="max-w-2xl">
@@ -391,109 +385,92 @@
       </div>
     </div>
   {:else}
-    {#if settingsWarning !== null}
-      <div class="flex items-center gap-2 border-b border-border bg-muted/40 px-5 py-2 text-xs text-foreground-muted">
-        <AlertTriangle class="size-3.5" />
-        <span>{settingsWarning}</span>
-      </div>
-    {/if}
+    <div
+      data-testid={TEST_IDS.diffView.root}
+      class="grid h-full min-h-0 grid-cols-[262px_minmax(0,1fr)_252px] grid-rows-[auto_1fr_auto] bg-background text-foreground max-[1024px]:grid-cols-[minmax(0,1fr)] max-[1024px]:grid-rows-[auto_minmax(0,1fr)_auto]"
+    >
+      <div class="col-span-3 max-[1024px]:col-span-1">
+        <DiffToolbar
+          {meta}
+          layout={viewState.layout}
+          full={viewState.full}
+          filterText={viewState.filterText}
+          refreshing={tab.lifecycle.state === "refreshing"}
+          canCopy={activeFileIdx !== null}
+          {allFilesFolded}
+          onSetLayout={handleSetLayout}
+          onToggleFull={handleToggleFull}
+          onToggleAllFilesFolded={handleToggleAllFilesFolded}
+          onFilterTextChange={handleFilterTextChange}
+          onRefresh={() => onRefresh(tab)}
+          onCopyVisible={copyCurrentRows}
+        />
 
-    <DiffToolbar
-      {meta}
-      layout={viewState.layout}
-      full={viewState.full}
-      filterText={viewState.filterText}
-      refreshing={tab.lifecycle.state === "refreshing"}
-      canCopy={activeFileIdx !== null}
-      {allFilesFolded}
-      onSetLayout={handleSetLayout}
-      onToggleFull={handleToggleFull}
-      onToggleAllFilesFolded={handleToggleAllFilesFolded}
-      onFilterTextChange={handleFilterTextChange}
-      onRefresh={() => onRefresh(tab)}
-      onCopyVisible={copyCurrentRows}
-    />
-
-    {#if tab.lifecycle.state === "error"}
-      <div class="px-5 pt-4">
-        <Alert.Root variant="destructive">
-          <AlertTriangle />
-          <Alert.Title>Refresh failed</Alert.Title>
-          <Alert.Description>{tab.lifecycle.message}</Alert.Description>
-          <Alert.Action>
-            <Button variant="destructive" size="sm" onclick={() => onRefresh(tab)}>
-              <RefreshCw data-icon="inline-start" />
-              Retry
-            </Button>
-          </Alert.Action>
-        </Alert.Root>
-      </div>
-    {/if}
-
-    <CommitShelf
-      commits={meta.commits}
-      focusedCommits={viewState.focusedCommits}
-      onToggleCommitFocus={handleToggleCommitFocus}
-      onClearFocus={handleClearCommitFocus}
-    />
-
-    <div class="grid min-h-0 flex-1 lg:grid-cols-[300px_minmax(0,1fr)]">
-      <FileTree
-        {meta}
-        filterText={viewState.filterText}
-        focusedCommits={viewState.focusedCommits}
-        selectedFileIdx={activeFileIdx}
-        onSelectFile={handleSelectFile}
-        onScrollToFile={handleScrollToFile}
-      />
-
-      <section data-testid={TEST_IDS.diffView.content} bind:this={contentRef} class="min-h-0 overflow-auto px-5 py-4">
-        <div class="mb-4 flex items-center justify-between gap-2">
-          <div>
-            <h2 class="text-sm font-semibold">Files in view</h2>
-            <p class="mt-1 text-xs text-foreground-muted">
-              {meta.foot_note || "Select a file to inspect its paged diff rows."}
-            </p>
-          </div>
-          <div class="flex items-center gap-2">
-            <Badge variant="outline">{visibleFiles.length} files</Badge>
-            <Badge variant={viewState.layout === "split" ? "secondary" : "outline"}>{viewState.layout}</Badge>
-            <Badge variant={viewState.full ? "secondary" : "outline"}>{viewState.full ? "full" : "compact"}</Badge>
-          </div>
-        </div>
-
-        {#if activePanelFiles.length > 0}
-          <div class="flex flex-col gap-3">
-            {#each activePanelFiles as file (file.fileIdx)}
-              <section id={sectionId(file.fileIdx)} class="scroll-mt-4">
-                {#if tab.tabId !== null}
-                  <FileDiffPanel
-                    tabId={tab.tabId}
-                    fileIdx={file.fileIdx}
-                    path={file.path}
-                    status={file.status}
-                    added={file.added}
-                    removed={file.removed}
-                    hasFull={file.hasFull}
-                    commits={file.commits}
-                    layout={viewState.layout}
-                    full={viewState.full}
-                    selected={activeFileIdx === file.fileIdx}
-                    expanded={filePanelIsExpanded(foldState, file.fileIdx)}
-                    onToggleExpanded={() => handleToggleFilePanel(file.fileIdx)}
-                    rowCache={rowPageCache}
-                    {updateRowCache}
-                  />
-                {/if}
-              </section>
-            {/each}
-          </div>
-        {:else}
-          <div class="rounded-lg border border-dashed border-border px-4 py-8 text-sm text-foreground-muted">
-            No files match the current filter and commit focus.
+        {#if settingsWarning !== null}
+          <div
+            class="flex items-center gap-2 border-b border-border bg-muted/40 px-5 py-2 text-xs text-foreground-muted"
+          >
+            <AlertTriangle class="size-3.5" />
+            <span>{settingsWarning}</span>
           </div>
         {/if}
-      </section>
+
+        {#if tab.lifecycle.state === "error"}
+          <div class="border-b border-border px-5 py-4">
+            <Alert.Root variant="destructive">
+              <AlertTriangle />
+              <Alert.Title>Refresh failed</Alert.Title>
+              <Alert.Description>{tab.lifecycle.message}</Alert.Description>
+              <Alert.Action>
+                <Button variant="destructive" size="sm" onclick={() => onRefresh(tab)}>
+                  <RefreshCw data-icon="inline-start" />
+                  Retry
+                </Button>
+              </Alert.Action>
+            </Alert.Root>
+          </div>
+        {/if}
+      </div>
+
+      <div class="contents max-[1024px]:hidden">
+        <FileTree
+          {meta}
+          filterText={viewState.filterText}
+          focusedCommits={viewState.focusedCommits}
+          selectedFileIdx={activeFileIdx}
+          onSelectFile={handleSelectFile}
+          onScrollToFile={handleScrollToFile}
+        />
+      </div>
+
+      {#if tab.tabId !== null}
+        <VirtualFileList
+          bind:handle={fileListHandle}
+          tabId={tab.tabId}
+          files={visibleFiles}
+          selectedFileIdx={activeFileIdx}
+          {foldState}
+          layout={viewState.layout}
+          full={viewState.full}
+          rowCache={rowPageCache}
+          {updateRowCache}
+          expanded={(fileIdx) => filePanelIsExpanded(foldState, fileIdx)}
+          onToggleExpanded={handleToggleFilePanel}
+        />
+      {/if}
+
+      <div class="contents max-[1024px]:hidden">
+        <CommitShelf
+          commits={meta.commits}
+          focusedCommits={viewState.focusedCommits}
+          onToggleCommitFocus={handleToggleCommitFocus}
+          onClearFocus={handleClearCommitFocus}
+        />
+      </div>
+
+      <div class="col-span-3 max-[1024px]:col-span-1">
+        <DiffKeybar {meta} />
+      </div>
     </div>
   {/if}
 </div>

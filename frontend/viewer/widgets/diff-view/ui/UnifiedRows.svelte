@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { UnifiedRow } from "@/shared/api";
+  import { cn } from "@/shared/lib/utils";
   import { Button } from "@/shared/ui/button";
   import { TEST_IDS } from "@/shared/testids";
   import { unifiedEachKey, unifiedLongRowKey } from "../model/row-render";
@@ -21,7 +22,7 @@
         return "-";
       case "meta":
       case "hunk":
-        return "@";
+        return "";
       case "context":
         return " ";
     }
@@ -29,10 +30,6 @@
 
   function lineNumber(value: number | null): string {
     return value === null ? "" : `${value}`;
-  }
-
-  function ownerLabel(owner: string | null): string {
-    return owner ?? "";
   }
 
   function isExpanded(row: UnifiedRow, index: number): boolean {
@@ -45,26 +42,40 @@
   {@const longRowKey = unifiedLongRowKey(baseIndex + index)}
   <div
     data-testid={TEST_IDS.diffView.row}
-    class="grid grid-cols-[28px_56px_56px_112px_minmax(0,1fr)] items-start gap-x-3 border-b border-border/70 px-3 py-1.5 font-mono text-[12.5px] leading-5"
+    class={cn(
+      "grid grid-cols-[44px_44px_minmax(0,1fr)] items-start font-mono text-[14px] leading-[1.6]",
+      row.kind === "add" && "bg-add-muted text-add",
+      row.kind === "del" && "bg-delete-muted text-delete",
+      row.kind === "hunk" && "bg-sunk text-foreground-dim",
+      row.kind === "meta" && "opacity-60",
+    )}
   >
-    <div class="pt-0.5 text-center text-sm font-semibold text-foreground-muted">{marker(row)}</div>
-    <div class="truncate text-right text-foreground-muted">{lineNumber(row.old_no)}</div>
-    <div class="truncate text-right text-foreground-muted">{lineNumber(row.new_no)}</div>
-    <div class="truncate text-xs text-foreground-muted" title={ownerLabel(row.owner)}>{ownerLabel(row.owner)}</div>
+    <div class="px-2 text-right text-[12px] text-foreground-dim select-none">{lineNumber(row.old_no)}</div>
+    <div class="px-2 text-right text-[12px] text-foreground-dim select-none">{lineNumber(row.new_no)}</div>
 
-    <div class="min-w-0">
+    <div class="min-w-0 px-3">
       {#if row.long_len !== null && !expanded}
         <div class="flex min-w-0 items-start gap-2">
-          <span class="min-w-0 flex-1 truncate" title={row.text}>{row.text}</span>
-          <Button variant="ghost" size="sm" class="h-6 px-2 text-[11px]" onclick={() => onToggleLongRow(longRowKey)}>
+          <span class="min-w-0 flex-1 truncate" title={`${marker(row)}${row.text}`}>{marker(row)}{row.text}</span>
+          <Button
+            variant="ghost"
+            size="xs"
+            class="h-5 rounded border border-accent/40 bg-accent/15 px-1.5 text-[11px] text-accent hover:bg-accent hover:text-accent-foreground"
+            onclick={() => onToggleLongRow(longRowKey)}
+          >
             Show full
           </Button>
         </div>
       {:else}
         <div class="flex items-start gap-2">
-          <span class="min-w-0 flex-1 break-words whitespace-pre-wrap text-foreground">{row.text}</span>
+          <span class="min-w-0 flex-1 break-words whitespace-pre-wrap">{marker(row)}{row.text}</span>
           {#if row.long_len !== null}
-            <Button variant="ghost" size="sm" class="h-6 px-2 text-[11px]" onclick={() => onToggleLongRow(longRowKey)}>
+            <Button
+              variant="ghost"
+              size="xs"
+              class="h-5 rounded border border-accent/40 bg-accent/15 px-1.5 text-[11px] text-accent hover:bg-accent hover:text-accent-foreground"
+              onclick={() => onToggleLongRow(longRowKey)}
+            >
               Collapse
             </Button>
           {/if}

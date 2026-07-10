@@ -18,3 +18,4 @@ export {
   type DiffLayout,
   type DiffViewState,
 } from "./model/diff-view";
+export * from "./model/file-panel-window";

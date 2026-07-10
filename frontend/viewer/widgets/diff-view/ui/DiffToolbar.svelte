@@ -62,24 +62,34 @@
   }
 </script>
 
-<div data-testid={TEST_IDS.diffView.toolbar} class="flex flex-wrap items-center gap-3 border-b border-border px-5 py-3">
+<div
+  data-testid={TEST_IDS.diffView.titlebar}
+  class="titlebar flex flex-col gap-3 border-b border-border bg-surface px-5 py-3 font-mono 2xl:flex-row 2xl:items-center"
+>
   <div class="min-w-0 flex-1">
     <div class="flex flex-wrap items-center gap-2">
-      <h1 class="truncate text-sm font-semibold">{meta.title || meta.repo_name || "Native diff"}</h1>
+      <h1 class="truncate text-[18px] font-semibold">{meta.title || "Native diff"}</h1>
       <Badge variant="outline">{meta.commits_label}</Badge>
       {#if refreshing}
         <Badge variant="secondary">Refreshing</Badge>
       {/if}
     </div>
+    <div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11.5px] text-foreground-muted">
+      <span class="max-w-[20rem] truncate text-foreground" title={meta.repo_root}>{meta.repo_name}</span>
+      <span aria-hidden="true" class="text-foreground-dim">/</span>
+      <span class="max-w-[15rem] truncate" title={meta.branch}>{meta.branch}</span>
+      <span aria-hidden="true" class="text-foreground-dim">/</span>
+      <span class="max-w-[15rem] truncate" title={meta.upstream}>{meta.upstream}</span>
+    </div>
     <p
-      class="mt-1 truncate font-mono text-xs text-foreground-muted"
+      class="mt-0.5 truncate text-[12.5px] text-foreground-muted"
       title={`${meta.cmd_lead}${meta.cmd_range}${meta.cmd_trail}`}
     >
       <span>{meta.cmd_lead}</span><span class="text-foreground">{meta.cmd_range}</span><span>{meta.cmd_trail}</span>
     </p>
   </div>
 
-  <div class="flex flex-wrap items-center gap-2">
+  <div class="flex max-w-full flex-wrap items-center gap-2 2xl:shrink-0">
     <ToggleGroup.Root
       data-testid={TEST_IDS.diffView.layoutToggle}
       type="single"

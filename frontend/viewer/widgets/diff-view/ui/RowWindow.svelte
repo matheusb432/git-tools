@@ -112,7 +112,11 @@
   }
 </script>
 
-<div data-testid={TEST_IDS.diffView.rowWindow} bind:this={scrollElement} class="h-full min-h-0 overflow-auto">
+<div
+  data-testid={TEST_IDS.diffView.rowWindow}
+  bind:this={scrollElement}
+  class="diff h-full min-h-0 overflow-auto bg-surface"
+>
   <div class="relative w-full" style={`height: ${totalSize}px;`}>
     {#each virtualItems as item (item.key)}
       <div

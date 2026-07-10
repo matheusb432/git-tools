@@ -177,6 +177,14 @@
     rowWindowHandle?.scrollToIndex(0);
   }
 
+  function handleTopClick(): void {
+    scrollToTop();
+  }
+
+  function handleToggleClick(): void {
+    onToggleExpanded();
+  }
+
   function resetPaneState(_paneKey: string): void {
     expandedLongRows = new Set<string>();
     loadingKeys = new Set<string>();
@@ -204,35 +212,42 @@
 
 <section
   data-testid={TEST_IDS.diffView.filePanel}
-  class={cn("rounded-lg border", selected ? "border-accent/40 bg-surface/65" : "border-border bg-surface/40")}
+  class={cn(
+    "file overflow-hidden rounded-md border bg-surface font-mono",
+    selected ? "border-accent/45" : "border-border",
+  )}
 >
-  <div class="flex flex-wrap items-start justify-between gap-3 border-b border-border/80 px-4 py-4">
-    <div class="min-w-0">
-      <div class="flex items-center gap-2">
-        <FileCode2 class="text-foreground-muted" />
-        <h3 class="truncate text-sm font-semibold" title={path}>{path}</h3>
-      </div>
-      <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-foreground-muted">
-        <Badge variant="outline">{status}</Badge>
-        <span class="font-mono text-emerald-300">+{added}</span>
-        <span class="font-mono text-rose-300">-{removed}</span>
-        {#if hasFull}
-          <Badge variant="secondary">full rows ready</Badge>
-        {/if}
-        {#if commits.length > 0}
-          <span class="font-mono">{commits.map((sha) => sha.slice(0, 7)).join(", ")}</span>
-        {/if}
-      </div>
-    </div>
+  <div class="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-muted px-3 py-2 text-[12.5px]">
+    <button
+      type="button"
+      class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
+      aria-expanded={expanded}
+      aria-label={`${expanded ? "Collapse" : "Expand"} ${path}`}
+      onclick={onToggleExpanded}
+    >
+      <FileCode2 class="size-4 shrink-0 text-foreground-muted" />
+      <span class="min-w-0 flex-1">
+        <span class="block truncate text-[12.5px] text-foreground" title={path}>{path}</span>
+        <span class="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-foreground-muted">
+          <Badge variant="outline">{status}</Badge>
+          <span class="text-add">+{added}</span>
+          <span class="text-delete">-{removed}</span>
+          {#if hasFull}
+            <Badge variant="secondary">full rows ready</Badge>
+          {/if}
+          {#if commits.length > 0}
+            <span class="font-mono">{commits.map((sha) => sha.slice(0, 7)).join(", ")}</span>
+          {/if}
+        </span>
+      </span>
+    </button>
 
-    <div class="flex items-center gap-2">
-      {#if expanded}
-        <Button variant="ghost" size="sm" onclick={scrollToTop}>Top</Button>
-      {/if}
-      <Button variant="outline" size="sm" onclick={onToggleExpanded}>
-        {expanded ? "Collapse" : "Expand"}
-      </Button>
-    </div>
+    {#if expanded}
+      <Button variant="ghost" size="xs" onclick={handleTopClick}>Top</Button>
+    {/if}
+    <Button variant="outline" size="xs" onclick={handleToggleClick}>
+      {expanded ? "Collapse" : "Expand"}
+    </Button>
   </div>
 
   {#if expanded}
@@ -259,7 +274,7 @@
     {:else if bodyState === "empty"}
       <div class="px-4 py-5 text-sm text-foreground-muted">No diff rows are available for this file.</div>
     {:else if bodyState === "rows"}
-      <div class="h-[200px] min-h-0">
+      <div class="h-[220px] min-h-0">
         <RowWindow
           bind:handle={rowWindowHandle}
           {layout}

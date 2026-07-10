@@ -2,7 +2,6 @@
   import type { FileSummary, TabMeta } from "@/shared/api";
   import { filterFiles } from "@/entities/diff-tab";
   import { cn } from "@/shared/lib/utils";
-  import { Badge, type BadgeVariant } from "@/shared/ui/badge";
   import { TEST_IDS } from "@/shared/testids";
 
   type Props = {
@@ -28,69 +27,55 @@
     })),
   );
 
-  function statusVariant(status: string): BadgeVariant {
-    switch (status) {
-      case "added":
-        return "secondary";
-      case "deleted":
-        return "destructive";
-      default:
-        return "outline";
-    }
-  }
-
   function handleActivate(fileIdx: number): void {
     onSelectFile(fileIdx);
     onScrollToFile(fileIdx);
   }
-
-  function handleKeydown(event: KeyboardEvent, fileIdx: number): void {
-    if (event.key === " ") event.preventDefault();
-    if (event.key === "Enter" || event.key === " ") handleActivate(fileIdx);
-  }
 </script>
 
-<aside data-testid={TEST_IDS.diffView.fileTree} class="flex min-h-0 flex-col border-r border-border bg-surface/50">
-  <div class="border-b border-border px-4 py-3">
-    <div class="flex items-center justify-between gap-2">
-      <h2 class="text-sm font-semibold">Files</h2>
-      <Badge variant="outline">{rows.length}</Badge>
-    </div>
-    <p class="mt-1 text-xs text-foreground-muted">{meta.repo_name || meta.repo_root}</p>
+<aside
+  data-testid={TEST_IDS.diffView.fileTree}
+  class="tree min-h-0 overflow-auto border-r border-border bg-surface p-3 font-mono max-[1024px]:hidden"
+>
+  <div class="tree-head mt-1 mb-2 flex justify-between text-[11px] tracking-[0.06em] text-foreground-dim uppercase">
+    <span>Files</span>
+    <span>{rows.length}</span>
+  </div>
+  <div class="mb-3 flex flex-wrap gap-2 text-[11px]">
+    <span class="rounded border border-border-strong px-2 py-0.5 text-foreground-muted"
+      ><b class="text-foreground">{rows.length}</b> files</span
+    >
+    <span class="rounded border border-add/40 px-2 py-0.5 text-add"
+      >+{meta.files.reduce((sum, file) => sum + file.added, 0)}</span
+    >
+    <span class="rounded border border-delete/40 px-2 py-0.5 text-delete"
+      >-{meta.files.reduce((sum, file) => sum + file.removed, 0)}</span
+    >
   </div>
 
-  <div class="min-h-0 flex-1 overflow-auto px-2 py-2">
-    {#if rows.length > 0}
-      <div class="flex flex-col gap-1">
-        {#each rows as row (row.file.path)}
-          <div
-            role="button"
-            tabindex="0"
-            class={cn(
-              "rounded-lg border border-transparent px-3 py-2 text-left transition-colors hover:border-border hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none",
-              selectedFileIdx === row.fileIdx && "border-accent/40 bg-muted text-foreground",
-            )}
-            onclick={() => handleActivate(row.fileIdx)}
-            onkeydown={(event) => handleKeydown(event, row.fileIdx)}
-          >
-            <div class="flex items-start gap-2">
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium" title={row.file.path}>{row.file.path}</p>
-                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-foreground-muted">
-                  <Badge variant={statusVariant(row.file.status)}>{row.file.status}</Badge>
-                  <span class="font-mono text-emerald-300">+{row.file.added}</span>
-                  <span class="font-mono text-rose-300">-{row.file.removed}</span>
-                  {#if selectedFileIdx === row.fileIdx}
-                    <span class="text-accent">Selected</span>
-                  {/if}
-                </div>
-              </div>
-            </div>
-          </div>
-        {/each}
-      </div>
-    {:else}
-      <p class="px-2 py-6 text-sm text-foreground-muted">No files match the current filter.</p>
-    {/if}
-  </div>
+  {#if rows.length > 0}
+    <div class="tree-body flex flex-col">
+      {#each rows as row (row.file.path)}
+        <button
+          type="button"
+          class={cn(
+            "flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-left text-[12.5px] leading-snug text-foreground-muted hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none",
+            selectedFileIdx === row.fileIdx &&
+              "bg-accent/15 text-foreground shadow-[inset_2px_0_0_var(--color-accent)]",
+          )}
+          onclick={() => handleActivate(row.fileIdx)}
+          title={row.file.path}
+        >
+          <span class="min-w-0 flex-1 truncate">{row.file.path}</span>
+          <span class="rounded border border-border-strong px-1 text-[9.5px] font-bold text-foreground-dim uppercase">
+            {row.file.status.slice(0, 1)}
+          </span>
+          <span class="shrink-0 text-add">+{row.file.added}</span>
+          <span class="shrink-0 text-delete">-{row.file.removed}</span>
+        </button>
+      {/each}
+    </div>
+  {:else}
+    <p class="px-2 py-6 text-[12.5px] text-foreground-muted">No files match the current filter.</p>
+  {/if}
 </aside>

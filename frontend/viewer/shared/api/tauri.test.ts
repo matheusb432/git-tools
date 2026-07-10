@@ -145,6 +145,17 @@ test("native wrappers invoke exact Tauri command names and args", async () => {
   expect(calls[2]?.args).toEqual({ tabId: 7, fileIdx: 0, layout: "unified", full: false, start: 0, count: 80 });
 });
 
+test("setSetting accepts Tauri's null unit response", async () => {
+  (globalThis.window as unknown as Record<string, unknown>) = {
+    __TAURI__: {
+      core: { invoke: () => Promise.resolve(null) },
+      event: { listen: () => Promise.resolve(() => undefined) },
+    },
+  };
+
+  await expect(setSetting("diff.layout", "split")).resolves.toBeUndefined();
+});
+
 test("native wrappers reject malformed payloads", async () => {
   (globalThis.window as unknown as Record<string, unknown>) = {
     __TAURI__: {
@@ -162,6 +173,7 @@ test("native wrappers reject malformed payloads", async () => {
           }
           if (command === "refresh_tab") return Promise.resolve({ ...meta, tab_id: "7" });
           if (command === "close_tab") return Promise.resolve("yes");
+          if (command === "set_setting") return Promise.resolve("yes");
           return Promise.resolve(undefined);
         },
       },
@@ -176,6 +188,7 @@ test("native wrappers reject malformed payloads", async () => {
   );
   await expect(refreshTab(7)).rejects.toThrow("Malformed refresh_tab response");
   await expect(closeNativeTab(7)).rejects.toThrow("Malformed close_tab response");
+  await expect(setSetting("diff.layout", "split")).rejects.toThrow("Malformed set_setting response");
 });
 
 test("isSourceProbe accepts ok and well-formed broken payloads, rejects the rest", () => {
