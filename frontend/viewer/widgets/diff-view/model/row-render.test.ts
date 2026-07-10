@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import type { SplitCell } from "@/shared/api";
 import {
-  filePanelBodyState,
   panePageErrorEntries,
   retryablePanePageRequests,
   siblingLayout,
@@ -9,16 +8,6 @@ import {
   splitMarker,
   unifiedLongRowKey,
 } from "./row-render";
-
-test("first-page row errors suppress the empty panel state", () => {
-  expect(
-    filePanelBodyState({
-      isInitialLoading: false,
-      hasFirstPageError: true,
-      totalRows: 0,
-    }),
-  ).toBe("error");
-});
 
 test("missing split sides render an empty marker gutter", () => {
   expect(splitMarker("old", null)).toBe("");

@@ -188,7 +188,13 @@ pub(crate) async fn close_tab(
     tabs: tauri::State<'_, RenderedTabs>,
     tab_id: u64,
 ) -> Result<bool, String> {
-    Ok(tabs.close(tab_id))
+    let tabs = tabs.inner().clone();
+    // Dropping the removed tab's `panes` cache can be heavy (an unbounded,
+    // never-pruned rows cache); hop off the IPC task like its siblings so
+    // that drop never stalls other commands.
+    tauri::async_runtime::spawn_blocking(move || tabs.close(tab_id))
+        .await
+        .map_err(|err| err.to_string())
 }
 
 #[cfg(test)]

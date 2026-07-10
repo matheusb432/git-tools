@@ -3,13 +3,12 @@
   import { createVirtualizer } from "@tanstack/svelte-virtual";
   import type { RowPageCache } from "@/entities/diff-tab";
   import type { DiffLayout, FilePanelFoldState } from "../model/diff-view";
+  import { filePanelDomKey, filePanelWindowIndexes } from "../model/file-panel-window";
   import {
-    FILE_PANEL_ESTIMATED_HEIGHT,
-    FILE_PANEL_OVERSCAN,
-    FILE_PANEL_WINDOW_TARGET,
-    filePanelDomKey,
-    filePanelOverscanForViewport,
-  } from "../model/file-panel-window";
+    FILE_PANEL_CHROME_PADDING_PX,
+    FILE_PANEL_HEADER_HEIGHT_PX,
+    estimatePanelHeight,
+  } from "../model/panel-size-estimate";
   import { TEST_IDS } from "@/shared/testids";
   import FileDiffPanel from "./FileDiffPanel.svelte";
 
@@ -56,22 +55,24 @@
   }: Props = $props();
 
   let scrollElement = $state<HTMLElement | null>(null);
-  let viewportHeight = $state(0);
-  const panelOverscan = $derived(
-    filePanelOverscanForViewport(
-      viewportHeight,
-      FILE_PANEL_WINDOW_TARGET,
-      FILE_PANEL_OVERSCAN,
-      FILE_PANEL_ESTIMATED_HEIGHT,
-    ),
-  );
+
+  function estimateSize(index: number): number {
+    const file = files[index];
+    if (file === undefined) return FILE_PANEL_HEADER_HEIGHT_PX + FILE_PANEL_CHROME_PADDING_PX;
+    return estimatePanelHeight({
+      added: file.added,
+      removed: file.removed,
+      layout,
+      collapsed: !expanded(file.fileIdx),
+    });
+  }
 
   const virtualizer = createVirtualizer<HTMLElement, HTMLElement>({
     getScrollElement: () => scrollElement,
     count: 0,
-    estimateSize: () => FILE_PANEL_ESTIMATED_HEIGHT,
-    overscan: FILE_PANEL_OVERSCAN,
+    estimateSize,
     getItemKey: (index) => files[index]?.fileIdx ?? index,
+    rangeExtractor: filePanelWindowIndexes,
     onChange: () => undefined,
   });
 
@@ -79,12 +80,19 @@
     return files.findIndex((file) => file.fileIdx === fileIdx);
   }
 
+  function scrollPanelToTop(index: number): void {
+    untrack(() => $virtualizer).scrollToIndex(index, { align: "start" });
+  }
+
   $effect(() => {
+    // Re-read layout/foldState so estimateSize re-estimates unmeasured panels
+    // after a layout toggle or fold change.
+    void layout;
     untrack(() => $virtualizer).setOptions({
       count: files.length,
-      estimateSize: () => FILE_PANEL_ESTIMATED_HEIGHT,
-      overscan: panelOverscan,
+      estimateSize,
       getItemKey: (index) => files[index]?.fileIdx ?? index,
+      rangeExtractor: filePanelWindowIndexes,
     });
   });
 
@@ -101,6 +109,8 @@
 
   const virtualItems = $derived($virtualizer.getVirtualItems());
   const totalSize = $derived($virtualizer.getTotalSize());
+  const outerScrollTop = $derived($virtualizer.scrollOffset ?? 0);
+  const outerViewportHeight = $derived($virtualizer.scrollRect?.height ?? 0);
 
   function measurePanel(node: HTMLElement): void {
     $virtualizer.measureElement(node);
@@ -110,7 +120,6 @@
 <section
   data-testid={TEST_IDS.diffView.fileList}
   bind:this={scrollElement}
-  bind:clientHeight={viewportHeight}
   class="main min-h-0 overflow-auto"
 >
   <div class="relative w-full" style={`height: ${totalSize}px;`}>
@@ -141,6 +150,10 @@
               selected={selectedFileIdx === file.fileIdx}
               expanded={expanded(file.fileIdx)}
               onToggleExpanded={() => onToggleExpanded(file.fileIdx)}
+              panelTop={item.start}
+              {outerScrollTop}
+              {outerViewportHeight}
+              onScrollToTop={() => scrollPanelToTop(item.index)}
               {rowCache}
               {updateRowCache}
             />

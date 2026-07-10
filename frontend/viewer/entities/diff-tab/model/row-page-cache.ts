@@ -1,7 +1,19 @@
 import type { RowsPage } from "@/shared/api";
 
 export type RowPageKey = string;
-export const ROW_PAGE_CACHE_MAX_PAGES = 8;
+
+/**
+ * Upper bound on cached row pages across a whole tab.
+ *
+ * The file list mounts a full window of expanded panels at once (see
+ * `FILE_PANEL_MIN_WINDOW`), and each panel loads at least its first page in
+ * both layouts. This budget must comfortably exceed that working set — a value
+ * at or below it would evict a still-mounted panel's page the moment a sibling
+ * loads, flipping the panel back to a loading state and triggering an endless
+ * refetch/eviction thrash. Each page holds at most `PAGE_SIZE` lightweight row
+ * DTOs, so the memory ceiling stays small.
+ */
+export const ROW_PAGE_CACHE_MAX_PAGES = 256;
 
 export type RowPageKeyParts = {
   readonly tabId: number;

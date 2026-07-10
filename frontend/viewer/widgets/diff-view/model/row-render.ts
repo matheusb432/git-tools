@@ -1,25 +1,6 @@
 import type { SplitCell, SplitRow, UnifiedRow } from "@/shared/api";
 import type { RowPageRequest } from "@/entities/diff-tab";
 
-export type FilePanelBodyState = "loading" | "error" | "empty" | "rows";
-
-type FilePanelBodyStateArgs = {
-  readonly isInitialLoading: boolean;
-  readonly hasFirstPageError: boolean;
-  readonly totalRows: number;
-};
-
-export function filePanelBodyState({
-  isInitialLoading,
-  hasFirstPageError,
-  totalRows,
-}: FilePanelBodyStateArgs): FilePanelBodyState {
-  if (isInitialLoading) return "loading";
-  if (hasFirstPageError) return "error";
-  if (totalRows === 0) return "empty";
-  return "rows";
-}
-
 export function panePageErrorEntries(
   pageErrors: ReadonlyMap<string, string>,
   paneKey: string,

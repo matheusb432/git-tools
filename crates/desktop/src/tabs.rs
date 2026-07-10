@@ -166,13 +166,16 @@ impl RenderedTabs {
     }
 
     /// Drop a tab. Idempotent: closing an unknown id is `false`, not an error.
+    ///
+    /// The removed [`RenderedTab`] is bound to a local so the `MutexGuard`
+    /// temporary drops at the end of this statement — *before* the removed
+    /// value (and its potentially large `panes` cache) drops at the end of
+    /// the function. Collapsing this into one chained expression would drop
+    /// both temporaries in reverse creation order (guard last), running the
+    /// heavy drop while the lock is still held.
     pub fn close(&self, tab_id: u64) -> bool {
-        self.0
-            .lock()
-            .expect("tabs lock")
-            .tabs
-            .remove(&tab_id)
-            .is_some()
+        let removed = self.0.lock().expect("tabs lock").tabs.remove(&tab_id);
+        removed.is_some()
     }
 
     /// A bounded page of one file's rows in one pane variant, deriving and
@@ -369,5 +372,49 @@ mod tests {
         assert!(tabs.close(id));
         assert!(!tabs.close(id), "second close is a no-op");
         assert!(tabs.meta(id).is_none());
+    }
+
+    /// A tab with several files, each warmed across every layout/full-context
+    /// combo — representative of a large diff someone has actually browsed —
+    /// mirroring the `panes` cache `close` must remove-then-drop correctly.
+    fn multi_file_view(file_count: usize) -> View {
+        let files = (0..file_count)
+            .map(|i| FileDiff {
+                path: format!("src/f{i}.rs"),
+                added: 1,
+                removed: 1,
+                lines: lines(&["@@ -1,2 +1,2 @@", " keep", "-old", "+new"]),
+                full_lines: None,
+                commits: vec![],
+                owners: LineOwners::default(),
+            })
+            .collect();
+        View {
+            files,
+            ..view("multi")
+        }
+    }
+
+    #[test]
+    fn close_removes_a_warmed_tab_and_is_idempotent_on_unknown_ids() {
+        let tabs = RenderedTabs::default();
+        let id = tabs.upsert(recipe("/repos/gt"), "b1".into(), multi_file_view(5));
+
+        // Warm every pane combo for every file, so the removed `RenderedTab`
+        // carries a full `panes` cache — the heavy drop `close` must perform
+        // only after releasing the tabs lock, not while holding it.
+        for file_idx in 0..5 {
+            for full in [false, true] {
+                for layout in [Layout::Unified, Layout::Split] {
+                    tabs.rows_page(id, file_idx, layout, full, 0, 100)
+                        .expect("pane warms");
+                }
+            }
+        }
+
+        assert!(tabs.close(id), "closing a known, warmed tab reports removal");
+        assert!(!tabs.close(id), "closing an already-closed tab is a no-op");
+        assert!(!tabs.close(99), "closing an unknown tab is a no-op");
+        assert!(tabs.meta(id).is_none(), "tab is gone after close");
     }
 }

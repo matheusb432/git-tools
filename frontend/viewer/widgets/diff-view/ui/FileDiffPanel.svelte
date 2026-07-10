@@ -7,15 +7,15 @@
   import * as Alert from "@/shared/ui/alert";
   import { Badge } from "@/shared/ui/badge";
   import { Button } from "@/shared/ui/button";
-  import { Skeleton } from "@/shared/ui/skeleton";
   import { TEST_IDS } from "@/shared/testids";
   import { activePaneKey, type DiffLayout } from "../model/diff-view";
+  import { panePageErrorEntries, retryablePanePageRequests, siblingLayout } from "../model/row-render";
   import {
-    filePanelBodyState,
-    panePageErrorEntries,
-    retryablePanePageRequests,
-    siblingLayout,
-  } from "../model/row-render";
+    ESTIMATED_ROW_HEIGHT_PX,
+    FILE_PANEL_HEADER_HEIGHT_PX,
+    estimateRowCount,
+  } from "../model/panel-size-estimate";
+  import { ROW_WINDOW_OVERSCAN_PX, visibleRowWindow } from "../model/row-window";
   import RowWindow from "./RowWindow.svelte";
 
   const PAGE_SIZE = 80;
@@ -36,6 +36,14 @@
     readonly selected: boolean;
     readonly expanded: boolean;
     readonly onToggleExpanded: () => void;
+    /** This panel's top offset within the outer scroll content. */
+    readonly panelTop: number;
+    /** Live scroll offset of the single outer scroll surface. */
+    readonly outerScrollTop: number;
+    /** Live height of the outer viewport. */
+    readonly outerViewportHeight: number;
+    /** Scroll the outer list so this panel's top aligns to the viewport top. */
+    readonly onScrollToTop: () => void;
     readonly rowCache: RowPageCache;
     readonly updateRowCache: UpdateRowCache;
   };
@@ -57,6 +65,10 @@
     selected,
     expanded,
     onToggleExpanded,
+    panelTop,
+    outerScrollTop,
+    outerViewportHeight,
+    onScrollToTop,
     rowCache,
     updateRowCache,
   }: Props = $props();
@@ -64,30 +76,49 @@
   let expandedLongRows = $state.raw<ReadonlySet<string>>(new Set<string>());
   let loadingKeys = $state.raw<RowPageLoadingSet>(new Set<string>());
   let pageErrors = $state.raw<RowPageErrorMap>(new Map<string, string>());
-  let rowWindowHandle = $state<{
-    readonly scrollToIndex: (index: number) => void;
-    readonly measure: () => void;
-  } | null>(null);
 
   const paneKey = $derived(activePaneKey({ tabId, fileIdx, layout, full }));
-  const panePrefix = $derived(`${paneKey}:`);
   const firstPageCacheKey = $derived(rowPageKey({ tabId, fileIdx, layout, full, pageStart: 0, pageSize: PAGE_SIZE }));
 
   const firstPage = $derived(getRows(rowCache, firstPageCacheKey));
   const totalRows = $derived(firstPage?.total ?? 0);
+  // Before the first page loads, size the panel from metadata so the outer
+  // scrollbar is correct and measurement only refines it.
+  const windowTotalRows = $derived(firstPage?.total ?? estimateRowCount({ added, removed, layout }));
   const activePageErrors = $derived(panePageErrorEntries(pageErrors, paneKey));
   const hasFirstPageError = $derived(pageErrors.has(firstPageCacheKey));
-  const isInitialLoading = $derived(!hasFirstPageError && firstPage === undefined);
   const hasAnyError = $derived(activePageErrors.length > 0);
-  const bodyState = $derived(filePanelBodyState({ isInitialLoading, hasFirstPageError, totalRows }));
+
+  const rowWindow = $derived(
+    expanded
+      ? visibleRowWindow({
+          outerScrollTop,
+          outerViewportHeight,
+          panelTop,
+          headerHeight: FILE_PANEL_HEADER_HEIGHT_PX,
+          totalRows: windowTotalRows,
+          rowHeight: ESTIMATED_ROW_HEIGHT_PX,
+          overscanPx: ROW_WINDOW_OVERSCAN_PX,
+        })
+      : null,
+  );
+
+  // A primitive identity for the slice so the page-request effect fires only
+  // when the quantized range actually changes, not on every scroll frame
+  // (visibleRowWindow returns a fresh object each call).
+  const rowRequestKey = $derived(rowWindow === null ? null : `${rowWindow.start}:${rowWindow.end}`);
+
+  const beforeSpacerPx = $derived((rowWindow?.start ?? 0) * ESTIMATED_ROW_HEIGHT_PX);
+  const afterSpacerPx = $derived(
+    Math.max(0, windowTotalRows - (rowWindow?.end ?? -1) - 1) * ESTIMATED_ROW_HEIGHT_PX,
+  );
+  const reservedSpacerPx = $derived(windowTotalRows * ESTIMATED_ROW_HEIGHT_PX);
 
   const rowsByIndex = $derived.by(() => {
     const rows = new Map<number, UnifiedRow | SplitRow>();
-    for (const [cacheKey, page] of rowCache) {
-      if (!cacheKey.startsWith(panePrefix)) continue;
-      const parts = cacheKey.split(":");
-      const pageStart = Number(parts.at(-2));
-      if (!Number.isFinite(pageStart)) continue;
+    for (let pageStart = 0; pageStart < totalRows; pageStart += PAGE_SIZE) {
+      const page = getRows(rowCache, rowPageKey({ tabId, fileIdx, layout, full, pageStart, pageSize: PAGE_SIZE }));
+      if (page === undefined) continue;
       page.rows.forEach((row, offset) => {
         rows.set(pageStart + offset, row);
       });
@@ -120,7 +151,8 @@
     if (next.has(rowKey)) next.delete(rowKey);
     else next.add(rowKey);
     expandedLongRows = next;
-    rowWindowHandle?.measure();
+    // The panel grows/shrinks; the outer virtualizer's ResizeObserver corrects
+    // the measured height automatically — no manual remeasure needed.
   }
 
   async function prefetchSiblingFirstPage(pageStart: number, pageSize: number): Promise<void> {
@@ -163,26 +195,10 @@
     }
   }
 
-  function handleVisibleRange(range: { readonly start: number; readonly end: number }): void {
-    requestVisibleRange(range.start, range.end);
-  }
-
   function retryErrors(): void {
     for (const page of retryablePanePageRequests(pageErrors, paneKey)) {
       void requestPage(page.pageStart, page.pageSize);
     }
-  }
-
-  function scrollToTop(): void {
-    rowWindowHandle?.scrollToIndex(0);
-  }
-
-  function handleTopClick(): void {
-    scrollToTop();
-  }
-
-  function handleToggleClick(): void {
-    onToggleExpanded();
   }
 
   function resetPaneState(_paneKey: string): void {
@@ -191,33 +207,31 @@
     pageErrors = new Map<string, string>();
   }
 
-  function ensureFirstPageLoaded(_paneKey: string): void {
-    if (!expanded) return;
-    if (firstPage !== undefined) return;
-    untrack(() => {
-      if (!loadingKeys.has(firstPageCacheKey)) {
-        void requestPage(0, PAGE_SIZE);
-      }
-    });
-  }
-
   $effect(() => {
     resetPaneState(paneKey);
   });
 
+  // Load only the pages the shared outer viewport currently reveals for this
+  // panel; far-off panels resolve `rowWindow` to null and fetch nothing. Keyed
+  // on the primitive range so it fires per slice change, not per scroll frame.
   $effect(() => {
-    ensureFirstPageLoaded(paneKey);
+    if (rowRequestKey === null) return;
+    const window = untrack(() => rowWindow);
+    if (window === null) return;
+    untrack(() => requestVisibleRange(window.start, window.end));
   });
 </script>
 
 <section
   data-testid={TEST_IDS.diffView.filePanel}
   class={cn(
-    "file overflow-hidden rounded-md border bg-surface font-mono",
+    "file rounded-md border bg-surface font-mono",
     selected ? "border-accent/45" : "border-border",
   )}
 >
-  <div class="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-muted px-3 py-2 text-[12.5px]">
+  <div
+    class="sticky top-0 z-10 flex items-center gap-2 rounded-t-md border-b border-border bg-muted px-3 py-2 text-[12.5px]"
+  >
     <button
       type="button"
       class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left focus-visible:ring-2 focus-visible:ring-accent focus-visible:outline-none"
@@ -243,48 +257,46 @@
     </button>
 
     {#if expanded}
-      <Button variant="ghost" size="xs" onclick={handleTopClick}>Top</Button>
+      <Button variant="ghost" size="xs" onclick={onScrollToTop}>Top</Button>
     {/if}
-    <Button variant="outline" size="xs" onclick={handleToggleClick}>
+    <Button variant="outline" size="xs" onclick={onToggleExpanded}>
       {expanded ? "Collapse" : "Expand"}
     </Button>
   </div>
 
   {#if expanded}
-    {#if hasAnyError}
-      <div class="px-4 pt-4">
-        <Alert.Root variant="destructive">
-          <AlertTriangle />
-          <Alert.Title>Could not load some diff rows</Alert.Title>
-          <Alert.Description>{activePageErrors[0]?.[1] ?? "Unable to load diff rows."}</Alert.Description>
-          <Alert.Action>
-            <Button variant="destructive" size="sm" onclick={retryErrors}>Retry</Button>
-          </Alert.Action>
-        </Alert.Root>
-      </div>
-    {/if}
+    <div class="overflow-hidden rounded-b-md">
+      {#if hasAnyError}
+        <div class="px-4 pt-4">
+          <Alert.Root variant="destructive">
+            <AlertTriangle />
+            <Alert.Title>Could not load some diff rows</Alert.Title>
+            <Alert.Description>{activePageErrors[0]?.[1] ?? "Unable to load diff rows."}</Alert.Description>
+            <Alert.Action>
+              <Button variant="destructive" size="sm" onclick={retryErrors}>Retry</Button>
+            </Alert.Action>
+          </Alert.Root>
+        </div>
+      {/if}
 
-    {#if bodyState === "loading"}
-      <div class="space-y-2 px-4 py-4">
-        <Skeleton class="h-[22px] w-full rounded-md" />
-        <Skeleton class="h-[22px] w-full rounded-md" />
-        <Skeleton class="h-[22px] w-[92%] rounded-md" />
-        <Skeleton class="h-[22px] w-[86%] rounded-md" />
-      </div>
-    {:else if bodyState === "empty"}
-      <div class="px-4 py-5 text-sm text-foreground-muted">No diff rows are available for this file.</div>
-    {:else if bodyState === "rows"}
-      <div class="h-[220px] min-h-0">
+      {#if hasFirstPageError}
+        <!-- The alert above already explains the first-page failure. -->
+      {:else if firstPage !== undefined && totalRows === 0}
+        <div class="px-4 py-5 text-sm text-foreground-muted">No diff rows are available for this file.</div>
+      {:else if rowWindow === null}
+        <div style={`height: ${reservedSpacerPx}px;`} aria-hidden="true"></div>
+      {:else}
+        <div style={`height: ${beforeSpacerPx}px;`} aria-hidden="true"></div>
         <RowWindow
-          bind:handle={rowWindowHandle}
           {layout}
-          total={totalRows}
+          start={rowWindow.start}
+          end={rowWindow.end}
           {rowsByIndex}
           {expandedLongRows}
           onToggleLongRow={toggleLongRow}
-          onRange={handleVisibleRange}
         />
-      </div>
-    {/if}
+        <div style={`height: ${afterSpacerPx}px;`} aria-hidden="true"></div>
+      {/if}
+    </div>
   {/if}
 </section>
