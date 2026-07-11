@@ -31,11 +31,11 @@ function showToast(msg: string): void {
 // ! paste elsewhere already labelled. Selection granularity is whole lines. Bails to the
 // ! native copy for empty selections, selections outside a single diff file, selections that
 // ! touch no code rows, or when that view's context toggle is off.
-document.addEventListener("copy", (e: ClipboardEvent) => {
+export function handleDocumentCopy(e: ClipboardEvent): void {
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || !sel.rangeCount || !sel.containsNode) return;
   const node = sel.getRangeAt(0).commonAncestorContainer;
-  const el = node.nodeType === 1 ? (node as Element) : (node as Node).parentElement;
+  const el = node instanceof Element ? node : node.parentElement;
   const file = el?.closest ? el.closest("details.file") : null;
   if (!file) return;
   const layout = file.closest(".layout");
@@ -70,7 +70,7 @@ document.addEventListener("copy", (e: ClipboardEvent) => {
   e.clipboardData.setData("text/plain", `${header}\n${out.join("\n")}`);
   e.preventDefault();
   showToast(first !== null ? `Copied with context · lines ${range}` : "Copied with context");
-});
+}
 
 // * Opens `target` then schedules `land` in the next animation frame so a collapsed
 // * content-visibility giant is materialized before scrollLandOn runs its correction loop.
@@ -89,7 +89,21 @@ export function navigateToFile(
   raf(() => land(target, scroller));
 }
 
-export function enhanceLayout(root: HTMLElement): void {
+export function enhanceLayout(root: HTMLElement): () => void {
+  const cleanups: Array<() => void> = [];
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const listen = (target: EventTarget, type: string, listener: EventListener, options?: AddEventListenerOptions): void => {
+    target.addEventListener(type, listener, options);
+    cleanups.push(() => target.removeEventListener(type, listener, options));
+  };
+  const later = (callback: () => void, delay: number): ReturnType<typeof setTimeout> => {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      callback();
+    }, delay);
+    timers.add(timer);
+    return timer;
+  };
   // ! Scope every view to its own .layout root: the tabbed (diff subrepos) view inlines one
   // ! .layout per panel in a single document, so document.querySelector would only ever wire
   // ! the first panel. Querying within `root` keeps each tab independently interactive.
@@ -112,6 +126,21 @@ export function enhanceLayout(root: HTMLElement): void {
   // Compute the main scroller and sticky offset once
   const mainScroller = root.querySelector<HTMLElement>(".main") ?? root;
 
+  if (treeBody)
+    listen(treeBody, "click", (event) => {
+      if (!(event.target instanceof Element)) return;
+      const label = event.target.closest<HTMLElement>(".tlabel");
+      if (!label || !treeBody.contains(label)) return;
+      const fileItem = label.closest<HTMLElement>(".tfile");
+      if (fileItem) {
+        const targetId = fileItem.getAttribute("data-target");
+        const file = targetId ? fileEls.find((candidate) => candidate.id === targetId) : undefined;
+        if (file) openAndScrollTo(file);
+        return;
+      }
+      label.closest<HTMLElement>(".tdir")?.classList.toggle("open");
+    });
+
   function esc(s: string): string {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -128,7 +157,7 @@ export function enhanceLayout(root: HTMLElement): void {
     const stickyTop = summaryEl ? summaryEl.offsetHeight : 0;
     navigateToFile(t, mainScroller, { stickyTop });
     t.classList.add("flash");
-    setTimeout(() => {
+    later(() => {
       t.classList.remove("flash");
     }, 1200);
     markCurrent(t);
@@ -137,7 +166,8 @@ export function enhanceLayout(root: HTMLElement): void {
   // ---- commit filter + name filter: a file shows only if it survives both ----
   function applyFilter(): void {
     fileEls.forEach((el) => {
-      const byCommit = !!activeSet && !shasOf(el).some((s) => activeSet!.indexOf(s) !== -1);
+      const selected = activeSet;
+      const byCommit = selected !== null && !shasOf(el).some((sha) => selected.includes(sha));
       el.hidden = byCommit || !matchesFilter(el);
     });
     syncBeads();
@@ -146,13 +176,13 @@ export function enhanceLayout(root: HTMLElement): void {
   }
 
   if (filterInput)
-    filterInput.addEventListener("input", () => {
+    listen(filterInput, "input", () => {
       filterText = filterInput.value.trim().toLowerCase();
       applyFilter();
     });
 
   if (foldAll)
-    foldAll.addEventListener("click", () => {
+    listen(foldAll, "click", () => {
       const anyOpen = fileEls.some((el) => el.open);
       fileEls.forEach((el) => {
         el.open = !anyOpen;
@@ -176,14 +206,14 @@ export function enhanceLayout(root: HTMLElement): void {
   }
 
   if (viewToggle)
-    viewToggle.addEventListener("click", () => {
+    listen(viewToggle, "click", () => {
       if (docEl.dataset["diffFull"] === "on") delete docEl.dataset["diffFull"];
       else docEl.dataset["diffFull"] = "on";
       syncToggles();
     });
 
   if (layoutToggle)
-    layoutToggle.addEventListener("click", () => {
+    listen(layoutToggle, "click", () => {
       const split = docEl.dataset["diffLayout"] !== "split"; // currently unified -> switch to split
       if (split) docEl.dataset["diffLayout"] = "split";
       else delete docEl.dataset["diffLayout"];
@@ -199,23 +229,23 @@ export function enhanceLayout(root: HTMLElement): void {
   // ! reads that class at click time to decide whether to prepend the path/lines header.
   const ctxToggle = root.querySelector<HTMLElement>(".ctx-toggle");
   if (ctxToggle)
-    ctxToggle.addEventListener("click", () => {
+    listen(ctxToggle, "click", () => {
       const on = root.classList.toggle("copy-ctx");
       ctxToggle.setAttribute("aria-pressed", on ? "true" : "false");
       ctxToggle.classList.toggle("active", on);
     });
 
   function bindHorizontalWheel(scroller: Element): void {
-    scroller.addEventListener(
+    listen(
+      scroller,
       "wheel",
       (ev) => {
-        const e = ev as WheelEvent;
-        const el = scroller as HTMLElement;
-        const next = computeWheelScroll(el, e);
+        if (!(ev instanceof WheelEvent) || !(scroller instanceof HTMLElement)) return;
+        const next = computeWheelScroll(scroller, ev);
         if (next === null) return;
-        e.stopPropagation();
-        e.preventDefault();
-        el.scrollLeft = next;
+        ev.stopPropagation();
+        ev.preventDefault();
+        scroller.scrollLeft = next;
       },
       { passive: false },
     );
@@ -245,15 +275,17 @@ export function enhanceLayout(root: HTMLElement): void {
       const parts = (el.getAttribute("data-path") || "").split("/");
       let node = treeRoot;
       for (let i = 0; i < parts.length - 1; i++) {
-        const part = parts[i] as string;
+        const part = parts[i];
+        if (!part) continue;
         if (!node.dirs[part]) {
           node.dirs[part] = { dirs: {}, dirOrder: [], files: [] };
           node.dirOrder.push(part);
         }
-        node = node.dirs[part] as TreeNode;
+        const child = node.dirs[part];
+        if (child) node = child;
       }
       node.files.push({
-        name: parts[parts.length - 1] as string,
+        name: parts.at(-1) ?? "",
         el,
         status: el.getAttribute("data-status") || "modified",
         statusCode: el.getAttribute("data-status-code") || "M",
@@ -272,19 +304,13 @@ export function enhanceLayout(root: HTMLElement): void {
       const label = document.createElement("div");
       label.className = "tlabel";
       label.innerHTML = `<span class="tcaret"></span><span class="tname">${esc(name)}</span>`;
-      label.addEventListener("click", () => {
-        li.classList.toggle("open");
-      });
       li.appendChild(label);
-      li.appendChild(renderNode(node.dirs[name] as TreeNode));
+      const child = node.dirs[name];
+      if (child) li.appendChild(renderNode(child));
       ul.appendChild(li);
     });
     node.files.forEach((f) => {
       const li = buildFileLeaf(document, f);
-      const label = li.querySelector<HTMLElement>(".tlabel")!;
-      label.addEventListener("click", () => {
-        openAndScrollTo(f.el);
-      });
       ul.appendChild(li);
     });
     return ul;
@@ -314,9 +340,10 @@ export function enhanceLayout(root: HTMLElement): void {
       r.classList.remove("owned");
     });
     ownedRows = [];
-    if (activeSet) {
+    const selected = activeSet;
+    if (selected) {
       dlEls.forEach((r) => {
-        if (activeSet!.indexOf(r.getAttribute("data-commit") ?? "") !== -1) {
+        if (selected.includes(r.getAttribute("data-commit") ?? "")) {
           r.classList.add("owned");
           ownedRows.push(r);
         }
@@ -327,26 +354,26 @@ export function enhanceLayout(root: HTMLElement): void {
 
   clineEls.forEach((c) => {
     const sha = c.getAttribute("data-sha") ?? "";
-    c.addEventListener("click", () => {
+    listen(c, "click", () => {
       ({ sha: activeSha, set: activeSet } = resolveActiveSet(sha, c.getAttribute("data-members") || "", activeSha));
       applyFilter();
     });
-    c.addEventListener("keydown", (ev) => {
-      const e = ev as KeyboardEvent;
-      if (isShaTarget(e.target as Element | null)) return;
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
+    listen(c, "keydown", (event) => {
+      if (!(event instanceof KeyboardEvent)) return;
+      if (event.target instanceof Element && isShaTarget(event.target)) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
         c.click();
       }
     });
 
     const hashCopy = c.querySelector<HTMLElement>(".sha");
     if (hashCopy)
-      hashCopy.addEventListener("click", (e) => {
-        e.stopPropagation();
-        copyText(sha);
+      listen(hashCopy, "click", (event) => {
+        event.stopPropagation();
+        void copyText(sha);
         c.classList.add("copied");
-        setTimeout(() => {
+        later(() => {
           c.classList.remove("copied");
         }, 900);
       });
@@ -356,27 +383,35 @@ export function enhanceLayout(root: HTMLElement): void {
     const cssEscaped = window.CSS && CSS.escape ? CSS.escape(popId) : popId;
     const pop = root.querySelector<HTMLElement>(`#${cssEscaped}`);
     if (!pop) return;
-    let t: ReturnType<typeof setTimeout>;
+    const popover = pop;
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
     function show(): void {
-      clearTimeout(t);
+      if (hideTimer !== undefined) {
+        clearTimeout(hideTimer);
+        timers.delete(hideTimer);
+      }
       const r = c.getBoundingClientRect();
       let left = r.left - 338;
       if (left < 8) left = r.right + 6;
-      pop!.style.left = `${left}px`;
-      pop!.style.top = `${Math.min(r.top, innerHeight - 210)}px`;
-      if ("showPopover" in pop!) (pop as HTMLElement & { showPopover(): void }).showPopover();
+      popover.style.left = `${left}px`;
+      popover.style.top = `${Math.min(r.top, innerHeight - 210)}px`;
+      popover.showPopover?.();
     }
     function hide(): void {
-      t = setTimeout(() => {
-        if ("hidePopover" in pop!) (pop as HTMLElement & { hidePopover(): void }).hidePopover();
+      hideTimer = later(() => {
+        hideTimer = undefined;
+        popover.hidePopover?.();
       }, 140);
     }
-    c.addEventListener("mouseenter", show);
-    c.addEventListener("mouseleave", hide);
-    pop.addEventListener("mouseenter", () => {
-      clearTimeout(t);
+    listen(c, "mouseenter", show);
+    listen(c, "mouseleave", hide);
+    listen(popover, "mouseenter", () => {
+      if (hideTimer === undefined) return;
+      clearTimeout(hideTimer);
+      timers.delete(hideTimer);
+      hideTimer = undefined;
     });
-    pop.addEventListener("mouseleave", hide);
+    listen(popover, "mouseleave", hide);
   });
 
   // ---- keyboard (scoped): / focus filter, j/k next/prev file, alt+shift+c fold all ----
@@ -393,32 +428,39 @@ export function enhanceLayout(root: HTMLElement): void {
 
   // ! Listen on document (a div gets no keydown without focus) but ignore events while this
   // ! layout's tabbed panel is hidden, so each panel stays independently driven.
-  document.addEventListener("keydown", (ev) => {
-    const e = ev as KeyboardEvent;
+  listen(document, "keydown", (event) => {
+    if (!(event instanceof KeyboardEvent)) return;
     const panel = root.closest<HTMLElement>(".panel");
     if (panel && panel.hidden) return;
-    const command = keyboardCommand(e);
+    const command = keyboardCommand(event);
     if (command === "blur-input") {
-      (e.target as HTMLElement).blur();
+      if (event.target instanceof HTMLElement) event.target.blur();
       return;
     }
     if (command === "fold-all") {
-      e.preventDefault();
+      event.preventDefault();
       foldAll?.click();
     } else if (command === "focus-filter") {
-      e.preventDefault();
+      event.preventDefault();
       filterInput?.focus();
     } else if (command === "next-file") {
-      e.preventDefault();
+      event.preventDefault();
       focusFile(curFile + 1);
     } else if (command === "previous-file") {
-      e.preventDefault();
+      event.preventDefault();
       focusFile(curFile - 1);
     }
   });
 
-  root.querySelectorAll(".ln-more").forEach((b) => b.addEventListener("click", () => toggleLongLine(b)));
+  root.querySelectorAll<HTMLElement>(".ln-more").forEach((button) => {
+    listen(button, "click", () => toggleLongLine(button));
+  });
 
   buildTree();
   syncToggles();
+  return () => {
+    cleanups.reverse().forEach((cleanup) => cleanup());
+    timers.forEach(clearTimeout);
+    timers.clear();
+  };
 }

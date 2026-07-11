@@ -7,7 +7,9 @@
   let { root }: Props = $props();
 
   onMount(() => {
-    enhanceControls(root);
-    enhanceLayout(root);
+    const cleanups = [enhanceControls(root), enhanceLayout(root)];
+    return () => {
+      cleanups.reverse().forEach((cleanup) => cleanup());
+    };
   });
 </script>

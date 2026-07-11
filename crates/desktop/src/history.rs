@@ -1,6 +1,6 @@
-//! History view DTO: maps application `HistoryRecord`s to frontend rows.
-use application::ports::HistoryRecord;
-use domain::diffs::DiffKind;
+//! Maps persisted history records to the legacy shell and htmx viewer models.
+use application::ports::{HistoryRecord, RecentRenderRecord};
+use domain::{diffs::DiffKind, viewer::ViewerHistoryEntry};
 use serde::Serialize;
 
 /// One history row for the frontend. `url` is the tab's `diff://` source.
@@ -43,6 +43,17 @@ pub(crate) fn to_entry(r: HistoryRecord) -> HistoryEntry {
         byte_size: r.byte_size,
         url,
     }
+}
+
+pub(crate) fn to_viewer_entry(record: RecentRenderRecord) -> ViewerHistoryEntry {
+    ViewerHistoryEntry::new(
+        record.id,
+        record.title,
+        record.repo_name,
+        record.kind,
+        record.range_label,
+        record.rendered_at,
+    )
 }
 
 #[cfg(test)]

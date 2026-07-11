@@ -1,0 +1,357 @@
+mod document;
+mod fragments;
+mod routes;
+
+pub(crate) use document::MaudViewerRenderer;
+use routes::{ViewerRoute, ViewerSettingChange};
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use domain::{
+        diffs::{Cmd, Foot, View},
+        viewer::{
+            DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerDocument,
+            ViewerHistoryEntry, ViewerSettings, ViewerTab, ViewerTabId, ViewerTabKind,
+            ViewerTabState, ViewerView,
+        },
+    };
+
+    use super::{MaudViewerRenderer, ViewerRoute, ViewerSettingChange};
+
+    const HTMX_SHA256: &str = "71ea67185bfa8c98c39d31717c6fce5d852370fcdfd129db4543774d3145c0de";
+
+    fn tab_id(raw: u64) -> ViewerTabId {
+        ViewerTabId::try_new(raw).expect("positive tab id")
+    }
+
+    fn history_id(raw: i64) -> RenderHistoryId {
+        RenderHistoryId::try_new(raw).expect("positive history id")
+    }
+
+    fn view() -> Arc<View> {
+        Arc::new(View {
+            repo_name: "git-tools".into(),
+            repo_root: "/repo".into(),
+            branch: "feature/htmx".into(),
+            upstream: "origin/main".into(),
+            commits: vec![],
+            files: vec![],
+            title: "Working tree".into(),
+            cmd: Cmd {
+                lead: String::new(),
+                range: String::new(),
+                trail: String::new(),
+            },
+            commits_label: "Commits".into(),
+            foot: Foot {
+                cmd: "git diff".into(),
+                note: String::new(),
+            },
+            theme: None,
+        })
+    }
+
+    fn settings() -> ViewerSettings {
+        ViewerSettings::new(
+            RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
+            Theme::Hearth,
+        )
+    }
+
+    fn sample_document() -> ViewerDocument {
+        let id = tab_id(1);
+        ViewerDocument::new(
+            vec![ViewerTab::new(
+                id,
+                "git-tools changes".into(),
+                ViewerTabKind::Live,
+                ViewerTabState::Ready,
+            )],
+            Some(id),
+            Some(ViewerView::new(
+                id,
+                view(),
+                settings().options(),
+                ViewerTabKind::Live,
+            )),
+            vec![ViewerHistoryEntry::new(
+                history_id(7),
+                "Recent changes".into(),
+                "git-tools".into(),
+                "worktree".into(),
+                "main..HEAD".into(),
+                "2026-07-11T00:00:00Z".into(),
+            )],
+            settings(),
+        )
+        .expect("sample document is internally consistent")
+    }
+
+    #[test]
+    fn route_formatter_is_closed_over_validated_values() {
+        let tab = tab_id(7);
+        let options = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
+        let render = history_id(42);
+
+        assert_eq!(
+            ViewerRoute::View { tab, options }.to_string(),
+            "/tabs/7/view?layout=split&density=full"
+        );
+        assert_eq!(
+            ViewerRoute::Activate { tab }.to_string(),
+            "/tabs/7/activate"
+        );
+        assert_eq!(ViewerRoute::Refresh { tab }.to_string(), "/tabs/7/refresh");
+        assert_eq!(ViewerRoute::Close { tab }.to_string(), "/tabs/7/close");
+        assert_eq!(ViewerRoute::History.to_string(), "/history");
+        assert_eq!(
+            ViewerRoute::OpenHistory { render }.to_string(),
+            "/history/42/open"
+        );
+        assert_eq!(
+            ViewerRoute::Settings(ViewerSettingChange::Layout(DiffLayout::Unified)).to_string(),
+            "/settings?layout=unified"
+        );
+        assert_eq!(
+            ViewerRoute::Settings(ViewerSettingChange::Density(DiffDensity::Compact)).to_string(),
+            "/settings?density=compact"
+        );
+        assert_eq!(
+            ViewerRoute::Settings(ViewerSettingChange::Theme(Theme::Dark)).to_string(),
+            "/settings?theme=dark"
+        );
+        assert_eq!(ViewerRoute::Pending.to_string(), "/pending");
+    }
+
+    #[test]
+    fn document_is_offline_and_has_stable_swap_roots_and_one_active_layout() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+        let expected_route = ViewerRoute::View {
+            tab: tab_id(1),
+            options: settings().options(),
+        }
+        .to_string();
+
+        assert!(html.contains("id=\"viewer-tabs\""));
+        assert!(html.contains("id=\"viewer-view\""));
+        assert!(html.contains("id=\"viewer-history\""));
+        assert!(html.contains(&expected_route.replace('&', "&amp;")));
+        assert_eq!(html.matches(crate::protocol_config::APP_URL).count(), 1);
+        assert!(!html.contains("<iframe"));
+        assert!(!html.contains("<script src="));
+        assert!(!html.contains("<link "));
+        assert!(!html.contains("hx-swap-oob="));
+        assert_eq!(html.matches("class=\"layout").count(), 1);
+    }
+
+    #[test]
+    fn user_controlled_shell_values_are_escaped() {
+        let tab = ViewerTab::new(
+            tab_id(1),
+            "<script>alert(1)</script>".into(),
+            ViewerTabKind::Snapshot,
+            ViewerTabState::Error {
+                reason: "failed".into(),
+            },
+        );
+
+        let html = MaudViewerRenderer.build_tabs(&[tab], None);
+
+        assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
+        assert!(!html.contains("<script>alert(1)</script>"));
+    }
+
+    #[test]
+    fn broken_and_error_tabs_render_distinct_escaped_recovery_states() {
+        for (state, marker) in [
+            (
+                ViewerTabState::Broken {
+                    code: "missing<&>".into(),
+                    reason: "artifact <gone>".into(),
+                },
+                "viewer-status-broken",
+            ),
+            (
+                ViewerTabState::Error {
+                    reason: "render <failed>".into(),
+                },
+                "viewer-status-error",
+            ),
+        ] {
+            let id = tab_id(3);
+            let document = ViewerDocument::new(
+                vec![ViewerTab::new(
+                    id,
+                    "unavailable".into(),
+                    ViewerTabKind::Live,
+                    state,
+                )],
+                Some(id),
+                None,
+                vec![],
+                settings(),
+            )
+            .expect("non-ready active tabs intentionally have no view");
+
+            let html = MaudViewerRenderer.build_document(&document);
+
+            assert!(html.contains(marker));
+            assert!(html.contains("&lt;"));
+            assert!(!html.contains("class=\"layout"));
+            assert!(html.contains("/tabs/3/refresh"));
+        }
+    }
+
+    #[test]
+    fn empty_document_gives_a_direct_next_step() {
+        let document = ViewerDocument::new(vec![], None, None, vec![], settings())
+            .expect("empty viewer is valid");
+
+        let html = MaudViewerRenderer.build_document(&document);
+
+        assert!(html.contains("viewer-status-empty"));
+        assert!(html.contains("gtl diff"));
+        assert!(!html.contains("class=\"layout"));
+    }
+
+    #[test]
+    fn history_uses_stable_ids_and_escapes_metadata() {
+        let entry = ViewerHistoryEntry::new(
+            history_id(9),
+            "<recent>".into(),
+            "repo & tools".into(),
+            "worktree".into(),
+            "main..HEAD".into(),
+            "2026-07-11T00:00:00Z".into(),
+        );
+
+        let html = MaudViewerRenderer.build_history(&[entry]);
+
+        assert!(html.contains("/history/9/open"));
+        assert!(html.contains("&lt;recent&gt;"));
+        assert!(html.contains("repo &amp; tools"));
+    }
+
+    #[test]
+    fn theme_setting_updates_the_document_palette_without_a_reload() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+
+        assert!(html.contains("data-viewer-theme=\"dark\""));
+        assert!(html.contains("document.documentElement.dataset.theme"));
+        assert!(html.contains("/settings?theme=dark"));
+    }
+
+    #[test]
+    fn layout_and_density_swaps_follow_native_radio_changes() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+
+        assert_eq!(
+            html.matches("hx-trigger=\"change from:find input\"")
+                .count(),
+            4
+        );
+    }
+
+    #[test]
+    fn settings_controls_exclude_native_radio_parameters() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+        let settings_inputs: Vec<&str> = html
+            .split("<input ")
+            .skip(1)
+            .map(|tail| tail.split_once('>').expect("input has a closing angle").0)
+            .filter(|input| input.contains("hx-get=\"/settings?"))
+            .collect();
+
+        assert_eq!(settings_inputs.len(), 7);
+        for input in settings_inputs {
+            assert!(input.contains("hx-params=\"none\""), "{input}");
+        }
+    }
+
+    #[test]
+    fn view_primary_response_updates_tabs_out_of_band() {
+        let html = MaudViewerRenderer.build_view_with_tabs(&sample_document());
+
+        assert_eq!(html.matches("id=\"viewer-view\"").count(), 1);
+        assert_eq!(html.matches("id=\"viewer-tabs\"").count(), 1);
+        assert!(html.starts_with("<section id=\"viewer-view\""));
+        assert!(html.contains("<nav id=\"viewer-tabs\" hx-swap-oob=\"outerHTML\""));
+        assert!(!html.starts_with("<section id=\"viewer-view\" hx-swap-oob"));
+    }
+
+    #[test]
+    fn tabs_primary_response_updates_view_out_of_band() {
+        let html = MaudViewerRenderer.build_tabs_with_view(&sample_document());
+
+        assert_eq!(html.matches("id=\"viewer-tabs\"").count(), 1);
+        assert_eq!(html.matches("id=\"viewer-view\"").count(), 1);
+        assert!(html.starts_with("<nav id=\"viewer-tabs\""));
+        assert!(html.contains("<section id=\"viewer-view\" hx-swap-oob=\"outerHTML\""));
+        assert!(!html.starts_with("<nav id=\"viewer-tabs\" hx-swap-oob"));
+    }
+
+    #[test]
+    fn narrow_app_split_rows_stack_without_changing_raw_artifacts() {
+        let css = infra::html_renderer::preview_css();
+
+        assert!(css.contains(
+            "body.viewer-shell .diff-split .dl{grid-template-columns:44px minmax(0,1fr)}"
+        ));
+        assert!(css.contains("body:not(.viewer-shell) .diff-unified.diff-compact"));
+        assert!(css.contains(
+            "body.viewer-shell .diff-split .dl-meta,body.viewer-shell .diff-split .dl-hunk{grid-template-columns:minmax(0,1fr)}"
+        ));
+    }
+
+    #[test]
+    fn open_diff_navigation_uses_buttons_without_partial_tab_aria() {
+        let document = sample_document();
+        let html = MaudViewerRenderer.build_tabs(document.tabs(), Some(tab_id(1)));
+
+        assert!(html.contains("<nav id=\"viewer-tabs\""));
+        assert!(html.contains("<ul class=\"viewer-tab-list\""));
+        assert!(html.contains("aria-current=\"page\""));
+        assert!(!html.contains("role=\"tablist\""));
+        assert!(!html.contains("role=\"tab\""));
+        assert!(!html.contains("aria-selected="));
+    }
+
+    #[test]
+    fn dependent_actions_target_their_primary_compound_root() {
+        fn opening_tag_with<'html>(html: &'html str, needle: &str) -> &'html str {
+            let position = html.find(needle).expect("route appears in rendered markup");
+            let start = html[..position].rfind('<').expect("route belongs to a tag");
+            let end = html[position..].find('>').expect("tag closes") + position + 1;
+            &html[start..end]
+        }
+
+        let document = sample_document();
+        let html = MaudViewerRenderer.build_document(&document);
+        let activate = opening_tag_with(&html, "/tabs/1/activate");
+        let close = opening_tag_with(&html, "/tabs/1/close");
+        let open_history = opening_tag_with(&html, "/history/7/open");
+        let pending = opening_tag_with(&html, "/pending");
+
+        assert!(activate.contains("hx-target=\"#viewer-view\""));
+        for tag in [close, open_history, pending] {
+            assert!(tag.contains("hx-target=\"#viewer-tabs\""), "{tag}");
+        }
+    }
+
+    #[test]
+    fn vendored_htmx_digest_is_pinned() {
+        use std::fmt::Write as _;
+
+        use sha2::{Digest as _, Sha256};
+
+        let digest = Sha256::digest(crate::protocol_config::HTMX.as_bytes());
+        let mut encoded = String::with_capacity(digest.len() * 2);
+        for byte in digest {
+            write!(encoded, "{byte:02x}").expect("writing to a string cannot fail");
+        }
+
+        assert_eq!(encoded, HTMX_SHA256);
+    }
+}

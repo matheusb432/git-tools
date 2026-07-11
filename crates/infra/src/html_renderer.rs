@@ -1,4 +1,7 @@
-use domain::diffs::{FileDiff, LineOwners, RowKind, Span, SplitRow, View, long_line_len};
+use domain::{
+    diffs::{FileDiff, LineOwners, RowKind, Span, SplitRow, View, long_line_len},
+    viewer::{DiffDensity, DiffLayout, RenderOptions},
+};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 const GIANT_FILE_CHARS: usize = 250_000;
@@ -6,6 +9,28 @@ const ROW_PX: usize = 22;
 
 const PREVIEW_CSS: &str = include_str!("embedded/preview.css");
 const PREVIEW_BUNDLE: &str = include_str!("embedded/generated/preview.js");
+
+/// Returns the embedded stylesheet shared by artifact and app renderers.
+///
+/// # Examples
+///
+/// ```
+/// assert!(infra::html_renderer::preview_css().contains(".layout"));
+/// ```
+pub fn preview_css() -> &'static str {
+    PREVIEW_CSS
+}
+
+/// Returns the embedded progressive-enhancement bundle shared by artifact and app renderers.
+///
+/// # Examples
+///
+/// ```
+/// assert!(!infra::html_renderer::preview_bundle().is_empty());
+/// ```
+pub fn preview_bundle() -> &'static str {
+    PREVIEW_BUNDLE
+}
 
 // ! Head boot: restore the saved theme and diff layout before paint to avoid a flash of the
 // ! default palette / a unified→split flip. IIFE-wrapped so the locals never leak to global
@@ -121,7 +146,13 @@ pub fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
 // 3-column grid: file tree (left), diff (center), commit shelf (right), titlebar + keybar
 // spanning the full width. Per-commit [popover] elements live inside .layout so the
 // per-layout JS scoping in preview.js finds them.
-fn view_body(view: &View) -> Markup {
+#[derive(Debug, Clone, Copy)]
+enum RenderMode {
+    Artifact,
+    App(RenderOptions),
+}
+
+fn view_body(view: &View, mode: RenderMode) -> Markup {
     let total_add: u32 = view.files.iter().map(|f| f.added).sum();
     let total_del: u32 = view.files.iter().map(|f| f.removed).sum();
     let commit_count = view.commits.len();
@@ -141,15 +172,19 @@ fn view_body(view: &View) -> Markup {
                 }
                 div.spacer {}
                 button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
-                button type="button" class="layout-toggle" aria-pressed="false" title="Side-by-side / unified diff" { "Side by side" }
-                button type="button" class="view-toggle" aria-pressed="false" title="Show full-file diffs" { "Full file" }
+                @if matches!(mode, RenderMode::Artifact) {
+                    button type="button" class="layout-toggle" aria-pressed="false" title="Side-by-side / unified diff" { "Side by side" }
+                    button type="button" class="view-toggle" aria-pressed="false" title="Show full-file diffs" { "Full file" }
+                }
                 button type="button" class="ctx-toggle active" aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
-                label.theme-control {
-                    span { "theme" }
-                    select class="theme-select" aria-label="Theme" {
-                        option value="dark" { "dark" }
-                        option value="light" { "light" }
-                        option value="hearth" { "hearth" }
+                @if matches!(mode, RenderMode::Artifact) {
+                    label.theme-control {
+                        span { "theme" }
+                        select class="theme-select" aria-label="Theme" {
+                            option value="dark" { "dark" }
+                            option value="light" { "light" }
+                            option value="hearth" { "hearth" }
+                        }
                     }
                 }
             }
@@ -168,7 +203,7 @@ fn view_body(view: &View) -> Markup {
                 div.tree-body {}
             }
             main.main {
-                (file_blocks(view))
+                (file_blocks(view, mode))
             }
             aside.shelf aria-label="Commits in range" {
                 div.shelf-head {
@@ -189,6 +224,25 @@ fn view_body(view: &View) -> Markup {
             (commit_popovers(view))
         }
     }
+}
+
+/// Builds one app-hosted diff view using only the requested layout and density variant.
+///
+/// The fragment retains the server-rendered file tree, commit shelf, popovers, and diff rows,
+/// while leaving layout, density, and theme controls to the surrounding app shell.
+///
+/// # Examples
+///
+/// ```no_run
+/// use domain::{diffs::View, viewer::RenderOptions};
+/// use infra::html_renderer::build_view_fragment;
+///
+/// # fn load_view() -> View { todo!() }
+/// let fragment = build_view_fragment(&load_view(), RenderOptions::DEFAULT);
+/// assert!(fragment.into_string().contains("diff-unified diff-compact"));
+/// ```
+pub fn build_view_fragment(view: &View, options: RenderOptions) -> Markup {
+    view_body(view, RenderMode::App(options))
 }
 
 // Native-popover bodies for commits that carry a body, emitted once per .layout (top-level
@@ -228,7 +282,7 @@ pub fn build_html(view: &View) -> String {
                 style { (PreEscaped(PREVIEW_CSS)) }
             }
             body {
-                (view_body(view))
+                (view_body(view, RenderMode::Artifact))
                 script { (PreEscaped(PREVIEW_BUNDLE)) }
             }
         }
@@ -286,7 +340,7 @@ pub fn build_tabbed_html(title: &str, views: &[View]) -> String {
                 }
                 @for (index, view) in views.iter().enumerate() {
                     section.panel id={ "panel-" (index) } role="tabpanel" aria-labelledby={ "tab-" (index) } hidden[index != 0] {
-                        (view_body(view))
+                        (view_body(view, RenderMode::Artifact))
                     }
                 }
                 script { (PreEscaped(PREVIEW_BUNDLE)) }
@@ -533,7 +587,7 @@ fn commit_rows(view: &View) -> Markup {
     }
 }
 
-fn file_blocks(view: &View) -> Markup {
+fn file_blocks(view: &View, mode: RenderMode) -> Markup {
     if view.files.is_empty() {
         return html! { div.empty { "no file changes" } };
     }
@@ -569,16 +623,44 @@ fn file_blocks(view: &View) -> Markup {
                 // ! Diff rows live in their own body so content-visibility virtualizes the
                 // ! heavy content here while the summary stays sticky against `.main` (size
                 // ! containment on `details.file` itself would trap the sticky in the box).
-                // ! Four diff renderings; one is revealed by CSS from the <html> data-diff-layout
-                // ! (unified is the default) / data-diff-full attributes — no `hidden` plumbing.
-                div class="filebody" style=(intrinsic) {
-                    div class="diff diff-split diff-compact" { (PreEscaped(render_diff_split(&file.lines, &file.owners))) }
-                    div class="diff diff-unified diff-compact" { (PreEscaped(render_diff_lines(&file.lines, &file.owners))) }
-                    @if let Some(full_lines) = &file.full_lines {
-                        div class="diff diff-split diff-full" { (PreEscaped(render_diff_split(full_lines, &file.owners))) }
-                        div class="diff diff-unified diff-full" { (PreEscaped(render_diff_lines(full_lines, &file.owners))) }
-                    }
+                // ! Artifacts ship four variants selected by <html> data attributes; app
+                // ! fragments ship one visible variant selected by validated server options.
+                div class=(if matches!(mode, RenderMode::Artifact) { "filebody" } else { "filebody single-variant" }) style=(intrinsic) {
+                    (file_diff(file, mode))
                 }
+            }
+        }
+    }
+}
+
+fn file_diff(file: &FileDiff, mode: RenderMode) -> Markup {
+    match mode {
+        RenderMode::Artifact => html! {
+            div class="diff diff-split diff-compact" { (PreEscaped(render_diff_split(&file.lines, &file.owners))) }
+            div class="diff diff-unified diff-compact" { (PreEscaped(render_diff_lines(&file.lines, &file.owners))) }
+            @if let Some(full_lines) = &file.full_lines {
+                div class="diff diff-split diff-full" { (PreEscaped(render_diff_split(full_lines, &file.owners))) }
+                div class="diff diff-unified diff-full" { (PreEscaped(render_diff_lines(full_lines, &file.owners))) }
+            }
+        },
+        RenderMode::App(options) => {
+            let lines = match options.density() {
+                DiffDensity::Compact => &file.lines,
+                DiffDensity::Full => file.full_lines.as_ref().unwrap_or(&file.lines),
+            };
+            match (options.layout(), options.density()) {
+                (DiffLayout::Unified, DiffDensity::Compact) => html! {
+                    div class="diff diff-unified diff-compact" { (PreEscaped(render_diff_lines(lines, &file.owners))) }
+                },
+                (DiffLayout::Split, DiffDensity::Compact) => html! {
+                    div class="diff diff-split diff-compact" { (PreEscaped(render_diff_split(lines, &file.owners))) }
+                },
+                (DiffLayout::Unified, DiffDensity::Full) => html! {
+                    div class="diff diff-unified diff-full" { (PreEscaped(render_diff_lines(lines, &file.owners))) }
+                },
+                (DiffLayout::Split, DiffDensity::Full) => html! {
+                    div class="diff diff-split diff-full" { (PreEscaped(render_diff_split(lines, &file.owners))) }
+                },
             }
         }
     }
@@ -586,7 +668,10 @@ fn file_blocks(view: &View) -> Markup {
 
 #[cfg(test)]
 mod tests {
-    use domain::diffs::{Cmd, Commit, FileDiff, Foot, MAX_LINE_COLS, View};
+    use domain::{
+        diffs::{Cmd, Commit, FileDiff, Foot, MAX_LINE_COLS, View},
+        viewer::{DiffDensity, DiffLayout, RenderOptions},
+    };
 
     use super::*;
 
@@ -1118,6 +1203,78 @@ mod tests {
         // visibility is CSS-driven now; the diff blocks carry no `hidden` attribute
         assert!(!html.contains(r#"diff-full" hidden"#));
         assert!(!html.contains(r#"diff-compact" hidden"#));
+    }
+
+    #[test]
+    fn app_fragment_emits_only_the_requested_variant() {
+        let html = build_view_fragment(
+            &sample_view(),
+            RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
+        )
+        .into_string();
+
+        assert!(html.contains(r#"class="diff diff-split diff-full""#));
+        assert!(!html.contains("diff-unified"));
+        assert!(!html.contains("diff-compact"));
+    }
+
+    #[test]
+    fn app_fragment_omits_artifact_owned_controls_and_theme_boot() {
+        let html = build_view_fragment(&sample_view(), RenderOptions::DEFAULT).into_string();
+
+        assert!(!html.contains(r#"class="layout-toggle""#));
+        assert!(!html.contains(r#"class="view-toggle""#));
+        assert!(!html.contains(r#"class="theme-select""#));
+        assert!(!html.contains("localStorage"));
+        assert!(html.contains(r#"<aside class="tree""#));
+        assert!(html.contains(r#"<aside class="shelf""#));
+        assert!(html.contains(r#"<div id="pop-abc123def" popover>"#));
+        assert!(preview_css().contains(".filebody.single-variant .diff{display:block}"));
+    }
+
+    #[test]
+    fn app_fragment_full_density_falls_back_to_compact_source_lines() {
+        let mut view = sample_view();
+        view.files[0].full_lines = None;
+
+        let html = build_view_fragment(
+            &view,
+            RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
+        )
+        .into_string();
+
+        assert!(html.contains(r#"class="diff diff-unified diff-full""#));
+        assert!(html.contains("+extra"));
+        assert!(!html.contains("diff-compact"));
+    }
+
+    #[test]
+    fn raw_documents_still_emit_all_four_variants_and_artifact_controls() {
+        let view = sample_view();
+        let documents = [build_html(&view), build_tabbed_html("diffs", &[view])];
+
+        for html in documents {
+            for class in [
+                "diff-split diff-compact",
+                "diff-unified diff-compact",
+                "diff-split diff-full",
+                "diff-unified diff-full",
+            ] {
+                assert!(html.contains(class), "missing {class}");
+            }
+            assert!(html.contains(r#"class="layout-toggle""#));
+            assert!(html.contains(r#"class="view-toggle""#));
+            assert!(html.contains(r#"class="theme-select""#));
+            assert!(html.contains(THEME_BOOT_JS));
+        }
+    }
+
+    #[test]
+    fn public_preview_assets_are_the_embedded_offline_payloads() {
+        assert_eq!(preview_css(), PREVIEW_CSS);
+        assert_eq!(preview_bundle(), PREVIEW_BUNDLE);
+        assert!(!has_disallowed_external_url(preview_css()));
+        assert!(!has_disallowed_external_url(preview_bundle()));
     }
 
     #[test]
