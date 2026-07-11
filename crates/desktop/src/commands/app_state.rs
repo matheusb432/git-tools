@@ -221,17 +221,14 @@ pub(crate) async fn set_setting(
 
 #[cfg(test)]
 mod tests {
-    use application::{
-        ports::RepoProbeResult,
-        testing::{FakeDiffSource, FakeRepoProbe},
-    };
+    use application::{ports::RepoProbeResult, testing::FakeRepoProbe};
 
     use super::*;
 
     #[test]
     fn rejected_save_carries_the_typed_code_and_reason() {
         // FakeRepoProbe::default() answers NotFound.
-        let mediator = crate::test_support::fake_mediator(FakeDiffSource::default());
+        let mediator = crate::test_support::fake_mediator();
 
         let dto = save_live_view_inner(&mediator, Path::new("/data"), "/gone".into())
             .expect("save resolves");
@@ -247,14 +244,11 @@ mod tests {
 
     #[test]
     fn valid_save_maps_the_record() {
-        let mediator = crate::test_support::fake_mediator_with_probe(
-            FakeDiffSource::default(),
-            FakeRepoProbe {
-                result: RepoProbeResult::Repo {
-                    top_level: "/repos/gt".into(),
-                },
+        let mediator = crate::test_support::fake_mediator_with_probe(FakeRepoProbe {
+            result: RepoProbeResult::Repo {
+                top_level: "/repos/gt".into(),
             },
-        );
+        });
 
         let dto = save_live_view_inner(&mediator, Path::new("/data"), "/repos/gt".into())
             .expect("save resolves");
@@ -275,7 +269,7 @@ mod tests {
     #[test]
     fn probe_reports_broken_for_a_missing_directory() {
         // FakeRepoProbe::default() answers NotFound.
-        let mediator = crate::test_support::fake_mediator(FakeDiffSource::default());
+        let mediator = crate::test_support::fake_mediator();
 
         let dto = probe_source_inner(
             &mediator,
@@ -296,14 +290,11 @@ mod tests {
 
     #[test]
     fn probe_reports_ok_for_a_valid_repo() {
-        let mediator = crate::test_support::fake_mediator_with_probe(
-            FakeDiffSource::default(),
-            FakeRepoProbe {
-                result: RepoProbeResult::Repo {
-                    top_level: "/repos/gt".into(),
-                },
+        let mediator = crate::test_support::fake_mediator_with_probe(FakeRepoProbe {
+            result: RepoProbeResult::Repo {
+                top_level: "/repos/gt".into(),
             },
-        );
+        });
 
         let dto = probe_source_inner(
             &mediator,

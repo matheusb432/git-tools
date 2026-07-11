@@ -17,8 +17,7 @@ fn help_lists_the_verb_surface() {
         .stdout(predicates::str::contains("install"))
         .stdout(predicates::str::contains("uninstall"))
         .stdout(predicates::str::contains("gen-icon"))
-        .stdout(predicates::str::contains("ship"))
-        .stdout(predicates::str::contains("native-perf"));
+        .stdout(predicates::str::contains("ship"));
 }
 
 #[test]
@@ -115,17 +114,6 @@ fn ship_exposes_its_smoke_flag() {
         .args(["ship", "--help"])
         .assert()
         .success()
-        .stdout(predicates::str::contains("--smoke"));
-}
-
-#[test]
-fn native_perf_exposes_its_flags() {
-    Command::cargo_bin("xtask")
-        .unwrap()
-        .args(["native-perf", "--help"])
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("--evidence"))
         .stdout(predicates::str::contains("--smoke"));
 }
 

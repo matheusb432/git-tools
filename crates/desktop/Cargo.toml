@@ -22,7 +22,6 @@ cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.3.0", features 
 ] }
 domain = { path = "../domain" }
 gtl-platform = { path = "../../shared/gtl-platform" }
-gtl-recipe = { path = "../../shared/gtl-recipe" }
 infra = { path = "../infra" }
 raw-window-handle = "0.6"
 serde = { version = "1", features = ["derive"] }
@@ -39,6 +38,7 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
 application = { path = "../application", features = ["testing"] }
+tempfile = "3"
 
 [lints]
 workspace = true

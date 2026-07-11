@@ -1058,7 +1058,6 @@ dependencies = [
  "cqrsy",
  "domain",
  "gtl-platform",
- "gtl-recipe",
  "infra",
  "raw-window-handle",
  "serde",
@@ -1066,6 +1065,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
+ "tempfile",
 ]
 
 [[package]]

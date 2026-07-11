@@ -8,7 +8,6 @@ use contracts::{
     diffs::{RenderDiffAllRequest, RenderDiffSubreposRequest, RepoRefDto},
     envelope::Outcome,
 };
-use gtl_recipe::OpenRecipes;
 
 use crate::{
     cli::DiffTarget,
@@ -18,70 +17,31 @@ use crate::{
         discover::{discover_git_repos, repo_label},
         managed::{self, ManagedOptions},
     },
-    git, recipe, viewer,
+    git, viewer,
 };
 
-/// `diff -r`: default forwards one recipe batch to the viewer (no daemon, no
-/// artifact); `--raw`, or no display, keeps the daemon/store/browser path
-/// ([`run_scan_with`]).
+/// `diff -r`: render every discovered repo through the daemon and open the resulting
+/// tabbed store artifact — the `--raw`/headless path opens it in the browser, the default
+/// path hands it to the desktop viewer as a `diff://` url ([`run_scan_with`]).
 pub fn run_scan(
     root: impl AsRef<Path>,
     last: Option<NonZeroU32>,
     include_worktrees: bool,
     raw: bool,
 ) -> anyhow::Result<DiffOutcome> {
-    if take_raw_path(raw, viewer::has_display()) {
-        let backend = crate::client::HttpBackend::ensure_daemon()?;
-        return run_scan_with(&backend, root, last, include_worktrees);
-    }
-    let root = std::fs::canonicalize(root.as_ref())
-        .with_context(|| format!("failed to resolve {}", root.as_ref().display()))?;
-    forward_scan(
-        &root,
-        last,
-        include_worktrees,
-        super::forward_recipes,
-        || {
-            let backend = crate::client::HttpBackend::ensure_daemon()?;
-            run_scan_with(&backend, &root, last, include_worktrees)
-        },
-    )
-}
-
-/// Resolve `root`'s repo scan into a recipe batch and hand it to `forward`. On a forward
-/// failure (no viewer binary, or spawn failed) degrade to `degrade` (the raw path) rather
-/// than failing — FSD A-0002. A genuine error (no repos found, discovery failure) still
-/// propagates. Split from [`run_scan`] so tests can drive a fake forwarder + backend
-/// instead of spawning the real viewer.
-pub(crate) fn forward_scan(
-    root: &Path,
-    last: Option<NonZeroU32>,
-    include_worktrees: bool,
-    forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
-    degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
-) -> anyhow::Result<DiffOutcome> {
-    let recipes = recipe::subrepo_recipes(root, last, include_worktrees)?;
-    if recipes.is_empty() {
-        anyhow::bail!("diff -r: no git repos found under {}", root.display());
-    }
-    let batch = OpenRecipes {
-        batch_id: recipe::new_batch_id(),
-        recipes,
+    let open: fn(&Path) = if take_raw_path(raw, viewer::has_display()) {
+        super::open_artifact
+    } else {
+        super::open_in_viewer
     };
-    match forward(&batch) {
-        Ok(()) => Ok(DiffOutcome::Forwarded),
-        Err(err) => {
-            super::note_viewer_degrade(&err);
-            degrade()
-        }
-    }
+    let backend = crate::client::HttpBackend::ensure_daemon()?;
+    run_scan_with(&backend, root, last, include_worktrees, open)
 }
 
 /// A discovered or pre-filtered repo, resolved to its canonical top-level path and a
-/// display label. The unit shared by both the raw `RepoRefDto` wire path
-/// ([`run_scan_with`], [`run_managed_all_with`]) and the recipe path
-/// (`crate::recipe::subrepo_recipes`, `crate::recipe::managed_recipes`), so discovery
-/// and pre-filtering are implemented exactly once.
+/// display label. The unit shared by the raw `RepoRefDto` wire paths
+/// ([`run_scan_with`], [`run_managed_all_with`]), so discovery and pre-filtering are
+/// implemented exactly once.
 pub(crate) struct RepoTop {
     pub top: PathBuf,
     pub label: String,
@@ -131,6 +91,7 @@ pub(crate) fn run_scan_with(
     root: impl AsRef<Path>,
     last: Option<NonZeroU32>,
     include_worktrees: bool,
+    open: impl FnOnce(&Path),
 ) -> anyhow::Result<DiffOutcome> {
     let root = std::fs::canonicalize(root.as_ref())
         .with_context(|| format!("failed to resolve {}", root.as_ref().display()))?;
@@ -161,7 +122,7 @@ pub(crate) fn run_scan_with(
         Outcome::Ok => {
             let data = envelope.data.context("daemon returned ok without data")?;
             let artifact = PathBuf::from(data.artifact);
-            super::open_artifact(&artifact);
+            open(&artifact);
             Ok(DiffOutcome::Rendered(artifact))
         }
         Outcome::Empty => Ok(DiffOutcome::Empty),
@@ -169,64 +130,33 @@ pub(crate) fn run_scan_with(
     }
 }
 
-/// `diff --all`: default forwards one recipe batch (one recipe per managed repo with
-/// unpushed commits) to the viewer (no daemon, no artifact); `--raw`, or no display,
-/// keeps the daemon/store/browser path ([`run_managed_all_with`]).
+/// `diff --all`: render every managed repo with unpushed commits through the daemon's
+/// `/diffs/all` endpoint and open the resulting single tabbed store artifact — the
+/// `--raw`/headless path opens it in the browser, the default path hands it to the
+/// desktop viewer as a `diff://` url ([`run_managed_all_with`]).
 pub fn run_managed_all(
     root: impl AsRef<Path>,
     options: &ManagedOptions,
     raw: bool,
 ) -> anyhow::Result<DiffOutcome> {
-    if take_raw_path(raw, viewer::has_display()) {
-        let backend = crate::client::HttpBackend::ensure_daemon()?;
-        return run_managed_all_with(&backend, root, options).map(DiffOutcome::Rendered);
-    }
-    let root = root.as_ref();
-    forward_managed_all(root, options, super::forward_recipes, || {
-        let backend = crate::client::HttpBackend::ensure_daemon()?;
-        run_managed_all_with(&backend, root, options).map(DiffOutcome::Rendered)
-    })
-}
-
-/// Resolve `root`'s managed, unpushed-only repos into a recipe batch and hand it to
-/// `forward`. On a forward failure (no viewer binary, or spawn failed) degrade to
-/// `degrade` (the raw path) rather than failing — FSD A-0002. A genuine resolution error
-/// still propagates. An empty recipe list short-circuits before forwarding: with a display
-/// present there is nothing to render, so spawning the viewer would be a silent no-op.
-/// Split from [`run_managed_all`] so tests can drive a fake forwarder + backend instead of
-/// spawning the real viewer.
-pub(crate) fn forward_managed_all(
-    root: &Path,
-    options: &ManagedOptions,
-    forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
-    degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
-) -> anyhow::Result<DiffOutcome> {
-    let recipes = recipe::managed_recipes(root, options)?;
-    if recipes.is_empty() {
-        println!("diff --all: no managed repos with unpushed commits");
-        return Ok(DiffOutcome::Empty);
-    }
-    let batch = OpenRecipes {
-        batch_id: recipe::new_batch_id(),
-        recipes,
+    let open: fn(&Path) = if take_raw_path(raw, viewer::has_display()) {
+        super::open_artifact
+    } else {
+        super::open_in_viewer
     };
-    match forward(&batch) {
-        Ok(()) => Ok(DiffOutcome::Forwarded),
-        Err(err) => {
-            super::note_viewer_degrade(&err);
-            degrade()
-        }
-    }
+    let backend = crate::client::HttpBackend::ensure_daemon()?;
+    run_managed_all_with(&backend, root, options, open).map(DiffOutcome::Rendered)
 }
 
-/// Pre-filter managed repos with unpushed commits and render them through
-/// `backend`, printing its wire notes and opening the artifact. Split from
+/// Pre-filter managed repos with unpushed commits and render them through `backend`,
+/// printing its wire notes and handing the artifact to `open`. Split from
 /// [`run_managed_all`] so tests can drive a fake backend. The pre-filter loop
 /// stays cli-side (uses the `git` shim, not a port).
 pub(crate) fn run_managed_all_with(
     backend: &impl Backend,
     root: impl AsRef<Path>,
     options: &ManagedOptions,
+    open: impl FnOnce(&Path),
 ) -> anyhow::Result<PathBuf> {
     let root = std::fs::canonicalize(root.as_ref())
         .with_context(|| format!("failed to resolve {}", root.as_ref().display()))?;
@@ -252,7 +182,7 @@ pub(crate) fn run_managed_all_with(
         Outcome::Ok => {
             let data = envelope.data.context("daemon returned ok without data")?;
             let artifact = PathBuf::from(data.artifact);
-            super::open_artifact(&artifact);
+            open(&artifact);
             Ok(artifact)
         }
         _ => Err(anyhow::anyhow!(super::error_text(&envelope.notes))),
@@ -262,253 +192,4 @@ pub(crate) fn run_managed_all_with(
 fn unpushed_count(repo: &Path) -> anyhow::Result<usize> {
     let raw = git::run_git(repo, &["rev-list", "--count", "@{u}..HEAD"])?;
     Ok(raw.trim().parse().unwrap_or(0))
-}
-
-#[cfg(test)]
-mod tests {
-    use std::cell::{Cell, RefCell};
-
-    use contracts::{diffs::RenderDiffData, envelope::Envelope};
-
-    use super::*;
-
-    /// Records whether `render_diff_subrepos` was invoked, and returns an `Empty` outcome
-    /// so the raw path completes without opening anything — lets the degrade test assert
-    /// the raw backend was reached without spawning a viewer or writing an artifact.
-    struct TrackingBackend<'a>(&'a Cell<bool>);
-
-    impl Backend for TrackingBackend<'_> {
-        fn render_diff_subrepos(
-            &self,
-            _req: &RenderDiffSubreposRequest,
-        ) -> anyhow::Result<Envelope<RenderDiffData>> {
-            self.0.set(true);
-            Ok(Envelope {
-                outcome: Outcome::Empty,
-                notes: vec![],
-                data: None,
-            })
-        }
-    }
-
-    fn init_repo(dir: &Path) {
-        let g = |args: &[&str]| {
-            assert!(
-                std::process::Command::new("git")
-                    .arg("-C")
-                    .arg(dir)
-                    .args(args)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
-        };
-        g(&["init", "-q"]);
-        g(&["config", "user.email", "t@t"]);
-        g(&["config", "user.name", "t"]);
-        std::fs::write(dir.join("a.txt"), "a\n").unwrap();
-        g(&["add", "."]);
-        g(&["commit", "-qm", "first"]);
-    }
-
-    #[test]
-    fn forward_scan_forwards_one_recipe_per_discovered_repo_and_calls_no_backend() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path();
-        std::fs::create_dir_all(root.join("api")).unwrap();
-        init_repo(&root.join("api"));
-        std::fs::create_dir_all(root.join("web")).unwrap();
-        init_repo(&root.join("web"));
-        let captured: RefCell<Option<OpenRecipes>> = RefCell::new(None);
-
-        let outcome = forward_scan(
-            root,
-            None,
-            false,
-            |batch| {
-                *captured.borrow_mut() = Some(batch.clone());
-                Ok(())
-            },
-            || unreachable!("degrade must not run when forwarding succeeds"),
-        )
-        .unwrap();
-
-        assert!(matches!(outcome, DiffOutcome::Forwarded));
-        let batch = captured.into_inner().expect("forward must be called");
-        assert_eq!(batch.recipes.len(), 2);
-    }
-
-    #[test]
-    fn forward_scan_degrades_to_the_raw_backend_when_forwarding_fails() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(tmp.path()).unwrap();
-        std::fs::create_dir_all(root.join("api")).unwrap();
-        init_repo(&root.join("api"));
-        let backend_called = Cell::new(false);
-        let backend = TrackingBackend(&backend_called);
-
-        let outcome = forward_scan(
-            &root,
-            None,
-            false,
-            |_batch| anyhow::bail!("gtl-viewer is not installed"),
-            || run_scan_with(&backend, &root, None, false),
-        )
-        .unwrap();
-
-        assert!(
-            backend_called.get(),
-            "a forward failure must degrade to the raw backend, not error out"
-        );
-        assert!(matches!(outcome, DiffOutcome::Empty));
-    }
-
-    #[test]
-    fn forward_scan_errors_when_no_repos_are_found() {
-        let tmp = tempfile::tempdir().unwrap();
-
-        let result = forward_scan(
-            tmp.path(),
-            None,
-            false,
-            |_batch| Ok(()),
-            || unreachable!("a genuine 'no repos found' error must propagate, not degrade"),
-        );
-
-        assert!(result.is_err());
-    }
-
-    /// Set up one managed repo with an unpushed commit under `tmp`, returning the
-    /// `ManagedOptions` pointing at it. Shared by the tests that need `forward_managed_all`
-    /// to actually resolve a non-empty recipe batch.
-    fn managed_options_with_one_unpushed_repo(tmp: &std::path::Path) -> ManagedOptions {
-        let home = tmp.join("home");
-        std::fs::create_dir_all(home.join("repo1")).unwrap();
-        init_repo(&home.join("repo1"));
-        let remote = tmp.join("origin.git");
-        assert!(
-            std::process::Command::new("git")
-                .args(["init", "--bare"])
-                .arg(&remote)
-                .status()
-                .unwrap()
-                .success()
-        );
-        assert!(
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(home.join("repo1"))
-                .args(["remote", "add", "origin", remote.to_str().unwrap()])
-                .status()
-                .unwrap()
-                .success()
-        );
-        assert!(
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(home.join("repo1"))
-                .args(["push", "-u", "origin", "HEAD"])
-                .status()
-                .unwrap()
-                .success()
-        );
-        std::fs::write(home.join("repo1").join("a.txt"), "a\nmore\n").unwrap();
-        assert!(
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(home.join("repo1"))
-                .args(["commit", "-aqm", "second"])
-                .status()
-                .unwrap()
-                .success()
-        );
-
-        let manifest = tmp.join("repos.toml");
-        std::fs::write(
-            &manifest,
-            "[[repo]]\npath = \"repo1\"\nremote = \"origin\"\n",
-        )
-        .unwrap();
-        ManagedOptions {
-            repos_file: Some(manifest),
-            home_dir: Some(home),
-            dry: false,
-            json: false,
-            color: false,
-            message_for_all: None,
-            interactive: false,
-        }
-    }
-
-    #[test]
-    fn forward_managed_all_forwards_one_recipe_per_unpushed_repo_and_calls_no_backend() {
-        let tmp = tempfile::tempdir().unwrap();
-        let options = managed_options_with_one_unpushed_repo(tmp.path());
-        let captured: RefCell<Option<OpenRecipes>> = RefCell::new(None);
-
-        let outcome = forward_managed_all(
-            tmp.path(),
-            &options,
-            |batch| {
-                *captured.borrow_mut() = Some(batch.clone());
-                Ok(())
-            },
-            || unreachable!("degrade must not run when forwarding succeeds"),
-        )
-        .unwrap();
-
-        assert!(matches!(outcome, DiffOutcome::Forwarded));
-        let batch = captured.into_inner().expect("forward must be called");
-        assert_eq!(batch.recipes.len(), 1);
-    }
-
-    #[test]
-    fn forward_managed_all_degrades_to_the_raw_backend_when_forwarding_fails() {
-        let tmp = tempfile::tempdir().unwrap();
-        let options = managed_options_with_one_unpushed_repo(tmp.path());
-        let degraded = Cell::new(false);
-
-        let outcome = forward_managed_all(
-            tmp.path(),
-            &options,
-            |_batch| anyhow::bail!("gtl-viewer is not installed"),
-            || {
-                degraded.set(true);
-                Ok(DiffOutcome::Empty)
-            },
-        )
-        .unwrap();
-
-        assert!(
-            degraded.get(),
-            "a forward failure must degrade to the raw path, not error out"
-        );
-        assert!(matches!(outcome, DiffOutcome::Empty));
-    }
-
-    #[test]
-    fn forward_managed_all_short_circuits_on_an_empty_recipe_batch_without_forwarding() {
-        let tmp = tempfile::tempdir().unwrap();
-        let manifest = tmp.path().join("repos.toml");
-        std::fs::write(&manifest, "").unwrap(); // no managed repos -> empty batch
-        let options = ManagedOptions {
-            repos_file: Some(manifest),
-            home_dir: Some(tmp.path().to_path_buf()),
-            dry: false,
-            json: false,
-            color: false,
-            message_for_all: None,
-            interactive: false,
-        };
-
-        let outcome = forward_managed_all(
-            tmp.path(),
-            &options,
-            |_batch| unreachable!("an empty recipe batch must never be forwarded"),
-            || unreachable!("an empty recipe batch must not degrade to the raw backend either"),
-        )
-        .unwrap();
-
-        assert!(matches!(outcome, DiffOutcome::Empty));
-    }
 }

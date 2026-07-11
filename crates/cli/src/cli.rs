@@ -47,7 +47,7 @@ impl Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Diff the current repo (all managed repos with `--all`, nested subrepos with `-r`),
-    /// rendered natively in the app; `--raw` renders HTML to the browser instead.
+    /// opens the rendered diff in the app's viewer; `--raw` opens it in the browser instead.
     #[command(visible_alias = "d")]
     Diff(DiffArgs),
     /// Squash all unpushed local commits into a single commit.

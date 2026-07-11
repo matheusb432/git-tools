@@ -1,8 +1,9 @@
 //! Viewer/display predicates shared by the CLI's render paths, plus the viewer
-//! binary resolver. The effectful launch lives in `commands::open_artifact`
-//! (browser-only — `--raw` and the headless degrade) and `commands::forward_recipes`
-//! (the default app path).
-use std::path::PathBuf;
+//! binary + `diff://` url resolvers. The effectful launch lives in
+//! `commands::open_artifact` (browser — `--raw` and the headless degrade) and
+//! `commands::open_in_viewer` (the default app path: spawn `gtl-viewer` on the
+//! artifact's `diff://` url).
+use std::path::{Path, PathBuf};
 
 /// Whether a display server is available (`DISPLAY` or `WAYLAND_DISPLAY` set,
 /// non-empty presence — the *value* doesn't matter). Shared by the `--raw`/headless
@@ -21,6 +22,15 @@ pub(crate) fn is_no_open(value: Option<&str>) -> bool {
         value.map(str::trim),
         Some("1" | "true" | "TRUE" | "yes" | "YES")
     )
+}
+
+/// `<store>/diffs/<repo-id>/<hash>.html` → `diff://<repo-id>/<hash>`. The viewer
+/// resolves this custom scheme back to the store artifact it loads in an iframe tab.
+/// `None` for a path that isn't shaped like a store artifact. Pure.
+pub fn diff_url_from_store_path(path: &Path) -> Option<String> {
+    let hash = path.file_stem()?.to_str()?;
+    let repo_id = path.parent()?.file_name()?.to_str()?;
+    Some(format!("diff://{repo_id}/{hash}"))
 }
 
 /// The viewer binary: `gtl-viewer` next to the running CLI exe, else on PATH.
@@ -58,5 +68,14 @@ mod tests {
         assert!(!is_no_open(Some("0")));
         assert!(!is_no_open(Some("false")));
         assert!(!is_no_open(None));
+    }
+
+    #[test]
+    fn builds_diff_url_from_store_path() {
+        let p = Path::new("/store/diffs/0123456789abcdef/fedcba9876543210.html");
+        assert_eq!(
+            diff_url_from_store_path(p).as_deref(),
+            Some("diff://0123456789abcdef/fedcba9876543210")
+        );
     }
 }

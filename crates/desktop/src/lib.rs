@@ -1,63 +1,52 @@
-//! gtl-viewer: the Tauri diff viewer. Renders diff recipes natively as
-//! computed tabs — see `tabs`/`commands::tabs` — with no raw-HTML artifact
-//! viewing surface (that surface was retired; `--raw` still renders to the
-//! store and opens in the browser, but the desktop GUI never shows it).
+//! gtl-viewer: the Tauri diff viewer. Hosts the store's self-contained HTML
+//! artifacts as browser-style tabs over a scoped `diff://` scheme (ADR-0004).
 mod commands;
 mod diffs;
-mod recipe;
-mod tabs;
-mod view_dto;
+mod history;
+mod protocol;
 
 use application::{
-    diffs::{
-        compute_diff::{ComputeDiff, ComputeDiffHandler},
-        compute_merge_diff::{ComputeMergeDiff, ComputeMergeDiffHandler},
-        compute_squash_preview::{ComputeSquashPreview, ComputeSquashPreviewHandler},
-    },
-    history::record_render::{RecordRender, RecordRenderHandler},
+    history::list::{ListHistory, ListHistoryHandler},
     live_views::{
         list::{ListLiveViews, ListLiveViewsHandler},
         probe::{ProbeSource, ProbeSourceHandler},
         remove::{RemoveLiveView, RemoveLiveViewHandler},
         save::{SaveLiveView, SaveLiveViewHandler},
     },
-    ports::{AppStateStore, Clock, DiffSource, RepoProbe},
+    ports::{AppStateStore, ArtifactStore, Clock, RepoProbe},
     settings::{
         get::{GetSetting, GetSettingHandler},
         set::{SetSetting, SetSettingHandler},
     },
 };
-use diffs::{PendingRecipes, enqueue_and_wake, recipes_from_argv};
-use gtl_recipe::OpenRecipes;
+use cqrsy::Sender;
+use diffs::{PendingDiffs, diff_ref_from_argv};
 use infra::{
-    app_state::SqliteAppState, clock::SystemClock, diff_source::GitDiffSource,
+    app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
     repo_probe::GitRepoProbe,
 };
 use tauri::{
     Emitter, Manager, WindowEvent,
+    http::{Response, StatusCode},
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
 };
 
 /// Desktop's in-process dispatch facade — one handler field per operation.
 /// `#[derive(cqrsy::Mediator)]` implements `Sender<R>` per `#[handles(R)]`
-/// field, exactly like `DaemonMediator` in `crates/daemon`. The compute slices
-/// are the app render path (structured views, no HTML/store); the daemon stays
-/// the boundary for the CLI-facing render paths.
+/// field, exactly like `DaemonMediator` in `crates/daemon`. Structured diff
+/// computation lives only behind the daemon's CLI-facing render paths; the
+/// viewer renders `--raw` HTML artifacts, so it has no `DiffSource` port.
 #[derive(Clone, cqrsy::Mediator)]
-pub(crate) struct DesktopMediator<S, C, P, AS>
+pub(crate) struct DesktopMediator<A, C, P, AS>
 where
-    S: DiffSource + Clone + Send + Sync + 'static,
+    A: ArtifactStore + Clone + Send + Sync + 'static,
     C: Clock + Clone + Send + Sync + 'static,
     P: RepoProbe + Clone + Send + Sync + 'static,
     AS: AppStateStore + Clone + Send + Sync + 'static,
 {
-    #[handles(ComputeDiff)]
-    pub compute_diff: ComputeDiffHandler<S>,
-    #[handles(ComputeMergeDiff)]
-    pub compute_merge_diff: ComputeMergeDiffHandler<S>,
-    #[handles(ComputeSquashPreview)]
-    pub compute_squash_preview: ComputeSquashPreviewHandler<S>,
+    #[handles(ListHistory)]
+    pub list_history: ListHistoryHandler<A>,
     #[handles(ListLiveViews)]
     pub list_live_views: ListLiveViewsHandler<AS>,
     #[handles(SaveLiveView)]
@@ -70,25 +59,17 @@ where
     pub get_setting: GetSettingHandler<AS>,
     #[handles(SetSetting)]
     pub set_setting: SetSettingHandler<AS>,
-    #[handles(RecordRender)]
-    pub record_render: RecordRenderHandler<AS, C>,
 }
 
 /// The production wiring: real adapters end to end (the daemon's adapters plus
 /// the `SQLite` app-state store).
 pub(crate) type WiredMediator =
-    DesktopMediator<GitDiffSource, SystemClock, GitRepoProbe, SqliteAppState>;
+    DesktopMediator<StoreArtifacts, SystemClock, GitRepoProbe, SqliteAppState>;
 
 fn wired_mediator() -> WiredMediator {
     DesktopMediator {
-        compute_diff: ComputeDiffHandler {
-            source: GitDiffSource,
-        },
-        compute_merge_diff: ComputeMergeDiffHandler {
-            source: GitDiffSource,
-        },
-        compute_squash_preview: ComputeSquashPreviewHandler {
-            source: GitDiffSource,
+        list_history: ListHistoryHandler {
+            store: StoreArtifacts,
         },
         list_live_views: ListLiveViewsHandler {
             store: SqliteAppState,
@@ -109,10 +90,6 @@ fn wired_mediator() -> WiredMediator {
         },
         set_setting: SetSettingHandler {
             store: SqliteAppState,
-        },
-        record_render: RecordRenderHandler {
-            store: SqliteAppState,
-            clock: SystemClock,
         },
     }
 }
@@ -155,15 +132,30 @@ fn window_xid(window: &tauri::WebviewWindow) -> Option<u64> {
     }
 }
 
-/// Frontend pulls queued recipe batches on mount (cold-start + any that
-/// arrived first).
+/// Frontend pulls queued diff refs on mount (cold-start + any that arrived first).
 #[tauri::command]
 #[expect(
     clippy::needless_pass_by_value,
     reason = "tauri's #[command] extractors must be taken by value"
 )]
-fn drain_pending_recipes(state: tauri::State<'_, PendingRecipes>) -> Vec<OpenRecipes> {
+fn drain_pending_diffs(state: tauri::State<'_, PendingDiffs>) -> Vec<String> {
     state.drain()
+}
+
+/// Return all stored diff previews sorted newest-first, for the history panel.
+#[tauri::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "tauri's #[command] extractors must be taken by value"
+)]
+fn list_history(state: tauri::State<'_, WiredMediator>) -> Vec<history::HistoryEntry> {
+    let Some(store_root) = protocol::store_root() else {
+        return Vec::new();
+    };
+    state
+        .send_now(ListHistory { store_root })
+        .map(|resp| resp.entries.into_iter().map(history::to_entry).collect())
+        .unwrap_or_default()
 }
 
 /// Build and run the Tauri application. Called by `main.rs`.
@@ -174,25 +166,20 @@ fn drain_pending_recipes(state: tauri::State<'_, PendingRecipes>) -> Vec<OpenRec
 pub fn run() {
     tauri::Builder::default()
         .manage(wired_mediator())
-        .manage(tabs::RenderedTabs::default())
-        .manage(PendingRecipes::default())
+        .manage(PendingDiffs::default())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            if let Some(batch) = recipes_from_argv(&argv) {
-                enqueue_and_wake(app.state::<PendingRecipes>().inner(), batch, |batch| {
-                    app.emit("open-recipe", batch)
-                });
+            // Second launch: queue its diff, raise the window, tell the frontend.
+            if let Some(diff_ref) = diff_ref_from_argv(&argv) {
+                app.state::<PendingDiffs>().push(diff_ref.clone());
+                let _ = app.emit("open-diff", diff_ref);
             }
             if let Some(win) = app.get_webview_window("main") {
                 focus_main(&win);
             }
         }))
         .invoke_handler(tauri::generate_handler![
-            drain_pending_recipes,
-            commands::tabs::open_recipe,
-            commands::tabs::tab_meta,
-            commands::tabs::file_rows,
-            commands::tabs::refresh_tab,
-            commands::tabs::close_tab,
+            drain_pending_diffs,
+            list_history,
             commands::app_state::list_live_views,
             commands::app_state::save_live_view,
             commands::app_state::probe_source,
@@ -200,11 +187,13 @@ pub fn run() {
             commands::app_state::get_setting,
             commands::app_state::set_setting,
         ])
+        .register_asynchronous_uri_scheme_protocol("diff", |_ctx, request, responder| {
+            responder.respond(serve_diff(&request));
+        })
         .setup(|app| {
             // Cold-start argv → queue (frontend drains it on mount).
-            let argv = std::env::args().collect::<Vec<_>>();
-            if let Some(batch) = recipes_from_argv(&argv) {
-                app.state::<PendingRecipes>().push(batch);
+            if let Some(diff_ref) = diff_ref_from_argv(&std::env::args().collect::<Vec<_>>()) {
+                app.state::<PendingDiffs>().push(diff_ref);
             }
             // Tray: Show / Quit. Quit is the only real exit (keep-warm lifecycle).
             let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
@@ -239,58 +228,66 @@ pub fn run() {
         .expect("error while running gtl-viewer");
 }
 
+/// Map a `diff://<repo-id>/<content-hash>` request to the stored HTML bytes.
+/// Any malformed/escaping request or read failure yields 404 — never a panic.
+fn serve_diff(request: &tauri::http::Request<Vec<u8>>) -> Response<Vec<u8>> {
+    let not_found = || {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Vec::new())
+            .expect("static 404 builds")
+    };
+    let uri = request.uri();
+    let repo_id = uri.host().unwrap_or_default();
+    let hash = uri.path().trim_start_matches('/').trim_end_matches(".html");
+    let Some(root) = protocol::store_root() else {
+        return not_found();
+    };
+    let Some(path) = protocol::resolve_diff_uri(&root, repo_id, hash) else {
+        return not_found();
+    };
+    match std::fs::read(&path) {
+        Ok(bytes) => Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .body(bytes)
+            .expect("html response builds"),
+        Err(_) => not_found(),
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod test_support {
-    use application::testing::{FakeDiffSource, FakeRepoProbe, FixedClock, InMemoryAppStateStore};
+    use application::testing::{
+        FakeRepoProbe, FixedClock, InMemoryAppStateStore, InMemoryArtifactStore,
+    };
 
     use super::*;
 
     pub(crate) type FakeMediator =
-        DesktopMediator<FakeDiffSource, FixedClock, FakeRepoProbe, InMemoryAppStateStore>;
+        DesktopMediator<InMemoryArtifactStore, FixedClock, FakeRepoProbe, InMemoryAppStateStore>;
 
-    pub(crate) fn fake_mediator(source: FakeDiffSource) -> FakeMediator {
-        fake_mediator_parts(
-            source,
-            InMemoryAppStateStore::default(),
-            FakeRepoProbe::default(),
-        )
+    pub(crate) fn fake_mediator() -> FakeMediator {
+        fake_mediator_parts(InMemoryAppStateStore::default(), FakeRepoProbe::default())
     }
 
-    pub(crate) fn fake_mediator_with(
-        source: FakeDiffSource,
-        app_state: InMemoryAppStateStore,
-    ) -> FakeMediator {
-        fake_mediator_parts(source, app_state, FakeRepoProbe::default())
+    pub(crate) fn fake_mediator_with_probe(probe: FakeRepoProbe) -> FakeMediator {
+        fake_mediator_parts(InMemoryAppStateStore::default(), probe)
     }
 
-    pub(crate) fn fake_mediator_with_probe(
-        source: FakeDiffSource,
-        probe: FakeRepoProbe,
-    ) -> FakeMediator {
-        fake_mediator_parts(source, InMemoryAppStateStore::default(), probe)
-    }
-
-    fn fake_mediator_parts(
-        source: FakeDiffSource,
-        app_state: InMemoryAppStateStore,
-        probe: FakeRepoProbe,
-    ) -> FakeMediator {
+    fn fake_mediator_parts(app_state: InMemoryAppStateStore, probe: FakeRepoProbe) -> FakeMediator {
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         DesktopMediator {
-            compute_diff: ComputeDiffHandler {
-                source: source.clone(),
+            list_history: ListHistoryHandler {
+                store: InMemoryArtifactStore::default(),
             },
-            compute_merge_diff: ComputeMergeDiffHandler {
-                source: source.clone(),
-            },
-            compute_squash_preview: ComputeSquashPreviewHandler { source },
             list_live_views: ListLiveViewsHandler {
                 store: app_state.clone(),
             },
             save_live_view: SaveLiveViewHandler {
                 probe: probe.clone(),
                 store: app_state.clone(),
-                clock: clock.clone(),
+                clock,
             },
             probe_source: ProbeSourceHandler { probe },
             remove_live_view: RemoveLiveViewHandler {
@@ -299,48 +296,98 @@ pub(crate) mod test_support {
             get_setting: GetSettingHandler {
                 store: app_state.clone(),
             },
-            set_setting: SetSettingHandler {
-                store: app_state.clone(),
-            },
-            record_render: RecordRenderHandler {
-                store: app_state,
-                clock,
-            },
+            set_setting: SetSettingHandler { store: app_state },
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
+    use std::sync::Mutex;
 
     use super::*;
 
-    #[test]
-    fn desktop_mediator_dispatches_compute_diff_end_to_end() {
-        use application::testing::FakeDiffSource;
+    /// Guards tests that mutate `GIT_TOOLS_DATA_DIR` (process-global env var).
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-        let source = FakeDiffSource {
-            top_level: Some("/repo".into()),
-            branch: "feature".into(),
-            upstream: Some("origin/main".into()),
-            commits: vec![domain::diffs::Commit {
-                sha: "abc1234".into(),
-                subject: "feat: work".into(),
-                ..Default::default()
-            }],
-            diff_output: "diff --git a/f.txt b/f.txt\n@@ -1 +1 @@\n-a\n+b\n".into(),
-            ..Default::default()
-        };
-        let mediator = test_support::fake_mediator(source);
+    const REPO: &str = "0123456789abcdef";
+    const HASH: &str = "fedcba9876543210";
+
+    fn make_request(uri: &str) -> tauri::http::Request<Vec<u8>> {
+        tauri::http::Request::builder()
+            .uri(uri)
+            .body(Vec::new())
+            .unwrap()
+    }
+
+    #[test]
+    fn serve_diff_all_env_cases() {
+        let _guard = ENV_LOCK.lock().unwrap();
+
+        // --- Happy path: file exists, expect 200 with correct body + Content-Type ---
+        let tmp = tempfile::tempdir().unwrap();
+        let store = tmp.path();
+        let dir = store.join("diffs").join(REPO);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file_path = dir.join(format!("{HASH}.html"));
+        let content = b"<html>hello</html>";
+        std::fs::write(&file_path, content).unwrap();
+
+        // SAFETY: guarded by ENV_LOCK; no other thread touches this var concurrently.
+        unsafe { std::env::set_var("GIT_TOOLS_DATA_DIR", store) };
+
+        let req = make_request(&format!("diff://{REPO}/{HASH}"));
+        let resp = serve_diff(&req);
+        assert_eq!(resp.status(), StatusCode::OK, "happy path: expected 200");
+        assert_eq!(resp.body(), content, "happy path: body mismatch");
+        assert_eq!(
+            resp.headers()
+                .get("Content-Type")
+                .and_then(|v| v.to_str().ok()),
+            Some("text/html; charset=utf-8"),
+            "happy path: wrong Content-Type"
+        );
+
+        // --- Missing file: valid-shape ids but no file on disk ---
+        let req = make_request(&format!("diff://{REPO}/aabbccddeeff0011"));
+        let resp = serve_diff(&req);
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "missing file: expected 404"
+        );
+
+        // --- Multi-segment path attack: trailing segments make hash non-token-shaped ---
+        let req = make_request(&format!("diff://{REPO}/{HASH}/extra/segment"));
+        let resp = serve_diff(&req);
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "multi-segment: expected 404"
+        );
+
+        // --- Empty path: diff://<repo>/ ---
+        let req = make_request(&format!("diff://{REPO}/"));
+        let resp = serve_diff(&req);
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "empty path: expected 404"
+        );
+
+        // SAFETY: guarded by ENV_LOCK; no other thread touches this var concurrently.
+        unsafe { std::env::remove_var("GIT_TOOLS_DATA_DIR") };
+    }
+
+    #[test]
+    fn desktop_mediator_dispatches_list_history_end_to_end() {
+        let mediator = test_support::fake_mediator();
+        let store_root = tempfile::tempdir().unwrap().path().to_path_buf();
 
         let response = mediator
-            .send_now(ComputeDiff {
-                cwd: "/repo".into(),
-                target: domain::diffs::DiffTarget::Unpushed,
-            })
+            .send_now(application::history::list::ListHistory { store_root })
             .expect("dispatch succeeds");
 
-        assert_eq!(response.view.files.len(), 1);
+        assert!(response.entries.is_empty());
     }
 }

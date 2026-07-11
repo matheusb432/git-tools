@@ -15,7 +15,6 @@ mod drift;
 mod fmt;
 mod icon;
 mod install;
-mod native_perf;
 mod proc;
 mod ship;
 mod testing;
@@ -43,6 +42,5 @@ fn run(cli: &cli::Cli) -> Result<()> {
         cli::Command::CheckDeps => check_deps::run(None),
         cli::Command::GenIcon => icon::run(),
         cli::Command::Ship { smoke } => ship::run(*smoke),
-        cli::Command::NativePerf { evidence, smoke } => native_perf::run(*evidence, *smoke),
     }
 }

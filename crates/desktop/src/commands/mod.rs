@@ -1,9 +1,8 @@
-//! The Tauri command surface: thin adapters over the mediator + tab cache.
+//! The Tauri command surface: thin adapters over the mediator.
 //! Every command that computes or touches `SQLite` is async and dispatches on a
 //! blocking worker via `spawn_blocking(send_now)` — never the webview thread.
 
 pub(crate) mod app_state;
-pub(crate) mod tabs;
 
 use std::path::PathBuf;
 

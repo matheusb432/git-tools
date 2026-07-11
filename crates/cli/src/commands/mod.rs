@@ -34,9 +34,9 @@ fn repo_name(top: impl AsRef<Path>) -> String {
         .to_string()
 }
 
-/// Announce an artifact from the `--raw` path and the headless degrade fallback — the
-/// default render path opens the app via [`forward_recipes`] instead. The desktop GUI
-/// never shows raw HTML artifacts, so the terminal's `file://` link is the only way a
+/// Announce an artifact on the `--raw` path and the headless degrade fallback — the
+/// default render path hands it to the app via [`open_in_viewer`] instead. The browser
+/// shows raw HTML artifacts, so the terminal's `file://` link is the only way a
 /// `--raw`/headless caller learns where the preview landed: always printed to stdout,
 /// even under `GIT_TOOLS_NO_OPEN`. Additionally opens the artifact in the OS browser
 /// unless `GIT_TOOLS_NO_OPEN` is truthy. Best-effort — never fails the command.
@@ -47,6 +47,27 @@ pub(crate) fn open_artifact(path: &Path) {
         return;
     }
     gtl_platform::open_in_browser(path);
+}
+
+/// The app-default open: spawn `gtl-viewer` detached on the artifact's `diff://` url
+/// (single-instance forwarding to a running viewer is the app's own concern). Degrades
+/// to the OS browser when the viewer binary is missing, the store path can't be mapped
+/// to a `diff://` url, or the spawn fails. Respects `GIT_TOOLS_NO_OPEN` (does nothing).
+/// Best-effort — never fails the command.
+pub(crate) fn open_in_viewer(path: &Path) {
+    use crate::viewer::{diff_url_from_store_path, is_no_open, resolve_viewer_bin};
+    if is_no_open(std::env::var("GIT_TOOLS_NO_OPEN").ok().as_deref()) {
+        return;
+    }
+    match (resolve_viewer_bin(), diff_url_from_store_path(path)) {
+        (Some(bin), Some(url)) => {
+            if gtl_platform::spawn_detached(&bin, &[url.as_str()]).is_err() {
+                gtl_platform::open_in_browser(path); // spawn failed → browser
+            }
+        }
+        // Viewer not installed or unmappable path → browser fallback.
+        _ => gtl_platform::open_in_browser(path),
+    }
 }
 
 /// Renders `path` as a `file://` URL for the terminal. Not full RFC 8089
@@ -60,36 +81,6 @@ fn file_url(path: &Path) -> String {
     } else {
         format!("file:///{normalized}")
     }
-}
-
-/// Forward a recipe batch to the single-instance viewer as one `gtl-recipe://` argv
-/// token — the Phase 5 default render path (`commands::diff`, `commands::diff_subrepos`):
-/// no daemon call, no store artifact of our own. Respects `GIT_TOOLS_NO_OPEN`: when set
-/// truthy, this resolves nothing further and returns `Ok(())` without spawning.
-///
-/// # Errors
-///
-/// Returns an error if the viewer binary can't be resolved (`gtl-viewer` not installed
-/// next to this exe or on `PATH`) or the detached spawn fails — the caller decides
-/// whether/how to degrade.
-pub(crate) fn forward_recipes(batch: &gtl_recipe::OpenRecipes) -> anyhow::Result<()> {
-    use crate::viewer::{is_no_open, resolve_viewer_bin};
-
-    if is_no_open(std::env::var("GIT_TOOLS_NO_OPEN").ok().as_deref()) {
-        return Ok(());
-    }
-    let bin = resolve_viewer_bin()
-        .context("gtl-viewer is not installed; cannot forward the recipe batch")?;
-    let token = gtl_recipe::encode_token(batch);
-    gtl_platform::spawn_detached(&bin, &[token.as_str()])
-        .context("failed to spawn gtl-viewer to forward the recipe batch")
-}
-
-/// Low-noise stderr note emitted when the default (app) render path can't launch the
-/// viewer and degrades to the raw/browser path, i.e. `open_artifact` (FSD A-0002:
-/// header-less machines have no viewer, and the CLI must never fail for that).
-pub(crate) fn note_viewer_degrade(err: &anyhow::Error) {
-    eprintln!("diff: viewer unavailable ({err:#}); rendering via the browser instead");
 }
 
 /// Print a daemon envelope's wire [`Note`](contracts::envelope::Note)s: `Info` to
@@ -125,16 +116,20 @@ pub(crate) fn error_text(notes: &[Note]) -> String {
 }
 
 /// Finish a single-artifact render: print the envelope's wire notes, then on a
-/// successful outcome open the artifact and return its path; any non-`Ok` outcome
-/// becomes the service-composed error. Shared by `merge-diff` and `squash-preview`,
-/// whose success path is identical (both auto-open the freshly written artifact).
-pub(crate) fn finish_single_render(envelope: Envelope<RenderDiffData>) -> anyhow::Result<PathBuf> {
+/// successful outcome hand the artifact to `open` and return its path; any non-`Ok`
+/// outcome becomes the service-composed error. `open` is the caller's chosen opener —
+/// [`open_artifact`] on the `--raw`/headless path, [`open_in_viewer`] on the app path.
+/// Shared by `diff merge` and `diff squash`, whose success path is identical.
+pub(crate) fn finish_single_render(
+    envelope: Envelope<RenderDiffData>,
+    open: impl FnOnce(&Path),
+) -> anyhow::Result<PathBuf> {
     print_wire_notes(&envelope.notes);
     match envelope.outcome {
         Outcome::Ok => {
             let data = envelope.data.context("daemon returned ok without data")?;
             let artifact = PathBuf::from(data.artifact);
-            open_artifact(&artifact);
+            open(&artifact);
             Ok(artifact)
         }
         _ => Err(anyhow::anyhow!(error_text(&envelope.notes))),
