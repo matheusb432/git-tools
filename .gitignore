@@ -21,12 +21,6 @@ node_modules/
 # Per-machine agent config (skill scoping settings.local.json, CLAUDE.local.md) — never committed
 *.local.*
 
-# Ephemeral AI implementation plans — relevant only to the task that produced them, not
-# git history. Specs/ADRs + commit history are the durable record. (Rationale:
-# sample_project docs/planning/plans/README.md.)
-docs/planning/plans/*.md
-!docs/planning/plans/README.md
-
 *.swp
 
 *:Zone.Identifier

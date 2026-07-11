@@ -4,7 +4,11 @@
 
 use std::path::Path;
 
-use application::ports::{AppStateStore, LiveViewRecord, RECENT_RENDERS_CAP, RecentRenderRecord};
+use application::ports::{
+    AppStateError, AppStateStore, LiveViewRecord, NewRecentRenderRecord, RECENT_RENDERS_CAP,
+    RecentRenderRecord,
+};
+use domain::viewer::RenderHistoryId;
 use rusqlite::{OptionalExtension, params};
 
 use super::db::open_app_db;
@@ -12,6 +16,44 @@ use super::db::open_app_db;
 /// SQLite-backed [`AppStateStore`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SqliteAppState;
+
+struct RawRecentRenderRecord {
+    id: i64,
+    recipe_json: String,
+    title: String,
+    repo_name: String,
+    kind: String,
+    range_label: String,
+    rendered_at: String,
+}
+
+impl RawRecentRenderRecord {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get(0)?,
+            recipe_json: row.get(1)?,
+            title: row.get(2)?,
+            repo_name: row.get(3)?,
+            kind: row.get(4)?,
+            range_label: row.get(5)?,
+            rendered_at: row.get(6)?,
+        })
+    }
+
+    fn try_into_record(self) -> Result<RecentRenderRecord, AppStateError> {
+        let id = RenderHistoryId::try_new(self.id)
+            .map_err(|_| AppStateError::InvalidRecentRenderId { id: self.id })?;
+        Ok(RecentRenderRecord {
+            id,
+            recipe_json: self.recipe_json,
+            title: self.title,
+            repo_name: self.repo_name,
+            kind: self.kind,
+            range_label: self.range_label,
+            rendered_at: self.rendered_at,
+        })
+    }
+}
 
 impl AppStateStore for SqliteAppState {
     fn save_live_view(&self, data_root: &Path, record: &LiveViewRecord) -> anyhow::Result<bool> {
@@ -89,7 +131,11 @@ impl AppStateStore for SqliteAppState {
         Ok(())
     }
 
-    fn record_render(&self, data_root: &Path, record: &RecentRenderRecord) -> anyhow::Result<()> {
+    fn record_render(
+        &self,
+        data_root: &Path,
+        record: &NewRecentRenderRecord,
+    ) -> anyhow::Result<()> {
         let conn = open_app_db(data_root)?;
         conn.execute(
             "INSERT INTO recent_renders (recipe_json, title, repo_name, kind, range_label, rendered_at)
@@ -111,31 +157,52 @@ impl AppStateStore for SqliteAppState {
         Ok(())
     }
 
-    fn list_recent_renders(&self, data_root: &Path) -> anyhow::Result<Vec<RecentRenderRecord>> {
+    fn list_recent_renders(
+        &self,
+        data_root: &Path,
+    ) -> Result<Vec<RecentRenderRecord>, AppStateError> {
         let conn = open_app_db(data_root)?;
-        let mut stmt = conn.prepare(
-            "SELECT recipe_json, title, repo_name, kind, range_label, rendered_at
-             FROM recent_renders ORDER BY id DESC",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(RecentRenderRecord {
-                recipe_json: row.get(0)?,
-                title: row.get(1)?,
-                repo_name: row.get(2)?,
-                kind: row.get(3)?,
-                range_label: row.get(4)?,
-                rendered_at: row.get(5)?,
-            })
-        })?;
-        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, recipe_json, title, repo_name, kind, range_label, rendered_at
+                 FROM recent_renders ORDER BY id DESC",
+            )
+            .map_err(anyhow::Error::from)?;
+        let rows = stmt
+            .query_map([], RawRecentRenderRecord::from_row)
+            .map_err(anyhow::Error::from)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(anyhow::Error::from)?;
+        rows.into_iter()
+            .map(RawRecentRenderRecord::try_into_record)
+            .collect()
+    }
+
+    fn get_recent_render(
+        &self,
+        data_root: &Path,
+        id: RenderHistoryId,
+    ) -> Result<Option<RecentRenderRecord>, AppStateError> {
+        let conn = open_app_db(data_root)?;
+        let raw = conn
+            .query_row(
+                "SELECT id, recipe_json, title, repo_name, kind, range_label, rendered_at
+                 FROM recent_renders WHERE id = ?1",
+                params![i64::from(id)],
+                RawRecentRenderRecord::from_row,
+            )
+            .optional()
+            .map_err(anyhow::Error::from)?;
+        raw.map(RawRecentRenderRecord::try_into_record).transpose()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use application::ports::{
-        AppStateStore, LiveViewRecord, RECENT_RENDERS_CAP, RecentRenderRecord,
+        AppStateError, AppStateStore, LiveViewRecord, NewRecentRenderRecord, RECENT_RENDERS_CAP,
     };
+    use domain::viewer::RenderHistoryId;
 
     use super::super::db::open_app_db;
     use crate::app_state::SqliteAppState;
@@ -147,6 +214,17 @@ mod tests {
             display_name: display_name.to_string(),
             created_at: created_at.to_string(),
             last_opened_at: None,
+        }
+    }
+
+    fn recent_render(title: String) -> NewRecentRenderRecord {
+        NewRecentRenderRecord {
+            recipe_json: format!(r#"{{"title":"{title}"}}"#),
+            title,
+            repo_name: "repo".to_string(),
+            kind: "range".to_string(),
+            range_label: "main..HEAD".to_string(),
+            rendered_at: "2026-01-01T00:00:00Z".to_string(),
         }
     }
 
@@ -327,14 +405,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
 
         for i in 0..(RECENT_RENDERS_CAP + 5) {
-            let record = RecentRenderRecord {
-                recipe_json: format!("{{\"n\":{i}}}"),
-                title: format!("render {i}"),
-                repo_name: "repo".to_string(),
-                kind: "range".to_string(),
-                range_label: "main..HEAD".to_string(),
-                rendered_at: format!("2026-01-01T00:{i:02}:00Z"),
-            };
+            let mut record = recent_render(format!("render {i}"));
+            record.recipe_json = format!("{{\"n\":{i}}}");
+            record.rendered_at = format!("2026-01-01T00:{i:02}:00Z");
             SqliteAppState.record_render(tmp.path(), &record).unwrap();
         }
 
@@ -345,6 +418,58 @@ mod tests {
             format!("render {}", RECENT_RENDERS_CAP + 4)
         );
         assert_eq!(listed[listed.len() - 1].title, "render 5");
+    }
+
+    #[test]
+    fn recent_render_lookup_round_trips_by_stable_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        SqliteAppState
+            .record_render(tmp.path(), &recent_render("render".into()))
+            .unwrap();
+        let listed = SqliteAppState.list_recent_renders(tmp.path()).unwrap();
+        let id = listed[0].id;
+
+        let found = SqliteAppState
+            .get_recent_render(tmp.path(), id)
+            .unwrap()
+            .expect("record exists");
+
+        assert_eq!(found.id, id);
+        assert_eq!(found.title, "render");
+    }
+
+    #[test]
+    fn recent_render_lookup_returns_none_for_an_absent_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let absent_id = RenderHistoryId::try_new(99).expect("positive id");
+
+        let found = SqliteAppState
+            .get_recent_render(tmp.path(), absent_id)
+            .unwrap();
+
+        assert!(found.is_none());
+    }
+
+    #[test]
+    fn recent_render_reads_reject_a_non_positive_persisted_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let conn = open_app_db(tmp.path()).unwrap();
+        conn.execute(
+            "INSERT INTO recent_renders (id, recipe_json, title, repo_name, kind, range_label, rendered_at)
+             VALUES (0, '{}', 'invalid', 'repo', 'diff', 'main..HEAD', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let error = SqliteAppState
+            .list_recent_renders(tmp.path())
+            .expect_err("invalid persisted identity rejects");
+
+        assert!(matches!(
+            error,
+            AppStateError::InvalidRecentRenderId { id: 0 }
+        ));
     }
 
     #[test]

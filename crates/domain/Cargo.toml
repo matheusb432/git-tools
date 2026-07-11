@@ -5,8 +5,10 @@ edition = "2024"
 publish = false
 
 [dependencies]
+nutype = "0.7.0"
 serde = { version = "1", features = ["derive"] }
 similar = "3.1.1"
+thiserror = "2"
 
 [lints]
 workspace = true

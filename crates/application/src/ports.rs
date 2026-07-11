@@ -11,6 +11,7 @@ use std::{
 use domain::{
     diffs::{Commit, DiffKind, View},
     managed::ManagedRepo,
+    viewer::RenderHistoryId,
 };
 
 /// Everything the store needs to record one rendered artifact. `generated_at` is
@@ -60,15 +61,38 @@ pub struct LiveViewRecord {
     pub last_opened_at: Option<String>,
 }
 
-/// One recorded render recipe (app history), never a diff payload.
+/// One new render recipe to append to app history, never a diff payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecentRenderRecord {
+pub struct NewRecentRenderRecord {
     pub recipe_json: String,
     pub title: String,
     pub repo_name: String,
     pub kind: String,
     pub range_label: String,
     pub rendered_at: String,
+}
+
+/// One persisted render recipe read from app history with its stable row identity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentRenderRecord {
+    pub id: RenderHistoryId,
+    pub recipe_json: String,
+    pub title: String,
+    pub repo_name: String,
+    pub kind: String,
+    pub range_label: String,
+    pub rendered_at: String,
+}
+
+/// Describes typed failures surfaced by app-state persistence adapters.
+#[derive(Debug, thiserror::Error)]
+pub enum AppStateError {
+    /// Reports a persisted recent-render row whose identity violates the domain invariant.
+    #[error("recent_renders row id {id} violates the positive-ID invariant")]
+    InvalidRecentRenderId { id: i64 },
+    /// Reports an unexpected storage or migration failure.
+    #[error(transparent)]
+    Unexpected(#[from] anyhow::Error),
 }
 
 /// Cap on retained `recent_renders` rows; the adapter prunes past it on insert.
@@ -205,9 +229,19 @@ pub trait AppStateStore: Send + Sync {
     /// Upsert `key` to `value`.
     fn set_setting(&self, data_root: &Path, key: &str, value: &str) -> anyhow::Result<()>;
     /// Append one render record, pruning the log past [`RECENT_RENDERS_CAP`].
-    fn record_render(&self, data_root: &Path, record: &RecentRenderRecord) -> anyhow::Result<()>;
+    fn record_render(&self, data_root: &Path, record: &NewRecentRenderRecord)
+    -> anyhow::Result<()>;
     /// Recorded renders, newest first.
-    fn list_recent_renders(&self, data_root: &Path) -> anyhow::Result<Vec<RecentRenderRecord>>;
+    fn list_recent_renders(
+        &self,
+        data_root: &Path,
+    ) -> Result<Vec<RecentRenderRecord>, AppStateError>;
+    /// The recorded render identified by `id`, or `None` when no such row exists.
+    fn get_recent_render(
+        &self,
+        data_root: &Path,
+        id: RenderHistoryId,
+    ) -> Result<Option<RecentRenderRecord>, AppStateError>;
 }
 
 /// One captured git subprocess result: exit success plus combined stdout+stderr.

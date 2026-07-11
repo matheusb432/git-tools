@@ -4,6 +4,11 @@ mod commands;
 mod diffs;
 mod history;
 mod protocol;
+#[allow(
+    dead_code,
+    reason = "build-time contract is consumed by the htmx viewer routes in follow-up tasks"
+)]
+mod protocol_config;
 
 use application::{
     history::list::{ListHistory, ListHistoryHandler},

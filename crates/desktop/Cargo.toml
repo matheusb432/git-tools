@@ -13,7 +13,10 @@ name = "desktop"
 path = "src/lib.rs"
 
 [build-dependencies]
+serde = { version = "1", features = ["derive"] }
 tauri-build = { version = "2", features = [] }
+toml = "1.1.2"
+url = "2.5.8"
 
 [dependencies]
 application = { path = "../application" }
@@ -39,6 +42,8 @@ custom-protocol = ["tauri/custom-protocol"]
 [dev-dependencies]
 application = { path = "../application", features = ["testing"] }
 tempfile = "3"
+toml = "1.1.2"
+url = "2.5.8"
 
 [lints]
 workspace = true

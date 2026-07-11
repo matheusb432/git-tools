@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use cqrsy::Handler;
 
-use crate::ports::{AppStateStore, Clock, RecentRenderRecord};
+use crate::ports::{AppStateStore, Clock, NewRecentRenderRecord};
 
 /// Record one render in the app history.
 #[derive(Debug, Clone, PartialEq, cqrsy::Command)]
@@ -38,7 +38,7 @@ pub struct RecordRenderHandler<A: AppStateStore, C: Clock> {
 
 impl<A: AppStateStore, C: Clock> Handler<RecordRender> for RecordRenderHandler<A, C> {
     async fn handle(&self, req: RecordRender) -> Result<RecordRenderResponse, RecordRenderError> {
-        let record = RecentRenderRecord {
+        let record = NewRecentRenderRecord {
             recipe_json: req.recipe_json,
             title: req.title,
             repo_name: req.repo_name,
@@ -84,7 +84,8 @@ mod tests {
         assert_eq!(renders.len(), 1);
         assert_eq!(
             renders[0],
-            RecentRenderRecord {
+            crate::ports::RecentRenderRecord {
+                id: domain::viewer::RenderHistoryId::try_new(1).expect("positive id"),
                 recipe_json: r#"{"kind":"diff"}"#.into(),
                 title: "gt · unpushed".into(),
                 repo_name: "gt".into(),

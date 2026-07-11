@@ -5,3 +5,4 @@
 pub mod diffs;
 pub mod live_views;
 pub mod managed;
+pub mod viewer;

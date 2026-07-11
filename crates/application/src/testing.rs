@@ -10,12 +10,14 @@ use std::{
 use domain::{
     diffs::{Commit, DiffKind},
     managed::ManagedRepo,
+    viewer::RenderHistoryId,
 };
 
 use crate::ports::{
-    AppStateStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HistoryRecord, HtmlRenderer,
-    LedgerEntry, LiveViewRecord, ManagedManifest, PlacedArtifact, PushLedger, RecentRenderRecord,
-    RemoteSync, RepoProbe, RepoProbeResult, SyncOutput,
+    AppStateError, AppStateStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HistoryRecord,
+    HtmlRenderer, LedgerEntry, LiveViewRecord, ManagedManifest, NewRecentRenderRecord,
+    PlacedArtifact, PushLedger, RecentRenderRecord, RemoteSync, RepoProbe, RepoProbeResult,
+    SyncOutput,
 };
 
 /// Scripted `DiffSource`: every field is what the corresponding method returns.
@@ -303,6 +305,7 @@ pub struct InMemoryAppStateStore {
     pub live_views: Arc<Mutex<Vec<LiveViewRecord>>>,
     pub settings: Arc<Mutex<HashMap<String, String>>>,
     pub renders: Arc<Mutex<Vec<RecentRenderRecord>>>,
+    pub list_error_id: Arc<Mutex<Option<i64>>>,
 }
 
 impl AppStateStore for InMemoryAppStateStore {
@@ -342,14 +345,52 @@ impl AppStateStore for InMemoryAppStateStore {
             .insert(key.to_string(), value.to_string());
         Ok(())
     }
-    fn record_render(&self, _data_root: &Path, record: &RecentRenderRecord) -> anyhow::Result<()> {
-        self.renders.lock().unwrap().push(record.clone());
+    fn record_render(
+        &self,
+        _data_root: &Path,
+        record: &NewRecentRenderRecord,
+    ) -> anyhow::Result<()> {
+        let mut renders = self.renders.lock().unwrap();
+        let next_id = renders
+            .iter()
+            .map(|render| i64::from(render.id))
+            .max()
+            .unwrap_or(0)
+            + 1;
+        renders.push(RecentRenderRecord {
+            id: RenderHistoryId::try_new(next_id).expect("generated in-memory row id is positive"),
+            recipe_json: record.recipe_json.clone(),
+            title: record.title.clone(),
+            repo_name: record.repo_name.clone(),
+            kind: record.kind.clone(),
+            range_label: record.range_label.clone(),
+            rendered_at: record.rendered_at.clone(),
+        });
         Ok(())
     }
-    fn list_recent_renders(&self, _data_root: &Path) -> anyhow::Result<Vec<RecentRenderRecord>> {
+    fn list_recent_renders(
+        &self,
+        _data_root: &Path,
+    ) -> Result<Vec<RecentRenderRecord>, AppStateError> {
+        if let Some(id) = *self.list_error_id.lock().unwrap() {
+            return Err(AppStateError::InvalidRecentRenderId { id });
+        }
         let mut renders = self.renders.lock().unwrap().clone();
         renders.reverse();
         Ok(renders)
+    }
+    fn get_recent_render(
+        &self,
+        _data_root: &Path,
+        id: RenderHistoryId,
+    ) -> Result<Option<RecentRenderRecord>, AppStateError> {
+        Ok(self
+            .renders
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|render| render.id == id)
+            .cloned())
     }
 }
 
