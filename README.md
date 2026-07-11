@@ -10,7 +10,7 @@ Per-repo:
 - `squash-preview` / `merge-diff` — render HTML previews of a subrepo's unpushed work or a three-dot merge diff against a base branch.
 - `diff -r` — render one tabbed HTML diff for every git repo under the current directory.
 - `squash-local` — squash all unpushed local commits into one (`--dry` to preview).
-- `push` — push existing commits; with a message, stage all changes, commit, and push the current repo (confirms first; `-y` to skip).
+- `push` — push existing commits; with a message, stage all changes, commit, and push the current repo. Confirmation is required by default (`-y` skips it); `[push].confirm = false` disables it only for plain pushes.
 - `commit` — stage all changes and commit the current repo without pushing.
 - `tag` — list tags with fetched origin status, create annotated tags with `tag add <tag> <message>`, show tag commits with `-c`/`--commits`, or create-and-push with `tag up <tag> <message>`.
 
@@ -37,20 +37,16 @@ Previews are written to a central, app-owned store — **never into the repo bei
 
 Rendering is **idempotent**: an identical diff reuses its existing artifact (addressed by content hash), and re-running on the same committed range skips re-rendering entirely.
 
-After writing, the preview opens in the `gtl-viewer` desktop app (the default). `gtl-viewer` is a tray-resident Tauri window with a tab strip — each `gtl diff` opens or focuses a tab; the history panel lists every past diff across all repos, sorted newest-first, so you can reopen any of them. Control this behaviour with the `diff.viewer` config key:
+After writing, the preview opens in the `gtl-viewer` desktop app (the default). `gtl-viewer` is a tray-resident Tauri window with a tab strip — each `gtl diff` opens or focuses a tab; the history panel lists every past diff across all repos, sorted newest-first, so you can reopen any of them. Pass `--raw` to open a diff artifact directly in the default browser. When no display or viewer binary is available, the CLI falls back to the browser path automatically.
 
-| Value | Behaviour |
-| -- | -- |
-| `app` | Open in the `gtl-viewer` desktop app (default). Falls back to the browser automatically when no display is available (`$DISPLAY`/`$WAYLAND_DISPLAY` both absent), so `gtl diff` always succeeds in headless/CI environments. |
-| `browser` | Open the artifact file directly in the OS default browser. |
-| `none` | Write the artifact without opening anything (path is printed). |
-
-Set `GIT_TOOLS_NO_OPEN=1` to suppress opening for a single run regardless of the config. The config file lives at `~/.config/git-tools/config.toml` (override with `XDG_CONFIG_HOME` or `GIT_TOOLS_CONFIG`).
+Set `GIT_TOOLS_NO_OPEN=1` to suppress opening for a single run. The config file lives at `~/.config/git-tools/config.toml` (override with `XDG_CONFIG_HOME` or `GIT_TOOLS_CONFIG`).
 
 ```toml
 # ~/.config/git-tools/config.toml
-[diff]
-viewer = "app"    # app | browser | none
+theme = "dark" # dark | light | hearth
+
+[push]
+confirm = false # only plain `gtl push`; defaults to true
 ```
 
 Run `git-tools --help` (or `gtl --help`) for the full reference.

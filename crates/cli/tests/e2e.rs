@@ -733,6 +733,44 @@ fn push_without_message_pushes_existing_commits() {
 }
 
 #[test]
+fn plain_push_without_yes_requires_confirmation_by_default() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.commit("a.txt", "base\nlocal\n", "feat: already committed");
+    let config = repo.root.join("missing-config.toml");
+
+    repo.run(&["push"])
+        .env("GIT_TOOLS_CONFIG", config)
+        .assert()
+        .code(2)
+        .stdout(contains("review before pushing"))
+        .stderr(contains("pass --yes"));
+
+    assert_eq!(repo.unpushed_count(), 1);
+}
+
+#[test]
+fn plain_push_skips_confirmation_when_configured() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.commit("a.txt", "base\nlocal\n", "feat: already committed");
+    let config = repo.root.join("config.toml");
+    std::fs::write(&config, "[push]\nconfirm = false\n").unwrap();
+
+    repo.run(&["p"])
+        .env("GIT_TOOLS_CONFIG", config)
+        .assert()
+        .success()
+        .stdout(contains("review before pushing").not())
+        .stdout(contains("push: pushed 1 commit(s)"))
+        .stderr(contains("pass --yes").not());
+
+    assert_eq!(repo.unpushed_count(), 0);
+}
+
+#[test]
 fn push_noops_when_clean_and_up_to_date() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");

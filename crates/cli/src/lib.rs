@@ -140,7 +140,7 @@ fn dispatch(command: Command) -> ExitCode {
             message: None,
             yes,
             ..
-        }) => run_push_current(None, yes),
+        }) => run_push_current(yes, config::load().push.confirm),
         Command::Push(PushArgs {
             all: false,
             recursive: true,
@@ -399,17 +399,9 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
     }
 }
 
-/// Orchestrates current-repo `push`: optionally stage+commit first when a message is supplied,
-/// otherwise push existing commits only.
-fn run_push_current(message: Option<&str>, yes: bool) -> ExitCode {
+/// Orchestrates current-repo `push` for existing commits only.
+fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
     use crate::commands::sync;
-
-    if let Some(message) = message
-        && message.trim().is_empty()
-    {
-        eprintln!("push: a non-empty commit message is required");
-        return ExitCode::Usage;
-    }
 
     let runner = StdGitRunner;
     let target = match sync::plan(&runner, std::path::Path::new(".")) {
@@ -420,12 +412,11 @@ fn run_push_current(message: Option<&str>, yes: bool) -> ExitCode {
         sync::Plan::Ready(target) => target,
     };
 
-    match message {
-        Some(message) => println!("{}", sync::confirmation("push", &target, message)),
-        None => println!("{}", sync::push_confirmation(&target)),
+    if confirm {
+        println!("{}", sync::push_confirmation(&target));
     }
 
-    match sync::gate(yes, is_interactive()) {
+    match sync::gate(yes || !confirm, is_interactive()) {
         sync::Gate::RefuseNonInteractive => {
             eprintln!("push: non-interactive shell; pass --yes to confirm the push");
             return ExitCode::Usage;
@@ -433,24 +424,18 @@ fn run_push_current(message: Option<&str>, yes: bool) -> ExitCode {
         sync::Gate::Confirm => match prompt_confirmation() {
             Ok(sync::Answer::Yes) => {}
             Ok(sync::Answer::No) => {
-                eprintln!("{}", push_confirmation_outcome(message, false, None));
+                eprintln!("push: aborted — nothing pushed");
                 return ExitCode::Ok;
             }
             Err(err) => {
-                eprintln!(
-                    "{}",
-                    push_confirmation_outcome(message, true, Some(&err.to_string()))
-                );
+                eprintln!("push: {err} — nothing pushed");
                 return ExitCode::Usage;
             }
         },
         sync::Gate::Proceed => {}
     }
 
-    let result = match message {
-        Some(message) => sync::apply(&runner, &target, message),
-        None => sync::push_existing(&runner, &target),
-    };
+    let result = sync::push_existing(&runner, &target);
 
     match result.status {
         sync::Status::Synced | sync::Status::Noop => {
@@ -461,18 +446,6 @@ fn run_push_current(message: Option<&str>, yes: bool) -> ExitCode {
             eprintln!("push: {}", result.detail);
             ExitCode::Internal
         }
-    }
-}
-
-fn push_confirmation_outcome(message: Option<&str>, invalid: bool, detail: Option<&str>) -> String {
-    match (message, invalid, detail) {
-        (None, false, _) => "push: aborted — nothing pushed".to_string(),
-        (None, true, Some(detail)) => format!("push: {detail} — nothing pushed"),
-        (Some(_), false, _) => "push: aborted — nothing committed or pushed".to_string(),
-        (Some(_), true, Some(detail)) => {
-            format!("push: {detail} — nothing committed or pushed")
-        }
-        (_, true, None) => "push: invalid confirmation response — nothing pushed".to_string(),
     }
 }
 
@@ -1045,22 +1018,6 @@ mod tests {
     #[test]
     fn prune_help_exits_ok() {
         assert_eq!(run(&["prune".into(), "--help".into()]), ExitCode::Ok);
-    }
-
-    #[test]
-    fn push_confirmation_outcome_uses_push_only_copy_without_message() {
-        assert_eq!(
-            push_confirmation_outcome(None, false, None),
-            "push: aborted — nothing pushed"
-        );
-        assert_eq!(
-            push_confirmation_outcome(None, true, Some("unrecognized answer")),
-            "push: unrecognized answer — nothing pushed"
-        );
-        assert_eq!(
-            push_confirmation_outcome(Some("save work"), false, None),
-            "push: aborted — nothing committed or pushed"
-        );
     }
 
     #[test]

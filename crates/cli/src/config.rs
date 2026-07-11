@@ -1,5 +1,5 @@
-//! User TOML config for the diff renderer. A bad/missing config must never break
-//! rendering, so every failure path degrades to [`GtlConfig::default`].
+//! User TOML configuration. A bad or missing config must never weaken safety or
+//! break a command, so every read failure degrades to [`GtlConfig::default`].
 
 use std::path::{Path, PathBuf};
 
@@ -9,13 +9,61 @@ use serde::Deserialize;
 /// Theme values the renderer knows how to honour; anything else resolves to `None`.
 const KNOWN_THEMES: &[&str] = &["dark", "light", "hearth"];
 
+/// Holds the effective user configuration.
+///
+/// # Examples
+///
+/// ```
+/// let config = git_tools::config::from_toml("[push]\nconfirm = false");
+/// assert!(!config.push.confirm);
+/// ```
 #[derive(Debug, Default, Deserialize)]
 pub struct GtlConfig {
+    /// Selects the default diff-preview theme.
     pub theme: Option<String>,
+    /// Controls push behavior.
+    #[serde(default)]
+    pub push: PushConfig,
 }
 
-/// Parse + validate a config from raw TOML. Pure: a parse error or an unknown/missing
-/// `theme` both collapse to a default (no panic, no error out).
+/// Controls push behavior.
+///
+/// # Examples
+///
+/// ```
+/// let config = git_tools::config::from_toml("");
+/// assert!(config.push.confirm);
+/// ```
+#[derive(Debug, Deserialize)]
+pub struct PushConfig {
+    /// Requires confirmation before a plain current-repository push.
+    #[serde(default = "confirm_by_default")]
+    pub confirm: bool,
+}
+
+impl Default for PushConfig {
+    fn default() -> Self {
+        Self {
+            confirm: confirm_by_default(),
+        }
+    }
+}
+
+const fn confirm_by_default() -> bool {
+    true
+}
+
+/// Parses and validates a config from raw TOML.
+///
+/// A parse error produces the complete safe default; an unknown theme clears only
+/// the theme selection.
+///
+/// # Examples
+///
+/// ```
+/// let config = git_tools::config::from_toml("theme = \"light\"");
+/// assert_eq!(config.theme.as_deref(), Some("light"));
+/// ```
 pub fn from_toml(raw: &str) -> GtlConfig {
     let mut config = toml::from_str::<GtlConfig>(raw).unwrap_or_default();
     if !config
@@ -132,6 +180,31 @@ mod tests {
     #[test]
     fn from_toml_invalid_toml_does_not_panic() {
         assert_eq!(from_toml("not valid toml {{{").theme, None);
+    }
+
+    #[test]
+    fn from_toml_requires_plain_push_confirmation_by_default() {
+        assert!(from_toml("").push.confirm);
+    }
+
+    #[test]
+    fn from_toml_can_disable_plain_push_confirmation() {
+        assert!(!from_toml("[push]\nconfirm = false").push.confirm);
+    }
+
+    #[test]
+    fn from_toml_accepts_explicit_plain_push_confirmation() {
+        assert!(from_toml("[push]\nconfirm = true").push.confirm);
+    }
+
+    #[test]
+    fn from_toml_invalid_toml_requires_plain_push_confirmation() {
+        assert!(from_toml("not valid toml {{{").push.confirm);
+    }
+
+    #[test]
+    fn from_toml_empty_push_section_requires_confirmation() {
+        assert!(from_toml("[push]").push.confirm);
     }
 
     #[test]
