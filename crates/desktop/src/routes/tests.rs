@@ -10,14 +10,14 @@ use application::{
 };
 use domain::{
     diffs::Commit,
-    viewer::{DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, ViewerTabId},
+    viewer::{DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, ViewerTabId, ViewerTabKind},
 };
-use gtl_recipe::{OpenRecipes, Recipe, RecipeOp, RecipeSource, RecipeTarget};
+use gtl_recipe::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
 use tauri::http::{Method, Request, StatusCode};
 
 use super::{
     ErrorTarget, HTML_CONTENT_TYPE, RouteError, TEXT_CONTENT_TYPE, ViewerApp, error_response,
-    process_pending, serve_app,
+    history::to_viewer_entry, process_pending, serve_app,
 };
 use crate::{protocol_config, test_support};
 
@@ -50,6 +50,7 @@ fn recipe() -> Recipe {
         op: RecipeOp::Diff {
             target: RecipeTarget::Unpushed,
         },
+        name: None,
     }
 }
 
@@ -66,6 +67,27 @@ fn request(path: &str) -> Request<Vec<u8>> {
 }
 
 #[test]
+fn recent_render_mapping_preserves_task_five_viewer_fields() {
+    let id = RenderHistoryId::try_new(7).expect("positive id");
+    let entry = to_viewer_entry(RecentRenderRecord {
+        id,
+        title: "Named diff".into(),
+        repo_name: "git-tools".into(),
+        kind: "merge-diff".into(),
+        range_label: "main...feature".into(),
+        rendered_at: "2026-07-11T10:00:00Z".into(),
+        recipe_json: "{}".into(),
+    });
+
+    assert_eq!(entry.id(), id);
+    assert_eq!(entry.title(), "Named diff");
+    assert_eq!(entry.repo_name(), "git-tools");
+    assert_eq!(entry.kind(), "merge-diff");
+    assert_eq!(entry.range_label(), "main...feature");
+    assert_eq!(entry.rendered_at(), "2026-07-11T10:00:00Z");
+}
+
+#[test]
 fn document_does_not_drain_pending_and_pending_drains_every_batch_atomically() {
     let app = ViewerApp::new(
         test_support::fake_mediator(),
@@ -75,26 +97,146 @@ fn document_does_not_drain_pending_and_pending_drains_every_batch_atomically() {
     app.pending()
         .push(OpenRecipes {
             batch_id: "first".into(),
+            kind: RecipeBatchKind::Snapshot,
             recipes: Vec::new(),
         })
         .expect("queue first batch");
     app.pending()
         .push(OpenRecipes {
             batch_id: "second".into(),
+            kind: RecipeBatchKind::Snapshot,
             recipes: Vec::new(),
         })
         .expect("queue second batch");
 
     let document = serve_app(&app, request("/"));
     assert_eq!(document.status(), StatusCode::OK);
+    assert_eq!(document.headers()["Cache-Control"], "no-store");
     assert!(String::from_utf8_lossy(document.body()).contains("<!DOCTYPE html>"));
 
     let pending = serve_app(&app, request("/pending"));
     let html = String::from_utf8_lossy(pending.body());
     assert_eq!(pending.status(), StatusCode::OK);
+    assert_eq!(pending.headers()["Cache-Control"], "no-store");
     assert!(html.starts_with("<nav id=\"viewer-tabs\""));
     assert!(html.contains("hx-swap-oob=\"outerHTML\""));
     assert!(app.pending().drain().is_empty());
+}
+
+#[test]
+fn empty_pending_response_is_not_cached_before_a_later_batch_arrives() {
+    let app = ViewerApp::new(
+        test_support::fake_mediator_with(
+            source(),
+            InMemoryAppStateStore::default(),
+            FakeRepoProbe::default(),
+        ),
+        Path::new("/data").into(),
+        128 * 1024 * 1024,
+    );
+
+    let empty = serve_app(&app, request("/pending"));
+    assert_eq!(empty.headers()["Cache-Control"], "no-store");
+
+    app.pending()
+        .push(OpenRecipes {
+            batch_id: "later".into(),
+            kind: RecipeBatchKind::Snapshot,
+            recipes: vec![recipe()],
+        })
+        .expect("queue later batch");
+    let populated = serve_app(&app, request("/pending"));
+
+    assert_eq!(populated.headers()["Cache-Control"], "no-store");
+    assert!(String::from_utf8_lossy(populated.body()).contains("class=\"layout"));
+}
+
+#[test]
+fn pending_recipe_name_labels_the_opened_tab() {
+    let app = ViewerApp::new(
+        test_support::fake_mediator_with(
+            source(),
+            InMemoryAppStateStore::default(),
+            FakeRepoProbe::default(),
+        ),
+        Path::new("/data").into(),
+        128 * 1024 * 1024,
+    );
+    let mut named = recipe();
+    named.name = Some("Friendly diff".into());
+    app.pending()
+        .push(OpenRecipes {
+            batch_id: "machine-batch-id".into(),
+            kind: RecipeBatchKind::Snapshot,
+            recipes: vec![named],
+        })
+        .expect("queue named recipe");
+
+    let response = serve_app(&app, request("/pending"));
+    let html = String::from_utf8_lossy(response.body());
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(html.contains("Friendly diff"), "{html}");
+    assert!(!html.contains("machine-batch-id"), "{html}");
+
+    let repeated = serve_app(&app, request("/pending"));
+    let repeated_html = String::from_utf8_lossy(repeated.body());
+    assert_eq!(repeated.status(), StatusCode::OK);
+    assert_eq!(
+        repeated_html.matches("class=\"viewer-tab active\"").count(),
+        1
+    );
+}
+
+#[test]
+fn live_batch_reuses_the_named_restored_tab_and_keeps_it_live() {
+    let app_state = InMemoryAppStateStore::default();
+    app_state
+        .live_views
+        .lock()
+        .expect("live views lock")
+        .push(LiveViewRecord {
+            source_kind: "LocalRepo".into(),
+            source_value: "/repo".into(),
+            display_name: "Friendly live".into(),
+            created_at: "2026-07-11T00:00:00Z".into(),
+            last_opened_at: None,
+        });
+    let app = ViewerApp::new(
+        test_support::fake_mediator_with(
+            source(),
+            app_state,
+            FakeRepoProbe {
+                result: RepoProbeResult::Repo {
+                    top_level: "/repo".into(),
+                },
+            },
+        ),
+        Path::new("/data").into(),
+        128 * 1024 * 1024,
+    );
+    let mut named = recipe();
+    named.name = Some("Friendly live".into());
+    app.pending()
+        .push(OpenRecipes {
+            batch_id: "forwarded-live".into(),
+            kind: RecipeBatchKind::Live,
+            recipes: vec![named],
+        })
+        .expect("queue live batch");
+
+    assert_eq!(serve_app(&app, request("/")).status(), StatusCode::OK);
+    assert_eq!(
+        serve_app(&app, request("/pending")).status(),
+        StatusCode::OK
+    );
+
+    let session = app.session.lock().expect("session lock");
+    assert_eq!(session.tabs().len(), 1, "restoration and forward dedupe");
+    let tab = session.tabs().next().expect("one live tab");
+    assert_eq!(tab.tab.kind(), ViewerTabKind::Live);
+    assert_eq!(tab.tab.label(), "Friendly live");
+    assert_eq!(tab.batch_id, "forwarded-live");
 }
 
 #[test]
@@ -113,6 +255,7 @@ fn view_persists_options_and_close_returns_compound_state() {
     app.pending()
         .push(OpenRecipes {
             batch_id: "batch".into(),
+            kind: RecipeBatchKind::Snapshot,
             recipes: vec![recipe()],
         })
         .expect("queue batch");
@@ -357,20 +500,23 @@ fn pending_processing_preserves_fifo_failure_remainder_for_retry() {
         Recipe {
             source: RecipeSource::LocalRepo(path.into()),
             op: RecipeOp::SquashPreview,
+            name: None,
         }
     }
     let batches = vec![
         OpenRecipes {
             batch_id: "first".into(),
+            kind: RecipeBatchKind::Snapshot,
             recipes: vec![named("/one"), named("/fail"), named("/three")],
         },
         OpenRecipes {
             batch_id: "second".into(),
+            kind: RecipeBatchKind::Snapshot,
             recipes: vec![named("/four")],
         },
     ];
     let mut opened = Vec::new();
-    let failure = process_pending(batches, |recipe, batch| {
+    let failure = process_pending(batches, |recipe, batch, _kind| {
         let path = recipe.cwd().display().to_string();
         opened.push((batch.to_string(), path.clone()));
         if path == "/fail" {
@@ -406,7 +552,7 @@ fn pending_processing_preserves_fifo_failure_remainder_for_retry() {
         ]
     );
     let mut retried = Vec::new();
-    process_pending(failure.remainder, |recipe, batch| {
+    process_pending(failure.remainder, |recipe, batch, _kind| {
         retried.push((batch.to_string(), recipe.cwd()));
         Ok::<(), String>(())
     })
@@ -456,9 +602,11 @@ fn compute_failure_is_sanitized_immediately_and_in_later_tab_rendering() {
     app.pending()
         .push(OpenRecipes {
             batch_id: "secret".into(),
+            kind: RecipeBatchKind::Snapshot,
             recipes: vec![Recipe {
                 source: RecipeSource::LocalRepo("/sentinel/sql/path".into()),
                 op: RecipeOp::SquashPreview,
+                name: None,
             }],
         })
         .expect("queue");

@@ -19,6 +19,7 @@ pub mod client;
 pub mod commands;
 pub mod config;
 pub mod preprocess;
+pub(crate) mod recipe;
 pub mod viewer;
 
 mod confirm;
@@ -843,10 +844,7 @@ fn html_error_text(error: &anyhow::Error) -> String {
 
 /// Map a `diff live` result to an [`ExitCode`]: success (a save, or a clean
 /// no-managed-repos-unpushed no-op) is `Ok`; a validation rejection or transport
-/// failure prints the daemon's own message and exits `Internal`. The `Err` arm
-/// is currently unreachable — `commands::diff_live::run` is a stub that always
-/// returns `Ok` pending the htmx-based viewer — and will regain a caller when
-/// that integration lands.
+/// failure prints the daemon's own message and exits `Internal`.
 fn diff_live_exit(result: anyhow::Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::Ok,

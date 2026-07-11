@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
 use contracts::{diffs::RenderDiffRequest, envelope::Outcome};
+use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
 use crate::{cli::DiffTarget, client::Backend, viewer};
 
@@ -11,6 +12,7 @@ use crate::{cli::DiffTarget, client::Backend, viewer};
 pub enum DiffOutcome {
     Rendered(PathBuf),
     Empty,
+    Forwarded,
 }
 
 /// Decide whether this invocation opens the artifact in the browser (`--raw`) rather
@@ -21,19 +23,47 @@ pub(crate) fn take_raw_path(raw: bool, has_display: bool) -> bool {
     raw || !has_display
 }
 
-/// Render `target` through the daemon and open the resulting store artifact: the
-/// `--raw`/headless path opens it in the browser ([`super::open_artifact`]); the default
-/// path hands it to the desktop viewer as a `diff://` url ([`super::open_in_viewer`]),
-/// degrading to the browser when the viewer can't be launched (FSD A-0002 — a
-/// header-less machine still renders).
+/// Render `target`: raw/headless invocations use the daemon/store/browser path;
+/// displayed app-default invocations forward a recipe and use that raw path only when
+/// the viewer is unavailable. `GIT_TOOLS_NO_OPEN` preserves the daemon/store path while
+/// suppressing both viewer and browser effects.
 pub fn run(target: &DiffTarget, name: Option<&str>, raw: bool) -> anyhow::Result<DiffOutcome> {
-    let open: fn(&Path) = if take_raw_path(raw, viewer::has_display()) {
-        super::open_artifact
-    } else {
-        super::open_in_viewer
+    if take_raw_path(raw, viewer::has_display()) {
+        let backend = crate::client::HttpBackend::ensure_daemon()?;
+        return render(&backend, target, name, super::open_artifact);
+    }
+    if viewer::no_open_requested() {
+        let backend = crate::client::HttpBackend::ensure_daemon()?;
+        return render(&backend, target, name, super::do_not_open);
+    }
+    let cwd = std::env::current_dir()?;
+    render_app(&cwd, target, name, super::forward_recipes, || {
+        let backend = crate::client::HttpBackend::ensure_daemon()?;
+        render(&backend, target, name, super::open_artifact)
+    })
+}
+
+pub(crate) fn render_app(
+    cwd: &Path,
+    target: &DiffTarget,
+    name: Option<&str>,
+    forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
+    degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
+) -> anyhow::Result<DiffOutcome> {
+    let recipe =
+        crate::recipe::recipe_for_cwd(cwd, crate::recipe::diff_op_from_target(target), name)?;
+    let batch = OpenRecipes {
+        batch_id: crate::recipe::new_batch_id(),
+        kind: RecipeBatchKind::Snapshot,
+        recipes: vec![recipe],
     };
-    let backend = crate::client::HttpBackend::ensure_daemon()?;
-    render(&backend, target, name, open)
+    match forward(&batch) {
+        Ok(()) => Ok(DiffOutcome::Forwarded),
+        Err(error) => {
+            super::note_viewer_degrade(&error);
+            degrade()
+        }
+    }
 }
 
 /// Render `target` through `backend`, printing its wire notes and handing the artifact
@@ -69,12 +99,34 @@ pub(crate) fn render(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::{Cell, RefCell};
+
     use contracts::{
         diffs::RenderDiffData,
         envelope::{Envelope, Note, NoteLevel, Outcome},
     };
 
     use super::*;
+
+    fn init_repo(dir: &Path) {
+        let git = |args: &[&str]| {
+            assert!(
+                std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(dir)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        git(&["config", "user.name", "Test"]);
+        std::fs::write(dir.join("a.txt"), "a\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "first"]);
+    }
 
     struct FakeBackend(Envelope<RenderDiffData>);
 
@@ -93,6 +145,57 @@ mod tests {
         assert!(take_raw_path(true, false));
         assert!(take_raw_path(false, false));
         assert!(!take_raw_path(false, true));
+    }
+
+    #[test]
+    fn app_path_forwards_one_named_recipe_without_degrading() {
+        let repo = tempfile::tempdir().unwrap();
+        init_repo(repo.path());
+        let captured = RefCell::new(None);
+
+        let outcome = render_app(
+            repo.path(),
+            &DiffTarget::Unpushed,
+            Some("release review"),
+            |batch| {
+                *captured.borrow_mut() = Some(batch.clone());
+                Ok(())
+            },
+            || unreachable!("a successful forward must not enter daemon degradation"),
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, DiffOutcome::Forwarded));
+        let batch = captured.into_inner().expect("a recipe batch");
+        assert_eq!(batch.kind, RecipeBatchKind::Snapshot);
+        assert_eq!(batch.recipes.len(), 1);
+        assert_eq!(batch.recipes[0].name.as_deref(), Some("release review"));
+        assert_eq!(
+            batch.recipes[0].source,
+            gtl_recipe::RecipeSource::LocalRepo(std::fs::canonicalize(repo.path()).unwrap())
+        );
+    }
+
+    #[test]
+    fn app_path_enters_daemon_degradation_only_when_forwarding_fails() {
+        let repo = tempfile::tempdir().unwrap();
+        init_repo(repo.path());
+        let degraded = Cell::new(false);
+
+        let outcome = render_app(
+            repo.path(),
+            &DiffTarget::Unpushed,
+            None,
+            |_batch| anyhow::bail!("viewer unavailable"),
+            || {
+                degraded.set(true);
+                Ok(DiffOutcome::Empty)
+            },
+        )
+        .unwrap();
+
+        assert!(degraded.get());
+        assert!(matches!(outcome, DiffOutcome::Empty));
     }
 
     #[test]

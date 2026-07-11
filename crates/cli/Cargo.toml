@@ -19,7 +19,7 @@ clap = { version = "4", features = ["derive"] }
 contracts = { path = "../contracts" }
 domain = { path = "../domain" }
 gtl-platform = { path = "../../shared/gtl-platform" }
-gtl-recipe = { path = "../../shared/gtl-recipe" }
+gtl-recipe = { version = "0.1.0", path = "../../shared/gtl-recipe" }
 infra = { path = "../infra" }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 reqwest = { version = "0.13", default-features = false, features = [

@@ -29,7 +29,6 @@ pub(super) enum ViewerRoute {
         render: RenderHistoryId,
     },
     Settings(ViewerSettingChange),
-    Pending,
 }
 
 impl fmt::Display for ViewerRoute {
@@ -55,7 +54,6 @@ impl fmt::Display for ViewerRoute {
             Self::Settings(ViewerSettingChange::Theme(value)) => {
                 write!(formatter, "/settings?theme={value}")
             }
-            Self::Pending => formatter.write_str("/pending"),
         }
     }
 }

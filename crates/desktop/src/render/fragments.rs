@@ -109,7 +109,9 @@ pub(super) fn history(entries: &[ViewerHistoryEntry]) -> Markup {
                             class="viewer-history-row"
                             hx-get=(ViewerRoute::OpenHistory { render: entry.id() })
                             hx-target="#viewer-tabs"
-                            hx-swap="outerHTML" {
+                            hx-swap="outerHTML"
+                            popovertarget="viewer-history-popover"
+                            popovertargetaction="hide" {
                             span.viewer-history-title { (entry.title()) }
                             span.viewer-history-repo { (entry.repo_name()) }
                             span.viewer-history-kind { (entry.kind()) }

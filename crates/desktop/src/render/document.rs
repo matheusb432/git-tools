@@ -1,10 +1,11 @@
 use domain::viewer::{DiffDensity, ViewerDocument};
 use maud::{DOCTYPE, PreEscaped, html};
 
-use super::{ViewerRoute, fragments, fragments::SwapMode};
+use super::{fragments, fragments::SwapMode};
 use crate::protocol_config;
 
 const THEME_CONTROL_JS: &str = "(function(){document.addEventListener('change',function(event){var target=event.target;if(!(target instanceof HTMLInputElement))return;var theme=target.dataset.viewerTheme;if(theme)document.documentElement.dataset.theme=theme;});})();";
+const PENDING_RECIPES_JS: &str = r##"(async function(){var drain=function(){};await window.__TAURI__.event.listen("recipes-pending",function(){drain();});var chain=Promise.resolve();drain=function(){chain=chain.then(function(){return window.htmx.ajax("GET","/pending",{target:"#viewer-tabs",swap:"outerHTML"});}).catch(function(error){console.error("failed to drain pending recipes",error);});return chain;};await drain();})().catch(function(error){console.error("failed to subscribe to pending recipes",error);});"##;
 
 /// Renders the server-authored viewer document and its independently swappable fragments.
 #[derive(Debug, Clone, Copy, Default)]
@@ -54,12 +55,8 @@ impl MaudViewerRenderer {
                         }
                         (fragments::history(document.history()))
                     }
-                    div.viewer-pending hidden
-                        hx-get=(ViewerRoute::Pending)
-                        hx-trigger="load"
-                        hx-target="#viewer-tabs"
-                        hx-swap="outerHTML" {}
                     script { (PreEscaped(infra::html_renderer::preview_bundle())) }
+                    script { (PreEscaped(PENDING_RECIPES_JS)) }
                 }
             }
         }

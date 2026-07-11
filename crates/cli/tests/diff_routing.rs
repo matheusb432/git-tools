@@ -1,10 +1,10 @@
 //! Black-box wiring tests for `diff` routing behaviors that only emerge at the
 //! `run(argv) -> ExitCode` / built-binary level. The decision seams themselves
-//! (`viewer::has_display`, `viewer::diff_url_from_store_path`, `commands::diff::render`)
-//! are already unit-tested inline with fakes; this file drives the real binary end-to-end
+//! (`viewer::has_display`, recipe construction, and `commands::diff::render`) are already
+//! unit-tested inline with fakes; this file drives the real binary end-to-end
 //! to prove those seams are actually wired together correctly: headless degradation lands
 //! a real artifact in the store, the default path renders the artifact even under
-//! `GIT_TOOLS_NO_OPEN` (opening nothing), `diff live` is a pending-htmx stub, and an empty
+//! `GIT_TOOLS_NO_OPEN` (opening nothing), `diff live` persistence, and an empty
 //! `diff --all` doesn't hard-error. Follows the `viewer_headless.rs`/`e2e.rs` idiom: a real
 //! temp repo, an isolated `GIT_TOOLS_DATA_DIR`/`GIT_TOOLS_CONFIG`, and `env_remove` for
 //! `DISPLAY`/`WAYLAND_DISPLAY` to force headless.
@@ -186,11 +186,9 @@ fn headless_default_diff_degrades_to_the_store_and_writes_a_real_artifact() {
 
 // --- 2. GIT_TOOLS_NO_OPEN renders but opens nothing -------------------------------
 
-/// With a display present, `diff`'s default path renders the artifact through the daemon
-/// and hands the store path to `gtl-viewer` as a `diff://` url. `GIT_TOOLS_NO_OPEN=1`
-/// still renders — the artifact lands in the store — but opens nothing: no viewer spawn,
-/// no browser, and no `viewer unavailable` degrade note. Restores v0.17.0's URL-handoff
-/// routing (replacing the earlier forward short-circuit that skipped the daemon entirely).
+/// `GIT_TOOLS_NO_OPEN=1` preserves the current daemon/store behavior even when a display
+/// is present, but opens nothing: no viewer spawn, no browser, and no viewer-unavailable
+/// diagnostic.
 #[test]
 fn no_open_renders_the_artifact_but_opens_nothing() {
     let repo = Repo::new();
@@ -243,31 +241,47 @@ fn diff_raw_daemon_error_prints_its_message_once() {
     );
 }
 
-// --- 3. `diff live` is a pending-htmx stub ----------------------------------------
+// --- 3. `diff live` persists before forwarding -----------------------------------
 
-/// `diff live` has no native viewer surface to forward to anymore: it must print the
-/// pending-integration placeholder and exit success without touching the daemon, a
-/// manifest, or any repo state — regardless of `--path`.
 #[test]
-fn diff_live_prints_pending_stub_and_succeeds() {
-    let tmp = tempfile::tempdir().unwrap();
+fn diff_live_with_no_open_saves_but_forwards_nothing() {
+    let repo = Repo::new();
+    common::ensure_daemon_built();
 
-    let output = Command::cargo_bin("git-tools")
-        .unwrap()
-        .args(["diff", "live"])
-        .current_dir(tmp.path())
-        .env("GIT_TOOLS_CONFIG", "/dev/null")
+    repo.cmd(&["diff", "live", "--path", repo.dir.to_str().unwrap()])
+        .env("GIT_TOOLS_NO_OPEN", "1")
+        .assert()
+        .success()
+        .stdout(contains("saved live view"));
+}
+
+#[test]
+fn diff_live_bad_path_prints_the_daemons_rejection_message_once() {
+    let repo = Repo::new();
+    common::ensure_daemon_built();
+    let not_a_repo = tempfile::tempdir().unwrap();
+
+    let output = repo
+        .cmd(&[
+            "diff",
+            "live",
+            "--path",
+            not_a_repo.path().to_str().unwrap(),
+        ])
+        .env("GIT_TOOLS_NO_OPEN", "1")
         .output()
         .unwrap();
 
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let message = format!(
+        "The directory `{}` is not a git repository.",
+        not_a_repo.path().display()
     );
-    assert_eq!(
-        String::from_utf8(output.stdout).unwrap().trim(),
-        "TODO: pending htmx integration"
+    assert_eq!(stderr.matches(&message).count(), 1, "stderr: {stderr}");
+    assert!(
+        !stderr.contains("daemon reported an error"),
+        "stderr: {stderr}"
     );
 }
 

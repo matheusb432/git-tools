@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, num::NonZeroU64};
 
 use domain::viewer::{DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerTabId};
 use tauri::http::{Method, Request, StatusCode};
@@ -13,8 +13,23 @@ pub(crate) enum SettingChange {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ResumeNonce(NonZeroU64);
+
+impl ResumeNonce {
+    pub(crate) fn try_new(value: u64) -> Option<Self> {
+        NonZeroU64::new(value).map(Self)
+    }
+
+    pub(crate) const fn get(self) -> u64 {
+        self.0.get()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Route {
-    Document,
+    Document {
+        resume: Option<ResumeNonce>,
+    },
     View {
         tab: ViewerTabId,
         options: RenderOptions,
@@ -69,8 +84,8 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
 
     match shape {
         RouteShape::Document => {
-            reject_query(uri.query())?;
-            Ok(Route::Document)
+            let resume = parse_resume(uri.query())?;
+            Ok(Route::Document { resume })
         }
         RouteShape::View => {
             let tab = parse_tab_id(segments[1])?;
@@ -105,6 +120,21 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
             Ok(Route::Pending)
         }
     }
+}
+
+fn parse_resume(query: Option<&str>) -> Result<Option<ResumeNonce>, StatusCode> {
+    let Some(query) = query else {
+        return Ok(None);
+    };
+    let query = parse_query(Some(query))?;
+    if query.len() != 1 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let raw = query.get("resume").ok_or(StatusCode::BAD_REQUEST)?;
+    let value = raw.parse::<u64>().map_err(|_| StatusCode::BAD_REQUEST)?;
+    ResumeNonce::try_new(value)
+        .map(Some)
+        .ok_or(StatusCode::BAD_REQUEST)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -179,7 +209,7 @@ mod tests {
     use domain::viewer::{DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, ViewerTabId};
     use tauri::http::{Method, Request, StatusCode};
 
-    use super::{Route, parse};
+    use super::{ResumeNonce, Route, parse};
     use crate::protocol_config;
 
     fn app_uri(path_and_query: &str) -> String {
@@ -203,7 +233,7 @@ mod tests {
         let tab = ViewerTabId::try_new(7).expect("positive id");
         let render = RenderHistoryId::try_new(42).expect("positive id");
         for (uri, method, expected) in [
-            (app_uri("/"), Method::GET, Route::Document),
+            (app_uri("/"), Method::GET, Route::Document { resume: None }),
             (
                 app_uri("/tabs/7/view?layout=split&density=full"),
                 Method::GET,
@@ -225,6 +255,31 @@ mod tests {
             ),
         ] {
             assert_eq!(parse(&request(method, &uri)), Ok(expected));
+        }
+    }
+
+    #[test]
+    fn parses_only_a_single_positive_resume_nonce_on_the_document_route() {
+        assert_eq!(
+            parse(&request(Method::GET, &app_uri("/?resume=7"))),
+            Ok(Route::Document {
+                resume: Some(ResumeNonce::try_new(7).expect("positive nonce")),
+            })
+        );
+
+        for query in [
+            "?resume=",
+            "?resume=0",
+            "?resume=abc",
+            "?resume=1&resume=2",
+            "?unknown=1",
+            "?resume=1&unknown=2",
+        ] {
+            assert_eq!(
+                parse(&request(Method::GET, &app_uri(&format!("/{query}")))),
+                Err(StatusCode::BAD_REQUEST),
+                "{query}"
+            );
         }
     }
 

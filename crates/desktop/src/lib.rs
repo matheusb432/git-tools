@@ -1,14 +1,15 @@
-//! gtl-viewer: the Tauri diff viewer. Hosts the store's self-contained HTML
-//! artifacts as browser-style tabs over a scoped `diff://` scheme (ADR-0004).
+//! gtl-viewer: the custom-origin htmx desktop viewer.
 mod commands;
-mod diffs;
-mod history;
-mod protocol;
 mod protocol_config;
 mod recipes;
 mod render;
 mod routes;
 mod session;
+
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU64, Ordering},
+};
 
 use application::{
     diffs::{
@@ -17,7 +18,6 @@ use application::{
         compute_squash_preview::{ComputeSquashPreview, ComputeSquashPreviewHandler},
     },
     history::{
-        list::{ListHistory, ListHistoryHandler},
         list_recent::{
             GetRecentRender, GetRecentRenderHandler, ListRecentRenders, ListRecentRendersHandler,
         },
@@ -29,24 +29,24 @@ use application::{
         remove::{RemoveLiveView, RemoveLiveViewHandler},
         save::{SaveLiveView, SaveLiveViewHandler},
     },
-    ports::{AppStateStore, ArtifactStore, Clock, DiffSource, RepoProbe},
+    ports::{AppStateStore, Clock, DiffSource, RepoProbe},
     settings::{
         get::{GetSetting, GetSettingHandler},
         set::{SetSetting, SetSettingHandler},
     },
 };
-use cqrsy::Sender;
-use diffs::{PendingDiffs, diff_ref_from_argv};
+use gtl_recipe::{OpenRecipes, decode_token};
 use infra::{
-    app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
-    diff_source::GitDiffSource, repo_probe::GitRepoProbe,
+    app_state::SqliteAppState, clock::SystemClock, diff_source::GitDiffSource,
+    repo_probe::GitRepoProbe,
 };
 use tauri::{
-    Emitter, Manager, WindowEvent,
-    http::{Response, StatusCode},
+    Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
 };
+
+use crate::session::{PendingRecipes, PendingRecipesError};
 
 /// Desktop's in-process dispatch facade — one handler field per operation.
 /// `#[derive(cqrsy::Mediator)]` implements `Sender<R>` per `#[handles(R)]`
@@ -54,9 +54,8 @@ use tauri::{
 /// Recipe computation is dispatched through the same application handlers as
 /// daemon rendering; the process root only wires their ports.
 #[derive(Clone, cqrsy::Mediator)]
-pub(crate) struct DesktopMediator<A, C, P, AS, S>
+pub(crate) struct DesktopMediator<C, P, AS, S>
 where
-    A: ArtifactStore + Clone + Send + Sync + 'static,
     C: Clock + Clone + Send + Sync + 'static,
     P: RepoProbe + Clone + Send + Sync + 'static,
     AS: AppStateStore + Clone + Send + Sync + 'static,
@@ -68,8 +67,6 @@ where
     pub compute_merge_diff: ComputeMergeDiffHandler<S>,
     #[handles(ComputeSquashPreview)]
     pub compute_squash_preview: ComputeSquashPreviewHandler<S>,
-    #[handles(ListHistory)]
-    pub list_history: ListHistoryHandler<A>,
     #[handles(ListLiveViews)]
     pub list_live_views: ListLiveViewsHandler<AS>,
     #[handles(ListRecentRenders)]
@@ -93,10 +90,133 @@ where
 /// The production wiring: real adapters end to end (the daemon's adapters plus
 /// the `SQLite` app-state store).
 pub(crate) type WiredMediator =
-    DesktopMediator<StoreArtifacts, SystemClock, GitRepoProbe, SqliteAppState, GitDiffSource>;
+    DesktopMediator<SystemClock, GitRepoProbe, SqliteAppState, GitDiffSource>;
 pub(crate) type WiredViewerApp = routes::ViewerApp<WiredMediator>;
 
 const DEFAULT_VIEW_CACHE_WEIGHT: usize = 2 * 1024 * 1024 * 1024;
+const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
+const MAIN_WINDOW_SIZE: (f64, f64) = (1200.0, 800.0);
+const MAIN_WINDOW_MIN_SIZE: (f64, f64) = (720.0, 480.0);
+
+#[derive(Clone, Default)]
+struct MainWindowLifecycle {
+    hidden_by_close: Arc<AtomicBool>,
+    resume_counter: Arc<AtomicU64>,
+}
+
+impl MainWindowLifecycle {
+    fn mark_hidden_by_close(&self) {
+        self.hidden_by_close.store(true, Ordering::Release);
+    }
+
+    fn take_hidden_by_close(&self) -> bool {
+        self.hidden_by_close.swap(false, Ordering::AcqRel)
+    }
+
+    fn next_resume_nonce(&self) -> Option<routes::ResumeNonce> {
+        let previous = self
+            .resume_counter
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
+                value.checked_add(1)
+            })
+            .ok()?;
+        routes::ResumeNonce::try_new(previous.checked_add(1)?)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct NativeRestoration {
+    unminimized: bool,
+    shown: bool,
+    focused: bool,
+}
+
+impl NativeRestoration {
+    const fn succeeded(self) -> bool {
+        self.unminimized && self.shown && self.focused
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HiddenRecovery {
+    None,
+    Rearm,
+    Reload,
+}
+
+const fn hidden_recovery(
+    was_hidden_by_close: bool,
+    has_queued_work: bool,
+    restoration: NativeRestoration,
+) -> HiddenRecovery {
+    if !was_hidden_by_close {
+        HiddenRecovery::None
+    } else if !restoration.succeeded() {
+        HiddenRecovery::Rearm
+    } else if has_queued_work {
+        HiddenRecovery::Reload
+    } else {
+        HiddenRecovery::None
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ForwardRecipesError<E> {
+    Queue(PendingRecipesError),
+    Wake(E),
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for ForwardRecipesError<E> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Queue(error) => error.fmt(formatter),
+            Self::Wake(error) => write!(formatter, "failed to wake recipe viewer: {error}"),
+        }
+    }
+}
+
+fn recipes_from_argv(argv: &[String]) -> Vec<OpenRecipes> {
+    argv.iter().filter_map(|arg| decode_token(arg)).collect()
+}
+
+fn enqueue_batches(
+    pending: &PendingRecipes,
+    batches: Vec<OpenRecipes>,
+) -> Result<bool, PendingRecipesError> {
+    let has_batches = !batches.is_empty();
+    for batch in batches {
+        pending.push(batch)?;
+    }
+    Ok(has_batches)
+}
+
+fn enqueue_and_wake<E>(
+    pending: &PendingRecipes,
+    batches: Vec<OpenRecipes>,
+    wake: impl FnOnce() -> Result<(), E>,
+) -> Result<bool, ForwardRecipesError<E>> {
+    let has_queued_work = enqueue_batches(pending, batches).map_err(ForwardRecipesError::Queue)?;
+    if has_queued_work {
+        wake().map_err(ForwardRecipesError::Wake)?;
+    }
+    Ok(has_queued_work)
+}
+
+fn forward_recipes<E>(
+    pending: &PendingRecipes,
+    batches: Vec<OpenRecipes>,
+    wake: impl FnOnce() -> Result<(), E>,
+    focus: impl FnOnce(bool),
+) -> Result<(), ForwardRecipesError<E>> {
+    let result = enqueue_and_wake(pending, batches, wake);
+    let has_queued_work = match &result {
+        Ok(has_queued_work) => *has_queued_work,
+        Err(ForwardRecipesError::Wake(_)) => true,
+        Err(ForwardRecipesError::Queue(_)) => false,
+    };
+    focus(has_queued_work);
+    result.map(|_| ())
+}
 
 fn wired_mediator() -> WiredMediator {
     DesktopMediator {
@@ -108,9 +228,6 @@ fn wired_mediator() -> WiredMediator {
         },
         compute_squash_preview: ComputeSquashPreviewHandler {
             source: GitDiffSource,
-        },
-        list_history: ListHistoryHandler {
-            store: StoreArtifacts,
         },
         list_live_views: ListLiveViewsHandler {
             store: SqliteAppState,
@@ -155,10 +272,50 @@ fn wired_mediator() -> WiredMediator {
 /// `show()` is processed by the GTK loop only after this callback returns — so
 /// we defer the activation on a worker thread (the PAL opens its own X display,
 /// so this is thread-safe) and retry a few times to outlast the map latency.
-fn focus_main(window: &tauri::WebviewWindow) {
-    let _ = window.unminimize();
-    let _ = window.show();
-    let _ = window.set_focus();
+fn focus_main(window: &tauri::WebviewWindow, has_queued_work: bool) {
+    let app_handle = window.app_handle();
+    let lifecycle = app_handle.state::<MainWindowLifecycle>();
+    let was_hidden_by_close = lifecycle.take_hidden_by_close();
+    let unminimized = match window.unminimize() {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("gtl-viewer: failed to unminimize main window: {error}");
+            false
+        }
+    };
+    let shown = match window.show() {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("gtl-viewer: failed to show main window: {error}");
+            false
+        }
+    };
+    let focused = match window.set_focus() {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!("gtl-viewer: failed to focus main window: {error}");
+            false
+        }
+    };
+    let restoration = NativeRestoration {
+        unminimized,
+        shown,
+        focused,
+    };
+    match hidden_recovery(was_hidden_by_close, has_queued_work, restoration) {
+        HiddenRecovery::None => {}
+        HiddenRecovery::Rearm => lifecycle.mark_hidden_by_close(),
+        HiddenRecovery::Reload => {
+            let result = lifecycle
+                .next_resume_nonce()
+                .ok_or_else(|| "resume nonce exhausted".to_owned())
+                .and_then(resume_url)
+                .and_then(|url| window.navigate(url).map_err(|error| error.to_string()));
+            if let Err(error) = result {
+                eprintln!("gtl-viewer: failed to restore hidden recipe window: {error}");
+            }
+        }
+    }
     if let Some(xid) = window_xid(window) {
         std::thread::spawn(move || {
             for _ in 0..3 {
@@ -167,6 +324,15 @@ fn focus_main(window: &tauri::WebviewWindow) {
             }
         });
     }
+}
+
+fn resume_url(nonce: routes::ResumeNonce) -> Result<tauri::Url, String> {
+    let mut url = protocol_config::APP_URL
+        .parse::<tauri::Url>()
+        .map_err(|error| error.to_string())?;
+    url.query_pairs_mut()
+        .append_pair("resume", &nonce.get().to_string());
+    Ok(url)
 }
 
 /// Returns the native X11 window id of `window` when this is an X11 session, or
@@ -183,30 +349,17 @@ fn window_xid(window: &tauri::WebviewWindow) -> Option<u64> {
     }
 }
 
-/// Frontend pulls queued diff refs on mount (cold-start + any that arrived first).
-#[tauri::command]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "tauri's #[command] extractors must be taken by value"
-)]
-fn drain_pending_diffs(state: tauri::State<'_, PendingDiffs>) -> Vec<String> {
-    state.drain()
-}
-
-/// Return all stored diff previews sorted newest-first, for the history panel.
-#[tauri::command]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "tauri's #[command] extractors must be taken by value"
-)]
-fn list_history(state: tauri::State<'_, WiredMediator>) -> Vec<history::HistoryEntry> {
-    let Some(store_root) = protocol::store_root() else {
-        return Vec::new();
-    };
-    state
-        .send_now(ListHistory { store_root })
-        .map(|resp| resp.entries.into_iter().map(history::to_entry).collect())
-        .unwrap_or_default()
+fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
+    if let WindowEvent::CloseRequested { api, .. } = event {
+        api.prevent_close();
+        match window.hide() {
+            Ok(()) => window
+                .app_handle()
+                .state::<MainWindowLifecycle>()
+                .mark_hidden_by_close(),
+            Err(error) => eprintln!("gtl-viewer: failed to hide main window: {error}"),
+        }
+    }
 }
 
 /// Build and run the Tauri application. Called by `main.rs`.
@@ -218,23 +371,29 @@ pub fn run() {
     let mediator = wired_mediator();
     let data_root = commands::data_root().expect("viewer data root resolves");
     let viewer_app = WiredViewerApp::new(mediator.clone(), data_root, DEFAULT_VIEW_CACHE_WEIGHT);
+    let cold_start_batches = recipes_from_argv(&std::env::args().collect::<Vec<_>>());
     tauri::Builder::default()
         .manage(mediator)
         .manage(viewer_app)
-        .manage(PendingDiffs::default())
+        .manage(MainWindowLifecycle::default())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            // Second launch: queue its diff, raise the window, tell the frontend.
-            if let Some(diff_ref) = diff_ref_from_argv(&argv) {
-                app.state::<PendingDiffs>().push(diff_ref.clone());
-                let _ = app.emit("open-diff", diff_ref);
-            }
-            if let Some(win) = app.get_webview_window("main") {
-                focus_main(&win);
+            let batches = recipes_from_argv(&argv);
+            let viewer = app.state::<WiredViewerApp>();
+            let window = app.get_webview_window("main");
+            if let Err(error) = forward_recipes(
+                viewer.pending(),
+                batches,
+                || app.emit("recipes-pending", ()),
+                |has_queued_work| {
+                    if let Some(window) = &window {
+                        focus_main(window, has_queued_work);
+                    }
+                },
+            ) {
+                eprintln!("gtl-viewer: failed to forward recipe batch: {error}");
             }
         }))
         .invoke_handler(tauri::generate_handler![
-            drain_pending_diffs,
-            list_history,
             commands::app_state::list_live_views,
             commands::app_state::save_live_view,
             commands::app_state::probe_source,
@@ -242,9 +401,6 @@ pub fn run() {
             commands::app_state::get_setting,
             commands::app_state::set_setting,
         ])
-        .register_asynchronous_uri_scheme_protocol("diff", |_ctx, request, responder| {
-            responder.respond(serve_diff(&request));
-        })
         .register_asynchronous_uri_scheme_protocol(
             protocol_config::PROTOCOL_SCHEME,
             |ctx, request, responder| {
@@ -254,11 +410,20 @@ pub fn run() {
                 });
             },
         )
-        .setup(|app| {
-            // Cold-start argv → queue (frontend drains it on mount).
-            if let Some(diff_ref) = diff_ref_from_argv(&std::env::args().collect::<Vec<_>>()) {
-                app.state::<PendingDiffs>().push(diff_ref);
+        .setup(move |app| {
+            if let Err(error) =
+                enqueue_batches(app.state::<WiredViewerApp>().pending(), cold_start_batches)
+            {
+                eprintln!("gtl-viewer: failed to enqueue cold-start recipes: {error}");
             }
+            let app_url = protocol_config::APP_URL
+                .parse()
+                .expect("build-validated app URL");
+            WebviewWindowBuilder::new(app, "main", WebviewUrl::CustomProtocol(app_url))
+                .title(MAIN_WINDOW_TITLE)
+                .inner_size(MAIN_WINDOW_SIZE.0, MAIN_WINDOW_SIZE.1)
+                .min_inner_size(MAIN_WINDOW_MIN_SIZE.0, MAIN_WINDOW_MIN_SIZE.1)
+                .build()?;
             // Tray: Show / Quit. Quit is the only real exit (keep-warm lifecycle).
             let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -269,7 +434,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show" => {
                         if let Some(w) = app.get_webview_window("main") {
-                            focus_main(&w);
+                            focus_main(&w, false);
                         }
                     }
                     "quit" => app.exit(0),
@@ -281,60 +446,19 @@ pub fn run() {
             builder.build(app)?;
             Ok(())
         })
-        .on_window_event(|window, event| {
-            // Closing the last window hides it; the process + tray stay warm.
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
-            }
-        })
+        .on_window_event(handle_window_event)
         .run(tauri::generate_context!())
         .expect("error while running gtl-viewer");
 }
 
-/// Map a `diff://<repo-id>/<content-hash>` request to the stored HTML bytes.
-/// Any malformed/escaping request or read failure yields 404 — never a panic.
-fn serve_diff(request: &tauri::http::Request<Vec<u8>>) -> Response<Vec<u8>> {
-    let not_found = || {
-        Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Vec::new())
-            .expect("static 404 builds")
-    };
-    let uri = request.uri();
-    let repo_id = uri.host().unwrap_or_default();
-    let hash = uri.path().trim_start_matches('/').trim_end_matches(".html");
-    let Some(root) = protocol::store_root() else {
-        return not_found();
-    };
-    let Some(path) = protocol::resolve_diff_uri(&root, repo_id, hash) else {
-        return not_found();
-    };
-    match std::fs::read(&path) {
-        Ok(bytes) => Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "text/html; charset=utf-8")
-            .body(bytes)
-            .expect("html response builds"),
-        Err(_) => not_found(),
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod test_support {
-    use application::testing::{
-        FakeDiffSource, FakeRepoProbe, FixedClock, InMemoryAppStateStore, InMemoryArtifactStore,
-    };
+    use application::testing::{FakeDiffSource, FakeRepoProbe, FixedClock, InMemoryAppStateStore};
 
     use super::*;
 
-    pub(crate) type FakeMediator = DesktopMediator<
-        InMemoryArtifactStore,
-        FixedClock,
-        FakeRepoProbe,
-        InMemoryAppStateStore,
-        FakeDiffSource,
-    >;
+    pub(crate) type FakeMediator =
+        DesktopMediator<FixedClock, FakeRepoProbe, InMemoryAppStateStore, FakeDiffSource>;
 
     pub(crate) fn fake_mediator() -> FakeMediator {
         fake_mediator_parts(
@@ -374,9 +498,6 @@ pub(crate) mod test_support {
                 source: source.clone(),
             },
             compute_squash_preview: ComputeSquashPreviewHandler { source },
-            list_history: ListHistoryHandler {
-                store: InMemoryArtifactStore::default(),
-            },
             list_live_views: ListLiveViewsHandler {
                 store: app_state.clone(),
             },
@@ -411,91 +532,221 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
     use super::*;
 
-    /// Guards tests that mutate `GIT_TOOLS_DATA_DIR` (process-global env var).
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    fn successful_restoration() -> NativeRestoration {
+        NativeRestoration {
+            unminimized: true,
+            shown: true,
+            focused: true,
+        }
+    }
 
-    const REPO: &str = "0123456789abcdef";
-    const HASH: &str = "fedcba9876543210";
-
-    fn make_request(uri: &str) -> tauri::http::Request<Vec<u8>> {
-        tauri::http::Request::builder()
-            .uri(uri)
-            .body(Vec::new())
-            .unwrap()
+    fn recipe_batch(id: &str) -> gtl_recipe::OpenRecipes {
+        gtl_recipe::OpenRecipes {
+            batch_id: id.into(),
+            kind: gtl_recipe::RecipeBatchKind::Snapshot,
+            recipes: Vec::new(),
+        }
     }
 
     #[test]
-    fn serve_diff_all_env_cases() {
-        let _guard = ENV_LOCK.lock().unwrap();
+    fn recipe_argv_decodes_all_valid_batches_and_ignores_malformed_tokens() {
+        let first = recipe_batch("first");
+        let second = recipe_batch("second");
+        let argv = vec![
+            "gtl-viewer".into(),
+            gtl_recipe::encode_token(&first),
+            "gtl-recipe://malformed".into(),
+            "--flag".into(),
+            gtl_recipe::encode_token(&second),
+        ];
 
-        // --- Happy path: file exists, expect 200 with correct body + Content-Type ---
-        let tmp = tempfile::tempdir().unwrap();
-        let store = tmp.path();
-        let dir = store.join("diffs").join(REPO);
-        std::fs::create_dir_all(&dir).unwrap();
-        let file_path = dir.join(format!("{HASH}.html"));
-        let content = b"<html>hello</html>";
-        std::fs::write(&file_path, content).unwrap();
-
-        // SAFETY: guarded by ENV_LOCK; no other thread touches this var concurrently.
-        unsafe { std::env::set_var("GIT_TOOLS_DATA_DIR", store) };
-
-        let req = make_request(&format!("diff://{REPO}/{HASH}"));
-        let resp = serve_diff(&req);
-        assert_eq!(resp.status(), StatusCode::OK, "happy path: expected 200");
-        assert_eq!(resp.body(), content, "happy path: body mismatch");
-        assert_eq!(
-            resp.headers()
-                .get("Content-Type")
-                .and_then(|v| v.to_str().ok()),
-            Some("text/html; charset=utf-8"),
-            "happy path: wrong Content-Type"
-        );
-
-        // --- Missing file: valid-shape ids but no file on disk ---
-        let req = make_request(&format!("diff://{REPO}/aabbccddeeff0011"));
-        let resp = serve_diff(&req);
-        assert_eq!(
-            resp.status(),
-            StatusCode::NOT_FOUND,
-            "missing file: expected 404"
-        );
-
-        // --- Multi-segment path attack: trailing segments make hash non-token-shaped ---
-        let req = make_request(&format!("diff://{REPO}/{HASH}/extra/segment"));
-        let resp = serve_diff(&req);
-        assert_eq!(
-            resp.status(),
-            StatusCode::NOT_FOUND,
-            "multi-segment: expected 404"
-        );
-
-        // --- Empty path: diff://<repo>/ ---
-        let req = make_request(&format!("diff://{REPO}/"));
-        let resp = serve_diff(&req);
-        assert_eq!(
-            resp.status(),
-            StatusCode::NOT_FOUND,
-            "empty path: expected 404"
-        );
-
-        // SAFETY: guarded by ENV_LOCK; no other thread touches this var concurrently.
-        unsafe { std::env::remove_var("GIT_TOOLS_DATA_DIR") };
+        assert_eq!(recipes_from_argv(&argv), vec![first, second]);
     }
 
     #[test]
-    fn desktop_mediator_dispatches_list_history_end_to_end() {
-        let mediator = test_support::fake_mediator();
-        let store_root = tempfile::tempdir().unwrap().path().to_path_buf();
+    fn single_instance_argv_without_an_executable_decodes_the_first_batch() {
+        let batch = recipe_batch("warm");
 
-        let response = mediator
-            .send_now(application::history::list::ListHistory { store_root })
-            .expect("dispatch succeeds");
+        assert_eq!(
+            recipes_from_argv(&[gtl_recipe::encode_token(&batch)]),
+            vec![batch]
+        );
+    }
 
-        assert!(response.entries.is_empty());
+    #[test]
+    fn enqueue_happens_before_the_payload_free_wake() {
+        let pending = PendingRecipes::default();
+        let batch = recipe_batch("ordered");
+
+        enqueue_and_wake(&pending, vec![batch.clone()], || {
+            assert_eq!(
+                pending.try_drain().expect("inspect queue"),
+                vec![batch.clone()]
+            );
+            pending.prepend(vec![batch.clone()]).expect("restore queue");
+            Ok::<(), &'static str>(())
+        })
+        .expect("wake succeeds");
+
+        assert_eq!(pending.drain(), vec![batch]);
+    }
+
+    #[test]
+    fn failed_wake_keeps_the_batch_for_atomic_drain() {
+        let pending = PendingRecipes::default();
+        let batch = recipe_batch("durable");
+
+        let result = enqueue_and_wake(&pending, vec![batch.clone()], || Err("not listening"));
+
+        assert!(matches!(
+            result,
+            Err(ForwardRecipesError::Wake("not listening"))
+        ));
+        assert_eq!(pending.drain(), vec![batch]);
+    }
+
+    #[test]
+    fn forwarding_orders_durable_queue_then_wake_then_focus() {
+        let pending = PendingRecipes::default();
+        let batch = recipe_batch("ordered-forward");
+        let events = std::cell::RefCell::new(Vec::new());
+
+        forward_recipes(
+            &pending,
+            vec![batch.clone()],
+            || {
+                assert_eq!(pending.drain(), vec![batch.clone()]);
+                pending.push(batch.clone()).expect("restore queued batch");
+                events.borrow_mut().push("wake");
+                Ok::<(), &'static str>(())
+            },
+            |queued| {
+                events.borrow_mut().push(if queued {
+                    "focus-with-work"
+                } else {
+                    "focus-without-work"
+                });
+            },
+        )
+        .expect("forward succeeds");
+
+        assert_eq!(*events.borrow(), ["wake", "focus-with-work"]);
+    }
+
+    #[test]
+    fn tokenless_forward_focuses_without_claiming_queued_work() {
+        let pending = PendingRecipes::default();
+        let mut focused_with_work = None;
+
+        forward_recipes(
+            &pending,
+            Vec::new(),
+            || -> Result<(), &'static str> { panic!("empty forwarding must not wake") },
+            |queued| focused_with_work = Some(queued),
+        )
+        .expect("empty forwarding succeeds");
+
+        assert_eq!(focused_with_work, Some(false));
+        assert!(pending.drain().is_empty());
+    }
+
+    #[test]
+    fn programmatic_main_window_contract_is_pinned() {
+        assert_eq!(MAIN_WINDOW_TITLE, "git-tools diff viewer");
+        assert_eq!(MAIN_WINDOW_SIZE, (1200.0, 800.0));
+        assert_eq!(MAIN_WINDOW_MIN_SIZE, (720.0, 480.0));
+    }
+
+    #[test]
+    fn tray_show_restores_without_reloading() {
+        assert_eq!(
+            hidden_recovery(true, false, successful_restoration()),
+            HiddenRecovery::None
+        );
+    }
+
+    #[test]
+    fn tokenless_second_launch_restores_without_reloading() {
+        assert_eq!(
+            hidden_recovery(true, false, successful_restoration()),
+            HiddenRecovery::None
+        );
+    }
+
+    #[test]
+    fn queued_warm_forward_reloads_a_restored_close_hidden_window() {
+        assert_eq!(
+            hidden_recovery(true, true, successful_restoration()),
+            HiddenRecovery::Reload
+        );
+    }
+
+    #[test]
+    fn failed_native_restoration_rearms_close_hidden_recovery() {
+        for restoration in [
+            NativeRestoration {
+                unminimized: false,
+                shown: true,
+                focused: true,
+            },
+            NativeRestoration {
+                unminimized: true,
+                shown: false,
+                focused: true,
+            },
+            NativeRestoration {
+                unminimized: true,
+                shown: true,
+                focused: false,
+            },
+        ] {
+            assert_eq!(
+                hidden_recovery(true, true, restoration),
+                HiddenRecovery::Rearm
+            );
+        }
+    }
+
+    #[test]
+    fn close_hidden_lifecycle_flag_is_one_shot_and_clone_shared() {
+        let lifecycle = MainWindowLifecycle::default();
+        let clone = lifecycle.clone();
+        assert!(!lifecycle.take_hidden_by_close());
+
+        lifecycle.mark_hidden_by_close();
+
+        assert!(clone.take_hidden_by_close());
+        assert!(!lifecycle.take_hidden_by_close());
+    }
+
+    #[test]
+    fn resume_nonces_are_positive_monotonic_and_clone_shared() {
+        let lifecycle = MainWindowLifecycle::default();
+        let clone = lifecycle.clone();
+
+        let first = lifecycle.next_resume_nonce().expect("nonce available");
+        let second = clone.next_resume_nonce().expect("nonce available");
+
+        assert_eq!(first.get(), 1);
+        assert_eq!(second.get(), 2);
+    }
+
+    #[test]
+    fn resume_url_preserves_the_configured_origin_and_has_one_typed_query() {
+        let nonce = routes::ResumeNonce::try_new(9).expect("positive nonce");
+        let url = resume_url(nonce).expect("build-validated URL");
+
+        assert_eq!(url.scheme(), protocol_config::PROTOCOL_SCHEME);
+        assert_eq!(url.host_str(), Some(protocol_config::APP_HOST));
+        assert_eq!(url.path(), "/");
+        assert_eq!(
+            url.query_pairs().collect::<Vec<_>>(),
+            vec![(
+                std::borrow::Cow::Borrowed("resume"),
+                std::borrow::Cow::Borrowed("9")
+            )]
+        );
     }
 }

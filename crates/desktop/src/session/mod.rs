@@ -75,7 +75,10 @@ impl ViewerSession {
             .next_id
             .checked_add(1)
             .expect("viewer tab ID exhausted");
-        let label = recipe.cwd().display().to_string();
+        let label = recipe
+            .name
+            .clone()
+            .unwrap_or_else(|| recipe.cwd().display().to_string());
         self.tabs.push(SessionTab {
             tab: ViewerTab::new(
                 id,
@@ -140,7 +143,11 @@ impl ViewerSession {
             return PublishOutcome::Stale;
         }
 
-        let label = value.view.title.clone();
+        let label = tab
+            .recipe
+            .name
+            .clone()
+            .unwrap_or_else(|| value.view.title.clone());
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), ViewerTabState::Ready);
         self.cache.insert(ticket.tab_id, value);
         self.bump_revision();
@@ -163,7 +170,10 @@ impl ViewerSession {
             return PublishOutcome::Stale;
         }
         let label = if matches!(state, ViewerTabState::Error { .. }) {
-            "Render failed".into()
+            tab.recipe
+                .name
+                .clone()
+                .unwrap_or_else(|| "Render failed".into())
         } else {
             tab.tab.label().into()
         };
@@ -291,6 +301,7 @@ mod tests {
         Recipe {
             source: RecipeSource::LocalRepo(PathBuf::from("/repo")),
             op: RecipeOp::SquashPreview,
+            name: None,
         }
     }
 

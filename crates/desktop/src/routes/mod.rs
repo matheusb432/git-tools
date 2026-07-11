@@ -1,3 +1,4 @@
+mod history;
 mod parse;
 mod render;
 mod restoration;
@@ -25,12 +26,12 @@ use domain::viewer::{
     DiffDensity, DiffLayout, RenderOptions, Theme, ViewerHistoryEntry, ViewerSettings, ViewerTabId,
     ViewerTabKind, ViewerTabState,
 };
-use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
-pub(crate) use parse::{Route, SettingChange, parse};
+use gtl_recipe::{Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
+use history::to_viewer_entry;
+pub(crate) use parse::{ResumeNonce, Route, SettingChange, parse};
 use tauri::http::{Request, Response, StatusCode};
 
 use crate::{
-    history::to_viewer_entry,
     recipes::{RecipeError, open_recipe, refresh_recipe_versioned},
     render::MaudViewerRenderer,
     session::{PendingRecipes, PendingRecipesError, ViewerSession},
@@ -38,6 +39,7 @@ use crate::{
 
 const HTML_CONTENT_TYPE: &str = "text/html; charset=utf-8";
 const TEXT_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
+const DYNAMIC_CACHE_CONTROL: &str = "no-store";
 const LAYOUT_KEY: &str = "layout";
 const DENSITY_KEY: &str = "density";
 const THEME_KEY: &str = "theme";
@@ -148,8 +150,7 @@ impl<M> ViewerApp<M> {
         }
     }
 
-    #[cfg(test)]
-    fn pending(&self) -> &PendingRecipes {
+    pub(crate) fn pending(&self) -> &PendingRecipes {
         &self.pending
     }
 
@@ -180,7 +181,7 @@ pub(crate) fn serve_app<M: RouteMediator>(
 
 fn error_target(route: &Route) -> ErrorTarget {
     match route {
-        Route::Document | Route::Settings(_) => ErrorTarget::Document,
+        Route::Document { .. } | Route::Settings(_) => ErrorTarget::Document,
         Route::View { .. } | Route::Refresh { .. } | Route::Activate { .. } => ErrorTarget::View,
         Route::Close { .. } | Route::OpenHistory { .. } | Route::Pending => ErrorTarget::Tabs,
         Route::History => ErrorTarget::History,
@@ -206,13 +207,14 @@ fn error_response(target: ErrorTarget, error: &RouteError) -> Response<Vec<u8>> 
     Response::builder()
         .status(status)
         .header("Content-Type", HTML_CONTENT_TYPE)
+        .header("Cache-Control", DYNAMIC_CACHE_CONTROL)
         .body(body.into_bytes())
         .expect("static error response builds")
 }
 
 fn serve_route<M: RouteMediator>(app: &ViewerApp<M>, route: Route) -> RouteResult {
     match route {
-        Route::Document => document(app),
+        Route::Document { .. } => document(app),
         Route::View { tab, options } => view(app, tab, options),
         Route::Refresh { tab } => refresh(app, tab),
         Route::Close { tab } => close(app, tab),
@@ -360,14 +362,14 @@ fn pending<M: RouteMediator>(app: &ViewerApp<M>) -> RouteResult {
 
 fn pending_transaction<M: RouteMediator>(app: &ViewerApp<M>) -> RouteResult {
     let batches = app.pending.try_drain()?;
-    match process_pending(batches, |recipe, batch_id| {
+    match process_pending(batches, |recipe, batch_id, kind| {
         open_recipe(
             &app.mediator,
             &app.session,
             &app.data_root,
             recipe,
             batch_id.into(),
-            ViewerTabKind::Snapshot,
+            viewer_tab_kind(kind),
         )
     }) {
         Ok(latest) => {
@@ -398,14 +400,14 @@ struct PendingFailure<E> {
 
 fn process_pending<T, E>(
     batches: Vec<gtl_recipe::OpenRecipes>,
-    mut open: impl FnMut(&Recipe, &str) -> Result<T, E>,
+    mut open: impl FnMut(&Recipe, &str, RecipeBatchKind) -> Result<T, E>,
 ) -> Result<Option<T>, PendingFailure<E>> {
     let mut batches = VecDeque::from(batches);
     let mut latest = None;
     while let Some(mut batch) = batches.pop_front() {
         while !batch.recipes.is_empty() {
             let recipe = batch.recipes.remove(0);
-            match open(&recipe, &batch.batch_id) {
+            match open(&recipe, &batch.batch_id, batch.kind) {
                 Ok(value) => latest = Some(value),
                 Err(reason) => {
                     batch.recipes.insert(0, recipe);
@@ -417,6 +419,13 @@ fn process_pending<T, E>(
         }
     }
     Ok(latest)
+}
+
+const fn viewer_tab_kind(kind: RecipeBatchKind) -> ViewerTabKind {
+    match kind {
+        RecipeBatchKind::Snapshot => ViewerTabKind::Snapshot,
+        RecipeBatchKind::Live => ViewerTabKind::Live,
+    }
 }
 
 fn restore_live_views<M: RouteMediator>(
@@ -443,6 +452,7 @@ fn restore_live_views<M: RouteMediator>(
                     op: RecipeOp::Diff {
                         target: RecipeTarget::Unpushed,
                     },
+                    name: Some(record.display_name),
                 };
                 newest = Some(session.open(recipe, "restored-live".into(), ViewerTabKind::Live));
             }
@@ -557,6 +567,7 @@ fn html_response(body: String) -> Response<Vec<u8>> {
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", HTML_CONTENT_TYPE)
+        .header("Cache-Control", DYNAMIC_CACHE_CONTROL)
         .body(body.into_bytes())
         .expect("static HTML response builds")
 }
@@ -565,6 +576,7 @@ fn status_response(status: StatusCode) -> Response<Vec<u8>> {
     Response::builder()
         .status(status)
         .header("Content-Type", TEXT_CONTENT_TYPE)
+        .header("Cache-Control", DYNAMIC_CACHE_CONTROL)
         .body(Vec::new())
         .expect("static status response builds")
 }

@@ -288,6 +288,7 @@ mod tests {
         let recipe = Recipe {
             source: RecipeSource::LocalRepo("/repo".into()),
             op: RecipeOp::SquashPreview,
+            name: None,
         };
         let mut session = ViewerSession::new(1024 * 1024);
         let id = session.open(recipe, "batch".into(), ViewerTabKind::Snapshot);
@@ -369,6 +370,7 @@ mod tests {
                 Recipe {
                     source: RecipeSource::LocalRepo("/new".into()),
                     op: RecipeOp::SquashPreview,
+                    name: None,
                 },
                 "new".into(),
                 ViewerTabKind::Snapshot,
@@ -388,6 +390,7 @@ mod tests {
                 Recipe {
                     source: RecipeSource::LocalRepo("/two".into()),
                     op: RecipeOp::SquashPreview,
+                    name: None,
                 },
                 "two".into(),
                 ViewerTabKind::Snapshot,
@@ -421,6 +424,7 @@ mod tests {
                 Recipe {
                     source: RecipeSource::LocalRepo("/two".into()),
                     op: RecipeOp::SquashPreview,
+                    name: None,
                 },
                 "two".into(),
                 ViewerTabKind::Snapshot,
@@ -455,6 +459,7 @@ mod tests {
         let recipe = Recipe {
             source: RecipeSource::LocalRepo("/repo".into()),
             op: RecipeOp::SquashPreview,
+            name: None,
         };
         let mut state = ViewerSession::new(1);
         let id = state.open(recipe, "batch".into(), ViewerTabKind::Snapshot);

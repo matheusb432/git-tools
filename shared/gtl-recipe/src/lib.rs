@@ -54,6 +54,9 @@ pub enum RecipeOp {
 pub struct Recipe {
     pub source: RecipeSource,
     pub op: RecipeOp,
+    /// An optional human-readable label for the opened viewer tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl Recipe {
@@ -74,11 +77,35 @@ impl Recipe {
     }
 }
 
-/// A named batch of recipes to open together — the unit the CLI hands to the
-/// single-instance viewer as one argv token.
+/// Identifies how every recipe in an [`OpenRecipes`] batch behaves in the viewer.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RecipeBatchKind {
+    /// Opens immutable snapshot tabs.
+    #[default]
+    Snapshot,
+    /// Opens persisted, refreshable live tabs.
+    Live,
+}
+
+impl RecipeBatchKind {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde skip_serializing_if predicates receive a shared reference"
+    )]
+    const fn is_snapshot(&self) -> bool {
+        matches!(self, Self::Snapshot)
+    }
+}
+
+/// A homogeneous batch of recipes to open together — the unit the CLI hands to
+/// the single-instance viewer as one argv token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenRecipes {
     pub batch_id: String,
+    /// The viewer behavior shared by every recipe in this batch.
+    #[serde(default, skip_serializing_if = "RecipeBatchKind::is_snapshot")]
+    pub kind: RecipeBatchKind,
     pub recipes: Vec<Recipe>,
 }
 
@@ -120,17 +147,20 @@ mod tests {
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed,
             },
+            name: None,
         }
     }
 
     fn sample_batch() -> OpenRecipes {
         OpenRecipes {
             batch_id: "batch-1".into(),
+            kind: RecipeBatchKind::Snapshot,
             recipes: vec![
                 diff_recipe(),
                 Recipe {
                     source: RecipeSource::LocalRepo(PathBuf::from("/repos/other")),
                     op: RecipeOp::SquashPreview,
+                    name: None,
                 },
             ],
         }
@@ -148,16 +178,27 @@ mod tests {
     }
 
     #[test]
+    fn old_recipe_json_without_name_still_deserializes() {
+        let json = r#"{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed"}}}"#;
+
+        let recipe: Recipe = serde_json::from_str(json).expect("old history remains readable");
+
+        assert_eq!(recipe.name, None);
+    }
+
+    #[test]
     fn recipe_round_trips_through_json() {
         for recipe in [
             diff_recipe(),
             Recipe {
                 source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
                 op: RecipeOp::MergeDiff { base: None },
+                name: None,
             },
             Recipe {
                 source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
                 op: RecipeOp::SquashPreview,
+                name: None,
             },
         ] {
             let json = serde_json::to_string(&recipe).unwrap();
@@ -183,6 +224,31 @@ mod tests {
         let token = encode_token(&batch);
         assert!(token.starts_with(RECIPE_TOKEN_PREFIX));
         assert_eq!(decode_token(&token), Some(batch));
+    }
+
+    #[test]
+    fn old_batch_token_without_kind_decodes_as_snapshot() {
+        let old_json = r#"{"batch_id":"old","recipes":[]}"#;
+        let token = format!(
+            "{RECIPE_TOKEN_PREFIX}{}",
+            URL_SAFE_NO_PAD.encode(old_json.as_bytes())
+        );
+
+        let batch = decode_token(&token).expect("old token remains readable");
+
+        assert_eq!(batch.kind, RecipeBatchKind::Snapshot);
+        assert_eq!(serde_json::to_string(&batch).unwrap(), old_json);
+    }
+
+    #[test]
+    fn live_batch_kind_round_trips_through_the_token() {
+        let mut batch = sample_batch();
+        batch.kind = RecipeBatchKind::Live;
+
+        let decoded = decode_token(&encode_token(&batch)).expect("live token decodes");
+
+        assert_eq!(decoded, batch);
+        assert_eq!(decoded.kind, RecipeBatchKind::Live);
     }
 
     #[test]

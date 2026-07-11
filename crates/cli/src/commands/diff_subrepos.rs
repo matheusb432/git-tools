@@ -8,6 +8,7 @@ use contracts::{
     diffs::{RenderDiffAllRequest, RenderDiffSubreposRequest, RepoRefDto},
     envelope::Outcome,
 };
+use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
 use crate::{
     cli::DiffTarget,
@@ -17,25 +18,63 @@ use crate::{
         discover::{discover_git_repos, repo_label},
         managed::{self, ManagedOptions},
     },
-    git, viewer,
+    git, recipe, viewer,
 };
 
-/// `diff -r`: render every discovered repo through the daemon and open the resulting
-/// tabbed store artifact — the `--raw`/headless path opens it in the browser, the default
-/// path hands it to the desktop viewer as a `diff://` url ([`run_scan_with`]).
+/// `diff -r`: raw/headless invocations render one tabbed store artifact; displayed
+/// app-default invocations forward every discovered repo in one recipe batch.
 pub fn run_scan(
     root: impl AsRef<Path>,
     last: Option<NonZeroU32>,
     include_worktrees: bool,
     raw: bool,
 ) -> anyhow::Result<DiffOutcome> {
-    let open: fn(&Path) = if take_raw_path(raw, viewer::has_display()) {
-        super::open_artifact
-    } else {
-        super::open_in_viewer
-    };
-    let backend = crate::client::HttpBackend::ensure_daemon()?;
-    run_scan_with(&backend, root, last, include_worktrees, open)
+    if take_raw_path(raw, viewer::has_display()) {
+        let backend = crate::client::HttpBackend::ensure_daemon()?;
+        return run_scan_with(
+            &backend,
+            root,
+            last,
+            include_worktrees,
+            super::open_artifact,
+        );
+    }
+    if viewer::no_open_requested() {
+        let backend = crate::client::HttpBackend::ensure_daemon()?;
+        return run_scan_with(&backend, root, last, include_worktrees, super::do_not_open);
+    }
+    let root = std::fs::canonicalize(root.as_ref())
+        .with_context(|| format!("failed to resolve {}", root.as_ref().display()))?;
+    forward_scan(
+        &root,
+        last,
+        include_worktrees,
+        super::forward_recipes,
+        || {
+            let backend = crate::client::HttpBackend::ensure_daemon()?;
+            run_scan_with(
+                &backend,
+                &root,
+                last,
+                include_worktrees,
+                super::open_artifact,
+            )
+        },
+    )
+}
+
+pub(crate) fn forward_scan(
+    root: &Path,
+    last: Option<NonZeroU32>,
+    include_worktrees: bool,
+    forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
+    degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
+) -> anyhow::Result<DiffOutcome> {
+    let recipes = recipe::subrepo_recipes(root, last, include_worktrees)?;
+    if recipes.is_empty() {
+        anyhow::bail!("diff -r: no git repos found under {}", root.display());
+    }
+    forward_batch(recipes, forward, degrade)
 }
 
 /// A discovered or pre-filtered repo, resolved to its canonical top-level path and a
@@ -130,22 +169,62 @@ pub(crate) fn run_scan_with(
     }
 }
 
-/// `diff --all`: render every managed repo with unpushed commits through the daemon's
-/// `/diffs/all` endpoint and open the resulting single tabbed store artifact — the
-/// `--raw`/headless path opens it in the browser, the default path hands it to the
-/// desktop viewer as a `diff://` url ([`run_managed_all_with`]).
+/// `diff --all`: raw/headless invocations render one tabbed store artifact; displayed
+/// app-default invocations forward every managed repo with unpushed commits in one batch.
 pub fn run_managed_all(
     root: impl AsRef<Path>,
     options: &ManagedOptions,
     raw: bool,
 ) -> anyhow::Result<DiffOutcome> {
-    let open: fn(&Path) = if take_raw_path(raw, viewer::has_display()) {
-        super::open_artifact
-    } else {
-        super::open_in_viewer
+    if take_raw_path(raw, viewer::has_display()) {
+        let backend = crate::client::HttpBackend::ensure_daemon()?;
+        return run_managed_all_with(&backend, root, options, super::open_artifact)
+            .map(DiffOutcome::Rendered);
+    }
+    if viewer::no_open_requested() {
+        let backend = crate::client::HttpBackend::ensure_daemon()?;
+        return run_managed_all_with(&backend, root, options, super::do_not_open)
+            .map(DiffOutcome::Rendered);
+    }
+    let root = root.as_ref();
+    forward_managed_all(root, options, super::forward_recipes, || {
+        let backend = crate::client::HttpBackend::ensure_daemon()?;
+        run_managed_all_with(&backend, root, options, super::open_artifact)
+            .map(DiffOutcome::Rendered)
+    })
+}
+
+pub(crate) fn forward_managed_all(
+    root: &Path,
+    options: &ManagedOptions,
+    forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
+    degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
+) -> anyhow::Result<DiffOutcome> {
+    let recipes = recipe::managed_recipes(root, options)?;
+    if recipes.is_empty() {
+        println!("diff --all: no managed repos with unpushed commits");
+        return Ok(DiffOutcome::Empty);
+    }
+    forward_batch(recipes, forward, degrade)
+}
+
+fn forward_batch(
+    recipes: Vec<gtl_recipe::Recipe>,
+    forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
+    degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
+) -> anyhow::Result<DiffOutcome> {
+    let batch = OpenRecipes {
+        batch_id: recipe::new_batch_id(),
+        kind: RecipeBatchKind::Snapshot,
+        recipes,
     };
-    let backend = crate::client::HttpBackend::ensure_daemon()?;
-    run_managed_all_with(&backend, root, options, open).map(DiffOutcome::Rendered)
+    match forward(&batch) {
+        Ok(()) => Ok(DiffOutcome::Forwarded),
+        Err(error) => {
+            super::note_viewer_degrade(&error);
+            degrade()
+        }
+    }
 }
 
 /// Pre-filter managed repos with unpushed commits and render them through `backend`,
@@ -192,4 +271,63 @@ pub(crate) fn run_managed_all_with(
 fn unpushed_count(repo: &Path) -> anyhow::Result<usize> {
     let raw = git::run_git(repo, &["rev-list", "--count", "@{u}..HEAD"])?;
     Ok(raw.trim().parse().unwrap_or(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use super::*;
+
+    fn init_repo(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        let git = |args: &[&str]| {
+            assert!(
+                std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(dir)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "test@example.invalid"]);
+        git(&["config", "user.name", "Test"]);
+        std::fs::write(dir.join("a.txt"), "a\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "first"]);
+    }
+
+    #[test]
+    fn recursive_app_path_forwards_every_discovered_repo_in_one_batch() {
+        let root = tempfile::tempdir().unwrap();
+        init_repo(&root.path().join("api"));
+        init_repo(&root.path().join("web"));
+        let captured = RefCell::new(None);
+
+        let outcome = forward_scan(
+            root.path(),
+            None,
+            false,
+            |batch| {
+                *captured.borrow_mut() = Some(batch.clone());
+                Ok(())
+            },
+            || unreachable!("successful forwarding must not degrade"),
+        )
+        .unwrap();
+
+        assert!(matches!(outcome, DiffOutcome::Forwarded));
+        let batch = captured.into_inner().unwrap();
+        assert_eq!(batch.recipes.len(), 2);
+        let mut names = batch
+            .recipes
+            .into_iter()
+            .map(|recipe| recipe.name.unwrap())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(names, ["api", "web"]);
+    }
 }

@@ -122,7 +122,6 @@ mod tests {
             ViewerRoute::Settings(ViewerSettingChange::Theme(Theme::Dark)).to_string(),
             "/settings?theme=dark"
         );
-        assert_eq!(ViewerRoute::Pending.to_string(), "/pending");
     }
 
     #[test]
@@ -228,10 +227,17 @@ mod tests {
         );
 
         let html = MaudViewerRenderer.build_history(&[entry]);
+        let row = html
+            .split_once("<button")
+            .and_then(|(_, tail)| tail.split_once('>'))
+            .map(|(tag, _)| tag)
+            .expect("history entry renders as a button");
 
         assert!(html.contains("/history/9/open"));
         assert!(html.contains("&lt;recent&gt;"));
         assert!(html.contains("repo &amp; tools"));
+        assert!(row.contains("popovertarget=\"viewer-history-popover\""));
+        assert!(row.contains("popovertargetaction=\"hide\""));
     }
 
     #[test]
@@ -332,12 +338,29 @@ mod tests {
         let activate = opening_tag_with(&html, "/tabs/1/activate");
         let close = opening_tag_with(&html, "/tabs/1/close");
         let open_history = opening_tag_with(&html, "/history/7/open");
-        let pending = opening_tag_with(&html, "/pending");
 
         assert!(activate.contains("hx-target=\"#viewer-view\""));
-        for tag in [close, open_history, pending] {
+        for tag in [close, open_history] {
             assert!(tag.contains("hx-target=\"#viewer-tabs\""), "{tag}");
         }
+    }
+
+    #[test]
+    fn recipe_wake_subscription_precedes_the_first_pending_drain() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+        let listen = html
+            .find("event.listen(\"recipes-pending\"")
+            .expect("shell subscribes to recipe wake events");
+        let pending = html.find("/pending").expect("shell drains pending recipes");
+
+        assert!(
+            listen < pending,
+            "subscription must be established before draining"
+        );
+        assert!(html.contains("await window.__TAURI__.event.listen"));
+        assert!(html.contains("var chain=Promise.resolve()"));
+        assert!(!html.contains("hx-trigger=\"load\""));
+        assert!(!html.contains("<iframe"));
     }
 
     #[test]

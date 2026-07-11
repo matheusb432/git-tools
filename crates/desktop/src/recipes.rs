@@ -334,6 +334,7 @@ index 111..222 100644\n\
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed,
             },
+            name: None,
         }
     }
 
@@ -388,6 +389,35 @@ index 111..222 100644\n\
         let renders = app_state.renders.lock().expect("renders lock");
         assert_eq!(renders.len(), 1);
         assert_eq!(renders[0].kind, "diff");
+    }
+
+    #[test]
+    fn failed_initial_compute_preserves_the_explicit_recipe_label() {
+        let mediator = crate::test_support::fake_mediator_with(
+            FakeDiffSource::default(),
+            InMemoryAppStateStore::default(),
+            FakeRepoProbe::default(),
+        );
+        let session = Mutex::new(ViewerSession::new(1024));
+        let mut named = recipe();
+        named.name = Some("Named initial failure".into());
+
+        assert!(matches!(
+            open_recipe(
+                &mediator,
+                &session,
+                Path::new("/data"),
+                &named,
+                "batch".into(),
+                ViewerTabKind::Snapshot,
+            ),
+            Err(RecipeError::Failed(_))
+        ));
+
+        let session = session.lock().expect("session lock");
+        let tab = session.tabs().next().expect("failed tab remains open");
+        assert_eq!(tab.tab.label(), "Named initial failure");
+        assert!(matches!(tab.tab.state(), ViewerTabState::Error { .. }));
     }
 
     #[test]
@@ -556,6 +586,41 @@ index 111..222 100644\n\
         assert_eq!(app_state.renders.lock().expect("renders lock").len(), 1);
         let mut session = session.lock().expect("session lock");
         assert!(session.cached_view(id).is_some());
+    }
+
+    #[test]
+    fn failed_refresh_preserves_the_explicit_recipe_label() {
+        let app_state = InMemoryAppStateStore::default();
+        let successful = crate::test_support::fake_mediator_with(
+            source(),
+            app_state.clone(),
+            FakeRepoProbe::default(),
+        );
+        let failing = crate::test_support::fake_mediator_with(
+            FakeDiffSource::default(),
+            app_state,
+            FakeRepoProbe::default(),
+        );
+        let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
+        let mut named = recipe();
+        named.name = Some("Named refresh failure".into());
+        let id = open_recipe(
+            &successful,
+            &session,
+            Path::new("/data"),
+            &named,
+            "batch".into(),
+            ViewerTabKind::Snapshot,
+        )
+        .expect("initial open succeeds")
+        .tab_id;
+
+        assert!(refresh_recipe(&failing, &session, Path::new("/data"), id).is_err());
+
+        let session = session.lock().expect("session lock");
+        let tab = session.tab(id).expect("failed tab remains open");
+        assert_eq!(tab.tab.label(), "Named refresh failure");
+        assert!(matches!(tab.tab.state(), ViewerTabState::Error { .. }));
     }
 
     #[test]

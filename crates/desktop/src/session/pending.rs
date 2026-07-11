@@ -33,10 +33,6 @@ impl PendingRecipes {
             .map_err(|_| PendingRecipesError::Poisoned)?;
         Ok(operation())
     }
-    #[allow(
-        dead_code,
-        reason = "single-instance recipe forwarding is wired in Task 7"
-    )]
     pub(crate) fn push(&self, batch: OpenRecipes) -> Result<(), PendingRecipesError> {
         self.batches
             .lock()
@@ -75,13 +71,15 @@ impl PendingRecipes {
 mod tests {
     use std::sync::{Arc, Barrier};
 
-    use gtl_recipe::OpenRecipes;
+    use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
     use super::*;
+    use crate::{ForwardRecipesError, enqueue_and_wake};
 
     fn batch(id: &str) -> OpenRecipes {
         OpenRecipes {
             batch_id: id.into(),
+            kind: RecipeBatchKind::Snapshot,
             recipes: Vec::new(),
         }
     }
@@ -130,6 +128,27 @@ mod tests {
             pending.prepend(vec![batch("prepend")]),
             Err(PendingRecipesError::Poisoned)
         );
+    }
+
+    #[test]
+    fn poisoned_queue_prevents_wake_and_returns_a_typed_forwarding_error() {
+        let pending = PendingRecipes::default();
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = pending.batches.lock().expect("initial lock");
+            panic!("poison queue");
+        });
+        let mut woke = false;
+
+        let result = enqueue_and_wake(&pending, vec![batch("unavailable")], || {
+            woke = true;
+            Ok::<(), &'static str>(())
+        });
+
+        assert!(matches!(
+            result,
+            Err(ForwardRecipesError::Queue(PendingRecipesError::Poisoned))
+        ));
+        assert!(!woke);
     }
 
     #[test]
