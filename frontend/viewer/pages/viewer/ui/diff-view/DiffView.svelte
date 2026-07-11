@@ -52,7 +52,8 @@
   const focusedCommits = useSelector(mountedReviewStore, (snapshot) => snapshot.context.focusedCommits);
   const collapsedFileIdxs = useSelector(mountedReviewStore, (snapshot) => snapshot.context.collapsedFileIdxs);
   const settingsQuery = createViewerSettings();
-  const settingMutation = createSetViewerSetting();
+  const layoutMutation = createSetViewerSetting("layout");
+  const densityMutation = createSetViewerSetting("density");
   const api = useApi();
   const queryClient = useQueryClient();
 
@@ -69,7 +70,7 @@
   const settingsWarning = $derived(
     $settingsQuery.isError
       ? "Could not load diff view settings. Using defaults."
-      : $settingMutation.isError
+      : $layoutMutation.isError || $densityMutation.isError
         ? "Could not save diff view settings."
         : null,
   );
@@ -101,11 +102,11 @@
   );
 
   function handleSetLayout(nextLayout: DiffLayout): void {
-    $settingMutation.mutate({ key: "layout", value: nextLayout });
+    $layoutMutation.mutate(nextLayout);
   }
 
   function handleToggleFull(): void {
-    $settingMutation.mutate({ key: "density", value: density === "full" ? "compact" : "full" });
+    $densityMutation.mutate(density === "full" ? "compact" : "full");
   }
 
   function handleFilterTextChange(value: string): void {

@@ -23,6 +23,8 @@ export function planRowPages(input: RowPagePlanInput): readonly RowPageRequest[]
   const firstVisiblePage = Math.floor(visibleStart / pageSize) * pageSize;
   const lastVisiblePage = Math.floor(visibleEnd / pageSize) * pageSize;
   const nonzeroVisiblePage = firstVisiblePage === 0 ? Math.min(pageSize, lastVisiblePage) : firstVisiblePage;
-  if (nonzeroVisiblePage > 0) requests.push({ start: nonzeroVisiblePage, count: pageSize });
+  if (nonzeroVisiblePage > 0) {
+    requests.push({ start: nonzeroVisiblePage, count: lastVisiblePage - nonzeroVisiblePage + pageSize });
+  }
   return requests;
 }

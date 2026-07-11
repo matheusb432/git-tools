@@ -14,6 +14,7 @@
   } from "../api/recipe-tabs.svelte";
   import { createLiveViewsQuery, createSourceProbeFetcher } from "../api/live-views.svelte";
   import { resetTabRowPages } from "../api/row-pages.svelte";
+  import { createSerialWakeDrain } from "../api/serial-wake-drain";
   import { createDiffReviewStore, type DiffReviewStore } from "../model/diff-review";
   import { brokenSourceFromRejection, liveTabFromDto } from "../model/live-tab";
   import {
@@ -56,6 +57,7 @@
       } | null;
       readonly shellError: string | null;
       readonly reviewStoreCount: number;
+      readonly toastTimerCount: number;
       readonly browserErrors: readonly string[];
       readonly queryCache: {
         readonly rowPages: number;
@@ -92,6 +94,7 @@
   let nextToastId = 0;
   let unlistenRecipe: (() => void) | undefined;
   let batchQueue = Promise.resolve();
+  const toastTimeouts = new Map<number, ReturnType<typeof setTimeout>>();
 
   const metadataOptions = derived(tabShells, (tabs) =>
     tabs.flatMap((tab) => (tab.tabId === null ? [] : [tabMetaOptions(api, tab.tabId)])),
@@ -148,6 +151,9 @@
   }
 
   function dismissToast(id: number): void {
+    const timeout = toastTimeouts.get(id);
+    if (timeout !== undefined) clearTimeout(timeout);
+    toastTimeouts.delete(id);
     session.trigger["toast.dismissed"]({ id });
   }
 
@@ -156,7 +162,8 @@
     if (message === null) return;
     const toast = createToast(nextToastId++, message);
     session.trigger["toast.added"]({ toast });
-    setTimeout(() => dismissToast(toast.id), toast.timeoutMs);
+    const timeout = setTimeout(() => dismissToast(toast.id), toast.timeoutMs);
+    toastTimeouts.set(toast.id, timeout);
   }
 
   async function closeBackendTab(tabId: number): Promise<void> {
@@ -399,6 +406,7 @@
             },
       shellError: context.shellNotice,
       reviewStoreCount: reviewStores.size,
+      toastTimerCount: toastTimeouts.size,
       browserErrors: [...browserErrors],
       queryCache: {
         rowPages: queryClient
@@ -464,16 +472,17 @@
     };
     Reflect.set(window, "__GTL_VIEWER_TEST__", testApi);
 
-    let pendingSettled = false;
-    const unobservePending = pendingBatches.subscribe((result) => {
-      if (pendingSettled || result.isPending) return;
-      pendingSettled = true;
-      if (result.isError) {
-        session.trigger["shellNotice.changed"]({ message: result.error.message });
-        return;
-      }
-      enqueueRecipeBatches(result.data);
-    });
+    const pendingDrain = createSerialWakeDrain(
+      async () => {
+        const result = await get(pendingBatches).refetch();
+        if (result.isError) throw result.error;
+        if (!disposed) enqueueRecipeBatches(result.data ?? []);
+      },
+      (error) => {
+        session.trigger["shellNotice.changed"]({ message: error.message });
+      },
+    );
+    const unobservePending = pendingBatches.subscribe(() => undefined);
     let liveViewsSettled = false;
     const unobserveLiveViews = liveViewsQuery.subscribe((result) => {
       if (liveViewsSettled || result.isPending) return;
@@ -485,12 +494,22 @@
       restoreLiveViews();
     });
     api
-      .listen(OPEN_RECIPE_EVENT, openRecipesWireSchema, (batch) => {
-        enqueueRecipeBatches([batch]);
-      })
+      .listen(
+        OPEN_RECIPE_EVENT,
+        openRecipesWireSchema,
+        (_batch) => {
+          pendingDrain.wake();
+        },
+        (error) => {
+          session.trigger["shellNotice.changed"]({ message: error.message });
+        },
+      )
       .then((stop) => {
         if (disposed) stop();
-        else unlistenRecipe = stop;
+        else {
+          unlistenRecipe = stop;
+          pendingDrain.wake();
+        }
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "Failed to subscribe to recipe events";
@@ -504,10 +523,13 @@
       }
       window.removeEventListener("error", handleError);
       window.removeEventListener("unhandledrejection", handleRejection);
+      pendingDrain.dispose();
       unobservePending();
       unobserveLiveViews();
       unlistenRecipe?.();
       unlistenRecipe = undefined;
+      for (const timeout of toastTimeouts.values()) clearTimeout(timeout);
+      toastTimeouts.clear();
     };
   });
 </script>

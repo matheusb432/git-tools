@@ -7,7 +7,7 @@ test("an intersecting expanded zero-estimate panel always bootstraps page zero",
   ]);
 });
 
-test("known visible range requests at most two aligned pages", () => {
+test("known visible range covers every nonzero visible page with one aligned span", () => {
   expect(
     planRowPages({
       expanded: true,
@@ -18,7 +18,7 @@ test("known visible range requests at most two aligned pages", () => {
     }),
   ).toEqual([
     { start: 0, count: 80 },
-    { start: 80, count: 80 },
+    { start: 80, count: 160 },
   ]);
 });
 

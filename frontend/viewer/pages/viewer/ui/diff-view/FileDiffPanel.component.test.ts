@@ -131,13 +131,24 @@ mountedTest("collapsed and offscreen panels create no row observers", async () =
   expect(operations).toEqual([]);
 });
 
-mountedTest("an intersecting panel observes at most page zero and one aligned visible page", async () => {
+mountedTest("a tall visible row window renders its last visible row with two observers", async () => {
   const transport: ApiTransport = {
-    invoke: async (_operation, input = {}) => ({
-      total: 500,
-      layout: input.layout,
-      rows: [],
-    }),
+    invoke: async (_operation, input = {}) => {
+      const start = typeof input.start === "number" ? input.start : 0;
+      const count = typeof input.count === "number" ? input.count : 0;
+      return {
+        total: 500,
+        layout: "unified",
+        rows: Array.from({ length: Math.min(count, 500 - start) }, (_, offset) => ({
+          kind: "context" as const,
+          old_no: start + offset + 1,
+          new_no: start + offset + 1,
+          text: `row-${start + offset}`,
+          owner: null,
+          long_len: null,
+        })),
+      } satisfies RowsPage;
+    },
     listen: async () => () => undefined,
   };
   const { queryClient } = renderWithData(
@@ -159,7 +170,69 @@ mountedTest("an intersecting panel observes at most page zero and one aligned vi
       .filter((query) => query.observers.length > 0);
     expect(observed).toHaveLength(2);
     expect(observed.map((query) => query.queryKey.at(-2))).toEqual([0, 80]);
+    expect(observed.map((query) => query.queryKey.at(-1))).toEqual([80, 160]);
   });
+  expect(await screen.findByText("row-170")).toBeVisible();
+});
+
+mountedTest("a combined pending row span covers the last aligned page until it resolves", async () => {
+  let resolveCombinedPage: ((page: RowsPage) => void) | undefined;
+  const transport: ApiTransport = {
+    invoke: async (_operation, input = {}) => {
+      const start = typeof input.start === "number" ? input.start : 0;
+      const count = typeof input.count === "number" ? input.count : 0;
+      if (start === 80) {
+        return new Promise<RowsPage>((resolve) => {
+          resolveCombinedPage = resolve;
+        });
+      }
+      return {
+        total: 500,
+        layout: "unified",
+        rows: Array.from({ length: Math.min(count, 500 - start) }, (_, offset) => ({
+          kind: "context" as const,
+          old_no: start + offset + 1,
+          new_no: start + offset + 1,
+          text: `row-${start + offset}`,
+          owner: null,
+          long_len: null,
+        })),
+      } satisfies RowsPage;
+    },
+    listen: async () => () => undefined,
+  };
+  renderWithData(
+    FileDiffPanelTestHarness,
+    {
+      full: false,
+      added: 500,
+      panelHeight: 12_000,
+      outerScrollTop: 4_000,
+      outerViewportHeight: 400,
+    },
+    transport,
+  );
+
+  await waitFor(() => expect(resolveCombinedPage).toBeTypeOf("function"));
+  const lastVisibleRow = screen.getByTestId(TEST_IDS.diffView.rowWindow).lastElementChild;
+  if (!(lastVisibleRow instanceof HTMLElement)) throw new Error("The row window has no last row");
+  expect(lastVisibleRow).toHaveAttribute("data-testid", TEST_IDS.diffView.rowSkeleton);
+
+  resolveCombinedPage?.({
+    total: 500,
+    layout: "unified",
+    rows: Array.from({ length: 160 }, (_, offset) => ({
+      kind: "context" as const,
+      old_no: 81 + offset,
+      new_no: 81 + offset,
+      text: `row-${80 + offset}`,
+      owner: null,
+      long_len: null,
+    })),
+  });
+
+  expect(await screen.findByText("row-170")).toBeVisible();
+  expect(screen.queryAllByTestId(TEST_IDS.diffView.rowSkeleton)).toHaveLength(0);
 });
 
 mountedTest("pending page zero renders skeletons before an empty result", async () => {

@@ -412,7 +412,10 @@ mod tests {
             }
         }
 
-        assert!(tabs.close(id), "closing a known, warmed tab reports removal");
+        assert!(
+            tabs.close(id),
+            "closing a known, warmed tab reports removal"
+        );
         assert!(!tabs.close(id), "closing an already-closed tab is a no-op");
         assert!(!tabs.close(99), "closing an unknown tab is a no-op");
         assert!(tabs.meta(id).is_none(), "tab is gone after close");

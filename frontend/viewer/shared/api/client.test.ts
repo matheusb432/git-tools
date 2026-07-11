@@ -56,3 +56,41 @@ test("an aborted query discards a late transport result", async () => {
     name: "AbortError",
   });
 });
+
+test("a listener reports malformed event payloads through its typed decode-error boundary", async () => {
+  let receiveRaw: ((payload: unknown) => void) | undefined;
+  const errors: Error[] = [];
+  const received: number[] = [];
+  const transport: ApiTransport = {
+    invoke: async () => undefined,
+    listen: async (_event, receive) => {
+      receiveRaw = receive;
+      return () => undefined;
+    },
+  };
+  const api = createApiClient(transport);
+  await api.listen("counter-changed", z.object({ value: z.number() }), (payload) => received.push(payload.value), (error) =>
+    errors.push(error),
+  );
+
+  receiveRaw?.({ value: "seven" });
+
+  expect(received).toEqual([]);
+  expect(errors).toHaveLength(1);
+  expect(errors[0]?.message).toMatch(/counter-changed.*value/s);
+});
+
+test("a malformed listener payload still throws when no decode-error handler is provided", async () => {
+  let receiveRaw: ((payload: unknown) => void) | undefined;
+  const transport: ApiTransport = {
+    invoke: async () => undefined,
+    listen: async (_event, receive) => {
+      receiveRaw = receive;
+      return () => undefined;
+    },
+  };
+  const api = createApiClient(transport);
+  await api.listen("counter-changed", z.object({ value: z.number() }), () => undefined);
+
+  expect(() => receiveRaw?.({ value: "seven" })).toThrow(/counter-changed.*value/s);
+});

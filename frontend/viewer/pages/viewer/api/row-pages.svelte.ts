@@ -129,7 +129,7 @@ export function createRowPages(input: () => CreateRowPagesInput) {
   const options = derived(identities, ($identities) => $identities.map((identity) => rowPageOptions(api, identity)));
   const queries = createQueries({ queries: options });
 
-  return derived([identities, queries], ([$identities, $queries]): RowPages => {
+  return derived([currentInput, identities, queries], ([$current, $identities, $queries]): RowPages => {
     const rowsByIndex = new Map<number, UnifiedRow | SplitRow>();
     const pendingPageStarts = new Set<number>();
     const errors: RowPageError[] = [];
@@ -139,7 +139,12 @@ export function createRowPages(input: () => CreateRowPagesInput) {
     $queries.forEach((query, index) => {
       const identity = $identities[index];
       if (identity === undefined) return;
-      if (query.isPending) pendingPageStarts.add(identity.start);
+      if (query.isPending) {
+        const end = identity.start + identity.count;
+        for (let pageStart = identity.start; pageStart < end; pageStart += $current.pageSize) {
+          pendingPageStarts.add(pageStart);
+        }
+      }
       if (query.isError) {
         errors.push({ start: identity.start, message: errorMessage(query.error), refetch: () => query.refetch() });
       }

@@ -44,6 +44,7 @@ export function createPendingRecipeBatchesQuery() {
   return createQuery({
     queryKey: pendingRecipeBatchesKey,
     queryFn: ({ signal }) => api.query("drain_pending_recipes", {}, openRecipeBatchesSchema, signal),
+    enabled: false,
     staleTime: Infinity,
   });
 }

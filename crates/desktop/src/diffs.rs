@@ -1,7 +1,6 @@
 //! Pending-recipe handoff from CLI argv to the frontend. The Rust side queues
-//! `gtl-recipe://` batches (cold-start + single-instance forwards); the
-//! frontend drains them on mount and also live-listens for `open-recipe`, so
-//! neither path races.
+//! every `gtl-recipe://` batch before emitting a best-effort wake event; the
+//! frontend receives batches only by atomically draining this queue.
 use std::sync::Mutex;
 
 use gtl_recipe::{OpenRecipes, decode_token};
@@ -29,6 +28,15 @@ impl PendingRecipes {
     pub fn drain(&self) -> Vec<OpenRecipes> {
         std::mem::take(&mut *self.0.lock().expect("pending-recipes lock"))
     }
+}
+
+pub(super) fn enqueue_and_wake<E>(
+    pending: &PendingRecipes,
+    batch: OpenRecipes,
+    wake: impl FnOnce(OpenRecipes) -> Result<(), E>,
+) {
+    pending.push(batch.clone());
+    let _ = wake(batch);
 }
 
 #[cfg(test)]
@@ -77,5 +85,15 @@ mod tests {
         q.push(batch.clone());
         assert_eq!(q.drain(), vec![batch]);
         assert!(q.drain().is_empty());
+    }
+
+    #[test]
+    fn failed_wake_keeps_the_forwarded_batch_available_to_drain() {
+        let q = PendingRecipes::default();
+        let batch = sample_batch();
+
+        enqueue_and_wake(&q, batch.clone(), |_| Err("event unavailable"));
+
+        assert_eq!(q.drain(), vec![batch]);
     }
 }

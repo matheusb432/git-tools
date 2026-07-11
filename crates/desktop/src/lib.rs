@@ -27,7 +27,7 @@ use application::{
         set::{SetSetting, SetSettingHandler},
     },
 };
-use diffs::{PendingRecipes, recipes_from_argv};
+use diffs::{PendingRecipes, enqueue_and_wake, recipes_from_argv};
 use gtl_recipe::OpenRecipes;
 use infra::{
     app_state::SqliteAppState, clock::SystemClock, diff_source::GitDiffSource,
@@ -177,13 +177,10 @@ pub fn run() {
         .manage(tabs::RenderedTabs::default())
         .manage(PendingRecipes::default())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            // Second launch: the frontend is already mounted (drains its queue exactly once,
-            // at mount), so just emit the batch directly rather than also queueing it in
-            // `PendingRecipes` — a queued copy here would never be drained and leak for the
-            // life of the process. Cold start (below, in `setup`) still queues: that frontend
-            // isn't mounted yet.
             if let Some(batch) = recipes_from_argv(&argv) {
-                let _ = app.emit("open-recipe", batch);
+                enqueue_and_wake(app.state::<PendingRecipes>().inner(), batch, |batch| {
+                    app.emit("open-recipe", batch)
+                });
             }
             if let Some(win) = app.get_webview_window("main") {
                 focus_main(&win);

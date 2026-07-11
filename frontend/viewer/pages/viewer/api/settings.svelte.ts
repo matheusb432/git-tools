@@ -8,12 +8,8 @@ export type ViewerSettings = {
   readonly layout: DiffLayout;
   readonly density: DiffDensity;
 };
-export type SetViewerSetting =
-  | { readonly key: "layout"; readonly value: DiffLayout }
-  | { readonly key: "density"; readonly value: DiffDensity };
-type ViewerSettingsSnapshot = {
-  readonly previous: ViewerSettings | undefined;
-};
+type ViewerSettingKey = keyof ViewerSettings;
+type ViewerSettingsSnapshot<K extends ViewerSettingKey> = { readonly previous: ViewerSettings[K] };
 
 export const viewerSettingsKey = ["viewer", "settings"] as const;
 export const viewerSettingsDefaults: ViewerSettings = { layout: "unified", density: "compact" };
@@ -56,32 +52,46 @@ export function createViewerSettings() {
   });
 }
 
-export function createSetViewerSetting() {
+function withSetting<K extends ViewerSettingKey>(
+  settings: ViewerSettings,
+  key: K,
+  value: ViewerSettings[K],
+): ViewerSettings {
+  const next: { -readonly [P in keyof ViewerSettings]: ViewerSettings[P] } = { ...settings };
+  next[key] = value;
+  return next;
+}
+
+const settingStorageKeys = {
+  layout: "diff.layout",
+  density: "diff.full",
+} as const satisfies Record<ViewerSettingKey, string>;
+
+export function createSetViewerSetting<K extends ViewerSettingKey>(key: K) {
   const api = useApi();
   const queryClient = useQueryClient();
 
-  return createMutation<void, Error, SetViewerSetting, ViewerSettingsSnapshot>({
-    mutationFn: async (setting) => {
-      if (setting.key === "layout") {
-        return api.mutate("set_setting", { key: "diff.layout", value: settingFromLayout(setting.value) }, unitSchema);
-      }
-      return api.mutate("set_setting", { key: "diff.full", value: settingFromDensity(setting.value) }, unitSchema);
-    },
-    onMutate: async (setting) => {
+  return createMutation<void, Error, ViewerSettings[K], ViewerSettingsSnapshot<K>>({
+    mutationFn: async (value) => api.mutate("set_setting", { key: settingStorageKeys[key], value }, unitSchema),
+    onMutate: async (value) => {
       await queryClient.cancelQueries({ queryKey: viewerSettingsKey, exact: true });
-      const previous = queryClient.getQueryData<ViewerSettings>(viewerSettingsKey);
+      const previous = queryClient.getQueryData<ViewerSettings>(viewerSettingsKey) ?? viewerSettingsDefaults;
       queryClient.setQueryData<ViewerSettings>(viewerSettingsKey, (current = viewerSettingsDefaults) =>
-        setting.key === "layout" ? { ...current, layout: setting.value } : { ...current, density: setting.value },
+        withSetting(current, key, value),
       );
-      return { previous };
+      return { previous: previous[key] };
     },
-    onError: (_error, _setting, snapshot) => {
-      if (snapshot?.previous === undefined) {
-        queryClient.removeQueries({ queryKey: viewerSettingsKey, exact: true });
-        return;
-      }
-      queryClient.setQueryData(viewerSettingsKey, snapshot.previous);
+    onError: (_error, _value, snapshot) => {
+      if (snapshot === undefined) return;
+      queryClient.setQueryData<ViewerSettings>(viewerSettingsKey, (current = viewerSettingsDefaults) =>
+        withSetting(current, key, snapshot.previous),
+      );
     },
-    scope: { id: "viewer-settings" },
+    onSuccess: (_data, value) => {
+      queryClient.setQueryData<ViewerSettings>(viewerSettingsKey, (current = viewerSettingsDefaults) =>
+        withSetting(current, key, value),
+      );
+    },
+    scope: { id: `viewer-settings:${key}` },
   });
 }

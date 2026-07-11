@@ -1,6 +1,6 @@
 import { screen, waitFor } from "@testing-library/svelte";
 import userEvent from "@testing-library/user-event";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { ApiTransport } from "@/shared/api";
 import { recipe, renderWithData, tabMeta } from "@/shared/test";
 import { pendingRecipeBatchesKey, tabMetaKey } from "../api/recipe-tabs.svelte";
@@ -257,17 +257,123 @@ mountedTest("delayed listener registration stops immediately after the page has 
   await waitFor(() => expect(stopped).toBe(true));
 });
 
-mountedTest("pending drain and event batches share one sequential open queue", async () => {
+mountedTest("unmount clears pending toast dismissal timers", () => {
+  vi.useFakeTimers();
+  try {
+    const transport: ApiTransport = {
+      invoke: async (operation) => {
+        if (operation === "drain_pending_recipes" || operation === "list_live_views") return [];
+        throw new Error(`Unexpected operation: ${operation}`);
+      },
+      listen: async () => () => undefined,
+    };
+    const rendered = renderWithData(ViewerPage, {}, transport);
+    const bridge: unknown = Reflect.get(window, "__GTL_VIEWER_TEST__");
+    if (typeof bridge !== "object" || bridge === null || !("announceBatch" in bridge) || !("snapshot" in bridge)) {
+      throw new Error("viewer test bridge is unavailable");
+    }
+    const announceBatch = bridge.announceBatch;
+    const snapshot = bridge.snapshot;
+    if (typeof announceBatch !== "function") throw new Error("viewer announceBatch bridge is unavailable");
+    if (typeof snapshot !== "function") throw new Error("viewer snapshot bridge is unavailable");
+
+    announceBatch(2, "gtl diff --all");
+    expect(snapshot().toastTimerCount).toBe(1);
+
+    rendered.unmount();
+
+    expect(snapshot().toastTimerCount).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+mountedTest("a batch queued before delayed listener registration is drained exactly once", async () => {
   const operations: TransportOperation[] = [];
-  const openResolvers: Array<(value: unknown) => void> = [];
-  let receiveRecipe: ((payload: unknown) => void) | undefined;
+  let resolveListen: ((stop: () => void) => void) | undefined;
+  const queued = pendingBatch();
   const transport: ApiTransport = {
     invoke: async (operation, input = {}) => {
       operations.push({ operation, input });
-      if (operation === "drain_pending_recipes") return pendingBatch();
+      if (operation === "drain_pending_recipes") return queued.splice(0);
+      if (operation === "list_live_views") return [];
+      if (operation === "open_recipe") return { tab_id: 7, meta: tabMeta };
+      throw new Error(`Unexpected operation: ${operation}`);
+    },
+    listen: async () => {
+      return new Promise<() => void>((resolve) => {
+        resolveListen = resolve;
+      });
+    },
+  };
+  renderWithData(ViewerPage, {}, transport);
+  await waitFor(() => expect(typeof resolveListen).toBe("function"));
+
+  expect(operations.filter((entry) => entry.operation === "drain_pending_recipes")).toHaveLength(0);
+  resolveListen?.(() => undefined);
+
+  await waitFor(() =>
+    expect(operations.filter((entry) => entry.operation === "drain_pending_recipes")).toHaveLength(1),
+  );
+  await waitFor(() => expect(operations.filter((entry) => entry.operation === "open_recipe")).toHaveLength(1));
+  expect(queued).toHaveLength(0);
+});
+
+mountedTest("a malformed later recipe event becomes a shell notice without a browser error", async () => {
+  let receiveRecipe: ((payload: unknown) => void) | undefined;
+  const transport: ApiTransport = {
+    invoke: async (operation) => {
+      if (operation === "drain_pending_recipes" || operation === "list_live_views") return [];
+      throw new Error(`Unexpected operation: ${operation}`);
+    },
+    listen: async (_event, receive) => {
+      receiveRecipe = receive;
+      return () => undefined;
+    },
+  };
+  renderWithData(ViewerPage, {}, transport);
+  await waitFor(() => expect(typeof receiveRecipe).toBe("function"));
+
+  receiveRecipe?.({ batch_id: 42, recipes: [] });
+
+  expect(await screen.findByText(/Malformed open-recipe response/)).toBeVisible();
+  const bridge: unknown = Reflect.get(window, "__GTL_VIEWER_TEST__");
+  if (
+    typeof bridge !== "object" ||
+    bridge === null ||
+    !("snapshot" in bridge) ||
+    typeof bridge.snapshot !== "function"
+  ) {
+    throw new Error("viewer test bridge is unavailable");
+  }
+  expect(bridge.snapshot().browserErrors).toEqual([]);
+});
+
+mountedTest("a wake during an in-flight drain schedules a second serial drain without duplicates", async () => {
+  const operations: TransportOperation[] = [];
+  let drainCount = 0;
+  let resolveFirstDrain: ((value: unknown) => void) | undefined;
+  let receiveRecipe: ((payload: unknown) => void) | undefined;
+  const secondBatch = {
+    batch_id: "batch-2",
+    recipes: [{ ...recipe, source: { ...recipe.source, value: "/repo-2" } }],
+  };
+  const transport: ApiTransport = {
+    invoke: async (operation, input = {}) => {
+      operations.push({ operation, input });
+      if (operation === "drain_pending_recipes") {
+        drainCount += 1;
+        if (drainCount === 1) {
+          return new Promise<unknown>((resolve) => {
+            resolveFirstDrain = resolve;
+          });
+        }
+        return [secondBatch];
+      }
       if (operation === "list_live_views") return [];
       if (operation === "open_recipe") {
-        return new Promise<unknown>((resolve) => openResolvers.push(resolve));
+        const tabId = input.batchId === "batch-1" ? 7 : 8;
+        return { tab_id: tabId, meta: { ...tabMeta, tab_id: tabId, batch_id: input.batchId } };
       }
       throw new Error(`Unexpected operation: ${operation}`);
     },
@@ -277,18 +383,22 @@ mountedTest("pending drain and event batches share one sequential open queue", a
     },
   };
   renderWithData(ViewerPage, {}, transport);
-  await waitFor(() => expect(operations.filter((entry) => entry.operation === "open_recipe")).toHaveLength(1));
+  await waitFor(() => expect(typeof resolveFirstDrain).toBe("function"));
   await waitFor(() => expect(typeof receiveRecipe).toBe("function"));
 
-  receiveRecipe?.({ batch_id: "batch-2", recipes: [{ ...recipe, source: { ...recipe.source, value: "/repo-2" } }] });
+  receiveRecipe?.(secondBatch);
   await Promise.resolve();
 
-  expect(operations.filter((entry) => entry.operation === "open_recipe")).toHaveLength(1);
-  openResolvers[0]?.({ tab_id: 7, meta: tabMeta });
+  expect(operations.filter((entry) => entry.operation === "drain_pending_recipes")).toHaveLength(1);
+  expect(operations.filter((entry) => entry.operation === "open_recipe")).toHaveLength(0);
+  resolveFirstDrain?.(pendingBatch());
+
+  await waitFor(() =>
+    expect(operations.filter((entry) => entry.operation === "drain_pending_recipes")).toHaveLength(2),
+  );
   await waitFor(() => expect(operations.filter((entry) => entry.operation === "open_recipe")).toHaveLength(2));
   expect(operations.filter((entry) => entry.operation === "open_recipe").map((entry) => entry.input.batchId)).toEqual([
     "batch-1",
     "batch-2",
   ]);
-  openResolvers[1]?.({ tab_id: 8, meta: { ...tabMeta, tab_id: 8, batch_id: "batch-2" } });
 });

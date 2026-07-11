@@ -21,6 +21,7 @@ export type ApiClient = {
     event: string,
     schema: ZodType<Output>,
     receive: (payload: Output) => void,
+    onDecodeError?: (error: Error) => void,
   ) => Promise<() => void>;
 };
 
@@ -55,6 +56,17 @@ export function createApiClient(transport: ApiTransport): ApiClient {
   return {
     query: invoke,
     mutate: (operation, input, schema) => invoke(operation, input, schema),
-    listen: (event, schema, receive) => transport.listen(event, (raw) => receive(decode(event, schema, raw))),
+    listen: (event, schema, receive, onDecodeError) =>
+      transport.listen(event, (raw) => {
+        let payload: typeof schema._output;
+        try {
+          payload = decode(event, schema, raw);
+        } catch (error) {
+          if (onDecodeError === undefined) throw error;
+          onDecodeError(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+        receive(payload);
+      }),
   };
 }
