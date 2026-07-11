@@ -7,13 +7,16 @@ const LARGE_FILE_LINE_COUNT = 45_000;
 const MANY_FILES_COUNT = 300;
 const decoder = new TextDecoder();
 
-export type FixtureName = "small" | "large-file" | "many-files";
+export type FixtureName = "small" | "two-small-files" | "large-file" | "many-files";
 
 export type FixtureEntry = {
   readonly name: FixtureName;
   readonly repoRoot: string;
   readonly repoName: string;
   readonly primaryFile: string;
+  readonly secondaryFile: string | null;
+  readonly expectedPrimaryRowText: string;
+  readonly expectedSecondaryRowText: string | null;
   readonly recipe: Recipe;
 };
 
@@ -114,6 +117,34 @@ function buildSmallFixture(root: string): FixtureEntry {
     repoRoot,
     repoName: "small-repo",
     primaryFile,
+    secondaryFile: null,
+    expectedPrimaryRowText: "line 060 changed",
+    expectedSecondaryRowText: null,
+    recipe: diffRecipe(repoRoot),
+  };
+}
+
+function buildTwoSmallFilesFixture(root: string): FixtureEntry {
+  const repoRoot = join(root, "two-small-files-repo");
+  const primaryFile = "alpha.txt";
+  const secondaryFile = "beta.txt";
+  const expectedPrimaryRowText = "alpha uniquely changed";
+  const expectedSecondaryRowText = "beta uniquely changed";
+  initRepo(repoRoot);
+  writeRepoFile(repoRoot, primaryFile, "alpha base\n");
+  writeRepoFile(repoRoot, secondaryFile, "beta base\n");
+  commitAll(repoRoot, "base");
+  writeRepoFile(repoRoot, primaryFile, `${expectedPrimaryRowText}\n`);
+  writeRepoFile(repoRoot, secondaryFile, `${expectedSecondaryRowText}\n`);
+
+  return {
+    name: "two-small-files",
+    repoRoot,
+    repoName: "two-small-files-repo",
+    primaryFile,
+    secondaryFile,
+    expectedPrimaryRowText,
+    expectedSecondaryRowText,
     recipe: diffRecipe(repoRoot),
   };
 }
@@ -131,6 +162,9 @@ function buildLargeFileFixture(root: string): FixtureEntry {
     repoRoot,
     repoName: "large-file-repo",
     primaryFile,
+    secondaryFile: null,
+    expectedPrimaryRowText: "large line 00001",
+    expectedSecondaryRowText: null,
     recipe: diffRecipe(repoRoot),
   };
 }
@@ -148,11 +182,7 @@ function buildManyFilesFixture(root: string): FixtureEntry {
     writeRepoFile(
       repoRoot,
       filePath,
-      [
-        `changed ${index + 1} alpha`,
-        `changed ${index + 1} beta`,
-        `changed ${index + 1} gamma`,
-      ].join("\n") + "\n",
+      [`changed ${index + 1} alpha`, `changed ${index + 1} beta`, `changed ${index + 1} gamma`].join("\n") + "\n",
     );
   }
 
@@ -161,6 +191,9 @@ function buildManyFilesFixture(root: string): FixtureEntry {
     repoRoot,
     repoName: "many-files-repo",
     primaryFile: "files/file-001.txt",
+    secondaryFile: null,
+    expectedPrimaryRowText: "changed 1 alpha",
+    expectedSecondaryRowText: null,
     recipe: diffRecipe(repoRoot),
   };
 }
@@ -198,6 +231,7 @@ export function buildFixtures(fixtureRoot: string): FixtureManifest {
     generatedAt: new Date().toISOString(),
     fixtures: [
       buildSmallFixture(root),
+      buildTwoSmallFilesFixture(root),
       buildLargeFileFixture(root),
       buildManyFilesFixture(root),
     ],
@@ -223,10 +257,16 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
 function isFixtureEntry(value: unknown): value is FixtureEntry {
   if (!isObjectRecord(value)) return false;
   return (
-    (value.name === "small" || value.name === "large-file" || value.name === "many-files") &&
+    (value.name === "small" ||
+      value.name === "two-small-files" ||
+      value.name === "large-file" ||
+      value.name === "many-files") &&
     typeof value.repoRoot === "string" &&
     typeof value.repoName === "string" &&
     typeof value.primaryFile === "string" &&
+    (typeof value.secondaryFile === "string" || value.secondaryFile === null) &&
+    typeof value.expectedPrimaryRowText === "string" &&
+    (typeof value.expectedSecondaryRowText === "string" || value.expectedSecondaryRowText === null) &&
     isObjectRecord(value.recipe)
   );
 }
@@ -234,9 +274,7 @@ function isFixtureEntry(value: unknown): value is FixtureEntry {
 function isLiveViewFixture(value: unknown): value is LiveViewFixture {
   if (!isObjectRecord(value)) return false;
   return (
-    value.sourceKind === "LocalRepo" &&
-    typeof value.sourceValue === "string" &&
-    typeof value.displayName === "string"
+    value.sourceKind === "LocalRepo" && typeof value.sourceValue === "string" && typeof value.displayName === "string"
   );
 }
 

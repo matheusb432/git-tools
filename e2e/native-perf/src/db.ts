@@ -47,6 +47,8 @@ export type LiveViewSeed = {
   readonly lastOpenedAt?: string | null;
 };
 
+export type ViewerSettingsSeed = Readonly<Record<string, string>>;
+
 /** Writes `live_views` rows into `<dataDir>/gtl.db`, creating schema v1 fresh. Must run before
  * the viewer process first opens the db for this data dir — after startup, drive persistence
  * through the app's own `save_live_view` command instead. */
@@ -71,6 +73,22 @@ export function seedLiveViews(dataDir: string, rows: readonly LiveViewSeed[]): v
         row.createdAt ?? createdAtDefault,
         row.lastOpenedAt ?? null,
       );
+    }
+  } finally {
+    db.close();
+  }
+}
+
+/** Writes persisted viewer settings into the already-seeded app-state database. */
+export function seedViewerSettings(dataDir: string, settings: ViewerSettingsSeed): void {
+  const db = new Database(join(dataDir, "gtl.db"));
+  try {
+    const insert = db.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    );
+    for (const [key, value] of Object.entries(settings)) {
+      insert.run(key, value);
     }
   } finally {
     db.close();

@@ -10,7 +10,9 @@ export const selectors = {
   freshDot: byTestId(TEST_IDS.tabs.freshDot),
   diffRoot: byTestId(TEST_IDS.diffView.root),
   fileTree: byTestId(TEST_IDS.diffView.fileTree),
+  fileList: byTestId(TEST_IDS.diffView.fileList),
   row: byTestId(TEST_IDS.diffView.row),
+  rowSkeleton: byTestId(TEST_IDS.diffView.rowSkeleton),
   rowWindow: byTestId(TEST_IDS.diffView.rowWindow),
   layoutToggle: byTestId(TEST_IDS.diffView.layoutToggle),
   fullToggle: byTestId(TEST_IDS.diffView.fullToggle),
@@ -19,6 +21,7 @@ export const selectors = {
   unifiedLayoutButton: byTestId(TEST_IDS.diffView.layoutUnified),
   compactButton: byTestId(TEST_IDS.diffView.densityCompact),
   fullButton: byTestId(TEST_IDS.diffView.densityFull),
+  filter: `${byTestId(TEST_IDS.diffView.filter)} input`,
   brokenSource: byTestId(TEST_IDS.diffView.brokenSource),
   toastRoot: byTestId(TEST_IDS.toast.root),
   toastItem: byTestId(TEST_IDS.toast.item),
@@ -32,10 +35,14 @@ export async function selectorText(selector: string): Promise<string> {
 }
 
 export async function rowDomCount(): Promise<number> {
-  return browser.execute((diffRootSelector: string, rowSelector: string) => {
-    const diffRoot = Array.from(document.querySelectorAll(diffRootSelector)).find((candidate) =>
-      candidate instanceof HTMLElement && candidate.offsetParent !== null
-    );
-    return diffRoot instanceof HTMLElement ? diffRoot.querySelectorAll(rowSelector).length : 0;
-  }, selectors.diffRoot, selectors.row);
+  return browser.execute(
+    (diffRootSelector: string, rowSelector: string) => {
+      const diffRoot = Array.from(document.querySelectorAll(diffRootSelector)).find(
+        (candidate) => candidate instanceof HTMLElement && candidate.offsetParent !== null,
+      );
+      return diffRoot instanceof HTMLElement ? diffRoot.querySelectorAll(rowSelector).length : 0;
+    },
+    selectors.diffRoot,
+    selectors.row,
+  );
 }

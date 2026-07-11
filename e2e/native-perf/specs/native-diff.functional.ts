@@ -30,6 +30,34 @@ async function elementCount(selector: string): Promise<number> {
   return elements.length;
 }
 
+async function visibleElementCount(selector: string): Promise<number> {
+  return browser.execute(
+    (value: string) =>
+      Array.from(document.querySelectorAll(value)).filter(
+        (candidate) => candidate instanceof HTMLElement && candidate.offsetParent !== null,
+      ).length,
+    selector,
+  );
+}
+
+async function waitForDiffText(included: readonly string[], excluded: readonly string[] = []): Promise<void> {
+  await browser.waitUntil(
+    async () => {
+      const text = await selectorText(selectors.diffRoot);
+      return included.every((value) => text.includes(value)) && excluded.every((value) => !text.includes(value));
+    },
+    { timeout: 20_000, interval: 50, timeoutMsg: `diff text did not settle to include ${included.join(", ")}` },
+  );
+}
+
+async function waitForToggleState(selector: string, state: "on" | "off"): Promise<void> {
+  await browser.waitUntil(async () => (await $(selector).getAttribute("data-state")) === state, {
+    timeout: 10_000,
+    interval: 50,
+    timeoutMsg: `${selector} never reached toggle state ${state}`,
+  });
+}
+
 /** Waits until the visible row window's signature holds steady across two consecutive reads,
  * then returns it. Virtualized row pages fetch lazily, so `scrollHeight`/the first rows keep
  * shifting for a beat after `waitForRows` — a scenario asserting "nothing changed without a
@@ -74,7 +102,8 @@ async function waitForLiveTabSettled(sourceValue: string, timeoutMs = 20_000): P
     async () => {
       const snapshot = await viewerSnapshot();
       const tab = snapshot.tabs.find(
-        (candidate) => candidate.kind === "native" && candidate.live === true && candidate.source?.value === sourceValue,
+        (candidate) =>
+          candidate.kind === "native" && candidate.live === true && candidate.source?.value === sourceValue,
       );
       return tab !== undefined && (tab.lifecycle === "ready" || tab.lifecycle === "error");
     },
@@ -86,14 +115,16 @@ async function waitForLiveTabSettled(sourceValue: string, timeoutMs = 20_000): P
  * won). Paired with `waitForRows` before asserting, this makes a scenario robust to any
  * still-in-flight restore focus-steal. */
 async function waitForActiveRepo(repoName: string, timeoutMs = 20_000): Promise<void> {
-  await browser.waitUntil(
-    async () => (await viewerSnapshot()).activeTab?.repoName === repoName,
-    { timeout: timeoutMs, interval: 50, timeoutMsg: `repo ${repoName} never became the active tab` },
-  );
+  await browser.waitUntil(async () => (await viewerSnapshot()).activeTab?.repoName === repoName, {
+    timeout: timeoutMs,
+    interval: 50,
+    timeoutMsg: `repo ${repoName} never became the active tab`,
+  });
 }
 
 describe("native diff functional scenarios", () => {
   const small = fixture("small");
+  const twoSmallFiles = fixture("two-small-files");
   const large = fixture("large-file");
   const many = fixture("many-files");
 
@@ -113,6 +144,75 @@ describe("native diff functional scenarios", () => {
     assert.equal(snapshot.activeTab?.kind, "native", "expected the newly opened tab to be native");
     assert.equal(snapshot.activeTab?.lifecycle, "ready", "expected the native tab to reach the ready lifecycle");
     assert((await rowDomCount()) > 0, "expected native diff rows to be visible");
+  });
+
+  it("keeps two small files settled through settings, tab, filter, and fold transitions", async () => {
+    const secondaryFile = twoSmallFiles.secondaryFile;
+    const secondaryRowText = twoSmallFiles.expectedSecondaryRowText;
+    assert(secondaryFile !== null, "two-small-files fixture must expose its secondary filename");
+    assert(secondaryRowText !== null, "two-small-files fixture must expose its secondary row text");
+
+    await openNativeRecipe(twoSmallFiles.recipe, "func-two-small-files");
+    await waitForActiveRepo(twoSmallFiles.repoName);
+    await waitForDiffText([twoSmallFiles.expectedPrimaryRowText, secondaryRowText]);
+    assert.equal(await visibleElementCount(selectors.rowSkeleton), 0, "two settled files must show no row skeletons");
+    const fileTreeText = await selectorText(selectors.fileTree);
+    assert(fileTreeText.includes(twoSmallFiles.primaryFile), `missing ${twoSmallFiles.primaryFile} in the file tree`);
+    assert(fileTreeText.includes(secondaryFile), `missing ${secondaryFile} in the file tree`);
+    await waitForToggleState(selectors.splitLayoutButton, "on");
+    await waitForToggleState(selectors.fullButton, "on");
+
+    await $(selectors.unifiedLayoutButton).click();
+    await waitForToggleState(selectors.unifiedLayoutButton, "on");
+    await $(selectors.compactButton).click();
+    await waitForToggleState(selectors.compactButton, "on");
+    await waitForDiffText([twoSmallFiles.expectedPrimaryRowText, secondaryRowText]);
+    assert.equal(
+      await visibleElementCount(selectors.rowSkeleton),
+      0,
+      "unified compact rows must settle without skeletons",
+    );
+
+    await $(selectors.splitLayoutButton).click();
+    await waitForToggleState(selectors.splitLayoutButton, "on");
+    await $(selectors.fullButton).click();
+    await waitForToggleState(selectors.fullButton, "on");
+    await waitForDiffText([twoSmallFiles.expectedPrimaryRowText, secondaryRowText]);
+
+    await activateNativeRepo(small.repoName);
+    await waitForActiveRepo(small.repoName);
+    await activateNativeRepo(twoSmallFiles.repoName);
+    await waitForActiveRepo(twoSmallFiles.repoName);
+    await waitForDiffText([twoSmallFiles.expectedPrimaryRowText, secondaryRowText]);
+
+    await $(selectors.filter).setValue(twoSmallFiles.primaryFile);
+    await browser.waitUntil(
+      async () => {
+        const text = await selectorText(selectors.fileTree);
+        return text.includes(twoSmallFiles.primaryFile) && !text.includes(secondaryFile);
+      },
+      { timeout: 10_000, interval: 50, timeoutMsg: "file filter never narrowed to the primary file" },
+    );
+    await waitForDiffText([twoSmallFiles.expectedPrimaryRowText], [secondaryRowText]);
+
+    await $(selectors.filter).clearValue();
+    await browser.execute((selector: string) => {
+      const input = document.querySelector(selector);
+      if (input instanceof HTMLInputElement) input.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    }, selectors.filter);
+    await waitForDiffText([twoSmallFiles.expectedPrimaryRowText, secondaryRowText]);
+
+    const foldAll = await $("button=Fold all");
+    await foldAll.click();
+    await $("button=Expand all").waitForDisplayed({ timeout: 10_000 });
+    assert.equal(await visibleElementCount(selectors.rowSkeleton), 0, "collapsed files must not retain row skeletons");
+    await $("button=Expand all").click();
+    await $("button=Fold all").waitForDisplayed({ timeout: 10_000 });
+    await waitForDiffText([twoSmallFiles.expectedPrimaryRowText, secondaryRowText]);
+    assert.equal(await visibleElementCount(selectors.rowSkeleton), 0, "expanded files must settle without skeletons");
+
+    const snapshot = await viewerSnapshot();
+    assert.deepEqual(snapshot.browserErrors, [], "two-file transitions must not produce uncaught browser errors");
   });
 
   it("does not duplicate a native tab for the same recipe source", async () => {

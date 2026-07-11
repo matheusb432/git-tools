@@ -25,7 +25,8 @@ async function waitForLiveTabSettled(sourceValue: string, timeoutMs = 20_000): P
     async () => {
       const snapshot = await viewerSnapshot();
       const tab = snapshot.tabs.find(
-        (candidate) => candidate.kind === "native" && candidate.live === true && candidate.source?.value === sourceValue,
+        (candidate) =>
+          candidate.kind === "native" && candidate.live === true && candidate.source?.value === sourceValue,
       );
       return tab !== undefined && (tab.lifecycle === "ready" || tab.lifecycle === "error");
     },
@@ -45,25 +46,27 @@ function fixture(name: FixtureEntry["name"]): FixtureEntry {
 
 async function waitForRows(): Promise<void> {
   try {
-    await waitForVisibleRows(
-      selectors.rowWindow,
-      selectors.row,
-      1,
-      20_000,
-      "native diff rows never became visible",
-    );
+    await waitForVisibleRows(selectors.rowWindow, selectors.row, 1, 20_000, "native diff rows never became visible");
   } catch (error) {
     const snapshot = await viewerSnapshot().catch(() => null);
-    const domState = await browser.execute((diffRootSelector: string, toolbarSelector: string, fileTreeSelector: string, rowWindowSelector: string) => {
-      const diffRoot = document.querySelector(diffRootSelector);
-      return {
-        bodyText: document.body.textContent?.replace(/\s+/g, " ").trim().slice(0, 400) ?? "",
-        hasToolbar: document.querySelector(toolbarSelector) !== null,
-        hasFileTree: document.querySelector(fileTreeSelector) !== null,
-        hasRowWindow: document.querySelector(rowWindowSelector) !== null,
-        diffRootHtml: diffRoot?.innerHTML.slice(0, 800) ?? "",
-      };
-    }, selectors.diffRoot, selectors.layoutToggle, selectors.fileTree, selectors.rowWindow).catch(() => null);
+    const domState = await browser
+      .execute(
+        (diffRootSelector: string, toolbarSelector: string, fileTreeSelector: string, rowWindowSelector: string) => {
+          const diffRoot = document.querySelector(diffRootSelector);
+          return {
+            bodyText: document.body.textContent?.replace(/\s+/g, " ").trim().slice(0, 400) ?? "",
+            hasToolbar: document.querySelector(toolbarSelector) !== null,
+            hasFileTree: document.querySelector(fileTreeSelector) !== null,
+            hasRowWindow: document.querySelector(rowWindowSelector) !== null,
+            diffRootHtml: diffRoot?.innerHTML.slice(0, 800) ?? "",
+          };
+        },
+        selectors.diffRoot,
+        selectors.layoutToggle,
+        selectors.fileTree,
+        selectors.rowWindow,
+      )
+      .catch(() => null);
     throw new Error(
       `${error instanceof Error ? error.message : String(error)}\nviewer snapshot: ${JSON.stringify(snapshot, null, 2)}\ndom state: ${JSON.stringify(domState, null, 2)}`,
     );
@@ -71,15 +74,37 @@ async function waitForRows(): Promise<void> {
 }
 
 async function activateRepo(repoName: string): Promise<void> {
-  if ((await selectorText(selectors.fileTree)).includes(repoName)) {
-    return;
-  }
-
-  await activateNativeRepo(repoName);
-  await browser.waitUntil(async () => (await selectorText(selectors.fileTree)).includes(repoName), {
+  if ((await viewerSnapshot()).activeTab?.repoName !== repoName) await activateNativeRepo(repoName);
+  await browser.waitUntil(async () => (await viewerSnapshot()).activeTab?.repoName === repoName, {
     timeout: 10_000,
-    interval: 10,
+    interval: 50,
     timeoutMsg: `repo ${repoName} did not become active after switching tabs`,
+  });
+  await waitForRows();
+}
+
+async function waitForToggleState(selector: string, state: "on" | "off"): Promise<void> {
+  await browser.waitUntil(async () => (await $(selector).getAttribute("data-state")) === state, {
+    timeout: 10_000,
+    interval: 50,
+    timeoutMsg: `${selector} never reached toggle state ${state}`,
+  });
+}
+
+async function normalizeViewerSettings(): Promise<void> {
+  if ((await $(selectors.unifiedLayoutButton).getAttribute("data-state")) !== "on") {
+    await $(selectors.unifiedLayoutButton).click();
+  }
+  await waitForToggleState(selectors.unifiedLayoutButton, "on");
+  if ((await $(selectors.compactButton).getAttribute("data-state")) !== "on") {
+    await $(selectors.compactButton).click();
+  }
+  await waitForToggleState(selectors.compactButton, "on");
+  await waitForRows();
+  await browser.waitUntil(async () => (await $$(selectors.rowSkeleton)).length === 0, {
+    timeout: 10_000,
+    interval: 50,
+    timeoutMsg: "row skeletons did not settle after normalizing viewer settings",
   });
 }
 
@@ -94,6 +119,17 @@ describe("native diff perf harness", () => {
     // the focus-steal that rides it) before the timed interactions below.
     await waitForLiveTabSettled(manifest.liveViews.healthy.sourceValue);
 
+    await openNativeRecipe(small.recipe, "perf-settings-warmup");
+    await waitForRows();
+    await normalizeViewerSettings();
+    const activeTab = await $(`${selectors.tabs}[aria-selected="true"]`);
+    await activeTab.$("button").click();
+    await browser.waitUntil(async () => !(await viewerSnapshot()).tabs.some((tab) => tab.repoName === small.repoName), {
+      timeout: 10_000,
+      interval: 50,
+      timeoutMsg: "settings warmup tab did not close",
+    });
+
     const openMetrics = await openNativeRecipeMeasured(small.recipe, "perf-small");
     await waitForRows();
     const firstRowsAt = await browserNow();
@@ -105,20 +141,32 @@ describe("native diff perf harness", () => {
     assert(shellVisibleMs < 300, `shell visible gate failed: ${shellVisibleMs.toFixed(2)}ms`);
     assert(computeToRowsMs < 200, `compute-to-first-rows gate failed: ${computeToRowsMs.toFixed(2)}ms`);
 
+    let rowPageQueryPeak = 0;
+    const sampleRowPageQueryPeak = async (): Promise<void> => {
+      rowPageQueryPeak = Math.max(rowPageQueryPeak, (await viewerSnapshot()).queryCache.rowPages);
+    };
+
     await openNativeRecipe(large.recipe, "perf-large");
-    await browser.waitUntil(async () => (await selectorText(selectors.fileTree)).includes(large.repoName), {
+    await browser.waitUntil(async () => (await viewerSnapshot()).activeTab?.repoName === large.repoName, {
       timeout: 20_000,
-      interval: 10,
+      interval: 50,
       timeoutMsg: `large fixture ${large.repoName} never became active`,
     });
     await waitForRows();
+    await normalizeViewerSettings();
+    await sampleRowPageQueryPeak();
 
     const liveRows = await rowDomCount();
     recordDomCount({ name: "large-file-live-row-nodes", count: liveRows, limit: 500 });
     assert(liveRows <= 500, `expected <= 500 live row nodes, got ${liveRows}`);
 
-    const scrollMetrics = await measureSustainedScroll(selectors.rowWindow, 1_500);
-    recordTiming({ name: "large-file-scroll-effective-fps", value: scrollMetrics.effectiveFps, unit: "fps", minimum: 60 });
+    const scrollMetrics = await measureSustainedScroll(selectors.fileList, 1_500);
+    recordTiming({
+      name: "large-file-scroll-effective-fps",
+      value: scrollMetrics.effectiveFps,
+      unit: "fps",
+      minimum: 60,
+    });
     recordTiming({ name: "large-file-scroll-longest-frame-ms", ms: scrollMetrics.longestFrameMs, gateMs: 50 });
     assert(
       scrollMetrics.effectiveFps >= 60,
@@ -128,7 +176,9 @@ describe("native diff perf harness", () => {
       scrollMetrics.longestFrameMs <= 50,
       `large-file main-thread block gate failed: ${scrollMetrics.longestFrameMs.toFixed(2)}ms`,
     );
+    await sampleRowPageQueryPeak();
 
+    await normalizeViewerSettings();
     const layoutSignature = await rowWindowSignature();
     const splitToggleMs = await measureClickUntilRowWindowChanges(
       selectors.splitLayoutButton,
@@ -140,9 +190,11 @@ describe("native diff perf harness", () => {
     );
     recordTiming({ name: "toggle-split-ms", ms: splitToggleMs, gateMs: 150 });
     assert(splitToggleMs < 150, `split toggle gate failed: ${splitToggleMs.toFixed(2)}ms`);
+    await sampleRowPageQueryPeak();
 
     await activateRepo(small.repoName);
     await waitForRows();
+    await normalizeViewerSettings();
     const densitySignature = await rowWindowSignature();
     const fullToggleMs = await measureClickUntilRowWindowChanges(
       selectors.fullButton,
@@ -154,6 +206,7 @@ describe("native diff perf harness", () => {
     );
     recordTiming({ name: "toggle-full-ms", ms: fullToggleMs, gateMs: 150 });
     assert(fullToggleMs < 150, `full toggle gate failed: ${fullToggleMs.toFixed(2)}ms`);
+    await sampleRowPageQueryPeak();
 
     const rowsBeforeRefresh = await rowDomCount();
     assert(rowsBeforeRefresh > 0, "expected stale rows to exist before refreshing");
@@ -163,19 +216,29 @@ describe("native diff perf harness", () => {
 
     await waitForRows();
 
+    await normalizeViewerSettings();
     await openNativeRecipe(many.recipe, "perf-many");
-    await browser.waitUntil(async () => (await selectorText(selectors.fileTree)).includes(many.repoName), {
+    await browser.waitUntil(async () => (await viewerSnapshot()).activeTab?.repoName === many.repoName, {
       timeout: 20_000,
-      interval: 10,
+      interval: 50,
       timeoutMsg: `many-files fixture ${many.repoName} never became active`,
     });
     await waitForRows();
-    assert((await selectorText(selectors.fileTree)).includes(many.primaryFile), "many-files fixture did not render its file tree");
+    await normalizeViewerSettings();
+    await sampleRowPageQueryPeak();
+    assert(
+      (await selectorText(selectors.fileTree)).includes(many.primaryFile),
+      "many-files fixture did not render its file tree",
+    );
 
     const manyRows = await rowDomCount();
     recordDomCount({ name: "many-files-live-row-nodes", count: manyRows, limit: 500 });
     assert(manyRows <= 500, `expected <= 500 live row nodes after many-files fixture, got ${manyRows}`);
 
+    recordDomCount({ name: "row-page-query-peak", count: rowPageQueryPeak, limit: 256 });
+    assert(rowPageQueryPeak <= 256, `expected <= 256 cached row-page queries, got ${rowPageQueryPeak}`);
+
+    await normalizeViewerSettings();
     const currentFileTreeText = await selectorText(selectors.fileTree);
     const tabSwitchMs = await measureClickFirstInactiveTabUntilTextChanges(
       selectors.tabs,

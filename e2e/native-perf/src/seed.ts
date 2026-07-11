@@ -4,7 +4,7 @@
 // Node's ESM loader, which rejects the `bun:` URL scheme. Isolating the SQLite import here keeps
 // it out of the spec's module graph. Run right after `fixtures` in the package `fixtures` script.
 import { loadFixtureManifest } from "./fixtures";
-import { seedLiveViews } from "./db";
+import { seedLiveViews, seedViewerSettings } from "./db";
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
@@ -29,6 +29,7 @@ function main(): void {
       displayName: manifest.liveViews.broken.displayName,
     },
   ]);
+  seedViewerSettings(dataDir, { "diff.layout": "split", "diff.full": "full" });
 }
 
 if (import.meta.main) {

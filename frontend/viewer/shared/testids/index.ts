@@ -25,6 +25,7 @@ export const TEST_IDS = {
     filePanelMount: "diff-view.file-panel-mount",
     filePanel: "diff-view.file-panel",
     rowWindow: "diff-view.row-window",
+    rowSkeleton: "diff-view.row-skeleton",
     row: "diff-view.row",
     brokenSource: "diff-view.broken-source",
   },

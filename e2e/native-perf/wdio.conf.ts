@@ -121,7 +121,7 @@ export const config = {
   host: "127.0.0.1",
   port: driverPort,
   logLevel: "warn",
-  specs: ["./specs/native-diff.perf.ts", "./specs/native-diff.functional.ts"],
+  specs: ["./specs/native-diff.functional.ts", "./specs/native-diff.perf.ts"],
   maxInstances: 1,
   capabilities: [
     {

@@ -16,7 +16,7 @@
         transition:fly={{ y: 8, duration: 150 }}
         data-testid={TEST_IDS.toast.item}
         role="status"
-        class="pointer-events-auto flex items-center gap-3 rounded-lg border border-border bg-card px-3.5 py-2 text-sm text-card-foreground shadow-lg"
+        class="bg-card text-card-foreground pointer-events-auto flex items-center gap-3 rounded-lg border border-border px-3.5 py-2 text-sm shadow-lg"
       >
         <span>{toast.message}</span>
         <button
