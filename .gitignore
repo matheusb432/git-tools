@@ -37,6 +37,9 @@ testResults.xml
 
 /secrets/
 
+# Repo-local editing link to the global git-tools config.
+/config/local/config.toml
+
 # Canonical secret-bearing files — defense-in-depth; never commit (any depth).
 *.env
 !*.env.example

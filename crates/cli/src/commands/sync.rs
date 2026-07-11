@@ -53,39 +53,6 @@ pub enum LocalCommitPlan {
     Ready(LocalCommitTarget),
 }
 
-/// Whether the push needs an interactive confirmation, given the `--yes` flag and TTY state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Gate {
-    /// `--yes` was passed: push without prompting.
-    Proceed,
-    /// Interactive shell: prompt before pushing.
-    Confirm,
-    /// Non-interactive shell without `--yes`: refuse rather than auto-push.
-    RefuseNonInteractive,
-}
-
-/// A recognized answer to the interactive confirmation prompt. Unrecognized
-/// input is the error half of [`AnswerResult`], not a variant here — so callers
-/// can only branch on real yes/no, never on an "invalid" pseudo-answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Answer {
-    /// Empty/whitespace (the default) or an explicit `y`/`yes`.
-    Yes,
-    /// An explicit `n`/`no`.
-    No,
-}
-
-/// Why a confirmation reply could not be read as a yes/no answer.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum AnswerErr {
-    /// The reply was neither yes nor no; holds the offending input (trimmed).
-    #[error("unrecognized answer {0:?} (expected y/yes or n/no)")]
-    Invalid(String),
-}
-
-/// The result of parsing a confirmation reply: a yes/no [`Answer`] or [`AnswerErr`].
-pub type AnswerResult = Result<Answer, AnswerErr>;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     Refused,
@@ -106,29 +73,6 @@ impl SyncResult {
             status,
             detail: detail.into(),
         }
-    }
-}
-
-pub fn gate(yes: bool, interactive: bool) -> Gate {
-    if yes {
-        Gate::Proceed
-    } else if interactive {
-        Gate::Confirm
-    } else {
-        Gate::RefuseNonInteractive
-    }
-}
-
-/// Parses a confirmation reply. Empty/whitespace defaults to yes; `y`/`yes` is
-/// yes and `n`/`no` is no (case-insensitive, trimmed); anything else is an
-/// [`AnswerErr::Invalid`] so a typo or unexpected word never silently proceeds
-/// or aborts.
-pub fn parse_answer(input: &str) -> AnswerResult {
-    let trimmed = input.trim();
-    match trimmed.to_ascii_lowercase().as_str() {
-        "" | "y" | "yes" => Ok(Answer::Yes),
-        "n" | "no" => Ok(Answer::No),
-        _ => Err(AnswerErr::Invalid(trimmed.to_string())),
     }
 }
 
@@ -572,61 +516,6 @@ mod tests {
                 ahead: 0,
             },
         }
-    }
-
-    // --- gate ---------------------------------------------------------------
-
-    #[test]
-    fn gate_with_yes_proceeds_regardless_of_tty() {
-        assert_eq!(gate(true, false), Gate::Proceed);
-        assert_eq!(gate(true, true), Gate::Proceed);
-    }
-
-    #[test]
-    fn gate_interactive_without_yes_asks_to_confirm() {
-        assert_eq!(gate(false, true), Gate::Confirm);
-    }
-
-    #[test]
-    fn gate_noninteractive_without_yes_refuses() {
-        assert_eq!(gate(false, false), Gate::RefuseNonInteractive);
-    }
-
-    // --- parse_answer -------------------------------------------------------
-
-    #[test]
-    fn parse_answer_defaults_empty_and_whitespace_to_yes() {
-        assert_eq!(parse_answer(""), Ok(Answer::Yes));
-        assert_eq!(parse_answer("\n"), Ok(Answer::Yes));
-        assert_eq!(parse_answer("   \t "), Ok(Answer::Yes));
-    }
-
-    #[test]
-    fn parse_answer_accepts_explicit_yes_and_no_case_insensitively() {
-        for yes in ["y", "Y", "yes", "YES", " Yes "] {
-            assert_eq!(parse_answer(yes), Ok(Answer::Yes), "{yes:?}");
-        }
-        for no in ["n", "N", "no", "NO", " No "] {
-            assert_eq!(parse_answer(no), Ok(Answer::No), "{no:?}");
-        }
-    }
-
-    #[test]
-    fn parse_answer_rejects_anything_else_as_invalid() {
-        for other in ["please don't", "nope", "yse", "maybe", "ok", "1"] {
-            assert_eq!(
-                parse_answer(other),
-                Err(AnswerErr::Invalid(other.to_string())),
-                "{other:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn invalid_answer_error_names_the_offending_input() {
-        let message = AnswerErr::Invalid("maybe".to_string()).to_string();
-        assert!(message.contains("maybe"), "{message}");
-        assert!(message.contains("y/yes or n/no"), "{message}");
     }
 
     // --- confirmation -------------------------------------------------------

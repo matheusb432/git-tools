@@ -721,8 +721,10 @@ fn push_without_message_pushes_existing_commits() {
     repo.commit("a.txt", "base\n", "chore: base");
     repo.add_upstream();
     repo.commit("a.txt", "base\nlocal\n", "feat: already committed");
+    let config = repo.root.join("missing-config.toml");
 
     repo.run(&["push", "--yes"])
+        .env("GIT_TOOLS_CONFIG", config)
         .assert()
         .success()
         .stdout(contains("review before pushing"))

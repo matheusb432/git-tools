@@ -1,0 +1,6 @@
+# dark | light | hearth
+theme = "dark"
+
+[push]
+# Plain current-repo push only; defaults to true when omitted.
+confirm = true

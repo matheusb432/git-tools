@@ -11,6 +11,7 @@ use crate::{
         managed::{ManagedExit, ManagedOptions, ManagedRun},
         squash_local::{SquashResult, Status, invoke_squash_local},
     },
+    confirm::{Confirmation, DefaultAnswer, RealConfirm},
 };
 
 pub mod cli;
@@ -19,6 +20,8 @@ pub mod commands;
 pub mod config;
 pub mod preprocess;
 pub mod viewer;
+
+mod confirm;
 
 pub(crate) mod model {
     pub use domain::diffs::Commit;
@@ -367,23 +370,20 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
 
     println!("{}", sync::confirmation("push", &target, message));
 
-    match sync::gate(yes, is_interactive()) {
-        sync::Gate::RefuseNonInteractive => {
+    match confirm::request(&RealConfirm, yes, "Proceed?", DefaultAnswer::Yes) {
+        Confirmation::RefuseNonInteractive => {
             eprintln!("push: non-interactive shell; pass --yes to confirm the push");
             return ExitCode::Usage;
         }
-        sync::Gate::Confirm => match prompt_confirmation() {
-            Ok(sync::Answer::Yes) => {}
-            Ok(sync::Answer::No) => {
-                eprintln!("push: aborted — nothing committed or pushed");
-                return ExitCode::Ok;
-            }
-            Err(err) => {
-                eprintln!("push: {err} — nothing committed or pushed");
-                return ExitCode::Usage;
-            }
-        },
-        sync::Gate::Proceed => {}
+        Confirmation::Declined => {
+            eprintln!("push: aborted — nothing committed or pushed");
+            return ExitCode::Ok;
+        }
+        Confirmation::Invalid(err) => {
+            eprintln!("push: {err} — nothing committed or pushed");
+            return ExitCode::Usage;
+        }
+        Confirmation::Proceed => {}
     }
 
     let result = sync::apply(&runner, &target, message);
@@ -416,23 +416,25 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
         println!("{}", sync::push_confirmation(&target));
     }
 
-    match sync::gate(yes || !confirm, is_interactive()) {
-        sync::Gate::RefuseNonInteractive => {
+    match confirm::request(
+        &RealConfirm,
+        yes || !confirm,
+        "Proceed?",
+        DefaultAnswer::Yes,
+    ) {
+        Confirmation::RefuseNonInteractive => {
             eprintln!("push: non-interactive shell; pass --yes to confirm the push");
             return ExitCode::Usage;
         }
-        sync::Gate::Confirm => match prompt_confirmation() {
-            Ok(sync::Answer::Yes) => {}
-            Ok(sync::Answer::No) => {
-                eprintln!("push: aborted — nothing pushed");
-                return ExitCode::Ok;
-            }
-            Err(err) => {
-                eprintln!("push: {err} — nothing pushed");
-                return ExitCode::Usage;
-            }
-        },
-        sync::Gate::Proceed => {}
+        Confirmation::Declined => {
+            eprintln!("push: aborted — nothing pushed");
+            return ExitCode::Ok;
+        }
+        Confirmation::Invalid(err) => {
+            eprintln!("push: {err} — nothing pushed");
+            return ExitCode::Usage;
+        }
+        Confirmation::Proceed => {}
     }
 
     let result = sync::push_existing(&runner, &target);
@@ -470,23 +472,20 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
 
     println!("{}", sync::commit_confirmation(&target, message));
 
-    match sync::gate(yes, is_interactive()) {
-        sync::Gate::RefuseNonInteractive => {
+    match confirm::request(&RealConfirm, yes, "Proceed?", DefaultAnswer::Yes) {
+        Confirmation::RefuseNonInteractive => {
             eprintln!("commit: non-interactive shell; pass --yes to confirm the commit");
             return ExitCode::Usage;
         }
-        sync::Gate::Confirm => match prompt_confirmation() {
-            Ok(sync::Answer::Yes) => {}
-            Ok(sync::Answer::No) => {
-                eprintln!("commit: aborted — nothing committed");
-                return ExitCode::Usage;
-            }
-            Err(err) => {
-                eprintln!("commit: {err} — nothing committed");
-                return ExitCode::Usage;
-            }
-        },
-        sync::Gate::Proceed => {}
+        Confirmation::Declined => {
+            eprintln!("commit: aborted — nothing committed");
+            return ExitCode::Usage;
+        }
+        Confirmation::Invalid(err) => {
+            eprintln!("commit: {err} — nothing committed");
+            return ExitCode::Usage;
+        }
+        Confirmation::Proceed => {}
     }
 
     let result = sync::commit_local(&runner, &target, message);
@@ -508,7 +507,7 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
 /// push. Discovery and the resolved destinations are read-only and local — no fetch. The
 /// interactive prompt is the only side effect kept out of [`commands::up_subrepos`].
 fn run_push_subrepos(yes: bool) -> ExitCode {
-    use crate::commands::{sync, up_subrepos};
+    use crate::commands::up_subrepos;
 
     let runner = StdGitRunner;
     // Canonicalize first (like `diff -r`) so repo labels read off real path segments
@@ -529,23 +528,20 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
 
     println!("{}", up_subrepos::confirmation(&root, &targets));
 
-    match sync::gate(yes, is_interactive()) {
-        sync::Gate::RefuseNonInteractive => {
+    match confirm::request(&RealConfirm, yes, "Proceed?", DefaultAnswer::Yes) {
+        Confirmation::RefuseNonInteractive => {
             eprintln!("push -r: non-interactive shell; pass --yes to confirm the push");
             return ExitCode::Usage;
         }
-        sync::Gate::Confirm => match prompt_confirmation() {
-            Ok(sync::Answer::Yes) => {}
-            Ok(sync::Answer::No) => {
-                println!("push -r: aborted — nothing pushed");
-                return ExitCode::Ok;
-            }
-            Err(err) => {
-                eprintln!("push -r: {err} — nothing pushed");
-                return ExitCode::Usage;
-            }
-        },
-        sync::Gate::Proceed => {}
+        Confirmation::Declined => {
+            println!("push -r: aborted — nothing pushed");
+            return ExitCode::Ok;
+        }
+        Confirmation::Invalid(err) => {
+            eprintln!("push -r: {err} — nothing pushed");
+            return ExitCode::Usage;
+        }
+        Confirmation::Proceed => {}
     }
 
     let result = up_subrepos::apply(&runner, &targets);
@@ -636,7 +632,7 @@ fn finish_sw(result: &crate::commands::sw::SwResult) -> ExitCode {
 /// single-repo path plans read-only, shows the will-delete block, gates on `-y`/TTY like
 /// `push "<message>"`, then deletes. All git work is local; refusals → stderr, logs → stdout.
 fn run_prune(args: PruneArgs) -> ExitCode {
-    use crate::commands::{prune, sync};
+    use crate::commands::prune;
 
     let onto = args.onto.as_deref().unwrap_or("main");
 
@@ -648,7 +644,7 @@ fn run_prune(args: PruneArgs) -> ExitCode {
             json: args.json,
             color: false,
             message_for_all: None,
-            interactive: is_interactive(),
+            interactive: confirm::stdin_is_terminal(),
         };
         return managed_exit(&commands::managed::run_prune_all(onto, &options));
     }
@@ -676,23 +672,20 @@ fn run_prune(args: PruneArgs) -> ExitCode {
         println!("  {}  {}", branch.name, branch.sha);
     }
 
-    match sync::gate(args.yes, is_interactive()) {
-        sync::Gate::RefuseNonInteractive => {
+    match confirm::request(&RealConfirm, args.yes, "Proceed?", DefaultAnswer::Yes) {
+        Confirmation::RefuseNonInteractive => {
             eprintln!("prune: non-interactive shell; pass --yes to confirm the deletion");
             return ExitCode::Usage;
         }
-        sync::Gate::Confirm => match prompt_confirmation() {
-            Ok(sync::Answer::Yes) => {}
-            Ok(sync::Answer::No) => {
-                println!("prune: aborted — nothing deleted");
-                return ExitCode::Ok;
-            }
-            Err(err) => {
-                eprintln!("prune: {err} — nothing deleted");
-                return ExitCode::Usage;
-            }
-        },
-        sync::Gate::Proceed => {}
+        Confirmation::Declined => {
+            println!("prune: aborted — nothing deleted");
+            return ExitCode::Ok;
+        }
+        Confirmation::Invalid(err) => {
+            eprintln!("prune: {err} — nothing deleted");
+            return ExitCode::Usage;
+        }
+        Confirmation::Proceed => {}
     }
 
     let result = prune::apply(&runner, std::path::Path::new(&top), &branches);
@@ -762,24 +755,6 @@ fn run_tag(command: Option<TagCommand>, commits: bool) -> ExitCode {
     }
 }
 
-/// Prompts on stdout and reads an answer from stdin. Defaults to yes: an empty
-/// answer (just Enter) proceeds, `y`/`yes` proceeds, `n`/`no` aborts, and any
-/// other reply is an [`sync::AnswerErr`] — never a silent yes or no. A read
-/// failure is treated as a refusal (`Answer::No`) so unreadable stdin never pushes.
-fn prompt_confirmation() -> crate::commands::sync::AnswerResult {
-    use std::io::Write;
-
-    use crate::commands::sync::{Answer, parse_answer};
-
-    print!("Proceed? [Y/n] ");
-    let _ = std::io::stdout().flush();
-    let mut input = String::new();
-    if std::io::stdin().read_line(&mut input).is_err() {
-        return Ok(Answer::No);
-    }
-    parse_answer(&input)
-}
-
 /// Dispatches `status` by scope: `--all` ⇒ managed manifest, `-r` ⇒ recursive scan of
 /// the current directory, default ⇒ the current repo alone.
 fn run_status(args: StatusArgs) -> ManagedRun<commands::managed::StatusResult> {
@@ -826,7 +801,7 @@ fn managed_options(args: ManagedArgs, message_for_all: Option<String>) -> Manage
         json: args.json,
         color: false,
         message_for_all,
-        interactive: is_interactive(),
+        interactive: confirm::stdin_is_terminal(),
     }
 }
 
@@ -842,10 +817,6 @@ fn managed_exit<T>(run: &ManagedRun<T>) -> ExitCode {
         ManagedExit::Warn => ExitCode::Internal,
         ManagedExit::Fail | ManagedExit::Usage => ExitCode::Usage,
     }
-}
-
-fn is_interactive() -> bool {
-    std::io::IsTerminal::is_terminal(&std::io::stdin())
 }
 
 fn stdout_is_terminal() -> bool {
