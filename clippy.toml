@@ -7,5 +7,5 @@
 avoid-breaking-exported-api = false
 
 disallowed-methods = [
-  { path = "cqrsy_core::Handler::handle", reason = "implementation-only seam — send through a cqrsy::Sender (or cqrsy::send/send_now for bespoke wiring and tests)" },
+  { path = "cqrsy_core::Handler::handle", reason = "implementation-only seam — send through cqrsy::Sender::send or cqrsy::Sender::send_now" },
 ]

@@ -11,15 +11,6 @@ use std::{
     time::Duration,
 };
 
-use application::{
-    diffs::{
-        render_diff::RenderDiffHandler, render_diff_all::RenderDiffAllHandler,
-        render_diff_subrepos::RenderDiffSubreposHandler, render_merge_diff::RenderMergeDiffHandler,
-        render_squash_preview::RenderSquashPreviewHandler,
-    },
-    live_views::save::SaveLiveViewHandler,
-    managed::{pull_all::PullAllHandler, push_all::PushAllHandler},
-};
 use infra::{
     app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
     diff_source::GitDiffSource, html_renderer::MaudRenderer,
@@ -33,7 +24,7 @@ use tokio::{
 
 use crate::{
     lifecycle::{ExeIdentity, PortFile},
-    state::{AppState, DaemonMediator, Shared, now_ms},
+    state::{AppState, DaemonDependencies, DaemonMediator, Shared, now_ms},
 };
 
 /// Boot and serve the daemon until a shutdown signal, `POST /shutdown`, or the
@@ -82,53 +73,18 @@ pub async fn run() -> anyhow::Result<()> {
     let ledger_refresh_secs: u64 = bootstrap::parse_env_or("GIT_TOOLS_LEDGER_REFRESH_SECS", 0)?;
     spawn_ledger_refresh(ledger, ledger_refresh_secs);
 
-    let mediator = DaemonMediator {
-        render_diff: RenderDiffHandler {
-            source: GitDiffSource,
-            store: StoreArtifacts,
-            renderer: MaudRenderer,
-            clock: SystemClock,
-        },
-        render_merge_diff: RenderMergeDiffHandler {
-            source: GitDiffSource,
-            store: StoreArtifacts,
-            renderer: MaudRenderer,
-            clock: SystemClock,
-        },
-        render_squash_preview: RenderSquashPreviewHandler {
-            source: GitDiffSource,
-            store: StoreArtifacts,
-            renderer: MaudRenderer,
-            clock: SystemClock,
-        },
-        render_diff_subrepos: RenderDiffSubreposHandler {
-            source: GitDiffSource,
-            store: StoreArtifacts,
-            renderer: MaudRenderer,
-            clock: SystemClock,
-        },
-        render_diff_all: RenderDiffAllHandler {
-            source: GitDiffSource,
-            store: StoreArtifacts,
-            renderer: MaudRenderer,
-            clock: SystemClock,
-        },
-        push_all: PushAllHandler {
-            remote: TokioRemoteSync,
-            manifest: TokioManagedManifest,
-            ledger,
-            clock: SystemClock,
-        },
-        pull_all: PullAllHandler {
-            remote: TokioRemoteSync,
-            manifest: TokioManagedManifest,
-        },
-        save_live_view: SaveLiveViewHandler {
-            probe: GitRepoProbe,
-            store: SqliteAppState,
-            clock: SystemClock,
-        },
+    let dependencies = DaemonDependencies {
+        source: GitDiffSource,
+        artifacts: StoreArtifacts,
+        renderer: MaudRenderer,
+        clock: SystemClock,
+        remote: TokioRemoteSync,
+        manifest: TokioManagedManifest,
+        ledger,
+        probe: GitRepoProbe,
+        app_state: SqliteAppState,
     };
+    let mediator = DaemonMediator::new(&dependencies);
     let app = state::router(AppState { mediator, shared });
 
     tracing::info!(port = bound, "gtl-daemon listening on 127.0.0.1");

@@ -5,13 +5,6 @@
 use std::sync::{Arc, atomic::AtomicU64};
 
 use application::{
-    diffs::{
-        render_diff::RenderDiffHandler, render_diff_all::RenderDiffAllHandler,
-        render_diff_subrepos::RenderDiffSubreposHandler, render_merge_diff::RenderMergeDiffHandler,
-        render_squash_preview::RenderSquashPreviewHandler,
-    },
-    live_views::save::SaveLiveViewHandler,
-    managed::{pull_all::PullAllHandler, push_all::PushAllHandler},
     ports::RepoProbeResult,
     testing::{
         FakeDiffSource, FakeManagedManifest, FakePushLedger, FakeRemoteSync, FakeRepoProbe,
@@ -25,7 +18,7 @@ use axum::{
 };
 use daemon::{
     lifecycle::ExeIdentity,
-    state::{AppState, DaemonMediator, Shared, now_ms},
+    state::{AppState, DaemonDependencies, DaemonMediator, Shared, now_ms},
 };
 use http_body_util::BodyExt as _;
 use tokio::sync::watch;
@@ -61,59 +54,21 @@ fn app_with_probe(source: FakeDiffSource, probe: FakeRepoProbe) -> Fakes {
         shutdown_tx,
         last_activity_ms: AtomicU64::new(now_ms()),
     });
-    let mediator = DaemonMediator {
-        render_diff: RenderDiffHandler {
-            source: source.clone(),
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
+    let dependencies = DaemonDependencies {
+        source,
+        artifacts: InMemoryArtifactStore::default(),
+        renderer: StubRenderer,
+        clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        remote: FakeRemoteSync::default(),
+        manifest: FakeManagedManifest {
+            repos: Vec::new(),
+            error: None,
         },
-        render_merge_diff: RenderMergeDiffHandler {
-            source: source.clone(),
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        render_squash_preview: RenderSquashPreviewHandler {
-            source: source.clone(),
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        render_diff_subrepos: RenderDiffSubreposHandler {
-            source: source.clone(),
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        render_diff_all: RenderDiffAllHandler {
-            source,
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        push_all: PushAllHandler {
-            remote: FakeRemoteSync::default(),
-            manifest: FakeManagedManifest {
-                repos: Vec::new(),
-                error: None,
-            },
-            ledger: FakePushLedger::default(),
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        pull_all: PullAllHandler {
-            remote: FakeRemoteSync::default(),
-            manifest: FakeManagedManifest {
-                repos: Vec::new(),
-                error: None,
-            },
-        },
-        save_live_view: SaveLiveViewHandler {
-            probe,
-            store: InMemoryAppStateStore::default(),
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
+        ledger: FakePushLedger::default(),
+        probe,
+        app_state: InMemoryAppStateStore::default(),
     };
+    let mediator = DaemonMediator::new(&dependencies);
     let router = daemon::state::router(AppState {
         mediator,
         shared: shared.clone(),
@@ -133,51 +88,18 @@ fn app_with_managed(remote: FakeRemoteSync, manifest: FakeManagedManifest) -> Fa
         shutdown_tx,
         last_activity_ms: AtomicU64::new(now_ms()),
     });
-    let source = FakeDiffSource::default();
-    let mediator = DaemonMediator {
-        render_diff: RenderDiffHandler {
-            source: source.clone(),
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        render_merge_diff: RenderMergeDiffHandler {
-            source: source.clone(),
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        render_squash_preview: RenderSquashPreviewHandler {
-            source: source.clone(),
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        render_diff_subrepos: RenderDiffSubreposHandler {
-            source: source.clone(),
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        render_diff_all: RenderDiffAllHandler {
-            source,
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        push_all: PushAllHandler {
-            remote: remote.clone(),
-            manifest: manifest.clone(),
-            ledger: FakePushLedger::default(),
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
-        pull_all: PullAllHandler { remote, manifest },
-        save_live_view: SaveLiveViewHandler {
-            probe: FakeRepoProbe::default(),
-            store: InMemoryAppStateStore::default(),
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        },
+    let dependencies = DaemonDependencies {
+        source: FakeDiffSource::default(),
+        artifacts: InMemoryArtifactStore::default(),
+        renderer: StubRenderer,
+        clock: FixedClock("2026-07-02T00:00:00Z".into()),
+        remote,
+        manifest,
+        ledger: FakePushLedger::default(),
+        probe: FakeRepoProbe::default(),
+        app_state: InMemoryAppStateStore::default(),
     };
+    let mediator = DaemonMediator::new(&dependencies);
     let router = daemon::state::router(AppState {
         mediator,
         shared: shared.clone(),

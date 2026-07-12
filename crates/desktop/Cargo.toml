@@ -25,7 +25,7 @@ url = "2.5.8"
 
 [dependencies]
 application = { path = "../application" }
-cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.3.0", features = [
+cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.7.0", features = [
   "derive",
 ] }
 domain = { path = "../domain" }

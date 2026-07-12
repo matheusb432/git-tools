@@ -50,43 +50,67 @@ use tauri::{
 
 use crate::session::{PendingRecipes, PendingRecipesError};
 
-/// Desktop's in-process dispatch facade — one handler field per operation.
-/// `#[derive(cqrsy::Mediator)]` implements `Sender<R>` per `#[handles(R)]`
-/// field, exactly like `DaemonMediator` in `crates/daemon`. Structured diff
-/// Recipe computation is dispatched through the same application handlers as
-/// daemon rendering; the process root only wires their ports.
-#[derive(Clone, cqrsy::Mediator)]
-pub(crate) struct DesktopMediator<C, P, AS, S>
-where
-    C: Clock + Clone + Send + Sync + 'static,
-    P: RepoProbe + Clone + Send + Sync + 'static,
-    AS: AppStateStore + Clone + Send + Sync + 'static,
-    S: DiffSource + Clone + Send + Sync + 'static,
-{
-    #[handles(ComputeDiff)]
-    pub compute_diff: ComputeDiffHandler<S>,
-    #[handles(ComputeMergeDiff)]
-    pub compute_merge_diff: ComputeMergeDiffHandler<S>,
-    #[handles(ComputeSquashPreview)]
-    pub compute_squash_preview: ComputeSquashPreviewHandler<S>,
-    #[handles(ListLiveViews)]
-    pub list_live_views: ListLiveViewsHandler<AS>,
-    #[handles(ListRecentRenders)]
-    pub list_recent_renders: ListRecentRendersHandler<AS>,
-    #[handles(GetRecentRender)]
-    pub get_recent_render: GetRecentRenderHandler<AS>,
-    #[handles(SaveLiveView)]
-    pub save_live_view: SaveLiveViewHandler<P, AS, C>,
-    #[handles(ProbeSource)]
-    pub probe_source: ProbeSourceHandler<P>,
-    #[handles(RemoveLiveView)]
-    pub remove_live_view: RemoveLiveViewHandler<AS>,
-    #[handles(GetSetting)]
-    pub get_setting: GetSettingHandler<AS>,
-    #[handles(SetSetting)]
-    pub set_setting: SetSettingHandler<AS>,
-    #[handles(RecordRender)]
-    pub record_render: RecordRenderHandler<AS, C>,
+/// Owns the operation dependencies assembled by the desktop process root.
+pub(crate) struct DesktopDependencies<C, P, AS, S> {
+    clock: C,
+    probe: P,
+    app_state: AS,
+    source: S,
+}
+
+cqrsy::mediator! {
+    /// Dispatches every viewer operation through its generated handler.
+    #[derive(Clone)]
+    pub(crate) struct DesktopMediator<C, P, AS, S> from DesktopDependencies<C, P, AS, S>
+    where
+        C: Clock + cqrsy::Handle,
+        P: RepoProbe + cqrsy::Handle,
+        AS: AppStateStore + cqrsy::Handle,
+        S: DiffSource + cqrsy::Handle,
+    {
+        state {}
+        handlers {
+            ComputeDiff => compute_diff: ComputeDiffHandler<S> = |state| ComputeDiffHandler {
+                source: state.source.clone(),
+            },
+            ComputeMergeDiff => compute_merge_diff: ComputeMergeDiffHandler<S> = |state| ComputeMergeDiffHandler {
+                source: state.source.clone(),
+            },
+            ComputeSquashPreview => compute_squash_preview: ComputeSquashPreviewHandler<S> = |state| ComputeSquashPreviewHandler {
+                source: state.source.clone(),
+            },
+            ListLiveViews => list_live_views: ListLiveViewsHandler<AS> = |state| ListLiveViewsHandler {
+                store: state.app_state.clone(),
+            },
+            ListRecentRenders => list_recent_renders: ListRecentRendersHandler<AS> = |state| ListRecentRendersHandler {
+                store: state.app_state.clone(),
+            },
+            GetRecentRender => get_recent_render: GetRecentRenderHandler<AS> = |state| GetRecentRenderHandler {
+                store: state.app_state.clone(),
+            },
+            SaveLiveView => save_live_view: SaveLiveViewHandler<P, AS, C> = |state| SaveLiveViewHandler {
+                probe: state.probe.clone(),
+                store: state.app_state.clone(),
+                clock: state.clock.clone(),
+            },
+            ProbeSource => probe_source: ProbeSourceHandler<P> = |state| ProbeSourceHandler {
+                probe: state.probe.clone(),
+            },
+            RemoveLiveView => remove_live_view: RemoveLiveViewHandler<AS> = |state| RemoveLiveViewHandler {
+                store: state.app_state.clone(),
+            },
+            GetSetting => get_setting: GetSettingHandler<AS> = |state| GetSettingHandler {
+                store: state.app_state.clone(),
+            },
+            SetSetting => set_setting: SetSettingHandler<AS> = |state| SetSettingHandler {
+                store: state.app_state.clone(),
+            },
+            RecordRender => record_render: RecordRenderHandler<AS, C> = |state| RecordRenderHandler {
+                store: state.app_state.clone(),
+                clock: state.clock.clone(),
+            },
+        }
+    }
 }
 
 /// The production wiring: real adapters end to end (the daemon's adapters plus
@@ -221,47 +245,12 @@ fn forward_recipes<E>(
 }
 
 fn wired_mediator() -> WiredMediator {
-    DesktopMediator {
-        compute_diff: ComputeDiffHandler {
-            source: GitDiffSource,
-        },
-        compute_merge_diff: ComputeMergeDiffHandler {
-            source: GitDiffSource,
-        },
-        compute_squash_preview: ComputeSquashPreviewHandler {
-            source: GitDiffSource,
-        },
-        list_live_views: ListLiveViewsHandler {
-            store: SqliteAppState,
-        },
-        list_recent_renders: ListRecentRendersHandler {
-            store: SqliteAppState,
-        },
-        get_recent_render: GetRecentRenderHandler {
-            store: SqliteAppState,
-        },
-        save_live_view: SaveLiveViewHandler {
-            probe: GitRepoProbe,
-            store: SqliteAppState,
-            clock: SystemClock,
-        },
-        probe_source: ProbeSourceHandler {
-            probe: GitRepoProbe,
-        },
-        remove_live_view: RemoveLiveViewHandler {
-            store: SqliteAppState,
-        },
-        get_setting: GetSettingHandler {
-            store: SqliteAppState,
-        },
-        set_setting: SetSettingHandler {
-            store: SqliteAppState,
-        },
-        record_render: RecordRenderHandler {
-            store: SqliteAppState,
-            clock: SystemClock,
-        },
-    }
+    DesktopMediator::new(&DesktopDependencies {
+        clock: SystemClock,
+        probe: GitRepoProbe,
+        app_state: SqliteAppState,
+        source: GitDiffSource,
+    })
 }
 
 /// Brings the main window to the foreground — even over a focused fullscreen app.
@@ -475,44 +464,12 @@ pub(crate) mod test_support {
         app_state: InMemoryAppStateStore,
         probe: FakeRepoProbe,
     ) -> FakeMediator {
-        let clock = FixedClock("2026-07-07T00:00:00Z".into());
-        DesktopMediator {
-            compute_diff: ComputeDiffHandler {
-                source: source.clone(),
-            },
-            compute_merge_diff: ComputeMergeDiffHandler {
-                source: source.clone(),
-            },
-            compute_squash_preview: ComputeSquashPreviewHandler { source },
-            list_live_views: ListLiveViewsHandler {
-                store: app_state.clone(),
-            },
-            list_recent_renders: ListRecentRendersHandler {
-                store: app_state.clone(),
-            },
-            get_recent_render: GetRecentRenderHandler {
-                store: app_state.clone(),
-            },
-            save_live_view: SaveLiveViewHandler {
-                probe: probe.clone(),
-                store: app_state.clone(),
-                clock,
-            },
-            probe_source: ProbeSourceHandler { probe },
-            remove_live_view: RemoveLiveViewHandler {
-                store: app_state.clone(),
-            },
-            get_setting: GetSettingHandler {
-                store: app_state.clone(),
-            },
-            set_setting: SetSettingHandler {
-                store: app_state.clone(),
-            },
-            record_render: RecordRenderHandler {
-                store: app_state,
-                clock: FixedClock("2026-07-07T00:00:00Z".into()),
-            },
-        }
+        DesktopMediator::new(&DesktopDependencies {
+            clock: FixedClock("2026-07-07T00:00:00Z".into()),
+            probe,
+            app_state,
+            source,
+        })
     }
 }
 

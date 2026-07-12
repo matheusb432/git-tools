@@ -17,17 +17,17 @@ use crate::state::Shared;
 /// Shared endpoint body for every request handled off the blocking pool: touch,
 /// map-error → 400, run the handler via `send_now` (the handler shells out or
 /// hits `SQLite` synchronously), then project the response (or 500 on failure).
-pub(crate) async fn run<H, R, D>(
+pub(crate) async fn run<H, R, O, E, D>(
     handler: H,
     shared: Arc<Shared>,
     req: anyhow::Result<R>,
-    project: impl FnOnce(R::Output) -> Envelope<D> + Send + 'static,
+    project: impl FnOnce(O) -> Envelope<D> + Send + 'static,
 ) -> (StatusCode, Json<Envelope<D>>)
 where
     H: Sender<R> + Handle,
-    R: Request + Send + 'static,
-    R::Output: Send + 'static,
-    R::Error: std::fmt::Display + Send + 'static,
+    R: Request<Output = O, Error = E, Outcome = Result<O, E>> + Send + 'static,
+    O: Send + 'static,
+    E: std::fmt::Display + std::error::Error + Send + Sync + 'static,
     D: Send + 'static,
 {
     shared.touch();
