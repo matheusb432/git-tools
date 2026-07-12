@@ -2,13 +2,10 @@
 
 use std::path::PathBuf;
 
-use cqrsy::Handler;
-
 use crate::ports::AppStateStore;
 
 /// Delete the saved live view identified by `(source_kind, source_value)`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
-#[command(out = RemoveLiveViewResponse, err = RemoveLiveViewError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RemoveLiveView {
     pub data_root: PathBuf,
     pub source_kind: String,
@@ -26,27 +23,19 @@ pub enum RemoveLiveViewError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`RemoveLiveView`] by deleting through the app-state port.
-#[derive(Clone)]
-pub struct RemoveLiveViewHandler<A: AppStateStore> {
-    pub store: A,
-}
-
-impl<A: AppStateStore> Handler<RemoveLiveView> for RemoveLiveViewHandler<A> {
-    async fn handle(
-        &self,
-        req: RemoveLiveView,
-    ) -> Result<RemoveLiveViewResponse, RemoveLiveViewError> {
-        let removed =
-            self.store
-                .remove_live_view(&req.data_root, &req.source_kind, &req.source_value)?;
-        Ok(RemoveLiveViewResponse { removed })
-    }
+/// Removes a saved live view through the app-state port.
+#[cqrsy::handler(command)]
+pub fn handle(
+    store: &impl AppStateStore,
+    req: RemoveLiveView,
+) -> Result<RemoveLiveViewResponse, RemoveLiveViewError> {
+    let removed = store.remove_live_view(&req.data_root, &req.source_kind, &req.source_value)?;
+    Ok(RemoveLiveViewResponse { removed })
 }
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::send_now;
+    use cqrsy::Sender;
 
     use super::*;
     use crate::{ports::LiveViewRecord, testing::InMemoryAppStateStore};
@@ -65,16 +54,13 @@ mod tests {
             store: store.clone(),
         };
 
-        let response = send_now(
-            &(),
-            &handler,
-            RemoveLiveView {
+        let response = handler
+            .send_now(RemoveLiveView {
                 data_root: "/data".into(),
                 source_kind: "LocalRepo".into(),
                 source_value: "/repos/gt".into(),
-            },
-        )
-        .expect("remove succeeds");
+            })
+            .expect("remove succeeds");
 
         assert!(response.removed);
         assert!(store.live_views.lock().unwrap().is_empty());
@@ -86,16 +72,13 @@ mod tests {
             store: InMemoryAppStateStore::default(),
         };
 
-        let response = send_now(
-            &(),
-            &handler,
-            RemoveLiveView {
+        let response = handler
+            .send_now(RemoveLiveView {
                 data_root: "/data".into(),
                 source_kind: "LocalRepo".into(),
                 source_value: "/repos/unknown".into(),
-            },
-        )
-        .expect("remove succeeds");
+            })
+            .expect("remove succeeds");
 
         assert!(!response.removed);
     }

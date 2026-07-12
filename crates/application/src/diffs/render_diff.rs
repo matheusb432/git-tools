@@ -1,11 +1,10 @@
 //! The `render_diff` vertical slice: resolve a [`DiffTarget`] into a rendered,
 //! stored artifact (or an "empty, skipped" outcome), carrying every user-facing
 //! message out as [`Note`]s. The cli's `gtl diff` and `diff-subrepos` call this
-//! in-process; a future daemon dispatches it through [`cqrsy::Handler`].
+//! in-process; the daemon dispatches it through [`cqrsy::Sender`].
 
 use std::path::{Path, PathBuf};
 
-use cqrsy::Handler;
 use domain::diffs::{DiffKind, DiffTarget, Mode, View, ranges, sort_files_tree_order};
 
 use crate::{
@@ -15,8 +14,7 @@ use crate::{
 };
 
 /// Render a diff preview for `target` under `store_root`, resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
-#[command(out = RenderDiffResponse, err = RenderDiffError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderDiff {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
@@ -48,150 +46,134 @@ pub enum RenderDiffError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`RenderDiff`] by driving the diff engine through its ports.
-#[derive(Clone)]
-pub struct RenderDiffHandler<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> {
-    pub source: S,
-    pub store: A,
-    pub renderer: R,
-    pub clock: C,
+fn range_fast_path(
+    source: &impl DiffSource,
+    store: &impl ArtifactStore,
+    top: &str,
+    store_root: &Path,
+    target: &DiffTarget,
+) -> anyhow::Result<Option<PathBuf>> {
+    let Some((kind, base_sha, head_sha)) = resolved_range(source, top, target) else {
+        return Ok(None); // worktree mode or unresolved ⇒ no fast-path
+    };
+    store.lookup_by_range(store_root, Path::new(top), kind, &base_sha, &head_sha)
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> RenderDiffHandler<S, A, R, C> {
-    fn range_fast_path(
-        &self,
-        top: &str,
-        store_root: &Path,
-        target: &DiffTarget,
-    ) -> anyhow::Result<Option<PathBuf>> {
-        let Some((kind, base_sha, head_sha)) = self.resolved_range(top, target) else {
-            return Ok(None); // worktree mode or unresolved ⇒ no fast-path
-        };
-        self.store
-            .lookup_by_range(store_root, Path::new(top), kind, &base_sha, &head_sha)
-    }
-
-    // ! Returns (kind, base_sha, head_sha) only for pure commit ranges; None for
-    // ! worktree (Hash) mode. Mirrors build_view's range selection but skips assemble.
-    fn resolved_range(&self, top: &str, target: &DiffTarget) -> Option<(DiffKind, String, String)> {
-        let repo = Path::new(top);
-        let diff_range = match target {
-            DiffTarget::Range(r) => ranges(r, Mode::ExactRange).diff_range,
-            DiffTarget::Last(n) => ranges(&format!("HEAD~{n}..HEAD"), Mode::ExactRange).diff_range,
-            DiffTarget::Merge(b) => ranges(b, Mode::Merge).diff_range,
-            DiffTarget::Unpushed => {
-                // No upstream ⇒ build_view falls back to Hash (worktree) mode; not fast-path
-                // eligible, and the fallback warning is emitted there (once), not here.
-                let upstream = self.source.upstream(repo).ok()?;
-                ranges(&upstream, Mode::Unpushed).diff_range
-            }
-            DiffTarget::Base(_) => return None, // Hash mode ⇒ worktree
-        };
-        let kind = DiffKind::from_diff_range(&diff_range);
-        if kind == DiffKind::WorkTree {
-            return None;
+// ! Returns (kind, base_sha, head_sha) only for pure commit ranges; None for
+// ! worktree (Hash) mode. Mirrors build_view's range selection but skips assemble.
+fn resolved_range(
+    source: &impl DiffSource,
+    top: &str,
+    target: &DiffTarget,
+) -> Option<(DiffKind, String, String)> {
+    let repo = Path::new(top);
+    let diff_range = match target {
+        DiffTarget::Range(r) => ranges(r, Mode::ExactRange).diff_range,
+        DiffTarget::Last(n) => ranges(&format!("HEAD~{n}..HEAD"), Mode::ExactRange).diff_range,
+        DiffTarget::Merge(b) => ranges(b, Mode::Merge).diff_range,
+        DiffTarget::Unpushed => {
+            // No upstream ⇒ build_view falls back to Hash (worktree) mode; not fast-path
+            // eligible, and the fallback warning is emitted there (once), not here.
+            let upstream = source.upstream(repo).ok()?;
+            ranges(&upstream, Mode::Unpushed).diff_range
         }
-        let base = self
-            .source
-            .resolve_sha(repo, range_base(&diff_range))
-            .ok()?;
-        let head = self
-            .source
-            .resolve_sha(repo, diff_range.rsplit("..").next()?)
-            .ok()?;
-        Some((kind, base, head))
+        DiffTarget::Base(_) => return None, // Hash mode ⇒ worktree
+    };
+    let kind = DiffKind::from_diff_range(&diff_range);
+    if kind == DiffKind::WorkTree {
+        return None;
     }
+    let base = source.resolve_sha(repo, range_base(&diff_range)).ok()?;
+    let head = source
+        .resolve_sha(repo, diff_range.rsplit("..").next()?)
+        .ok()?;
+    Some((kind, base, head))
+}
 
-    // ! head = text after the last `..`; worktree mode has no commit head ⇒ sentinel.
-    fn head_sha_for(&self, top: &str, range: &str) -> String {
-        if range.contains("..") {
-            let tip = range.rsplit("..").next().unwrap_or("HEAD");
-            self.source
-                .resolve_sha(Path::new(top), tip)
-                .unwrap_or_default()
-        } else {
-            "WORKTREE".to_string()
-        }
+// ! head = text after the last `..`; worktree mode has no commit head ⇒ sentinel.
+fn head_sha_for(source: &impl DiffSource, top: &str, range: &str) -> String {
+    if range.contains("..") {
+        let tip = range.rsplit("..").next().unwrap_or("HEAD");
+        source.resolve_sha(Path::new(top), tip).unwrap_or_default()
+    } else {
+        "WORKTREE".to_string()
     }
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> Handler<RenderDiff>
-    for RenderDiffHandler<S, A, R, C>
-{
-    async fn handle(&self, req: RenderDiff) -> Result<RenderDiffResponse, RenderDiffError> {
-        let mut notes = Vec::new();
-        let top = self.source.top_level(&req.cwd)?;
+/// Renders a diff through the diff ports.
+#[cqrsy::handler(command)]
+pub fn handle(
+    source: &impl DiffSource,
+    store: &impl ArtifactStore,
+    renderer: &impl HtmlRenderer,
+    clock: &impl Clock,
+    req: RenderDiff,
+) -> Result<RenderDiffResponse, RenderDiffError> {
+    let mut notes = Vec::new();
+    let top = source.top_level(&req.cwd)?;
 
-        // ! Fast-path: pure commit ranges are fully determined by resolved shas, so a
-        // ! prior identical artifact can be reused without the expensive assemble.
-        if req.name.is_none()
-            && let Some(hit) = self.range_fast_path(&top, &req.store_root, &req.target)?
-        {
-            notes.push(Note::info(format!(
-                "diff-preview: reusing {}",
-                hit.display()
-            )));
-            return Ok(RenderDiffResponse {
-                outcome: RenderDiffOutcome::Rendered {
-                    artifact: hit,
-                    reused: true,
-                },
-                notes,
-            });
-        }
-
-        let (mut view, summary) = build_view(
-            &self.source,
-            &top,
-            &req.target,
-            req.theme.clone(),
-            &mut notes,
-        )?;
-        if let Some(name) = &req.name {
-            view.title.clone_from(name);
-        }
-        if view.is_empty() {
-            notes.push(Note::warn(format!(
-                "diff-preview: {summary} — nothing to show (no commits or changes); skipping"
-            )));
-            return Ok(RenderDiffResponse {
-                outcome: RenderDiffOutcome::Empty,
-                notes,
-            });
-        }
-        let file_count = view.files.len();
-        let html = self.renderer.build_html(&view);
-
-        let repo = Path::new(&top);
-        let meta = ArtifactMeta {
-            repo_root: PathBuf::from(&top),
-            repo_name: view.repo_name.clone(),
-            kind: DiffKind::from_diff_range(&view.cmd.range),
-            base_sha: self
-                .source
-                .resolve_sha(repo, range_base(&view.cmd.range))
-                .unwrap_or_default(),
-            head_sha: self.head_sha_for(&top, &view.cmd.range),
-            range_label: view.cmd.range.clone(),
-            head_committed_at: self.source.committed_at(repo, "HEAD"),
-            generated_at: self.clock.now_iso(),
-            title: view.title.clone(),
-        };
-        let placed = self.store.place(&req.store_root, &meta, &html)?;
-
+    // ! Fast-path: pure commit ranges are fully determined by resolved shas, so a
+    // ! prior identical artifact can be reused without the expensive assemble.
+    if req.name.is_none()
+        && let Some(hit) = range_fast_path(source, store, &top, &req.store_root, &req.target)?
+    {
         notes.push(Note::info(format!(
-            "diff-preview: {summary}, {}",
-            legacy_count_label(file_count, "file")
+            "diff-preview: reusing {}",
+            hit.display()
         )));
-        notes.push(Note::info(format!("wrote {}", placed.path.display())));
-        Ok(RenderDiffResponse {
+        return Ok(RenderDiffResponse {
             outcome: RenderDiffOutcome::Rendered {
-                artifact: placed.path,
-                reused: placed.reused,
+                artifact: hit,
+                reused: true,
             },
             notes,
-        })
+        });
     }
+
+    let (mut view, summary) = build_view(source, &top, &req.target, req.theme.clone(), &mut notes)?;
+    if let Some(name) = &req.name {
+        view.title.clone_from(name);
+    }
+    if view.is_empty() {
+        notes.push(Note::warn(format!(
+            "diff-preview: {summary} — nothing to show (no commits or changes); skipping"
+        )));
+        return Ok(RenderDiffResponse {
+            outcome: RenderDiffOutcome::Empty,
+            notes,
+        });
+    }
+    let file_count = view.files.len();
+    let html = renderer.build_html(&view);
+
+    let repo = Path::new(&top);
+    let meta = ArtifactMeta {
+        repo_root: PathBuf::from(&top),
+        repo_name: view.repo_name.clone(),
+        kind: DiffKind::from_diff_range(&view.cmd.range),
+        base_sha: source
+            .resolve_sha(repo, range_base(&view.cmd.range))
+            .unwrap_or_default(),
+        head_sha: head_sha_for(source, &top, &view.cmd.range),
+        range_label: view.cmd.range.clone(),
+        head_committed_at: source.committed_at(repo, "HEAD"),
+        generated_at: clock.now_iso(),
+        title: view.title.clone(),
+    };
+    let placed = store.place(&req.store_root, &meta, &html)?;
+
+    notes.push(Note::info(format!(
+        "diff-preview: {summary}, {}",
+        legacy_count_label(file_count, "file")
+    )));
+    notes.push(Note::info(format!("wrote {}", placed.path.display())));
+    Ok(RenderDiffResponse {
+        outcome: RenderDiffOutcome::Rendered {
+            artifact: placed.path,
+            reused: placed.reused,
+        },
+        notes,
+    })
 }
 
 /// Shared with diff-subrepos: builds the [`View`] + human summary for a target.
@@ -367,7 +349,7 @@ fn legacy_unpushed_commit_label(count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::diffs::{Commit, DiffKind, DiffTarget};
 
     use super::{RenderDiff, RenderDiffError, RenderDiffHandler, RenderDiffOutcome};
@@ -428,8 +410,9 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response =
-            send_now(&(), &handler, req("/repo", DiffTarget::Unpushed)).expect("render succeeds");
+        let response = handler
+            .send_now(req("/repo", DiffTarget::Unpushed))
+            .expect("render succeeds");
 
         assert_eq!(
             response.outcome,
@@ -463,8 +446,9 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response =
-            send_now(&(), &handler, req("/repo", DiffTarget::Unpushed)).expect("render succeeds");
+        let response = handler
+            .send_now(req("/repo", DiffTarget::Unpushed))
+            .expect("render succeeds");
 
         assert_eq!(response.outcome, RenderDiffOutcome::Empty);
         assert_eq!(
@@ -496,12 +480,9 @@ index 111..222 100644\n\
             PathBuf::from("/store/existing.html"),
         );
 
-        let response = send_now(
-            &(),
-            &handler,
-            req("/repo", DiffTarget::Range("a..b".into())),
-        )
-        .expect("render succeeds");
+        let response = handler
+            .send_now(req("/repo", DiffTarget::Range("a..b".into())))
+            .expect("render succeeds");
 
         assert_eq!(
             response.outcome,
@@ -542,7 +523,7 @@ index 111..222 100644\n\
 
         let mut request = req("/repo", DiffTarget::Range("a..b".into()));
         request.name = Some("custom".into());
-        let response = send_now(&(), &handler, request).expect("render succeeds");
+        let response = handler.send_now(request).expect("render succeeds");
 
         assert!(matches!(
             response.outcome,
@@ -566,8 +547,9 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response =
-            send_now(&(), &handler, req("/repo", DiffTarget::Unpushed)).expect("render succeeds");
+        let response = handler
+            .send_now(req("/repo", DiffTarget::Unpushed))
+            .expect("render succeeds");
 
         assert!(matches!(
             response.outcome,
@@ -593,7 +575,8 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let error = send_now(&(), &handler, req("/repo", DiffTarget::Base("nope".into())))
+        let error = handler
+            .send_now(req("/repo", DiffTarget::Base("nope".into())))
             .expect_err("unknown base errors");
 
         let RenderDiffError::Unexpected(err) = error;

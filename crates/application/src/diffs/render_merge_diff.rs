@@ -18,8 +18,7 @@ pub const DEFAULT_BASE: &str = "main";
 
 /// Render the merge-diff of the current branch into `base` (default `main`)
 /// under `store_root`, resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
-#[command(out = RenderMergeDiffResponse, err = RenderMergeDiffError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderMergeDiff {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
@@ -39,15 +38,6 @@ pub struct RenderMergeDiffResponse {
 pub enum RenderMergeDiffError {
     #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
-}
-
-/// Handles [`RenderMergeDiff`] by driving the diff engine through its ports.
-#[derive(Clone)]
-pub struct RenderMergeDiffHandler<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> {
-    pub source: S,
-    pub store: A,
-    pub renderer: R,
-    pub clock: C,
 }
 
 /// The computed merge view plus the range facts the artifact path still needs.
@@ -104,53 +94,52 @@ pub(crate) fn build_merge_view(
     })
 }
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<RenderMergeDiff>
-    for RenderMergeDiffHandler<S, A, R, C>
-{
-    async fn handle(
-        &self,
-        req: RenderMergeDiff,
-    ) -> Result<RenderMergeDiffResponse, RenderMergeDiffError> {
-        let built = build_merge_view(&self.source, &req.cwd, req.base.as_deref())?;
-        let view = built.view;
-        let commit_count = view.commits.len();
-        let file_count = view.files.len();
-        let html = self.renderer.build_html(&view);
+/// Renders a merge diff through the diff ports.
+#[cqrsy::handler(command)]
+pub fn handle(
+    source: &impl DiffSource,
+    store: &impl ArtifactStore,
+    renderer: &impl HtmlRenderer,
+    clock: &impl Clock,
+    req: RenderMergeDiff,
+) -> Result<RenderMergeDiffResponse, RenderMergeDiffError> {
+    let built = build_merge_view(source, &req.cwd, req.base.as_deref())?;
+    let view = built.view;
+    let commit_count = view.commits.len();
+    let file_count = view.files.len();
+    let html = renderer.build_html(&view);
 
-        let meta = ArtifactMeta {
-            repo_root: PathBuf::from(&built.top),
-            repo_name: view.repo_name.clone(),
-            kind: DiffKind::from_diff_range(&built.diff_range),
-            base_sha: self
-                .source
-                .resolve_sha(Path::new(&built.top), &built.base)
-                .unwrap_or_default(),
-            head_sha: self
-                .source
-                .resolve_sha(Path::new(&built.top), "HEAD")
-                .unwrap_or_default(),
-            range_label: built.diff_range.clone(),
-            head_committed_at: self.source.committed_at(Path::new(&built.top), "HEAD"),
-            generated_at: self.clock.now_iso(),
-            title: "merge-diff".to_string(),
-        };
-        let placed = self.store.place(&req.store_root, &meta, &html)?;
+    let meta = ArtifactMeta {
+        repo_root: PathBuf::from(&built.top),
+        repo_name: view.repo_name.clone(),
+        kind: DiffKind::from_diff_range(&built.diff_range),
+        base_sha: source
+            .resolve_sha(Path::new(&built.top), &built.base)
+            .unwrap_or_default(),
+        head_sha: source
+            .resolve_sha(Path::new(&built.top), "HEAD")
+            .unwrap_or_default(),
+        range_label: built.diff_range.clone(),
+        head_committed_at: source.committed_at(Path::new(&built.top), "HEAD"),
+        generated_at: clock.now_iso(),
+        title: "merge-diff".to_string(),
+    };
+    let placed = store.place(&req.store_root, &meta, &html)?;
 
-        let notes = vec![
-            Note::info(format!(
-                "merge-diff: {commit_count} commit{} to merge into {}, {file_count} file{}",
-                plural(commit_count),
-                built.base,
-                plural(file_count),
-            )),
-            Note::info(format!("wrote {}", placed.path.display())),
-        ];
-        Ok(RenderMergeDiffResponse {
-            artifact: placed.path,
-            reused: placed.reused,
-            notes,
-        })
-    }
+    let notes = vec![
+        Note::info(format!(
+            "merge-diff: {commit_count} commit{} to merge into {}, {file_count} file{}",
+            plural(commit_count),
+            built.base,
+            plural(file_count),
+        )),
+        Note::info(format!("wrote {}", placed.path.display())),
+    ];
+    Ok(RenderMergeDiffResponse {
+        artifact: placed.path,
+        reused: placed.reused,
+        notes,
+    })
 }
 
 fn plural(n: usize) -> &'static str {
@@ -161,7 +150,7 @@ fn plural(n: usize) -> &'static str {
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::diffs::Commit;
 
     use super::{RenderMergeDiff, RenderMergeDiffError, RenderMergeDiffHandler};
@@ -220,7 +209,9 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = send_now(&(), &handler, req("/repo", None)).expect("render succeeds");
+        let response = handler
+            .send_now(req("/repo", None))
+            .expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -252,7 +243,9 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = send_now(&(), &handler, req("/repo", Some("   "))).expect("render succeeds");
+        let response = handler
+            .send_now(req("/repo", Some("   ")))
+            .expect("render succeeds");
 
         assert_eq!(
             response.notes[0],
@@ -270,8 +263,9 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let error =
-            send_now(&(), &handler, req("/repo", Some("nope"))).expect_err("unknown base errors");
+        let error = handler
+            .send_now(req("/repo", Some("nope")))
+            .expect_err("unknown base errors");
 
         let RenderMergeDiffError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "unknown revision nope");

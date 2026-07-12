@@ -4,12 +4,9 @@
 
 use std::path::PathBuf;
 
-use cqrsy::Handler;
-
 use crate::ports::{ArtifactStore, HistoryRecord};
 
-#[derive(Debug, Clone, PartialEq, cqrsy::Query)]
-#[query(out = ListHistoryResponse, err = ListHistoryError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ListHistory {
     pub store_root: PathBuf,
 }
@@ -25,37 +22,35 @@ pub enum ListHistoryError {
     Unexpected(#[from] anyhow::Error),
 }
 
-#[derive(Clone)]
-pub struct ListHistoryHandler<A: ArtifactStore> {
-    pub store: A,
-}
-
-impl<A: ArtifactStore> Handler<ListHistory> for ListHistoryHandler<A> {
-    async fn handle(&self, req: ListHistory) -> Result<ListHistoryResponse, ListHistoryError> {
-        // `diff -r`/`diff --all` span multiple repos, so they carry no single
-        // head commit — `head_committed_at` is empty. Fall back to `generated_at`
-        // for those so they sort by actual recency instead of always trailing.
-        fn recency(r: &HistoryRecord) -> &str {
-            if r.head_committed_at.is_empty() {
-                &r.generated_at
-            } else {
-                &r.head_committed_at
-            }
+/// Lists artifact history in newest-first order.
+#[cqrsy::handler(query)]
+pub fn handle(
+    store: &impl ArtifactStore,
+    req: ListHistory,
+) -> Result<ListHistoryResponse, ListHistoryError> {
+    // `diff -r`/`diff --all` span multiple repos, so they carry no single
+    // head commit — `head_committed_at` is empty. Fall back to `generated_at`
+    // for those so they sort by actual recency instead of always trailing.
+    fn recency(r: &HistoryRecord) -> &str {
+        if r.head_committed_at.is_empty() {
+            &r.generated_at
+        } else {
+            &r.head_committed_at
         }
-
-        let mut entries = self.store.list_history(&req.store_root)?;
-        entries.sort_by(|a, b| {
-            recency(b)
-                .cmp(recency(a))
-                .then_with(|| b.generated_at.cmp(&a.generated_at))
-        });
-        Ok(ListHistoryResponse { entries })
     }
+
+    let mut entries = store.list_history(&req.store_root)?;
+    entries.sort_by(|a, b| {
+        recency(b)
+            .cmp(recency(a))
+            .then_with(|| b.generated_at.cmp(&a.generated_at))
+    });
+    Ok(ListHistoryResponse { entries })
 }
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::send_now;
+    use cqrsy::Sender;
 
     use super::*;
     use crate::{ports::HistoryRecord, testing::InMemoryArtifactStore};
@@ -92,7 +87,7 @@ mod tests {
         };
         let handler = ListHistoryHandler { store };
 
-        let response = send_now(&(), &handler, req()).expect("list succeeds");
+        let response = handler.send_now(req()).expect("list succeeds");
 
         assert_eq!(response.entries[0].repo_id, "c"); // tie broken by generated desc
         assert_eq!(response.entries[2].repo_id, "a");
@@ -112,7 +107,7 @@ mod tests {
         };
         let handler = ListHistoryHandler { store };
 
-        let response = send_now(&(), &handler, req()).expect("list succeeds");
+        let response = handler.send_now(req()).expect("list succeeds");
 
         assert_eq!(response.entries[0].repo_id, "fresh-multi-repo");
         assert_eq!(response.entries[1].repo_id, "old-commit");
@@ -124,7 +119,7 @@ mod tests {
             store: InMemoryArtifactStore::default(),
         };
 
-        let response = send_now(&(), &handler, req()).expect("list succeeds");
+        let response = handler.send_now(req()).expect("list succeeds");
 
         assert!(response.entries.is_empty());
     }

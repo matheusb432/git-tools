@@ -16,8 +16,7 @@ use crate::{
 
 /// Render a tabbed diff preview across every repo in `repos` (already filtered
 /// by the caller to upstream-present + unpushed > 0) under `store_root`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
-#[command(out = RenderDiffAllResponse, err = RenderDiffAllError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderDiffAll {
     pub store_root: PathBuf,
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
@@ -41,65 +40,57 @@ pub enum RenderDiffAllError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`RenderDiffAll`] by driving the diff engine through its ports.
-#[derive(Clone)]
-pub struct RenderDiffAllHandler<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> {
-    pub source: S,
-    pub store: A,
-    pub renderer: R,
-    pub clock: C,
-}
+/// Renders every requested repository through the diff ports.
+#[cqrsy::handler(command)]
+pub fn handle(
+    source: &impl DiffSource,
+    store: &impl ArtifactStore,
+    renderer: &impl HtmlRenderer,
+    clock: &impl Clock,
+    req: RenderDiffAll,
+) -> Result<RenderDiffAllResponse, RenderDiffAllError> {
+    let mut notes = Vec::new();
+    let batch = render_batch(
+        source,
+        &DiffTarget::Unpushed,
+        req.theme.as_deref(),
+        &req.repos,
+        false,
+        &mut notes,
+    )?;
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<RenderDiffAll>
-    for RenderDiffAllHandler<S, A, R, C>
-{
-    async fn handle(
-        &self,
-        req: RenderDiffAll,
-    ) -> Result<RenderDiffAllResponse, RenderDiffAllError> {
-        let mut notes = Vec::new();
-        let batch = render_batch(
-            &self.source,
-            &DiffTarget::Unpushed,
-            req.theme.as_deref(),
-            &req.repos,
-            false,
-            &mut notes,
-        )?;
+    let title = dated_title(clock, "diff-preview all");
+    let html = renderer.build_tabbed_html(&title, &batch.views);
+    let meta = ArtifactMeta {
+        repo_root: req.root.clone(),
+        repo_name: "all".to_string(),
+        kind: DiffKind::WorkTree,
+        base_sha: String::new(),
+        head_sha: String::new(),
+        range_label: String::new(),
+        head_committed_at: String::new(),
+        generated_at: clock.now_iso(),
+        title: title.clone(),
+    };
+    let placed = store.place(&req.store_root, &meta, &html)?;
 
-        let title = dated_title(&self.clock, "diff-preview all");
-        let html = self.renderer.build_tabbed_html(&title, &batch.views);
-        let meta = ArtifactMeta {
-            repo_root: req.root.clone(),
-            repo_name: "all".to_string(),
-            kind: DiffKind::WorkTree,
-            base_sha: String::new(),
-            head_sha: String::new(),
-            range_label: String::new(),
-            head_committed_at: String::new(),
-            generated_at: self.clock.now_iso(),
-            title: title.clone(),
-        };
-        let placed = self.store.place(&req.store_root, &meta, &html)?;
-
-        notes.push(Note::info(format!(
-            "diff-all: {} repo(s)",
-            batch.views.len()
-        )));
-        notes.push(Note::info(format!("wrote {}", placed.path.display())));
-        Ok(RenderDiffAllResponse {
-            artifact: placed.path,
-            reused: placed.reused,
-            notes,
-        })
-    }
+    notes.push(Note::info(format!(
+        "diff-all: {} repo(s)",
+        batch.views.len()
+    )));
+    notes.push(Note::info(format!("wrote {}", placed.path.display())));
+    Ok(RenderDiffAllResponse {
+        artifact: placed.path,
+        reused: placed.reused,
+        notes,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::diffs::{Commit, DiffKind};
 
     use super::{RenderDiffAll, RenderDiffAllHandler, RepoRef};
@@ -166,7 +157,7 @@ mod tests {
             },
         ];
 
-        let response = send_now(&(), &handler, req(repos)).expect("render succeeds");
+        let response = handler.send_now(req(repos)).expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -199,7 +190,7 @@ mod tests {
             label: "repo".into(),
         }];
 
-        let result = send_now(&(), &handler, req(repos));
+        let result = handler.send_now(req(repos));
 
         assert!(result.is_err());
         assert!(handler.store.placed.lock().unwrap().is_empty());

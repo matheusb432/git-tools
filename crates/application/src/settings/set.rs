@@ -2,12 +2,9 @@
 
 use std::path::PathBuf;
 
-use cqrsy::Handler;
-
 use crate::ports::AppStateStore;
 
-#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
-#[command(out = SetSettingResponse, err = SetSettingError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SetSetting {
     pub data_root: PathBuf,
     pub key: String,
@@ -23,23 +20,19 @@ pub enum SetSettingError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`SetSetting`] by writing through the app-state port.
-#[derive(Clone)]
-pub struct SetSettingHandler<A: AppStateStore> {
-    pub store: A,
-}
-
-impl<A: AppStateStore> Handler<SetSetting> for SetSettingHandler<A> {
-    async fn handle(&self, req: SetSetting) -> Result<SetSettingResponse, SetSettingError> {
-        self.store
-            .set_setting(&req.data_root, &req.key, &req.value)?;
-        Ok(SetSettingResponse {})
-    }
+/// Sets a value through the app-state port.
+#[cqrsy::handler(command)]
+pub fn handle(
+    store: &impl AppStateStore,
+    req: SetSetting,
+) -> Result<SetSettingResponse, SetSettingError> {
+    store.set_setting(&req.data_root, &req.key, &req.value)?;
+    Ok(SetSettingResponse {})
 }
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::send_now;
+    use cqrsy::Sender;
 
     use super::*;
     use crate::testing::InMemoryAppStateStore;
@@ -51,26 +44,20 @@ mod tests {
             store: store.clone(),
         };
 
-        send_now(
-            &(),
-            &handler,
-            SetSetting {
+        handler
+            .send_now(SetSetting {
                 data_root: "/data".into(),
                 key: "theme".into(),
                 value: "dark".into(),
-            },
-        )
-        .expect("set succeeds");
-        send_now(
-            &(),
-            &handler,
-            SetSetting {
+            })
+            .expect("set succeeds");
+        handler
+            .send_now(SetSetting {
                 data_root: "/data".into(),
                 key: "theme".into(),
                 value: "hearth".into(),
-            },
-        )
-        .expect("overwrite succeeds");
+            })
+            .expect("overwrite succeeds");
 
         assert_eq!(
             store

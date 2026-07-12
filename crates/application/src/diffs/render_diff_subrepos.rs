@@ -16,8 +16,7 @@ use crate::{
 };
 
 /// Render a tabbed diff preview across `repos` under `store_root`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
-#[command(out = RenderDiffSubreposResponse, err = RenderDiffSubreposError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderDiffSubrepos {
     pub store_root: PathBuf,
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
@@ -50,84 +49,76 @@ pub enum RenderDiffSubreposError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`RenderDiffSubrepos`] by driving the diff engine through its ports.
-#[derive(Clone)]
-pub struct RenderDiffSubreposHandler<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> {
-    pub source: S,
-    pub store: A,
-    pub renderer: R,
-    pub clock: C,
-}
+/// Renders the requested subrepositories through the diff ports.
+#[cqrsy::handler(command)]
+pub fn handle(
+    source: &impl DiffSource,
+    store: &impl ArtifactStore,
+    renderer: &impl HtmlRenderer,
+    clock: &impl Clock,
+    req: RenderDiffSubrepos,
+) -> Result<RenderDiffSubreposResponse, RenderDiffSubreposError> {
+    let mut notes = Vec::new();
+    let batch = render_batch(
+        source,
+        &req.target,
+        req.theme.as_deref(),
+        &req.repos,
+        true,
+        &mut notes,
+    )?;
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<RenderDiffSubrepos>
-    for RenderDiffSubreposHandler<S, A, R, C>
-{
-    async fn handle(
-        &self,
-        req: RenderDiffSubrepos,
-    ) -> Result<RenderDiffSubreposResponse, RenderDiffSubreposError> {
-        let mut notes = Vec::new();
-        let batch = render_batch(
-            &self.source,
-            &req.target,
-            req.theme.as_deref(),
-            &req.repos,
-            true,
-            &mut notes,
-        )?;
-
-        if batch.views.is_empty() {
-            notes.push(Note::warn(format!(
-                "diff -r: nothing to show across {} repo(s); no preview written",
-                req.repos.len()
-            )));
-            return Ok(RenderDiffSubreposResponse {
-                outcome: RenderDiffSubreposOutcome::Empty,
-                notes,
-            });
-        }
-
-        let title = dated_title(&self.clock, "diff-preview subrepos");
-        let html = self.renderer.build_tabbed_html(&title, &batch.views);
-        let meta = ArtifactMeta {
-            repo_root: req.root.clone(),
-            repo_name: "subrepos".to_string(),
-            kind: DiffKind::WorkTree,
-            base_sha: String::new(),
-            head_sha: String::new(),
-            range_label: String::new(),
-            head_committed_at: String::new(),
-            generated_at: self.clock.now_iso(),
-            title: title.clone(),
-        };
-        let placed = self.store.place(&req.store_root, &meta, &html)?;
-
-        notes.push(Note::info(format!(
-            "diff -r: {} repo(s)",
-            batch.views.len()
+    if batch.views.is_empty() {
+        notes.push(Note::warn(format!(
+            "diff -r: nothing to show across {} repo(s); no preview written",
+            req.repos.len()
         )));
-        if batch.skipped > 0 {
-            notes.push(Note::warn(format!(
-                "diff -r: skipped {} repo(s) with nothing to show",
-                batch.skipped
-            )));
-        }
-        notes.push(Note::info(format!("wrote {}", placed.path.display())));
-        Ok(RenderDiffSubreposResponse {
-            outcome: RenderDiffSubreposOutcome::Rendered {
-                artifact: placed.path,
-                reused: placed.reused,
-            },
+        return Ok(RenderDiffSubreposResponse {
+            outcome: RenderDiffSubreposOutcome::Empty,
             notes,
-        })
+        });
     }
+
+    let title = dated_title(clock, "diff-preview subrepos");
+    let html = renderer.build_tabbed_html(&title, &batch.views);
+    let meta = ArtifactMeta {
+        repo_root: req.root.clone(),
+        repo_name: "subrepos".to_string(),
+        kind: DiffKind::WorkTree,
+        base_sha: String::new(),
+        head_sha: String::new(),
+        range_label: String::new(),
+        head_committed_at: String::new(),
+        generated_at: clock.now_iso(),
+        title: title.clone(),
+    };
+    let placed = store.place(&req.store_root, &meta, &html)?;
+
+    notes.push(Note::info(format!(
+        "diff -r: {} repo(s)",
+        batch.views.len()
+    )));
+    if batch.skipped > 0 {
+        notes.push(Note::warn(format!(
+            "diff -r: skipped {} repo(s) with nothing to show",
+            batch.skipped
+        )));
+    }
+    notes.push(Note::info(format!("wrote {}", placed.path.display())));
+    Ok(RenderDiffSubreposResponse {
+        outcome: RenderDiffSubreposOutcome::Rendered {
+            artifact: placed.path,
+            reused: placed.reused,
+        },
+        notes,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::diffs::{Commit, DiffTarget};
 
     use super::{
@@ -192,7 +183,7 @@ mod tests {
             label: "repo-a".into(),
         }];
 
-        let response = send_now(&(), &handler, req(repos)).expect("render succeeds");
+        let response = handler.send_now(req(repos)).expect("render succeeds");
 
         assert_eq!(
             response.outcome,
@@ -228,7 +219,7 @@ mod tests {
             label: "repo-a".into(),
         }];
 
-        let response = send_now(&(), &handler, req(repos)).expect("render succeeds");
+        let response = handler.send_now(req(repos)).expect("render succeeds");
 
         assert_eq!(response.outcome, RenderDiffSubreposOutcome::Empty);
         assert_eq!(

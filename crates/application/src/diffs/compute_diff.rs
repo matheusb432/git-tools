@@ -5,14 +5,12 @@
 
 use std::path::PathBuf;
 
-use cqrsy::Handler;
 use domain::diffs::{DiffTarget, View};
 
 use crate::{diffs::render_diff::build_view, ports::DiffSource, shared::notes::Note};
 
 /// Compute the structured diff view for `target`, resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Query)]
-#[query(out = ComputeDiffResponse, err = ComputeDiffError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ComputeDiff {
     pub cwd: PathBuf,
     pub target: DiffTarget,
@@ -35,30 +33,27 @@ pub enum ComputeDiffError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`ComputeDiff`] by driving the diff engine through its source port.
-#[derive(Clone)]
-pub struct ComputeDiffHandler<S: DiffSource> {
-    pub source: S,
-}
-
-impl<S: DiffSource> Handler<ComputeDiff> for ComputeDiffHandler<S> {
-    async fn handle(&self, req: ComputeDiff) -> Result<ComputeDiffResponse, ComputeDiffError> {
-        let mut notes = Vec::new();
-        let top = self.source.top_level(&req.cwd)?;
-        let (view, summary) = build_view(&self.source, &top, &req.target, None, &mut notes)?;
-        Ok(ComputeDiffResponse {
-            view,
-            summary,
-            notes,
-        })
-    }
+/// Computes a diff by driving the diff engine through its source port.
+#[cqrsy::handler(query)]
+pub fn handle(
+    source: &impl DiffSource,
+    req: ComputeDiff,
+) -> Result<ComputeDiffResponse, ComputeDiffError> {
+    let mut notes = Vec::new();
+    let top = source.top_level(&req.cwd)?;
+    let (view, summary) = build_view(source, &top, &req.target, None, &mut notes)?;
+    Ok(ComputeDiffResponse {
+        view,
+        summary,
+        notes,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::diffs::{Commit, DiffTarget};
 
     use super::*;
@@ -102,8 +97,9 @@ index 111..222 100644\n\
             },
         };
 
-        let response =
-            send_now(&(), &handler, req(DiffTarget::Unpushed)).expect("compute succeeds");
+        let response = handler
+            .send_now(req(DiffTarget::Unpushed))
+            .expect("compute succeeds");
 
         assert_eq!(response.view.repo_name, "repo");
         assert_eq!(response.view.branch, "feature");
@@ -124,8 +120,9 @@ index 111..222 100644\n\
             },
         };
 
-        let response =
-            send_now(&(), &handler, req(DiffTarget::Unpushed)).expect("compute succeeds");
+        let response = handler
+            .send_now(req(DiffTarget::Unpushed))
+            .expect("compute succeeds");
 
         assert!(response.view.is_empty());
     }
@@ -144,8 +141,9 @@ index 111..222 100644\n\
             },
         };
 
-        let response =
-            send_now(&(), &handler, req(DiffTarget::Unpushed)).expect("compute succeeds");
+        let response = handler
+            .send_now(req(DiffTarget::Unpushed))
+            .expect("compute succeeds");
 
         assert_eq!(
             response.notes,
@@ -166,7 +164,8 @@ index 111..222 100644\n\
             },
         };
 
-        let error = send_now(&(), &handler, req(DiffTarget::Base("nope".into())))
+        let error = handler
+            .send_now(req(DiffTarget::Base("nope".into())))
             .expect_err("unknown base errors");
 
         let ComputeDiffError::Unexpected(err) = error;

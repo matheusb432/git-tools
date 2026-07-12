@@ -4,7 +4,6 @@
 
 use std::path::PathBuf;
 
-use cqrsy::Handler;
 use domain::managed::ManagedRepo;
 
 use crate::{
@@ -12,8 +11,7 @@ use crate::{
     ports::{ManagedManifest, RemoteSync},
 };
 
-#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
-#[command(out = PullAllResponse, err = PullAllError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PullAll {
     pub repos_file: PathBuf,
     pub home_dir: PathBuf,
@@ -32,24 +30,19 @@ pub enum PullAllError {
     Unexpected(#[from] anyhow::Error),
 }
 
-#[derive(Clone)]
-pub struct PullAllHandler<RS: RemoteSync, ML: ManagedManifest> {
-    pub remote: RS,
-    pub manifest: ML,
-}
-
-impl<RS: RemoteSync, ML: ManagedManifest> Handler<PullAll> for PullAllHandler<RS, ML> {
-    async fn handle(&self, req: PullAll) -> Result<PullAllResponse, PullAllError> {
-        let repos = self.manifest.load(&req.repos_file, &req.home_dir).await?;
-        let results = futures_util::future::join_all(
-            repos
-                .iter()
-                .map(|repo| pull_one(&self.remote, repo, req.dry)),
-        )
-        .await;
-        let exit = service::classify_exit(&results);
-        Ok(PullAllResponse { results, exit })
-    }
+/// Pulls every managed repository through the remote-sync ports.
+#[cqrsy::handler(command)]
+pub async fn handle(
+    remote: &impl RemoteSync,
+    manifest: &impl ManagedManifest,
+    req: PullAll,
+) -> Result<PullAllResponse, PullAllError> {
+    let repos = manifest.load(&req.repos_file, &req.home_dir).await?;
+    let results =
+        futures_util::future::join_all(repos.iter().map(|repo| pull_one(remote, repo, req.dry)))
+            .await;
+    let exit = service::classify_exit(&results);
+    Ok(PullAllResponse { results, exit })
 }
 
 async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> RepoSyncResult {
@@ -137,7 +130,7 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::managed::ManagedRepo;
 
     use super::*;
@@ -198,7 +191,7 @@ mod tests {
         let mut request = req();
         request.dry = true;
 
-        let response = send_now(&(), &handler, request).expect("pull succeeds");
+        let response = handler.send_now(request).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::WouldPull);
         assert_eq!(response.results[0].detail, "behind by 3 - fast-forward");
@@ -214,7 +207,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = send_now(&(), &handler, req()).expect("pull succeeds");
+        let response = handler.send_now(req()).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
@@ -234,7 +227,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = send_now(&(), &handler, req()).expect("pull succeeds");
+        let response = handler.send_now(req()).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::UpToDate);
         assert_eq!(
@@ -257,7 +250,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = send_now(&(), &handler, req()).expect("pull succeeds");
+        let response = handler.send_now(req()).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Pulled);
         assert_eq!(response.results[0].detail, "fast-forwarded 1 commit");
@@ -276,7 +269,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = send_now(&(), &handler, req()).expect("pull succeeds");
+        let response = handler.send_now(req()).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
@@ -295,7 +288,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = send_now(&(), &handler, req()).expect("pull succeeds");
+        let response = handler.send_now(req()).expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Warn);
         assert_eq!(response.results[0].detail, "no 'main' branch on origin");

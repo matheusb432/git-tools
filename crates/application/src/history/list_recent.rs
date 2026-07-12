@@ -3,13 +3,10 @@
 mod list {
     use std::path::PathBuf;
 
-    use cqrsy::Handler;
-
     use crate::ports::{AppStateError, AppStateStore, RecentRenderRecord};
 
     /// Requests every recent render in the store's newest-first order.
-    #[derive(Debug, Clone, PartialEq, Eq, cqrsy::Query)]
-    #[query(out = ListRecentRendersResponse, err = ListRecentRendersError)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ListRecentRenders {
         pub data_root: PathBuf,
     }
@@ -27,35 +24,27 @@ mod list {
         AppState(#[from] AppStateError),
     }
 
-    /// Handles [`ListRecentRenders`] through the app-state persistence port.
-    #[derive(Clone)]
-    pub struct ListRecentRendersHandler<A: AppStateStore> {
-        pub store: A,
-    }
-
-    impl<A: AppStateStore> Handler<ListRecentRenders> for ListRecentRendersHandler<A> {
-        async fn handle(
-            &self,
-            query: ListRecentRenders,
-        ) -> Result<ListRecentRendersResponse, ListRecentRendersError> {
-            Ok(ListRecentRendersResponse {
-                entries: self.store.list_recent_renders(&query.data_root)?,
-            })
-        }
+    /// Lists recent renders through the app-state persistence port.
+    #[cqrsy::handler(query)]
+    pub fn handle(
+        store: &impl AppStateStore,
+        query: ListRecentRenders,
+    ) -> Result<ListRecentRendersResponse, ListRecentRendersError> {
+        Ok(ListRecentRendersResponse {
+            entries: store.list_recent_renders(&query.data_root)?,
+        })
     }
 }
 
 mod get {
     use std::path::PathBuf;
 
-    use cqrsy::Handler;
     use domain::viewer::RenderHistoryId;
 
     use crate::ports::{AppStateError, AppStateStore, RecentRenderRecord};
 
     /// Requests one recent render by its stable persisted-row identity.
-    #[derive(Debug, Clone, PartialEq, Eq, cqrsy::Query)]
-    #[query(out = GetRecentRenderResponse, err = GetRecentRenderError)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct GetRecentRender {
         pub data_root: PathBuf,
         pub id: RenderHistoryId,
@@ -74,21 +63,15 @@ mod get {
         AppState(#[from] AppStateError),
     }
 
-    /// Handles [`GetRecentRender`] through the app-state persistence port.
-    #[derive(Clone)]
-    pub struct GetRecentRenderHandler<A: AppStateStore> {
-        pub store: A,
-    }
-
-    impl<A: AppStateStore> Handler<GetRecentRender> for GetRecentRenderHandler<A> {
-        async fn handle(
-            &self,
-            query: GetRecentRender,
-        ) -> Result<GetRecentRenderResponse, GetRecentRenderError> {
-            Ok(GetRecentRenderResponse {
-                entry: self.store.get_recent_render(&query.data_root, query.id)?,
-            })
-        }
+    /// Gets a recent render through the app-state persistence port.
+    #[cqrsy::handler(query)]
+    pub fn handle(
+        store: &impl AppStateStore,
+        query: GetRecentRender,
+    ) -> Result<GetRecentRenderResponse, GetRecentRenderError> {
+        Ok(GetRecentRenderResponse {
+            entry: store.get_recent_render(&query.data_root, query.id)?,
+        })
     }
 }
 
@@ -101,7 +84,7 @@ pub use list::{
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::viewer::RenderHistoryId;
 
     use super::{
@@ -133,14 +116,11 @@ mod tests {
             recent(RenderHistoryId::try_new(11).expect("positive id"), "newer"),
         ]);
 
-        let response = send_now(
-            &(),
-            &ListRecentRendersHandler { store },
-            ListRecentRenders {
+        let response = ListRecentRendersHandler { store }
+            .send_now(ListRecentRenders {
                 data_root: "/data".into(),
-            },
-        )
-        .expect("list succeeds");
+            })
+            .expect("list succeeds");
 
         assert_eq!(
             response
@@ -162,15 +142,12 @@ mod tests {
             .expect("renders lock")
             .push(recent(id, "render"));
 
-        let response = send_now(
-            &(),
-            &GetRecentRenderHandler { store },
-            GetRecentRender {
+        let response = GetRecentRenderHandler { store }
+            .send_now(GetRecentRender {
                 data_root: "/data".into(),
                 id,
-            },
-        )
-        .expect("lookup succeeds");
+            })
+            .expect("lookup succeeds");
 
         assert_eq!(response.entry.expect("record exists").id, id);
     }
@@ -179,16 +156,13 @@ mod tests {
     fn absent_recent_render_is_a_successful_miss() {
         let id = RenderHistoryId::try_new(99).expect("positive id");
 
-        let response = send_now(
-            &(),
-            &GetRecentRenderHandler {
-                store: InMemoryAppStateStore::default(),
-            },
-            GetRecentRender {
-                data_root: "/data".into(),
-                id,
-            },
-        )
+        let response = GetRecentRenderHandler {
+            store: InMemoryAppStateStore::default(),
+        }
+        .send_now(GetRecentRender {
+            data_root: "/data".into(),
+            id,
+        })
         .expect("lookup succeeds");
 
         assert!(response.entry.is_none());
@@ -199,14 +173,11 @@ mod tests {
         let store = InMemoryAppStateStore::default();
         *store.list_error_id.lock().expect("list error lock") = Some(0);
 
-        let error = send_now(
-            &(),
-            &ListRecentRendersHandler { store },
-            ListRecentRenders {
+        let error = ListRecentRendersHandler { store }
+            .send_now(ListRecentRenders {
                 data_root: "/data".into(),
-            },
-        )
-        .expect_err("corrupt row identity rejects");
+            })
+            .expect_err("corrupt row identity rejects");
 
         assert!(matches!(
             error,

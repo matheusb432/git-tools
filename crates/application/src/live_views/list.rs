@@ -2,13 +2,10 @@
 
 use std::path::PathBuf;
 
-use cqrsy::Handler;
-
 use crate::ports::{AppStateStore, LiveViewRecord};
 
 /// List every saved live view under `data_root`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Query)]
-#[query(out = ListLiveViewsResponse, err = ListLiveViewsError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ListLiveViews {
     pub data_root: PathBuf,
 }
@@ -24,25 +21,19 @@ pub enum ListLiveViewsError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`ListLiveViews`] by reading through the app-state port.
-#[derive(Clone)]
-pub struct ListLiveViewsHandler<A: AppStateStore> {
-    pub store: A,
-}
-
-impl<A: AppStateStore> Handler<ListLiveViews> for ListLiveViewsHandler<A> {
-    async fn handle(
-        &self,
-        req: ListLiveViews,
-    ) -> Result<ListLiveViewsResponse, ListLiveViewsError> {
-        let views = self.store.list_live_views(&req.data_root)?;
-        Ok(ListLiveViewsResponse { views })
-    }
+/// Lists saved live views through the app-state port.
+#[cqrsy::handler(query)]
+pub fn handle(
+    store: &impl AppStateStore,
+    req: ListLiveViews,
+) -> Result<ListLiveViewsResponse, ListLiveViewsError> {
+    let views = store.list_live_views(&req.data_root)?;
+    Ok(ListLiveViewsResponse { views })
 }
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::send_now;
+    use cqrsy::Sender;
 
     use super::*;
     use crate::{ports::LiveViewRecord, testing::InMemoryAppStateStore};
@@ -64,14 +55,11 @@ mod tests {
         store.live_views.lock().unwrap().push(record("/repos/b"));
         let handler = ListLiveViewsHandler { store };
 
-        let response = send_now(
-            &(),
-            &handler,
-            ListLiveViews {
+        let response = handler
+            .send_now(ListLiveViews {
                 data_root: "/data".into(),
-            },
-        )
-        .expect("list succeeds");
+            })
+            .expect("list succeeds");
 
         assert_eq!(
             response

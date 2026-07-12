@@ -2,13 +2,10 @@
 
 use std::path::PathBuf;
 
-use cqrsy::Handler;
-
 use crate::ports::{AppStateStore, Clock, NewRecentRenderRecord};
 
 /// Record one render in the app history.
-#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
-#[command(out = RecordRenderResponse, err = RecordRenderError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RecordRender {
     pub data_root: PathBuf,
     pub recipe_json: String,
@@ -29,31 +26,28 @@ pub enum RecordRenderError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`RecordRender`] by writing through the app-state port.
-#[derive(Clone)]
-pub struct RecordRenderHandler<A: AppStateStore, C: Clock> {
-    pub store: A,
-    pub clock: C,
-}
-
-impl<A: AppStateStore, C: Clock> Handler<RecordRender> for RecordRenderHandler<A, C> {
-    async fn handle(&self, req: RecordRender) -> Result<RecordRenderResponse, RecordRenderError> {
-        let record = NewRecentRenderRecord {
-            recipe_json: req.recipe_json,
-            title: req.title,
-            repo_name: req.repo_name,
-            kind: req.kind,
-            range_label: req.range_label,
-            rendered_at: self.clock.now_iso(),
-        };
-        self.store.record_render(&req.data_root, &record)?;
-        Ok(RecordRenderResponse {})
-    }
+/// Records a render through the app-state port.
+#[cqrsy::handler(command)]
+pub fn handle(
+    store: &impl AppStateStore,
+    clock: &impl Clock,
+    req: RecordRender,
+) -> Result<RecordRenderResponse, RecordRenderError> {
+    let record = NewRecentRenderRecord {
+        recipe_json: req.recipe_json,
+        title: req.title,
+        repo_name: req.repo_name,
+        kind: req.kind,
+        range_label: req.range_label,
+        rendered_at: clock.now_iso(),
+    };
+    store.record_render(&req.data_root, &record)?;
+    Ok(RecordRenderResponse {})
 }
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::send_now;
+    use cqrsy::Sender;
 
     use super::*;
     use crate::testing::{FixedClock, InMemoryAppStateStore};
@@ -66,19 +60,16 @@ mod tests {
             clock: FixedClock("2026-07-07T00:00:00Z".into()),
         };
 
-        send_now(
-            &(),
-            &handler,
-            RecordRender {
+        handler
+            .send_now(RecordRender {
                 data_root: "/data".into(),
                 recipe_json: r#"{"kind":"diff"}"#.into(),
                 title: "gt · unpushed".into(),
                 repo_name: "gt".into(),
                 kind: "diff".into(),
                 range_label: "origin/main..HEAD".into(),
-            },
-        )
-        .expect("record succeeds");
+            })
+            .expect("record succeeds");
 
         let renders = store.renders.lock().unwrap();
         assert_eq!(renders.len(), 1);

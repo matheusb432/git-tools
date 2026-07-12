@@ -3,15 +3,13 @@
 
 use std::path::PathBuf;
 
-use cqrsy::Handler;
 use domain::diffs::View;
 
 use crate::{diffs::render_merge_diff::build_merge_view, ports::DiffSource};
 
 /// Compute the merge view of the current branch into `base` (default `main`),
 /// resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Query)]
-#[query(out = ComputeMergeDiffResponse, err = ComputeMergeDiffError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ComputeMergeDiff {
     pub cwd: PathBuf,
     pub base: Option<String>,
@@ -30,27 +28,21 @@ pub enum ComputeMergeDiffError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`ComputeMergeDiff`] via the shared merge view builder.
-#[derive(Clone)]
-pub struct ComputeMergeDiffHandler<S: DiffSource> {
-    pub source: S,
-}
-
-impl<S: DiffSource> Handler<ComputeMergeDiff> for ComputeMergeDiffHandler<S> {
-    async fn handle(
-        &self,
-        req: ComputeMergeDiff,
-    ) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
-        let built = build_merge_view(&self.source, &req.cwd, req.base.as_deref())?;
-        Ok(ComputeMergeDiffResponse { view: built.view })
-    }
+/// Computes a merge diff via the shared merge view builder.
+#[cqrsy::handler(query)]
+pub fn handle(
+    source: &impl DiffSource,
+    req: ComputeMergeDiff,
+) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
+    let built = build_merge_view(source, &req.cwd, req.base.as_deref())?;
+    Ok(ComputeMergeDiffResponse { view: built.view })
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::diffs::Commit;
 
     use super::*;
@@ -83,15 +75,12 @@ index 111..222 100644\n\
             },
         };
 
-        let response = send_now(
-            &(),
-            &handler,
-            ComputeMergeDiff {
+        let response = handler
+            .send_now(ComputeMergeDiff {
                 cwd: PathBuf::from("/repo"),
                 base: None,
-            },
-        )
-        .expect("compute succeeds");
+            })
+            .expect("compute succeeds");
 
         assert_eq!(response.view.upstream, "main");
         assert_eq!(response.view.branch, "feature");
@@ -109,15 +98,12 @@ index 111..222 100644\n\
             },
         };
 
-        let error = send_now(
-            &(),
-            &handler,
-            ComputeMergeDiff {
+        let error = handler
+            .send_now(ComputeMergeDiff {
                 cwd: PathBuf::from("/repo"),
                 base: Some("nope".into()),
-            },
-        )
-        .expect_err("unknown base errors");
+            })
+            .expect_err("unknown base errors");
 
         let ComputeMergeDiffError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "unknown revision nope");

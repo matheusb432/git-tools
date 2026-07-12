@@ -17,8 +17,7 @@ use crate::{
 /// Render the squash-preview of the current branch's unpushed commits (base is
 /// always the configured upstream) under `store_root`, resolving the repo from
 /// `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
-#[command(out = RenderSquashPreviewResponse, err = RenderSquashPreviewError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderSquashPreview {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
@@ -39,58 +38,49 @@ pub enum RenderSquashPreviewError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`RenderSquashPreview`] by driving the diff engine through its ports.
-#[derive(Clone)]
-pub struct RenderSquashPreviewHandler<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> {
-    pub source: S,
-    pub store: A,
-    pub renderer: R,
-    pub clock: C,
-}
+/// Renders a squash preview through the diff ports.
+#[cqrsy::handler(command)]
+pub fn handle(
+    source: &impl DiffSource,
+    store: &impl ArtifactStore,
+    renderer: &impl HtmlRenderer,
+    clock: &impl Clock,
+    req: RenderSquashPreview,
+) -> Result<RenderSquashPreviewResponse, RenderSquashPreviewError> {
+    let built = build_squash_view(source, &req.cwd)?;
+    let view = built.view;
+    let commit_count = view.commits.len();
+    let file_count = view.files.len();
+    let html = renderer.build_html(&view);
 
-impl<S: DiffSource, A: ArtifactStore, R: HtmlRenderer, C: Clock> cqrsy::Handler<RenderSquashPreview>
-    for RenderSquashPreviewHandler<S, A, R, C>
-{
-    async fn handle(
-        &self,
-        req: RenderSquashPreview,
-    ) -> Result<RenderSquashPreviewResponse, RenderSquashPreviewError> {
-        let built = build_squash_view(&self.source, &req.cwd)?;
-        let view = built.view;
-        let commit_count = view.commits.len();
-        let file_count = view.files.len();
-        let html = self.renderer.build_html(&view);
+    let meta = ArtifactMeta {
+        repo_root: PathBuf::from(&built.top),
+        repo_name: view.repo_name.clone(),
+        // ! WorkTree by design: squash-preview is base→working-tree, not a commit range,
+        // ! so it is intentionally excluded from range-dedup in the store.
+        kind: DiffKind::WorkTree,
+        base_sha: String::new(),
+        head_sha: source
+            .resolve_sha(Path::new(&built.top), "HEAD")
+            .unwrap_or_default(),
+        range_label: built.log_range.clone(),
+        head_committed_at: source.committed_at(Path::new(&built.top), "HEAD"),
+        generated_at: clock.now_iso(),
+        title: "squash-preview".to_string(),
+    };
+    let placed = store.place(&req.store_root, &meta, &html)?;
 
-        let meta = ArtifactMeta {
-            repo_root: PathBuf::from(&built.top),
-            repo_name: view.repo_name.clone(),
-            // ! WorkTree by design: squash-preview is base→working-tree, not a commit range,
-            // ! so it is intentionally excluded from range-dedup in the store.
-            kind: DiffKind::WorkTree,
-            base_sha: String::new(),
-            head_sha: self
-                .source
-                .resolve_sha(Path::new(&built.top), "HEAD")
-                .unwrap_or_default(),
-            range_label: built.log_range.clone(),
-            head_committed_at: self.source.committed_at(Path::new(&built.top), "HEAD"),
-            generated_at: self.clock.now_iso(),
-            title: "squash-preview".to_string(),
-        };
-        let placed = self.store.place(&req.store_root, &meta, &html)?;
-
-        let notes = vec![
-            Note::info(format!(
-                "squash-preview: {commit_count} unpushed commit(s), {file_count} file(s)",
-            )),
-            Note::info(format!("wrote {}", placed.path.display())),
-        ];
-        Ok(RenderSquashPreviewResponse {
-            artifact: placed.path,
-            reused: placed.reused,
-            notes,
-        })
-    }
+    let notes = vec![
+        Note::info(format!(
+            "squash-preview: {commit_count} unpushed commit(s), {file_count} file(s)",
+        )),
+        Note::info(format!("wrote {}", placed.path.display())),
+    ];
+    Ok(RenderSquashPreviewResponse {
+        artifact: placed.path,
+        reused: placed.reused,
+        notes,
+    })
 }
 
 /// The computed squash-preview view plus the facts the artifact path still needs.
@@ -160,7 +150,7 @@ fn collapse_note(commit_count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::diffs::Commit;
 
     use super::{RenderSquashPreview, RenderSquashPreviewError, RenderSquashPreviewHandler};
@@ -219,7 +209,7 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let response = send_now(&(), &handler, req("/repo")).expect("render succeeds");
+        let response = handler.send_now(req("/repo")).expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -248,7 +238,9 @@ index 111..222 100644\n\
         };
         let handler = handler_with(source);
 
-        let error = send_now(&(), &handler, req("/repo")).expect_err("missing upstream errors");
+        let error = handler
+            .send_now(req("/repo"))
+            .expect_err("missing upstream errors");
 
         let RenderSquashPreviewError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "no upstream");

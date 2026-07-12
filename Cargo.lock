@@ -123,7 +123,7 @@ name = "application"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "cqrsy",
+ "cqrsy 0.7.0",
  "domain",
  "futures-util",
  "thiserror 2.0.18",
@@ -883,8 +883,17 @@ name = "cqrsy"
 version = "0.3.0"
 source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.3.0#a6ec57886bf6dc7405a32011c146bc6d510eb1eb"
 dependencies = [
- "cqrsy-core",
- "cqrsy-macros",
+ "cqrsy-core 0.3.0",
+ "cqrsy-macros 0.3.0",
+]
+
+[[package]]
+name = "cqrsy"
+version = "0.7.0"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.7.0#f4e522add942cf1a8286ab8cbc0ce3c2901271a9"
+dependencies = [
+ "cqrsy-core 0.7.0",
+ "cqrsy-macros 0.7.0",
 ]
 
 [[package]]
@@ -893,9 +902,24 @@ version = "0.3.0"
 source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.3.0#a6ec57886bf6dc7405a32011c146bc6d510eb1eb"
 
 [[package]]
+name = "cqrsy-core"
+version = "0.7.0"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.7.0#f4e522add942cf1a8286ab8cbc0ce3c2901271a9"
+
+[[package]]
 name = "cqrsy-macros"
 version = "0.3.0"
 source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.3.0#a6ec57886bf6dc7405a32011c146bc6d510eb1eb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "cqrsy-macros"
+version = "0.7.0"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.7.0#f4e522add942cf1a8286ab8cbc0ce3c2901271a9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1053,7 +1077,7 @@ dependencies = [
  "axum",
  "bootstrap",
  "contracts",
- "cqrsy",
+ "cqrsy 0.3.0",
  "domain",
  "gtl-platform",
  "http-body-util",
@@ -1178,7 +1202,7 @@ name = "desktop"
 version = "0.1.0"
 dependencies = [
  "application",
- "cqrsy",
+ "cqrsy 0.3.0",
  "criterion",
  "domain",
  "gtl-platform",

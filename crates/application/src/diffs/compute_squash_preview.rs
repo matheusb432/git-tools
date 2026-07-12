@@ -3,15 +3,13 @@
 
 use std::path::PathBuf;
 
-use cqrsy::Handler;
 use domain::diffs::View;
 
 use crate::{diffs::render_squash_preview::build_squash_view, ports::DiffSource};
 
 /// Compute the squash-preview view of the current branch's unpushed commits
 /// (base is always the configured upstream), resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq, cqrsy::Query)]
-#[query(out = ComputeSquashPreviewResponse, err = ComputeSquashPreviewError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ComputeSquashPreview {
     pub cwd: PathBuf,
 }
@@ -29,27 +27,21 @@ pub enum ComputeSquashPreviewError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Handles [`ComputeSquashPreview`] via the shared squash view builder.
-#[derive(Clone)]
-pub struct ComputeSquashPreviewHandler<S: DiffSource> {
-    pub source: S,
-}
-
-impl<S: DiffSource> Handler<ComputeSquashPreview> for ComputeSquashPreviewHandler<S> {
-    async fn handle(
-        &self,
-        req: ComputeSquashPreview,
-    ) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
-        let built = build_squash_view(&self.source, &req.cwd)?;
-        Ok(ComputeSquashPreviewResponse { view: built.view })
-    }
+/// Computes a squash preview via the shared squash view builder.
+#[cqrsy::handler(query)]
+pub fn handle(
+    source: &impl DiffSource,
+    req: ComputeSquashPreview,
+) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
+    let built = build_squash_view(source, &req.cwd)?;
+    Ok(ComputeSquashPreviewResponse { view: built.view })
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::diffs::Commit;
 
     use super::*;
@@ -82,14 +74,11 @@ index 111..222 100644\n\
             },
         };
 
-        let response = send_now(
-            &(),
-            &handler,
-            ComputeSquashPreview {
+        let response = handler
+            .send_now(ComputeSquashPreview {
                 cwd: PathBuf::from("/repo"),
-            },
-        )
-        .expect("compute succeeds");
+            })
+            .expect("compute succeeds");
 
         assert_eq!(response.view.title, "squash-preview");
         assert_eq!(response.view.upstream, "origin/main");
@@ -107,14 +96,11 @@ index 111..222 100644\n\
             },
         };
 
-        let error = send_now(
-            &(),
-            &handler,
-            ComputeSquashPreview {
+        let error = handler
+            .send_now(ComputeSquashPreview {
                 cwd: PathBuf::from("/repo"),
-            },
-        )
-        .expect_err("no upstream errors");
+            })
+            .expect_err("no upstream errors");
 
         let ComputeSquashPreviewError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "no upstream");

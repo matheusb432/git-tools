@@ -3,7 +3,6 @@
 
 use std::path::PathBuf;
 
-use cqrsy::Handler;
 use domain::managed::ManagedRepo;
 
 use crate::{
@@ -11,8 +10,7 @@ use crate::{
     ports::{Clock, ManagedManifest, PushLedger, RemoteSync},
 };
 
-#[derive(Debug, Clone, PartialEq, cqrsy::Command)]
-#[command(out = PushAllResponse, err = PushAllError)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PushAll {
     pub repos_file: PathBuf,
     pub home_dir: PathBuf,
@@ -31,28 +29,24 @@ pub enum PushAllError {
     Unexpected(#[from] anyhow::Error),
 }
 
-#[derive(Clone)]
-pub struct PushAllHandler<RS: RemoteSync, ML: ManagedManifest, PL: PushLedger, C: Clock> {
-    pub remote: RS,
-    pub manifest: ML,
-    pub ledger: PL,
-    pub clock: C,
-}
-
-impl<RS: RemoteSync, ML: ManagedManifest, PL: PushLedger, C: Clock> Handler<PushAll>
-    for PushAllHandler<RS, ML, PL, C>
-{
-    async fn handle(&self, req: PushAll) -> Result<PushAllResponse, PushAllError> {
-        let repos = self.manifest.load(&req.repos_file, &req.home_dir).await?;
-        let results = futures_util::future::join_all(
-            repos
-                .iter()
-                .map(|repo| push_one(&self.remote, &self.ledger, &self.clock, repo, req.dry)),
-        )
-        .await;
-        let exit = service::classify_exit(&results);
-        Ok(PushAllResponse { results, exit })
-    }
+/// Pushes every managed repository through the remote-sync ports.
+#[cqrsy::handler(command)]
+pub async fn handle(
+    remote: &impl RemoteSync,
+    manifest: &impl ManagedManifest,
+    ledger: &impl PushLedger,
+    clock: &impl Clock,
+    req: PushAll,
+) -> Result<PushAllResponse, PushAllError> {
+    let repos = manifest.load(&req.repos_file, &req.home_dir).await?;
+    let results = futures_util::future::join_all(
+        repos
+            .iter()
+            .map(|repo| push_one(remote, ledger, clock, repo, req.dry)),
+    )
+    .await;
+    let exit = service::classify_exit(&results);
+    Ok(PushAllResponse { results, exit })
 }
 
 async fn push_one(
@@ -138,7 +132,7 @@ fn push_failure_detail(output: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::send_now;
+    use cqrsy::Sender;
     use domain::managed::ManagedRepo;
 
     use super::*;
@@ -186,7 +180,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = send_now(&(), &handler, req()).expect("push succeeds");
+        let response = handler.send_now(req()).expect("push succeeds");
 
         assert_eq!(response.results.len(), 1);
         assert_eq!(response.results[0].status, SyncStatus::UpToDate);
@@ -212,7 +206,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = send_now(&(), &handler, req()).expect("push succeeds");
+        let response = handler.send_now(req()).expect("push succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Pushed);
         assert_eq!(response.results[0].detail, "abc..def  main -> main");
@@ -238,7 +232,7 @@ mod tests {
         let mut request = req();
         request.dry = true;
 
-        let response = send_now(&(), &handler, request).expect("push succeeds");
+        let response = handler.send_now(request).expect("push succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::WouldPush);
     }
@@ -261,7 +255,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = send_now(&(), &handler, req()).expect("push succeeds");
+        let response = handler.send_now(req()).expect("push succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
@@ -282,7 +276,7 @@ mod tests {
             vec![repo("a")],
         );
 
-        let response = send_now(&(), &handler, req()).expect("push succeeds");
+        let response = handler.send_now(req()).expect("push succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Warn);
         assert_eq!(
@@ -302,7 +296,7 @@ mod tests {
             vec![repo("a"), repo("b"), repo("c")],
         );
 
-        let response = send_now(&(), &handler, req()).expect("push succeeds");
+        let response = handler.send_now(req()).expect("push succeeds");
 
         assert_eq!(response.results.len(), 3);
         assert_eq!(
@@ -327,7 +321,9 @@ mod tests {
             clock: FixedClock("2026-07-03T00:00:00Z".into()),
         };
 
-        let error = send_now(&(), &handler, req()).expect_err("manifest error propagates");
+        let error = handler
+            .send_now(req())
+            .expect_err("manifest error propagates");
         assert!(format!("{error:#}").contains("boom"));
     }
 }
