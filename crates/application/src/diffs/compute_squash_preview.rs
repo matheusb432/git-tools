@@ -12,6 +12,7 @@ use crate::{diffs::render_squash_preview::build_squash_view, ports::DiffSource};
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputeSquashPreview {
     pub cwd: PathBuf,
+    pub pinned: Option<domain::diffs::PinnedRange>,
 }
 
 /// The computed squash-preview view.
@@ -33,7 +34,7 @@ pub fn handle(
     source: &impl DiffSource,
     req: ComputeSquashPreview,
 ) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
-    let built = build_squash_view(source, &req.cwd)?;
+    let built = build_squash_view(source, &req.cwd, req.pinned.as_ref())?;
     Ok(ComputeSquashPreviewResponse { view: built.view })
 }
 
@@ -77,12 +78,44 @@ index 111..222 100644\n\
         let response = handler
             .send_now(ComputeSquashPreview {
                 cwd: PathBuf::from("/repo"),
+                pinned: None,
             })
             .expect("compute succeeds");
 
         assert_eq!(response.view.title, "squash-preview");
         assert_eq!(response.view.upstream, "origin/main");
         assert_eq!(response.view.files.len(), 1);
+    }
+
+    #[test]
+    fn pinned_squash_preview_computes_without_an_upstream() {
+        let handler = ComputeSquashPreviewHandler {
+            source: FakeDiffSource {
+                top_level: Some("/repo".into()),
+                branch: "feature".into(),
+                upstream: None, // symbolic squash preview errors with "no upstream"
+                commits: vec![Commit {
+                    sha: "abc1234".into(),
+                    subject: "feat: work".into(),
+                    ..Default::default()
+                }],
+                diff_output: SINGLE_FILE_DIFF.into(),
+                ..Default::default()
+            },
+        };
+
+        let response = handler
+            .send_now(ComputeSquashPreview {
+                cwd: PathBuf::from("/repo"),
+                pinned: Some(domain::diffs::PinnedRange {
+                    base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
+                    head: "1111111111222222222233333333334444444444".into(),
+                }),
+            })
+            .expect("pinned squash compute succeeds");
+
+        assert_eq!(response.view.upstream, "aaaaaaaaaa");
+        assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
     }
 
     #[test]
@@ -99,6 +132,7 @@ index 111..222 100644\n\
         let error = handler
             .send_now(ComputeSquashPreview {
                 cwd: PathBuf::from("/repo"),
+                pinned: None,
             })
             .expect_err("no upstream errors");
 

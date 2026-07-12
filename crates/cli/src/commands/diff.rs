@@ -155,7 +155,7 @@ mod tests {
 
         let outcome = render_app(
             repo.path(),
-            &DiffTarget::Unpushed,
+            &DiffTarget::Unpushed { pinned: None },
             Some("release review"),
             |batch| {
                 *captured.borrow_mut() = Some(batch.clone());
@@ -184,7 +184,7 @@ mod tests {
 
         let outcome = render_app(
             repo.path(),
-            &DiffTarget::Unpushed,
+            &DiffTarget::Unpushed { pinned: None },
             None,
             |_batch| anyhow::bail!("viewer unavailable"),
             || {
@@ -208,7 +208,12 @@ mod tests {
             }],
             data: None,
         });
-        let Err(err) = render(&backend, &DiffTarget::Unpushed, None, |_| {}) else {
+        let Err(err) = render(
+            &backend,
+            &DiffTarget::Unpushed { pinned: None },
+            None,
+            |_| {},
+        ) else {
             panic!("error outcome must map to Err")
         };
         assert_eq!(format!("{err:#}"), "not a git repo");
@@ -222,7 +227,13 @@ mod tests {
             data: None,
         });
         assert!(matches!(
-            render(&backend, &DiffTarget::Unpushed, None, |_| {}).unwrap(),
+            render(
+                &backend,
+                &DiffTarget::Unpushed { pinned: None },
+                None,
+                |_| {}
+            )
+            .unwrap(),
             DiffOutcome::Empty
         ));
     }

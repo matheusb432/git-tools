@@ -33,7 +33,8 @@ fn render_app(
     forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
     degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
 ) -> anyhow::Result<DiffOutcome> {
-    let recipe = crate::recipe::recipe_for_cwd(repo, RecipeOp::SquashPreview, None)?;
+    let recipe =
+        crate::recipe::recipe_for_cwd(repo, RecipeOp::SquashPreview { pinned: None }, None)?;
     let batch = OpenRecipes {
         batch_id: crate::recipe::new_batch_id(),
         kind: RecipeBatchKind::Snapshot,
@@ -145,7 +146,7 @@ mod tests {
         assert!(matches!(outcome, DiffOutcome::Forwarded));
         assert_eq!(
             captured.into_inner().unwrap().recipes[0].op,
-            RecipeOp::SquashPreview
+            RecipeOp::SquashPreview { pinned: None }
         );
     }
 }

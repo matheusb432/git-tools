@@ -14,6 +14,9 @@
 
 node_modules/
 
+# Repo-local editing link to the global git-tools config.
+/config/local/config.toml
+
 # >>> CFG: shared ignored artifacts
 # superpowers audit artifacts
 .superpowers/
@@ -30,9 +33,6 @@ node_modules/
 testResults.xml
 
 /secrets/
-
-# Repo-local editing link to the global git-tools config.
-/config/local/config.toml
 
 # Canonical secret-bearing files — defense-in-depth; never commit (any depth).
 *.env

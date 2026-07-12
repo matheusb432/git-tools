@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{DiffKind, Mode, View, ranges};
+use domain::diffs::{DiffKind, Mode, PinnedRange, View, ranges, ranges_over};
 
 use crate::{
     diffs::util::{DiffData, assemble, repo_name},
@@ -49,11 +49,14 @@ pub(crate) struct MergeViewBuild {
 }
 
 /// Shared with `compute_merge_diff`: builds the merge [`View`] for the repo at
-/// `cwd` into `base` (default [`DEFAULT_BASE`]). No HTML, no store.
+/// `cwd` into `base` (default [`DEFAULT_BASE`]). `pinned: Some` computes over
+/// its resolved SHA range instead, skipping the symbolic `verify_commit`. No
+/// HTML, no store.
 pub(crate) fn build_merge_view(
     source: &impl DiffSource,
     cwd: &Path,
     base: Option<&str>,
+    pinned: Option<&PinnedRange>,
 ) -> anyhow::Result<MergeViewBuild> {
     let top = source.top_level(cwd)?;
     let branch = source.current_branch(Path::new(&top))?;
@@ -63,14 +66,22 @@ pub(crate) fn build_merge_view(
         .filter(|b| !b.is_empty())
         .unwrap_or(DEFAULT_BASE);
 
-    source.verify_commit(Path::new(&top), base)?;
-    let ranges = ranges(base, Mode::Merge);
+    let (io_ranges, view_ranges) = if let Some(pin) = pinned {
+        (
+            ranges_over(&pin.git_range(), Mode::Merge),
+            ranges_over(&pin.display_range(), Mode::Merge),
+        )
+    } else {
+        source.verify_commit(Path::new(&top), base)?;
+        let symbolic = ranges(base, Mode::Merge);
+        (symbolic.clone(), symbolic)
+    };
     let DiffData { commits, files } = assemble(
         source,
         Path::new(&top),
-        &ranges.diff_args,
-        &ranges.diff_range,
-        &ranges.log_range,
+        &io_ranges.diff_args,
+        &io_ranges.diff_range,
+        &io_ranges.log_range,
     )?;
 
     let view = View {
@@ -78,10 +89,10 @@ pub(crate) fn build_merge_view(
         repo_root: top.clone(),
         branch,
         upstream: base.to_string(),
-        title: ranges.title,
-        cmd: ranges.cmd,
-        commits_label: ranges.commits_label,
-        foot: ranges.foot,
+        title: view_ranges.title,
+        cmd: view_ranges.cmd,
+        commits_label: view_ranges.commits_label,
+        foot: view_ranges.foot,
         commits,
         files,
         theme: None,
@@ -90,7 +101,7 @@ pub(crate) fn build_merge_view(
         view,
         top,
         base: base.to_string(),
-        diff_range: ranges.diff_range,
+        diff_range: io_ranges.diff_range,
     })
 }
 
@@ -103,7 +114,7 @@ pub fn handle(
     clock: &impl Clock,
     req: RenderMergeDiff,
 ) -> Result<RenderMergeDiffResponse, RenderMergeDiffError> {
-    let built = build_merge_view(source, &req.cwd, req.base.as_deref())?;
+    let built = build_merge_view(source, &req.cwd, req.base.as_deref(), None)?;
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();

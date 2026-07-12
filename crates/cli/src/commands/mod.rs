@@ -140,13 +140,13 @@ pub(crate) fn finish_single_render(
 /// Map a [`DiffTarget`] onto its wire DTO.
 pub(crate) fn to_target_dto(target: &DiffTarget) -> DiffTargetDto {
     match target {
-        DiffTarget::Unpushed => DiffTargetDto::Unpushed,
+        DiffTarget::Unpushed { .. } => DiffTargetDto::Unpushed,
         DiffTarget::Base(rev) => DiffTargetDto::Base { rev: rev.clone() },
-        DiffTarget::Range(range) => DiffTargetDto::Range {
+        DiffTarget::Range { range, .. } => DiffTargetDto::Range {
             range: range.clone(),
         },
-        DiffTarget::Merge(base) => DiffTargetDto::Merge { base: base.clone() },
-        DiffTarget::Last(count) => DiffTargetDto::Last { count: count.get() },
+        DiffTarget::Merge { base, .. } => DiffTargetDto::Merge { base: base.clone() },
+        DiffTarget::Last { count, .. } => DiffTargetDto::Last { count: count.get() },
     }
 }
 
@@ -159,7 +159,7 @@ mod tests {
     #[test]
     fn to_target_dto_maps_every_variant() {
         assert_eq!(
-            to_target_dto(&DiffTarget::Unpushed),
+            to_target_dto(&DiffTarget::Unpushed { pinned: None }),
             DiffTargetDto::Unpushed
         );
         assert_eq!(
@@ -167,19 +167,28 @@ mod tests {
             DiffTargetDto::Base { rev: "abc".into() }
         );
         assert_eq!(
-            to_target_dto(&DiffTarget::Range("a..b".into())),
+            to_target_dto(&DiffTarget::Range {
+                range: "a..b".into(),
+                pinned: None
+            }),
             DiffTargetDto::Range {
                 range: "a..b".into()
             }
         );
         assert_eq!(
-            to_target_dto(&DiffTarget::Merge("main".into())),
+            to_target_dto(&DiffTarget::Merge {
+                base: "main".into(),
+                pinned: None
+            }),
             DiffTargetDto::Merge {
                 base: "main".into()
             }
         );
         assert_eq!(
-            to_target_dto(&DiffTarget::Last(NonZeroU32::new(3).unwrap())),
+            to_target_dto(&DiffTarget::Last {
+                count: NonZeroU32::new(3).unwrap(),
+                pinned: None
+            }),
             DiffTargetDto::Last { count: 3 }
         );
     }

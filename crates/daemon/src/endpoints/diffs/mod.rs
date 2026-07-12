@@ -51,14 +51,18 @@ pub(crate) fn to_request(dto: RenderDiffRequest) -> anyhow::Result<RenderDiff> {
 /// Returns an error when the DTO carries an invalid selection (e.g. a `last` count of zero).
 fn to_target(dto: DiffTargetDto) -> anyhow::Result<DiffTarget> {
     Ok(match dto {
-        DiffTargetDto::Unpushed => DiffTarget::Unpushed,
+        DiffTargetDto::Unpushed => DiffTarget::Unpushed { pinned: None },
         DiffTargetDto::Base { rev } => DiffTarget::Base(rev),
-        DiffTargetDto::Range { range } => DiffTarget::Range(range),
-        DiffTargetDto::Merge { base } => DiffTarget::Merge(base),
-        DiffTargetDto::Last { count } => DiffTarget::Last(
-            std::num::NonZeroU32::new(count)
+        DiffTargetDto::Range { range } => DiffTarget::Range {
+            range,
+            pinned: None,
+        },
+        DiffTargetDto::Merge { base } => DiffTarget::Merge { base, pinned: None },
+        DiffTargetDto::Last { count } => DiffTarget::Last {
+            count: std::num::NonZeroU32::new(count)
                 .ok_or_else(|| anyhow::anyhow!("last count must be >= 1"))?,
-        ),
+            pinned: None,
+        },
     })
 }
 

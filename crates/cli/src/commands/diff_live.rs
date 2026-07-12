@@ -149,7 +149,7 @@ fn live_recipe(data: &SaveLiveViewData) -> Recipe {
     Recipe {
         source: RecipeSource::LocalRepo(data.source_value.clone().into()),
         op: RecipeOp::Diff {
-            target: RecipeTarget::Unpushed,
+            target: RecipeTarget::Unpushed { pinned: None },
         },
         name: Some(data.display_name.clone()),
     }
@@ -302,7 +302,7 @@ mod tests {
             Recipe {
                 source: RecipeSource::LocalRepo("/repos/one".into()),
                 op: RecipeOp::Diff {
-                    target: RecipeTarget::Unpushed
+                    target: RecipeTarget::Unpushed { pinned: None }
                 },
                 name: Some("repo".into()),
             }
@@ -538,7 +538,7 @@ mod tests {
             Recipe {
                 source: RecipeSource::LocalRepo(canonical_top),
                 op: RecipeOp::Diff {
-                    target: RecipeTarget::Unpushed
+                    target: RecipeTarget::Unpushed { pinned: None }
                 },
                 name: Some("repo".into()),
             }
@@ -590,7 +590,7 @@ mod tests {
             Recipe {
                 source: RecipeSource::LocalRepo("/repos/three".into()),
                 op: RecipeOp::Diff {
-                    target: RecipeTarget::Unpushed
+                    target: RecipeTarget::Unpushed { pinned: None }
                 },
                 name: Some("three".into()),
             }

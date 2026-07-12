@@ -52,7 +52,7 @@ pub fn handle(
     let mut notes = Vec::new();
     let batch = render_batch(
         source,
-        &DiffTarget::Unpushed,
+        &DiffTarget::Unpushed { pinned: None },
         req.theme.as_deref(),
         &req.repos,
         false,

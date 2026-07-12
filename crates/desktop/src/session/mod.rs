@@ -56,13 +56,21 @@ impl ViewerSession {
         batch_id: String,
         kind: ViewerTabKind,
     ) -> ViewerTabId {
-        if let Some(existing) = self.tabs.iter_mut().find(|tab| tab.recipe == recipe) {
+        let unpinned = recipe.unpinned();
+        if let Some(existing) = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.recipe.unpinned() == unpinned)
+        {
             existing.tab = ViewerTab::new(
                 existing.tab.id(),
                 existing.tab.label().into(),
                 kind,
                 existing.tab.state().clone(),
             );
+            // Intentionally symmetric: reopening an unpinned (legacy/history) recipe
+            // replaces a pinned one too, since the tab shows what was most recently opened.
+            existing.recipe = recipe;
             existing.batch_id = batch_id;
             self.active = Some(existing.tab.id());
             let id = existing.tab.id();
@@ -293,14 +301,14 @@ mod tests {
         diffs::{Cmd, Foot, View},
         viewer::{ViewerTabId, ViewerTabKind},
     };
-    use gtl_recipe::{Recipe, RecipeOp, RecipeSource};
+    use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::*;
 
     fn recipe() -> Recipe {
         Recipe {
             source: RecipeSource::LocalRepo(PathBuf::from("/repo")),
-            op: RecipeOp::SquashPreview,
+            op: RecipeOp::SquashPreview { pinned: None },
             name: None,
         }
     }
@@ -483,5 +491,69 @@ mod tests {
     fn session_can_be_guarded_and_shared_across_tauri_threads() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<std::sync::Mutex<ViewerSession>>();
+    }
+
+    fn pinned_unpushed_recipe(head: &str) -> Recipe {
+        Recipe {
+            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Unpushed {
+                    pinned: Some(gtl_recipe::PinnedRange {
+                        base: "a".repeat(40),
+                        head: head.repeat(40),
+                    }),
+                },
+            },
+            name: None,
+        }
+    }
+
+    #[test]
+    fn open_dedupes_snapshot_tabs_by_unpinned_identity_and_adopts_the_new_pin() {
+        let mut session = ViewerSession::new(1024 * 1024);
+        let first = session.open(
+            pinned_unpushed_recipe("b"),
+            "batch-1".into(),
+            ViewerTabKind::Snapshot,
+        );
+        let second = session.open(
+            pinned_unpushed_recipe("c"),
+            "batch-2".into(),
+            ViewerTabKind::Snapshot,
+        );
+
+        assert_eq!(first, second, "same repo+op must reuse the tab across pins");
+        let tab = session.tab(second).expect("tab exists");
+        assert_eq!(
+            tab.recipe,
+            pinned_unpushed_recipe("c"),
+            "the newest pin wins the tab"
+        );
+    }
+
+    #[test]
+    fn open_keeps_distinct_symbolic_intents_as_distinct_tabs() {
+        let mut session = ViewerSession::new(1024 * 1024);
+        let range_recipe = |range: &str| Recipe {
+            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Range {
+                    range: range.into(),
+                    pinned: None,
+                },
+            },
+            name: None,
+        };
+        let a = session.open(
+            range_recipe("a..b"),
+            "batch-1".into(),
+            ViewerTabKind::Snapshot,
+        );
+        let b = session.open(
+            range_recipe("c..d"),
+            "batch-2".into(),
+            ViewerTabKind::Snapshot,
+        );
+        assert_ne!(a, b);
     }
 }

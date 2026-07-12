@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{Cmd, DiffKind, Foot, Mode, View, ranges};
+use domain::diffs::{Cmd, DiffKind, Foot, Mode, PinnedRange, View, ranges, ranges_over};
 
 use crate::{
     diffs::util::{DiffData, assemble, repo_name},
@@ -47,7 +47,7 @@ pub fn handle(
     clock: &impl Clock,
     req: RenderSquashPreview,
 ) -> Result<RenderSquashPreviewResponse, RenderSquashPreviewError> {
-    let built = build_squash_view(source, &req.cwd)?;
+    let built = build_squash_view(source, &req.cwd, None)?;
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
@@ -91,24 +91,35 @@ pub(crate) struct SquashViewBuild {
 }
 
 /// Shared with `compute_squash_preview`: builds the squash-preview [`View`]
-/// for the repo at `cwd` (base is always the configured upstream). No HTML,
-/// no store.
+/// for the repo at `cwd` (base is always the configured upstream, unless
+/// `pinned` supplies a resolved SHA range). No HTML, no store.
 pub(crate) fn build_squash_view(
     source: &impl DiffSource,
     cwd: &Path,
+    pinned: Option<&PinnedRange>,
 ) -> anyhow::Result<SquashViewBuild> {
     let top = source.top_level(cwd)?;
-    let upstream = source.upstream(Path::new(&top))?;
     let branch = source.current_branch(Path::new(&top))?;
     let repo_name = repo_name(&top);
-    let ranges = ranges(&upstream, Mode::Unpushed);
+
+    let (upstream, io_ranges, view_ranges) = if let Some(pin) = pinned {
+        (
+            pin.display_base(),
+            ranges_over(&pin.git_range(), Mode::Unpushed),
+            ranges_over(&pin.display_range(), Mode::Unpushed),
+        )
+    } else {
+        let upstream = source.upstream(Path::new(&top))?;
+        let symbolic = ranges(&upstream, Mode::Unpushed);
+        (upstream, symbolic.clone(), symbolic)
+    };
 
     let DiffData { commits, files } = assemble(
         source,
         Path::new(&top),
-        &ranges.diff_args,
-        &ranges.diff_range,
-        &ranges.log_range,
+        &io_ranges.diff_args,
+        &io_ranges.diff_range,
+        &io_ranges.log_range,
     )?;
 
     let view = View {
@@ -119,7 +130,7 @@ pub(crate) fn build_squash_view(
         title: "squash-preview".to_string(),
         cmd: Cmd {
             lead: "git log ".to_string(),
-            range: ranges.log_range.clone(),
+            range: view_ranges.log_range.clone(),
             trail: " --stat".to_string(),
         },
         commits_label: "# commits — collapse into 1".to_string(),
@@ -134,7 +145,7 @@ pub(crate) fn build_squash_view(
     Ok(SquashViewBuild {
         view,
         top,
-        log_range: ranges.log_range,
+        log_range: io_ranges.log_range,
     })
 }
 

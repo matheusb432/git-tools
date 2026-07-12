@@ -133,7 +133,7 @@ mod tests {
 
         let batch = render_batch(
             &source,
-            &DiffTarget::Unpushed,
+            &DiffTarget::Unpushed { pinned: None },
             None,
             &repos,
             true,
@@ -161,7 +161,7 @@ mod tests {
 
         let batch = render_batch(
             &source,
-            &DiffTarget::Unpushed,
+            &DiffTarget::Unpushed { pinned: None },
             None,
             &repos,
             true,
@@ -184,7 +184,7 @@ mod tests {
 
         let batch = render_batch(
             &source,
-            &DiffTarget::Unpushed,
+            &DiffTarget::Unpushed { pinned: None },
             None,
             &repos,
             false,
@@ -209,7 +209,7 @@ mod tests {
 
         let result = render_batch(
             &source,
-            &DiffTarget::Unpushed,
+            &DiffTarget::Unpushed { pinned: None },
             None,
             &repos,
             false,

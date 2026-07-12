@@ -163,7 +163,7 @@ mod tests {
         RenderDiffSubrepos {
             store_root: PathBuf::from("/store"),
             root: PathBuf::from("/scan-root"),
-            target: DiffTarget::Unpushed,
+            target: DiffTarget::Unpushed { pinned: None },
             repos,
             theme: None,
         }

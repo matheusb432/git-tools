@@ -19,6 +19,48 @@ pub struct Ranges {
     pub foot: Foot,
 }
 
+/// Build [`Ranges`] whose diff/log run over `range` verbatim while keeping
+/// `mode`'s semantic labels — the pinned-target companion to [`ranges`].
+/// `Hash` has no pinned form (it diffs the working tree) and maps to the
+/// exact-range labels defensively.
+pub fn ranges_over(range: &str, mode: Mode) -> Ranges {
+    match mode {
+        Mode::Unpushed => Ranges {
+            diff_args: vec!["diff".to_string(), range.to_string()],
+            diff_range: range.to_string(),
+            log_range: range.to_string(),
+            title: "diff".to_string(),
+            cmd: Cmd {
+                lead: "git diff ".to_string(),
+                range: range.to_string(),
+                trail: String::new(),
+            },
+            commits_label: "# unpushed commits".to_string(),
+            foot: Foot {
+                cmd: format!("git diff {range}"),
+                note: "# unpushed work — read-only preview".to_string(),
+            },
+        },
+        Mode::Merge => Ranges {
+            diff_args: vec!["diff".to_string(), range.to_string()],
+            diff_range: range.to_string(),
+            log_range: range.to_string(),
+            title: "merge-diff".to_string(),
+            cmd: Cmd {
+                lead: "git diff ".to_string(),
+                range: range.to_string(),
+                trail: String::new(),
+            },
+            commits_label: "# commits to merge".to_string(),
+            foot: Foot {
+                cmd: format!("git diff {range}"),
+                note: "# merge preview — read-only".to_string(),
+            },
+        },
+        Mode::Hash | Mode::ExactRange => ranges(range, Mode::ExactRange),
+    }
+}
+
 pub fn ranges(base: &str, mode: Mode) -> Ranges {
     match mode {
         Mode::Unpushed => {
@@ -152,5 +194,51 @@ mod tests {
         assert_eq!(ranges.title, "merge-diff");
         assert_eq!(ranges.commits_label, "# commits to merge");
         assert_eq!(ranges.foot.cmd, "git diff main...HEAD");
+    }
+
+    #[test]
+    fn ranges_over_keeps_unpushed_labels_over_the_exact_range() {
+        let exact = ranges_over("aaa..bbb", Mode::Unpushed);
+        assert_eq!(exact.diff_args, vec!["diff", "aaa..bbb"]);
+        assert_eq!(exact.diff_range, "aaa..bbb");
+        assert_eq!(exact.log_range, "aaa..bbb");
+        assert_eq!(exact.title, "diff");
+        assert_eq!(exact.commits_label, "# unpushed commits");
+        assert_eq!(exact.foot.cmd, "git diff aaa..bbb");
+
+        // Ensure labels don't drift from the symbolic builder
+        let symbolic = ranges("origin/main", Mode::Unpushed);
+        assert_eq!(exact.title, symbolic.title);
+        assert_eq!(exact.commits_label, symbolic.commits_label);
+        assert_eq!(exact.foot.note, symbolic.foot.note);
+        assert_eq!(exact.cmd.lead, symbolic.cmd.lead);
+    }
+
+    #[test]
+    fn ranges_over_keeps_merge_labels_over_the_exact_two_dot_range() {
+        let exact = ranges_over("aaa..bbb", Mode::Merge);
+        assert_eq!(exact.diff_args, vec!["diff", "aaa..bbb"]);
+        assert_eq!(exact.log_range, "aaa..bbb");
+        assert_eq!(exact.title, "merge-diff");
+        assert_eq!(exact.commits_label, "# commits to merge");
+
+        // Ensure labels don't drift from the symbolic builder
+        let symbolic = ranges("main", Mode::Merge);
+        assert_eq!(exact.title, symbolic.title);
+        assert_eq!(exact.commits_label, symbolic.commits_label);
+        assert_eq!(exact.foot.note, symbolic.foot.note);
+        assert_eq!(exact.cmd.lead, symbolic.cmd.lead);
+    }
+
+    #[test]
+    fn ranges_over_exact_range_matches_the_symbolic_builder() {
+        assert_eq!(
+            ranges_over("a..b", Mode::ExactRange).diff_range,
+            ranges("a..b", Mode::ExactRange).diff_range
+        );
+        assert_eq!(
+            ranges_over("a..b", Mode::ExactRange).commits_label,
+            "# commits in range"
+        );
     }
 }

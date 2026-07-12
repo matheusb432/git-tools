@@ -287,7 +287,7 @@ mod tests {
     fn ready_session() -> (Mutex<ViewerSession>, ViewerTabId) {
         let recipe = Recipe {
             source: RecipeSource::LocalRepo("/repo".into()),
-            op: RecipeOp::SquashPreview,
+            op: RecipeOp::SquashPreview { pinned: None },
             name: None,
         };
         let mut session = ViewerSession::new(1024 * 1024);
@@ -369,7 +369,7 @@ mod tests {
             session.lock().expect("session").open(
                 Recipe {
                     source: RecipeSource::LocalRepo("/new".into()),
-                    op: RecipeOp::SquashPreview,
+                    op: RecipeOp::SquashPreview { pinned: None },
                     name: None,
                 },
                 "new".into(),
@@ -389,7 +389,7 @@ mod tests {
             let id = state.open(
                 Recipe {
                     source: RecipeSource::LocalRepo("/two".into()),
-                    op: RecipeOp::SquashPreview,
+                    op: RecipeOp::SquashPreview { pinned: None },
                     name: None,
                 },
                 "two".into(),
@@ -423,7 +423,7 @@ mod tests {
             let id = state.open(
                 Recipe {
                     source: RecipeSource::LocalRepo("/two".into()),
-                    op: RecipeOp::SquashPreview,
+                    op: RecipeOp::SquashPreview { pinned: None },
                     name: None,
                 },
                 "two".into(),
@@ -458,7 +458,7 @@ mod tests {
     fn stale_transient_followed_by_current_oversize_view_is_bounded_conflict() {
         let recipe = Recipe {
             source: RecipeSource::LocalRepo("/repo".into()),
-            op: RecipeOp::SquashPreview,
+            op: RecipeOp::SquashPreview { pinned: None },
             name: None,
         };
         let mut state = ViewerSession::new(1);

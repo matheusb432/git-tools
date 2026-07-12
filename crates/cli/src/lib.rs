@@ -286,12 +286,15 @@ fn diff_invocation(args: DiffTargetArgs) -> DiffInvocation {
 fn diff_target(args: DiffTargetArgs) -> DiffTarget {
     // ? `-l N` wins via clap conflict guard; `target` is None whenever `last` is Some.
     if args.unpushed {
-        DiffTarget::Unpushed
+        DiffTarget::Unpushed { pinned: None }
     } else if let Some(base) = args.merge {
-        DiffTarget::Merge(base)
+        DiffTarget::Merge { base, pinned: None }
     } else {
         match args.last {
-            Some(count) => DiffTarget::Last(count),
+            Some(count) => DiffTarget::Last {
+                count,
+                pinned: None,
+            },
             None => DiffTarget::from_arg(args.target.as_deref()),
         }
     }
@@ -591,7 +594,11 @@ fn run_sw(args: &SwArgs) -> ExitCode {
         };
         let code = finish_sw(&sw::apply_rebase(&runner, &target));
         if code == ExitCode::Ok && args.diff {
-            return diff_exit(commands::diff::run(&DiffTarget::Unpushed, None, false));
+            return diff_exit(commands::diff::run(
+                &DiffTarget::Unpushed { pinned: None },
+                None,
+                false,
+            ));
         }
         return code;
     }

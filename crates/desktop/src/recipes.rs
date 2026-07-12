@@ -74,13 +74,33 @@ impl ComputationOutcome {
     }
 }
 
+/// Carry an optional pin across the crate boundary: `gtl_recipe::PinnedRange`
+/// to `domain::diffs::PinnedRange`.
+fn to_domain_pin(pinned: Option<&gtl_recipe::PinnedRange>) -> Option<domain::diffs::PinnedRange> {
+    pinned.map(|pin| domain::diffs::PinnedRange {
+        base: pin.base.clone(),
+        head: pin.head.clone(),
+    })
+}
+
 fn diff_target(target: &RecipeTarget) -> DiffTarget {
     match target {
-        RecipeTarget::Unpushed => DiffTarget::Unpushed,
+        RecipeTarget::Unpushed { pinned } => DiffTarget::Unpushed {
+            pinned: to_domain_pin(pinned.as_ref()),
+        },
         RecipeTarget::Base { rev } => DiffTarget::Base(rev.clone()),
-        RecipeTarget::Range { range } => DiffTarget::Range(range.clone()),
-        RecipeTarget::Merge { base } => DiffTarget::Merge(base.clone()),
-        RecipeTarget::Last { count } => DiffTarget::Last(*count),
+        RecipeTarget::Range { range, pinned } => DiffTarget::Range {
+            range: range.clone(),
+            pinned: to_domain_pin(pinned.as_ref()),
+        },
+        RecipeTarget::Merge { base, pinned } => DiffTarget::Merge {
+            base: base.clone(),
+            pinned: to_domain_pin(pinned.as_ref()),
+        },
+        RecipeTarget::Last { count, pinned } => DiffTarget::Last {
+            count: *count,
+            pinned: to_domain_pin(pinned.as_ref()),
+        },
     }
 }
 
@@ -97,15 +117,19 @@ where
             })
             .map(|response| response.view)
             .map_err(|error| format!("{error:#}")),
-        RecipeOp::MergeDiff { base } => mediator
+        RecipeOp::MergeDiff { base, pinned } => mediator
             .send_now(ComputeMergeDiff {
                 cwd,
                 base: base.clone(),
+                pinned: to_domain_pin(pinned.as_ref()),
             })
             .map(|response| response.view)
             .map_err(|error| format!("{error:#}")),
-        RecipeOp::SquashPreview => mediator
-            .send_now(ComputeSquashPreview { cwd })
+        RecipeOp::SquashPreview { pinned } => mediator
+            .send_now(ComputeSquashPreview {
+                cwd,
+                pinned: to_domain_pin(pinned.as_ref()),
+            })
             .map(|response| response.view)
             .map_err(|error| format!("{error:#}")),
     }
@@ -349,7 +373,7 @@ index 111..222 100644\n\
         Recipe {
             source: RecipeSource::LocalRepo("/repo".into()),
             op: RecipeOp::Diff {
-                target: RecipeTarget::Unpushed,
+                target: RecipeTarget::Unpushed { pinned: None },
             },
             name: None,
         }

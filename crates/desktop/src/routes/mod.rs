@@ -460,7 +460,7 @@ fn restore_live_views<M: RouteMediator>(
                 let recipe = Recipe {
                     source: RecipeSource::LocalRepo(record.source_value.into()),
                     op: RecipeOp::Diff {
-                        target: RecipeTarget::Unpushed,
+                        target: RecipeTarget::Unpushed { pinned: None },
                     },
                     name: Some(record.display_name),
                 };

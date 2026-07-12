@@ -48,7 +48,7 @@ fn recipe() -> Recipe {
     Recipe {
         source: RecipeSource::LocalRepo(PathBuf::from("/repo")),
         op: RecipeOp::Diff {
-            target: RecipeTarget::Unpushed,
+            target: RecipeTarget::Unpushed { pinned: None },
         },
         name: None,
     }
@@ -499,7 +499,7 @@ fn pending_processing_preserves_fifo_failure_remainder_for_retry() {
     fn named(path: &str) -> Recipe {
         Recipe {
             source: RecipeSource::LocalRepo(path.into()),
-            op: RecipeOp::SquashPreview,
+            op: RecipeOp::SquashPreview { pinned: None },
             name: None,
         }
     }

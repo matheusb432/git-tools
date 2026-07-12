@@ -175,6 +175,11 @@ pub fn resolve_sha(repo: impl AsRef<Path>, rev: &str) -> anyhow::Result<String> 
     Ok(run_git(repo, &["rev-parse", rev])?.trim().to_string())
 }
 
+/// The merge base of `a` and `b` as a full sha.
+pub fn merge_base(repo: impl AsRef<Path>, a: &str, b: &str) -> anyhow::Result<String> {
+    Ok(run_git(repo, &["merge-base", a, b])?.trim().to_string())
+}
+
 /// The committer date of `rev` as a strict ISO-8601 string (empty on failure).
 pub fn committed_at(repo: impl AsRef<Path>, rev: &str) -> String {
     run_git(repo, &["show", "-s", "--format=%cI", rev])

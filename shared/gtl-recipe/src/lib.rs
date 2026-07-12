@@ -1,7 +1,9 @@
 //! The recipe DTO: a serializable descriptor of *how to produce* a view —
 //! source identity + operation — never view data. Crosses the Tauri IPC
 //! boundary and, serialized, the app-history log (`recent_renders.recipe_json`).
-//! `Recipe` equality is the tab-dedupe identity.
+//! `Recipe::unpinned()` equality is the snapshot-tab dedupe identity (pins
+//! differ across runs of the same repo + operation); live recipes are always
+//! unpinned, so full `Recipe` equality still governs their identity.
 //!
 //! This crate is deliberately app-agnostic: it holds only pure serde DTOs and
 //! the codec, with no dependency on `domain`. [`RecipeTarget`] mirrors
@@ -27,35 +29,67 @@ pub enum RecipeSource {
     LocalRepo(PathBuf),
 }
 
+/// A commit range resolved to immutable SHAs at invocation time. `None` on a
+/// target means "resolve symbolically at compute time" — the live behavior.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PinnedRange {
+    /// Full SHA of the range base (exclusive end).
+    pub base: String,
+    /// Full SHA of the range head (inclusive end).
+    pub head: String,
+}
+
 /// A hand-maintained serde mirror of `domain::diffs::DiffTarget`. This crate
 /// carries no `domain` dependency (it must stay app-agnostic); the mapping onto
 /// the domain type lives in the consuming crate.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "target", rename_all = "kebab-case")]
 pub enum RecipeTarget {
-    Unpushed,
-    Base { rev: String },
-    Range { range: String },
-    Merge { base: String },
-    Last { count: NonZeroU32 },
+    Unpushed {
+        pinned: Option<PinnedRange>,
+    },
+    Base {
+        rev: String,
+    },
+    Range {
+        range: String,
+        pinned: Option<PinnedRange>,
+    },
+    Merge {
+        base: String,
+        pinned: Option<PinnedRange>,
+    },
+    Last {
+        count: NonZeroU32,
+        pinned: Option<PinnedRange>,
+    },
 }
 
 /// Which diff-family operation the recipe runs.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "kebab-case")]
 pub enum RecipeOp {
-    Diff { target: RecipeTarget },
-    MergeDiff { base: Option<String> },
-    SquashPreview,
+    Diff {
+        target: RecipeTarget,
+    },
+    MergeDiff {
+        base: Option<String>,
+        pinned: Option<PinnedRange>,
+    },
+    SquashPreview {
+        pinned: Option<PinnedRange>,
+    },
 }
 
 /// One renderable recipe: the repo source plus the operation.
+#[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Recipe {
     pub source: RecipeSource,
     pub op: RecipeOp,
     /// An optional human-readable label for the opened viewer tab.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
 
@@ -72,8 +106,29 @@ impl Recipe {
         match self.op {
             RecipeOp::Diff { .. } => "diff",
             RecipeOp::MergeDiff { .. } => "merge-diff",
-            RecipeOp::SquashPreview => "squash-preview",
+            RecipeOp::SquashPreview { .. } => "squash-preview",
         }
+    }
+
+    /// The pin-stripped projection used as the viewer's snapshot-tab dedupe
+    /// identity: two renders of the same repo + operation match even when their
+    /// pinned resolutions differ.
+    #[must_use]
+    pub fn unpinned(&self) -> Recipe {
+        let mut recipe = self.clone();
+        match &mut recipe.op {
+            RecipeOp::Diff { target } => match target {
+                RecipeTarget::Unpushed { pinned }
+                | RecipeTarget::Range { pinned, .. }
+                | RecipeTarget::Merge { pinned, .. }
+                | RecipeTarget::Last { pinned, .. } => *pinned = None,
+                RecipeTarget::Base { .. } => {}
+            },
+            RecipeOp::MergeDiff { pinned, .. } | RecipeOp::SquashPreview { pinned } => {
+                *pinned = None;
+            }
+        }
+        recipe
     }
 }
 
@@ -145,7 +200,7 @@ mod tests {
         Recipe {
             source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
             op: RecipeOp::Diff {
-                target: RecipeTarget::Unpushed,
+                target: RecipeTarget::Unpushed { pinned: None },
             },
             name: None,
         }
@@ -159,7 +214,7 @@ mod tests {
                 diff_recipe(),
                 Recipe {
                     source: RecipeSource::LocalRepo(PathBuf::from("/repos/other")),
-                    op: RecipeOp::SquashPreview,
+                    op: RecipeOp::SquashPreview { pinned: None },
                     name: None,
                 },
             ],
@@ -192,12 +247,15 @@ mod tests {
             diff_recipe(),
             Recipe {
                 source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
-                op: RecipeOp::MergeDiff { base: None },
+                op: RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                },
                 name: None,
             },
             Recipe {
                 source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
-                op: RecipeOp::SquashPreview,
+                op: RecipeOp::SquashPreview { pinned: None },
                 name: None,
             },
         ] {
@@ -268,5 +326,119 @@ mod tests {
             decode_token(&format!("{RECIPE_TOKEN_PREFIX}{garbage}")),
             None
         );
+    }
+
+    #[test]
+    fn pinned_unpushed_recipe_json_shape_is_pinned() {
+        let recipe = Recipe {
+            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Unpushed {
+                    pinned: Some(PinnedRange {
+                        base: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                        head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                    }),
+                },
+            },
+            name: None,
+        };
+        let json = serde_json::to_string(&recipe).unwrap();
+        assert_eq!(
+            json,
+            r#"{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}}"#
+        );
+        let back: Recipe = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, recipe);
+    }
+
+    #[test]
+    fn old_squash_preview_op_json_still_deserializes_unpinned() {
+        let json =
+            r#"{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"squash-preview"}}"#;
+        let recipe: Recipe = serde_json::from_str(json).expect("old history remains readable");
+        assert_eq!(recipe.op, RecipeOp::SquashPreview { pinned: None });
+        // And it round-trips back to the identical string (skip_serializing_if).
+        assert_eq!(serde_json::to_string(&recipe).unwrap(), json);
+    }
+
+    #[test]
+    fn old_merge_diff_op_json_still_deserializes_unpinned() {
+        let json = r#"{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"merge-diff","base":null}}"#;
+        let recipe: Recipe = serde_json::from_str(json).expect("old history remains readable");
+        assert_eq!(
+            recipe.op,
+            RecipeOp::MergeDiff {
+                base: None,
+                pinned: None
+            }
+        );
+    }
+
+    #[test]
+    fn unpinned_projection_strips_every_pin() {
+        let pin = Some(PinnedRange {
+            base: "a".repeat(40),
+            head: "b".repeat(40),
+        });
+        let cases = vec![
+            RecipeOp::Diff {
+                target: RecipeTarget::Unpushed {
+                    pinned: pin.clone(),
+                },
+            },
+            RecipeOp::Diff {
+                target: RecipeTarget::Range {
+                    range: "x..y".into(),
+                    pinned: pin.clone(),
+                },
+            },
+            RecipeOp::Diff {
+                target: RecipeTarget::Merge {
+                    base: "main".into(),
+                    pinned: pin.clone(),
+                },
+            },
+            RecipeOp::Diff {
+                target: RecipeTarget::Last {
+                    count: NonZeroU32::new(2).unwrap(),
+                    pinned: pin.clone(),
+                },
+            },
+            RecipeOp::MergeDiff {
+                base: Some("main".into()),
+                pinned: pin.clone(),
+            },
+            RecipeOp::SquashPreview { pinned: pin },
+        ];
+        for op in cases {
+            let recipe = Recipe {
+                source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+                op,
+                name: Some("n".into()),
+            };
+            let stripped = recipe.unpinned();
+            assert!(!serde_json::to_string(&stripped).unwrap().contains("pinned"));
+            // Everything except the pin is preserved.
+            assert_eq!(stripped.source, recipe.source);
+            assert_eq!(stripped.name, recipe.name);
+        }
+    }
+
+    #[test]
+    fn unpinned_projection_of_two_different_pins_is_equal() {
+        let recipe_with = |head: &str| Recipe {
+            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Unpushed {
+                    pinned: Some(PinnedRange {
+                        base: "a".repeat(40),
+                        head: head.repeat(40),
+                    }),
+                },
+            },
+            name: None,
+        };
+        assert_ne!(recipe_with("b"), recipe_with("c"));
+        assert_eq!(recipe_with("b").unpinned(), recipe_with("c").unpinned());
     }
 }

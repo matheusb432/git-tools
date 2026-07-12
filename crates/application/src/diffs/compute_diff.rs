@@ -84,6 +84,13 @@ index 111..222 100644\n\
         }
     }
 
+    fn pin() -> domain::diffs::PinnedRange {
+        domain::diffs::PinnedRange {
+            base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
+            head: "1111111111222222222233333333334444444444".into(),
+        }
+    }
+
     #[test]
     fn computes_the_view_without_touching_store_or_renderer() {
         let handler = ComputeDiffHandler {
@@ -98,7 +105,7 @@ index 111..222 100644\n\
         };
 
         let response = handler
-            .send_now(req(DiffTarget::Unpushed))
+            .send_now(req(DiffTarget::Unpushed { pinned: None }))
             .expect("compute succeeds");
 
         assert_eq!(response.view.repo_name, "repo");
@@ -121,7 +128,7 @@ index 111..222 100644\n\
         };
 
         let response = handler
-            .send_now(req(DiffTarget::Unpushed))
+            .send_now(req(DiffTarget::Unpushed { pinned: None }))
             .expect("compute succeeds");
 
         assert!(response.view.is_empty());
@@ -142,7 +149,7 @@ index 111..222 100644\n\
         };
 
         let response = handler
-            .send_now(req(DiffTarget::Unpushed))
+            .send_now(req(DiffTarget::Unpushed { pinned: None }))
             .expect("compute succeeds");
 
         assert_eq!(
@@ -151,6 +158,86 @@ index 111..222 100644\n\
                 "diff-preview: no upstream; falling back to main"
             )]
         );
+    }
+
+    #[test]
+    fn pinned_unpushed_computes_without_an_upstream_and_without_the_fallback_note() {
+        let handler = ComputeDiffHandler {
+            source: FakeDiffSource {
+                top_level: Some("/repo".into()),
+                branch: "feature".into(),
+                upstream: None, // would warn-and-fallback (or error) symbolically
+                commits: vec![one_commit()],
+                diff_output: SINGLE_FILE_DIFF.into(),
+                ..Default::default()
+            },
+        };
+
+        let response = handler
+            .send_now(req(DiffTarget::Unpushed {
+                pinned: Some(pin()),
+            }))
+            .expect("pinned compute succeeds");
+
+        assert!(
+            response.notes.is_empty(),
+            "no fallback note for a pinned range"
+        );
+        assert_eq!(response.view.commits_label, "# unpushed commits");
+        assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
+        assert_eq!(response.view.foot.cmd, "git diff aaaaaaaaaa..1111111111");
+        assert_eq!(response.view.upstream, "aaaaaaaaaa");
+        assert_eq!(response.summary, "1 unpushed commit(s)");
+    }
+
+    #[test]
+    fn pinned_merge_target_skips_symbolic_verification() {
+        let handler = ComputeDiffHandler {
+            source: FakeDiffSource {
+                top_level: Some("/repo".into()),
+                branch: "feature".into(),
+                known_revs: vec![], // symbolic verify_commit("main") would error
+                commits: vec![one_commit()],
+                diff_output: SINGLE_FILE_DIFF.into(),
+                ..Default::default()
+            },
+        };
+
+        let response = handler
+            .send_now(req(DiffTarget::Merge {
+                base: "main".into(),
+                pinned: Some(pin()),
+            }))
+            .expect("pinned merge computes");
+
+        assert_eq!(response.view.title, "merge-diff");
+        assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
+        assert_eq!(response.summary, "to merge into main");
+    }
+
+    #[test]
+    fn pinned_range_target_computes_over_the_pin_with_exact_range_labels() {
+        let handler = ComputeDiffHandler {
+            source: FakeDiffSource {
+                top_level: Some("/repo".into()),
+                branch: "feature".into(),
+                known_revs: vec![], // symbolic verify_exact_range would error
+                commits: vec![one_commit()],
+                diff_output: SINGLE_FILE_DIFF.into(),
+                ..Default::default()
+            },
+        };
+
+        let response = handler
+            .send_now(req(DiffTarget::Range {
+                range: "a..b".into(),
+                pinned: Some(pin()),
+            }))
+            .expect("pinned range computes");
+
+        assert!(response.notes.is_empty());
+        assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
+        assert_eq!(response.view.commits_label, "# commits in range");
     }
 
     #[test]

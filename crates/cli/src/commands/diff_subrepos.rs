@@ -151,7 +151,13 @@ pub(crate) fn run_scan_with(
             .to_string_lossy()
             .into_owned(),
         root: root.to_string_lossy().into_owned(),
-        target: super::to_target_dto(&last.map_or(DiffTarget::Unpushed, DiffTarget::Last)),
+        target: super::to_target_dto(&last.map_or(
+            DiffTarget::Unpushed { pinned: None },
+            |count| DiffTarget::Last {
+                count,
+                pinned: None,
+            },
+        )),
         repos: repo_refs,
         theme: crate::config::load().theme,
     };
