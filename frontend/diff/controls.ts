@@ -10,7 +10,8 @@ export function enhanceControls(root: HTMLElement): () => void {
   let active = true;
   const scheduleReset = (button: HTMLButtonElement, state: CopyState): void => {
     button.dataset["state"] = state;
-    button.textContent = state === "ok" ? "copied" : state === "err" ? "failed" : (button.dataset["copyLabel"] ?? "copy");
+    button.textContent =
+      state === "ok" ? "copied" : state === "err" ? "failed" : (button.dataset["copyLabel"] ?? "copy");
     const timer = setTimeout(() => {
       timers.delete(timer);
       button.dataset["state"] = "";

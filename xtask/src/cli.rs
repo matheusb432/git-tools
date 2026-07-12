@@ -58,8 +58,10 @@ pub enum Command {
         #[arg(long)]
         all: bool,
     },
-    /// Rebuild the committed frontend bundles and fail if they drift from their TS sources
-    /// (`crates/infra/src/embedded/generated` + `crates/desktop/dist`). Skips when bun is absent.
+    /// Build and drive the real gtl-viewer binary through Tauri's external `WebDriver` provider.
+    DesktopTestE2e,
+    /// Rebuild the committed diff-preview bundle and fail if it drifts from its TypeScript
+    /// sources. Skips when bun is absent.
     /// Migrates the `_js-drift-guard` recipe — a CI/pre-commit gate.
     DriftCheck,
     /// Mechanical architecture lint: walks `crates/*/src` and `shared/*/src` and exits 3 on
@@ -101,5 +103,12 @@ mod tests {
     fn ship_accepts_the_smoke_flag() {
         let cli = Cli::try_parse_from(["xtask", "ship", "--smoke"]).unwrap();
         assert!(matches!(cli.command, super::Command::Ship { smoke: true }));
+    }
+
+    #[test]
+    fn desktop_test_e2e_is_a_closed_verb_without_flags() {
+        let cli = Cli::try_parse_from(["xtask", "desktop-test-e2e"]).unwrap();
+        assert!(matches!(cli.command, super::Command::DesktopTestE2e));
+        assert!(Cli::try_parse_from(["xtask", "desktop-test-e2e", "--raw"]).is_err());
     }
 }

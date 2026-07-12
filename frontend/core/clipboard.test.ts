@@ -11,7 +11,11 @@ test("copyText resolves true via execCommand fallback when clipboard API absent"
     globalThis.navigator = {} as unknown as Navigator;
     const created: unknown[] = [];
     globalThis.document = {
-      createElement: () => { const el = { value: "", style: {}, select() {} }; created.push(el); return el; },
+      createElement: () => {
+        const el = { value: "", style: {}, select() {} };
+        created.push(el);
+        return el;
+      },
       body: { appendChild() {}, removeChild() {} },
       execCommand: () => true,
     } as unknown as Document;

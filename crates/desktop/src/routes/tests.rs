@@ -586,6 +586,8 @@ fn conflict_and_internal_errors_keep_target_roots_and_hide_details() {
         let response = error_response(target, &error);
         let html = String::from_utf8_lossy(response.body());
         assert_eq!(response.status(), status);
+        assert_eq!(response.headers()["X-GTL-Recovery"], "true");
+        assert_eq!(response.headers()["HX-Reswap"], "outerHTML");
         assert!(html.starts_with(root));
         assert!(!html.contains("sqlite"));
         assert!(!html.contains("/secret/path"));
@@ -593,35 +595,139 @@ fn conflict_and_internal_errors_keep_target_roots_and_hide_details() {
 }
 
 #[test]
-fn compute_failure_is_sanitized_immediately_and_in_later_tab_rendering() {
+fn settings_failure_returns_an_unmarked_sanitized_document_error() {
+    let app_state = InMemoryAppStateStore::default();
+    *app_state
+        .set_setting_error
+        .lock()
+        .expect("setting error lock") = Some("secret settings persistence failure".into());
     let app = ViewerApp::new(
-        test_support::fake_mediator(),
+        test_support::fake_mediator_with(
+            FakeDiffSource::default(),
+            app_state,
+            FakeRepoProbe::default(),
+        ),
         Path::new("/data").into(),
         1024,
     );
+    let response = serve_app(&app, request("/settings?theme=light"));
+    let html = String::from_utf8_lossy(response.body());
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(html.starts_with("<!DOCTYPE html>"));
+    assert!(html.contains("The viewer could not complete this request"));
+    assert!(!html.contains("secret settings persistence failure"));
+    assert!(response.headers().get("X-GTL-Recovery").is_none());
+    assert!(response.headers().get("HX-Reswap").is_none());
+}
+
+#[test]
+fn compute_failure_publishes_sanitized_tab_and_does_not_block_later_batches() {
+    let app = ViewerApp::new(
+        test_support::fake_mediator_with(
+            source(),
+            InMemoryAppStateStore::default(),
+            FakeRepoProbe::default(),
+        ),
+        Path::new("/data").into(),
+        128 * 1024 * 1024,
+    );
+    let failed = Recipe {
+        source: RecipeSource::LocalRepo("/sentinel/sql/path".into()),
+        op: RecipeOp::Diff {
+            target: RecipeTarget::Base {
+                rev: "missing-secret-revision".into(),
+            },
+        },
+        name: Some("Failed first".into()),
+    };
+    let mut second = recipe();
+    second.source = RecipeSource::LocalRepo("/second".into());
+    second.name = Some("Second succeeds".into());
+    let mut third = recipe();
+    third.source = RecipeSource::LocalRepo("/third".into());
+    third.name = Some("Third succeeds".into());
     app.pending()
         .push(OpenRecipes {
-            batch_id: "secret".into(),
+            batch_id: "first".into(),
             kind: RecipeBatchKind::Snapshot,
-            recipes: vec![Recipe {
-                source: RecipeSource::LocalRepo("/sentinel/sql/path".into()),
-                op: RecipeOp::SquashPreview,
-                name: None,
-            }],
+            recipes: vec![failed, second],
         })
-        .expect("queue");
+        .expect("queue first batch");
+    app.pending()
+        .push(OpenRecipes {
+            batch_id: "second".into(),
+            kind: RecipeBatchKind::Snapshot,
+            recipes: vec![third],
+        })
+        .expect("queue second batch");
 
-    let failed = serve_app(&app, request("/pending"));
-    let failed_html = String::from_utf8_lossy(failed.body());
-    assert_eq!(failed.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(failed_html.starts_with("<nav id=\"viewer-tabs\""));
-    assert!(!failed_html.contains("sentinel"));
-    assert!(!failed_html.contains("sql/path"));
+    let response = serve_app(&app, request("/pending"));
+    let html = String::from_utf8_lossy(response.body());
 
-    let later = serve_app(&app, request("/"));
-    let later_html = String::from_utf8_lossy(later.body());
-    assert_eq!(later.status(), StatusCode::OK);
-    assert!(later_html.contains("The diff could not be rendered. Please retry."));
-    assert!(!later_html.contains("sentinel"));
-    assert!(!later_html.contains("sql/path"));
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(html.starts_with("<nav id=\"viewer-tabs\""));
+    let failed_index = html.find("Failed first").expect("failed tab label");
+    let second_index = html.find("Second succeeds").expect("second tab label");
+    let third_index = html.find("Third succeeds").expect("third tab label");
+    assert!(
+        failed_index < second_index && second_index < third_index,
+        "{html}"
+    );
+    assert!(!html.contains("missing-secret-revision"));
+    assert!(!html.contains("sentinel"));
+    assert!(!html.contains("sql/path"));
+    assert!(app.pending().drain().is_empty());
+    let session = app.session.lock().expect("session lock");
+    let failed_tab = session.tabs().next().expect("failed tab remains open");
+    assert_eq!(failed_tab.tab.label(), "Failed first");
+    assert_eq!(
+        failed_tab.tab.state(),
+        &domain::viewer::ViewerTabState::Error {
+            reason: "The diff could not be rendered. Please retry.".into(),
+        }
+    );
+}
+
+#[test]
+fn retryable_pending_failure_requeues_the_exact_fifo_remainder() {
+    let app = ViewerApp::new(
+        test_support::fake_mediator_with(
+            source(),
+            InMemoryAppStateStore::default(),
+            FakeRepoProbe::default(),
+        ),
+        Path::new("/data").into(),
+        128 * 1024 * 1024,
+    );
+    let mut first = recipe();
+    first.name = Some("first".into());
+    let mut second = recipe();
+    second.source = RecipeSource::LocalRepo("/second".into());
+    second.name = Some("second".into());
+    let queued = vec![
+        OpenRecipes {
+            batch_id: "one".into(),
+            kind: RecipeBatchKind::Snapshot,
+            recipes: vec![first],
+        },
+        OpenRecipes {
+            batch_id: "two".into(),
+            kind: RecipeBatchKind::Snapshot,
+            recipes: vec![second],
+        },
+    ];
+    for batch in queued.clone() {
+        app.pending().push(batch).expect("queue batch");
+    }
+    let session = Arc::clone(&app.session);
+    let _ = catch_unwind(AssertUnwindSafe(move || {
+        let _guard = session.lock().expect("initial session lock");
+        panic!("poison pending session");
+    }));
+
+    let response = serve_app(&app, request("/pending"));
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(app.pending().drain(), queued);
 }

@@ -4,12 +4,7 @@ import { enhanceLayout } from "./enhance-layout";
 import { enhanceControls } from "./controls";
 import { resolveActiveSet } from "./commit-focus";
 import { toggleLongLine } from "./long-lines";
-import {
-  captureSwapAnchor,
-  createEnhancementLifecycle,
-  installSwapLifecycle,
-  restoreSwapAnchor,
-} from "./swap";
+import { captureSwapAnchor, createEnhancementLifecycle, installSwapLifecycle, restoreSwapAnchor } from "./swap";
 
 // JS behavior contracts migrated from deleted Rust PREVIEW_JS.contains tests.
 // Covered here so bun test owns the JS logic while cargo test stays bun-free.
@@ -101,10 +96,30 @@ function viewWithFile(path: string): HTMLElement {
 
 type SwapEventName = "htmx:beforeSwap" | "htmx:afterSwap" | "htmx:oobBeforeSwap" | "htmx:oobAfterSwap";
 
-function dispatchSwap(type: SwapEventName, origin: HTMLElement, detailTarget: HTMLElement, shouldSwap = true): void {
+type SwapDetail = {
+  readonly target: HTMLElement;
+  shouldSwap: boolean;
+  isError: boolean;
+  readonly xhr?: { readonly getResponseHeader: (name: string) => string | null };
+};
+
+function dispatchSwap(
+  type: SwapEventName,
+  origin: HTMLElement,
+  detailTarget: HTMLElement,
+  shouldSwap = true,
+  marker: string | null = null,
+): SwapDetail {
   const event = new Event(type, { bubbles: true });
-  Object.defineProperty(event, "detail", { value: { target: detailTarget, shouldSwap } });
+  const detail: SwapDetail = {
+    target: detailTarget,
+    shouldSwap,
+    isError: !shouldSwap,
+    xhr: { getResponseHeader: (name) => (name === "X-GTL-Recovery" ? marker : null) },
+  };
+  Object.defineProperty(event, "detail", { value: detail });
   origin.dispatchEvent(event);
+  return detail;
 }
 
 const testLifecycle = createEnhancementLifecycle(
@@ -240,6 +255,42 @@ test("a canceled normal swap leaves the existing view mounted and interactive", 
   expect(root.dataset["gtlEnhanced"]).toBe("true");
   fold.click();
   expect(file.open).toBe(true);
+});
+
+test("a marked recovery error opts into the real htmx swap lifecycle", () => {
+  document.body.replaceChildren();
+  installSwapLifecycle(document, testLifecycle);
+  const view = viewWithFile("src/lib.rs");
+  document.body.appendChild(view);
+  testLifecycle.enhanceWithin(view);
+  const root = view.querySelector<HTMLElement>(".layout");
+  if (!root) throw new Error("view helper is incomplete");
+
+  const detail = dispatchSwap("htmx:beforeSwap", view, view, false, "true");
+
+  expect(detail.shouldSwap).toBe(true);
+  expect(detail.isError).toBe(false);
+  expect(root.dataset["gtlEnhanced"]).toBeUndefined();
+});
+
+test("an unmarked settings-like HTTP error remains unswapped and mounted", () => {
+  document.body.replaceChildren();
+  installSwapLifecycle(document, testLifecycle);
+  const view = viewWithFile("src/lib.rs");
+  document.body.appendChild(view);
+  testLifecycle.enhanceWithin(view);
+  const root = view.querySelector<HTMLElement>(".layout");
+  if (!root) throw new Error("view helper is incomplete");
+  const setting = document.createElement("input");
+  setting.type = "radio";
+  setting.setAttribute("hx-swap", "none");
+  view.appendChild(setting);
+
+  const detail = dispatchSwap("htmx:beforeSwap", setting, setting, false);
+
+  expect(detail.shouldSwap).toBe(false);
+  expect(detail.isError).toBe(true);
+  expect(root.dataset["gtlEnhanced"]).toBe("true");
 });
 
 test("an OOB viewer replacement unmounts the old view and enhances the inserted event origin", () => {

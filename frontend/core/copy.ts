@@ -3,8 +3,7 @@ export function extractCopyText(file: Element): string {
   // ! (the split panes lay the same lines across two columns). Honour the full-file toggle.
   const full = document.documentElement.dataset["diffFull"] === "on";
   const unified =
-    (full ? file.querySelector(".diff-unified.diff-full") : null) ??
-    file.querySelector(".diff-unified.diff-compact");
+    (full ? file.querySelector(".diff-unified.diff-full") : null) ?? file.querySelector(".diff-unified.diff-compact");
   const rows = unified ? Array.from(unified.querySelectorAll(".dl-add, .dl-ctx")) : [];
   const out: string[] = [];
   let firstLine: number | null = null;

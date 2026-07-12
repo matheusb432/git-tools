@@ -7,20 +7,10 @@
   "sortPackageJson": {
     "sortScripts": true
   },
-  "sortTailwindcss": {
-    "functions": ["cn", "tv"],
-    "stylesheet": "frontend/viewer/app/app.css"
-  },
   "svelte": {
     "allowShorthand": true,
     "indentScriptAndStyle": true,
     "sortOrder": "options-scripts-markup-styles"
   },
-  "ignorePatterns": [
-    "crates/desktop/dist",
-    "crates/infra/src/embedded/generated",
-    "frontend/viewer/node_modules",
-    "node_modules",
-    "target"
-  ]
+  "ignorePatterns": ["crates/infra/src/embedded/generated", "node_modules", "target"]
 }

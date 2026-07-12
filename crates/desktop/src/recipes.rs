@@ -59,6 +59,21 @@ pub(crate) struct RefreshedRecipe {
     pub(crate) view: Option<Arc<View>>,
 }
 
+#[derive(Debug, Clone)]
+enum ComputationOutcome {
+    Rendered(Arc<View>),
+    StateOnly,
+}
+
+impl ComputationOutcome {
+    fn into_view(self) -> Option<Arc<View>> {
+        match self {
+            Self::Rendered(view) => Some(view),
+            Self::StateOnly => None,
+        }
+    }
+}
+
 fn diff_target(target: &RecipeTarget) -> DiffTarget {
     match target {
         RecipeTarget::Unpushed => DiffTarget::Unpushed,
@@ -123,7 +138,7 @@ where
         (id, ticket)
     };
 
-    let view = compute_and_publish(mediator, session, data_root, recipe, kind, ticket)?;
+    let view = compute_and_publish(mediator, session, data_root, recipe, kind, ticket)?.into_view();
     Ok(OpenedRecipe {
         tab_id: id,
         ticket,
@@ -158,6 +173,7 @@ where
     };
 
     compute_and_publish(mediator, session, data_root, &recipe, kind, ticket)
+        .map(ComputationOutcome::into_view)
         .map_err(|error| error.to_string())
 }
 
@@ -187,7 +203,8 @@ where
             .ok_or_else(|| format!("unknown tab {id}"))?;
         (recipe, kind, ticket)
     };
-    let view = compute_and_publish(mediator, session, data_root, &recipe, kind, ticket)?;
+    let view =
+        compute_and_publish(mediator, session, data_root, &recipe, kind, ticket)?.into_view();
     Ok(RefreshedRecipe { ticket, view })
 }
 
@@ -198,7 +215,7 @@ fn compute_and_publish<M>(
     recipe: &Recipe,
     kind: ViewerTabKind,
     ticket: ComputeTicket,
-) -> Result<Option<Arc<View>>, RecipeError>
+) -> Result<ComputationOutcome, RecipeError>
 where
     M: Sender<ComputeDiff>
         + Sender<ComputeMergeDiff>
@@ -216,14 +233,14 @@ where
         if session.set_state_if_current(ticket, broken) == PublishOutcome::Stale {
             return Err(RecipeError::Stale);
         }
-        return Ok(None);
+        return Ok(ComputationOutcome::StateOnly);
     }
 
     let view = match compute_view(mediator, recipe) {
         Ok(view) => Arc::new(view),
         Err(reason) => {
             publish_compute_error(session, ticket, &reason)?;
-            return Err(RecipeError::Failed(reason));
+            return Ok(ComputationOutcome::StateOnly);
         }
     };
     let published = {
@@ -234,7 +251,7 @@ where
     };
     if published == PublishOutcome::Published {
         record_render(mediator, data_root, recipe, &view);
-        return Ok(Some(view));
+        return Ok(ComputationOutcome::Rendered(view));
     }
     Err(RecipeError::Stale)
 }
@@ -402,17 +419,16 @@ index 111..222 100644\n\
         let mut named = recipe();
         named.name = Some("Named initial failure".into());
 
-        assert!(matches!(
-            open_recipe(
-                &mediator,
-                &session,
-                Path::new("/data"),
-                &named,
-                "batch".into(),
-                ViewerTabKind::Snapshot,
-            ),
-            Err(RecipeError::Failed(_))
-        ));
+        let opened = open_recipe(
+            &mediator,
+            &session,
+            Path::new("/data"),
+            &named,
+            "batch".into(),
+            ViewerTabKind::Snapshot,
+        )
+        .expect("published compute errors are acknowledged");
+        assert!(opened.view.is_none());
 
         let session = session.lock().expect("session lock");
         let tab = session.tabs().next().expect("failed tab remains open");
@@ -615,7 +631,11 @@ index 111..222 100644\n\
         .expect("initial open succeeds")
         .tab_id;
 
-        assert!(refresh_recipe(&failing, &session, Path::new("/data"), id).is_err());
+        assert!(
+            refresh_recipe(&failing, &session, Path::new("/data"), id)
+                .expect("published refresh errors are acknowledged")
+                .is_none()
+        );
 
         let session = session.lock().expect("session lock");
         let tab = session.tab(id).expect("failed tab remains open");

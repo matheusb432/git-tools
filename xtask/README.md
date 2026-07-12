@@ -13,7 +13,7 @@
 | `fmt [--check]` | Pinned-nightly `cargo fmt` (toolchain from `.rustfmt-nightly`) + taplo. `--check` additionally runs the `check-structure` and `check-deps` architecture lints and a clippy `disallowed_methods` gate. Migrates `just fmt` / `just fmt-check`. | `just fmt` / `just fmt-check` |
 | `check-structure` | Mechanical layout lint over `crates/*/src` and `shared/*/src`: max dir depth 2, no nested `errors/`/`events/` dirs, no `services/` dir. Only wired into `fmt --check`; no standalone justfile entry. | (via `just fmt-check`) |
 | `check-deps` | Dependency-direction lint over every `crates/*/Cargo.toml` and `shared/*/Cargo.toml` dependency table (`dependencies`, `dev-dependencies`, `build-dependencies`, and their `target.<cfg>` forms): `shared/*` never depends on an app crate, and the core crates (`domain`, `application`, `contracts`) never depend outward. Only wired into `fmt --check`; no standalone justfile entry. | (via `just fmt-check`) |
-| `drift-check` | Rebuild the committed JS bundles and fail if they drift from their TS sources (CI/pre-commit gate). | `just drift-check` |
+| `drift-check` | Rebuild the committed diff-preview JS bundle and fail if it drifts from its TypeScript sources (CI/pre-commit gate). | `just drift-check` |
 | `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |
 | `ship [--smoke]` | Cross-build the three Win11 release exes (CLI + gtl-daemon + viewer) from a Linux host via `cargo-xwin`, with a host-testable preflight; `--smoke` is a fast debug-profile linkage drift check (no artifact verify). | `just ship` / `just ship --smoke` |
 

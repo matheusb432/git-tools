@@ -1,4 +1,6 @@
 //! gtl-viewer: the custom-origin htmx desktop viewer.
+#[cfg(feature = "benchmark-support")]
+pub mod benchmark_support;
 mod commands;
 mod protocol_config;
 mod recipes;
@@ -93,7 +95,7 @@ pub(crate) type WiredMediator =
     DesktopMediator<SystemClock, GitRepoProbe, SqliteAppState, GitDiffSource>;
 pub(crate) type WiredViewerApp = routes::ViewerApp<WiredMediator>;
 
-const DEFAULT_VIEW_CACHE_WEIGHT: usize = 2 * 1024 * 1024 * 1024;
+const DEFAULT_VIEW_CACHE_WEIGHT: usize = 128 * 1024 * 1024;
 const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
 const MAIN_WINDOW_SIZE: (f64, f64) = (1200.0, 800.0);
 const MAIN_WINDOW_MIN_SIZE: (f64, f64) = (720.0, 480.0);
@@ -393,14 +395,6 @@ pub fn run() {
                 eprintln!("gtl-viewer: failed to forward recipe batch: {error}");
             }
         }))
-        .invoke_handler(tauri::generate_handler![
-            commands::app_state::list_live_views,
-            commands::app_state::save_live_view,
-            commands::app_state::probe_source,
-            commands::app_state::remove_live_view,
-            commands::app_state::get_setting,
-            commands::app_state::set_setting,
-        ])
         .register_asynchronous_uri_scheme_protocol(
             protocol_config::PROTOCOL_SCHEME,
             |ctx, request, responder| {
@@ -465,14 +459,6 @@ pub(crate) mod test_support {
             FakeDiffSource::default(),
             InMemoryAppStateStore::default(),
             FakeRepoProbe::default(),
-        )
-    }
-
-    pub(crate) fn fake_mediator_with_probe(probe: FakeRepoProbe) -> FakeMediator {
-        fake_mediator_parts(
-            FakeDiffSource::default(),
-            InMemoryAppStateStore::default(),
-            probe,
         )
     }
 
@@ -657,6 +643,11 @@ mod tests {
         assert_eq!(MAIN_WINDOW_TITLE, "git-tools diff viewer");
         assert_eq!(MAIN_WINDOW_SIZE, (1200.0, 800.0));
         assert_eq!(MAIN_WINDOW_MIN_SIZE, (720.0, 480.0));
+    }
+
+    #[test]
+    fn production_view_cache_respects_the_low_memory_budget() {
+        assert_eq!(DEFAULT_VIEW_CACHE_WEIGHT, 128 * 1024 * 1024);
     }
 
     #[test]

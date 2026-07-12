@@ -13,7 +13,7 @@ export function readStoredTheme(storage: StorageLike): Theme | undefined {
   try {
     const raw = storage.getItem(STORAGE_KEY);
     return raw === null ? undefined : toTheme(raw);
-  } catch (_error) {
+  } catch {
     return undefined;
   }
 }
@@ -21,7 +21,7 @@ export function readStoredTheme(storage: StorageLike): Theme | undefined {
 export function writeStoredTheme(storage: StorageLike, theme: Theme): void {
   try {
     storage.setItem(STORAGE_KEY, theme);
-  } catch (_error) {
+  } catch {
     return;
   }
 }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use super::{
     RenderHistoryId, RenderOptions, Theme, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState,
@@ -342,6 +342,9 @@ impl ViewerSettings {
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ViewerDocumentError {
+    /// Reports an identity assigned to more than one tab-strip entry.
+    #[error("viewer tab {tab_id} appears more than once in the tab strip")]
+    DuplicateTabId { tab_id: ViewerTabId },
     /// Reports an active identity absent from the document's tab strip.
     #[error("active viewer tab {tab_id} is absent from the tab strip")]
     ActiveTabMissing { tab_id: ViewerTabId },
@@ -399,9 +402,9 @@ impl ViewerDocument {
     ///
     /// # Errors
     ///
-    /// Returns [`ViewerDocumentError`] when the active identity is missing, the active rendered
-    /// view belongs to another tab, its kind differs from the tab kind, or the active tab state
-    /// disagrees with view presence.
+    /// Returns [`ViewerDocumentError`] when tab identities are duplicated, the active identity is
+    /// missing, the active rendered view belongs to another tab, its kind differs from the tab
+    /// kind, or the active tab state disagrees with view presence.
     ///
     /// # Examples
     ///
@@ -425,6 +428,13 @@ impl ViewerDocument {
         history: Vec<ViewerHistoryEntry>,
         settings: ViewerSettings,
     ) -> Result<Self, ViewerDocumentError> {
+        let mut tab_ids = HashSet::with_capacity(tabs.len());
+        for tab in &tabs {
+            if !tab_ids.insert(tab.id()) {
+                return Err(ViewerDocumentError::DuplicateTabId { tab_id: tab.id() });
+            }
+        }
+
         let active_tab = active_tab_id
             .map(|tab_id| {
                 tabs.iter()
@@ -636,6 +646,32 @@ mod tests {
             error,
             ViewerDocumentError::ReadyTabMissingView { tab_id: id }
         );
+    }
+
+    #[test]
+    fn duplicate_tab_id_is_rejected_before_active_lookup() {
+        let id = tab_id(1);
+        let duplicate = || {
+            ViewerTab::new(
+                id,
+                "duplicate".into(),
+                ViewerTabKind::Snapshot,
+                ViewerTabState::Error {
+                    reason: "failed".into(),
+                },
+            )
+        };
+
+        let error = ViewerDocument::new(
+            vec![duplicate(), duplicate()],
+            Some(tab_id(2)),
+            None,
+            vec![],
+            settings(),
+        )
+        .expect_err("duplicate identities reject before missing active identity");
+
+        assert_eq!(error, ViewerDocumentError::DuplicateTabId { tab_id: id });
     }
 
     #[test]

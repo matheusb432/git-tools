@@ -7,7 +7,7 @@ _default:
 
 # Build the gtl-viewer Tauri binary (skips with a clear message if webkit2gtk-4.1 headers are absent).
 [group('desktop')]
-build: build-viewer-ui
+build:
     if pkg-config --exists webkit2gtk-4.1 2>/dev/null; then \
       cargo build --release -p desktop --features custom-protocol; \
     else echo "webkit2gtk-4.1 headers absent — skipping gtl-viewer build (CLI-only mode; browser fallback active)" >&2; fi
@@ -21,17 +21,12 @@ install:
 [group('desktop')]
 update: build install
 
-# Bundle the viewer Svelte app -> crates/desktop/dist (committed). Needs bun.
-[group('desktop')]
-build-viewer-ui:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if command -v bun >/dev/null 2>&1; then
-      NODE_ENV=production bunx vite build --config frontend/viewer/vite.config.mjs
-      echo "built crates/desktop/dist (viewer app)"
-    else echo "bun not installed; skipping build-viewer-ui" >&2; fi
-
 # Render the viewer icon assets (icon.png + multi-res icon.ico) via the Rust xtask generator.
 [group('desktop')]
 gen-icon:
     cargo run --quiet -p xtask -- gen-icon
+
+# Build and drive the real gtl-viewer binary under Tauri WebDriver (Xvfb + WebKitWebDriver on Linux).
+[group('desktop')]
+test-e2e:
+    cargo run --quiet -p xtask -- desktop-test-e2e

@@ -47,7 +47,7 @@ function makeRowEl(desc: RowDesc): object {
     const codeTextEl = { textContent: rawText };
     codeEl = {
       textContent: rawText + "[expand]", // simulates extra label text on the outer code
-      querySelector: (sel: string): object | null => sel === ".code-text" ? codeTextEl : null,
+      querySelector: (sel: string): object | null => (sel === ".code-text" ? codeTextEl : null),
     };
   } else {
     codeEl = {
@@ -57,8 +57,8 @@ function makeRowEl(desc: RowDesc): object {
   }
 
   return {
-    querySelector: (sel: string): object | null => sel === "code" ? codeEl : null,
-    querySelectorAll: (sel: string): object[] => sel === ".ln" ? lnEls : [],
+    querySelector: (sel: string): object | null => (sel === "code" ? codeEl : null),
+    querySelectorAll: (sel: string): object[] => (sel === ".ln" ? lnEls : []),
   };
 }
 
@@ -70,7 +70,7 @@ function makeFileStub(rowsHtml: string, attrs: Record<string, string> = {}): obj
   const hasCopyCtx = "copy-ctx" in attrs;
   const layoutEl = {
     classList: {
-      contains: (cls: string): boolean => cls === "copy-ctx" ? hasCopyCtx : false,
+      contains: (cls: string): boolean => (cls === "copy-ctx" ? hasCopyCtx : false),
     },
   };
 
@@ -78,31 +78,32 @@ function makeFileStub(rowsHtml: string, attrs: Record<string, string> = {}): obj
   // the on-screen layout. Returning it only for the .diff-unified selectors guards against a
   // regression that copied from the split panes (which carry no such rows).
   const unifiedEl = {
-    querySelectorAll: (sel: string): object[] =>
-      sel.includes("dl-add") || sel.includes("dl-ctx") ? rowEls : [],
+    querySelectorAll: (sel: string): object[] => (sel.includes("dl-add") || sel.includes("dl-ctx") ? rowEls : []),
   };
 
   return {
     querySelector: (sel: string): object | null =>
       sel === ".diff-unified.diff-compact" || sel === ".diff-unified.diff-full" ? unifiedEl : null,
-    closest: (sel: string): object | null => sel === ".layout" ? layoutEl : null,
+    closest: (sel: string): object | null => (sel === ".layout" ? layoutEl : null),
     getAttribute: (name: string): string | null => attrs[name] ?? null,
   };
 }
 
 test("extractCopyText reads .code-text (not the expander label) and strips markers", () => {
-  const file = makeFileStub(
-    `<row code="+const x = 1" lns="0,12"/>`,
-    { "data-comment": "//", "data-path": "src/a.ts", "copy-ctx": "true" },
-  );
+  const file = makeFileStub(`<row code="+const x = 1" lns="0,12"/>`, {
+    "data-comment": "//",
+    "data-path": "src/a.ts",
+    "copy-ctx": "true",
+  });
   expect(extractCopyText(file as Element)).toBe("// * src/a.ts, lines: 12\nconst x = 1");
 });
 
 test("extractCopyText collapses a single-line marker to one line number, keeps the range for spans", () => {
-  const multi = makeFileStub(
-    `<row code="+const x = 1" lns="0,12"/><row code="+const y = 2" lns="0,13"/>`,
-    { "data-comment": "//", "data-path": "src/a.ts", "copy-ctx": "true" },
-  );
+  const multi = makeFileStub(`<row code="+const x = 1" lns="0,12"/><row code="+const y = 2" lns="0,13"/>`, {
+    "data-comment": "//",
+    "data-path": "src/a.ts",
+    "copy-ctx": "true",
+  });
   expect(extractCopyText(multi as Element)).toBe("// * src/a.ts, lines: 12..13\nconst x = 1\nconst y = 2");
 });
 

@@ -92,7 +92,12 @@ export function navigateToFile(
 export function enhanceLayout(root: HTMLElement): () => void {
   const cleanups: Array<() => void> = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
-  const listen = (target: EventTarget, type: string, listener: EventListener, options?: AddEventListenerOptions): void => {
+  const listen = (
+    target: EventTarget,
+    type: string,
+    listener: EventListener,
+    options?: AddEventListenerOptions,
+  ): void => {
     target.addEventListener(type, listener, options);
     cleanups.push(() => target.removeEventListener(type, listener, options));
   };
@@ -285,7 +290,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
         if (child) node = child;
       }
       node.files.push({
-        name: parts.at(-1) ?? "",
+        name: parts[parts.length - 1] ?? "",
         el,
         status: el.getAttribute("data-status") || "modified",
         statusCode: el.getAttribute("data-status-code") || "M",

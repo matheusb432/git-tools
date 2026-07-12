@@ -6,8 +6,9 @@ A small Rust CLI for git workflow previews and local-history housekeeping. Insta
 
 Per-repo:
 
-- `diff` — render an HTML diff of the current repo: unpushed work (the default), a base commit, an exact `<start>..<end>` range, the last N commits (`-l N`), or a three-dot merge preview (`-m/--merge <base>`). `diff -r` renders one tabbed diff for every git repo under the current directory.
+- `diff` — render a diff of the current repo: unpushed work (the default), a base commit, an exact `<start>..<end>` range, the last N commits (`-l N`), or a three-dot merge preview (`-m/--merge <base>`). `diff -r` opens one viewer tab per git repo under the current directory; `--raw` emits one tabbed browser artifact instead.
 - `diff merge --repo <r> [--base <b>]` / `diff squash --repo <r>` — merge and squash previews of a subrepo (the legacy `merge-diff`/`squash-preview` spellings still work).
+- `diff live [--path <p>]` — save a durable live view, open it as a refreshable viewer tab, and restore it automatically on later viewer starts. The initial save rejects a missing or non-git source; if a previously valid saved source later becomes missing or non-git, the viewer shows a distinct broken-source state.
 - `squash-local` — squash all unpushed local commits into one (`--dry` to preview).
 - `push` — push existing commits; with a message, stage all changes, commit, and push. Confirmation is required by default (`-y` skips it); `[push].confirm = false` disables it only for plain pushes.
 - `commit` — stage all changes and commit without pushing.
@@ -16,7 +17,7 @@ Per-repo:
 
 Across a set of managed repos (declared in a `repos.toml` manifest of `[[repo]]` tables with `path` + `remote`):
 
-- `diff --all` — one tabbed HTML preview of unpushed commits across every managed repo that has them.
+- `diff --all` — one viewer tab per managed repo with unpushed commits, or one tabbed browser artifact with `--raw`.
 - `status --all` — branch, unpushed commits, and pending changes for every repo (`--json` for machine output).
 - `push --all` / `pull --all` / `commit --all` — fan out across the set.
 
@@ -24,9 +25,9 @@ The manifest is resolved from `--repos-file`, then `GIT_TOOLS_MANAGED_REPOS_FILE
 
 Every HTML preview is a single self-contained **offline** file (opens from `file://`, no network): fast on large diffs (offscreen file blocks deferred via CSS `content-visibility`), theme-switchable, with per-file copy buttons for the relative path, the absolute path, and the code with diff `+`/`-` markers stripped.
 
-## Where previews are saved
+## Where raw previews are saved
 
-Previews go to a central, app-owned store — **never into the repo being diffed**. Default: your platform data dir (`~/.local/share/git-tools/diffs/` on Linux, `%LOCALAPPDATA%\git-tools\diffs\` on Windows), overridable with `GIT_TOOLS_DATA_DIR`:
+`--raw` previews and automatic browser fallbacks go to a central, app-owned store — **never into the repo being diffed**. The displayed app-default viewer path computes from recipes in-process and does not write these artifacts. Default store: your platform data dir (`~/.local/share/git-tools/diffs/` on Linux, `%LOCALAPPDATA%\git-tools\diffs\` on Windows), overridable with `GIT_TOOLS_DATA_DIR`:
 
 ```
 <data-dir>/diffs/<repo-id>/<content-hash>.html   # the self-contained preview
@@ -35,7 +36,9 @@ Previews go to a central, app-owned store — **never into the repo being diffed
 
 `<repo-id>` derives from the repo's root commit (stable across clone/move/rename). Rendering is **idempotent**: an identical diff reuses its artifact (addressed by content hash), and re-running the same committed range skips re-rendering.
 
-The preview opens in the `gtl-viewer` desktop app by default — a tray-resident Tauri window with a tab strip (each `gtl diff` opens or focuses a tab) and a history panel of every past diff across all repos, newest first. Pass `--raw` to open the artifact in your browser instead; with no display or viewer binary, the CLI falls back to the browser automatically. `GIT_TOOLS_NO_OPEN=1` suppresses opening for a single run.
+The preview opens in the `gtl-viewer` desktop app by default. The CLI hands it a compact recipe instead of pre-rendered HTML; the tray-resident viewer computes through its in-process application layer and serves a Maud document from the build-configured `gtl://app` origin. htmx swaps server-rendered tab, view, settings, refresh, and history fragments, while the Svelte diff bundle progressively enhances the rendered DOM. Only the active layout/density variant is present, and a 128 MiB weighted cache keeps recent computed views responsive without unbounded growth.
+
+The viewer records successful recipes in a newest-first history panel, restores durable live tabs at startup, and shows broken live sources without taking down other tabs. Pass `--raw` to use the content-addressed artifact and browser path instead; with no display or when the viewer cannot launch, the CLI falls back to that path automatically. `GIT_TOOLS_NO_OPEN=1` suppresses opening for a single run.
 
 Config lives at `~/.config/git-tools/config.toml` (override with `XDG_CONFIG_HOME` or `GIT_TOOLS_CONFIG`):
 
@@ -56,7 +59,9 @@ just cli build      # only the CLI engine -> target/release/{git-tools,gtl-daemo
 just desktop build  # only the gtl-viewer Tauri binary (skipped without webkit2gtk-4.1 headers)
 ```
 
-Diff and managed-repo commands execute via a resident `gtl-daemon` on `127.0.0.1`; the CLI autostarts it on first use and restarts it after a version mismatch (e.g. after `just update`). `gtl daemon status` / `gtl daemon stop` inspect and terminate it — most users never need to.
+Daemon-backed operations — `--raw` and headless/browser diff rendering, `diff live` persistence, and managed sync — use the resident `gtl-daemon` on `127.0.0.1`. The CLI autostarts it when one of those paths first needs it and restarts it after a binary-version mismatch (for example, after `just update`); `gtl daemon status` / `gtl daemon stop` inspect and terminate it. A displayed app-default diff that successfully hands a recipe to the viewer is computed in-process by the viewer and does not need the daemon.
+
+The desktop app origin and vendored htmx source are compile-time settings in `crates/desktop/viewer.toml`; changing either requires rebuilding `gtl-viewer`.
 
 `just` recipes use bash; on Windows run them from Git Bash (`set windows-shell` points `just` at bash there).
 

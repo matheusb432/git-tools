@@ -62,7 +62,7 @@ fmt:
 fmt-check:
     cargo run --quiet -p xtask -- fmt --check
 
-# Rebuild the committed JS bundles and fail if they drift from their TS sources (CI/pre-commit gate).
+# Rebuild the committed diff-preview JS bundle and fail if it drifts from its TypeScript sources (CI/pre-commit gate).
 [group('quality')]
 drift-check:
     cargo run --quiet -p xtask -- drift-check

@@ -40,6 +40,8 @@ use crate::{
 const HTML_CONTENT_TYPE: &str = "text/html; charset=utf-8";
 const TEXT_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 const DYNAMIC_CACHE_CONTROL: &str = "no-store";
+const RECOVERY_HEADER: &str = "X-GTL-Recovery";
+const RECOVERY_RESWAP: &str = "outerHTML";
 const LAYOUT_KEY: &str = "layout";
 const DENSITY_KEY: &str = "density";
 const THEME_KEY: &str = "theme";
@@ -204,10 +206,18 @@ fn error_response(target: ErrorTarget, error: &RouteError) -> Response<Vec<u8>> 
         ErrorTarget::Tabs => render::error_tabs(),
         ErrorTarget::History => render::error_history(),
     };
-    Response::builder()
+    let builder = Response::builder()
         .status(status)
         .header("Content-Type", HTML_CONTENT_TYPE)
-        .header("Cache-Control", DYNAMIC_CACHE_CONTROL)
+        .header("Cache-Control", DYNAMIC_CACHE_CONTROL);
+    let builder = if matches!(target, ErrorTarget::Document) {
+        builder
+    } else {
+        builder
+            .header(RECOVERY_HEADER, "true")
+            .header("HX-Reswap", RECOVERY_RESWAP)
+    };
+    builder
         .body(body.into_bytes())
         .expect("static error response builds")
 }

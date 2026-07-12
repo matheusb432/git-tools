@@ -36,6 +36,7 @@ fn run(cli: &cli::Cli) -> Result<()> {
             force,
         } => install::run_uninstall(*remove_config, *force),
         cli::Command::Test { verbose, all } => testing::run(*verbose, *all),
+        cli::Command::DesktopTestE2e => testing::run_desktop_e2e(),
         cli::Command::Fmt { check } => fmt::run(*check),
         cli::Command::DriftCheck => drift::run(),
         cli::Command::CheckStructure => check_structure::run(None),

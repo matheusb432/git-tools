@@ -9,15 +9,26 @@ test("scrollLandOn converges target top to stickyTop despite estimate drift", ()
     getBoundingClientRect: () => ({ top: 800 - scrollTop + realized * 40 }),
   } as unknown as HTMLElement;
   const scroller = {
-    get scrollTop() { return scrollTop; },
-    set scrollTop(v: number) { scrollTop = v; },
+    get scrollTop() {
+      return scrollTop;
+    },
+    set scrollTop(v: number) {
+      scrollTop = v;
+    },
     getBoundingClientRect: () => ({ top: 0 }),
-    scrollHeight: 100000, clientHeight: 900,
+    scrollHeight: 100000,
+    clientHeight: 900,
   } as unknown as HTMLElement;
   const queue: FrameRequestCallback[] = [];
-  const raf = (cb: FrameRequestCallback) => { queue.push(cb); return queue.length; };
+  const raf = (cb: FrameRequestCallback) => {
+    queue.push(cb);
+    return queue.length;
+  };
   scrollLandOn(target, scroller, { stickyTop: 48, raf, maxFrames: 20 });
   // drain frames; each frame realizes a bit more layout
-  for (let i = 0; i < 30 && queue.length; i++) { realized = Math.min(realized + 1, 3); queue.shift()!(0); }
+  for (let i = 0; i < 30 && queue.length; i++) {
+    realized = Math.min(realized + 1, 3);
+    queue.shift()!(0);
+  }
   expect(Math.abs(target.getBoundingClientRect().top - 48)).toBeLessThanOrEqual(1);
 });

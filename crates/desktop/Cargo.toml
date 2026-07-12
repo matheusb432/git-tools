@@ -12,6 +12,11 @@ path = "src/main.rs"
 name = "desktop"
 path = "src/lib.rs"
 
+[[bench]]
+name = "viewer_render"
+harness = false
+required-features = ["benchmark-support"]
+
 [build-dependencies]
 serde = { version = "1", features = ["derive"] }
 tauri-build = { version = "2", features = [] }
@@ -36,6 +41,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
 
 [features]
+benchmark-support = []
 # Production/standalone builds must enable this so tauri's build.rs sets
 # cfg(dev)=false and the exe serves the embedded frontend via the tauri custom
 # protocol instead of devUrl. `just build`/install pass it explicitly (we do not
@@ -44,6 +50,7 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
 application = { path = "../application", features = ["testing"] }
+criterion = "0.8.2"
 sha2 = "0.11.0"
 tempfile = "3"
 toml = "1.1.2"

@@ -19,6 +19,7 @@ type LandOnAnchor = (target: HTMLDetailsElement, scroller: HTMLElement, offset: 
 
 const installedDocuments = new WeakSet<Document>();
 const pendingAnchors = new WeakMap<HTMLElement, SwapAnchor>();
+const RECOVERY_HEADER = "X-GTL-Recovery";
 
 function layoutsWithin(scope: ParentNode): readonly HTMLElement[] {
   if (scope instanceof HTMLElement && scope.matches(".layout")) return [scope];
@@ -92,7 +93,10 @@ export function restoreSwapAnchor(
     land(target, scroller, anchor.offset);
     return;
   }
-  scroller.scrollTop = Math.min(Math.max(anchor.scrollTop, 0), Math.max(scroller.scrollHeight - scroller.clientHeight, 0));
+  scroller.scrollTop = Math.min(
+    Math.max(anchor.scrollTop, 0),
+    Math.max(scroller.scrollHeight - scroller.clientHeight, 0),
+  );
 }
 
 function eventTarget(event: Event): HTMLElement | null {
@@ -106,6 +110,32 @@ function swapWillRun(event: Event): boolean {
   if (!("detail" in event)) return false;
   const detail = event.detail;
   return typeof detail === "object" && detail !== null && (!("shouldSwap" in detail) || detail.shouldSwap !== false);
+}
+
+function optIntoMarkedRecoverySwap(event: Event): void {
+  if (!("detail" in event)) return;
+  const detail = event.detail;
+  if (
+    typeof detail !== "object" ||
+    detail === null ||
+    !("xhr" in detail) ||
+    !("shouldSwap" in detail) ||
+    !("isError" in detail)
+  ) {
+    return;
+  }
+  const xhr = detail.xhr;
+  if (
+    typeof xhr !== "object" ||
+    xhr === null ||
+    !("getResponseHeader" in xhr) ||
+    typeof xhr.getResponseHeader !== "function" ||
+    xhr.getResponseHeader(RECOVERY_HEADER) !== "true"
+  ) {
+    return;
+  }
+  detail.shouldSwap = true;
+  detail.isError = false;
 }
 
 function replacementTarget(event: Event): HTMLElement | null {
@@ -123,6 +153,7 @@ export function installSwapLifecycle(
   if (installedDocuments.has(targetDocument)) return;
   installedDocuments.add(targetDocument);
   const beforeSwap = (event: Event): void => {
+    optIntoMarkedRecoverySwap(event);
     const target = eventTarget(event);
     if (!target || !isViewerView(target) || !swapWillRun(event)) return;
     if (!pendingAnchors.has(target)) pendingAnchors.set(target, captureSwapAnchor(target));

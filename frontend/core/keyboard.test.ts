@@ -16,7 +16,9 @@ test("keyboardCommand maps alt shift c to fold-all", () => {
 });
 
 test("keyboardCommand routes Escape inside an input to blur-input", () => {
-  expect(keyboardCommand(event({ key: "Escape", target: { tagName: "INPUT" } as unknown as EventTarget }))).toBe("blur-input");
+  expect(keyboardCommand(event({ key: "Escape", target: { tagName: "INPUT" } as unknown as EventTarget }))).toBe(
+    "blur-input",
+  );
 });
 
 test("keyboardCommand ignores navigation keys typed inside an input", () => {

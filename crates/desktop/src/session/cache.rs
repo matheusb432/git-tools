@@ -326,4 +326,58 @@ mod tests {
         );
         assert_eq!(cache.weight(), base + 8);
     }
+
+    #[test]
+    fn repeated_large_view_and_fragment_churn_never_crosses_the_hard_bound() {
+        const LINE_COUNT: usize = 45_000;
+        let lines = std::iter::once(format!("@@ -1,{LINE_COUNT} +1,{LINE_COUNT} @@"))
+            .chain((1..LINE_COUNT).map(|line| format!(" line {line:05}: cache churn payload")))
+            .collect::<Vec<_>>();
+        let view = Arc::new(View {
+            repo_name: "benchmark".into(),
+            repo_root: "/fixtures/benchmark".into(),
+            branch: "main".into(),
+            upstream: "origin/main".into(),
+            commits: vec![],
+            files: vec![domain::diffs::FileDiff {
+                path: "src/large.rs".into(),
+                added: 0,
+                removed: 0,
+                full_lines: Some(lines.clone()),
+                lines,
+                commits: vec![],
+                owners: domain::diffs::LineOwners::default(),
+            }],
+            title: "Large diff".into(),
+            cmd: Cmd {
+                lead: "git diff ".into(),
+                range: "origin/main..HEAD".into(),
+                trail: String::new(),
+            },
+            commits_label: "0 commits".into(),
+            foot: Foot {
+                cmd: "git diff origin/main..HEAD".into(),
+                note: "cache fixture".into(),
+            },
+            theme: None,
+        });
+        let mut cache = WeightedViewCache::new(crate::DEFAULT_VIEW_CACHE_WEIGHT);
+
+        for raw_id in 1..=96 {
+            let tab_id = id(raw_id);
+            assert_eq!(
+                cache.insert(tab_id, CachedView::new(Arc::clone(&view))),
+                CacheDisposition::Cached
+            );
+            assert!(cache.weight() <= crate::DEFAULT_VIEW_CACHE_WEIGHT);
+
+            let fragment: Arc<str> = Arc::from("x".repeat(512 * 1024));
+            let _ = cache.insert_fragment(tab_id, RenderOptions::DEFAULT, Theme::Dark, fragment);
+            assert!(cache.weight() <= crate::DEFAULT_VIEW_CACHE_WEIGHT);
+
+            if raw_id > 2 {
+                let _ = cache.get(id(raw_id - 2));
+            }
+        }
+    }
 }

@@ -1,11 +1,5 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["unicorn", "typescript", "oxc", "import"],
-  "ignorePatterns": [
-    "crates/desktop/dist",
-    "crates/infra/src/embedded/generated",
-    "frontend/viewer/node_modules",
-    "node_modules",
-    "target"
-  ]
+  "ignorePatterns": ["crates/infra/src/embedded/generated", "node_modules", "target"]
 }

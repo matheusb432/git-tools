@@ -1,6 +1,9 @@
 export function copyText(text: string): Promise<boolean> {
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    return navigator.clipboard.writeText(text).then(() => true, () => execCopy(text));
+    return navigator.clipboard.writeText(text).then(
+      () => true,
+      () => execCopy(text),
+    );
   }
   return Promise.resolve(execCopy(text));
 }
@@ -16,7 +19,7 @@ function execCopy(text: string): boolean {
     const ok = document.execCommand("copy");
     document.body.removeChild(textarea);
     return ok;
-  } catch (_error) {
+  } catch {
     return false;
   }
 }

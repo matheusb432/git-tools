@@ -17,7 +17,9 @@ test("writeStoredTheme stores gtl-theme", () => {
   const writes = new Map<string, string>();
   const storage: StorageLike = {
     getItem: (key) => writes.get(key) ?? null,
-    setItem: (key, value) => { writes.set(key, value); },
+    setItem: (key, value) => {
+      writes.set(key, value);
+    },
   };
   writeStoredTheme(storage, "hearth");
   expect(writes.get("gtl-theme")).toBe("hearth");

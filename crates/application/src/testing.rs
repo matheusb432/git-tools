@@ -304,6 +304,7 @@ impl PushLedger for FakePushLedger {
 pub struct InMemoryAppStateStore {
     pub live_views: Arc<Mutex<Vec<LiveViewRecord>>>,
     pub settings: Arc<Mutex<HashMap<String, String>>>,
+    pub set_setting_error: Arc<Mutex<Option<String>>>,
     pub renders: Arc<Mutex<Vec<RecentRenderRecord>>>,
     pub list_error_id: Arc<Mutex<Option<i64>>>,
 }
@@ -339,6 +340,9 @@ impl AppStateStore for InMemoryAppStateStore {
         Ok(self.settings.lock().unwrap().get(key).cloned())
     }
     fn set_setting(&self, _data_root: &Path, key: &str, value: &str) -> anyhow::Result<()> {
+        if let Some(message) = self.set_setting_error.lock().unwrap().as_ref() {
+            anyhow::bail!(message.clone());
+        }
         self.settings
             .lock()
             .unwrap()
