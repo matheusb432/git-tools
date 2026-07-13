@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { keyboardCommand, type KeyboardEventLike } from "./keyboard";
 
 function event(overrides: Partial<KeyboardEventLike>): KeyboardEventLike {

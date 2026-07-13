@@ -1,12 +1,10 @@
 //! `xtask drift-check` — rebuild the committed frontend bundle and fail if it drifts from
-//! its TypeScript sources. Migrates the `_js-drift-guard` recipe. The bundle *build* stays bun
-//! (reused via the existing `just cli build-js` recipe — the single source for the Vite
-//! invocation); this verb only orchestrates it and diffs the committed
-//! output. Skipped with a message when bun is absent (the bundles can't be rebuilt to compare).
+//! its TypeScript sources. Reuses `just cli build-js` as the single Vite invocation, then diffs
+//! the committed output.
 
 use std::process::Command;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
 use crate::proc;
 
@@ -33,12 +31,11 @@ fn git_clean(dir: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Rebuild the bundle via the existing bun recipe, then diff the committed output.
+/// Rebuilds the bundle via the existing Deno recipe, then diffs the committed output.
 pub fn run() -> Result<()> {
-    if which::which("bun").is_err() {
-        eprintln!("bun absent; skipping js drift guard");
-        return Ok(());
-    }
+    which::which("deno").context(
+        "required tool `deno` is missing; install it through the declarative host configuration",
+    )?;
     proc::run("build-js", "just", &["cli", "build-js"])?;
     check_drift(BUNDLES, &git_clean)
 }

@@ -1,5 +1,5 @@
 import "../test/dom-stub"; // ensure globalThis.document exists before any imports
-import { expect, test, describe } from "bun:test";
+import { describe, expect, test } from "vitest";
 import { computeWheelScroll } from "./wheel";
 import { isShaTarget } from "./commit-focus";
 import { buildFileLeaf } from "./file-tree";

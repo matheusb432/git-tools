@@ -1,11 +1,9 @@
-use std::{collections::BTreeMap, path::Path};
+use std::{cmp::Ordering, collections::BTreeMap, path::Path};
 
 use crate::commands::git_runner::GitRunner;
 
-const LOCAL_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=2)\t%(contents:lines=1)";
-const REMOTE_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=4)\t%(contents:lines=1)";
-const TAG_NAME_SORT_ARG: &str = "--sort=refname";
-const NEWEST_TAG_SORT_ARG: &str = "--sort=-creatordate";
+const LOCAL_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=2)\t%(contents:lines=1)\t%(creatordate:unix)";
+const REMOTE_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=4)\t%(contents:lines=1)\t%(creatordate:unix)";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
@@ -37,8 +35,11 @@ pub fn list(runner: &impl GitRunner, repo: &Path, commits: bool) -> TagResult {
         Err(detail) => return TagResult::new(Status::Fail, detail),
     };
 
+    let mut groups = group_by_commit(refs.local.values());
+    sort_groups(&mut groups, TagSortOrder::CreatedAtAsc);
+
     let mut lines = Vec::new();
-    for group in group_by_commit(refs.ordered_local()) {
+    for group in groups {
         match group.as_slice() {
             [single] => lines.push(render_tag(&refs, single, commits)),
             many => match classify_group(many) {
@@ -85,7 +86,7 @@ fn classify_group<'a>(group: &[&'a TagRef]) -> TagGroup<'a> {
     }
 }
 
-/// Buckets tags by resolved commit, preserving group order and sorting members by name.
+/// Buckets tags by resolved commit while preserving input order.
 fn group_by_commit<'a>(tags: impl Iterator<Item = &'a TagRef>) -> Vec<Vec<&'a TagRef>> {
     let mut groups: Vec<Vec<&'a TagRef>> = Vec::new();
     for tag in tags {
@@ -97,10 +98,38 @@ fn group_by_commit<'a>(tags: impl Iterator<Item = &'a TagRef>) -> Vec<Vec<&'a Ta
             None => groups.push(vec![tag]),
         }
     }
-    for group in &mut groups {
-        group.sort_by(|left, right| left.name.cmp(&right.name));
-    }
     groups
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TagSortOrder {
+    CreatedAtAsc,
+}
+
+fn sort_groups(groups: &mut [Vec<&TagRef>], order: TagSortOrder) {
+    groups.sort_by(|left, right| {
+        compare_tags(
+            group_order_tag(left, order),
+            group_order_tag(right, order),
+            order,
+        )
+    });
+}
+
+/// Selects a commit group's leading tag for the requested order.
+fn group_order_tag<'a>(group: &[&'a TagRef], order: TagSortOrder) -> &'a TagRef {
+    group
+        .iter()
+        .copied()
+        .min_by(|left, right| compare_tags(left, right, order))
+        .expect("group_by_commit never creates empty groups")
+}
+
+fn compare_tags(left: &TagRef, right: &TagRef, order: TagSortOrder) -> Ordering {
+    match order {
+        TagSortOrder::CreatedAtAsc => left.created_at.cmp(&right.created_at),
+    }
+    .then_with(|| left.name.cmp(&right.name))
 }
 
 fn ref_state(refs: &TagRefs, tag: &TagRef) -> &'static str {
@@ -240,7 +269,7 @@ fn push_created(
 
     let mut pending = Vec::new();
     for name in names {
-        let Some(tag_ref) = refs.local.iter().find(|tag| tag.name == *name) else {
+        let Some(tag_ref) = refs.local.get(*name) else {
             return TagResult::new(Status::Fail, format!("created tag {name} was not found"));
         };
         if !refs.is_remote(tag_ref) {
@@ -324,6 +353,8 @@ struct TagRef {
     commit: String,
     peeled_short: String,
     name: String,
+    /// Git `creatordate` as Unix seconds; absent for objects without a creation date.
+    created_at: Option<i64>,
     /// First line of the annotated tag's message (`%(contents:lines=1)`). For a
     /// lightweight tag this is the underlying commit's subject, so it is only
     /// surfaced for message-bearing tags (see [`TagRef::message_subject`]).
@@ -368,15 +399,11 @@ impl TagRef {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TagRefs {
-    local: Vec<TagRef>,
+    local: BTreeMap<String, TagRef>,
     remote: BTreeMap<String, TagRef>,
 }
 
 impl TagRefs {
-    fn ordered_local(&self) -> impl Iterator<Item = &TagRef> {
-        self.local.iter()
-    }
-
     fn is_remote(&self, tag: &TagRef) -> bool {
         self.remote
             .get(&tag.name)
@@ -384,33 +411,21 @@ impl TagRefs {
     }
 
     fn pending(&self) -> Vec<&TagRef> {
-        let mut pending = self
-            .local
-            .iter()
+        self.local
+            .values()
             .filter(|tag| !self.is_remote(tag))
-            .collect::<Vec<_>>();
-        pending.sort_by(|left, right| left.name.cmp(&right.name));
-        pending
+            .collect()
     }
 }
 
 fn tag_refs(runner: &impl GitRunner, repo: &Path) -> Result<TagRefs, String> {
-    // Git applies the last sort key as the primary one. `creatordate` selects the
-    // tagger date for annotated tags and the commit date for lightweight tags.
-    let local = load_refs(
-        runner,
-        repo,
-        &[
-            "for-each-ref",
-            TAG_NAME_SORT_ARG,
-            NEWEST_TAG_SORT_ARG,
-            LOCAL_TAG_FORMAT_ARG,
-            "refs/tags",
-        ],
-    )?;
     Ok(TagRefs {
-        local,
-        remote: refs_by_name(load_refs(
+        local: load_refs(
+            runner,
+            repo,
+            &["for-each-ref", LOCAL_TAG_FORMAT_ARG, "refs/tags"],
+        )?,
+        remote: load_refs(
             runner,
             repo,
             &[
@@ -418,11 +433,15 @@ fn tag_refs(runner: &impl GitRunner, repo: &Path) -> Result<TagRefs, String> {
                 REMOTE_TAG_FORMAT_ARG,
                 "refs/remotes/origin/tags",
             ],
-        )?),
+        )?,
     })
 }
 
-fn load_refs(runner: &impl GitRunner, repo: &Path, args: &[&str]) -> Result<Vec<TagRef>, String> {
+fn load_refs(
+    runner: &impl GitRunner,
+    repo: &Path,
+    args: &[&str],
+) -> Result<BTreeMap<String, TagRef>, String> {
     match runner.run(repo, args) {
         Ok(output) if output.exit_code == 0 => Ok(parse_refs(&output.stdout)),
         Ok(output) => Err(output.fail_detail("git for-each-ref failed")),
@@ -430,7 +449,7 @@ fn load_refs(runner: &impl GitRunner, repo: &Path, args: &[&str]) -> Result<Vec<
     }
 }
 
-fn parse_refs(stdout: &str) -> Vec<TagRef> {
+fn parse_refs(stdout: &str) -> BTreeMap<String, TagRef> {
     stdout
         .lines()
         .filter_map(|line| {
@@ -439,24 +458,29 @@ fn parse_refs(stdout: &str) -> Vec<TagRef> {
             let commit = fields.next()?.to_string();
             let peeled_short = fields.next()?.to_string();
             let name = fields.next()?.to_string();
-            let message = fields.next().unwrap_or_default().to_string();
+            let message_and_date = fields.next().unwrap_or_default();
+            let (message, created_at) = match message_and_date.rsplit_once('\t') {
+                Some((message, created_at)) => match created_at.parse() {
+                    Ok(created_at) => (message.to_string(), Some(created_at)),
+                    Err(_) => (message_and_date.to_string(), None),
+                },
+                None => (message_and_date.to_string(), None),
+            };
             if object.is_empty() || name.is_empty() {
                 return None;
             }
-            Some(TagRef {
-                object,
-                commit,
-                peeled_short,
-                name,
-                message,
-            })
+            Some((
+                name.clone(),
+                TagRef {
+                    object,
+                    commit,
+                    peeled_short,
+                    name,
+                    created_at,
+                    message,
+                },
+            ))
         })
-        .collect()
-}
-
-fn refs_by_name(refs: Vec<TagRef>) -> BTreeMap<String, TagRef> {
-    refs.into_iter()
-        .map(|tag| (tag.name.clone(), tag))
         .collect()
 }
 
@@ -538,13 +562,7 @@ mod tests {
         assert_eq!(
             runner.arg_lists(),
             vec![
-                vec![
-                    "for-each-ref",
-                    TAG_NAME_SORT_ARG,
-                    NEWEST_TAG_SORT_ARG,
-                    LOCAL_TAG_FORMAT_ARG,
-                    "refs/tags",
-                ],
+                vec!["for-each-ref", LOCAL_TAG_FORMAT_ARG, "refs/tags",],
                 vec![
                     "for-each-ref",
                     REMOTE_TAG_FORMAT_ARG,
@@ -568,13 +586,7 @@ mod tests {
         assert_eq!(
             runner.arg_lists(),
             vec![
-                vec![
-                    "for-each-ref",
-                    TAG_NAME_SORT_ARG,
-                    NEWEST_TAG_SORT_ARG,
-                    LOCAL_TAG_FORMAT_ARG,
-                    "refs/tags",
-                ],
+                vec!["for-each-ref", LOCAL_TAG_FORMAT_ARG, "refs/tags",],
                 vec![
                     "for-each-ref",
                     REMOTE_TAG_FORMAT_ARG,
@@ -879,6 +891,7 @@ mod tests {
             commit: "ccc".to_string(),
             peeled_short: "ccc".to_string(),
             name: name.to_string(),
+            created_at: None,
             message: format!("message for {name}"),
         };
         let lightweight = |name: &str| TagRef {
@@ -886,6 +899,7 @@ mod tests {
             commit: String::new(),
             peeled_short: String::new(),
             name: name.to_string(),
+            created_at: None,
             message: String::new(),
         };
 

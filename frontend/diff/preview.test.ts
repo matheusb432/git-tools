@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { navigateToFile } from "./enhance-layout";
 import { enhanceLayout } from "./enhance-layout";
 import { enhanceControls } from "./controls";
@@ -7,7 +7,7 @@ import { toggleLongLine } from "./long-lines";
 import { captureSwapAnchor, createEnhancementLifecycle, installSwapLifecycle, restoreSwapAnchor } from "./swap";
 
 // JS behavior contracts migrated from deleted Rust PREVIEW_JS.contains tests.
-// Covered here so bun test owns the JS logic while cargo test stays bun-free.
+// Covered here so the frontend unit suite owns the JS logic while cargo test stays JS-free.
 
 test("non-merge card: active set is [sha]", () => {
   const result = resolveActiveSet("abc123def", "", null);
@@ -345,13 +345,13 @@ test("control cleanup removes button behavior before a swapped layout is discard
   const cleanup = enhanceControls(root);
 
   button.click();
-  await Bun.sleep(0);
+  await new Promise((resolve) => setTimeout(resolve, 0));
   expect(button.dataset["state"]).toBe("err");
 
   cleanup();
   button.dataset["state"] = "";
   button.click();
-  await Bun.sleep(0);
+  await new Promise((resolve) => setTimeout(resolve, 0));
   expect(button.dataset["state"]).toBe("");
 });
 

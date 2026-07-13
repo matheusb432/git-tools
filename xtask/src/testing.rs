@@ -1,8 +1,7 @@
 //! `xtask test [--verbose] [--all]` — run the test suite. Migrates `just test` (the `ShellSpec`
 //! install suite it used to also run is retired; its coverage is now `cargo test` Rust tests).
 //! Terse by default (`cargo test --quiet`); `--verbose` streams full output; `--all` additionally
-//! runs the bun frontend unit tests (`just cli test-js`) — the bun build/test stays bun, this only
-//! orchestrates it.
+//! runs the Deno frontend type-check and unit tests (`just cli test-js`).
 
 use std::{ffi::OsStr, path::Path};
 
@@ -28,7 +27,7 @@ fn cargo_test_args(verbose: bool) -> Vec<&'static str> {
     }
 }
 
-/// Run the suite. `cargo test` always; the bun frontend tests under `--all`.
+/// Runs the suite: `cargo test` always, plus the Deno frontend gate under `--all`.
 pub fn run(verbose: bool, all: bool) -> Result<()> {
     proc::run("cargo-test", "cargo", &cargo_test_args(verbose))?;
     if all {
@@ -75,11 +74,19 @@ fn e2e_command(os: &str) -> Result<E2eCommand> {
     match os {
         "linux" => Ok(E2eCommand {
             program: "xvfb-run",
-            args: vec!["-a", "bun", "run", "--cwd", "e2e/viewer", "test:e2e"],
+            args: vec![
+                "-a",
+                "deno",
+                "task",
+                "--frozen",
+                "--cwd",
+                "e2e/viewer",
+                "test:e2e",
+            ],
         }),
         "windows" => Ok(E2eCommand {
-            program: "bun",
-            args: vec!["run", "--cwd", "e2e/viewer", "test:e2e"],
+            program: "deno",
+            args: vec!["task", "--frozen", "--cwd", "e2e/viewer", "test:e2e"],
         }),
         unsupported => bail!(
             "desktop WebDriver e2e is not configured for {unsupported}; the external Tauri provider supports this project on Linux and Windows"
@@ -134,8 +141,8 @@ pub fn run_desktop_e2e() -> Result<()> {
 
 fn run_desktop_e2e_workflow() -> Result<()> {
     require_tool(
-        "bun",
-        "install Bun through the declarative host configuration",
+        "deno",
+        "install Deno through the declarative host configuration",
     )?;
     require_tool(
         "tauri-driver",
@@ -159,8 +166,8 @@ fn run_desktop_e2e_workflow() -> Result<()> {
     proc::run_in(
         "viewer-e2e-install",
         "e2e/viewer",
-        "bun",
-        &["install", "--frozen-lockfile"],
+        "deno",
+        &["install", "--frozen"],
     )?;
     proc::run("viewer-e2e-cli-build", "just", &["cli", "build"])?;
     proc::run("viewer-e2e-build", "cargo", DESKTOP_BUILD_ARGS)?;
@@ -208,12 +215,20 @@ mod tests {
     }
 
     #[test]
-    fn linux_e2e_runs_bun_under_an_auto_numbered_xvfb_server() {
+    fn linux_e2e_runs_deno_under_an_auto_numbered_xvfb_server() {
         assert_eq!(
             e2e_command("linux").unwrap(),
             E2eCommand {
                 program: "xvfb-run",
-                args: vec!["-a", "bun", "run", "--cwd", "e2e/viewer", "test:e2e"],
+                args: vec![
+                    "-a",
+                    "deno",
+                    "task",
+                    "--frozen",
+                    "--cwd",
+                    "e2e/viewer",
+                    "test:e2e",
+                ],
             }
         );
     }
@@ -223,8 +238,8 @@ mod tests {
         assert_eq!(
             e2e_command("windows").unwrap(),
             E2eCommand {
-                program: "bun",
-                args: vec!["run", "--cwd", "e2e/viewer", "test:e2e"],
+                program: "deno",
+                args: vec!["task", "--frozen", "--cwd", "e2e/viewer", "test:e2e"],
             }
         );
     }

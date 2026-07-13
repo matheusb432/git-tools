@@ -1,4 +1,4 @@
-// Minimal DOM for Bun tests. It models the tree, selector, event, and geometry behavior
+// Minimal DOM for frontend tests. It models the tree, selector, event, and geometry behavior
 // needed to exercise progressive enhancement without a browser dependency.
 if (typeof globalThis.document === "undefined") {
   const rectangles = new WeakMap<object, DOMRect>();

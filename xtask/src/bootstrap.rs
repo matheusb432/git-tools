@@ -5,9 +5,10 @@
 //!
 //! Steps (CWD is the repo root — `bootstrap.sh` cds there, and `just bootstrap` runs from root):
 //! 1. link `.claude/skills` -> `../.agents/skills` (cross-platform via the PAL symlink primitive);
-//! 2. build both artifacts (`just build` — reuses the bun/cargo recipes; bun stays bun);
-//! 3. install both onto PATH (`install::run_install`);
-//! 4. ensure `~/.local/bin` is on PATH (append to `~/.bashrc` once, when absent).
+//! 2. install the pinned Deno dependencies;
+//! 3. build both artifacts (`just build`);
+//! 4. install both onto PATH (`install::run_install`);
+//! 5. ensure `~/.local/bin` is on PATH (append to `~/.bashrc` once, when absent).
 
 use std::{
     env, fs,
@@ -25,7 +26,11 @@ pub fn run() -> Result<()> {
     if which::which("just").is_err() {
         bail!("`just` not found on PATH — install it (e.g. `cargo install just`) then re-run");
     }
+    which::which("deno").context(
+        "required tool `deno` is missing; install it through the declarative host configuration",
+    )?;
     link_skills()?;
+    proc::run("frontend-dependencies", "deno", &["install", "--frozen"])?;
     proc::run("build", "just", &["build"])?;
     install::run_install(InstallTarget::Both)?;
     ensure_path_on_bashrc()?;

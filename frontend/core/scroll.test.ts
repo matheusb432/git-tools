@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { scrollLandOn } from "./scroll";
 
 test("scrollLandOn converges target top to stickyTop despite estimate drift", () => {

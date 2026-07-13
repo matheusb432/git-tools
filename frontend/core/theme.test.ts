@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { readStoredTheme, toTheme, writeStoredTheme, type StorageLike } from "./theme";
 
 test("toTheme accepts known themes and defaults unknown values to dark", () => {

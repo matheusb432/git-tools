@@ -1086,7 +1086,7 @@ mod tests {
 
     #[test]
     fn commit_shelf_click_contract_focuses_card_and_copies_hash_tag() {
-        // ! JS behavior: sha-guard predicate (isShaTarget) covered by bun wheel.test.ts.
+        // ! JS behavior: sha-guard predicate (isShaTarget) covered by Vitest wheel.test.ts.
         // ! copyText + stopPropagation wiring is event-listener-only and not extracted.
         let html = build_html(&sample_view());
 
@@ -1099,7 +1099,7 @@ mod tests {
 
     #[test]
     fn commit_focus_highlight_is_wired() {
-        // ! JS behavior: resolveActiveSet (toggle/member-set) covered by bun preview.test.ts.
+        // ! JS behavior: resolveActiveSet (toggle/member-set) covered by Vitest preview.test.ts.
         // ! owned-row DOM mutation is event-listener-only and not extracted.
         assert!(PREVIEW_CSS.contains(".commit-focus .diff-unified .dl.owned{opacity:1}"));
         assert!(PREVIEW_CSS.contains(".commit-focus .diff-split .sp.owned{opacity:1"));
@@ -1360,7 +1360,8 @@ mod tests {
     #[test]
     fn file_status_indicators_stay_compact_trailing_and_discreet() {
         // ! JS behavior: buildFileLeaf (li class, [name,status] child order, no icon) covered
-        // ! by bun wheel.test.ts. Horizontal-wheel scroll math covered by computeWheelScroll there.
+        // ! by Vitest wheel.test.ts. Horizontal-wheel scroll math covered by computeWheelScroll
+        // there.
         assert!(PREVIEW_CSS.contains(".tfile.status-added>.tlabel"));
         assert!(PREVIEW_CSS.contains(".tfile.status-deleted>.tlabel"));
         assert!(

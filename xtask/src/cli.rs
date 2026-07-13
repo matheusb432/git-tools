@@ -49,19 +49,19 @@ pub enum Command {
         check: bool,
     },
     /// Run the test suite: `cargo test`, terse by default. `--verbose` streams full output;
-    /// `--all` also runs the bun frontend unit tests. Migrates `just test`.
+    /// `--all` also runs the Deno frontend type-check and unit tests. Migrates `just test`.
     Test {
         /// Stream full test output (`cargo test -- --nocapture`) instead of the terse default.
         #[arg(long)]
         verbose: bool,
-        /// Also run the bun frontend unit tests (`just cli test-js`).
+        /// Also run the Deno frontend type-check and unit tests (`just cli test-js`).
         #[arg(long)]
         all: bool,
     },
     /// Build and drive the real gtl-viewer binary through Tauri's external `WebDriver` provider.
     DesktopTestE2e,
     /// Rebuild the committed diff-preview bundle and fail if it drifts from its TypeScript
-    /// sources. Skips when bun is absent.
+    /// sources. Requires Deno.
     /// Migrates the `_js-drift-guard` recipe — a CI/pre-commit gate.
     DriftCheck,
     /// Mechanical architecture lint: walks `crates/*/src` and `shared/*/src` and exits 3 on

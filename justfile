@@ -47,7 +47,7 @@ _preflight:
 
 # ============ quality ============
 
-# cargo tests (terse). --verbose streams output; --all also runs the bun frontend tests.
+# cargo tests (terse). --verbose streams output; --all also runs the Deno frontend tests.
 [group('quality')]
 test *args:
     cargo run --quiet -p xtask -- test {{ args }}

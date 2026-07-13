@@ -53,6 +53,8 @@ Run `gtl --help` for the full reference.
 
 ## Build
 
+Deno 2 owns the frontend dependencies and tasks. Run `deno install --frozen` after cloning.
+
 ```sh
 just build          # both: CLI engine (+ diff bundle + gtl-daemon) and the desktop viewer
 just cli build      # only the CLI engine -> target/release/{git-tools,gtl-daemon}[.exe]

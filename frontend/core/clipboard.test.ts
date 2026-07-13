@@ -1,9 +1,9 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { copyText } from "./clipboard";
 
 test("copyText resolves true via execCommand fallback when clipboard API absent", async () => {
   // ! Swap in a minimal document/navigator for the fallback path, but restore the shared
-  // ! dom-stub globals afterward — bun runs every test file in one process, so leaving these
+  // ! dom-stub globals afterward — the runner may reuse one process, so leaving these
   // ! overwritten pollutes any test file that runs later and expects the fuller stub.
   const previousDocument = globalThis.document;
   const previousNavigator = globalThis.navigator;

@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test } from "vitest";
 import { extractCopyText } from "./copy";
 
 // Row descriptor parsed from a minimal XML-like mini-DSL:

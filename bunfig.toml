@@ -1,2 +1,0 @@
-[test]
-preload = ["./frontend/test/dom-stub.ts"]

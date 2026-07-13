@@ -20,17 +20,14 @@ install:
 update: build install
 
 # NODE_ENV=production forces frontend dependencies' production builds.
-# Bundle frontend/diff -> crates/infra/src/embedded/generated/preview.js (committed). Needs bun.
+# Bundle frontend/diff -> crates/infra/src/embedded/generated/preview.js (committed). Needs Deno.
 [group('cli')]
 build-js:
-    if command -v bun >/dev/null 2>&1; then \
-      NODE_ENV=production bunx vite build --config frontend/diff/vite.config.mjs; \
-      echo "built crates/infra/src/embedded/generated/preview.js"; \
-    else echo "bun not installed; skipping build-js (commit embedded/generated unchanged)" >&2; fi
+    NODE_ENV=production deno task --frozen build
+    @echo "built crates/infra/src/embedded/generated/preview.js"
 
-# Run the frontend TypeScript unit tests (diff preview + shared enhancers). Needs bun.
+# Type-check with TS7 and run the frontend unit tests (diff preview + shared enhancers). Needs Deno.
 [group('cli')]
 test-js:
-    if command -v bun >/dev/null 2>&1; then \
-      bun test --isolate frontend/diff frontend/core; \
-    else echo "bun not installed; skipping test-js" >&2; fi
+    deno task --frozen typecheck
+    deno task --frozen test
