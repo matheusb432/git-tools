@@ -55,8 +55,12 @@ fn recipe() -> Recipe {
 }
 
 fn request(path: &str) -> Request<Vec<u8>> {
+    request_with_method(Method::GET, path)
+}
+
+fn request_with_method(method: Method, path: &str) -> Request<Vec<u8>> {
     Request::builder()
-        .method(Method::GET)
+        .method(method)
         .uri(format!(
             "{}{}",
             protocol_config::APP_URL,
@@ -64,6 +68,16 @@ fn request(path: &str) -> Request<Vec<u8>> {
         ))
         .body(Vec::new())
         .expect("request builds")
+}
+
+fn live_record(path: &str) -> LiveViewRecord {
+    LiveViewRecord {
+        source_kind: "LocalRepo".into(),
+        source_value: path.into(),
+        display_name: path.into(),
+        created_at: "2026-07-11T00:00:00Z".into(),
+        last_opened_at: None,
+    }
 }
 
 #[test]
@@ -237,6 +251,217 @@ fn live_batch_reuses_the_named_restored_tab_and_keeps_it_live() {
     assert_eq!(tab.tab.kind(), ViewerTabKind::Live);
     assert_eq!(tab.tab.label(), "Friendly live");
     assert_eq!(tab.batch_id, "forwarded-live");
+}
+
+#[test]
+fn deleting_an_active_live_view_removes_durable_and_session_state_but_keeps_history() {
+    let app_state = InMemoryAppStateStore::default();
+    app_state
+        .live_views
+        .lock()
+        .expect("live views lock")
+        .push(live_record("/repo"));
+    let history_id = RenderHistoryId::try_new(7).expect("positive history id");
+    app_state
+        .renders
+        .lock()
+        .expect("renders lock")
+        .push(RecentRenderRecord {
+            id: history_id,
+            recipe_json: serde_json::to_string(&recipe()).expect("recipe serializes"),
+            title: "Historic snapshot".into(),
+            repo_name: "repo".into(),
+            kind: "diff".into(),
+            range_label: "main..HEAD".into(),
+            rendered_at: "2026-07-11T00:00:00Z".into(),
+        });
+    let mediator = test_support::fake_mediator_with(
+        source(),
+        app_state.clone(),
+        FakeRepoProbe {
+            result: RepoProbeResult::Repo {
+                top_level: "/repo".into(),
+            },
+        },
+    );
+    let app = ViewerApp::new(
+        mediator.clone(),
+        Path::new("/data").into(),
+        128 * 1024 * 1024,
+    );
+    assert_eq!(serve_app(&app, request("/")).status(), StatusCode::OK);
+    let history_len = app_state.renders.lock().expect("renders lock").len();
+
+    let deleted = serve_app(
+        &app,
+        request_with_method(Method::DELETE, "/tabs/1/live-view"),
+    );
+    let html = String::from_utf8_lossy(deleted.body());
+
+    assert_eq!(deleted.status(), StatusCode::OK);
+    assert!(html.starts_with("<nav id=\"viewer-tabs\""));
+    assert!(html.contains("id=\"viewer-view\" hx-swap-oob=\"outerHTML\""));
+    assert!(html.contains("viewer-status-empty"));
+    assert!(html.contains("role=\"status\" aria-live=\"polite\" aria-atomic=\"true\""));
+    assert!(html.contains("Live view deleted. No diffs remain open."));
+    assert!(html.contains("class=\"viewer-recovery-button\" autofocus"));
+    assert!(
+        app_state
+            .live_views
+            .lock()
+            .expect("live views lock")
+            .is_empty()
+    );
+    assert_eq!(
+        app_state.renders.lock().expect("renders lock").len(),
+        history_len
+    );
+    assert_eq!(app.active_tab(), None);
+    assert_eq!(app.session.lock().expect("session lock").tabs().len(), 0);
+
+    let restarted = ViewerApp::new(mediator, Path::new("/data").into(), 128 * 1024 * 1024);
+    let document = serve_app(&restarted, request("/"));
+    let html = String::from_utf8_lossy(document.body());
+    assert!(html.contains("viewer-status-empty"));
+    let history = serve_app(&restarted, request("/history/7/open"));
+    assert_eq!(history.status(), StatusCode::OK);
+    assert!(!String::from_utf8_lossy(history.body()).contains("Delete live view"));
+}
+
+#[test]
+fn deleting_an_inactive_live_view_preserves_the_active_tab_and_removes_only_its_record() {
+    let app_state = InMemoryAppStateStore::default();
+    app_state
+        .live_views
+        .lock()
+        .expect("live views lock")
+        .extend([live_record("/first"), live_record("/second")]);
+    let app = ViewerApp::new(
+        test_support::fake_mediator_with(
+            source(),
+            app_state.clone(),
+            FakeRepoProbe {
+                result: RepoProbeResult::Repo {
+                    top_level: "/repo".into(),
+                },
+            },
+        ),
+        Path::new("/data").into(),
+        128 * 1024 * 1024,
+    );
+    assert_eq!(serve_app(&app, request("/")).status(), StatusCode::OK);
+    let active = ViewerTabId::try_new(2).expect("positive id");
+    assert_eq!(app.active_tab(), Some(active));
+
+    let deleted = serve_app(
+        &app,
+        request_with_method(Method::DELETE, "/tabs/1/live-view"),
+    );
+
+    assert_eq!(deleted.status(), StatusCode::OK);
+    assert_eq!(app.active_tab(), Some(active));
+    let html = String::from_utf8_lossy(deleted.body());
+    assert!(html.contains("Live view deleted. Focus moved to /second."));
+    assert!(html.contains("class=\"viewer-tab-activate\" aria-current=\"page\" autofocus"));
+    let records = app_state.live_views.lock().expect("live views lock");
+    assert_eq!(records.as_slice(), &[live_record("/second")]);
+    drop(records);
+    let session = app.session.lock().expect("session lock");
+    assert!(
+        session
+            .tab(ViewerTabId::try_new(1).expect("positive id"))
+            .is_none()
+    );
+    assert!(session.tab(active).is_some());
+}
+
+#[test]
+fn deleting_missing_or_snapshot_tabs_is_not_found() {
+    let app = ViewerApp::new(
+        test_support::fake_mediator(),
+        Path::new("/data").into(),
+        1024,
+    );
+    assert_eq!(
+        serve_app(
+            &app,
+            request_with_method(Method::DELETE, "/tabs/99/live-view")
+        )
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    app.pending()
+        .push(OpenRecipes {
+            batch_id: "snapshot".into(),
+            kind: RecipeBatchKind::Snapshot,
+            recipes: vec![recipe()],
+        })
+        .expect("queue snapshot");
+    assert_eq!(
+        serve_app(&app, request("/pending")).status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        serve_app(
+            &app,
+            request_with_method(Method::DELETE, "/tabs/1/live-view")
+        )
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    assert!(
+        app.session
+            .lock()
+            .expect("session lock")
+            .tab(ViewerTabId::try_new(1).expect("positive id"))
+            .is_some()
+    );
+}
+
+#[test]
+fn persistence_failure_keeps_the_live_tab_and_record_available_for_retry() {
+    let app_state = InMemoryAppStateStore::default();
+    app_state
+        .live_views
+        .lock()
+        .expect("live views lock")
+        .push(live_record("/repo"));
+    *app_state
+        .remove_live_view_error
+        .lock()
+        .expect("remove error lock") = Some("secret sqlite delete failure".into());
+    let app = ViewerApp::new(
+        test_support::fake_mediator_with(
+            source(),
+            app_state.clone(),
+            FakeRepoProbe {
+                result: RepoProbeResult::Repo {
+                    top_level: "/repo".into(),
+                },
+            },
+        ),
+        Path::new("/data").into(),
+        128 * 1024 * 1024,
+    );
+    assert_eq!(serve_app(&app, request("/")).status(), StatusCode::OK);
+
+    let failed = serve_app(
+        &app,
+        request_with_method(Method::DELETE, "/tabs/1/live-view"),
+    );
+    let html = String::from_utf8_lossy(failed.body());
+
+    assert_eq!(failed.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(html.starts_with("<nav id=\"viewer-tabs\""));
+    assert!(!html.contains("secret sqlite delete failure"));
+    assert_eq!(
+        app_state.live_views.lock().expect("live views lock").len(),
+        1
+    );
+    let id = ViewerTabId::try_new(1).expect("positive id");
+    let mut session = app.session.lock().expect("session lock");
+    assert!(session.tab(id).is_some());
+    assert!(session.cached_view(id).is_some());
 }
 
 #[test]

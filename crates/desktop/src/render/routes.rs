@@ -24,6 +24,9 @@ pub(super) enum ViewerRoute {
     Close {
         tab: ViewerTabId,
     },
+    DeleteLiveView {
+        tab: ViewerTabId,
+    },
     History,
     OpenHistory {
         render: RenderHistoryId,
@@ -43,6 +46,7 @@ impl fmt::Display for ViewerRoute {
             Self::Activate { tab } => write!(formatter, "/tabs/{tab}/activate"),
             Self::Refresh { tab } => write!(formatter, "/tabs/{tab}/refresh"),
             Self::Close { tab } => write!(formatter, "/tabs/{tab}/close"),
+            Self::DeleteLiveView { tab } => write!(formatter, "/tabs/{tab}/live-view"),
             Self::History => formatter.write_str("/history"),
             Self::OpenHistory { render } => write!(formatter, "/history/{render}/open"),
             Self::Settings(ViewerSettingChange::Layout(value)) => {

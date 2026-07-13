@@ -15,17 +15,24 @@
 //! recipes from the CLI to the single-instance viewer: [`OpenRecipes`] is a
 //! named batch, [`encode_token`]/[`decode_token`] round-trip it through a
 //! `gtl-recipe://`-prefixed, base64url-encoded argv string.
+//!
+//! Every enum serializes its wire tag in `snake_case`. Deserialization also
+//! accepts the legacy `PascalCase` source and `kebab-case` operation tags so
+//! persisted history rows and argv tokens remain readable across the migration.
 
 use std::{num::NonZeroU32, path::PathBuf};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 
-/// The identity of the repository a recipe renders from (the live-view source
-/// model: `kind` + `value`; only `LocalRepo` exists today).
+/// The identity of the repository a recipe renders from.
+///
+/// Recipe JSON uses the `local_repo` tag. The live-view store's separate
+/// `source_kind` identity remains the stable `LocalRepo` string.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "value")]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum RecipeSource {
+    #[serde(alias = "LocalRepo")]
     LocalRepo(PathBuf),
 }
 
@@ -44,7 +51,7 @@ pub struct PinnedRange {
 /// the domain type lives in the consuming crate.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "target", rename_all = "kebab-case")]
+#[serde(tag = "target", rename_all = "snake_case")]
 pub enum RecipeTarget {
     Unpushed {
         pinned: Option<PinnedRange>,
@@ -69,15 +76,17 @@ pub enum RecipeTarget {
 /// Which diff-family operation the recipe runs.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "op", rename_all = "kebab-case")]
+#[serde(tag = "op", rename_all = "snake_case")]
 pub enum RecipeOp {
     Diff {
         target: RecipeTarget,
     },
+    #[serde(alias = "merge-diff")]
     MergeDiff {
         base: Option<String>,
         pinned: Option<PinnedRange>,
     },
+    #[serde(alias = "squash-preview")]
     SquashPreview {
         pinned: Option<PinnedRange>,
     },
@@ -134,7 +143,7 @@ impl Recipe {
 
 /// Identifies how every recipe in an [`OpenRecipes`] batch behaves in the viewer.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "snake_case")]
 pub enum RecipeBatchKind {
     /// Opens immutable snapshot tabs.
     #[default]
@@ -222,23 +231,131 @@ mod tests {
     }
 
     #[test]
-    fn recipe_json_shape_is_pinned() {
-        // ! This exact string lands in recent_renders.recipe_json — changing it
-        // ! breaks reopening of previously recorded history rows.
+    fn canonical_recipe_json_shape_is_pinned() {
         let json = serde_json::to_string(&diff_recipe()).unwrap();
         assert_eq!(
             json,
-            r#"{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed"}}}"#
+            r#"{"source":{"kind":"local_repo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed"}}}"#
         );
     }
 
     #[test]
-    fn old_recipe_json_without_name_still_deserializes() {
-        let json = r#"{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed"}}}"#;
+    fn canonical_multiword_operation_tags_are_snake_case() {
+        for (op, expected_tag) in [
+            (
+                RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                },
+                "merge_diff",
+            ),
+            (RecipeOp::SquashPreview { pinned: None }, "squash_preview"),
+        ] {
+            let recipe = Recipe {
+                source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+                op,
+                name: None,
+            };
 
-        let recipe: Recipe = serde_json::from_str(json).expect("old history remains readable");
+            let json = serde_json::to_value(recipe).expect("recipe serializes");
 
-        assert_eq!(recipe.name, None);
+            assert_eq!(json["op"]["op"], expected_tag);
+        }
+    }
+
+    #[test]
+    fn every_legacy_recipe_enum_tag_still_deserializes() {
+        let source: RecipeSource =
+            serde_json::from_str(r#"{"kind":"LocalRepo","value":"/repos/gt"}"#)
+                .expect("legacy source tag remains readable");
+        assert_eq!(source, RecipeSource::LocalRepo("/repos/gt".into()));
+
+        for (json, expected) in [
+            (
+                r#"{"target":"unpushed"}"#,
+                RecipeTarget::Unpushed { pinned: None },
+            ),
+            (
+                r#"{"target":"base","rev":"HEAD"}"#,
+                RecipeTarget::Base { rev: "HEAD".into() },
+            ),
+            (
+                r#"{"target":"range","range":"a..b"}"#,
+                RecipeTarget::Range {
+                    range: "a..b".into(),
+                    pinned: None,
+                },
+            ),
+            (
+                r#"{"target":"merge","base":"main"}"#,
+                RecipeTarget::Merge {
+                    base: "main".into(),
+                    pinned: None,
+                },
+            ),
+            (
+                r#"{"target":"last","count":2}"#,
+                RecipeTarget::Last {
+                    count: NonZeroU32::new(2).unwrap(),
+                    pinned: None,
+                },
+            ),
+        ] {
+            let target: RecipeTarget =
+                serde_json::from_str(json).expect("legacy target tag remains readable");
+            assert_eq!(target, expected);
+        }
+
+        for (json, expected) in [
+            (
+                r#"{"op":"diff","target":{"target":"unpushed"}}"#,
+                RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
+            ),
+            (
+                r#"{"op":"merge-diff","base":null}"#,
+                RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                },
+            ),
+            (
+                r#"{"op":"squash-preview"}"#,
+                RecipeOp::SquashPreview { pinned: None },
+            ),
+        ] {
+            let op: RecipeOp =
+                serde_json::from_str(json).expect("legacy operation tag remains readable");
+            assert_eq!(op, expected);
+        }
+
+        for (json, expected) in [
+            (r#""snapshot""#, RecipeBatchKind::Snapshot),
+            (r#""live""#, RecipeBatchKind::Live),
+        ] {
+            let kind: RecipeBatchKind =
+                serde_json::from_str(json).expect("legacy batch tag remains readable");
+            assert_eq!(kind, expected);
+        }
+    }
+
+    #[test]
+    fn legacy_recipe_token_tags_still_decode() {
+        let legacy_json = r#"{"batch_id":"old","kind":"live","recipes":[{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"squash-preview"}}]}"#;
+        let token = format!(
+            "{RECIPE_TOKEN_PREFIX}{}",
+            URL_SAFE_NO_PAD.encode(legacy_json.as_bytes())
+        );
+
+        let batch = decode_token(&token).expect("legacy argv token remains readable");
+
+        assert_eq!(batch.kind, RecipeBatchKind::Live);
+        assert_eq!(batch.recipes.len(), 1);
+        assert_eq!(
+            batch.recipes[0].op,
+            RecipeOp::SquashPreview { pinned: None }
+        );
     }
 
     #[test]
@@ -267,7 +384,30 @@ mod tests {
 
     #[test]
     fn kind_tag_names_the_operation() {
-        assert_eq!(diff_recipe().kind_tag(), "diff");
+        for (op, expected) in [
+            (
+                RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
+                "diff",
+            ),
+            (
+                RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                },
+                "merge-diff",
+            ),
+            (RecipeOp::SquashPreview { pinned: None }, "squash-preview"),
+        ] {
+            let recipe = Recipe {
+                source: RecipeSource::LocalRepo("/repos/gt".into()),
+                op,
+                name: None,
+            };
+
+            assert_eq!(recipe.kind_tag(), expected);
+        }
     }
 
     #[test]
@@ -345,33 +485,10 @@ mod tests {
         let json = serde_json::to_string(&recipe).unwrap();
         assert_eq!(
             json,
-            r#"{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}}"#
+            r#"{"source":{"kind":"local_repo","value":"/repos/gt"},"op":{"op":"diff","target":{"target":"unpushed","pinned":{"base":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}}"#
         );
         let back: Recipe = serde_json::from_str(&json).unwrap();
         assert_eq!(back, recipe);
-    }
-
-    #[test]
-    fn old_squash_preview_op_json_still_deserializes_unpinned() {
-        let json =
-            r#"{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"squash-preview"}}"#;
-        let recipe: Recipe = serde_json::from_str(json).expect("old history remains readable");
-        assert_eq!(recipe.op, RecipeOp::SquashPreview { pinned: None });
-        // And it round-trips back to the identical string (skip_serializing_if).
-        assert_eq!(serde_json::to_string(&recipe).unwrap(), json);
-    }
-
-    #[test]
-    fn old_merge_diff_op_json_still_deserializes_unpinned() {
-        let json = r#"{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"merge-diff","base":null}}"#;
-        let recipe: Recipe = serde_json::from_str(json).expect("old history remains readable");
-        assert_eq!(
-            recipe.op,
-            RecipeOp::MergeDiff {
-                base: None,
-                pinned: None
-            }
-        );
     }
 
     #[test]

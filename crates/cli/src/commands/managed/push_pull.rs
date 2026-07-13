@@ -1,6 +1,6 @@
 //! Fanning `push`/`pull` out across every managed repo via the daemon.
 
-use std::fmt::Write as _;
+use std::{fmt::Write as _, path::PathBuf};
 
 use contracts::{
     envelope::{Envelope, NoteLevel, Outcome},
@@ -50,7 +50,15 @@ pub(crate) fn run_push_all_with(
     backend: &impl Backend,
     options: &ManagedOptions,
 ) -> ManagedRun<PushPullResult> {
-    let (repos_file, home_dir) = match resolve_manifest_location(options) {
+    run_push_all_resolving_with(backend, options, resolve_manifest_location)
+}
+
+fn run_push_all_resolving_with(
+    backend: &impl Backend,
+    options: &ManagedOptions,
+    resolve_manifest: impl FnOnce(&ManagedOptions) -> anyhow::Result<(PathBuf, PathBuf)>,
+) -> ManagedRun<PushPullResult> {
+    let (repos_file, home_dir) = match resolve_manifest(options) {
         Ok(location) => location,
         Err(error) => return manifest_error(&error),
     };
@@ -190,8 +198,6 @@ fn format_push_pull(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
-
     use contracts::{
         envelope::{Envelope, Note, NoteLevel, Outcome},
         managed::{PullAllRequest, PushAllRequest, RepoSyncResultDto, SyncData, SyncExitDto},
@@ -199,45 +205,6 @@ mod tests {
 
     use super::*;
     use crate::{client::Backend, commands::managed::test_support::ManagedFixture};
-
-    /// Guards tests that mutate `HOME` (process-global env var). `resolve_repos_file`'s
-    /// home-default fallback reads real ambient `HOME` directly — it has no seam for
-    /// `ManagedOptions::home_dir` — so a "manifest unresolvable" test must pin `HOME` to a
-    /// directory with no `tools/sample_project/repos.toml`, or it silently finds whatever
-    /// real manifest the *running machine* happens to have at that default location.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    /// RAII guard: pins `HOME` for the guarded test, restoring the prior value on drop
-    /// (even on panic/assertion failure) so later tests see the real environment again.
-    struct HomeOverride {
-        _lock: std::sync::MutexGuard<'static, ()>,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl HomeOverride {
-        fn set(value: &std::path::Path) -> Self {
-            let lock = ENV_LOCK
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let previous = std::env::var_os("HOME");
-            // SAFETY: guarded by ENV_LOCK; no other thread touches HOME concurrently.
-            unsafe { std::env::set_var("HOME", value) };
-            Self {
-                _lock: lock,
-                previous,
-            }
-        }
-    }
-
-    impl Drop for HomeOverride {
-        fn drop(&mut self) {
-            // SAFETY: guarded by ENV_LOCK; no other thread touches HOME concurrently.
-            match &self.previous {
-                Some(value) => unsafe { std::env::set_var("HOME", value) },
-                None => unsafe { std::env::remove_var("HOME") },
-            }
-        }
-    }
 
     #[derive(Default)]
     struct FakeBackend {
@@ -338,18 +305,14 @@ mod tests {
     }
 
     #[test]
-    fn an_unresolvable_manifest_never_reaches_the_backend() {
+    fn a_manifest_resolution_error_never_reaches_the_backend() {
         let fixture = ManagedFixture::new("push-no-manifest");
-        let nowhere = fixture.root.join("nowhere");
-        let mut options = options(&fixture, false, false);
-        options.repos_file = None;
-        options.home_dir = Some(nowhere.clone());
+        let options = options(&fixture, false, false);
         let backend = FakeBackend::default();
-        // Pin real HOME to the same empty dir: `resolve_repos_file`'s home-default
-        // fallback reads ambient HOME directly, not `options.home_dir`.
-        let _home = HomeOverride::set(&nowhere);
 
-        let run = run_push_all_with(&backend, &options);
+        let run = run_push_all_resolving_with(&backend, &options, |_| {
+            Err(anyhow::anyhow!("managed-repos manifest not found"))
+        });
 
         assert_eq!(run.exit, ManagedExit::Fail);
         assert!(run.stderr.contains("managed-repos manifest not found"));

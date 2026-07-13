@@ -189,6 +189,11 @@ impl Repo {
 
     /// Writes `file` then commits it with a fixed date; returns the new full SHA.
     fn commit(&self, file: &str, contents: &str, message: &str) -> String {
+        self.commit_at(file, contents, message, "2026-01-01T12:00:00 +0000")
+    }
+
+    /// Writes `file` then commits it at `date`; returns the new full SHA.
+    fn commit_at(&self, file: &str, contents: &str, message: &str, date: &str) -> String {
         let path = self.subrepo.join(file);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
@@ -199,8 +204,8 @@ impl Repo {
             .arg("-C")
             .arg(&self.subrepo)
             .args(["commit", "-m", message])
-            .env("GIT_AUTHOR_DATE", "2026-01-01T12:00:00")
-            .env("GIT_COMMITTER_DATE", "2026-01-01T12:00:00")
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
             .output()
             .unwrap();
         assert!(
@@ -209,6 +214,22 @@ impl Repo {
             String::from_utf8_lossy(&out.stderr)
         );
         self.git(&["rev-parse", "HEAD"])
+    }
+
+    /// Creates an annotated tag at `HEAD` with a deterministic tagger date.
+    fn annotated_tag_at(&self, name: &str, message: &str, date: &str) {
+        let out = Git::new("git")
+            .arg("-C")
+            .arg(&self.subrepo)
+            .args(["tag", "-a", name, "-m", message])
+            .env("GIT_COMMITTER_DATE", date)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git tag failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 
     /// Adds a bare `origin` and pushes `main`, establishing an upstream (`@{u}`).
@@ -899,6 +920,70 @@ fn tag_lists_all_tags_by_default() {
         .success()
         .stdout(contains("v1.0.0"))
         .stdout(contains("v1.1.0"));
+}
+
+#[test]
+fn tag_lists_newest_groups_first_with_deterministic_ties() {
+    let repo = Repo::new();
+    repo.commit_at(
+        "a.txt",
+        "old\n",
+        "chore: old release",
+        "2026-01-01T12:00:00 +0000",
+    );
+    repo.git(&["tag", "old-label"]);
+    repo.annotated_tag_at(
+        "z-newest-release",
+        "newest release",
+        "2026-01-03T12:00:00 +0000",
+    );
+    repo.commit_at(
+        "a.txt",
+        "middle\n",
+        "feat: middle z",
+        "2026-01-02T12:00:00 +0000",
+    );
+    repo.git(&["tag", "z-tied"]);
+    repo.commit_at(
+        "a.txt",
+        "middle again\n",
+        "feat: middle a",
+        "2026-01-02T12:00:00 +0000",
+    );
+    repo.git(&["tag", "a-tied"]);
+
+    repo.run(&["tag", "ls"]).assert().success().stdout(
+        "z-newest-release [local]  newest release\n  - old-label [local]\na-tied [local]\nz-tied [local]\n",
+    );
+}
+
+#[test]
+fn tag_lists_same_commit_members_by_name_not_tagger_date() {
+    let repo = Repo::new();
+    let commit = repo.commit_at(
+        "a.txt",
+        "release\n",
+        "feat: release",
+        "2026-01-01T12:00:00 +0000",
+    );
+    repo.annotated_tag_at(
+        "a-older-annotation",
+        "older annotation",
+        "2026-01-02T12:00:00 +0000",
+    );
+    repo.annotated_tag_at(
+        "z-newer-annotation",
+        "newer annotation",
+        "2026-01-03T12:00:00 +0000",
+    );
+
+    repo.run(&["tag", "ls"])
+        .assert()
+        .success()
+        .stdout(format!(
+            "{}\n  - a-older-annotation [local]  older annotation\n  - z-newer-annotation [local]  newer annotation\n",
+            &commit[..7]
+        ));
 }
 
 #[test]

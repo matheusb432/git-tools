@@ -1,7 +1,10 @@
 use domain::viewer::{DiffDensity, ViewerDocument};
 use maud::{DOCTYPE, PreEscaped, html};
 
-use super::{fragments, fragments::SwapMode};
+use super::{
+    fragments,
+    fragments::{SwapFeedback, SwapMode},
+};
 use crate::protocol_config;
 
 const THEME_CONTROL_JS: &str = "(function(){document.addEventListener('change',function(event){var target=event.target;if(!(target instanceof HTMLInputElement))return;var theme=target.dataset.viewerTheme;if(theme)document.documentElement.dataset.theme=theme;});})();";
@@ -42,8 +45,8 @@ impl MaudViewerRenderer {
                 }
                 body.viewer-shell {
                     main.viewer-app {
-                        (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary))
-                        (fragments::view(document, SwapMode::Primary))
+                        (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::None))
+                        (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
                     }
                     aside id="viewer-history-popover" class="viewer-history-popover" popover {
                         header.viewer-history-header {
@@ -64,7 +67,7 @@ impl MaudViewerRenderer {
     }
 
     pub(crate) fn build_view(self, document: &ViewerDocument) -> String {
-        fragments::view(document, SwapMode::Primary).into_string()
+        fragments::view(document, SwapMode::Primary, SwapFeedback::None).into_string()
     }
 
     #[cfg(test)]
@@ -73,7 +76,7 @@ impl MaudViewerRenderer {
         tabs: &[domain::viewer::ViewerTab],
         active_tab_id: Option<domain::viewer::ViewerTabId>,
     ) -> String {
-        fragments::tabs(tabs, active_tab_id, SwapMode::Primary).into_string()
+        fragments::tabs(tabs, active_tab_id, SwapMode::Primary, SwapFeedback::None).into_string()
     }
 
     pub(crate) fn build_history(self, history: &[domain::viewer::ViewerHistoryEntry]) -> String {
@@ -82,8 +85,8 @@ impl MaudViewerRenderer {
 
     pub(crate) fn build_view_with_tabs(self, document: &ViewerDocument) -> String {
         html! {
-            (fragments::view(document, SwapMode::Primary))
-            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::OutOfBand))
+            (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
+            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
     }
@@ -95,15 +98,26 @@ impl MaudViewerRenderer {
     ) -> String {
         html! {
             (PreEscaped(view))
-            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::OutOfBand))
+            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
     }
 
     pub(crate) fn build_tabs_with_view(self, document: &ViewerDocument) -> String {
         html! {
-            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary))
-            (fragments::view(document, SwapMode::OutOfBand))
+            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::None))
+            (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::None))
+        }
+        .into_string()
+    }
+
+    pub(crate) fn build_tabs_with_view_after_live_delete(
+        self,
+        document: &ViewerDocument,
+    ) -> String {
+        html! {
+            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::LiveViewDeleted))
+            (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::LiveViewDeleted))
         }
         .into_string()
     }

@@ -105,6 +105,10 @@ mod tests {
         );
         assert_eq!(ViewerRoute::Refresh { tab }.to_string(), "/tabs/7/refresh");
         assert_eq!(ViewerRoute::Close { tab }.to_string(), "/tabs/7/close");
+        assert_eq!(
+            ViewerRoute::DeleteLiveView { tab }.to_string(),
+            "/tabs/7/live-view"
+        );
         assert_eq!(ViewerRoute::History.to_string(), "/history");
         assert_eq!(
             ViewerRoute::OpenHistory { render }.to_string(),
@@ -200,7 +204,45 @@ mod tests {
             assert!(html.contains("&lt;"));
             assert!(!html.contains("class=\"layout"));
             assert!(html.contains("/tabs/3/refresh"));
+            assert!(html.contains("hx-delete=\"/tabs/3/live-view\""));
+            assert!(html.contains("hx-confirm=\"Delete this saved live view?"));
         }
+    }
+
+    #[test]
+    fn destructive_live_action_is_accessible_and_never_appears_for_snapshots_or_raw_artifacts() {
+        let live = MaudViewerRenderer.build_document(&sample_document());
+        assert!(live.contains("class=\"viewer-control-button viewer-danger-button\""));
+        assert!(live.contains("aria-label=\"Delete saved live view\""));
+        assert!(live.contains("hx-delete=\"/tabs/1/live-view\""));
+        assert!(live.contains("hx-target=\"#viewer-tabs\""));
+
+        let id = tab_id(1);
+        let snapshot = ViewerDocument::new(
+            vec![ViewerTab::new(
+                id,
+                "snapshot".into(),
+                ViewerTabKind::Snapshot,
+                ViewerTabState::Ready,
+            )],
+            Some(id),
+            Some(ViewerView::new(
+                id,
+                view(),
+                settings().options(),
+                ViewerTabKind::Snapshot,
+            )),
+            vec![],
+            settings(),
+        )
+        .expect("snapshot document is valid");
+        let snapshot = MaudViewerRenderer.build_document(&snapshot);
+        assert!(!snapshot.contains("Delete live view"));
+        assert!(!snapshot.contains("/live-view"));
+
+        let raw = infra::html_renderer::build_html(&view());
+        assert!(!raw.contains("Delete live view"));
+        assert!(!raw.contains("/live-view"));
     }
 
     #[test]
@@ -296,6 +338,38 @@ mod tests {
         assert!(html.starts_with("<nav id=\"viewer-tabs\""));
         assert!(html.contains("<section id=\"viewer-view\" hx-swap-oob=\"outerHTML\""));
         assert!(!html.starts_with("<nav id=\"viewer-tabs\" hx-swap-oob"));
+    }
+
+    #[test]
+    fn live_delete_feedback_focuses_the_active_tab_and_announces_success() {
+        let html = MaudViewerRenderer.build_tabs_with_view_after_live_delete(&sample_document());
+        let active = html
+            .split_once("class=\"viewer-tab-activate\"")
+            .and_then(|(_, tail)| tail.split_once('>'))
+            .map(|(tag, _)| tag)
+            .expect("active tab button renders");
+
+        assert!(active.contains("autofocus"), "{active}");
+        assert!(html.contains("role=\"status\" aria-live=\"polite\" aria-atomic=\"true\""));
+        assert!(html.contains("Live view deleted. Focus moved to git-tools changes."));
+        assert_eq!(html.matches("autofocus").count(), 1);
+    }
+
+    #[test]
+    fn live_delete_feedback_focuses_history_when_no_tabs_remain() {
+        let empty = ViewerDocument::new(vec![], None, None, vec![], settings())
+            .expect("empty viewer is valid");
+        let html = MaudViewerRenderer.build_tabs_with_view_after_live_delete(&empty);
+        let history = html
+            .split_once("class=\"viewer-recovery-button\"")
+            .and_then(|(_, tail)| tail.split_once('>'))
+            .map(|(tag, _)| tag)
+            .expect("empty-state History action renders");
+
+        assert!(history.contains("autofocus"), "{history}");
+        assert!(html.contains("Live view deleted. No diffs remain open."));
+        assert!(html.contains("Open History or run gtl diff live to add one."));
+        assert_eq!(html.matches("autofocus").count(), 1);
     }
 
     #[test]

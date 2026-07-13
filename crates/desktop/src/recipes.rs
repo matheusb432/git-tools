@@ -20,7 +20,10 @@ use domain::{
 };
 use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
-use crate::session::{CachedView, ComputeTicket, PublishOutcome, ViewerSession};
+use crate::{
+    session::{CachedView, ComputeTicket, PublishOutcome, ViewerSession},
+    tab_label,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RecipeError {
@@ -335,7 +338,7 @@ where
     if let Err(error) = mediator.send_now(RecordRender {
         data_root: data_root.to_path_buf(),
         recipe_json,
-        title: view.title.clone(),
+        title: tab_label::computed(recipe, view),
         repo_name: view.repo_name.clone(),
         kind: recipe.kind_tag().into(),
         range_label: view.cmd.range.clone(),
@@ -430,6 +433,7 @@ index 111..222 100644\n\
         let renders = app_state.renders.lock().expect("renders lock");
         assert_eq!(renders.len(), 1);
         assert_eq!(renders[0].kind, "diff");
+        assert_eq!(renders[0].title, "repo: 1 commit");
     }
 
     #[test]

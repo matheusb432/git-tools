@@ -1,4 +1,5 @@
 mod history;
+mod live_views;
 mod parse;
 mod render;
 mod restoration;
@@ -18,7 +19,7 @@ use application::{
         list_recent::{GetRecentRender, ListRecentRenders},
         record_render::RecordRender,
     },
-    live_views::{list::ListLiveViews, probe::ProbeSource},
+    live_views::{list::ListLiveViews, probe::ProbeSource, remove::RemoveLiveView},
     settings::{get::GetSetting, set::SetSetting},
 };
 use cqrsy::{Handle, Sender};
@@ -99,6 +100,7 @@ pub(crate) trait RouteMediator:
     + Sender<ProbeSource>
     + Sender<RecordRender>
     + Sender<ListLiveViews>
+    + Sender<RemoveLiveView>
     + Sender<ListRecentRenders>
     + Sender<GetRecentRender>
     + Sender<GetSetting>
@@ -118,6 +120,7 @@ impl<T> RouteMediator for T where
         + Sender<ProbeSource>
         + Sender<RecordRender>
         + Sender<ListLiveViews>
+        + Sender<RemoveLiveView>
         + Sender<ListRecentRenders>
         + Sender<GetRecentRender>
         + Sender<GetSetting>
@@ -185,7 +188,10 @@ fn error_target(route: &Route) -> ErrorTarget {
     match route {
         Route::Document { .. } | Route::Settings(_) => ErrorTarget::Document,
         Route::View { .. } | Route::Refresh { .. } | Route::Activate { .. } => ErrorTarget::View,
-        Route::Close { .. } | Route::OpenHistory { .. } | Route::Pending => ErrorTarget::Tabs,
+        Route::Close { .. }
+        | Route::DeleteLiveView { .. }
+        | Route::OpenHistory { .. }
+        | Route::Pending => ErrorTarget::Tabs,
         Route::History => ErrorTarget::History,
     }
 }
@@ -228,6 +234,7 @@ fn serve_route<M: RouteMediator>(app: &ViewerApp<M>, route: Route) -> RouteResul
         Route::View { tab, options } => view(app, tab, options),
         Route::Refresh { tab } => refresh(app, tab),
         Route::Close { tab } => close(app, tab),
+        Route::DeleteLiveView { tab } => live_views::delete(app, tab),
         Route::Activate { tab } => activate(app, tab),
         Route::History => history(app),
         Route::OpenHistory { render } => open_history(app, render),

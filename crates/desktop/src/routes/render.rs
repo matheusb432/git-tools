@@ -149,8 +149,43 @@ fn view_with_tabs_using(
 pub(super) fn tabs_with_view(
     renderer: MaudViewerRenderer,
     session: &Mutex<ViewerSession>,
+    transient: Option<VersionedView>,
+    settings: ViewerSettings,
+) -> Result<String, RenderError> {
+    tabs_with_view_using(
+        renderer,
+        session,
+        transient,
+        settings,
+        |renderer, document| renderer.build_tabs_with_view(document),
+    )
+}
+
+pub(super) fn tabs_with_view_after_live_delete(
+    renderer: MaudViewerRenderer,
+    session: &Mutex<ViewerSession>,
+    transient: Option<VersionedView>,
+    settings: ViewerSettings,
+) -> Result<String, RenderError> {
+    tabs_with_view_using(
+        renderer,
+        session,
+        transient,
+        settings,
+        |renderer, document| renderer.build_tabs_with_view_after_live_delete(document),
+    )
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "bounded retries clone one validated settings value"
+)]
+fn tabs_with_view_using(
+    renderer: MaudViewerRenderer,
+    session: &Mutex<ViewerSession>,
     mut transient: Option<VersionedView>,
     settings: ViewerSettings,
+    build: impl Fn(MaudViewerRenderer, &ViewerDocument) -> String,
 ) -> Result<String, RenderError> {
     for _ in 0..MAX_GENERATION_RETRIES {
         let snapshot = match snapshot(session, transient.take(), Vec::new(), settings.clone()) {
@@ -158,7 +193,7 @@ pub(super) fn tabs_with_view(
             Err(RenderError::Retry) => continue,
             Err(error) => return Err(error),
         };
-        let html = renderer.build_tabs_with_view(&snapshot.document);
+        let html = build(renderer, &snapshot.document);
         if snapshot_is_current(session, snapshot.ticket, snapshot.revision)? {
             return Ok(html);
         }

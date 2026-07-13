@@ -303,6 +303,7 @@ impl PushLedger for FakePushLedger {
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryAppStateStore {
     pub live_views: Arc<Mutex<Vec<LiveViewRecord>>>,
+    pub remove_live_view_error: Arc<Mutex<Option<String>>>,
     pub settings: Arc<Mutex<HashMap<String, String>>>,
     pub set_setting_error: Arc<Mutex<Option<String>>>,
     pub renders: Arc<Mutex<Vec<RecentRenderRecord>>>,
@@ -331,6 +332,9 @@ impl AppStateStore for InMemoryAppStateStore {
         source_kind: &str,
         source_value: &str,
     ) -> anyhow::Result<bool> {
+        if let Some(message) = self.remove_live_view_error.lock().unwrap().as_ref() {
+            anyhow::bail!(message.clone());
+        }
         let mut views = self.live_views.lock().unwrap();
         let before = views.len();
         views.retain(|v| !(v.source_kind == source_kind && v.source_value == source_value));

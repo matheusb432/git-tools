@@ -3,9 +3,14 @@ mod pending;
 
 pub(crate) use cache::CachedView;
 use cache::WeightedViewCache;
-use domain::viewer::{RenderOptions, Theme, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState};
-use gtl_recipe::Recipe;
+use domain::{
+    live_views::LiveSource,
+    viewer::{RenderOptions, Theme, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState},
+};
+use gtl_recipe::{Recipe, RecipeSource};
 pub(crate) use pending::{PendingRecipes, PendingRecipesError};
+
+use crate::tab_label;
 
 /// A generation token authorizing publication for one still-current compute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,10 +88,7 @@ impl ViewerSession {
             .next_id
             .checked_add(1)
             .expect("viewer tab ID exhausted");
-        let label = recipe
-            .name
-            .clone()
-            .unwrap_or_else(|| recipe.cwd().display().to_string());
+        let label = tab_label::initial(&recipe);
         self.tabs.push(SessionTab {
             tab: ViewerTab::new(
                 id,
@@ -151,11 +153,7 @@ impl ViewerSession {
             return PublishOutcome::Stale;
         }
 
-        let label = tab
-            .recipe
-            .name
-            .clone()
-            .unwrap_or_else(|| value.view.title.clone());
+        let label = tab_label::computed(&tab.recipe, &value.view);
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), ViewerTabState::Ready);
         self.cache.insert(ticket.tab_id, value);
         self.bump_revision();
@@ -177,14 +175,7 @@ impl ViewerSession {
         if tab.generation != ticket.generation {
             return PublishOutcome::Stale;
         }
-        let label = if matches!(state, ViewerTabState::Error { .. }) {
-            tab.recipe
-                .name
-                .clone()
-                .unwrap_or_else(|| "Render failed".into())
-        } else {
-            tab.tab.label().into()
-        };
+        let label = tab.tab.label().into();
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), state);
         self.bump_revision();
         PublishOutcome::Published
@@ -205,6 +196,23 @@ impl ViewerSession {
         }
         self.bump_revision();
         true
+    }
+
+    pub(crate) fn live_source(&self, id: ViewerTabId) -> Option<LiveSource> {
+        let tab = self.tab(id)?;
+        if tab.tab.kind() != ViewerTabKind::Live {
+            return None;
+        }
+        match &tab.recipe.source {
+            RecipeSource::LocalRepo(path) => Some(LiveSource::local_repo(path.clone())),
+        }
+    }
+
+    pub(crate) fn close_live_view(&mut self, id: ViewerTabId, source: &LiveSource) -> bool {
+        if self.live_source(id).as_ref() != Some(source) {
+            return false;
+        }
+        self.close(id)
     }
 
     pub(crate) fn activate(&mut self, id: ViewerTabId) -> bool {
@@ -298,7 +306,7 @@ mod tests {
     use std::{path::PathBuf, sync::Arc};
 
     use domain::{
-        diffs::{Cmd, Foot, View},
+        diffs::{Cmd, Commit, Foot, View},
         viewer::{ViewerTabId, ViewerTabKind},
     };
     use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
@@ -336,6 +344,26 @@ mod tests {
         })
     }
 
+    fn view_with_context(
+        repo_name: &str,
+        branch: &str,
+        upstream: &str,
+        commit_count: usize,
+    ) -> Arc<View> {
+        let mut view = Arc::unwrap_or_clone(view("generic diff title"));
+        view.repo_name = repo_name.into();
+        view.branch = branch.into();
+        view.upstream = upstream.into();
+        view.commits = (0..commit_count)
+            .map(|index| Commit {
+                sha: format!("sha-{index}"),
+                subject: format!("commit {index}"),
+                ..Default::default()
+            })
+            .collect();
+        Arc::new(view)
+    }
+
     fn ready_session() -> (ViewerSession, ViewerTabId) {
         let mut session = ViewerSession::new(1024);
         let id = session.open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot);
@@ -368,6 +396,115 @@ mod tests {
         let tab = session.tab(id).expect("tab");
         assert_eq!(tab.tab.kind(), ViewerTabKind::Live);
         assert_eq!(tab.batch_id, "live");
+    }
+
+    #[test]
+    fn ready_tabs_use_concise_repository_and_operation_context() {
+        let cases = [
+            (
+                Recipe {
+                    source: RecipeSource::LocalRepo("/repos/project".into()),
+                    op: RecipeOp::Diff {
+                        target: RecipeTarget::Unpushed { pinned: None },
+                    },
+                    name: None,
+                },
+                view_with_context("project", "feature", "origin/main", 2),
+                "project: 2 commits",
+            ),
+            (
+                Recipe {
+                    source: RecipeSource::LocalRepo("/repos/project".into()),
+                    op: RecipeOp::MergeDiff {
+                        base: Some("main".into()),
+                        pinned: None,
+                    },
+                    name: None,
+                },
+                view_with_context("project", "feature", "main", 1),
+                "project: merge feature->main",
+            ),
+            (
+                Recipe {
+                    source: RecipeSource::LocalRepo("/repos/project".into()),
+                    op: RecipeOp::SquashPreview { pinned: None },
+                    name: None,
+                },
+                view_with_context("project", "feature", "origin/main", 3),
+                "project: squash 3 commits",
+            ),
+        ];
+
+        for (recipe, view, expected) in cases {
+            let mut session = ViewerSession::new(1024 * 1024);
+            let id = session.open(recipe, "batch".into(), ViewerTabKind::Snapshot);
+            let ticket = session.begin_compute(id).expect("tab exists");
+
+            assert_eq!(
+                session.publish_if_current(ticket, CachedView::new(view)),
+                PublishOutcome::Published
+            );
+            assert_eq!(session.tab(id).expect("tab").tab.label(), expected);
+        }
+    }
+
+    #[test]
+    fn explicit_recipe_name_has_priority_over_computed_context() {
+        let mut named = recipe();
+        named.name = Some("Release review".into());
+        let mut session = ViewerSession::new(1024 * 1024);
+        let id = session.open(named, "batch".into(), ViewerTabKind::Snapshot);
+        let ticket = session.begin_compute(id).expect("tab exists");
+
+        session.publish_if_current(
+            ticket,
+            CachedView::new(view_with_context("project", "feature", "main", 4)),
+        );
+
+        assert_eq!(session.tab(id).expect("tab").tab.label(), "Release review");
+    }
+
+    #[test]
+    fn unnamed_failures_preserve_the_recipe_specific_label() {
+        let mut session = ViewerSession::new(1024);
+        let id = session.open(recipe(), "batch".into(), ViewerTabKind::Snapshot);
+        assert_eq!(session.tab(id).expect("tab").tab.label(), "repo: squash");
+        let ticket = session.begin_compute(id).expect("tab exists");
+
+        session.set_state_if_current(
+            ticket,
+            ViewerTabState::Error {
+                reason: "safe failure".into(),
+            },
+        );
+
+        assert_eq!(session.tab(id).expect("tab").tab.label(), "repo: squash");
+    }
+
+    #[test]
+    fn blank_merge_target_failure_keeps_a_useful_generic_label() {
+        let blank_merge = Recipe {
+            source: RecipeSource::LocalRepo("/repos/project".into()),
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Merge {
+                    base: "  ".into(),
+                    pinned: None,
+                },
+            },
+            name: None,
+        };
+        let mut session = ViewerSession::new(1024);
+        let id = session.open(blank_merge, "batch".into(), ViewerTabKind::Snapshot);
+        let ticket = session.begin_compute(id).expect("tab exists");
+
+        session.set_state_if_current(
+            ticket,
+            ViewerTabState::Error {
+                reason: "safe failure".into(),
+            },
+        );
+
+        assert_eq!(session.tab(id).expect("tab").tab.label(), "project: merge");
     }
 
     #[test]

@@ -4,6 +4,8 @@ use crate::commands::git_runner::GitRunner;
 
 const LOCAL_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=2)\t%(contents:lines=1)";
 const REMOTE_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=4)\t%(contents:lines=1)";
+const TAG_NAME_SORT_ARG: &str = "--sort=refname";
+const NEWEST_TAG_SORT_ARG: &str = "--sort=-creatordate";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
@@ -36,7 +38,7 @@ pub fn list(runner: &impl GitRunner, repo: &Path, commits: bool) -> TagResult {
     };
 
     let mut lines = Vec::new();
-    for group in group_by_commit(refs.local.values()) {
+    for group in group_by_commit(refs.ordered_local()) {
         match group.as_slice() {
             [single] => lines.push(render_tag(&refs, single, commits)),
             many => match classify_group(many) {
@@ -83,7 +85,7 @@ fn classify_group<'a>(group: &[&'a TagRef]) -> TagGroup<'a> {
     }
 }
 
-/// Buckets tags by the commit they resolve to, preserving first-seen order.
+/// Buckets tags by resolved commit, preserving group order and sorting members by name.
 fn group_by_commit<'a>(tags: impl Iterator<Item = &'a TagRef>) -> Vec<Vec<&'a TagRef>> {
     let mut groups: Vec<Vec<&'a TagRef>> = Vec::new();
     for tag in tags {
@@ -94,6 +96,9 @@ fn group_by_commit<'a>(tags: impl Iterator<Item = &'a TagRef>) -> Vec<Vec<&'a Ta
             Some(group) => group.push(tag),
             None => groups.push(vec![tag]),
         }
+    }
+    for group in &mut groups {
+        group.sort_by(|left, right| left.name.cmp(&right.name));
     }
     groups
 }
@@ -235,7 +240,7 @@ fn push_created(
 
     let mut pending = Vec::new();
     for name in names {
-        let Some(tag_ref) = refs.local.get(*name) else {
+        let Some(tag_ref) = refs.local.iter().find(|tag| tag.name == *name) else {
             return TagResult::new(Status::Fail, format!("created tag {name} was not found"));
         };
         if !refs.is_remote(tag_ref) {
@@ -363,11 +368,15 @@ impl TagRef {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TagRefs {
-    local: BTreeMap<String, TagRef>,
+    local: Vec<TagRef>,
     remote: BTreeMap<String, TagRef>,
 }
 
 impl TagRefs {
+    fn ordered_local(&self) -> impl Iterator<Item = &TagRef> {
+        self.local.iter()
+    }
+
     fn is_remote(&self, tag: &TagRef) -> bool {
         self.remote
             .get(&tag.name)
@@ -375,21 +384,33 @@ impl TagRefs {
     }
 
     fn pending(&self) -> Vec<&TagRef> {
-        self.local
-            .values()
+        let mut pending = self
+            .local
+            .iter()
             .filter(|tag| !self.is_remote(tag))
-            .collect()
+            .collect::<Vec<_>>();
+        pending.sort_by(|left, right| left.name.cmp(&right.name));
+        pending
     }
 }
 
 fn tag_refs(runner: &impl GitRunner, repo: &Path) -> Result<TagRefs, String> {
+    // Git applies the last sort key as the primary one. `creatordate` selects the
+    // tagger date for annotated tags and the commit date for lightweight tags.
+    let local = load_refs(
+        runner,
+        repo,
+        &[
+            "for-each-ref",
+            TAG_NAME_SORT_ARG,
+            NEWEST_TAG_SORT_ARG,
+            LOCAL_TAG_FORMAT_ARG,
+            "refs/tags",
+        ],
+    )?;
     Ok(TagRefs {
-        local: load_refs(
-            runner,
-            repo,
-            &["for-each-ref", LOCAL_TAG_FORMAT_ARG, "refs/tags"],
-        )?,
-        remote: load_refs(
+        local,
+        remote: refs_by_name(load_refs(
             runner,
             repo,
             &[
@@ -397,15 +418,11 @@ fn tag_refs(runner: &impl GitRunner, repo: &Path) -> Result<TagRefs, String> {
                 REMOTE_TAG_FORMAT_ARG,
                 "refs/remotes/origin/tags",
             ],
-        )?,
+        )?),
     })
 }
 
-fn load_refs(
-    runner: &impl GitRunner,
-    repo: &Path,
-    args: &[&str],
-) -> Result<BTreeMap<String, TagRef>, String> {
+fn load_refs(runner: &impl GitRunner, repo: &Path, args: &[&str]) -> Result<Vec<TagRef>, String> {
     match runner.run(repo, args) {
         Ok(output) if output.exit_code == 0 => Ok(parse_refs(&output.stdout)),
         Ok(output) => Err(output.fail_detail("git for-each-ref failed")),
@@ -413,7 +430,7 @@ fn load_refs(
     }
 }
 
-fn parse_refs(stdout: &str) -> BTreeMap<String, TagRef> {
+fn parse_refs(stdout: &str) -> Vec<TagRef> {
     stdout
         .lines()
         .filter_map(|line| {
@@ -426,17 +443,20 @@ fn parse_refs(stdout: &str) -> BTreeMap<String, TagRef> {
             if object.is_empty() || name.is_empty() {
                 return None;
             }
-            Some((
-                name.clone(),
-                TagRef {
-                    object,
-                    commit,
-                    peeled_short,
-                    name,
-                    message,
-                },
-            ))
+            Some(TagRef {
+                object,
+                commit,
+                peeled_short,
+                name,
+                message,
+            })
         })
+        .collect()
+}
+
+fn refs_by_name(refs: Vec<TagRef>) -> BTreeMap<String, TagRef> {
+    refs.into_iter()
+        .map(|tag| (tag.name.clone(), tag))
         .collect()
 }
 
@@ -518,7 +538,13 @@ mod tests {
         assert_eq!(
             runner.arg_lists(),
             vec![
-                vec!["for-each-ref", LOCAL_TAG_FORMAT_ARG, "refs/tags",],
+                vec![
+                    "for-each-ref",
+                    TAG_NAME_SORT_ARG,
+                    NEWEST_TAG_SORT_ARG,
+                    LOCAL_TAG_FORMAT_ARG,
+                    "refs/tags",
+                ],
                 vec![
                     "for-each-ref",
                     REMOTE_TAG_FORMAT_ARG,
@@ -542,7 +568,13 @@ mod tests {
         assert_eq!(
             runner.arg_lists(),
             vec![
-                vec!["for-each-ref", LOCAL_TAG_FORMAT_ARG, "refs/tags",],
+                vec![
+                    "for-each-ref",
+                    TAG_NAME_SORT_ARG,
+                    NEWEST_TAG_SORT_ARG,
+                    LOCAL_TAG_FORMAT_ARG,
+                    "refs/tags",
+                ],
                 vec![
                     "for-each-ref",
                     REMOTE_TAG_FORMAT_ARG,

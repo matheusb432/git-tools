@@ -7,6 +7,7 @@ mod recipes;
 mod render;
 mod routes;
 mod session;
+mod tab_label;
 
 use std::sync::{
     Arc,

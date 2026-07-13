@@ -31,6 +31,14 @@ async function git(cwd, ...args) {
   return run('git', args, cwd);
 }
 
+async function pressEnter() {
+  if (process.platform === 'linux') {
+    await run('xdotool', ['key', 'Return'], root);
+    return;
+  }
+  await browser.keys('Enter');
+}
+
 async function createRepo(name, content) {
   const repo = path.join(fixtureRoot, name);
   await mkdir(repo, { recursive: true });
@@ -175,8 +183,11 @@ describe('server-rendered viewer', () => {
   });
 
   it('refreshes a live source and distinguishes a subsequently broken source', async () => {
+    while (await $('.viewer-tab-close').isExisting()) {
+      await $('.viewer-tab-close').click();
+    }
     await run(cli, ['diff', 'live', '--path', primaryRepo], root);
-    await drainPending({ minTabs: 2, activeKind: 'L' });
+    await drainPending({ minTabs: 1, activeKind: 'L' });
     await expectReadyDocument();
 
     await writeFile(path.join(primaryRepo, 'work.txt'), 'base\nalpha-v2\n');
@@ -189,5 +200,43 @@ describe('server-rendered viewer', () => {
     await $('button=Refresh').click();
     await expect($('.viewer-status-broken')).toBeDisplayed();
     await expect($('.viewer-status-error')).not.toExist();
+
+    const deleteLiveView = $('button=Delete live view');
+    await browser.execute((button) => button.focus(), await deleteLiveView);
+    await pressEnter();
+    expect(await browser.getAlertText()).toBe(
+      'Delete this saved live view? This removes its tab and automatic restoration. You can add it again with gtl diff live.',
+    );
+    await browser.acceptAlert();
+    await browser.waitUntil(
+      async () =>
+        browser.execute(
+          () =>
+            document.activeElement?.classList.contains('viewer-recovery-button') &&
+            document.activeElement?.textContent?.trim() === 'Open history',
+        ),
+      { timeoutMsg: 'focus did not move to the empty-state History action' },
+    );
+    expect(
+      await browser.execute(
+        () => document.querySelector('.viewer-sr-only[role="status"]')?.textContent?.trim(),
+      ),
+    ).toContain(
+      'Live view deleted. No diffs remain open.',
+    );
+    await browser.waitUntil(
+      async () =>
+        browser.execute(
+          () =>
+            !Array.from(document.querySelectorAll('.viewer-tab-kind')).some(
+              (kind) => kind.textContent === 'L',
+            ),
+        ),
+      { timeoutMsg: 'deleted live view remained in the authoritative tab strip' },
+    );
+
+    await browser.reloadSession();
+    await expect($('.viewer-status-empty')).toBeDisplayed();
+    await expect($('button=Delete live view')).not.toExist();
   });
 });

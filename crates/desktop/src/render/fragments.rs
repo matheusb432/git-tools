@@ -12,6 +12,12 @@ pub(super) enum SwapMode {
     OutOfBand,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SwapFeedback {
+    None,
+    LiveViewDeleted,
+}
+
 impl SwapMode {
     const fn out_of_band(self) -> Option<&'static str> {
         match self {
@@ -25,6 +31,7 @@ pub(super) fn tabs(
     tabs: &[ViewerTab],
     active_tab_id: Option<ViewerTabId>,
     swap: SwapMode,
+    feedback: SwapFeedback,
 ) -> Markup {
     html! {
         nav id="viewer-tabs" hx-swap-oob=[swap.out_of_band()] class="viewer-tabs" aria-label="Open diffs" {
@@ -35,6 +42,7 @@ pub(super) fn tabs(
                         button type="button"
                             class="viewer-tab-activate"
                             aria-current=[active.then_some("page")]
+                            autofocus[active && feedback == SwapFeedback::LiveViewDeleted]
                             title=(tab.label())
                             hx-get=(ViewerRoute::Activate { tab: tab.id() })
                             hx-target="#viewer-view"
@@ -64,23 +72,31 @@ pub(super) fn tabs(
                     span.viewer-count { (tabs.len()) }
                 }
             }
+            @if feedback == SwapFeedback::LiveViewDeleted {
+                div class="viewer-sr-only" role="status" aria-live="polite" aria-atomic="true" {
+                    @match tabs.iter().find(|tab| Some(tab.id()) == active_tab_id) {
+                        Some(tab) => { "Live view deleted. Focus moved to " (tab.label()) "." }
+                        None => { "Live view deleted. No diffs remain open. Open History or run gtl diff live to add one." }
+                    }
+                }
+            }
         }
     }
 }
 
-pub(super) fn view(document: &ViewerDocument, swap: SwapMode) -> Markup {
+pub(super) fn view(document: &ViewerDocument, swap: SwapMode, feedback: SwapFeedback) -> Markup {
     html! {
         section id="viewer-view" hx-swap-oob=[swap.out_of_band()] class="viewer-view" data-tab-id=[document.active_tab_id().map(|id| id.to_string())] {
             @match document.active_tab() {
-                None => (empty_view()),
+                None => (empty_view(feedback == SwapFeedback::LiveViewDeleted)),
                 Some(tab) => @match tab.state() {
                     ViewerTabState::Ready => {
                         @let view = document.active_view().expect("ViewerDocument guarantees a view for the ready active tab");
                         (view_controls(view, document.settings()))
                         (infra::html_renderer::build_view_fragment(view.view(), view.options()))
                     },
-                    ViewerTabState::Broken { code, reason } => (broken_view(tab.id(), code, reason)),
-                    ViewerTabState::Error { reason } => (error_view(tab.id(), reason)),
+                    ViewerTabState::Broken { code, reason } => (broken_view(tab, code, reason)),
+                    ViewerTabState::Error { reason } => (error_view(tab, reason)),
                 }
             }
         }
@@ -144,6 +160,7 @@ fn view_controls(view: &ViewerView, settings: &ViewerSettings) -> Markup {
                     hx-get=(ViewerRoute::Refresh { tab: view.tab_id() })
                     hx-target="#viewer-view"
                     hx-swap="outerHTML" { "Refresh" }
+                (delete_live_view_button(view.tab_id()))
             }
             div.viewer-spacer {}
             div.viewer-control-group role="group" aria-label="Theme" {
@@ -211,7 +228,7 @@ fn theme_choice(settings: &ViewerSettings, theme: Theme, label: &str) -> Markup 
     }
 }
 
-fn broken_view(tab: ViewerTabId, code: &str, reason: &str) -> Markup {
+fn broken_view(tab: &ViewerTab, code: &str, reason: &str) -> Markup {
     html! {
         div.viewer-status.viewer-status-broken role="status" {
             span.viewer-status-mark aria-hidden="true" { "!" }
@@ -221,15 +238,18 @@ fn broken_view(tab: ViewerTabId, code: &str, reason: &str) -> Markup {
                 p { (reason) }
                 button type="button"
                     class="viewer-recovery-button"
-                    hx-get=(ViewerRoute::Refresh { tab })
+                    hx-get=(ViewerRoute::Refresh { tab: tab.id() })
                     hx-target="#viewer-view"
                     hx-swap="outerHTML" { "Try again" }
+                @if tab.kind() == ViewerTabKind::Live {
+                    (delete_live_view_button(tab.id()))
+                }
             }
         }
     }
 }
 
-fn error_view(tab: ViewerTabId, reason: &str) -> Markup {
+fn error_view(tab: &ViewerTab, reason: &str) -> Markup {
     html! {
         div.viewer-status.viewer-status-error role="alert" {
             span.viewer-status-mark aria-hidden="true" { "×" }
@@ -239,15 +259,31 @@ fn error_view(tab: ViewerTabId, reason: &str) -> Markup {
                 p { (reason) }
                 button type="button"
                     class="viewer-recovery-button"
-                    hx-get=(ViewerRoute::Refresh { tab })
+                    hx-get=(ViewerRoute::Refresh { tab: tab.id() })
                     hx-target="#viewer-view"
                     hx-swap="outerHTML" { "Render again" }
+                @if tab.kind() == ViewerTabKind::Live {
+                    (delete_live_view_button(tab.id()))
+                }
             }
         }
     }
 }
 
-fn empty_view() -> Markup {
+fn delete_live_view_button(tab: ViewerTabId) -> Markup {
+    html! {
+        button type="button"
+            class="viewer-control-button viewer-danger-button"
+            aria-label="Delete saved live view"
+            title="Delete saved live view"
+            hx-delete=(ViewerRoute::DeleteLiveView { tab })
+            hx-confirm="Delete this saved live view? This removes its tab and automatic restoration. You can add it again with gtl diff live."
+            hx-target="#viewer-tabs"
+            hx-swap="outerHTML" { "Delete live view" }
+    }
+}
+
+fn empty_view(focus_history: bool) -> Markup {
     html! {
         div.viewer-status.viewer-status-empty {
             span.viewer-status-mark aria-hidden="true" { "±" }
@@ -255,7 +291,7 @@ fn empty_view() -> Markup {
                 p.viewer-status-eyebrow { "Viewer ready" }
                 h1 { "No diff open" }
                 p { "Run " code { "gtl diff" } " in a repository, or choose a previous render from History." }
-                button type="button" class="viewer-recovery-button" popovertarget="viewer-history-popover" { "Open history" }
+                button type="button" class="viewer-recovery-button" autofocus[focus_history] popovertarget="viewer-history-popover" { "Open history" }
             }
         }
     }

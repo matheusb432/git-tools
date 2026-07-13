@@ -232,7 +232,7 @@ mod tests {
                     .success()
             );
         };
-        g(&["init", "-q"]);
+        g(&["init", "-q", "-b", "main"]);
         g(&["config", "user.email", "t@t"]);
         g(&["config", "user.name", "t"]);
         std::fs::write(dir.join("a.txt"), "a\n").unwrap();
@@ -564,11 +564,6 @@ mod tests {
     fn recipe_for_cwd_pins_merge_diff_to_merge_base_and_head() {
         let tmp = tempfile::tempdir().unwrap();
         init_repo(tmp.path());
-        // `-M` (force-rename) works whether the ambient default branch is already
-        // `main` or not (unlike `branch -f`, which git refuses on the currently
-        // checked-out branch) — cross-version-safe regardless of git's
-        // init.defaultBranch config at the moment this repo was created.
-        git_out(tmp.path(), &["branch", "-M", "main"]);
         git_out(tmp.path(), &["checkout", "-qb", "feature"]);
         std::fs::write(tmp.path().join("f.txt"), "f\n").unwrap();
         git_out(tmp.path(), &["add", "."]);

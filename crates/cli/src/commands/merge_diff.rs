@@ -103,7 +103,7 @@ mod tests {
                     .success()
             );
         };
-        git(&["init", "-q"]);
+        git(&["init", "-q", "-b", "main"]);
         git(&["config", "user.email", "test@example.invalid"]);
         git(&["config", "user.name", "Test"]);
         std::fs::write(dir.join("a.txt"), "a\n").unwrap();
@@ -140,19 +140,6 @@ mod tests {
     fn app_path_forwards_the_merge_recipe() {
         let repo = tempfile::tempdir().unwrap();
         init_repo(repo.path());
-        // `-M` guarantees a `main` ref regardless of the ambient init.defaultBranch
-        // config (ordinary `git branch -f main` fails when `main` is already the
-        // checked-out branch, and the default branch name can otherwise race with
-        // other tests that mutate the process-global `HOME` env var).
-        assert!(
-            std::process::Command::new("git")
-                .arg("-C")
-                .arg(repo.path())
-                .args(["branch", "-M", "main"])
-                .status()
-                .unwrap()
-                .success()
-        );
         // Single commit on `main` — merge-base against itself resolves both pin
         // endpoints to that one commit's sha (GTL-0131: recipe_for_cwd pins at mint
         // time via pin_op).

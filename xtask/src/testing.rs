@@ -43,6 +43,34 @@ struct E2eCommand {
     args: Vec<&'static str>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RequiredTool {
+    name: &'static str,
+    hint: &'static str,
+}
+
+const LINUX_E2E_TOOLS: &[RequiredTool] = &[
+    RequiredTool {
+        name: "WebKitWebDriver",
+        hint: "install the webkit2gtk-driver system package through config-provisioner",
+    },
+    RequiredTool {
+        name: "xvfb-run",
+        hint: "install Xvfb through config-provisioner",
+    },
+    RequiredTool {
+        name: "xdotool",
+        hint: "install xdotool through config-provisioner",
+    },
+];
+
+fn platform_e2e_tools(os: &str) -> &'static [RequiredTool] {
+    match os {
+        "linux" => LINUX_E2E_TOOLS,
+        _ => &[],
+    }
+}
+
 fn e2e_command(os: &str) -> Result<E2eCommand> {
     match os {
         "linux" => Ok(E2eCommand {
@@ -115,12 +143,8 @@ fn run_desktop_e2e_workflow() -> Result<()> {
     )?;
 
     let command = e2e_command(std::env::consts::OS)?;
-    if std::env::consts::OS == "linux" {
-        require_tool(
-            "WebKitWebDriver",
-            "install the webkit2gtk-driver system package through config-provisioner",
-        )?;
-        require_tool("xvfb-run", "install Xvfb through config-provisioner")?;
+    for tool in platform_e2e_tools(std::env::consts::OS) {
+        require_tool(tool.name, tool.hint)?;
     }
     preflight_desktop_build(std::env::consts::OS, || {
         proc::run_captured_with_env(
@@ -203,6 +227,18 @@ mod tests {
                 args: vec!["run", "--cwd", "e2e/viewer", "test:e2e"],
             }
         );
+    }
+
+    #[test]
+    fn linux_e2e_preflight_declares_xdotool_with_an_actionable_hint() {
+        let xdotool = platform_e2e_tools("linux")
+            .iter()
+            .find(|tool| tool.name == "xdotool")
+            .expect("Linux keyboard e2e declares xdotool");
+
+        assert!(xdotool.hint.contains("install xdotool"));
+        assert!(xdotool.hint.contains("config-provisioner"));
+        assert!(platform_e2e_tools("windows").is_empty());
     }
 
     #[test]

@@ -40,6 +40,9 @@ pub(crate) enum Route {
     Close {
         tab: ViewerTabId,
     },
+    DeleteLiveView {
+        tab: ViewerTabId,
+    },
     Activate {
         tab: ViewerTabId,
     },
@@ -71,6 +74,7 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
         ["tabs", _, "view"] => RouteShape::View,
         ["tabs", _, "refresh"] => RouteShape::Refresh,
         ["tabs", _, "close"] => RouteShape::Close,
+        ["tabs", _, "live-view"] => RouteShape::DeleteLiveView,
         ["tabs", _, "activate"] => RouteShape::Activate,
         ["history"] => RouteShape::History,
         ["history", _, "open"] => RouteShape::OpenHistory,
@@ -78,7 +82,12 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
         ["pending"] => RouteShape::Pending,
         _ => return Err(StatusCode::NOT_FOUND),
     };
-    if request.method() != Method::GET {
+    let expected_method = if matches!(shape, RouteShape::DeleteLiveView) {
+        Method::DELETE
+    } else {
+        Method::GET
+    };
+    if request.method() != expected_method {
         return Err(StatusCode::METHOD_NOT_ALLOWED);
     }
 
@@ -101,6 +110,9 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
         }
         RouteShape::Refresh => tab_route(uri.query(), segments[1], |tab| Route::Refresh { tab }),
         RouteShape::Close => tab_route(uri.query(), segments[1], |tab| Route::Close { tab }),
+        RouteShape::DeleteLiveView => tab_route(uri.query(), segments[1], |tab| {
+            Route::DeleteLiveView { tab }
+        }),
         RouteShape::Activate => tab_route(uri.query(), segments[1], |tab| Route::Activate { tab }),
         RouteShape::History => {
             reject_query(uri.query())?;
@@ -143,6 +155,7 @@ enum RouteShape {
     View,
     Refresh,
     Close,
+    DeleteLiveView,
     Activate,
     History,
     OpenHistory,
@@ -247,6 +260,11 @@ mod tests {
                 Method::GET,
                 Route::Refresh { tab },
             ),
+            (
+                app_uri("/tabs/7/live-view"),
+                Method::DELETE,
+                Route::DeleteLiveView { tab },
+            ),
             (app_uri("/history"), Method::GET, Route::History),
             (
                 app_uri("/history/42/open"),
@@ -302,6 +320,11 @@ mod tests {
                 "{route}"
             );
         }
+
+        assert_eq!(
+            parse(&request(Method::GET, &app_uri("/tabs/7/live-view"))),
+            Err(StatusCode::METHOD_NOT_ALLOWED)
+        );
 
         for route in [
             "/tabs/../view",

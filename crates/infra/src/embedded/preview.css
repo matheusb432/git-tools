@@ -228,6 +228,7 @@
   .viewer-history-button{display:flex;flex:none;align-items:center;gap:7px;margin-bottom:7px;padding:6px 9px;border:1px solid transparent;border-radius:var(--r-sm);color:var(--ink-2);font-size:12px}
   .viewer-history-button:hover{color:var(--ink);border-color:var(--line-2);background:var(--surface-2)}
   .viewer-count{min-width:18px;padding:0 5px;border-radius:9px;background:var(--acc-soft);color:var(--acc);font-size:10px;text-align:center}
+  .viewer-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 
   .viewer-view{min-width:0;min-height:0;overflow:hidden}
   .viewer-view:has(>.layout){display:grid;grid-template-rows:auto minmax(0,1fr)}
@@ -239,6 +240,8 @@
   .viewer-choice input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
   .viewer-choice span,.viewer-control-button{display:inline-flex;min-height:27px;align-items:center;padding:4px 8px;border:1px solid transparent;border-radius:var(--r-sm);font-size:11.5px;white-space:nowrap}
   .viewer-choice:hover span,.viewer-control-button:hover{color:var(--ink);border-color:var(--line-2);background:var(--surface-2)}
+  body.viewer-shell .viewer-danger-button{margin-left:8px;color:var(--del);border-color:color-mix(in srgb,var(--del) 38%,transparent);background:var(--del-bg)}
+  body.viewer-shell .viewer-danger-button:hover{color:var(--bg);border-color:var(--del);background:var(--del)}
   .viewer-choice input:checked+span{color:var(--acc);border-color:var(--acc-line);background:var(--acc-soft)}
   .viewer-choice input:focus-visible+span,.viewer-control-button:focus-visible,.viewer-tab-activate:focus-visible,.viewer-tab-close:focus-visible,.viewer-history-button:focus-visible,.viewer-icon-button:focus-visible,.viewer-recovery-button:focus-visible,.viewer-history-row:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
   .viewer-spacer{flex:1}
