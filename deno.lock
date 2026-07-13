@@ -1,11 +1,9 @@
 {
   "version": "5",
   "specifiers": {
-    "npm:@sveltejs/vite-plugin-svelte@^7.1.2": "7.1.2_svelte@5.56.4_vite@8.1.0",
     "npm:@typescript/typescript6@6.0.2": "6.0.2",
     "npm:oxfmt@0.58.0": "0.58.0_svelte@5.56.4",
     "npm:oxlint@1.73.0": "1.73.0",
-    "npm:svelte@^5.56.4": "5.56.4",
     "npm:typescript@7.0.2": "7.0.2",
     "npm:vite@^8.1.0": "8.1.0",
     "npm:vitest@4.1.10": "4.1.10_vite@8.1.0"
@@ -349,17 +347,6 @@
         "acorn"
       ]
     },
-    "@sveltejs/vite-plugin-svelte@7.1.2_svelte@5.56.4_vite@8.1.0": {
-      "integrity": "sha512-DrUBA2UXRfDmUX/ZTiEopd3X40yavsJF1FX2RygcuIScHL7o5YX1fMvoYnDhjeJQC4weCOklirpNWlcb2NiSeA==",
-      "dependencies": [
-        "deepmerge",
-        "magic-string",
-        "obug",
-        "svelte",
-        "vite",
-        "vitefu"
-      ]
-    },
     "@tybys/wasm-util@0.10.3": {
       "integrity": "sha512-F3fo1MYrRJYL3zER0OUOmkutjr1Vp23m7OsSgp7nq4SP6OqX6C/56XFIPAl5bt3zaBRjmW7SGz3u/6LwFpYcOg==",
       "dependencies": [
@@ -566,9 +553,6 @@
     },
     "convert-source-map@2.0.0": {
       "integrity": "sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg=="
-    },
-    "deepmerge@4.3.1": {
-      "integrity": "sha512-3sUqbMEc77XqpdNO7FRyRog+eW3ph+GYCbj+rK+uYyRMuwsVy0rMiVtPn+QJlKFvWP/1PYpapqYn0Me2knFn+A=="
     },
     "detect-libc@2.1.2": {
       "integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="
@@ -905,15 +889,6 @@
       ],
       "bin": true
     },
-    "vitefu@1.1.3_vite@8.1.0": {
-      "integrity": "sha512-ub4okH7Z5KLjb6hDyjqrGXqWtWvoYdU3IGm/NorpgHncKoLTCfRIbvlhBm7r0YstIaQRYlp4yEbFqDcKSzXSSg==",
-      "dependencies": [
-        "vite"
-      ],
-      "optionalPeers": [
-        "vite"
-      ]
-    },
     "vitest@4.1.10_vite@8.1.0": {
       "integrity": "sha512-R9jUTe5S4Qb0HCd4TNqpC7oGcrMssMRGXLW80ubjWsW9VH5GF8y1Y0SFLY9AbqSk6nt0PnOx4H4WNJYZ13GUPw==",
       "dependencies": [
@@ -955,11 +930,9 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
-        "npm:@sveltejs/vite-plugin-svelte@^7.1.2",
         "npm:@typescript/typescript6@6.0.2",
         "npm:oxfmt@0.58.0",
         "npm:oxlint@1.73.0",
-        "npm:svelte@^5.56.4",
         "npm:typescript@7.0.2",
         "npm:vite@^8.1.0",
         "npm:vitest@4.1.10"

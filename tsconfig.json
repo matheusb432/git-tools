@@ -17,5 +17,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["frontend/**/*.ts", "frontend/**/*.svelte"]
+  "include": ["frontend/**/*.ts"]
 }

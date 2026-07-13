@@ -1,8 +1,8 @@
-import { mount, unmount } from "svelte";
 import { scrollLandOn } from "../core/scroll";
-import App from "./App.svelte";
+import { enhanceControls } from "./controls";
+import { enhanceLayout } from "./enhance-layout";
 
-type MountedApp = ReturnType<typeof mount>;
+type Teardown = { readonly destroy: () => void };
 
 export type EnhancementLifecycle = {
   readonly enhanceWithin: (scope: ParentNode) => void;
@@ -52,10 +52,17 @@ export function createEnhancementLifecycle<Handle extends object>(
   };
 }
 
-const enhancementLifecycle = createEnhancementLifecycle<MountedApp>(
-  (root) => mount(App, { target: root, props: { root } }),
-  (component) => {
-    void unmount(component);
+const enhancementLifecycle = createEnhancementLifecycle<Teardown>(
+  (root) => {
+    const cleanups = [enhanceControls(root), enhanceLayout(root)];
+    return {
+      destroy: () => {
+        cleanups.reverse().forEach((cleanup) => cleanup());
+      },
+    };
+  },
+  (handle) => {
+    handle.destroy();
   },
 );
 
