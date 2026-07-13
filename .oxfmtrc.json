@@ -7,10 +7,5 @@
   "sortPackageJson": {
     "sortScripts": true
   },
-  "svelte": {
-    "allowShorthand": true,
-    "indentScriptAndStyle": true,
-    "sortOrder": "options-scripts-markup-styles"
-  },
   "ignorePatterns": ["crates/infra/src/embedded/generated", "node_modules", "target"]
 }

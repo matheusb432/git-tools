@@ -675,21 +675,12 @@ mod tests {
 
     use super::*;
 
-    /// Returns true if `html` contains any http(s):// URL that is not an inert
-    /// Svelte runtime error-message literal (`https://svelte.dev/e/<code>`),
-    /// which never triggers a network load. Enforces the offline-artifact contract.
+    /// Returns true if `html` contains any http(s):// URL. Enforces the
+    /// offline-artifact contract: nothing in the artifact may trigger a
+    /// network load.
     fn has_disallowed_external_url(html: &str) -> bool {
-        html.match_indices("://").any(|(sep, _)| {
-            let scheme_ok = html[..sep].ends_with("http") || html[..sep].ends_with("https");
-            if !scheme_ok {
-                return false;
-            }
-            // start of the scheme
-            let start = html[..sep]
-                .rfind(|c: char| !c.is_ascii_alphabetic())
-                .map_or(0, |i| i + 1);
-            !html[start..].starts_with("https://svelte.dev/e/")
-        })
+        html.match_indices("://")
+            .any(|(sep, _)| html[..sep].ends_with("http") || html[..sep].ends_with("https"))
     }
 
     #[test]
