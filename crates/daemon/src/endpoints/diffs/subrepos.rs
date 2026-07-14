@@ -21,7 +21,7 @@ pub async fn handle(
     let shared = state.shared.clone();
     crate::endpoints::run(
         shared,
-        super::to_subrepos_request(dto),
+        super::to_subrepos_request(dto, super::config_exclusions()),
         move |request| {
             render_diff_subrepos::execute(
                 request,

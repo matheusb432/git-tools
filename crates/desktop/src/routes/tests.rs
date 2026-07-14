@@ -29,11 +29,22 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_config(None)
+    }
+
+    /// `Some(toml)` writes a user config into the temp dir and points the app
+    /// at it, so exclusion tests exercise the real load path hermetically.
+    fn with_config(config_toml: Option<&str>) -> Self {
         let temp = tempfile::tempdir().expect("temp dir");
         let repo = temp.path().join("repo");
         std::fs::create_dir_all(&repo).expect("repo dir");
         init_repo(&repo);
-        let app = ViewerApp::new(temp.path().join("data"), 128 * 1024 * 1024);
+        let config_path = config_toml.map(|raw| {
+            let path = temp.path().join("config.toml");
+            std::fs::write(&path, raw).expect("write config");
+            path
+        });
+        let app = ViewerApp::new(temp.path().join("data"), config_path, 128 * 1024 * 1024);
         Self {
             _temp: temp,
             app,
@@ -143,6 +154,35 @@ fn document_keeps_pending_work_and_pending_opens_the_recipe() {
     let html = String::from_utf8(pending.into_body()).expect("html");
     assert!(html.contains("viewer-tabs"));
     assert!(html.contains("f.txt"));
+}
+
+#[test]
+fn configured_exclusions_hide_files_and_render_the_chip() {
+    let fixture = Fixture::with_config(Some("[diff.exclude]\nrepo = [\"md\"]\n"));
+    std::fs::write(fixture.repo.join("notes.md"), "plan\n").expect("notes file");
+    git(&fixture.repo, &["add", "notes.md"]);
+    git(&fixture.repo, &["commit", "-qm", "docs: notes"]);
+    fixture.enqueue("batch", RecipeBatchKind::Snapshot, vec![fixture.recipe()]);
+    serve_app(&fixture.app, request("/"));
+
+    let pending = serve_app(&fixture.app, request("/pending"));
+
+    assert_eq!(pending.status(), StatusCode::OK);
+    let html = String::from_utf8(pending.into_body()).expect("html");
+    assert!(html.contains(r#"data-path="f.txt""#));
+    assert!(
+        !html.contains(r#"data-path="notes.md""#),
+        "excluded file must not render a file block"
+    );
+    assert!(
+        html.contains(r#"<span class="excl-chip""#),
+        "exclusion chip missing"
+    );
+    assert!(html.contains("1 file hidden · md"));
+    assert!(
+        html.contains("notes.md"),
+        "the chip tooltip still names the hidden path"
+    );
 }
 
 #[test]

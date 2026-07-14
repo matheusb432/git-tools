@@ -27,13 +27,22 @@ use contracts::{
     },
     envelope::{Envelope, Note, NoteLevel, Outcome},
 };
-use domain::diffs::DiffTarget;
+use domain::diffs::{DiffExclusions, DiffTarget};
+
+/// The `[diff.exclude]` map, re-read from the user config per request so an
+/// edit applies to the next render without restarting the daemon.
+pub(crate) fn config_exclusions() -> DiffExclusions {
+    infra::user_config::load().diff_exclusions()
+}
 
 /// Map the wire request DTO onto the application request.
 ///
 /// # Errors
 /// Returns an error when the DTO carries an invalid selection (e.g. a `last` count of zero).
-pub(crate) fn to_request(dto: RenderDiffRequest) -> anyhow::Result<RenderDiff> {
+pub(crate) fn to_request(
+    dto: RenderDiffRequest,
+    exclusions: DiffExclusions,
+) -> anyhow::Result<RenderDiff> {
     let target = to_target(dto.target)?;
     Ok(RenderDiff {
         cwd: dto.cwd.into(),
@@ -41,6 +50,7 @@ pub(crate) fn to_request(dto: RenderDiffRequest) -> anyhow::Result<RenderDiff> {
         target,
         name: dto.name,
         theme: dto.theme,
+        exclusions,
     })
 }
 
@@ -75,19 +85,27 @@ fn to_repo_ref(dto: RepoRefDto) -> RepoRef {
 }
 
 /// Map the wire request DTO onto the application request.
-pub(crate) fn to_merge_request(dto: RenderMergeDiffRequest) -> RenderMergeDiff {
+pub(crate) fn to_merge_request(
+    dto: RenderMergeDiffRequest,
+    exclusions: DiffExclusions,
+) -> RenderMergeDiff {
     RenderMergeDiff {
         cwd: dto.cwd.into(),
         store_root: dto.store_root.into(),
         base: dto.base,
+        exclusions,
     }
 }
 
 /// Map the wire request DTO onto the application request.
-pub(crate) fn to_squash_request(dto: RenderSquashPreviewRequest) -> RenderSquashPreview {
+pub(crate) fn to_squash_request(
+    dto: RenderSquashPreviewRequest,
+    exclusions: DiffExclusions,
+) -> RenderSquashPreview {
     RenderSquashPreview {
         cwd: dto.cwd.into(),
         store_root: dto.store_root.into(),
+        exclusions,
     }
 }
 
@@ -98,6 +116,7 @@ pub(crate) fn to_squash_request(dto: RenderSquashPreviewRequest) -> RenderSquash
 /// zero).
 pub(crate) fn to_subrepos_request(
     dto: RenderDiffSubreposRequest,
+    exclusions: DiffExclusions,
 ) -> anyhow::Result<RenderDiffSubrepos> {
     Ok(RenderDiffSubrepos {
         store_root: dto.store_root.into(),
@@ -105,16 +124,21 @@ pub(crate) fn to_subrepos_request(
         target: to_target(dto.target)?,
         repos: dto.repos.into_iter().map(to_repo_ref).collect(),
         theme: dto.theme,
+        exclusions,
     })
 }
 
 /// Map the wire request DTO onto the application request.
-pub(crate) fn to_all_request(dto: RenderDiffAllRequest) -> RenderDiffAll {
+pub(crate) fn to_all_request(
+    dto: RenderDiffAllRequest,
+    exclusions: DiffExclusions,
+) -> RenderDiffAll {
     RenderDiffAll {
         store_root: dto.store_root.into(),
         root: dto.root.into(),
         repos: dto.repos.into_iter().map(to_repo_ref).collect(),
         theme: dto.theme,
+        exclusions,
     }
 }
 

@@ -130,6 +130,14 @@ fn view_weight(view: &View) -> usize {
         + string_weight(&view.foot.cmd)
         + string_weight(&view.foot.note)
         + view.theme.as_ref().map_or(0, string_weight)
+        + view.exclusions.as_ref().map_or(0, |applied| {
+            applied
+                .extensions
+                .iter()
+                .chain(&applied.hidden_paths)
+                .map(string_weight)
+                .sum()
+        })
 }
 
 fn commit_weight(commit: &Commit) -> usize {
@@ -180,6 +188,7 @@ mod tests {
 
     fn cached(title: &str) -> CachedView {
         CachedView::new(Arc::new(View {
+            exclusions: None,
             repo_name: String::new(),
             repo_root: String::new(),
             branch: String::new(),
@@ -334,6 +343,7 @@ mod tests {
             .chain((1..LINE_COUNT).map(|line| format!(" line {line:05}: cache churn payload")))
             .collect::<Vec<_>>();
         let view = Arc::new(View {
+            exclusions: None,
             repo_name: "benchmark".into(),
             repo_root: "/fixtures/benchmark".into(),
             branch: "main".into(),

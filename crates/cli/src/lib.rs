@@ -17,7 +17,6 @@ use crate::{
 pub mod cli;
 pub mod client;
 pub mod commands;
-pub mod config;
 pub mod preprocess;
 pub(crate) mod recipe;
 pub mod viewer;
@@ -144,7 +143,7 @@ fn dispatch(command: Command) -> ExitCode {
             message: None,
             yes,
             ..
-        }) => run_push_current(yes, config::load().push.confirm),
+        }) => run_push_current(yes, infra::user_config::load().push.confirm),
         Command::Push(PushArgs {
             all: false,
             recursive: true,
@@ -217,7 +216,7 @@ fn run_daemon_ctl(command: &DaemonCommand) -> ExitCode {
 
 /// Persist the diff-preview theme to the user config and exit (no rendering).
 fn run_set_theme(theme: Theme) -> ExitCode {
-    match config::save_theme(theme.as_config_str()) {
+    match infra::user_config::save_theme(theme.as_config_str()) {
         Ok(path) => {
             println!(
                 "diff-preview theme set to \"{}\" in {}",

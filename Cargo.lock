@@ -782,7 +782,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "toml 1.1.2+spec-1.1.0",
- "toml_edit 0.25.12+spec-1.1.0",
  "uuid",
  "walkdir",
 ]
@@ -2447,6 +2446,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "toml 1.1.2+spec-1.1.0",
+ "toml_edit 0.25.12+spec-1.1.0",
 ]
 
 [[package]]

@@ -3,11 +3,12 @@ use std::{
     path::Path,
 };
 
-use domain::diffs::{Commit, FileDiff, FileStatus, LineOwners};
+use domain::diffs::{Commit, ExcludedExtensions, FileDiff, FileStatus, LineOwners, View};
 
 use crate::{
     diffs::attribution::{self, NewSide},
     ports::DiffSource,
+    shared::notes::Note,
 };
 
 pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
@@ -88,21 +89,30 @@ pub fn attach_commits<S: std::hash::BuildHasher>(
 }
 
 /// The assembled diff data for one preview: commits in range and changed files
-/// (with per-line owners attached).
+/// (with per-line owners attached), plus the paths hidden by the extension
+/// exclusion filter.
 pub struct DiffData {
     pub commits: Vec<Commit>,
     pub files: Vec<FileDiff>,
+    pub hidden_paths: Vec<String>,
 }
 
-/// The shared diff generator: log + diff + full-context + file-commit map +
-/// per-line attribution. Takes range primitives so it stays decoupled from
-/// `commands::Ranges`. Does NOT sort files — callers order as they always have.
+/// The shared diff generator: log + diff + exclusion filter + full-context +
+/// file-commit map + per-line attribution. Takes range primitives so it stays
+/// decoupled from `commands::Ranges`. Does NOT sort files — callers order as
+/// they always have.
+///
+/// Exclusions are applied *before* the content diffs run: a cheap `--name-only`
+/// pass discovers the hidden paths, and both content invocations then carry
+/// `:(exclude,literal)` pathspecs, so git never computes — and this module
+/// never parses, counts, or blames — an excluded file's line diffs.
 pub fn assemble(
     source: &impl DiffSource,
     repo: &Path,
     diff_args: &[String],
     diff_range: &str,
     log_range: &str,
+    excluded: &ExcludedExtensions,
 ) -> anyhow::Result<DiffData> {
     let mut commits = source.log_commits(repo, log_range)?;
     let (base, new_side) = blame_targets(diff_range, log_range);
@@ -117,10 +127,15 @@ pub fn assemble(
         }
     }
 
-    let mut files = parse_diff(&source.diff_raw(repo, diff_args)?);
+    let hidden_paths = hidden_paths(source, repo, diff_args, excluded)?;
+    let content_args = with_exclude_pathspecs(diff_args, &hidden_paths);
+    // ? partition again after parsing: a source that ignores the exclude
+    // ? pathspecs (the scripted test fake) must still never leak hidden files.
+    let (mut files, _) =
+        partition_excluded(parse_diff(&source.diff_raw(repo, &content_args)?), excluded);
     attach_full_context(
         &mut files,
-        parse_diff(&source.diff_raw(repo, &full_context_args(diff_args))?),
+        parse_diff(&source.diff_raw(repo, &full_context_args(&content_args))?),
     );
     let file_commits = source.file_commit_map(repo, log_range)?;
     attach_commits(&mut files, &file_commits);
@@ -128,7 +143,87 @@ pub fn assemble(
     let in_range: HashSet<String> = commits.iter().map(|commit| commit.sha.clone()).collect();
     attribution::attribute(source, repo, &base, &new_side, &in_range, &mut files);
 
-    Ok(DiffData { commits, files })
+    Ok(DiffData {
+        commits,
+        files,
+        hidden_paths,
+    })
+}
+
+/// The paths the exclusion set hides, in diff order, discovered through a
+/// content-free `--name-only` pass. Skips the extra git call entirely when
+/// nothing is excluded.
+fn hidden_paths(
+    source: &impl DiffSource,
+    repo: &Path,
+    diff_args: &[String],
+    excluded: &ExcludedExtensions,
+) -> anyhow::Result<Vec<String>> {
+    if excluded.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(source
+        .diff_raw(repo, &name_only_args(diff_args))?
+        .lines()
+        .map(str::trim)
+        .filter(|path| !path.is_empty() && excluded.matches(path))
+        .map(String::from)
+        .collect())
+}
+
+/// The `--name-only` variant of a diff invocation (mirrors [`full_context_args`]).
+fn name_only_args(args: &[String]) -> Vec<String> {
+    let mut name_only = Vec::with_capacity(args.len() + 1);
+    if let Some((cmd, rest)) = args.split_first() {
+        name_only.push(cmd.clone());
+        name_only.push("--name-only".to_string());
+        name_only.extend(rest.iter().cloned());
+    }
+    name_only
+}
+
+/// Append one `:(exclude,literal)` pathspec per hidden path so git never emits
+/// (nor computes) those files' content. `literal` keeps glob characters in
+/// filenames inert. No hidden paths → the args pass through untouched.
+fn with_exclude_pathspecs(args: &[String], hidden_paths: &[String]) -> Vec<String> {
+    if hidden_paths.is_empty() {
+        return args.to_vec();
+    }
+    let mut excluded_args = Vec::with_capacity(args.len() + 1 + hidden_paths.len());
+    excluded_args.extend(args.iter().cloned());
+    excluded_args.push("--".to_string());
+    excluded_args.extend(
+        hidden_paths
+            .iter()
+            .map(|path| format!(":(exclude,literal){path}")),
+    );
+    excluded_args
+}
+
+/// Split parsed files into (kept, hidden paths) under the exclusion set (pure).
+fn partition_excluded(
+    files: Vec<FileDiff>,
+    excluded: &ExcludedExtensions,
+) -> (Vec<FileDiff>, Vec<String>) {
+    if excluded.is_empty() {
+        return (files, Vec::new());
+    }
+    let (hidden, kept): (Vec<FileDiff>, Vec<FileDiff>) = files
+        .into_iter()
+        .partition(|file| excluded.matches(&file.path));
+    (kept, hidden.into_iter().map(|file| file.path).collect())
+}
+
+/// The user-facing note for a view whose exclusion filter hid files, prefixed
+/// with the slice's label (`diff-preview`, `squash-preview`).
+pub(crate) fn exclusion_note(label: &str, view: &View) -> Option<Note> {
+    view.exclusions.as_ref().map(|applied| {
+        Note::info(format!(
+            "{label}: {} file(s) hidden by config [diff.exclude] ({})",
+            applied.hidden_paths.len(),
+            applied.extensions_label(),
+        ))
+    })
 }
 
 // ! log_range is always two-dot `base..tip`; diff_range lacking `..` (hash mode) means the
@@ -280,5 +375,38 @@ index 000..333\n\
             full_context_args(&args),
             vec!["diff", "--unified=2147483647", "main..HEAD"]
         );
+    }
+
+    #[test]
+    fn name_only_args_inserts_the_flag_after_the_diff_command() {
+        let args = vec!["diff".to_string(), "main..HEAD".to_string()];
+
+        assert_eq!(
+            name_only_args(&args),
+            vec!["diff", "--name-only", "main..HEAD"]
+        );
+    }
+
+    #[test]
+    fn with_exclude_pathspecs_appends_literal_excludes_after_a_separator() {
+        let args = vec!["diff".to_string(), "main..HEAD".to_string()];
+
+        assert_eq!(
+            with_exclude_pathspecs(&args, &["docs/plan.md".to_string(), "a[1].md".to_string()]),
+            vec![
+                "diff",
+                "main..HEAD",
+                "--",
+                ":(exclude,literal)docs/plan.md",
+                ":(exclude,literal)a[1].md",
+            ]
+        );
+    }
+
+    #[test]
+    fn with_exclude_pathspecs_passes_args_through_when_nothing_is_hidden() {
+        let args = vec!["diff".to_string(), "main..HEAD".to_string()];
+
+        assert_eq!(with_exclude_pathspecs(&args, &[]), args);
     }
 }

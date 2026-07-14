@@ -255,7 +255,11 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
 /// webview install) — fatal for a desktop app, so it surfaces as a crash.
 pub fn run() {
     let data_root = commands::data_root().expect("viewer data root resolves");
-    let viewer_app = routes::ViewerApp::new(data_root, DEFAULT_VIEW_CACHE_WEIGHT);
+    let viewer_app = routes::ViewerApp::new(
+        data_root,
+        infra::user_config::config_path(),
+        DEFAULT_VIEW_CACHE_WEIGHT,
+    );
     let cold_start_batches = recipes_from_argv(&std::env::args().collect::<Vec<_>>());
     tauri::Builder::default()
         .manage(viewer_app)

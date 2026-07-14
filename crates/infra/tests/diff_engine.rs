@@ -9,7 +9,7 @@ use application::diffs::{
     attribution::{NewSide, attribute},
     util::assemble,
 };
-use domain::diffs::{FileDiff, LineOwners};
+use domain::diffs::{ExcludedExtensions, FileDiff, LineOwners};
 use infra::diff_source::GitDiffSource;
 
 fn git(dir: &Path, args: &[&str]) {
@@ -65,6 +65,7 @@ fn assemble_attaches_brought_in_members_to_a_merge() {
         &["diff".to_string(), "main...HEAD".to_string()],
         "main...HEAD",
         "main..HEAD",
+        &ExcludedExtensions::default(),
     )
     .unwrap();
 
@@ -87,6 +88,47 @@ fn assemble_attaches_brought_in_members_to_a_merge() {
     assert!(
         feat_a.members.is_empty(),
         "a non-merge commit has no members"
+    );
+}
+
+#[test]
+fn assemble_excludes_extensions_at_the_git_level() {
+    let tmp = tempfile::tempdir().unwrap();
+    let d = tmp.path();
+    git(d, &["init", "-q"]);
+    git(d, &["config", "user.email", "t@t"]);
+    git(d, &["config", "user.name", "t"]);
+    std::fs::write(d.join("base.txt"), "base\n").unwrap();
+    git(d, &["add", "."]);
+    git(d, &["commit", "-qm", "base"]);
+    git(d, &["branch", "-M", "main"]);
+    git(d, &["checkout", "-q", "-b", "feature"]);
+    std::fs::write(d.join("code.rs"), "fn work() {}\n").unwrap();
+    std::fs::write(d.join("docs plan.MD"), "l1\nl2\nl3\n").unwrap();
+    git(d, &["add", "."]);
+    git(d, &["commit", "-qm", "feat: work"]);
+
+    let data = assemble(
+        &GitDiffSource,
+        d,
+        &["diff".to_string(), "main...HEAD".to_string()],
+        "main...HEAD",
+        "main..HEAD",
+        &ExcludedExtensions::new(["md"]),
+    )
+    .unwrap();
+
+    let paths: Vec<&str> = data.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["code.rs"], "git must not emit the excluded file");
+    assert_eq!(
+        data.hidden_paths,
+        ["docs plan.MD"],
+        "hidden paths come from the name-only pass, case-insensitively"
+    );
+    let total_added: u32 = data.files.iter().map(|f| f.added).sum();
+    assert_eq!(
+        total_added, 1,
+        "excluded lines contribute nothing to the totals"
     );
 }
 

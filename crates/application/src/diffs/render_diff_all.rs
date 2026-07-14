@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::{DiffKind, DiffTarget};
+use domain::diffs::{DiffExclusions, DiffKind, DiffTarget};
 
 use crate::{
     diffs::batch::{RepoRef, dated_title, render_batch},
@@ -23,6 +23,7 @@ pub struct RenderDiffAll {
     pub root: PathBuf,
     pub repos: Vec<RepoRef>,
     pub theme: Option<String>,
+    pub exclusions: DiffExclusions,
 }
 
 /// The stored artifact plus every message the render wanted surfaced.
@@ -54,12 +55,14 @@ pub fn execute(
         store_root,
         repos,
         theme,
+        exclusions,
     } = req;
     let mut notes = Vec::new();
     let batch = render_batch(
         source,
         &DiffTarget::Unpushed { pinned: None },
         theme.as_deref(),
+        &exclusions,
         &repos,
         false,
         &mut notes,
@@ -77,6 +80,7 @@ pub fn execute(
         head_committed_at: String::new(),
         generated_at: clock.now_iso(),
         title: title.clone(),
+        excluded_extensions: Vec::new(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
@@ -96,7 +100,7 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{Commit, DiffKind};
+    use domain::diffs::{Commit, DiffExclusions, DiffKind};
 
     use super::{RenderDiffAll, RepoRef, execute};
     use crate::{
@@ -124,6 +128,7 @@ mod tests {
 
     fn req(repos: Vec<RepoRef>) -> RenderDiffAll {
         RenderDiffAll {
+            exclusions: DiffExclusions::default(),
             store_root: PathBuf::from("/store"),
             root: PathBuf::from("/scan-root"),
             repos,

@@ -3,7 +3,7 @@
 //! whether an empty or errored view is skipped-and-counted (diff-subrepos) or kept
 //! and propagated (diff-all).
 
-use domain::diffs::{DiffTarget, View};
+use domain::diffs::{DiffExclusions, DiffTarget, View};
 
 use crate::{
     diffs::render_diff::build_view,
@@ -34,6 +34,7 @@ pub(crate) fn render_batch(
     source: &impl DiffSource,
     target: &DiffTarget,
     theme: Option<&str>,
+    exclusions: &DiffExclusions,
     repos: &[RepoRef],
     skip_empty: bool,
     notes: &mut Vec<Note>,
@@ -41,7 +42,14 @@ pub(crate) fn render_batch(
     let mut views = Vec::with_capacity(repos.len());
     let mut skipped = 0usize;
     for repo in repos {
-        let built = build_view(source, &repo.top, target, theme.map(String::from), notes);
+        let built = build_view(
+            source,
+            &repo.top,
+            target,
+            theme.map(String::from),
+            exclusions,
+            notes,
+        );
         if skip_empty {
             match built {
                 Ok((mut view, _)) if !view.is_empty() => {
@@ -135,6 +143,7 @@ mod tests {
             &source,
             &DiffTarget::Unpushed { pinned: None },
             None,
+            &domain::diffs::DiffExclusions::default(),
             &repos,
             true,
             &mut notes,
@@ -163,6 +172,7 @@ mod tests {
             &source,
             &DiffTarget::Unpushed { pinned: None },
             None,
+            &domain::diffs::DiffExclusions::default(),
             &repos,
             true,
             &mut notes,
@@ -186,6 +196,7 @@ mod tests {
             &source,
             &DiffTarget::Unpushed { pinned: None },
             None,
+            &domain::diffs::DiffExclusions::default(),
             &repos,
             false,
             &mut notes,
@@ -195,6 +206,58 @@ mod tests {
         assert_eq!(batch.views.len(), repos.len());
         assert_eq!(batch.skipped, 0);
         assert!(batch.views.iter().all(domain::diffs::View::is_empty));
+    }
+
+    #[test]
+    fn exclusions_apply_per_repo_by_directory_name() {
+        const TWO_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
+--- a/f.txt\n\
++++ b/f.txt\n\
+@@ -1 +1 @@\n\
+-old\n\
++new\n\
+diff --git a/notes.md b/notes.md\n\
+--- a/notes.md\n\
++++ b/notes.md\n\
+@@ -1 +1 @@\n\
+-plan\n\
++more plan\n";
+        let mut source = FakeDiffSource {
+            upstream: Some("origin/main".into()),
+            ..Default::default()
+        };
+        for top in ["/repo-a", "/repo-b"] {
+            source.per_repo.insert(
+                top.into(),
+                RepoOverride {
+                    commits: vec![one_commit()],
+                    diff_output: TWO_FILE_DIFF.into(),
+                },
+            );
+        }
+        let exclusions = domain::diffs::DiffExclusions::new(
+            [("repo-a".to_string(), vec!["md".to_string()])],
+            None,
+        );
+        let repos = two_repos();
+        let mut notes = Vec::new();
+
+        let batch = render_batch(
+            &source,
+            &DiffTarget::Unpushed { pinned: None },
+            None,
+            &exclusions,
+            &repos,
+            true,
+            &mut notes,
+        )
+        .expect("batch succeeds");
+
+        assert_eq!(batch.views.len(), 2);
+        assert_eq!(batch.views[0].files.len(), 1, "repo-a hides notes.md");
+        assert!(batch.views[0].exclusions.is_some());
+        assert_eq!(batch.views[1].files.len(), 2, "repo-b is untouched");
+        assert!(batch.views[1].exclusions.is_none());
     }
 
     #[test]
@@ -211,6 +274,7 @@ mod tests {
             &source,
             &DiffTarget::Unpushed { pinned: None },
             None,
+            &domain::diffs::DiffExclusions::default(),
             &repos,
             false,
             &mut notes,

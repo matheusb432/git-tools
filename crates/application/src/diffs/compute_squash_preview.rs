@@ -13,6 +13,7 @@ use crate::{diffs::render_squash_preview::build_squash_view, ports::DiffSource};
 pub struct ComputeSquashPreview {
     pub cwd: PathBuf,
     pub pinned: Option<domain::diffs::PinnedRange>,
+    pub exclusions: domain::diffs::DiffExclusions,
 }
 
 /// The computed squash-preview view.
@@ -34,8 +35,12 @@ pub fn execute(
     req: ComputeSquashPreview,
     source: &impl DiffSource,
 ) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
-    let ComputeSquashPreview { cwd, pinned } = req;
-    let built = build_squash_view(source, &cwd, pinned.as_ref())?;
+    let ComputeSquashPreview {
+        cwd,
+        pinned,
+        exclusions,
+    } = req;
+    let built = build_squash_view(source, &cwd, pinned.as_ref(), &exclusions)?;
     Ok(ComputeSquashPreviewResponse { view: built.view })
 }
 
@@ -43,7 +48,7 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::Commit;
+    use domain::diffs::{Commit, DiffExclusions};
 
     use super::*;
     use crate::testing::FakeDiffSource;
@@ -75,6 +80,7 @@ index 111..222 100644\n\
 
         let response = execute(
             ComputeSquashPreview {
+                exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
                 pinned: None,
             },
@@ -104,6 +110,7 @@ index 111..222 100644\n\
 
         let response = execute(
             ComputeSquashPreview {
+                exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
                 pinned: Some(domain::diffs::PinnedRange {
                     base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
@@ -129,6 +136,7 @@ index 111..222 100644\n\
 
         let error = execute(
             ComputeSquashPreview {
+                exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
                 pinned: None,
             },

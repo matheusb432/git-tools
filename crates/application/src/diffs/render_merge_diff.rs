@@ -5,10 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{DiffKind, Mode, PinnedRange, View, ranges, ranges_over};
+use domain::diffs::{
+    AppliedExclusions, DiffExclusions, DiffKind, Mode, PinnedRange, View, ranges, ranges_over,
+};
 
 use crate::{
-    diffs::util::{DiffData, assemble, repo_name},
+    diffs::util::{DiffData, assemble, exclusion_note, repo_name},
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
@@ -23,6 +25,7 @@ pub struct RenderMergeDiff {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
     pub base: Option<String>,
+    pub exclusions: DiffExclusions,
 }
 
 /// The stored artifact plus every message the render wanted surfaced.
@@ -57,10 +60,12 @@ pub(crate) fn build_merge_view(
     cwd: &Path,
     base: Option<&str>,
     pinned: Option<&PinnedRange>,
+    exclusions: &DiffExclusions,
 ) -> anyhow::Result<MergeViewBuild> {
     let top = source.top_level(cwd)?;
     let branch = source.current_branch(Path::new(&top))?;
     let repo_name = repo_name(&top);
+    let excluded = exclusions.for_project_or_default(&repo_name);
     let base = base
         .map(str::trim)
         .filter(|b| !b.is_empty())
@@ -76,12 +81,17 @@ pub(crate) fn build_merge_view(
         let symbolic = ranges(base, Mode::Merge);
         (symbolic.clone(), symbolic)
     };
-    let DiffData { commits, files } = assemble(
+    let DiffData {
+        commits,
+        files,
+        hidden_paths,
+    } = assemble(
         source,
         Path::new(&top),
         &io_ranges.diff_args,
         &io_ranges.diff_range,
         &io_ranges.log_range,
+        excluded,
     )?;
 
     let view = View {
@@ -96,6 +106,7 @@ pub(crate) fn build_merge_view(
         commits,
         files,
         theme: None,
+        exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
     };
     Ok(MergeViewBuild {
         view,
@@ -118,8 +129,9 @@ pub fn execute(
         cwd,
         store_root,
         base,
+        exclusions,
     } = req;
-    let built = build_merge_view(source, &cwd, base.as_deref(), None)?;
+    let built = build_merge_view(source, &cwd, base.as_deref(), None, &exclusions)?;
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
@@ -139,18 +151,22 @@ pub fn execute(
         head_committed_at: source.committed_at(Path::new(&built.top), "HEAD"),
         generated_at: clock.now_iso(),
         title: "merge-diff".to_string(),
+        excluded_extensions: exclusions
+            .for_project_or_default(&view.repo_name)
+            .extensions()
+            .to_vec(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
-    let notes = vec![
-        Note::info(format!(
-            "merge-diff: {commit_count} commit{} to merge into {}, {file_count} file{}",
-            plural(commit_count),
-            built.base,
-            plural(file_count),
-        )),
-        Note::info(format!("wrote {}", placed.path.display())),
-    ];
+    let mut notes = Vec::new();
+    notes.extend(exclusion_note("merge-diff", &view));
+    notes.push(Note::info(format!(
+        "merge-diff: {commit_count} commit{} to merge into {}, {file_count} file{}",
+        plural(commit_count),
+        built.base,
+        plural(file_count),
+    )));
+    notes.push(Note::info(format!("wrote {}", placed.path.display())));
     Ok(RenderMergeDiffResponse {
         artifact: placed.path,
         reused: placed.reused,
@@ -166,7 +182,7 @@ fn plural(n: usize) -> &'static str {
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::Commit;
+    use domain::diffs::{Commit, DiffExclusions};
 
     use super::{RenderMergeDiff, RenderMergeDiffError, execute};
     use crate::{
@@ -194,6 +210,7 @@ index 111..222 100644\n\
 
     fn req(source_top: &str, base: Option<&str>) -> RenderMergeDiff {
         RenderMergeDiff {
+            exclusions: DiffExclusions::default(),
             cwd: PathBuf::from(source_top),
             store_root: PathBuf::from("/store"),
             base: base.map(str::to_string),

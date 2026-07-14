@@ -20,7 +20,7 @@ pub async fn handle(
     let shared = state.shared.clone();
     crate::endpoints::run(
         shared,
-        Ok(super::to_merge_request(dto)),
+        Ok(super::to_merge_request(dto, super::config_exclusions())),
         move |request| {
             render_merge_diff::execute(
                 request,

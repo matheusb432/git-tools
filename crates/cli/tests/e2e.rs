@@ -737,6 +737,39 @@ fn push_stages_commits_and_pushes_dirty_repo() {
 }
 
 #[test]
+fn diff_hides_configured_extensions_and_reports_the_exclusion() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+    repo.commit("notes.md", "plan\n", "docs: plan");
+    // Keyed by the repo's directory name; the daemon inherits the env and
+    // resolves the same config when it renders.
+    let config = repo.root.join("config.toml");
+    std::fs::write(&config, "[diff.exclude]\nrepo = [\"md\"]\n").unwrap();
+
+    let mut cmd = repo.run(&["diff"]);
+    cmd.env("GIT_TOOLS_CONFIG", &config);
+    let (stdout, _) = run_success(cmd);
+
+    assert!(
+        stdout.contains("diff-preview: 1 file(s) hidden by config [diff.exclude] (md)"),
+        "exclusion note missing: {stdout}"
+    );
+    let artifact = artifact_from_stdout(&stdout);
+    let html = std::fs::read_to_string(&artifact).unwrap();
+    assert!(html.contains(r#"data-path="a.txt""#));
+    assert!(
+        !html.contains(r#"data-path="notes.md""#),
+        "excluded file must not render a file block"
+    );
+    assert!(
+        html.contains(r#"<span class="excl-chip""#),
+        "artifact must show the exclusion chip"
+    );
+}
+
+#[test]
 fn push_without_message_pushes_existing_commits() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");

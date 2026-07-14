@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::{DiffTarget, View};
+use domain::diffs::{DiffExclusions, DiffTarget, View};
 
 use crate::{diffs::render_diff::build_view, ports::DiffSource, shared::notes::Note};
 
@@ -14,6 +14,7 @@ use crate::{diffs::render_diff::build_view, ports::DiffSource, shared::notes::No
 pub struct ComputeDiff {
     pub cwd: PathBuf,
     pub target: DiffTarget,
+    pub exclusions: DiffExclusions,
 }
 
 /// The computed view plus the human summary and every surfaced message.
@@ -39,10 +40,14 @@ pub fn execute(
     req: ComputeDiff,
     source: &impl DiffSource,
 ) -> Result<ComputeDiffResponse, ComputeDiffError> {
-    let ComputeDiff { cwd, target } = req;
+    let ComputeDiff {
+        cwd,
+        target,
+        exclusions,
+    } = req;
     let mut notes = Vec::new();
     let top = source.top_level(&cwd)?;
-    let (view, summary) = build_view(source, &top, &target, None, &mut notes)?;
+    let (view, summary) = build_view(source, &top, &target, None, &exclusions, &mut notes)?;
     Ok(ComputeDiffResponse {
         view,
         summary,
@@ -81,6 +86,7 @@ index 111..222 100644\n\
         ComputeDiff {
             cwd: PathBuf::from("/repo"),
             target,
+            exclusions: DiffExclusions::default(),
         }
     }
 
@@ -245,5 +251,107 @@ index 111..222 100644\n\
 
         let ComputeDiffError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "unknown revision nope");
+    }
+
+    const CODE_AND_NOTES_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
+index 111..222 100644\n\
+--- a/f.txt\n\
++++ b/f.txt\n\
+@@ -1 +1 @@\n\
+-old\n\
++new\n\
+diff --git a/docs/notes.md b/docs/notes.md\n\
+index 333..444 100644\n\
+--- a/docs/notes.md\n\
++++ b/docs/notes.md\n\
+@@ -1 +1 @@\n\
+-plan\n\
++more plan\n";
+
+    fn excluding(project: &str, extensions: &[&str]) -> DiffExclusions {
+        DiffExclusions::new(
+            [(
+                project.to_string(),
+                extensions.iter().map(ToString::to_string).collect(),
+            )],
+            None,
+        )
+    }
+
+    #[test]
+    fn configured_extensions_are_hidden_and_reported() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![one_commit()],
+            diff_output: CODE_AND_NOTES_DIFF.into(),
+            ..Default::default()
+        };
+        let mut request = req(DiffTarget::Unpushed { pinned: None });
+        request.exclusions = excluding("repo", &["md"]);
+
+        let response = execute(request, &source).expect("compute succeeds");
+
+        let paths: Vec<&str> = response
+            .view
+            .files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect();
+        assert_eq!(paths, ["f.txt"], "the .md file is hidden");
+        let applied = response
+            .view
+            .exclusions
+            .expect("hidden files carry a summary");
+        assert_eq!(applied.extensions, ["md"]);
+        assert_eq!(applied.hidden_paths, ["docs/notes.md"]);
+        assert!(
+            response.notes.contains(&Note::info(
+                "diff-preview: 1 file(s) hidden by config [diff.exclude] (md)"
+            )),
+            "exclusion note missing: {:?}",
+            response.notes
+        );
+    }
+
+    #[test]
+    fn exclusions_for_another_project_do_not_apply() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![one_commit()],
+            diff_output: CODE_AND_NOTES_DIFF.into(),
+            ..Default::default()
+        };
+        let mut request = req(DiffTarget::Unpushed { pinned: None });
+        request.exclusions = excluding("other-repo", &["md"]);
+
+        let response = execute(request, &source).expect("compute succeeds");
+
+        assert_eq!(response.view.files.len(), 2);
+        assert_eq!(response.view.exclusions, None);
+        assert!(response.notes.is_empty());
+    }
+
+    #[test]
+    fn idle_exclusions_matching_nothing_stay_invisible() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![one_commit()],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            ..Default::default()
+        };
+        let mut request = req(DiffTarget::Unpushed { pinned: None });
+        request.exclusions = excluding("repo", &["md"]);
+
+        let response = execute(request, &source).expect("compute succeeds");
+
+        assert_eq!(response.view.files.len(), 1);
+        assert_eq!(response.view.exclusions, None);
+        assert!(response.notes.is_empty());
     }
 }

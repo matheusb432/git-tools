@@ -16,7 +16,7 @@ use application::{
     ports::{AppStateStore, Clock, DiffSource, RepoProbe},
 };
 use domain::{
-    diffs::{DiffTarget, View},
+    diffs::{DiffExclusions, DiffTarget, View},
     viewer::{ViewerTabId, ViewerTabKind, ViewerTabState},
 };
 use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
@@ -76,6 +76,7 @@ pub(crate) struct RecipeContext<'a, Source, Probe, State, Time> {
     app_state: &'a State,
     clock: &'a Time,
     data_root: &'a Path,
+    exclusions: &'a DiffExclusions,
 }
 
 impl<Source, Probe, State, Time> Copy for RecipeContext<'_, Source, Probe, State, Time> {}
@@ -93,6 +94,7 @@ impl<'a, Source, Probe, State, Time> RecipeContext<'a, Source, Probe, State, Tim
         app_state: &'a State,
         clock: &'a Time,
         data_root: &'a Path,
+        exclusions: &'a DiffExclusions,
     ) -> Self {
         Self {
             source,
@@ -100,6 +102,7 @@ impl<'a, Source, Probe, State, Time> RecipeContext<'a, Source, Probe, State, Tim
             app_state,
             clock,
             data_root,
+            exclusions,
         }
     }
 }
@@ -143,13 +146,18 @@ fn diff_target(target: &RecipeTarget) -> DiffTarget {
     }
 }
 
-pub(crate) fn compute_view(source: &impl DiffSource, recipe: &Recipe) -> Result<View, String> {
+pub(crate) fn compute_view(
+    source: &impl DiffSource,
+    recipe: &Recipe,
+    exclusions: &DiffExclusions,
+) -> Result<View, String> {
     let cwd = recipe.cwd();
     match &recipe.op {
         RecipeOp::Diff { target } => compute_diff::execute(
             ComputeDiff {
                 cwd,
                 target: diff_target(target),
+                exclusions: exclusions.clone(),
             },
             source,
         )
@@ -160,6 +168,7 @@ pub(crate) fn compute_view(source: &impl DiffSource, recipe: &Recipe) -> Result<
                 cwd,
                 base: base.clone(),
                 pinned: to_domain_pin(pinned.as_ref()),
+                exclusions: exclusions.clone(),
             },
             source,
         )
@@ -169,6 +178,7 @@ pub(crate) fn compute_view(source: &impl DiffSource, recipe: &Recipe) -> Result<
             ComputeSquashPreview {
                 cwd,
                 pinned: to_domain_pin(pinned.as_ref()),
+                exclusions: exclusions.clone(),
             },
             source,
         )
@@ -265,7 +275,7 @@ fn compute_and_publish(
         return Ok(ComputationOutcome::StateOnly);
     }
 
-    let view = match compute_view(context.source, recipe) {
+    let view = match compute_view(context.source, recipe, context.exclusions) {
         Ok(view) => Arc::new(view),
         Err(reason) => {
             publish_compute_error(session, ticket, &reason)?;
@@ -424,7 +434,14 @@ index 111..222 100644\n\
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
 
         let opened = open_recipe(
-            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &DiffExclusions::default(),
+            ),
             &session,
             &recipe(),
             "batch-1".into(),
@@ -458,7 +475,14 @@ index 111..222 100644\n\
         named.name = Some("Named initial failure".into());
 
         let opened = open_recipe(
-            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &DiffExclusions::default(),
+            ),
             &session,
             &named,
             "batch".into(),
@@ -482,7 +506,14 @@ index 111..222 100644\n\
         let session = Mutex::new(ViewerSession::new(1));
 
         let opened = open_recipe(
-            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &DiffExclusions::default(),
+            ),
             &session,
             &recipe(),
             "batch".into(),
@@ -511,7 +542,14 @@ index 111..222 100644\n\
         let session = Mutex::new(ViewerSession::new(1024));
 
         let id = open_recipe(
-            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &DiffExclusions::default(),
+            ),
             &session,
             &recipe(),
             "live".into(),
@@ -542,7 +580,14 @@ index 111..222 100644\n\
         let session = Mutex::new(ViewerSession::new(1024));
 
         let id = open_recipe(
-            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &DiffExclusions::default(),
+            ),
             &session,
             &recipe(),
             "live".into(),
@@ -573,7 +618,14 @@ index 111..222 100644\n\
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let id = open_recipe(
-            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &DiffExclusions::default(),
+            ),
             &session,
             &recipe,
             "snapshot".into(),
@@ -588,7 +640,14 @@ index 111..222 100644\n\
         app_state.renders.lock().expect("renders lock").clear();
 
         let refreshed = refresh_recipe(
-            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &DiffExclusions::default(),
+            ),
             &session,
             id,
         )
@@ -614,7 +673,14 @@ index 111..222 100644\n\
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let id = open_recipe(
-            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &DiffExclusions::default(),
+            ),
             &session,
             &recipe(),
             "batch".into(),
@@ -625,7 +691,14 @@ index 111..222 100644\n\
         app_state.renders.lock().expect("renders lock").clear();
 
         refresh_recipe(
-            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &DiffExclusions::default(),
+            ),
             &session,
             id,
         )
@@ -653,6 +726,7 @@ index 111..222 100644\n\
                 &app_state,
                 &clock,
                 Path::new("/data"),
+                &DiffExclusions::default(),
             ),
             &session,
             &named,
@@ -670,6 +744,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
+                    &DiffExclusions::default(),
                 ),
                 &session,
                 id,
@@ -687,7 +762,8 @@ index 111..222 100644\n\
     #[test]
     fn older_failing_refresh_becomes_stale_after_newer_success() {
         let source = source();
-        let mut newest_view = compute_view(&source, &recipe()).expect("view computes");
+        let mut newest_view =
+            compute_view(&source, &recipe(), &DiffExclusions::default()).expect("view computes");
         newest_view.title = "newer success".into();
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let id = session.lock().expect("session").open(

@@ -16,6 +16,11 @@ pub struct Sidecar {
     pub generated_at: String,
     pub title: String,
     pub byte_size: u64,
+    /// Extension set in force at render time (normalized, sorted; empty =
+    /// unfiltered). Defaults keep pre-exclusion sidecars readable, and their
+    /// empty set correctly means "rendered without exclusions".
+    #[serde(default)]
+    pub excluded_extensions: Vec<String>,
 }
 
 #[cfg(test)]
@@ -36,6 +41,7 @@ mod tests {
             generated_at: "2026-06-22T10:01:00Z".into(),
             title: "diff".into(),
             byte_size: 1234,
+            excluded_extensions: vec!["md".into()],
         };
         let json = serde_json::to_string(&sc).unwrap();
         assert_eq!(serde_json::from_str::<Sidecar>(&json).unwrap(), sc);

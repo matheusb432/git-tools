@@ -99,11 +99,18 @@ pub(crate) struct ViewerApp {
     pending: Arc<PendingRecipes>,
     renderer: MaudViewerRenderer,
     pub(crate) data_root: Arc<PathBuf>,
+    /// User config file to read `[diff.exclude]` from on every compute; `None`
+    /// (unresolvable environment) computes without exclusions.
+    config_path: Arc<Option<PathBuf>>,
     restoration: Arc<restoration::RestorationGate>,
 }
 
 impl ViewerApp {
-    pub(crate) fn new(data_root: PathBuf, max_cache_weight: usize) -> Self {
+    pub(crate) fn new(
+        data_root: PathBuf,
+        config_path: Option<PathBuf>,
+        max_cache_weight: usize,
+    ) -> Self {
         Self {
             clock: SystemClock,
             probe: GitRepoProbe,
@@ -113,6 +120,7 @@ impl ViewerApp {
             pending: Arc::new(PendingRecipes::default()),
             renderer: MaudViewerRenderer,
             data_root: Arc::new(data_root),
+            config_path: Arc::new(config_path),
             restoration: Arc::new(restoration::RestorationGate::default()),
         }
     }
@@ -121,21 +129,28 @@ impl ViewerApp {
         &self.pending
     }
 
+    /// Re-reads `[diff.exclude]` so a config edit applies on the next compute.
+    fn diff_exclusions(&self) -> domain::diffs::DiffExclusions {
+        infra::user_config::load_from(self.config_path.as_deref()).diff_exclusions()
+    }
+
     #[cfg(test)]
     fn active_tab(&self) -> Option<ViewerTabId> {
         self.session.lock().expect("session lock").active()
     }
 }
 
-fn recipe_context(
-    app: &ViewerApp,
-) -> RecipeContext<'_, GitDiffSource, GitRepoProbe, SqliteAppState, SystemClock> {
+fn recipe_context<'a>(
+    app: &'a ViewerApp,
+    exclusions: &'a domain::diffs::DiffExclusions,
+) -> RecipeContext<'a, GitDiffSource, GitRepoProbe, SqliteAppState, SystemClock> {
     RecipeContext::new(
         &app.source,
         &app.probe,
         &app.app_state,
         &app.clock,
         &app.data_root,
+        exclusions,
     )
 }
 
@@ -244,7 +259,8 @@ fn refresh(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     if !tab_exists(app, tab)? {
         return Ok(status_response(StatusCode::NOT_FOUND));
     }
-    let result = refresh_recipe_versioned(recipe_context(app), &app.session, tab)?;
+    let exclusions = app.diff_exclusions();
+    let result = refresh_recipe_versioned(recipe_context(app, &exclusions), &app.session, tab)?;
     let transient = result.view.map(|view| render::VersionedView {
         ticket: result.ticket,
         view,
@@ -307,8 +323,9 @@ fn open_history(app: &ViewerApp, id: domain::viewer::RenderHistoryId) -> RouteRe
     };
     let recipe: Recipe = serde_json::from_str(&entry.recipe_json)
         .map_err(|error| format!("invalid saved recipe for history {id}: {error}"))?;
+    let exclusions = app.diff_exclusions();
     let opened = open_recipe(
-        recipe_context(app),
+        recipe_context(app, &exclusions),
         &app.session,
         &recipe,
         format!("history-{id}"),
@@ -343,9 +360,10 @@ fn pending(app: &ViewerApp) -> RouteResult {
 
 fn pending_transaction(app: &ViewerApp) -> RouteResult {
     let batches = app.pending.try_drain()?;
+    let exclusions = app.diff_exclusions();
     match process_pending(batches, |recipe, batch_id, kind| {
         open_recipe(
-            recipe_context(app),
+            recipe_context(app, &exclusions),
             &app.session,
             recipe,
             batch_id.into(),
@@ -437,8 +455,10 @@ fn restore_live_views(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
             }
         }
         if let Some(tab) = newest {
-            let result = refresh_recipe_versioned(recipe_context(app), &app.session, tab)
-                .map_err(|error| error.to_string())?;
+            let exclusions = app.diff_exclusions();
+            let result =
+                refresh_recipe_versioned(recipe_context(app, &exclusions), &app.session, tab)
+                    .map_err(|error| error.to_string())?;
             transient = result.view.map(|view| render::VersionedView {
                 ticket: result.ticket,
                 view,
@@ -470,7 +490,8 @@ fn ensure_active_view(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
     let Some(id) = refresh else {
         return Ok(None);
     };
-    let result = refresh_recipe_versioned(recipe_context(app), &app.session, id)?;
+    let exclusions = app.diff_exclusions();
+    let result = refresh_recipe_versioned(recipe_context(app, &exclusions), &app.session, id)?;
     Ok(result.view.map(|view| render::VersionedView {
         ticket: result.ticket,
         view,

@@ -294,6 +294,7 @@ mod tests {
 
     fn view(title: &str) -> Arc<View> {
         Arc::new(View {
+            exclusions: None,
             repo_name: "repo".into(),
             repo_root: "/repo".into(),
             branch: "feature".into(),

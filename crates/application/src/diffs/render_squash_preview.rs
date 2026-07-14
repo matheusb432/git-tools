@@ -6,10 +6,13 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{Cmd, DiffKind, Foot, Mode, PinnedRange, View, ranges, ranges_over};
+use domain::diffs::{
+    AppliedExclusions, Cmd, DiffExclusions, DiffKind, Foot, Mode, PinnedRange, View, ranges,
+    ranges_over,
+};
 
 use crate::{
-    diffs::util::{DiffData, assemble, repo_name},
+    diffs::util::{DiffData, assemble, exclusion_note, repo_name},
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
@@ -21,6 +24,7 @@ use crate::{
 pub struct RenderSquashPreview {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
+    pub exclusions: DiffExclusions,
 }
 
 /// The stored artifact plus every message the render wanted surfaced.
@@ -47,8 +51,12 @@ pub fn execute(
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
 ) -> Result<RenderSquashPreviewResponse, RenderSquashPreviewError> {
-    let RenderSquashPreview { cwd, store_root } = req;
-    let built = build_squash_view(source, &cwd, None)?;
+    let RenderSquashPreview {
+        cwd,
+        store_root,
+        exclusions,
+    } = req;
+    let built = build_squash_view(source, &cwd, None, &exclusions)?;
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
@@ -68,15 +76,21 @@ pub fn execute(
         head_committed_at: source.committed_at(Path::new(&built.top), "HEAD"),
         generated_at: clock.now_iso(),
         title: "squash-preview".to_string(),
+        // TODO: refactor this inneficiency. the request must not need _all_ the exclusions when it
+        // just needs that of its current project.
+        excluded_extensions: exclusions
+            .for_project_or_default(&view.repo_name)
+            .extensions()
+            .to_vec(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
-    let notes = vec![
-        Note::info(format!(
-            "squash-preview: {commit_count} unpushed commit(s), {file_count} file(s)",
-        )),
-        Note::info(format!("wrote {}", placed.path.display())),
-    ];
+    let mut notes = Vec::new();
+    notes.extend(exclusion_note("squash-preview", &view));
+    notes.push(Note::info(format!(
+        "squash-preview: {commit_count} unpushed commit(s), {file_count} file(s)",
+    )));
+    notes.push(Note::info(format!("wrote {}", placed.path.display())));
     Ok(RenderSquashPreviewResponse {
         artifact: placed.path,
         reused: placed.reused,
@@ -98,10 +112,12 @@ pub(crate) fn build_squash_view(
     source: &impl DiffSource,
     cwd: &Path,
     pinned: Option<&PinnedRange>,
+    exclusions: &DiffExclusions,
 ) -> anyhow::Result<SquashViewBuild> {
     let top = source.top_level(cwd)?;
     let branch = source.current_branch(Path::new(&top))?;
     let repo_name = repo_name(&top);
+    let excluded = exclusions.for_project_or_default(&repo_name);
 
     let (upstream, io_ranges, view_ranges) = if let Some(pin) = pinned {
         (
@@ -115,12 +131,17 @@ pub(crate) fn build_squash_view(
         (upstream, symbolic.clone(), symbolic)
     };
 
-    let DiffData { commits, files } = assemble(
+    let DiffData {
+        commits,
+        files,
+        hidden_paths,
+    } = assemble(
         source,
         Path::new(&top),
         &io_ranges.diff_args,
         &io_ranges.diff_range,
         &io_ranges.log_range,
+        excluded,
     )?;
 
     let view = View {
@@ -142,6 +163,7 @@ pub(crate) fn build_squash_view(
         commits,
         files,
         theme: None,
+        exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
     };
     Ok(SquashViewBuild {
         view,
@@ -162,7 +184,7 @@ fn collapse_note(commit_count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::Commit;
+    use domain::diffs::{Commit, DiffExclusions};
 
     use super::{RenderSquashPreview, RenderSquashPreviewError, execute};
     use crate::{
@@ -190,6 +212,7 @@ index 111..222 100644\n\
 
     fn req(source_top: &str) -> RenderSquashPreview {
         RenderSquashPreview {
+            exclusions: DiffExclusions::default(),
             cwd: PathBuf::from(source_top),
             store_root: PathBuf::from("/store"),
         }

@@ -5,11 +5,12 @@
 use std::path::{Path, PathBuf};
 
 use domain::diffs::{
-    DiffKind, DiffTarget, Mode, Ranges, View, ranges, ranges_over, sort_files_tree_order,
+    AppliedExclusions, DiffExclusions, DiffKind, DiffTarget, Mode, Ranges, View, ranges,
+    ranges_over, sort_files_tree_order,
 };
 
 use crate::{
-    diffs::util::{DiffData, assemble, repo_name},
+    diffs::util::{DiffData, assemble, exclusion_note, repo_name},
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
@@ -22,6 +23,7 @@ pub struct RenderDiff {
     pub target: DiffTarget,
     pub name: Option<String>,
     pub theme: Option<String>,
+    pub exclusions: DiffExclusions,
 }
 
 /// The outcome plus every message the render wanted surfaced.
@@ -53,11 +55,19 @@ fn range_fast_path(
     top: &str,
     store_root: &Path,
     target: &DiffTarget,
+    excluded_extensions: &[String],
 ) -> anyhow::Result<Option<PathBuf>> {
     let Some((kind, base_sha, head_sha)) = resolved_range(source, top, target) else {
         return Ok(None); // worktree mode or unresolved ⇒ no fast-path
     };
-    store.lookup_by_range(store_root, Path::new(top), kind, &base_sha, &head_sha)
+    store.lookup_by_range(
+        store_root,
+        Path::new(top),
+        kind,
+        &base_sha,
+        &head_sha,
+        excluded_extensions,
+    )
 }
 
 // ! Returns (kind, base_sha, head_sha) only for pure commit ranges; None for
@@ -137,14 +147,24 @@ pub fn execute(
         target,
         name,
         theme,
+        exclusions,
     } = req;
     let mut notes = Vec::new();
     let top = source.top_level(&cwd)?;
+    let excluded = exclusions.for_project_or_default(&repo_name(&top));
 
-    // ! Fast-path: pure commit ranges are fully determined by resolved shas, so a
-    // ! prior identical artifact can be reused without the expensive assemble.
+    // ! Fast-path: pure commit ranges are fully determined by resolved shas plus
+    // ! the active exclusion set, so a prior identical artifact can be reused
+    // ! without the expensive assemble — never across a config change.
     if name.is_none()
-        && let Some(hit) = range_fast_path(source, store, &top, &store_root, &target)?
+        && let Some(hit) = range_fast_path(
+            source,
+            store,
+            &top,
+            &store_root,
+            &target,
+            excluded.extensions(),
+        )?
     {
         notes.push(Note::info(format!(
             "diff-preview: reusing {}",
@@ -159,7 +179,7 @@ pub fn execute(
         });
     }
 
-    let (mut view, summary) = build_view(source, &top, &target, theme, &mut notes)?;
+    let (mut view, summary) = build_view(source, &top, &target, theme, &exclusions, &mut notes)?;
     if let Some(name) = &name {
         view.title.clone_from(name);
     }
@@ -188,6 +208,7 @@ pub fn execute(
         head_committed_at: source.committed_at(repo, "HEAD"),
         generated_at: clock.now_iso(),
         title: view.title.clone(),
+        excluded_extensions: excluded.extensions().to_vec(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
@@ -318,17 +339,19 @@ fn resolve_target_ranges(
 }
 
 /// Shared with diff-subrepos: builds the [`View`] + human summary for a target.
-/// Emits the "no upstream" fallback warning into `notes`.
+/// Emits the "no upstream" fallback warning and the exclusion note into `notes`.
 pub fn build_view(
     source: &impl DiffSource,
     top: &str,
     target: &DiffTarget,
     theme: Option<String>,
+    exclusions: &DiffExclusions,
     notes: &mut Vec<Note>,
 ) -> anyhow::Result<(View, String)> {
     let repo = Path::new(top);
     let branch = source.current_branch(repo)?;
     let repo_name = repo_name(top);
+    let excluded = exclusions.for_project_or_default(&repo_name);
 
     let ResolvedTarget {
         base_ref,
@@ -337,12 +360,17 @@ pub fn build_view(
         fallback_to_main,
     } = resolve_target_ranges(source, top, target, notes)?;
 
-    let DiffData { commits, mut files } = assemble(
+    let DiffData {
+        commits,
+        mut files,
+        hidden_paths,
+    } = assemble(
         source,
         repo,
         &io_ranges.diff_args,
         &io_ranges.diff_range,
         &io_ranges.log_range,
+        excluded,
     )?;
     sort_files_tree_order(&mut files);
 
@@ -358,7 +386,9 @@ pub fn build_view(
         commits,
         files,
         theme,
+        exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
     };
+    notes.extend(exclusion_note("diff-preview", &view));
 
     let summary = match target {
         DiffTarget::Range { .. } => base_ref.clone(),
@@ -441,7 +471,7 @@ fn legacy_unpushed_commit_label(count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{Commit, DiffKind, DiffTarget};
+    use domain::diffs::{Commit, DiffExclusions, DiffKind, DiffTarget};
 
     use super::{RenderDiff, RenderDiffError, RenderDiffOutcome, execute};
     use crate::{
@@ -469,6 +499,7 @@ index 111..222 100644\n\
 
     fn req(source_top: &str, target: DiffTarget) -> RenderDiff {
         RenderDiff {
+            exclusions: DiffExclusions::default(),
             cwd: PathBuf::from(source_top),
             store_root: PathBuf::from("/store"),
             target,
@@ -566,7 +597,12 @@ index 111..222 100644\n\
         };
         let store = InMemoryArtifactStore::default();
         store.range_hits.lock().unwrap().insert(
-            (DiffKind::TwoDot, "sha-a".to_string(), "sha-b".to_string()),
+            (
+                DiffKind::TwoDot,
+                "sha-a".to_string(),
+                "sha-b".to_string(),
+                Vec::new(),
+            ),
             PathBuf::from("/store/existing.html"),
         );
 
@@ -599,6 +635,120 @@ index 111..222 100644\n\
     }
 
     #[test]
+    fn fast_path_never_reuses_an_artifact_rendered_under_a_different_exclusion_set() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            commits: vec![one_commit()],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            shas: [
+                ("a".to_string(), "sha-a".to_string()),
+                ("b".to_string(), "sha-b".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            known_revs: vec!["a".into(), "b".into()],
+            ..Default::default()
+        };
+        let store = InMemoryArtifactStore::default();
+        // A hit exists for this range rendered WITHOUT exclusions…
+        store.range_hits.lock().unwrap().insert(
+            (
+                DiffKind::TwoDot,
+                "sha-a".to_string(),
+                "sha-b".to_string(),
+                Vec::new(),
+            ),
+            PathBuf::from("/store/unfiltered.html"),
+        );
+
+        // …but this render runs with an md filter for the repo, so it must
+        // recompute instead of serving the stale unfiltered artifact.
+        let mut request = req(
+            "/repo",
+            DiffTarget::Range {
+                range: "a..b".into(),
+                pinned: None,
+            },
+        );
+        request.exclusions =
+            DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None);
+        let response = execute(
+            request,
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
+
+        assert!(matches!(
+            response.outcome,
+            RenderDiffOutcome::Rendered { reused: false, .. }
+        ));
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert_eq!(
+            artifact.meta.excluded_extensions,
+            vec!["md".to_string()],
+            "the active set must be recorded for future range lookups"
+        );
+    }
+
+    #[test]
+    fn fast_path_reuses_an_artifact_rendered_under_the_same_exclusion_set() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            shas: [
+                ("a".to_string(), "sha-a".to_string()),
+                ("b".to_string(), "sha-b".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            known_revs: vec!["a".into(), "b".into()],
+            ..Default::default()
+        };
+        let store = InMemoryArtifactStore::default();
+        store.range_hits.lock().unwrap().insert(
+            (
+                DiffKind::TwoDot,
+                "sha-a".to_string(),
+                "sha-b".to_string(),
+                vec!["md".to_string()],
+            ),
+            PathBuf::from("/store/filtered.html"),
+        );
+
+        let mut request = req(
+            "/repo",
+            DiffTarget::Range {
+                range: "a..b".into(),
+                pinned: None,
+            },
+        );
+        request.exclusions =
+            DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None);
+        let response = execute(
+            request,
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
+
+        assert_eq!(
+            response.outcome,
+            RenderDiffOutcome::Rendered {
+                artifact: PathBuf::from("/store/filtered.html"),
+                reused: true,
+            }
+        );
+    }
+
+    #[test]
     fn named_run_skips_the_fast_path_and_overrides_the_title() {
         let source = FakeDiffSource {
             top_level: Some("/repo".into()),
@@ -617,7 +767,12 @@ index 111..222 100644\n\
         let store = InMemoryArtifactStore::default();
         // A range hit exists, but a named run must ignore the fast-path entirely.
         store.range_hits.lock().unwrap().insert(
-            (DiffKind::TwoDot, "sha-a".to_string(), "sha-b".to_string()),
+            (
+                DiffKind::TwoDot,
+                "sha-a".to_string(),
+                "sha-b".to_string(),
+                Vec::new(),
+            ),
             PathBuf::from("/store/existing.html"),
         );
 

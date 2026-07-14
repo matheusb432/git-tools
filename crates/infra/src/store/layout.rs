@@ -74,21 +74,27 @@ fn atomic_write(final_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Find an existing artifact for a pure commit range. Returns `None` for
-/// `WorkTree` (never range-addressable) or on a miss. Scans the repo's sidecars.
+/// Find an existing artifact for a pure commit range rendered under the same
+/// exclusion set. Returns `None` for `WorkTree` (never range-addressable) or on
+/// a miss. Scans the repo's sidecars.
 pub fn lookup_by_range(
     store_root: &Path,
     repo_id: &str,
     kind: DiffKind,
     base_sha: &str,
     head_sha: &str,
+    excluded_extensions: &[String],
 ) -> Option<PathBuf> {
     if kind == DiffKind::WorkTree {
         return None;
     }
     let dir = repo_dir(store_root, repo_id);
     for (stem, sidecar) in read_sidecars_paired(&dir) {
-        if sidecar.kind == kind && sidecar.base_sha == base_sha && sidecar.head_sha == head_sha {
+        if sidecar.kind == kind
+            && sidecar.base_sha == base_sha
+            && sidecar.head_sha == head_sha
+            && sidecar.excluded_extensions == excluded_extensions
+        {
             return Some(dir.join(format!("{stem}.html")));
         }
     }
@@ -151,6 +157,7 @@ mod tests {
             generated_at: "t".into(),
             title: "diff".into(),
             byte_size: 0,
+            excluded_extensions: Vec::new(),
         }
     }
 
@@ -188,16 +195,83 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let sc = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
         place(tmp.path(), "repo0000", "<html>x</html>", &sc).unwrap();
-        let hit = lookup_by_range(tmp.path(), "repo0000", DiffKind::TwoDot, "aaaa", "bbbb");
+        let hit = lookup_by_range(
+            tmp.path(),
+            "repo0000",
+            DiffKind::TwoDot,
+            "aaaa",
+            "bbbb",
+            &[],
+        );
         assert!(hit.is_some());
-        let miss = lookup_by_range(tmp.path(), "repo0000", DiffKind::TwoDot, "aaaa", "cccc");
+        let miss = lookup_by_range(
+            tmp.path(),
+            "repo0000",
+            DiffKind::TwoDot,
+            "aaaa",
+            "cccc",
+            &[],
+        );
         assert!(miss.is_none());
+    }
+
+    #[test]
+    fn lookup_by_range_requires_the_same_exclusion_set() {
+        let tmp = tempfile::tempdir().unwrap();
+        // An artifact rendered without exclusions (or by a pre-exclusion build,
+        // whose sidecar lacks the field entirely) …
+        let sc = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
+        place(tmp.path(), "repo0000", "<html>unfiltered</html>", &sc).unwrap();
+        // … must never satisfy a render running under an active filter.
+        let filtered = lookup_by_range(
+            tmp.path(),
+            "repo0000",
+            DiffKind::TwoDot,
+            "aaaa",
+            "bbbb",
+            &["md".to_string()],
+        );
+        assert!(filtered.is_none(), "stale unfiltered artifact was reused");
+
+        // And a filtered artifact is only reusable under the identical set.
+        let mut filtered_sidecar = sidecar(DiffKind::TwoDot, "cccc", "dddd");
+        filtered_sidecar.excluded_extensions = vec!["md".to_string()];
+        place(
+            tmp.path(),
+            "repo0000",
+            "<html>filtered</html>",
+            &filtered_sidecar,
+        )
+        .unwrap();
+        assert!(
+            lookup_by_range(
+                tmp.path(),
+                "repo0000",
+                DiffKind::TwoDot,
+                "cccc",
+                "dddd",
+                &["md".to_string()],
+            )
+            .is_some()
+        );
+        assert!(
+            lookup_by_range(
+                tmp.path(),
+                "repo0000",
+                DiffKind::TwoDot,
+                "cccc",
+                "dddd",
+                &[]
+            )
+            .is_none(),
+            "filtered artifact must not serve an unfiltered render"
+        );
     }
 
     #[test]
     fn worktree_is_never_range_addressable() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(lookup_by_range(tmp.path(), "r", DiffKind::WorkTree, "a", "b").is_none());
+        assert!(lookup_by_range(tmp.path(), "r", DiffKind::WorkTree, "a", "b", &[]).is_none());
     }
 
     #[test]

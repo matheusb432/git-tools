@@ -159,7 +159,7 @@ pub(crate) fn run_scan_with(
             },
         )),
         repos: repo_refs,
-        theme: crate::config::load().theme,
+        theme: infra::user_config::load().theme,
     };
     let envelope = backend.render_diff_subrepos(&req)?;
     super::print_wire_notes(&envelope.notes);
@@ -259,7 +259,7 @@ pub(crate) fn run_managed_all_with(
             .into_owned(),
         root: root.to_string_lossy().into_owned(),
         repos: repo_refs,
-        theme: crate::config::load().theme,
+        theme: infra::user_config::load().theme,
     };
     let envelope = backend.render_diff_all(&req)?;
     super::print_wire_notes(&envelope.notes);

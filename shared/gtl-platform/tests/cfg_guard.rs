@@ -12,8 +12,11 @@ const OS_CFG_NEEDLES: &[&str] = &[
 ];
 
 fn workspace_root() -> PathBuf {
-    // CARGO_MANIFEST_DIR = .../shared/gtl-platform → up two levels to the root.
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    // Runtime cwd (cargo runs test binaries from the crate root, .../shared/gtl-platform)
+    // rather than compile-time CARGO_MANIFEST_DIR: the shared target dir can reuse a
+    // binary built in another checkout/worktree whose baked path no longer exists.
+    std::env::current_dir()
+        .expect("test binary runs from the crate root")
         .join("../..")
         .canonicalize()
         .unwrap()

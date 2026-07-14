@@ -1,4 +1,4 @@
-use super::{commit::Commit, file::FileDiff};
+use super::{commit::Commit, exclusions::AppliedExclusions, file::FileDiff};
 
 /// The `$ <lead><range><trail>` command line shown at the top of the screen.
 #[derive(Debug, Clone)]
@@ -33,6 +33,9 @@ pub struct View {
     pub foot: Foot,
     /// Diff-preview theme read from config; `None` = default.
     pub theme: Option<String>,
+    /// `Some` when the config's `[diff.exclude]` filter hid files from this
+    /// view — every surface must show it so hidden files never read as missing.
+    pub exclusions: Option<AppliedExclusions>,
 }
 
 impl View {

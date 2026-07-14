@@ -1,9 +1,14 @@
-//! User TOML configuration. A bad or missing config must never weaken safety or
-//! break a command, so every read failure degrades to [`GtlConfig::default`].
+//! User TOML configuration, shared by every process root (CLI, daemon,
+//! viewer). A bad or missing config must never weaken safety or break a
+//! command, so every read failure degrades to [`GtlConfig::default`].
 
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
+use domain::diffs::DiffExclusions;
 use serde::Deserialize;
 
 /// Theme values the renderer knows how to honour; anything else resolves to `None`.
@@ -14,7 +19,7 @@ const KNOWN_THEMES: &[&str] = &["dark", "light", "hearth"];
 /// # Examples
 ///
 /// ```
-/// let config = git_tools::config::from_toml("[push]\nconfirm = false");
+/// let config = infra::user_config::from_toml("[push]\nconfirm = false");
 /// assert!(!config.push.confirm);
 /// ```
 #[derive(Debug, Default, Deserialize)]
@@ -24,6 +29,9 @@ pub struct GtlConfig {
     /// Controls push behavior.
     #[serde(default)]
     pub push: PushConfig,
+    /// Controls diff-preview computation.
+    #[serde(default)]
+    pub diff: DiffConfig,
 }
 
 /// Controls push behavior.
@@ -31,7 +39,7 @@ pub struct GtlConfig {
 /// # Examples
 ///
 /// ```
-/// let config = git_tools::config::from_toml("");
+/// let config = infra::user_config::from_toml("");
 /// assert!(config.push.confirm);
 /// ```
 #[derive(Debug, Deserialize)]
@@ -39,6 +47,41 @@ pub struct PushConfig {
     /// Requires confirmation before a plain current-repository push.
     #[serde(default = "confirm_by_default")]
     pub confirm: bool,
+}
+
+/// Controls diff-preview computation (`[diff]`). The retired `diff.viewer` key
+/// still parses as an ignored unknown field.
+///
+/// # Examples
+///
+/// ```
+/// let config = infra::user_config::from_toml("[diff.exclude]\ngit-tools = [\"md\"]");
+/// assert!(
+///     config
+///         .diff_exclusions()
+///         .for_project("git-tools")
+///         .is_some_and(|p| .matches("README.md"))
+/// );
+/// ```
+#[derive(Debug, Default, Deserialize)]
+pub struct DiffConfig {
+    /// Per-project extension exclusions, keyed by repo directory name:
+    /// `[diff.exclude]` `git-tools = ["md", "lock"]`.
+    #[serde(default)]
+    pub exclude: BTreeMap<String, Vec<String>>,
+}
+
+impl GtlConfig {
+    /// The `[diff.exclude]` table as the domain exclusion map.
+    pub fn diff_exclusions(&self) -> DiffExclusions {
+        DiffExclusions::new(
+            self.diff
+                .exclude
+                .iter()
+                .map(|(project, extensions)| (project.clone(), extensions.clone())),
+            None,
+        )
+    }
 }
 
 impl Default for PushConfig {
@@ -61,7 +104,7 @@ const fn confirm_by_default() -> bool {
 /// # Examples
 ///
 /// ```
-/// let config = git_tools::config::from_toml("theme = \"light\"");
+/// let config = infra::user_config::from_toml("theme = \"light\"");
 /// assert_eq!(config.theme.as_deref(), Some("light"));
 /// ```
 pub fn from_toml(raw: &str) -> GtlConfig {
@@ -77,11 +120,11 @@ pub fn from_toml(raw: &str) -> GtlConfig {
 }
 
 /// Read the config at `path` (if present) and parse it; any miss → default.
-fn load_from(path: Option<PathBuf>) -> GtlConfig {
+pub fn load_from(path: Option<&Path>) -> GtlConfig {
     let Some(path) = path else {
         return GtlConfig::default();
     };
-    match std::fs::read_to_string(&path) {
+    match std::fs::read_to_string(path) {
         Ok(raw) => from_toml(&raw),
         Err(_) => GtlConfig::default(),
     }
@@ -103,7 +146,7 @@ fn config_path_from(
 }
 
 /// Resolve the config path from the process environment (mirrors `home_dir_from_env`).
-fn config_path() -> Option<PathBuf> {
+pub fn config_path() -> Option<PathBuf> {
     let env_override = std::env::var_os("GIT_TOOLS_CONFIG").map(PathBuf::from);
     let xdg_config_home = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
     let home = std::env::var_os("USERPROFILE")
@@ -114,7 +157,7 @@ fn config_path() -> Option<PathBuf> {
 
 /// Load the effective user config from the environment.
 pub fn load() -> GtlConfig {
-    load_from(config_path())
+    load_from(config_path().as_deref())
 }
 
 /// Set the `theme` key in `raw` TOML, preserving every other key, formatting, and
@@ -208,13 +251,53 @@ mod tests {
     }
 
     #[test]
+    fn from_toml_reads_per_project_diff_exclusions() {
+        let config = from_toml("[diff.exclude]\ngit-tools = [\"md\", \".LOCK\"]\napi = [\"json\"]");
+        let exclusions = config.diff_exclusions();
+        assert!(
+            exclusions
+                .for_project_or_default("git-tools")
+                .matches("Cargo.lock")
+        );
+        assert!(
+            exclusions
+                .for_project_or_default("api")
+                .matches("openapi.json")
+        );
+        assert!(
+            !exclusions
+                .for_project_or_default("api")
+                .matches("Cargo.lock")
+        );
+    }
+
+    #[test]
+    fn from_toml_empty_config_has_no_exclusions() {
+        assert!(from_toml("").diff_exclusions().is_empty());
+    }
+
+    #[test]
+    fn from_toml_ignores_a_stale_diff_viewer_key_next_to_exclusions() {
+        // `diff.viewer` was retired (app is the default renderer, `--raw` is the
+        // explicit browser path); a leftover key from an older config must be
+        // silently ignored rather than erroring or losing the theme.
+        let config = from_toml(
+            "theme = \"dark\"\n[diff]\nviewer = \"app\"\n[diff.exclude]\napi = [\"json\"]",
+        );
+        assert_eq!(config.theme.as_deref(), Some("dark"));
+        assert!(
+            config
+                .diff_exclusions()
+                .for_project_or_default("api")
+                .matches("a.json")
+        );
+    }
+
+    #[test]
     fn load_from_reads_theme_from_file() {
         let mut file = NamedTempFile::new().expect("create temp config");
         write!(file, "theme = \"light\"").expect("write temp config");
-        assert_eq!(
-            load_from(Some(file.path().to_path_buf())).theme.as_deref(),
-            Some("light")
-        );
+        assert_eq!(load_from(Some(file.path())).theme.as_deref(), Some("light"));
     }
 
     #[test]
@@ -225,7 +308,7 @@ mod tests {
     #[test]
     fn load_from_nonexistent_path_is_default() {
         assert_eq!(
-            load_from(Some(PathBuf::from("/no/such/git-tools/config.toml"))).theme,
+            load_from(Some(Path::new("/no/such/git-tools/config.toml"))).theme,
             None
         );
     }
@@ -277,7 +360,7 @@ mod tests {
 
     #[test]
     fn set_theme_in_toml_preserves_other_keys_and_comments() {
-        let raw = "# my config\ntheme = \"light\"\n\n[diff]\nviewer = \"browser\" # keep me\n";
+        let raw = "# my config\ntheme = \"light\"\n\n[diff.exclude]\napi = [\"json\"] # keep me\n";
         let updated = set_theme_in_toml(raw, "dark").unwrap();
         assert!(
             updated.contains("# my config"),
@@ -288,8 +371,8 @@ mod tests {
             "theme not set: {updated}"
         );
         assert!(
-            updated.contains("viewer = \"browser\" # keep me"),
-            "viewer/comment dropped: {updated}"
+            updated.contains("api = [\"json\"] # keep me"),
+            "exclusions/comment dropped: {updated}"
         );
     }
 
@@ -303,31 +386,22 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("git-tools").join("config.toml");
         save_theme_to(&path, "hearth").expect("save theme");
-        assert_eq!(load_from(Some(path)).theme.as_deref(), Some("hearth"));
+        assert_eq!(load_from(Some(&path)).theme.as_deref(), Some("hearth"));
     }
 
     #[test]
-    fn save_theme_to_preserves_an_existing_viewer_setting() {
+    fn save_theme_to_preserves_existing_exclusions() {
         let mut file = NamedTempFile::new().expect("create temp config");
-        write!(file, "[diff]\nviewer = \"browser\"\n").expect("seed config");
+        write!(file, "[diff.exclude]\ngit-tools = [\"md\"]\n").expect("seed config");
         save_theme_to(file.path(), "light").expect("save theme");
-        assert_eq!(
-            load_from(Some(file.path().to_path_buf())).theme.as_deref(),
-            Some("light")
-        );
-        let raw = std::fs::read_to_string(file.path()).expect("read back config");
+        let config = load_from(Some(file.path()));
+        assert_eq!(config.theme.as_deref(), Some("light"));
         assert!(
-            raw.contains("viewer = \"browser\""),
-            "stale diff.viewer key dropped: {raw}"
+            config
+                .diff_exclusions()
+                .for_project_or_default("git-tools")
+                .matches("README.md"),
+            "exclusions dropped by theme save"
         );
-    }
-
-    #[test]
-    fn from_toml_ignores_a_stale_diff_viewer_key() {
-        // `diff.viewer` was retired (app is the default renderer, `--raw` is the
-        // explicit browser path); a leftover key from an older config must be
-        // silently ignored rather than erroring or losing the theme.
-        let config = from_toml("theme = \"dark\"\n[diff]\nviewer = \"app\"");
-        assert_eq!(config.theme.as_deref(), Some("dark"));
     }
 }

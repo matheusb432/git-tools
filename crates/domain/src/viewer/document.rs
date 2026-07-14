@@ -602,6 +602,7 @@ mod tests {
                 note: String::new(),
             },
             theme: None,
+            exclusions: None,
         })
     }
 

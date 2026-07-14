@@ -20,7 +20,7 @@ pub async fn handle(
     let shared = state.shared.clone();
     crate::endpoints::run(
         shared,
-        Ok(super::to_squash_request(dto)),
+        Ok(super::to_squash_request(dto, super::config_exclusions())),
         move |request| {
             render_squash_preview::execute(
                 request,

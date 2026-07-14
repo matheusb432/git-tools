@@ -81,7 +81,7 @@ pub(crate) fn render(
             .into_owned(),
         target: super::to_target_dto(target),
         name: name.map(str::to_string),
-        theme: crate::config::load().theme,
+        theme: infra::user_config::load().theme,
     };
     let envelope = backend.render_diff(&req)?;
     super::print_wire_notes(&envelope.notes);

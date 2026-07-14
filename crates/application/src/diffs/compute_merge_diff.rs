@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::View;
+use domain::diffs::{DiffExclusions, View};
 
 use crate::{diffs::render_merge_diff::build_merge_view, ports::DiffSource};
 
@@ -14,6 +14,7 @@ pub struct ComputeMergeDiff {
     pub cwd: PathBuf,
     pub base: Option<String>,
     pub pinned: Option<domain::diffs::PinnedRange>,
+    pub exclusions: DiffExclusions,
 }
 
 /// The computed merge view.
@@ -35,8 +36,13 @@ pub fn execute(
     req: ComputeMergeDiff,
     source: &impl DiffSource,
 ) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
-    let ComputeMergeDiff { cwd, base, pinned } = req;
-    let built = build_merge_view(source, &cwd, base.as_deref(), pinned.as_ref())?;
+    let ComputeMergeDiff {
+        cwd,
+        base,
+        pinned,
+        exclusions,
+    } = req;
+    let built = build_merge_view(source, &cwd, base.as_deref(), pinned.as_ref(), &exclusions)?;
     Ok(ComputeMergeDiffResponse { view: built.view })
 }
 
@@ -76,6 +82,7 @@ index 111..222 100644\n\
 
         let response = execute(
             ComputeMergeDiff {
+                exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
                 base: None,
                 pinned: None,
@@ -106,6 +113,7 @@ index 111..222 100644\n\
 
         let response = execute(
             ComputeMergeDiff {
+                exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
                 base: None,
                 pinned: Some(domain::diffs::PinnedRange {
@@ -132,6 +140,7 @@ index 111..222 100644\n\
 
         let error = execute(
             ComputeMergeDiff {
+                exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
                 base: Some("nope".into()),
                 pinned: None,

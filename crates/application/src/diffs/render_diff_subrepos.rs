@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::{DiffKind, DiffTarget};
+use domain::diffs::{DiffExclusions, DiffKind, DiffTarget};
 
 use crate::{
     diffs::batch::{RepoRef, dated_title, render_batch},
@@ -24,6 +24,7 @@ pub struct RenderDiffSubrepos {
     pub target: DiffTarget,
     pub repos: Vec<RepoRef>,
     pub theme: Option<String>,
+    pub exclusions: DiffExclusions,
 }
 
 /// The outcome plus every message the render wanted surfaced.
@@ -64,9 +65,18 @@ pub fn execute(
         repos,
         target,
         theme,
+        exclusions,
     } = req;
     let mut notes = Vec::new();
-    let batch = render_batch(source, &target, theme.as_deref(), &repos, true, &mut notes)?;
+    let batch = render_batch(
+        source,
+        &target,
+        theme.as_deref(),
+        &exclusions,
+        &repos,
+        true,
+        &mut notes,
+    )?;
 
     if batch.views.is_empty() {
         notes.push(Note::warn(format!(
@@ -91,6 +101,7 @@ pub fn execute(
         head_committed_at: String::new(),
         generated_at: clock.now_iso(),
         title: title.clone(),
+        excluded_extensions: Vec::new(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
@@ -118,7 +129,7 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{Commit, DiffTarget};
+    use domain::diffs::{Commit, DiffExclusions, DiffTarget};
 
     use super::{RenderDiffSubrepos, RenderDiffSubreposOutcome, RepoRef, execute};
     use crate::{
@@ -146,6 +157,7 @@ mod tests {
 
     fn req(repos: Vec<RepoRef>) -> RenderDiffSubrepos {
         RenderDiffSubrepos {
+            exclusions: DiffExclusions::default(),
             store_root: PathBuf::from("/store"),
             root: PathBuf::from("/scan-root"),
             target: DiffTarget::Unpushed { pinned: None },

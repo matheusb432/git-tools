@@ -28,6 +28,10 @@ pub struct ArtifactMeta {
     pub head_committed_at: String,
     pub generated_at: String,
     pub title: String,
+    /// The extension set that was in force when the artifact rendered (normalized,
+    /// sorted; empty = unfiltered). Part of the range-reuse key: an artifact is
+    /// only reusable by a render running under the same filter.
+    pub excluded_extensions: Vec<String>,
 }
 
 /// A placed artifact: where it landed and whether an identical one already existed.
@@ -171,8 +175,9 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
         meta: &ArtifactMeta,
         html: &str,
     ) -> anyhow::Result<PlacedArtifact>;
-    /// Find an existing artifact for a pure commit range, or `None` on a miss
-    /// (always `None` for `WorkTree`, which is never range-addressable).
+    /// Find an existing artifact for a pure commit range rendered under the same
+    /// exclusion set, or `None` on a miss (always `None` for `WorkTree`, which is
+    /// never range-addressable).
     fn lookup_by_range(
         &self,
         store_root: &Path,
@@ -180,6 +185,7 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
         kind: DiffKind,
         base_sha: &str,
         head_sha: &str,
+        excluded_extensions: &[String],
     ) -> anyhow::Result<Option<PathBuf>>;
     /// Every recorded artifact under `store_root`, across all repos, unordered
     /// (the `history/list` handler owns sort order).

@@ -106,6 +106,7 @@ mod tests {
 
     fn view(commit_count: usize) -> View {
         View {
+            exclusions: None,
             repo_name: "git-tools".into(),
             repo_root: "/repos/git-tools".into(),
             branch: "feature".into(),

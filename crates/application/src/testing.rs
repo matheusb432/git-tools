@@ -47,6 +47,15 @@ pub struct RepoOverride {
     pub diff_output: String,
 }
 
+impl FakeDiffSource {
+    /// The scripted primary diff for `repo`: its per-repo override, else the shared one.
+    fn scripted_diff(&self, repo: &Path) -> String {
+        self.per_repo
+            .get(&repo.to_string_lossy().into_owned())
+            .map_or_else(|| self.diff_output.clone(), |o| o.diff_output.clone())
+    }
+}
+
 impl DiffSource for FakeDiffSource {
     fn top_level(&self, _dir: &Path) -> anyhow::Result<String> {
         self.top_level
@@ -93,6 +102,15 @@ impl DiffSource for FakeDiffSource {
         Ok(vec![])
     }
     fn diff_raw(&self, repo: &Path, args: &[String]) -> anyhow::Result<String> {
+        // The exclusion pass asks for paths only; mirror git by listing the
+        // scripted diff's file paths, one per line.
+        if args.iter().any(|a| a == "--name-only") {
+            let paths: Vec<String> = crate::diffs::util::parse_diff(&self.scripted_diff(repo))
+                .into_iter()
+                .map(|file| file.path)
+                .collect();
+            return Ok(paths.join("\n"));
+        }
         // Full-context re-runs carry the -U flag added by `full_context_args`.
         if args
             .iter()
@@ -100,10 +118,7 @@ impl DiffSource for FakeDiffSource {
         {
             return Ok(self.full_diff_output.clone());
         }
-        Ok(self
-            .per_repo
-            .get(&repo.to_string_lossy().into_owned())
-            .map_or_else(|| self.diff_output.clone(), |o| o.diff_output.clone()))
+        Ok(self.scripted_diff(repo))
     }
     fn blame_forward(&self, _r: &Path, _b: &str, _t: &str, _p: &str) -> anyhow::Result<String> {
         Ok(String::new())
@@ -130,8 +145,8 @@ impl DiffSource for FakeDiffSource {
 }
 
 /// In-memory artifact store with deterministic paths and scripted range hits.
-/// Scripted range-lookup hits keyed by `(kind, base_sha, head_sha)`.
-pub type RangeHits = Arc<Mutex<HashMap<(DiffKind, String, String), PathBuf>>>;
+/// Scripted range-lookup hits keyed by `(kind, base_sha, head_sha, excluded_extensions)`.
+pub type RangeHits = Arc<Mutex<HashMap<(DiffKind, String, String, Vec<String>), PathBuf>>>;
 
 /// Artifact content observable through [`InMemoryArtifactStore`].
 #[derive(Debug, Clone, PartialEq)]
@@ -184,12 +199,18 @@ impl ArtifactStore for InMemoryArtifactStore {
         kind: DiffKind,
         base_sha: &str,
         head_sha: &str,
+        excluded_extensions: &[String],
     ) -> anyhow::Result<Option<PathBuf>> {
         Ok(self
             .range_hits
             .lock()
             .unwrap()
-            .get(&(kind, base_sha.to_string(), head_sha.to_string()))
+            .get(&(
+                kind,
+                base_sha.to_string(),
+                head_sha.to_string(),
+                excluded_extensions.to_vec(),
+            ))
             .cloned())
     }
     fn list_history(&self, _store_root: &Path) -> anyhow::Result<Vec<HistoryRecord>> {

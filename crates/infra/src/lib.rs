@@ -15,3 +15,4 @@ pub mod push_ledger;
 pub mod remote_sync;
 pub mod repo_probe;
 pub mod store;
+pub mod user_config;

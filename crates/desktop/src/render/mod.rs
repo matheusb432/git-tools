@@ -32,6 +32,7 @@ mod tests {
 
     fn view() -> Arc<View> {
         Arc::new(View {
+            exclusions: None,
             repo_name: "git-tools".into(),
             repo_root: "/repo".into(),
             branch: "feature/htmx".into(),

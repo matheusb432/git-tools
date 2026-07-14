@@ -1,6 +1,7 @@
 //! The diffs feature's domain model.
 
 mod commit;
+mod exclusions;
 mod file;
 mod intraline;
 mod kind;
@@ -11,6 +12,7 @@ mod target;
 mod view;
 
 pub use commit::Commit;
+pub use exclusions::{AppliedExclusions, DiffExclusions, ExcludedExtensions};
 pub use file::{FileDiff, FileStatus, LineOwners};
 pub use intraline::{LineSpans, Span, changed_spans};
 pub use kind::DiffKind;

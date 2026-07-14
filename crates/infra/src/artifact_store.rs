@@ -37,6 +37,7 @@ impl ArtifactStore for StoreArtifacts {
             generated_at: meta.generated_at.clone(),
             title: meta.title.clone(),
             byte_size: html.len() as u64,
+            excluded_extensions: meta.excluded_extensions.clone(),
         };
         let placed = crate::store::place(store_root, &repo_id, html, &sidecar)?;
         Ok(PlacedArtifact {
@@ -52,6 +53,7 @@ impl ArtifactStore for StoreArtifacts {
         kind: DiffKind,
         base_sha: &str,
         head_sha: &str,
+        excluded_extensions: &[String],
     ) -> anyhow::Result<Option<PathBuf>> {
         let canonical =
             std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
@@ -60,7 +62,12 @@ impl ArtifactStore for StoreArtifacts {
             &canonical,
         );
         Ok(crate::store::lookup_by_range(
-            store_root, &repo_id, kind, base_sha, head_sha,
+            store_root,
+            &repo_id,
+            kind,
+            base_sha,
+            head_sha,
+            excluded_extensions,
         ))
     }
 
@@ -101,6 +108,7 @@ mod tests {
             range_label: "main..HEAD".into(),
             head_committed_at: "2026-07-03T00:00:00Z".into(),
             generated_at: "2026-07-03T00:01:00Z".into(),
+            excluded_extensions: Vec::new(),
             title: "diff".into(),
             byte_size: 42,
         };

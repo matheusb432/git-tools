@@ -4,3 +4,13 @@ theme = "dark"
 [push]
 # Plain current-repo push only; defaults to true when omitted.
 confirm = true
+
+# Per-project diff exclusions, keyed by the repo's directory name (FR-0029).
+# Files whose final extension matches are hidden from every preview; the
+# preview shows a "N files hidden" chip whenever the filter applied.
+# Extensions are case-insensitive; a leading dot is optional.
+[diff.exclude]
+# will apply to any project not explicitly specified
+defaults = ["md", "lock"]
+# does not merge with defaults. mutually exclusive for simplicity, for now.
+git-tools = ["md", "lock", "js"]

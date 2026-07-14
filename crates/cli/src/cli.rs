@@ -353,7 +353,7 @@ pub enum Theme {
 }
 
 impl Theme {
-    /// The config-file string for this theme (matches `config::KNOWN_THEMES`).
+    /// The config-file string for this theme (matches `infra::user_config::KNOWN_THEMES`).
     pub fn as_config_str(self) -> &'static str {
         match self {
             Self::Dark => "dark",

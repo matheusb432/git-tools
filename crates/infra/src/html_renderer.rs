@@ -1,5 +1,7 @@
 use domain::{
-    diffs::{FileDiff, LineOwners, RowKind, Span, SplitRow, View, long_line_len},
+    diffs::{
+        AppliedExclusions, FileDiff, LineOwners, RowKind, Span, SplitRow, View, long_line_len,
+    },
     viewer::{DiffDensity, DiffLayout, RenderOptions},
 };
 use maud::{DOCTYPE, Markup, PreEscaped, html};
@@ -169,6 +171,13 @@ fn view_body(view: &View, mode: RenderMode) -> Markup {
                     span.ref-branch { (view.branch) }
                     span.arr { "→" }
                     span.ref-up { (view.upstream) }
+                }
+                @if let Some(excluded) = &view.exclusions {
+                    span.excl-chip title=(exclusion_tooltip(excluded)) {
+                        (excluded.hidden_paths.len())
+                        " file" (plural(excluded.hidden_paths.len()))
+                        " hidden · " (excluded.extensions_label())
+                    }
                 }
                 div.spacer {}
                 button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
@@ -539,6 +548,17 @@ pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
 
 fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
+}
+
+// ! The chip's hover tooltip: names the config source, then every hidden path,
+// ! so a "missing" file is one hover away from its explanation.
+fn exclusion_tooltip(excluded: &AppliedExclusions) -> String {
+    let mut tooltip = String::from("Hidden by git-tools config [diff.exclude]:");
+    for path in &excluded.hidden_paths {
+        tooltip.push('\n');
+        tooltip.push_str(path);
+    }
+    tooltip
 }
 
 fn file_commits(file: &FileDiff) -> String {
@@ -963,6 +983,7 @@ mod tests {
     #[test]
     fn build_html_renders_offline_document_with_core_diff_data() {
         let view = View {
+            exclusions: None,
             repo_name: "api".to_string(),
             repo_root: "/home/user/api".to_string(),
             branch: "main".to_string(),
@@ -1023,6 +1044,61 @@ mod tests {
         assert!(html.contains("src/a b.rs"));
         assert!(html.contains(r#"<span class="a">+2</span>"#));
         assert!(html.contains(r#"<span class="d">−1</span>"#));
+    }
+
+    fn applied_exclusions() -> AppliedExclusions {
+        AppliedExclusions {
+            extensions: vec!["lock".to_string(), "md".to_string()],
+            hidden_paths: vec!["docs/plan.md".to_string(), "Cargo.lock".to_string()],
+        }
+    }
+
+    #[test]
+    fn build_html_shows_the_exclusion_chip_when_files_were_hidden() {
+        let mut view = sample_view();
+        view.exclusions = Some(applied_exclusions());
+
+        let html = build_html(&view);
+
+        assert!(
+            html.contains(r#"<span class="excl-chip""#),
+            "chip missing: {html}"
+        );
+        assert!(html.contains("2 files hidden · lock, md"));
+        assert!(
+            html.contains("Hidden by git-tools config [diff.exclude]:\ndocs/plan.md\nCargo.lock"),
+            "tooltip must list every hidden path"
+        );
+    }
+
+    #[test]
+    fn build_html_omits_the_exclusion_chip_without_hidden_files() {
+        // ? the class name still appears once — in the inlined stylesheet
+        assert!(!build_html(&sample_view()).contains(r#"<span class="excl-chip""#));
+    }
+
+    #[test]
+    fn build_view_fragment_carries_the_exclusion_chip_into_the_app_shell() {
+        let mut view = sample_view();
+        view.exclusions = Some(applied_exclusions());
+
+        let fragment = build_view_fragment(&view, RenderOptions::DEFAULT).into_string();
+
+        assert!(fragment.contains(r#"<span class="excl-chip""#));
+    }
+
+    #[test]
+    fn build_html_escapes_user_controlled_exclusion_values() {
+        let mut view = sample_view();
+        view.exclusions = Some(AppliedExclusions {
+            extensions: vec!["md".to_string()],
+            hidden_paths: vec!["a&b<script>.md".to_string()],
+        });
+
+        let html = build_html(&view);
+
+        assert!(html.contains("a&amp;b&lt;script&gt;.md"));
+        assert!(!html.contains("a&b<script>.md"));
     }
 
     #[test]
@@ -1502,6 +1578,7 @@ mod tests {
 
     fn sample_view() -> View {
         View {
+            exclusions: None,
             repo_name: "api".to_string(),
             repo_root: "/home/user/api".to_string(),
             branch: "main".to_string(),
