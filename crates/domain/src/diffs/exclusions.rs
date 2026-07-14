@@ -79,10 +79,17 @@ impl ExcludedExtensions {
 /// ```
 /// use domain::diffs::DiffExclusions;
 ///
-/// let exclusions =
-///     DiffExclusions::from_projects([("git-tools".to_string(), vec!["md".to_string()])]);
-/// assert!(exclusions.for_project("git-tools").matches("README.md"));
-/// assert!(!exclusions.for_project("other").matches("README.md"));
+/// let exclusions = DiffExclusions::new([("git-tools".to_string(), vec!["md".to_string()])], None);
+/// assert!(
+///     exclusions
+///         .for_project_or_default("git-tools")
+///         .matches("README.md")
+/// );
+/// assert!(
+///     !exclusions
+///         .for_project_or_default("other")
+///         .matches("README.md")
+/// );
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiffExclusions {

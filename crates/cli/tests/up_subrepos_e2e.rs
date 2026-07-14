@@ -96,7 +96,7 @@ fn push_recursive_yes_pushes_root_and_nested_repos() {
         .args(["push", "-r", "-y"])
         .assert()
         .success()
-        .stdout(contains("pushed 3 repo(s)"))
+        .stdout(contains("exit 0  -  3 repos: 2 pushed, 1 skipped"))
         // The already-synced repo is spotted at plan time (local `@{u}..HEAD` == 0) and
         // reported as synced in the confirmation — never pushed over the network.
         .stdout(contains("already synced"))
@@ -148,6 +148,7 @@ fn push_recursive_skips_a_repo_without_an_upstream_without_failing() {
         .args(["push", "-r", "-y"])
         .assert()
         .success()
+        .stdout(contains("exit 0  -  2 repos: 1 pushed, 1 skipped"))
         .stdout(contains("skipped — no upstream tracking branch"));
 }
 

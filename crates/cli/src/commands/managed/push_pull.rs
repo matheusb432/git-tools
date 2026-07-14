@@ -4,19 +4,59 @@ use std::{fmt::Write as _, path::PathBuf};
 
 use contracts::{
     envelope::{Envelope, NoteLevel, Outcome},
-    managed::{PullAllRequest, PushAllRequest, RepoSyncResultDto, SyncData, SyncExitDto},
+    managed::{
+        PullAllRequest, PushAllRequest, RepoSyncResultDto, RepoSyncStatusDto, SyncData, SyncExitDto,
+    },
 };
 use serde::Serialize;
 
 use super::{ManagedExit, ManagedOptions, ManagedRun, manifest::resolve_manifest_location};
-use crate::client::{Backend, HttpBackend};
+use crate::{
+    client::{Backend, HttpBackend},
+    commands::push_summary::{PushOutcome, PushSummary},
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SyncOperation {
+    Push,
+    Pull,
+}
+
+impl SyncOperation {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Push => "push",
+            Self::Pull => "pull",
+        }
+    }
+
+    const fn arrow(self) -> &'static str {
+        match self {
+            Self::Push => "->",
+            Self::Pull => "<-",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum PushPullFormatError {
+    #[error("failed to serialize managed sync results")]
+    SerializeJson(#[source] serde_json::Error),
+    #[error(
+        "repository `{repo}` returned pull-only status `{status}` while formatting push results"
+    )]
+    PullOnlyStatus {
+        repo: String,
+        status: RepoSyncStatusDto,
+    },
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PushPullResult {
     pub name: String,
     pub branch: String,
-    pub status: String,
+    pub status: RepoSyncStatusDto,
     pub detail: String,
 }
 
@@ -68,7 +108,7 @@ fn run_push_all_resolving_with(
         dry: options.dry,
     };
     match backend.push_all(&req) {
-        Ok(envelope) => finish("push", options, envelope),
+        Ok(envelope) => finish(SyncOperation::Push, options, envelope),
         Err(error) => manifest_error(&error),
     }
 }
@@ -94,7 +134,7 @@ pub(crate) fn run_pull_all_with(
         dry: options.dry,
     };
     match backend.pull_all(&req) {
-        Ok(envelope) => finish("pull", options, envelope),
+        Ok(envelope) => finish(SyncOperation::Pull, options, envelope),
         Err(error) => manifest_error(&error),
     }
 }
@@ -119,7 +159,7 @@ fn manifest_error<T>(error: &anyhow::Error) -> ManagedRun<T> {
 }
 
 fn finish(
-    label: &str,
+    operation: SyncOperation,
     options: &ManagedOptions,
     envelope: Envelope<SyncData>,
 ) -> ManagedRun<PushPullResult> {
@@ -140,7 +180,10 @@ fn finish(
     };
     let results: Vec<PushPullResult> = data.results.into_iter().map(PushPullResult::from).collect();
     let exit = exit_from_dto(data.exit);
-    let stdout = format_push_pull(label, options.dry, options.json, &results, exit);
+    let stdout = match format_push_pull(operation, options.dry, options.json, &results, exit) {
+        Ok(stdout) => stdout,
+        Err(error) => return manifest_error(&error.into()),
+    };
     ManagedRun {
         exit,
         results,
@@ -150,25 +193,47 @@ fn finish(
 }
 
 fn format_push_pull(
-    label: &str,
+    operation: SyncOperation,
     dry: bool,
     json: bool,
     results: &[PushPullResult],
     exit: ManagedExit,
-) -> String {
+) -> Result<String, PushPullFormatError> {
+    format_push_pull_with(operation, dry, json, results, exit, |results| {
+        serde_json::to_string_pretty(results)
+    })
+}
+
+fn format_push_pull_with(
+    operation: SyncOperation,
+    dry: bool,
+    json: bool,
+    results: &[PushPullResult],
+    exit: ManagedExit,
+    serialize: impl FnOnce(&[PushPullResult]) -> serde_json::Result<String>,
+) -> Result<String, PushPullFormatError> {
+    let push_outcomes = match operation {
+        SyncOperation::Push => Some(
+            results
+                .iter()
+                .map(push_outcome)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        SyncOperation::Pull => None,
+    };
+
     if json {
-        return serde_json::to_string_pretty(results).unwrap_or_else(|_| "[]".to_string());
+        return serialize(results).map_err(PushPullFormatError::SerializeJson);
     }
 
     let mut out = String::new();
     for result in results {
         let verb = if dry {
-            format!("dry {label}")
+            format!("dry {}", operation.label())
         } else {
-            label.to_string()
+            operation.label().to_string()
         };
-        let arrow = if label == "pull" { "<-" } else { "->" };
-        let _ = writeln!(out, "{verb} {arrow} {}", result.name);
+        let _ = writeln!(out, "{verb} {} {}", operation.arrow(), result.name);
     }
     out.push('\n');
     let _ = writeln!(
@@ -183,24 +248,53 @@ fn format_push_pull(
             result.name, result.branch, result.status, result.detail
         );
     }
-    let fail = results.iter().filter(|r| r.status == "fail").count();
-    let warn = results.iter().filter(|r| r.status == "warn").count();
-    let _ = write!(
-        out,
-        "\nexit {}  -  {} repos: {} fail, {} warn",
-        exit.code(),
-        results.len(),
-        fail,
-        warn
-    );
-    out
+    if let Some(outcomes) = push_outcomes {
+        let summary = PushSummary::from_outcomes(outcomes, dry);
+        let _ = write!(out, "\n{}", summary.render(exit.code()));
+    } else {
+        let fail = results
+            .iter()
+            .filter(|result| result.status == RepoSyncStatusDto::Fail)
+            .count();
+        let warn = results
+            .iter()
+            .filter(|result| result.status == RepoSyncStatusDto::Warn)
+            .count();
+        let _ = write!(
+            out,
+            "\nexit {}  -  {} repos: {} fail, {} warn",
+            exit.code(),
+            results.len(),
+            fail,
+            warn
+        );
+    }
+    Ok(out)
+}
+
+fn push_outcome(result: &PushPullResult) -> Result<PushOutcome, PushPullFormatError> {
+    match result.status {
+        RepoSyncStatusDto::Pushed | RepoSyncStatusDto::WouldPush => Ok(PushOutcome::Pushed),
+        RepoSyncStatusDto::Skip | RepoSyncStatusDto::UpToDate => Ok(PushOutcome::Skipped),
+        RepoSyncStatusDto::Fail => Ok(PushOutcome::Failed),
+        RepoSyncStatusDto::Warn => Ok(PushOutcome::Warned),
+        RepoSyncStatusDto::Pulled | RepoSyncStatusDto::WouldPull => {
+            Err(PushPullFormatError::PullOnlyStatus {
+                repo: result.name.clone(),
+                status: result.status,
+            })
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use contracts::{
         envelope::{Envelope, Note, NoteLevel, Outcome},
-        managed::{PullAllRequest, PushAllRequest, RepoSyncResultDto, SyncData, SyncExitDto},
+        managed::{
+            PullAllRequest, PushAllRequest, RepoSyncResultDto, RepoSyncStatusDto, SyncData,
+            SyncExitDto,
+        },
     };
 
     use super::*;
@@ -221,17 +315,23 @@ mod tests {
         }
     }
 
-    fn ok_envelope(status: &str, exit: SyncExitDto) -> Envelope<SyncData> {
+    fn ok_envelope(
+        statuses: &[(&str, RepoSyncStatusDto)],
+        exit: SyncExitDto,
+    ) -> Envelope<SyncData> {
         Envelope {
             outcome: Outcome::Ok,
             notes: Vec::new(),
             data: Some(SyncData {
-                results: vec![RepoSyncResultDto {
-                    name: "repo".into(),
-                    branch: "main".into(),
-                    status: status.into(),
-                    detail: "detail".into(),
-                }],
+                results: statuses
+                    .iter()
+                    .map(|(name, status)| RepoSyncResultDto {
+                        name: (*name).into(),
+                        branch: "main".into(),
+                        status: *status,
+                        detail: "detail".into(),
+                    })
+                    .collect(),
                 exit,
             }),
         }
@@ -254,14 +354,17 @@ mod tests {
         let fixture = ManagedFixture::new("push-thin");
         fixture.write_manifest(&[("repo", "")]);
         let backend = FakeBackend {
-            push_response: Some(ok_envelope("pushed", SyncExitDto::Clean)),
+            push_response: Some(ok_envelope(
+                &[("repo", RepoSyncStatusDto::Pushed)],
+                SyncExitDto::Clean,
+            )),
             ..Default::default()
         };
 
         let run = run_push_all_with(&backend, &options(&fixture, false, false));
 
         assert_eq!(run.exit, ManagedExit::Clean);
-        assert_eq!(run.results[0].status, "pushed");
+        assert_eq!(run.results[0].status, RepoSyncStatusDto::Pushed);
         assert!(run.stdout.contains("push -> repo"));
         assert!(run.stdout.contains("REPO"));
     }
@@ -271,7 +374,10 @@ mod tests {
         let fixture = ManagedFixture::new("pull-thin-json");
         fixture.write_manifest(&[("repo", "")]);
         let backend = FakeBackend {
-            pull_response: Some(ok_envelope("pulled", SyncExitDto::Warn)),
+            pull_response: Some(ok_envelope(
+                &[("repo", RepoSyncStatusDto::Pulled)],
+                SyncExitDto::Warn,
+            )),
             ..Default::default()
         };
 
@@ -280,6 +386,142 @@ mod tests {
         assert_eq!(run.exit, ManagedExit::Warn);
         assert!(run.stdout.contains("\"Name\": \"repo\""));
         assert!(run.stdout.contains("\"Status\": \"pulled\""));
+    }
+
+    #[test]
+    fn managed_push_summary_reports_pushed_and_skipped_without_zero_noise() {
+        let fixture = ManagedFixture::new("push-summary-clean");
+        fixture.write_manifest(&[("repo", "")]);
+        let backend = FakeBackend {
+            push_response: Some(ok_envelope(
+                &[
+                    ("pushed", RepoSyncStatusDto::Pushed),
+                    ("current", RepoSyncStatusDto::UpToDate),
+                    ("absent", RepoSyncStatusDto::Skip),
+                ],
+                SyncExitDto::Clean,
+            )),
+            ..Default::default()
+        };
+
+        let run = run_push_all_with(&backend, &options(&fixture, false, false));
+
+        assert!(
+            run.stdout
+                .ends_with("exit 0  -  3 repos: 1 pushed, 2 skipped")
+        );
+        assert!(!run.stdout.contains("0 fail"));
+        assert!(!run.stdout.contains("0 warn"));
+    }
+
+    #[test]
+    fn managed_push_summary_reports_dry_and_nonzero_problem_counts() {
+        let fixture = ManagedFixture::new("push-summary-dry");
+        fixture.write_manifest(&[("repo", "")]);
+        let backend = FakeBackend {
+            push_response: Some(ok_envelope(
+                &[
+                    ("candidate", RepoSyncStatusDto::WouldPush),
+                    ("current", RepoSyncStatusDto::UpToDate),
+                    ("broken", RepoSyncStatusDto::Fail),
+                    ("detached", RepoSyncStatusDto::Warn),
+                ],
+                SyncExitDto::Fail,
+            )),
+            ..Default::default()
+        };
+
+        let run = run_push_all_with(&backend, &options(&fixture, true, false));
+
+        assert!(
+            run.stdout
+                .ends_with("exit 2  -  4 repos: 1 would push, 1 skipped, 1 fail, 1 warn")
+        );
+    }
+
+    #[test]
+    fn pull_only_status_in_push_response_is_a_contextual_error() {
+        let fixture = ManagedFixture::new("push-summary-invalid");
+        fixture.write_manifest(&[("repo", "")]);
+        let backend = FakeBackend {
+            push_response: Some(ok_envelope(
+                &[("wrong-repo", RepoSyncStatusDto::Pulled)],
+                SyncExitDto::Clean,
+            )),
+            ..Default::default()
+        };
+
+        let run = run_push_all_with(&backend, &options(&fixture, false, false));
+
+        assert_eq!(run.exit, ManagedExit::Fail);
+        assert!(run.stderr.contains("wrong-repo"), "{}", run.stderr);
+        assert!(run.stderr.contains("pulled"), "{}", run.stderr);
+    }
+
+    #[test]
+    fn pull_only_status_in_json_push_response_is_a_contextual_error() {
+        let fixture = ManagedFixture::new("push-summary-invalid-json");
+        fixture.write_manifest(&[("repo", "")]);
+        let backend = FakeBackend {
+            push_response: Some(ok_envelope(
+                &[("wrong-json-repo", RepoSyncStatusDto::WouldPull)],
+                SyncExitDto::Clean,
+            )),
+            ..Default::default()
+        };
+
+        let run = run_push_all_with(&backend, &options(&fixture, false, true));
+
+        assert_eq!(run.exit, ManagedExit::Fail);
+        assert!(run.stderr.contains("wrong-json-repo"), "{}", run.stderr);
+        assert!(run.stderr.contains("would-pull"), "{}", run.stderr);
+    }
+
+    #[test]
+    fn json_serialization_failure_is_a_typed_format_error() {
+        let serialization_error = serde_json::from_str::<serde_json::Value>("{")
+            .expect_err("fixture must be invalid JSON");
+
+        let error = format_push_pull_with(
+            SyncOperation::Push,
+            false,
+            true,
+            &[],
+            ManagedExit::Clean,
+            |_| Err(serialization_error),
+        )
+        .expect_err("serialization failure must propagate");
+
+        assert!(matches!(&error, PushPullFormatError::SerializeJson(_)));
+        assert!(
+            error
+                .to_string()
+                .contains("failed to serialize managed sync results")
+        );
+    }
+
+    #[test]
+    fn managed_pull_human_summary_remains_unchanged() {
+        let fixture = ManagedFixture::new("pull-summary-stable");
+        fixture.write_manifest(&[("repo", "")]);
+        let backend = FakeBackend {
+            pull_response: Some(ok_envelope(
+                &[("repo", RepoSyncStatusDto::Warn)],
+                SyncExitDto::Warn,
+            )),
+            ..Default::default()
+        };
+
+        let run = run_pull_all_with(&backend, &options(&fixture, false, false));
+
+        let expected_row = format!("{:<30} {:<18} {:<12} {}", "repo", "main", "warn", "detail");
+        let actual_row = run
+            .stdout
+            .lines()
+            .find(|line| line.starts_with("repo"))
+            .expect("managed pull output should contain the repository table row");
+        assert_eq!(actual_row, expected_row);
+        assert!(run.stdout.ends_with("exit 1  -  1 repos: 0 fail, 1 warn"));
     }
 
     #[test]

@@ -60,7 +60,7 @@ pub struct PushConfig {
 ///     config
 ///         .diff_exclusions()
 ///         .for_project("git-tools")
-///         .is_some_and(|p| .matches("README.md"))
+///         .is_some_and(|p| p.matches("README.md"))
 /// );
 /// ```
 #[derive(Debug, Default, Deserialize)]

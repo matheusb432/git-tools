@@ -6,11 +6,13 @@ pub mod push_all;
 use application::managed::{
     pull_all::{PullAll, PullAllResponse},
     push_all::{PushAll, PushAllResponse},
-    service::{RepoSyncResult, SyncExit},
+    service::{RepoSyncResult, SyncExit, SyncStatus},
 };
 use contracts::{
     envelope::{Envelope, Outcome},
-    managed::{PullAllRequest, PushAllRequest, RepoSyncResultDto, SyncData, SyncExitDto},
+    managed::{
+        PullAllRequest, PushAllRequest, RepoSyncResultDto, RepoSyncStatusDto, SyncData, SyncExitDto,
+    },
 };
 
 pub(crate) fn to_push_all_request(dto: PushAllRequest) -> PushAll {
@@ -37,11 +39,24 @@ fn to_exit_dto(exit: SyncExit) -> SyncExitDto {
     }
 }
 
+fn to_status_dto(status: SyncStatus) -> RepoSyncStatusDto {
+    match status {
+        SyncStatus::Skip => RepoSyncStatusDto::Skip,
+        SyncStatus::UpToDate => RepoSyncStatusDto::UpToDate,
+        SyncStatus::Pushed => RepoSyncStatusDto::Pushed,
+        SyncStatus::WouldPush => RepoSyncStatusDto::WouldPush,
+        SyncStatus::Pulled => RepoSyncStatusDto::Pulled,
+        SyncStatus::WouldPull => RepoSyncStatusDto::WouldPull,
+        SyncStatus::Warn => RepoSyncStatusDto::Warn,
+        SyncStatus::Fail => RepoSyncStatusDto::Fail,
+    }
+}
+
 fn to_result_dto(result: RepoSyncResult) -> RepoSyncResultDto {
     RepoSyncResultDto {
         name: result.name,
         branch: result.branch,
-        status: result.status.as_wire().to_string(),
+        status: to_status_dto(result.status),
         detail: result.detail,
     }
 }

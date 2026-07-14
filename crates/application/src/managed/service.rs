@@ -16,8 +16,7 @@ pub struct RepoSyncResult {
 
 /// The outcome classification for one repo's push/pull. Replaces the former
 /// stringly-typed status so [`classify_exit`] and every call site are checked
-/// against the closed set. [`SyncStatus::as_wire`] is the exact token the
-/// `--json` output and the status table have always emitted — keep it byte-stable.
+/// against the closed set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncStatus {
     /// Repo is not present on this machine; nothing was attempted.
@@ -36,22 +35,6 @@ pub enum SyncStatus {
     Warn,
     /// The operation failed.
     Fail,
-}
-
-impl SyncStatus {
-    /// The stable wire/display token for this status.
-    pub fn as_wire(self) -> &'static str {
-        match self {
-            Self::Skip => "skip",
-            Self::UpToDate => "up-to-date",
-            Self::Pushed => "pushed",
-            Self::WouldPush => "would-push",
-            Self::Pulled => "pulled",
-            Self::WouldPull => "would-pull",
-            Self::Warn => "warn",
-            Self::Fail => "fail",
-        }
-    }
 }
 
 /// The aggregate exit classification across every repo's result. Ported from
@@ -145,20 +128,6 @@ mod tests {
             path: "/repo".into(),
             remote: String::new(),
         }
-    }
-
-    #[test]
-    fn sync_status_wire_tokens_are_byte_stable() {
-        // These tokens are the JSON `--json` contract and the status-table column;
-        // changing one is a breaking output change, so pin every variant.
-        assert_eq!(SyncStatus::Skip.as_wire(), "skip");
-        assert_eq!(SyncStatus::UpToDate.as_wire(), "up-to-date");
-        assert_eq!(SyncStatus::Pushed.as_wire(), "pushed");
-        assert_eq!(SyncStatus::WouldPush.as_wire(), "would-push");
-        assert_eq!(SyncStatus::Pulled.as_wire(), "pulled");
-        assert_eq!(SyncStatus::WouldPull.as_wire(), "would-pull");
-        assert_eq!(SyncStatus::Warn.as_wire(), "warn");
-        assert_eq!(SyncStatus::Fail.as_wire(), "fail");
     }
 
     #[test]

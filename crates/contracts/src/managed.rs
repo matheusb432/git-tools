@@ -16,6 +16,36 @@ pub struct PullAllRequest {
     pub dry: bool,
 }
 
+/// The stable per-repository status used by managed push and pull responses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RepoSyncStatusDto {
+    Skip,
+    UpToDate,
+    Pushed,
+    WouldPush,
+    Pulled,
+    WouldPull,
+    Warn,
+    Fail,
+}
+
+impl std::fmt::Display for RepoSyncStatusDto {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let token = match self {
+            Self::Skip => "skip",
+            Self::UpToDate => "up-to-date",
+            Self::Pushed => "pushed",
+            Self::WouldPush => "would-push",
+            Self::Pulled => "pulled",
+            Self::WouldPull => "would-pull",
+            Self::Warn => "warn",
+            Self::Fail => "fail",
+        };
+        formatter.pad(token)
+    }
+}
+
 /// The exact JSON shape the CLI's `--json` mode has always produced
 /// (`PushPullResult`'s retired `#[serde(rename_all = "PascalCase")]`), preserved
 /// so `--json` output stays byte-identical.
@@ -24,7 +54,7 @@ pub struct PullAllRequest {
 pub struct RepoSyncResultDto {
     pub name: String,
     pub branch: String,
-    pub status: String,
+    pub status: RepoSyncStatusDto,
     pub detail: String,
 }
 
@@ -79,7 +109,7 @@ mod tests {
         let dto = RepoSyncResultDto {
             name: "repo".into(),
             branch: "main".into(),
-            status: "pushed".into(),
+            status: RepoSyncStatusDto::Pushed,
             detail: "ok".into(),
         };
         let json = serde_json::to_value(&dto).unwrap();
@@ -96,7 +126,7 @@ mod tests {
                 results: vec![RepoSyncResultDto {
                     name: "repo".into(),
                     branch: "main".into(),
-                    status: "up-to-date".into(),
+                    status: RepoSyncStatusDto::UpToDate,
                     detail: "up to date".into(),
                 }],
                 exit,
@@ -104,5 +134,43 @@ mod tests {
             let json = serde_json::to_string(&original).unwrap();
             assert_eq!(serde_json::from_str::<SyncData>(&json).unwrap(), original);
         }
+    }
+
+    #[test]
+    fn repo_sync_status_dto_tokens_are_byte_stable() {
+        let cases = [
+            (RepoSyncStatusDto::Skip, "skip"),
+            (RepoSyncStatusDto::UpToDate, "up-to-date"),
+            (RepoSyncStatusDto::Pushed, "pushed"),
+            (RepoSyncStatusDto::WouldPush, "would-push"),
+            (RepoSyncStatusDto::Pulled, "pulled"),
+            (RepoSyncStatusDto::WouldPull, "would-pull"),
+            (RepoSyncStatusDto::Warn, "warn"),
+            (RepoSyncStatusDto::Fail, "fail"),
+        ];
+
+        for (status, token) in cases {
+            assert_eq!(
+                serde_json::to_string(&status).unwrap(),
+                format!(r#""{token}""#)
+            );
+            assert_eq!(
+                serde_json::from_str::<RepoSyncStatusDto>(&format!(r#""{token}""#)).unwrap(),
+                status
+            );
+            assert_eq!(status.to_string(), token);
+        }
+    }
+
+    #[test]
+    fn repo_sync_status_dto_honors_display_alignment() {
+        assert_eq!(format!("{:<12}", RepoSyncStatusDto::Pushed), "pushed      ");
+    }
+
+    #[test]
+    fn repo_sync_status_dto_rejects_unknown_tokens() {
+        let error = serde_json::from_str::<RepoSyncStatusDto>(r#""unknown""#)
+            .expect_err("unknown status must fail decoding");
+        assert!(error.to_string().contains("unknown variant"), "{error}");
     }
 }

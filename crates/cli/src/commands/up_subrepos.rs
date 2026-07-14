@@ -18,6 +18,7 @@ use std::{
 use crate::commands::{
     discover::{discover_git_repos, repo_label},
     git_runner::{GitOutput, GitRunner},
+    push_summary::{PushOutcome, PushSummary},
 };
 
 /// Where a discovered repo's current branch would be pushed, resolved from local refs.
@@ -78,8 +79,17 @@ pub enum Status {
     Ok,
     /// Some repos pushed, some failed.
     Partial,
-    /// Every attempted push failed.
+    /// At least one repo failed and none were pushed.
     Fail,
+}
+
+impl Status {
+    const fn exit_code(self) -> i32 {
+        match self {
+            Self::Ok => 0,
+            Self::Partial | Self::Fail => 1,
+        }
+    }
 }
 
 /// Applied result: a status, a human-readable detail block, and the per-repo reports.
@@ -199,24 +209,24 @@ pub fn apply(runner: &impl GitRunner, targets: &[RepoTarget]) -> PushAllResult {
         })
         .collect();
 
-    let pushed = reports
-        .iter()
-        .filter(|report| matches!(report.outcome, RepoOutcome::Pushed | RepoOutcome::UpToDate))
-        .count();
-    let failed = reports
-        .iter()
-        .filter(|report| matches!(report.outcome, RepoOutcome::Failed(_)))
-        .count();
+    let summary = PushSummary::from_outcomes(
+        reports.iter().map(|report| match &report.outcome {
+            RepoOutcome::Pushed => PushOutcome::Pushed,
+            RepoOutcome::UpToDate | RepoOutcome::Skipped(_) => PushOutcome::Skipped,
+            RepoOutcome::Failed(_) => PushOutcome::Failed,
+        }),
+        false,
+    );
 
-    let status = if failed == 0 {
+    let status = if summary.failed() == 0 {
         Status::Ok
-    } else if pushed == 0 {
+    } else if summary.pushed() == 0 {
         Status::Fail
     } else {
         Status::Partial
     };
 
-    let mut detail = format!("pushed {pushed} repo(s).");
+    let mut detail = summary.render(status.exit_code());
     for report in &reports {
         let line = match &report.outcome {
             RepoOutcome::Pushed => format!("\n  {}: pushed", report.label),
@@ -529,6 +539,37 @@ mod tests {
     }
 
     #[test]
+    fn apply_counts_synced_and_unpushable_repos_as_skipped() {
+        let runner = FakeRunner::new(vec![FakeRunner::ok("")]);
+        let targets = vec![
+            push_target("pushed"),
+            RepoTarget {
+                path: PathBuf::from("/repos/current"),
+                label: "current".into(),
+                dest: Dest::Synced {
+                    branch: "main".into(),
+                    remote: "origin".into(),
+                },
+            },
+            RepoTarget {
+                path: PathBuf::from("/repos/loose"),
+                label: "loose".into(),
+                dest: Dest::Skip {
+                    reason: "no upstream tracking branch".into(),
+                },
+            },
+        ];
+
+        let result = apply(&runner, &targets);
+
+        assert!(
+            result
+                .detail
+                .starts_with("exit 0  -  3 repos: 1 pushed, 2 skipped\n  pushed: pushed")
+        );
+    }
+
+    #[test]
     fn apply_reports_partial_when_one_push_fails() {
         let runner = FakeRunner::new(vec![
             FakeRunner::ok(""),
@@ -539,6 +580,12 @@ mod tests {
         assert_eq!(result.status, Status::Partial);
         assert_eq!(result.reports[0].outcome, RepoOutcome::Pushed);
         assert!(matches!(result.reports[1].outcome, RepoOutcome::Failed(_)));
+        assert!(
+            result
+                .detail
+                .starts_with("exit 1  -  2 repos: 1 pushed, 0 skipped, 1 fail")
+        );
+        assert!(!result.detail.contains("0 warn"));
         assert!(result.detail.contains("web: failed —"), "{}", result.detail);
     }
 

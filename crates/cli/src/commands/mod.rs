@@ -17,6 +17,7 @@ pub mod git_runner;
 pub mod managed;
 pub mod merge_diff;
 pub mod prune;
+mod push_summary;
 pub mod squash_local;
 pub mod squash_preview;
 pub mod sw;
