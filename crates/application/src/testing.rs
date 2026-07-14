@@ -129,16 +129,32 @@ impl DiffSource for FakeDiffSource {
     }
 }
 
-/// Recording `ArtifactStore`: `place` records and returns a deterministic path;
-/// `lookup_by_range` answers from the `range_hits` script.
+/// In-memory artifact store with deterministic paths and scripted range hits.
 /// Scripted range-lookup hits keyed by `(kind, base_sha, head_sha)`.
 pub type RangeHits = Arc<Mutex<HashMap<(DiffKind, String, String), PathBuf>>>;
 
+/// Artifact content observable through [`InMemoryArtifactStore`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredArtifact {
+    /// Metadata stored alongside the rendered document.
+    pub meta: ArtifactMeta,
+    /// Rendered document content.
+    pub html: String,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryArtifactStore {
-    pub placed: Arc<Mutex<Vec<(ArtifactMeta, String)>>>,
+    /// Persisted artifacts keyed by their deterministic path.
+    pub artifacts: Arc<Mutex<HashMap<PathBuf, StoredArtifact>>>,
     pub range_hits: RangeHits,
     pub history: Vec<HistoryRecord>,
+}
+
+impl InMemoryArtifactStore {
+    /// Returns the persisted artifact at `path`.
+    pub fn artifact(&self, path: &Path) -> Option<StoredArtifact> {
+        self.artifacts.lock().ok()?.get(path).cloned()
+    }
 }
 
 impl ArtifactStore for InMemoryArtifactStore {
@@ -148,12 +164,16 @@ impl ArtifactStore for InMemoryArtifactStore {
         meta: &ArtifactMeta,
         html: &str,
     ) -> anyhow::Result<PlacedArtifact> {
-        self.placed
-            .lock()
-            .unwrap()
-            .push((meta.clone(), html.to_string()));
+        let path = store_root.join("diffs/fake/artifact.html");
+        self.artifacts.lock().unwrap().insert(
+            path.clone(),
+            StoredArtifact {
+                meta: meta.clone(),
+                html: html.to_string(),
+            },
+        );
         Ok(PlacedArtifact {
-            path: store_root.join("diffs/fake/artifact.html"),
+            path,
             reused: false,
         })
     }
@@ -277,21 +297,14 @@ impl ManagedManifest for FakeManagedManifest {
     }
 }
 
-/// Recording `PushLedger`: `record` calls are captured for assertions;
-/// `last_known` answers from the `known` script (defaults to `None`).
+/// Scripted `PushLedger`: `last_known` answers from `known` and writes are no-ops.
 #[derive(Debug, Default, Clone)]
 pub struct FakePushLedger {
-    pub recorded: Arc<Mutex<Vec<(String, usize, String)>>>,
     pub known: HashMap<String, LedgerEntry>,
 }
 
 impl PushLedger for FakePushLedger {
-    async fn record(&self, repo_name: &str, ahead: usize, checked_at: &str) {
-        self.recorded
-            .lock()
-            .unwrap()
-            .push((repo_name.to_string(), ahead, checked_at.to_string()));
-    }
+    async fn record(&self, _repo_name: &str, _ahead: usize, _checked_at: &str) {}
     async fn last_known(&self, repo_name: &str) -> Option<LedgerEntry> {
         self.known.get(repo_name).cloned()
     }

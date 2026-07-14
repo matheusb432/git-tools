@@ -23,18 +23,17 @@ pub enum ListLiveViewsError {
 
 /// Lists saved live views through the app-state port.
 #[cqrsy::handler(query)]
-pub fn handle(
-    store: &impl AppStateStore,
+pub fn execute(
     req: ListLiveViews,
+    store: &impl AppStateStore,
 ) -> Result<ListLiveViewsResponse, ListLiveViewsError> {
-    let views = store.list_live_views(&req.data_root)?;
+    let ListLiveViews { data_root } = req;
+    let views = store.list_live_views(&data_root)?;
     Ok(ListLiveViewsResponse { views })
 }
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
-
     use super::*;
     use crate::{ports::LiveViewRecord, testing::InMemoryAppStateStore};
 
@@ -53,13 +52,13 @@ mod tests {
         let store = InMemoryAppStateStore::default();
         store.live_views.lock().unwrap().push(record("/repos/a"));
         store.live_views.lock().unwrap().push(record("/repos/b"));
-        let handler = ListLiveViewsHandler { store };
-
-        let response = handler
-            .send_now(ListLiveViews {
+        let response = execute(
+            ListLiveViews {
                 data_root: "/data".into(),
-            })
-            .expect("list succeeds");
+            },
+            &store,
+        )
+        .expect("list succeeds");
 
         assert_eq!(
             response

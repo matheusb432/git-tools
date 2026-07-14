@@ -24,9 +24,9 @@ pub enum ListHistoryError {
 
 /// Lists artifact history in newest-first order.
 #[cqrsy::handler(query)]
-pub fn handle(
-    store: &impl ArtifactStore,
+pub fn execute(
     req: ListHistory,
+    store: &impl ArtifactStore,
 ) -> Result<ListHistoryResponse, ListHistoryError> {
     // `diff -r`/`diff --all` span multiple repos, so they carry no single
     // head commit — `head_committed_at` is empty. Fall back to `generated_at`
@@ -39,7 +39,8 @@ pub fn handle(
         }
     }
 
-    let mut entries = store.list_history(&req.store_root)?;
+    let ListHistory { store_root } = req;
+    let mut entries = store.list_history(&store_root)?;
     entries.sort_by(|a, b| {
         recency(b)
             .cmp(recency(a))
@@ -50,8 +51,6 @@ pub fn handle(
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
-
     use super::*;
     use crate::{ports::HistoryRecord, testing::InMemoryArtifactStore};
 
@@ -85,9 +84,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let handler = ListHistoryHandler { store };
-
-        let response = handler.send_now(req()).expect("list succeeds");
+        let response = execute(req(), &store).expect("list succeeds");
 
         assert_eq!(response.entries[0].repo_id, "c"); // tie broken by generated desc
         assert_eq!(response.entries[2].repo_id, "a");
@@ -105,9 +102,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let handler = ListHistoryHandler { store };
-
-        let response = handler.send_now(req()).expect("list succeeds");
+        let response = execute(req(), &store).expect("list succeeds");
 
         assert_eq!(response.entries[0].repo_id, "fresh-multi-repo");
         assert_eq!(response.entries[1].repo_id, "old-commit");
@@ -115,11 +110,8 @@ mod tests {
 
     #[test]
     fn empty_store_returns_an_empty_list() {
-        let handler = ListHistoryHandler {
-            store: InMemoryArtifactStore::default(),
-        };
-
-        let response = handler.send_now(req()).expect("list succeeds");
+        let store = InMemoryArtifactStore::default();
+        let response = execute(req(), &store).expect("list succeeds");
 
         assert!(response.entries.is_empty());
     }

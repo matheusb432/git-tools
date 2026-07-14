@@ -1,8 +1,8 @@
 //! Application core (Ports & Adapters "inside"): ports plus vertical slices.
 //!
-//! Each feature operation owns its request and one public fused
-//! `#[cqrsy::handler(command|query)]` function. Cqrsy generates the request and
-//! handler contracts; process roots and tests dispatch through [`cqrsy::Sender`].
+//! Each feature operation owns its request and one public request-first
+//! `#[cqrsy::handler(command|query)]` `execute` function. Callers import the
+//! operation module and invoke `operation::execute(...)` directly.
 //! This crate depends only on `domain` and `cqrsy`.
 
 pub mod diffs;

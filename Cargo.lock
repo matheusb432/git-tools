@@ -458,6 +458,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "bon"
+version = "3.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a602c73c7b0148ec6d12af6fd5cc7a46e2eacc8878271a999abac56eed12f561"
+dependencies = [
+ "bon-macros",
+ "rustversion",
+]
+
+[[package]]
+name = "bon-macros"
+version = "3.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6dee98b0db6a962de883bf5d20362dee4d7ca0d12fe39a7c6c73c844e1cd7c1f"
+dependencies = [
+ "darling",
+ "ident_case",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 2.0.118",
+]
+
+[[package]]
 name = "bootstrap"
 version = "0.1.0"
 dependencies = [
@@ -880,22 +905,23 @@ dependencies = [
 
 [[package]]
 name = "cqrsy"
-version = "0.7.0"
-source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.7.0#f4e522add942cf1a8286ab8cbc0ce3c2901271a9"
+version = "0.9.0"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.9.0#341ace9ce2f8be0e28b26558a85b54a2e3405a98"
 dependencies = [
+ "bon",
  "cqrsy-core",
  "cqrsy-macros",
 ]
 
 [[package]]
 name = "cqrsy-core"
-version = "0.7.0"
-source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.7.0#f4e522add942cf1a8286ab8cbc0ce3c2901271a9"
+version = "0.9.0"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.9.0#341ace9ce2f8be0e28b26558a85b54a2e3405a98"
 
 [[package]]
 name = "cqrsy-macros"
-version = "0.7.0"
-source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.7.0#f4e522add942cf1a8286ab8cbc0ce3c2901271a9"
+version = "0.9.0"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.9.0#341ace9ce2f8be0e28b26558a85b54a2e3405a98"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1053,7 +1079,6 @@ dependencies = [
  "axum",
  "bootstrap",
  "contracts",
- "cqrsy",
  "domain",
  "gtl-platform",
  "http-body-util",
@@ -1178,7 +1203,6 @@ name = "desktop"
 version = "0.1.0"
 dependencies = [
  "application",
- "cqrsy",
  "criterion",
  "domain",
  "gtl-platform",

@@ -40,14 +40,15 @@ pub enum RenderSquashPreviewError {
 
 /// Renders a squash preview through the diff ports.
 #[cqrsy::handler(command)]
-pub fn handle(
+pub fn execute(
+    req: RenderSquashPreview,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-    req: RenderSquashPreview,
 ) -> Result<RenderSquashPreviewResponse, RenderSquashPreviewError> {
-    let built = build_squash_view(source, &req.cwd, None)?;
+    let RenderSquashPreview { cwd, store_root } = req;
+    let built = build_squash_view(source, &cwd, None)?;
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
@@ -68,7 +69,7 @@ pub fn handle(
         generated_at: clock.now_iso(),
         title: "squash-preview".to_string(),
     };
-    let placed = store.place(&req.store_root, &meta, &html)?;
+    let placed = store.place(&store_root, &meta, &html)?;
 
     let notes = vec![
         Note::info(format!(
@@ -161,10 +162,9 @@ fn collapse_note(commit_count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::Sender;
     use domain::diffs::Commit;
 
-    use super::{RenderSquashPreview, RenderSquashPreviewError, RenderSquashPreviewHandler};
+    use super::{RenderSquashPreview, RenderSquashPreviewError, execute};
     use crate::{
         shared::notes::Note,
         testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
@@ -179,18 +179,6 @@ index 111..222 100644\n\
 -old line\n\
 +new line\n\
 +extra line\n";
-
-    fn handler_with(
-        source: FakeDiffSource,
-    ) -> RenderSquashPreviewHandler<FakeDiffSource, InMemoryArtifactStore, StubRenderer, FixedClock>
-    {
-        RenderSquashPreviewHandler {
-            source,
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        }
-    }
 
     fn one_commit(sha: &str) -> Commit {
         Commit {
@@ -218,9 +206,16 @@ index 111..222 100644\n\
             diff_output: SINGLE_FILE_DIFF.into(),
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
 
-        let response = handler.send_now(req("/repo")).expect("render succeeds");
+        let response = execute(
+            req("/repo"),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -234,9 +229,10 @@ index 111..222 100644\n\
                 Note::info("wrote /store/diffs/fake/artifact.html"),
             ]
         );
-        let placed = handler.store.placed.lock().unwrap();
-        assert_eq!(placed.len(), 1);
-        assert_eq!(placed[0].0.title, "squash-preview");
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert_eq!(artifact.meta.title, "squash-preview");
     }
 
     #[test]
@@ -247,11 +243,16 @@ index 111..222 100644\n\
             upstream: None,
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
 
-        let error = handler
-            .send_now(req("/repo"))
-            .expect_err("missing upstream errors");
+        let error = execute(
+            req("/repo"),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect_err("missing upstream errors");
 
         let RenderSquashPreviewError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "no upstream");

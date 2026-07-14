@@ -31,12 +31,12 @@ pub enum PushAllError {
 
 /// Pushes every managed repository through the remote-sync ports.
 #[cqrsy::handler(command)]
-pub async fn handle(
+pub async fn execute(
+    req: PushAll,
     remote: &impl RemoteSync,
     manifest: &impl ManagedManifest,
     ledger: &impl PushLedger,
     clock: &impl Clock,
-    req: PushAll,
 ) -> Result<PushAllResponse, PushAllError> {
     let repos = manifest.load(&req.repos_file, &req.home_dir).await?;
     let results = futures_util::future::join_all(
@@ -132,7 +132,6 @@ fn push_failure_detail(output: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
     use domain::managed::ManagedRepo;
 
     use super::*;
@@ -146,16 +145,20 @@ mod tests {
         }
     }
 
-    fn handler_with(
+    async fn execute_with(
         remote: FakeRemoteSync,
         repos: Vec<ManagedRepo>,
-    ) -> PushAllHandler<FakeRemoteSync, FakeManagedManifest, FakePushLedger, FixedClock> {
-        PushAllHandler {
-            remote,
-            manifest: FakeManagedManifest { repos, error: None },
-            ledger: FakePushLedger::default(),
-            clock: FixedClock("2026-07-03T00:00:00Z".into()),
-        }
+        request: PushAll,
+    ) -> Result<PushAllResponse, PushAllError> {
+        let manifest = FakeManagedManifest { repos, error: None };
+        execute(
+            request,
+            &remote,
+            &manifest,
+            &FakePushLedger::default(),
+            &FixedClock("2026-07-03T00:00:00Z".into()),
+        )
+        .await
     }
 
     fn req() -> PushAll {
@@ -166,9 +169,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn skips_a_repo_already_synced_with_its_upstream() {
-        let handler = handler_with(
+    #[tokio::test]
+    async fn skips_a_repo_already_synced_with_its_upstream() {
+        let response = execute_with(
             FakeRemoteSync {
                 present: true,
                 branch: "main".into(),
@@ -178,9 +181,10 @@ mod tests {
                 ..Default::default()
             },
             vec![repo("a")],
-        );
-
-        let response = handler.send_now(req()).expect("push succeeds");
+            req(),
+        )
+        .await
+        .expect("push succeeds");
 
         assert_eq!(response.results.len(), 1);
         assert_eq!(response.results[0].status, SyncStatus::UpToDate);
@@ -188,9 +192,9 @@ mod tests {
         assert_eq!(response.exit, SyncExit::Clean);
     }
 
-    #[test]
-    fn pushes_a_repo_with_unpushed_commits() {
-        let handler = handler_with(
+    #[tokio::test]
+    async fn pushes_a_repo_with_unpushed_commits() {
+        let response = execute_with(
             FakeRemoteSync {
                 present: true,
                 branch: "main".into(),
@@ -204,42 +208,42 @@ mod tests {
                 ..Default::default()
             },
             vec![repo("a")],
-        );
-
-        let response = handler.send_now(req()).expect("push succeeds");
+            req(),
+        )
+        .await
+        .expect("push succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Pushed);
         assert_eq!(response.results[0].detail, "abc..def  main -> main");
         assert_eq!(response.exit, SyncExit::Clean);
     }
 
-    #[test]
-    fn dry_run_reports_would_push_without_treating_it_as_pushed() {
-        let handler = handler_with(
-            FakeRemoteSync {
-                present: true,
-                branch: "main".into(),
-                has_remote: true,
-                rev_list_count: 1,
-                push_result: crate::ports::SyncOutput {
-                    success: true,
-                    combined: "would push".into(),
-                },
-                ..Default::default()
+    #[tokio::test]
+    async fn dry_run_reports_would_push_without_treating_it_as_pushed() {
+        let remote = FakeRemoteSync {
+            present: true,
+            branch: "main".into(),
+            has_remote: true,
+            rev_list_count: 1,
+            push_result: crate::ports::SyncOutput {
+                success: true,
+                combined: "would push".into(),
             },
-            vec![repo("a")],
-        );
+            ..Default::default()
+        };
         let mut request = req();
         request.dry = true;
 
-        let response = handler.send_now(request).expect("push succeeds");
+        let response = execute_with(remote, vec![repo("a")], request)
+            .await
+            .expect("push succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::WouldPush);
     }
 
-    #[test]
-    fn a_rejected_push_reports_fail_and_the_exit_precedence_wins() {
-        let handler = handler_with(
+    #[tokio::test]
+    async fn a_rejected_push_reports_fail_and_the_exit_precedence_wins() {
+        let response = execute_with(
             FakeRemoteSync {
                 present: true,
                 branch: "main".into(),
@@ -253,9 +257,10 @@ mod tests {
                 ..Default::default()
             },
             vec![repo("a")],
-        );
-
-        let response = handler.send_now(req()).expect("push succeeds");
+            req(),
+        )
+        .await
+        .expect("push succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
@@ -265,18 +270,19 @@ mod tests {
         assert_eq!(response.exit, SyncExit::Fail);
     }
 
-    #[test]
-    fn a_detached_head_repo_is_reported_as_a_warning_without_touching_the_remote() {
-        let handler = handler_with(
+    #[tokio::test]
+    async fn a_detached_head_repo_is_reported_as_a_warning_without_touching_the_remote() {
+        let response = execute_with(
             FakeRemoteSync {
                 present: true,
                 branch: "HEAD".into(),
                 ..Default::default()
             },
             vec![repo("a")],
-        );
-
-        let response = handler.send_now(req()).expect("push succeeds");
+            req(),
+        )
+        .await
+        .expect("push succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Warn);
         assert_eq!(
@@ -286,17 +292,18 @@ mod tests {
         assert_eq!(response.exit, SyncExit::Warn);
     }
 
-    #[test]
-    fn fanning_out_over_multiple_repos_preserves_each_repos_identity() {
-        let handler = handler_with(
+    #[tokio::test]
+    async fn fanning_out_over_multiple_repos_preserves_each_repos_identity() {
+        let response = execute_with(
             FakeRemoteSync {
                 present: false,
                 ..Default::default()
             },
             vec![repo("a"), repo("b"), repo("c")],
-        );
-
-        let response = handler.send_now(req()).expect("push succeeds");
+            req(),
+        )
+        .await
+        .expect("push succeeds");
 
         assert_eq!(response.results.len(), 3);
         assert_eq!(
@@ -309,21 +316,20 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_manifest_load_failure_propagates_as_an_error() {
-        let handler = PushAllHandler {
-            remote: FakeRemoteSync::default(),
-            manifest: FakeManagedManifest {
+    #[tokio::test]
+    async fn a_manifest_load_failure_propagates_as_an_error() {
+        let error = execute(
+            req(),
+            &FakeRemoteSync::default(),
+            &FakeManagedManifest {
                 repos: Vec::new(),
                 error: Some("boom".into()),
             },
-            ledger: FakePushLedger::default(),
-            clock: FixedClock("2026-07-03T00:00:00Z".into()),
-        };
-
-        let error = handler
-            .send_now(req())
-            .expect_err("manifest error propagates");
+            &FakePushLedger::default(),
+            &FixedClock("2026-07-03T00:00:00Z".into()),
+        )
+        .await
+        .expect_err("manifest error propagates");
         assert!(format!("{error:#}").contains("boom"));
     }
 }

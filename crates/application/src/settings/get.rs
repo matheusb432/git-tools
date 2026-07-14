@@ -23,18 +23,17 @@ pub enum GetSettingError {
 
 /// Gets a setting through the app-state port.
 #[cqrsy::handler(query)]
-pub fn handle(
-    store: &impl AppStateStore,
+pub fn execute(
     req: GetSetting,
+    store: &impl AppStateStore,
 ) -> Result<GetSettingResponse, GetSettingError> {
-    let value = store.get_setting(&req.data_root, &req.key)?;
+    let GetSetting { data_root, key } = req;
+    let value = store.get_setting(&data_root, &key)?;
     Ok(GetSettingResponse { value })
 }
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
-
     use super::*;
     use crate::testing::InMemoryAppStateStore;
 
@@ -46,30 +45,29 @@ mod tests {
             .lock()
             .unwrap()
             .insert("theme".into(), "hearth".into());
-        let handler = GetSettingHandler { store };
-
-        let response = handler
-            .send_now(GetSetting {
+        let response = execute(
+            GetSetting {
                 data_root: "/data".into(),
                 key: "theme".into(),
-            })
-            .expect("get succeeds");
+            },
+            &store,
+        )
+        .expect("get succeeds");
 
         assert_eq!(response.value.as_deref(), Some("hearth"));
     }
 
     #[test]
     fn missing_key_is_none_not_an_error() {
-        let handler = GetSettingHandler {
-            store: InMemoryAppStateStore::default(),
-        };
-
-        let response = handler
-            .send_now(GetSetting {
+        let store = InMemoryAppStateStore::default();
+        let response = execute(
+            GetSetting {
                 data_root: "/data".into(),
                 key: "absent".into(),
-            })
-            .expect("get succeeds");
+            },
+            &store,
+        )
+        .expect("get succeeds");
 
         assert_eq!(response.value, None);
     }

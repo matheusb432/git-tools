@@ -10,22 +10,20 @@ use std::sync::Arc;
 
 use axum::{Json, http::StatusCode};
 use contracts::envelope::{Envelope, Note, NoteLevel, Outcome};
-use cqrsy::{Handle, Request, Sender};
 
 use crate::state::Shared;
 
 /// Shared endpoint body for every request handled off the blocking pool: touch,
-/// map-error → 400, run the handler via `send_now` (the handler shells out or
-/// hits `SQLite` synchronously), then project the response (or 500 on failure).
-pub(crate) async fn run<H, R, O, E, D>(
-    handler: H,
+/// map request errors to 400, run the operation away from Tokio workers, then
+/// project the response or map operation failures to 500.
+pub(crate) async fn run<R, O, E, D>(
     shared: Arc<Shared>,
     req: anyhow::Result<R>,
+    execute: impl FnOnce(R) -> Result<O, E> + Send + 'static,
     project: impl FnOnce(O) -> Envelope<D> + Send + 'static,
 ) -> (StatusCode, Json<Envelope<D>>)
 where
-    H: Sender<R> + Handle,
-    R: Request<Output = O, Error = E, Outcome = Result<O, E>> + Send + 'static,
+    R: Send + 'static,
     O: Send + 'static,
     E: std::fmt::Display + std::error::Error + Send + Sync + 'static,
     D: Send + 'static,
@@ -40,9 +38,9 @@ where
             );
         }
     };
-    // The handler does synchronous, potentially slow I/O (git subprocess, SQLite) — run
+    // The operation does synchronous, potentially slow I/O (git subprocess, SQLite) — run
     // it on the blocking pool.
-    let joined = tokio::task::spawn_blocking(move || handler.send_now(req)).await;
+    let joined = tokio::task::spawn_blocking(move || execute(req)).await;
     match joined {
         Ok(Ok(resp)) => (StatusCode::OK, Json(project(resp))),
         Ok(Err(e)) => (

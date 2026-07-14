@@ -1,6 +1,7 @@
 //! Port traits: the seams the application core talks through, implemented by
-//! `infra` adapters at the composition root. Every port is `Send + Sync` so a
-//! future daemon can share adapters across tokio tasks.
+//! `infra` adapters at the composition root. Every port is a cheap-clone,
+//! thread-safe `'static` handle so cqrsy can prepare operation dependencies and
+//! process roots can move adapters across worker boundaries.
 
 use std::{
     collections::HashMap,
@@ -111,7 +112,7 @@ pub enum RepoProbeResult {
 
 /// Read-only git access for the diff engine. Every method shells out to git in the
 /// real adapter; the fake scripts each return value.
-pub trait DiffSource: Send + Sync {
+pub trait DiffSource: Clone + Send + Sync + 'static {
     /// Absolute path of the repository containing `dir`; errors when `dir` is not a git repo.
     fn top_level(&self, dir: &Path) -> anyhow::Result<String>;
     /// The current branch name (`HEAD`'s `--abbrev-ref`).
@@ -161,7 +162,7 @@ pub trait DiffSource: Send + Sync {
 }
 
 /// The content-addressed artifact store behind the diff previews.
-pub trait ArtifactStore: Send + Sync {
+pub trait ArtifactStore: Clone + Send + Sync + 'static {
     /// Place `html` and its metadata under `store_root`, addressed by content hash.
     /// Idempotent per content hash: identical HTML reuses the existing artifact.
     fn place(
@@ -186,7 +187,7 @@ pub trait ArtifactStore: Send + Sync {
 }
 
 /// Renders a diff [`View`] to a self-contained HTML document.
-pub trait HtmlRenderer: Send + Sync {
+pub trait HtmlRenderer: Clone + Send + Sync + 'static {
     /// The complete `file://`-ready HTML for `view`.
     fn build_html(&self, view: &View) -> String;
     /// Renders several views as one tab-stripped document (diff-subrepos / diff --all).
@@ -194,13 +195,13 @@ pub trait HtmlRenderer: Send + Sync {
 }
 
 /// A source of the current time as an ISO-8601 string.
-pub trait Clock: Send + Sync {
+pub trait Clock: Clone + Send + Sync + 'static {
     /// The current instant as a strict ISO-8601 timestamp string.
     fn now_iso(&self) -> String;
 }
 
 /// Filesystem/git probe behind live-view validation.
-pub trait RepoProbe: Send + Sync {
+pub trait RepoProbe: Clone + Send + Sync + 'static {
     /// Classify `dir`; errors only on unexpected I/O failures, never on the
     /// three expected outcomes (those are values).
     fn probe(&self, dir: &Path) -> anyhow::Result<RepoProbeResult>;
@@ -210,7 +211,7 @@ pub trait RepoProbe: Send + Sync {
 /// One `SQLite` file under `data_root` in the real adapter; every method opens,
 /// migrates, and closes per call so callers stay hermetic (the `ArtifactStore`
 /// per-call `store_root` pattern).
-pub trait AppStateStore: Send + Sync {
+pub trait AppStateStore: Clone + Send + Sync + 'static {
     /// Upsert by `(source_kind, source_value)`: a new row keeps `record` as-is;
     /// an existing row keeps its `created_at`/`last_opened_at` and takes only
     /// the new `display_name`. Returns `true` when the view already existed.
@@ -256,7 +257,7 @@ pub struct SyncOutput {
 /// one git invocation the CLI's retired `push_pull.rs` shelled out to; fallback rules
 /// (empty branch on failure, treat a rev-list error as zero, etc.) stay in the
 /// `managed` slices, not here — same split as [`DiffSource`].
-pub trait RemoteSync: Send + Sync {
+pub trait RemoteSync: Clone + Send + Sync + 'static {
     /// Whether `repo`'s `.git` directory exists on this machine (pure fs check).
     fn repo_present(&self, repo: &Path) -> bool;
     /// `git rev-parse --abbrev-ref HEAD`.
@@ -316,7 +317,7 @@ pub trait RemoteSync: Send + Sync {
 /// the file lives (env var, upward search, `sample_project`, home-dir default) stays a
 /// CLI concern — it depends on the caller's shell cwd, same reasoning as
 /// merge-diff's cwd-absolute-resolution rule.
-pub trait ManagedManifest: Send + Sync {
+pub trait ManagedManifest: Clone + Send + Sync + 'static {
     fn load(
         &self,
         repos_file: &Path,
@@ -335,7 +336,7 @@ pub struct LedgerEntry {
 /// `last_known` always answers `None` behind the shipped adapter; a future effort
 /// gives this a real backing store and teaches `push_all` to consult `last_known`
 /// to skip already-synced repos without a network round trip.
-pub trait PushLedger: Send + Sync {
+pub trait PushLedger: Clone + Send + Sync + 'static {
     fn record(
         &self,
         repo_name: &str,

@@ -35,13 +35,14 @@ pub enum ComputeDiffError {
 
 /// Computes a diff by driving the diff engine through its source port.
 #[cqrsy::handler(query)]
-pub fn handle(
-    source: &impl DiffSource,
+pub fn execute(
     req: ComputeDiff,
+    source: &impl DiffSource,
 ) -> Result<ComputeDiffResponse, ComputeDiffError> {
+    let ComputeDiff { cwd, target } = req;
     let mut notes = Vec::new();
-    let top = source.top_level(&req.cwd)?;
-    let (view, summary) = build_view(source, &top, &req.target, None, &mut notes)?;
+    let top = source.top_level(&cwd)?;
+    let (view, summary) = build_view(source, &top, &target, None, &mut notes)?;
     Ok(ComputeDiffResponse {
         view,
         summary,
@@ -53,7 +54,6 @@ pub fn handle(
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::Sender;
     use domain::diffs::{Commit, DiffTarget};
 
     use super::*;
@@ -93,20 +93,17 @@ index 111..222 100644\n\
 
     #[test]
     fn computes_the_view_without_touching_store_or_renderer() {
-        let handler = ComputeDiffHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                upstream: Some("origin/main".into()),
-                commits: vec![one_commit()],
-                diff_output: SINGLE_FILE_DIFF.into(),
-                ..Default::default()
-            },
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![one_commit()],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            ..Default::default()
         };
 
-        let response = handler
-            .send_now(req(DiffTarget::Unpushed { pinned: None }))
-            .expect("compute succeeds");
+        let response =
+            execute(req(DiffTarget::Unpushed { pinned: None }), &source).expect("compute succeeds");
 
         assert_eq!(response.view.repo_name, "repo");
         assert_eq!(response.view.branch, "feature");
@@ -118,39 +115,33 @@ index 111..222 100644\n\
 
     #[test]
     fn empty_range_returns_an_empty_view_not_an_error() {
-        let handler = ComputeDiffHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                upstream: Some("origin/main".into()),
-                ..Default::default()
-            },
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            ..Default::default()
         };
 
-        let response = handler
-            .send_now(req(DiffTarget::Unpushed { pinned: None }))
-            .expect("compute succeeds");
+        let response =
+            execute(req(DiffTarget::Unpushed { pinned: None }), &source).expect("compute succeeds");
 
         assert!(response.view.is_empty());
     }
 
     #[test]
     fn no_upstream_falls_back_to_main_with_the_warning_note() {
-        let handler = ComputeDiffHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                upstream: None,
-                known_revs: vec!["main".into()],
-                commits: vec![one_commit()],
-                diff_output: SINGLE_FILE_DIFF.into(),
-                ..Default::default()
-            },
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: None,
+            known_revs: vec!["main".into()],
+            commits: vec![one_commit()],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            ..Default::default()
         };
 
-        let response = handler
-            .send_now(req(DiffTarget::Unpushed { pinned: None }))
-            .expect("compute succeeds");
+        let response =
+            execute(req(DiffTarget::Unpushed { pinned: None }), &source).expect("compute succeeds");
 
         assert_eq!(
             response.notes,
@@ -162,22 +153,22 @@ index 111..222 100644\n\
 
     #[test]
     fn pinned_unpushed_computes_without_an_upstream_and_without_the_fallback_note() {
-        let handler = ComputeDiffHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                upstream: None, // would warn-and-fallback (or error) symbolically
-                commits: vec![one_commit()],
-                diff_output: SINGLE_FILE_DIFF.into(),
-                ..Default::default()
-            },
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: None, // would warn-and-fallback (or error) symbolically
+            commits: vec![one_commit()],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            ..Default::default()
         };
 
-        let response = handler
-            .send_now(req(DiffTarget::Unpushed {
+        let response = execute(
+            req(DiffTarget::Unpushed {
                 pinned: Some(pin()),
-            }))
-            .expect("pinned compute succeeds");
+            }),
+            &source,
+        )
+        .expect("pinned compute succeeds");
 
         assert!(
             response.notes.is_empty(),
@@ -192,23 +183,23 @@ index 111..222 100644\n\
 
     #[test]
     fn pinned_merge_target_skips_symbolic_verification() {
-        let handler = ComputeDiffHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                known_revs: vec![], // symbolic verify_commit("main") would error
-                commits: vec![one_commit()],
-                diff_output: SINGLE_FILE_DIFF.into(),
-                ..Default::default()
-            },
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            known_revs: vec![], // symbolic verify_commit("main") would error
+            commits: vec![one_commit()],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            ..Default::default()
         };
 
-        let response = handler
-            .send_now(req(DiffTarget::Merge {
+        let response = execute(
+            req(DiffTarget::Merge {
                 base: "main".into(),
                 pinned: Some(pin()),
-            }))
-            .expect("pinned merge computes");
+            }),
+            &source,
+        )
+        .expect("pinned merge computes");
 
         assert_eq!(response.view.title, "merge-diff");
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
@@ -217,23 +208,23 @@ index 111..222 100644\n\
 
     #[test]
     fn pinned_range_target_computes_over_the_pin_with_exact_range_labels() {
-        let handler = ComputeDiffHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                known_revs: vec![], // symbolic verify_exact_range would error
-                commits: vec![one_commit()],
-                diff_output: SINGLE_FILE_DIFF.into(),
-                ..Default::default()
-            },
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            known_revs: vec![], // symbolic verify_exact_range would error
+            commits: vec![one_commit()],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            ..Default::default()
         };
 
-        let response = handler
-            .send_now(req(DiffTarget::Range {
+        let response = execute(
+            req(DiffTarget::Range {
                 range: "a..b".into(),
                 pinned: Some(pin()),
-            }))
-            .expect("pinned range computes");
+            }),
+            &source,
+        )
+        .expect("pinned range computes");
 
         assert!(response.notes.is_empty());
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
@@ -242,17 +233,14 @@ index 111..222 100644\n\
 
     #[test]
     fn unknown_base_is_an_error() {
-        let handler = ComputeDiffHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                known_revs: vec![],
-                ..Default::default()
-            },
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            known_revs: vec![],
+            ..Default::default()
         };
 
-        let error = handler
-            .send_now(req(DiffTarget::Base("nope".into())))
+        let error = execute(req(DiffTarget::Base("nope".into())), &source)
             .expect_err("unknown base errors");
 
         let ComputeDiffError::Unexpected(err) = error;

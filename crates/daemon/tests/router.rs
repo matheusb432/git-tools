@@ -1,16 +1,11 @@
-//! Router-level tests: drive the daemon's HTTP surface through `tower::oneshot`
-//! with application fakes, asserting the lifecycle contract's status codes and
-//! envelope shapes without binding a real socket.
+//! Router-level tests exercising the concrete daemon state through real temporary boundaries.
 
-use std::sync::{Arc, atomic::AtomicU64};
-
-use application::{
-    ports::RepoProbeResult,
-    testing::{
-        FakeDiffSource, FakeManagedManifest, FakePushLedger, FakeRemoteSync, FakeRepoProbe,
-        FixedClock, InMemoryAppStateStore, InMemoryArtifactStore, StubRenderer,
-    },
+use std::{
+    path::Path,
+    process::Command,
+    sync::{Arc, atomic::AtomicU64},
 };
+
 use axum::{
     Router,
     body::Body,
@@ -18,129 +13,140 @@ use axum::{
 };
 use daemon::{
     lifecycle::ExeIdentity,
-    state::{AppState, DaemonDependencies, DaemonMediator, Shared, now_ms},
+    state::{DaemonState, Shared, now_ms},
 };
 use http_body_util::BodyExt as _;
+use serde_json::{Value, json};
+use tempfile::TempDir;
 use tokio::sync::watch;
 use tower::ServiceExt as _;
 
-const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
-index 111..222 100644\n\
---- a/f.txt\n\
-+++ b/f.txt\n\
-@@ -1,2 +1,3 @@\n\
- keep\n\
--old line\n\
-+new line\n\
-+extra line\n";
-
-type Fakes = (Router, watch::Receiver<bool>, Arc<Shared>);
-
-fn app_with(source: FakeDiffSource) -> Fakes {
-    app_with_probe(source, FakeRepoProbe::default())
+struct Fixture {
+    _temp: TempDir,
+    app: Router,
+    shutdown_rx: watch::Receiver<bool>,
+    shared: Arc<Shared>,
+    repo: std::path::PathBuf,
+    store: std::path::PathBuf,
+    data: std::path::PathBuf,
+    manifest: std::path::PathBuf,
 }
 
-/// Like [`app_with`], but with a scripted [`FakeRepoProbe`] for tests that drive
-/// `/live-views/save`.
-fn app_with_probe(source: FakeDiffSource, probe: FakeRepoProbe) -> Fakes {
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let shared = Arc::new(Shared {
-        identity: ExeIdentity {
-            exe_len: 4242,
-            exe_modified_ms: 111,
-        },
-        version: "9.9.9",
-        pid: 4242,
-        shutdown_tx,
-        last_activity_ms: AtomicU64::new(now_ms()),
-    });
-    let dependencies = DaemonDependencies {
-        source,
-        artifacts: InMemoryArtifactStore::default(),
-        renderer: StubRenderer,
-        clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        remote: FakeRemoteSync::default(),
-        manifest: FakeManagedManifest {
-            repos: Vec::new(),
-            error: None,
-        },
-        ledger: FakePushLedger::default(),
-        probe,
-        app_state: InMemoryAppStateStore::default(),
-    };
-    let mediator = DaemonMediator::new(&dependencies);
-    let router = daemon::state::router(AppState {
-        mediator,
-        shared: shared.clone(),
-    });
-    (router, shutdown_rx, shared)
-}
+impl Fixture {
+    fn new(with_feature_commit: bool) -> Self {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let repo = temp.path().join("repo");
+        let store = temp.path().join("store");
+        let data = temp.path().join("data");
+        let manifest = temp.path().join("repos.toml");
+        std::fs::create_dir_all(&repo).expect("repo dir");
+        init_repo(&repo, with_feature_commit);
 
-fn app_with_managed(remote: FakeRemoteSync, manifest: FakeManagedManifest) -> Fakes {
-    let (shutdown_tx, shutdown_rx) = watch::channel(false);
-    let shared = Arc::new(Shared {
-        identity: ExeIdentity {
-            exe_len: 4242,
-            exe_modified_ms: 111,
-        },
-        version: "9.9.9",
-        pid: 4242,
-        shutdown_tx,
-        last_activity_ms: AtomicU64::new(now_ms()),
-    });
-    let dependencies = DaemonDependencies {
-        source: FakeDiffSource::default(),
-        artifacts: InMemoryArtifactStore::default(),
-        renderer: StubRenderer,
-        clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        remote,
-        manifest,
-        ledger: FakePushLedger::default(),
-        probe: FakeRepoProbe::default(),
-        app_state: InMemoryAppStateStore::default(),
-    };
-    let mediator = DaemonMediator::new(&dependencies);
-    let router = daemon::state::router(AppState {
-        mediator,
-        shared: shared.clone(),
-    });
-    (router, shutdown_rx, shared)
-}
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let shared = Arc::new(Shared {
+            identity: ExeIdentity {
+                exe_len: 4242,
+                exe_modified_ms: 111,
+            },
+            version: "9.9.9",
+            pid: 4242,
+            shutdown_tx,
+            last_activity_ms: AtomicU64::new(now_ms()),
+        });
+        let app = daemon::state::router(DaemonState::new(shared.clone()));
+        Self {
+            _temp: temp,
+            app,
+            shutdown_rx,
+            shared,
+            repo,
+            store,
+            data,
+            manifest,
+        }
+    }
 
-/// A scripted happy-path diff source (mirrors the `render_diff` slice's happy test).
-fn happy_source() -> FakeDiffSource {
-    FakeDiffSource {
-        top_level: Some("/repo".into()),
-        branch: "feature".into(),
-        upstream: Some("origin/main".into()),
-        commits: vec![domain::diffs::Commit {
-            sha: "abc1234".into(),
-            subject: "feat: work".into(),
-            ..Default::default()
-        }],
-        diff_output: SINGLE_FILE_DIFF.into(),
-        committed_at: "2026-07-02".into(),
-        ..Default::default()
+    async fn post(&self, uri: &str, body: Value) -> axum::response::Response {
+        post(self.app.clone(), uri, &body.to_string()).await
     }
 }
 
-async fn body_json(response: axum::response::Response) -> serde_json::Value {
-    let bytes = response.into_body().collect().await.unwrap().to_bytes();
-    serde_json::from_slice(&bytes).unwrap()
+fn init_repo(repo: &Path, with_feature_commit: bool) {
+    git(repo, &["init", "-q", "-b", "main"]);
+    git(repo, &["config", "user.email", "test@example.com"]);
+    git(repo, &["config", "user.name", "Test User"]);
+    std::fs::write(repo.join("f.txt"), "base\n").expect("base file");
+    git(repo, &["add", "f.txt"]);
+    git(repo, &["commit", "-qm", "initial"]);
+    git(repo, &["switch", "-qc", "feature"]);
+    if with_feature_commit {
+        std::fs::write(repo.join("f.txt"), "feature\n").expect("feature file");
+        git(repo, &["add", "f.txt"]);
+        git(repo, &["commit", "-qm", "feature"]);
+    }
+    git(repo, &["branch", "--set-upstream-to=main", "feature"]);
+}
+
+fn git(repo: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(repo)
+        .output()
+        .expect("run git");
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+async fn post(app: Router, uri: &str, body: &str) -> axum::response::Response {
+    app.oneshot(
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request"),
+    )
+    .await
+    .expect("response")
+}
+
+async fn body_json(response: axum::response::Response) -> Value {
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    serde_json::from_slice(&bytes).expect("json body")
+}
+
+fn assert_ok_artifact(json: &Value) {
+    assert_eq!(json["outcome"], "ok");
+    let artifact = json["data"]["artifact"].as_str().expect("artifact path");
+    assert!(!artifact.is_empty());
+    assert!(
+        Path::new(artifact).is_file(),
+        "artifact should exist: {artifact}"
+    );
 }
 
 #[tokio::test]
 async fn health_returns_startup_identity() {
-    let (app, _rx, _shared) = app_with(FakeDiffSource::default());
-    let response = app
+    let fixture = Fixture::new(false);
+    let response = fixture
+        .app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/health")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("request"),
         )
         .await
-        .unwrap();
+        .expect("response");
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
@@ -151,42 +157,40 @@ async fn health_returns_startup_identity() {
 
 #[tokio::test]
 async fn shutdown_returns_202_and_flips_the_watch() {
-    let (app, mut rx, _shared) = app_with(FakeDiffSource::default());
-    assert!(!*rx.borrow());
+    let mut fixture = Fixture::new(false);
+    assert!(!*fixture.shutdown_rx.borrow());
 
-    let response = app
+    let response = fixture
+        .app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri("/shutdown")
                 .body(Body::empty())
-                .unwrap(),
+                .expect("request"),
         )
         .await
-        .unwrap();
+        .expect("response");
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
-    rx.changed().await.unwrap();
-    assert!(*rx.borrow());
+    fixture
+        .shutdown_rx
+        .changed()
+        .await
+        .expect("shutdown change");
+    assert!(*fixture.shutdown_rx.borrow());
 }
 
 #[tokio::test]
 async fn render_with_a_bad_target_is_a_400_error_envelope() {
-    let (app, _rx, _shared) = app_with(FakeDiffSource::default());
-    // A `last` count of zero cannot map to a NonZeroU32 target.
-    let body = r#"{"cwd":"/x","store_root":"/y","target":{"kind":"last","count":0}}"#;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/diffs/render")
-                .header("content-type", "application/json")
-                .body(Body::from(body))
-                .unwrap(),
+    let fixture = Fixture::new(false);
+    let response = fixture
+        .post(
+            "/diffs/render",
+            json!({"cwd": fixture.repo, "store_root": fixture.store, "target": {"kind": "last", "count": 0}}),
         )
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = body_json(response).await;
@@ -196,170 +200,105 @@ async fn render_with_a_bad_target_is_a_400_error_envelope() {
 
 #[tokio::test]
 async fn render_against_a_non_repo_is_a_500_error_envelope() {
-    // top_level: None ⇒ the diff source reports "not a git repository".
-    let (app, _rx, _shared) = app_with(FakeDiffSource::default());
-    let body = r#"{"cwd":"/x","store_root":"/y","target":{"kind":"unpushed"}}"#;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/diffs/render")
-                .header("content-type", "application/json")
-                .body(Body::from(body))
-                .unwrap(),
+    let fixture = Fixture::new(false);
+    let response = fixture
+        .post(
+            "/diffs/render",
+            json!({"cwd": fixture.store, "store_root": fixture.store, "target": {"kind": "unpushed"}}),
         )
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let json = body_json(response).await;
     assert_eq!(json["outcome"], "error");
-    let notes = json["notes"].as_array().unwrap();
-    assert_eq!(notes.len(), 1);
-    assert_eq!(notes[0]["level"], "error");
+    assert_eq!(json["notes"][0]["level"], "error");
 }
 
 #[tokio::test]
 async fn render_happy_path_is_a_200_ok_envelope_with_artifact_and_notes() {
-    let (app, _rx, _shared) = app_with(happy_source());
-    let body = r#"{"cwd":"/repo","store_root":"/store","target":{"kind":"unpushed"}}"#;
-
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/diffs/render")
-                .header("content-type", "application/json")
-                .body(Body::from(body))
-                .unwrap(),
+    let fixture = Fixture::new(true);
+    let response = fixture
+        .post(
+            "/diffs/render",
+            json!({"cwd": fixture.repo, "store_root": fixture.store, "target": {"kind": "unpushed"}}),
         )
-        .await
-        .unwrap();
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
-    assert_eq!(json["outcome"], "ok");
-    assert!(
-        !json["data"]["artifact"].as_str().unwrap().is_empty(),
-        "artifact path must be non-empty"
-    );
-    let notes = json["notes"].as_array().unwrap();
-    assert!(
-        notes
-            .iter()
-            .any(|n| n["text"].as_str().unwrap().contains("diff-preview:")),
-        "notes must carry the diff-preview summary line: {notes:?}"
-    );
-}
-
-/// A scripted happy-path source for the merge-diff endpoint: unlike
-/// [`happy_source`], `render_merge_diff` calls `verify_commit` against the
-/// (default) base, so `known_revs` must list it.
-fn merge_happy_source() -> FakeDiffSource {
-    FakeDiffSource {
-        top_level: Some("/repo".into()),
-        branch: "feature".into(),
-        known_revs: vec!["main".into()],
-        commits: vec![domain::diffs::Commit {
-            sha: "abc1234".into(),
-            subject: "feat: work".into(),
-            ..Default::default()
-        }],
-        diff_output: SINGLE_FILE_DIFF.into(),
-        committed_at: "2026-07-02".into(),
-        ..Default::default()
-    }
-}
-
-async fn post(app: Router, uri: &str, body: &str) -> axum::response::Response {
-    app.oneshot(
-        Request::builder()
-            .method("POST")
-            .uri(uri)
-            .header("content-type", "application/json")
-            .body(Body::from(body.to_string()))
-            .unwrap(),
-    )
-    .await
-    .unwrap()
+    assert_ok_artifact(&json);
+    assert!(json["notes"].as_array().expect("notes").iter().any(|note| {
+        note["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("diff-preview:"))
+    }));
 }
 
 #[tokio::test]
 async fn merge_happy_path_is_a_200_ok_envelope_with_artifact() {
-    let (app, _rx, _shared) = app_with(merge_happy_source());
-    let body = r#"{"cwd":"/repo","store_root":"/store"}"#;
-
-    let response = post(app, "/diffs/merge", body).await;
+    let fixture = Fixture::new(true);
+    let response = fixture
+        .post(
+            "/diffs/merge",
+            json!({"cwd": fixture.repo, "store_root": fixture.store}),
+        )
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "ok");
-    assert!(
-        !json["data"]["artifact"].as_str().unwrap().is_empty(),
-        "artifact path must be non-empty"
-    );
+    assert_ok_artifact(&body_json(response).await);
 }
 
 #[tokio::test]
 async fn squash_preview_happy_path_is_a_200_ok_envelope_with_artifact() {
-    let (app, _rx, _shared) = app_with(happy_source());
-    let body = r#"{"cwd":"/repo","store_root":"/store"}"#;
-
-    let response = post(app, "/diffs/squash-preview", body).await;
+    let fixture = Fixture::new(true);
+    let response = fixture
+        .post(
+            "/diffs/squash-preview",
+            json!({"cwd": fixture.repo, "store_root": fixture.store}),
+        )
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "ok");
-    assert!(
-        !json["data"]["artifact"].as_str().unwrap().is_empty(),
-        "artifact path must be non-empty"
-    );
+    assert_ok_artifact(&body_json(response).await);
 }
 
 #[tokio::test]
 async fn all_happy_path_is_a_200_ok_envelope_with_artifact() {
-    let (app, _rx, _shared) = app_with(happy_source());
-    let body = r#"{"store_root":"/store","root":"/scan-root","repos":[{"top":"/repo-a","label":"repo-a"}]}"#;
-
-    let response = post(app, "/diffs/all", body).await;
+    let fixture = Fixture::new(true);
+    let response = fixture
+        .post(
+            "/diffs/all",
+            json!({"store_root": fixture.store, "root": fixture.repo, "repos": [{"top": fixture.repo, "label": "repo"}]}),
+        )
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "ok");
-    assert!(
-        !json["data"]["artifact"].as_str().unwrap().is_empty(),
-        "artifact path must be non-empty"
-    );
+    assert_ok_artifact(&body_json(response).await);
 }
 
 #[tokio::test]
 async fn subrepos_happy_path_is_a_200_ok_envelope_with_artifact() {
-    let (app, _rx, _shared) = app_with(happy_source());
-    let body = r#"{"store_root":"/store","root":"/scan-root","target":{"kind":"unpushed"},"repos":[{"top":"/repo-a","label":"repo-a"}]}"#;
-
-    let response = post(app, "/diffs/subrepos", body).await;
+    let fixture = Fixture::new(true);
+    let response = fixture
+        .post(
+            "/diffs/subrepos",
+            json!({"store_root": fixture.store, "root": fixture.repo, "target": {"kind": "unpushed"}, "repos": [{"top": fixture.repo, "label": "repo"}]}),
+        )
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "ok");
-    assert!(
-        !json["data"]["artifact"].as_str().unwrap().is_empty(),
-        "artifact path must be non-empty"
-    );
+    assert_ok_artifact(&body_json(response).await);
 }
 
 #[tokio::test]
 async fn subrepos_with_nothing_to_show_is_a_200_empty_envelope() {
-    // Every field defaults empty: no commits, no diff — every repo's view is
-    // empty, so the batch skips it and nothing gets rendered.
-    let (app, _rx, _shared) = app_with(FakeDiffSource {
-        upstream: Some("origin/main".into()),
-        ..Default::default()
-    });
-    let body = r#"{"store_root":"/store","root":"/scan-root","target":{"kind":"unpushed"},"repos":[{"top":"/repo-a","label":"repo-a"}]}"#;
-
-    let response = post(app, "/diffs/subrepos", body).await;
+    let fixture = Fixture::new(false);
+    let response = fixture
+        .post(
+            "/diffs/subrepos",
+            json!({"store_root": fixture.store, "root": fixture.repo, "target": {"kind": "unpushed"}, "repos": [{"top": fixture.repo, "label": "repo"}]}),
+        )
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
@@ -367,89 +306,62 @@ async fn subrepos_with_nothing_to_show_is_a_200_empty_envelope() {
     assert!(json["data"].is_null());
 }
 
-#[tokio::test]
-async fn managed_push_all_happy_path_is_a_200_ok_envelope_with_one_result() {
-    let manifest = FakeManagedManifest {
-        repos: vec![domain::managed::ManagedRepo {
-            name: "repo".into(),
-            path: "/repos/repo".into(),
-            remote: String::new(),
-        }],
-        error: None,
-    };
-    let remote = FakeRemoteSync {
-        present: false, // "skip" path — no real subprocess needed for a router test
-        ..Default::default()
-    };
-    let (app, _rx, _shared) = app_with_managed(remote, manifest);
-    let body = r#"{"repos_file":"/repos.toml","home_dir":"/home","dry":false}"#;
-
-    let response = post(app, "/managed/push-all", body).await;
+async fn assert_managed_skip(uri: &str) {
+    let fixture = Fixture::new(false);
+    std::fs::write(&fixture.manifest, "[[repo]]\npath = 'missing'\n").expect("manifest");
+    let response = fixture
+        .post(
+            uri,
+            json!({"repos_file": fixture.manifest, "home_dir": fixture.data, "dry": false}),
+        )
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
     assert_eq!(json["outcome"], "ok");
-    let results = json["data"]["results"].as_array().unwrap();
+    let results = json["data"]["results"].as_array().expect("results");
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["Status"], "skip");
+}
+
+#[tokio::test]
+async fn managed_push_all_happy_path_is_a_200_ok_envelope_with_one_result() {
+    assert_managed_skip("/managed/push-all").await;
 }
 
 #[tokio::test]
 async fn managed_pull_all_happy_path_is_a_200_ok_envelope_with_one_result() {
-    let manifest = FakeManagedManifest {
-        repos: vec![domain::managed::ManagedRepo {
-            name: "repo".into(),
-            path: "/repos/repo".into(),
-            remote: String::new(),
-        }],
-        error: None,
-    };
-    let remote = FakeRemoteSync {
-        present: false,
-        ..Default::default()
-    };
-    let (app, _rx, _shared) = app_with_managed(remote, manifest);
-    let body = r#"{"repos_file":"/repos.toml","home_dir":"/home","dry":false}"#;
-
-    let response = post(app, "/managed/pull-all", body).await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "ok");
-    let results = json["data"]["results"].as_array().unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["Status"], "skip");
+    assert_managed_skip("/managed/pull-all").await;
 }
 
 #[tokio::test]
 async fn live_view_save_happy_path_is_a_200_ok_envelope() {
-    let probe = FakeRepoProbe {
-        result: RepoProbeResult::Repo {
-            top_level: "/repos/gt".into(),
-        },
-    };
-    let (app, _rx, _shared) = app_with_probe(FakeDiffSource::default(), probe);
-    let body = r#"{"data_root":"/data","path":"/repos/gt"}"#;
-
-    let response = post(app, "/live-views/save", body).await;
+    let fixture = Fixture::new(false);
+    let response = fixture
+        .post(
+            "/live-views/save",
+            json!({"data_root": fixture.data, "path": fixture.repo}),
+        )
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
     assert_eq!(json["outcome"], "ok");
     assert_eq!(json["data"]["source_kind"], "LocalRepo");
-    assert_eq!(json["data"]["display_name"], "gt");
+    assert_eq!(json["data"]["display_name"], "repo");
     assert_eq!(json["data"]["already_saved"], false);
 }
 
 #[tokio::test]
 async fn live_view_save_rejection_is_a_200_error_envelope_with_the_exact_message() {
-    let probe = FakeRepoProbe {
-        result: RepoProbeResult::NotFound,
-    };
-    let (app, _rx, _shared) = app_with_probe(FakeDiffSource::default(), probe);
-    let body = r#"{"data_root":"/data","path":"/gone"}"#;
-
-    let response = post(app, "/live-views/save", body).await;
+    let fixture = Fixture::new(false);
+    let gone = fixture.data.join("gone");
+    let response = fixture
+        .post(
+            "/live-views/save",
+            json!({"data_root": fixture.data, "path": gone}),
+        )
+        .await;
 
     assert_eq!(response.status(), StatusCode::OK);
     let json = body_json(response).await;
@@ -458,15 +370,18 @@ async fn live_view_save_rejection_is_a_200_error_envelope_with_the_exact_message
     assert_eq!(json["notes"][0]["level"], "warn");
     assert_eq!(
         json["notes"][0]["text"],
-        "The git repo's directory at `/gone` was not found."
+        format!(
+            "The git repo's directory at `{}` was not found.",
+            gone.display()
+        )
     );
 }
 
 #[tokio::test]
 async fn live_view_save_with_a_malformed_body_is_a_400() {
-    let (app, _rx, _shared) = app_with(FakeDiffSource::default());
-
-    let response = post(app, "/live-views/save", "not json").await;
+    let fixture = Fixture::new(false);
+    let response = post(fixture.app, "/live-views/save", "not json").await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(fixture.shared.pid, 4242);
 }

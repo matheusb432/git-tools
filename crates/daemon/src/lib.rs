@@ -11,12 +11,7 @@ use std::{
     time::Duration,
 };
 
-use infra::{
-    app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
-    diff_source::GitDiffSource, html_renderer::MaudRenderer,
-    managed_manifest::TokioManagedManifest, push_ledger::NoOpPushLedger,
-    remote_sync::TokioRemoteSync, repo_probe::GitRepoProbe,
-};
+use infra::push_ledger::NoOpPushLedger;
 use tokio::{
     io::{AsyncReadExt as _, AsyncWriteExt as _},
     sync::watch,
@@ -24,7 +19,7 @@ use tokio::{
 
 use crate::{
     lifecycle::{ExeIdentity, PortFile},
-    state::{AppState, DaemonDependencies, DaemonMediator, Shared, now_ms},
+    state::{DaemonState, Shared, now_ms},
 };
 
 /// Boot and serve the daemon until a shutdown signal, `POST /shutdown`, or the
@@ -73,19 +68,7 @@ pub async fn run() -> anyhow::Result<()> {
     let ledger_refresh_secs: u64 = bootstrap::parse_env_or("GIT_TOOLS_LEDGER_REFRESH_SECS", 0)?;
     spawn_ledger_refresh(ledger, ledger_refresh_secs);
 
-    let dependencies = DaemonDependencies {
-        source: GitDiffSource,
-        artifacts: StoreArtifacts,
-        renderer: MaudRenderer,
-        clock: SystemClock,
-        remote: TokioRemoteSync,
-        manifest: TokioManagedManifest,
-        ledger,
-        probe: GitRepoProbe,
-        app_state: SqliteAppState,
-    };
-    let mediator = DaemonMediator::new(&dependencies);
-    let app = state::router(AppState { mediator, shared });
+    let app = state::router(DaemonState::new(shared));
 
     tracing::info!(port = bound, "gtl-daemon listening on 127.0.0.1");
     let graceful = async move {

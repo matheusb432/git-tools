@@ -14,35 +14,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
-use application::{
-    diffs::{
-        compute_diff::{ComputeDiff, ComputeDiffHandler},
-        compute_merge_diff::{ComputeMergeDiff, ComputeMergeDiffHandler},
-        compute_squash_preview::{ComputeSquashPreview, ComputeSquashPreviewHandler},
-    },
-    history::{
-        list_recent::{
-            GetRecentRender, GetRecentRenderHandler, ListRecentRenders, ListRecentRendersHandler,
-        },
-        record_render::{RecordRender, RecordRenderHandler},
-    },
-    live_views::{
-        list::{ListLiveViews, ListLiveViewsHandler},
-        probe::{ProbeSource, ProbeSourceHandler},
-        remove::{RemoveLiveView, RemoveLiveViewHandler},
-        save::{SaveLiveView, SaveLiveViewHandler},
-    },
-    ports::{AppStateStore, Clock, DiffSource, RepoProbe},
-    settings::{
-        get::{GetSetting, GetSettingHandler},
-        set::{SetSetting, SetSettingHandler},
-    },
-};
 use gtl_recipe::{OpenRecipes, decode_token};
-use infra::{
-    app_state::SqliteAppState, clock::SystemClock, diff_source::GitDiffSource,
-    repo_probe::GitRepoProbe,
-};
 use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
     menu::{Menu, MenuItem},
@@ -50,75 +22,6 @@ use tauri::{
 };
 
 use crate::session::{PendingRecipes, PendingRecipesError};
-
-/// Owns the operation dependencies assembled by the desktop process root.
-pub(crate) struct DesktopDependencies<C, P, AS, S> {
-    clock: C,
-    probe: P,
-    app_state: AS,
-    source: S,
-}
-
-cqrsy::mediator! {
-    /// Dispatches every viewer operation through its generated handler.
-    #[derive(Clone)]
-    pub(crate) struct DesktopMediator<C, P, AS, S> from DesktopDependencies<C, P, AS, S>
-    where
-        C: Clock + cqrsy::Handle,
-        P: RepoProbe + cqrsy::Handle,
-        AS: AppStateStore + cqrsy::Handle,
-        S: DiffSource + cqrsy::Handle,
-    {
-        state {}
-        handlers {
-            ComputeDiff => compute_diff: ComputeDiffHandler<S> = |state| ComputeDiffHandler {
-                source: state.source.clone(),
-            },
-            ComputeMergeDiff => compute_merge_diff: ComputeMergeDiffHandler<S> = |state| ComputeMergeDiffHandler {
-                source: state.source.clone(),
-            },
-            ComputeSquashPreview => compute_squash_preview: ComputeSquashPreviewHandler<S> = |state| ComputeSquashPreviewHandler {
-                source: state.source.clone(),
-            },
-            ListLiveViews => list_live_views: ListLiveViewsHandler<AS> = |state| ListLiveViewsHandler {
-                store: state.app_state.clone(),
-            },
-            ListRecentRenders => list_recent_renders: ListRecentRendersHandler<AS> = |state| ListRecentRendersHandler {
-                store: state.app_state.clone(),
-            },
-            GetRecentRender => get_recent_render: GetRecentRenderHandler<AS> = |state| GetRecentRenderHandler {
-                store: state.app_state.clone(),
-            },
-            SaveLiveView => save_live_view: SaveLiveViewHandler<P, AS, C> = |state| SaveLiveViewHandler {
-                probe: state.probe.clone(),
-                store: state.app_state.clone(),
-                clock: state.clock.clone(),
-            },
-            ProbeSource => probe_source: ProbeSourceHandler<P> = |state| ProbeSourceHandler {
-                probe: state.probe.clone(),
-            },
-            RemoveLiveView => remove_live_view: RemoveLiveViewHandler<AS> = |state| RemoveLiveViewHandler {
-                store: state.app_state.clone(),
-            },
-            GetSetting => get_setting: GetSettingHandler<AS> = |state| GetSettingHandler {
-                store: state.app_state.clone(),
-            },
-            SetSetting => set_setting: SetSettingHandler<AS> = |state| SetSettingHandler {
-                store: state.app_state.clone(),
-            },
-            RecordRender => record_render: RecordRenderHandler<AS, C> = |state| RecordRenderHandler {
-                store: state.app_state.clone(),
-                clock: state.clock.clone(),
-            },
-        }
-    }
-}
-
-/// The production wiring: real adapters end to end (the daemon's adapters plus
-/// the `SQLite` app-state store).
-pub(crate) type WiredMediator =
-    DesktopMediator<SystemClock, GitRepoProbe, SqliteAppState, GitDiffSource>;
-pub(crate) type WiredViewerApp = routes::ViewerApp<WiredMediator>;
 
 const DEFAULT_VIEW_CACHE_WEIGHT: usize = 128 * 1024 * 1024;
 const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
@@ -245,15 +148,6 @@ fn forward_recipes<E>(
     result.map(|_| ())
 }
 
-fn wired_mediator() -> WiredMediator {
-    DesktopMediator::new(&DesktopDependencies {
-        clock: SystemClock,
-        probe: GitRepoProbe,
-        app_state: SqliteAppState,
-        source: GitDiffSource,
-    })
-}
-
 /// Brings the main window to the foreground — even over a focused fullscreen app.
 ///
 /// `set_focus` alone is enough when no other window is fullscreen, but under
@@ -360,17 +254,15 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
 /// Panics when the Tauri runtime fails to build or start (no display, broken
 /// webview install) — fatal for a desktop app, so it surfaces as a crash.
 pub fn run() {
-    let mediator = wired_mediator();
     let data_root = commands::data_root().expect("viewer data root resolves");
-    let viewer_app = WiredViewerApp::new(mediator.clone(), data_root, DEFAULT_VIEW_CACHE_WEIGHT);
+    let viewer_app = routes::ViewerApp::new(data_root, DEFAULT_VIEW_CACHE_WEIGHT);
     let cold_start_batches = recipes_from_argv(&std::env::args().collect::<Vec<_>>());
     tauri::Builder::default()
-        .manage(mediator)
         .manage(viewer_app)
         .manage(MainWindowLifecycle::default())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let batches = recipes_from_argv(&argv);
-            let viewer = app.state::<WiredViewerApp>();
+            let viewer = app.state::<routes::ViewerApp>();
             let window = app.get_webview_window("main");
             if let Err(error) = forward_recipes(
                 viewer.pending(),
@@ -388,16 +280,21 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol(
             protocol_config::PROTOCOL_SCHEME,
             |ctx, request, responder| {
-                let app = ctx.app_handle().state::<WiredViewerApp>().inner().clone();
+                let app = ctx
+                    .app_handle()
+                    .state::<routes::ViewerApp>()
+                    .inner()
+                    .clone();
                 tauri::async_runtime::spawn_blocking(move || {
                     responder.respond(routes::serve_app(&app, request));
                 });
             },
         )
         .setup(move |app| {
-            if let Err(error) =
-                enqueue_batches(app.state::<WiredViewerApp>().pending(), cold_start_batches)
-            {
+            if let Err(error) = enqueue_batches(
+                app.state::<routes::ViewerApp>().pending(),
+                cold_start_batches,
+            ) {
                 eprintln!("gtl-viewer: failed to enqueue cold-start recipes: {error}");
             }
             let app_url = protocol_config::APP_URL
@@ -433,45 +330,6 @@ pub fn run() {
         .on_window_event(handle_window_event)
         .run(tauri::generate_context!())
         .expect("error while running gtl-viewer");
-}
-
-#[cfg(test)]
-pub(crate) mod test_support {
-    use application::testing::{FakeDiffSource, FakeRepoProbe, FixedClock, InMemoryAppStateStore};
-
-    use super::*;
-
-    pub(crate) type FakeMediator =
-        DesktopMediator<FixedClock, FakeRepoProbe, InMemoryAppStateStore, FakeDiffSource>;
-
-    pub(crate) fn fake_mediator() -> FakeMediator {
-        fake_mediator_parts(
-            FakeDiffSource::default(),
-            InMemoryAppStateStore::default(),
-            FakeRepoProbe::default(),
-        )
-    }
-
-    pub(crate) fn fake_mediator_with(
-        source: FakeDiffSource,
-        app_state: InMemoryAppStateStore,
-        probe: FakeRepoProbe,
-    ) -> FakeMediator {
-        fake_mediator_parts(source, app_state, probe)
-    }
-
-    fn fake_mediator_parts(
-        source: FakeDiffSource,
-        app_state: InMemoryAppStateStore,
-        probe: FakeRepoProbe,
-    ) -> FakeMediator {
-        DesktopMediator::new(&DesktopDependencies {
-            clock: FixedClock("2026-07-07T00:00:00Z".into()),
-            probe,
-            app_state,
-            source,
-        })
-    }
 }
 
 #[cfg(test)]

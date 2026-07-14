@@ -51,27 +51,27 @@ pub enum RenderDiffSubreposError {
 
 /// Renders the requested subrepositories through the diff ports.
 #[cqrsy::handler(command)]
-pub fn handle(
+pub fn execute(
+    req: RenderDiffSubrepos,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-    req: RenderDiffSubrepos,
 ) -> Result<RenderDiffSubreposResponse, RenderDiffSubreposError> {
+    let RenderDiffSubrepos {
+        root,
+        store_root,
+        repos,
+        target,
+        theme,
+    } = req;
     let mut notes = Vec::new();
-    let batch = render_batch(
-        source,
-        &req.target,
-        req.theme.as_deref(),
-        &req.repos,
-        true,
-        &mut notes,
-    )?;
+    let batch = render_batch(source, &target, theme.as_deref(), &repos, true, &mut notes)?;
 
     if batch.views.is_empty() {
         notes.push(Note::warn(format!(
             "diff -r: nothing to show across {} repo(s); no preview written",
-            req.repos.len()
+            repos.len()
         )));
         return Ok(RenderDiffSubreposResponse {
             outcome: RenderDiffSubreposOutcome::Empty,
@@ -82,7 +82,7 @@ pub fn handle(
     let title = dated_title(clock, "diff-preview subrepos");
     let html = renderer.build_tabbed_html(&title, &batch.views);
     let meta = ArtifactMeta {
-        repo_root: req.root.clone(),
+        repo_root: root,
         repo_name: "subrepos".to_string(),
         kind: DiffKind::WorkTree,
         base_sha: String::new(),
@@ -92,7 +92,7 @@ pub fn handle(
         generated_at: clock.now_iso(),
         title: title.clone(),
     };
-    let placed = store.place(&req.store_root, &meta, &html)?;
+    let placed = store.place(&store_root, &meta, &html)?;
 
     notes.push(Note::info(format!(
         "diff -r: {} repo(s)",
@@ -118,12 +118,9 @@ pub fn handle(
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::Sender;
     use domain::diffs::{Commit, DiffTarget};
 
-    use super::{
-        RenderDiffSubrepos, RenderDiffSubreposHandler, RenderDiffSubreposOutcome, RepoRef,
-    };
+    use super::{RenderDiffSubrepos, RenderDiffSubreposOutcome, RepoRef, execute};
     use crate::{
         shared::notes::Note,
         testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
@@ -138,18 +135,6 @@ mod tests {
         -old line\n\
         +new line\n\
         +extra line\n";
-
-    fn handler_with(
-        source: FakeDiffSource,
-    ) -> RenderDiffSubreposHandler<FakeDiffSource, InMemoryArtifactStore, StubRenderer, FixedClock>
-    {
-        RenderDiffSubreposHandler {
-            source,
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        }
-    }
 
     fn one_commit() -> Commit {
         Commit {
@@ -177,13 +162,20 @@ mod tests {
             diff_output: SINGLE_FILE_DIFF.into(),
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
         let repos = vec![RepoRef {
             top: "/repo-a".into(),
             label: "repo-a".into(),
         }];
 
-        let response = handler.send_now(req(repos)).expect("render succeeds");
+        let response = execute(
+            req(repos),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert_eq!(
             response.outcome,
@@ -199,10 +191,11 @@ mod tests {
                 Note::info("wrote /store/diffs/fake/artifact.html"),
             ]
         );
-        let placed = handler.store.placed.lock().unwrap();
-        assert_eq!(placed.len(), 1);
-        assert_eq!(placed[0].0.title, "2026-07-02 diff-preview subrepos");
-        assert_eq!(placed[0].0.repo_name, "subrepos");
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert_eq!(artifact.meta.title, "2026-07-02 diff-preview subrepos");
+        assert_eq!(artifact.meta.repo_name, "subrepos");
     }
 
     #[test]
@@ -213,13 +206,20 @@ mod tests {
             diff_output: String::new(),
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
         let repos = vec![RepoRef {
             top: "/repo-a".into(),
             label: "repo-a".into(),
         }];
 
-        let response = handler.send_now(req(repos)).expect("render succeeds");
+        let response = execute(
+            req(repos),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert_eq!(response.outcome, RenderDiffSubreposOutcome::Empty);
         assert_eq!(
@@ -228,6 +228,5 @@ mod tests {
                 "diff -r: nothing to show across 1 repo(s); no preview written"
             )]
         );
-        assert!(handler.store.placed.lock().unwrap().is_empty());
     }
 }

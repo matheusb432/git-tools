@@ -30,11 +30,12 @@ pub enum ComputeSquashPreviewError {
 
 /// Computes a squash preview via the shared squash view builder.
 #[cqrsy::handler(query)]
-pub fn handle(
-    source: &impl DiffSource,
+pub fn execute(
     req: ComputeSquashPreview,
+    source: &impl DiffSource,
 ) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
-    let built = build_squash_view(source, &req.cwd, req.pinned.as_ref())?;
+    let ComputeSquashPreview { cwd, pinned } = req;
+    let built = build_squash_view(source, &cwd, pinned.as_ref())?;
     Ok(ComputeSquashPreviewResponse { view: built.view })
 }
 
@@ -42,7 +43,6 @@ pub fn handle(
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::Sender;
     use domain::diffs::Commit;
 
     use super::*;
@@ -60,27 +60,27 @@ index 111..222 100644\n\
 
     #[test]
     fn computes_the_squash_view_from_the_upstream() {
-        let handler = ComputeSquashPreviewHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                upstream: Some("origin/main".into()),
-                commits: vec![Commit {
-                    sha: "abc1234".into(),
-                    subject: "feat: work".into(),
-                    ..Default::default()
-                }],
-                diff_output: SINGLE_FILE_DIFF.into(),
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![Commit {
+                sha: "abc1234".into(),
+                subject: "feat: work".into(),
                 ..Default::default()
-            },
+            }],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            ..Default::default()
         };
 
-        let response = handler
-            .send_now(ComputeSquashPreview {
+        let response = execute(
+            ComputeSquashPreview {
                 cwd: PathBuf::from("/repo"),
                 pinned: None,
-            })
-            .expect("compute succeeds");
+            },
+            &source,
+        )
+        .expect("compute succeeds");
 
         assert_eq!(response.view.title, "squash-preview");
         assert_eq!(response.view.upstream, "origin/main");
@@ -89,30 +89,30 @@ index 111..222 100644\n\
 
     #[test]
     fn pinned_squash_preview_computes_without_an_upstream() {
-        let handler = ComputeSquashPreviewHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                upstream: None, // symbolic squash preview errors with "no upstream"
-                commits: vec![Commit {
-                    sha: "abc1234".into(),
-                    subject: "feat: work".into(),
-                    ..Default::default()
-                }],
-                diff_output: SINGLE_FILE_DIFF.into(),
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: None, // symbolic squash preview errors with "no upstream"
+            commits: vec![Commit {
+                sha: "abc1234".into(),
+                subject: "feat: work".into(),
                 ..Default::default()
-            },
+            }],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            ..Default::default()
         };
 
-        let response = handler
-            .send_now(ComputeSquashPreview {
+        let response = execute(
+            ComputeSquashPreview {
                 cwd: PathBuf::from("/repo"),
                 pinned: Some(domain::diffs::PinnedRange {
                     base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
                     head: "1111111111222222222233333333334444444444".into(),
                 }),
-            })
-            .expect("pinned squash compute succeeds");
+            },
+            &source,
+        )
+        .expect("pinned squash compute succeeds");
 
         assert_eq!(response.view.upstream, "aaaaaaaaaa");
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
@@ -120,21 +120,21 @@ index 111..222 100644\n\
 
     #[test]
     fn missing_upstream_is_an_error() {
-        let handler = ComputeSquashPreviewHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                upstream: None,
-                ..Default::default()
-            },
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: None,
+            ..Default::default()
         };
 
-        let error = handler
-            .send_now(ComputeSquashPreview {
+        let error = execute(
+            ComputeSquashPreview {
                 cwd: PathBuf::from("/repo"),
                 pinned: None,
-            })
-            .expect_err("no upstream errors");
+            },
+            &source,
+        )
+        .expect_err("no upstream errors");
 
         let ComputeSquashPreviewError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "no upstream");

@@ -1,7 +1,6 @@
 //! The `render_diff` vertical slice: resolve a [`DiffTarget`] into a rendered,
 //! stored artifact (or an "empty, skipped" outcome), carrying every user-facing
-//! message out as [`Note`]s. The cli's `gtl diff` and `diff-subrepos` call this
-//! in-process; the daemon dispatches it through [`cqrsy::Sender`].
+//! message out as [`Note`]s. The CLI and daemon call [`execute`] directly.
 
 use std::path::{Path, PathBuf};
 
@@ -125,20 +124,27 @@ fn head_sha_for(source: &impl DiffSource, top: &str, range: &str) -> String {
 
 /// Renders a diff through the diff ports.
 #[cqrsy::handler(command)]
-pub fn handle(
+pub fn execute(
+    req: RenderDiff,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-    req: RenderDiff,
 ) -> Result<RenderDiffResponse, RenderDiffError> {
+    let RenderDiff {
+        cwd,
+        store_root,
+        target,
+        name,
+        theme,
+    } = req;
     let mut notes = Vec::new();
-    let top = source.top_level(&req.cwd)?;
+    let top = source.top_level(&cwd)?;
 
     // ! Fast-path: pure commit ranges are fully determined by resolved shas, so a
     // ! prior identical artifact can be reused without the expensive assemble.
-    if req.name.is_none()
-        && let Some(hit) = range_fast_path(source, store, &top, &req.store_root, &req.target)?
+    if name.is_none()
+        && let Some(hit) = range_fast_path(source, store, &top, &store_root, &target)?
     {
         notes.push(Note::info(format!(
             "diff-preview: reusing {}",
@@ -153,8 +159,8 @@ pub fn handle(
         });
     }
 
-    let (mut view, summary) = build_view(source, &top, &req.target, req.theme.clone(), &mut notes)?;
-    if let Some(name) = &req.name {
+    let (mut view, summary) = build_view(source, &top, &target, theme, &mut notes)?;
+    if let Some(name) = &name {
         view.title.clone_from(name);
     }
     if view.is_empty() {
@@ -183,7 +189,7 @@ pub fn handle(
         generated_at: clock.now_iso(),
         title: view.title.clone(),
     };
-    let placed = store.place(&req.store_root, &meta, &html)?;
+    let placed = store.place(&store_root, &meta, &html)?;
 
     notes.push(Note::info(format!(
         "diff-preview: {summary}, {}",
@@ -435,10 +441,9 @@ fn legacy_unpushed_commit_label(count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::Sender;
     use domain::diffs::{Commit, DiffKind, DiffTarget};
 
-    use super::{RenderDiff, RenderDiffError, RenderDiffHandler, RenderDiffOutcome};
+    use super::{RenderDiff, RenderDiffError, RenderDiffOutcome, execute};
     use crate::{
         shared::notes::Note,
         testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
@@ -453,17 +458,6 @@ index 111..222 100644\n\
 -old line\n\
 +new line\n\
 +extra line\n";
-
-    fn handler_with(
-        source: FakeDiffSource,
-    ) -> RenderDiffHandler<FakeDiffSource, InMemoryArtifactStore, StubRenderer, FixedClock> {
-        RenderDiffHandler {
-            source,
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        }
-    }
 
     fn one_commit() -> Commit {
         Commit {
@@ -494,11 +488,16 @@ index 111..222 100644\n\
             committed_at: "2026-07-02".into(),
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
 
-        let response = handler
-            .send_now(req("/repo", DiffTarget::Unpushed { pinned: None }))
-            .expect("render succeeds");
+        let response = execute(
+            req("/repo", DiffTarget::Unpushed { pinned: None }),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert_eq!(
             response.outcome,
@@ -507,10 +506,11 @@ index 111..222 100644\n\
                 reused: false,
             }
         );
-        let placed = handler.store.placed.lock().unwrap();
-        assert_eq!(placed.len(), 1);
-        assert_eq!(placed[0].0.title, "diff");
-        assert_eq!(placed[0].0.repo_name, "repo");
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert_eq!(artifact.meta.title, "diff");
+        assert_eq!(artifact.meta.repo_name, "repo");
         assert_eq!(
             response.notes,
             vec![
@@ -530,11 +530,16 @@ index 111..222 100644\n\
             diff_output: String::new(),
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
 
-        let response = handler
-            .send_now(req("/repo", DiffTarget::Unpushed { pinned: None }))
-            .expect("render succeeds");
+        let response = execute(
+            req("/repo", DiffTarget::Unpushed { pinned: None }),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert_eq!(response.outcome, RenderDiffOutcome::Empty);
         assert_eq!(
@@ -543,7 +548,6 @@ index 111..222 100644\n\
                 "diff-preview: 0 unpushed commit(s) — nothing to show (no commits or changes); skipping"
             )]
         );
-        assert!(handler.store.placed.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -560,21 +564,26 @@ index 111..222 100644\n\
             known_revs: vec!["a".into(), "b".into()],
             ..Default::default()
         };
-        let handler = handler_with(source);
-        handler.store.range_hits.lock().unwrap().insert(
+        let store = InMemoryArtifactStore::default();
+        store.range_hits.lock().unwrap().insert(
             (DiffKind::TwoDot, "sha-a".to_string(), "sha-b".to_string()),
             PathBuf::from("/store/existing.html"),
         );
 
-        let response = handler
-            .send_now(req(
+        let response = execute(
+            req(
                 "/repo",
                 DiffTarget::Range {
                     range: "a..b".into(),
                     pinned: None,
                 },
-            ))
-            .expect("render succeeds");
+            ),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert_eq!(
             response.outcome,
@@ -587,7 +596,6 @@ index 111..222 100644\n\
             response.notes,
             vec![Note::info("diff-preview: reusing /store/existing.html")]
         );
-        assert!(handler.store.placed.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -606,9 +614,9 @@ index 111..222 100644\n\
             known_revs: vec!["a".into(), "b".into()],
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
         // A range hit exists, but a named run must ignore the fast-path entirely.
-        handler.store.range_hits.lock().unwrap().insert(
+        store.range_hits.lock().unwrap().insert(
             (DiffKind::TwoDot, "sha-a".to_string(), "sha-b".to_string()),
             PathBuf::from("/store/existing.html"),
         );
@@ -621,15 +629,23 @@ index 111..222 100644\n\
             },
         );
         request.name = Some("custom".into());
-        let response = handler.send_now(request).expect("render succeeds");
+        let response = execute(
+            request,
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert!(matches!(
             response.outcome,
             RenderDiffOutcome::Rendered { reused: false, .. }
         ));
-        let placed = handler.store.placed.lock().unwrap();
-        assert_eq!(placed.len(), 1);
-        assert_eq!(placed[0].0.title, "custom");
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert_eq!(artifact.meta.title, "custom");
     }
 
     #[test]
@@ -643,11 +659,16 @@ index 111..222 100644\n\
             diff_output: SINGLE_FILE_DIFF.into(),
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
 
-        let response = handler
-            .send_now(req("/repo", DiffTarget::Unpushed { pinned: None }))
-            .expect("render succeeds");
+        let response = execute(
+            req("/repo", DiffTarget::Unpushed { pinned: None }),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert!(matches!(
             response.outcome,
@@ -671,11 +692,16 @@ index 111..222 100644\n\
             known_revs: vec![],
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
 
-        let error = handler
-            .send_now(req("/repo", DiffTarget::Base("nope".into())))
-            .expect_err("unknown base errors");
+        let error = execute(
+            req("/repo", DiffTarget::Base("nope".into())),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect_err("unknown base errors");
 
         let RenderDiffError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "unknown revision nope");

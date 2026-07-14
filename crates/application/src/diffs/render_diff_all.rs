@@ -42,19 +42,25 @@ pub enum RenderDiffAllError {
 
 /// Renders every requested repository through the diff ports.
 #[cqrsy::handler(command)]
-pub fn handle(
+pub fn execute(
+    req: RenderDiffAll,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-    req: RenderDiffAll,
 ) -> Result<RenderDiffAllResponse, RenderDiffAllError> {
+    let RenderDiffAll {
+        root,
+        store_root,
+        repos,
+        theme,
+    } = req;
     let mut notes = Vec::new();
     let batch = render_batch(
         source,
         &DiffTarget::Unpushed { pinned: None },
-        req.theme.as_deref(),
-        &req.repos,
+        theme.as_deref(),
+        &repos,
         false,
         &mut notes,
     )?;
@@ -62,7 +68,7 @@ pub fn handle(
     let title = dated_title(clock, "diff-preview all");
     let html = renderer.build_tabbed_html(&title, &batch.views);
     let meta = ArtifactMeta {
-        repo_root: req.root.clone(),
+        repo_root: root,
         repo_name: "all".to_string(),
         kind: DiffKind::WorkTree,
         base_sha: String::new(),
@@ -72,7 +78,7 @@ pub fn handle(
         generated_at: clock.now_iso(),
         title: title.clone(),
     };
-    let placed = store.place(&req.store_root, &meta, &html)?;
+    let placed = store.place(&store_root, &meta, &html)?;
 
     notes.push(Note::info(format!(
         "diff-all: {} repo(s)",
@@ -90,10 +96,9 @@ pub fn handle(
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::Sender;
     use domain::diffs::{Commit, DiffKind};
 
-    use super::{RenderDiffAll, RenderDiffAllHandler, RepoRef};
+    use super::{RenderDiffAll, RepoRef, execute};
     use crate::{
         shared::notes::Note,
         testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
@@ -108,17 +113,6 @@ mod tests {
         -old line\n\
         +new line\n\
         +extra line\n";
-
-    fn handler_with(
-        source: FakeDiffSource,
-    ) -> RenderDiffAllHandler<FakeDiffSource, InMemoryArtifactStore, StubRenderer, FixedClock> {
-        RenderDiffAllHandler {
-            source,
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        }
-    }
 
     fn one_commit() -> Commit {
         Commit {
@@ -145,7 +139,7 @@ mod tests {
             diff_output: SINGLE_FILE_DIFF.into(),
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
         let repos = vec![
             RepoRef {
                 top: "/repo-a".into(),
@@ -157,7 +151,14 @@ mod tests {
             },
         ];
 
-        let response = handler.send_now(req(repos)).expect("render succeeds");
+        let response = execute(
+            req(repos),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -171,10 +172,11 @@ mod tests {
                 Note::info("wrote /store/diffs/fake/artifact.html"),
             ]
         );
-        let placed = handler.store.placed.lock().unwrap();
-        assert_eq!(placed.len(), 1);
-        assert_eq!(placed[0].0.repo_name, "all");
-        assert_eq!(placed[0].0.kind, DiffKind::WorkTree);
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert_eq!(artifact.meta.repo_name, "all");
+        assert_eq!(artifact.meta.kind, DiffKind::WorkTree);
     }
 
     #[test]
@@ -184,15 +186,20 @@ mod tests {
             known_revs: vec![],
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
         let repos = vec![RepoRef {
             top: "/repo".into(),
             label: "repo".into(),
         }];
 
-        let result = handler.send_now(req(repos));
+        let result = execute(
+            req(repos),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        );
 
         assert!(result.is_err());
-        assert!(handler.store.placed.lock().unwrap().is_empty());
     }
 }

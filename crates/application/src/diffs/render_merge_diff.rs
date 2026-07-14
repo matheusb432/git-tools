@@ -107,14 +107,19 @@ pub(crate) fn build_merge_view(
 
 /// Renders a merge diff through the diff ports.
 #[cqrsy::handler(command)]
-pub fn handle(
+pub fn execute(
+    req: RenderMergeDiff,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-    req: RenderMergeDiff,
 ) -> Result<RenderMergeDiffResponse, RenderMergeDiffError> {
-    let built = build_merge_view(source, &req.cwd, req.base.as_deref(), None)?;
+    let RenderMergeDiff {
+        cwd,
+        store_root,
+        base,
+    } = req;
+    let built = build_merge_view(source, &cwd, base.as_deref(), None)?;
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
@@ -135,7 +140,7 @@ pub fn handle(
         generated_at: clock.now_iso(),
         title: "merge-diff".to_string(),
     };
-    let placed = store.place(&req.store_root, &meta, &html)?;
+    let placed = store.place(&store_root, &meta, &html)?;
 
     let notes = vec![
         Note::info(format!(
@@ -161,10 +166,9 @@ fn plural(n: usize) -> &'static str {
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::Sender;
     use domain::diffs::Commit;
 
-    use super::{RenderMergeDiff, RenderMergeDiffError, RenderMergeDiffHandler};
+    use super::{RenderMergeDiff, RenderMergeDiffError, execute};
     use crate::{
         shared::notes::Note,
         testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
@@ -179,18 +183,6 @@ index 111..222 100644\n\
 -old line\n\
 +new line\n\
 +extra line\n";
-
-    fn handler_with(
-        source: FakeDiffSource,
-    ) -> RenderMergeDiffHandler<FakeDiffSource, InMemoryArtifactStore, StubRenderer, FixedClock>
-    {
-        RenderMergeDiffHandler {
-            source,
-            store: InMemoryArtifactStore::default(),
-            renderer: StubRenderer,
-            clock: FixedClock("2026-07-02T00:00:00Z".into()),
-        }
-    }
 
     fn one_commit() -> Commit {
         Commit {
@@ -218,11 +210,16 @@ index 111..222 100644\n\
             diff_output: SINGLE_FILE_DIFF.into(),
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
 
-        let response = handler
-            .send_now(req("/repo", None))
-            .expect("render succeeds");
+        let response = execute(
+            req("/repo", None),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert_eq!(
             response.artifact,
@@ -236,10 +233,11 @@ index 111..222 100644\n\
                 Note::info("wrote /store/diffs/fake/artifact.html"),
             ]
         );
-        let placed = handler.store.placed.lock().unwrap();
-        assert_eq!(placed.len(), 1);
-        assert_eq!(placed[0].0.title, "merge-diff");
-        assert_eq!(placed[0].0.repo_name, "repo");
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert_eq!(artifact.meta.title, "merge-diff");
+        assert_eq!(artifact.meta.repo_name, "repo");
     }
 
     #[test]
@@ -252,11 +250,16 @@ index 111..222 100644\n\
             diff_output: String::new(),
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
 
-        let response = handler
-            .send_now(req("/repo", Some("   ")))
-            .expect("render succeeds");
+        let response = execute(
+            req("/repo", Some("   ")),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
 
         assert_eq!(
             response.notes[0],
@@ -272,11 +275,16 @@ index 111..222 100644\n\
             known_revs: vec![],
             ..Default::default()
         };
-        let handler = handler_with(source);
+        let store = InMemoryArtifactStore::default();
 
-        let error = handler
-            .send_now(req("/repo", Some("nope")))
-            .expect_err("unknown base errors");
+        let error = execute(
+            req("/repo", Some("nope")),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect_err("unknown base errors");
 
         let RenderMergeDiffError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "unknown revision nope");

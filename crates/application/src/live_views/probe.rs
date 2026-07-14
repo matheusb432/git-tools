@@ -50,15 +50,17 @@ pub enum ProbeSourceError {
 /// Probes a source by rebuilding its [`LiveSource`] identity and
 /// probing its directory through the [`RepoProbe`] port.
 #[cqrsy::handler(query)]
-pub fn handle(
-    probe: &impl RepoProbe,
+pub fn execute(
     req: ProbeSource,
+    probe: &impl RepoProbe,
 ) -> Result<ProbeSourceResponse, ProbeSourceError> {
-    let source = LiveSource::from_parts(&req.source_kind, &req.source_value).ok_or_else(|| {
-        ProbeSourceError::UnknownSourceKind {
-            kind: req.source_kind.clone(),
-        }
-    })?;
+    let ProbeSource {
+        source_kind,
+        source_value,
+        ..
+    } = req;
+    let source = LiveSource::from_parts(&source_kind, &source_value)
+        .ok_or_else(|| ProbeSourceError::UnknownSourceKind { kind: source_kind })?;
     let LiveSource::LocalRepo { path } = source;
 
     let outcome = match probe.probe(&path)? {
@@ -80,16 +82,12 @@ pub fn handle(
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
-
     use super::*;
     use crate::{ports::RepoProbeResult, testing::FakeRepoProbe};
 
-    fn handler(probe_result: RepoProbeResult) -> ProbeSourceHandler<FakeRepoProbe> {
-        ProbeSourceHandler {
-            probe: FakeRepoProbe {
-                result: probe_result,
-            },
+    fn probe(probe_result: RepoProbeResult) -> FakeRepoProbe {
+        FakeRepoProbe {
+            result: probe_result,
         }
     }
 
@@ -103,9 +101,8 @@ mod tests {
 
     #[test]
     fn missing_dir_reports_broken_with_dir_not_found() {
-        let handler = handler(RepoProbeResult::NotFound);
-
-        let response = handler.send_now(request("/gone")).expect("probe succeeds");
+        let probe = probe(RepoProbeResult::NotFound);
+        let response = execute(request("/gone"), &probe).expect("probe succeeds");
 
         match response.outcome {
             ProbeOutcome::Broken { rejection } => {
@@ -121,9 +118,8 @@ mod tests {
 
     #[test]
     fn non_repo_dir_reports_broken_with_dir_not_git_repo() {
-        let handler = handler(RepoProbeResult::NotAGitRepo);
-
-        let response = handler.send_now(request("/plain")).expect("probe succeeds");
+        let probe = probe(RepoProbeResult::NotAGitRepo);
+        let response = execute(request("/plain"), &probe).expect("probe succeeds");
 
         match response.outcome {
             ProbeOutcome::Broken { rejection } => {
@@ -139,28 +135,26 @@ mod tests {
 
     #[test]
     fn valid_repo_reports_ok() {
-        let handler = handler(RepoProbeResult::Repo {
+        let probe = probe(RepoProbeResult::Repo {
             top_level: "/repos/gt".into(),
         });
-
-        let response = handler
-            .send_now(request("/repos/gt"))
-            .expect("probe succeeds");
+        let response = execute(request("/repos/gt"), &probe).expect("probe succeeds");
 
         assert_eq!(response.outcome, ProbeOutcome::Ok);
     }
 
     #[test]
     fn unknown_source_kind_errors() {
-        let handler = handler(RepoProbeResult::NotFound);
-
-        let err = handler
-            .send_now(ProbeSource {
+        let probe = probe(RepoProbeResult::NotFound);
+        let err = execute(
+            ProbeSource {
                 data_root: "/data".into(),
                 source_kind: "GithubRepo".into(),
                 source_value: "owner/repo".into(),
-            })
-            .expect_err("unknown kind rejects");
+            },
+            &probe,
+        )
+        .expect_err("unknown kind rejects");
 
         assert!(
             matches!(err, ProbeSourceError::UnknownSourceKind { kind } if kind == "GithubRepo")

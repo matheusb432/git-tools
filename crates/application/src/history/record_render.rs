@@ -28,10 +28,10 @@ pub enum RecordRenderError {
 
 /// Records a render through the app-state port.
 #[cqrsy::handler(command)]
-pub fn handle(
+pub fn execute(
+    req: RecordRender,
     store: &impl AppStateStore,
     clock: &impl Clock,
-    req: RecordRender,
 ) -> Result<RecordRenderResponse, RecordRenderError> {
     let record = NewRecentRenderRecord {
         recipe_json: req.recipe_json,
@@ -47,29 +47,26 @@ pub fn handle(
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
-
     use super::*;
     use crate::testing::{FixedClock, InMemoryAppStateStore};
 
     #[test]
     fn records_a_render_stamped_by_the_clock() {
         let store = InMemoryAppStateStore::default();
-        let handler = RecordRenderHandler {
-            store: store.clone(),
-            clock: FixedClock("2026-07-07T00:00:00Z".into()),
-        };
-
-        handler
-            .send_now(RecordRender {
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
+        execute(
+            RecordRender {
                 data_root: "/data".into(),
                 recipe_json: r#"{"kind":"diff"}"#.into(),
                 title: "gt · unpushed".into(),
                 repo_name: "gt".into(),
                 kind: "diff".into(),
                 range_label: "origin/main..HEAD".into(),
-            })
-            .expect("record succeeds");
+            },
+            &store,
+            &clock,
+        )
+        .expect("record succeeds");
 
         let renders = store.renders.lock().unwrap();
         assert_eq!(renders.len(), 1);

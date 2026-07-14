@@ -32,10 +32,10 @@ pub enum PullAllError {
 
 /// Pulls every managed repository through the remote-sync ports.
 #[cqrsy::handler(command)]
-pub async fn handle(
+pub async fn execute(
+    req: PullAll,
     remote: &impl RemoteSync,
     manifest: &impl ManagedManifest,
-    req: PullAll,
 ) -> Result<PullAllResponse, PullAllError> {
     let repos = manifest.load(&req.repos_file, &req.home_dir).await?;
     let results =
@@ -130,7 +130,6 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
     use domain::managed::ManagedRepo;
 
     use super::*;
@@ -147,14 +146,13 @@ mod tests {
         }
     }
 
-    fn handler_with(
+    async fn execute_with(
         remote: FakeRemoteSync,
         repos: Vec<ManagedRepo>,
-    ) -> PullAllHandler<FakeRemoteSync, FakeManagedManifest> {
-        PullAllHandler {
-            remote,
-            manifest: FakeManagedManifest { repos, error: None },
-        }
+        request: PullAll,
+    ) -> Result<PullAllResponse, PullAllError> {
+        let manifest = FakeManagedManifest { repos, error: None };
+        execute(request, &remote, &manifest).await
     }
 
     fn req() -> PullAll {
@@ -179,35 +177,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn dry_run_reports_would_pull_without_merging() {
-        let handler = handler_with(
-            FakeRemoteSync {
-                rev_list_left_right: (3, 0),
-                ..ready_remote()
-            },
-            vec![repo("a")],
-        );
+    #[tokio::test]
+    async fn dry_run_reports_would_pull_without_merging() {
+        let remote = FakeRemoteSync {
+            rev_list_left_right: (3, 0),
+            ..ready_remote()
+        };
         let mut request = req();
         request.dry = true;
 
-        let response = handler.send_now(request).expect("pull succeeds");
+        let response = execute_with(remote, vec![repo("a")], request)
+            .await
+            .expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::WouldPull);
         assert_eq!(response.results[0].detail, "behind by 3 - fast-forward");
     }
 
-    #[test]
-    fn diverged_repos_fail_without_merging() {
-        let handler = handler_with(
+    #[tokio::test]
+    async fn diverged_repos_fail_without_merging() {
+        let response = execute_with(
             FakeRemoteSync {
                 rev_list_left_right: (2, 1),
                 ..ready_remote()
             },
             vec![repo("a")],
-        );
-
-        let response = handler.send_now(req()).expect("pull succeeds");
+            req(),
+        )
+        .await
+        .expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
@@ -217,17 +215,18 @@ mod tests {
         assert_eq!(response.exit, SyncExit::Fail);
     }
 
-    #[test]
-    fn already_up_to_date_with_local_ahead_reports_push_pending() {
-        let handler = handler_with(
+    #[tokio::test]
+    async fn already_up_to_date_with_local_ahead_reports_push_pending() {
+        let response = execute_with(
             FakeRemoteSync {
                 rev_list_left_right: (0, 2),
                 ..ready_remote()
             },
             vec![repo("a")],
-        );
-
-        let response = handler.send_now(req()).expect("pull succeeds");
+            req(),
+        )
+        .await
+        .expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::UpToDate);
         assert_eq!(
@@ -236,9 +235,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_fast_forward_merge_succeeds() {
-        let handler = handler_with(
+    #[tokio::test]
+    async fn a_fast_forward_merge_succeeds() {
+        let response = execute_with(
             FakeRemoteSync {
                 rev_list_left_right: (1, 0),
                 merge_result: SyncOutput {
@@ -248,17 +247,18 @@ mod tests {
                 ..ready_remote()
             },
             vec![repo("a")],
-        );
-
-        let response = handler.send_now(req()).expect("pull succeeds");
+            req(),
+        )
+        .await
+        .expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Pulled);
         assert_eq!(response.results[0].detail, "fast-forwarded 1 commit");
     }
 
-    #[test]
-    fn a_fetch_failure_is_reported_as_fail() {
-        let handler = handler_with(
+    #[tokio::test]
+    async fn a_fetch_failure_is_reported_as_fail() {
+        let response = execute_with(
             FakeRemoteSync {
                 fetch_result: SyncOutput {
                     success: false,
@@ -267,9 +267,10 @@ mod tests {
                 ..ready_remote()
             },
             vec![repo("a")],
-        );
-
-        let response = handler.send_now(req()).expect("pull succeeds");
+            req(),
+        )
+        .await
+        .expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Fail);
         assert_eq!(
@@ -278,17 +279,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_missing_remote_branch_is_a_warning() {
-        let handler = handler_with(
+    #[tokio::test]
+    async fn a_missing_remote_branch_is_a_warning() {
+        let response = execute_with(
             FakeRemoteSync {
                 verify_ref: false,
                 ..ready_remote()
             },
             vec![repo("a")],
-        );
-
-        let response = handler.send_now(req()).expect("pull succeeds");
+            req(),
+        )
+        .await
+        .expect("pull succeeds");
 
         assert_eq!(response.results[0].status, SyncStatus::Warn);
         assert_eq!(response.results[0].detail, "no 'main' branch on origin");

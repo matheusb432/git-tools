@@ -22,42 +22,45 @@ pub enum SetSettingError {
 
 /// Sets a value through the app-state port.
 #[cqrsy::handler(command)]
-pub fn handle(
-    store: &impl AppStateStore,
+pub fn execute(
     req: SetSetting,
+    store: &impl AppStateStore,
 ) -> Result<SetSettingResponse, SetSettingError> {
-    store.set_setting(&req.data_root, &req.key, &req.value)?;
+    let SetSetting {
+        data_root,
+        key,
+        value,
+    } = req;
+    store.set_setting(&data_root, &key, &value)?;
     Ok(SetSettingResponse {})
 }
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
-
     use super::*;
     use crate::testing::InMemoryAppStateStore;
 
     #[test]
     fn stores_and_overwrites_the_value() {
         let store = InMemoryAppStateStore::default();
-        let handler = SetSettingHandler {
-            store: store.clone(),
-        };
-
-        handler
-            .send_now(SetSetting {
+        execute(
+            SetSetting {
                 data_root: "/data".into(),
                 key: "theme".into(),
                 value: "dark".into(),
-            })
-            .expect("set succeeds");
-        handler
-            .send_now(SetSetting {
+            },
+            &store,
+        )
+        .expect("set succeeds");
+        execute(
+            SetSetting {
                 data_root: "/data".into(),
                 key: "theme".into(),
                 value: "hearth".into(),
-            })
-            .expect("overwrite succeeds");
+            },
+            &store,
+        )
+        .expect("overwrite succeeds");
 
         assert_eq!(
             store

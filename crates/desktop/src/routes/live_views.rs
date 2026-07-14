@@ -1,13 +1,13 @@
-use application::live_views::remove::RemoveLiveView;
+use application::live_views::remove as remove_live_view;
 use domain::viewer::ViewerTabId;
 use tauri::http::StatusCode;
 
 use super::{
-    RouteError, RouteMediator, RouteResult, ViewerApp, ensure_active_view, html_response,
-    load_settings, render, status_response,
+    RouteError, RouteResult, ViewerApp, ensure_active_view, html_response, load_settings, render,
+    status_response,
 };
 
-pub(super) fn delete<M: RouteMediator>(app: &ViewerApp<M>, tab: ViewerTabId) -> RouteResult {
+pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     let source = {
         let session = app.session.lock().map_err(|error| error.to_string())?;
         session.live_source(tab)
@@ -16,13 +16,15 @@ pub(super) fn delete<M: RouteMediator>(app: &ViewerApp<M>, tab: ViewerTabId) -> 
         return Ok(status_response(StatusCode::NOT_FOUND));
     };
 
-    app.mediator
-        .send_now(RemoveLiveView {
+    remove_live_view::execute(
+        remove_live_view::RemoveLiveView {
             data_root: (*app.data_root).clone(),
             source_kind: source.kind().into(),
             source_value: source.value(),
-        })
-        .map_err(|error| format!("{error:#}"))?;
+        },
+        &app.app_state,
+    )
+    .map_err(|error| format!("{error:#}"))?;
 
     let closed = app
         .session

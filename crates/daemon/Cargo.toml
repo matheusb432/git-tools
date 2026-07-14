@@ -14,9 +14,6 @@ application = { path = "../application" }
 axum = "0.8"
 bootstrap = { path = "../../shared/bootstrap" }
 contracts = { path = "../contracts" }
-cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.7.0", features = [
-  "derive",
-] }
 domain = { path = "../domain" }
 gtl-platform = { path = "../../shared/gtl-platform" }
 infra = { path = "../infra" }

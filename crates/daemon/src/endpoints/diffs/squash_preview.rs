@@ -1,31 +1,36 @@
 //! `POST /diffs/squash-preview` — mirrors `endpoints/diffs/render.rs` exactly.
 
-use std::sync::Arc;
-
-use application::diffs::render_squash_preview::RenderSquashPreview;
+use application::diffs::render_squash_preview;
 use axum::{Json, extract::State, http::StatusCode};
 use contracts::{
     diffs::{RenderDiffData, RenderSquashPreviewRequest},
     envelope::Envelope,
 };
-use cqrsy::{Handle, Sender};
 
-use crate::state::Shared;
+use crate::state::DaemonState;
 
 /// Renders a squash-preview for the request body, returning the wire envelope.
 ///
 /// - `200` with an `ok` envelope on success.
 /// - `500` with an error envelope when the handler (or its blocking task) fails.
-pub async fn handle<H>(
-    State(handler): State<H>,
-    State(shared): State<Arc<Shared>>,
+pub async fn handle(
+    State(state): State<DaemonState>,
     Json(dto): Json<RenderSquashPreviewRequest>,
-) -> (StatusCode, Json<Envelope<RenderDiffData>>)
-where
-    H: Sender<RenderSquashPreview> + Handle,
-{
-    crate::endpoints::run(handler, shared, Ok(super::to_squash_request(dto)), |resp| {
-        super::to_squash_envelope(&resp)
-    })
+) -> (StatusCode, Json<Envelope<RenderDiffData>>) {
+    let shared = state.shared.clone();
+    crate::endpoints::run(
+        shared,
+        Ok(super::to_squash_request(dto)),
+        move |request| {
+            render_squash_preview::execute(
+                request,
+                &state.source,
+                &state.artifacts,
+                &state.renderer,
+                &state.clock,
+            )
+        },
+        |response| super::to_squash_envelope(&response),
+    )
     .await
 }

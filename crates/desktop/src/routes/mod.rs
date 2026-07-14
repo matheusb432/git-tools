@@ -11,24 +11,20 @@ use std::{
 };
 
 use application::{
-    diffs::{
-        compute_diff::ComputeDiff, compute_merge_diff::ComputeMergeDiff,
-        compute_squash_preview::ComputeSquashPreview,
-    },
-    history::{
-        list_recent::{GetRecentRender, ListRecentRenders},
-        record_render::RecordRender,
-    },
-    live_views::{list::ListLiveViews, probe::ProbeSource, remove::RemoveLiveView},
-    settings::{get::GetSetting, set::SetSetting},
+    history::list_recent::{get as get_recent_render, list as list_recent_renders},
+    live_views::list as list_live_views,
+    settings::{get as get_setting, set as set_setting},
 };
-use cqrsy::{Handle, Sender};
 use domain::viewer::{
     DiffDensity, DiffLayout, RenderOptions, Theme, ViewerHistoryEntry, ViewerSettings, ViewerTabId,
     ViewerTabKind, ViewerTabState,
 };
 use gtl_recipe::{Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
 use history::to_viewer_entry;
+use infra::{
+    app_state::SqliteAppState, clock::SystemClock, diff_source::GitDiffSource,
+    repo_probe::GitRepoProbe,
+};
 pub(crate) use parse::{ResumeNonce, Route, SettingChange, parse};
 use tauri::http::{Request, Response, StatusCode};
 
@@ -93,60 +89,26 @@ impl From<RecipeError> for RouteError {
 
 type RouteResult = Result<Response<Vec<u8>>, RouteError>;
 
-pub(crate) trait RouteMediator:
-    Sender<ComputeDiff>
-    + Sender<ComputeMergeDiff>
-    + Sender<ComputeSquashPreview>
-    + Sender<ProbeSource>
-    + Sender<RecordRender>
-    + Sender<ListLiveViews>
-    + Sender<RemoveLiveView>
-    + Sender<ListRecentRenders>
-    + Sender<GetRecentRender>
-    + Sender<GetSetting>
-    + Sender<SetSetting>
-    + Handle
-    + Clone
-    + Send
-    + Sync
-    + 'static
-{
-}
-
-impl<T> RouteMediator for T where
-    T: Sender<ComputeDiff>
-        + Sender<ComputeMergeDiff>
-        + Sender<ComputeSquashPreview>
-        + Sender<ProbeSource>
-        + Sender<RecordRender>
-        + Sender<ListLiveViews>
-        + Sender<RemoveLiveView>
-        + Sender<ListRecentRenders>
-        + Sender<GetRecentRender>
-        + Sender<GetSetting>
-        + Sender<SetSetting>
-        + Handle
-        + Clone
-        + Send
-        + Sync
-        + 'static
-{
-}
-
 #[derive(Clone)]
-pub(crate) struct ViewerApp<M> {
-    mediator: M,
-    session: Arc<Mutex<ViewerSession>>,
+pub(crate) struct ViewerApp {
+    pub(crate) clock: SystemClock,
+    pub(crate) probe: GitRepoProbe,
+    pub(crate) app_state: SqliteAppState,
+    pub(crate) source: GitDiffSource,
+    pub(crate) session: Arc<Mutex<ViewerSession>>,
     pending: Arc<PendingRecipes>,
     renderer: MaudViewerRenderer,
-    data_root: Arc<PathBuf>,
+    pub(crate) data_root: Arc<PathBuf>,
     restoration: Arc<restoration::RestorationGate>,
 }
 
-impl<M> ViewerApp<M> {
-    pub(crate) fn new(mediator: M, data_root: PathBuf, max_cache_weight: usize) -> Self {
+impl ViewerApp {
+    pub(crate) fn new(data_root: PathBuf, max_cache_weight: usize) -> Self {
         Self {
-            mediator,
+            clock: SystemClock,
+            probe: GitRepoProbe,
+            app_state: SqliteAppState,
+            source: GitDiffSource,
             session: Arc::new(Mutex::new(ViewerSession::new(max_cache_weight))),
             pending: Arc::new(PendingRecipes::default()),
             renderer: MaudViewerRenderer,
@@ -169,10 +131,7 @@ impl<M> ViewerApp<M> {
     clippy::needless_pass_by_value,
     reason = "the Tauri protocol callback moves its owned request onto a blocking worker"
 )]
-pub(crate) fn serve_app<M: RouteMediator>(
-    app: &ViewerApp<M>,
-    request: Request<Vec<u8>>,
-) -> Response<Vec<u8>> {
+pub(crate) fn serve_app(app: &ViewerApp, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     let route = match parse(&request) {
         Ok(route) => route,
         Err(status) => return status_response(status),
@@ -228,7 +187,7 @@ fn error_response(target: ErrorTarget, error: &RouteError) -> Response<Vec<u8>> 
         .expect("static error response builds")
 }
 
-fn serve_route<M: RouteMediator>(app: &ViewerApp<M>, route: Route) -> RouteResult {
+fn serve_route(app: &ViewerApp, route: Route) -> RouteResult {
     match route {
         Route::Document { .. } => document(app),
         Route::View { tab, options } => view(app, tab, options),
@@ -243,7 +202,7 @@ fn serve_route<M: RouteMediator>(app: &ViewerApp<M>, route: Route) -> RouteResul
     }
 }
 
-fn document<M: RouteMediator>(app: &ViewerApp<M>) -> RouteResult {
+fn document(app: &ViewerApp) -> RouteResult {
     let transient = restore_live_views(app)?;
     let settings = load_settings(app)?;
     let history = load_history(app)?;
@@ -252,11 +211,7 @@ fn document<M: RouteMediator>(app: &ViewerApp<M>) -> RouteResult {
         .map_err(Into::into)
 }
 
-fn view<M: RouteMediator>(
-    app: &ViewerApp<M>,
-    tab: ViewerTabId,
-    options: RenderOptions,
-) -> RouteResult {
+fn view(app: &ViewerApp, tab: ViewerTabId, options: RenderOptions) -> RouteResult {
     {
         let mut session = app.session.lock().map_err(|error| error.to_string())?;
         if !session.activate(tab) {
@@ -273,11 +228,19 @@ fn view<M: RouteMediator>(
         .map_err(Into::into)
 }
 
-fn refresh<M: RouteMediator>(app: &ViewerApp<M>, tab: ViewerTabId) -> RouteResult {
+fn refresh(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     if !tab_exists(app, tab)? {
         return Ok(status_response(StatusCode::NOT_FOUND));
     }
-    let result = refresh_recipe_versioned(&app.mediator, &app.session, &app.data_root, tab)?;
+    let result = refresh_recipe_versioned(
+        &app.source,
+        &app.probe,
+        &app.app_state,
+        &app.clock,
+        &app.session,
+        &app.data_root,
+        tab,
+    )?;
     let transient = result.view.map(|view| render::VersionedView {
         ticket: result.ticket,
         view,
@@ -288,7 +251,7 @@ fn refresh<M: RouteMediator>(app: &ViewerApp<M>, tab: ViewerTabId) -> RouteResul
         .map_err(Into::into)
 }
 
-fn close<M: RouteMediator>(app: &ViewerApp<M>, tab: ViewerTabId) -> RouteResult {
+fn close(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     let closed = app
         .session
         .lock()
@@ -304,7 +267,7 @@ fn close<M: RouteMediator>(app: &ViewerApp<M>, tab: ViewerTabId) -> RouteResult 
         .map_err(Into::into)
 }
 
-fn activate<M: RouteMediator>(app: &ViewerApp<M>, tab: ViewerTabId) -> RouteResult {
+fn activate(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     let activated = app
         .session
         .lock()
@@ -320,30 +283,31 @@ fn activate<M: RouteMediator>(app: &ViewerApp<M>, tab: ViewerTabId) -> RouteResu
         .map_err(Into::into)
 }
 
-fn history<M: RouteMediator>(app: &ViewerApp<M>) -> RouteResult {
+fn history(app: &ViewerApp) -> RouteResult {
     let entries = load_history(app)?;
     Ok(html_response(render::history(app.renderer, &entries)))
 }
 
-fn open_history<M: RouteMediator>(
-    app: &ViewerApp<M>,
-    id: domain::viewer::RenderHistoryId,
-) -> RouteResult {
-    let Some(entry) = app
-        .mediator
-        .send_now(GetRecentRender {
+fn open_history(app: &ViewerApp, id: domain::viewer::RenderHistoryId) -> RouteResult {
+    let Some(entry) = get_recent_render::execute(
+        get_recent_render::GetRecentRender {
             data_root: (*app.data_root).clone(),
             id,
-        })
-        .map_err(|error| format!("{error:#}"))?
-        .entry
+        },
+        &app.app_state,
+    )
+    .map_err(|error| format!("{error:#}"))?
+    .entry
     else {
         return Ok(status_response(StatusCode::NOT_FOUND));
     };
     let recipe: Recipe = serde_json::from_str(&entry.recipe_json)
         .map_err(|error| format!("invalid saved recipe for history {id}: {error}"))?;
     let opened = open_recipe(
-        &app.mediator,
+        &app.source,
+        &app.probe,
+        &app.app_state,
+        &app.clock,
         &app.session,
         &app.data_root,
         &recipe,
@@ -363,7 +327,7 @@ fn open_history<M: RouteMediator>(
         .map_err(Into::into)
 }
 
-fn settings<M: RouteMediator>(app: &ViewerApp<M>, change: SettingChange) -> RouteResult {
+fn settings(app: &ViewerApp, change: SettingChange) -> RouteResult {
     let (key, value) = match change {
         SettingChange::Layout(value) => (LAYOUT_KEY, value.to_string()),
         SettingChange::Density(value) => (DENSITY_KEY, value.to_string()),
@@ -373,15 +337,18 @@ fn settings<M: RouteMediator>(app: &ViewerApp<M>, change: SettingChange) -> Rout
     Ok(status_response(StatusCode::NO_CONTENT))
 }
 
-fn pending<M: RouteMediator>(app: &ViewerApp<M>) -> RouteResult {
+fn pending(app: &ViewerApp) -> RouteResult {
     app.pending.with_consumer(|| pending_transaction(app))?
 }
 
-fn pending_transaction<M: RouteMediator>(app: &ViewerApp<M>) -> RouteResult {
+fn pending_transaction(app: &ViewerApp) -> RouteResult {
     let batches = app.pending.try_drain()?;
     match process_pending(batches, |recipe, batch_id, kind| {
         open_recipe(
-            &app.mediator,
+            &app.source,
+            &app.probe,
+            &app.app_state,
+            &app.clock,
             &app.session,
             &app.data_root,
             recipe,
@@ -445,18 +412,17 @@ const fn viewer_tab_kind(kind: RecipeBatchKind) -> ViewerTabKind {
     }
 }
 
-fn restore_live_views<M: RouteMediator>(
-    app: &ViewerApp<M>,
-) -> Result<Option<render::VersionedView>, RouteError> {
+fn restore_live_views(app: &ViewerApp) -> Result<Option<render::VersionedView>, RouteError> {
     let mut transient = None;
     let owner = app.restoration.run_once(|| {
-        let records = app
-            .mediator
-            .send_now(ListLiveViews {
+        let records = list_live_views::execute(
+            list_live_views::ListLiveViews {
                 data_root: (*app.data_root).clone(),
-            })
-            .map_err(|error| format!("{error:#}"))?
-            .views;
+            },
+            &app.app_state,
+        )
+        .map_err(|error| format!("{error:#}"))?
+        .views;
         let mut newest = None;
         {
             let mut session = app.session.lock().map_err(|error| error.to_string())?;
@@ -475,8 +441,16 @@ fn restore_live_views<M: RouteMediator>(
             }
         }
         if let Some(tab) = newest {
-            let result = refresh_recipe_versioned(&app.mediator, &app.session, &app.data_root, tab)
-                .map_err(|error| error.to_string())?;
+            let result = refresh_recipe_versioned(
+                &app.source,
+                &app.probe,
+                &app.app_state,
+                &app.clock,
+                &app.session,
+                &app.data_root,
+                tab,
+            )
+            .map_err(|error| error.to_string())?;
             transient = result.view.map(|view| render::VersionedView {
                 ticket: result.ticket,
                 view,
@@ -491,9 +465,7 @@ fn restore_live_views<M: RouteMediator>(
     }
 }
 
-fn ensure_active_view<M: RouteMediator>(
-    app: &ViewerApp<M>,
-) -> Result<Option<render::VersionedView>, RouteError> {
+fn ensure_active_view(app: &ViewerApp) -> Result<Option<render::VersionedView>, RouteError> {
     let refresh = {
         let mut session = app.session.lock().map_err(|error| error.to_string())?;
         let Some(id) = session.active() else {
@@ -510,14 +482,22 @@ fn ensure_active_view<M: RouteMediator>(
     let Some(id) = refresh else {
         return Ok(None);
     };
-    let result = refresh_recipe_versioned(&app.mediator, &app.session, &app.data_root, id)?;
+    let result = refresh_recipe_versioned(
+        &app.source,
+        &app.probe,
+        &app.app_state,
+        &app.clock,
+        &app.session,
+        &app.data_root,
+        id,
+    )?;
     Ok(result.view.map(|view| render::VersionedView {
         ticket: result.ticket,
         view,
     }))
 }
 
-fn tab_exists<M>(app: &ViewerApp<M>, id: ViewerTabId) -> Result<bool, String> {
+fn tab_exists(app: &ViewerApp, id: ViewerTabId) -> Result<bool, String> {
     Ok(app
         .session
         .lock()
@@ -526,16 +506,18 @@ fn tab_exists<M>(app: &ViewerApp<M>, id: ViewerTabId) -> Result<bool, String> {
         .is_some())
 }
 
-fn load_history<M: RouteMediator>(app: &ViewerApp<M>) -> Result<Vec<ViewerHistoryEntry>, String> {
-    app.mediator
-        .send_now(ListRecentRenders {
+fn load_history(app: &ViewerApp) -> Result<Vec<ViewerHistoryEntry>, String> {
+    list_recent_renders::execute(
+        list_recent_renders::ListRecentRenders {
             data_root: (*app.data_root).clone(),
-        })
-        .map(|response| response.entries.into_iter().map(to_viewer_entry).collect())
-        .map_err(|error| format!("{error:#}"))
+        },
+        &app.app_state,
+    )
+    .map(|response| response.entries.into_iter().map(to_viewer_entry).collect())
+    .map_err(|error| format!("{error:#}"))
 }
 
-fn load_settings<M: RouteMediator>(app: &ViewerApp<M>) -> Result<ViewerSettings, String> {
+fn load_settings(app: &ViewerApp) -> Result<ViewerSettings, String> {
     let layout = load_setting(app, LAYOUT_KEY)?
         .map_or(Ok(DiffLayout::Unified), |value| value.parse())
         .map_err(|error| error.to_string())?;
@@ -549,35 +531,35 @@ fn load_settings<M: RouteMediator>(app: &ViewerApp<M>) -> Result<ViewerSettings,
     ))
 }
 
-fn load_theme<M: RouteMediator>(app: &ViewerApp<M>) -> Result<Theme, String> {
+fn load_theme(app: &ViewerApp) -> Result<Theme, String> {
     load_setting(app, THEME_KEY)?
         .map_or(Ok(Theme::Dark), |value| value.parse())
         .map_err(|error| error.to_string())
 }
 
-fn load_setting<M: RouteMediator>(app: &ViewerApp<M>, key: &str) -> Result<Option<String>, String> {
-    app.mediator
-        .send_now(GetSetting {
+fn load_setting(app: &ViewerApp, key: &str) -> Result<Option<String>, String> {
+    get_setting::execute(
+        get_setting::GetSetting {
             data_root: (*app.data_root).clone(),
             key: key.into(),
-        })
-        .map(|response| response.value)
-        .map_err(|error| format!("{error:#}"))
+        },
+        &app.app_state,
+    )
+    .map(|response| response.value)
+    .map_err(|error| format!("{error:#}"))
 }
 
-fn persist_setting<M: RouteMediator>(
-    app: &ViewerApp<M>,
-    key: &str,
-    value: String,
-) -> Result<(), String> {
-    app.mediator
-        .send_now(SetSetting {
+fn persist_setting(app: &ViewerApp, key: &str, value: String) -> Result<(), String> {
+    set_setting::execute(
+        set_setting::SetSetting {
             data_root: (*app.data_root).clone(),
             key: key.into(),
             value,
-        })
-        .map(|_| ())
-        .map_err(|error| format!("{error:#}"))
+        },
+        &app.app_state,
+    )
+    .map(|_| ())
+    .map_err(|error| format!("{error:#}"))
 }
 
 fn html_response(body: String) -> Response<Vec<u8>> {

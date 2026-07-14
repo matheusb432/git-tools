@@ -64,22 +64,23 @@ pub enum SaveLiveViewError {
 
 /// Saves a live view by probing `path` and writing through the app-state port.
 #[cqrsy::handler(command)]
-pub fn handle(
+pub fn execute(
+    req: SaveLiveView,
     probe: &impl RepoProbe,
     store: &impl AppStateStore,
     clock: &impl Clock,
-    req: SaveLiveView,
 ) -> Result<SaveLiveViewResponse, SaveLiveViewError> {
-    let top_level = match probe.probe(&req.path)? {
+    let SaveLiveView { data_root, path } = req;
+    let top_level = match probe.probe(&path)? {
         RepoProbeResult::Repo { top_level } => top_level,
         RepoProbeResult::NotFound => {
             return Ok(rejected(LiveViewRejection::DirNotFound {
-                path: req.path.display().to_string(),
+                path: path.display().to_string(),
             }));
         }
         RepoProbeResult::NotAGitRepo => {
             return Ok(rejected(LiveViewRejection::DirNotGitRepo {
-                path: req.path.display().to_string(),
+                path: path.display().to_string(),
             }));
         }
     };
@@ -92,7 +93,7 @@ pub fn handle(
         created_at: clock.now_iso(),
         last_opened_at: None,
     };
-    let already_saved = store.save_live_view(&req.data_root, &record)?;
+    let already_saved = store.save_live_view(&data_root, &record)?;
     let text = if already_saved {
         format!(
             "live view for `{}` already saved — refreshed",
@@ -121,8 +122,6 @@ fn rejected(rejection: LiveViewRejection) -> SaveLiveViewResponse {
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
-
     use super::*;
     use crate::{
         ports::{LiveViewRecord, RepoProbeResult},
@@ -130,28 +129,31 @@ mod tests {
         testing::{FakeRepoProbe, FixedClock, InMemoryAppStateStore},
     };
 
-    fn handler(
+    fn dependencies(
         probe_result: RepoProbeResult,
-    ) -> SaveLiveViewHandler<FakeRepoProbe, InMemoryAppStateStore, FixedClock> {
-        SaveLiveViewHandler {
-            probe: FakeRepoProbe {
+    ) -> (FakeRepoProbe, InMemoryAppStateStore, FixedClock) {
+        (
+            FakeRepoProbe {
                 result: probe_result,
             },
-            store: InMemoryAppStateStore::default(),
-            clock: FixedClock("2026-01-01T00:00:00Z".into()),
-        }
+            InMemoryAppStateStore::default(),
+            FixedClock("2026-01-01T00:00:00Z".into()),
+        )
     }
 
     #[test]
     fn missing_dir_rejects_with_dir_not_found() {
-        let handler = handler(RepoProbeResult::NotFound);
-
-        let response = handler
-            .send_now(SaveLiveView {
+        let (probe, store, clock) = dependencies(RepoProbeResult::NotFound);
+        let response = execute(
+            SaveLiveView {
                 data_root: "/data".into(),
                 path: "/gone".into(),
-            })
-            .expect("save succeeds with a rejected outcome");
+            },
+            &probe,
+            &store,
+            &clock,
+        )
+        .expect("save succeeds with a rejected outcome");
 
         match &response.outcome {
             SaveLiveViewOutcome::Rejected { rejection } => {
@@ -170,21 +172,24 @@ mod tests {
             "The git repo's directory at `/gone` was not found."
         );
         assert!(
-            handler.store.live_views.lock().unwrap().is_empty(),
+            store.live_views.lock().unwrap().is_empty(),
             "nothing should be persisted on rejection"
         );
     }
 
     #[test]
     fn non_repo_dir_rejects_with_dir_not_git_repo() {
-        let handler = handler(RepoProbeResult::NotAGitRepo);
-
-        let response = handler
-            .send_now(SaveLiveView {
+        let (probe, store, clock) = dependencies(RepoProbeResult::NotAGitRepo);
+        let response = execute(
+            SaveLiveView {
                 data_root: "/data".into(),
                 path: "/plain".into(),
-            })
-            .expect("save succeeds with a rejected outcome");
+            },
+            &probe,
+            &store,
+            &clock,
+        )
+        .expect("save succeeds with a rejected outcome");
 
         match &response.outcome {
             SaveLiveViewOutcome::Rejected { rejection } => {
@@ -201,23 +206,26 @@ mod tests {
             "The directory `/plain` is not a git repository."
         );
         assert!(
-            handler.store.live_views.lock().unwrap().is_empty(),
+            store.live_views.lock().unwrap().is_empty(),
             "nothing should be persisted on rejection"
         );
     }
 
     #[test]
     fn valid_repo_saves_a_record_with_canonical_identity_and_clock_time() {
-        let handler = handler(RepoProbeResult::Repo {
+        let (probe, store, clock) = dependencies(RepoProbeResult::Repo {
             top_level: "/repos/gt".into(),
         });
-
-        let response = handler
-            .send_now(SaveLiveView {
+        let response = execute(
+            SaveLiveView {
                 data_root: "/data".into(),
                 path: "/repos/gt".into(),
-            })
-            .expect("save succeeds");
+            },
+            &probe,
+            &store,
+            &clock,
+        )
+        .expect("save succeeds");
 
         match &response.outcome {
             SaveLiveViewOutcome::Saved {
@@ -241,33 +249,32 @@ mod tests {
         assert_eq!(response.notes.len(), 1);
         assert_eq!(response.notes[0].level, NoteLevel::Info);
         assert_eq!(response.notes[0].text, "saved live view for `gt`");
-        assert_eq!(handler.store.live_views.lock().unwrap().len(), 1);
+        assert_eq!(store.live_views.lock().unwrap().len(), 1);
     }
 
     #[test]
     fn resaving_reports_already_saved() {
-        let handler = handler(RepoProbeResult::Repo {
+        let (probe, store, clock) = dependencies(RepoProbeResult::Repo {
             top_level: "/repos/gt".into(),
         });
-        handler
-            .store
-            .live_views
-            .lock()
-            .unwrap()
-            .push(LiveViewRecord {
-                source_kind: "LocalRepo".into(),
-                source_value: "/repos/gt".into(),
-                display_name: "gt".into(),
-                created_at: "2025-01-01T00:00:00Z".into(),
-                last_opened_at: None,
-            });
+        store.live_views.lock().unwrap().push(LiveViewRecord {
+            source_kind: "LocalRepo".into(),
+            source_value: "/repos/gt".into(),
+            display_name: "gt".into(),
+            created_at: "2025-01-01T00:00:00Z".into(),
+            last_opened_at: None,
+        });
 
-        let response = handler
-            .send_now(SaveLiveView {
+        let response = execute(
+            SaveLiveView {
                 data_root: "/data".into(),
                 path: "/repos/gt".into(),
-            })
-            .expect("save succeeds");
+            },
+            &probe,
+            &store,
+            &clock,
+        )
+        .expect("save succeeds");
 
         match &response.outcome {
             SaveLiveViewOutcome::Saved { already_saved, .. } => assert!(already_saved),
@@ -277,6 +284,6 @@ mod tests {
             response.notes[0].text,
             "live view for `gt` already saved — refreshed"
         );
-        assert_eq!(handler.store.live_views.lock().unwrap().len(), 1);
+        assert_eq!(store.live_views.lock().unwrap().len(), 1);
     }
 }

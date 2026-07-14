@@ -25,18 +25,21 @@ pub enum RemoveLiveViewError {
 
 /// Removes a saved live view through the app-state port.
 #[cqrsy::handler(command)]
-pub fn handle(
-    store: &impl AppStateStore,
+pub fn execute(
     req: RemoveLiveView,
+    store: &impl AppStateStore,
 ) -> Result<RemoveLiveViewResponse, RemoveLiveViewError> {
-    let removed = store.remove_live_view(&req.data_root, &req.source_kind, &req.source_value)?;
+    let RemoveLiveView {
+        data_root,
+        source_kind,
+        source_value,
+    } = req;
+    let removed = store.remove_live_view(&data_root, &source_kind, &source_value)?;
     Ok(RemoveLiveViewResponse { removed })
 }
 
 #[cfg(test)]
 mod tests {
-    use cqrsy::Sender;
-
     use super::*;
     use crate::{ports::LiveViewRecord, testing::InMemoryAppStateStore};
 
@@ -50,17 +53,15 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
             last_opened_at: None,
         });
-        let handler = RemoveLiveViewHandler {
-            store: store.clone(),
-        };
-
-        let response = handler
-            .send_now(RemoveLiveView {
+        let response = execute(
+            RemoveLiveView {
                 data_root: "/data".into(),
                 source_kind: "LocalRepo".into(),
                 source_value: "/repos/gt".into(),
-            })
-            .expect("remove succeeds");
+            },
+            &store,
+        )
+        .expect("remove succeeds");
 
         assert!(response.removed);
         assert!(store.live_views.lock().unwrap().is_empty());
@@ -68,17 +69,16 @@ mod tests {
 
     #[test]
     fn remove_reports_false_for_unknown_identity() {
-        let handler = RemoveLiveViewHandler {
-            store: InMemoryAppStateStore::default(),
-        };
-
-        let response = handler
-            .send_now(RemoveLiveView {
+        let store = InMemoryAppStateStore::default();
+        let response = execute(
+            RemoveLiveView {
                 data_root: "/data".into(),
                 source_kind: "LocalRepo".into(),
                 source_value: "/repos/unknown".into(),
-            })
-            .expect("remove succeeds");
+            },
+            &store,
+        )
+        .expect("remove succeeds");
 
         assert!(!response.removed);
     }

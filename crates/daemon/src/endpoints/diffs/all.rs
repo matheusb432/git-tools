@@ -1,31 +1,36 @@
 //! `POST /diffs/all` — mirrors `endpoints/diffs/render.rs` exactly.
 
-use std::sync::Arc;
-
-use application::diffs::render_diff_all::RenderDiffAll;
+use application::diffs::render_diff_all;
 use axum::{Json, extract::State, http::StatusCode};
 use contracts::{
     diffs::{RenderDiffAllRequest, RenderDiffData},
     envelope::Envelope,
 };
-use cqrsy::{Handle, Sender};
 
-use crate::state::Shared;
+use crate::state::DaemonState;
 
 /// Renders a diff-all preview for the request body, returning the wire envelope.
 ///
 /// - `200` with an `ok` envelope on success.
 /// - `500` with an error envelope when the handler (or its blocking task) fails.
-pub async fn handle<H>(
-    State(handler): State<H>,
-    State(shared): State<Arc<Shared>>,
+pub async fn handle(
+    State(state): State<DaemonState>,
     Json(dto): Json<RenderDiffAllRequest>,
-) -> (StatusCode, Json<Envelope<RenderDiffData>>)
-where
-    H: Sender<RenderDiffAll> + Handle,
-{
-    crate::endpoints::run(handler, shared, Ok(super::to_all_request(dto)), |resp| {
-        super::to_all_envelope(&resp)
-    })
+) -> (StatusCode, Json<Envelope<RenderDiffData>>) {
+    let shared = state.shared.clone();
+    crate::endpoints::run(
+        shared,
+        Ok(super::to_all_request(dto)),
+        move |request| {
+            render_diff_all::execute(
+                request,
+                &state.source,
+                &state.artifacts,
+                &state.renderer,
+                &state.clock,
+            )
+        },
+        |response| super::to_all_envelope(&response),
+    )
     .await
 }

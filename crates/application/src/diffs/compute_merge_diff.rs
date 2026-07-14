@@ -31,11 +31,12 @@ pub enum ComputeMergeDiffError {
 
 /// Computes a merge diff via the shared merge view builder.
 #[cqrsy::handler(query)]
-pub fn handle(
-    source: &impl DiffSource,
+pub fn execute(
     req: ComputeMergeDiff,
+    source: &impl DiffSource,
 ) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
-    let built = build_merge_view(source, &req.cwd, req.base.as_deref(), req.pinned.as_ref())?;
+    let ComputeMergeDiff { cwd, base, pinned } = req;
+    let built = build_merge_view(source, &cwd, base.as_deref(), pinned.as_ref())?;
     Ok(ComputeMergeDiffResponse { view: built.view })
 }
 
@@ -43,7 +44,6 @@ pub fn handle(
 mod tests {
     use std::path::PathBuf;
 
-    use cqrsy::Sender;
     use domain::diffs::Commit;
 
     use super::*;
@@ -61,28 +61,28 @@ index 111..222 100644\n\
 
     #[test]
     fn computes_the_merge_view_with_the_default_base() {
-        let handler = ComputeMergeDiffHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                known_revs: vec!["main".into()],
-                commits: vec![Commit {
-                    sha: "abc1234".into(),
-                    subject: "feat: work".into(),
-                    ..Default::default()
-                }],
-                diff_output: SINGLE_FILE_DIFF.into(),
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            known_revs: vec!["main".into()],
+            commits: vec![Commit {
+                sha: "abc1234".into(),
+                subject: "feat: work".into(),
                 ..Default::default()
-            },
+            }],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            ..Default::default()
         };
 
-        let response = handler
-            .send_now(ComputeMergeDiff {
+        let response = execute(
+            ComputeMergeDiff {
                 cwd: PathBuf::from("/repo"),
                 base: None,
                 pinned: None,
-            })
-            .expect("compute succeeds");
+            },
+            &source,
+        )
+        .expect("compute succeeds");
 
         assert_eq!(response.view.upstream, "main");
         assert_eq!(response.view.branch, "feature");
@@ -91,31 +91,31 @@ index 111..222 100644\n\
 
     #[test]
     fn pinned_merge_diff_computes_over_the_pinned_range_without_verification() {
-        let handler = ComputeMergeDiffHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                known_revs: vec![], // verify_commit would fail symbolically
-                commits: vec![Commit {
-                    sha: "abc1234".into(),
-                    subject: "feat: work".into(),
-                    ..Default::default()
-                }],
-                diff_output: SINGLE_FILE_DIFF.into(),
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            known_revs: vec![], // verify_commit would fail symbolically
+            commits: vec![Commit {
+                sha: "abc1234".into(),
+                subject: "feat: work".into(),
                 ..Default::default()
-            },
+            }],
+            diff_output: SINGLE_FILE_DIFF.into(),
+            ..Default::default()
         };
 
-        let response = handler
-            .send_now(ComputeMergeDiff {
+        let response = execute(
+            ComputeMergeDiff {
                 cwd: PathBuf::from("/repo"),
                 base: None,
                 pinned: Some(domain::diffs::PinnedRange {
                     base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
                     head: "1111111111222222222233333333334444444444".into(),
                 }),
-            })
-            .expect("pinned merge compute succeeds");
+            },
+            &source,
+        )
+        .expect("pinned merge compute succeeds");
 
         assert_eq!(response.view.title, "merge-diff");
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
@@ -123,22 +123,22 @@ index 111..222 100644\n\
 
     #[test]
     fn unknown_base_is_an_error() {
-        let handler = ComputeMergeDiffHandler {
-            source: FakeDiffSource {
-                top_level: Some("/repo".into()),
-                branch: "feature".into(),
-                known_revs: vec![],
-                ..Default::default()
-            },
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            known_revs: vec![],
+            ..Default::default()
         };
 
-        let error = handler
-            .send_now(ComputeMergeDiff {
+        let error = execute(
+            ComputeMergeDiff {
                 cwd: PathBuf::from("/repo"),
                 base: Some("nope".into()),
                 pinned: None,
-            })
-            .expect_err("unknown base errors");
+            },
+            &source,
+        )
+        .expect_err("unknown base errors");
 
         let ComputeMergeDiffError::Unexpected(err) = error;
         assert_eq!(format!("{err:#}"), "unknown revision nope");

@@ -1,4 +1,4 @@
-//! Recipe compute orchestration through the desktop mediator.
+//! Recipe compute orchestration through direct application operations.
 
 use std::{
     path::Path,
@@ -7,13 +7,14 @@ use std::{
 
 use application::{
     diffs::{
-        compute_diff::ComputeDiff, compute_merge_diff::ComputeMergeDiff,
-        compute_squash_preview::ComputeSquashPreview,
+        compute_diff::{self, ComputeDiff},
+        compute_merge_diff::{self, ComputeMergeDiff},
+        compute_squash_preview::{self, ComputeSquashPreview},
     },
-    history::record_render::RecordRender,
-    live_views::probe::{ProbeOutcome, ProbeSource},
+    history::record_render::{self, RecordRender},
+    live_views::probe::{self, ProbeOutcome, ProbeSource},
+    ports::{AppStateStore, Clock, DiffSource, RepoProbe},
 };
-use cqrsy::{Handle, Sender};
 use domain::{
     diffs::{DiffTarget, View},
     viewer::{ViewerTabId, ViewerTabKind, ViewerTabState},
@@ -107,53 +108,51 @@ fn diff_target(target: &RecipeTarget) -> DiffTarget {
     }
 }
 
-pub(crate) fn compute_view<M>(mediator: &M, recipe: &Recipe) -> Result<View, String>
-where
-    M: Sender<ComputeDiff> + Sender<ComputeMergeDiff> + Sender<ComputeSquashPreview> + Handle,
-{
+pub(crate) fn compute_view(source: &impl DiffSource, recipe: &Recipe) -> Result<View, String> {
     let cwd = recipe.cwd();
     match &recipe.op {
-        RecipeOp::Diff { target } => mediator
-            .send_now(ComputeDiff {
+        RecipeOp::Diff { target } => compute_diff::execute(
+            ComputeDiff {
                 cwd,
                 target: diff_target(target),
-            })
-            .map(|response| response.view)
-            .map_err(|error| format!("{error:#}")),
-        RecipeOp::MergeDiff { base, pinned } => mediator
-            .send_now(ComputeMergeDiff {
+            },
+            source,
+        )
+        .map(|response| response.view)
+        .map_err(|error| format!("{error:#}")),
+        RecipeOp::MergeDiff { base, pinned } => compute_merge_diff::execute(
+            ComputeMergeDiff {
                 cwd,
                 base: base.clone(),
                 pinned: to_domain_pin(pinned.as_ref()),
-            })
-            .map(|response| response.view)
-            .map_err(|error| format!("{error:#}")),
-        RecipeOp::SquashPreview { pinned } => mediator
-            .send_now(ComputeSquashPreview {
+            },
+            source,
+        )
+        .map(|response| response.view)
+        .map_err(|error| format!("{error:#}")),
+        RecipeOp::SquashPreview { pinned } => compute_squash_preview::execute(
+            ComputeSquashPreview {
                 cwd,
                 pinned: to_domain_pin(pinned.as_ref()),
-            })
-            .map(|response| response.view)
-            .map_err(|error| format!("{error:#}")),
+            },
+            source,
+        )
+        .map(|response| response.view)
+        .map_err(|error| format!("{error:#}")),
     }
 }
 
-pub(crate) fn open_recipe<M>(
-    mediator: &M,
+pub(crate) fn open_recipe(
+    source: &impl DiffSource,
+    probe: &impl RepoProbe,
+    app_state: &impl AppStateStore,
+    clock: &impl Clock,
     session: &Mutex<ViewerSession>,
     data_root: &Path,
     recipe: &Recipe,
     batch_id: String,
     kind: ViewerTabKind,
-) -> Result<OpenedRecipe, RecipeError>
-where
-    M: Sender<ComputeDiff>
-        + Sender<ComputeMergeDiff>
-        + Sender<ComputeSquashPreview>
-        + Sender<ProbeSource>
-        + Sender<RecordRender>
-        + Handle,
-{
+) -> Result<OpenedRecipe, RecipeError> {
     let (id, ticket) = {
         let mut session = session
             .lock()
@@ -165,7 +164,10 @@ where
         (id, ticket)
     };
 
-    let view = compute_and_publish(mediator, session, data_root, recipe, kind, ticket)?.into_view();
+    let view = compute_and_publish(
+        source, app_state, probe, clock, session, data_root, recipe, kind, ticket,
+    )?
+    .into_view();
     Ok(OpenedRecipe {
         tab_id: id,
         ticket,
@@ -174,20 +176,15 @@ where
 }
 
 #[cfg(test)]
-pub(crate) fn refresh_recipe<M>(
-    mediator: &M,
+pub(crate) fn refresh_recipe(
+    source: &impl DiffSource,
+    probe: &impl RepoProbe,
+    app_state: &impl AppStateStore,
+    clock: &impl Clock,
     session: &Mutex<ViewerSession>,
     data_root: &Path,
     id: ViewerTabId,
-) -> Result<Option<Arc<View>>, String>
-where
-    M: Sender<ComputeDiff>
-        + Sender<ComputeMergeDiff>
-        + Sender<ComputeSquashPreview>
-        + Sender<ProbeSource>
-        + Sender<RecordRender>
-        + Handle,
-{
+) -> Result<Option<Arc<View>>, String> {
     let (recipe, kind, ticket) = {
         let mut session = session.lock().map_err(|error| error.to_string())?;
         let tab = session.tab(id).ok_or_else(|| format!("unknown tab {id}"))?;
@@ -199,25 +196,22 @@ where
         (recipe, kind, ticket)
     };
 
-    compute_and_publish(mediator, session, data_root, &recipe, kind, ticket)
-        .map(ComputationOutcome::into_view)
-        .map_err(|error| error.to_string())
+    compute_and_publish(
+        source, app_state, probe, clock, session, data_root, &recipe, kind, ticket,
+    )
+    .map(ComputationOutcome::into_view)
+    .map_err(|error| error.to_string())
 }
 
-pub(crate) fn refresh_recipe_versioned<M>(
-    mediator: &M,
+pub(crate) fn refresh_recipe_versioned(
+    source: &impl DiffSource,
+    probe: &impl RepoProbe,
+    app_state: &impl AppStateStore,
+    clock: &impl Clock,
     session: &Mutex<ViewerSession>,
     data_root: &Path,
     id: ViewerTabId,
-) -> Result<RefreshedRecipe, RecipeError>
-where
-    M: Sender<ComputeDiff>
-        + Sender<ComputeMergeDiff>
-        + Sender<ComputeSquashPreview>
-        + Sender<ProbeSource>
-        + Sender<RecordRender>
-        + Handle,
-{
+) -> Result<RefreshedRecipe, RecipeError> {
     let (recipe, kind, ticket) = {
         let mut session = session
             .lock()
@@ -230,29 +224,26 @@ where
             .ok_or_else(|| format!("unknown tab {id}"))?;
         (recipe, kind, ticket)
     };
-    let view =
-        compute_and_publish(mediator, session, data_root, &recipe, kind, ticket)?.into_view();
+    let view = compute_and_publish(
+        source, app_state, probe, clock, session, data_root, &recipe, kind, ticket,
+    )?
+    .into_view();
     Ok(RefreshedRecipe { ticket, view })
 }
 
-fn compute_and_publish<M>(
-    mediator: &M,
+fn compute_and_publish(
+    source: &impl DiffSource,
+    app_state: &impl AppStateStore,
+    probe: &impl RepoProbe,
+    clock: &impl Clock,
     session: &Mutex<ViewerSession>,
     data_root: &Path,
     recipe: &Recipe,
     kind: ViewerTabKind,
     ticket: ComputeTicket,
-) -> Result<ComputationOutcome, RecipeError>
-where
-    M: Sender<ComputeDiff>
-        + Sender<ComputeMergeDiff>
-        + Sender<ComputeSquashPreview>
-        + Sender<ProbeSource>
-        + Sender<RecordRender>
-        + Handle,
-{
+) -> Result<ComputationOutcome, RecipeError> {
     if kind == ViewerTabKind::Live
-        && let Some(broken) = probe_live_source(mediator, data_root, recipe)?
+        && let Some(broken) = probe_live_source(probe, data_root, recipe)?
     {
         let mut session = session
             .lock()
@@ -263,7 +254,7 @@ where
         return Ok(ComputationOutcome::StateOnly);
     }
 
-    let view = match compute_view(mediator, recipe) {
+    let view = match compute_view(source, recipe) {
         Ok(view) => Arc::new(view),
         Err(reason) => {
             publish_compute_error(session, ticket, &reason)?;
@@ -277,7 +268,7 @@ where
         session.publish_if_current(ticket, CachedView::new(Arc::clone(&view)))
     };
     if published == PublishOutcome::Published {
-        record_render(mediator, data_root, recipe, &view);
+        record_render(app_state, clock, data_root, recipe, &view);
         return Ok(ComputationOutcome::Rendered(view));
     }
     Err(RecipeError::Stale)
@@ -303,22 +294,21 @@ fn publish_compute_error(
     }
 }
 
-fn probe_live_source<M>(
-    mediator: &M,
+fn probe_live_source(
+    probe: &impl RepoProbe,
     data_root: &Path,
     recipe: &Recipe,
-) -> Result<Option<ViewerTabState>, String>
-where
-    M: Sender<ProbeSource> + Handle,
-{
+) -> Result<Option<ViewerTabState>, String> {
     let RecipeSource::LocalRepo(path) = &recipe.source;
-    let response = mediator
-        .send_now(ProbeSource {
+    let response = probe::execute(
+        ProbeSource {
             data_root: data_root.to_path_buf(),
             source_kind: "LocalRepo".into(),
             source_value: path.display().to_string(),
-        })
-        .map_err(|error| format!("{error:#}"))?;
+        },
+        probe,
+    )
+    .map_err(|error| format!("{error:#}"))?;
     Ok(match response.outcome {
         ProbeOutcome::Ok => None,
         ProbeOutcome::Broken { rejection } => Some(ViewerTabState::Broken {
@@ -328,21 +318,28 @@ where
     })
 }
 
-fn record_render<M>(mediator: &M, data_root: &Path, recipe: &Recipe, view: &View)
-where
-    M: Sender<RecordRender> + Handle,
-{
+fn record_render(
+    app_state: &impl AppStateStore,
+    clock: &impl Clock,
+    data_root: &Path,
+    recipe: &Recipe,
+    view: &View,
+) {
     let Ok(recipe_json) = serde_json::to_string(recipe) else {
         return;
     };
-    if let Err(error) = mediator.send_now(RecordRender {
-        data_root: data_root.to_path_buf(),
-        recipe_json,
-        title: tab_label::computed(recipe, view),
-        repo_name: view.repo_name.clone(),
-        kind: recipe.kind_tag().into(),
-        range_label: view.cmd.range.clone(),
-    }) {
+    if let Err(error) = record_render::execute(
+        RecordRender {
+            data_root: data_root.to_path_buf(),
+            recipe_json,
+            title: tab_label::computed(recipe, view),
+            repo_name: view.repo_name.clone(),
+            kind: recipe.kind_tag().into(),
+            range_label: view.cmd.range.clone(),
+        },
+        app_state,
+        clock,
+    ) {
         eprintln!("gtl-viewer: failed to record render history: {error:#}");
     }
 }
@@ -353,7 +350,7 @@ mod tests {
 
     use application::{
         ports::RepoProbeResult,
-        testing::{FakeDiffSource, FakeRepoProbe, InMemoryAppStateStore},
+        testing::{FakeDiffSource, FakeRepoProbe, FixedClock, InMemoryAppStateStore},
     };
     use domain::{
         diffs::Commit,
@@ -400,19 +397,20 @@ index 111..222 100644\n\
     #[test]
     fn open_computes_publishes_and_records_only_the_current_view() {
         let app_state = InMemoryAppStateStore::default();
-        let mediator = crate::test_support::fake_mediator_with(
-            source(),
-            app_state.clone(),
-            FakeRepoProbe {
-                result: RepoProbeResult::Repo {
-                    top_level: "/repo".into(),
-                },
+        let source = source();
+        let probe = FakeRepoProbe {
+            result: RepoProbeResult::Repo {
+                top_level: "/repo".into(),
             },
-        );
+        };
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
 
         let opened = open_recipe(
-            &mediator,
+            &source,
+            &probe,
+            &app_state,
+            &clock,
             &session,
             Path::new("/data"),
             &recipe(),
@@ -438,17 +436,19 @@ index 111..222 100644\n\
 
     #[test]
     fn failed_initial_compute_preserves_the_explicit_recipe_label() {
-        let mediator = crate::test_support::fake_mediator_with(
-            FakeDiffSource::default(),
-            InMemoryAppStateStore::default(),
-            FakeRepoProbe::default(),
-        );
+        let source = FakeDiffSource::default();
+        let probe = FakeRepoProbe::default();
+        let app_state = InMemoryAppStateStore::default();
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(1024));
         let mut named = recipe();
         named.name = Some("Named initial failure".into());
 
         let opened = open_recipe(
-            &mediator,
+            &source,
+            &probe,
+            &app_state,
+            &clock,
             &session,
             Path::new("/data"),
             &named,
@@ -466,15 +466,17 @@ index 111..222 100644\n\
 
     #[test]
     fn oversize_open_returns_the_view_without_retaining_it() {
-        let mediator = crate::test_support::fake_mediator_with(
-            source(),
-            InMemoryAppStateStore::default(),
-            FakeRepoProbe::default(),
-        );
+        let source = source();
+        let probe = FakeRepoProbe::default();
+        let app_state = InMemoryAppStateStore::default();
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(1));
 
         let opened = open_recipe(
-            &mediator,
+            &source,
+            &probe,
+            &app_state,
+            &clock,
             &session,
             Path::new("/data"),
             &recipe(),
@@ -496,17 +498,18 @@ index 111..222 100644\n\
     #[test]
     fn broken_live_source_is_published_without_invoking_diff_compute() {
         let app_state = InMemoryAppStateStore::default();
-        let mediator = crate::test_support::fake_mediator_with(
-            FakeDiffSource::default(),
-            app_state.clone(),
-            FakeRepoProbe {
-                result: RepoProbeResult::NotFound,
-            },
-        );
+        let source = FakeDiffSource::default();
+        let probe = FakeRepoProbe {
+            result: RepoProbeResult::NotFound,
+        };
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(1024));
 
         let id = open_recipe(
-            &mediator,
+            &source,
+            &probe,
+            &app_state,
+            &clock,
             &session,
             Path::new("/data"),
             &recipe(),
@@ -530,17 +533,18 @@ index 111..222 100644\n\
     #[test]
     fn non_repo_live_source_is_published_without_invoking_diff_compute() {
         let app_state = InMemoryAppStateStore::default();
-        let mediator = crate::test_support::fake_mediator_with(
-            FakeDiffSource::default(),
-            app_state.clone(),
-            FakeRepoProbe {
-                result: RepoProbeResult::NotAGitRepo,
-            },
-        );
+        let source = FakeDiffSource::default();
+        let probe = FakeRepoProbe {
+            result: RepoProbeResult::NotAGitRepo,
+        };
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(1024));
 
         let id = open_recipe(
-            &mediator,
+            &source,
+            &probe,
+            &app_state,
+            &clock,
             &session,
             Path::new("/data"),
             &recipe(),
@@ -565,16 +569,17 @@ index 111..222 100644\n\
     fn refresh_after_snapshot_to_live_reopen_probes_before_compute() {
         let app_state = InMemoryAppStateStore::default();
         let recipe = recipe();
-        let mediator = crate::test_support::fake_mediator_with(
-            source(),
-            app_state.clone(),
-            FakeRepoProbe {
-                result: RepoProbeResult::NotFound,
-            },
-        );
+        let source = source();
+        let probe = FakeRepoProbe {
+            result: RepoProbeResult::NotFound,
+        };
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let id = open_recipe(
-            &mediator,
+            &source,
+            &probe,
+            &app_state,
+            &clock,
             &session,
             Path::new("/data"),
             &recipe,
@@ -589,8 +594,16 @@ index 111..222 100644\n\
         }
         app_state.renders.lock().expect("renders lock").clear();
 
-        let refreshed = refresh_recipe(&mediator, &session, Path::new("/data"), id)
-            .expect("broken live refresh remains a tab");
+        let refreshed = refresh_recipe(
+            &source,
+            &probe,
+            &app_state,
+            &clock,
+            &session,
+            Path::new("/data"),
+            id,
+        )
+        .expect("broken live refresh remains a tab");
 
         assert!(refreshed.is_none());
         let session = session.lock().expect("session lock");
@@ -607,14 +620,15 @@ index 111..222 100644\n\
     #[test]
     fn refresh_recomputes_the_reserved_tab_and_records_the_current_result() {
         let app_state = InMemoryAppStateStore::default();
-        let mediator = crate::test_support::fake_mediator_with(
-            source(),
-            app_state.clone(),
-            FakeRepoProbe::default(),
-        );
+        let source = source();
+        let probe = FakeRepoProbe::default();
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let id = open_recipe(
-            &mediator,
+            &source,
+            &probe,
+            &app_state,
+            &clock,
             &session,
             Path::new("/data"),
             &recipe(),
@@ -625,7 +639,16 @@ index 111..222 100644\n\
         .tab_id;
         app_state.renders.lock().expect("renders lock").clear();
 
-        refresh_recipe(&mediator, &session, Path::new("/data"), id).expect("refresh succeeds");
+        refresh_recipe(
+            &source,
+            &probe,
+            &app_state,
+            &clock,
+            &session,
+            Path::new("/data"),
+            id,
+        )
+        .expect("refresh succeeds");
 
         assert_eq!(app_state.renders.lock().expect("renders lock").len(), 1);
         let mut session = session.lock().expect("session lock");
@@ -635,21 +658,18 @@ index 111..222 100644\n\
     #[test]
     fn failed_refresh_preserves_the_explicit_recipe_label() {
         let app_state = InMemoryAppStateStore::default();
-        let successful = crate::test_support::fake_mediator_with(
-            source(),
-            app_state.clone(),
-            FakeRepoProbe::default(),
-        );
-        let failing = crate::test_support::fake_mediator_with(
-            FakeDiffSource::default(),
-            app_state,
-            FakeRepoProbe::default(),
-        );
+        let successful_source = source();
+        let failing_source = FakeDiffSource::default();
+        let probe = FakeRepoProbe::default();
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let mut named = recipe();
         named.name = Some("Named refresh failure".into());
         let id = open_recipe(
-            &successful,
+            &successful_source,
+            &probe,
+            &app_state,
+            &clock,
             &session,
             Path::new("/data"),
             &named,
@@ -660,9 +680,17 @@ index 111..222 100644\n\
         .tab_id;
 
         assert!(
-            refresh_recipe(&failing, &session, Path::new("/data"), id)
-                .expect("published refresh errors are acknowledged")
-                .is_none()
+            refresh_recipe(
+                &failing_source,
+                &probe,
+                &app_state,
+                &clock,
+                &session,
+                Path::new("/data"),
+                id,
+            )
+            .expect("published refresh errors are acknowledged")
+            .is_none()
         );
 
         let session = session.lock().expect("session lock");
@@ -673,12 +701,8 @@ index 111..222 100644\n\
 
     #[test]
     fn older_failing_refresh_becomes_stale_after_newer_success() {
-        let mediator = crate::test_support::fake_mediator_with(
-            source(),
-            InMemoryAppStateStore::default(),
-            FakeRepoProbe::default(),
-        );
-        let mut newest_view = compute_view(&mediator, &recipe()).expect("view computes");
+        let source = source();
+        let mut newest_view = compute_view(&source, &recipe()).expect("view computes");
         newest_view.title = "newer success".into();
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let id = session.lock().expect("session").open(

@@ -1,11 +1,4 @@
-# Clippy tuning for this repo's Rust crates — REPO-OWNED (sample_project's `sync-clippy` fan-out manages
-# only the `[workspace.lints.clippy]` LEVELS table in the root Cargo.toml; this file opts out of
-# the whole-file sync via `clippy_toml = false` in repos.toml because of the bespoke
-# disallowed-methods below).
+# Clippy tuning for this repo's Rust crates.
 
 # Internal binaries, never published libraries: let Clippy suggest better signatures freely.
 avoid-breaking-exported-api = false
-
-disallowed-methods = [
-  { path = "cqrsy_core::Handler::handle", reason = "implementation-only seam — send through cqrsy::Sender::send or cqrsy::Sender::send_now" },
-]
