@@ -67,7 +67,18 @@ fn test_exposes_its_flags() {
         .assert()
         .success()
         .stdout(predicates::str::contains("--verbose"))
+        .stdout(predicates::str::contains("--e2e"))
         .stdout(predicates::str::contains("--all"));
+}
+
+#[test]
+fn test_rejects_conflicting_expensive_scopes() {
+    Command::cargo_bin("xtask")
+        .unwrap()
+        .args(["test", "--e2e", "--all"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("cannot be used with"));
 }
 
 #[test]
@@ -108,13 +119,14 @@ fn fmt_exposes_its_check_flag() {
 }
 
 #[test]
-fn ship_exposes_its_smoke_flag() {
+fn ship_exposes_smoke_and_force_flags() {
     Command::cargo_bin("xtask")
         .unwrap()
         .args(["ship", "--help"])
         .assert()
         .success()
-        .stdout(predicates::str::contains("--smoke"));
+        .stdout(predicates::str::contains("--smoke"))
+        .stdout(predicates::str::contains("--force"));
 }
 
 #[test]

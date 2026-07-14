@@ -5,10 +5,11 @@
 //!
 //! Steps (CWD is the repo root — `bootstrap.sh` cds there, and `just bootstrap` runs from root):
 //! 1. link `.claude/skills` -> `../.agents/skills` (cross-platform via the PAL symlink primitive);
-//! 2. install the pinned Deno dependencies;
-//! 3. build both artifacts (`just build`);
-//! 4. install both onto PATH (`install::run_install`);
-//! 5. ensure `~/.local/bin` is on PATH (append to `~/.bashrc` once, when absent).
+//! 2. configure the tracked `.githooks` directory for this clone;
+//! 3. install the pinned Deno dependencies;
+//! 4. build both artifacts (`just build`);
+//! 5. install both onto PATH (`install::run_install`);
+//! 6. ensure `~/.local/bin` is on PATH (append to `~/.bashrc` once, when absent).
 
 use std::{
     env, fs,
@@ -30,12 +31,21 @@ pub fn run() -> Result<()> {
         "required tool `deno` is missing; install it through the declarative host configuration",
     )?;
     link_skills()?;
+    configure_git_hooks()?;
     proc::run("frontend-dependencies", "deno", &["install", "--frozen"])?;
     proc::run("build", "just", &["build"])?;
     install::run_install(InstallTarget::Both)?;
     ensure_path_on_bashrc()?;
     proc::result("bootstrap", "PASS");
     Ok(())
+}
+
+fn configure_git_hooks() -> Result<()> {
+    proc::run(
+        "git-hooks",
+        "git",
+        &["config", "core.hooksPath", ".githooks"],
+    )
 }
 
 /// Link `.claude/skills` -> `../.agents/skills` so Claude Code sees the cross-agent skills

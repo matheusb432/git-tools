@@ -4,7 +4,7 @@
 //! three layout rules (see `docs/planning/specs/2026-07-02-pragmatic-backend-architecture.md`,
 //! Mechanical Gates section). Called standalone as `cargo run -p xtask -- check-structure
 //! [<root>]` and wired
-//! into `fmt-check` so the gate runs on every CI / pre-commit invocation.
+//! into `fmt-check` so the architecture gate cannot be silently skipped.
 //!
 //! ## Rules
 //!

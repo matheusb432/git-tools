@@ -28,6 +28,35 @@ pub fn run(label: &str, program: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// Delegate a captured command to the workspace gate runner.
+pub fn gate(scope: &str, command: &str, verbose: bool) -> Result<()> {
+    let mut args = vec!["run", "--quiet", "-p", "gate", "--"];
+    if verbose {
+        args.push("--verbose");
+    }
+    args.extend_from_slice(&[scope, command]);
+    run(&format!("gate:{scope}"), "cargo", &args)
+}
+
+/// Run a command after removing environment variables that could leak host GUI state.
+pub fn run_with_removed_env(
+    label: &str,
+    program: &str,
+    args: &[&str],
+    removed: &[&str],
+) -> Result<()> {
+    let mut command = Command::new(program);
+    command.args(args);
+    for name in removed {
+        command.env_remove(name);
+    }
+    let status = command.status()?;
+    if !status.success() {
+        bail!("{label} failed (exit {})", status.code().unwrap_or(-1));
+    }
+    Ok(())
+}
+
 /// Run `program args…` in `dir`, returning an error tagged with `label` on non-zero exit.
 pub fn run_in(label: &str, dir: &str, program: &str, args: &[&str]) -> Result<()> {
     let status = Command::new(program).current_dir(dir).args(args).status()?;

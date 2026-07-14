@@ -29,7 +29,7 @@ pub(crate) use parse::{ResumeNonce, Route, SettingChange, parse};
 use tauri::http::{Request, Response, StatusCode};
 
 use crate::{
-    recipes::{RecipeError, open_recipe, refresh_recipe_versioned},
+    recipes::{RecipeContext, RecipeError, open_recipe, refresh_recipe_versioned},
     render::MaudViewerRenderer,
     session::{PendingRecipes, PendingRecipesError, ViewerSession},
 };
@@ -125,6 +125,18 @@ impl ViewerApp {
     fn active_tab(&self) -> Option<ViewerTabId> {
         self.session.lock().expect("session lock").active()
     }
+}
+
+fn recipe_context(
+    app: &ViewerApp,
+) -> RecipeContext<'_, GitDiffSource, GitRepoProbe, SqliteAppState, SystemClock> {
+    RecipeContext::new(
+        &app.source,
+        &app.probe,
+        &app.app_state,
+        &app.clock,
+        &app.data_root,
+    )
 }
 
 #[expect(
@@ -232,15 +244,7 @@ fn refresh(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     if !tab_exists(app, tab)? {
         return Ok(status_response(StatusCode::NOT_FOUND));
     }
-    let result = refresh_recipe_versioned(
-        &app.source,
-        &app.probe,
-        &app.app_state,
-        &app.clock,
-        &app.session,
-        &app.data_root,
-        tab,
-    )?;
+    let result = refresh_recipe_versioned(recipe_context(app), &app.session, tab)?;
     let transient = result.view.map(|view| render::VersionedView {
         ticket: result.ticket,
         view,
@@ -304,12 +308,8 @@ fn open_history(app: &ViewerApp, id: domain::viewer::RenderHistoryId) -> RouteRe
     let recipe: Recipe = serde_json::from_str(&entry.recipe_json)
         .map_err(|error| format!("invalid saved recipe for history {id}: {error}"))?;
     let opened = open_recipe(
-        &app.source,
-        &app.probe,
-        &app.app_state,
-        &app.clock,
+        recipe_context(app),
         &app.session,
-        &app.data_root,
         &recipe,
         format!("history-{id}"),
         ViewerTabKind::Snapshot,
@@ -345,12 +345,8 @@ fn pending_transaction(app: &ViewerApp) -> RouteResult {
     let batches = app.pending.try_drain()?;
     match process_pending(batches, |recipe, batch_id, kind| {
         open_recipe(
-            &app.source,
-            &app.probe,
-            &app.app_state,
-            &app.clock,
+            recipe_context(app),
             &app.session,
-            &app.data_root,
             recipe,
             batch_id.into(),
             viewer_tab_kind(kind),
@@ -441,16 +437,8 @@ fn restore_live_views(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
             }
         }
         if let Some(tab) = newest {
-            let result = refresh_recipe_versioned(
-                &app.source,
-                &app.probe,
-                &app.app_state,
-                &app.clock,
-                &app.session,
-                &app.data_root,
-                tab,
-            )
-            .map_err(|error| error.to_string())?;
+            let result = refresh_recipe_versioned(recipe_context(app), &app.session, tab)
+                .map_err(|error| error.to_string())?;
             transient = result.view.map(|view| render::VersionedView {
                 ticket: result.ticket,
                 view,
@@ -482,15 +470,7 @@ fn ensure_active_view(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
     let Some(id) = refresh else {
         return Ok(None);
     };
-    let result = refresh_recipe_versioned(
-        &app.source,
-        &app.probe,
-        &app.app_state,
-        &app.clock,
-        &app.session,
-        &app.data_root,
-        id,
-    )?;
+    let result = refresh_recipe_versioned(recipe_context(app), &app.session, id)?;
     Ok(result.view.map(|view| render::VersionedView {
         ticket: result.ticket,
         view,

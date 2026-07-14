@@ -1,15 +1,14 @@
 //! `xtask drift-check` — rebuild the committed frontend bundle and fail if it drifts from
-//! its TypeScript sources. Reuses `just cli build-js` as the single Vite invocation, then diffs
-//! the committed output.
+//! its TypeScript sources, then diffs the committed output.
 
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-use crate::proc;
+use crate::frontend;
 
 /// The committed bundle dirs and the recipe that regenerates each, paired for the stale hint.
-const BUNDLES: &[(&str, &str)] = &[("crates/infra/src/embedded/generated/", "just cli build-js")];
+const BUNDLES: &[(&str, &str)] = &[("crates/infra/src/embedded/generated/", "just cli build")];
 
 /// Fail if any bundle dir has uncommitted changes after a rebuild — i.e. it drifted from its TS
 /// source. `is_clean(dir)` reports whether the dir matches its committed state; injected so the
@@ -36,7 +35,7 @@ pub fn run() -> Result<()> {
     which::which("deno").context(
         "required tool `deno` is missing; install it through the declarative host configuration",
     )?;
-    proc::run("build-js", "just", &["cli", "build-js"])?;
+    frontend::build()?;
     check_drift(BUNDLES, &git_clean)
 }
 
@@ -56,6 +55,6 @@ mod tests {
             err.contains("crates/infra/src/embedded/generated/ is stale"),
             "{err}"
         );
-        assert!(err.contains("just cli build-js"), "{err}");
+        assert!(err.contains("just cli build"), "{err}");
     }
 }

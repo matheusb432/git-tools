@@ -69,6 +69,41 @@ enum ComputationOutcome {
     StateOnly,
 }
 
+#[derive(Debug)]
+pub(crate) struct RecipeContext<'a, Source, Probe, State, Time> {
+    source: &'a Source,
+    probe: &'a Probe,
+    app_state: &'a State,
+    clock: &'a Time,
+    data_root: &'a Path,
+}
+
+impl<Source, Probe, State, Time> Copy for RecipeContext<'_, Source, Probe, State, Time> {}
+
+impl<Source, Probe, State, Time> Clone for RecipeContext<'_, Source, Probe, State, Time> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, Source, Probe, State, Time> RecipeContext<'a, Source, Probe, State, Time> {
+    pub(crate) fn new(
+        source: &'a Source,
+        probe: &'a Probe,
+        app_state: &'a State,
+        clock: &'a Time,
+        data_root: &'a Path,
+    ) -> Self {
+        Self {
+            source,
+            probe,
+            app_state,
+            clock,
+            data_root,
+        }
+    }
+}
+
 impl ComputationOutcome {
     fn into_view(self) -> Option<Arc<View>> {
         match self {
@@ -143,12 +178,8 @@ pub(crate) fn compute_view(source: &impl DiffSource, recipe: &Recipe) -> Result<
 }
 
 pub(crate) fn open_recipe(
-    source: &impl DiffSource,
-    probe: &impl RepoProbe,
-    app_state: &impl AppStateStore,
-    clock: &impl Clock,
+    context: RecipeContext<'_, impl DiffSource, impl RepoProbe, impl AppStateStore, impl Clock>,
     session: &Mutex<ViewerSession>,
-    data_root: &Path,
     recipe: &Recipe,
     batch_id: String,
     kind: ViewerTabKind,
@@ -164,10 +195,7 @@ pub(crate) fn open_recipe(
         (id, ticket)
     };
 
-    let view = compute_and_publish(
-        source, app_state, probe, clock, session, data_root, recipe, kind, ticket,
-    )?
-    .into_view();
+    let view = compute_and_publish(&context, session, recipe, kind, ticket)?.into_view();
     Ok(OpenedRecipe {
         tab_id: id,
         ticket,
@@ -177,12 +205,8 @@ pub(crate) fn open_recipe(
 
 #[cfg(test)]
 pub(crate) fn refresh_recipe(
-    source: &impl DiffSource,
-    probe: &impl RepoProbe,
-    app_state: &impl AppStateStore,
-    clock: &impl Clock,
+    context: RecipeContext<'_, impl DiffSource, impl RepoProbe, impl AppStateStore, impl Clock>,
     session: &Mutex<ViewerSession>,
-    data_root: &Path,
     id: ViewerTabId,
 ) -> Result<Option<Arc<View>>, String> {
     let (recipe, kind, ticket) = {
@@ -196,20 +220,14 @@ pub(crate) fn refresh_recipe(
         (recipe, kind, ticket)
     };
 
-    compute_and_publish(
-        source, app_state, probe, clock, session, data_root, &recipe, kind, ticket,
-    )
-    .map(ComputationOutcome::into_view)
-    .map_err(|error| error.to_string())
+    compute_and_publish(&context, session, &recipe, kind, ticket)
+        .map(ComputationOutcome::into_view)
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn refresh_recipe_versioned(
-    source: &impl DiffSource,
-    probe: &impl RepoProbe,
-    app_state: &impl AppStateStore,
-    clock: &impl Clock,
+    context: RecipeContext<'_, impl DiffSource, impl RepoProbe, impl AppStateStore, impl Clock>,
     session: &Mutex<ViewerSession>,
-    data_root: &Path,
     id: ViewerTabId,
 ) -> Result<RefreshedRecipe, RecipeError> {
     let (recipe, kind, ticket) = {
@@ -224,26 +242,19 @@ pub(crate) fn refresh_recipe_versioned(
             .ok_or_else(|| format!("unknown tab {id}"))?;
         (recipe, kind, ticket)
     };
-    let view = compute_and_publish(
-        source, app_state, probe, clock, session, data_root, &recipe, kind, ticket,
-    )?
-    .into_view();
+    let view = compute_and_publish(&context, session, &recipe, kind, ticket)?.into_view();
     Ok(RefreshedRecipe { ticket, view })
 }
 
 fn compute_and_publish(
-    source: &impl DiffSource,
-    app_state: &impl AppStateStore,
-    probe: &impl RepoProbe,
-    clock: &impl Clock,
+    context: &RecipeContext<'_, impl DiffSource, impl RepoProbe, impl AppStateStore, impl Clock>,
     session: &Mutex<ViewerSession>,
-    data_root: &Path,
     recipe: &Recipe,
     kind: ViewerTabKind,
     ticket: ComputeTicket,
 ) -> Result<ComputationOutcome, RecipeError> {
     if kind == ViewerTabKind::Live
-        && let Some(broken) = probe_live_source(probe, data_root, recipe)?
+        && let Some(broken) = probe_live_source(context.probe, context.data_root, recipe)?
     {
         let mut session = session
             .lock()
@@ -254,7 +265,7 @@ fn compute_and_publish(
         return Ok(ComputationOutcome::StateOnly);
     }
 
-    let view = match compute_view(source, recipe) {
+    let view = match compute_view(context.source, recipe) {
         Ok(view) => Arc::new(view),
         Err(reason) => {
             publish_compute_error(session, ticket, &reason)?;
@@ -268,7 +279,13 @@ fn compute_and_publish(
         session.publish_if_current(ticket, CachedView::new(Arc::clone(&view)))
     };
     if published == PublishOutcome::Published {
-        record_render(app_state, clock, data_root, recipe, &view);
+        record_render(
+            context.app_state,
+            context.clock,
+            context.data_root,
+            recipe,
+            &view,
+        );
         return Ok(ComputationOutcome::Rendered(view));
     }
     Err(RecipeError::Stale)
@@ -407,12 +424,8 @@ index 111..222 100644\n\
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
 
         let opened = open_recipe(
-            &source,
-            &probe,
-            &app_state,
-            &clock,
+            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
             &session,
-            Path::new("/data"),
             &recipe(),
             "batch-1".into(),
             ViewerTabKind::Snapshot,
@@ -445,12 +458,8 @@ index 111..222 100644\n\
         named.name = Some("Named initial failure".into());
 
         let opened = open_recipe(
-            &source,
-            &probe,
-            &app_state,
-            &clock,
+            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
             &session,
-            Path::new("/data"),
             &named,
             "batch".into(),
             ViewerTabKind::Snapshot,
@@ -473,12 +482,8 @@ index 111..222 100644\n\
         let session = Mutex::new(ViewerSession::new(1));
 
         let opened = open_recipe(
-            &source,
-            &probe,
-            &app_state,
-            &clock,
+            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
             &session,
-            Path::new("/data"),
             &recipe(),
             "batch".into(),
             ViewerTabKind::Snapshot,
@@ -506,12 +511,8 @@ index 111..222 100644\n\
         let session = Mutex::new(ViewerSession::new(1024));
 
         let id = open_recipe(
-            &source,
-            &probe,
-            &app_state,
-            &clock,
+            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
             &session,
-            Path::new("/data"),
             &recipe(),
             "live".into(),
             ViewerTabKind::Live,
@@ -541,12 +542,8 @@ index 111..222 100644\n\
         let session = Mutex::new(ViewerSession::new(1024));
 
         let id = open_recipe(
-            &source,
-            &probe,
-            &app_state,
-            &clock,
+            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
             &session,
-            Path::new("/data"),
             &recipe(),
             "live".into(),
             ViewerTabKind::Live,
@@ -576,12 +573,8 @@ index 111..222 100644\n\
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let id = open_recipe(
-            &source,
-            &probe,
-            &app_state,
-            &clock,
+            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
             &session,
-            Path::new("/data"),
             &recipe,
             "snapshot".into(),
             ViewerTabKind::Snapshot,
@@ -595,12 +588,8 @@ index 111..222 100644\n\
         app_state.renders.lock().expect("renders lock").clear();
 
         let refreshed = refresh_recipe(
-            &source,
-            &probe,
-            &app_state,
-            &clock,
+            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
             &session,
-            Path::new("/data"),
             id,
         )
         .expect("broken live refresh remains a tab");
@@ -625,12 +614,8 @@ index 111..222 100644\n\
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let id = open_recipe(
-            &source,
-            &probe,
-            &app_state,
-            &clock,
+            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
             &session,
-            Path::new("/data"),
             &recipe(),
             "batch".into(),
             ViewerTabKind::Snapshot,
@@ -640,12 +625,8 @@ index 111..222 100644\n\
         app_state.renders.lock().expect("renders lock").clear();
 
         refresh_recipe(
-            &source,
-            &probe,
-            &app_state,
-            &clock,
+            RecipeContext::new(&source, &probe, &app_state, &clock, Path::new("/data")),
             &session,
-            Path::new("/data"),
             id,
         )
         .expect("refresh succeeds");
@@ -666,12 +647,14 @@ index 111..222 100644\n\
         let mut named = recipe();
         named.name = Some("Named refresh failure".into());
         let id = open_recipe(
-            &successful_source,
-            &probe,
-            &app_state,
-            &clock,
+            RecipeContext::new(
+                &successful_source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+            ),
             &session,
-            Path::new("/data"),
             &named,
             "batch".into(),
             ViewerTabKind::Snapshot,
@@ -681,12 +664,14 @@ index 111..222 100644\n\
 
         assert!(
             refresh_recipe(
-                &failing_source,
-                &probe,
-                &app_state,
-                &clock,
+                RecipeContext::new(
+                    &failing_source,
+                    &probe,
+                    &app_state,
+                    &clock,
+                    Path::new("/data"),
+                ),
                 &session,
-                Path::new("/data"),
                 id,
             )
             .expect("published refresh errors are acknowledged")

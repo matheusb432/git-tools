@@ -21,25 +21,29 @@ help: _preflight
 # Build both the CLI engine (+ diff bundle) and the desktop viewer.
 [group('build')]
 build:
-    just cli build
-    just desktop build
+    cargo run --quiet -p xtask -- build
 
 # Place both the prebuilt CLI engine and desktop viewer on PATH. Build first with `just build`.
 [group('build')]
 install:
-    just cli install
-    just desktop install
+    cargo run --quiet -p xtask -- install --target both
 
 # Build + install everything: the CLI engine (git-tools + gtl + gtl-daemon) and the desktop viewer (gtl-viewer).
 [group('build')]
 update:
-    just cli update
-    just desktop update
+    just build
+    just install
 
-# Remove the installed binary/alias + viewer. Add --remove-config to also delete git-tools.toml/secrets (confirms).
+# Remove the installed CLI, daemon, alias, viewer, desktop entry, and icon; preserve configuration.
 [group('build')]
-uninstall *args:
-    cargo run --quiet -p xtask -- uninstall {{ args }}
+uninstall:
+    cargo run --quiet -p xtask -- uninstall
+
+# Remove installed artifacts and permanently delete repo-local git-tools configuration.
+[confirm("Remove installed artifacts and delete git-tools.toml / git-tools.secrets.toml?")]
+[group('build')]
+purge:
+    cargo run --quiet -p xtask -- uninstall --remove-config --force
 
 # Build only if the binary is missing (preflight for run recipes).
 _preflight:
@@ -47,29 +51,39 @@ _preflight:
 
 # ============ quality ============
 
-# cargo tests (terse). --verbose streams output; --all also runs the Deno frontend tests.
+# Fast gate: fmt-check + default-member Rust tests (desktop excluded). --e2e runs only hermetic viewer E2E; --all adds all Rust tests, frontend, drift, and E2E; --verbose streams logs.
 [group('quality')]
 test *args:
     cargo run --quiet -p xtask -- test {{ args }}
 
-# Format Rust with the pinned nightly rustfmt and all TOML with taplo (no-op if taplo is absent).
+# Apply pinned-nightly rustfmt, Taplo, mdformat, and Oxfmt across the repository.
 [group('quality')]
 fmt:
     cargo run --quiet -p xtask -- fmt
 
-# Check Rust + TOML formatting without writing, then run the architecture lints (check-structure + check-deps; exit 3 on violation).
+# Check every formatter, Oxlint, architecture constraints, and Clippy over the full workspace including desktop.
 [group('quality')]
 fmt-check:
     cargo run --quiet -p xtask -- fmt --check
 
-# Rebuild the committed diff-preview JS bundle and fail if it drifts from its TypeScript sources (CI/pre-commit gate).
+# Apply Clippy and Oxlint fixes first, then normalize every formatter; extra args go to Clippy.
+[group('quality')]
+fix *args:
+    cargo run --quiet -p xtask -- fix {{ args }}
+
+# Rebuild the committed diff-preview JS bundle and fail if it drifts from its TypeScript sources.
 [group('quality')]
 drift-check:
     cargo run --quiet -p xtask -- drift-check
 
+# Read-only first-run check for required tools, Linux desktop-test dependencies, and hook wiring.
+[group('quality')]
+doctor *args:
+    doctor-rs {{ args }}
+
 # ============ windows cross-build (host/release split — see specs) ============
 
-# Cross-build all three Win11 release exes (CLI + gtl-daemon + viewer) from this Linux host via the xtask `ship` verb; `--smoke` = fast debug linkage check (runtime is certified separately on real Win11 — see `win-release-checklist`).
+# Cross-build all three Win11 exes; runs `just test --all` first unless -f/--force. --smoke selects a debug linkage build; use `--smoke --force` for the fast smoke path.
 [group('windows')]
 ship *args:
     cargo run --quiet -p xtask -- ship {{ args }}
@@ -77,28 +91,8 @@ ship *args:
 # Print the manual Win11 runtime-certification checklist (run on a real Windows box/VM).
 [group('windows')]
 win-release-checklist:
-    #!/usr/bin/env bash
-    cat <<'EOF'
-    git-tools — Windows 11 runtime certification checklist
-    (Run on a real Win11 machine/VM. Linux cargo-xwin artifacts prove linkage, not runtime.)
+    @cat docs/windows-release-checklist.md
 
-      1. Build/transfer both exes onto PATH:
-           just cli build && just cli install   (native Git Bash build), or transfer the
-           cross-built target/x86_64-pc-windows-msvc/release/*.exe
-      2. In a git repo, run:  gtl diff
-           -> the gtl-viewer window opens and WebView2 RENDERS the diff in a tab.
-      3. Close the window  -> a tray icon remains (keep-warm). Re-run `gtl diff`
-           -> the existing window is raised/focused (single-instance); no second process.
-      4. Store path: artifacts land under %LOCALAPPDATA%\git-tools\data\diffs\... ;
-           the History panel lists past diffs.
-      5. Tray "Quit" terminates the process.
-      6. `gtl diff --viewer browser` opens the artifact in the default browser (explorer.exe).
-      7. With the viewer absent / no display, `gtl diff` degrades to the browser path
-           without erroring.
-
-    All seven green => Windows runtime certified for this build.
-    EOF
-
-# Full dev-host bring-up: link skills, build + install both artifacts, ensure ~/.local/bin on PATH (fresh machine: `sh xtask/bootstrap.sh`).
+# Full dev-host bring-up: link skills, configure hooks, build + install both artifacts, ensure ~/.local/bin on PATH (fresh machine: `sh xtask/bootstrap.sh`).
 bootstrap:
     cargo run --quiet -p xtask -- bootstrap

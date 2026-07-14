@@ -40,29 +40,44 @@ pub enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Format Rust with the pinned-nightly rustfmt (toolchain from `.rustfmt-nightly`) and all
-    /// TOML with taplo (skipped when absent). `--check` verifies without writing. Migrates
-    /// `just fmt` / `just fmt-check`.
+    /// Format Rust, TOML, Markdown, and frontend sources with the repository's complete pinned
+    /// formatter matrix. `--check` also runs every linter, including full-workspace Clippy.
     Fmt {
         /// Verify formatting without writing (exits non-zero on drift).
         #[arg(long)]
         check: bool,
     },
-    /// Run the test suite: `cargo test`, terse by default. `--verbose` streams full output;
-    /// `--all` also runs the Deno frontend type-check and unit tests. Migrates `just test`.
+    /// Apply autofixable Rust and frontend lints, then run every configured formatter.
+    Fix {
+        /// Extra arguments forwarded to Cargo Clippy.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        extra: Vec<String>,
+    },
+    /// Run the selected test scope, terse by default. The default excludes desktop tests;
+    /// `--e2e` is hermetic viewer E2E only; `--all` is the complete repository gate.
     Test {
         /// Stream full test output (`cargo test -- --nocapture`) instead of the terse default.
         #[arg(long)]
         verbose: bool,
-        /// Also run the Deno frontend type-check and unit tests (`just cli test-js`).
-        #[arg(long)]
+        /// Run only the hermetic desktop viewer E2E suite.
+        #[arg(long, conflicts_with = "all")]
+        e2e: bool,
+        /// Run all workspace Rust tests, frontend checks, drift, and hermetic viewer E2E.
+        #[arg(long, conflicts_with = "e2e")]
         all: bool,
     },
-    /// Build and drive the real gtl-viewer binary through Tauri's external `WebDriver` provider.
-    DesktopTestE2e,
+    /// Build the CLI engine, desktop viewer, or both release artifacts.
+    Build {
+        /// Which release artifact set to build.
+        #[arg(long, value_enum, default_value_t = BuildTarget::Both)]
+        target: BuildTarget,
+    },
+    /// Type-check and test the framework-free frontend sources.
+    FrontendTest,
+    /// Run the pure viewer-render benchmark without a host display.
+    DesktopBench,
     /// Rebuild the committed diff-preview bundle and fail if it drifts from its TypeScript
     /// sources. Requires Deno.
-    /// Migrates the `_js-drift-guard` recipe — a CI/pre-commit gate.
     DriftCheck,
     /// Mechanical architecture lint: walks `crates/*/src` and `shared/*/src` and exits 3 on
     /// layout violations (max dir depth 2, flat feature folders, no `services/` dir).
@@ -82,7 +97,18 @@ pub enum Command {
         /// check (no artifact verify), not a shippable.
         #[arg(long)]
         smoke: bool,
+        /// Skip only the `just test --all` preflight.
+        #[arg(short = 'f', long)]
+        force: bool,
     },
+}
+
+/// Which release artifact set `build` produces.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum BuildTarget {
+    Cli,
+    Viewer,
+    Both,
 }
 
 /// Which artifact(s) `install` places. `both` covers the CLI engine and the desktop viewer.
@@ -102,13 +128,47 @@ mod tests {
     #[test]
     fn ship_accepts_the_smoke_flag() {
         let cli = Cli::try_parse_from(["xtask", "ship", "--smoke"]).unwrap();
-        assert!(matches!(cli.command, super::Command::Ship { smoke: true }));
+        assert!(matches!(
+            cli.command,
+            super::Command::Ship {
+                smoke: true,
+                force: false
+            }
+        ));
     }
 
     #[test]
-    fn desktop_test_e2e_is_a_closed_verb_without_flags() {
-        let cli = Cli::try_parse_from(["xtask", "desktop-test-e2e"]).unwrap();
-        assert!(matches!(cli.command, super::Command::DesktopTestE2e));
-        assert!(Cli::try_parse_from(["xtask", "desktop-test-e2e", "--raw"]).is_err());
+    fn e2e_and_all_test_scopes_conflict() {
+        let error = Cli::try_parse_from(["xtask", "test", "--e2e", "--all"])
+            .err()
+            .expect("conflicting scopes are rejected");
+        assert!(error.to_string().contains("cannot be used with"));
+    }
+
+    #[test]
+    fn verbose_composes_with_the_e2e_scope() {
+        let cli = Cli::try_parse_from(["xtask", "test", "--e2e", "--verbose"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            super::Command::Test {
+                verbose: true,
+                e2e: true,
+                all: false
+            }
+        ));
+    }
+
+    #[test]
+    fn ship_force_has_short_and_long_forms() {
+        for force in ["-f", "--force"] {
+            let cli = Cli::try_parse_from(["xtask", "ship", force]).unwrap();
+            assert!(matches!(
+                cli.command,
+                super::Command::Ship {
+                    smoke: false,
+                    force: true
+                }
+            ));
+        }
     }
 }

@@ -142,10 +142,6 @@ fn view_with_tabs_using(
     Err(RenderError::Conflict)
 }
 
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "bounded retries clone one validated settings value"
-)]
 pub(super) fn tabs_with_view(
     renderer: MaudViewerRenderer,
     session: &Mutex<ViewerSession>,
@@ -157,7 +153,7 @@ pub(super) fn tabs_with_view(
         session,
         transient,
         settings,
-        |renderer, document| renderer.build_tabs_with_view(document),
+        MaudViewerRenderer::build_tabs_with_view,
     )
 }
 
@@ -172,7 +168,7 @@ pub(super) fn tabs_with_view_after_live_delete(
         session,
         transient,
         settings,
-        |renderer, document| renderer.build_tabs_with_view_after_live_delete(document),
+        MaudViewerRenderer::build_tabs_with_view_after_live_delete,
     )
 }
 

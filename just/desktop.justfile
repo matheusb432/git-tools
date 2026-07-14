@@ -5,12 +5,10 @@ set working-directory := '..'
 _default:
     @just --list desktop
 
-# Build the gtl-viewer Tauri binary (skips with a clear message if webkit2gtk-4.1 headers are absent).
+# Build the gtl-viewer Tauri binary; missing webkit2gtk-4.1 headers fail with an actionable error.
 [group('desktop')]
 build:
-    if pkg-config --exists webkit2gtk-4.1 2>/dev/null; then \
-      cargo build --release -p desktop --features custom-protocol; \
-    else echo "webkit2gtk-4.1 headers absent — skipping gtl-viewer build (CLI-only mode; browser fallback active)" >&2; fi
+    cargo run --quiet -p xtask -- build --target viewer
 
 # Place the prebuilt gtl-viewer binary on PATH via atomic replace (warm-tray safe). Build first with `just desktop build`.
 [group('desktop')]
@@ -26,7 +24,7 @@ update: build install
 gen-icon:
     cargo run --quiet -p xtask -- gen-icon
 
-# Build and drive the real gtl-viewer binary under Tauri WebDriver (Xvfb + WebKitWebDriver on Linux).
+# Run the pure viewer-render benchmark with host display variables removed.
 [group('desktop')]
-test-e2e:
-    cargo run --quiet -p xtask -- desktop-test-e2e
+bench:
+    cargo run --quiet -p xtask -- desktop-bench

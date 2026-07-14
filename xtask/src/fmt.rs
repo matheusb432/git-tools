@@ -1,10 +1,7 @@
-//! `xtask fmt [--check]` — format (or check) Rust with the pinned-nightly rustfmt, all TOML with
-//! taplo, and Markdown with mdformat. The nightly toolchain is read from `.rustfmt-nightly`
-//! (stable `cargo fmt` silently skips this repo's nightly-only rustfmt.toml keys, so the
-//! `+toolchain` token is mandatory — see rust-style). taplo is optional: skipped with a message
-//! when absent. Markdown files come from `git ls-files` so gitignored paths are never formatted.
-//! `--check` also runs the check-structure and check-deps architecture lints, plus clippy with
-//! warnings denied.
+//! Whole-repository formatter and linter matrix. The nightly toolchain is read from
+//! `.rustfmt-nightly` (stable `cargo fmt` silently skips this repo's nightly-only rustfmt.toml
+//! keys, so the `+toolchain` token is mandatory — see rust-style). Markdown files come from `git
+//! ls-files` so gitignored paths are never formatted.
 
 use std::{env, fs};
 
@@ -19,6 +16,14 @@ const MDFORMAT_WITHS: &[&str] = &[
     "mdformat-wikilink",
     "mdformat-frontmatter",
 ];
+
+/// One action over the repository's complete formatter/linter tool matrix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    Format,
+    Check,
+    Fix,
+}
 
 /// Build the `cargo +<toolchain> fmt [--check]` argv. The `+toolchain` token must come first so
 /// the rustup proxy selects the pinned nightly before `fmt` runs.
@@ -69,19 +74,29 @@ fn read_nightly() -> Result<String> {
     Ok(raw.trim().to_string())
 }
 
-/// Format or check the workspace. Rust via pinned-nightly rustfmt (hard requirement); TOML via
-/// taplo when present; Markdown via mdformat (`uvx`, git-ls-files-driven).
-pub fn run(check: bool) -> Result<()> {
+/// Apply the selected action across every configured formatter and linter.
+pub fn run(action: Action, clippy_extra: &[String]) -> Result<()> {
+    if action == Action::Fix {
+        fix_linters(clippy_extra)?;
+        return formatters(false);
+    }
+    formatters(action == Action::Check)?;
+    if action == Action::Check {
+        check_linters()?;
+    }
+    Ok(())
+}
+
+fn formatters(check: bool) -> Result<()> {
     let toolchain = read_nightly()?;
     let cargo_args = cargo_fmt_args(&toolchain, check);
     let cargo_args: Vec<&str> = cargo_args.iter().map(String::as_str).collect();
     proc::run("cargo-fmt", "cargo", &cargo_args)?;
 
-    if which::which("taplo").is_ok() {
-        proc::run("taplo", "taplo", &taplo_args(check))?;
-    } else {
-        eprintln!("taplo not installed; skipping");
-    }
+    which::which("taplo").context(
+        "required formatter `taplo` is missing; install taplo-cli through the declarative host configuration",
+    )?;
+    proc::run("taplo", "taplo", &taplo_args(check))?;
 
     let md_files = git_markdown_files()?;
     if !md_files.is_empty() {
@@ -101,28 +116,47 @@ pub fn run(check: bool) -> Result<()> {
         proc::run("mdformat", "uvx", &args_refs)?;
     }
 
-    if check {
-        crate::check_structure::run(None)?;
-        crate::check_deps::run(None)?;
-        // The optional Tauri viewer needs webkit2gtk-4.1 system headers that are not available
-        // on every development machine, so the workspace-wide clippy pass excludes it.
-        proc::run(
-            "clippy",
-            "cargo",
-            &[
-                "clippy",
-                "--workspace",
-                "--exclude",
-                "desktop",
-                "--all-targets",
-                "--",
-                "-D",
-                "warnings",
-            ],
-        )?;
-    }
+    proc::run(
+        "frontend-format",
+        "deno",
+        &[
+            "task",
+            "--frozen",
+            if check { "format:check" } else { "format" },
+        ],
+    )?;
 
     Ok(())
+}
+
+fn check_linters() -> Result<()> {
+    proc::run("frontend-lint", "deno", &["task", "--frozen", "lint"])?;
+    crate::check_structure::run(None)?;
+    crate::check_deps::run(None)?;
+    proc::run(
+        "clippy",
+        "cargo",
+        &["clippy", "--workspace", "--all-targets"],
+    )
+}
+
+fn fix_linters(clippy_extra: &[String]) -> Result<()> {
+    let mut args = vec![
+        "clippy".to_string(),
+        "--workspace".to_string(),
+        "--all-targets".to_string(),
+        "--fix".to_string(),
+        "--allow-dirty".to_string(),
+        "--allow-staged".to_string(),
+    ];
+    args.extend_from_slice(clippy_extra);
+    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+    proc::run("clippy-fix", "cargo", &args)?;
+    proc::run(
+        "frontend-lint-fix",
+        "deno",
+        &["task", "--frozen", "lint:fix"],
+    )
 }
 
 #[cfg(test)]

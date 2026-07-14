@@ -8,6 +8,7 @@
     "format": "oxfmt frontend/diff frontend/core .oxfmtrc.json .oxlintrc.json package.json tsconfig.json vitest.config.mjs",
     "format:check": "oxfmt --check frontend/diff frontend/core .oxfmtrc.json .oxlintrc.json package.json tsconfig.json vitest.config.mjs",
     "lint": "oxlint frontend/diff frontend/core --deny-warnings",
+    "lint:fix": "oxlint frontend/diff frontend/core --fix",
     "test": "vitest run frontend/diff frontend/core",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },

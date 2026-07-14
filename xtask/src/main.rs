@@ -7,16 +7,21 @@
 use anyhow::Result;
 use clap::Parser;
 
+mod bench;
 mod bootstrap;
+mod build;
 mod check_deps;
 mod check_structure;
 mod cli;
+mod desktop_e2e;
 mod drift;
 mod fmt;
+mod frontend;
 mod icon;
 mod install;
 mod proc;
 mod ship;
+mod status_notifier;
 mod testing;
 
 fn main() {
@@ -35,13 +40,27 @@ fn run(cli: &cli::Cli) -> Result<()> {
             remove_config,
             force,
         } => install::run_uninstall(*remove_config, *force),
-        cli::Command::Test { verbose, all } => testing::run(*verbose, *all),
-        cli::Command::DesktopTestE2e => testing::run_desktop_e2e(),
-        cli::Command::Fmt { check } => fmt::run(*check),
+        cli::Command::Test { verbose, e2e, all } => testing::run(testing::TestOptions {
+            verbose: *verbose,
+            e2e: *e2e,
+            all: *all,
+        }),
+        cli::Command::Build { target } => build::run(*target),
+        cli::Command::FrontendTest => frontend::test(),
+        cli::Command::DesktopBench => bench::run(),
+        cli::Command::Fmt { check } => fmt::run(
+            if *check {
+                fmt::Action::Check
+            } else {
+                fmt::Action::Format
+            },
+            &[],
+        ),
+        cli::Command::Fix { extra } => fmt::run(fmt::Action::Fix, extra),
         cli::Command::DriftCheck => drift::run(),
         cli::Command::CheckStructure => check_structure::run(None),
         cli::Command::CheckDeps => check_deps::run(None),
         cli::Command::GenIcon => icon::run(),
-        cli::Command::Ship { smoke } => ship::run(*smoke),
+        cli::Command::Ship { smoke, force } => ship::run(*smoke, *force),
     }
 }

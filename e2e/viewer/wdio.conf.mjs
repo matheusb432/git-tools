@@ -7,6 +7,28 @@ const root = path.resolve(here, '../..');
 const executableSuffix = process.platform === 'win32' ? '.exe' : '';
 const application = path.join(root, 'target', 'release', `gtl-viewer${executableSuffix}`);
 const dataRoot = process.env.GTL_E2E_DATA_ROOT;
+const isolatedEnvironment = Object.fromEntries(
+  [
+    'HOME',
+    'XDG_CONFIG_HOME',
+    'XDG_DATA_HOME',
+    'XDG_CACHE_HOME',
+    'XDG_RUNTIME_DIR',
+    'TMPDIR',
+    'TEMP',
+    'TMP',
+    'USERPROFILE',
+    'LOCALAPPDATA',
+    'APPDATA',
+    'DISPLAY',
+    'DBUS_SESSION_BUS_ADDRESS',
+    'GIT_TOOLS_DATA_DIR',
+    'GTL_E2E_DATA_ROOT',
+    'GTL_E2E_FIXTURE_ROOT',
+  ]
+    .filter((name) => process.env[name])
+    .map((name) => [name, process.env[name]]),
+);
 const tauriServicePackage = JSON.parse(
   readFileSync(path.join(here, 'node_modules/@wdio/tauri-service/package.json'), 'utf8'),
 );
@@ -28,10 +50,11 @@ export const config = {
   framework: 'mocha',
   reporters: ['spec'],
   mochaOpts: {
-    timeout: 120_000,
+    bail: true,
+    timeout: 60_000,
   },
   waitforTimeout: 30_000,
-  connectionRetryTimeout: 120_000,
+  connectionRetryTimeout: 60_000,
   capabilities: [
     {
       browserName: 'tauri',
@@ -41,9 +64,7 @@ export const config = {
       'wdio:tauriServiceOptions': {
         appBinaryPath: application,
         driverProvider: 'external',
-        env: {
-          GIT_TOOLS_DATA_DIR: dataRoot,
-        },
+        env: isolatedEnvironment,
       },
     },
   ],
@@ -54,9 +75,7 @@ export const config = {
         appBinaryPath: application,
         driverProvider: 'external',
         autoInstallTauriDriver: false,
-        env: {
-          GIT_TOOLS_DATA_DIR: dataRoot,
-        },
+        env: isolatedEnvironment,
       },
     ],
   ],

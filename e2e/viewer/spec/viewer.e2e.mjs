@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +10,11 @@ const root = path.resolve(here, '../../..');
 const executableSuffix = process.platform === 'win32' ? '.exe' : '';
 const cli = path.join(root, 'target', 'release', `git-tools${executableSuffix}`);
 const dataRoot = process.env.GTL_E2E_DATA_ROOT;
+const sandboxFixtures = process.env.GTL_E2E_FIXTURE_ROOT;
+
+if (!sandboxFixtures) {
+  throw new Error('GTL_E2E_FIXTURE_ROOT must be set by the xtask e2e harness');
+}
 
 let fixtureRoot;
 let remoteRoot;
@@ -110,10 +114,59 @@ async function expectReadyDocument() {
   }
 }
 
+async function waitForHtmxIdle(label) {
+  await browser.waitUntil(
+    async () =>
+      browser.execute(
+        () => !document.querySelector('.hx-request, .htmx-request'),
+      ),
+    { timeoutMsg: `htmx did not settle after ${label}` },
+  );
+}
+
+async function selectSplitLayout() {
+  await browser.execute(() => {
+    const input = document.querySelector("input[name='viewer-layout'][value='split']");
+    if (!(input instanceof HTMLInputElement)) {
+      throw new Error('split layout input is missing');
+    }
+    input.click();
+  });
+  await waitForHtmxIdle('selecting the split layout');
+  await expect($('#viewer-view .diff-split')).toExist();
+  await expect($("input[name='viewer-layout'][value='split']")).toBeChecked();
+}
+
+async function closeActiveTab() {
+  const before = await browser.execute(
+    () => document.querySelectorAll('.viewer-tab').length,
+  );
+  await $('.viewer-tab.active .viewer-tab-close').click();
+  await browser.waitUntil(
+    async () =>
+      browser.execute(
+        (previous) => document.querySelectorAll('.viewer-tab').length < previous,
+        before,
+      ),
+    { timeoutMsg: 'active tab did not close' },
+  );
+  await waitForHtmxIdle('closing the active tab');
+}
+
+async function closeAllTabs() {
+  while (
+    (await browser.execute(() => document.querySelectorAll('.viewer-tab').length)) > 0
+  ) {
+    await closeActiveTab();
+  }
+}
+
 describe('server-rendered viewer', () => {
   before(async () => {
-    fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'gtl-viewer-e2e-'));
-    remoteRoot = await mkdtemp(path.join(os.tmpdir(), 'gtl-viewer-remotes-'));
+    fixtureRoot = path.join(sandboxFixtures, 'dom-repositories');
+    remoteRoot = path.join(sandboxFixtures, 'dom-remotes');
+    await mkdir(fixtureRoot, { recursive: true });
+    await mkdir(remoteRoot, { recursive: true });
     primaryRepo = await createRepo('primary', 'base\n');
     secondaryRepo = await createRepo('secondary', 'base\n');
     await writeFile(path.join(primaryRepo, 'work.txt'), 'base\nalpha-v1\n');
@@ -141,8 +194,7 @@ describe('server-rendered viewer', () => {
   });
 
   it('persists layout across a real WebDriver session restart', async () => {
-    await $('span=Side by side').click();
-    await expect($('#viewer-view .diff-split')).toExist();
+    await selectSplitLayout();
 
     await browser.reloadSession();
     await openDiff(primaryRepo, 1, '--name', 'primary after restart');
@@ -152,8 +204,7 @@ describe('server-rendered viewer', () => {
   });
 
   it('reopens history by its stable persisted id', async () => {
-    const close = $('.viewer-tab.active .viewer-tab-close');
-    await close.click();
+    await closeActiveTab();
     await expect($('.viewer-status-empty')).toBeDisplayed();
 
     await $('.viewer-history-button').click();
@@ -183,9 +234,7 @@ describe('server-rendered viewer', () => {
   });
 
   it('refreshes a live source and distinguishes a subsequently broken source', async () => {
-    while (await $('.viewer-tab-close').isExisting()) {
-      await $('.viewer-tab-close').click();
-    }
+    await closeAllTabs();
     await run(cli, ['diff', 'live', '--path', primaryRepo], root);
     await drainPending({ minTabs: 1, activeKind: 'L' });
     await expectReadyDocument();

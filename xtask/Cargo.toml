@@ -22,6 +22,10 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 ico = "0.5"
 # PATH probe for the `ship` preflight (no `sh -c` interpolation; cross-platform).
 which = "8.0.4"
+# Own complete native desktop process trees on Unix and Windows so failed E2E runs cannot leak.
+command-group = "5.0.1"
+# Minimal in-process StatusNotifierWatcher for asserting the production AppIndicator tray path.
+zbus = "5.16.0"
 # Cross-platform directory symlink for the `bootstrap` skills-link. The OS `#[cfg]` lives in the
 # PAL (ADR-0003), so the bootstrap verb stays cfg-free.
 gtl-platform = { path = "../shared/gtl-platform" }

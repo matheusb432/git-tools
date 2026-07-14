@@ -58,7 +58,7 @@ Deno 2 owns the frontend dependencies and tasks. Run `deno install --frozen` aft
 ```sh
 just build          # both: CLI engine (+ diff bundle + gtl-daemon) and the desktop viewer
 just cli build      # only the CLI engine -> target/release/{git-tools,gtl-daemon}[.exe]
-just desktop build  # only the gtl-viewer Tauri binary (skipped without webkit2gtk-4.1 headers)
+just desktop build  # only the gtl-viewer Tauri binary; missing host dependencies fail loudly
 ```
 
 Daemon-backed operations — `--raw` and headless/browser diff rendering, `diff live` persistence, and managed sync — use the resident `gtl-daemon` on `127.0.0.1`. The CLI autostarts it when one of those paths first needs it and restarts it after a binary-version mismatch (for example, after `just update`); `gtl daemon status` / `gtl daemon stop` inspect and terminate it. A displayed app-default diff that successfully hands a recipe to the viewer is computed in-process by the viewer and does not need the daemon.
@@ -71,10 +71,24 @@ To build **Windows 11 release binaries from a Linux host**, cross-compile with [
 
 ```sh
 just ship          # all three Win11 exes -> target/x86_64-pc-windows-msvc/release/{git-tools,gtl-daemon,gtl-viewer}.exe
-just ship --smoke  # fast debug-profile linkage check (not a shippable)
+just ship --smoke --force  # fast debug-profile linkage check without the full preflight gate
 ```
 
-Needs `cargo-xwin` and the `x86_64-pc-windows-msvc` rustup target; the preflight prints the install commands if missing. A cross-build proves the project *links* — WebView2 rendering, file dialogs, and the `%LOCALAPPDATA%` store path are certified on a real Win11 machine via `just win-release-checklist`.
+`just ship` runs `just test --all` before cross-compiling; `--force` skips only that test preflight. The build needs `cargo-xwin` and the `x86_64-pc-windows-msvc` rustup target, and prints install commands if either is missing. A cross-build proves the project *links* — WebView2 rendering, file dialogs, and the `%LOCALAPPDATA%` store path are certified on a real Win11 machine via `just win-release-checklist`.
+
+## Quality gates
+
+```sh
+just fmt-check      # every formatter and linter, including desktop Clippy
+just test           # fmt-check + default-member Rust tests; no desktop tests
+just test --e2e     # hermetic desktop lifecycle and WebDriver E2E only
+just test --all     # complete gate: all Rust, frontend, drift, and desktop E2E
+just cli test       # focused frontend type-check and unit tests
+just desktop bench  # headless viewer-render benchmark
+just doctor         # read-only tool, desktop dependency, and hook readiness
+```
+
+`--verbose` composes with every test scope. `--e2e` and `--all` are mutually exclusive. Linux desktop E2E creates its own home/data/runtime directories, X display, window manager, D-Bus session, and tray watcher; it does not reuse the interactive desktop session.
 
 ## Install
 
@@ -85,9 +99,10 @@ just update          # build + install both
 just cli update      # build + install only the CLI engine (git-tools + gtl + gtl-daemon)
 just desktop update  # build + install only the desktop viewer
 just install         # place all prebuilt artifacts on PATH (~/.local/bin)
-just uninstall       # remove the binaries and the gtl alias
+just uninstall       # remove installed artifacts but preserve configuration
+just purge           # confirmed removal of installed artifacts and repo-local configuration
 ```
 
 These work on Linux and on Windows via Git Bash (the `.exe` suffix is handled via `std::env::consts::EXE_SUFFIX`). The viewer and `gtl-daemon` are copied via atomic replace, so updates are safe while the tray app or daemon is running (no "Text file busy"). Override the install directory with `GIT_TOOLS_BINDIR`.
 
-For a fresh machine, `sh xtask/bootstrap.sh` installs the Rust toolchain then runs the full bring-up (`just bootstrap`): build, install, and ensure `~/.local/bin` is on your `PATH`.
+For a fresh machine, `sh xtask/bootstrap.sh` installs the Rust toolchain then runs the full bring-up (`just bootstrap`): configure the tracked pre-commit hook, build, install, and ensure `~/.local/bin` is on your `PATH`.

@@ -7,7 +7,7 @@ use std::{path::Path, process::Command};
 
 use anyhow::{Result, bail};
 
-use crate::proc;
+use crate::{frontend, proc};
 
 /// The Windows cross-target. `--features custom-protocol` is required for the viewer (else the
 /// exe serves devUrl and fails with `ERR_CONNECTION_REFUSED`).
@@ -61,8 +61,13 @@ fn target_installed(triple: &str) -> bool {
 /// Cross-build the Win11 shippables. `smoke` = fast debug linkage check (committed bundles, no
 /// artifact verify); otherwise a release ship (fresh bundles + verify). Migrates the
 /// `win-build`/`win-compile-smoke` recipes + `scripts/win-preflight.sh`.
-pub fn run(smoke: bool) -> Result<()> {
-    // 1. preflight (side-effect-free decision)
+pub fn run(smoke: bool, force: bool) -> Result<()> {
+    // 1. repository gate; force skips only this test preflight.
+    if !force {
+        proc::run("ship-tests", "just", &["test", "--all"])?;
+    }
+
+    // 2. cross-toolchain preflight (side-effect-free decision)
     let report = preflight(&on_path, &target_installed);
     if !report.ok {
         // ! Hints → stderr (human); the RESULT line → stdout (machine-parsed). Keep the split.
@@ -73,13 +78,13 @@ pub fn run(smoke: bool) -> Result<()> {
         bail!("ship preflight failed");
     }
 
-    // 2. frontend bundle (release only — smoke uses the committed bundle for speed)
-    if !smoke && proc::run("frontend-cli", "just", &["cli", "build-js"]).is_err() {
+    // 3. frontend bundle (release only — smoke uses the committed bundle for speed)
+    if !smoke && frontend::build().is_err() {
         proc::result_fail_step("ship", "frontend");
         bail!("ship frontend bundle build failed");
     }
 
-    // 3. cross-build all three packages
+    // 4. cross-build all three packages
     let profile: &[&str] = if smoke { &[] } else { &["--release"] };
     let mut cli_args = vec!["xwin", "build"];
     cli_args.extend_from_slice(profile);
@@ -108,7 +113,7 @@ pub fn run(smoke: bool) -> Result<()> {
         bail!("ship cross-build failed");
     }
 
-    // 4. verify artifacts (release only)
+    // 5. verify artifacts (release only)
     if !smoke {
         for exe in ["git-tools.exe", "gtl-daemon.exe", "gtl-viewer.exe"] {
             let path = Path::new("target")

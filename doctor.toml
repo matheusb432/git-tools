@@ -1,0 +1,51 @@
+# git-tools dev-environment readiness. Engine: the shared doctor-rs binary (CODE DOC).
+# Run `just doctor`. Read-only: provisioning owns installation and repair.
+
+[[tool]]
+name = "cargo"
+min = "1.85"
+hint = "install Rust through sample_project provisioning"
+
+[[tool]]
+name = "just"
+min = "1.40"
+hint = "install just through sample_project provisioning"
+
+[[tool]]
+name = "deno"
+min = "2.0"
+hint = "install Deno through sample_project provisioning"
+
+[[tool]]
+name = "git"
+min = "2.40"
+hint = "install Git through sample_project provisioning"
+
+[[tool]]
+name = "taplo"
+min = "0.10"
+hint = "install taplo-cli through sample_project provisioning"
+
+[[tool]]
+name = "uvx"
+min = "0.8"
+hint = "install uv through sample_project provisioning"
+
+[[tool]]
+name = "doctor-rs"
+hint = "run sample_project provision install-doctor"
+
+[[check]]
+label = "pinned rustfmt nightly"
+run = "rustup run \"$(cat .rustfmt-nightly)\" rustfmt --version >/dev/null"
+hint = "install the toolchain named in .rustfmt-nightly with its rustfmt component"
+
+[[check]]
+label = "tracked pre-commit hook"
+run = "test \"$(git config --get core.hooksPath)\" = .githooks && test -x .githooks/pre-commit"
+hint = "run just bootstrap to configure the tracked .githooks directory"
+
+[[check]]
+label = "Linux desktop build and E2E dependencies"
+run = "if test \"$(uname -s)\" != Linux; then exit 0; fi; command -v pkg-config >/dev/null && pkg-config --exists webkit2gtk-4.1 && command -v tauri-driver >/dev/null && command -v WebKitWebDriver >/dev/null && command -v Xvfb >/dev/null && command -v openbox >/dev/null && command -v stalonetray >/dev/null && command -v dbus-run-session >/dev/null && command -v xdotool >/dev/null && command -v xwininfo >/dev/null && command -v xdpyinfo >/dev/null"
+hint = "run sample_project provision linux to install the declared desktop build and E2E packages"
