@@ -5,10 +5,11 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind, PinnedRange, View};
+use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind};
 
 use crate::{
     diffs::{
+        PinnedRange, View,
         range::DiffRanges,
         range_view::{RangePresentation, RangeView, TITLE_MERGE_DIFF},
         util::{DiffData, assemble, exclusion_note, repo_name},

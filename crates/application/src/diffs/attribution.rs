@@ -11,8 +11,7 @@ use std::{
     path::Path,
 };
 
-use domain::diffs::FileDiff;
-
+use super::FileDiff;
 use crate::ports::DiffSource;
 
 /// The new (right) side of the previewed diff: a committed tip, or the working

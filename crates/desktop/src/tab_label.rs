@@ -1,5 +1,4 @@
-use application::diffs::render_merge_diff::DEFAULT_BASE;
-use domain::diffs::View;
+use application::diffs::{View, render_merge_diff::DEFAULT_BASE};
 use gtl_recipe::{Recipe, RecipeOp, RecipeTarget};
 
 pub(super) fn initial(recipe: &Recipe) -> String {
@@ -91,7 +90,8 @@ fn source_repo_name(recipe: &Recipe) -> String {
 mod tests {
     use std::num::NonZeroU32;
 
-    use domain::diffs::{Cmd, Commit, Foot};
+    use application::diffs::{Cmd, Foot};
+    use domain::diffs::Commit;
     use gtl_recipe::RecipeSource;
 
     use super::*;

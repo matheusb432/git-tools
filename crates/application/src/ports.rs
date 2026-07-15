@@ -10,10 +10,12 @@ use std::{
 };
 
 use domain::{
-    diffs::{Commit, DiffKind, View},
+    diffs::{Commit, DiffKind},
     managed::ManagedRepo,
     viewer::RenderHistoryId,
 };
+
+use crate::diffs::View;
 
 /// Everything the store needs to record one rendered artifact. `generated_at` is
 /// supplied by the caller (via [`Clock`]) so placement stays deterministic in tests.

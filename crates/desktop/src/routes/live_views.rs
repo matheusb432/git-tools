@@ -1,5 +1,4 @@
-use application::live_views::remove as remove_live_view;
-use domain::viewer::ViewerTabId;
+use application::{live_views::remove as remove_live_view, viewer::ViewerTabId};
 use tauri::http::StatusCode;
 
 use super::{

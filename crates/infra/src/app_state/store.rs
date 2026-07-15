@@ -4,11 +4,13 @@
 
 use std::path::Path;
 
-use application::ports::{
-    AppStateError, AppStateStore, LiveViewRecord, NewRecentRenderRecord, RECENT_RENDERS_CAP,
-    RecentRenderRecord,
+use application::{
+    ports::{
+        AppStateError, AppStateStore, LiveViewRecord, NewRecentRenderRecord, RECENT_RENDERS_CAP,
+        RecentRenderRecord,
+    },
+    viewer::RenderHistoryId,
 };
-use domain::viewer::RenderHistoryId;
 use rusqlite::{OptionalExtension, params};
 
 use super::db::open_app_db;
@@ -199,10 +201,12 @@ impl AppStateStore for SqliteAppState {
 
 #[cfg(test)]
 mod tests {
-    use application::ports::{
-        AppStateError, AppStateStore, LiveViewRecord, NewRecentRenderRecord, RECENT_RENDERS_CAP,
+    use application::{
+        ports::{
+            AppStateError, AppStateStore, LiveViewRecord, NewRecentRenderRecord, RECENT_RENDERS_CAP,
+        },
+        viewer::RenderHistoryId,
     };
-    use domain::viewer::RenderHistoryId;
 
     use super::super::db::open_app_db;
     use crate::app_state::SqliteAppState;

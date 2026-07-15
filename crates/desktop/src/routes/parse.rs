@@ -1,6 +1,8 @@
 use std::{collections::HashMap, num::NonZeroU64};
 
-use domain::viewer::{DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerTabId};
+use application::viewer::{
+    DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerTabId,
+};
 use tauri::http::{Method, Request, StatusCode};
 
 use crate::protocol_config;
@@ -219,7 +221,9 @@ fn parse_query(query: Option<&str>) -> Result<HashMap<&str, &str>, StatusCode> {
 
 #[cfg(test)]
 mod tests {
-    use domain::viewer::{DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, ViewerTabId};
+    use application::viewer::{
+        DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, ViewerTabId,
+    };
     use tauri::http::{Method, Request, StatusCode};
 
     use super::{ResumeNonce, Route, parse};

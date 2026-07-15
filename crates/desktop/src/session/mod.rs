@@ -305,10 +305,11 @@ impl ViewerSession {
 mod tests {
     use std::{path::PathBuf, sync::Arc};
 
-    use domain::{
-        diffs::{Cmd, Commit, Foot, View},
+    use application::{
+        diffs::{Cmd, Foot, View},
         viewer::{ViewerTabId, ViewerTabKind},
     };
+    use domain::diffs::Commit;
     use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::*;

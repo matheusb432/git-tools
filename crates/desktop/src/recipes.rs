@@ -7,6 +7,7 @@ use std::{
 
 use application::{
     diffs::{
+        DiffTarget, PinnedRange, View,
         compute_diff::{self, ComputeDiff},
         compute_merge_diff::{self, ComputeMergeDiff},
         compute_squash_preview::{self, ComputeSquashPreview},
@@ -14,11 +15,9 @@ use application::{
     history::record_render::{self, RecordRender},
     live_views::probe::{self, ProbeOutcome, ProbeSource},
     ports::{AppStateStore, Clock, DiffSource, RepoProbe},
-};
-use domain::{
-    diffs::{DiffExclusions, DiffTarget, View},
     viewer::{ViewerTabId, ViewerTabKind, ViewerTabState},
 };
+use domain::diffs::DiffExclusions;
 use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
 use crate::{
@@ -117,9 +116,9 @@ impl ComputationOutcome {
 }
 
 /// Carry an optional pin across the crate boundary: `gtl_recipe::PinnedRange`
-/// to `domain::diffs::PinnedRange`.
-fn to_domain_pin(pinned: Option<&gtl_recipe::PinnedRange>) -> Option<domain::diffs::PinnedRange> {
-    pinned.map(|pin| domain::diffs::PinnedRange {
+/// to `application::diffs::PinnedRange`.
+fn to_application_pin(pinned: Option<&gtl_recipe::PinnedRange>) -> Option<PinnedRange> {
+    pinned.map(|pin| PinnedRange {
         base: pin.base.clone(),
         head: pin.head.clone(),
     })
@@ -128,20 +127,20 @@ fn to_domain_pin(pinned: Option<&gtl_recipe::PinnedRange>) -> Option<domain::dif
 fn diff_target(target: &RecipeTarget) -> DiffTarget {
     match target {
         RecipeTarget::Unpushed { pinned } => DiffTarget::Unpushed {
-            pinned: to_domain_pin(pinned.as_ref()),
+            pinned: to_application_pin(pinned.as_ref()),
         },
         RecipeTarget::Base { rev } => DiffTarget::Base(rev.clone()),
         RecipeTarget::Range { range, pinned } => DiffTarget::Range {
             range: range.clone(),
-            pinned: to_domain_pin(pinned.as_ref()),
+            pinned: to_application_pin(pinned.as_ref()),
         },
         RecipeTarget::Merge { base, pinned } => DiffTarget::Merge {
             base: base.clone(),
-            pinned: to_domain_pin(pinned.as_ref()),
+            pinned: to_application_pin(pinned.as_ref()),
         },
         RecipeTarget::Last { count, pinned } => DiffTarget::Last {
             count: *count,
-            pinned: to_domain_pin(pinned.as_ref()),
+            pinned: to_application_pin(pinned.as_ref()),
         },
     }
 }
@@ -167,7 +166,7 @@ pub(crate) fn compute_view(
             ComputeMergeDiff {
                 cwd,
                 base: base.clone(),
-                pinned: to_domain_pin(pinned.as_ref()),
+                pinned: to_application_pin(pinned.as_ref()),
                 exclusions: exclusions.clone(),
             },
             source,
@@ -177,7 +176,7 @@ pub(crate) fn compute_view(
         RecipeOp::SquashPreview { pinned } => compute_squash_preview::execute(
             ComputeSquashPreview {
                 cwd,
-                pinned: to_domain_pin(pinned.as_ref()),
+                pinned: to_application_pin(pinned.as_ref()),
                 exclusions: exclusions.clone(),
             },
             source,

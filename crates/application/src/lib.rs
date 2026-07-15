@@ -12,6 +12,7 @@ pub mod managed;
 pub mod ports;
 pub mod settings;
 pub mod shared;
+pub mod viewer;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

@@ -3,10 +3,10 @@
 //! whether an empty or errored view is skipped-and-counted (diff-subrepos) or kept
 //! and propagated (diff-all).
 
-use domain::diffs::{DiffExclusions, DiffTarget, View};
+use domain::diffs::DiffExclusions;
 
 use crate::{
-    diffs::render_diff::build_view,
+    diffs::{DiffTarget, View, render_diff::build_view},
     ports::{Clock, DiffSource},
     shared::notes::Note,
 };
@@ -76,10 +76,13 @@ pub(crate) fn dated_title(clock: &impl Clock, label: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use domain::diffs::{Commit, DiffTarget};
+    use domain::diffs::Commit;
 
     use super::{RepoRef, dated_title, render_batch};
-    use crate::testing::{FakeDiffSource, FixedClock, RepoOverride};
+    use crate::{
+        diffs::{DiffTarget, View},
+        testing::{FakeDiffSource, FixedClock, RepoOverride},
+    };
 
     const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
         index 111..222 100644\n\
@@ -205,7 +208,7 @@ mod tests {
 
         assert_eq!(batch.views.len(), repos.len());
         assert_eq!(batch.skipped, 0);
-        assert!(batch.views.iter().all(domain::diffs::View::is_empty));
+        assert!(batch.views.iter().all(View::is_empty));
     }
 
     #[test]

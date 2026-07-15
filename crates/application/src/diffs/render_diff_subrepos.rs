@@ -7,10 +7,13 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::{DiffExclusions, DiffKind, DiffTarget};
+use domain::diffs::{DiffExclusions, DiffKind};
 
 use crate::{
-    diffs::batch::{RepoRef, dated_title, render_batch},
+    diffs::{
+        DiffTarget,
+        batch::{RepoRef, dated_title, render_batch},
+    },
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
@@ -129,10 +132,11 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{Commit, DiffExclusions, DiffTarget};
+    use domain::diffs::{Commit, DiffExclusions};
 
     use super::{RenderDiffSubrepos, RenderDiffSubreposOutcome, RepoRef, execute};
     use crate::{
+        diffs::DiffTarget,
         shared::notes::Note,
         testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
     };

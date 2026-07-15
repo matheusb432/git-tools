@@ -1,4 +1,4 @@
-use domain::viewer::{
+use application::viewer::{
     DiffDensity, DiffLayout, Theme, ViewerDocument, ViewerHistoryEntry, ViewerSettings, ViewerTab,
     ViewerTabId, ViewerTabKind, ViewerTabState, ViewerView,
 };

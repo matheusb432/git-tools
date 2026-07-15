@@ -1,9 +1,10 @@
 use std::{collections::HashMap, sync::Arc};
 
-use domain::{
-    diffs::{Commit, FileDiff, View},
+use application::{
+    diffs::{FileDiff, View},
     viewer::{RenderOptions, Theme, ViewerTabId},
 };
+use domain::diffs::Commit;
 use lru::LruCache;
 
 /// A computed view and any server-rendered option variants retained with it.
@@ -175,8 +176,8 @@ fn string_weight(value: &String) -> usize {
 mod tests {
     use std::sync::Arc;
 
-    use domain::{
-        diffs::{Cmd, Foot, View},
+    use application::{
+        diffs::{Cmd, Foot, LineOwners, View},
         viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabId},
     };
 
@@ -349,14 +350,14 @@ mod tests {
             branch: "main".into(),
             upstream: "origin/main".into(),
             commits: vec![],
-            files: vec![domain::diffs::FileDiff {
+            files: vec![FileDiff {
                 path: "src/large.rs".into(),
                 added: 0,
                 removed: 0,
                 full_lines: Some(lines.clone()),
                 lines,
                 commits: vec![],
-                owners: domain::diffs::LineOwners::default(),
+                owners: LineOwners::default(),
             }],
             title: "Large diff".into(),
             cmd: Cmd {

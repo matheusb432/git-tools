@@ -1,8 +1,10 @@
 use std::{collections::HashSet, sync::Arc};
 
-use super::{
-    RenderHistoryId, RenderOptions, Theme, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState,
+pub use domain::viewer::{
+    DiffDensity, DiffLayout, ParseRenderOptionError, RenderHistoryId, RenderOptions, Theme,
+    ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState,
 };
+
 use crate::diffs::View;
 
 /// Couples one ready tab with the diff view and options used to render it.
@@ -13,7 +15,7 @@ use crate::diffs::View;
 ///
 /// ```no_run
 /// # use std::sync::Arc;
-/// # use domain::{diffs::View, viewer::{RenderOptions, ViewerTabId, ViewerTabKind, ViewerView}};
+/// # use application::{diffs::View, viewer::{RenderOptions, ViewerTabId, ViewerTabKind, ViewerView}};
 /// # fn load_view() -> View { unimplemented!() }
 /// let tab_id = ViewerTabId::try_new(1).expect("positive id");
 /// let view = ViewerView::new(tab_id, Arc::new(load_view()), RenderOptions::DEFAULT, ViewerTabKind::Snapshot);
@@ -34,7 +36,7 @@ impl ViewerView {
     ///
     /// ```no_run
     /// # use std::sync::Arc;
-    /// # use domain::{diffs::View, viewer::{RenderOptions, ViewerTabId, ViewerTabKind, ViewerView}};
+    /// # use application::{diffs::View, viewer::{RenderOptions, ViewerTabId, ViewerTabKind, ViewerView}};
     /// # fn load_view() -> View { unimplemented!() }
     /// let id = ViewerTabId::try_new(1).expect("positive id");
     /// let rendered = ViewerView::new(id, Arc::new(load_view()), RenderOptions::DEFAULT, ViewerTabKind::Snapshot);
@@ -59,7 +61,7 @@ impl ViewerView {
     /// # Examples
     ///
     /// ```no_run
-    /// # use domain::viewer::{ViewerTabId, ViewerView};
+    /// # use application::viewer::{ViewerTabId, ViewerView};
     /// # fn rendered() -> ViewerView { unimplemented!() }
     /// assert_eq!(
     ///     rendered().tab_id(),
@@ -75,7 +77,7 @@ impl ViewerView {
     /// # Examples
     ///
     /// ```no_run
-    /// # use domain::viewer::ViewerView;
+    /// # use application::viewer::ViewerView;
     /// # fn rendered() -> ViewerView { unimplemented!() }
     /// assert_eq!(rendered().view().repo_name, "git-tools");
     /// ```
@@ -88,7 +90,7 @@ impl ViewerView {
     /// # Examples
     ///
     /// ```no_run
-    /// # use domain::viewer::{RenderOptions, ViewerView};
+    /// # use application::viewer::{RenderOptions, ViewerView};
     /// # fn rendered() -> ViewerView { unimplemented!() }
     /// assert_eq!(rendered().options(), RenderOptions::DEFAULT);
     /// ```
@@ -101,7 +103,7 @@ impl ViewerView {
     /// # Examples
     ///
     /// ```no_run
-    /// # use domain::viewer::{ViewerTabKind, ViewerView};
+    /// # use application::viewer::{ViewerTabKind, ViewerView};
     /// # fn rendered() -> ViewerView { unimplemented!() }
     /// assert_eq!(rendered().kind(), ViewerTabKind::Snapshot);
     /// ```
@@ -115,7 +117,7 @@ impl ViewerView {
 /// # Examples
 ///
 /// ```
-/// use domain::viewer::{RenderHistoryId, ViewerHistoryEntry};
+/// use application::viewer::{RenderHistoryId, ViewerHistoryEntry};
 ///
 /// let id = RenderHistoryId::try_new(1).expect("positive id");
 /// let entry = ViewerHistoryEntry::new(
@@ -144,7 +146,7 @@ impl ViewerHistoryEntry {
     /// # Examples
     ///
     /// ```
-    /// use domain::viewer::{RenderHistoryId, ViewerHistoryEntry};
+    /// use application::viewer::{RenderHistoryId, ViewerHistoryEntry};
     ///
     /// let id = RenderHistoryId::try_new(1).expect("positive id");
     /// let entry = ViewerHistoryEntry::new(
@@ -180,7 +182,7 @@ impl ViewerHistoryEntry {
     /// # Examples
     ///
     /// ```no_run
-    /// # use domain::viewer::{RenderHistoryId, ViewerHistoryEntry};
+    /// # use application::viewer::{RenderHistoryId, ViewerHistoryEntry};
     /// # fn entry() -> ViewerHistoryEntry { unimplemented!() }
     /// assert_eq!(
     ///     entry().id(),
@@ -196,7 +198,7 @@ impl ViewerHistoryEntry {
     /// # Examples
     ///
     /// ```no_run
-    /// # use domain::viewer::ViewerHistoryEntry;
+    /// # use application::viewer::ViewerHistoryEntry;
     /// # fn entry() -> ViewerHistoryEntry { unimplemented!() }
     /// assert_eq!(entry().title(), "Changes");
     /// ```
@@ -209,7 +211,7 @@ impl ViewerHistoryEntry {
     /// # Examples
     ///
     /// ```no_run
-    /// # use domain::viewer::ViewerHistoryEntry;
+    /// # use application::viewer::ViewerHistoryEntry;
     /// # fn entry() -> ViewerHistoryEntry { unimplemented!() }
     /// assert_eq!(entry().repo_name(), "git-tools");
     /// ```
@@ -222,7 +224,7 @@ impl ViewerHistoryEntry {
     /// # Examples
     ///
     /// ```no_run
-    /// # use domain::viewer::ViewerHistoryEntry;
+    /// # use application::viewer::ViewerHistoryEntry;
     /// # fn entry() -> ViewerHistoryEntry { unimplemented!() }
     /// assert_eq!(entry().kind(), "diff");
     /// ```
@@ -235,7 +237,7 @@ impl ViewerHistoryEntry {
     /// # Examples
     ///
     /// ```no_run
-    /// # use domain::viewer::ViewerHistoryEntry;
+    /// # use application::viewer::ViewerHistoryEntry;
     /// # fn entry() -> ViewerHistoryEntry { unimplemented!() }
     /// assert_eq!(entry().range_label(), "main..HEAD");
     /// ```
@@ -248,7 +250,7 @@ impl ViewerHistoryEntry {
     /// # Examples
     ///
     /// ```no_run
-    /// # use domain::viewer::ViewerHistoryEntry;
+    /// # use application::viewer::ViewerHistoryEntry;
     /// # fn entry() -> ViewerHistoryEntry { unimplemented!() }
     /// assert_eq!(entry().rendered_at(), "2026-07-11T00:00:00Z");
     /// ```
@@ -262,7 +264,7 @@ impl ViewerHistoryEntry {
 /// # Examples
 ///
 /// ```
-/// use domain::viewer::{RenderOptions, Theme, ViewerSettings};
+/// use application::viewer::{RenderOptions, Theme, ViewerSettings};
 ///
 /// let settings = ViewerSettings::new(RenderOptions::DEFAULT, Theme::Dark);
 /// assert_eq!(settings.theme(), Theme::Dark);
@@ -279,7 +281,7 @@ impl ViewerSettings {
     /// # Examples
     ///
     /// ```
-    /// use domain::viewer::{RenderOptions, Theme, ViewerSettings};
+    /// use application::viewer::{RenderOptions, Theme, ViewerSettings};
     ///
     /// let settings = ViewerSettings::new(RenderOptions::DEFAULT, Theme::Dark);
     /// assert_eq!(settings.theme(), Theme::Dark);
@@ -293,7 +295,7 @@ impl ViewerSettings {
     /// # Examples
     ///
     /// ```
-    /// use domain::viewer::{RenderOptions, Theme, ViewerSettings};
+    /// use application::viewer::{RenderOptions, Theme, ViewerSettings};
     ///
     /// let settings = ViewerSettings::new(RenderOptions::DEFAULT, Theme::Dark);
     /// assert_eq!(settings.options(), RenderOptions::DEFAULT);
@@ -307,7 +309,7 @@ impl ViewerSettings {
     /// # Examples
     ///
     /// ```
-    /// use domain::viewer::{RenderOptions, Theme, ViewerSettings};
+    /// use application::viewer::{RenderOptions, Theme, ViewerSettings};
     ///
     /// let settings = ViewerSettings::new(RenderOptions::DEFAULT, Theme::Hearth);
     /// assert_eq!(settings.theme(), Theme::Hearth);
@@ -322,7 +324,7 @@ impl ViewerSettings {
 /// # Examples
 ///
 /// ```
-/// use domain::viewer::{
+/// use application::viewer::{
 ///     RenderOptions, Theme, ViewerDocument, ViewerDocumentError, ViewerSettings, ViewerTabId,
 /// };
 ///
@@ -376,7 +378,7 @@ pub enum ViewerDocumentError {
 /// # Examples
 ///
 /// ```
-/// use domain::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
+/// use application::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
 ///
 /// let document = ViewerDocument::new(
 ///     vec![],
@@ -409,7 +411,7 @@ impl ViewerDocument {
     /// # Examples
     ///
     /// ```
-    /// use domain::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
+    /// use application::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
     ///
     /// let document = ViewerDocument::new(
     ///     vec![],
@@ -493,7 +495,7 @@ impl ViewerDocument {
     /// # Examples
     ///
     /// ```
-    /// # use domain::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
+    /// # use application::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
     /// # let document = ViewerDocument::new(vec![], None, None, vec![], ViewerSettings::new(RenderOptions::DEFAULT, Theme::Dark)).expect("valid viewer");
     /// assert!(document.tabs().is_empty());
     /// ```
@@ -506,7 +508,7 @@ impl ViewerDocument {
     /// # Examples
     ///
     /// ```
-    /// # use domain::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
+    /// # use application::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
     /// # let document = ViewerDocument::new(vec![], None, None, vec![], ViewerSettings::new(RenderOptions::DEFAULT, Theme::Dark)).expect("valid viewer");
     /// assert_eq!(document.active_tab_id(), None);
     /// ```
@@ -519,7 +521,7 @@ impl ViewerDocument {
     /// # Examples
     ///
     /// ```
-    /// # use domain::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
+    /// # use application::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
     /// # let document = ViewerDocument::new(vec![], None, None, vec![], ViewerSettings::new(RenderOptions::DEFAULT, Theme::Dark)).expect("valid viewer");
     /// assert!(document.active_tab().is_none());
     /// ```
@@ -533,7 +535,7 @@ impl ViewerDocument {
     /// # Examples
     ///
     /// ```
-    /// # use domain::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
+    /// # use application::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
     /// # let document = ViewerDocument::new(vec![], None, None, vec![], ViewerSettings::new(RenderOptions::DEFAULT, Theme::Dark)).expect("valid viewer");
     /// assert!(document.active_view().is_none());
     /// ```
@@ -546,7 +548,7 @@ impl ViewerDocument {
     /// # Examples
     ///
     /// ```
-    /// # use domain::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
+    /// # use application::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
     /// # let document = ViewerDocument::new(vec![], None, None, vec![], ViewerSettings::new(RenderOptions::DEFAULT, Theme::Dark)).expect("valid viewer");
     /// assert!(document.history().is_empty());
     /// ```
@@ -559,7 +561,7 @@ impl ViewerDocument {
     /// # Examples
     ///
     /// ```
-    /// # use domain::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
+    /// # use application::viewer::{RenderOptions, Theme, ViewerDocument, ViewerSettings};
     /// # let document = ViewerDocument::new(vec![], None, None, vec![], ViewerSettings::new(RenderOptions::DEFAULT, Theme::Hearth)).expect("valid viewer");
     /// assert_eq!(document.settings().theme(), Theme::Hearth);
     /// ```
@@ -572,7 +574,7 @@ impl ViewerDocument {
 mod tests {
     use std::sync::Arc;
 
-    use super::super::{
+    use super::{
         RenderOptions, Theme, ViewerDocument, ViewerDocumentError, ViewerSettings, ViewerTab,
         ViewerTabId, ViewerTabKind, ViewerTabState, ViewerView,
     };

@@ -1,13 +1,64 @@
-use domain::{
-    diffs::{
-        AppliedExclusions, FileDiff, LineOwners, RowKind, Span, SplitRow, View, long_line_len,
-    },
+mod intraline;
+mod rows;
+mod split;
+
+use application::{
+    diffs::{FileDiff, FileStatus, LineOwners, View},
     viewer::{DiffDensity, DiffLayout, RenderOptions},
 };
+use domain::diffs::AppliedExclusions;
 use maud::{DOCTYPE, Markup, PreEscaped, html};
+
+use self::{
+    intraline::Span,
+    rows::{Row, RowKind, derive_rows, long_line_len},
+    split::{SplitRow, split_rows},
+};
 
 const GIANT_FILE_CHARS: usize = 250_000;
 const ROW_PX: usize = 22;
+
+#[derive(Clone, Copy)]
+struct FileStatusPresentation {
+    key: &'static str,
+    code: &'static str,
+    label: &'static str,
+    css_class: &'static str,
+}
+
+const STATUS_ADDED: FileStatusPresentation = FileStatusPresentation {
+    key: "added",
+    code: "A",
+    label: "Added file",
+    css_class: "status-added",
+};
+const STATUS_DELETED: FileStatusPresentation = FileStatusPresentation {
+    key: "deleted",
+    code: "D",
+    label: "Deleted file",
+    css_class: "status-deleted",
+};
+const STATUS_RENAMED: FileStatusPresentation = FileStatusPresentation {
+    key: "renamed",
+    code: "R",
+    label: "Renamed file",
+    css_class: "status-renamed",
+};
+const STATUS_MODIFIED: FileStatusPresentation = FileStatusPresentation {
+    key: "modified",
+    code: "M",
+    label: "Modified file",
+    css_class: "status-modified",
+};
+
+fn file_status_presentation(status: FileStatus) -> FileStatusPresentation {
+    match status {
+        FileStatus::Added => STATUS_ADDED,
+        FileStatus::Deleted => STATUS_DELETED,
+        FileStatus::Renamed => STATUS_RENAMED,
+        FileStatus::Modified => STATUS_MODIFIED,
+    }
+}
 
 const PREVIEW_CSS: &str = include_str!("embedded/preview.css");
 const PREVIEW_BUNDLE: &str = include_str!("embedded/generated/preview.js");
@@ -84,11 +135,16 @@ pub fn slug(s: &str) -> String {
 }
 
 pub fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
+    render_unified_rows(&derive_rows(lines, owners))
+}
+
+fn render_unified_rows(parsed: &[Row]) -> String {
     use std::fmt::Write;
 
-    let mut rows = String::with_capacity(lines.iter().map(String::len).sum::<usize>() * 2);
+    let mut rows =
+        String::with_capacity(parsed.iter().map(|row| row.text.len()).sum::<usize>() * 2);
 
-    for row in domain::diffs::derive_rows(lines, owners) {
+    for row in parsed {
         match row.kind {
             RowKind::Meta => {
                 let _ = write!(
@@ -243,7 +299,7 @@ fn view_body(view: &View, mode: RenderMode) -> Markup {
 /// # Examples
 ///
 /// ```no_run
-/// use domain::{diffs::View, viewer::RenderOptions};
+/// use application::{diffs::View, viewer::RenderOptions};
 /// use infra::html_renderer::build_view_fragment;
 ///
 /// # fn load_view() -> View { todo!() }
@@ -467,24 +523,28 @@ const SPLIT_PAD: &str = r#"<span class="ln"></span><code class="sp sp-pad"></cod
 // following run of additions (the shorter side padded), context lines mirror on both panes,
 // and meta/hunk headers span the full width. Same gutter-number tracking and owner tagging.
 pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
+    render_split_rows(&split_rows(&derive_rows(lines, owners)))
+}
+
+fn render_split_rows(parsed: &[SplitRow]) -> String {
     use std::fmt::Write;
 
-    let mut rows = String::with_capacity(lines.iter().map(String::len).sum::<usize>() * 3);
+    let mut rows = String::with_capacity(parsed.len() * 128);
 
-    for row in domain::diffs::split_rows(&domain::diffs::derive_rows(lines, owners)) {
+    for row in parsed {
         match row {
             SplitRow::Meta { text } => {
                 let _ = write!(
                     rows,
                     r#"<div class="dl dl-meta"><code>{}</code></div>"#,
-                    html_or_nbsp(&text)
+                    html_or_nbsp(text)
                 );
             }
             SplitRow::Hunk { text } => {
                 let _ = write!(
                     rows,
                     r#"<div class="dl dl-hunk"><code>{}</code></div>"#,
-                    escape_html(&text)
+                    escape_html(text)
                 );
             }
             SplitRow::Context {
@@ -492,14 +552,14 @@ pub fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
                 new_no,
                 text,
             } => {
-                let long = long_line_len(&text);
+                let long = long_line_len(text);
                 let _ = write!(
                     rows,
                     r#"<div class="dl"><span class="ln">{}</span>{}<span class="ln">{}</span>{}</div>"#,
                     old_no,
-                    split_code(&text, long, "sp-ctx", None, &[]),
+                    split_code(text, long, "sp-ctx", None, &[]),
                     new_no,
-                    split_code(&text, long, "sp-ctx", None, &[]),
+                    split_code(text, long, "sp-ctx", None, &[]),
                 );
             }
             SplitRow::Pair { old, new } => {
@@ -615,22 +675,22 @@ fn file_blocks(view: &View, mode: RenderMode) -> Markup {
     html! {
         @for file in &view.files {
             @let absolute = format!("{}/{}", view.repo_root, file.path);
-            @let status = file.status();
+            @let status = file_status_presentation(file.status());
             @let giant = file.lines.iter().map(String::len).sum::<usize>() > GIANT_FILE_CHARS;
             @let rows = file.lines.iter().filter(|l| !l.is_empty()).count();
             @let intrinsic = format!("contain-intrinsic-size:auto {}px", rows * ROW_PX);
             details open[!giant]
                 id=(slug(&file.path))
-                class=(format!("file {}", status.css_class()))
+                class=(format!("file {}", status.css_class))
                 data-path=(file.path)
                 data-comment=(crate::comment_syntax::comment_leader(&file.path))
                 data-commits=(file_commits(file))
-                data-status=(status.key())
-                data-status-code=(status.code())
-                data-status-label=(status.label()) {
+                data-status=(status.key)
+                data-status-code=(status.code)
+                data-status-label=(status.label) {
                 summary {
                     span.path { (file.path) }
-                    span class=(format!("status-badge {}", status.css_class())) title=(status.label()) aria-label=(status.label()) { (status.code()) }
+                    span class=(format!("status-badge {}", status.css_class)) title=(status.label) aria-label=(status.label) { (status.code) }
                     span.copies {
                         button type="button" class="copy-button" data-copy-value=(file.path) data-copy-label="path" { "path" }
                         button type="button" class="copy-button" data-copy-value=(absolute) data-copy-label="abs" { "abs" }
@@ -688,12 +748,13 @@ fn file_diff(file: &FileDiff, mode: RenderMode) -> Markup {
 
 #[cfg(test)]
 mod tests {
-    use domain::{
-        diffs::{Cmd, Commit, FileDiff, Foot, MAX_LINE_COLS, View},
+    use application::{
+        diffs::{Cmd, FileDiff, Foot, LineOwners, View},
         viewer::{DiffDensity, DiffLayout, RenderOptions},
     };
+    use domain::diffs::Commit;
 
-    use super::*;
+    use super::{rows::MAX_LINE_COLS, split::SplitCell, *};
 
     /// Returns true if `html` contains any http(s):// URL. Enforces the
     /// offline-artifact contract: nothing in the artifact may trigger a
@@ -719,17 +780,44 @@ mod tests {
     }
 
     #[test]
-    fn render_diff_lines_classifies_rows_and_tracks_gutter_numbers() {
-        let html = render_diff_lines(
-            &[
-                "index 111..222 100644".to_string(),
-                "@@ -3,2 +7,2 @@".to_string(),
-                " keep".to_string(),
-                "-old".to_string(),
-                "+new".to_string(),
-            ],
-            &LineOwners::default(),
-        );
+    fn render_unified_rows_maps_each_row_kind_and_gutter() {
+        let html = render_unified_rows(&[
+            Row {
+                kind: RowKind::Meta,
+                old_no: None,
+                new_no: None,
+                text: "index 111..222 100644".into(),
+                owner: None,
+            },
+            Row {
+                kind: RowKind::Hunk,
+                old_no: None,
+                new_no: None,
+                text: "@@ -3,2 +7,2 @@".into(),
+                owner: None,
+            },
+            Row {
+                kind: RowKind::Context,
+                old_no: Some(3),
+                new_no: Some(7),
+                text: " keep".into(),
+                owner: None,
+            },
+            Row {
+                kind: RowKind::Del,
+                old_no: Some(4),
+                new_no: None,
+                text: "-old".into(),
+                owner: None,
+            },
+            Row {
+                kind: RowKind::Add,
+                old_no: None,
+                new_no: Some(8),
+                text: "+new".into(),
+                owner: None,
+            },
+        ]);
 
         assert!(html.contains(r#"<div class="dl dl-meta"><span class="ln"></span><span class="ln"></span><code>index 111..222 100644</code></div>"#));
         assert!(html.contains(r#"<div class="dl dl-hunk"><span class="ln"></span><span class="ln"></span><code>@@ -3,2 +7,2 @@</code></div>"#));
@@ -739,19 +827,30 @@ mod tests {
     }
 
     #[test]
-    fn render_diff_lines_tags_rows_with_owning_commit() {
-        let mut owners = domain::diffs::LineOwners::default();
-        owners.added.insert(8, "abc123def".to_string());
-        owners.deleted.insert(4, "fff000aaa".to_string());
-        let html = render_diff_lines(
-            &[
-                "@@ -3,2 +7,2 @@".to_string(),
-                " keep".to_string(),
-                "-old".to_string(),
-                "+new".to_string(),
-            ],
-            &owners,
-        );
+    fn render_unified_rows_maps_commit_owners_to_attributes() {
+        let html = render_unified_rows(&[
+            Row {
+                kind: RowKind::Context,
+                old_no: Some(3),
+                new_no: Some(7),
+                text: " keep".into(),
+                owner: None,
+            },
+            Row {
+                kind: RowKind::Del,
+                old_no: Some(4),
+                new_no: None,
+                text: "-old".into(),
+                owner: Some("fff000aaa".into()),
+            },
+            Row {
+                kind: RowKind::Add,
+                old_no: None,
+                new_no: Some(8),
+                text: "+new".into(),
+                owner: Some("abc123def".into()),
+            },
+        ]);
         assert!(html.contains(r#"<div class="dl dl-del" data-commit="fff000aaa">"#));
         assert!(html.contains(r#"<div class="dl dl-add" data-commit="abc123def">"#));
         // context rows carry no owner attribute
@@ -759,17 +858,34 @@ mod tests {
     }
 
     #[test]
-    fn render_diff_split_pairs_changes_and_mirrors_context() {
-        let html = render_diff_split(
-            &[
-                "index 111..222 100644".to_string(),
-                "@@ -3,2 +7,2 @@".to_string(),
-                " keep".to_string(),
-                "-old".to_string(),
-                "+new".to_string(),
-            ],
-            &LineOwners::default(),
-        );
+    fn render_split_rows_maps_meta_hunk_context_and_pairs() {
+        let html = render_split_rows(&[
+            SplitRow::Meta {
+                text: "index 111..222 100644".into(),
+            },
+            SplitRow::Hunk {
+                text: "@@ -3,2 +7,2 @@".into(),
+            },
+            SplitRow::Context {
+                old_no: 3,
+                new_no: 7,
+                text: " keep".into(),
+            },
+            SplitRow::Pair {
+                old: Some(SplitCell {
+                    no: 4,
+                    text: "-old".into(),
+                    owner: None,
+                    spans: vec![],
+                }),
+                new: Some(SplitCell {
+                    no: 8,
+                    text: "+new".into(),
+                    owner: None,
+                    spans: vec![],
+                }),
+            },
+        ]);
 
         // meta + hunk headers span the full width (single cell, no gutters)
         assert!(
@@ -783,48 +899,53 @@ mod tests {
     }
 
     #[test]
-    fn render_diff_split_pads_the_shorter_change_run() {
-        let html = render_diff_split(
-            &[
-                "@@ -1,2 +1,1 @@".to_string(),
-                "-a".to_string(),
-                "-b".to_string(),
-                "+c".to_string(),
-            ],
-            &LineOwners::default(),
-        );
+    fn render_split_rows_maps_a_missing_side_to_padding() {
+        let html = render_split_rows(&[SplitRow::Pair {
+            old: Some(SplitCell {
+                no: 2,
+                text: "-b".into(),
+                owner: None,
+                spans: vec![],
+            }),
+            new: None,
+        }]);
 
-        // first deletion pairs with the lone addition
-        assert!(html.contains(r#"<div class="dl"><span class="ln">1</span><code class="sp sp-del">-a</code><span class="ln">1</span><code class="sp sp-add">+c</code></div>"#));
-        // the surplus deletion gets a blank, shaded filler on the new pane
         assert!(html.contains(r#"<div class="dl"><span class="ln">2</span><code class="sp sp-del">-b</code><span class="ln"></span><code class="sp sp-pad"></code></div>"#));
     }
 
     #[test]
-    fn render_diff_split_tags_sides_with_owning_commit() {
-        let mut owners = domain::diffs::LineOwners::default();
-        owners.added.insert(8, "abc123def".to_string());
-        owners.deleted.insert(4, "fff000aaa".to_string());
-        let html = render_diff_split(
-            &[
-                "@@ -3,2 +7,2 @@".to_string(),
-                " keep".to_string(),
-                "-old".to_string(),
-                "+new".to_string(),
-            ],
-            &owners,
-        );
+    fn render_split_rows_maps_commit_owners_to_each_side() {
+        let html = render_split_rows(&[SplitRow::Pair {
+            old: Some(SplitCell {
+                no: 4,
+                text: "-old".into(),
+                owner: Some("fff000aaa".into()),
+                spans: vec![],
+            }),
+            new: Some(SplitCell {
+                no: 8,
+                text: "+new".into(),
+                owner: Some("abc123def".into()),
+                spans: vec![],
+            }),
+        }]);
 
         assert!(html.contains(r#"<code class="sp sp-del" data-commit="fff000aaa">-old</code>"#));
         assert!(html.contains(r#"<code class="sp sp-add" data-commit="abc123def">+new</code>"#));
-        // context sides carry no owner attribute
-        assert!(html.contains(r#"<code class="sp sp-ctx"> keep</code>"#));
     }
 
     #[test]
-    fn render_diff_split_tames_overlong_lines() {
+    fn render_split_rows_tames_overlong_lines() {
         let long = format!("+{}", "a".repeat(MAX_LINE_COLS + 5));
-        let html = render_diff_split(&["@@ -0,0 +1 @@".to_string(), long], &LineOwners::default());
+        let html = render_split_rows(&[SplitRow::Pair {
+            old: None,
+            new: Some(SplitCell {
+                no: 1,
+                text: long,
+                owner: None,
+                spans: vec![],
+            }),
+        }]);
         assert!(html.contains(r#"<code class="sp sp-add long">"#));
         assert!(html.contains(r#"<span class="code-text">"#));
         assert!(html.contains(&format!(
@@ -834,15 +955,21 @@ mod tests {
     }
 
     #[test]
-    fn render_diff_split_marks_intra_line_word_changes_on_both_panes() {
-        let html = render_diff_split(
-            &[
-                "@@ -1,1 +1,1 @@".to_string(),
-                "-let x = 1;".to_string(),
-                "+let x = 2;".to_string(),
-            ],
-            &LineOwners::default(),
-        );
+    fn render_split_rows_maps_intraline_spans_to_markup() {
+        let html = render_split_rows(&[SplitRow::Pair {
+            old: Some(SplitCell {
+                no: 1,
+                text: "-let x = 1;".into(),
+                owner: None,
+                spans: vec![Span { start: 8, end: 9 }],
+            }),
+            new: Some(SplitCell {
+                no: 1,
+                text: "+let x = 2;".into(),
+                owner: None,
+                spans: vec![Span { start: 8, end: 9 }],
+            }),
+        }]);
 
         // only the differing char is wrapped; the shared prefix/suffix stay bare
         assert!(
@@ -854,59 +981,16 @@ mod tests {
     }
 
     #[test]
-    fn render_diff_split_leaves_fully_rewritten_pairs_unmarked() {
-        let html = render_diff_split(
-            &[
-                "@@ -1,1 +1,1 @@".to_string(),
-                "-old".to_string(),
-                "+new".to_string(),
-            ],
-            &LineOwners::default(),
-        );
-
-        // no shared run -> the line color already conveys the change, no intra-line marks
-        assert!(!html.contains("ciw"));
-        assert!(html.contains(r#"<code class="sp sp-del">-old</code>"#));
-        assert!(html.contains(r#"<code class="sp sp-add">+new</code>"#));
-    }
-
-    #[test]
-    fn render_diff_split_skips_intra_line_marks_on_unpaired_lines() {
-        // a lone addition (no deletion to pair with) is wholly new -> no intra-line marks
-        let html = render_diff_split(
-            &["@@ -0,0 +1 @@".to_string(), "+brandnew".to_string()],
-            &LineOwners::default(),
-        );
-
-        assert!(!html.contains("ciw"));
-    }
-
-    #[test]
-    fn render_diff_split_skips_intra_line_marks_on_long_lines() {
-        let del = format!("-{}x", "a".repeat(MAX_LINE_COLS + 5));
-        let add = format!("+{}y", "a".repeat(MAX_LINE_COLS + 5));
-        let html = render_diff_split(
-            &["@@ -1,1 +1,1 @@".to_string(), del, add],
-            &LineOwners::default(),
-        );
-
-        // long lines are tamed, not word-diffed (a word-diff over base64 would be pointless)
-        assert!(!html.contains("ciw"));
-        assert!(html.contains(r#"<code class="sp sp-del long">"#));
-        assert!(html.contains(r#"<code class="sp sp-add long">"#));
-    }
-
-    #[test]
-    fn render_diff_split_marks_escape_user_controlled_chars() {
-        let html = render_diff_split(
-            &[
-                "@@ -1,1 +1,1 @@".to_string(),
-                "-a<b>&1".to_string(),
-                "-".to_string(),
-                "+a<b>&2".to_string(),
-            ],
-            &LineOwners::default(),
-        );
+    fn render_split_rows_escapes_marked_user_controlled_chars() {
+        let html = render_split_rows(&[SplitRow::Pair {
+            old: Some(SplitCell {
+                no: 1,
+                text: "-a<b>&1".into(),
+                owner: None,
+                spans: vec![Span { start: 5, end: 6 }],
+            }),
+            new: None,
+        }]);
 
         // the marked char stays escaped inside the span; no raw `<b>` leaks
         assert!(html.contains(r#"a&lt;b&gt;&amp;<span class="ciw">1</span>"#));
@@ -951,9 +1035,15 @@ mod tests {
     }
 
     #[test]
-    fn render_diff_lines_tames_overlong_lines() {
+    fn render_unified_rows_tames_overlong_lines() {
         let long = format!("+{}", "a".repeat(MAX_LINE_COLS + 5));
-        let html = render_diff_lines(&["@@ -0,0 +1 @@".to_string(), long], &LineOwners::default());
+        let html = render_unified_rows(&[Row {
+            kind: RowKind::Add,
+            old_no: None,
+            new_no: Some(1),
+            text: long,
+            owner: None,
+        }]);
         assert!(html.contains(r#"class="dl dl-add dl-long""#));
         assert!(html.contains(r#"<span class="code-text">"#));
         assert!(html.contains(&format!(
@@ -963,21 +1053,16 @@ mod tests {
     }
 
     #[test]
-    fn render_diff_lines_leaves_normal_lines_untamed() {
-        let html = render_diff_lines(
-            &["@@ -0,0 +1 @@".to_string(), "+short".to_string()],
-            &LineOwners::default(),
-        );
+    fn render_unified_rows_leaves_normal_lines_untamed() {
+        let html = render_unified_rows(&[Row {
+            kind: RowKind::Add,
+            old_no: None,
+            new_no: Some(1),
+            text: "+short".into(),
+            owner: None,
+        }]);
         assert!(!html.contains("dl-long"));
         assert!(!html.contains("code-text"));
-    }
-
-    #[test]
-    fn render_diff_lines_does_not_treat_malformed_headers_as_hunks() {
-        let html = render_diff_lines(&["@@ -1, +2 @@".to_string()], &LineOwners::default());
-
-        assert!(!html.contains("dl-hunk"));
-        assert!(html.contains(r#"<div class="dl dl-ctx"><span class="ln">0</span><span class="ln">0</span><code>@@ -1, +2 @@</code></div>"#));
     }
 
     #[test]
@@ -1016,7 +1101,7 @@ mod tests {
                     " end".to_string(),
                 ]),
                 commits: vec!["abc123def".to_string()],
-                owners: domain::diffs::LineOwners::default(),
+                owners: LineOwners::default(),
             }],
             title: "diff".to_string(),
             cmd: Cmd {
@@ -1378,7 +1463,7 @@ mod tests {
                 ],
                 full_lines: None,
                 commits: vec!["abc123def".to_string()],
-                owners: domain::diffs::LineOwners::default(),
+                owners: LineOwners::default(),
             },
             FileDiff {
                 path: "src/gone.rs".to_string(),
@@ -1393,7 +1478,7 @@ mod tests {
                 ],
                 full_lines: None,
                 commits: vec!["abc123def".to_string()],
-                owners: domain::diffs::LineOwners::default(),
+                owners: LineOwners::default(),
             },
             FileDiff {
                 path: "src/new-name.rs".to_string(),
@@ -1406,7 +1491,7 @@ mod tests {
                 ],
                 full_lines: None,
                 commits: vec!["abc123def".to_string()],
-                owners: domain::diffs::LineOwners::default(),
+                owners: LineOwners::default(),
             },
         ];
 
@@ -1611,7 +1696,7 @@ mod tests {
                     " end".to_string(),
                 ]),
                 commits: vec!["abc123def".to_string()],
-                owners: domain::diffs::LineOwners::default(),
+                owners: LineOwners::default(),
             }],
             title: "diff".to_string(),
             cmd: Cmd {

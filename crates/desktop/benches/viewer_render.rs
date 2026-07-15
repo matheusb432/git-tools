@@ -1,6 +1,6 @@
+use application::viewer::{DiffDensity, DiffLayout, RenderOptions};
 use criterion::{Criterion, criterion_group, criterion_main};
 use desktop::benchmark_support::ViewerRenderBenchmark;
-use domain::viewer::{DiffDensity, DiffLayout, RenderOptions};
 
 fn render_large_viewer(c: &mut Criterion) {
     let fixture = ViewerRenderBenchmark::fixture_45k();

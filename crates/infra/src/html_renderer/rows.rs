@@ -2,17 +2,17 @@
 //! unified-diff text, consumed by every renderer (Maud HTML and the native
 //! viewer) so hunk/gutter parsing exists in exactly one place.
 
-use super::file::{FileDiff, LineOwners};
+use application::diffs::LineOwners;
 
 /// Char length (marker excluded) beyond which a line is "long" and is exempt
 /// from intra-line diffing and wrap layout. Shared presentation rule for all
 /// renderers.
-pub const MAX_LINE_COLS: usize = 2000;
+pub(super) const MAX_LINE_COLS: usize = 2000;
 
 /// What a single diff row is: git metadata, a hunk header, or a
 /// context/added/deleted code line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RowKind {
+pub(super) enum RowKind {
     Meta,
     Hunk,
     Context,
@@ -25,17 +25,17 @@ pub enum RowKind {
 /// present only on the side(s) the row exists on; `owner` is the short sha of
 /// the commit owning a changed line (never set on context/meta/hunk rows).
 #[derive(Debug, Clone, PartialEq)]
-pub struct Row {
-    pub kind: RowKind,
-    pub old_no: Option<u32>,
-    pub new_no: Option<u32>,
-    pub text: String,
-    pub owner: Option<String>,
+pub(super) struct Row {
+    pub(super) kind: RowKind,
+    pub(super) old_no: Option<u32>,
+    pub(super) new_no: Option<u32>,
+    pub(super) text: String,
+    pub(super) owner: Option<String>,
 }
 
 /// True for git's non-code diff lines (file headers, mode/rename/similarity
 /// markers, binary notices, the `\ No newline` marker).
-pub fn is_meta_line(raw: &str) -> bool {
+pub(super) fn is_meta_line(raw: &str) -> bool {
     raw.starts_with("index ")
         || raw.starts_with("--- ")
         || raw.starts_with("+++ ")
@@ -53,7 +53,7 @@ pub fn is_meta_line(raw: &str) -> bool {
 /// gutter numbers from hunk headers and attaching per-line commit ownership.
 /// Empty lines are skipped; a malformed hunk header degrades to a context row
 /// (matching the historical renderer behavior).
-pub fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
+pub(super) fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
     let mut old_no = 0u32;
     let mut new_no = 0u32;
     let mut rows = Vec::with_capacity(lines.len());
@@ -123,7 +123,7 @@ pub fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
 
 /// A changed line body with its leading diff marker stripped, ready for
 /// intra-line diffing or marker-free presentation.
-pub fn line_body(raw: &str) -> &str {
+pub(super) fn line_body(raw: &str) -> &str {
     raw.get(1..).unwrap_or("")
 }
 
@@ -131,7 +131,7 @@ pub fn line_body(raw: &str) -> &str {
 /// line is "long" (beyond [`MAX_LINE_COLS`]), else `None`. The single long-line
 /// rule shared by every renderer: Maud's long-line taming, the split pane's
 /// intra-line exemption, and the native viewer's row DTOs.
-pub fn long_line_len(raw: &str) -> Option<usize> {
+pub(super) fn long_line_len(raw: &str) -> Option<usize> {
     let marker = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
     let len = raw.chars().count().saturating_sub(marker);
     (len > MAX_LINE_COLS).then_some(len)
@@ -161,24 +161,9 @@ fn parse_hunk_range(s: &str) -> Option<u32> {
     start.parse().ok()
 }
 
-impl FileDiff {
-    /// Structured rows for the compact (default-context) diff.
-    pub fn rows(&self) -> Vec<Row> {
-        derive_rows(&self.lines, &self.owners)
-    }
-
-    /// Structured rows for the full-file diff, when it was computed.
-    pub fn full_rows(&self) -> Option<Vec<Row>> {
-        self.full_lines
-            .as_ref()
-            .map(|lines| derive_rows(lines, &self.owners))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diffs::LineOwners;
 
     fn lines(raw: &[&str]) -> Vec<String> {
         raw.iter().map(ToString::to_string).collect()
@@ -288,26 +273,5 @@ mod tests {
     fn line_body_strips_the_marker() {
         assert_eq!(line_body("-old"), "old");
         assert_eq!(line_body(""), "");
-    }
-
-    #[test]
-    fn filediff_rows_uses_compact_lines_and_full_rows_uses_full_lines() {
-        let file = crate::diffs::FileDiff {
-            path: "src/a.rs".into(),
-            added: 1,
-            removed: 0,
-            lines: lines(&["@@ -1 +1 @@", "+x"]),
-            full_lines: Some(lines(&["@@ -1 +1 @@", " ctx", "+x"])),
-            commits: vec![],
-            owners: LineOwners::default(),
-        };
-        assert_eq!(file.rows().len(), 2);
-        assert_eq!(file.full_rows().unwrap().len(), 3);
-
-        let no_full = crate::diffs::FileDiff {
-            full_lines: None,
-            ..file
-        };
-        assert!(no_full.full_rows().is_none());
     }
 }

@@ -7,7 +7,7 @@
 //!
 //! This crate is deliberately app-agnostic: it holds only pure serde DTOs and
 //! the codec, with no dependency on `domain`. [`RecipeTarget`] mirrors
-//! `domain::diffs::DiffTarget`'s shape by hand; consumers that need the domain
+//! `application::diffs::DiffTarget`'s shape by hand; consumers that need the application
 //! type map it locally (the mapping lives in the crate that owns both types —
 //! e.g. `crates/desktop`).
 //!
@@ -46,7 +46,7 @@ pub struct PinnedRange {
     pub head: String,
 }
 
-/// A hand-maintained serde mirror of `domain::diffs::DiffTarget`. This crate
+/// A hand-maintained serde mirror of `application::diffs::DiffTarget`. This crate
 /// carries no `domain` dependency (it must stay app-agnostic); the mapping onto
 /// the domain type lives in the consuming crate.
 #[serde_with::skip_serializing_none]

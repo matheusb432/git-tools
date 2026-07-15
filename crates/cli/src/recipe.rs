@@ -22,16 +22,18 @@ use crate::{
     git,
 };
 
-/// Carry an optional pin across the crate boundary: `domain::diffs::PinnedRange`
+/// Carry an optional pin across the crate boundary: `application::diffs::PinnedRange`
 /// to `gtl_recipe::PinnedRange`.
-fn to_recipe_pin(pinned: Option<&domain::diffs::PinnedRange>) -> Option<gtl_recipe::PinnedRange> {
+fn to_recipe_pin(
+    pinned: Option<&application::diffs::PinnedRange>,
+) -> Option<gtl_recipe::PinnedRange> {
     pinned.map(|pin| gtl_recipe::PinnedRange {
         base: pin.base.clone(),
         head: pin.head.clone(),
     })
 }
 
-/// Map the domain [`DiffTarget`] onto the wire-agnostic [`RecipeTarget`] — the
+/// Map the application [`DiffTarget`] onto the wire-agnostic [`RecipeTarget`] — the
 /// inverse of the viewer's recipe-to-domain mapping.
 fn recipe_target_from_diff_target(target: &DiffTarget) -> RecipeTarget {
     match target {

@@ -9,7 +9,7 @@ use routes::{ViewerRoute, ViewerSettingChange};
 mod tests {
     use std::sync::Arc;
 
-    use domain::{
+    use application::{
         diffs::{Cmd, Foot, View},
         viewer::{
             DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerDocument,

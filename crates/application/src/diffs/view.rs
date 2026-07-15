@@ -1,4 +1,6 @@
-use super::{commit::Commit, exclusions::AppliedExclusions, file::FileDiff};
+use domain::diffs::{AppliedExclusions, Commit};
+
+use super::FileDiff;
 
 /// The `$ <lead><range><trail>` command line shown at the top of the screen.
 #[derive(Debug, Clone)]
@@ -73,46 +75,4 @@ pub fn sort_files_tree_order(files: &mut [FileDiff]) {
         // ? one path is a prefix of the other: shorter (shallower) comes first
         a_components.len().cmp(&b_components.len())
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{super::file::LineOwners, *};
-
-    fn file(path: &str) -> FileDiff {
-        FileDiff {
-            path: path.to_string(),
-            added: 0,
-            removed: 0,
-            lines: Vec::new(),
-            full_lines: None,
-            commits: Vec::new(),
-            owners: LineOwners::default(),
-        }
-    }
-
-    #[test]
-    fn sort_files_tree_order_dirs_before_files_alpha_per_level() {
-        let mut files = vec![
-            file("src/render.rs"),
-            file("docs/adr/0001-render-stack.md"),
-            file("src/assets/preview.css"),
-            file("src/model.rs"),
-            file("src/assets/components.js"),
-        ];
-
-        sort_files_tree_order(&mut files);
-
-        let order: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
-        assert_eq!(
-            order,
-            vec![
-                "docs/adr/0001-render-stack.md",
-                "src/assets/components.js",
-                "src/assets/preview.css",
-                "src/model.rs",
-                "src/render.rs",
-            ]
-        );
-    }
 }

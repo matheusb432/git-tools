@@ -1,4 +1,4 @@
-//! Intra-line (word-level) diffing for the side-by-side view.
+//! Computes intra-line changed spans for the renderer's side-by-side view.
 //!
 //! Given a paired deletion/addition line, [`changed_spans`] computes the changed
 //! character runs on each side so the renderer can highlight only what actually
@@ -9,9 +9,9 @@ use similar::{ChangeTag, TextDiff};
 /// A half-open `[start, end)` range of char indices within a line body marking a
 /// changed run. Indices count `char`s, matching the renderer's per-`char` walk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
+pub(super) struct Span {
+    pub(super) start: usize,
+    pub(super) end: usize,
 }
 
 /// Changed character spans within a paired deletion/addition line: `old` indexes the
@@ -19,15 +19,15 @@ pub struct Span {
 /// share no common run — the whole line already reads as changed via its line color,
 /// so an intra-line highlight would be redundant noise.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct LineSpans {
-    pub old: Vec<Span>,
-    pub new: Vec<Span>,
+pub(super) struct LineSpans {
+    pub(super) old: Vec<Span>,
+    pub(super) new: Vec<Span>,
 }
 
 /// Char-level diff of two changed-line bodies (markers already stripped), returning the
 /// changed char spans per side with contiguous runs merged. Returns empty spans when the
 /// bodies share no common character run.
-pub fn changed_spans(old: &str, new: &str) -> LineSpans {
+pub(super) fn changed_spans(old: &str, new: &str) -> LineSpans {
     let diff = TextDiff::from_chars(old, new);
     let mut spans = LineSpans::default();
     let mut old_idx = 0usize;

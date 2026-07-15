@@ -3,16 +3,17 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::View;
-
-use crate::{diffs::render_squash_preview::build_squash_view, ports::DiffSource};
+use crate::{
+    diffs::{PinnedRange, View, render_squash_preview::build_squash_view},
+    ports::DiffSource,
+};
 
 /// Compute the squash-preview view of the current branch's unpushed commits
 /// (base is always the configured upstream), resolving the repo from `cwd`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputeSquashPreview {
     pub cwd: PathBuf,
-    pub pinned: Option<domain::diffs::PinnedRange>,
+    pub pinned: Option<PinnedRange>,
     pub exclusions: domain::diffs::DiffExclusions,
 }
 
@@ -112,7 +113,7 @@ index 111..222 100644\n\
             ComputeSquashPreview {
                 exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
-                pinned: Some(domain::diffs::PinnedRange {
+                pinned: Some(PinnedRange {
                     base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
                     head: "1111111111222222222233333333334444444444".into(),
                 }),

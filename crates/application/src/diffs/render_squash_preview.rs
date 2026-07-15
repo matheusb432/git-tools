@@ -6,10 +6,11 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{AppliedExclusions, Cmd, DiffExclusions, DiffKind, Foot, PinnedRange, View};
+use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind};
 
 use crate::{
     diffs::{
+        Cmd, Foot, PinnedRange, View,
         range::DiffRanges,
         util::{DiffData, assemble, exclusion_note, repo_name},
     },

@@ -479,7 +479,7 @@ pub struct ManagedArgs {
     pub home_dir: Option<String>,
 }
 
-pub use domain::diffs::DiffTarget;
+pub use application::diffs::DiffTarget;
 
 #[cfg(test)]
 mod tests {

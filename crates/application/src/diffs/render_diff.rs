@@ -4,15 +4,14 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{
-    AppliedExclusions, DiffExclusions, DiffKind, DiffTarget, PinnedRange, View,
-    sort_files_tree_order,
-};
+use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind};
 
 use crate::{
     diffs::{
+        DiffTarget, PinnedRange, View,
         range::DiffRanges,
         range_view::{RangePresentation, RangeView},
+        sort_files_tree_order,
         util::{DiffData, assemble, exclusion_note, repo_name},
     },
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
@@ -487,10 +486,11 @@ fn legacy_unpushed_commit_label(count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{Commit, DiffExclusions, DiffKind, DiffTarget};
+    use domain::diffs::{Commit, DiffExclusions, DiffKind};
 
     use super::{RenderDiff, RenderDiffError, RenderDiffOutcome, execute};
     use crate::{
+        diffs::DiffTarget,
         shared::notes::Note,
         testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
     };

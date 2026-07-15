@@ -1,4 +1,4 @@
-use domain::diffs::{Cmd, Foot};
+use super::{Cmd, Foot};
 
 const TITLE_DIFF: &str = "diff";
 pub(super) const TITLE_MERGE_DIFF: &str = "merge-diff";

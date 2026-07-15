@@ -9,6 +9,7 @@ pub mod subrepos;
 
 use application::{
     diffs::{
+        DiffTarget,
         batch::RepoRef,
         render_diff::{RenderDiff, RenderDiffOutcome, RenderDiffResponse},
         render_diff_all::{RenderDiffAll, RenderDiffAllResponse},
@@ -27,7 +28,7 @@ use contracts::{
     },
     envelope::{Envelope, Note, NoteLevel, Outcome},
 };
-use domain::diffs::{DiffExclusions, DiffTarget};
+use domain::diffs::DiffExclusions;
 
 /// The `[diff.exclude]` map, re-read from the user config per request so an
 /// edit applies to the next render without restarting the daemon.

@@ -10,17 +10,17 @@ use super::{
 
 /// One side of a paired side-by-side row.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SplitCell {
-    pub no: u32,
-    pub text: String,
-    pub owner: Option<String>,
-    pub spans: Vec<Span>,
+pub(super) struct SplitCell {
+    pub(super) no: u32,
+    pub(super) text: String,
+    pub(super) owner: Option<String>,
+    pub(super) spans: Vec<Span>,
 }
 
 /// One side-by-side row: full-width meta/hunk lines, mirrored context, or an
 /// old/new pair where a missing side marks the "no corresponding line" gap.
 #[derive(Debug, Clone, PartialEq)]
-pub enum SplitRow {
+pub(super) enum SplitRow {
     Meta {
         text: String,
     },
@@ -39,7 +39,7 @@ pub enum SplitRow {
 }
 
 /// Pair structured rows into side-by-side rows.
-pub fn split_rows(rows: &[Row]) -> Vec<SplitRow> {
+pub(super) fn split_rows(rows: &[Row]) -> Vec<SplitRow> {
     let mut out = Vec::with_capacity(rows.len());
     let mut dels: Vec<&Row> = Vec::new();
     let mut adds: Vec<&Row> = Vec::new();
@@ -113,8 +113,12 @@ fn flush_pairs(out: &mut Vec<SplitRow>, dels: &mut Vec<&Row>, adds: &mut Vec<&Ro
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::diffs::{LineOwners, MAX_LINE_COLS, derive_rows};
+    use application::diffs::LineOwners;
+
+    use super::{
+        super::rows::{MAX_LINE_COLS, derive_rows},
+        *,
+    };
 
     fn split(raw: &[&str]) -> Vec<SplitRow> {
         let lines: Vec<String> = raw.iter().map(ToString::to_string).collect();

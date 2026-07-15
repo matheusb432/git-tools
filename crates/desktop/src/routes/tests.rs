@@ -9,8 +9,8 @@ use application::{
     history::list_recent::list as list_recent_renders,
     live_views::{list as list_live_views, save as save_live_view},
     ports::RecentRenderRecord,
+    viewer::{RenderHistoryId, ViewerTabKind},
 };
-use domain::viewer::{RenderHistoryId, ViewerTabKind};
 use gtl_recipe::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
 use tauri::http::{Method, Request, StatusCode};
 use tempfile::TempDir;

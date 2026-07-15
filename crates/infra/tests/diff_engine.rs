@@ -6,10 +6,11 @@
 use std::{path::Path, process::Command};
 
 use application::diffs::{
+    FileDiff, LineOwners,
     attribution::{NewSide, attribute},
     util::assemble,
 };
-use domain::diffs::{ExcludedExtensions, FileDiff, LineOwners};
+use domain::diffs::ExcludedExtensions;
 use infra::diff_source::GitDiffSource;
 
 fn git(dir: &Path, args: &[&str]) {

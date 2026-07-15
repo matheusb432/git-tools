@@ -3,9 +3,12 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::{DiffExclusions, View};
+use domain::diffs::DiffExclusions;
 
-use crate::{diffs::render_merge_diff::build_merge_view, ports::DiffSource};
+use crate::{
+    diffs::{PinnedRange, View, render_merge_diff::build_merge_view},
+    ports::DiffSource,
+};
 
 /// Compute the merge view of the current branch into `base` (default `main`),
 /// resolving the repo from `cwd`.
@@ -13,7 +16,7 @@ use crate::{diffs::render_merge_diff::build_merge_view, ports::DiffSource};
 pub struct ComputeMergeDiff {
     pub cwd: PathBuf,
     pub base: Option<String>,
-    pub pinned: Option<domain::diffs::PinnedRange>,
+    pub pinned: Option<PinnedRange>,
     pub exclusions: DiffExclusions,
 }
 
@@ -116,7 +119,7 @@ index 111..222 100644\n\
                 exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
                 base: None,
-                pinned: Some(domain::diffs::PinnedRange {
+                pinned: Some(PinnedRange {
                     base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
                     head: "1111111111222222222233333333334444444444".into(),
                 }),

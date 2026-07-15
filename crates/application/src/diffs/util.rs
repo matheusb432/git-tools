@@ -3,10 +3,13 @@ use std::{
     path::Path,
 };
 
-use domain::diffs::{Commit, ExcludedExtensions, FileDiff, FileStatus, LineOwners, View};
+use domain::diffs::{Commit, ExcludedExtensions};
 
 use crate::{
-    diffs::attribution::{self, NewSide},
+    diffs::{
+        FileDiff, FileStatus, LineOwners, View,
+        attribution::{self, NewSide},
+    },
     ports::DiffSource,
     shared::notes::Note,
 };

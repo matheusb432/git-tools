@@ -23,6 +23,7 @@ pub struct LineOwners {
     pub deleted: HashMap<u32, String>,
 }
 
+/// The change kind encoded by a file's raw Git diff metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileStatus {
     Added,
@@ -31,45 +32,8 @@ pub enum FileStatus {
     Modified,
 }
 
-impl FileStatus {
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Added => "added",
-            Self::Deleted => "deleted",
-            Self::Renamed => "renamed",
-            Self::Modified => "modified",
-        }
-    }
-
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Added => "A",
-            Self::Deleted => "D",
-            Self::Renamed => "R",
-            Self::Modified => "M",
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Added => "Added file",
-            Self::Deleted => "Deleted file",
-            Self::Renamed => "Renamed file",
-            Self::Modified => "Modified file",
-        }
-    }
-
-    pub fn css_class(self) -> &'static str {
-        match self {
-            Self::Added => "status-added",
-            Self::Deleted => "status-deleted",
-            Self::Renamed => "status-renamed",
-            Self::Modified => "status-modified",
-        }
-    }
-}
-
 impl FileDiff {
+    /// Classifies the file from Git's raw diff metadata.
     pub fn status(&self) -> FileStatus {
         if self
             .lines
@@ -93,16 +57,5 @@ impl FileDiff {
             return FileStatus::Deleted;
         }
         FileStatus::Modified
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn line_owners_default_is_empty() {
-        let owners = LineOwners::default();
-        assert!(owners.added.is_empty() && owners.deleted.is_empty());
     }
 }

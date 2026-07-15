@@ -223,10 +223,10 @@ impl ArtifactStore for InMemoryArtifactStore {
 pub struct StubRenderer;
 
 impl HtmlRenderer for StubRenderer {
-    fn build_html(&self, view: &domain::diffs::View) -> String {
+    fn build_html(&self, view: &crate::diffs::View) -> String {
         format!("<html><title>{}</title></html>", view.title)
     }
-    fn build_tabbed_html(&self, title: &str, views: &[domain::diffs::View]) -> String {
+    fn build_tabbed_html(&self, title: &str, views: &[crate::diffs::View]) -> String {
         format!("<html><title>{title}</title>{} views</html>", views.len())
     }
 }

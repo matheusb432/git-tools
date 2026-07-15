@@ -1,4 +1,4 @@
-use domain::viewer::{DiffDensity, ViewerDocument};
+use application::viewer::{DiffDensity, ViewerDocument};
 use maud::{DOCTYPE, PreEscaped, html};
 
 use super::{
@@ -73,13 +73,16 @@ impl MaudViewerRenderer {
     #[cfg(test)]
     pub(crate) fn build_tabs(
         self,
-        tabs: &[domain::viewer::ViewerTab],
-        active_tab_id: Option<domain::viewer::ViewerTabId>,
+        tabs: &[application::viewer::ViewerTab],
+        active_tab_id: Option<application::viewer::ViewerTabId>,
     ) -> String {
         fragments::tabs(tabs, active_tab_id, SwapMode::Primary, SwapFeedback::None).into_string()
     }
 
-    pub(crate) fn build_history(self, history: &[domain::viewer::ViewerHistoryEntry]) -> String {
+    pub(crate) fn build_history(
+        self,
+        history: &[application::viewer::ViewerHistoryEntry],
+    ) -> String {
         fragments::history(history).into_string()
     }
 

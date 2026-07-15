@@ -5,9 +5,13 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::{DiffExclusions, DiffTarget, View};
+use domain::diffs::DiffExclusions;
 
-use crate::{diffs::render_diff::build_view, ports::DiffSource, shared::notes::Note};
+use crate::{
+    diffs::{DiffTarget, View, render_diff::build_view},
+    ports::DiffSource,
+    shared::notes::Note,
+};
 
 /// Compute the structured diff view for `target`, resolving the repo from `cwd`.
 #[derive(Debug, Clone, PartialEq)]
@@ -59,11 +63,14 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{Commit, DiffTarget};
+    use domain::diffs::Commit;
 
     use super::*;
     use crate::{
-        diffs::range_view::{LABEL_COMMITS_IN_RANGE, LABEL_UNPUSHED_COMMITS, NOTE_WORKING_TREE},
+        diffs::{
+            DiffTarget, PinnedRange,
+            range_view::{LABEL_COMMITS_IN_RANGE, LABEL_UNPUSHED_COMMITS, NOTE_WORKING_TREE},
+        },
         testing::FakeDiffSource,
     };
 
@@ -93,8 +100,8 @@ index 111..222 100644\n\
         }
     }
 
-    fn pin() -> domain::diffs::PinnedRange {
-        domain::diffs::PinnedRange {
+    fn pin() -> PinnedRange {
+        PinnedRange {
             base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
             head: "1111111111222222222233333333334444444444".into(),
         }

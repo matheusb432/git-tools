@@ -14,10 +14,10 @@ use application::{
     history::list_recent::{get as get_recent_render, list as list_recent_renders},
     live_views::list as list_live_views,
     settings::{get as get_setting, set as set_setting},
-};
-use domain::viewer::{
-    DiffDensity, DiffLayout, RenderOptions, Theme, ViewerHistoryEntry, ViewerSettings, ViewerTabId,
-    ViewerTabKind, ViewerTabState,
+    viewer::{
+        DiffDensity, DiffLayout, RenderOptions, Theme, ViewerHistoryEntry, ViewerSettings,
+        ViewerTabId, ViewerTabKind, ViewerTabState,
+    },
 };
 use gtl_recipe::{Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
 use history::to_viewer_entry;
@@ -308,7 +308,7 @@ fn history(app: &ViewerApp) -> RouteResult {
     Ok(html_response(render::history(app.renderer, &entries)))
 }
 
-fn open_history(app: &ViewerApp, id: domain::viewer::RenderHistoryId) -> RouteResult {
+fn open_history(app: &ViewerApp, id: application::viewer::RenderHistoryId) -> RouteResult {
     let Some(entry) = get_recent_render::execute(
         get_recent_render::GetRecentRender {
             data_root: (*app.data_root).clone(),

@@ -1,5 +1,4 @@
-use application::ports::RecentRenderRecord;
-use domain::viewer::ViewerHistoryEntry;
+use application::{ports::RecentRenderRecord, viewer::ViewerHistoryEntry};
 
 pub(super) fn to_viewer_entry(record: RecentRenderRecord) -> ViewerHistoryEntry {
     ViewerHistoryEntry::new(

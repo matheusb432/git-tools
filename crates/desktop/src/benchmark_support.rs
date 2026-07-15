@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use domain::{
+use application::{
     diffs::{Cmd, FileDiff, Foot, LineOwners, View},
     viewer::{
         RenderOptions, Theme, ViewerDocument, ViewerSettings, ViewerTab, ViewerTabId,
@@ -41,8 +41,8 @@ impl ViewerRenderBenchmark {
     /// # Examples
     ///
     /// ```
+    /// use application::viewer::RenderOptions;
     /// use desktop::benchmark_support::ViewerRenderBenchmark;
-    /// use domain::viewer::RenderOptions;
     ///
     /// let fixture = ViewerRenderBenchmark::fixture_45k();
     /// let html = fixture.render(RenderOptions::DEFAULT);
@@ -120,7 +120,7 @@ fn large_view() -> View {
 
 #[cfg(test)]
 mod tests {
-    use domain::viewer::{DiffDensity, DiffLayout};
+    use application::viewer::{DiffDensity, DiffLayout};
 
     use super::*;
 

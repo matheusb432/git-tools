@@ -1,6 +1,8 @@
 use std::fmt;
 
-use domain::viewer::{DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerTabId};
+use application::viewer::{
+    DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerTabId,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ViewerSettingChange {

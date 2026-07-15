@@ -294,7 +294,15 @@ fn diff_target(args: DiffTargetArgs) -> DiffTarget {
                 count,
                 pinned: None,
             },
-            None => DiffTarget::from_arg(args.target.as_deref()),
+            None => match args.target {
+                None => DiffTarget::Unpushed { pinned: None },
+                Some(value) if value.trim().is_empty() => DiffTarget::Unpushed { pinned: None },
+                Some(range) if range.contains("..") => DiffTarget::Range {
+                    range,
+                    pinned: None,
+                },
+                Some(base) => DiffTarget::Base(base),
+            },
         }
     }
 }
@@ -900,6 +908,47 @@ fn print_squash_local_line(stream: OutputStream, line: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn target_args(target: Option<&str>) -> DiffTargetArgs {
+        DiffTargetArgs {
+            all: false,
+            unpushed: false,
+            target: target.map(str::to_owned),
+            last: None,
+            recursive: false,
+            worktrees: false,
+            merge: None,
+            name: None,
+            repos_file: None,
+            home_dir: None,
+            set_theme: None,
+        }
+    }
+
+    #[test]
+    fn diff_target_maps_absent_and_blank_positionals_to_unpushed() {
+        for target in [None, Some(""), Some("   ")] {
+            assert_eq!(
+                diff_target(target_args(target)),
+                DiffTarget::Unpushed { pinned: None }
+            );
+        }
+    }
+
+    #[test]
+    fn diff_target_distinguishes_exact_ranges_from_base_revisions() {
+        assert_eq!(
+            diff_target(target_args(Some("abc123..def456"))),
+            DiffTarget::Range {
+                range: "abc123..def456".into(),
+                pinned: None,
+            }
+        );
+        assert_eq!(
+            diff_target(target_args(Some("abc123"))),
+            DiffTarget::Base("abc123".into())
+        );
+    }
 
     #[test]
     fn exit_code_values_are_stable() {

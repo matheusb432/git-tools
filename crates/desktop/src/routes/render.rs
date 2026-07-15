@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use domain::{
+use application::{
     diffs::View,
     viewer::{ViewerDocument, ViewerHistoryEntry, ViewerSettings, ViewerTabState, ViewerView},
 };
@@ -103,7 +103,7 @@ fn view_with_tabs_using(
             snapshot
                 .document
                 .active_tab()
-                .map(domain::viewer::ViewerTab::state),
+                .map(application::viewer::ViewerTab::state),
             Some(ViewerTabState::Ready)
         ) {
             let html = renderer.build_view_with_tabs(&snapshot.document);
@@ -263,7 +263,7 @@ fn snapshot(
         ViewerDocument::new(tabs, active, active_view, history, settings).map_err(|error| {
             if matches!(
                 error,
-                domain::viewer::ViewerDocumentError::ReadyTabMissingView { .. }
+                application::viewer::ViewerDocumentError::ReadyTabMissingView { .. }
             ) {
                 RenderError::Retry
             } else {
@@ -281,7 +281,7 @@ fn snapshot(
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use domain::{
+    use application::{
         diffs::{Cmd, Foot, View},
         viewer::{
             RenderOptions, Theme, ViewerSettings, ViewerTabId, ViewerTabKind, ViewerTabState,
