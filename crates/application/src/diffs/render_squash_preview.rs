@@ -6,13 +6,13 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{
-    AppliedExclusions, Cmd, DiffExclusions, DiffKind, Foot, Mode, PinnedRange, View, ranges,
-    ranges_over,
-};
+use domain::diffs::{AppliedExclusions, Cmd, DiffExclusions, DiffKind, Foot, PinnedRange, View};
 
 use crate::{
-    diffs::util::{DiffData, assemble, exclusion_note, repo_name},
+    diffs::{
+        range::DiffRanges,
+        util::{DiffData, assemble, exclusion_note, repo_name},
+    },
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
@@ -122,12 +122,12 @@ pub(crate) fn build_squash_view(
     let (upstream, io_ranges, view_ranges) = if let Some(pin) = pinned {
         (
             pin.display_base(),
-            ranges_over(&pin.git_range(), Mode::Unpushed),
-            ranges_over(&pin.display_range(), Mode::Unpushed),
+            DiffRanges::exact(pin.git_range()),
+            DiffRanges::exact(pin.display_range()),
         )
     } else {
         let upstream = source.upstream(Path::new(&top))?;
-        let symbolic = ranges(&upstream, Mode::Unpushed);
+        let symbolic = DiffRanges::unpushed(&upstream);
         (upstream, symbolic.clone(), symbolic)
     };
 
@@ -138,9 +138,8 @@ pub(crate) fn build_squash_view(
     } = assemble(
         source,
         Path::new(&top),
-        &io_ranges.diff_args,
-        &io_ranges.diff_range,
-        &io_ranges.log_range,
+        &io_ranges.diff,
+        &io_ranges.log,
         excluded,
     )?;
 
@@ -152,7 +151,7 @@ pub(crate) fn build_squash_view(
         title: "squash-preview".to_string(),
         cmd: Cmd {
             lead: "git log ".to_string(),
-            range: view_ranges.log_range.clone(),
+            range: view_ranges.log.clone(),
             trail: " --stat".to_string(),
         },
         commits_label: "# commits — collapse into 1".to_string(),
@@ -168,7 +167,7 @@ pub(crate) fn build_squash_view(
     Ok(SquashViewBuild {
         view,
         top,
-        log_range: io_ranges.log_range,
+        log_range: io_ranges.log,
     })
 }
 

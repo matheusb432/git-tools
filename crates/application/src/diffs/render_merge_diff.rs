@@ -5,12 +5,14 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{
-    AppliedExclusions, DiffExclusions, DiffKind, Mode, PinnedRange, View, ranges, ranges_over,
-};
+use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind, PinnedRange, View};
 
 use crate::{
-    diffs::util::{DiffData, assemble, exclusion_note, repo_name},
+    diffs::{
+        range::DiffRanges,
+        range_view::{RangePresentation, RangeView, TITLE_MERGE_DIFF},
+        util::{DiffData, assemble, exclusion_note, repo_name},
+    },
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
@@ -73,14 +75,15 @@ pub(crate) fn build_merge_view(
 
     let (io_ranges, view_ranges) = if let Some(pin) = pinned {
         (
-            ranges_over(&pin.git_range(), Mode::Merge),
-            ranges_over(&pin.display_range(), Mode::Merge),
+            DiffRanges::exact(pin.git_range()),
+            DiffRanges::exact(pin.display_range()),
         )
     } else {
         source.verify_commit(Path::new(&top), base)?;
-        let symbolic = ranges(base, Mode::Merge);
+        let symbolic = DiffRanges::merge(base);
         (symbolic.clone(), symbolic)
     };
+    let range_view = RangeView::new(&view_ranges.diff, RangePresentation::Merge);
     let DiffData {
         commits,
         files,
@@ -88,9 +91,8 @@ pub(crate) fn build_merge_view(
     } = assemble(
         source,
         Path::new(&top),
-        &io_ranges.diff_args,
-        &io_ranges.diff_range,
-        &io_ranges.log_range,
+        &io_ranges.diff,
+        &io_ranges.log,
         excluded,
     )?;
 
@@ -99,10 +101,10 @@ pub(crate) fn build_merge_view(
         repo_root: top.clone(),
         branch,
         upstream: base.to_string(),
-        title: view_ranges.title,
-        cmd: view_ranges.cmd,
-        commits_label: view_ranges.commits_label,
-        foot: view_ranges.foot,
+        title: range_view.title,
+        cmd: range_view.cmd,
+        commits_label: range_view.commits_label,
+        foot: range_view.foot,
         commits,
         files,
         theme: None,
@@ -112,7 +114,7 @@ pub(crate) fn build_merge_view(
         view,
         top,
         base: base.to_string(),
-        diff_range: io_ranges.diff_range,
+        diff_range: io_ranges.diff,
     })
 }
 
@@ -150,7 +152,7 @@ pub fn execute(
         range_label: built.diff_range.clone(),
         head_committed_at: source.committed_at(Path::new(&built.top), "HEAD"),
         generated_at: clock.now_iso(),
-        title: "merge-diff".to_string(),
+        title: TITLE_MERGE_DIFF.to_string(),
         excluded_extensions: exclusions
             .for_project_or_default(&view.repo_name)
             .extensions()
@@ -159,9 +161,9 @@ pub fn execute(
     let placed = store.place(&store_root, &meta, &html)?;
 
     let mut notes = Vec::new();
-    notes.extend(exclusion_note("merge-diff", &view));
+    notes.extend(exclusion_note(TITLE_MERGE_DIFF, &view));
     notes.push(Note::info(format!(
-        "merge-diff: {commit_count} commit{} to merge into {}, {file_count} file{}",
+        "{TITLE_MERGE_DIFF}: {commit_count} commit{} to merge into {}, {file_count} file{}",
         plural(commit_count),
         built.base,
         plural(file_count),

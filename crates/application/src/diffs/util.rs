@@ -98,9 +98,8 @@ pub struct DiffData {
 }
 
 /// The shared diff generator: log + diff + exclusion filter + full-context +
-/// file-commit map + per-line attribution. Takes range primitives so it stays
-/// decoupled from `commands::Ranges`. Does NOT sort files — callers order as
-/// they always have.
+/// file-commit map + per-line attribution. Does NOT sort files — callers order
+/// as they always have.
 ///
 /// Exclusions are applied *before* the content diffs run: a cheap `--name-only`
 /// pass discovers the hidden paths, and both content invocations then carry
@@ -109,11 +108,11 @@ pub struct DiffData {
 pub fn assemble(
     source: &impl DiffSource,
     repo: &Path,
-    diff_args: &[String],
     diff_range: &str,
     log_range: &str,
     excluded: &ExcludedExtensions,
 ) -> anyhow::Result<DiffData> {
+    let diff_args = vec!["diff".to_string(), diff_range.to_string()];
     let mut commits = source.log_commits(repo, log_range)?;
     let (base, new_side) = blame_targets(diff_range, log_range);
 
@@ -127,8 +126,8 @@ pub fn assemble(
         }
     }
 
-    let hidden_paths = hidden_paths(source, repo, diff_args, excluded)?;
-    let content_args = with_exclude_pathspecs(diff_args, &hidden_paths);
+    let hidden_paths = hidden_paths(source, repo, &diff_args, excluded)?;
+    let content_args = with_exclude_pathspecs(&diff_args, &hidden_paths);
     // ? partition again after parsing: a source that ignores the exclude
     // ? pathspecs (the scripted test fake) must still never leak hidden files.
     let (mut files, _) =

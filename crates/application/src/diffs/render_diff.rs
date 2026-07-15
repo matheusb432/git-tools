@@ -5,12 +5,16 @@
 use std::path::{Path, PathBuf};
 
 use domain::diffs::{
-    AppliedExclusions, DiffExclusions, DiffKind, DiffTarget, Mode, Ranges, View, ranges,
-    ranges_over, sort_files_tree_order,
+    AppliedExclusions, DiffExclusions, DiffKind, DiffTarget, PinnedRange, View,
+    sort_files_tree_order,
 };
 
 use crate::{
-    diffs::util::{DiffData, assemble, exclusion_note, repo_name},
+    diffs::{
+        range::DiffRanges,
+        range_view::{RangePresentation, RangeView},
+        util::{DiffData, assemble, exclusion_note, repo_name},
+    },
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
@@ -82,17 +86,17 @@ fn resolved_range(
         DiffTarget::Range {
             range,
             pinned: None,
-        } => ranges(range, Mode::ExactRange).diff_range,
+        } => DiffRanges::exact(range).diff,
         DiffTarget::Last {
             count,
             pinned: None,
-        } => ranges(&format!("HEAD~{count}..HEAD"), Mode::ExactRange).diff_range,
-        DiffTarget::Merge { base, pinned: None } => ranges(base, Mode::Merge).diff_range,
+        } => DiffRanges::exact(format!("HEAD~{count}..HEAD")).diff,
+        DiffTarget::Merge { base, pinned: None } => DiffRanges::merge(base).diff,
         DiffTarget::Unpushed { pinned: None } => {
             // No upstream ⇒ build_view falls back to Hash (worktree) mode; not fast-path
             // eligible, and the fallback warning is emitted there (once), not here.
             let upstream = source.upstream(repo).ok()?;
-            ranges(&upstream, Mode::Unpushed).diff_range
+            DiffRanges::unpushed(&upstream).diff
         }
         // Pinned targets already carry resolved SHAs, but the fast path keys on
         // symbolic upstream resolution (`source.upstream`/`resolve_sha` against a
@@ -227,12 +231,40 @@ pub fn execute(
 }
 
 /// The resolved base label plus the io (real SHAs/refs) and view (display-safe)
-/// [`Ranges`] for a target, and whether it silently fell back to `main`.
+/// ranges for a target, and whether it silently fell back to `main`.
 struct ResolvedTarget {
     base_ref: String,
-    io_ranges: Ranges,
-    view_ranges: Ranges,
+    io_ranges: DiffRanges,
+    view_ranges: DiffRanges,
+    presentation: RangePresentation,
     fallback_to_main: bool,
+}
+
+impl ResolvedTarget {
+    fn pinned(pin: &PinnedRange, base_ref: String, presentation: RangePresentation) -> Self {
+        Self {
+            base_ref,
+            io_ranges: DiffRanges::exact(pin.git_range()),
+            view_ranges: DiffRanges::exact(pin.display_range()),
+            presentation,
+            fallback_to_main: false,
+        }
+    }
+
+    fn same_ranges(
+        base_ref: String,
+        ranges: DiffRanges,
+        presentation: RangePresentation,
+        fallback_to_main: bool,
+    ) -> Self {
+        Self {
+            base_ref,
+            io_ranges: ranges.clone(),
+            view_ranges: ranges,
+            presentation,
+            fallback_to_main,
+        }
+    }
 }
 
 /// Resolves `target` to its ranges: a pinned target computes verbatim over its
@@ -247,78 +279,67 @@ fn resolve_target_ranges(
 ) -> anyhow::Result<ResolvedTarget> {
     let repo = Path::new(top);
     let resolved = match target {
-        // `Range` and `Last` both resolve to an exact commit range, so a pinned
-        // instance of either computes identically: verbatim over the resolved SHAs.
+        // Range, Last, and Unpushed pins are all exact ranges. Only their summary/upstream label
+        // differs; range computation and presentation stay identical.
         DiffTarget::Range {
             pinned: Some(pin), ..
         }
         | DiffTarget::Last {
             pinned: Some(pin), ..
-        } => ResolvedTarget {
-            base_ref: pin.display_range(),
-            io_ranges: ranges_over(&pin.git_range(), Mode::ExactRange),
-            view_ranges: ranges_over(&pin.display_range(), Mode::ExactRange),
-            fallback_to_main: false,
-        },
+        } => ResolvedTarget::pinned(pin, pin.display_range(), RangePresentation::Exact),
         DiffTarget::Range {
             range,
             pinned: None,
         } => {
             verify_exact_range(source, top, range)?;
-            ResolvedTarget {
-                base_ref: range.clone(),
-                io_ranges: ranges(range, Mode::ExactRange),
-                view_ranges: ranges(range, Mode::ExactRange),
-                fallback_to_main: false,
-            }
+            ResolvedTarget::same_ranges(
+                range.clone(),
+                DiffRanges::exact(range),
+                RangePresentation::Exact,
+                false,
+            )
         }
         DiffTarget::Base(base) => {
             source.verify_commit(repo, base)?;
             let short = source.short_ref(repo, base)?;
             ResolvedTarget {
                 base_ref: short.clone(),
-                io_ranges: ranges(base, Mode::Hash),
-                view_ranges: ranges(&short, Mode::Hash),
+                io_ranges: DiffRanges::working_tree(base),
+                view_ranges: DiffRanges::working_tree(&short),
+                presentation: RangePresentation::WorkingTree,
                 fallback_to_main: false,
             }
         }
         DiffTarget::Merge {
             base,
             pinned: Some(pin),
-        } => ResolvedTarget {
-            base_ref: base.clone(),
-            io_ranges: ranges_over(&pin.git_range(), Mode::Merge),
-            view_ranges: ranges_over(&pin.display_range(), Mode::Merge),
-            fallback_to_main: false,
-        },
+        } => ResolvedTarget::pinned(pin, base.clone(), RangePresentation::Merge),
         DiffTarget::Merge { base, pinned: None } => {
             source.verify_commit(repo, base)?;
-            ResolvedTarget {
-                base_ref: base.clone(),
-                io_ranges: ranges(base, Mode::Merge),
-                view_ranges: ranges(base, Mode::Merge),
-                fallback_to_main: false,
-            }
+            ResolvedTarget::same_ranges(
+                base.clone(),
+                DiffRanges::merge(base),
+                RangePresentation::Merge,
+                false,
+            )
         }
-        DiffTarget::Unpushed { pinned: Some(pin) } => ResolvedTarget {
-            base_ref: pin.display_base(),
-            io_ranges: ranges_over(&pin.git_range(), Mode::Unpushed),
-            view_ranges: ranges_over(&pin.display_range(), Mode::Unpushed),
-            fallback_to_main: false,
-        },
+        DiffTarget::Unpushed { pinned: Some(pin) } => {
+            ResolvedTarget::pinned(pin, pin.display_base(), RangePresentation::Exact)
+        }
         DiffTarget::Unpushed { pinned: None } => {
             let base = unpushed_or_main_base(source, top, notes)?;
-            let mode = if base.is_upstream {
-                Mode::Unpushed
+            let (ranges, presentation) = if base.is_upstream {
+                (
+                    DiffRanges::unpushed(&base.ref_name),
+                    RangePresentation::Unpushed,
+                )
             } else {
-                Mode::Hash
+                (
+                    DiffRanges::working_tree(&base.ref_name),
+                    RangePresentation::WorkingTree,
+                )
             };
-            ResolvedTarget {
-                base_ref: base.ref_name.clone(),
-                io_ranges: ranges(&base.ref_name, mode),
-                view_ranges: ranges(&base.ref_name, mode),
-                fallback_to_main: !base.is_upstream,
-            }
+            ResolvedTarget::same_ranges(base.ref_name, ranges, presentation, !base.is_upstream)
         }
         DiffTarget::Last {
             count,
@@ -327,12 +348,12 @@ fn resolve_target_ranges(
             // * "last N" is just the HEAD~N..HEAD range; reuse the verified ExactRange plumbing.
             let range = format!("HEAD~{count}..HEAD");
             verify_exact_range(source, top, &range)?;
-            ResolvedTarget {
-                base_ref: range.clone(),
-                io_ranges: ranges(&range, Mode::ExactRange),
-                view_ranges: ranges(&range, Mode::ExactRange),
-                fallback_to_main: false,
-            }
+            ResolvedTarget::same_ranges(
+                range.clone(),
+                DiffRanges::exact(range),
+                RangePresentation::Exact,
+                false,
+            )
         }
     };
     Ok(resolved)
@@ -357,21 +378,16 @@ pub fn build_view(
         base_ref,
         io_ranges,
         view_ranges,
+        presentation,
         fallback_to_main,
     } = resolve_target_ranges(source, top, target, notes)?;
+    let range_view = RangeView::new(&view_ranges.diff, presentation);
 
     let DiffData {
         commits,
         mut files,
         hidden_paths,
-    } = assemble(
-        source,
-        repo,
-        &io_ranges.diff_args,
-        &io_ranges.diff_range,
-        &io_ranges.log_range,
-        excluded,
-    )?;
+    } = assemble(source, repo, &io_ranges.diff, &io_ranges.log, excluded)?;
     sort_files_tree_order(&mut files);
 
     let view = View {
@@ -379,10 +395,10 @@ pub fn build_view(
         repo_root: top.to_string(),
         branch,
         upstream: base_ref.clone(),
-        title: view_ranges.title,
-        cmd: view_ranges.cmd,
-        commits_label: view_ranges.commits_label,
-        foot: view_ranges.foot,
+        title: range_view.title,
+        cmd: range_view.cmd,
+        commits_label: range_view.commits_label,
+        foot: range_view.foot,
         commits,
         files,
         theme,

@@ -8,6 +8,8 @@ pub mod batch;
 pub mod compute_diff;
 pub mod compute_merge_diff;
 pub mod compute_squash_preview;
+mod range;
+mod range_view;
 pub mod render_diff;
 pub mod render_diff_all;
 pub mod render_diff_subrepos;

@@ -62,7 +62,6 @@ fn assemble_attaches_brought_in_members_to_a_merge() {
     let data = assemble(
         &GitDiffSource,
         d,
-        &["diff".to_string(), "main...HEAD".to_string()],
         "main...HEAD",
         "main..HEAD",
         &ExcludedExtensions::default(),
@@ -111,7 +110,6 @@ fn assemble_excludes_extensions_at_the_git_level() {
     let data = assemble(
         &GitDiffSource,
         d,
-        &["diff".to_string(), "main...HEAD".to_string()],
         "main...HEAD",
         "main..HEAD",
         &ExcludedExtensions::new(["md"]),

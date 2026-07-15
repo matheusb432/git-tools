@@ -62,7 +62,10 @@ mod tests {
     use domain::diffs::{Commit, DiffTarget};
 
     use super::*;
-    use crate::testing::FakeDiffSource;
+    use crate::{
+        diffs::range_view::{LABEL_COMMITS_IN_RANGE, LABEL_UNPUSHED_COMMITS, NOTE_WORKING_TREE},
+        testing::FakeDiffSource,
+    };
 
     const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
 index 111..222 100644\n\
@@ -115,6 +118,7 @@ index 111..222 100644\n\
         assert_eq!(response.view.branch, "feature");
         assert_eq!(response.view.files.len(), 1);
         assert_eq!(response.view.files[0].path, "f.txt");
+        assert_eq!(response.view.commits_label, LABEL_UNPUSHED_COMMITS);
         assert_eq!(response.summary, "1 unpushed commit(s)");
         assert!(response.notes.is_empty());
     }
@@ -155,10 +159,11 @@ index 111..222 100644\n\
                 "diff-preview: no upstream; falling back to main"
             )]
         );
+        assert_eq!(response.view.foot.note, NOTE_WORKING_TREE);
     }
 
     #[test]
-    fn pinned_unpushed_computes_without_an_upstream_and_without_the_fallback_note() {
+    fn pinned_unpushed_computes_without_an_upstream() {
         let source = FakeDiffSource {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -180,7 +185,7 @@ index 111..222 100644\n\
             response.notes.is_empty(),
             "no fallback note for a pinned range"
         );
-        assert_eq!(response.view.commits_label, "# unpushed commits");
+        assert_eq!(response.view.commits_label, LABEL_COMMITS_IN_RANGE);
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
         assert_eq!(response.view.foot.cmd, "git diff aaaaaaaaaa..1111111111");
         assert_eq!(response.view.upstream, "aaaaaaaaaa");
@@ -234,7 +239,7 @@ index 111..222 100644\n\
 
         assert!(response.notes.is_empty());
         assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
-        assert_eq!(response.view.commits_label, "# commits in range");
+        assert_eq!(response.view.commits_label, LABEL_COMMITS_IN_RANGE);
     }
 
     #[test]

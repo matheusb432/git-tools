@@ -1,0 +1,68 @@
+use domain::diffs::{Cmd, Foot};
+
+const TITLE_DIFF: &str = "diff";
+pub(super) const TITLE_MERGE_DIFF: &str = "merge-diff";
+const GIT_DIFF_LEAD: &str = "git diff ";
+pub(super) const LABEL_UNPUSHED_COMMITS: &str = "# unpushed commits";
+pub(super) const LABEL_COMMITS_IN_RANGE: &str = "# commits in range";
+const LABEL_COMMITS_TO_MERGE: &str = "# commits to merge";
+const NOTE_UNPUSHED_WORK: &str = "# unpushed work";
+pub(super) const NOTE_WORKING_TREE: &str = "# base → working tree";
+const NOTE_COMMIT_RANGE: &str = "# commit range";
+const NOTE_MERGE_PREVIEW: &str = "# merge preview";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RangePresentation {
+    Unpushed,
+    WorkingTree,
+    Exact,
+    Merge,
+}
+
+pub(super) struct RangeView {
+    pub(super) title: String,
+    pub(super) cmd: Cmd,
+    pub(super) commits_label: String,
+    pub(super) foot: Foot,
+}
+
+impl RangeView {
+    pub(super) fn new(range: &str, presentation: RangePresentation) -> Self {
+        let (title, commits_label, note) = match presentation {
+            RangePresentation::Unpushed => (
+                TITLE_DIFF,
+                LABEL_UNPUSHED_COMMITS.to_string(),
+                NOTE_UNPUSHED_WORK,
+            ),
+            RangePresentation::WorkingTree => (
+                TITLE_DIFF,
+                format!("# commits since {range}"),
+                NOTE_WORKING_TREE,
+            ),
+            RangePresentation::Exact => (
+                TITLE_DIFF,
+                LABEL_COMMITS_IN_RANGE.to_string(),
+                NOTE_COMMIT_RANGE,
+            ),
+            RangePresentation::Merge => (
+                TITLE_MERGE_DIFF,
+                LABEL_COMMITS_TO_MERGE.to_string(),
+                NOTE_MERGE_PREVIEW,
+            ),
+        };
+
+        Self {
+            title: title.to_string(),
+            cmd: Cmd {
+                lead: GIT_DIFF_LEAD.to_string(),
+                range: range.to_string(),
+                trail: String::new(),
+            },
+            commits_label,
+            foot: Foot {
+                cmd: format!("{GIT_DIFF_LEAD}{range}"),
+                note: note.to_string(),
+            },
+        }
+    }
+}
