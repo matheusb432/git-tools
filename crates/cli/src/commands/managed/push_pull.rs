@@ -137,16 +137,6 @@ pub(crate) fn run_pull_all_with(
     }
 }
 
-/// Still used by `commit.rs`'s own git-output parsing — kept here (not moved during this
-/// task's daemon rewire) since that module's local git logic is untouched by this plan.
-pub(super) fn last_non_empty_line(output: &str) -> Option<&str> {
-    output
-        .lines()
-        .rev()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-}
-
 fn manifest_error<T>(error: &anyhow::Error) -> ManagedRun<T> {
     ManagedRun {
         exit: ManagedExit::Fail,

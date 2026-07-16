@@ -2,7 +2,7 @@
 //! shared state so tests keep a handle after passing a fake in).
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -459,12 +459,13 @@ impl RepoProbe for FakeRepoProbe {
 /// One recorded [`FakeGitRunner`] invocation: the repo it ran in plus its argv.
 pub type RecordedGitCall = (PathBuf, Vec<String>);
 
-/// Scripted `GitRunner`: pops the next queued [`GitOutput`] per call and records
-/// every argv it saw (with the repo it ran in).
+/// Scripted `GitRunner`: returns queued outputs or transport errors per call and
+/// records every argv it saw (with the repo it ran in).
 #[derive(Debug, Clone, Default)]
 pub struct FakeGitRunner {
     pub calls: Arc<Mutex<Vec<RecordedGitCall>>>,
     pub results: Arc<Mutex<Vec<GitOutput>>>,
+    transport_errors: Arc<Mutex<BTreeMap<usize, anyhow::Error>>>,
     /// Repos `repo_present` answers `false` for; everything else is present.
     pub absent_repos: Arc<Mutex<Vec<PathBuf>>>,
 }
@@ -474,6 +475,27 @@ impl FakeGitRunner {
         Self {
             calls: Arc::new(Mutex::new(Vec::new())),
             results: Arc::new(Mutex::new(results)),
+            transport_errors: Arc::new(Mutex::new(BTreeMap::new())),
+            absent_repos: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Scripts successful Git outputs and transport errors in invocation order.
+    pub fn with_results(results: Vec<anyhow::Result<GitOutput>>) -> Self {
+        let mut outputs = Vec::new();
+        let mut transport_errors = BTreeMap::new();
+        for (index, result) in results.into_iter().enumerate() {
+            match result {
+                Ok(output) => outputs.push(output),
+                Err(error) => {
+                    transport_errors.insert(index, error);
+                }
+            }
+        }
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(outputs)),
+            transport_errors: Arc::new(Mutex::new(transport_errors)),
             absent_repos: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -522,10 +544,16 @@ impl FakeGitRunner {
 
 impl GitRunner for FakeGitRunner {
     fn run(&self, repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
-        self.calls.lock().unwrap().push((
+        let mut calls = self.calls.lock().unwrap();
+        let index = calls.len();
+        calls.push((
             repo.to_path_buf(),
             args.iter().map(ToString::to_string).collect(),
         ));
+        drop(calls);
+        if let Some(error) = self.transport_errors.lock().unwrap().remove(&index) {
+            return Err(error);
+        }
         Ok(self.results.lock().unwrap().remove(0))
     }
 

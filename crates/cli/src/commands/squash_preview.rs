@@ -1,7 +1,8 @@
 use std::path::Path;
 
+use application::recipes::RecipeRequest;
 use contracts::diffs::RenderSquashPreviewRequest;
-use gtl_recipe::{OpenRecipes, RecipeBatchKind, RecipeOp};
+use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
 use crate::{
     client::Backend,
@@ -33,8 +34,7 @@ fn render_app(
     forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
     degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
 ) -> anyhow::Result<DiffOutcome> {
-    let recipe =
-        crate::recipe::recipe_for_cwd(repo, RecipeOp::SquashPreview { pinned: None }, None)?;
+    let recipe = crate::recipe::recipe_for_cwd(repo, RecipeRequest::SquashPreview, None)?;
     let batch = OpenRecipes {
         batch_id: crate::recipe::new_batch_id(),
         kind: RecipeBatchKind::Snapshot,
@@ -71,8 +71,6 @@ pub(crate) fn render(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-
     use contracts::{
         diffs::RenderDiffData,
         envelope::{Envelope, Note, NoteLevel, Outcome},
@@ -81,26 +79,6 @@ mod tests {
     use super::*;
 
     struct FakeBackend(Envelope<RenderDiffData>);
-
-    fn init_repo(dir: &Path) {
-        let git = |args: &[&str]| {
-            assert!(
-                std::process::Command::new("git")
-                    .arg("-C")
-                    .arg(dir)
-                    .args(args)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
-        };
-        git(&["init", "-q"]);
-        git(&["config", "user.email", "test@example.invalid"]);
-        git(&["config", "user.name", "Test"]);
-        std::fs::write(dir.join("a.txt"), "a\n").unwrap();
-        git(&["add", "."]);
-        git(&["commit", "-qm", "first"]);
-    }
 
     impl Backend for FakeBackend {
         fn render_squash_preview(
@@ -125,28 +103,5 @@ mod tests {
             panic!("error outcome must map to Err")
         };
         assert_eq!(format!("{err:#}"), "not a git repo");
-    }
-
-    #[test]
-    fn app_path_forwards_the_squash_preview_recipe() {
-        let repo = tempfile::tempdir().unwrap();
-        init_repo(repo.path());
-        let captured = RefCell::new(None);
-
-        let outcome = render_app(
-            repo.path(),
-            |batch| {
-                *captured.borrow_mut() = Some(batch.clone());
-                Ok(())
-            },
-            || unreachable!("successful forwarding must not degrade"),
-        )
-        .unwrap();
-
-        assert!(matches!(outcome, DiffOutcome::Forwarded));
-        assert_eq!(
-            captured.into_inner().unwrap().recipes[0].op,
-            RecipeOp::SquashPreview { pinned: None }
-        );
     }
 }

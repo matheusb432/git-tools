@@ -1150,6 +1150,33 @@ fn tag_up_with_tag_and_message_creates_and_pushes_tag() {
 }
 
 #[test]
+fn tag_update_attaches_and_tracks_a_lightweight_label_on_the_existing_tag_commit() {
+    let repo = Repo::new();
+    let commit = repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.git(&["tag", "-a", "v1.0.0", "-m", "release notes"]);
+    repo.git(&["push", "origin", "refs/tags/v1.0.0:refs/tags/v1.0.0"]);
+    repo.git(&["fetch", "origin", "+refs/tags/*:refs/remotes/origin/tags/*"]);
+
+    repo.run(&["tag", "update", "v1.0.0", "-l", "stable"])
+        .assert()
+        .success()
+        .stdout(contains("created tag stable"))
+        .stdout(contains("pushed 1 tag: stable"));
+
+    assert_eq!(repo.git(&["rev-parse", "stable"]), commit);
+    assert_eq!(repo.git(&["cat-file", "-t", "stable"]), "commit");
+    assert!(
+        repo.git(&["ls-remote", "--tags", "origin"])
+            .contains("refs/tags/stable")
+    );
+    repo.run(&["tag", "up"])
+        .assert()
+        .success()
+        .stdout(contains("tags already up to date"));
+}
+
+#[test]
 fn tag_up_skips_when_fetched_remote_tags_are_current() {
     let repo = Repo::new();
     repo.commit("a.txt", "base\n", "chore: base");
@@ -1583,6 +1610,24 @@ fn squash_local_collapses_unpushed_commits() {
     // Now exactly one commit ahead, carrying the new message.
     assert_eq!(repo.unpushed_count(), 1);
     assert_eq!(repo.git(&["log", "-1", "--format=%s"]), "collapse work");
+}
+
+#[test]
+fn squash_local_commit_failure_restores_original_head() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.commit("a.txt", "base\n1\n", "feat: one");
+    let pre = repo.commit("a.txt", "base\n1\n2\n", "feat: two");
+
+    repo.run(&["squash-local", "collapse work", "--repo", repo.repo_arg()])
+        .env("GIT_AUTHOR_NAME", "")
+        .env("GIT_COMMITTER_NAME", "")
+        .assert()
+        .code(1)
+        .stderr(contains("commit failed").and(contains("restored")));
+
+    assert_eq!(repo.git(&["rev-parse", "HEAD"]), pre);
 }
 
 #[test]

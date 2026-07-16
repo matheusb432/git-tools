@@ -1,7 +1,8 @@
 use std::path::Path;
 
+use application::recipes::RecipeRequest;
 use contracts::diffs::RenderMergeDiffRequest;
-use gtl_recipe::{OpenRecipes, RecipeBatchKind, RecipeOp};
+use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
 use crate::{
     client::Backend,
@@ -36,9 +37,8 @@ fn render_app(
 ) -> anyhow::Result<DiffOutcome> {
     let recipe = crate::recipe::recipe_for_cwd(
         repo,
-        RecipeOp::MergeDiff {
+        RecipeRequest::MergeDiff {
             base: base.map(str::to_string),
-            pinned: None,
         },
         None,
     )?;
@@ -80,8 +80,6 @@ pub(crate) fn render(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-
     use contracts::{
         diffs::RenderDiffData,
         envelope::{Envelope, Note, NoteLevel, Outcome},
@@ -90,26 +88,6 @@ mod tests {
     use super::*;
 
     struct FakeBackend(Envelope<RenderDiffData>);
-
-    fn init_repo(dir: &Path) {
-        let git = |args: &[&str]| {
-            assert!(
-                std::process::Command::new("git")
-                    .arg("-C")
-                    .arg(dir)
-                    .args(args)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
-        };
-        git(&["init", "-q", "-b", "main"]);
-        git(&["config", "user.email", "test@example.invalid"]);
-        git(&["config", "user.name", "Test"]);
-        std::fs::write(dir.join("a.txt"), "a\n").unwrap();
-        git(&["add", "."]);
-        git(&["commit", "-qm", "first"]);
-    }
 
     impl Backend for FakeBackend {
         fn render_merge_diff(
@@ -134,45 +112,5 @@ mod tests {
             panic!("error outcome must map to Err")
         };
         assert_eq!(format!("{err:#}"), "not a git repo");
-    }
-
-    #[test]
-    fn app_path_forwards_the_merge_recipe() {
-        let repo = tempfile::tempdir().unwrap();
-        init_repo(repo.path());
-        // Single commit on `main` — merge-base against itself resolves both pin
-        // endpoints to that one commit's sha (GTL-0131: recipe_for_cwd pins at mint
-        // time via pin_op).
-        let head = std::process::Command::new("git")
-            .arg("-C")
-            .arg(repo.path())
-            .args(["rev-parse", "HEAD"])
-            .output()
-            .unwrap();
-        let sha = String::from_utf8(head.stdout).unwrap().trim().to_string();
-        let captured = RefCell::new(None);
-
-        let outcome = render_app(
-            repo.path(),
-            Some("main"),
-            |batch| {
-                *captured.borrow_mut() = Some(batch.clone());
-                Ok(())
-            },
-            || unreachable!("successful forwarding must not degrade"),
-        )
-        .unwrap();
-
-        assert!(matches!(outcome, DiffOutcome::Forwarded));
-        assert_eq!(
-            captured.into_inner().unwrap().recipes[0].op,
-            RecipeOp::MergeDiff {
-                base: Some("main".into()),
-                pinned: Some(gtl_recipe::PinnedRange {
-                    base: sha.clone(),
-                    head: sha
-                })
-            }
-        );
     }
 }

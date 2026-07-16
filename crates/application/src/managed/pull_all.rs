@@ -57,7 +57,8 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
         Ok(outcome) => {
             let detail = format!(
                 "fetch failed: {}",
-                service::last_non_empty_line(&outcome.combined).unwrap_or("fetch failed")
+                crate::shared::git::last_non_empty_line(&outcome.combined)
+                    .unwrap_or("fetch failed")
             );
             return service::result(repo, &branch, SyncStatus::Fail, &detail);
         }

@@ -3,7 +3,7 @@
 //! `application::managed::status_repos` slice; only repo-list resolution and
 //! terminal formatting stay here.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use application::managed::status_repos;
 pub use domain::managed::status::StatusResult;
@@ -15,22 +15,25 @@ mod palette;
 
 pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
     match super::manifest::load_repos(options) {
-        Ok(repos) => status_run(classify(repos), options),
+        Ok(repos) => status_run(
+            status_repos::execute(status_repos::StatusRepos { repos }, &StdGitRunner),
+            options,
+        ),
         Err(error) => status_fail(format!("{error:#}")),
     }
-}
-
-/// Classify `repos` through the application slice with the real git adapter.
-fn classify(repos: Vec<ManagedRepo>) -> Vec<StatusResult> {
-    status_repos::execute(status_repos::StatusRepos { repos }, &StdGitRunner)
 }
 
 /// Status of the single repo that contains `dir` (resolved via `git rev-parse
 /// --show-toplevel`, so it works from any subdirectory). Fails (exit 2) when `dir`
 /// is not inside a git repo.
 pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<StatusResult> {
-    let top = match crate::git::top_level(dir) {
-        Ok(top) => PathBuf::from(top),
+    let top = match application::discovery::resolve_repo_top::execute(
+        application::discovery::resolve_repo_top::ResolveRepoTop {
+            repo: dir.to_path_buf(),
+        },
+        &StdGitRunner,
+    ) {
+        Ok(top) => top,
         Err(error) => return status_fail(format!("status: {error:#}")),
     };
     let repo = ManagedRepo {
@@ -38,7 +41,13 @@ pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<St
         path: top,
         remote: String::new(),
     };
-    status_run(classify(vec![repo]), options)
+    status_run(
+        status_repos::execute(
+            status_repos::StatusRepos { repos: vec![repo] },
+            &StdGitRunner,
+        ),
+        options,
+    )
 }
 
 /// Status of the repo at `root` plus every nested subrepo beneath it. Linked
@@ -79,7 +88,10 @@ pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun
             remote: String::new(),
         })
         .collect::<Vec<_>>();
-    status_run(classify(repos), options)
+    status_run(
+        status_repos::execute(status_repos::StatusRepos { repos }, &StdGitRunner),
+        options,
+    )
 }
 
 fn status_run(results: Vec<StatusResult>, options: &ManagedOptions) -> ManagedRun<StatusResult> {

@@ -88,7 +88,7 @@ fn run_managed_with_options(
     options: &ManagedOptions,
     forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
-    let tops = crate::commands::diff_subrepos::unpushed_managed_repo_tops(options)?;
+    let tops = crate::recipe::selected_managed_repos(options)?;
     if tops.is_empty() {
         println!("diff live: no managed repos with unpushed commits");
         return Ok(());

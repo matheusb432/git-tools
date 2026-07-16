@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
+use application::recipes::RecipeRequest;
 use contracts::{diffs::RenderDiffRequest, envelope::Outcome};
 use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
@@ -50,8 +51,7 @@ pub(crate) fn render_app(
     forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
     degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
 ) -> anyhow::Result<DiffOutcome> {
-    let recipe =
-        crate::recipe::recipe_for_cwd(cwd, crate::recipe::diff_op_from_target(target), name)?;
+    let recipe = crate::recipe::recipe_for_cwd(cwd, RecipeRequest::Diff(target.clone()), name)?;
     let batch = OpenRecipes {
         batch_id: crate::recipe::new_batch_id(),
         kind: RecipeBatchKind::Snapshot,

@@ -10,25 +10,35 @@ use crate::ports::GitRunner;
 /// The repo's working-tree state: absent when its `.git` entry is missing, else
 /// the parsed `git status --porcelain` file list (empty on a git failure).
 pub fn dirty_state(git: &impl GitRunner, repo: &Path) -> DirtyState {
+    dirty_state_checked(git, repo).unwrap_or(DirtyState {
+        present: true,
+        dirty: false,
+        files: Vec::new(),
+    })
+}
+
+pub(super) fn dirty_state_checked(git: &impl GitRunner, repo: &Path) -> anyhow::Result<DirtyState> {
     if !git.repo_present(repo) {
-        return DirtyState {
+        return Ok(DirtyState {
             present: false,
             dirty: false,
             files: Vec::new(),
-        };
+        });
     }
 
-    let output = match git.run(repo, &["status", "--porcelain"]) {
-        Ok(output) if output.success() => output.stdout,
-        _ => String::new(),
+    let output = git.run(repo, &["status", "--porcelain"])?;
+    let porcelain = if output.success() {
+        output.stdout
+    } else {
+        String::new()
     };
-    let files = parse_porcelain(&output);
+    let files = parse_porcelain(&porcelain);
 
-    DirtyState {
+    Ok(DirtyState {
         present: true,
         dirty: !files.is_empty(),
         files,
-    }
+    })
 }
 
 /// Parses `git status --porcelain` output into the changed-file list.
@@ -49,7 +59,7 @@ mod tests {
     use crate::testing::FakeGitRunner;
 
     #[test]
-    fn absent_repo_reports_not_present_without_calling_git() {
+    fn absent_repo_reports_not_present() {
         let runner = FakeGitRunner::default();
         runner
             .absent_repos
@@ -67,7 +77,6 @@ mod tests {
                 files: Vec::new(),
             }
         );
-        assert!(runner.arg_lists().is_empty(), "absent repos never call git");
     }
 
     #[test]

@@ -1,0 +1,355 @@
+//! Lightweight Rust token scanning for the CLI Git ownership boundary.
+
+/// A forbidden production-CLI Git boundary marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum GitBoundaryViolation {
+    GitRunnerPort,
+    RetiredGitShim,
+    ReceiverRun,
+    DirectGitLaunch,
+}
+
+impl GitBoundaryViolation {
+    pub(super) const fn description(self) -> &'static str {
+        match self {
+            Self::GitRunnerPort => "reference the application GitRunner port",
+            Self::RetiredGitShim => "use the retired crate::git shim",
+            Self::ReceiverRun => "call a receiver method named run",
+            Self::DirectGitLaunch => "launch git directly",
+        }
+    }
+}
+
+/// Finds forbidden Git boundary markers in the production portion of one Rust source file.
+pub(super) fn git_boundary_violations(source: &str) -> Vec<GitBoundaryViolation> {
+    let tokens = production_tokens(source);
+    let checks = [
+        (
+            GitBoundaryViolation::GitRunnerPort,
+            contains_identifier(&tokens, "GitRunner"),
+        ),
+        (
+            GitBoundaryViolation::RetiredGitShim,
+            contains_sequence(
+                &tokens,
+                &[
+                    ExpectedToken::Identifier("crate"),
+                    ExpectedToken::Punctuation(':'),
+                    ExpectedToken::Punctuation(':'),
+                    ExpectedToken::Identifier("git"),
+                ],
+            ),
+        ),
+        (
+            GitBoundaryViolation::ReceiverRun,
+            contains_sequence(
+                &tokens,
+                &[
+                    ExpectedToken::Punctuation('.'),
+                    ExpectedToken::Identifier("run"),
+                ],
+            ),
+        ),
+        (
+            GitBoundaryViolation::DirectGitLaunch,
+            contains_sequence(
+                &tokens,
+                &[
+                    ExpectedToken::Identifier("Command"),
+                    ExpectedToken::Punctuation(':'),
+                    ExpectedToken::Punctuation(':'),
+                    ExpectedToken::Identifier("new"),
+                    ExpectedToken::Punctuation('('),
+                    ExpectedToken::StringLiteral("git"),
+                ],
+            ),
+        ),
+    ];
+
+    checks
+        .into_iter()
+        .filter_map(|(violation, present)| present.then_some(violation))
+        .collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Token<'source> {
+    Identifier(&'source str),
+    Punctuation(char),
+    StringLiteral(&'source str),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExpectedToken<'source> {
+    Identifier(&'source str),
+    Punctuation(char),
+    StringLiteral(&'source str),
+}
+
+impl ExpectedToken<'_> {
+    fn matches(self, actual: Token<'_>) -> bool {
+        match (self, actual) {
+            (Self::Identifier(expected), Token::Identifier(actual))
+            | (Self::StringLiteral(expected), Token::StringLiteral(actual)) => expected == actual,
+            (Self::Punctuation(expected), Token::Punctuation(actual)) => expected == actual,
+            _ => false,
+        }
+    }
+}
+
+fn contains_identifier(tokens: &[Token<'_>], expected: &str) -> bool {
+    tokens
+        .iter()
+        .any(|token| matches!(token, Token::Identifier(actual) if *actual == expected))
+}
+
+fn contains_sequence(tokens: &[Token<'_>], expected: &[ExpectedToken<'_>]) -> bool {
+    tokens.windows(expected.len()).any(|window| {
+        expected
+            .iter()
+            .zip(window)
+            .all(|(expected, actual)| expected.matches(*actual))
+    })
+}
+
+fn production_tokens(source: &str) -> Vec<Token<'_>> {
+    let tokens = tokenize(source);
+    if has_file_cfg_test(&tokens) {
+        return Vec::new();
+    }
+
+    let mut brace_depth = 0usize;
+    for index in 0..tokens.len() {
+        if brace_depth == 0 && starts_test_module(&tokens[index..]) {
+            return tokens[..index].to_vec();
+        }
+
+        match tokens[index] {
+            Token::Punctuation('{') => brace_depth += 1,
+            Token::Punctuation('}') => brace_depth = brace_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    tokens
+}
+
+fn has_file_cfg_test(tokens: &[Token<'_>]) -> bool {
+    let expected = [
+        ExpectedToken::Punctuation('#'),
+        ExpectedToken::Punctuation('!'),
+        ExpectedToken::Punctuation('['),
+        ExpectedToken::Identifier("cfg"),
+        ExpectedToken::Punctuation('('),
+        ExpectedToken::Identifier("test"),
+        ExpectedToken::Punctuation(')'),
+        ExpectedToken::Punctuation(']'),
+    ];
+    let mut brace_depth = 0usize;
+
+    for index in 0..tokens.len() {
+        if brace_depth == 0 && starts_sequence(&tokens[index..], &expected) {
+            return true;
+        }
+        match tokens[index] {
+            Token::Punctuation('{') => brace_depth += 1,
+            Token::Punctuation('}') => brace_depth = brace_depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+
+    false
+}
+
+fn starts_test_module(tokens: &[Token<'_>]) -> bool {
+    let expected = [
+        ExpectedToken::Punctuation('#'),
+        ExpectedToken::Punctuation('['),
+        ExpectedToken::Identifier("cfg"),
+        ExpectedToken::Punctuation('('),
+        ExpectedToken::Identifier("test"),
+        ExpectedToken::Punctuation(')'),
+        ExpectedToken::Punctuation(']'),
+        ExpectedToken::Identifier("mod"),
+        ExpectedToken::Identifier("tests"),
+    ];
+
+    tokens.len() > expected.len()
+        && starts_sequence(tokens, &expected)
+        && matches!(tokens[expected.len()], Token::Punctuation('{' | ';'))
+}
+
+fn starts_sequence(tokens: &[Token<'_>], expected: &[ExpectedToken<'_>]) -> bool {
+    tokens.len() >= expected.len()
+        && expected
+            .iter()
+            .zip(tokens)
+            .all(|(expected, actual)| expected.matches(*actual))
+}
+
+fn tokenize(source: &str) -> Vec<Token<'_>> {
+    let bytes = source.as_bytes();
+    let mut tokens = Vec::new();
+    let mut index = 0;
+
+    while index < bytes.len() {
+        match bytes[index] {
+            byte if byte.is_ascii_whitespace() => index += 1,
+            b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                index = skip_line_comment(bytes, index + 2);
+            }
+            b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                index = skip_block_comment(bytes, index + 2);
+            }
+            b'r' if raw_string_hashes(bytes, index).is_some() => {
+                let hashes = raw_string_hashes(bytes, index).expect("raw string was identified");
+                let (content, next) = raw_string(source, index, hashes);
+                tokens.push(Token::StringLiteral(content));
+                index = next;
+            }
+            b'"' => {
+                let (content, next) = quoted_string(source, index);
+                tokens.push(Token::StringLiteral(content));
+                index = next;
+            }
+            b'b' if bytes.get(index + 1) == Some(&b'"') => {
+                index = quoted_string(source, index + 1).1;
+            }
+            b'b' if bytes.get(index + 1) == Some(&b'r')
+                && raw_string_hashes(bytes, index + 1).is_some() =>
+            {
+                let hashes =
+                    raw_string_hashes(bytes, index + 1).expect("raw byte string was identified");
+                index = raw_string(source, index + 1, hashes).1;
+            }
+            b'b' if bytes.get(index + 1) == Some(&b'\'') => {
+                index = skip_character(bytes, index + 1);
+            }
+            b'\'' if is_character_literal(bytes, index) => {
+                index = skip_character(bytes, index);
+            }
+            b'r' if bytes.get(index + 1) == Some(&b'#')
+                && bytes.get(index + 2).is_some_and(u8::is_ascii_alphabetic) =>
+            {
+                let start = index + 2;
+                index = take_identifier(bytes, start);
+                tokens.push(Token::Identifier(&source[start..index]));
+            }
+            byte if is_identifier_start(byte) => {
+                let start = index;
+                index = take_identifier(bytes, start);
+                tokens.push(Token::Identifier(&source[start..index]));
+            }
+            byte if byte.is_ascii() => {
+                tokens.push(Token::Punctuation(char::from(byte)));
+                index += 1;
+            }
+            _ => {
+                index += source[index..]
+                    .chars()
+                    .next()
+                    .expect("index is inside source")
+                    .len_utf8();
+            }
+        }
+    }
+
+    tokens
+}
+
+fn skip_line_comment(bytes: &[u8], start: usize) -> usize {
+    bytes[start..]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(bytes.len(), |offset| start + offset + 1)
+}
+
+fn skip_block_comment(bytes: &[u8], start: usize) -> usize {
+    let mut depth = 1usize;
+    let mut index = start;
+    while index < bytes.len() && depth > 0 {
+        if bytes.get(index..index + 2) == Some(b"/*") {
+            depth += 1;
+            index += 2;
+        } else if bytes.get(index..index + 2) == Some(b"*/") {
+            depth -= 1;
+            index += 2;
+        } else {
+            index += 1;
+        }
+    }
+    index
+}
+
+fn raw_string_hashes(bytes: &[u8], start: usize) -> Option<usize> {
+    if bytes.get(start) != Some(&b'r') {
+        return None;
+    }
+    let mut index = start + 1;
+    while bytes.get(index) == Some(&b'#') {
+        index += 1;
+    }
+    (bytes.get(index) == Some(&b'"')).then_some(index - start - 1)
+}
+
+fn raw_string(source: &str, start: usize, hashes: usize) -> (&str, usize) {
+    let content_start = start + 2 + hashes;
+    let closing = format!("\"{}", "#".repeat(hashes));
+    let Some(relative_end) = source[content_start..].find(&closing) else {
+        return (&source[content_start..], source.len());
+    };
+    let content_end = content_start + relative_end;
+    (
+        &source[content_start..content_end],
+        content_end + closing.len(),
+    )
+}
+
+fn quoted_string(source: &str, quote: usize) -> (&str, usize) {
+    let bytes = source.as_bytes();
+    let content_start = quote + 1;
+    let mut index = content_start;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index = (index + 2).min(bytes.len()),
+            b'"' => return (&source[content_start..index], index + 1),
+            _ => index += 1,
+        }
+    }
+    (&source[content_start..], source.len())
+}
+
+fn is_character_literal(bytes: &[u8], quote: usize) -> bool {
+    match bytes.get(quote + 1) {
+        Some(b'\\') => bytes.get(quote + 3) == Some(&b'\''),
+        Some(_) => bytes.get(quote + 2) == Some(&b'\''),
+        None => false,
+    }
+}
+
+fn skip_character(bytes: &[u8], quote: usize) -> usize {
+    let mut index = quote + 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' => index = (index + 2).min(bytes.len()),
+            b'\'' => return index + 1,
+            _ => index += 1,
+        }
+    }
+    bytes.len()
+}
+
+const fn is_identifier_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
+
+fn take_identifier(bytes: &[u8], start: usize) -> usize {
+    let mut index = start + 1;
+    while bytes
+        .get(index)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+    {
+        index += 1;
+    }
+    index
+}

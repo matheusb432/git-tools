@@ -71,14 +71,6 @@ pub(crate) fn classify_exit(results: &[RepoSyncResult]) -> SyncExit {
     SyncExit::Clean
 }
 
-pub(crate) fn last_non_empty_line(output: &str) -> Option<&str> {
-    output
-        .lines()
-        .rev()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-}
-
 /// The shared present/branch/remote checks both `push_one` and `pull_one` run
 /// before their operation-specific logic. `detached_detail` differs between the
 /// two callers ("nothing to push" vs "nothing to pull onto").
@@ -147,12 +139,6 @@ mod tests {
         assert_eq!(classify_exit(&clean), SyncExit::Clean);
         assert_eq!(classify_exit(&warn), SyncExit::Warn);
         assert_eq!(classify_exit(&fail), SyncExit::Fail);
-    }
-
-    #[test]
-    fn last_non_empty_line_finds_the_last_populated_line() {
-        assert_eq!(last_non_empty_line("a\n\nb\n \n"), Some("b"));
-        assert_eq!(last_non_empty_line("\n\n"), None);
     }
 
     #[tokio::test]

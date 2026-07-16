@@ -1,6 +1,8 @@
 //! Shared test fixtures for the `managed` submodules: a throwaway `$HOME` plus real git
 //! repos/remotes, so push/pull/commit/status/manifest tests exercise real `git` behavior.
 
+#![cfg(test)]
+
 use std::{
     path::{Path, PathBuf},
     process::Command,
@@ -39,6 +41,14 @@ impl ManagedFixture {
         git(&repo, &["add", "-A"]);
         git(&repo, &["commit", "-m", "base"]);
         repo
+    }
+
+    pub(super) fn add_origin(&self, repo: &Path) -> PathBuf {
+        let remote = self.root.join("origin.git");
+        cmd("git", &["init", "--bare", remote.to_str().unwrap()]);
+        git(repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(repo, &["push", "-u", "origin", "main"]);
+        remote
     }
 
     pub(super) fn write_manifest(&self, entries: &[(&str, &str)]) {

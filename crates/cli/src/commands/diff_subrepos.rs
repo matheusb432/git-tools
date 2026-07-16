@@ -8,7 +8,6 @@ use contracts::{
     diffs::{RenderDiffAllRequest, RenderDiffSubreposRequest, RepoRefDto},
     envelope::Outcome,
 };
-use domain::discovery::DiscoveredRepo;
 use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
 use crate::{
@@ -16,9 +15,9 @@ use crate::{
     client::Backend,
     commands::{
         diff::{DiffOutcome, take_raw_path},
-        managed::{self, ManagedOptions},
+        managed::ManagedOptions,
     },
-    git, recipe, viewer,
+    recipe, viewer,
 };
 
 /// `diff -r`: raw/headless invocations render one tabbed store artifact; displayed
@@ -70,7 +69,13 @@ pub(crate) fn forward_scan(
     forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
     degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
 ) -> anyhow::Result<DiffOutcome> {
-    let recipes = recipe::subrepo_recipes(root, last, include_worktrees)?;
+    let target = last.map_or(DiffTarget::Unpushed { pinned: None }, |count| {
+        DiffTarget::Last {
+            count,
+            pinned: None,
+        }
+    });
+    let recipes = recipe::subrepo_recipes(root, target, include_worktrees)?;
     if recipes.is_empty() {
         anyhow::bail!("diff -r: no git repos found under {}", root.display());
     }
@@ -81,10 +86,10 @@ pub(crate) fn forward_scan(
 /// a label relative to `root` — one call into the `discovery/find_repo_tops` slice
 /// with the production adapters. No unpushed filtering — `diff -r` renders every
 /// discovered repo regardless of whether it has unpushed work.
-pub(crate) fn scan_repo_tops(
+fn scan_repo_tops(
     root: &Path,
     include_worktrees: bool,
-) -> anyhow::Result<Vec<DiscoveredRepo>> {
+) -> anyhow::Result<Vec<domain::discovery::DiscoveredRepo>> {
     Ok(application::discovery::find_repo_tops::execute(
         application::discovery::find_repo_tops::FindRepoTops {
             root: root.to_path_buf(),
@@ -93,27 +98,6 @@ pub(crate) fn scan_repo_tops(
         &infra::repo_discovery::WalkdirRepoDiscovery,
         &infra::git_runner::StdGitRunner,
     )?)
-}
-
-/// Load managed repos from `options` and keep only those with unpushed commits against
-/// their upstream: skips repos without a `.git` dir, without a resolvable upstream, or
-/// with nothing unpushed (`unpushed_count` == 0).
-pub(crate) fn unpushed_managed_repo_tops(
-    options: &ManagedOptions,
-) -> anyhow::Result<Vec<DiscoveredRepo>> {
-    let repos = managed::load_repos(options)?;
-    let mut tops = Vec::new();
-    for repo in repos.iter().filter(|repo| repo.path.join(".git").exists()) {
-        if git::upstream(&repo.path).is_err() || unpushed_count(&repo.path)? == 0 {
-            continue;
-        }
-        let top = git::top_level(&repo.path)?;
-        tops.push(DiscoveredRepo {
-            path: PathBuf::from(top),
-            label: repo.name.clone(),
-        });
-    }
-    Ok(tops)
 }
 
 /// Discover repos under `root` and render them through `backend`, printing its
@@ -200,7 +184,12 @@ pub(crate) fn forward_managed_all(
     forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
     degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
 ) -> anyhow::Result<DiffOutcome> {
-    let recipes = recipe::managed_recipes(root, options)?;
+    std::fs::canonicalize(root)
+        .map_err(|error| anyhow::anyhow!("failed to resolve {}: {error}", root.display()))?;
+    let recipes = recipe::managed_recipes(
+        options,
+        application::recipes::RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
+    )?;
     if recipes.is_empty() {
         println!("diff --all: no managed repos with unpushed commits");
         return Ok(DiffOutcome::Empty);
@@ -229,8 +218,7 @@ fn forward_batch(
 
 /// Pre-filter managed repos with unpushed commits and render them through `backend`,
 /// printing its wire notes and handing the artifact to `open`. Split from
-/// [`run_managed_all`] so tests can drive a fake backend. The pre-filter loop
-/// stays cli-side (uses the `git` shim, not a port).
+/// [`run_managed_all`] so tests can drive a fake backend.
 pub(crate) fn run_managed_all_with(
     backend: &impl Backend,
     root: impl AsRef<Path>,
@@ -239,7 +227,7 @@ pub(crate) fn run_managed_all_with(
 ) -> anyhow::Result<PathBuf> {
     let root = std::fs::canonicalize(root.as_ref())
         .with_context(|| format!("failed to resolve {}", root.as_ref().display()))?;
-    let repo_refs = unpushed_managed_repo_tops(options)?
+    let repo_refs = recipe::selected_managed_repos(options)?
         .into_iter()
         .map(|repo_top| RepoRefDto {
             top: repo_top.path.to_string_lossy().into_owned(),
@@ -266,11 +254,6 @@ pub(crate) fn run_managed_all_with(
         }
         _ => Err(anyhow::anyhow!(super::error_text(&envelope.notes))),
     }
-}
-
-fn unpushed_count(repo: &Path) -> anyhow::Result<usize> {
-    let raw = git::run_git(repo, &["rev-list", "--count", "@{u}..HEAD"])?;
-    Ok(raw.trim().parse().unwrap_or(0))
 }
 
 #[cfg(test)]

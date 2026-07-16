@@ -126,6 +126,7 @@ dependencies = [
  "cqrsy",
  "domain",
  "futures-util",
+ "gtl-recipe",
  "thiserror 2.0.18",
  "tokio",
 ]

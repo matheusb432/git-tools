@@ -3,12 +3,12 @@
 //! the [`GitRunner`](crate::ports::GitRunner) port — the unit the `diff -r` wire
 //! paths hand to the daemon.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use domain::discovery::DiscoveredRepo;
 
 use crate::{
-    discovery::find_repos,
+    discovery::{find_repos, resolve_repo_top},
     ports::{GitRunner, RepoDiscovery},
 };
 
@@ -22,13 +22,24 @@ pub struct FindRepoTops {
 
 /// Everything that can go wrong discovering and resolving repo tops.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum FindRepoTopsError {
+    /// Reports that repositories could not be discovered under the requested root.
     #[error(transparent)]
-    Unexpected(#[from] anyhow::Error),
+    Discover(#[from] find_repos::DiscoverError),
+    /// Reports that a discovered repository's canonical top level could not be resolved.
+    #[error(transparent)]
+    Resolve(#[from] resolve_repo_top::ResolveRepoTopError),
 }
 
 /// Walk `root` through the discovery slice and resolve each repo's `path` to its
 /// `git rev-parse --show-toplevel`. Labels stay relative to `root`.
+///
+/// # Errors
+///
+/// Returns [`FindRepoTopsError::Discover`] when repository discovery fails, or
+/// [`FindRepoTopsError::Resolve`] when a discovered repository's canonical top
+/// level cannot be resolved.
 #[cqrsy::handler(query)]
 pub fn execute(
     req: FindRepoTops,
@@ -45,35 +56,19 @@ pub fn execute(
             include_worktrees,
         },
         discovery,
-    )
-    .map_err(anyhow::Error::from)?;
+    )?;
     discovered
         .into_iter()
         .map(|repo| {
             Ok(DiscoveredRepo {
-                path: top_level(git, &repo.path)?,
+                path: resolve_repo_top::execute(
+                    resolve_repo_top::ResolveRepoTop { repo: repo.path },
+                    git,
+                )?,
                 label: repo.label,
             })
         })
         .collect()
-}
-
-/// The repo's canonical top-level path, or the legacy-shaped error (git's own
-/// diagnostic, then `not a git repo: <path>`) when `dir` is not a git repo.
-fn top_level(git: &impl GitRunner, dir: &Path) -> Result<PathBuf, FindRepoTopsError> {
-    let out = git
-        .run(dir, &["rev-parse", "--show-toplevel"])
-        .map_err(anyhow::Error::from)?;
-    if out.success() {
-        return Ok(PathBuf::from(out.stdout.trim()));
-    }
-    let said = out.diagnostic();
-    let error = if said.is_empty() {
-        anyhow::anyhow!("not a git repo: {}", dir.display())
-    } else {
-        anyhow::anyhow!("{said}\nnot a git repo: {}", dir.display())
-    };
-    Err(FindRepoTopsError::Unexpected(error))
 }
 
 #[cfg(test)]
@@ -112,13 +107,6 @@ mod tests {
                     path: "/real/libs/inner".into(),
                     label: "libs/inner".into(),
                 },
-            ]
-        );
-        assert_eq!(
-            runner.arg_lists(),
-            vec![
-                vec!["rev-parse", "--show-toplevel"],
-                vec!["rev-parse", "--show-toplevel"],
             ]
         );
     }

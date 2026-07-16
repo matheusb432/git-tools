@@ -88,6 +88,43 @@ fn prune_yes_deletes_merged_and_keeps_unmerged() {
 }
 
 #[test]
+fn prune_partial_failure_reports_recovery_and_preserves_blocked_branch() {
+    let (_tmp, repo) = setup();
+    git(&repo, &["branch", "feat/blocked"]);
+    let linked_worktree = repo.join("linked-worktree");
+    git(
+        &repo,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            linked_worktree.to_str().unwrap(),
+            "feat/blocked",
+        ],
+    );
+
+    gtl(&repo)
+        .args(["prune", "-y"])
+        .assert()
+        .failure()
+        .code(1)
+        .stdout(contains("will delete 2 branch(es) merged into 'main':"))
+        .stderr(contains("prune: deleted 1 branch."))
+        .stderr(contains("recover: git branch feat/merged"))
+        .stderr(contains("failed: feat/blocked"));
+
+    assert!(
+        !branch_exists(&repo, "feat/merged"),
+        "deletable merged branch removed"
+    );
+    assert!(
+        branch_exists(&repo, "feat/blocked"),
+        "checked-out merged branch preserved"
+    );
+    assert!(branch_exists(&repo, "feat/wip"), "unmerged branch kept");
+}
+
+#[test]
 fn prune_non_interactive_without_yes_refuses() {
     let (_tmp, repo) = setup();
     gtl(&repo)

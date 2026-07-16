@@ -96,7 +96,7 @@ async fn push_one(
     } else {
         SyncStatus::Pushed
     };
-    let detail = service::last_non_empty_line(&outcome.combined).unwrap_or("up to date");
+    let detail = crate::shared::git::last_non_empty_line(&outcome.combined).unwrap_or("up to date");
     service::result(repo, &branch, status, detail)
 }
 
@@ -125,7 +125,7 @@ fn push_failure_detail(output: &str) -> String {
                 || trimmed.starts_with("fatal:")
         })
         .map(str::trim)
-        .or_else(|| service::last_non_empty_line(output))
+        .or_else(|| crate::shared::git::last_non_empty_line(output))
         .unwrap_or("push failed")
         .to_string()
 }

@@ -1,10 +1,12 @@
 //! Fanning `prune` out across every managed repo.
 
-use std::{fmt::Write as _, path::Path};
+use std::fmt::Write as _;
 
+use application::managed::prune_all::{self, PruneAction, PruneExit};
+use infra::git_runner::StdGitRunner;
 use serde::Serialize;
 
-use super::{ManagedExit, ManagedOptions, ManagedRepo, ManagedRun};
+use super::{ManagedExit, ManagedOptions, ManagedRun};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "PascalCase")]
@@ -31,23 +33,15 @@ pub struct PruneRepoResult {
 pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRepoResult> {
     match super::manifest::load_repos(options) {
         Ok(repos) => {
-            let runner = infra::git_runner::StdGitRunner;
-            let results = repos
-                .iter()
-                .map(|repo| prune_one(&runner, repo, onto, options.dry))
-                .collect::<Vec<_>>();
-            let exit = if results.iter().any(|result| !result.failed.is_empty()) {
-                ManagedExit::Warn
-            } else {
-                ManagedExit::Clean
-            };
-            let stdout = format_prune(onto, options.dry, options.json, &results);
-            ManagedRun {
-                exit,
-                results,
-                stdout,
-                stderr: String::new(),
-            }
+            let execution = prune_all::execute(
+                prune_all::PruneAll {
+                    repos,
+                    onto: onto.into(),
+                    dry: options.dry,
+                },
+                &StdGitRunner,
+            );
+            project_prune_execution(onto, options.dry, options.json, execution)
         }
         Err(error) => ManagedRun {
             exit: ManagedExit::Fail,
@@ -58,59 +52,108 @@ pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRe
     }
 }
 
-fn prune_one(
-    runner: &impl application::ports::GitRunner,
-    repo: &ManagedRepo,
+fn project_prune_execution(
     onto: &str,
     dry: bool,
-) -> PruneRepoResult {
-    use crate::commands::prune::{self, PrunePlan};
-
-    let mut result = PruneRepoResult {
-        name: repo.name.clone(),
-        present: false,
-        deleted: Vec::new(),
-        failed: Vec::new(),
-        detail: String::new(),
-    };
-    if !repo.path.join(".git").exists() {
-        result.detail = "not present on this machine".to_string();
-        return result;
-    }
-    result.present = true;
-
-    match prune::plan(runner, &repo.path, onto) {
-        PrunePlan::Refused(detail) | PrunePlan::Nothing(detail) => result.detail = detail,
-        PrunePlan::Ready { top, branches, .. } => {
-            if dry {
-                result.deleted = branches
-                    .iter()
-                    .map(|branch| PrunedBranch {
-                        name: branch.name.clone(),
-                        sha: branch.sha.clone(),
-                    })
-                    .collect();
-                result.detail = format!("would delete {} branch(es)", branches.len());
-            } else {
-                let applied = prune::apply(runner, Path::new(&top), &branches);
-                result.deleted = applied
-                    .deleted
-                    .iter()
-                    .map(|branch| PrunedBranch {
-                        name: branch.name.clone(),
-                        sha: branch.sha.clone(),
-                    })
-                    .collect();
-                result.failed = applied
-                    .failed
-                    .iter()
-                    .map(|branch| branch.name.clone())
-                    .collect();
-                result.detail = applied.detail;
+    json: bool,
+    execution: Result<prune_all::PruneAllResult, prune_all::PruneAllError>,
+) -> ManagedRun<PruneRepoResult> {
+    match execution {
+        Ok(execution) => {
+            let exit = match execution.exit {
+                PruneExit::Clean => ManagedExit::Clean,
+                PruneExit::Warn => ManagedExit::Warn,
+            };
+            let results = project_repo_results(execution.results);
+            let stdout = format_prune(onto, dry, json, &results);
+            ManagedRun {
+                exit,
+                results,
+                stdout,
+                stderr: String::new(),
+            }
+        }
+        Err(error) => {
+            let stderr = format!("{error:#}");
+            let results = match error {
+                prune_all::PruneAllError::Transport {
+                    mut completed_results,
+                    failed_result,
+                    ..
+                } => {
+                    if let Some(failed_result) = failed_result {
+                        completed_results.push(*failed_result);
+                    }
+                    project_repo_results(completed_results)
+                }
+                _ => Vec::new(),
+            };
+            let stdout = format_prune(onto, dry, json, &results);
+            ManagedRun {
+                exit: ManagedExit::Warn,
+                results,
+                stdout,
+                stderr,
             }
         }
     }
-    result
+}
+
+fn project_repo_results(results: Vec<prune_all::PruneRepoResult>) -> Vec<PruneRepoResult> {
+    results
+        .into_iter()
+        .map(|result| project_repo_result(result.name, result.action))
+        .collect()
+}
+
+fn project_repo_result(name: String, action: PruneAction) -> PruneRepoResult {
+    match action {
+        PruneAction::Absent => PruneRepoResult {
+            name,
+            present: false,
+            deleted: Vec::new(),
+            failed: Vec::new(),
+            detail: "not present on this machine".into(),
+        },
+        PruneAction::Refused(detail) | PruneAction::Nothing(detail) => PruneRepoResult {
+            name,
+            present: true,
+            deleted: Vec::new(),
+            failed: Vec::new(),
+            detail,
+        },
+        PruneAction::WouldDelete(branches) => PruneRepoResult {
+            name,
+            present: true,
+            detail: format!("would delete {} branch(es)", branches.len()),
+            deleted: branches
+                .into_iter()
+                .map(|branch| PrunedBranch {
+                    name: branch.name,
+                    sha: branch.sha,
+                })
+                .collect(),
+            failed: Vec::new(),
+        },
+        PruneAction::Applied(result) => PruneRepoResult {
+            name,
+            present: true,
+            deleted: result
+                .deleted
+                .iter()
+                .map(|branch| PrunedBranch {
+                    name: branch.name.clone(),
+                    sha: branch.sha.clone(),
+                })
+                .collect(),
+            failed: result
+                .failed
+                .iter()
+                .map(|failure| failure.name.clone())
+                .collect(),
+            detail: crate::commands::prune::render_result(&result),
+        },
+    }
 }
 
 fn format_prune(onto: &str, dry: bool, json: bool, results: &[PruneRepoResult]) -> String {
@@ -146,4 +189,117 @@ fn format_prune(onto: &str, dry: bool, json: bool, results: &[PruneRepoResult]) 
         failed
     );
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use application::{
+        branches::{
+            apply_prune::{PruneFailure, PruneResult, PruneStatus},
+            plan_prune::PruneBranch,
+        },
+        managed::prune_all::{
+            PruneAction, PruneAllResult, PruneExit, PruneRepoResult as ApplicationPruneRepoResult,
+        },
+    };
+
+    use super::*;
+
+    #[test]
+    fn application_results_project_to_the_existing_json_shape() {
+        let execution = PruneAllResult {
+            exit: PruneExit::Warn,
+            results: vec![ApplicationPruneRepoResult {
+                name: "api".into(),
+                action: PruneAction::Applied(PruneResult {
+                    status: PruneStatus::Partial,
+                    deleted: vec![PruneBranch {
+                        name: "feature/done".into(),
+                        sha: "aaaaaaa".into(),
+                    }],
+                    failed: vec![PruneFailure {
+                        name: "feature/blocked".into(),
+                        reason: "branch is checked out".into(),
+                    }],
+                }),
+            }],
+        };
+
+        let run = project_prune_execution("main", false, true, Ok(execution));
+
+        assert_eq!(run.exit, ManagedExit::Warn);
+        assert_eq!(
+            run.stdout,
+            concat!(
+                "[\n",
+                "  {\n",
+                "    \"Name\": \"api\",\n",
+                "    \"Present\": true,\n",
+                "    \"Deleted\": [\n",
+                "      {\n",
+                "        \"Name\": \"feature/done\",\n",
+                "        \"Sha\": \"aaaaaaa\"\n",
+                "      }\n",
+                "    ],\n",
+                "    \"Failed\": [\n",
+                "      \"feature/blocked\"\n",
+                "    ],\n",
+                "    \"Detail\": \"deleted 1 branch.\\nrecover: git branch feature/done aaaaaaa\\nfailed: feature/blocked — branch is checked out\"\n",
+                "  }\n",
+                "]",
+            )
+        );
+    }
+
+    #[test]
+    fn transport_failure_projection_preserves_completed_stdout_and_stderr() {
+        let completed_result = ApplicationPruneRepoResult {
+            name: "api".into(),
+            action: PruneAction::Applied(PruneResult {
+                status: PruneStatus::Ok,
+                deleted: vec![PruneBranch {
+                    name: "feature/api".into(),
+                    sha: "aaaaaaa".into(),
+                }],
+                failed: Vec::new(),
+            }),
+        };
+        let failed_result = ApplicationPruneRepoResult {
+            name: "web".into(),
+            action: PruneAction::Applied(PruneResult {
+                status: PruneStatus::Ok,
+                deleted: vec![PruneBranch {
+                    name: "feature/web".into(),
+                    sha: "bbbbbbb".into(),
+                }],
+                failed: Vec::new(),
+            }),
+        };
+        let execution = Err(prune_all::PruneAllError::Transport {
+            failed_repo: "web".into(),
+            completed_results: vec![completed_result],
+            failed_result: Some(Box::new(failed_result)),
+            source: anyhow::anyhow!("git transport unavailable"),
+        });
+
+        let run = project_prune_execution("main", false, false, execution);
+
+        assert_eq!(run.exit, ManagedExit::Warn);
+        assert_eq!(run.results.len(), 2);
+        assert_eq!(
+            run.stdout,
+            concat!(
+                "prune (merged into 'main')\n",
+                "\n",
+                "REPO                           BRANCHES   DETAIL\n",
+                "api                            1          deleted 1 branch.\n",
+                "web                            1          deleted 1 branch.\n",
+                "\n2 repos: 2 deleted, 0 failed",
+            )
+        );
+        assert_eq!(
+            run.stderr,
+            "managed prune failed for 'web': git transport unavailable"
+        );
+    }
 }
