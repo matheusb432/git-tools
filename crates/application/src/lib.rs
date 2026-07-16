@@ -11,6 +11,7 @@ pub mod history;
 pub mod live_views;
 pub mod managed;
 pub mod ports;
+pub mod push_subrepos;
 pub mod settings;
 pub mod shared;
 pub mod viewer;

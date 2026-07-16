@@ -8,6 +8,7 @@ use contracts::{
     diffs::{RenderDiffAllRequest, RenderDiffSubreposRequest, RepoRefDto},
     envelope::Outcome,
 };
+use domain::discovery::DiscoveredRepo;
 use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
 use crate::{
@@ -76,42 +77,30 @@ pub(crate) fn forward_scan(
     forward_batch(recipes, forward, degrade)
 }
 
-/// A discovered or pre-filtered repo, resolved to its canonical top-level path and a
-/// display label. The unit shared by the raw `RepoRefDto` wire paths
-/// ([`run_scan_with`], [`run_managed_all_with`]), so discovery and pre-filtering are
-/// implemented exactly once.
-pub(crate) struct RepoTop {
-    pub top: PathBuf,
-    pub label: String,
-}
-
-/// Discover git repos under `root` (via the `discovery` slice) and resolve each to
-/// its canonical top-level path + a label relative to `root`. No unpushed filtering —
-/// `diff -r` renders every discovered repo regardless of whether it has unpushed work.
-pub(crate) fn scan_repo_tops(root: &Path, include_worktrees: bool) -> anyhow::Result<Vec<RepoTop>> {
-    let discovered = application::discovery::find_repos::execute(
-        application::discovery::find_repos::DiscoverRepos {
+/// Discover git repos under `root` and resolve each to its canonical top-level path +
+/// a label relative to `root` — one call into the `discovery/find_repo_tops` slice
+/// with the production adapters. No unpushed filtering — `diff -r` renders every
+/// discovered repo regardless of whether it has unpushed work.
+pub(crate) fn scan_repo_tops(
+    root: &Path,
+    include_worktrees: bool,
+) -> anyhow::Result<Vec<DiscoveredRepo>> {
+    Ok(application::discovery::find_repo_tops::execute(
+        application::discovery::find_repo_tops::FindRepoTops {
             root: root.to_path_buf(),
             include_worktrees,
         },
         &infra::repo_discovery::WalkdirRepoDiscovery,
-    )?;
-    discovered
-        .into_iter()
-        .map(|repo| {
-            let top = git::top_level(&repo.path)?;
-            Ok(RepoTop {
-                top: PathBuf::from(top),
-                label: repo.label,
-            })
-        })
-        .collect()
+        &infra::git_runner::StdGitRunner,
+    )?)
 }
 
 /// Load managed repos from `options` and keep only those with unpushed commits against
 /// their upstream: skips repos without a `.git` dir, without a resolvable upstream, or
 /// with nothing unpushed (`unpushed_count` == 0).
-pub(crate) fn unpushed_managed_repo_tops(options: &ManagedOptions) -> anyhow::Result<Vec<RepoTop>> {
+pub(crate) fn unpushed_managed_repo_tops(
+    options: &ManagedOptions,
+) -> anyhow::Result<Vec<DiscoveredRepo>> {
     let repos = managed::load_repos(options)?;
     let mut tops = Vec::new();
     for repo in repos.iter().filter(|repo| repo.path.join(".git").exists()) {
@@ -119,8 +108,8 @@ pub(crate) fn unpushed_managed_repo_tops(options: &ManagedOptions) -> anyhow::Re
             continue;
         }
         let top = git::top_level(&repo.path)?;
-        tops.push(RepoTop {
-            top: PathBuf::from(top),
+        tops.push(DiscoveredRepo {
+            path: PathBuf::from(top),
             label: repo.name.clone(),
         });
     }
@@ -146,7 +135,7 @@ pub(crate) fn run_scan_with(
     let repo_refs = repo_tops
         .into_iter()
         .map(|repo_top| RepoRefDto {
-            top: repo_top.top.to_string_lossy().into_owned(),
+            top: repo_top.path.to_string_lossy().into_owned(),
             label: repo_top.label,
         })
         .collect();
@@ -253,7 +242,7 @@ pub(crate) fn run_managed_all_with(
     let repo_refs = unpushed_managed_repo_tops(options)?
         .into_iter()
         .map(|repo_top| RepoRefDto {
-            top: repo_top.top.to_string_lossy().into_owned(),
+            top: repo_top.path.to_string_lossy().into_owned(),
             label: repo_top.label,
         })
         .collect();

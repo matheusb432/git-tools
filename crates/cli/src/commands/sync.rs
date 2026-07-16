@@ -1,6 +1,6 @@
 use std::{fmt::Write as _, path::Path};
 
-use crate::commands::git_runner::GitRunner;
+use application::ports::GitRunner;
 
 /// What a `sync` will push, gathered read-only for the confirmation prompt.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -427,12 +427,13 @@ fn repo_name(top: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::{
-        cell::RefCell,
         path::{Path, PathBuf},
+        sync::{Arc, Mutex},
     };
 
+    use application::ports::GitOutput;
+
     use super::*;
-    use crate::commands::git_runner::GitOutput;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct Call {
@@ -440,16 +441,17 @@ mod tests {
         args: Vec<String>,
     }
 
+    #[derive(Clone)]
     struct FakeRunner {
-        calls: RefCell<Vec<Call>>,
-        results: RefCell<Vec<GitOutput>>,
+        calls: Arc<Mutex<Vec<Call>>>,
+        results: Arc<Mutex<Vec<GitOutput>>>,
     }
 
     impl FakeRunner {
         fn new(results: Vec<GitOutput>) -> Self {
             Self {
-                calls: RefCell::new(Vec::new()),
-                results: RefCell::new(results),
+                calls: Arc::new(Mutex::new(Vec::new())),
+                results: Arc::new(Mutex::new(results)),
             }
         }
 
@@ -470,7 +472,7 @@ mod tests {
         }
 
         fn calls(&self) -> Vec<Call> {
-            self.calls.borrow().clone()
+            self.calls.lock().unwrap().clone()
         }
 
         fn arg_lists(&self) -> Vec<Vec<String>> {
@@ -480,11 +482,11 @@ mod tests {
 
     impl GitRunner for FakeRunner {
         fn run(&self, repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
-            self.calls.borrow_mut().push(Call {
+            self.calls.lock().unwrap().push(Call {
                 repo: repo.to_path_buf(),
                 args: args.iter().map(std::string::ToString::to_string).collect(),
             });
-            Ok(self.results.borrow_mut().remove(0))
+            Ok(self.results.lock().unwrap().remove(0))
         }
     }
 

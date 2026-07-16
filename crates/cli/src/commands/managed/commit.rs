@@ -2,13 +2,12 @@
 
 use std::fmt::{self, Write as _};
 
+use application::{managed::working_tree, ports::GitRunner as _};
+pub use domain::managed::working_tree::CommitFile;
+use infra::git_runner::StdGitRunner;
 use serde::{Serialize, Serializer};
 
-pub use super::working_tree::CommitFile;
-use super::{
-    ManagedExit, ManagedOptions, ManagedRepo, ManagedRun, git_capture::git_capture,
-    push_pull::last_non_empty_line, working_tree,
-};
+use super::{ManagedExit, ManagedOptions, ManagedRepo, ManagedRun, push_pull::last_non_empty_line};
 
 /// What `commit --all` did with one repo. Replaces the former stringly-typed
 /// `action` so [`commit_exit_code`] and every call site are checked against the
@@ -130,7 +129,7 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
 }
 
 fn commit_one(repo: &ManagedRepo, options: &ManagedOptions) -> CommitResult {
-    let state = working_tree::dirty_state(&repo.path);
+    let state = working_tree::dirty_state(&StdGitRunner, &repo.path);
     let mut result = CommitResult {
         name: repo.name.clone(),
         present: state.present,
@@ -162,7 +161,7 @@ fn commit_one(repo: &ManagedRepo, options: &ManagedOptions) -> CommitResult {
         return result;
     };
 
-    match git_capture(&repo.path, &["add", "-A"]) {
+    match StdGitRunner.run(&repo.path, &["add", "-A"]) {
         Ok(output) if output.success() => {}
         _ => {
             result.action = CommitAction::Fail;
@@ -171,7 +170,7 @@ fn commit_one(repo: &ManagedRepo, options: &ManagedOptions) -> CommitResult {
         }
     }
 
-    match git_capture(&repo.path, &["commit", "-m", message]) {
+    match StdGitRunner.run(&repo.path, &["commit", "-m", message]) {
         Ok(output) if output.success() => {
             result.action = CommitAction::Committed;
             result.detail = last_non_empty_line(&output.combined())

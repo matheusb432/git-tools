@@ -1,5 +1,7 @@
 //! git-tools - CLI entry point: clap parsing + a machine-readable exit-code contract.
 
+use infra::git_runner::StdGitRunner;
+
 use crate::{
     cli::{
         Cli, ColorChoice, Command, CommitArgs, DaemonArgs, DaemonCommand, DiffSub, DiffTarget,
@@ -7,7 +9,6 @@ use crate::{
         SquashArgs, StatusArgs, SwArgs, TagCommand, Theme, WorktreeCommand,
     },
     commands::{
-        git_runner::StdGitRunner,
         managed::{ManagedExit, ManagedOptions, ManagedRun},
         squash_local::{SquashResult, Status, invoke_squash_local},
     },
@@ -516,18 +517,24 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
 /// confirmation listing each repo's push destination, gate on `--yes`/TTY like
 /// `push "<message>"`, then
 /// push. Discovery and the resolved destinations are read-only and local — no fetch. The
-/// interactive prompt is the only side effect kept out of [`commands::up_subrepos`].
+/// interactive prompt is the only side effect kept out of the
+/// [`application::push_subrepos`] slice.
 fn run_push_subrepos(yes: bool) -> ExitCode {
-    use crate::commands::up_subrepos;
+    use application::push_subrepos;
+    use domain::managed::push_subrepos::SubreposPlan;
 
     let runner = StdGitRunner;
     // Canonicalize first (like `diff -r`) so repo labels read off real path segments
     // — the root repo is named for its directory, not the bare ".".
     let root = std::fs::canonicalize(".").unwrap_or_else(|_| std::path::PathBuf::from("."));
 
-    let targets = match up_subrepos::plan(&runner, &root) {
-        Ok(up_subrepos::SubreposPlan::Ready(targets)) => targets,
-        Ok(up_subrepos::SubreposPlan::Refused(detail)) => {
+    let targets = match push_subrepos::plan::execute(
+        push_subrepos::plan::PlanPush { root: root.clone() },
+        &infra::repo_discovery::WalkdirRepoDiscovery,
+        &runner,
+    ) {
+        Ok(SubreposPlan::Ready(targets)) => targets,
+        Ok(SubreposPlan::Refused(detail)) => {
             eprintln!("push -r: {detail}");
             return ExitCode::Internal;
         }
@@ -537,7 +544,7 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
         }
     };
 
-    println!("{}", up_subrepos::confirmation(&root, &targets));
+    println!("{}", push_subrepos::confirmation(&root, &targets));
 
     match confirm::request(&RealConfirm, yes, "Proceed?", DefaultAnswer::Yes) {
         Confirmation::RefuseNonInteractive => {
@@ -555,13 +562,15 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
         Confirmation::Proceed => {}
     }
 
-    let result = up_subrepos::apply(&runner, &targets);
+    let result =
+        push_subrepos::apply::execute(push_subrepos::apply::ApplyPush { targets }, &runner);
     match result.status {
-        up_subrepos::Status::Ok => {
+        domain::managed::push_subrepos::Status::Ok => {
             println!("{}", result.detail);
             ExitCode::Ok
         }
-        up_subrepos::Status::Partial | up_subrepos::Status::Fail => {
+        domain::managed::push_subrepos::Status::Partial
+        | domain::managed::push_subrepos::Status::Fail => {
             eprintln!("{}", result.detail);
             ExitCode::Internal
         }

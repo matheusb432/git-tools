@@ -31,7 +31,7 @@ pub struct PruneRepoResult {
 pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRepoResult> {
     match super::manifest::load_repos(options) {
         Ok(repos) => {
-            let runner = crate::commands::git_runner::StdGitRunner;
+            let runner = infra::git_runner::StdGitRunner;
             let results = repos
                 .iter()
                 .map(|repo| prune_one(&runner, repo, onto, options.dry))
@@ -59,7 +59,7 @@ pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRe
 }
 
 fn prune_one(
-    runner: &impl crate::commands::git_runner::GitRunner,
+    runner: &impl application::ports::GitRunner,
     repo: &ManagedRepo,
     onto: &str,
     dry: bool,

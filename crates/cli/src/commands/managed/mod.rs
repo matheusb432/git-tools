@@ -7,27 +7,20 @@
 use std::path::PathBuf;
 
 mod commit;
-mod git_capture;
 mod manifest;
 mod prune_all;
 mod push_pull;
 mod status;
 #[cfg(test)]
 mod test_support;
-mod working_tree;
 
 pub use commit::{CommitFile, CommitResult, run_commit_all};
+/// The manifest entry shape — the domain type, shared with the application slices.
+pub use domain::managed::ManagedRepo;
 pub use manifest::{sample_project_manifest_path, load_repos};
 pub use prune_all::{PruneRepoResult, PrunedBranch, run_prune_all};
 pub use push_pull::{PushPullResult, run_pull_all, run_push_all};
 pub use status::{StatusResult, run_status, run_status_current, run_status_recursive};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ManagedRepo {
-    pub name: String,
-    pub path: PathBuf,
-    pub remote: String,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManagedExit {

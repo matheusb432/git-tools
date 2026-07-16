@@ -14,10 +14,10 @@ use domain::{
 };
 
 use crate::ports::{
-    AppStateError, AppStateStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HistoryRecord,
-    HtmlRenderer, LedgerEntry, LiveViewRecord, ManagedManifest, NewRecentRenderRecord,
-    PlacedArtifact, PushLedger, RecentRenderRecord, RemoteSync, RepoDiscovery, RepoProbe,
-    RepoProbeResult, SyncOutput,
+    AppStateError, AppStateStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, GitOutput,
+    GitRunner, HistoryRecord, HtmlRenderer, LedgerEntry, LiveViewRecord, ManagedManifest,
+    NewRecentRenderRecord, PlacedArtifact, PushLedger, RecentRenderRecord, RemoteSync,
+    RepoDiscovery, RepoProbe, RepoProbeResult, SyncOutput,
 };
 
 /// Scripted `DiffSource`: every field is what the corresponding method returns.
@@ -453,6 +453,84 @@ impl Default for FakeRepoProbe {
 impl RepoProbe for FakeRepoProbe {
     fn probe(&self, _dir: &Path) -> anyhow::Result<RepoProbeResult> {
         Ok(self.result.clone())
+    }
+}
+
+/// One recorded [`FakeGitRunner`] invocation: the repo it ran in plus its argv.
+pub type RecordedGitCall = (PathBuf, Vec<String>);
+
+/// Scripted `GitRunner`: pops the next queued [`GitOutput`] per call and records
+/// every argv it saw (with the repo it ran in).
+#[derive(Debug, Clone, Default)]
+pub struct FakeGitRunner {
+    pub calls: Arc<Mutex<Vec<RecordedGitCall>>>,
+    pub results: Arc<Mutex<Vec<GitOutput>>>,
+    /// Repos `repo_present` answers `false` for; everything else is present.
+    pub absent_repos: Arc<Mutex<Vec<PathBuf>>>,
+}
+
+impl FakeGitRunner {
+    pub fn new(results: Vec<GitOutput>) -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            results: Arc::new(Mutex::new(results)),
+            absent_repos: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// A clean-exit output with `stdout`.
+    pub fn ok(stdout: &str) -> GitOutput {
+        GitOutput {
+            stdout: stdout.into(),
+            stderr: String::new(),
+            exit_code: 0,
+        }
+    }
+
+    /// A clean-exit output whose message rode on stderr (git does this for pushes).
+    pub fn ok_stderr(stderr: &str) -> GitOutput {
+        GitOutput {
+            stdout: String::new(),
+            stderr: stderr.into(),
+            exit_code: 0,
+        }
+    }
+
+    /// A failed output with `stderr` and `code`.
+    pub fn exit_err(stderr: &str, code: i32) -> GitOutput {
+        GitOutput {
+            stdout: String::new(),
+            stderr: stderr.into(),
+            exit_code: code,
+        }
+    }
+
+    /// Every recorded argv, without the repo paths.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the internal call log's lock is poisoned (a prior test panic).
+    pub fn arg_lists(&self) -> Vec<Vec<String>> {
+        self.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, args)| args.clone())
+            .collect()
+    }
+}
+
+impl GitRunner for FakeGitRunner {
+    fn run(&self, repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
+        self.calls.lock().unwrap().push((
+            repo.to_path_buf(),
+            args.iter().map(ToString::to_string).collect(),
+        ));
+        Ok(self.results.lock().unwrap().remove(0))
+    }
+
+    fn repo_present(&self, repo: &Path) -> bool {
+        !self.absent_repos.lock().unwrap().iter().any(|p| p == repo)
     }
 }
 

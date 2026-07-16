@@ -2,6 +2,7 @@
 
 use std::{fmt::Write as _, path::PathBuf};
 
+use application::shared::push_summary::{PushOutcome, PushSummary};
 use contracts::{
     envelope::{Envelope, NoteLevel, Outcome},
     managed::{
@@ -11,10 +12,7 @@ use contracts::{
 use serde::Serialize;
 
 use super::{ManagedExit, ManagedOptions, ManagedRun, manifest::resolve_manifest_location};
-use crate::{
-    client::{Backend, HttpBackend},
-    commands::push_summary::{PushOutcome, PushSummary},
-};
+use crate::client::{Backend, HttpBackend};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SyncOperation {

@@ -12,17 +12,14 @@ pub mod daemon_ctl;
 pub mod diff;
 pub mod diff_live;
 pub mod diff_subrepos;
-pub mod git_runner;
 pub mod managed;
 pub mod merge_diff;
 pub mod prune;
-mod push_summary;
 pub mod squash_local;
 pub mod squash_preview;
 pub mod sw;
 pub mod sync;
 pub mod tag;
-pub mod up_subrepos;
 pub mod worktree;
 
 /// Announce an artifact on the `--raw` path and the headless/viewer-unavailable

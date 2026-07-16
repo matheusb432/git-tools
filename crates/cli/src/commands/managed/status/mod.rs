@@ -1,50 +1,28 @@
-//! Reading and formatting the status of managed repos (`status`, `status --current`,
-//! `status --recursive`).
+//! Dispatching and formatting the status of managed repos (`status`,
+//! `status --current`, `status --recursive`). Classification lives in the
+//! `application::managed::status_repos` slice; only repo-list resolution and
+//! terminal formatting stay here.
 
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use application::managed::status_repos;
+pub use domain::managed::status::StatusResult;
+use infra::git_runner::StdGitRunner;
 
 use self::palette::StatusColorPalette;
-use super::{
-    ManagedExit, ManagedOptions, ManagedRepo, ManagedRun, git_capture::git_capture, working_tree,
-};
+use super::{ManagedExit, ManagedOptions, ManagedRepo, ManagedRun};
 mod palette;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "PascalCase")]
-pub struct StatusResult {
-    pub name: String,
-    pub present: bool,
-    pub branch: String,
-    pub upstream: String,
-    pub ahead: usize,
-    pub dirty: bool,
-    pub dirty_count: usize,
-    pub untracked_count: usize,
-    pub state: String,
-    pub detail: String,
-}
 
 pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
     match super::manifest::load_repos(options) {
-        Ok(repos) => {
-            let results = repos.iter().map(status_one).collect::<Vec<_>>();
-            let stdout = format_status(options.json, options.color, &results);
-            ManagedRun {
-                exit: ManagedExit::Clean,
-                results,
-                stdout,
-                stderr: String::new(),
-            }
-        }
-        Err(error) => ManagedRun {
-            exit: ManagedExit::Fail,
-            results: Vec::new(),
-            stdout: String::new(),
-            stderr: format!("{error:#}"),
-        },
+        Ok(repos) => status_run(classify(repos), options),
+        Err(error) => status_fail(format!("{error:#}")),
     }
+}
+
+/// Classify `repos` through the application slice with the real git adapter.
+fn classify(repos: Vec<ManagedRepo>) -> Vec<StatusResult> {
+    status_repos::execute(status_repos::StatusRepos { repos }, &StdGitRunner)
 }
 
 /// Status of the single repo that contains `dir` (resolved via `git rev-parse
@@ -60,7 +38,7 @@ pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<St
         path: top,
         remote: String::new(),
     };
-    status_run(vec![status_one(&repo)], options)
+    status_run(classify(vec![repo]), options)
 }
 
 /// Status of the repo at `root` plus every nested subrepo beneath it. Linked
@@ -93,17 +71,15 @@ pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun
         ));
     }
 
-    let results = discovered
+    let repos = discovered
         .into_iter()
-        .map(|repo| {
-            status_one(&ManagedRepo {
-                name: repo.label,
-                path: repo.path,
-                remote: String::new(),
-            })
+        .map(|repo| ManagedRepo {
+            name: repo.label,
+            path: repo.path,
+            remote: String::new(),
         })
         .collect::<Vec<_>>();
-    status_run(results, options)
+    status_run(classify(repos), options)
 }
 
 fn status_run(results: Vec<StatusResult>, options: &ManagedOptions) -> ManagedRun<StatusResult> {
@@ -123,105 +99,6 @@ fn status_fail(message: String) -> ManagedRun<StatusResult> {
         stdout: String::new(),
         stderr: message,
     }
-}
-
-fn status_one(repo: &ManagedRepo) -> StatusResult {
-    let mut result = StatusResult {
-        name: repo.name.clone(),
-        present: false,
-        branch: String::new(),
-        upstream: String::new(),
-        ahead: 0,
-        dirty: false,
-        dirty_count: 0,
-        untracked_count: 0,
-        state: "absent".to_string(),
-        detail: "not present".to_string(),
-    };
-
-    if !repo.path.join(".git").exists() {
-        return result;
-    }
-
-    result.present = true;
-    result.branch = match git_capture(&repo.path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
-        Ok(output) if output.success() => output.stdout.trim().to_string(),
-        _ => String::new(),
-    };
-
-    let dirty = working_tree::dirty_state(&repo.path);
-    result.untracked_count = dirty
-        .files
-        .iter()
-        .filter(|file| file.status == "??")
-        .count();
-    result.dirty_count = dirty.files.len().saturating_sub(result.untracked_count);
-    result.dirty = result.dirty_count > 0 || result.untracked_count > 0;
-
-    let mut parts = Vec::new();
-    if result.branch.is_empty() {
-        parts.push("branch-unavailable".to_string());
-    } else if result.branch == "HEAD" {
-        result.branch = "detached".to_string();
-        parts.push("detached".to_string());
-    } else {
-        match upstream_ahead(&repo.path) {
-            Some((upstream, ahead)) => {
-                result.upstream = upstream;
-                result.ahead = ahead;
-                if ahead > 0 {
-                    parts.push(format!("⇡{ahead}"));
-                }
-            }
-            None => parts.push("no-upstream".to_string()),
-        }
-    }
-
-    let change_symbols = format!(
-        "{}{}",
-        if result.dirty_count > 0 { "!" } else { "" },
-        if result.untracked_count > 0 { "?" } else { "" }
-    );
-    if !change_symbols.is_empty() {
-        parts.push(change_symbols);
-    }
-    if parts.is_empty() {
-        parts.push("✓".to_string());
-    }
-
-    result.detail = parts.join(" ");
-    result.state = if result.detail == "✓" {
-        "clean".to_string()
-    } else if result.detail.contains("no-upstream")
-        || result.detail.contains("detached")
-        || result.detail.contains("branch-unavailable")
-    {
-        "warn".to_string()
-    } else {
-        "pending".to_string()
-    };
-    result
-}
-
-/// The current branch's upstream tracking ref and how many commits it is ahead of that ref
-/// (`@{u}..HEAD`) — the two sync facts `gtl status --all` reports. `None` when the branch has
-/// no upstream. Purely local (no fetch); shared with `push --all` so it skips repos already
-/// synced with their remote instead of pushing every one.
-pub(in crate::commands::managed) fn upstream_ahead(repo: &Path) -> Option<(String, usize)> {
-    let upstream = match git_capture(
-        repo,
-        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-    ) {
-        Ok(output) if output.success() && !output.stdout.trim().is_empty() => {
-            output.stdout.trim().to_string()
-        }
-        _ => return None,
-    };
-    let ahead = match git_capture(repo, &["rev-list", "--count", "@{u}..HEAD"]) {
-        Ok(output) if output.success() => output.stdout.trim().parse().unwrap_or(0),
-        _ => 0,
-    };
-    Some((upstream, ahead))
 }
 
 fn format_status(json: bool, color: bool, results: &[StatusResult]) -> String {

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::commands::git_runner::GitRunner;
+use application::ports::GitRunner;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {

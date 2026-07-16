@@ -173,12 +173,12 @@ pub(crate) fn managed_recipes(
         .into_iter()
         .map(|repo_top| Recipe {
             op: pin_op(
-                &repo_top.top,
+                &repo_top.path,
                 RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
                 },
             ),
-            source: RecipeSource::LocalRepo(repo_top.top),
+            source: RecipeSource::LocalRepo(repo_top.path),
             name: Some(repo_top.label),
         })
         .collect())
@@ -207,12 +207,12 @@ pub(crate) fn subrepo_recipes(
         .into_iter()
         .map(|repo_top| Recipe {
             op: pin_op(
-                &repo_top.top,
+                &repo_top.path,
                 RecipeOp::Diff {
                     target: target.clone(),
                 },
             ),
-            source: RecipeSource::LocalRepo(repo_top.top),
+            source: RecipeSource::LocalRepo(repo_top.path),
             name: Some(repo_top.label),
         })
         .collect())

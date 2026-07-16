@@ -5,7 +5,10 @@
 
 use std::{fmt::Write as _, path::Path};
 
-use crate::commands::git_runner::{GitRunner, capture, onto_exists};
+use application::{
+    ports::GitRunner,
+    shared::git::{capture, onto_exists},
+};
 
 /// One prunable branch and the short sha it points at (captured for the recovery hint).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,20 +175,25 @@ fn plural(n: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, path::Path};
+    use std::{
+        path::Path,
+        sync::{Arc, Mutex},
+    };
+
+    use application::ports::GitOutput;
 
     use super::*;
-    use crate::commands::git_runner::GitOutput;
 
+    #[derive(Clone)]
     struct FakeRunner {
-        calls: RefCell<Vec<Vec<String>>>,
-        results: RefCell<Vec<GitOutput>>,
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+        results: Arc<Mutex<Vec<GitOutput>>>,
     }
     impl FakeRunner {
         fn new(results: Vec<GitOutput>) -> Self {
             Self {
-                calls: RefCell::new(Vec::new()),
-                results: RefCell::new(results),
+                calls: Arc::new(Mutex::new(Vec::new())),
+                results: Arc::new(Mutex::new(results)),
             }
         }
         fn ok(stdout: &str) -> GitOutput {
@@ -210,15 +218,16 @@ mod tests {
             }
         }
         fn arg_lists(&self) -> Vec<Vec<String>> {
-            self.calls.borrow().clone()
+            self.calls.lock().unwrap().clone()
         }
     }
     impl GitRunner for FakeRunner {
         fn run(&self, _repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
             self.calls
-                .borrow_mut()
+                .lock()
+                .unwrap()
                 .push(args.iter().map(std::string::ToString::to_string).collect());
-            Ok(self.results.borrow_mut().remove(0))
+            Ok(self.results.lock().unwrap().remove(0))
         }
     }
 

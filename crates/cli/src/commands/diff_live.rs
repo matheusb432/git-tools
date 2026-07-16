@@ -96,7 +96,7 @@ fn run_managed_with_options(
 
     let mut recipes = Vec::new();
     for repo_top in tops {
-        let path = repo_top.top.to_string_lossy().into_owned();
+        let path = repo_top.path.to_string_lossy().into_owned();
         match save_one(backend, &path) {
             Ok(data) => recipes.push(live_recipe(&data)),
             // One repo's rejection doesn't fail the whole batch; `save_one` withholds

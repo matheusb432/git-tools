@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PushOutcome {
+pub enum PushOutcome {
     Pushed,
     Skipped,
     Failed,
@@ -11,7 +11,7 @@ pub(super) enum PushOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PushSummary {
+pub struct PushSummary {
     total: usize,
     pushed: usize,
     skipped: usize,
@@ -21,10 +21,7 @@ pub(super) struct PushSummary {
 }
 
 impl PushSummary {
-    pub(super) fn from_outcomes(
-        outcomes: impl IntoIterator<Item = PushOutcome>,
-        dry: bool,
-    ) -> Self {
+    pub fn from_outcomes(outcomes: impl IntoIterator<Item = PushOutcome>, dry: bool) -> Self {
         let mut summary = Self {
             total: 0,
             pushed: 0,
@@ -45,15 +42,15 @@ impl PushSummary {
         summary
     }
 
-    pub(super) const fn pushed(self) -> usize {
+    pub const fn pushed(self) -> usize {
         self.pushed
     }
 
-    pub(super) const fn failed(self) -> usize {
+    pub const fn failed(self) -> usize {
         self.failed
     }
 
-    pub(super) fn render(self, exit_code: i32) -> String {
+    pub fn render(self, exit_code: i32) -> String {
         let pushed_label = if self.dry { "would push" } else { "pushed" };
         let mut output = format!(
             "exit {exit_code}  -  {} repos: {} {pushed_label}, {} skipped",

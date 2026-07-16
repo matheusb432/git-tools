@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::commands::git_runner::{GitOutput, GitRunner};
+use application::ports::{GitOutput, GitRunner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -274,8 +274,8 @@ fn lines(raw: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use std::{
-        cell::RefCell,
         path::{Path, PathBuf},
+        sync::{Arc, Mutex},
     };
 
     use anyhow::anyhow;
@@ -294,16 +294,17 @@ mod tests {
         Error(&'static str),
     }
 
+    #[derive(Clone)]
     struct FakeRunner {
-        calls: RefCell<Vec<Call>>,
-        results: RefCell<Vec<Scripted>>,
+        calls: Arc<Mutex<Vec<Call>>>,
+        results: Arc<Mutex<Vec<Scripted>>>,
     }
 
     impl FakeRunner {
         fn new(results: Vec<Scripted>) -> Self {
             Self {
-                calls: RefCell::new(Vec::new()),
-                results: RefCell::new(results),
+                calls: Arc::new(Mutex::new(Vec::new())),
+                results: Arc::new(Mutex::new(results)),
             }
         }
 
@@ -328,17 +329,17 @@ mod tests {
         }
 
         fn calls(&self) -> Vec<Call> {
-            self.calls.borrow().clone()
+            self.calls.lock().unwrap().clone()
         }
     }
 
     impl GitRunner for FakeRunner {
         fn run(&self, repo: &Path, args: &[&str]) -> anyhow::Result<GitOutput> {
-            self.calls.borrow_mut().push(Call {
+            self.calls.lock().unwrap().push(Call {
                 repo: repo.to_path_buf(),
                 args: args.iter().map(std::string::ToString::to_string).collect(),
             });
-            match self.results.borrow_mut().remove(0) {
+            match self.results.lock().unwrap().remove(0) {
                 Scripted::Output(output) => Ok(output),
                 Scripted::Error(message) => Err(anyhow!(message)),
             }
