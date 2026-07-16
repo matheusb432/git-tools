@@ -12,7 +12,6 @@ pub mod daemon_ctl;
 pub mod diff;
 pub mod diff_live;
 pub mod diff_subrepos;
-mod discover;
 pub mod git_runner;
 pub mod managed;
 pub mod merge_diff;
@@ -25,15 +24,6 @@ pub mod sync;
 pub mod tag;
 pub mod up_subrepos;
 pub mod worktree;
-
-fn repo_name(top: impl AsRef<Path>) -> String {
-    top.as_ref()
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("repo")
-        .to_string()
-}
 
 /// Announce an artifact on the `--raw` path and the headless/viewer-unavailable
 /// fallback. The browser

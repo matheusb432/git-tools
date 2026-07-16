@@ -1,7 +1,7 @@
 //! Recursive `push -r` support — push every git repo under the current directory to its upstream.
 //!
 //! The sibling of [`crate::commands::diff_subrepos`] for pushing: discover every repo under
-//! a root (reusing [`crate::commands::discover`]), resolve each one's push destination from
+//! a root (via the `application::discovery` slice), resolve each one's push destination from
 //! *local* refs only (no fetch), confirm, then push. A repo with no upstream — or a
 //! detached HEAD — carries a [`Dest::Skip`] reason instead of a push target, so an
 //! un-pushable repo is unrepresentable as a push and is reported, never silently dropped.
@@ -16,7 +16,6 @@ use std::{
 };
 
 use crate::commands::{
-    discover::{discover_git_repos, repo_label},
     git_runner::{GitOutput, GitRunner},
     push_summary::{PushOutcome, PushSummary},
 };
@@ -150,21 +149,24 @@ fn is_synced(runner: &impl GitRunner, path: &Path) -> bool {
 }
 
 /// Discovers every git repo under `root` and resolves each one's push destination.
-/// Linked worktrees are skipped (see [`discover_git_repos`]).
+/// Linked worktrees are skipped (via the `application::discovery` slice).
 pub fn plan(runner: &impl GitRunner, root: &Path) -> anyhow::Result<SubreposPlan> {
-    let repos = discover_git_repos(root, false)?;
-    if repos.is_empty() {
+    let discovered = application::discovery::find_repos::execute(
+        application::discovery::find_repos::DiscoverRepos {
+            root: root.to_path_buf(),
+            include_worktrees: false,
+        },
+        &infra::repo_discovery::WalkdirRepoDiscovery,
+    )?;
+    if discovered.is_empty() {
         return Ok(SubreposPlan::Refused(format!(
             "no git repos found under {}",
             root.display()
         )));
     }
-    let targets = repos
-        .iter()
-        .map(|repo| {
-            let label = repo_label(root, repo);
-            inspect(runner, repo, label)
-        })
+    let targets = discovered
+        .into_iter()
+        .map(|repo| inspect(runner, &repo.path, repo.label))
         .collect();
     Ok(SubreposPlan::Ready(targets))
 }

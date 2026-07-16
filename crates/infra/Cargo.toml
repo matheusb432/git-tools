@@ -1,28 +1,29 @@
 [package]
 name = "infra"
 version = "0.1.0"
-edition = "2024"
-publish = false
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
-anyhow = "1.0.102"
-application = { path = "../application" }
-domain = { path = "../domain" }
-jiff = { version = "0.2", default-features = false, features = ["std"] }
-maud = "0.27"
-rusqlite = { version = "0.40", features = ["bundled"] }
-rusqlite_migration = "2.6"
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.150"
-sha2 = "0.11.0"
-similar = "3.1.1"
-tokio = { version = "1", features = ["fs", "process"] }
-toml = "1.1.2"
-toml_edit = "0.25.12"
+anyhow.workspace = true
+application.workspace = true
+domain.workspace = true
+jiff.workspace = true
+maud.workspace = true
+rusqlite.workspace = true
+rusqlite_migration.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+similar.workspace = true
+tokio = { workspace = true, features = ["fs", "process"] }
+toml.workspace = true
+toml_edit.workspace = true
+walkdir.workspace = true
 
 [dev-dependencies]
-tempfile = "3.27.0"
-tokio = { version = "1", features = ["fs", "macros", "rt"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs", "macros", "rt"] }
 
 [lints]
 workspace = true

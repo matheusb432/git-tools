@@ -32,8 +32,76 @@ default-members = [
   "xtask",
 ]
 
+[workspace.package]
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+anyhow = "1"
+application = { path = "crates/application" }
+assert_cmd = "2"
+axum = "0.8"
+base64 = "0.22.1"
+bootstrap = { path = "shared/bootstrap" }
+clap = { version = "4", features = ["derive"] }
+command-group = "5.0.1"
+contracts = { path = "crates/contracts" }
+cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.9.0", features = [
+  "derive",
+] }
+criterion = "0.8.2"
+directories = "6.0.0"
+domain = { path = "crates/domain" }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+gtl-platform = { path = "shared/gtl-platform" }
+gtl-recipe = { path = "shared/gtl-recipe" }
+http-body-util = "0.1"
+ico = "0.5"
+image = { version = "0.25", default-features = false, features = ["png"] }
+infra = { path = "crates/infra" }
+jiff = { version = "0.2", default-features = false, features = ["std"] }
+lru = "0.18.1"
+maud = "0.27"
+nutype = "0.7.0"
+predicates = "3"
+raw-window-handle = "0.6"
+reqwest = { version = "0.13", default-features = false, features = [
+  "blocking",
+  "json",
+] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite_migration = "2.6"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+serde_with = { version = "3", default-features = false, features = ["macros"] }
+sha2 = "0.11.0"
+similar = "3.1.1"
+tauri = "2"
+tauri-build = "2"
+tauri-plugin-single-instance = "2"
+tempfile = "3.27.0"
+thiserror = "2.0.18"
+tiny-skia = "0.12"
+tokio = "1"
+toml = "1.1.2"
+toml_edit = "0.25.12"
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2.5.8"
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2.5.0"
+which = "8.0.4"
+x11-dl = "2.21.0"
+zbus = "5.16.0"
+
 [profile.release]
-strip = true
+strip = "symbols"
+
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
 
 # Real delta over clippy defaults is `pedantic = warn`; group levels sit low so per-lint overrides win.
 [workspace.lints.clippy]
@@ -41,6 +109,13 @@ all = { level = "warn", priority = -2 }
 pedantic = { level = "warn", priority = -2 }
 # Stays fatal despite `all = warn`.
 correctness = { level = "deny", priority = -1 }
+# Keeps clippy.toml's disallowed methods hard errors in local runs, not just under `-D warnings`.
+disallowed_methods = "deny"
+# Nursery opt-ins (the group itself stays off): a branching-weight gate — threshold lives in
+# clippy.toml's `cognitive-complexity-threshold` — plus two duplicate/dead-logic catchers.
+cognitive_complexity = "warn"
+branches_sharing_code = "warn"
+collection_is_never_read = "warn"
 # Heuristic and over-flags; real "ignored value" safety is rustc's `unused_must_use`.
 must_use_candidate = "allow"
 missing_errors_doc = "allow"

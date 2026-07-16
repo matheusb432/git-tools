@@ -1,20 +1,20 @@
 [package]
 name = "gtl-platform"
 version = "0.1.0"
-edition = "2024"
-publish = false
+edition.workspace = true
+publish.workspace = true
 
 [dependencies]
-anyhow = "1.0.102"
-directories = "6.0.0"
+anyhow.workspace = true
+directories.workspace = true
 
 # X11 EWMH window activation (focus over fullscreen). Runtime dlopen of libX11 —
 # no link-time X headers. Already in the tree via the desktop viewer's tao/wry.
 [target.'cfg(target_os = "linux")'.dependencies]
-x11-dl = "2.21.0"
+x11-dl.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
+tempfile.workspace = true
 
 [lints]
 workspace = true

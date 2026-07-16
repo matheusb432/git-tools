@@ -16,8 +16,8 @@ use domain::{
 use crate::ports::{
     AppStateError, AppStateStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HistoryRecord,
     HtmlRenderer, LedgerEntry, LiveViewRecord, ManagedManifest, NewRecentRenderRecord,
-    PlacedArtifact, PushLedger, RecentRenderRecord, RemoteSync, RepoProbe, RepoProbeResult,
-    SyncOutput,
+    PlacedArtifact, PushLedger, RecentRenderRecord, RemoteSync, RepoDiscovery, RepoProbe,
+    RepoProbeResult, SyncOutput,
 };
 
 /// Scripted `DiffSource`: every field is what the corresponding method returns.
@@ -453,5 +453,17 @@ impl Default for FakeRepoProbe {
 impl RepoProbe for FakeRepoProbe {
     fn probe(&self, _dir: &Path) -> anyhow::Result<RepoProbeResult> {
         Ok(self.result.clone())
+    }
+}
+
+/// Scripted `RepoDiscovery`: returns a fixed repo list regardless of root/flag.
+#[derive(Debug, Clone, Default)]
+pub struct FakeRepoDiscovery {
+    pub repos: Vec<PathBuf>,
+}
+
+impl RepoDiscovery for FakeRepoDiscovery {
+    fn find_repos(&self, _root: &Path, _include_worktrees: bool) -> anyhow::Result<Vec<PathBuf>> {
+        Ok(self.repos.clone())
     }
 }

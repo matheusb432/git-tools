@@ -9,8 +9,6 @@ use self::palette::StatusColorPalette;
 use super::{
     ManagedExit, ManagedOptions, ManagedRepo, ManagedRun, git_capture::git_capture, working_tree,
 };
-use crate::commands::discover::{discover_git_repos, repo_label};
-
 mod palette;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -58,7 +56,7 @@ pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<St
         Err(error) => return status_fail(format!("status: {error:#}")),
     };
     let repo = ManagedRepo {
-        name: crate::commands::repo_name(&top),
+        name: application::discovery::rules::repo_name(&top),
         path: top,
         remote: String::new(),
     };
@@ -78,23 +76,29 @@ pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun
             ));
         }
     };
-    let repos = match discover_git_repos(&root, false) {
-        Ok(repos) => repos,
+    let discovered = match application::discovery::find_repos::execute(
+        application::discovery::find_repos::DiscoverRepos {
+            root: root.clone(),
+            include_worktrees: false,
+        },
+        &infra::repo_discovery::WalkdirRepoDiscovery,
+    ) {
+        Ok(discovered) => discovered,
         Err(error) => return status_fail(format!("status: {error:#}")),
     };
-    if repos.is_empty() {
+    if discovered.is_empty() {
         return status_fail(format!(
             "status: no git repos found under {}",
             root.display()
         ));
     }
 
-    let results = repos
-        .iter()
-        .map(|path| {
+    let results = discovered
+        .into_iter()
+        .map(|repo| {
             status_one(&ManagedRepo {
-                name: repo_label(&root, path),
-                path: path.clone(),
+                name: repo.label,
+                path: repo.path,
                 remote: String::new(),
             })
         })

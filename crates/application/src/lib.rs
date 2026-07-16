@@ -6,6 +6,7 @@
 //! This crate depends only on `domain` and `cqrsy`.
 
 pub mod diffs;
+pub mod discovery;
 pub mod history;
 pub mod live_views;
 pub mod managed;

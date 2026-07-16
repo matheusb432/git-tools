@@ -3,6 +3,7 @@
 //! docs/planning/specs/2026-07-02-pragmatic-backend-architecture.md).
 
 pub mod diffs;
+pub mod discovery;
 pub mod live_views;
 pub mod managed;
 pub mod viewer;

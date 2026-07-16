@@ -2,3 +2,6 @@
 
 # Internal binaries, never published libraries: let Clippy suggest better signatures freely.
 avoid-breaking-exported-api = false
+
+# Pairs with the fleet `cognitive_complexity` opt-in; matches the fleet threshold (clippy default is 25).
+cognitive-complexity-threshold = 30

@@ -15,7 +15,6 @@ use crate::{
     client::Backend,
     commands::{
         diff::{DiffOutcome, take_raw_path},
-        discover::{discover_git_repos, repo_label},
         managed::{self, ManagedOptions},
     },
     git, recipe, viewer,
@@ -86,18 +85,24 @@ pub(crate) struct RepoTop {
     pub label: String,
 }
 
-/// Walk `root` for git repos (see [`discover_git_repos`]) and resolve each to its
-/// canonical top-level path + a label relative to `root`. No unpushed filtering —
+/// Discover git repos under `root` (via the `discovery` slice) and resolve each to
+/// its canonical top-level path + a label relative to `root`. No unpushed filtering —
 /// `diff -r` renders every discovered repo regardless of whether it has unpushed work.
 pub(crate) fn scan_repo_tops(root: &Path, include_worktrees: bool) -> anyhow::Result<Vec<RepoTop>> {
-    discover_git_repos(root, include_worktrees)?
-        .iter()
+    let discovered = application::discovery::find_repos::execute(
+        application::discovery::find_repos::DiscoverRepos {
+            root: root.to_path_buf(),
+            include_worktrees,
+        },
+        &infra::repo_discovery::WalkdirRepoDiscovery,
+    )?;
+    discovered
+        .into_iter()
         .map(|repo| {
-            let top = git::top_level(repo)?;
-            let label = repo_label(root, Path::new(&top));
+            let top = git::top_level(&repo.path)?;
             Ok(RepoTop {
                 top: PathBuf::from(top),
-                label,
+                label: repo.label,
             })
         })
         .collect()
