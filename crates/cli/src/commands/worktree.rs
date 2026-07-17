@@ -1,4 +1,4 @@
-use application::worktrees::Worktree;
+use domain::worktrees::Worktree;
 
 pub(crate) fn render_list(worktrees: &[Worktree]) -> String {
     let rows = worktrees

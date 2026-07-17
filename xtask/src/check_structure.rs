@@ -16,10 +16,11 @@
 //!    `events.rs` alongside the feature's handler — never a subdirectory.
 //! 3. **No `services/` directory.** The convention is per-feature `service.rs` files plus a single
 //!    `application/src/shared/` module; any directory named `services` anywhere in a crate's `src`
-//!    tree is a violation.
+//!    tree is a violation. The layout walk rejects symlinks instead of following or silently
+//!    skipping source trees that could hide violations of rules 1-3.
 //! 4. **CLI operations are thin.** Production CLI Rust may compose application operations and pass
 //!    the concrete Git adapter, but may not reference or invoke the application Git port, use the
-//!    retired CLI Git shim, or launch Git directly.
+//!    retired CLI Git shim, launch Git directly, or hide source behind symlinks.
 
 use std::path::Path;
 
@@ -71,6 +72,8 @@ const DEPTH_EXEMPT_CRATES: [&str; 1] = ["cli"];
 
 /// Every production CLI Rust source belongs behind the application Git-operation boundary.
 const CLI_SOURCE_DIR: &str = "crates/cli/src";
+const CLI_SOURCE_SYMLINK_DESCRIPTION: &str = "production CLI source tree may not contain symlinks";
+const SOURCE_LAYOUT_SYMLINK_DESCRIPTION: &str = "source layout tree may not contain symlinks";
 
 /// Collect every violation under `root/{crates,shared}/*/src`.
 fn collect_violations(root: &Path) -> Result<Vec<String>> {
@@ -88,6 +91,9 @@ fn collect_cli_source_violations(root: &Path, violations: &mut Vec<String>) -> R
     match std::fs::symlink_metadata(&source_dir) {
         Ok(metadata) if metadata.file_type().is_dir() => {
             walk_cli_sources(&source_dir, violations)?;
+        }
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            collect_cli_symlink_violation(&source_dir, violations);
         }
         Ok(_) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -110,7 +116,9 @@ fn walk_cli_sources(current: &Path, violations: &mut Vec<String>) -> Result<()> 
             .file_type()
             .with_context(|| format!("reading file type for {}", entry.path().display()))?;
         let path = entry.path();
-        if file_type.is_dir() {
+        if file_type.is_symlink() {
+            collect_cli_symlink_violation(&path, violations);
+        } else if file_type.is_dir() {
             walk_cli_sources(&path, violations)?;
         } else if file_type.is_file() && path.extension().is_some_and(|extension| extension == "rs")
         {
@@ -119,6 +127,20 @@ fn walk_cli_sources(current: &Path, violations: &mut Vec<String>) -> Result<()> 
     }
 
     Ok(())
+}
+
+fn collect_cli_symlink_violation(path: &Path, violations: &mut Vec<String>) {
+    violations.push(format!(
+        "[rule 4: CLI operations use application slices] {} — {CLI_SOURCE_SYMLINK_DESCRIPTION}",
+        path.display()
+    ));
+}
+
+fn collect_source_layout_symlink_violation(path: &Path, violations: &mut Vec<String>) {
+    violations.push(format!(
+        "[rules 1-3: source layout is bounded] {} — {SOURCE_LAYOUT_SYMLINK_DESCRIPTION}",
+        path.display()
+    ));
 }
 
 /// Collects forbidden Git boundary markers from one production CLI source file.
@@ -140,8 +162,17 @@ fn collect_cli_file_violations(path: &Path, violations: &mut Vec<String>) -> Res
 /// Collect violations under one member directory (e.g. `crates/` or `shared/`). A missing directory
 /// is not an error — it simply contributes nothing.
 fn collect_member_violations(member_dir: &Path, violations: &mut Vec<String>) -> Result<()> {
-    if !member_dir.is_dir() {
-        return Ok(());
+    match std::fs::symlink_metadata(member_dir) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            collect_source_layout_symlink_violation(member_dir, violations);
+            return Ok(());
+        }
+        Ok(metadata) if !metadata.file_type().is_dir() => return Ok(()),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", member_dir.display()));
+        }
     }
 
     let mut entries: Vec<_> = std::fs::read_dir(member_dir)
@@ -152,13 +183,38 @@ fn collect_member_violations(member_dir: &Path, violations: &mut Vec<String>) ->
     entries.sort_by_key(std::fs::DirEntry::file_name);
 
     for entry in entries {
-        let crate_name = entry.file_name();
-        let skip_depth_rule = DEPTH_EXEMPT_CRATES.iter().any(|e| crate_name == *e);
-        let src = entry.path().join("src");
-        if !src.is_dir() {
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("reading file type for {}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            collect_source_layout_symlink_violation(&entry.path(), violations);
             continue;
         }
-        walk_dirs(&src, 0, skip_depth_rule, violations)?;
+        if !file_type.is_dir() {
+            continue;
+        }
+        let crate_name = entry.file_name();
+        let skip_depth_rule = DEPTH_EXEMPT_CRATES.iter().any(|e| crate_name == *e);
+        let cli_source =
+            member_dir.file_name().is_some_and(|name| name == "crates") && crate_name == "cli";
+        let src = entry.path().join("src");
+        let src_metadata = match std::fs::symlink_metadata(&src) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error).with_context(|| format!("reading {}", src.display()));
+            }
+        };
+        if src_metadata.file_type().is_symlink() {
+            if !cli_source {
+                collect_source_layout_symlink_violation(&src, violations);
+            }
+            continue;
+        }
+        if !src_metadata.file_type().is_dir() {
+            continue;
+        }
+        walk_dirs(&src, 0, skip_depth_rule, !cli_source, violations)?;
     }
 
     Ok(())
@@ -174,6 +230,7 @@ fn walk_dirs(
     current: &Path,
     depth: usize,
     skip_depth_rule: bool,
+    collect_source_symlinks: bool,
     violations: &mut Vec<String>,
 ) -> Result<()> {
     let mut entries: Vec<_> = std::fs::read_dir(current)
@@ -183,10 +240,19 @@ fn walk_dirs(
     entries.sort_by_key(std::fs::DirEntry::file_name);
 
     for entry in entries {
-        let path = entry.path();
-        if !path.is_dir() {
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("reading file type for {}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            if collect_source_symlinks {
+                collect_source_layout_symlink_violation(&entry.path(), violations);
+            }
             continue;
         }
+        if !file_type.is_dir() {
+            continue;
+        }
+        let path = entry.path();
 
         let child_depth = depth + 1;
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -217,7 +283,13 @@ fn walk_dirs(
             ));
         }
 
-        walk_dirs(&path, child_depth, skip_depth_rule, violations)?;
+        walk_dirs(
+            &path,
+            child_depth,
+            skip_depth_rule,
+            collect_source_symlinks,
+            violations,
+        )?;
     }
 
     Ok(())
@@ -281,6 +353,88 @@ mod tests {
         seed(dir.path(), "crates/app/src/services/foo.rs");
         let v = collect_violations(dir.path()).unwrap();
         assert!(v.iter().any(|s| s.contains("rule 3")), "violations: {v:?}");
+    }
+
+    #[test]
+    fn linked_non_cli_services_tree_cannot_bypass_layout_rules() {
+        let dir = TempDir::new().unwrap();
+        let external = dir.path().join("external");
+        seed(&external, "services/forbidden.rs");
+        let source = dir.path().join("crates/app/src");
+        fs::create_dir_all(&source).unwrap();
+        let linked = source.join("linked");
+        gtl_platform::symlink_dir(&external, &linked).unwrap();
+
+        let violations = collect_violations(dir.path()).unwrap();
+
+        assert_eq!(
+            violations,
+            vec![format!(
+                "[rules 1-3: source layout is bounded] {} — source layout tree may not contain symlinks",
+                linked.display()
+            )]
+        );
+    }
+
+    #[test]
+    fn linked_non_cli_source_root_is_a_layout_violation() {
+        let dir = TempDir::new().unwrap();
+        let external = dir.path().join("external");
+        seed(&external, "services/forbidden.rs");
+        let member = dir.path().join("crates/app");
+        fs::create_dir_all(&member).unwrap();
+        let source = member.join("src");
+        gtl_platform::symlink_dir(&external, &source).unwrap();
+
+        let violations = collect_violations(dir.path()).unwrap();
+
+        assert_eq!(
+            violations,
+            vec![format!(
+                "[rules 1-3: source layout is bounded] {} — source layout tree may not contain symlinks",
+                source.display()
+            )]
+        );
+    }
+
+    #[test]
+    fn linked_workspace_member_is_a_layout_violation() {
+        let dir = TempDir::new().unwrap();
+        let external = dir.path().join("external");
+        seed(&external, "src/services/forbidden.rs");
+        let members = dir.path().join("crates");
+        fs::create_dir_all(&members).unwrap();
+        let member = members.join("app");
+        gtl_platform::symlink_dir(&external, &member).unwrap();
+
+        let violations = collect_violations(dir.path()).unwrap();
+
+        assert_eq!(
+            violations,
+            vec![format!(
+                "[rules 1-3: source layout is bounded] {} — source layout tree may not contain symlinks",
+                member.display()
+            )]
+        );
+    }
+
+    #[test]
+    fn linked_member_bucket_is_a_layout_violation() {
+        let dir = TempDir::new().unwrap();
+        let external = dir.path().join("external");
+        seed(&external, "app/src/services/forbidden.rs");
+        let members = dir.path().join("crates");
+        gtl_platform::symlink_dir(&external, &members).unwrap();
+
+        let violations = collect_violations(dir.path()).unwrap();
+
+        assert_eq!(
+            violations,
+            vec![format!(
+                "[rules 1-3: source layout is bounded] {} — source layout tree may not contain symlinks",
+                members.display()
+            )]
+        );
     }
 
     #[test]
@@ -479,6 +633,24 @@ mod tests {
     }
 
     #[test]
+    fn cli_source_cannot_launch_git_through_a_command_alias() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/cli/src/client.rs",
+            "use std::process::Command as Process;\nfn execute() { let _ = Process::new(\"git\").status(); }\n",
+        );
+
+        let violations = rule_4_messages(dir.path());
+
+        assert_eq!(violations.len(), 1, "violations: {violations:?}");
+        assert!(
+            violations[0].contains("may not launch git directly"),
+            "violations: {violations:?}"
+        );
+    }
+
+    #[test]
     fn std_git_runner_composition_and_application_execution_are_allowed() {
         let dir = TempDir::new().unwrap();
         seed_with(
@@ -552,6 +724,42 @@ mod tests {
     }
 
     #[test]
+    fn production_after_top_level_test_module_is_still_scanned() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/cli/src/lib.rs",
+            "#[cfg(test)]\nmod tests { fn test_only() {} }\nfn execute(runner: &Runner) { runner.run(request); }\n",
+        );
+
+        let violations = rule_4_messages(dir.path());
+
+        assert_eq!(violations.len(), 1, "violations: {violations:?}");
+        assert!(
+            violations[0].contains("may not call a receiver method named run"),
+            "violations: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn macro_inner_attribute_tokens_do_not_mark_the_file_as_test_only() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/cli/src/lib.rs",
+            "swallow!(#![cfg(test)]);\nfn execute(runner: &Runner) { runner.run(request); }\n",
+        );
+
+        let violations = rule_4_messages(dir.path());
+
+        assert_eq!(violations.len(), 1, "violations: {violations:?}");
+        assert!(
+            violations[0].contains("may not call a receiver method named run"),
+            "violations: {violations:?}"
+        );
+    }
+
+    #[test]
     fn nested_file_cfg_test_attribute_does_not_hide_later_production_code() {
         let dir = TempDir::new().unwrap();
         seed_with(
@@ -601,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn cli_source_walk_does_not_follow_directory_symlinks() {
+    fn cli_source_directory_symlink_is_a_deterministic_rule_4_violation() {
         let dir = TempDir::new().unwrap();
         let external = dir.path().join("external");
         seed_with(
@@ -615,6 +823,73 @@ mod tests {
 
         let violations = rule_4_messages(dir.path());
 
-        assert!(violations.is_empty(), "violations: {violations:?}");
+        assert_eq!(
+            violations,
+            vec![format!(
+                "[rule 4: CLI operations use application slices] {} — production CLI source tree may not contain symlinks",
+                cli_source.join("linked").display()
+            )]
+        );
+    }
+
+    #[test]
+    fn layout_walk_does_not_enter_cli_source_symlinks_before_rule_4() {
+        let dir = TempDir::new().unwrap();
+        let external = dir.path().join("external");
+        seed(&external, "services/forbidden.rs");
+        let cli_source = dir.path().join("crates/cli/src");
+        fs::create_dir_all(&cli_source).unwrap();
+        let linked = cli_source.join("linked");
+        gtl_platform::symlink_dir(&external, &linked).unwrap();
+
+        let violations = collect_violations(dir.path()).unwrap();
+
+        assert_eq!(
+            violations,
+            vec![format!(
+                "[rule 4: CLI operations use application slices] {} — production CLI source tree may not contain symlinks",
+                linked.display()
+            )]
+        );
+    }
+
+    #[test]
+    fn cyclic_cli_source_symlink_is_reported_without_recursing() {
+        let dir = TempDir::new().unwrap();
+        let cli_source = dir.path().join("crates/cli/src");
+        fs::create_dir_all(&cli_source).unwrap();
+        let linked = cli_source.join("loop");
+        gtl_platform::symlink_dir(Path::new("."), &linked).unwrap();
+
+        let violations = collect_violations(dir.path()).unwrap();
+
+        assert_eq!(
+            violations,
+            vec![format!(
+                "[rule 4: CLI operations use application slices] {} — production CLI source tree may not contain symlinks",
+                linked.display()
+            )]
+        );
+    }
+
+    #[test]
+    fn cli_source_root_symlink_is_a_deterministic_rule_4_violation() {
+        let dir = TempDir::new().unwrap();
+        let external = dir.path().join("external");
+        seed_with(&external, "lib.rs", "fn render() {}\n");
+        let cli_crate = dir.path().join("crates/cli");
+        fs::create_dir_all(&cli_crate).unwrap();
+        let cli_source = cli_crate.join("src");
+        gtl_platform::symlink_dir(&external, &cli_source).unwrap();
+
+        let violations = rule_4_messages(dir.path());
+
+        assert_eq!(
+            violations,
+            vec![format!(
+                "[rule 4: CLI operations use application slices] {} — production CLI source tree may not contain symlinks",
+                cli_source.display()
+            )]
+        );
     }
 }

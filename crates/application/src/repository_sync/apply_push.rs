@@ -240,8 +240,10 @@ fn transport(args: &[&str], progress: PushProgress, source: anyhow::Error) -> Ap
 mod tests {
     use std::{error::Error as _, path::PathBuf};
 
+    use domain::repository::PendingChanges;
+
     use super::*;
-    use crate::{repository_sync::PendingChanges, testing::FakeGitRunner};
+    use crate::testing::FakeGitRunner;
 
     fn target() -> PushTarget {
         PushTarget {

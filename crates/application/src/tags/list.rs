@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use super::{TagList, git_command_error::GitCommandError, parse, tag::group};
+use super::{TagList, git_command_error::GitCommandError, group::group, parse};
 use crate::ports::GitRunner;
 
 /// Requests the local and origin-tracking tag state for one repository.

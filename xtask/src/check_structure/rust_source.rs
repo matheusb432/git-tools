@@ -52,17 +52,7 @@ pub(super) fn git_boundary_violations(source: &str) -> Vec<GitBoundaryViolation>
         ),
         (
             GitBoundaryViolation::DirectGitLaunch,
-            contains_sequence(
-                &tokens,
-                &[
-                    ExpectedToken::Identifier("Command"),
-                    ExpectedToken::Punctuation(':'),
-                    ExpectedToken::Punctuation(':'),
-                    ExpectedToken::Identifier("new"),
-                    ExpectedToken::Punctuation('('),
-                    ExpectedToken::StringLiteral("git"),
-                ],
-            ),
+            contains_direct_git_launch(&tokens),
         ),
     ];
 
@@ -103,6 +93,35 @@ fn contains_identifier(tokens: &[Token<'_>], expected: &str) -> bool {
         .any(|token| matches!(token, Token::Identifier(actual) if *actual == expected))
 }
 
+fn contains_direct_git_launch(tokens: &[Token<'_>]) -> bool {
+    contains_named_git_launch(tokens, "Command")
+        || tokens.windows(3).any(|window| {
+            let [
+                Token::Identifier("Command"),
+                Token::Identifier("as"),
+                Token::Identifier(alias),
+            ] = window
+            else {
+                return false;
+            };
+            contains_named_git_launch(tokens, alias)
+        })
+}
+
+fn contains_named_git_launch(tokens: &[Token<'_>], receiver: &str) -> bool {
+    contains_sequence(
+        tokens,
+        &[
+            ExpectedToken::Identifier(receiver),
+            ExpectedToken::Punctuation(':'),
+            ExpectedToken::Punctuation(':'),
+            ExpectedToken::Identifier("new"),
+            ExpectedToken::Punctuation('('),
+            ExpectedToken::StringLiteral("git"),
+        ],
+    )
+}
+
 fn contains_sequence(tokens: &[Token<'_>], expected: &[ExpectedToken<'_>]) -> bool {
     tokens.windows(expected.len()).any(|window| {
         expected
@@ -118,24 +137,15 @@ fn production_tokens(source: &str) -> Vec<Token<'_>> {
         return Vec::new();
     }
 
-    let mut brace_depth = 0usize;
-    for index in 0..tokens.len() {
-        if brace_depth == 0 && starts_test_module(&tokens[index..]) {
-            return tokens[..index].to_vec();
-        }
-
-        match tokens[index] {
-            Token::Punctuation('{') => brace_depth += 1,
-            Token::Punctuation('}') => brace_depth = brace_depth.saturating_sub(1),
-            _ => {}
-        }
+    if let Some(suffix_start) = test_module_suffix_start(&tokens) {
+        return tokens[..suffix_start].to_vec();
     }
 
     tokens
 }
 
 fn has_file_cfg_test(tokens: &[Token<'_>]) -> bool {
-    let expected = [
+    let cfg_test = [
         ExpectedToken::Punctuation('#'),
         ExpectedToken::Punctuation('!'),
         ExpectedToken::Punctuation('['),
@@ -145,24 +155,61 @@ fn has_file_cfg_test(tokens: &[Token<'_>]) -> bool {
         ExpectedToken::Punctuation(')'),
         ExpectedToken::Punctuation(']'),
     ];
-    let mut brace_depth = 0usize;
+    let mut index = 0;
 
-    for index in 0..tokens.len() {
-        if brace_depth == 0 && starts_sequence(&tokens[index..], &expected) {
+    while starts_sequence(
+        &tokens[index..],
+        &[
+            ExpectedToken::Punctuation('#'),
+            ExpectedToken::Punctuation('!'),
+            ExpectedToken::Punctuation('['),
+        ],
+    ) {
+        let Some(attribute_end) = delimiter_end(tokens, index + 2) else {
+            return false;
+        };
+        if attribute_end == index + cfg_test.len()
+            && starts_sequence(&tokens[index..attribute_end], &cfg_test)
+        {
             return true;
         }
-        match tokens[index] {
-            Token::Punctuation('{') => brace_depth += 1,
-            Token::Punctuation('}') => brace_depth = brace_depth.saturating_sub(1),
-            _ => {}
-        }
+        index = attribute_end;
     }
 
     false
 }
 
+fn test_module_suffix_start(tokens: &[Token<'_>]) -> Option<usize> {
+    let mut delimiters = Vec::new();
+
+    for index in 0..tokens.len() {
+        if delimiters.is_empty() && starts_test_module(&tokens[index..]) {
+            let body_start = index + test_module_prefix().len();
+            let suffix_end = match tokens[body_start] {
+                Token::Punctuation(';') => Some(body_start + 1),
+                Token::Punctuation('{') => delimiter_end(tokens, body_start),
+                _ => None,
+            };
+            if suffix_end == Some(tokens.len()) {
+                return Some(index);
+            }
+        }
+        update_delimiters(&mut delimiters, tokens[index]);
+    }
+
+    None
+}
+
 fn starts_test_module(tokens: &[Token<'_>]) -> bool {
-    let expected = [
+    let expected = test_module_prefix();
+
+    tokens.len() > expected.len()
+        && starts_sequence(tokens, &expected)
+        && matches!(tokens[expected.len()], Token::Punctuation('{' | ';'))
+}
+
+fn test_module_prefix() -> [ExpectedToken<'static>; 9] {
+    [
         ExpectedToken::Punctuation('#'),
         ExpectedToken::Punctuation('['),
         ExpectedToken::Identifier("cfg"),
@@ -172,11 +219,7 @@ fn starts_test_module(tokens: &[Token<'_>]) -> bool {
         ExpectedToken::Punctuation(']'),
         ExpectedToken::Identifier("mod"),
         ExpectedToken::Identifier("tests"),
-    ];
-
-    tokens.len() > expected.len()
-        && starts_sequence(tokens, &expected)
-        && matches!(tokens[expected.len()], Token::Punctuation('{' | ';'))
+    ]
 }
 
 fn starts_sequence(tokens: &[Token<'_>], expected: &[ExpectedToken<'_>]) -> bool {
@@ -185,6 +228,38 @@ fn starts_sequence(tokens: &[Token<'_>], expected: &[ExpectedToken<'_>]) -> bool
             .iter()
             .zip(tokens)
             .all(|(expected, actual)| expected.matches(*actual))
+}
+
+fn delimiter_end(tokens: &[Token<'_>], open_index: usize) -> Option<usize> {
+    let mut delimiters = Vec::new();
+    for (index, token) in tokens.iter().copied().enumerate().skip(open_index) {
+        if !update_delimiters(&mut delimiters, token) {
+            return None;
+        }
+        if delimiters.is_empty() {
+            return Some(index + 1);
+        }
+    }
+    None
+}
+
+fn update_delimiters(delimiters: &mut Vec<char>, token: Token<'_>) -> bool {
+    match token {
+        Token::Punctuation(open @ ('(' | '[' | '{')) => delimiters.push(open),
+        Token::Punctuation(close @ (')' | ']' | '}')) => {
+            let expected = match close {
+                ')' => '(',
+                ']' => '[',
+                '}' => '{',
+                _ => unreachable!(),
+            };
+            if delimiters.pop() != Some(expected) {
+                return false;
+            }
+        }
+        _ => {}
+    }
+    true
 }
 
 fn tokenize(source: &str) -> Vec<Token<'_>> {

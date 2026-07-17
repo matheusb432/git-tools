@@ -1,8 +1,7 @@
 use std::fmt::Write as _;
 
-use application::repository_sync::{
-    PendingChanges, plan_commit::CommitTarget, plan_push::PushTarget,
-};
+use application::repository_sync::{plan_commit::CommitTarget, plan_push::PushTarget};
+use domain::repository::PendingChanges;
 
 /// Builds the review block printed before the current-repo stage/commit/push flow runs.
 /// Spells out every side effect so the user confirms an action, not just a repository.

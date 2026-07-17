@@ -133,8 +133,10 @@ fn transport(args: &[&str], progress: CommitProgress, source: anyhow::Error) -> 
 mod tests {
     use std::error::Error as _;
 
+    use domain::repository::PendingChanges;
+
     use super::*;
-    use crate::{repository_sync::PendingChanges, testing::FakeGitRunner};
+    use crate::testing::FakeGitRunner;
 
     fn target() -> CommitTarget {
         CommitTarget {

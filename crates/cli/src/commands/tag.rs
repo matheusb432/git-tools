@@ -1,4 +1,5 @@
-use application::tags::{Tag, TagGroup, TagList, TagState};
+use application::tags::{TagGroup, TagList};
+use domain::tags::{Tag, TagState};
 
 pub fn render_list(list: &TagList, commits: bool) -> String {
     let groups = match list {

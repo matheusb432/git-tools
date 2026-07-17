@@ -1,7 +1,7 @@
 //! git-tools - CLI entry point: clap parsing + a machine-readable exit-code contract.
 
 use application::{
-    managed::push_workflow::{self, ManagedPush, ManagedPushDirective, ManagedPushStepStatus},
+    managed::plan_push::{self, PlanPush, PushPlan},
     squash_local::{self, SquashLocal, SquashResult, SquashStatus},
 };
 use infra::git_runner::StdGitRunner;
@@ -353,51 +353,35 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
     let repos_file = repos_file.map(Into::into);
     let home_dir = home_dir.map(Into::into);
     let interactive = confirm::stdin_is_terminal();
-    let mut directive = push_workflow::execute(ManagedPush { message, dry });
-    let mut exit = ExitCode::Ok;
-
-    loop {
-        directive = match directive {
-            ManagedPushDirective::Commit(commit) => {
-                let run = commands::managed::run_commit_all(&ManagedOptions {
-                    repos_file: repos_file.clone(),
-                    home_dir: home_dir.clone(),
-                    dry: commit.dry,
-                    json,
-                    color: false,
-                    message_for_all: Some(commit.message.clone()),
-                    interactive,
-                });
-                let status = managed_push_step_status(run.exit);
-                exit = managed_exit(&run);
-                commit.complete(status)
+    let dry = match plan_push::execute(PlanPush { message, dry }) {
+        PushPlan::PushOnly { dry } => dry,
+        PushPlan::CommitThenPush { message, dry } => {
+            let run = commands::managed::run_commit_all(&ManagedOptions {
+                repos_file: repos_file.clone(),
+                home_dir: home_dir.clone(),
+                dry,
+                json,
+                color: false,
+                message_for_all: Some(message),
+                interactive,
+            });
+            let exit = managed_exit(&run);
+            if exit != ExitCode::Ok {
+                return exit;
             }
-            ManagedPushDirective::Push(push) => {
-                let run = commands::managed::run_push_all(&ManagedOptions {
-                    repos_file: repos_file.clone(),
-                    home_dir: home_dir.clone(),
-                    dry: push.dry,
-                    json,
-                    color: false,
-                    message_for_all: None,
-                    interactive,
-                });
-                let status = managed_push_step_status(run.exit);
-                exit = managed_exit(&run);
-                push.complete(status)
-            }
-            ManagedPushDirective::Complete(_) => return exit,
-        };
-    }
-}
-
-const fn managed_push_step_status(exit: ManagedExit) -> ManagedPushStepStatus {
-    match exit {
-        ManagedExit::Clean => ManagedPushStepStatus::Clean,
-        ManagedExit::Warn | ManagedExit::Fail | ManagedExit::Usage => {
-            ManagedPushStepStatus::NonClean
+            dry
         }
-    }
+    };
+
+    managed_exit(&commands::managed::run_push_all(&ManagedOptions {
+        repos_file,
+        home_dir,
+        dry,
+        json,
+        color: false,
+        message_for_all: None,
+        interactive,
+    }))
 }
 
 fn managed_diff_options(repos_file: Option<String>, home_dir: Option<String>) -> ManagedOptions {

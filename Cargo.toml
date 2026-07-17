@@ -103,19 +103,14 @@ inherits = "release"
 debug = "line-tables-only"
 strip = "none"
 
-# Real delta over clippy defaults is `pedantic = warn`; group levels sit low so per-lint overrides win.
+# Avoid tweaking, prefer fixing the lints.
 [workspace.lints.clippy]
 all = { level = "warn", priority = -2 }
 pedantic = { level = "warn", priority = -2 }
-# Stays fatal despite `all = warn`.
 correctness = { level = "deny", priority = -1 }
-# Keeps clippy.toml's disallowed methods hard errors in local runs, not just under `-D warnings`.
 disallowed_methods = "deny"
-# Nursery opt-ins (the group itself stays off): a branching-weight gate — threshold lives in
-# clippy.toml's `cognitive-complexity-threshold` — plus two duplicate/dead-logic catchers.
 cognitive_complexity = "warn"
 branches_sharing_code = "warn"
 collection_is_never_read = "warn"
-# Heuristic and over-flags; real "ignored value" safety is rustc's `unused_must_use`.
 must_use_candidate = "allow"
 missing_errors_doc = "allow"

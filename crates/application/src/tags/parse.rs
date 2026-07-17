@@ -1,9 +1,8 @@
 use std::{collections::BTreeMap, path::Path};
 
-use super::{
-    git_command_error::GitCommandError,
-    tag::{Tag, TagState},
-};
+use domain::tags::Tag;
+
+use super::git_command_error::GitCommandError;
 use crate::ports::GitRunner;
 
 pub(super) const LOCAL_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=2)\t%(contents:lines=1)\t%(creatordate:unix)";
@@ -37,7 +36,7 @@ impl TagRefs {
                 .get(tag.name())
                 .is_some_and(|remote_tag| remote_tag.object() == tag.object())
             {
-                tag.state = TagState::Remote;
+                tag.mark_remote();
             }
         }
         self.local.into_values().collect()
@@ -119,27 +118,28 @@ pub(super) fn parse_refs(stdout: &str) -> BTreeMap<String, Tag> {
             let message = annotated
                 .then(|| message.trim().to_string())
                 .filter(|message| !message.is_empty());
-            Some((
-                name.clone(),
-                Tag {
+            let tag = if annotated {
+                Tag::annotated(
+                    name.clone(),
                     object,
                     commit,
                     commit_short,
-                    name,
                     created_at,
                     message,
-                    annotated,
-                    state: TagState::Local,
-                },
-            ))
+                )
+            } else {
+                Tag::lightweight(name.clone(), commit, commit_short, created_at)
+            };
+            Some((name, tag))
         })
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
+    use domain::tags::Tag;
+
     use super::{TagRefs, parse_refs};
-    use crate::tags::tag::{Tag, TagState};
 
     #[test]
     fn parses_annotated_and_lightweight_refs_without_borrowing_commit_messages() {
@@ -150,29 +150,23 @@ mod tests {
 
         assert_eq!(
             refs.get("v1.0.0"),
-            Some(&Tag {
-                object: "tag-object".into(),
-                commit: "commit-a".into(),
-                commit_short: "commit".into(),
-                name: "v1.0.0".into(),
-                created_at: Some(100),
-                message: Some("release one".into()),
-                annotated: true,
-                state: TagState::Local,
-            })
+            Some(&Tag::annotated(
+                "v1.0.0".into(),
+                "tag-object".into(),
+                "commit-a".into(),
+                "commit".into(),
+                Some(100),
+                Some("release one".into()),
+            ))
         );
         assert_eq!(
             refs.get("stable"),
-            Some(&Tag {
-                object: "commit-b".into(),
-                commit: "commit-b".into(),
-                commit_short: "commit-".into(),
-                name: "stable".into(),
-                created_at: Some(110),
-                message: None,
-                annotated: false,
-                state: TagState::Local,
-            })
+            Some(&Tag::lightweight(
+                "stable".into(),
+                "commit-b".into(),
+                "commit-".into(),
+                Some(110),
+            ))
         );
     }
 

@@ -1,62 +1,8 @@
+//! Pure grouping and ordering of local tag values.
+
 use std::{cmp::Ordering, collections::BTreeMap};
 
-/// Identifies whether a local tag object is known by the origin tracking refs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TagState {
-    /// The tag object is absent from origin's local tracking refs.
-    Local,
-    /// Origin's local tracking ref points to the same tag object.
-    Remote,
-}
-
-/// Describes one local tag and the commit it resolves to.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Tag {
-    pub(super) object: String,
-    pub(super) commit: String,
-    pub(super) commit_short: String,
-    pub(super) name: String,
-    pub(super) created_at: Option<i64>,
-    pub(super) message: Option<String>,
-    pub(super) annotated: bool,
-    pub(super) state: TagState,
-}
-
-impl Tag {
-    /// Returns the full object identifier stored in the tag ref.
-    pub(super) fn object(&self) -> &str {
-        &self.object
-    }
-
-    /// Returns the full commit identifier the tag resolves to.
-    pub(super) fn commit(&self) -> &str {
-        &self.commit
-    }
-
-    /// Returns the abbreviated commit identifier used for presentation.
-    pub fn commit_short(&self) -> &str {
-        &self.commit_short
-    }
-
-    /// Returns the local tag name without the `refs/tags/` prefix.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Returns the first line of an annotated tag message.
-    pub fn message(&self) -> Option<&str> {
-        self.message.as_deref()
-    }
-
-    /// Returns whether the tag is local-only or known by origin.
-    pub fn state(&self) -> TagState {
-        self.state
-    }
-
-    fn is_annotated(&self) -> bool {
-        self.annotated
-    }
-}
+use domain::tags::Tag;
 
 /// Groups tags that resolve to the same commit for deterministic presentation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,9 +53,12 @@ pub(super) fn group(tags: Vec<Tag>) -> Vec<TagGroup> {
     let mut commit_order = Vec::new();
     for tag in tags {
         if !by_commit.contains_key(tag.commit()) {
-            commit_order.push(tag.commit.clone());
+            commit_order.push(tag.commit().to_string());
         }
-        by_commit.entry(tag.commit.clone()).or_default().push(tag);
+        by_commit
+            .entry(tag.commit().to_string())
+            .or_default()
+            .push(tag);
     }
 
     let mut groups = commit_order
@@ -144,14 +93,16 @@ fn classify(mut tags: Vec<Tag>) -> TagGroup {
 }
 
 fn compare_tags(left: &Tag, right: &Tag) -> Ordering {
-    left.created_at
-        .cmp(&right.created_at)
-        .then_with(|| left.name.cmp(&right.name))
+    left.created_at()
+        .cmp(&right.created_at())
+        .then_with(|| left.name().cmp(right.name()))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Tag, TagGroup, TagState, group};
+    use domain::tags::Tag;
+
+    use super::{TagGroup, group};
 
     fn annotated_tag(
         name: &str,
@@ -160,29 +111,18 @@ mod tests {
         created_at: i64,
         message: &str,
     ) -> Tag {
-        Tag {
-            object: object.into(),
-            commit: commit.into(),
-            commit_short: commit.into(),
-            name: name.into(),
-            created_at: Some(created_at),
-            message: Some(message.into()),
-            annotated: true,
-            state: TagState::Local,
-        }
+        Tag::annotated(
+            name.into(),
+            object.into(),
+            commit.into(),
+            commit.into(),
+            Some(created_at),
+            Some(message.into()),
+        )
     }
 
     fn lightweight_tag(name: &str, commit: &str, created_at: i64) -> Tag {
-        Tag {
-            object: commit.into(),
-            commit: commit.into(),
-            commit_short: commit.into(),
-            name: name.into(),
-            created_at: Some(created_at),
-            message: None,
-            annotated: false,
-            state: TagState::Local,
-        }
+        Tag::lightweight(name.into(), commit.into(), commit.into(), Some(created_at))
     }
 
     #[test]
@@ -222,8 +162,14 @@ mod tests {
 
     #[test]
     fn annotated_tag_with_an_empty_subject_remains_canonical() {
-        let mut canonical = annotated_tag("v1.0.0", "tag-object", "commit-a", 100, "");
-        canonical.message = None;
+        let canonical = Tag::annotated(
+            "v1.0.0".into(),
+            "tag-object".into(),
+            "commit-a".into(),
+            "commit-a".into(),
+            Some(100),
+            None,
+        );
         let label = lightweight_tag("stable", "commit-a", 110);
 
         assert_eq!(

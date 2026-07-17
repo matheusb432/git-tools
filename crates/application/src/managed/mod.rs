@@ -2,10 +2,10 @@
 //! selection operations over already-resolved manifest entries.
 
 pub mod commit_all;
+pub mod plan_push;
 pub mod prune_all;
 pub mod pull_all;
 pub mod push_all;
-pub mod push_workflow;
 pub mod select_unpushed;
 pub mod service;
 pub mod status_repos;

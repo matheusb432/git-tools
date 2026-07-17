@@ -1,9 +1,10 @@
-//! Pure domain model: diff view-model entities, range/mode math, target and
-//! diff-kind types. Zero I/O, zero framework dependencies (spec:
-//! docs/planning/specs/2026-07-02-pragmatic-backend-architecture.md).
+//! Pure business values and rules. Zero I/O and zero framework dependencies.
 
 pub mod diffs;
 pub mod discovery;
 pub mod live_views;
 pub mod managed;
+pub mod repository;
+pub mod tags;
 pub mod viewer;
+pub mod worktrees;

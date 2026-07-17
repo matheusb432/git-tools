@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use super::{Worktree, worktree};
+use domain::worktrees::Worktree;
+
+use super::porcelain;
 use crate::ports::GitRunner;
 
 /// Requests every worktree registered for one repository.
@@ -40,17 +42,22 @@ pub fn execute(
     git: &impl GitRunner,
 ) -> Result<WorktreeListResult, ListWorktreesError> {
     let ListWorktrees { repo } = query;
-    match worktree::load(git, &repo) {
-        Ok(worktree::WorktreeLoad::Listed(worktrees)) if worktrees.is_empty() => {
-            Ok(WorktreeListResult::Failed {
-                detail: "git returned no worktrees".into(),
-            })
-        }
-        Ok(worktree::WorktreeLoad::Listed(worktrees)) => {
-            Ok(WorktreeListResult::Listed { worktrees })
-        }
-        Ok(worktree::WorktreeLoad::Rejected(detail)) => Ok(WorktreeListResult::Failed { detail }),
-        Err(source) => Err(ListWorktreesError::Unexpected(source)),
+    let output = git
+        .run(&repo, &["worktree", "list", "--porcelain"])
+        .map_err(ListWorktreesError::Unexpected)?;
+    if output.exit_code != 0 {
+        return Ok(WorktreeListResult::Failed {
+            detail: format!("git worktree list failed (exit {})", output.exit_code),
+        });
+    }
+
+    let worktrees = porcelain::parse(&output.stdout);
+    if worktrees.is_empty() {
+        Ok(WorktreeListResult::Failed {
+            detail: "git returned no worktrees".into(),
+        })
+    } else {
+        Ok(WorktreeListResult::Listed { worktrees })
     }
 }
 

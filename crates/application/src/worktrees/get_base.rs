@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use super::worktree;
+use super::porcelain;
 use crate::ports::GitRunner;
 
 /// Requests the primary worktree path for one repository.
@@ -40,17 +40,22 @@ pub fn execute(
     git: &impl GitRunner,
 ) -> Result<WorktreeBaseResult, GetWorktreeBaseError> {
     let GetWorktreeBase { repo } = query;
-    match worktree::load(git, &repo) {
-        Ok(worktree::WorktreeLoad::Listed(worktrees)) => match worktrees.into_iter().next() {
-            Some(worktree) => Ok(WorktreeBaseResult::Found {
-                path: worktree.path,
-            }),
-            None => Ok(WorktreeBaseResult::Failed {
-                detail: "git returned no worktrees".into(),
-            }),
-        },
-        Ok(worktree::WorktreeLoad::Rejected(detail)) => Ok(WorktreeBaseResult::Failed { detail }),
-        Err(source) => Err(GetWorktreeBaseError::Unexpected(source)),
+    let output = git
+        .run(&repo, &["worktree", "list", "--porcelain"])
+        .map_err(GetWorktreeBaseError::Unexpected)?;
+    if output.exit_code != 0 {
+        return Ok(WorktreeBaseResult::Failed {
+            detail: format!("git worktree list failed (exit {})", output.exit_code),
+        });
+    }
+
+    match porcelain::parse(&output.stdout).into_iter().next() {
+        Some(worktree) => Ok(WorktreeBaseResult::Found {
+            path: worktree.path,
+        }),
+        None => Ok(WorktreeBaseResult::Failed {
+            detail: "git returned no worktrees".into(),
+        }),
     }
 }
 

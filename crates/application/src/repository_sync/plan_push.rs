@@ -2,7 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use super::PendingChanges;
+use domain::repository::PendingChanges;
+
+use super::pending_changes;
 use crate::{
     ports::GitRunner,
     shared::git::{capture_checked, command_label},
@@ -101,7 +103,7 @@ pub fn execute(query: PlanPush, git: &impl GitRunner) -> Result<PushPlan, PlanPu
         branch,
         remote,
         remote_url,
-        pending: PendingChanges::from_porcelain(&porcelain, ahead),
+        pending: pending_changes::classify(&porcelain, ahead),
     }))
 }
 

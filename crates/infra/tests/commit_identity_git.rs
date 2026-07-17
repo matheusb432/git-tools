@@ -3,12 +3,12 @@ use std::{path::Path, process::Command};
 use application::{
     managed::commit_all::{self, CommitAll},
     repository_sync::{
-        CommitProgress, PendingChanges,
+        CommitProgress,
         apply_commit::{self, ApplyCommit},
         plan_commit::CommitTarget,
     },
 };
-use domain::managed::ManagedRepo;
+use domain::{managed::ManagedRepo, repository::PendingChanges};
 use infra::git_runner::StdGitRunner;
 
 fn git(repo: &Path, args: &[&str]) -> String {

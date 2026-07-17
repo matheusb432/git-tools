@@ -2,11 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
+use domain::tags::Tag;
+
 use super::{
     git_command_error::GitCommandError,
     outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
     parse,
-    tag::Tag,
 };
 use crate::ports::GitRunner;
 
@@ -155,13 +156,12 @@ fn track(git: &impl GitRunner, repo: &Path, tag: &Tag) -> Result<(), GitCommandE
 
 #[cfg(test)]
 mod tests {
+    use domain::tags::Tag;
+
     use super::{PushTags, PushTagsError, execute, push_refspecs};
     use crate::{
-        tags::{
-            outcome::{
-                TagActionOutcome, TagActionStatus, TagOperationProgress, TagRemotePushProgress,
-            },
-            tag::{Tag, TagState},
+        tags::outcome::{
+            TagActionOutcome, TagActionStatus, TagOperationProgress, TagRemotePushProgress,
         },
         testing::FakeGitRunner,
     };
@@ -169,16 +169,8 @@ mod tests {
     const LOCAL_TAG: &str = "object-v1\t\t\tv1.0.0\t\t100\n";
 
     fn tag(name: &str) -> Tag {
-        Tag {
-            object: format!("object-{name}"),
-            commit: format!("commit-{name}"),
-            commit_short: format!("short-{name}"),
-            name: name.into(),
-            created_at: None,
-            message: None,
-            annotated: false,
-            state: TagState::Local,
-        }
+        let commit = format!("object-{name}");
+        Tag::lightweight(name.into(), commit, format!("short-{name}"), None)
     }
 
     #[test]
