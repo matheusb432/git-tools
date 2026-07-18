@@ -2,11 +2,11 @@
 
 use anyhow::Result;
 
-use crate::proc;
+use crate::process;
 
 /// Run the pure renderer benchmark with host display variables removed.
 pub fn run() -> Result<()> {
-    proc::run_with_removed_env(
+    process::run_with_removed_env(
         "desktop-render-benchmark",
         "cargo",
         &[

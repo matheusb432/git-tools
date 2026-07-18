@@ -7,7 +7,11 @@ use std::{path::Path, process::Command};
 
 use anyhow::{Result, bail};
 
-use crate::{frontend, proc};
+use super::frontend;
+use crate::{
+    process::{self, Status},
+    verb::Verb,
+};
 
 /// The Windows cross-target. `--features custom-protocol` is required for the viewer (else the
 /// exe serves devUrl and fails with `ERR_CONNECTION_REFUSED`).
@@ -64,7 +68,7 @@ fn target_installed(triple: &str) -> bool {
 pub fn run(smoke: bool, force: bool) -> Result<()> {
     // 1. repository gate; force skips only this test preflight.
     if !force {
-        proc::run("ship-tests", "just", &["test", "--all"])?;
+        process::run("ship-tests", "just", &["test", "--all"])?;
     }
 
     // 2. cross-toolchain preflight (side-effect-free decision)
@@ -74,13 +78,13 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
         for line in &report.lines {
             eprintln!("{line}");
         }
-        proc::result_fail_step("ship", "preflight");
+        process::result_fail_step(Verb::SHIP, "preflight");
         bail!("ship preflight failed");
     }
 
     // 3. frontend bundle (release only — smoke uses the committed bundle for speed)
     if !smoke && frontend::build().is_err() {
-        proc::result_fail_step("ship", "frontend");
+        process::result_fail_step(Verb::SHIP, "frontend");
         bail!("ship frontend bundle build failed");
     }
 
@@ -105,11 +109,11 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
         WIN_TARGET,
     ]);
 
-    if proc::run("cross-build-cli", "cargo", &cli_args).is_err()
-        || proc::run("cross-build-daemon", "cargo", &daemon_args).is_err()
-        || proc::run("cross-build-viewer", "cargo", &viewer_args).is_err()
+    if process::run("cross-build-cli", "cargo", &cli_args).is_err()
+        || process::run("cross-build-daemon", "cargo", &daemon_args).is_err()
+        || process::run("cross-build-viewer", "cargo", &viewer_args).is_err()
     {
-        proc::result_fail_step("ship", "cross-build");
+        process::result_fail_step(Verb::SHIP, "cross-build");
         bail!("ship cross-build failed");
     }
 
@@ -122,13 +126,13 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
                 .join(exe);
             let bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
             if bytes == 0 {
-                proc::result_fail_step("ship", "verify");
+                process::result_fail_step(Verb::SHIP, "verify");
                 bail!("ship verify: {} is missing or empty", path.display());
             }
         }
     }
 
-    proc::result("ship", "PASS");
+    process::result(Verb::SHIP, Status::Pass);
     Ok(())
 }
 

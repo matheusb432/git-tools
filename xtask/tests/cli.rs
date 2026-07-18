@@ -7,6 +7,19 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 
 #[test]
+fn forced_color_help_uses_cargo_palette() {
+    Command::cargo_bin("xtask")
+        .unwrap()
+        .arg("--help")
+        .env_remove("NO_COLOR")
+        .env("CLICOLOR_FORCE", "1")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("\u{1b}["))
+        .stdout(predicates::str::contains("36m"));
+}
+
+#[test]
 fn help_lists_the_verb_surface() {
     Command::cargo_bin("xtask")
         .unwrap()
@@ -67,6 +80,7 @@ fn test_exposes_its_flags() {
         .assert()
         .success()
         .stdout(predicates::str::contains("--verbose"))
+        .stdout(predicates::str::contains("--scope"))
         .stdout(predicates::str::contains("--e2e"))
         .stdout(predicates::str::contains("--all"));
 }
@@ -109,13 +123,16 @@ fn check_structure_is_a_known_verb() {
 }
 
 #[test]
-fn fmt_exposes_its_check_flag() {
+fn quality_verbs_are_separate_subcommands() {
     Command::cargo_bin("xtask")
         .unwrap()
-        .args(["fmt", "--help"])
+        .arg("--help")
         .assert()
         .success()
-        .stdout(predicates::str::contains("--check"));
+        .stdout(predicates::str::contains("fmt "))
+        .stdout(predicates::str::contains("fmt-check"))
+        .stdout(predicates::str::contains("lint"))
+        .stdout(predicates::str::contains("check"));
 }
 
 #[test]

@@ -1,14 +1,8 @@
-//! Shared process + output-contract helpers. Every verb spawns children and emits its
-//! `RESULT scope=… status=…` line through this module — never spawn ad hoc per verb.
+//! Shared process execution and the `RESULT scope=… status=…` output contract. Every verb spawns
+//! children and emits its result line through this module — never spawn ad hoc per verb.
 //!
-//! Cleanup-sensitive workflows capture and replay child output through
-//! [`run_captured_with_env`]. There is no separate gate binary; process spawning remains
-//! centralized here.
-//!
-//! `run_in` and `result_fail_step` are starter helpers the example verbs don't yet call;
-//! the module-level `allow(dead_code)` keeps a freshly scaffolded crate warning-clean. Drop
-//! the attribute once your real verbs use them (they will).
-#![allow(dead_code)]
+//! Command plans expressed as [`crate::task::Step`] run through [`run_step`] and [`step_succeeds`];
+//! cleanup-sensitive workflows capture and replay child output through [`run_captured_with_env`].
 
 use std::{
     ffi::OsStr,
@@ -18,6 +12,43 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+
+use crate::{task::Step, verb::Verb};
+
+/// A terminal verb outcome for the `RESULT` line: `PASS` for a read-only gate, `DONE` for a
+/// mutation.
+#[derive(Clone, Copy)]
+pub(crate) enum Status {
+    Pass,
+    Done,
+}
+
+impl std::fmt::Display for Status {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Pass => "PASS",
+            Self::Done => "DONE",
+        })
+    }
+}
+
+/// Run one command plan, tagging any non-zero exit with the step's label.
+pub(crate) fn run_step(step: &Step) -> Result<()> {
+    run(step.label(), step.program(), &argument_refs(step))
+}
+
+/// Run one command plan and report whether it succeeded (used by the read-only gate).
+pub(crate) fn step_succeeds(step: &Step) -> Result<bool> {
+    let status = Command::new(step.program())
+        .args(step.arguments())
+        .status()
+        .with_context(|| format!("spawning {}", step.label()))?;
+    Ok(status.success())
+}
+
+fn argument_refs(step: &Step) -> Vec<&str> {
+    step.arguments().iter().map(String::as_str).collect()
+}
 
 /// Run `program args…`, returning an error tagged with `label` if it exits non-zero.
 pub fn run(label: &str, program: &str, args: &[&str]) -> Result<()> {
@@ -104,12 +135,12 @@ pub fn run_captured_with_env(
 }
 
 /// Emit the parsed contract line on stdout (keep this byte-stable — consumers grep it).
-pub fn result(scope: &str, status: &str) {
+pub(crate) fn result(scope: Verb, status: Status) {
     println!("RESULT scope={scope} status={status}");
 }
 
 /// Emit a FAIL contract line naming the failed step.
-pub fn result_fail_step(scope: &str, step: &str) {
+pub(crate) fn result_fail_step(scope: Verb, step: &str) {
     println!("RESULT scope={scope} status=FAIL step={step}");
 }
 

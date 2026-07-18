@@ -14,7 +14,12 @@ use std::{
 use anyhow::{Context, Result, bail};
 use command_group::{CommandGroup, GroupChild};
 
-use crate::{build, cli::BuildTarget, proc, status_notifier::StatusNotifierWatcher};
+use super::{build, status_notifier::StatusNotifierWatcher};
+use crate::{
+    cli::BuildTarget,
+    process::{self, Status},
+    verb::Verb,
+};
 
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -252,8 +257,8 @@ impl Drop for DaemonCleanupGuard {
 pub fn run() -> Result<()> {
     let result = workflow();
     match &result {
-        Ok(()) => proc::result("desktop-e2e", "PASS"),
-        Err(_) => proc::result_fail_step("desktop-e2e", "workflow"),
+        Ok(()) => process::result(Verb::DESKTOP_E2E, Status::Pass),
+        Err(_) => process::result_fail_step(Verb::DESKTOP_E2E, "workflow"),
     }
     result
 }
@@ -264,7 +269,7 @@ fn workflow() -> Result<()> {
         "tauri-driver",
         "install tauri-driver through sample_project provisioning",
     )?;
-    proc::run_in(
+    process::run_in(
         "viewer-e2e-dependencies",
         "e2e/viewer",
         "deno",

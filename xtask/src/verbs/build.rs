@@ -4,7 +4,8 @@ use std::ffi::OsStr;
 
 use anyhow::{Result, anyhow};
 
-use crate::{cli::BuildTarget, frontend, proc};
+use super::frontend;
+use crate::{cli::BuildTarget, process};
 
 const VIEWER_BUILD_ARGS: &[&str] = &[
     "build",
@@ -29,7 +30,7 @@ pub fn run(target: BuildTarget) -> Result<()> {
 
 fn build_cli() -> Result<()> {
     frontend::build()?;
-    proc::run(
+    process::run(
         "cli-release-build",
         "cargo",
         &["build", "--release", "-p", "cli", "-p", "daemon"],
@@ -38,7 +39,7 @@ fn build_cli() -> Result<()> {
 
 fn build_viewer() -> Result<()> {
     if std::env::consts::OS == "linux" {
-        proc::run_captured_with_env(
+        process::run_captured_with_env(
             "viewer-webkit-headers",
             None,
             OsStr::new("pkg-config"),
@@ -51,7 +52,7 @@ fn build_viewer() -> Result<()> {
             )
         })?;
     }
-    proc::run("viewer-release-build", "cargo", VIEWER_BUILD_ARGS)
+    process::run("viewer-release-build", "cargo", VIEWER_BUILD_ARGS)
 }
 
 #[cfg(test)]

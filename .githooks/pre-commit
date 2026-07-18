@@ -1,2 +1,2 @@
 #!/bin/sh
-exec just fmt-check
+exec just check

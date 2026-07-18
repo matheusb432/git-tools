@@ -5,7 +5,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-use crate::frontend;
+use super::frontend;
 
 /// The committed bundle dirs and the recipe that regenerates each, paired for the stale hint.
 const BUNDLES: &[(&str, &str)] = &[("crates/infra/src/embedded/generated/", "just cli build")];

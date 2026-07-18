@@ -19,7 +19,12 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 
-use crate::{cli::InstallTarget, install, proc};
+use super::install;
+use crate::{
+    cli::InstallTarget,
+    process::{self, Status},
+    verb::Verb,
+};
 
 /// Run the bring-up. `just` is required (it drives the build); fail loud with a fix hint when
 /// absent rather than a cryptic mid-build error.
@@ -32,16 +37,16 @@ pub fn run() -> Result<()> {
     )?;
     link_skills()?;
     configure_git_hooks()?;
-    proc::run("frontend-dependencies", "deno", &["install", "--frozen"])?;
-    proc::run("build", "just", &["build"])?;
+    process::run("frontend-dependencies", "deno", &["install", "--frozen"])?;
+    process::run("build", "just", &["build"])?;
     install::run_install(InstallTarget::Both)?;
     ensure_path_on_bashrc()?;
-    proc::result("bootstrap", "PASS");
+    process::result(Verb::BOOTSTRAP, Status::Pass);
     Ok(())
 }
 
 fn configure_git_hooks() -> Result<()> {
-    proc::run(
+    process::run(
         "git-hooks",
         "git",
         &["config", "core.hooksPath", ".githooks"],

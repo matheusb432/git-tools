@@ -4,9 +4,15 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+use crate::{verb::Verb, verbs::test::TestArguments};
+
 /// xtask — this repo's embedded dev/release automation (xtask).
 #[derive(Parser)]
-#[command(version, about = "this repo's embedded dev/release automation (xtask)")]
+#[command(
+    version,
+    about = "this repo's embedded dev/release automation (xtask)",
+    styles = clap_cargo::style::CLAP_STYLING
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -20,10 +26,12 @@ pub enum Command {
     /// Full post-toolchain dev-host bring-up: link `.claude/skills`, build + install both
     /// artifacts, ensure `~/.local/bin` is on PATH. Migrates `install-git-tools.sh` + the old
     /// skills-link recipe. The toolchain install itself stays in `bootstrap.sh` — see that file.
+    #[command(name = Verb::BOOTSTRAP.as_str())]
     Bootstrap,
     /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the
     /// desktop viewer on PATH. Builds are owned by the justfile; this only copies the
     /// already-built artifacts. Migrates `scripts/install.sh`.
+    #[command(name = Verb::INSTALL.as_str())]
     Install {
         /// Which artifact(s) to place: `cli`, `viewer`, or `both` (default).
         #[arg(long, value_enum, default_value_t = InstallTarget::Both)]
@@ -31,6 +39,7 @@ pub enum Command {
     },
     /// Remove the installed CLI binary + `gtl` alias + `gtl-daemon` and the desktop viewer from
     /// PATH. Migrates `scripts/install.sh uninstall`.
+    #[command(name = Verb::UNINSTALL.as_str())]
     Uninstall {
         /// Also delete repo-local git-tools.toml / git-tools.secrets.toml (refused
         /// non-interactively unless `--force`).
@@ -41,13 +50,21 @@ pub enum Command {
         force: bool,
     },
     /// Format Rust, TOML, Markdown, and frontend sources with the repository's complete pinned
-    /// formatter matrix. `--check` also runs every linter, including full-workspace Clippy.
-    Fmt {
-        /// Verify formatting without writing (exits non-zero on drift).
-        #[arg(long)]
-        check: bool,
-    },
+    /// formatter matrix, in place.
+    #[command(name = Verb::FORMAT.as_str())]
+    Fmt,
+    /// Check formatting without modifying files; exits non-zero on drift. Formatting only — the
+    /// linters live under `lint` and the aggregate `check` gate.
+    #[command(name = Verb::FORMAT_CHECK.as_str())]
+    FmtCheck,
+    /// Run every repository linter (Oxlint, the architecture lints, and full-workspace Clippy).
+    #[command(name = Verb::LINT.as_str())]
+    Lint,
+    /// Run the complete read-only quality gate: formatting drift, then every linter.
+    #[command(name = Verb::CHECK.as_str())]
+    Check,
     /// Apply autofixable Rust and frontend lints, then run every configured formatter.
+    #[command(name = Verb::FIX.as_str())]
     Fix {
         /// Extra arguments forwarded to Cargo Clippy.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -55,43 +72,42 @@ pub enum Command {
     },
     /// Run the selected test scope, terse by default. The default excludes desktop tests;
     /// `--e2e` is hermetic viewer E2E only; `--all` is the complete repository gate.
-    Test {
-        /// Stream full test output (`cargo test -- --nocapture`) instead of the terse default.
-        #[arg(long)]
-        verbose: bool,
-        /// Run only the hermetic desktop viewer E2E suite.
-        #[arg(long, conflicts_with = "all")]
-        e2e: bool,
-        /// Run all workspace Rust tests, frontend checks, drift, and hermetic viewer E2E.
-        #[arg(long, conflicts_with = "e2e")]
-        all: bool,
-    },
+    #[command(name = Verb::TEST.as_str())]
+    Test(TestArguments),
     /// Build the CLI engine, desktop viewer, or both release artifacts.
+    #[command(name = Verb::BUILD.as_str())]
     Build {
         /// Which release artifact set to build.
         #[arg(long, value_enum, default_value_t = BuildTarget::Both)]
         target: BuildTarget,
     },
     /// Type-check and test the framework-free frontend sources.
+    #[command(name = Verb::FRONTEND_TEST.as_str())]
     FrontendTest,
     /// Run the pure viewer-render benchmark without a host display.
+    #[command(name = Verb::DESKTOP_BENCH.as_str())]
     DesktopBench,
     /// Rebuild the committed diff-preview bundle and fail if it drifts from its TypeScript
     /// sources. Requires Deno.
+    #[command(name = Verb::DRIFT_CHECK.as_str())]
     DriftCheck,
     /// Mechanical architecture lint: walks `crates/*/src` and `shared/*/src` and exits 3 on
     /// layout violations (max dir depth 2, flat feature folders, no `services/` dir).
+    #[command(name = Verb::CHECK_STRUCTURE.as_str())]
     CheckStructure,
     /// Dependency-direction lint: exits 3 when `shared/*` depends on app crates or a core
     /// crate (`domain`/`application`/`contracts`) depends on outer crates/frameworks.
+    #[command(name = Verb::CHECK_DEPS.as_str())]
     CheckDeps,
     /// Render the gtl-viewer icon assets (`crates/desktop/icons/icon.{png,ico}`) from code.
     /// Ports the retired Python generator; the multi-res `.ico` is required by tauri-build on
     /// Windows.
+    #[command(name = Verb::GEN_ICON.as_str())]
     GenIcon,
     /// Cross-build the Win11 shippables (CLI + viewer + gtl-daemon) from this Linux host via
     /// cargo-xwin. `--smoke` is a fast debug-profile linkage check; the default is the release
     /// ship + verify.
+    #[command(name = Verb::SHIP.as_str())]
     Ship {
         /// Debug-profile compile-smoke of all three binaries — a non-authoritative linkage drift
         /// check (no artifact verify), not a shippable.
@@ -124,6 +140,15 @@ mod tests {
     use clap::Parser;
 
     use super::Cli;
+    use crate::verbs::test::Scope;
+
+    fn parse_scope(args: &[&str]) -> Scope {
+        let cli = Cli::try_parse_from(args).unwrap();
+        let super::Command::Test(arguments) = cli.command else {
+            panic!("expected the test subcommand");
+        };
+        arguments.scope
+    }
 
     #[test]
     fn ship_accepts_the_smoke_flag() {
@@ -146,16 +171,29 @@ mod tests {
     }
 
     #[test]
+    fn scope_defaults_to_unit_and_shorthands_resolve_it() {
+        assert_eq!(parse_scope(&["xtask", "test"]), Scope::Unit);
+        assert_eq!(parse_scope(&["xtask", "test", "--e2e"]), Scope::E2e);
+        assert_eq!(parse_scope(&["xtask", "test", "--all"]), Scope::All);
+        assert_eq!(
+            parse_scope(&["xtask", "test", "--scope", "all"]),
+            Scope::All
+        );
+    }
+
+    #[test]
     fn verbose_composes_with_the_e2e_scope() {
         let cli = Cli::try_parse_from(["xtask", "test", "--e2e", "--verbose"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            super::Command::Test {
-                verbose: true,
-                e2e: true,
-                all: false
-            }
-        ));
+        let super::Command::Test(arguments) = cli.command else {
+            panic!("expected the test subcommand");
+        };
+        assert_eq!(arguments.scope, Scope::E2e);
+        assert!(arguments.verbose);
+    }
+
+    #[test]
+    fn scope_flag_conflicts_with_the_shorthands() {
+        assert!(Cli::try_parse_from(["xtask", "test", "--scope", "all", "--e2e"]).is_err());
     }
 
     #[test]

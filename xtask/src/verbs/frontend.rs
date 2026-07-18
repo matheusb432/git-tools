@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 
 use anyhow::{Context, Result};
 
-use crate::proc;
+use crate::process;
 
 fn require_deno() -> Result<()> {
     which::which("deno").context(
@@ -17,7 +17,7 @@ fn require_deno() -> Result<()> {
 /// Build the committed offline viewer bundle in production mode.
 pub fn build() -> Result<()> {
     require_deno()?;
-    proc::run_captured_with_env(
+    process::run_captured_with_env(
         "frontend-build",
         None,
         OsStr::new("deno"),
@@ -29,10 +29,10 @@ pub fn build() -> Result<()> {
 /// Type-check and run the framework-free frontend unit tests.
 pub fn test() -> Result<()> {
     require_deno()?;
-    proc::run(
+    process::run(
         "frontend-typecheck",
         "deno",
         &["task", "--frozen", "typecheck"],
     )?;
-    proc::run("frontend-test", "deno", &["task", "--frozen", "test"])
+    process::run("frontend-test", "deno", &["task", "--frozen", "test"])
 }

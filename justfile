@@ -51,7 +51,7 @@ _preflight:
 
 # ============ quality ============
 
-# Fast gate: fmt-check + default-member Rust tests (desktop excluded). --e2e runs only hermetic viewer E2E; --all adds all Rust tests, frontend, drift, and E2E; --verbose streams logs.
+# Fast gate: check (formatting + linters) + default-member Rust tests (desktop excluded). --e2e runs only hermetic viewer E2E; --all adds all Rust tests, frontend, drift, and E2E; --verbose streams logs.
 [group('quality')]
 test *args:
     cargo run --quiet -p xtask -- test {{ args }}
@@ -61,10 +61,20 @@ test *args:
 fmt:
     cargo run --quiet -p xtask -- fmt
 
-# Check every formatter, Oxlint, architecture constraints, and Clippy over the full workspace including desktop.
+# Check formatting without modifying files (exits non-zero on drift); formatting only.
 [group('quality')]
 fmt-check:
-    cargo run --quiet -p xtask -- fmt --check
+    cargo run --quiet -p xtask -- fmt-check
+
+# Run every repository linter: Oxlint, architecture constraints, and Clippy over the full workspace including desktop.
+[group('quality')]
+lint:
+    cargo run --quiet -p xtask -- lint
+
+# Complete read-only quality gate: formatting drift, then every linter.
+[group('quality')]
+check:
+    cargo run --quiet -p xtask -- check
 
 # Apply Clippy and Oxlint fixes first, then normalize every formatter; extra args go to Clippy.
 [group('quality')]

@@ -4,7 +4,7 @@
 //! architecture rules (see `docs/planning/specs/2026-07-02-pragmatic-backend-architecture.md`,
 //! Mechanical Gates section). Called standalone as `cargo run -p xtask -- check-structure
 //! [<root>]` and wired
-//! into `fmt-check` so the architecture gate cannot be silently skipped.
+//! into `lint` / `check` so the architecture gate cannot be silently skipped.
 //!
 //! ## Rules
 //!
@@ -51,7 +51,7 @@ pub(crate) fn run(root: Option<&Path>) -> Result<()> {
 
     if !violations.is_empty() {
         eprintln!(
-            "\n{} violation(s) — fix the directory structure and re-run `just fmt-check`",
+            "\n{} violation(s) — fix the directory structure and re-run `just check`",
             violations.len()
         );
         std::process::exit(3);
