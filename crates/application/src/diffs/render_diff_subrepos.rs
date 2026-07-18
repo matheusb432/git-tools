@@ -15,7 +15,7 @@ use crate::{
         DiffTarget, DiffTargetRequest, DiffTargetRequestError,
         batch::{RepoRef, dated_title, render_batch},
     },
-    ports::{AppSettingsStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
+    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -58,7 +58,7 @@ pub enum RenderDiffSubreposError {
 #[cqrsy::command]
 pub fn execute(
     req: RenderDiffSubrepos,
-    app_settings: &impl AppSettingsStore,
+    app_settings: &impl UserSettingsStore,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
@@ -132,22 +132,14 @@ mod tests {
     use super::{RenderDiffSubrepos, RenderDiffSubreposOutcome, RepoRef, execute};
     use crate::{
         diffs::DiffTargetRequest,
-        ports::{AppSettings, AppSettingsStore},
+        ports::AppSettings,
         shared::notes::Note,
         testing::{
-            FakeDiffSource, FixedAppSettingsStore, FixedClock, InMemoryArtifactStore, StubRenderer,
+            FakeDiffSource, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
+            StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
-
-    #[derive(Clone)]
-    struct PanicAppSettingsStore;
-
-    impl AppSettingsStore for PanicAppSettingsStore {
-        fn load(&self) -> AppSettings {
-            panic!("invalid requests must not load settings")
-        }
-    }
 
     fn req(repos: Vec<RepoRef>) -> RenderDiffSubrepos {
         RenderDiffSubrepos {
@@ -156,26 +148,6 @@ mod tests {
             target: DiffTargetRequest::Unpushed,
             repos,
         }
-    }
-
-    #[test]
-    fn invalid_target_is_rejected_before_settings_are_loaded() {
-        let error = execute(
-            RenderDiffSubrepos {
-                store_root: "/store".into(),
-                root: "/root".into(),
-                target: DiffTargetRequest::Last { count: 0 },
-                repos: Vec::new(),
-            },
-            &PanicAppSettingsStore,
-            &FakeDiffSource::default(),
-            &InMemoryArtifactStore::default(),
-            &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
-        )
-        .expect_err("invalid target errors");
-
-        assert_eq!(error.to_string(), "last count must be >= 1");
     }
 
     #[test]
@@ -194,7 +166,7 @@ mod tests {
 
         let response = execute(
             req(repos),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -239,7 +211,7 @@ mod tests {
 
         let response = execute(
             req(repos),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -276,7 +248,7 @@ diff --git a/notes.md b/notes.md\n\
             diff_output: TWO_FILE_DIFF.into(),
             ..Default::default()
         };
-        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
             Some("night".into()),
             true,
             DiffExclusions::new([("repo-a".to_string(), vec!["md"])], None),

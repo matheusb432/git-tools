@@ -36,7 +36,9 @@ CREATE TABLE recent_renders (
 ) STRICT;
 ";
 
-const MIGRATIONS_SLICE: &[M<'_>] = &[M::up(SCHEMA_V1)];
+const SCHEMA_V2: &str = "DROP TABLE settings;";
+
+const MIGRATIONS_SLICE: &[M<'_>] = &[M::up(SCHEMA_V1), M::up(SCHEMA_V2)];
 const MIGRATIONS: Migrations<'_> = Migrations::from_slice(MIGRATIONS_SLICE);
 
 /// Init-sequence retry ceiling: bounded well under the 5s `busy_timeout` so a
@@ -56,7 +58,7 @@ pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
     conn.busy_timeout(Duration::from_secs(5))?;
 
     // ! Fresh-file race: daemon and viewer can both open a brand-new gtl.db
-    // ! and both attempt the WAL switch and migration v1 concurrently. SQLite
+    // ! and both attempt the WAL switch and migrations concurrently. SQLite
     // ! does not run the busy_timeout retry loop for the journal_mode=WAL
     // ! transition on a fresh file, so the loser can get an immediate
     // ! SQLITE_BUSY ("database is locked") right there, and even past that
@@ -95,6 +97,58 @@ pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migration_v2_drops_settings_and_preserves_runtime_state() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("gtl.db");
+        let mut connection = Connection::open(&path).expect("open v1 database");
+        Migrations::from_slice(&[M::up(SCHEMA_V1)])
+            .to_latest(&mut connection)
+            .expect("apply v1");
+        connection
+            .execute(
+                "INSERT INTO settings (key, value) VALUES ('theme', 'light')",
+                [],
+            )
+            .expect("seed settings");
+        connection
+            .execute(
+                "INSERT INTO live_views (source_kind, source_value, display_name, created_at) VALUES ('local', '/repo', 'Repo', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("seed live view");
+        connection
+            .execute(
+                "INSERT INTO recent_renders (recipe_json, title, repo_name, kind, range_label, rendered_at) VALUES ('{}', 'Render', 'repo', 'diff', 'main..HEAD', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("seed render");
+        drop(connection);
+
+        let connection = open_app_db(directory.path()).expect("migrate database");
+        let user_version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("user version");
+        let settings_table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'settings'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("settings table count");
+        let live_view_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM live_views", [], |row| row.get(0))
+            .expect("live view count");
+        let recent_render_count: i64 = connection
+            .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
+            .expect("recent render count");
+
+        assert_eq!(user_version, 2);
+        assert_eq!(settings_table_count, 0);
+        assert_eq!(live_view_count, 1);
+        assert_eq!(recent_render_count, 1);
+    }
 
     /// Two processes (daemon + viewer) can open a fresh db concurrently; both
     /// must succeed. Deterministically hitting the migration race is not

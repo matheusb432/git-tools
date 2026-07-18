@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::{
     diffs::{PinnedRange, View, render_merge_diff::build_merge_view},
-    ports::{AppSettingsStore, DiffSource},
+    ports::{DiffSource, UserSettingsStore},
 };
 
 /// Compute the merge view of the current branch into `base` (default `main`),
@@ -34,7 +34,7 @@ pub enum ComputeMergeDiffError {
 #[cqrsy::query]
 pub fn execute(
     req: ComputeMergeDiff,
-    app_settings: &impl AppSettingsStore,
+    app_settings: &impl UserSettingsStore,
     source: &impl DiffSource,
 ) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
     let ComputeMergeDiff { cwd, base, pinned } = req;
@@ -60,7 +60,7 @@ mod tests {
     use crate::{
         ports::AppSettings,
         testing::{
-            FakeDiffSource, FixedAppSettingsStore,
+            FakeDiffSource, FixedUserSettingsStore,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -84,7 +84,7 @@ index 333..444 100644\n\
         request: ComputeMergeDiff,
         source: &FakeDiffSource,
     ) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
-        execute(request, &FixedAppSettingsStore::default(), source)
+        execute(request, &FixedUserSettingsStore::default(), source)
     }
 
     #[test]
@@ -97,7 +97,7 @@ index 333..444 100644\n\
             diff_output: CODE_AND_NOTES_DIFF.into(),
             ..Default::default()
         };
-        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
             None,
             true,
             DiffExclusions::new([("repo".into(), vec!["md"])], None),

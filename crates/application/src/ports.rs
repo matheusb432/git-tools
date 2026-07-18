@@ -12,7 +12,7 @@ use std::{
 use domain::{
     diffs::{Commit, DiffExclusions, DiffKind},
     managed::ManagedRepo,
-    viewer::RenderHistoryId,
+    viewer::{RenderHistoryId, RenderOptions},
 };
 
 use crate::diffs::View;
@@ -21,6 +21,7 @@ use crate::diffs::View;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppSettings {
     theme: Option<String>,
+    viewer_render_options: RenderOptions,
     push_confirmation_required: bool,
     diff_exclusions: DiffExclusions,
 }
@@ -34,9 +35,25 @@ impl AppSettings {
     ) -> Self {
         Self {
             theme,
+            viewer_render_options: RenderOptions::DEFAULT,
             push_confirmation_required,
             diff_exclusions,
         }
+    }
+
+    /// Returns this snapshot with the selected viewer layout and density.
+    #[must_use]
+    pub const fn with_viewer_render_options(
+        mut self,
+        viewer_render_options: RenderOptions,
+    ) -> Self {
+        self.viewer_render_options = viewer_render_options;
+        self
+    }
+
+    /// Returns the effective viewer layout and density.
+    pub const fn viewer_render_options(&self) -> RenderOptions {
+        self.viewer_render_options
     }
 
     /// The raw diff-preview theme, when the renderer should force one.
@@ -61,10 +78,65 @@ impl Default for AppSettings {
     }
 }
 
-/// Reads a fresh effective application-settings snapshot for one operation.
-pub trait AppSettingsStore: Clone + Send + Sync + 'static {
+/// Reports a strict user-settings document edit failure.
+///
+/// # Examples
+///
+/// ```
+/// use application::ports::UserSettingsEditError;
+///
+/// let error = UserSettingsEditError::InvalidValueShape;
+/// assert!(error.to_string().contains("not a string"));
+/// ```
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum UserSettingsEditError {
+    /// The existing root item is present but is not a string.
+    #[error("the existing user setting is not a string")]
+    InvalidValueShape,
+    /// A path, read, parse, lock, synchronization, or replacement effect failed.
+    #[error(transparent)]
+    Unexpected(#[from] anyhow::Error),
+}
+
+pub trait UserSettingsStore: Clone + Send + Sync + 'static {
     /// Loads the current snapshot, degrading adapter failures to safe defaults.
     fn load(&self) -> AppSettings;
+}
+
+/// Edits root string values in the configured user-settings document.
+///
+/// # Examples
+///
+/// ```no_run
+/// use application::ports::{UserSettingsEditError, UserSettingsEditor};
+///
+/// fn select_light_theme(
+///     store: &impl UserSettingsEditor,
+/// ) -> Result<Option<String>, UserSettingsEditError> {
+///     store.set_string("theme", "light")
+/// }
+/// ```
+pub trait UserSettingsEditor: UserSettingsStore {
+    /// Sets one root string and returns the previous string.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UserSettingsEditError`] when the existing item is not a string or
+    /// the strict file transaction fails.
+    fn set_string(
+        &self,
+        key: &str,
+        value_new: &str,
+    ) -> Result<Option<String>, UserSettingsEditError>;
+
+    /// Removes one root string and returns the removed string.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UserSettingsEditError`] when the existing item is not a string or
+    /// the strict file transaction fails.
+    fn remove_string(&self, key: &str) -> Result<Option<String>, UserSettingsEditError>;
 }
 
 /// Everything the store needs to record one rendered artifact. `generated_at` is
@@ -283,7 +355,7 @@ pub trait RepoDiscovery: Clone + Send + Sync + 'static {
     fn find_repos(&self, root: &Path, include_worktrees: bool) -> anyhow::Result<Vec<PathBuf>>;
 }
 
-/// The app-state store: saved live views, settings, and the recent-render log.
+/// Stores saved live views and the recent-render log.
 /// One `SQLite` file under `data_root` in the real adapter; every method opens,
 /// migrates, and closes per call so callers stay hermetic (the `ArtifactStore`
 /// per-call `store_root` pattern).
@@ -301,10 +373,6 @@ pub trait AppStateStore: Clone + Send + Sync + 'static {
         source_kind: &str,
         source_value: &str,
     ) -> anyhow::Result<bool>;
-    /// The stored value for `key`, or `None` when unset.
-    fn get_setting(&self, data_root: &Path, key: &str) -> anyhow::Result<Option<String>>;
-    /// Upsert `key` to `value`.
-    fn set_setting(&self, data_root: &Path, key: &str, value: &str) -> anyhow::Result<()>;
     /// Append one render record, pruning the log past [`RECENT_RENDERS_CAP`].
     fn record_render(&self, data_root: &Path, record: &NewRecentRenderRecord)
     -> anyhow::Result<()>;
@@ -501,6 +569,7 @@ mod tests {
         let settings = AppSettings::default();
 
         assert_eq!(settings.theme(), None);
+        assert_eq!(settings.viewer_render_options(), RenderOptions::DEFAULT);
         assert!(settings.push_confirmation_required());
         assert!(settings.diff_exclusions().is_empty());
     }

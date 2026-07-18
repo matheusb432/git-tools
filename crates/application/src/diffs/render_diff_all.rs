@@ -14,7 +14,7 @@ use crate::{
         DiffTarget,
         batch::{RepoRef, dated_title, render_batch},
     },
-    ports::{AppSettingsStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
+    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -47,7 +47,7 @@ pub enum RenderDiffAllError {
 #[cqrsy::command]
 pub fn execute(
     req: RenderDiffAll,
-    app_settings: &impl AppSettingsStore,
+    app_settings: &impl UserSettingsStore,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
@@ -110,21 +110,21 @@ mod tests {
 
     use super::{RenderDiffAll, RepoRef, execute};
     use crate::{
-        ports::{AppSettings, AppSettingsStore},
+        ports::{AppSettings, UserSettingsStore},
         shared::notes::Note,
         testing::{
-            FakeDiffSource, FixedAppSettingsStore, FixedClock, InMemoryArtifactStore, RepoOverride,
-            StubRenderer,
+            FakeDiffSource, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
+            RepoOverride, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
 
     #[derive(Clone)]
-    struct SequenceAppSettingsStore {
+    struct SequenceUserSettingsStore {
         snapshots: Arc<Mutex<VecDeque<AppSettings>>>,
     }
 
-    impl SequenceAppSettingsStore {
+    impl SequenceUserSettingsStore {
         fn new(snapshots: impl IntoIterator<Item = AppSettings>) -> Self {
             Self {
                 snapshots: Arc::new(Mutex::new(snapshots.into_iter().collect())),
@@ -132,7 +132,7 @@ mod tests {
         }
     }
 
-    impl AppSettingsStore for SequenceAppSettingsStore {
+    impl UserSettingsStore for SequenceUserSettingsStore {
         fn load(&self) -> AppSettings {
             self.snapshots
                 .lock()
@@ -172,7 +172,7 @@ mod tests {
 
         let response = execute(
             req(repos),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -214,7 +214,7 @@ mod tests {
 
         let result = execute(
             req(repos),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -251,7 +251,7 @@ diff --git a/notes.md b/notes.md\n\
                 },
             );
         }
-        let app_settings = SequenceAppSettingsStore::new([
+        let app_settings = SequenceUserSettingsStore::new([
             AppSettings::new(
                 Some("first".into()),
                 true,

@@ -23,7 +23,7 @@ pub async fn handle(
     let response = tokio::task::spawn_blocking(move || {
         application::diffs::render_diff::execute(
             request,
-            &state.app_settings,
+            &state.user_settings,
             &state.source,
             &state.artifacts,
             &state.renderer,

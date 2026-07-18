@@ -14,7 +14,7 @@ use application::{
 use gtl_recipe::{
     OpenRecipes, PinnedRange, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget,
 };
-use infra::user_config::AppSettingsStoreUserConfig;
+use infra::user_config::TomlSettingsStore;
 use tauri::http::{Method, Request, StatusCode};
 use tempfile::TempDir;
 
@@ -27,6 +27,7 @@ use crate::protocol_config;
 struct Fixture {
     _temp: TempDir,
     app: ViewerApp,
+    config_path: PathBuf,
     repo: PathBuf,
 }
 
@@ -35,26 +36,24 @@ impl Fixture {
         Self::with_config(None)
     }
 
-    /// `Some(toml)` writes a user config into the temp dir and points the app
-    /// at it, so exclusion tests exercise the real load path hermetically.
     fn with_config(config_toml: Option<&str>) -> Self {
         let temp = tempfile::tempdir().expect("temp dir");
         let repo = temp.path().join("repo");
         std::fs::create_dir_all(&repo).expect("repo dir");
         init_repo(&repo);
-        let config_path = config_toml.map(|raw| {
-            let path = temp.path().join("config.toml");
-            std::fs::write(&path, raw).expect("write config");
-            path
-        });
+        let config_path = temp.path().join("config.toml");
+        if let Some(raw) = config_toml {
+            std::fs::write(&config_path, raw).expect("write config");
+        }
         let app = ViewerApp::new(
             temp.path().join("data"),
-            AppSettingsStoreUserConfig::new(config_path),
+            TomlSettingsStore::new(Some(config_path.clone())),
             128 * 1024 * 1024,
         );
         Self {
             _temp: temp,
             app,
+            config_path,
             repo,
         }
     }
@@ -229,14 +228,34 @@ fn configured_exclusions_hide_files_and_render_the_chip() {
 }
 
 #[test]
-fn settings_persist_through_sqlite_and_render_in_the_document() {
-    let fixture = Fixture::new();
-    let response = serve_app(&fixture.app, request("/settings?theme=light"));
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+fn settings_persist_through_toml_and_render_in_the_document() {
+    let fixture = Fixture::with_config(Some("[push]\nconfirm = false\n"));
+    assert_eq!(
+        serve_app(&fixture.app, request("/settings?theme=light")).status(),
+        StatusCode::NO_CONTENT
+    );
 
-    let document = serve_app(&fixture.app, request("/"));
-    let html = String::from_utf8(document.into_body()).expect("html");
+    let raw = std::fs::read_to_string(&fixture.config_path).expect("settings TOML");
+    let document = toml::from_str::<toml::Value>(&raw).expect("valid TOML");
+    assert_eq!(document["theme"].as_str(), Some("light"));
+    assert_eq!(document["push"]["confirm"].as_bool(), Some(false));
+
+    let response = serve_app(&fixture.app, request("/"));
+    let html = String::from_utf8(response.into_body()).expect("html");
     assert!(html.contains("data-theme=\"light\""), "{html}");
+}
+
+#[test]
+fn layout_and_density_restore_from_toml_before_rendering() {
+    let fixture = Fixture::with_config(Some("layout = \"split\"\ndensity = \"full\"\n"));
+
+    let response = serve_app(&fixture.app, request("/"));
+    let html = String::from_utf8(response.into_body()).expect("html");
+
+    assert!(
+        html.contains("data-theme=\"dark\" data-diff-layout=\"split\" data-diff-full=\"on\""),
+        "{html}"
+    );
 }
 
 #[test]

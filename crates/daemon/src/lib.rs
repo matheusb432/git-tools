@@ -45,7 +45,7 @@ pub async fn run() -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION"),
         pid,
         shutdown_tx,
-        infra::user_config::AppSettingsStoreUserConfig::from_environment(),
+        infra::user_config::TomlSettingsStore::from_environment(),
     ));
 
     tracing::info!(port = bound, "gtl-daemon listening on 127.0.0.1");

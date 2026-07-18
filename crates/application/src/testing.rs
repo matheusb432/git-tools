@@ -17,26 +17,26 @@ use domain::{
 };
 
 use crate::ports::{
-    AppSettings, AppSettingsStore, AppStateError, AppStateStore, ArtifactMeta, ArtifactStore,
-    Clock, DiffSource, GitOutput, GitRunner, HistoryRecord, HtmlRenderer, LedgerEntry,
-    LiveViewRecord, ManagedManifest, NewRecentRenderRecord, PlacedArtifact, PushLedger,
-    RecentRenderRecord, RemoteSync, RepoDiscovery, RepoProbe, RepoProbeResult, SyncOutput,
+    AppSettings, AppStateError, AppStateStore, ArtifactMeta, ArtifactStore, Clock, DiffSource,
+    GitOutput, GitRunner, HistoryRecord, HtmlRenderer, LedgerEntry, LiveViewRecord,
+    ManagedManifest, NewRecentRenderRecord, PlacedArtifact, PushLedger, RecentRenderRecord,
+    RemoteSync, RepoDiscovery, RepoProbe, RepoProbeResult, SyncOutput, UserSettingsStore,
 };
 
 /// Fixed effective settings for application operation tests.
 #[derive(Debug, Clone, Default)]
-pub struct FixedAppSettingsStore {
+pub struct FixedUserSettingsStore {
     settings: AppSettings,
 }
 
-impl FixedAppSettingsStore {
+impl FixedUserSettingsStore {
     /// Creates a store that returns `settings` from every load.
     pub const fn new(settings: AppSettings) -> Self {
         Self { settings }
     }
 }
 
-impl AppSettingsStore for FixedAppSettingsStore {
+impl UserSettingsStore for FixedUserSettingsStore {
     fn load(&self) -> AppSettings {
         self.settings.clone()
     }
@@ -398,14 +398,12 @@ impl PushLedger for FakePushLedger {
     async fn refresh(&self) {}
 }
 
-/// Recording `AppStateStore`: plain in-memory maps behind `Arc<Mutex<...>>`
-/// so tests keep a handle after moving the fake into a handler.
+/// Records app state in shared memory so cloned test stores observe the same
+/// values.
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryAppStateStore {
     pub live_views: Arc<Mutex<Vec<LiveViewRecord>>>,
     pub remove_live_view_error: Arc<Mutex<Option<String>>>,
-    pub settings: Arc<Mutex<HashMap<String, String>>>,
-    pub set_setting_error: Arc<Mutex<Option<String>>>,
     pub renders: Arc<Mutex<Vec<RecentRenderRecord>>>,
     pub list_error_id: Arc<Mutex<Option<i64>>>,
 }
@@ -439,19 +437,6 @@ impl AppStateStore for InMemoryAppStateStore {
         let before = views.len();
         views.retain(|v| !(v.source_kind == source_kind && v.source_value == source_value));
         Ok(views.len() != before)
-    }
-    fn get_setting(&self, _data_root: &Path, key: &str) -> anyhow::Result<Option<String>> {
-        Ok(self.settings.lock().unwrap().get(key).cloned())
-    }
-    fn set_setting(&self, _data_root: &Path, key: &str, value: &str) -> anyhow::Result<()> {
-        if let Some(message) = self.set_setting_error.lock().unwrap().as_ref() {
-            anyhow::bail!(message.clone());
-        }
-        self.settings
-            .lock()
-            .unwrap()
-            .insert(key.to_string(), value.to_string());
-        Ok(())
     }
     fn record_render(
         &self,

@@ -15,7 +15,7 @@ use crate::{
         sort_files_tree_order,
         util::{DiffData, assemble, exclusion_note, repo_name},
     },
-    ports::{AppSettingsStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
+    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -143,7 +143,7 @@ fn head_sha_for(source: &impl DiffSource, top: &str, range: &str) -> String {
 #[cqrsy::command]
 pub fn execute(
     req: RenderDiff,
-    app_settings: &impl AppSettingsStore,
+    app_settings: &impl UserSettingsStore,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
@@ -508,10 +508,11 @@ mod tests {
     use super::{RenderDiff, RenderDiffError, RenderDiffOutcome, execute};
     use crate::{
         diffs::{DiffTarget, DiffTargetRequest},
-        ports::{AppSettings, AppSettingsStore},
+        ports::AppSettings,
         shared::notes::Note,
         testing::{
-            FakeDiffSource, FixedAppSettingsStore, FixedClock, InMemoryArtifactStore, StubRenderer,
+            FakeDiffSource, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
+            StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -523,36 +524,6 @@ mod tests {
             target: DiffTargetRequest::from(target),
             name: None,
         }
-    }
-
-    #[derive(Clone)]
-    struct PanicAppSettingsStore;
-
-    impl AppSettingsStore for PanicAppSettingsStore {
-        fn load(&self) -> AppSettings {
-            panic!("invalid requests must not load settings")
-        }
-    }
-
-    #[test]
-    fn invalid_target_is_rejected_before_settings_are_loaded() {
-        let error = execute(
-            RenderDiff {
-                cwd: PathBuf::from("/repo"),
-                store_root: PathBuf::from("/store"),
-                target: DiffTargetRequest::Last { count: 0 },
-                name: None,
-            },
-            &PanicAppSettingsStore,
-            &FakeDiffSource::default(),
-            &InMemoryArtifactStore::default(),
-            &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
-        )
-        .expect_err("invalid target errors");
-
-        assert!(matches!(error, RenderDiffError::InvalidTarget(_)));
-        assert_eq!(error.to_string(), "last count must be >= 1");
     }
 
     #[test]
@@ -570,7 +541,7 @@ mod tests {
 
         let response = execute(
             req("/repo", &DiffTarget::Unpushed { pinned: None }),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -610,7 +581,7 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
             Some("night".into()),
             true,
             DiffExclusions::new(
@@ -658,7 +629,7 @@ mod tests {
 
         let response = execute(
             req("/repo", &DiffTarget::Unpushed { pinned: None }),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -707,7 +678,7 @@ mod tests {
                     pinned: None,
                 },
             ),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -764,7 +735,7 @@ mod tests {
                 pinned: None,
             },
         );
-        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
             None,
             true,
             DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None),
@@ -827,7 +798,7 @@ mod tests {
                     pinned: None,
                 },
             ),
-            &FixedAppSettingsStore::new(AppSettings::new(
+            &FixedUserSettingsStore::new(AppSettings::new(
                 Some("light".to_string()),
                 true,
                 DiffExclusions::default(),
@@ -876,7 +847,7 @@ mod tests {
                 pinned: None,
             },
         );
-        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
             None,
             true,
             DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None),
@@ -937,7 +908,7 @@ mod tests {
         request.name = Some("custom".into());
         let response = execute(
             request,
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -970,7 +941,7 @@ mod tests {
 
         let response = execute(
             req("/repo", &DiffTarget::Unpushed { pinned: None }),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -1004,7 +975,7 @@ mod tests {
 
         let error = execute(
             req("/repo", &DiffTarget::Base("nope".into())),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,

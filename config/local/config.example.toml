@@ -1,6 +1,12 @@
 # dark | light | hearth
 theme = "dark"
 
+# unified | split
+layout = "unified"
+
+# compact | full
+density = "compact"
+
 [push]
 # Plain current-repo push only; defaults to true when omitted.
 confirm = true

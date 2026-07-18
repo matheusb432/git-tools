@@ -112,27 +112,6 @@ impl AppStateStore for SqliteAppState {
         Ok(removed > 0)
     }
 
-    fn get_setting(&self, data_root: &Path, key: &str) -> anyhow::Result<Option<String>> {
-        let conn = open_app_db(data_root)?;
-        Ok(conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                params![key],
-                |row| row.get(0),
-            )
-            .optional()?)
-    }
-
-    fn set_setting(&self, data_root: &Path, key: &str, value: &str) -> anyhow::Result<()> {
-        let conn = open_app_db(data_root)?;
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?1, ?2)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![key, value],
-        )?;
-        Ok(())
-    }
-
     fn record_render(
         &self,
         data_root: &Path,
@@ -233,14 +212,14 @@ mod tests {
     }
 
     #[test]
-    fn migrations_apply_from_empty_and_land_on_v1() {
+    fn migrations_apply_from_empty_and_land_on_v2() {
         let tmp = tempfile::tempdir().unwrap();
         let conn = open_app_db(tmp.path()).unwrap();
 
         let user_version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(user_version, 1);
+        assert_eq!(user_version, 2);
 
         for (table, expected_columns) in [
             (
@@ -254,7 +233,6 @@ mod tests {
                     "last_opened_at",
                 ],
             ),
-            ("settings", vec!["key", "value"]),
             (
                 "recent_renders",
                 vec![
@@ -285,7 +263,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let conn = open_app_db(tmp.path()).unwrap();
 
-        let result = conn.execute("INSERT INTO settings (key, value) VALUES ('k', x'00')", []);
+        let result = conn.execute(
+            "INSERT INTO live_views (source_kind, source_value, display_name, created_at)
+             VALUES ('local', '/repo', x'00', '2026-01-01T00:00:00Z')",
+            [],
+        );
         let error = result.expect_err("STRICT table must reject a BLOB in a TEXT column");
         assert!(
             matches!(
@@ -376,32 +358,6 @@ mod tests {
             .remove_live_view(tmp.path(), &record.source_kind, &record.source_value)
             .unwrap();
         assert!(!removed_again);
-    }
-
-    #[test]
-    fn settings_round_trip_and_overwrite() {
-        let tmp = tempfile::tempdir().unwrap();
-
-        assert_eq!(
-            SqliteAppState.get_setting(tmp.path(), "theme").unwrap(),
-            None
-        );
-
-        SqliteAppState
-            .set_setting(tmp.path(), "theme", "dark")
-            .unwrap();
-        assert_eq!(
-            SqliteAppState.get_setting(tmp.path(), "theme").unwrap(),
-            Some("dark".to_string())
-        );
-
-        SqliteAppState
-            .set_setting(tmp.path(), "theme", "light")
-            .unwrap();
-        assert_eq!(
-            SqliteAppState.get_setting(tmp.path(), "theme").unwrap(),
-            Some("light".to_string())
-        );
     }
 
     #[test]

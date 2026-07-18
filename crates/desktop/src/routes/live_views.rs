@@ -35,7 +35,7 @@ pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     }
 
     let transient = ensure_active_view(app)?;
-    let settings = load_settings(app)?;
+    let settings = load_settings(app);
     render::tabs_with_view_after_live_delete(app.renderer, &app.session, transient, settings)
         .map(html_response)
         .map_err(Into::into)

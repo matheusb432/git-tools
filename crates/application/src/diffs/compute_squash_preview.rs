@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use crate::{
     diffs::{PinnedRange, View, render_squash_preview::build_squash_view},
-    ports::{AppSettingsStore, DiffSource},
+    ports::{DiffSource, UserSettingsStore},
 };
 
 /// Compute the squash-preview view of the current branch's unpushed commits
@@ -33,7 +33,7 @@ pub enum ComputeSquashPreviewError {
 #[cqrsy::query]
 pub fn execute(
     req: ComputeSquashPreview,
-    app_settings: &impl AppSettingsStore,
+    app_settings: &impl UserSettingsStore,
     source: &impl DiffSource,
 ) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
     let ComputeSquashPreview { cwd, pinned } = req;
@@ -58,7 +58,7 @@ mod tests {
     use crate::{
         ports::AppSettings,
         testing::{
-            FakeDiffSource, FixedAppSettingsStore,
+            FakeDiffSource, FixedUserSettingsStore,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -82,7 +82,7 @@ index 333..444 100644\n\
         request: ComputeSquashPreview,
         source: &FakeDiffSource,
     ) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
-        execute(request, &FixedAppSettingsStore::default(), source)
+        execute(request, &FixedUserSettingsStore::default(), source)
     }
 
     #[test]
@@ -95,7 +95,7 @@ index 333..444 100644\n\
             diff_output: CODE_AND_NOTES_DIFF.into(),
             ..Default::default()
         };
-        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
             None,
             true,
             DiffExclusions::new([("repo".into(), vec!["md"])], None),

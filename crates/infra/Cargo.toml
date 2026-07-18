@@ -16,13 +16,14 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 similar.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["fs", "process"] }
 toml.workspace = true
 toml_edit.workspace = true
 walkdir.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
+gtl-platform.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt"] }
 
 [lints]

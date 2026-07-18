@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use crate::{
     diffs::{DiffTarget, View, render_diff::build_view},
-    ports::{AppSettingsStore, DiffSource},
+    ports::{DiffSource, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -38,7 +38,7 @@ pub enum ComputeDiffError {
 #[cqrsy::query]
 pub fn execute(
     req: ComputeDiff,
-    app_settings: &impl AppSettingsStore,
+    app_settings: &impl UserSettingsStore,
     source: &impl DiffSource,
 ) -> Result<ComputeDiffResponse, ComputeDiffError> {
     let ComputeDiff { cwd, target } = req;
@@ -74,7 +74,7 @@ mod tests {
         },
         ports::AppSettings,
         testing::{
-            FakeDiffSource, FixedAppSettingsStore,
+            FakeDiffSource, FixedUserSettingsStore,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -90,7 +90,7 @@ mod tests {
         request: ComputeDiff,
         source: &FakeDiffSource,
     ) -> Result<ComputeDiffResponse, ComputeDiffError> {
-        execute(request, &FixedAppSettingsStore::default(), source)
+        execute(request, &FixedUserSettingsStore::default(), source)
     }
 
     fn pin() -> PinnedRange {
@@ -298,7 +298,7 @@ index 333..444 100644\n\
         };
         let request = req(DiffTarget::Unpushed { pinned: None });
         let app_settings =
-            FixedAppSettingsStore::new(AppSettings::new(None, true, excluding("repo", &["md"])));
+            FixedUserSettingsStore::new(AppSettings::new(None, true, excluding("repo", &["md"])));
 
         let response = execute(request, &app_settings, &source).expect("compute succeeds");
 
@@ -335,7 +335,7 @@ index 333..444 100644\n\
             ..Default::default()
         };
         let request = req(DiffTarget::Unpushed { pinned: None });
-        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
             None,
             true,
             excluding("other-repo", &["md"]),
@@ -360,7 +360,7 @@ index 333..444 100644\n\
         };
         let request = req(DiffTarget::Unpushed { pinned: None });
         let app_settings =
-            FixedAppSettingsStore::new(AppSettings::new(None, true, excluding("repo", &["md"])));
+            FixedUserSettingsStore::new(AppSettings::new(None, true, excluding("repo", &["md"])));
 
         let response = execute(request, &app_settings, &source).expect("compute succeeds");
 

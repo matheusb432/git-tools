@@ -14,11 +14,11 @@ use application::{
     },
     history::record_render::{self, RecordRender},
     live_views::probe::{self, ProbeOutcome, ProbeSource},
-    ports::{AppSettingsStore, AppStateStore, Clock, DiffSource, RepoProbe},
+    ports::{AppStateStore, Clock, DiffSource, RepoProbe, UserSettingsStore},
     viewer::{ViewerTabId, ViewerTabKind, ViewerTabState},
 };
 use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
-use infra::user_config::AppSettingsStoreUserConfig;
+use infra::user_config::TomlSettingsStore;
 
 use crate::{
     session::{CachedView, ComputeTicket, PublishOutcome, ViewerSession},
@@ -82,7 +82,7 @@ pub(crate) struct RecipeContext<'a, Source, Probe, State, Time> {
     app_state: &'a State,
     clock: &'a Time,
     data_root: &'a Path,
-    app_settings: &'a AppSettingsStoreUserConfig,
+    user_settings: &'a TomlSettingsStore,
 }
 
 impl<Source, Probe, State, Time> Copy for RecipeContext<'_, Source, Probe, State, Time> {}
@@ -100,7 +100,7 @@ impl<'a, Source, Probe, State, Time> RecipeContext<'a, Source, Probe, State, Tim
         app_state: &'a State,
         clock: &'a Time,
         data_root: &'a Path,
-        app_settings: &'a AppSettingsStoreUserConfig,
+        user_settings: &'a TomlSettingsStore,
     ) -> Self {
         Self {
             source,
@@ -108,7 +108,7 @@ impl<'a, Source, Probe, State, Time> RecipeContext<'a, Source, Probe, State, Tim
             app_state,
             clock,
             data_root,
-            app_settings,
+            user_settings,
         }
     }
 }
@@ -155,7 +155,7 @@ fn diff_target(target: &RecipeTarget) -> DiffTarget {
 pub(crate) fn compute_view(
     source: &impl DiffSource,
     recipe: &Recipe,
-    app_settings: &impl AppSettingsStore,
+    user_settings: &impl UserSettingsStore,
 ) -> Result<View, String> {
     let cwd = recipe.cwd();
     match &recipe.op {
@@ -164,7 +164,7 @@ pub(crate) fn compute_view(
                 cwd,
                 target: diff_target(target),
             },
-            app_settings,
+            user_settings,
             source,
         )
         .map(|response| response.view)
@@ -175,7 +175,7 @@ pub(crate) fn compute_view(
                 base: base.clone(),
                 pinned: to_application_pin(pinned.as_ref()),
             },
-            app_settings,
+            user_settings,
             source,
         )
         .map(|response| response.view)
@@ -185,7 +185,7 @@ pub(crate) fn compute_view(
                 cwd,
                 pinned: to_application_pin(pinned.as_ref()),
             },
-            app_settings,
+            user_settings,
             source,
         )
         .map(|response| response.view)
@@ -288,7 +288,7 @@ fn compute_and_publish(
         return Ok(ComputationOutcome::StateOnly);
     }
 
-    let view = match compute_view(context.source, recipe, context.app_settings) {
+    let view = match compute_view(context.source, recipe, context.user_settings) {
         Ok(view) => Arc::new(view),
         Err(reason) => {
             publish_compute_error(session, ticket, &reason)?;
@@ -481,7 +481,7 @@ index 111..222 100644\n\
                 &app_state,
                 &clock,
                 Path::new("/data"),
-                &AppSettingsStoreUserConfig::new(None),
+                &TomlSettingsStore::new(None),
             ),
             &session,
             &recipe(),
@@ -517,7 +517,7 @@ index 111..222 100644\n\
                 &app_state,
                 &clock,
                 Path::new("/data"),
-                &AppSettingsStoreUserConfig::new(None),
+                &TomlSettingsStore::new(None),
             ),
             &session,
             &recipe(),
@@ -562,7 +562,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
-                    &AppSettingsStoreUserConfig::new(None),
+                    &TomlSettingsStore::new(None),
                 ),
                 &session,
                 &recipe(),
@@ -605,7 +605,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
-                    &AppSettingsStoreUserConfig::new(None),
+                    &TomlSettingsStore::new(None),
                 ),
                 &session,
                 &named,
@@ -638,7 +638,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
-                    &AppSettingsStoreUserConfig::new(None),
+                    &TomlSettingsStore::new(None),
                 ),
                 &session,
                 &recipe(),
@@ -676,7 +676,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
-                    &AppSettingsStoreUserConfig::new(None),
+                    &TomlSettingsStore::new(None),
                 ),
                 &session,
                 &recipe(),
@@ -716,7 +716,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
-                    &AppSettingsStoreUserConfig::new(None),
+                    &TomlSettingsStore::new(None),
                 ),
                 &session,
                 &recipe(),
@@ -756,7 +756,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
-                    &AppSettingsStoreUserConfig::new(None),
+                    &TomlSettingsStore::new(None),
                 ),
                 &session,
                 &recipe,
@@ -779,7 +779,7 @@ index 111..222 100644\n\
                 &app_state,
                 &clock,
                 Path::new("/data"),
-                &AppSettingsStoreUserConfig::new(None),
+                &TomlSettingsStore::new(None),
             ),
             &session,
             id,
@@ -813,7 +813,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
-                    &AppSettingsStoreUserConfig::new(None),
+                    &TomlSettingsStore::new(None),
                 ),
                 &session,
                 &recipe(),
@@ -832,7 +832,7 @@ index 111..222 100644\n\
                 &app_state,
                 &clock,
                 Path::new("/data"),
-                &AppSettingsStoreUserConfig::new(None),
+                &TomlSettingsStore::new(None),
             ),
             &session,
             id,
@@ -862,7 +862,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
-                    &AppSettingsStoreUserConfig::new(None),
+                    &TomlSettingsStore::new(None),
                 ),
                 &session,
                 &named,
@@ -881,7 +881,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
-                    &AppSettingsStoreUserConfig::new(None),
+                    &TomlSettingsStore::new(None),
                 ),
                 &session,
                 id,
@@ -900,8 +900,7 @@ index 111..222 100644\n\
     fn older_failing_refresh_becomes_stale_after_newer_success() {
         let source = source();
         let mut newest_view =
-            compute_view(&source, &recipe(), &AppSettingsStoreUserConfig::new(None))
-                .expect("view computes");
+            compute_view(&source, &recipe(), &TomlSettingsStore::new(None)).expect("view computes");
         newest_view.title = "newer success".into();
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let id = session.lock().expect("session").open(

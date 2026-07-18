@@ -15,7 +15,7 @@ use crate::{
         range::DiffRanges,
         util::{DiffData, assemble, exclusion_note, repo_name},
     },
-    ports::{AppSettingsStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
+    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -47,7 +47,7 @@ pub enum RenderSquashPreviewError {
 #[cqrsy::command]
 pub fn execute(
     req: RenderSquashPreview,
-    app_settings: &impl AppSettingsStore,
+    app_settings: &impl UserSettingsStore,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
@@ -196,7 +196,8 @@ mod tests {
         ports::AppSettings,
         shared::notes::Note,
         testing::{
-            FakeDiffSource, FixedAppSettingsStore, FixedClock, InMemoryArtifactStore, StubRenderer,
+            FakeDiffSource, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
+            StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -223,7 +224,7 @@ mod tests {
 
         let response = execute(
             req("/repo"),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -260,7 +261,7 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
             Some("night".into()),
             true,
             DiffExclusions::new([("repo".to_string(), vec!["md"])], None),
@@ -298,7 +299,7 @@ mod tests {
 
         let error = execute(
             req("/repo"),
-            &FixedAppSettingsStore::default(),
+            &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,

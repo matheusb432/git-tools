@@ -95,6 +95,12 @@ pub fn symlink_dir(original: &Path, link: &Path) -> std::io::Result<()> {
     symlink_dir_impl(original, link)
 }
 
+/// Creates a file symlink at `link` pointing to `original`, replacing an existing link.
+pub fn symlink_file(original: &Path, link: &Path) -> std::io::Result<()> {
+    let _ = std::fs::remove_file(link).or_else(|_| std::fs::remove_dir(link));
+    symlink_file_impl(original, link)
+}
+
 #[cfg(unix)]
 fn symlink_dir_impl(original: &Path, link: &Path) -> std::io::Result<()> {
     std::os::unix::fs::symlink(original, link)
@@ -103,6 +109,16 @@ fn symlink_dir_impl(original: &Path, link: &Path) -> std::io::Result<()> {
 #[cfg(windows)]
 fn symlink_dir_impl(original: &Path, link: &Path) -> std::io::Result<()> {
     std::os::windows::fs::symlink_dir(original, link)
+}
+
+#[cfg(unix)]
+fn symlink_file_impl(original: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(original, link)
+}
+
+#[cfg(windows)]
+fn symlink_file_impl(original: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_file(original, link)
 }
 
 fn no_open_requested(value: Option<&str>) -> bool {
@@ -138,5 +154,19 @@ mod tests {
         // `ln -sfn` semantics: re-linking an existing link replaces it, no error.
         symlink_dir(&target, &link).unwrap();
         assert_eq!(std::fs::read(link.join("f.txt")).unwrap(), b"hi");
+    }
+
+    #[test]
+    fn symlink_file_links_and_is_idempotent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("real.txt");
+        std::fs::write(&target, b"hi").unwrap();
+        let link = tmp.path().join("link.txt");
+
+        symlink_file(&target, &link).unwrap();
+        assert_eq!(std::fs::read(&link).unwrap(), b"hi");
+
+        symlink_file(&target, &link).unwrap();
+        assert_eq!(std::fs::read(&link).unwrap(), b"hi");
     }
 }

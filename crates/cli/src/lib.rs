@@ -1,7 +1,10 @@
 //! git-tools - CLI entry point: clap parsing + a machine-readable exit-code contract.
 
+use std::path::Path;
+
 use application::{
     managed::plan_push::{self, PlanPush, PushPlan},
+    ports::UserSettingsStore,
     squash_local::{self, SquashLocal, SquashResult, SquashStatus},
 };
 use infra::git_runner::StdGitRunner;
@@ -153,7 +156,10 @@ fn dispatch(command: Command) -> ExitCode {
             message: None,
             yes,
             ..
-        }) => run_push_current(yes, infra::user_config::load().push_confirmation_required()),
+        }) => {
+            let settings = infra::user_config::TomlSettingsStore::from_environment().load();
+            run_push_current(yes, settings.push_confirmation_required())
+        }
         Command::Push(PushArgs {
             all: false,
             recursive: true,
@@ -232,11 +238,25 @@ fn run_daemon_ctl(command: &DaemonCommand) -> ExitCode {
 
 /// Persist the diff-preview theme to the user config and exit (no rendering).
 fn run_set_theme(theme: Theme) -> ExitCode {
-    match infra::user_config::save_theme(theme.as_config_str()) {
-        Ok(path) => {
+    let store = infra::user_config::TomlSettingsStore::from_environment();
+    let Some(path) = store.path().map(Path::to_path_buf) else {
+        eprintln!(
+            "error: could not resolve a config path (no GIT_TOOLS_CONFIG, XDG_CONFIG_HOME, or HOME)"
+        );
+        return ExitCode::Internal;
+    };
+    let value_new = theme.as_config_str().to_owned();
+
+    match application::settings::set_key::execute(
+        application::settings::set_key::SetSettingKey {
+            key: "theme".into(),
+            value_new: value_new.clone(),
+        },
+        &store,
+    ) {
+        Ok(_) => {
             println!(
-                "diff-preview theme set to \"{}\" in {}",
-                theme.as_config_str(),
+                "diff-preview theme set to \"{value_new}\" in {}",
                 path.display()
             );
             ExitCode::Ok

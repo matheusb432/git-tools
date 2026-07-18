@@ -8,8 +8,7 @@ use infra::{
     app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
     diff_source::GitDiffSource, html_renderer::MaudRenderer,
     managed_manifest::TokioManagedManifest, push_ledger::NoOpPushLedger,
-    remote_sync::TokioRemoteSync, repo_probe::GitRepoProbe,
-    user_config::AppSettingsStoreUserConfig,
+    remote_sync::TokioRemoteSync, repo_probe::GitRepoProbe, user_config::TomlSettingsStore,
 };
 use tokio::sync::watch;
 
@@ -31,7 +30,7 @@ pub struct DaemonState {
     pub(crate) ledger: NoOpPushLedger,
     pub(crate) probe: GitRepoProbe,
     pub(crate) app_state: SqliteAppState,
-    pub(crate) app_settings: AppSettingsStoreUserConfig,
+    pub(crate) user_settings: TomlSettingsStore,
 }
 
 impl DaemonState {
@@ -41,7 +40,7 @@ impl DaemonState {
         version: &'static str,
         pid: u32,
         shutdown_tx: watch::Sender<bool>,
-        app_settings: AppSettingsStoreUserConfig,
+        user_settings: TomlSettingsStore,
     ) -> Self {
         Self {
             identity,
@@ -57,7 +56,7 @@ impl DaemonState {
             ledger: NoOpPushLedger,
             probe: GitRepoProbe,
             app_state: SqliteAppState,
-            app_settings,
+            user_settings,
         }
     }
 }

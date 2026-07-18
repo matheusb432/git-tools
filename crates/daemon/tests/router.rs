@@ -48,7 +48,7 @@ impl Fixture {
             "9.9.9",
             4242,
             shutdown_tx,
-            infra::user_config::AppSettingsStoreUserConfig::new(None),
+            infra::user_config::TomlSettingsStore::new(None),
         ));
         Self {
             _temp: temp,

@@ -13,17 +13,17 @@ use std::{
 use application::{
     history::list_recent::{get as get_recent_render, list as list_recent_renders},
     live_views::list as list_live_views,
-    settings::{get as get_setting, set as set_setting},
+    ports::UserSettingsStore,
     viewer::{
-        DiffDensity, DiffLayout, RenderOptions, Theme, ViewerHistoryEntry, ViewerSettings,
-        ViewerTabId, ViewerTabKind, ViewerTabState,
+        RenderOptions, Theme, ViewerHistoryEntry, ViewerSettings, ViewerTabId, ViewerTabKind,
+        ViewerTabState,
     },
 };
 use gtl_recipe::{Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
 use history::to_viewer_entry;
 use infra::{
     app_state::SqliteAppState, clock::SystemClock, diff_source::GitDiffSource,
-    repo_probe::GitRepoProbe, user_config::AppSettingsStoreUserConfig,
+    repo_probe::GitRepoProbe, user_config::TomlSettingsStore,
 };
 pub(crate) use parse::{ResumeNonce, Route, SettingChange, parse};
 use tauri::http::{Request, Response, StatusCode};
@@ -101,14 +101,14 @@ pub(crate) struct ViewerApp {
     pending: Arc<PendingRecipes>,
     renderer: MaudViewerRenderer,
     pub(crate) data_root: Arc<PathBuf>,
-    app_settings: AppSettingsStoreUserConfig,
+    user_settings: TomlSettingsStore,
     restoration: Arc<restoration::RestorationGate>,
 }
 
 impl ViewerApp {
     pub(crate) fn new(
         data_root: PathBuf,
-        app_settings: AppSettingsStoreUserConfig,
+        user_settings: TomlSettingsStore,
         max_cache_weight: usize,
     ) -> Self {
         Self {
@@ -120,7 +120,7 @@ impl ViewerApp {
             pending: Arc::new(PendingRecipes::default()),
             renderer: MaudViewerRenderer,
             data_root: Arc::new(data_root),
-            app_settings,
+            user_settings,
             restoration: Arc::new(restoration::RestorationGate::default()),
         }
     }
@@ -144,7 +144,7 @@ fn recipe_context(
         &app.app_state,
         &app.clock,
         &app.data_root,
-        &app.app_settings,
+        &app.user_settings,
     )
 }
 
@@ -225,7 +225,7 @@ fn serve_route(app: &ViewerApp, route: Route) -> RouteResult {
 
 fn document(app: &ViewerApp) -> RouteResult {
     let transient = restore_live_views(app)?;
-    let settings = load_settings(app)?;
+    let settings = load_settings(app);
     let history = load_history(app)?;
     render::document(app.renderer, &app.session, transient, history, settings)
         .map(html_response)
@@ -242,7 +242,7 @@ fn view(app: &ViewerApp, tab: ViewerTabId, options: RenderOptions) -> RouteResul
     persist_setting(app, LAYOUT_KEY, options.layout().to_string())?;
     persist_setting(app, DENSITY_KEY, options.density().to_string())?;
     let transient = ensure_active_view(app)?;
-    let theme = load_theme(app)?;
+    let theme = load_settings(app).theme();
     let settings = ViewerSettings::new(options, theme);
     render::view_with_tabs(app.renderer, &app.session, transient, settings)
         .map(html_response)
@@ -258,7 +258,7 @@ fn refresh(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
         ticket: result.ticket,
         view,
     });
-    let settings = load_settings(app)?;
+    let settings = load_settings(app);
     render::view_with_tabs(app.renderer, &app.session, transient, settings)
         .map(html_response)
         .map_err(Into::into)
@@ -274,7 +274,7 @@ fn close(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
         return Ok(status_response(StatusCode::NOT_FOUND));
     }
     let transient = ensure_active_view(app)?;
-    let settings = load_settings(app)?;
+    let settings = load_settings(app);
     render::tabs_with_view(app.renderer, &app.session, transient, settings)
         .map(html_response)
         .map_err(Into::into)
@@ -290,7 +290,7 @@ fn activate(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
         return Ok(status_response(StatusCode::NOT_FOUND));
     }
     let transient = ensure_active_view(app)?;
-    let settings = load_settings(app)?;
+    let settings = load_settings(app);
     render::view_with_tabs(app.renderer, &app.session, transient, settings)
         .map(html_response)
         .map_err(Into::into)
@@ -333,7 +333,7 @@ fn open_history(app: &ViewerApp, id: application::viewer::RenderHistoryId) -> Ro
         }
         OpenRecipeOutcome::Skipped { .. } => None,
     };
-    let settings = load_settings(app)?;
+    let settings = load_settings(app);
     render::tabs_with_view(app.renderer, &app.session, transient, settings)
         .map(html_response)
         .map_err(Into::into)
@@ -380,7 +380,7 @@ fn pending_transaction(app: &ViewerApp) -> RouteResult {
                     view,
                 })
             });
-            let settings = load_settings(app)?;
+            let settings = load_settings(app);
             let html = if skipped_labels.is_empty() {
                 render::tabs_with_view(app.renderer, &app.session, transient, settings)
             } else {
@@ -546,46 +546,22 @@ fn load_history(app: &ViewerApp) -> Result<Vec<ViewerHistoryEntry>, String> {
     .map_err(|error| format!("{error:#}"))
 }
 
-fn load_settings(app: &ViewerApp) -> Result<ViewerSettings, String> {
-    let layout = load_setting(app, LAYOUT_KEY)?
-        .map_or(Ok(DiffLayout::Unified), |value| value.parse())
-        .map_err(|error| error.to_string())?;
-    let density = load_setting(app, DENSITY_KEY)?
-        .map_or(Ok(DiffDensity::Compact), |value| value.parse())
-        .map_err(|error| error.to_string())?;
-    let theme = load_theme(app)?;
-    Ok(ViewerSettings::new(
-        RenderOptions::new(layout, density),
-        theme,
-    ))
+fn load_settings(app: &ViewerApp) -> ViewerSettings {
+    let settings = app.user_settings.load();
+    let theme = settings
+        .theme()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(Theme::Dark);
+    ViewerSettings::new(settings.viewer_render_options(), theme)
 }
 
-fn load_theme(app: &ViewerApp) -> Result<Theme, String> {
-    load_setting(app, THEME_KEY)?
-        .map_or(Ok(Theme::Dark), |value| value.parse())
-        .map_err(|error| error.to_string())
-}
-
-fn load_setting(app: &ViewerApp, key: &str) -> Result<Option<String>, String> {
-    get_setting::execute(
-        get_setting::GetSetting {
-            data_root: (*app.data_root).clone(),
+fn persist_setting(app: &ViewerApp, key: &str, value_new: String) -> Result<(), String> {
+    application::settings::set_key::execute(
+        application::settings::set_key::SetSettingKey {
             key: key.into(),
+            value_new,
         },
-        &app.app_state,
-    )
-    .map(|response| response.value)
-    .map_err(|error| format!("{error:#}"))
-}
-
-fn persist_setting(app: &ViewerApp, key: &str, value: String) -> Result<(), String> {
-    set_setting::execute(
-        set_setting::SetSetting {
-            data_root: (*app.data_root).clone(),
-            key: key.into(),
-            value,
-        },
-        &app.app_state,
+        &app.user_settings,
     )
     .map(|_| ())
     .map_err(|error| format!("{error:#}"))

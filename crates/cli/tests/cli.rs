@@ -146,34 +146,41 @@ fn diff_help_documents_set_theme() {
 }
 
 #[test]
-fn diff_set_theme_writes_config_and_exits_zero() {
-    // Points the config at a not-yet-existing path to prove the writer creates parents.
-    // No git repo needed: persisting the theme is a pure config write.
-    let dir = tempfile::tempdir().unwrap();
-    let config = dir.path().join("nested").join("config.toml");
+fn diff_set_theme_uses_the_user_settings_operation() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let config = directory.path().join("nested").join("config.toml");
+    std::fs::create_dir_all(config.parent().expect("config parent")).expect("parent");
+    std::fs::write(&config, "layout = \"split\"\n").expect("seed config");
+
     git_tools()
         .args(["diff", "--set-theme", "hearth"])
         .env("GIT_TOOLS_CONFIG", &config)
         .assert()
         .success()
-        .stdout(contains("hearth"));
-    let written = std::fs::read_to_string(&config).expect("config written");
-    assert!(written.contains("theme = \"hearth\""), "got: {written}");
+        .stdout(contains("hearth"))
+        .stdout(contains(config.display().to_string()));
+
+    let raw = std::fs::read_to_string(config).expect("updated config");
+    let document = toml::from_str::<toml::Value>(&raw).expect("valid settings TOML");
+    assert_eq!(document["theme"].as_str(), Some("hearth"));
+    assert_eq!(document["layout"].as_str(), Some("split"));
 }
 
 #[test]
-fn diff_set_theme_preserves_existing_config_content() {
-    let dir = tempfile::tempdir().unwrap();
-    let config = dir.path().join("config.toml");
-    std::fs::write(&config, "[diff]\nviewer = \"browser\"\n").unwrap();
+fn diff_set_theme_rejects_a_non_string_existing_theme_without_modifying_it() {
+    let directory = tempfile::tempdir().expect("temp directory");
+    let config = directory.path().join("config.toml");
+    let raw = "theme = 7\nlayout = \"split\"\n";
+    std::fs::write(&config, raw).expect("seed config");
+
     git_tools()
         .args(["diff", "--set-theme", "light"])
         .env("GIT_TOOLS_CONFIG", &config)
         .assert()
-        .success();
-    let written = std::fs::read_to_string(&config).unwrap();
-    assert!(written.contains("theme = \"light\""), "got: {written}");
-    assert!(written.contains("viewer = \"browser\""), "got: {written}");
+        .code(1)
+        .stderr(contains("user setting `theme` must be a string"));
+
+    assert_eq!(std::fs::read_to_string(config).unwrap(), raw);
 }
 
 #[test]
