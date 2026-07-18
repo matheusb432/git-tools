@@ -114,6 +114,18 @@ impl MaudViewerRenderer {
         .into_string()
     }
 
+    pub(crate) fn build_tabs_with_view_after_snapshot_skips(
+        self,
+        document: &ViewerDocument,
+        labels: &[String],
+    ) -> String {
+        html! {
+            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::SnapshotRecipesSkipped(labels)))
+            (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::None))
+        }
+        .into_string()
+    }
+
     pub(crate) fn build_tabs_with_view_after_live_delete(
         self,
         document: &ViewerDocument,

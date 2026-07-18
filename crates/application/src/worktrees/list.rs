@@ -36,7 +36,7 @@ pub enum ListWorktreesError {
 /// # Errors
 ///
 /// Returns [`ListWorktreesError`] when Git cannot be executed.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     query: ListWorktrees,
     git: &impl GitRunner,

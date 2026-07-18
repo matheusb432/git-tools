@@ -19,7 +19,7 @@ pub struct ApplyPush {
 /// Pushes each repo's current branch to its upstream, skipping the un-pushable ones, and
 /// aggregates per-repo outcomes into an overall [`Status`]. Infallible by design: a
 /// failed push becomes a [`RepoOutcome::Failed`] report, never an error.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(command: ApplyPush, git: &impl GitRunner) -> PushAllResult {
     let ApplyPush { targets } = command;
     let reports: Vec<RepoReport> = targets

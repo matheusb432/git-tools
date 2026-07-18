@@ -50,7 +50,7 @@ pub enum PlanCommitError {
 /// # Errors
 ///
 /// Returns [`PlanCommitError`] when Git transport fails.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(query: PlanCommit, git: &impl GitRunner) -> Result<CommitPlan, PlanCommitError> {
     let PlanCommit { repo } = query;
     let top_args = ["rev-parse", "--show-toplevel"];

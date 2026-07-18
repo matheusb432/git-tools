@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{
@@ -14,18 +15,17 @@ use crate::{
         range::DiffRanges,
         util::{DiffData, assemble, exclusion_note, repo_name},
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
+    ports::{AppSettingsStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
 
 /// Render the squash-preview of the current branch's unpushed commits (base is
 /// always the configured upstream) under `store_root`, resolving the repo from
 /// `cwd`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderSquashPreview {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
-    pub exclusions: DiffExclusions,
 }
 
 /// The stored artifact plus every message the render wanted surfaced.
@@ -44,20 +44,24 @@ pub enum RenderSquashPreviewError {
 }
 
 /// Renders a squash preview through the diff ports.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     req: RenderSquashPreview,
+    app_settings: &impl AppSettingsStore,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
 ) -> Result<RenderSquashPreviewResponse, RenderSquashPreviewError> {
-    let RenderSquashPreview {
-        cwd,
-        store_root,
-        exclusions,
-    } = req;
-    let built = build_squash_view(source, &cwd, None, &exclusions)?;
+    let RenderSquashPreview { cwd, store_root } = req;
+    let settings = app_settings.load();
+    let built = build_squash_view(
+        source,
+        &cwd,
+        None,
+        settings.theme().map(str::to_owned),
+        settings.diff_exclusions(),
+    )?;
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
@@ -77,9 +81,9 @@ pub fn execute(
         head_committed_at: source.committed_at(Path::new(&built.top), "HEAD"),
         generated_at: clock.now_iso(),
         title: "squash-preview".to_string(),
-        // TODO: refactor this inneficiency. the request must not need _all_ the exclusions when it
-        // just needs that of its current project.
-        excluded_extensions: exclusions
+        theme: settings.theme().map(str::to_owned),
+        excluded_extensions: settings
+            .diff_exclusions()
             .for_project_or_default(&view.repo_name)
             .extensions()
             .to_vec(),
@@ -113,6 +117,7 @@ pub(crate) fn build_squash_view(
     source: &impl DiffSource,
     cwd: &Path,
     pinned: Option<&PinnedRange>,
+    theme: Option<String>,
     exclusions: &DiffExclusions,
 ) -> anyhow::Result<SquashViewBuild> {
     let top = source.top_level(cwd)?;
@@ -162,7 +167,7 @@ pub(crate) fn build_squash_view(
         },
         commits,
         files,
-        theme: None,
+        theme,
         exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
     };
     Ok(SquashViewBuild {
@@ -184,35 +189,20 @@ fn collapse_note(commit_count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{Commit, DiffExclusions};
+    use domain::diffs::DiffExclusions;
 
     use super::{RenderSquashPreview, RenderSquashPreviewError, execute};
     use crate::{
+        ports::AppSettings,
         shared::notes::Note,
-        testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
+        testing::{
+            FakeDiffSource, FixedAppSettingsStore, FixedClock, InMemoryArtifactStore, StubRenderer,
+            diffs::{DIFF_SINGLE_FILE, commit},
+        },
     };
-
-    const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
-index 111..222 100644\n\
---- a/f.txt\n\
-+++ b/f.txt\n\
-@@ -1,2 +1,3 @@\n\
- keep\n\
--old line\n\
-+new line\n\
-+extra line\n";
-
-    fn one_commit(sha: &str) -> Commit {
-        Commit {
-            sha: sha.to_string(),
-            subject: "feat: work".into(),
-            ..Default::default()
-        }
-    }
 
     fn req(source_top: &str) -> RenderSquashPreview {
         RenderSquashPreview {
-            exclusions: DiffExclusions::default(),
             cwd: PathBuf::from(source_top),
             store_root: PathBuf::from("/store"),
         }
@@ -225,14 +215,15 @@ index 111..222 100644\n\
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
             known_revs: vec!["origin/main".into()],
-            commits: vec![one_commit("abc1234"), one_commit("def5678")],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234"), commit("def5678")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
 
         let response = execute(
             req("/repo"),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -259,6 +250,43 @@ index 111..222 100644\n\
     }
 
     #[test]
+    fn render_uses_the_settings_theme_and_resolved_project_exclusions() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
+            ..Default::default()
+        };
+        let store = InMemoryArtifactStore::default();
+        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+            Some("night".into()),
+            true,
+            DiffExclusions::new([("repo".to_string(), vec!["md"])], None),
+        ));
+
+        execute(
+            RenderSquashPreview {
+                cwd: PathBuf::from("/repo"),
+                store_root: PathBuf::from("/store"),
+            },
+            &app_settings,
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
+
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert_eq!(artifact.meta.excluded_extensions, vec!["md"]);
+        assert!(artifact.html.contains("night"));
+    }
+
+    #[test]
     fn no_upstream_is_an_error() {
         let source = FakeDiffSource {
             top_level: Some("/repo".into()),
@@ -270,6 +298,7 @@ index 111..222 100644\n\
 
         let error = execute(
             req("/repo"),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,

@@ -1,6 +1,7 @@
-//! User TOML configuration, shared by every process root (CLI, daemon,
-//! viewer). A bad or missing config must never weaken safety or break a
-//! command, so every read failure degrades to [`GtlConfig::default`].
+//! User TOML configuration adapter shared by every process root.
+//!
+//! A bad or missing config must never weaken safety or break a command, so
+//! every read failure degrades to [`AppSettings::default`].
 
 use std::{
     collections::BTreeMap,
@@ -8,83 +9,35 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use application::ports::{AppSettings, AppSettingsStore};
 use domain::diffs::DiffExclusions;
 use serde::Deserialize;
 
 /// Theme values the renderer knows how to honour; anything else resolves to `None`.
 const KNOWN_THEMES: &[&str] = &["dark", "light", "hearth"];
 
-/// Holds the effective user configuration.
-///
-/// # Examples
-///
-/// ```
-/// let config = infra::user_config::from_toml("[push]\nconfirm = false");
-/// assert!(!config.push.confirm);
-/// ```
 #[derive(Debug, Default, Deserialize)]
-pub struct GtlConfig {
-    /// Selects the default diff-preview theme.
-    pub theme: Option<String>,
-    /// Controls push behavior.
+struct AppSettingsToml {
+    theme: Option<String>,
     #[serde(default)]
-    pub push: PushConfig,
-    /// Controls diff-preview computation.
+    push: PushSettingsToml,
     #[serde(default)]
-    pub diff: DiffConfig,
+    diff: DiffSettingsToml,
 }
 
-/// Controls push behavior.
-///
-/// # Examples
-///
-/// ```
-/// let config = infra::user_config::from_toml("");
-/// assert!(config.push.confirm);
-/// ```
 #[derive(Debug, Deserialize)]
-pub struct PushConfig {
-    /// Requires confirmation before a plain current-repository push.
+struct PushSettingsToml {
     #[serde(default = "confirm_by_default")]
-    pub confirm: bool,
+    confirm: bool,
 }
 
-/// Controls diff-preview computation (`[diff]`). The retired `diff.viewer` key
-/// still parses as an ignored unknown field.
-///
-/// # Examples
-///
-/// ```
-/// let config = infra::user_config::from_toml("[diff.exclude]\ngit-tools = [\"md\"]");
-/// assert!(
-///     config
-///         .diff_exclusions()
-///         .for_project("git-tools")
-///         .is_some_and(|p| p.matches("README.md"))
-/// );
-/// ```
 #[derive(Debug, Default, Deserialize)]
-pub struct DiffConfig {
-    /// Per-project extension exclusions, keyed by repo directory name:
-    /// `[diff.exclude]` `git-tools = ["md", "lock"]`.
+struct DiffSettingsToml {
     #[serde(default)]
-    pub exclude: BTreeMap<String, Vec<String>>,
+    exclude: BTreeMap<String, Vec<String>>,
 }
 
-impl GtlConfig {
-    /// The `[diff.exclude]` table as the domain exclusion map.
-    pub fn diff_exclusions(&self) -> DiffExclusions {
-        DiffExclusions::new(
-            self.diff
-                .exclude
-                .iter()
-                .map(|(project, extensions)| (project.clone(), extensions.clone())),
-            None,
-        )
-    }
-}
-
-impl Default for PushConfig {
+impl Default for PushSettingsToml {
     fn default() -> Self {
         Self {
             confirm: confirm_by_default(),
@@ -104,11 +57,11 @@ const fn confirm_by_default() -> bool {
 /// # Examples
 ///
 /// ```
-/// let config = infra::user_config::from_toml("theme = \"light\"");
-/// assert_eq!(config.theme.as_deref(), Some("light"));
+/// let settings = infra::user_config::from_toml("theme = \"light\"");
+/// assert_eq!(settings.theme(), Some("light"));
 /// ```
-pub fn from_toml(raw: &str) -> GtlConfig {
-    let mut config = toml::from_str::<GtlConfig>(raw).unwrap_or_default();
+pub fn from_toml(raw: &str) -> AppSettings {
+    let mut config = toml::from_str::<AppSettingsToml>(raw).unwrap_or_default();
     if !config
         .theme
         .as_deref()
@@ -116,17 +69,44 @@ pub fn from_toml(raw: &str) -> GtlConfig {
     {
         config.theme = None;
     }
-    config
+    AppSettings::new(
+        config.theme,
+        config.push.confirm,
+        DiffExclusions::new(config.diff.exclude, None),
+    )
 }
 
-/// Read the config at `path` (if present) and parse it; any miss → default.
-pub fn load_from(path: Option<&Path>) -> GtlConfig {
+fn load_from(path: Option<&Path>) -> AppSettings {
     let Some(path) = path else {
-        return GtlConfig::default();
+        return AppSettings::default();
     };
     match std::fs::read_to_string(path) {
         Ok(raw) => from_toml(&raw),
-        Err(_) => GtlConfig::default(),
+        Err(_) => AppSettings::default(),
+    }
+}
+
+/// TOML-backed application-settings adapter for one resolved user-config path.
+#[derive(Debug, Clone)]
+pub struct AppSettingsStoreUserConfig {
+    path: Option<PathBuf>,
+}
+
+impl AppSettingsStoreUserConfig {
+    /// Creates an adapter for an explicit config path, or safe defaults when absent.
+    pub const fn new(path: Option<PathBuf>) -> Self {
+        Self { path }
+    }
+
+    /// Resolves the production config path from the current process environment.
+    pub fn from_environment() -> Self {
+        Self::new(config_path())
+    }
+}
+
+impl AppSettingsStore for AppSettingsStoreUserConfig {
+    fn load(&self) -> AppSettings {
+        load_from(self.path.as_deref())
     }
 }
 
@@ -145,8 +125,7 @@ fn config_path_from(
     home.map(|home| home.join(".config").join("git-tools").join("config.toml"))
 }
 
-/// Resolve the config path from the process environment (mirrors `home_dir_from_env`).
-pub fn config_path() -> Option<PathBuf> {
+fn config_path() -> Option<PathBuf> {
     let env_override = std::env::var_os("GIT_TOOLS_CONFIG").map(PathBuf::from);
     let xdg_config_home = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
     let home = std::env::var_os("USERPROFILE")
@@ -155,9 +134,9 @@ pub fn config_path() -> Option<PathBuf> {
     config_path_from(env_override, xdg_config_home, home)
 }
 
-/// Load the effective user config from the environment.
-pub fn load() -> GtlConfig {
-    load_from(config_path().as_deref())
+/// Loads one effective settings snapshot from the production config path.
+pub fn load() -> AppSettings {
+    AppSettingsStoreUserConfig::from_environment().load()
 }
 
 /// Set the `theme` key in `raw` TOML, preserving every other key, formatting, and
@@ -203,51 +182,74 @@ mod tests {
     use super::*;
 
     #[test]
-    fn from_toml_accepts_known_theme() {
-        assert_eq!(
-            from_toml("theme = \"hearth\"").theme.as_deref(),
-            Some("hearth")
+    fn config_example_maps_to_effective_app_settings() {
+        let settings = from_toml(include_str!("../../../config/local/config.example.toml"));
+
+        assert_eq!(settings.theme(), Some("dark"));
+        assert!(settings.push_confirmation_required());
+        assert!(
+            settings
+                .diff_exclusions()
+                .for_project_or_default("unconfigured")
+                .matches("README.md")
+        );
+        assert!(
+            settings
+                .diff_exclusions()
+                .for_project_or_default("git-tools")
+                .matches("frontend.js")
+        );
+        assert!(
+            !settings
+                .diff_exclusions()
+                .for_project_or_default("git-tools")
+                .matches("openapi.json")
         );
     }
 
     #[test]
+    fn from_toml_accepts_known_theme() {
+        assert_eq!(from_toml("theme = \"hearth\"").theme(), Some("hearth"));
+    }
+
+    #[test]
     fn from_toml_empty_has_no_theme() {
-        assert_eq!(from_toml("").theme, None);
+        assert_eq!(from_toml("").theme(), None);
     }
 
     #[test]
     fn from_toml_rejects_unknown_theme() {
-        assert_eq!(from_toml("theme = \"bogus\"").theme, None);
+        assert_eq!(from_toml("theme = \"bogus\"").theme(), None);
     }
 
     #[test]
     fn from_toml_invalid_toml_does_not_panic() {
-        assert_eq!(from_toml("not valid toml {{{").theme, None);
+        assert_eq!(from_toml("not valid toml {{{").theme(), None);
     }
 
     #[test]
     fn from_toml_requires_plain_push_confirmation_by_default() {
-        assert!(from_toml("").push.confirm);
+        assert!(from_toml("").push_confirmation_required());
     }
 
     #[test]
     fn from_toml_can_disable_plain_push_confirmation() {
-        assert!(!from_toml("[push]\nconfirm = false").push.confirm);
+        assert!(!from_toml("[push]\nconfirm = false").push_confirmation_required());
     }
 
     #[test]
     fn from_toml_accepts_explicit_plain_push_confirmation() {
-        assert!(from_toml("[push]\nconfirm = true").push.confirm);
+        assert!(from_toml("[push]\nconfirm = true").push_confirmation_required());
     }
 
     #[test]
     fn from_toml_invalid_toml_requires_plain_push_confirmation() {
-        assert!(from_toml("not valid toml {{{").push.confirm);
+        assert!(from_toml("not valid toml {{{").push_confirmation_required());
     }
 
     #[test]
     fn from_toml_empty_push_section_requires_confirmation() {
-        assert!(from_toml("[push]").push.confirm);
+        assert!(from_toml("[push]").push_confirmation_required());
     }
 
     #[test]
@@ -284,7 +286,7 @@ mod tests {
         let config = from_toml(
             "theme = \"dark\"\n[diff]\nviewer = \"app\"\n[diff.exclude]\napi = [\"json\"]",
         );
-        assert_eq!(config.theme.as_deref(), Some("dark"));
+        assert_eq!(config.theme(), Some("dark"));
         assert!(
             config
                 .diff_exclusions()
@@ -297,20 +299,39 @@ mod tests {
     fn load_from_reads_theme_from_file() {
         let mut file = NamedTempFile::new().expect("create temp config");
         write!(file, "theme = \"light\"").expect("write temp config");
-        assert_eq!(load_from(Some(file.path())).theme.as_deref(), Some("light"));
+        assert_eq!(load_from(Some(file.path())).theme(), Some("light"));
     }
 
     #[test]
     fn load_from_none_is_default() {
-        assert_eq!(load_from(None).theme, None);
+        assert_eq!(load_from(None).theme(), None);
     }
 
     #[test]
     fn load_from_nonexistent_path_is_default() {
         assert_eq!(
-            load_from(Some(Path::new("/no/such/git-tools/config.toml"))).theme,
+            load_from(Some(Path::new("/no/such/git-tools/config.toml"))).theme(),
             None
         );
+    }
+
+    #[test]
+    fn load_from_unreadable_path_is_default() {
+        let directory = tempfile::tempdir().expect("create temp directory");
+
+        assert_eq!(load_from(Some(directory.path())), AppSettings::default());
+    }
+
+    #[test]
+    fn app_settings_store_user_config_reads_fresh_snapshot() {
+        let file = NamedTempFile::new().expect("create temp config");
+        std::fs::write(file.path(), "theme = \"light\"").expect("write first config");
+        let store = AppSettingsStoreUserConfig::new(Some(file.path().to_path_buf()));
+
+        assert_eq!(store.load().theme(), Some("light"));
+
+        std::fs::write(file.path(), "theme = \"hearth\"").expect("write second config");
+        assert_eq!(store.load().theme(), Some("hearth"));
     }
 
     #[test]
@@ -386,7 +407,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("git-tools").join("config.toml");
         save_theme_to(&path, "hearth").expect("save theme");
-        assert_eq!(load_from(Some(&path)).theme.as_deref(), Some("hearth"));
+        assert_eq!(load_from(Some(&path)).theme(), Some("hearth"));
     }
 
     #[test]
@@ -395,7 +416,7 @@ mod tests {
         write!(file, "[diff.exclude]\ngit-tools = [\"md\"]\n").expect("seed config");
         save_theme_to(file.path(), "light").expect("save theme");
         let config = load_from(Some(file.path()));
-        assert_eq!(config.theme.as_deref(), Some("light"));
+        assert_eq!(config.theme(), Some("light"));
         assert!(
             config
                 .diff_exclusions()

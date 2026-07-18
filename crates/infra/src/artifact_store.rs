@@ -37,6 +37,8 @@ impl ArtifactStore for StoreArtifacts {
             generated_at: meta.generated_at.clone(),
             title: meta.title.clone(),
             byte_size: html.len() as u64,
+            theme: meta.theme.clone(),
+            theme_recorded: true,
             excluded_extensions: meta.excluded_extensions.clone(),
         };
         let placed = crate::store::place(store_root, &repo_id, html, &sidecar)?;
@@ -53,6 +55,7 @@ impl ArtifactStore for StoreArtifacts {
         kind: DiffKind,
         base_sha: &str,
         head_sha: &str,
+        theme: Option<&str>,
         excluded_extensions: &[String],
     ) -> anyhow::Result<Option<PathBuf>> {
         let canonical =
@@ -67,6 +70,7 @@ impl ArtifactStore for StoreArtifacts {
             kind,
             base_sha,
             head_sha,
+            theme,
             excluded_extensions,
         ))
     }
@@ -111,6 +115,8 @@ mod tests {
             excluded_extensions: Vec::new(),
             title: "diff".into(),
             byte_size: 42,
+            theme: None,
+            theme_recorded: true,
         };
         let placed = crate::store::place(dir.path(), "repo123", "<html></html>", &sidecar).unwrap();
         let expected_hash = placed.path.file_stem().unwrap().to_str().unwrap();

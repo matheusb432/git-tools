@@ -1,6 +1,9 @@
 //! In-memory fakes for the application ports (template pattern: cheap-clone
 //! shared state so tests keep a handle after passing a fake in).
 
+#[cfg(test)]
+pub(crate) mod diffs;
+
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
@@ -14,11 +17,30 @@ use domain::{
 };
 
 use crate::ports::{
-    AppStateError, AppStateStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, GitOutput,
-    GitRunner, HistoryRecord, HtmlRenderer, LedgerEntry, LiveViewRecord, ManagedManifest,
-    NewRecentRenderRecord, PlacedArtifact, PushLedger, RecentRenderRecord, RemoteSync,
-    RepoDiscovery, RepoProbe, RepoProbeResult, SyncOutput,
+    AppSettings, AppSettingsStore, AppStateError, AppStateStore, ArtifactMeta, ArtifactStore,
+    Clock, DiffSource, GitOutput, GitRunner, HistoryRecord, HtmlRenderer, LedgerEntry,
+    LiveViewRecord, ManagedManifest, NewRecentRenderRecord, PlacedArtifact, PushLedger,
+    RecentRenderRecord, RemoteSync, RepoDiscovery, RepoProbe, RepoProbeResult, SyncOutput,
 };
+
+/// Fixed effective settings for application operation tests.
+#[derive(Debug, Clone, Default)]
+pub struct FixedAppSettingsStore {
+    settings: AppSettings,
+}
+
+impl FixedAppSettingsStore {
+    /// Creates a store that returns `settings` from every load.
+    pub const fn new(settings: AppSettings) -> Self {
+        Self { settings }
+    }
+}
+
+impl AppSettingsStore for FixedAppSettingsStore {
+    fn load(&self) -> AppSettings {
+        self.settings.clone()
+    }
+}
 
 /// Scripted `DiffSource`: every field is what the corresponding method returns.
 #[derive(Debug, Default, Clone)]
@@ -145,8 +167,9 @@ impl DiffSource for FakeDiffSource {
 }
 
 /// In-memory artifact store with deterministic paths and scripted range hits.
-/// Scripted range-lookup hits keyed by `(kind, base_sha, head_sha, excluded_extensions)`.
-pub type RangeHits = Arc<Mutex<HashMap<(DiffKind, String, String, Vec<String>), PathBuf>>>;
+/// Scripted range-lookup hits keyed by range, renderer theme, and exclusions.
+pub type RangeHits =
+    Arc<Mutex<HashMap<(DiffKind, String, String, Option<String>, Vec<String>), PathBuf>>>;
 
 /// Artifact content observable through [`InMemoryArtifactStore`].
 #[derive(Debug, Clone, PartialEq)]
@@ -169,6 +192,31 @@ impl InMemoryArtifactStore {
     /// Returns the persisted artifact at `path`.
     pub fn artifact(&self, path: &Path) -> Option<StoredArtifact> {
         self.artifacts.lock().ok()?.get(path).cloned()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn range_hit_insert(
+        &self,
+        kind: DiffKind,
+        base_sha: &str,
+        head_sha: &str,
+        theme: Option<&str>,
+        excluded_extensions: &[&str],
+        artifact_path: &str,
+    ) {
+        self.range_hits.lock().unwrap().insert(
+            (
+                kind,
+                base_sha.to_owned(),
+                head_sha.to_owned(),
+                theme.map(str::to_owned),
+                excluded_extensions
+                    .iter()
+                    .map(|extension| (*extension).to_owned())
+                    .collect(),
+            ),
+            PathBuf::from(artifact_path),
+        );
     }
 }
 
@@ -199,6 +247,7 @@ impl ArtifactStore for InMemoryArtifactStore {
         kind: DiffKind,
         base_sha: &str,
         head_sha: &str,
+        theme: Option<&str>,
         excluded_extensions: &[String],
     ) -> anyhow::Result<Option<PathBuf>> {
         Ok(self
@@ -209,6 +258,7 @@ impl ArtifactStore for InMemoryArtifactStore {
                 kind,
                 base_sha.to_string(),
                 head_sha.to_string(),
+                theme.map(str::to_owned),
                 excluded_extensions.to_vec(),
             ))
             .cloned())
@@ -224,10 +274,26 @@ pub struct StubRenderer;
 
 impl HtmlRenderer for StubRenderer {
     fn build_html(&self, view: &crate::diffs::View) -> String {
-        format!("<html><title>{}</title></html>", view.title)
+        format!(
+            "<html data-theme=\"{}\"><title>{}</title></html>",
+            view.theme.as_deref().unwrap_or_default(),
+            view.title
+        )
     }
     fn build_tabbed_html(&self, title: &str, views: &[crate::diffs::View]) -> String {
-        format!("<html><title>{title}</title>{} views</html>", views.len())
+        let view_summaries = views
+            .iter()
+            .map(|view| {
+                format!(
+                    "{}:{}:{}",
+                    view.repo_name,
+                    view.theme.as_deref().unwrap_or_default(),
+                    view.files.len()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("|");
+        format!("<html><title>{title}</title>{view_summaries}</html>")
     }
 }
 

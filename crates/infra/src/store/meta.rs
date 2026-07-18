@@ -16,6 +16,14 @@ pub struct Sidecar {
     pub generated_at: String,
     pub title: String,
     pub byte_size: u64,
+    /// Configured renderer theme used for this artifact. `None` means the
+    /// renderer selected its default theme.
+    #[serde(default)]
+    pub theme: Option<String>,
+    /// Distinguishes current default-theme artifacts from legacy sidecars that
+    /// predate theme metadata and must not satisfy range reuse.
+    #[serde(default)]
+    pub theme_recorded: bool,
     /// Extension set in force at render time (normalized, sorted; empty =
     /// unfiltered). Defaults keep pre-exclusion sidecars readable, and their
     /// empty set correctly means "rendered without exclusions".
@@ -41,9 +49,33 @@ mod tests {
             generated_at: "2026-06-22T10:01:00Z".into(),
             title: "diff".into(),
             byte_size: 1234,
+            theme: Some("dark".into()),
+            theme_recorded: true,
             excluded_extensions: vec!["md".into()],
         };
         let json = serde_json::to_string(&sc).unwrap();
         assert_eq!(serde_json::from_str::<Sidecar>(&json).unwrap(), sc);
+    }
+
+    #[test]
+    fn sidecar_without_theme_metadata_is_marked_legacy() {
+        let json = r#"{
+            "repo_id":"deadbeef00000000",
+            "repo_name":"git-tools",
+            "repo_root":"/repo",
+            "kind":"two_dot",
+            "base_sha":"aaaa",
+            "head_sha":"bbbb",
+            "range_label":"a..b",
+            "head_committed_at":"t",
+            "generated_at":"t",
+            "title":"diff",
+            "byte_size":1
+        }"#;
+
+        let sidecar = serde_json::from_str::<Sidecar>(json).unwrap();
+
+        assert_eq!(sidecar.theme, None);
+        assert!(!sidecar.theme_recorded);
     }
 }

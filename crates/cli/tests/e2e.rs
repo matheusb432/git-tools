@@ -9,6 +9,7 @@
 use std::{
     path::{Path, PathBuf},
     process::Command as Git,
+    time::Duration,
 };
 
 use assert_cmd::Command;
@@ -20,6 +21,7 @@ mod common;
 /// A throwaway git repo with an isolated central store.
 struct Repo {
     _tmp: TempDir,
+    _daemon: common::DaemonProcessGuard,
     _store: TempDir,
     root: PathBuf,
     subrepo: PathBuf,
@@ -29,6 +31,7 @@ struct Repo {
 
 struct NestedRepos {
     _tmp: TempDir,
+    _daemon: common::DaemonProcessGuard,
     _store: TempDir,
     root: PathBuf,
     repos: Vec<PathBuf>,
@@ -40,6 +43,7 @@ impl NestedRepos {
         let tmp = tempfile::tempdir().unwrap();
         let store = tempfile::tempdir().unwrap();
         let store_dir = store.path().to_path_buf();
+        let daemon = common::DaemonProcessGuard::new(&store_dir);
         let root = tmp.path().to_path_buf();
         let repos = names.iter().map(|name| root.join(name)).collect::<Vec<_>>();
 
@@ -65,6 +69,7 @@ impl NestedRepos {
 
         Self {
             _tmp: tmp,
+            _daemon: daemon,
             _store: store,
             root,
             repos,
@@ -79,8 +84,6 @@ impl NestedRepos {
             .current_dir(&self.root)
             .env("GIT_TOOLS_NO_OPEN", "1")
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
-            // Diff commands spawn a per-store daemon; a short idle timeout reaps it.
-            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
             // This suite pins the daemon/store/browser path directly (artifacts,
             // sidecars, wire-note text); simulate headless so `diff`'s default degrades
             // to that path without needing `--raw` sprinkled through every call
@@ -150,6 +153,7 @@ impl Repo {
         let tmp = tempfile::tempdir().unwrap();
         let store = tempfile::tempdir().unwrap();
         let store_dir = store.path().to_path_buf();
+        let daemon = common::DaemonProcessGuard::new(&store_dir);
         let root = tmp.path().to_path_buf();
         let repo = root.join("repo");
         let monorepo = root.join("monorepo");
@@ -157,6 +161,7 @@ impl Repo {
         std::fs::create_dir_all(&monorepo).unwrap();
         let this = Self {
             _tmp: tmp,
+            _daemon: daemon,
             _store: store,
             root,
             subrepo: repo,
@@ -253,8 +258,6 @@ impl Repo {
             .current_dir(&self.subrepo)
             .env("GIT_TOOLS_NO_OPEN", "1")
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
-            // Diff commands spawn a per-store daemon; a short idle timeout reaps it.
-            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
             // This suite pins the daemon/store/browser path directly (artifacts,
             // sidecars, wire-note text); simulate headless so `diff`'s default degrades
             // to that path without needing `--raw` sprinkled through every call
@@ -276,6 +279,12 @@ impl Repo {
     }
     fn monorepo_arg(&self) -> &str {
         self.monorepo.to_str().unwrap()
+    }
+
+    fn daemon_pid(&self) -> u32 {
+        let raw = std::fs::read_to_string(self.store_dir.join("daemon.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        u32::try_from(json["pid"].as_u64().unwrap()).unwrap()
     }
 }
 
@@ -387,6 +396,25 @@ fn diff_unpushed_writes_artifact() {
         !repo.subrepo.join(".artifacts").exists(),
         "no .artifacts in repo"
     );
+}
+
+#[test]
+fn daemon_stays_resident_beyond_the_retired_idle_window() {
+    let repo = Repo::new();
+    repo.commit("a.txt", "base\n", "chore: base");
+    repo.add_upstream();
+    repo.commit("a.txt", "base\nlocal\n", "feat: local work");
+
+    repo.run(&["diff"]).assert().success();
+    let pid = repo.daemon_pid();
+    std::thread::sleep(Duration::from_secs(4));
+
+    repo.run(&["daemon", "status"])
+        .assert()
+        .success()
+        .stdout(contains("gtl-daemon running"))
+        .stdout(contains(format!("pid {pid}")));
+    assert_eq!(repo.daemon_pid(), pid);
 }
 
 #[test]
@@ -636,13 +664,13 @@ fn diff_outside_a_git_repo_errors() {
     common::ensure_daemon_built();
     let tmp = tempfile::tempdir().unwrap();
     let store = tempfile::tempdir().unwrap();
+    let _daemon = common::DaemonProcessGuard::new(store.path());
     Command::cargo_bin("git-tools")
         .unwrap()
         .arg("diff")
         .current_dir(tmp.path())
         .env("GIT_TOOLS_NO_OPEN", "1")
         .env("GIT_TOOLS_DATA_DIR", store.path())
-        .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
         .assert()
         .code(1)
         .stderr(contains("not a git repo"));

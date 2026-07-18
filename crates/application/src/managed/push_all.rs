@@ -30,7 +30,7 @@ pub enum PushAllError {
 }
 
 /// Pushes every managed repository through the remote-sync ports.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub async fn execute(
     req: PushAll,
     remote: &impl RemoteSync,

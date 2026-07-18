@@ -25,6 +25,7 @@ mod common;
 /// manifests as needed.
 struct Repo {
     _tmp: TempDir,
+    _daemon: common::DaemonProcessGuard,
     _store: TempDir,
     root: PathBuf,
     dir: PathBuf,
@@ -36,11 +37,13 @@ impl Repo {
         let tmp = tempfile::tempdir().unwrap();
         let store = tempfile::tempdir().unwrap();
         let store_dir = store.path().to_path_buf();
+        let daemon = common::DaemonProcessGuard::new(&store_dir);
         let root = tmp.path().to_path_buf();
         let dir = root.join("repo");
         fs::create_dir_all(&dir).unwrap();
         let this = Self {
             _tmp: tmp,
+            _daemon: daemon,
             _store: store,
             root,
             dir,
@@ -109,7 +112,6 @@ impl Repo {
         cmd.args(args)
             .current_dir(&self.dir)
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
-            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
             .env("GIT_TOOLS_CONFIG", "/dev/null");
         cmd
     }

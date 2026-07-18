@@ -49,7 +49,7 @@ pub enum ProbeSourceError {
 
 /// Probes a source by rebuilding its [`LiveSource`] identity and
 /// probing its directory through the [`RepoProbe`] port.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     req: ProbeSource,
     probe: &impl RepoProbe,

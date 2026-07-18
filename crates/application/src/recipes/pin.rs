@@ -50,7 +50,7 @@ pub enum PinRecipeError {
 /// Returns [`PinRecipeError::TopLevel`] when Git cannot resolve `query.repo` to
 /// a repository top level. Returns [`PinRecipeError::Transport`] when Git
 /// transport fails while resolving an immutable pin.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(query: PinRecipe, git: &impl GitRunner) -> Result<Recipe, PinRecipeError> {
     let top = resolve_repo_top::execute(
         resolve_repo_top::ResolveRepoTop {

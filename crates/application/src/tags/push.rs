@@ -35,7 +35,7 @@ pub enum PushTagsError {
 /// # Errors
 ///
 /// Returns [`PushTagsError`] when Git cannot be executed.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(command: PushTags, git: &impl GitRunner) -> Result<TagActionOutcome, PushTagsError> {
     match push(command, git) {
         Ok(outcome) => Ok(outcome),

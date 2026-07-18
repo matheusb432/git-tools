@@ -56,7 +56,7 @@ pub enum ApplyPruneError {
 ///
 /// Returns [`ApplyPruneError`] when Git cannot be executed before every selected branch is
 /// attempted. Completed branch outcomes remain available on the error.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(command: ApplyPrune, git: &impl GitRunner) -> Result<PruneResult, ApplyPruneError> {
     let ApplyPrune { top, branches } = command;
     let mut deleted = Vec::new();

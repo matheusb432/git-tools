@@ -153,7 +153,7 @@ fn dispatch(command: Command) -> ExitCode {
             message: None,
             yes,
             ..
-        }) => run_push_current(yes, infra::user_config::load().push.confirm),
+        }) => run_push_current(yes, infra::user_config::load().push_confirmation_required()),
         Command::Push(PushArgs {
             all: false,
             recursive: true,
@@ -212,16 +212,22 @@ fn run_commit(args: CommitArgs) -> ExitCode {
     }
 }
 
-/// Dispatch `daemon status|stop`. Both verbs exit 0 whether or not a daemon is
-/// running.
+/// Dispatch resident daemon lifecycle commands.
 fn run_daemon_ctl(command: &DaemonCommand) -> ExitCode {
     use crate::commands::daemon_ctl;
 
-    match command {
+    let result = match command {
         DaemonCommand::Status => daemon_ctl::status(),
+        DaemonCommand::Restart => daemon_ctl::restart(),
         DaemonCommand::Stop => daemon_ctl::stop(),
+    };
+    match result {
+        Ok(()) => ExitCode::Ok,
+        Err(error) => {
+            eprintln!("gtl-daemon: {error:#}");
+            ExitCode::Internal
+        }
     }
-    ExitCode::Ok
 }
 
 /// Persist the diff-preview theme to the user config and exit (no rendering).

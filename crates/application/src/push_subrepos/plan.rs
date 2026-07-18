@@ -26,7 +26,7 @@ pub enum PlanPushError {
 
 /// Discovers every git repo under the root and resolves each one's push destination.
 /// Linked worktrees are skipped (via the `discovery` slice).
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     req: PlanPush,
     discovery: &impl RepoDiscovery,

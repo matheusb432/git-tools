@@ -22,5 +22,5 @@ mod view;
 
 pub use batch::RepoRef;
 pub use file::{FileDiff, FileStatus, LineOwners};
-pub use target::{DiffTarget, PinnedRange};
+pub use target::{DiffTarget, DiffTargetRequest, DiffTargetRequestError, PinnedRange};
 pub use view::{Cmd, Foot, View, sort_files_tree_order};

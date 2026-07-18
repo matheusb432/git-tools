@@ -24,7 +24,7 @@ pub enum RemoveLiveViewError {
 }
 
 /// Removes a saved live view through the app-state port.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     req: RemoveLiveView,
     store: &impl AppStateStore,

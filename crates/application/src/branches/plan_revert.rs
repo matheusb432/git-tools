@@ -47,7 +47,7 @@ pub enum PlanRevertError {
 /// # Errors
 ///
 /// Returns [`PlanRevertError`] when Git transport fails.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(query: PlanRevert, git: &impl GitRunner) -> Result<RevertPlan, PlanRevertError> {
     let PlanRevert { repo, onto } = query;
     let top_args = ["rev-parse", "--show-toplevel"];

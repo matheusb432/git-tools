@@ -48,7 +48,7 @@ pub enum PlanPruneError {
 /// # Errors
 ///
 /// Returns [`PlanPruneError`] when Git cannot be executed.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(query: PlanPrune, git: &impl GitRunner) -> Result<PrunePlan, PlanPruneError> {
     let PlanPrune { repo, onto } = query;
     let top = git

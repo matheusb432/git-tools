@@ -40,7 +40,7 @@ pub enum FindRepoTopsError {
 /// Returns [`FindRepoTopsError::Discover`] when repository discovery fails, or
 /// [`FindRepoTopsError::Resolve`] when a discovered repository's canonical top
 /// level cannot be resolved.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     req: FindRepoTops,
     discovery: &impl RepoDiscovery,

@@ -55,7 +55,7 @@ pub enum PlanRebaseError {
 /// # Errors
 ///
 /// Returns [`PlanRebaseError`] when Git transport fails.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(query: PlanRebase, git: &impl GitRunner) -> Result<RebasePlan, PlanRebaseError> {
     let PlanRebase { repo, onto } = query;
     let top_args = ["rev-parse", "--show-toplevel"];

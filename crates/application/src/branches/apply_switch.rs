@@ -50,7 +50,7 @@ pub enum ApplySwitchError {
 /// # Errors
 ///
 /// Returns [`ApplySwitchError`] when Git transport fails.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     command: ApplySwitch,
     git: &impl GitRunner,

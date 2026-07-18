@@ -27,7 +27,7 @@ pub enum RecordRenderError {
 }
 
 /// Records a render through the app-state port.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     req: RecordRender,
     store: &impl AppStateStore,

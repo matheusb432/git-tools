@@ -1,7 +1,6 @@
 use std::path::Path;
 
-use application::recipes::RecipeRequest;
-use contracts::diffs::RenderMergeDiffRequest;
+use application::{diffs::render_merge_diff::RenderMergeDiff, recipes::RecipeRequest};
 use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
 use crate::{
@@ -67,14 +66,12 @@ pub(crate) fn render(
     // Lexical, no filesystem access — the daemon process's own cwd is unrelated
     // to the caller's shell, so `cwd` must already be absolute on the wire.
     let cwd = std::path::absolute(repo.as_ref())?;
-    let req = RenderMergeDiffRequest {
-        cwd: cwd.to_string_lossy().into_owned(),
-        store_root: gtl_platform::paths::store_root()?
-            .to_string_lossy()
-            .into_owned(),
+    let request = RenderMergeDiff {
+        cwd,
+        store_root: gtl_platform::paths::store_root()?,
         base: base.map(str::to_string),
     };
-    let artifact = super::finish_single_render(backend.render_merge_diff(&req)?, open)?;
+    let artifact = super::finish_single_render(backend.render_merge_diff(&request)?, open)?;
     Ok(DiffOutcome::Rendered(artifact))
 }
 
@@ -92,7 +89,7 @@ mod tests {
     impl Backend for FakeBackend {
         fn render_merge_diff(
             &self,
-            _req: &RenderMergeDiffRequest,
+            _request: &RenderMergeDiff,
         ) -> anyhow::Result<Envelope<RenderDiffData>> {
             Ok(self.0.clone())
         }

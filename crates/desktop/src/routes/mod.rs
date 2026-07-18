@@ -23,13 +23,15 @@ use gtl_recipe::{Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
 use history::to_viewer_entry;
 use infra::{
     app_state::SqliteAppState, clock::SystemClock, diff_source::GitDiffSource,
-    repo_probe::GitRepoProbe,
+    repo_probe::GitRepoProbe, user_config::AppSettingsStoreUserConfig,
 };
 pub(crate) use parse::{ResumeNonce, Route, SettingChange, parse};
 use tauri::http::{Request, Response, StatusCode};
 
 use crate::{
-    recipes::{RecipeContext, RecipeError, open_recipe, refresh_recipe_versioned},
+    recipes::{
+        OpenRecipeOutcome, RecipeContext, RecipeError, open_recipe, refresh_recipe_versioned,
+    },
     render::MaudViewerRenderer,
     session::{PendingRecipes, PendingRecipesError, ViewerSession},
 };
@@ -99,16 +101,14 @@ pub(crate) struct ViewerApp {
     pending: Arc<PendingRecipes>,
     renderer: MaudViewerRenderer,
     pub(crate) data_root: Arc<PathBuf>,
-    /// User config file to read `[diff.exclude]` from on every compute; `None`
-    /// (unresolvable environment) computes without exclusions.
-    config_path: Arc<Option<PathBuf>>,
+    app_settings: AppSettingsStoreUserConfig,
     restoration: Arc<restoration::RestorationGate>,
 }
 
 impl ViewerApp {
     pub(crate) fn new(
         data_root: PathBuf,
-        config_path: Option<PathBuf>,
+        app_settings: AppSettingsStoreUserConfig,
         max_cache_weight: usize,
     ) -> Self {
         Self {
@@ -120,7 +120,7 @@ impl ViewerApp {
             pending: Arc::new(PendingRecipes::default()),
             renderer: MaudViewerRenderer,
             data_root: Arc::new(data_root),
-            config_path: Arc::new(config_path),
+            app_settings,
             restoration: Arc::new(restoration::RestorationGate::default()),
         }
     }
@@ -129,28 +129,22 @@ impl ViewerApp {
         &self.pending
     }
 
-    /// Re-reads `[diff.exclude]` so a config edit applies on the next compute.
-    fn diff_exclusions(&self) -> domain::diffs::DiffExclusions {
-        infra::user_config::load_from(self.config_path.as_deref()).diff_exclusions()
-    }
-
     #[cfg(test)]
     fn active_tab(&self) -> Option<ViewerTabId> {
         self.session.lock().expect("session lock").active()
     }
 }
 
-fn recipe_context<'a>(
-    app: &'a ViewerApp,
-    exclusions: &'a domain::diffs::DiffExclusions,
-) -> RecipeContext<'a, GitDiffSource, GitRepoProbe, SqliteAppState, SystemClock> {
+fn recipe_context(
+    app: &ViewerApp,
+) -> RecipeContext<'_, GitDiffSource, GitRepoProbe, SqliteAppState, SystemClock> {
     RecipeContext::new(
         &app.source,
         &app.probe,
         &app.app_state,
         &app.clock,
         &app.data_root,
-        exclusions,
+        &app.app_settings,
     )
 }
 
@@ -259,8 +253,7 @@ fn refresh(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     if !tab_exists(app, tab)? {
         return Ok(status_response(StatusCode::NOT_FOUND));
     }
-    let exclusions = app.diff_exclusions();
-    let result = refresh_recipe_versioned(recipe_context(app, &exclusions), &app.session, tab)?;
+    let result = refresh_recipe_versioned(recipe_context(app), &app.session, tab)?;
     let transient = result.view.map(|view| render::VersionedView {
         ticket: result.ticket,
         view,
@@ -323,21 +316,23 @@ fn open_history(app: &ViewerApp, id: application::viewer::RenderHistoryId) -> Ro
     };
     let recipe: Recipe = serde_json::from_str(&entry.recipe_json)
         .map_err(|error| format!("invalid saved recipe for history {id}: {error}"))?;
-    let exclusions = app.diff_exclusions();
     let opened = open_recipe(
-        recipe_context(app, &exclusions),
+        recipe_context(app),
         &app.session,
         &recipe,
         format!("history-{id}"),
         ViewerTabKind::Snapshot,
     )?;
-    let transient = Some(opened).and_then(|opened| {
-        debug_assert_eq!(opened.tab_id, opened.ticket.tab_id);
-        opened.view.map(|view| render::VersionedView {
-            ticket: opened.ticket,
-            view,
-        })
-    });
+    let transient = match opened {
+        OpenRecipeOutcome::Opened(opened) => {
+            debug_assert_eq!(opened.tab_id, opened.ticket.tab_id);
+            opened.view.map(|view| render::VersionedView {
+                ticket: opened.ticket,
+                view,
+            })
+        }
+        OpenRecipeOutcome::Skipped { .. } => None,
+    };
     let settings = load_settings(app)?;
     render::tabs_with_view(app.renderer, &app.session, transient, settings)
         .map(html_response)
@@ -360,18 +355,25 @@ fn pending(app: &ViewerApp) -> RouteResult {
 
 fn pending_transaction(app: &ViewerApp) -> RouteResult {
     let batches = app.pending.try_drain()?;
-    let exclusions = app.diff_exclusions();
     match process_pending(batches, |recipe, batch_id, kind| {
         open_recipe(
-            recipe_context(app, &exclusions),
+            recipe_context(app),
             &app.session,
             recipe,
             batch_id.into(),
             viewer_tab_kind(kind),
         )
+        .map(|outcome| match outcome {
+            OpenRecipeOutcome::Opened(opened) => PendingRecipeOutcome::Opened(opened),
+            OpenRecipeOutcome::Skipped { label } => PendingRecipeOutcome::Skipped(label),
+        })
     }) {
-        Ok(latest) => {
-            let transient = latest.and_then(|opened| {
+        Ok(processed) => {
+            let PendingProcess {
+                latest_opened,
+                skipped_labels,
+            } = processed;
+            let transient = latest_opened.and_then(|opened| {
                 debug_assert_eq!(opened.tab_id, opened.ticket.tab_id);
                 opened.view.map(|view| render::VersionedView {
                     ticket: opened.ticket,
@@ -379,15 +381,36 @@ fn pending_transaction(app: &ViewerApp) -> RouteResult {
                 })
             });
             let settings = load_settings(app)?;
-            render::tabs_with_view(app.renderer, &app.session, transient, settings)
-                .map(html_response)
-                .map_err(Into::into)
+            let html = if skipped_labels.is_empty() {
+                render::tabs_with_view(app.renderer, &app.session, transient, settings)
+            } else {
+                render::tabs_with_view_after_snapshot_skips(
+                    app.renderer,
+                    &app.session,
+                    transient,
+                    settings,
+                    &skipped_labels,
+                )
+            }?;
+            Ok(html_response(html))
         }
         Err(failure) => {
             app.pending.prepend(failure.remainder)?;
             Err(RouteError::from(failure.reason))
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PendingRecipeOutcome<T> {
+    Opened(T),
+    Skipped(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingProcess<T> {
+    latest_opened: Option<T>,
+    skipped_labels: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -398,15 +421,23 @@ struct PendingFailure<E> {
 
 fn process_pending<T, E>(
     batches: Vec<gtl_recipe::OpenRecipes>,
-    mut open: impl FnMut(&Recipe, &str, RecipeBatchKind) -> Result<T, E>,
-) -> Result<Option<T>, PendingFailure<E>> {
+    mut open: impl FnMut(&Recipe, &str, RecipeBatchKind) -> Result<PendingRecipeOutcome<T>, E>,
+) -> Result<PendingProcess<T>, PendingFailure<E>> {
     let mut batches = VecDeque::from(batches);
-    let mut latest = None;
+    let mut processed = PendingProcess {
+        latest_opened: None,
+        skipped_labels: Vec::new(),
+    };
     while let Some(mut batch) = batches.pop_front() {
         while !batch.recipes.is_empty() {
             let recipe = batch.recipes.remove(0);
             match open(&recipe, &batch.batch_id, batch.kind) {
-                Ok(value) => latest = Some(value),
+                Ok(PendingRecipeOutcome::Opened(value)) => {
+                    processed.latest_opened = Some(value);
+                }
+                Ok(PendingRecipeOutcome::Skipped(label)) => {
+                    processed.skipped_labels.push(label);
+                }
                 Err(reason) => {
                     batch.recipes.insert(0, recipe);
                     let mut remainder = vec![batch];
@@ -416,7 +447,7 @@ fn process_pending<T, E>(
             }
         }
     }
-    Ok(latest)
+    Ok(processed)
 }
 
 const fn viewer_tab_kind(kind: RecipeBatchKind) -> ViewerTabKind {
@@ -455,10 +486,8 @@ fn restore_live_views(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
             }
         }
         if let Some(tab) = newest {
-            let exclusions = app.diff_exclusions();
-            let result =
-                refresh_recipe_versioned(recipe_context(app, &exclusions), &app.session, tab)
-                    .map_err(|error| error.to_string())?;
+            let result = refresh_recipe_versioned(recipe_context(app), &app.session, tab)
+                .map_err(|error| error.to_string())?;
             transient = result.view.map(|view| render::VersionedView {
                 ticket: result.ticket,
                 view,
@@ -490,8 +519,7 @@ fn ensure_active_view(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
     let Some(id) = refresh else {
         return Ok(None);
     };
-    let exclusions = app.diff_exclusions();
-    let result = refresh_recipe_versioned(recipe_context(app, &exclusions), &app.session, id)?;
+    let result = refresh_recipe_versioned(recipe_context(app), &app.session, id)?;
     Ok(result.view.map(|view| render::VersionedView {
         ticket: result.ticket,
         view,

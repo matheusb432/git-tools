@@ -85,7 +85,7 @@ struct PruneAttemptError {
 ///
 /// Returns [`PruneAllError`] when Git cannot be executed. Results completed before the transport
 /// failure remain available on the error.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(command: PruneAll, git: &impl GitRunner) -> Result<PruneAllResult, PruneAllError> {
     let PruneAll { repos, onto, dry } = command;
     let mut results = Vec::with_capacity(repos.len());

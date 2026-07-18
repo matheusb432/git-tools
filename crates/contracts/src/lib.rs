@@ -1,6 +1,5 @@
-//! Wire-format DTOs for the daemon boundary. Intentionally free of any
-//! `domain`/`application` dependency — process roots own the mapping
-//! (template pattern; enforced by the check-deps lint).
+//! Process-boundary values that are not application operation requests.
+//! Application requests are serialized directly by their presentation layer.
 
 pub mod diffs;
 pub mod envelope;

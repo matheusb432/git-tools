@@ -85,7 +85,7 @@ pub enum ApplyRebaseError {
 /// # Errors
 ///
 /// Returns [`ApplyRebaseError`] when Git transport fails.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     command: ApplyRebase,
     git: &impl GitRunner,

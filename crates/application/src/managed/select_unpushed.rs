@@ -48,7 +48,7 @@ pub enum SelectUnpushedError {
 ///
 /// Returns [`SelectUnpushedError`] when Git transport fails, the ahead-count
 /// command is rejected, or an ahead repository's top-level path cannot be resolved.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     query: SelectUnpushed,
     git: &impl GitRunner,

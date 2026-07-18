@@ -22,7 +22,7 @@ pub enum ListLiveViewsError {
 }
 
 /// Lists saved live views through the app-state port.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     req: ListLiveViews,
     store: &impl AppStateStore,

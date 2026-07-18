@@ -30,7 +30,7 @@ pub enum BuildManagedRecipesError {
 /// # Errors
 ///
 /// Returns [`BuildManagedRecipesError`] when selection or immutable pin resolution fails.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     query: BuildManagedRecipes,
     git: &impl GitRunner,

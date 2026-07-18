@@ -35,7 +35,7 @@ pub enum BuildSubrepoRecipesError {
 /// # Errors
 ///
 /// Returns [`BuildSubrepoRecipesError`] when discovery, top-level resolution, or pinning fails.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     query: BuildSubrepoRecipes,
     discovery: &impl RepoDiscovery,

@@ -1,37 +1,39 @@
 //! `POST /diffs/subrepos` — mirrors `endpoints/diffs/render.rs` exactly.
 
-use application::diffs::render_diff_subrepos;
-use axum::{Json, extract::State, http::StatusCode};
-use contracts::{
-    diffs::{RenderDiffData, RenderDiffSubreposRequest},
-    envelope::Envelope,
+use application::diffs::render_diff_subrepos::{RenderDiffSubrepos, RenderDiffSubreposError};
+use axum::{
+    Json,
+    extract::{State, rejection::JsonRejection},
 };
+use contracts::{diffs::RenderDiffData, envelope::Envelope};
 
-use crate::state::DaemonState;
+use crate::{endpoints::EndpointError, state::DaemonState};
 
 /// Renders a diff-subrepos preview for the request body, returning the wire envelope.
 ///
 /// - `200` with an `ok`/`empty` envelope on success.
-/// - `400` with an error envelope when the DTO cannot be mapped (bad target).
+/// - `400` with an error envelope when the JSON or target selection is invalid.
 /// - `500` with an error envelope when the handler (or its blocking task) fails.
 pub async fn handle(
     State(state): State<DaemonState>,
-    Json(dto): Json<RenderDiffSubreposRequest>,
-) -> (StatusCode, Json<Envelope<RenderDiffData>>) {
-    let shared = state.shared.clone();
-    crate::endpoints::run(
-        shared,
-        super::to_subrepos_request(dto, super::config_exclusions()),
-        move |request| {
-            render_diff_subrepos::execute(
-                request,
-                &state.source,
-                &state.artifacts,
-                &state.renderer,
-                &state.clock,
-            )
-        },
-        super::to_subrepos_envelope,
-    )
+    request: Result<Json<RenderDiffSubrepos>, JsonRejection>,
+) -> Result<Json<Envelope<RenderDiffData>>, EndpointError> {
+    let Json(request) = request.map_err(|error| EndpointError::bad_request(error.body_text()))?;
+    let response = tokio::task::spawn_blocking(move || {
+        application::diffs::render_diff_subrepos::execute(
+            request,
+            &state.app_settings,
+            &state.source,
+            &state.artifacts,
+            &state.renderer,
+            &state.clock,
+        )
+    })
     .await
+    .map_err(EndpointError::task_join)?
+    .map_err(|error| match error {
+        RenderDiffSubreposError::InvalidTarget(error) => EndpointError::bad_request(error),
+        RenderDiffSubreposError::Unexpected(error) => EndpointError::unexpected(error),
+    })?;
+    Ok(Json(super::to_subrepos_envelope(response)))
 }

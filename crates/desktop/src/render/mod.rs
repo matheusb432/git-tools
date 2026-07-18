@@ -342,6 +342,32 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_skips_render_one_accessible_escaped_toast() {
+        let labels = vec!["api".into(), "<script>web</script>".into()];
+
+        let html = MaudViewerRenderer
+            .build_tabs_with_view_after_snapshot_skips(&sample_document(), &labels);
+
+        assert!(html.contains("class=\"gtl-toast viewer-toast-skip show\""));
+        assert!(html.contains("data-viewer-toast"));
+        assert!(html.contains("role=\"status\" aria-live=\"polite\" aria-atomic=\"true\""));
+        assert!(html.contains(
+            "Skipped 2 diffs with no commits or changed files: api, &lt;script&gt;web&lt;/script&gt;."
+        ));
+        assert!(!html.contains("<script>web</script>"));
+    }
+
+    #[test]
+    fn snapshot_skip_toast_has_a_bounded_reduced_motion_aware_lifetime() {
+        let css = infra::html_renderer::preview_css();
+
+        assert!(css.contains("@keyframes viewer-toast-dismiss"));
+        assert!(css.contains("animation:viewer-toast-dismiss 5s ease forwards"));
+        assert!(css.contains("@media (prefers-reduced-motion:reduce)"));
+        assert!(css.contains("animation-timing-function:step-end"));
+    }
+
+    #[test]
     fn live_delete_feedback_focuses_the_active_tab_and_announces_success() {
         let html = MaudViewerRenderer.build_tabs_with_view_after_live_delete(&sample_document());
         let active = html

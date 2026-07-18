@@ -1,10 +1,5 @@
 //! Concrete daemon state and route table.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
-
 use axum::{
     Router,
     routing::{get, post},
@@ -14,44 +9,19 @@ use infra::{
     diff_source::GitDiffSource, html_renderer::MaudRenderer,
     managed_manifest::TokioManagedManifest, push_ledger::NoOpPushLedger,
     remote_sync::TokioRemoteSync, repo_probe::GitRepoProbe,
+    user_config::AppSettingsStoreUserConfig,
 };
 use tokio::sync::watch;
 
 use crate::{endpoints, lifecycle::ExeIdentity};
 
-/// Cross-cutting daemon state: identity for the handshake, the shutdown trigger, and idle state.
-pub struct Shared {
-    pub identity: ExeIdentity,
-    pub version: &'static str,
-    pub pid: u32,
-    pub shutdown_tx: watch::Sender<bool>,
-    pub last_activity_ms: AtomicU64,
-}
-
-impl Shared {
-    /// Records that a request arrived, resetting the idle countdown.
-    pub fn touch(&self) {
-        self.last_activity_ms.store(now_ms(), Ordering::Relaxed);
-    }
-
-    /// Returns the last-activity instant in epoch milliseconds.
-    pub fn last_activity_ms(&self) -> u64 {
-        self.last_activity_ms.load(Ordering::Relaxed)
-    }
-}
-
-/// Wall-clock now in epoch milliseconds, saturating on the impossible pre-epoch case.
-pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| {
-            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-        })
-}
-
 /// Production adapters owned by the daemon process root.
 #[derive(Clone)]
 pub struct DaemonState {
+    pub(crate) identity: ExeIdentity,
+    pub(crate) version: &'static str,
+    pub(crate) pid: u32,
+    pub(crate) shutdown_tx: watch::Sender<bool>,
     pub(crate) source: GitDiffSource,
     pub(crate) artifacts: StoreArtifacts,
     pub(crate) renderer: MaudRenderer,
@@ -61,13 +31,23 @@ pub struct DaemonState {
     pub(crate) ledger: NoOpPushLedger,
     pub(crate) probe: GitRepoProbe,
     pub(crate) app_state: SqliteAppState,
-    pub(crate) shared: Arc<Shared>,
+    pub(crate) app_settings: AppSettingsStoreUserConfig,
 }
 
 impl DaemonState {
-    /// Creates the production daemon state around its process-lifecycle state.
-    pub fn new(shared: Arc<Shared>) -> Self {
+    /// Creates the daemon state from startup identity and concrete adapters.
+    pub fn new(
+        identity: ExeIdentity,
+        version: &'static str,
+        pid: u32,
+        shutdown_tx: watch::Sender<bool>,
+        app_settings: AppSettingsStoreUserConfig,
+    ) -> Self {
         Self {
+            identity,
+            version,
+            pid,
+            shutdown_tx,
             source: GitDiffSource,
             artifacts: StoreArtifacts,
             renderer: MaudRenderer,
@@ -77,7 +57,7 @@ impl DaemonState {
             ledger: NoOpPushLedger,
             probe: GitRepoProbe,
             app_state: SqliteAppState,
-            shared,
+            app_settings,
         }
     }
 }

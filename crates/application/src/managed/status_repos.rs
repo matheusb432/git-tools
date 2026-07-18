@@ -19,7 +19,7 @@ pub struct StatusRepos {
 /// Classifies each repo purely from local refs (no fetch). Infallible by design:
 /// an unreadable fact degrades to its neutral value (`branch-unavailable`,
 /// `no-upstream`, ahead `0`) and is reported in the result, never as an error.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(query: StatusRepos, git: &impl GitRunner) -> Vec<StatusResult> {
     let StatusRepos { repos } = query;
     repos.iter().map(|repo| status_one(git, repo)).collect()

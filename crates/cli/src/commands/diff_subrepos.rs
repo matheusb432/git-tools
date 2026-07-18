@@ -4,10 +4,11 @@ use std::{
 };
 
 use anyhow::Context;
-use contracts::{
-    diffs::{RenderDiffAllRequest, RenderDiffSubreposRequest, RepoRefDto},
-    envelope::Outcome,
+use application::diffs::{
+    DiffTargetRequest, RepoRef, render_diff_all::RenderDiffAll,
+    render_diff_subrepos::RenderDiffSubrepos,
 };
+use contracts::envelope::Outcome;
 use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
 use crate::{
@@ -118,28 +119,21 @@ pub(crate) fn run_scan_with(
     }
     let repo_refs = repo_tops
         .into_iter()
-        .map(|repo_top| RepoRefDto {
+        .map(|repo_top| RepoRef {
             top: repo_top.path.to_string_lossy().into_owned(),
             label: repo_top.label,
         })
         .collect();
 
-    let req = RenderDiffSubreposRequest {
-        store_root: gtl_platform::paths::store_root()?
-            .to_string_lossy()
-            .into_owned(),
-        root: root.to_string_lossy().into_owned(),
-        target: super::to_target_dto(&last.map_or(
-            DiffTarget::Unpushed { pinned: None },
-            |count| DiffTarget::Last {
-                count,
-                pinned: None,
-            },
-        )),
+    let request = RenderDiffSubrepos {
+        store_root: gtl_platform::paths::store_root()?,
+        root,
+        target: last.map_or(DiffTargetRequest::Unpushed, |count| {
+            DiffTargetRequest::Last { count: count.get() }
+        }),
         repos: repo_refs,
-        theme: infra::user_config::load().theme,
     };
-    let envelope = backend.render_diff_subrepos(&req)?;
+    let envelope = backend.render_diff_subrepos(&request)?;
     super::print_wire_notes(&envelope.notes);
     match envelope.outcome {
         Outcome::Ok => {
@@ -229,21 +223,18 @@ pub(crate) fn run_managed_all_with(
         .with_context(|| format!("failed to resolve {}", root.as_ref().display()))?;
     let repo_refs = recipe::selected_managed_repos(options)?
         .into_iter()
-        .map(|repo_top| RepoRefDto {
+        .map(|repo_top| RepoRef {
             top: repo_top.path.to_string_lossy().into_owned(),
             label: repo_top.label,
         })
         .collect();
 
-    let req = RenderDiffAllRequest {
-        store_root: gtl_platform::paths::store_root()?
-            .to_string_lossy()
-            .into_owned(),
-        root: root.to_string_lossy().into_owned(),
+    let request = RenderDiffAll {
+        store_root: gtl_platform::paths::store_root()?,
+        root,
         repos: repo_refs,
-        theme: infra::user_config::load().theme,
     };
-    let envelope = backend.render_diff_all(&req)?;
+    let envelope = backend.render_diff_all(&request)?;
     super::print_wire_notes(&envelope.notes);
     match envelope.outcome {
         Outcome::Ok => {

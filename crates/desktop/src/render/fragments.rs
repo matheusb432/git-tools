@@ -13,9 +13,10 @@ pub(super) enum SwapMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SwapFeedback {
+pub(super) enum SwapFeedback<'a> {
     None,
     LiveViewDeleted,
+    SnapshotRecipesSkipped(&'a [String]),
 }
 
 impl SwapMode {
@@ -31,7 +32,7 @@ pub(super) fn tabs(
     tabs: &[ViewerTab],
     active_tab_id: Option<ViewerTabId>,
     swap: SwapMode,
-    feedback: SwapFeedback,
+    feedback: SwapFeedback<'_>,
 ) -> Markup {
     html! {
         nav id="viewer-tabs" hx-swap-oob=[swap.out_of_band()] class="viewer-tabs" aria-label="Open diffs" {
@@ -72,6 +73,22 @@ pub(super) fn tabs(
                     span.viewer-count { (tabs.len()) }
                 }
             }
+            @if let SwapFeedback::SnapshotRecipesSkipped(labels) = feedback {
+                div class="gtl-toast viewer-toast-skip show"
+                    data-viewer-toast
+                    role="status"
+                    aria-live="polite"
+                    aria-atomic="true" {
+                    "Skipped " (labels.len()) " "
+                    (if labels.len() == 1 { "diff" } else { "diffs" })
+                    " with no commits or changed files: "
+                    @for (index, label) in labels.iter().enumerate() {
+                        @if index > 0 { ", " }
+                        (label)
+                    }
+                    "."
+                }
+            }
             @if feedback == SwapFeedback::LiveViewDeleted {
                 div class="viewer-sr-only" role="status" aria-live="polite" aria-atomic="true" {
                     @match tabs.iter().find(|tab| Some(tab.id()) == active_tab_id) {
@@ -84,7 +101,11 @@ pub(super) fn tabs(
     }
 }
 
-pub(super) fn view(document: &ViewerDocument, swap: SwapMode, feedback: SwapFeedback) -> Markup {
+pub(super) fn view(
+    document: &ViewerDocument,
+    swap: SwapMode,
+    feedback: SwapFeedback<'_>,
+) -> Markup {
     html! {
         section id="viewer-view" hx-swap-oob=[swap.out_of_band()] class="viewer-view" data-tab-id=[document.active_tab_id().map(|id| id.to_string())] {
             @match document.active_tab() {

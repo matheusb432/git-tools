@@ -25,7 +25,7 @@ pub mod list {
     }
 
     /// Lists recent renders through the app-state persistence port.
-    #[cqrsy::handler(query)]
+    #[cqrsy::query]
     pub fn execute(
         query: ListRecentRenders,
         store: &impl AppStateStore,
@@ -65,7 +65,7 @@ pub mod get {
     }
 
     /// Gets a recent render through the app-state persistence port.
-    #[cqrsy::handler(query)]
+    #[cqrsy::query]
     pub fn execute(
         query: GetRecentRender,
         store: &impl AppStateStore,

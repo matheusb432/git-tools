@@ -11,13 +11,16 @@ use application::{
     ports::RecentRenderRecord,
     viewer::{RenderHistoryId, ViewerTabKind},
 };
-use gtl_recipe::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
+use gtl_recipe::{
+    OpenRecipes, PinnedRange, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget,
+};
+use infra::user_config::AppSettingsStoreUserConfig;
 use tauri::http::{Method, Request, StatusCode};
 use tempfile::TempDir;
 
 use super::{
-    ErrorTarget, HTML_CONTENT_TYPE, RouteError, TEXT_CONTENT_TYPE, ViewerApp, error_response,
-    history::to_viewer_entry, process_pending, serve_app,
+    ErrorTarget, HTML_CONTENT_TYPE, PendingRecipeOutcome, RouteError, TEXT_CONTENT_TYPE, ViewerApp,
+    error_response, history::to_viewer_entry, process_pending, serve_app,
 };
 use crate::protocol_config;
 
@@ -44,7 +47,11 @@ impl Fixture {
             std::fs::write(&path, raw).expect("write config");
             path
         });
-        let app = ViewerApp::new(temp.path().join("data"), config_path, 128 * 1024 * 1024);
+        let app = ViewerApp::new(
+            temp.path().join("data"),
+            AppSettingsStoreUserConfig::new(config_path),
+            128 * 1024 * 1024,
+        );
         Self {
             _temp: temp,
             app,
@@ -89,6 +96,10 @@ fn init_repo(repo: &Path) {
 }
 
 fn git(repo: &Path, args: &[&str]) {
+    git_stdout(repo, args);
+}
+
+fn git_stdout(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)
         .current_dir(repo)
@@ -99,6 +110,10 @@ fn git(repo: &Path, args: &[&str]) {
         "git {args:?} failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    String::from_utf8(output.stdout)
+        .expect("git output is UTF-8")
+        .trim()
+        .into()
 }
 
 fn request(path: &str) -> Request<Vec<u8>> {
@@ -154,6 +169,34 @@ fn document_keeps_pending_work_and_pending_opens_the_recipe() {
     let html = String::from_utf8(pending.into_body()).expect("html");
     assert!(html.contains("viewer-tabs"));
     assert!(html.contains("f.txt"));
+}
+
+#[test]
+fn pending_snapshot_skips_render_the_empty_viewer_and_escaped_toast() {
+    let fixture = Fixture::new();
+    git(&fixture.repo, &["switch", "-q", "main"]);
+    let mut recipe = fixture.recipe();
+    recipe.name = Some("<script>empty snapshot</script>".into());
+    let head = git_stdout(&fixture.repo, &["rev-parse", "HEAD"]);
+    recipe.op = RecipeOp::Diff {
+        target: RecipeTarget::Unpushed {
+            pinned: Some(PinnedRange {
+                base: head.clone(),
+                head,
+            }),
+        },
+    };
+    fixture.enqueue("batch", RecipeBatchKind::Snapshot, vec![recipe]);
+
+    let response = serve_app(&fixture.app, request("/pending"));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = String::from_utf8(response.into_body()).expect("html");
+    assert!(!html.contains("class=\"viewer-tab\""));
+    assert!(html.contains("viewer-status-empty"));
+    assert!(html.contains("data-viewer-toast"));
+    assert!(html.contains("&lt;script&gt;empty snapshot&lt;/script&gt;"));
+    assert!(!html.contains("<script>empty snapshot</script>"));
 }
 
 #[test]
@@ -358,7 +401,7 @@ fn pending_processing_preserves_fifo_failure_remainder_for_retry() {
         if path == "/fail" {
             Err(String::from("boom"))
         } else {
-            Ok(path)
+            Ok(PendingRecipeOutcome::Opened(path))
         }
     })
     .expect_err("middle recipe fails");
@@ -376,6 +419,35 @@ fn pending_processing_preserves_fifo_failure_remainder_for_retry() {
         PathBuf::from("/fail")
     );
     assert_eq!(failure.remainder[1].batch_id, "second");
+}
+
+#[test]
+fn pending_processing_preserves_opened_and_skipped_results_independently() {
+    fn named(path: &str) -> Recipe {
+        Recipe {
+            source: RecipeSource::LocalRepo(path.into()),
+            op: RecipeOp::SquashPreview { pinned: None },
+            name: None,
+        }
+    }
+    let batches = vec![OpenRecipes {
+        batch_id: "batch".into(),
+        kind: RecipeBatchKind::Snapshot,
+        recipes: vec![named("/one"), named("/skip"), named("/three")],
+    }];
+
+    let processed = process_pending(batches, |recipe, _batch, _kind| {
+        let path = recipe.cwd().display().to_string();
+        Ok::<_, String>(if path == "/skip" {
+            PendingRecipeOutcome::Skipped("skip label".into())
+        } else {
+            PendingRecipeOutcome::Opened(path)
+        })
+    })
+    .expect("batch succeeds");
+
+    assert_eq!(processed.latest_opened.as_deref(), Some("/three"));
+    assert_eq!(processed.skipped_labels, ["skip label"]);
 }
 
 #[test]

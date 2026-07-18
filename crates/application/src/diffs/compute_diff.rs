@@ -5,11 +5,9 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::DiffExclusions;
-
 use crate::{
     diffs::{DiffTarget, View, render_diff::build_view},
-    ports::DiffSource,
+    ports::{AppSettingsStore, DiffSource},
     shared::notes::Note,
 };
 
@@ -18,12 +16,10 @@ use crate::{
 pub struct ComputeDiff {
     pub cwd: PathBuf,
     pub target: DiffTarget,
-    pub exclusions: DiffExclusions,
 }
 
 /// The computed view plus the human summary and every surfaced message.
-/// An empty view is a legitimate outcome (`view.is_empty()`); tab policy is the
-/// caller's concern.
+/// A view without diff content is a legitimate outcome; tab policy is the caller's concern.
 #[derive(Debug, Clone)]
 pub struct ComputeDiffResponse {
     pub view: View,
@@ -39,19 +35,24 @@ pub enum ComputeDiffError {
 }
 
 /// Computes a diff by driving the diff engine through its source port.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     req: ComputeDiff,
+    app_settings: &impl AppSettingsStore,
     source: &impl DiffSource,
 ) -> Result<ComputeDiffResponse, ComputeDiffError> {
-    let ComputeDiff {
-        cwd,
-        target,
-        exclusions,
-    } = req;
+    let ComputeDiff { cwd, target } = req;
     let mut notes = Vec::new();
+    let settings = app_settings.load();
     let top = source.top_level(&cwd)?;
-    let (view, summary) = build_view(source, &top, &target, None, &exclusions, &mut notes)?;
+    let (view, summary) = build_view(
+        source,
+        &top,
+        &target,
+        None,
+        settings.diff_exclusions(),
+        &mut notes,
+    )?;
     Ok(ComputeDiffResponse {
         view,
         summary,
@@ -63,7 +64,7 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::Commit;
+    use domain::diffs::DiffExclusions;
 
     use super::*;
     use crate::{
@@ -71,33 +72,25 @@ mod tests {
             DiffTarget, PinnedRange,
             range_view::{LABEL_COMMITS_IN_RANGE, LABEL_UNPUSHED_COMMITS, NOTE_WORKING_TREE},
         },
-        testing::FakeDiffSource,
+        ports::AppSettings,
+        testing::{
+            FakeDiffSource, FixedAppSettingsStore,
+            diffs::{DIFF_SINGLE_FILE, commit},
+        },
     };
-
-    const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
-index 111..222 100644\n\
---- a/f.txt\n\
-+++ b/f.txt\n\
-@@ -1,2 +1,3 @@\n\
- keep\n\
--old line\n\
-+new line\n\
-+extra line\n";
-
-    fn one_commit() -> Commit {
-        Commit {
-            sha: "abc1234".into(),
-            subject: "feat: work".into(),
-            ..Default::default()
-        }
-    }
 
     fn req(target: DiffTarget) -> ComputeDiff {
         ComputeDiff {
             cwd: PathBuf::from("/repo"),
             target,
-            exclusions: DiffExclusions::default(),
         }
+    }
+
+    fn execute_default_settings(
+        request: ComputeDiff,
+        source: &FakeDiffSource,
+    ) -> Result<ComputeDiffResponse, ComputeDiffError> {
+        execute(request, &FixedAppSettingsStore::default(), source)
     }
 
     fn pin() -> PinnedRange {
@@ -113,13 +106,14 @@ index 111..222 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
 
         let response =
-            execute(req(DiffTarget::Unpushed { pinned: None }), &source).expect("compute succeeds");
+            execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source)
+                .expect("compute succeeds");
 
         assert_eq!(response.view.repo_name, "repo");
         assert_eq!(response.view.branch, "feature");
@@ -140,9 +134,10 @@ index 111..222 100644\n\
         };
 
         let response =
-            execute(req(DiffTarget::Unpushed { pinned: None }), &source).expect("compute succeeds");
+            execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source)
+                .expect("compute succeeds");
 
-        assert!(response.view.is_empty());
+        assert!(!response.view.has_diff_content());
     }
 
     #[test]
@@ -152,13 +147,14 @@ index 111..222 100644\n\
             branch: "feature".into(),
             upstream: None,
             known_revs: vec!["main".into()],
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
 
         let response =
-            execute(req(DiffTarget::Unpushed { pinned: None }), &source).expect("compute succeeds");
+            execute_default_settings(req(DiffTarget::Unpushed { pinned: None }), &source)
+                .expect("compute succeeds");
 
         assert_eq!(
             response.notes,
@@ -175,12 +171,12 @@ index 111..222 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: None, // would warn-and-fallback (or error) symbolically
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
 
-        let response = execute(
+        let response = execute_default_settings(
             req(DiffTarget::Unpushed {
                 pinned: Some(pin()),
             }),
@@ -205,12 +201,12 @@ index 111..222 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec![], // symbolic verify_commit("main") would error
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
 
-        let response = execute(
+        let response = execute_default_settings(
             req(DiffTarget::Merge {
                 base: "main".into(),
                 pinned: Some(pin()),
@@ -230,12 +226,12 @@ index 111..222 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec![], // symbolic verify_exact_range would error
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
 
-        let response = execute(
+        let response = execute_default_settings(
             req(DiffTarget::Range {
                 range: "a..b".into(),
                 pinned: Some(pin()),
@@ -258,7 +254,7 @@ index 111..222 100644\n\
             ..Default::default()
         };
 
-        let error = execute(req(DiffTarget::Base("nope".into())), &source)
+        let error = execute_default_settings(req(DiffTarget::Base("nope".into())), &source)
             .expect_err("unknown base errors");
 
         let ComputeDiffError::Unexpected(err) = error;
@@ -296,14 +292,15 @@ index 333..444 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
-            commits: vec![one_commit()],
+            commits: vec![commit("abc1234")],
             diff_output: CODE_AND_NOTES_DIFF.into(),
             ..Default::default()
         };
-        let mut request = req(DiffTarget::Unpushed { pinned: None });
-        request.exclusions = excluding("repo", &["md"]);
+        let request = req(DiffTarget::Unpushed { pinned: None });
+        let app_settings =
+            FixedAppSettingsStore::new(AppSettings::new(None, true, excluding("repo", &["md"])));
 
-        let response = execute(request, &source).expect("compute succeeds");
+        let response = execute(request, &app_settings, &source).expect("compute succeeds");
 
         let paths: Vec<&str> = response
             .view
@@ -333,14 +330,18 @@ index 333..444 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
-            commits: vec![one_commit()],
+            commits: vec![commit("abc1234")],
             diff_output: CODE_AND_NOTES_DIFF.into(),
             ..Default::default()
         };
-        let mut request = req(DiffTarget::Unpushed { pinned: None });
-        request.exclusions = excluding("other-repo", &["md"]);
+        let request = req(DiffTarget::Unpushed { pinned: None });
+        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+            None,
+            true,
+            excluding("other-repo", &["md"]),
+        ));
 
-        let response = execute(request, &source).expect("compute succeeds");
+        let response = execute(request, &app_settings, &source).expect("compute succeeds");
 
         assert_eq!(response.view.files.len(), 2);
         assert_eq!(response.view.exclusions, None);
@@ -353,14 +354,15 @@ index 333..444 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
-        let mut request = req(DiffTarget::Unpushed { pinned: None });
-        request.exclusions = excluding("repo", &["md"]);
+        let request = req(DiffTarget::Unpushed { pinned: None });
+        let app_settings =
+            FixedAppSettingsStore::new(AppSettings::new(None, true, excluding("repo", &["md"])));
 
-        let response = execute(request, &source).expect("compute succeeds");
+        let response = execute(request, &app_settings, &source).expect("compute succeeds");
 
         assert_eq!(response.view.files.len(), 1);
         assert_eq!(response.view.exclusions, None);

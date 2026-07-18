@@ -169,6 +169,7 @@ describe('server-rendered viewer', () => {
     await mkdir(remoteRoot, { recursive: true });
     primaryRepo = await createRepo('primary', 'base\n');
     secondaryRepo = await createRepo('secondary', 'base\n');
+    await createRepo('empty', 'base\n');
     await writeFile(path.join(primaryRepo, 'work.txt'), 'base\nalpha-v1\n');
     await writeFile(path.join(secondaryRepo, 'work.txt'), 'base\nbeta-v1\n');
     for (const repo of [primaryRepo, secondaryRepo]) {
@@ -216,21 +217,45 @@ describe('server-rendered viewer', () => {
     await expectReadyDocument();
   });
 
-  it('accepts a second viewer process batch without losing a recipe', async () => {
-    await openDiff(fixtureRoot, 2, '-r');
+  it('accepts a recursive batch while reporting clean repositories', async () => {
+    await run(cli, ['diff', '-r'], fixtureRoot);
 
-    await expect($$('.viewer-tab')).toBeElementsArrayOfSize(3);
-    const labels = await browser.execute(() =>
-      Array.from(document.querySelectorAll('.viewer-tab-label')).map(
-        (label) => label.textContent,
-      ),
+    await browser.waitUntil(
+      async () =>
+        browser.execute(
+          () => document.querySelectorAll('.viewer-tab').length >= 3,
+        ),
+      {
+        timeout: 30_000,
+        interval: 100,
+        timeoutMsg: 'recursive batch did not reach the viewer',
+      },
     );
+
+    const batchState = await browser.execute(() => ({
+      tabs: Array.from(document.querySelectorAll('.viewer-tab')).map((tab) => ({
+        label: tab.querySelector('.viewer-tab-label')?.textContent,
+        state: tab.querySelector('.viewer-tab-state')?.getAttribute('aria-label') ?? 'ready',
+      })),
+    }));
+    expect(batchState.tabs).toHaveLength(3);
+    const toast = $('[data-viewer-toast]');
+    await expect(toast).toBeDisplayed();
+    await expect(toast).toHaveText(expect.stringContaining('empty'));
+    const labels = batchState.tabs.map((tab) => tab.label);
     expect(labels).toEqual(expect.arrayContaining(['primary', 'secondary']));
     const activeLabel = await browser.execute(
       () => document.querySelector('.viewer-tab.active .viewer-tab-label')?.textContent,
     );
     expect(activeLabel).toContain('secondary');
     await expectReadyDocument();
+    await browser.waitUntil(
+      async () =>
+        browser.execute(
+          () => getComputedStyle(document.querySelector('[data-viewer-toast]')).opacity === '0',
+        ),
+      { timeout: 8_000, timeoutMsg: 'skipped-diff toast did not dismiss' },
+    );
   });
 
   it('refreshes a live source and distinguishes a subsequently broken source', async () => {

@@ -1,36 +1,36 @@
 //! `POST /diffs/all` — mirrors `endpoints/diffs/render.rs` exactly.
 
-use application::diffs::render_diff_all;
-use axum::{Json, extract::State, http::StatusCode};
-use contracts::{
-    diffs::{RenderDiffAllRequest, RenderDiffData},
-    envelope::Envelope,
+use application::diffs::render_diff_all::RenderDiffAll;
+use axum::{
+    Json,
+    extract::{State, rejection::JsonRejection},
 };
+use contracts::{diffs::RenderDiffData, envelope::Envelope};
 
-use crate::state::DaemonState;
+use crate::{endpoints::EndpointError, state::DaemonState};
 
 /// Renders a diff-all preview for the request body, returning the wire envelope.
 ///
 /// - `200` with an `ok` envelope on success.
+/// - `400` with an error envelope when the JSON is invalid.
 /// - `500` with an error envelope when the handler (or its blocking task) fails.
 pub async fn handle(
     State(state): State<DaemonState>,
-    Json(dto): Json<RenderDiffAllRequest>,
-) -> (StatusCode, Json<Envelope<RenderDiffData>>) {
-    let shared = state.shared.clone();
-    crate::endpoints::run(
-        shared,
-        Ok(super::to_all_request(dto, super::config_exclusions())),
-        move |request| {
-            render_diff_all::execute(
-                request,
-                &state.source,
-                &state.artifacts,
-                &state.renderer,
-                &state.clock,
-            )
-        },
-        |response| super::to_all_envelope(&response),
-    )
+    request: Result<Json<RenderDiffAll>, JsonRejection>,
+) -> Result<Json<Envelope<RenderDiffData>>, EndpointError> {
+    let Json(request) = request.map_err(|error| EndpointError::bad_request(error.body_text()))?;
+    let response = tokio::task::spawn_blocking(move || {
+        application::diffs::render_diff_all::execute(
+            request,
+            &state.app_settings,
+            &state.source,
+            &state.artifacts,
+            &state.renderer,
+            &state.clock,
+        )
+    })
     .await
+    .map_err(EndpointError::task_join)?
+    .map_err(EndpointError::unexpected)?;
+    Ok(Json(super::to_all_envelope(&response)))
 }

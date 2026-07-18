@@ -58,7 +58,7 @@ pub enum ApplyCommitError {
 /// # Errors
 ///
 /// Returns [`ApplyCommitError`] when Git transport fails.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     command: ApplyCommit,
     git: &impl GitRunner,

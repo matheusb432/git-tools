@@ -23,7 +23,7 @@ pub enum DiscoverError {
 }
 
 /// Walk `root` through the port and label each discovered repo relative to it.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     req: DiscoverRepos,
     discovery: &impl RepoDiscovery,

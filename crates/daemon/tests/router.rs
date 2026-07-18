@@ -1,20 +1,18 @@
 //! Router-level tests exercising the concrete daemon state through real temporary boundaries.
 
-use std::{
-    path::Path,
-    process::Command,
-    sync::{Arc, atomic::AtomicU64},
-};
+use std::{path::Path, process::Command, time::Duration};
 
+use application::diffs::{
+    DiffTargetRequest, RepoRef, render_diff::RenderDiff, render_diff_all::RenderDiffAll,
+    render_diff_subrepos::RenderDiffSubrepos, render_merge_diff::RenderMergeDiff,
+    render_squash_preview::RenderSquashPreview,
+};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode},
 };
-use daemon::{
-    lifecycle::ExeIdentity,
-    state::{DaemonState, Shared, now_ms},
-};
+use daemon::{lifecycle::ExeIdentity, state::DaemonState};
 use http_body_util::BodyExt as _;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -25,7 +23,6 @@ struct Fixture {
     _temp: TempDir,
     app: Router,
     shutdown_rx: watch::Receiver<bool>,
-    shared: Arc<Shared>,
     repo: std::path::PathBuf,
     store: std::path::PathBuf,
     data: std::path::PathBuf,
@@ -43,22 +40,20 @@ impl Fixture {
         init_repo(&repo, with_feature_commit);
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let shared = Arc::new(Shared {
-            identity: ExeIdentity {
+        let app = daemon::state::router(DaemonState::new(
+            ExeIdentity {
                 exe_len: 4242,
                 exe_modified_ms: 111,
             },
-            version: "9.9.9",
-            pid: 4242,
+            "9.9.9",
+            4242,
             shutdown_tx,
-            last_activity_ms: AtomicU64::new(now_ms()),
-        });
-        let app = daemon::state::router(DaemonState::new(shared.clone()));
+            infra::user_config::AppSettingsStoreUserConfig::new(None),
+        ));
         Self {
             _temp: temp,
             app,
             shutdown_rx,
-            shared,
             repo,
             store,
             data,
@@ -133,6 +128,88 @@ fn assert_ok_artifact(json: &Value) {
     );
 }
 
+#[test]
+fn application_diff_requests_preserve_the_route_json_contract() {
+    let render = RenderDiff {
+        cwd: "/repo".into(),
+        store_root: "/store".into(),
+        target: DiffTargetRequest::Base { rev: "main".into() },
+        name: Some("review".into()),
+    };
+    let render_json = json!({
+        "cwd": "/repo",
+        "store_root": "/store",
+        "target": {"kind": "base", "rev": "main"},
+        "name": "review"
+    });
+    assert_eq!(serde_json::to_value(&render).unwrap(), render_json);
+    assert_eq!(
+        serde_json::from_value::<RenderDiff>(render_json).unwrap(),
+        render
+    );
+
+    let merge = RenderMergeDiff {
+        cwd: "/repo".into(),
+        store_root: "/store".into(),
+        base: Some("main".into()),
+    };
+    let merge_json = json!({"cwd": "/repo", "store_root": "/store", "base": "main"});
+    assert_eq!(serde_json::to_value(&merge).unwrap(), merge_json);
+    assert_eq!(
+        serde_json::from_value::<RenderMergeDiff>(merge_json).unwrap(),
+        merge
+    );
+
+    let squash = RenderSquashPreview {
+        cwd: "/repo".into(),
+        store_root: "/store".into(),
+    };
+    let squash_json = json!({"cwd": "/repo", "store_root": "/store"});
+    assert_eq!(serde_json::to_value(&squash).unwrap(), squash_json);
+    assert_eq!(
+        serde_json::from_value::<RenderSquashPreview>(squash_json).unwrap(),
+        squash
+    );
+
+    let repo = RepoRef {
+        top: "/repo".into(),
+        label: "repo".into(),
+    };
+    let subrepos = RenderDiffSubrepos {
+        store_root: "/store".into(),
+        root: "/root".into(),
+        target: DiffTargetRequest::Unpushed,
+        repos: vec![repo.clone()],
+    };
+    let subrepos_json = json!({
+        "store_root": "/store",
+        "root": "/root",
+        "target": {"kind": "unpushed"},
+        "repos": [{"top": "/repo", "label": "repo"}]
+    });
+    assert_eq!(serde_json::to_value(&subrepos).unwrap(), subrepos_json);
+    assert_eq!(
+        serde_json::from_value::<RenderDiffSubrepos>(subrepos_json).unwrap(),
+        subrepos
+    );
+
+    let all = RenderDiffAll {
+        store_root: "/store".into(),
+        root: "/root".into(),
+        repos: vec![repo],
+    };
+    let all_json = json!({
+        "store_root": "/store",
+        "root": "/root",
+        "repos": [{"top": "/repo", "label": "repo"}]
+    });
+    assert_eq!(serde_json::to_value(&all).unwrap(), all_json);
+    assert_eq!(
+        serde_json::from_value::<RenderDiffAll>(all_json).unwrap(),
+        all
+    );
+}
+
 #[tokio::test]
 async fn health_returns_startup_identity() {
     let fixture = Fixture::new(false);
@@ -196,6 +273,44 @@ async fn render_with_a_bad_target_is_a_400_error_envelope() {
     let json = body_json(response).await;
     assert_eq!(json["outcome"], "error");
     assert_eq!(json["notes"][0]["level"], "error");
+    assert_eq!(json["notes"][0]["text"], "last count must be >= 1");
+}
+
+#[tokio::test]
+async fn subrepos_with_a_bad_target_is_a_400_error_envelope() {
+    let fixture = Fixture::new(false);
+    let response = fixture
+        .post(
+            "/diffs/subrepos",
+            json!({
+                "store_root": fixture.store,
+                "root": fixture.repo,
+                "target": {"kind": "last", "count": 0},
+                "repos": []
+            }),
+        )
+        .await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "error");
+    assert_eq!(json["notes"][0]["text"], "last count must be >= 1");
+}
+
+#[tokio::test]
+async fn malformed_render_json_is_a_400_error_envelope() {
+    let fixture = Fixture::new(false);
+    let response = post(fixture.app.clone(), "/diffs/render", r#"{"target":42}"#).await;
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "error");
+    assert_eq!(json["notes"][0]["level"], "error");
+    assert!(
+        json["notes"][0]["text"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty())
+    );
 }
 
 #[tokio::test]
@@ -212,6 +327,8 @@ async fn render_against_a_non_repo_is_a_500_error_envelope() {
     let json = body_json(response).await;
     assert_eq!(json["outcome"], "error");
     assert_eq!(json["notes"][0]["level"], "error");
+    let error_text = json["notes"][0]["text"].as_str().expect("error text");
+    assert!(!error_text.is_empty(), "{json}");
 }
 
 #[tokio::test]
@@ -335,6 +452,26 @@ async fn managed_pull_all_happy_path_is_a_200_ok_envelope_with_one_result() {
 }
 
 #[tokio::test]
+async fn managed_push_all_missing_manifest_is_a_500_error_envelope() {
+    let fixture = Fixture::new(false);
+    let response = fixture
+        .post(
+            "/managed/push-all",
+            json!({
+                "repos_file": fixture.data.join("missing.toml"),
+                "home_dir": fixture.data,
+                "dry": false
+            }),
+        )
+        .await;
+
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "error");
+    assert_eq!(json["notes"][0]["level"], "error");
+}
+
+#[tokio::test]
 async fn live_view_save_happy_path_is_a_200_ok_envelope() {
     let fixture = Fixture::new(false);
     let response = fixture
@@ -383,5 +520,58 @@ async fn live_view_save_with_a_malformed_body_is_a_400() {
     let response = post(fixture.app, "/live-views/save", "not json").await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    assert_eq!(fixture.shared.pid, 4242);
+    let json = body_json(response).await;
+    assert_eq!(json["outcome"], "error");
+    assert_eq!(json["notes"][0]["level"], "error");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn health_remains_responsive_while_live_view_save_waits_on_the_database() {
+    let fixture = Fixture::new(false);
+    let warm_response = fixture
+        .post(
+            "/live-views/save",
+            json!({"data_root": fixture.data, "path": fixture.repo}),
+        )
+        .await;
+    assert_eq!(warm_response.status(), StatusCode::OK);
+
+    let database_connection =
+        rusqlite::Connection::open(fixture.data.join("gtl.db")).expect("open app database");
+    database_connection
+        .execute_batch("BEGIN IMMEDIATE")
+        .expect("hold app database write lock");
+
+    let save_router = fixture.app.clone();
+    let save_body = json!({"data_root": fixture.data, "path": fixture.repo}).to_string();
+    let save_task =
+        tokio::spawn(async move { post(save_router, "/live-views/save", &save_body).await });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !save_task.is_finished(),
+        "the synchronous save should still be waiting on the database lock"
+    );
+
+    let health_response = tokio::time::timeout(
+        Duration::from_millis(500),
+        fixture.app.clone().oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .expect("request"),
+        ),
+    )
+    .await
+    .expect("health must not wait on the synchronous route")
+    .expect("health response");
+    assert_eq!(health_response.status(), StatusCode::OK);
+
+    database_connection
+        .execute_batch("ROLLBACK")
+        .expect("release app database write lock");
+    let save_response = tokio::time::timeout(Duration::from_secs(3), save_task)
+        .await
+        .expect("save completes after lock release")
+        .expect("save task");
+    assert_eq!(save_response.status(), StatusCode::OK);
 }

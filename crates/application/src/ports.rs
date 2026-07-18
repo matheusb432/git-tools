@@ -1,7 +1,7 @@
 //! Port traits: the seams the application core talks through, implemented by
-//! `infra` adapters at the composition root. Every port is a cheap-clone,
-//! thread-safe `'static` handle so cqrsy can prepare operation dependencies and
-//! process roots can move adapters across worker boundaries.
+//! `infra` adapters at the composition root. Every port is cheap to clone,
+//! thread-safe, and `'static` so process roots can move adapters across worker
+//! boundaries.
 
 use std::{
     collections::HashMap,
@@ -10,12 +10,62 @@ use std::{
 };
 
 use domain::{
-    diffs::{Commit, DiffKind},
+    diffs::{Commit, DiffExclusions, DiffKind},
     managed::ManagedRepo,
     viewer::RenderHistoryId,
 };
 
 use crate::diffs::View;
+
+/// One effective snapshot of the user configuration used by application operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppSettings {
+    theme: Option<String>,
+    push_confirmation_required: bool,
+    diff_exclusions: DiffExclusions,
+}
+
+impl AppSettings {
+    /// Creates an effective settings snapshot from application and domain values.
+    pub fn new(
+        theme: Option<String>,
+        push_confirmation_required: bool,
+        diff_exclusions: DiffExclusions,
+    ) -> Self {
+        Self {
+            theme,
+            push_confirmation_required,
+            diff_exclusions,
+        }
+    }
+
+    /// The raw diff-preview theme, when the renderer should force one.
+    pub fn theme(&self) -> Option<&str> {
+        self.theme.as_deref()
+    }
+
+    /// Whether a plain current-repository push requires confirmation.
+    pub const fn push_confirmation_required(&self) -> bool {
+        self.push_confirmation_required
+    }
+
+    /// The complete project and default diff-exclusion map.
+    pub const fn diff_exclusions(&self) -> &DiffExclusions {
+        &self.diff_exclusions
+    }
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self::new(None, true, DiffExclusions::default())
+    }
+}
+
+/// Reads a fresh effective application-settings snapshot for one operation.
+pub trait AppSettingsStore: Clone + Send + Sync + 'static {
+    /// Loads the current snapshot, degrading adapter failures to safe defaults.
+    fn load(&self) -> AppSettings;
+}
 
 /// Everything the store needs to record one rendered artifact. `generated_at` is
 /// supplied by the caller (via [`Clock`]) so placement stays deterministic in tests.
@@ -30,6 +80,9 @@ pub struct ArtifactMeta {
     pub head_committed_at: String,
     pub generated_at: String,
     pub title: String,
+    /// The configured renderer theme used to build the artifact. `None` means
+    /// the renderer selected its default theme.
+    pub theme: Option<String>,
     /// The extension set that was in force when the artifact rendered (normalized,
     /// sorted; empty = unfiltered). Part of the range-reuse key: an artifact is
     /// only reusable by a render running under the same filter.
@@ -178,8 +231,12 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
         html: &str,
     ) -> anyhow::Result<PlacedArtifact>;
     /// Find an existing artifact for a pure commit range rendered under the same
-    /// exclusion set, or `None` on a miss (always `None` for `WorkTree`, which is
-    /// never range-addressable).
+    /// renderer theme and exclusion set, or `None` on a miss (always `None` for
+    /// `WorkTree`, which is never range-addressable).
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the explicit fields are the persisted range-reuse key"
+    )]
     fn lookup_by_range(
         &self,
         store_root: &Path,
@@ -187,6 +244,7 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
         kind: DiffKind,
         base_sha: &str,
         head_sha: &str,
+        theme: Option<&str>,
         excluded_extensions: &[String],
     ) -> anyhow::Result<Option<PathBuf>>;
     /// Every recorded artifact under `store_root`, across all repos, unordered
@@ -437,6 +495,15 @@ pub trait PushLedger: Clone + Send + Sync + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_settings_default_preserves_safe_behavior() {
+        let settings = AppSettings::default();
+
+        assert_eq!(settings.theme(), None);
+        assert!(settings.push_confirmation_required());
+        assert!(settings.diff_exclusions().is_empty());
+    }
 
     #[test]
     fn git_output_error_line_prefers_stderr_then_stdout_then_generic() {

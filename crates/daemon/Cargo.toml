@@ -14,26 +14,25 @@ application.workspace = true
 axum.workspace = true
 bootstrap.workspace = true
 contracts.workspace = true
-domain.workspace = true
 gtl-platform.workspace = true
 infra.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = [
-  "io-util",
   "macros",
   "net",
   "rt-multi-thread",
-  "signal",
   "sync",
-  "time",
 ] }
 tracing.workspace = true
 
 [dev-dependencies]
 application = { workspace = true, features = ["testing"] }
 http-body-util.workspace = true
+rusqlite.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["time"] }
 tower.workspace = true
 
 [lints]

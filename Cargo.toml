@@ -46,9 +46,7 @@ bootstrap = { path = "shared/bootstrap" }
 clap = { version = "4", features = ["derive"] }
 command-group = "5.0.1"
 contracts = { path = "crates/contracts" }
-cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.9.0", features = [
-  "derive",
-] }
+cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.10.0" }
 criterion = "0.8.2"
 directories = "6.0.0"
 domain = { path = "crates/domain" }

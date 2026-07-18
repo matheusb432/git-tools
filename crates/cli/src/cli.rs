@@ -100,6 +100,8 @@ pub struct DaemonArgs {
 pub enum DaemonCommand {
     /// Report whether the daemon is running (port, pid, version).
     Status,
+    /// Stop any healthy daemon and start a fresh process.
+    Restart,
     /// Ask the daemon to exit.
     Stop,
 }
@@ -495,6 +497,18 @@ mod tests {
                 sub: Some(DiffSub::Squash(SquashArgs { repo, .. })),
                 ..
             }) if repo == "r"
+        ));
+    }
+
+    #[test]
+    fn parse_args_routes_daemon_restart_subcommand() {
+        let cli = Cli::parse_args(&["daemon".into(), "restart".into()]).unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Command::Daemon(DaemonArgs {
+                command: DaemonCommand::Restart
+            })
         ));
     }
 

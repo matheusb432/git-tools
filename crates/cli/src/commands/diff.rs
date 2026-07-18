@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use application::recipes::RecipeRequest;
-use contracts::{diffs::RenderDiffRequest, envelope::Outcome};
+use application::{diffs::render_diff::RenderDiff, recipes::RecipeRequest};
+use contracts::envelope::Outcome;
 use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
 use crate::{cli::DiffTarget, client::Backend, viewer};
@@ -74,16 +74,13 @@ pub(crate) fn render(
     name: Option<&str>,
     open: impl FnOnce(&Path),
 ) -> anyhow::Result<DiffOutcome> {
-    let req = RenderDiffRequest {
-        cwd: std::env::current_dir()?.to_string_lossy().into_owned(),
-        store_root: gtl_platform::paths::store_root()?
-            .to_string_lossy()
-            .into_owned(),
-        target: super::to_target_dto(target),
+    let request = RenderDiff {
+        cwd: std::env::current_dir()?,
+        store_root: gtl_platform::paths::store_root()?,
+        target: target.into(),
         name: name.map(str::to_string),
-        theme: infra::user_config::load().theme,
     };
-    let envelope = backend.render_diff(&req)?;
+    let envelope = backend.render_diff(&request)?;
     super::print_wire_notes(&envelope.notes);
     match envelope.outcome {
         Outcome::Ok => {
@@ -131,10 +128,7 @@ mod tests {
     struct FakeBackend(Envelope<RenderDiffData>);
 
     impl Backend for FakeBackend {
-        fn render_diff(
-            &self,
-            _req: &RenderDiffRequest,
-        ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        fn render_diff(&self, _request: &RenderDiff) -> anyhow::Result<Envelope<RenderDiffData>> {
             Ok(self.0.clone())
         }
     }

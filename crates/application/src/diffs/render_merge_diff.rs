@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{
@@ -14,7 +15,7 @@ use crate::{
         range_view::{RangePresentation, RangeView, TITLE_MERGE_DIFF},
         util::{DiffData, assemble, exclusion_note, repo_name},
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
+    ports::{AppSettingsStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
 
@@ -23,12 +24,12 @@ pub const DEFAULT_BASE: &str = "main";
 
 /// Render the merge-diff of the current branch into `base` (default `main`)
 /// under `store_root`, resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderMergeDiff {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
+    #[serde(default)]
     pub base: Option<String>,
-    pub exclusions: DiffExclusions,
 }
 
 /// The stored artifact plus every message the render wanted surfaced.
@@ -63,6 +64,7 @@ pub(crate) fn build_merge_view(
     cwd: &Path,
     base: Option<&str>,
     pinned: Option<&PinnedRange>,
+    theme: Option<String>,
     exclusions: &DiffExclusions,
 ) -> anyhow::Result<MergeViewBuild> {
     let top = source.top_level(cwd)?;
@@ -108,7 +110,7 @@ pub(crate) fn build_merge_view(
         foot: range_view.foot,
         commits,
         files,
-        theme: None,
+        theme,
         exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
     };
     Ok(MergeViewBuild {
@@ -120,9 +122,10 @@ pub(crate) fn build_merge_view(
 }
 
 /// Renders a merge diff through the diff ports.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     req: RenderMergeDiff,
+    app_settings: &impl AppSettingsStore,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
@@ -132,9 +135,16 @@ pub fn execute(
         cwd,
         store_root,
         base,
-        exclusions,
     } = req;
-    let built = build_merge_view(source, &cwd, base.as_deref(), None, &exclusions)?;
+    let settings = app_settings.load();
+    let built = build_merge_view(
+        source,
+        &cwd,
+        base.as_deref(),
+        None,
+        settings.theme().map(str::to_owned),
+        settings.diff_exclusions(),
+    )?;
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
@@ -154,7 +164,9 @@ pub fn execute(
         head_committed_at: source.committed_at(Path::new(&built.top), "HEAD"),
         generated_at: clock.now_iso(),
         title: TITLE_MERGE_DIFF.to_string(),
-        excluded_extensions: exclusions
+        theme: settings.theme().map(str::to_owned),
+        excluded_extensions: settings
+            .diff_exclusions()
             .for_project_or_default(&view.repo_name)
             .extensions()
             .to_vec(),
@@ -185,35 +197,20 @@ fn plural(n: usize) -> &'static str {
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{Commit, DiffExclusions};
+    use domain::diffs::DiffExclusions;
 
     use super::{RenderMergeDiff, RenderMergeDiffError, execute};
     use crate::{
+        ports::AppSettings,
         shared::notes::Note,
-        testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
+        testing::{
+            FakeDiffSource, FixedAppSettingsStore, FixedClock, InMemoryArtifactStore, StubRenderer,
+            diffs::{DIFF_SINGLE_FILE, commit},
+        },
     };
-
-    const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
-index 111..222 100644\n\
---- a/f.txt\n\
-+++ b/f.txt\n\
-@@ -1,2 +1,3 @@\n\
- keep\n\
--old line\n\
-+new line\n\
-+extra line\n";
-
-    fn one_commit() -> Commit {
-        Commit {
-            sha: "abc1234".into(),
-            subject: "feat: work".into(),
-            ..Default::default()
-        }
-    }
 
     fn req(source_top: &str, base: Option<&str>) -> RenderMergeDiff {
         RenderMergeDiff {
-            exclusions: DiffExclusions::default(),
             cwd: PathBuf::from(source_top),
             store_root: PathBuf::from("/store"),
             base: base.map(str::to_string),
@@ -226,14 +223,15 @@ index 111..222 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
 
         let response = execute(
             req("/repo", None),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -261,6 +259,44 @@ index 111..222 100644\n\
     }
 
     #[test]
+    fn render_uses_the_settings_theme_and_resolved_project_exclusions() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            known_revs: vec!["main".into()],
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
+            ..Default::default()
+        };
+        let store = InMemoryArtifactStore::default();
+        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+            Some("night".into()),
+            true,
+            DiffExclusions::new([("repo".to_string(), vec!["md"])], None),
+        ));
+
+        execute(
+            RenderMergeDiff {
+                cwd: PathBuf::from("/repo"),
+                store_root: PathBuf::from("/store"),
+                base: None,
+            },
+            &app_settings,
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
+
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert_eq!(artifact.meta.excluded_extensions, vec!["md"]);
+        assert!(artifact.html.contains("night"));
+    }
+
+    #[test]
     fn blank_base_falls_back_to_default() {
         let source = FakeDiffSource {
             top_level: Some("/repo".into()),
@@ -274,6 +310,7 @@ index 111..222 100644\n\
 
         let response = execute(
             req("/repo", Some("   ")),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -299,6 +336,7 @@ index 111..222 100644\n\
 
         let error = execute(
             req("/repo", Some("nope")),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,

@@ -3,17 +3,17 @@
 //! whether an empty or errored view is skipped-and-counted (diff-subrepos) or kept
 //! and propagated (diff-all).
 
-use domain::diffs::DiffExclusions;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{DiffTarget, View, render_diff::build_view},
-    ports::{Clock, DiffSource},
+    ports::{AppSettings, Clock, DiffSource},
     shared::notes::Note,
 };
 
 /// One repo to include in a multi-repo render: its resolved top-level path and the
 /// label to show on its tab (relative path under the scan root, or the manifest name).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoRef {
     pub top: String,
     pub label: String,
@@ -33,8 +33,7 @@ pub(crate) struct BatchBuild {
 pub(crate) fn render_batch(
     source: &impl DiffSource,
     target: &DiffTarget,
-    theme: Option<&str>,
-    exclusions: &DiffExclusions,
+    settings: &AppSettings,
     repos: &[RepoRef],
     skip_empty: bool,
     notes: &mut Vec<Note>,
@@ -46,13 +45,13 @@ pub(crate) fn render_batch(
             source,
             &repo.top,
             target,
-            theme.map(String::from),
-            exclusions,
+            settings.theme().map(str::to_owned),
+            settings.diff_exclusions(),
             notes,
         );
         if skip_empty {
             match built {
-                Ok((mut view, _)) if !view.is_empty() => {
+                Ok((mut view, _)) if view.has_diff_content() => {
                     view.repo_name.clone_from(&repo.label);
                     views.push(view);
                 }
@@ -76,31 +75,17 @@ pub(crate) fn dated_title(clock: &impl Clock, label: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use domain::diffs::Commit;
+    use domain::diffs::DiffExclusions;
 
     use super::{RepoRef, dated_title, render_batch};
     use crate::{
-        diffs::{DiffTarget, View},
-        testing::{FakeDiffSource, FixedClock, RepoOverride},
+        diffs::DiffTarget,
+        ports::AppSettings,
+        testing::{
+            FakeDiffSource, FixedClock, RepoOverride,
+            diffs::{DIFF_SINGLE_FILE, commit},
+        },
     };
-
-    const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
-        index 111..222 100644\n\
-        --- a/f.txt\n\
-        +++ b/f.txt\n\
-        @@ -1,2 +1,3 @@\n\
-         keep\n\
-        -old line\n\
-        +new line\n\
-        +extra line\n";
-
-    fn one_commit() -> Commit {
-        Commit {
-            sha: "abc1234".into(),
-            subject: "feat: work".into(),
-            ..Default::default()
-        }
-    }
 
     fn two_repos() -> Vec<RepoRef> {
         vec![
@@ -135,8 +120,8 @@ mod tests {
         source.per_repo.insert(
             "/repo-b".into(),
             RepoOverride {
-                commits: vec![one_commit()],
-                diff_output: SINGLE_FILE_DIFF.into(),
+                commits: vec![commit("abc1234")],
+                diff_output: DIFF_SINGLE_FILE.into(),
             },
         );
         let repos = two_repos();
@@ -145,8 +130,7 @@ mod tests {
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            None,
-            &domain::diffs::DiffExclusions::default(),
+            &AppSettings::default(),
             &repos,
             true,
             &mut notes,
@@ -174,8 +158,7 @@ mod tests {
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            None,
-            &domain::diffs::DiffExclusions::default(),
+            &AppSettings::default(),
             &repos,
             true,
             &mut notes,
@@ -198,8 +181,7 @@ mod tests {
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            None,
-            &domain::diffs::DiffExclusions::default(),
+            &AppSettings::default(),
             &repos,
             false,
             &mut notes,
@@ -208,7 +190,7 @@ mod tests {
 
         assert_eq!(batch.views.len(), repos.len());
         assert_eq!(batch.skipped, 0);
-        assert!(batch.views.iter().all(View::is_empty));
+        assert!(batch.views.iter().all(|view| !view.has_diff_content()));
     }
 
     #[test]
@@ -233,7 +215,7 @@ diff --git a/notes.md b/notes.md\n\
             source.per_repo.insert(
                 top.into(),
                 RepoOverride {
-                    commits: vec![one_commit()],
+                    commits: vec![commit("abc1234")],
                     diff_output: TWO_FILE_DIFF.into(),
                 },
             );
@@ -242,14 +224,14 @@ diff --git a/notes.md b/notes.md\n\
             [("repo-a".to_string(), vec!["md".to_string()])],
             None,
         );
+        let settings = AppSettings::new(None, true, exclusions);
         let repos = two_repos();
         let mut notes = Vec::new();
 
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            None,
-            &exclusions,
+            &settings,
             &repos,
             true,
             &mut notes,
@@ -261,6 +243,60 @@ diff --git a/notes.md b/notes.md\n\
         assert!(batch.views[0].exclusions.is_some());
         assert_eq!(batch.views[1].files.len(), 2, "repo-b is untouched");
         assert!(batch.views[1].exclusions.is_none());
+    }
+
+    #[test]
+    fn settings_value_supplies_theme_and_project_exclusions_to_every_view() {
+        const TWO_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
+--- a/f.txt\n\
++++ b/f.txt\n\
+@@ -1 +1 @@\n\
+-old\n\
++new\n\
+diff --git a/notes.md b/notes.md\n\
+--- a/notes.md\n\
++++ b/notes.md\n\
+@@ -1 +1 @@\n\
+-plan\n\
++more plan\n";
+        let mut source = FakeDiffSource {
+            upstream: Some("origin/main".into()),
+            ..Default::default()
+        };
+        for top in ["/repo-a", "/repo-b"] {
+            source.per_repo.insert(
+                top.into(),
+                RepoOverride {
+                    commits: vec![commit("abc1234")],
+                    diff_output: TWO_FILE_DIFF.into(),
+                },
+            );
+        }
+        let settings = AppSettings::new(
+            Some("night".into()),
+            true,
+            DiffExclusions::new([("repo-a".to_string(), vec!["md"])], None),
+        );
+        let mut notes = Vec::new();
+
+        let batch = render_batch(
+            &source,
+            &DiffTarget::Unpushed { pinned: None },
+            &settings,
+            &two_repos(),
+            true,
+            &mut notes,
+        )
+        .expect("batch succeeds");
+
+        assert!(
+            batch
+                .views
+                .iter()
+                .all(|view| view.theme.as_deref() == Some("night"))
+        );
+        assert_eq!(batch.views[0].files.len(), 1);
+        assert_eq!(batch.views[1].files.len(), 2);
     }
 
     #[test]
@@ -276,8 +312,7 @@ diff --git a/notes.md b/notes.md\n\
         let result = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            None,
-            &domain::diffs::DiffExclusions::default(),
+            &AppSettings::default(),
             &repos,
             false,
             &mut notes,

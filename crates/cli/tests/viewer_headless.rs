@@ -37,6 +37,7 @@ fn two_commit_repo() -> tempfile::TempDir {
 fn diff_with_no_display_writes_to_store_and_keeps_repo_clean() {
     let repo = two_commit_repo();
     let store = tempfile::tempdir().unwrap();
+    let _daemon = common::DaemonProcessGuard::new(store.path());
     common::ensure_daemon_built();
 
     assert_cmd::Command::cargo_bin("git-tools")
@@ -44,7 +45,6 @@ fn diff_with_no_display_writes_to_store_and_keeps_repo_clean() {
         .current_dir(repo.path())
         .args(["diff", "-l", "1"])
         .env("GIT_TOOLS_DATA_DIR", store.path())
-        .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
         // The no-display fallback lands on the browser path, which honors this guard; nothing
         // opens.
         .env("GIT_TOOLS_NO_OPEN", "1")

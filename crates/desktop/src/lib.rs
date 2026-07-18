@@ -257,7 +257,7 @@ pub fn run() {
     let data_root = commands::data_root().expect("viewer data root resolves");
     let viewer_app = routes::ViewerApp::new(
         data_root,
-        infra::user_config::config_path(),
+        infra::user_config::AppSettingsStoreUserConfig::from_environment(),
         DEFAULT_VIEW_CACHE_WEIGHT,
     );
     let cold_start_batches = recipes_from_argv(&std::env::args().collect::<Vec<_>>());

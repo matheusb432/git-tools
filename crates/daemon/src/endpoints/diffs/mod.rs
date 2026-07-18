@@ -1,5 +1,4 @@
-//! The `diffs` endpoints and the one place mapping wire DTOs ↔ domain/application
-//! types (template pattern: `endpoints/todos/mod.rs`).
+//! Diff endpoint response projection onto the shared wire envelope.
 
 pub mod all;
 pub mod merge;
@@ -9,139 +8,18 @@ pub mod subrepos;
 
 use application::{
     diffs::{
-        DiffTarget,
-        batch::RepoRef,
-        render_diff::{RenderDiff, RenderDiffOutcome, RenderDiffResponse},
-        render_diff_all::{RenderDiffAll, RenderDiffAllResponse},
-        render_diff_subrepos::{
-            RenderDiffSubrepos, RenderDiffSubreposOutcome, RenderDiffSubreposResponse,
-        },
-        render_merge_diff::{RenderMergeDiff, RenderMergeDiffResponse},
-        render_squash_preview::{RenderSquashPreview, RenderSquashPreviewResponse},
+        render_diff::{RenderDiffOutcome, RenderDiffResponse},
+        render_diff_all::RenderDiffAllResponse,
+        render_diff_subrepos::{RenderDiffSubreposOutcome, RenderDiffSubreposResponse},
+        render_merge_diff::RenderMergeDiffResponse,
+        render_squash_preview::RenderSquashPreviewResponse,
     },
     shared::notes as app_notes,
 };
 use contracts::{
-    diffs::{
-        DiffTargetDto, RenderDiffAllRequest, RenderDiffData, RenderDiffRequest,
-        RenderDiffSubreposRequest, RenderMergeDiffRequest, RenderSquashPreviewRequest, RepoRefDto,
-    },
+    diffs::RenderDiffData,
     envelope::{Envelope, Note, NoteLevel, Outcome},
 };
-use domain::diffs::DiffExclusions;
-
-/// The `[diff.exclude]` map, re-read from the user config per request so an
-/// edit applies to the next render without restarting the daemon.
-pub(crate) fn config_exclusions() -> DiffExclusions {
-    infra::user_config::load().diff_exclusions()
-}
-
-/// Map the wire request DTO onto the application request.
-///
-/// # Errors
-/// Returns an error when the DTO carries an invalid selection (e.g. a `last` count of zero).
-pub(crate) fn to_request(
-    dto: RenderDiffRequest,
-    exclusions: DiffExclusions,
-) -> anyhow::Result<RenderDiff> {
-    let target = to_target(dto.target)?;
-    Ok(RenderDiff {
-        cwd: dto.cwd.into(),
-        store_root: dto.store_root.into(),
-        target,
-        name: dto.name,
-        theme: dto.theme,
-        exclusions,
-    })
-}
-
-/// Map the wire target DTO onto the domain target, shared by [`to_request`] and
-/// [`to_subrepos_request`].
-///
-/// # Errors
-/// Returns an error when the DTO carries an invalid selection (e.g. a `last` count of zero).
-fn to_target(dto: DiffTargetDto) -> anyhow::Result<DiffTarget> {
-    Ok(match dto {
-        DiffTargetDto::Unpushed => DiffTarget::Unpushed { pinned: None },
-        DiffTargetDto::Base { rev } => DiffTarget::Base(rev),
-        DiffTargetDto::Range { range } => DiffTarget::Range {
-            range,
-            pinned: None,
-        },
-        DiffTargetDto::Merge { base } => DiffTarget::Merge { base, pinned: None },
-        DiffTargetDto::Last { count } => DiffTarget::Last {
-            count: std::num::NonZeroU32::new(count)
-                .ok_or_else(|| anyhow::anyhow!("last count must be >= 1"))?,
-            pinned: None,
-        },
-    })
-}
-
-/// Map a wire repo reference onto the application's.
-fn to_repo_ref(dto: RepoRefDto) -> RepoRef {
-    RepoRef {
-        top: dto.top,
-        label: dto.label,
-    }
-}
-
-/// Map the wire request DTO onto the application request.
-pub(crate) fn to_merge_request(
-    dto: RenderMergeDiffRequest,
-    exclusions: DiffExclusions,
-) -> RenderMergeDiff {
-    RenderMergeDiff {
-        cwd: dto.cwd.into(),
-        store_root: dto.store_root.into(),
-        base: dto.base,
-        exclusions,
-    }
-}
-
-/// Map the wire request DTO onto the application request.
-pub(crate) fn to_squash_request(
-    dto: RenderSquashPreviewRequest,
-    exclusions: DiffExclusions,
-) -> RenderSquashPreview {
-    RenderSquashPreview {
-        cwd: dto.cwd.into(),
-        store_root: dto.store_root.into(),
-        exclusions,
-    }
-}
-
-/// Map the wire request DTO onto the application request.
-///
-/// # Errors
-/// Returns an error when the DTO carries an invalid target selection (e.g. a `last` count of
-/// zero).
-pub(crate) fn to_subrepos_request(
-    dto: RenderDiffSubreposRequest,
-    exclusions: DiffExclusions,
-) -> anyhow::Result<RenderDiffSubrepos> {
-    Ok(RenderDiffSubrepos {
-        store_root: dto.store_root.into(),
-        root: dto.root.into(),
-        target: to_target(dto.target)?,
-        repos: dto.repos.into_iter().map(to_repo_ref).collect(),
-        theme: dto.theme,
-        exclusions,
-    })
-}
-
-/// Map the wire request DTO onto the application request.
-pub(crate) fn to_all_request(
-    dto: RenderDiffAllRequest,
-    exclusions: DiffExclusions,
-) -> RenderDiffAll {
-    RenderDiffAll {
-        store_root: dto.store_root.into(),
-        root: dto.root.into(),
-        repos: dto.repos.into_iter().map(to_repo_ref).collect(),
-        theme: dto.theme,
-        exclusions,
-    }
-}
 
 /// Project a successful application response onto the wire envelope.
 pub(crate) fn to_envelope(resp: RenderDiffResponse) -> Envelope<RenderDiffData> {

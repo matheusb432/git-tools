@@ -14,11 +14,11 @@ use application::{
     },
     history::record_render::{self, RecordRender},
     live_views::probe::{self, ProbeOutcome, ProbeSource},
-    ports::{AppStateStore, Clock, DiffSource, RepoProbe},
+    ports::{AppSettingsStore, AppStateStore, Clock, DiffSource, RepoProbe},
     viewer::{ViewerTabId, ViewerTabKind, ViewerTabState},
 };
-use domain::diffs::DiffExclusions;
 use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+use infra::user_config::AppSettingsStoreUserConfig;
 
 use crate::{
     session::{CachedView, ComputeTicket, PublishOutcome, ViewerSession},
@@ -57,6 +57,12 @@ pub(crate) struct OpenedRecipe {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) enum OpenRecipeOutcome {
+    Opened(OpenedRecipe),
+    Skipped { label: String },
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct RefreshedRecipe {
     pub(crate) ticket: ComputeTicket,
     pub(crate) view: Option<Arc<View>>,
@@ -65,6 +71,7 @@ pub(crate) struct RefreshedRecipe {
 #[derive(Debug, Clone)]
 enum ComputationOutcome {
     Rendered(Arc<View>),
+    Skipped { label: String },
     StateOnly,
 }
 
@@ -75,7 +82,7 @@ pub(crate) struct RecipeContext<'a, Source, Probe, State, Time> {
     app_state: &'a State,
     clock: &'a Time,
     data_root: &'a Path,
-    exclusions: &'a DiffExclusions,
+    app_settings: &'a AppSettingsStoreUserConfig,
 }
 
 impl<Source, Probe, State, Time> Copy for RecipeContext<'_, Source, Probe, State, Time> {}
@@ -93,7 +100,7 @@ impl<'a, Source, Probe, State, Time> RecipeContext<'a, Source, Probe, State, Tim
         app_state: &'a State,
         clock: &'a Time,
         data_root: &'a Path,
-        exclusions: &'a DiffExclusions,
+        app_settings: &'a AppSettingsStoreUserConfig,
     ) -> Self {
         Self {
             source,
@@ -101,7 +108,7 @@ impl<'a, Source, Probe, State, Time> RecipeContext<'a, Source, Probe, State, Tim
             app_state,
             clock,
             data_root,
-            exclusions,
+            app_settings,
         }
     }
 }
@@ -110,7 +117,7 @@ impl ComputationOutcome {
     fn into_view(self) -> Option<Arc<View>> {
         match self {
             Self::Rendered(view) => Some(view),
-            Self::StateOnly => None,
+            Self::Skipped { .. } | Self::StateOnly => None,
         }
     }
 }
@@ -148,7 +155,7 @@ fn diff_target(target: &RecipeTarget) -> DiffTarget {
 pub(crate) fn compute_view(
     source: &impl DiffSource,
     recipe: &Recipe,
-    exclusions: &DiffExclusions,
+    app_settings: &impl AppSettingsStore,
 ) -> Result<View, String> {
     let cwd = recipe.cwd();
     match &recipe.op {
@@ -156,8 +163,8 @@ pub(crate) fn compute_view(
             ComputeDiff {
                 cwd,
                 target: diff_target(target),
-                exclusions: exclusions.clone(),
             },
+            app_settings,
             source,
         )
         .map(|response| response.view)
@@ -167,8 +174,8 @@ pub(crate) fn compute_view(
                 cwd,
                 base: base.clone(),
                 pinned: to_application_pin(pinned.as_ref()),
-                exclusions: exclusions.clone(),
             },
+            app_settings,
             source,
         )
         .map(|response| response.view)
@@ -177,8 +184,8 @@ pub(crate) fn compute_view(
             ComputeSquashPreview {
                 cwd,
                 pinned: to_application_pin(pinned.as_ref()),
-                exclusions: exclusions.clone(),
             },
+            app_settings,
             source,
         )
         .map(|response| response.view)
@@ -192,7 +199,7 @@ pub(crate) fn open_recipe(
     recipe: &Recipe,
     batch_id: String,
     kind: ViewerTabKind,
-) -> Result<OpenedRecipe, RecipeError> {
+) -> Result<OpenRecipeOutcome, RecipeError> {
     let (id, ticket) = {
         let mut session = session
             .lock()
@@ -204,12 +211,19 @@ pub(crate) fn open_recipe(
         (id, ticket)
     };
 
-    let view = compute_and_publish(&context, session, recipe, kind, ticket)?.into_view();
-    Ok(OpenedRecipe {
-        tab_id: id,
-        ticket,
-        view,
-    })
+    match compute_and_publish(&context, session, recipe, kind, ticket)? {
+        ComputationOutcome::Rendered(view) => Ok(OpenRecipeOutcome::Opened(OpenedRecipe {
+            tab_id: id,
+            ticket,
+            view: Some(view),
+        })),
+        ComputationOutcome::StateOnly => Ok(OpenRecipeOutcome::Opened(OpenedRecipe {
+            tab_id: id,
+            ticket,
+            view: None,
+        })),
+        ComputationOutcome::Skipped { label } => Ok(OpenRecipeOutcome::Skipped { label }),
+    }
 }
 
 #[cfg(test)]
@@ -274,13 +288,23 @@ fn compute_and_publish(
         return Ok(ComputationOutcome::StateOnly);
     }
 
-    let view = match compute_view(context.source, recipe, context.exclusions) {
+    let view = match compute_view(context.source, recipe, context.app_settings) {
         Ok(view) => Arc::new(view),
         Err(reason) => {
             publish_compute_error(session, ticket, &reason)?;
             return Ok(ComputationOutcome::StateOnly);
         }
     };
+    if kind == ViewerTabKind::Snapshot && !view.has_diff_content() {
+        let label = tab_label::initial(recipe);
+        let mut session = session
+            .lock()
+            .map_err(|error| RecipeError::Failed(error.to_string()))?;
+        return match session.close_if_current(ticket) {
+            PublishOutcome::Published => Ok(ComputationOutcome::Skipped { label }),
+            PublishOutcome::Stale => Err(RecipeError::Stale),
+        };
+    }
     let published = {
         let mut session = session
             .lock()
@@ -420,6 +444,104 @@ index 111..222 100644\n\
         }
     }
 
+    fn empty_source() -> FakeDiffSource {
+        FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            ..Default::default()
+        }
+    }
+
+    fn expect_opened(outcome: OpenRecipeOutcome) -> OpenedRecipe {
+        match outcome {
+            OpenRecipeOutcome::Opened(opened) => opened,
+            OpenRecipeOutcome::Skipped { label } => {
+                panic!("expected an opened recipe, skipped {label}")
+            }
+        }
+    }
+
+    #[test]
+    fn empty_snapshot_is_skipped_without_history() {
+        let app_state = InMemoryAppStateStore::default();
+        let source = empty_source();
+        let probe = FakeRepoProbe {
+            result: RepoProbeResult::Repo {
+                top_level: "/repo".into(),
+            },
+        };
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
+        let session = Mutex::new(ViewerSession::new(1024));
+
+        let outcome = open_recipe(
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &AppSettingsStoreUserConfig::new(None),
+            ),
+            &session,
+            &recipe(),
+            "snapshot".into(),
+            ViewerTabKind::Snapshot,
+        )
+        .expect("empty snapshot is a successful skip");
+
+        let OpenRecipeOutcome::Skipped { label } = outcome else {
+            panic!("empty snapshot must be skipped");
+        };
+        assert_eq!(label, "repo: diff");
+        assert!(session.lock().expect("session").tabs().next().is_none());
+        assert!(app_state.renders.lock().expect("renders").is_empty());
+    }
+
+    #[test]
+    fn empty_live_view_remains_ready_and_refreshable() {
+        let app_state = InMemoryAppStateStore::default();
+        let source = empty_source();
+        let probe = FakeRepoProbe {
+            result: RepoProbeResult::Repo {
+                top_level: "/repo".into(),
+            },
+        };
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
+        let session = Mutex::new(ViewerSession::new(1024));
+
+        let outcome = open_recipe(
+            RecipeContext::new(
+                &source,
+                &probe,
+                &app_state,
+                &clock,
+                Path::new("/data"),
+                &AppSettingsStoreUserConfig::new(None),
+            ),
+            &session,
+            &recipe(),
+            "live".into(),
+            ViewerTabKind::Live,
+        )
+        .expect("empty live view opens");
+
+        let OpenRecipeOutcome::Opened(opened) = outcome else {
+            panic!("empty live view must remain open");
+        };
+        assert!(
+            opened
+                .view
+                .as_ref()
+                .is_some_and(|view| !view.has_diff_content())
+        );
+        let session = session.lock().expect("session");
+        assert_eq!(
+            session.tab(opened.tab_id).expect("tab").tab.state(),
+            &ViewerTabState::Ready
+        );
+    }
+
     #[test]
     fn open_computes_publishes_and_records_only_the_current_view() {
         let app_state = InMemoryAppStateStore::default();
@@ -432,21 +554,23 @@ index 111..222 100644\n\
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
 
-        let opened = open_recipe(
-            RecipeContext::new(
-                &source,
-                &probe,
-                &app_state,
-                &clock,
-                Path::new("/data"),
-                &DiffExclusions::default(),
-            ),
-            &session,
-            &recipe(),
-            "batch-1".into(),
-            ViewerTabKind::Snapshot,
-        )
-        .expect("open succeeds");
+        let opened = expect_opened(
+            open_recipe(
+                RecipeContext::new(
+                    &source,
+                    &probe,
+                    &app_state,
+                    &clock,
+                    Path::new("/data"),
+                    &AppSettingsStoreUserConfig::new(None),
+                ),
+                &session,
+                &recipe(),
+                "batch-1".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("open succeeds"),
+        );
         let id = opened.tab_id;
         assert!(opened.view.is_some());
 
@@ -473,21 +597,23 @@ index 111..222 100644\n\
         let mut named = recipe();
         named.name = Some("Named initial failure".into());
 
-        let opened = open_recipe(
-            RecipeContext::new(
-                &source,
-                &probe,
-                &app_state,
-                &clock,
-                Path::new("/data"),
-                &DiffExclusions::default(),
-            ),
-            &session,
-            &named,
-            "batch".into(),
-            ViewerTabKind::Snapshot,
-        )
-        .expect("published compute errors are acknowledged");
+        let opened = expect_opened(
+            open_recipe(
+                RecipeContext::new(
+                    &source,
+                    &probe,
+                    &app_state,
+                    &clock,
+                    Path::new("/data"),
+                    &AppSettingsStoreUserConfig::new(None),
+                ),
+                &session,
+                &named,
+                "batch".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("published compute errors are acknowledged"),
+        );
         assert!(opened.view.is_none());
 
         let session = session.lock().expect("session lock");
@@ -504,21 +630,23 @@ index 111..222 100644\n\
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(1));
 
-        let opened = open_recipe(
-            RecipeContext::new(
-                &source,
-                &probe,
-                &app_state,
-                &clock,
-                Path::new("/data"),
-                &DiffExclusions::default(),
-            ),
-            &session,
-            &recipe(),
-            "batch".into(),
-            ViewerTabKind::Snapshot,
-        )
-        .expect("open succeeds");
+        let opened = expect_opened(
+            open_recipe(
+                RecipeContext::new(
+                    &source,
+                    &probe,
+                    &app_state,
+                    &clock,
+                    Path::new("/data"),
+                    &AppSettingsStoreUserConfig::new(None),
+                ),
+                &session,
+                &recipe(),
+                "batch".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("open succeeds"),
+        );
 
         assert!(opened.view.is_some());
         assert!(
@@ -540,21 +668,23 @@ index 111..222 100644\n\
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(1024));
 
-        let id = open_recipe(
-            RecipeContext::new(
-                &source,
-                &probe,
-                &app_state,
-                &clock,
-                Path::new("/data"),
-                &DiffExclusions::default(),
-            ),
-            &session,
-            &recipe(),
-            "live".into(),
-            ViewerTabKind::Live,
+        let id = expect_opened(
+            open_recipe(
+                RecipeContext::new(
+                    &source,
+                    &probe,
+                    &app_state,
+                    &clock,
+                    Path::new("/data"),
+                    &AppSettingsStoreUserConfig::new(None),
+                ),
+                &session,
+                &recipe(),
+                "live".into(),
+                ViewerTabKind::Live,
+            )
+            .expect("broken source remains an open tab"),
         )
-        .expect("broken source remains an open tab")
         .tab_id;
 
         let session = session.lock().expect("session lock");
@@ -578,21 +708,23 @@ index 111..222 100644\n\
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(1024));
 
-        let id = open_recipe(
-            RecipeContext::new(
-                &source,
-                &probe,
-                &app_state,
-                &clock,
-                Path::new("/data"),
-                &DiffExclusions::default(),
-            ),
-            &session,
-            &recipe(),
-            "live".into(),
-            ViewerTabKind::Live,
+        let id = expect_opened(
+            open_recipe(
+                RecipeContext::new(
+                    &source,
+                    &probe,
+                    &app_state,
+                    &clock,
+                    Path::new("/data"),
+                    &AppSettingsStoreUserConfig::new(None),
+                ),
+                &session,
+                &recipe(),
+                "live".into(),
+                ViewerTabKind::Live,
+            )
+            .expect("broken source remains an open tab"),
         )
-        .expect("broken source remains an open tab")
         .tab_id;
 
         let session = session.lock().expect("session lock");
@@ -616,21 +748,23 @@ index 111..222 100644\n\
         };
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
-        let id = open_recipe(
-            RecipeContext::new(
-                &source,
-                &probe,
-                &app_state,
-                &clock,
-                Path::new("/data"),
-                &DiffExclusions::default(),
-            ),
-            &session,
-            &recipe,
-            "snapshot".into(),
-            ViewerTabKind::Snapshot,
+        let id = expect_opened(
+            open_recipe(
+                RecipeContext::new(
+                    &source,
+                    &probe,
+                    &app_state,
+                    &clock,
+                    Path::new("/data"),
+                    &AppSettingsStoreUserConfig::new(None),
+                ),
+                &session,
+                &recipe,
+                "snapshot".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("snapshot computes without probing"),
         )
-        .expect("snapshot computes without probing")
         .tab_id;
         {
             let mut session = session.lock().expect("session lock");
@@ -645,7 +779,7 @@ index 111..222 100644\n\
                 &app_state,
                 &clock,
                 Path::new("/data"),
-                &DiffExclusions::default(),
+                &AppSettingsStoreUserConfig::new(None),
             ),
             &session,
             id,
@@ -671,21 +805,23 @@ index 111..222 100644\n\
         let probe = FakeRepoProbe::default();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
-        let id = open_recipe(
-            RecipeContext::new(
-                &source,
-                &probe,
-                &app_state,
-                &clock,
-                Path::new("/data"),
-                &DiffExclusions::default(),
-            ),
-            &session,
-            &recipe(),
-            "batch".into(),
-            ViewerTabKind::Snapshot,
+        let id = expect_opened(
+            open_recipe(
+                RecipeContext::new(
+                    &source,
+                    &probe,
+                    &app_state,
+                    &clock,
+                    Path::new("/data"),
+                    &AppSettingsStoreUserConfig::new(None),
+                ),
+                &session,
+                &recipe(),
+                "batch".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("open succeeds"),
         )
-        .expect("open succeeds")
         .tab_id;
         app_state.renders.lock().expect("renders lock").clear();
 
@@ -696,7 +832,7 @@ index 111..222 100644\n\
                 &app_state,
                 &clock,
                 Path::new("/data"),
-                &DiffExclusions::default(),
+                &AppSettingsStoreUserConfig::new(None),
             ),
             &session,
             id,
@@ -718,21 +854,23 @@ index 111..222 100644\n\
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let mut named = recipe();
         named.name = Some("Named refresh failure".into());
-        let id = open_recipe(
-            RecipeContext::new(
-                &successful_source,
-                &probe,
-                &app_state,
-                &clock,
-                Path::new("/data"),
-                &DiffExclusions::default(),
-            ),
-            &session,
-            &named,
-            "batch".into(),
-            ViewerTabKind::Snapshot,
+        let id = expect_opened(
+            open_recipe(
+                RecipeContext::new(
+                    &successful_source,
+                    &probe,
+                    &app_state,
+                    &clock,
+                    Path::new("/data"),
+                    &AppSettingsStoreUserConfig::new(None),
+                ),
+                &session,
+                &named,
+                "batch".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("initial open succeeds"),
         )
-        .expect("initial open succeeds")
         .tab_id;
 
         assert!(
@@ -743,7 +881,7 @@ index 111..222 100644\n\
                     &app_state,
                     &clock,
                     Path::new("/data"),
-                    &DiffExclusions::default(),
+                    &AppSettingsStoreUserConfig::new(None),
                 ),
                 &session,
                 id,
@@ -762,7 +900,8 @@ index 111..222 100644\n\
     fn older_failing_refresh_becomes_stale_after_newer_success() {
         let source = source();
         let mut newest_view =
-            compute_view(&source, &recipe(), &DiffExclusions::default()).expect("view computes");
+            compute_view(&source, &recipe(), &AppSettingsStoreUserConfig::new(None))
+                .expect("view computes");
         newest_view.title = "newer success".into();
         let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
         let id = session.lock().expect("session").open(

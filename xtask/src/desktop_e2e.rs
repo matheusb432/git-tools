@@ -193,6 +193,61 @@ impl Drop for ManagedChild {
     }
 }
 
+#[derive(Debug)]
+struct DaemonCleanupGuard {
+    cli: PathBuf,
+    cwd: PathBuf,
+    environments: Vec<(&'static str, IsolatedEnv)>,
+    stopped: bool,
+}
+
+impl DaemonCleanupGuard {
+    fn new(sandbox: &Sandbox) -> Result<Self> {
+        Ok(Self {
+            cli: release_binary("git-tools")?,
+            cwd: sandbox.root.clone(),
+            environments: vec![
+                ("native", sandbox.environment(&sandbox.native_data)),
+                ("dom", sandbox.environment(&sandbox.dom_data)),
+            ],
+            stopped: false,
+        })
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        let mut failures = Vec::new();
+        for (name, environment) in &self.environments {
+            if let Err(error) = command_checked(
+                environment,
+                self.cli.to_string_lossy().as_ref(),
+                &["daemon", "stop"],
+                &self.cwd,
+            ) {
+                failures.push(format!("{name} store: {error:#}"));
+            }
+        }
+        if !failures.is_empty() {
+            bail!(
+                "failed to stop {} isolated daemon(s): {}",
+                failures.len(),
+                failures.join("; ")
+            );
+        }
+        self.stopped = true;
+        Ok(())
+    }
+}
+
+impl Drop for DaemonCleanupGuard {
+    fn drop(&mut self) {
+        if !self.stopped
+            && let Err(error) = self.stop()
+        {
+            eprintln!("desktop-e2e: failed to stop an isolated daemon: {error:#}");
+        }
+    }
+}
+
 /// Build and run the platform desktop E2E workflow.
 pub fn run() -> Result<()> {
     let result = workflow();
@@ -219,6 +274,7 @@ fn workflow() -> Result<()> {
     build::run(BuildTarget::Viewer)?;
 
     let sandbox = Sandbox::create()?;
+    let mut daemon_cleanup = DaemonCleanupGuard::new(&sandbox)?;
     let result = match std::env::consts::OS {
         "linux" => run_linux(&sandbox),
         "windows" => run_dom_phase(&sandbox, &sandbox.environment(&sandbox.dom_data)),
@@ -226,8 +282,11 @@ fn workflow() -> Result<()> {
             "hermetic desktop E2E is not configured for {unsupported}; Linux and Windows are supported"
         ),
     };
-    preserve_logs(&sandbox)?;
-    result
+    let cleanup_result = daemon_cleanup.stop();
+    let logs_result = preserve_logs(&sandbox);
+    result?;
+    cleanup_result?;
+    logs_result
 }
 
 fn run_linux(sandbox: &Sandbox) -> Result<()> {

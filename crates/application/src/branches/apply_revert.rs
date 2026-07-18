@@ -61,7 +61,7 @@ pub enum ApplyRevertError {
 /// # Errors
 ///
 /// Returns [`ApplyRevertError`] when Git transport fails.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     command: ApplyRevert,
     git: &impl GitRunner,

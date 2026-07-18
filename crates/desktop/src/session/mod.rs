@@ -185,6 +185,15 @@ impl ViewerSession {
         self.begin_compute(id)
     }
 
+    pub(crate) fn close_if_current(&mut self, ticket: ComputeTicket) -> PublishOutcome {
+        if self.current_ticket(ticket.tab_id) != Some(ticket) {
+            return PublishOutcome::Stale;
+        }
+        let closed = self.close(ticket.tab_id);
+        debug_assert!(closed);
+        PublishOutcome::Published
+    }
+
     pub(crate) fn close(&mut self, id: ViewerTabId) -> bool {
         let Some(index) = self.tabs.iter().position(|tab| tab.tab.id() == id) else {
             return false;
@@ -527,6 +536,18 @@ mod tests {
             session.cached_view(id).expect("current view").view.title,
             "newer"
         );
+    }
+
+    #[test]
+    fn close_if_current_rejects_a_stale_compute() {
+        let (mut session, id) = ready_session();
+        let stale = session.begin_compute(id).expect("stale ticket");
+        let current = session.begin_compute(id).expect("current ticket");
+
+        assert_eq!(session.close_if_current(stale), PublishOutcome::Stale);
+        assert!(session.tab(id).is_some());
+        assert_eq!(session.close_if_current(current), PublishOutcome::Published);
+        assert!(session.tab(id).is_none());
     }
 
     #[test]

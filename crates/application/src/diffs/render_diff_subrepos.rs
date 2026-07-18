@@ -3,31 +3,30 @@
 //! reporting the skip count. Repo *discovery* stays cli-side (filesystem
 //! walking, not a port); the cli's `gtl diff -r` sends the
 //! already-discovered [`RepoRef`]s to the resident daemon over HTTP, which
-//! dispatches this request through the daemon mediator.
+//! dispatches this application request directly.
 
 use std::path::PathBuf;
 
-use domain::diffs::{DiffExclusions, DiffKind};
+use domain::diffs::DiffKind;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{
-        DiffTarget,
+        DiffTarget, DiffTargetRequest, DiffTargetRequestError,
         batch::{RepoRef, dated_title, render_batch},
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
+    ports::{AppSettingsStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
 
 /// Render a tabbed diff preview across `repos` under `store_root`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiffSubrepos {
     pub store_root: PathBuf,
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
     pub root: PathBuf,
-    pub target: DiffTarget,
+    pub target: DiffTargetRequest,
     pub repos: Vec<RepoRef>,
-    pub theme: Option<String>,
-    pub exclusions: DiffExclusions,
 }
 
 /// The outcome plus every message the render wanted surfaced.
@@ -50,13 +49,16 @@ pub enum RenderDiffSubreposOutcome {
 #[derive(Debug, thiserror::Error)]
 pub enum RenderDiffSubreposError {
     #[error(transparent)]
+    InvalidTarget(#[from] DiffTargetRequestError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
 /// Renders the requested subrepositories through the diff ports.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     req: RenderDiffSubrepos,
+    app_settings: &impl AppSettingsStore,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
@@ -67,19 +69,11 @@ pub fn execute(
         store_root,
         repos,
         target,
-        theme,
-        exclusions,
     } = req;
+    let target = DiffTarget::try_from(target)?;
+    let settings = app_settings.load();
     let mut notes = Vec::new();
-    let batch = render_batch(
-        source,
-        &target,
-        theme.as_deref(),
-        &exclusions,
-        &repos,
-        true,
-        &mut notes,
-    )?;
+    let batch = render_batch(source, &target, &settings, &repos, true, &mut notes)?;
 
     if batch.views.is_empty() {
         notes.push(Note::warn(format!(
@@ -104,6 +98,7 @@ pub fn execute(
         head_committed_at: String::new(),
         generated_at: clock.now_iso(),
         title: title.clone(),
+        theme: settings.theme().map(str::to_owned),
         excluded_extensions: Vec::new(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
@@ -132,50 +127,63 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{Commit, DiffExclusions};
+    use domain::diffs::DiffExclusions;
 
     use super::{RenderDiffSubrepos, RenderDiffSubreposOutcome, RepoRef, execute};
     use crate::{
-        diffs::DiffTarget,
+        diffs::DiffTargetRequest,
+        ports::{AppSettings, AppSettingsStore},
         shared::notes::Note,
-        testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
+        testing::{
+            FakeDiffSource, FixedAppSettingsStore, FixedClock, InMemoryArtifactStore, StubRenderer,
+            diffs::{DIFF_SINGLE_FILE, commit},
+        },
     };
 
-    const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
-        index 111..222 100644\n\
-        --- a/f.txt\n\
-        +++ b/f.txt\n\
-        @@ -1,2 +1,3 @@\n\
-         keep\n\
-        -old line\n\
-        +new line\n\
-        +extra line\n";
+    #[derive(Clone)]
+    struct PanicAppSettingsStore;
 
-    fn one_commit() -> Commit {
-        Commit {
-            sha: "abc1234".into(),
-            subject: "feat: work".into(),
-            ..Default::default()
+    impl AppSettingsStore for PanicAppSettingsStore {
+        fn load(&self) -> AppSettings {
+            panic!("invalid requests must not load settings")
         }
     }
 
     fn req(repos: Vec<RepoRef>) -> RenderDiffSubrepos {
         RenderDiffSubrepos {
-            exclusions: DiffExclusions::default(),
             store_root: PathBuf::from("/store"),
             root: PathBuf::from("/scan-root"),
-            target: DiffTarget::Unpushed { pinned: None },
+            target: DiffTargetRequest::Unpushed,
             repos,
-            theme: None,
         }
+    }
+
+    #[test]
+    fn invalid_target_is_rejected_before_settings_are_loaded() {
+        let error = execute(
+            RenderDiffSubrepos {
+                store_root: "/store".into(),
+                root: "/root".into(),
+                target: DiffTargetRequest::Last { count: 0 },
+                repos: Vec::new(),
+            },
+            &PanicAppSettingsStore,
+            &FakeDiffSource::default(),
+            &InMemoryArtifactStore::default(),
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect_err("invalid target errors");
+
+        assert_eq!(error.to_string(), "last count must be >= 1");
     }
 
     #[test]
     fn renders_a_tabbed_artifact_and_reports_the_skip_count() {
         let source = FakeDiffSource {
             upstream: Some("origin/main".into()),
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
@@ -186,6 +194,7 @@ mod tests {
 
         let response = execute(
             req(repos),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -230,6 +239,7 @@ mod tests {
 
         let response = execute(
             req(repos),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -244,5 +254,56 @@ mod tests {
                 "diff -r: nothing to show across 1 repo(s); no preview written"
             )]
         );
+    }
+
+    #[test]
+    fn render_uses_the_settings_snapshot_for_the_batch() {
+        const TWO_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
+--- a/f.txt\n\
++++ b/f.txt\n\
+@@ -1 +1 @@\n\
+-old\n\
++new\n\
+diff --git a/notes.md b/notes.md\n\
+--- a/notes.md\n\
++++ b/notes.md\n\
+@@ -1 +1 @@\n\
+-plan\n\
++more plan\n";
+        let source = FakeDiffSource {
+            upstream: Some("origin/main".into()),
+            commits: vec![commit("abc1234")],
+            diff_output: TWO_FILE_DIFF.into(),
+            ..Default::default()
+        };
+        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+            Some("night".into()),
+            true,
+            DiffExclusions::new([("repo-a".to_string(), vec!["md"])], None),
+        ));
+        let store = InMemoryArtifactStore::default();
+
+        execute(
+            RenderDiffSubrepos {
+                store_root: PathBuf::from("/store"),
+                root: PathBuf::from("/scan-root"),
+                target: DiffTargetRequest::Unpushed,
+                repos: vec![RepoRef {
+                    top: "/repo-a".into(),
+                    label: "repo-a".into(),
+                }],
+            },
+            &app_settings,
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
+
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert!(artifact.html.contains("repo-a:night:1"));
     }
 }

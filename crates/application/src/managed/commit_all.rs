@@ -92,7 +92,7 @@ struct CommitAttemptError {
 /// # Errors
 ///
 /// Returns [`CommitAllError`] when Git cannot be executed while staging or committing.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     command: CommitAll,
     git: &impl GitRunner,

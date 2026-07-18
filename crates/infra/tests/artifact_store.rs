@@ -47,6 +47,7 @@ fn meta(repo: &Path, kind: DiffKind, base: &str, head: &str) -> ArtifactMeta {
         head_committed_at: "2026-07-02T00:00:00Z".to_string(),
         generated_at: "2026-07-02T00:00:00Z".to_string(),
         title: "diff".to_string(),
+        theme: None,
     }
 }
 
@@ -66,12 +67,28 @@ fn place_then_lookup_by_range_returns_the_placed_artifact() {
     assert!(!placed.reused);
 
     let hit = StoreArtifacts
-        .lookup_by_range(store.path(), &repo, DiffKind::TwoDot, "aaaa", "bbbb", &[])
+        .lookup_by_range(
+            store.path(),
+            &repo,
+            DiffKind::TwoDot,
+            "aaaa",
+            "bbbb",
+            None,
+            &[],
+        )
         .unwrap();
     assert_eq!(hit.as_deref(), Some(placed.path.as_path()));
 
     let miss = StoreArtifacts
-        .lookup_by_range(store.path(), &repo, DiffKind::TwoDot, "aaaa", "cccc", &[])
+        .lookup_by_range(
+            store.path(),
+            &repo,
+            DiffKind::TwoDot,
+            "aaaa",
+            "cccc",
+            None,
+            &[],
+        )
         .unwrap();
     assert!(miss.is_none());
 }
@@ -90,7 +107,7 @@ fn worktree_artifacts_are_never_range_addressable() {
         .unwrap();
 
     let hit = StoreArtifacts
-        .lookup_by_range(store.path(), &repo, DiffKind::WorkTree, "", "", &[])
+        .lookup_by_range(store.path(), &repo, DiffKind::WorkTree, "", "", None, &[])
         .unwrap();
     assert!(hit.is_none());
 }

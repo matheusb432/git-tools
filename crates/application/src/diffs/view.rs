@@ -41,11 +41,33 @@ pub struct View {
 }
 
 impl View {
-    /// Whether the preview would show nothing: no commits in range and no changed
-    /// files. Rendering this case produces a blank artifact that reads as a bug, so
-    /// callers warn and skip the render instead.
-    pub fn is_empty(&self) -> bool {
-        self.commits.is_empty() && self.files.is_empty()
+    /// Returns whether the view contains at least one commit or changed file.
+    ///
+    /// Snapshot previews require diff content. Live views may remain open without it so they can be
+    /// refreshed later.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use application::diffs::{Cmd, Foot, View};
+    /// # let view = View {
+    /// #     repo_name: "repo".into(),
+    /// #     repo_root: "/repo".into(),
+    /// #     branch: "feature".into(),
+    /// #     upstream: "origin/main".into(),
+    /// #     commits: Vec::new(),
+    /// #     files: Vec::new(),
+    /// #     title: "Diff".into(),
+    /// #     cmd: Cmd { lead: String::new(), range: String::new(), trail: String::new() },
+    /// #     commits_label: "Commits".into(),
+    /// #     foot: Foot { cmd: "git diff".into(), note: String::new() },
+    /// #     theme: None,
+    /// #     exclusions: None,
+    /// # };
+    /// assert!(!view.has_diff_content());
+    /// ```
+    pub fn has_diff_content(&self) -> bool {
+        !self.commits.is_empty() || !self.files.is_empty()
     }
 }
 
@@ -75,4 +97,61 @@ pub fn sort_files_tree_order(files: &mut [FileDiff]) {
         // ? one path is a prefix of the other: shorter (shallower) comes first
         a_components.len().cmp(&b_components.len())
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use domain::diffs::Commit;
+
+    use super::*;
+    use crate::diffs::LineOwners;
+
+    fn view() -> View {
+        View {
+            repo_name: "repo".into(),
+            repo_root: "/repo".into(),
+            branch: "feature".into(),
+            upstream: "origin/main".into(),
+            commits: Vec::new(),
+            files: Vec::new(),
+            title: "Diff".into(),
+            cmd: Cmd {
+                lead: String::new(),
+                range: String::new(),
+                trail: String::new(),
+            },
+            commits_label: "Commits".into(),
+            foot: Foot {
+                cmd: "git diff".into(),
+                note: String::new(),
+            },
+            theme: None,
+            exclusions: None,
+        }
+    }
+
+    fn file() -> FileDiff {
+        FileDiff {
+            path: "f.txt".into(),
+            added: 1,
+            removed: 0,
+            lines: Vec::new(),
+            full_lines: None,
+            commits: Vec::new(),
+            owners: LineOwners::default(),
+        }
+    }
+
+    #[test]
+    fn diff_content_requires_a_commit_or_changed_file() {
+        let mut view = view();
+        assert!(!view.has_diff_content());
+
+        view.commits.push(Commit::default());
+        assert!(view.has_diff_content());
+
+        view.commits.clear();
+        view.files.push(file());
+        assert!(view.has_diff_content());
+    }
 }

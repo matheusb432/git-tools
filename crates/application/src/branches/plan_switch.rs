@@ -48,7 +48,7 @@ pub enum PlanSwitchError {
 /// # Errors
 ///
 /// Returns [`PlanSwitchError`] when Git transport fails.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(query: PlanSwitch, git: &impl GitRunner) -> Result<SwitchPlan, PlanSwitchError> {
     let PlanSwitch { repo, onto } = query;
     let top_args = ["rev-parse", "--show-toplevel"];

@@ -15,14 +15,12 @@ pub struct Health {
     pub exe_modified_ms: u64,
 }
 
-/// Returns `200 OK` with the daemon's startup identity. Also counts as activity
-/// so a health-poll keeps an otherwise-idle daemon alive.
+/// Returns `200 OK` with the daemon's startup identity.
 pub async fn handle(State(state): State<DaemonState>) -> Json<Health> {
-    state.shared.touch();
     Json(Health {
-        pid: state.shared.pid,
-        version: state.shared.version.to_string(),
-        exe_len: state.shared.identity.exe_len,
-        exe_modified_ms: state.shared.identity.exe_modified_ms,
+        pid: state.pid,
+        version: state.version.to_string(),
+        exe_len: state.identity.exe_len,
+        exe_modified_ms: state.identity.exe_modified_ms,
     })
 }

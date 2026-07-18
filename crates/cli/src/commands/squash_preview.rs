@@ -1,7 +1,6 @@
 use std::path::Path;
 
-use application::recipes::RecipeRequest;
-use contracts::diffs::RenderSquashPreviewRequest;
+use application::{diffs::render_squash_preview::RenderSquashPreview, recipes::RecipeRequest};
 use gtl_recipe::{OpenRecipes, RecipeBatchKind};
 
 use crate::{
@@ -59,13 +58,11 @@ pub(crate) fn render(
     // Lexical, no filesystem access — the daemon process's own cwd is unrelated
     // to the caller's shell, so `cwd` must already be absolute on the wire.
     let cwd = std::path::absolute(repo.as_ref())?;
-    let req = RenderSquashPreviewRequest {
-        cwd: cwd.to_string_lossy().into_owned(),
-        store_root: gtl_platform::paths::store_root()?
-            .to_string_lossy()
-            .into_owned(),
+    let request = RenderSquashPreview {
+        cwd,
+        store_root: gtl_platform::paths::store_root()?,
     };
-    let artifact = super::finish_single_render(backend.render_squash_preview(&req)?, open)?;
+    let artifact = super::finish_single_render(backend.render_squash_preview(&request)?, open)?;
     Ok(DiffOutcome::Rendered(artifact))
 }
 
@@ -83,7 +80,7 @@ mod tests {
     impl Backend for FakeBackend {
         fn render_squash_preview(
             &self,
-            _req: &RenderSquashPreviewRequest,
+            _request: &RenderSquashPreview,
         ) -> anyhow::Result<Envelope<RenderDiffData>> {
             Ok(self.0.clone())
         }

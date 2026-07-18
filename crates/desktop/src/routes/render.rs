@@ -172,6 +172,24 @@ pub(super) fn tabs_with_view_after_live_delete(
     )
 }
 
+pub(super) fn tabs_with_view_after_snapshot_skips(
+    renderer: MaudViewerRenderer,
+    session: &Mutex<ViewerSession>,
+    transient: Option<VersionedView>,
+    settings: ViewerSettings,
+    skipped_labels: &[String],
+) -> Result<String, RenderError> {
+    tabs_with_view_using(
+        renderer,
+        session,
+        transient,
+        settings,
+        |renderer, document| {
+            renderer.build_tabs_with_view_after_snapshot_skips(document, skipped_labels)
+        },
+    )
+}
+
 #[expect(
     clippy::needless_pass_by_value,
     reason = "bounded retries clone one validated settings value"

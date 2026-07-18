@@ -127,6 +127,7 @@ dependencies = [
  "domain",
  "futures-util",
  "gtl-recipe",
+ "serde",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -456,31 +457,6 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "piper",
-]
-
-[[package]]
-name = "bon"
-version = "3.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a602c73c7b0148ec6d12af6fd5cc7a46e2eacc8878271a999abac56eed12f561"
-dependencies = [
- "bon-macros",
- "rustversion",
-]
-
-[[package]]
-name = "bon-macros"
-version = "3.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dee98b0db6a962de883bf5d20362dee4d7ca0d12fe39a7c6c73c844e1cd7c1f"
-dependencies = [
- "darling",
- "ident_case",
- "prettyplease",
- "proc-macro2",
- "quote",
- "rustversion",
- "syn 2.0.118",
 ]
 
 [[package]]
@@ -914,23 +890,8 @@ dependencies = [
 
 [[package]]
 name = "cqrsy"
-version = "0.9.0"
-source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.9.0#341ace9ce2f8be0e28b26558a85b54a2e3405a98"
-dependencies = [
- "bon",
- "cqrsy-core",
- "cqrsy-macros",
-]
-
-[[package]]
-name = "cqrsy-core"
-version = "0.9.0"
-source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.9.0#341ace9ce2f8be0e28b26558a85b54a2e3405a98"
-
-[[package]]
-name = "cqrsy-macros"
-version = "0.9.0"
-source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.9.0#341ace9ce2f8be0e28b26558a85b54a2e3405a98"
+version = "0.10.0"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.10.0#bb4b8a672716102f50957d7cf20d9ad48d6d9371"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1088,13 +1049,14 @@ dependencies = [
  "axum",
  "bootstrap",
  "contracts",
- "domain",
  "gtl-platform",
  "http-body-util",
  "infra",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tower",
  "tracing",

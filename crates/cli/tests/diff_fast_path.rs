@@ -35,7 +35,6 @@ fn run_diff(repo: &tempfile::TempDir, store: &tempfile::TempDir, args: &[&str]) 
         .current_dir(repo.path())
         .env("GIT_TOOLS_DATA_DIR", store.path())
         .env("GIT_TOOLS_NO_OPEN", "1")
-        .env("GIT_TOOLS_DAEMON_IDLE_SECS", "2")
         // This suite pins the daemon/store fast-path directly (reuse, sidecar naming);
         // simulate headless so `diff`'s default degrades to that path without needing
         // `--raw` sprinkled through every call (Phase 5, Task 1.6).
@@ -89,6 +88,7 @@ fn sidecar_titles(store: &tempfile::TempDir) -> Vec<String> {
 fn second_identical_range_run_reuses_artifact() {
     let repo = tiny_repo();
     let store = tempfile::tempdir().unwrap();
+    let _daemon = common::DaemonProcessGuard::new(store.path());
 
     let _first = run_diff(&repo, &store, &["diff", "HEAD~1..HEAD"]);
     let second = run_diff(&repo, &store, &["diff", "HEAD~1..HEAD"]);
@@ -102,6 +102,7 @@ fn second_identical_range_run_reuses_artifact() {
 fn named_range_run_records_the_name_in_history_metadata() {
     let repo = tiny_repo();
     let store = tempfile::tempdir().unwrap();
+    let _daemon = common::DaemonProcessGuard::new(store.path());
 
     let output = run_diff(
         &repo,
@@ -120,6 +121,7 @@ fn named_range_run_records_the_name_in_history_metadata() {
 fn differently_named_range_runs_create_distinct_history_entries() {
     let repo = tiny_repo();
     let store = tempfile::tempdir().unwrap();
+    let _daemon = common::DaemonProcessGuard::new(store.path());
 
     run_diff(&repo, &store, &["diff", "-n", "morning", "HEAD~1..HEAD"]);
     run_diff(&repo, &store, &["diff", "-n", "end-of-day", "HEAD~1..HEAD"]);

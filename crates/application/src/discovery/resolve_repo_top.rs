@@ -32,7 +32,7 @@ pub enum ResolveRepoTopError {
 ///
 /// Returns [`ResolveRepoTopError`] when Git transport fails or the path is not
 /// inside a repository.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     query: ResolveRepoTop,
     git: &impl GitRunner,

@@ -25,7 +25,7 @@ pub enum ListTagsError {
 /// # Errors
 ///
 /// Returns [`ListTagsError`] when Git cannot be executed.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(query: ListTags, git: &impl GitRunner) -> Result<TagList, ListTagsError> {
     let ListTags { repo } = query;
     match parse::load(git, &repo) {

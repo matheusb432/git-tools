@@ -19,7 +19,7 @@ pub enum PushPlan {
 }
 
 /// Selects the managed push mode without performing external actions.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(query: PlanPush) -> PushPlan {
     let PlanPush { message, dry } = query;
     match message {

@@ -34,7 +34,7 @@ pub enum GetWorktreeBaseError {
 /// # Errors
 ///
 /// Returns [`GetWorktreeBaseError`] when Git cannot be executed.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     query: GetWorktreeBase,
     git: &impl GitRunner,

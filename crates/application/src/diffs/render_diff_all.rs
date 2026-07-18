@@ -6,27 +6,26 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::{DiffExclusions, DiffKind};
+use domain::diffs::DiffKind;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{
         DiffTarget,
         batch::{RepoRef, dated_title, render_batch},
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
+    ports::{AppSettingsStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
 
 /// Render a tabbed diff preview across every repo in `repos` (already filtered
 /// by the caller to upstream-present + unpushed > 0) under `store_root`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiffAll {
     pub store_root: PathBuf,
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
     pub root: PathBuf,
     pub repos: Vec<RepoRef>,
-    pub theme: Option<String>,
-    pub exclusions: DiffExclusions,
 }
 
 /// The stored artifact plus every message the render wanted surfaced.
@@ -45,9 +44,10 @@ pub enum RenderDiffAllError {
 }
 
 /// Renders every requested repository through the diff ports.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     req: RenderDiffAll,
+    app_settings: &impl AppSettingsStore,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
@@ -57,15 +57,13 @@ pub fn execute(
         root,
         store_root,
         repos,
-        theme,
-        exclusions,
     } = req;
+    let settings = app_settings.load();
     let mut notes = Vec::new();
     let batch = render_batch(
         source,
         &DiffTarget::Unpushed { pinned: None },
-        theme.as_deref(),
-        &exclusions,
+        &settings,
         &repos,
         false,
         &mut notes,
@@ -83,6 +81,7 @@ pub fn execute(
         head_committed_at: String::new(),
         generated_at: clock.now_iso(),
         title: title.clone(),
+        theme: settings.theme().map(str::to_owned),
         excluded_extensions: Vec::new(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
@@ -101,41 +100,53 @@ pub fn execute(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{
+        collections::VecDeque,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    };
 
-    use domain::diffs::{Commit, DiffExclusions, DiffKind};
+    use domain::diffs::{DiffExclusions, DiffKind};
 
     use super::{RenderDiffAll, RepoRef, execute};
     use crate::{
+        ports::{AppSettings, AppSettingsStore},
         shared::notes::Note,
-        testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
+        testing::{
+            FakeDiffSource, FixedAppSettingsStore, FixedClock, InMemoryArtifactStore, RepoOverride,
+            StubRenderer,
+            diffs::{DIFF_SINGLE_FILE, commit},
+        },
     };
 
-    const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
-        index 111..222 100644\n\
-        --- a/f.txt\n\
-        +++ b/f.txt\n\
-        @@ -1,2 +1,3 @@\n\
-         keep\n\
-        -old line\n\
-        +new line\n\
-        +extra line\n";
+    #[derive(Clone)]
+    struct SequenceAppSettingsStore {
+        snapshots: Arc<Mutex<VecDeque<AppSettings>>>,
+    }
 
-    fn one_commit() -> Commit {
-        Commit {
-            sha: "abc1234".into(),
-            subject: "feat: work".into(),
-            ..Default::default()
+    impl SequenceAppSettingsStore {
+        fn new(snapshots: impl IntoIterator<Item = AppSettings>) -> Self {
+            Self {
+                snapshots: Arc::new(Mutex::new(snapshots.into_iter().collect())),
+            }
+        }
+    }
+
+    impl AppSettingsStore for SequenceAppSettingsStore {
+        fn load(&self) -> AppSettings {
+            self.snapshots
+                .lock()
+                .expect("settings sequence lock")
+                .pop_front()
+                .expect("one settings snapshot per operation")
         }
     }
 
     fn req(repos: Vec<RepoRef>) -> RenderDiffAll {
         RenderDiffAll {
-            exclusions: DiffExclusions::default(),
             store_root: PathBuf::from("/store"),
             root: PathBuf::from("/scan-root"),
             repos,
-            theme: None,
         }
     }
 
@@ -143,8 +154,8 @@ mod tests {
     fn renders_every_repo_without_skipping_empties() {
         let source = FakeDiffSource {
             upstream: Some("origin/main".into()),
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
@@ -161,6 +172,7 @@ mod tests {
 
         let response = execute(
             req(repos),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -202,6 +214,7 @@ mod tests {
 
         let result = execute(
             req(repos),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -209,5 +222,96 @@ mod tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn batch_reuses_one_snapshot_and_the_next_operation_observes_a_change() {
+        const TWO_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
+--- a/f.txt\n\
++++ b/f.txt\n\
+@@ -1 +1 @@\n\
+-old\n\
++new\n\
+diff --git a/notes.md b/notes.md\n\
+--- a/notes.md\n\
++++ b/notes.md\n\
+@@ -1 +1 @@\n\
+-plan\n\
++more plan\n";
+        let mut source = FakeDiffSource {
+            upstream: Some("origin/main".into()),
+            ..Default::default()
+        };
+        for top in ["/repo-a", "/repo-b"] {
+            source.per_repo.insert(
+                top.into(),
+                RepoOverride {
+                    commits: vec![commit("abc1234")],
+                    diff_output: TWO_FILE_DIFF.into(),
+                },
+            );
+        }
+        let app_settings = SequenceAppSettingsStore::new([
+            AppSettings::new(
+                Some("first".into()),
+                true,
+                DiffExclusions::new([("repo-a".to_string(), vec!["md"])], None),
+            ),
+            AppSettings::new(
+                Some("second".into()),
+                true,
+                DiffExclusions::new([("repo-b".to_string(), vec!["txt"])], None),
+            ),
+        ]);
+        let store = InMemoryArtifactStore::default();
+        let repos = vec![
+            RepoRef {
+                top: "/repo-a".into(),
+                label: "repo-a".into(),
+            },
+            RepoRef {
+                top: "/repo-b".into(),
+                label: "repo-b".into(),
+            },
+        ];
+
+        execute(
+            RenderDiffAll {
+                store_root: PathBuf::from("/store"),
+                root: PathBuf::from("/scan-root"),
+                repos: repos.clone(),
+            },
+            &app_settings,
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("first render succeeds");
+        let first_html = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("first artifact persisted")
+            .html;
+
+        execute(
+            RenderDiffAll {
+                store_root: PathBuf::from("/store"),
+                root: PathBuf::from("/scan-root"),
+                repos,
+            },
+            &app_settings,
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("second render succeeds");
+        let second_html = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("second artifact persisted")
+            .html;
+
+        assert!(first_html.contains("repo-a:first:1|repo-b:first:2"));
+        assert!(second_html.contains("repo-a:second:2|repo-b:second:1"));
     }
 }

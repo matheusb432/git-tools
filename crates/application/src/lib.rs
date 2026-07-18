@@ -1,8 +1,9 @@
 //! Application core (Ports & Adapters "inside"): ports plus vertical slices.
 //!
 //! Each feature operation owns its request and one public request-first
-//! `#[cqrsy::handler(command|query)]` `execute` function. Callers import the
-//! operation module and invoke `operation::execute(...)` directly.
+//! `#[cqrsy::command]` or `#[cqrsy::query]` `execute` function. cqrsy validates
+//! its signature at compile time and generates no dispatch runtime. Callers
+//! import the operation module and invoke `operation::execute(...)` directly.
 //! This crate depends on the inward-facing domain and operation crates plus the
 //! app-agnostic `gtl-recipe` DTO shared with process adapters.
 

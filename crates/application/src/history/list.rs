@@ -22,23 +22,21 @@ pub enum ListHistoryError {
     Unexpected(#[from] anyhow::Error),
 }
 
+// Multi-repo renders have no single head commit, so generation time is their recency.
+fn recency(r: &HistoryRecord) -> &str {
+    if r.head_committed_at.is_empty() {
+        &r.generated_at
+    } else {
+        &r.head_committed_at
+    }
+}
+
 /// Lists artifact history in newest-first order.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     req: ListHistory,
     store: &impl ArtifactStore,
 ) -> Result<ListHistoryResponse, ListHistoryError> {
-    // `diff -r`/`diff --all` span multiple repos, so they carry no single
-    // head commit — `head_committed_at` is empty. Fall back to `generated_at`
-    // for those so they sort by actual recency instead of always trailing.
-    fn recency(r: &HistoryRecord) -> &str {
-        if r.head_committed_at.is_empty() {
-            &r.generated_at
-        } else {
-            &r.head_committed_at
-        }
-    }
-
     let ListHistory { store_root } = req;
     let mut entries = store.list_history(&store_root)?;
     entries.sort_by(|a, b| {

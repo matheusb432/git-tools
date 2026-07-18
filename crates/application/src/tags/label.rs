@@ -35,7 +35,7 @@ pub enum LabelTagError {
 /// # Errors
 ///
 /// Returns [`LabelTagError`] when Git cannot be executed.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(command: LabelTag, git: &impl GitRunner) -> Result<TagActionOutcome, LabelTagError> {
     match label(command, git) {
         Ok(outcome) => Ok(outcome),

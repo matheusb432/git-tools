@@ -34,7 +34,7 @@ pub enum AddTagError {
 /// # Errors
 ///
 /// Returns [`AddTagError`] when Git cannot be executed.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(command: AddTag, git: &impl GitRunner) -> Result<TagActionOutcome, AddTagError> {
     match create(command, git) {
         Ok(outcome) => Ok(outcome),

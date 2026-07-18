@@ -21,7 +21,7 @@ pub enum SetSettingError {
 }
 
 /// Sets a value through the app-state port.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     req: SetSetting,
     store: &impl AppStateStore,

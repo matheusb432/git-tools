@@ -5,28 +5,28 @@
 use std::path::{Path, PathBuf};
 
 use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{
-        DiffTarget, PinnedRange, View,
+        DiffTarget, DiffTargetRequest, DiffTargetRequestError, PinnedRange, View,
         range::DiffRanges,
         range_view::{RangePresentation, RangeView},
         sort_files_tree_order,
         util::{DiffData, assemble, exclusion_note, repo_name},
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
+    ports::{AppSettingsStore, ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer},
     shared::notes::Note,
 };
 
 /// Render a diff preview for `target` under `store_root`, resolving the repo from `cwd`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiff {
     pub cwd: PathBuf,
     pub store_root: PathBuf,
-    pub target: DiffTarget,
+    pub target: DiffTargetRequest,
+    #[serde(default)]
     pub name: Option<String>,
-    pub theme: Option<String>,
-    pub exclusions: DiffExclusions,
 }
 
 /// The outcome plus every message the render wanted surfaced.
@@ -49,6 +49,8 @@ pub enum RenderDiffOutcome {
 #[derive(Debug, thiserror::Error)]
 pub enum RenderDiffError {
     #[error(transparent)]
+    InvalidTarget(#[from] DiffTargetRequestError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
@@ -58,6 +60,7 @@ fn range_fast_path(
     top: &str,
     store_root: &Path,
     target: &DiffTarget,
+    theme: Option<&str>,
     excluded_extensions: &[String],
 ) -> anyhow::Result<Option<PathBuf>> {
     let Some((kind, base_sha, head_sha)) = resolved_range(source, top, target) else {
@@ -69,6 +72,7 @@ fn range_fast_path(
         kind,
         &base_sha,
         &head_sha,
+        theme,
         excluded_extensions,
     )
 }
@@ -136,9 +140,10 @@ fn head_sha_for(source: &impl DiffSource, top: &str, range: &str) -> String {
 }
 
 /// Renders a diff through the diff ports.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     req: RenderDiff,
+    app_settings: &impl AppSettingsStore,
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
@@ -149,16 +154,19 @@ pub fn execute(
         store_root,
         target,
         name,
-        theme,
-        exclusions,
     } = req;
+    let target = DiffTarget::try_from(target)?;
     let mut notes = Vec::new();
+    let settings = app_settings.load();
+    let theme = settings.theme().map(str::to_owned);
     let top = source.top_level(&cwd)?;
-    let excluded = exclusions.for_project_or_default(&repo_name(&top));
+    let excluded = settings
+        .diff_exclusions()
+        .for_project_or_default(&repo_name(&top));
 
     // ! Fast-path: pure commit ranges are fully determined by resolved shas plus
-    // ! the active exclusion set, so a prior identical artifact can be reused
-    // ! without the expensive assemble — never across a config change.
+    // ! the active rendering settings, so a prior identical artifact can be
+    // ! reused without the expensive assemble — never across a config change.
     if name.is_none()
         && let Some(hit) = range_fast_path(
             source,
@@ -166,6 +174,7 @@ pub fn execute(
             &top,
             &store_root,
             &target,
+            theme.as_deref(),
             excluded.extensions(),
         )?
     {
@@ -182,11 +191,18 @@ pub fn execute(
         });
     }
 
-    let (mut view, summary) = build_view(source, &top, &target, theme, &exclusions, &mut notes)?;
+    let (mut view, summary) = build_view(
+        source,
+        &top,
+        &target,
+        theme.clone(),
+        settings.diff_exclusions(),
+        &mut notes,
+    )?;
     if let Some(name) = &name {
         view.title.clone_from(name);
     }
-    if view.is_empty() {
+    if !view.has_diff_content() {
         notes.push(Note::warn(format!(
             "diff-preview: {summary} — nothing to show (no commits or changes); skipping"
         )));
@@ -211,6 +227,7 @@ pub fn execute(
         head_committed_at: source.committed_at(repo, "HEAD"),
         generated_at: clock.now_iso(),
         title: view.title.clone(),
+        theme,
         excluded_extensions: excluded.extensions().to_vec(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
@@ -486,42 +503,56 @@ fn legacy_unpushed_commit_label(count: usize) -> String {
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{Commit, DiffExclusions, DiffKind};
+    use domain::diffs::{DiffExclusions, DiffKind};
 
     use super::{RenderDiff, RenderDiffError, RenderDiffOutcome, execute};
     use crate::{
-        diffs::DiffTarget,
+        diffs::{DiffTarget, DiffTargetRequest},
+        ports::{AppSettings, AppSettingsStore},
         shared::notes::Note,
-        testing::{FakeDiffSource, FixedClock, InMemoryArtifactStore, StubRenderer},
+        testing::{
+            FakeDiffSource, FixedAppSettingsStore, FixedClock, InMemoryArtifactStore, StubRenderer,
+            diffs::{DIFF_SINGLE_FILE, commit},
+        },
     };
 
-    const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
-index 111..222 100644\n\
---- a/f.txt\n\
-+++ b/f.txt\n\
-@@ -1,2 +1,3 @@\n\
- keep\n\
--old line\n\
-+new line\n\
-+extra line\n";
-
-    fn one_commit() -> Commit {
-        Commit {
-            sha: "abc1234".into(),
-            subject: "feat: work".into(),
-            ..Default::default()
+    fn req(source_top: &str, target: &DiffTarget) -> RenderDiff {
+        RenderDiff {
+            cwd: PathBuf::from(source_top),
+            store_root: PathBuf::from("/store"),
+            target: DiffTargetRequest::from(target),
+            name: None,
         }
     }
 
-    fn req(source_top: &str, target: DiffTarget) -> RenderDiff {
-        RenderDiff {
-            exclusions: DiffExclusions::default(),
-            cwd: PathBuf::from(source_top),
-            store_root: PathBuf::from("/store"),
-            target,
-            name: None,
-            theme: None,
+    #[derive(Clone)]
+    struct PanicAppSettingsStore;
+
+    impl AppSettingsStore for PanicAppSettingsStore {
+        fn load(&self) -> AppSettings {
+            panic!("invalid requests must not load settings")
         }
+    }
+
+    #[test]
+    fn invalid_target_is_rejected_before_settings_are_loaded() {
+        let error = execute(
+            RenderDiff {
+                cwd: PathBuf::from("/repo"),
+                store_root: PathBuf::from("/store"),
+                target: DiffTargetRequest::Last { count: 0 },
+                name: None,
+            },
+            &PanicAppSettingsStore,
+            &FakeDiffSource::default(),
+            &InMemoryArtifactStore::default(),
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect_err("invalid target errors");
+
+        assert!(matches!(error, RenderDiffError::InvalidTarget(_)));
+        assert_eq!(error.to_string(), "last count must be >= 1");
     }
 
     #[test]
@@ -530,15 +561,16 @@ index 111..222 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             committed_at: "2026-07-02".into(),
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
 
         let response = execute(
-            req("/repo", DiffTarget::Unpushed { pinned: None }),
+            req("/repo", &DiffTarget::Unpushed { pinned: None }),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -568,6 +600,51 @@ index 111..222 100644\n\
     }
 
     #[test]
+    fn render_uses_the_resolved_projects_settings_snapshot() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
+            ..Default::default()
+        };
+        let store = InMemoryArtifactStore::default();
+        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+            Some("night".into()),
+            true,
+            DiffExclusions::new(
+                [
+                    ("repo".to_string(), vec!["md".to_string()]),
+                    ("defaults".to_string(), vec!["txt".to_string()]),
+                ],
+                None,
+            ),
+        ));
+
+        execute(
+            RenderDiff {
+                cwd: PathBuf::from("/repo"),
+                store_root: PathBuf::from("/store"),
+                target: DiffTargetRequest::Unpushed,
+                name: None,
+            },
+            &app_settings,
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
+
+        let artifact = store
+            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .expect("artifact persisted");
+        assert_eq!(artifact.meta.excluded_extensions, vec!["md"]);
+        assert!(artifact.html.contains("night"));
+    }
+
+    #[test]
     fn empty_view_returns_empty_with_the_skip_warning() {
         let source = FakeDiffSource {
             top_level: Some("/repo".into()),
@@ -580,7 +657,8 @@ index 111..222 100644\n\
         let store = InMemoryArtifactStore::default();
 
         let response = execute(
-            req("/repo", DiffTarget::Unpushed { pinned: None }),
+            req("/repo", &DiffTarget::Unpushed { pinned: None }),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -612,24 +690,24 @@ index 111..222 100644\n\
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        store.range_hits.lock().unwrap().insert(
-            (
-                DiffKind::TwoDot,
-                "sha-a".to_string(),
-                "sha-b".to_string(),
-                Vec::new(),
-            ),
-            PathBuf::from("/store/existing.html"),
+        store.range_hit_insert(
+            DiffKind::TwoDot,
+            "sha-a",
+            "sha-b",
+            None,
+            &[],
+            "/store/existing.html",
         );
 
         let response = execute(
             req(
                 "/repo",
-                DiffTarget::Range {
+                &DiffTarget::Range {
                     range: "a..b".into(),
                     pinned: None,
                 },
             ),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -655,8 +733,8 @@ index 111..222 100644\n\
         let source = FakeDiffSource {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             shas: [
                 ("a".to_string(), "sha-a".to_string()),
                 ("b".to_string(), "sha-b".to_string()),
@@ -668,29 +746,32 @@ index 111..222 100644\n\
         };
         let store = InMemoryArtifactStore::default();
         // A hit exists for this range rendered WITHOUT exclusions…
-        store.range_hits.lock().unwrap().insert(
-            (
-                DiffKind::TwoDot,
-                "sha-a".to_string(),
-                "sha-b".to_string(),
-                Vec::new(),
-            ),
-            PathBuf::from("/store/unfiltered.html"),
+        store.range_hit_insert(
+            DiffKind::TwoDot,
+            "sha-a",
+            "sha-b",
+            None,
+            &[],
+            "/store/unfiltered.html",
         );
 
         // …but this render runs with an md filter for the repo, so it must
         // recompute instead of serving the stale unfiltered artifact.
-        let mut request = req(
+        let request = req(
             "/repo",
-            DiffTarget::Range {
+            &DiffTarget::Range {
                 range: "a..b".into(),
                 pinned: None,
             },
         );
-        request.exclusions =
-            DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None);
+        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+            None,
+            true,
+            DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None),
+        ));
         let response = execute(
             request,
+            &app_settings,
             &source,
             &store,
             &StubRenderer,
@@ -713,6 +794,58 @@ index 111..222 100644\n\
     }
 
     #[test]
+    fn fast_path_never_reuses_an_artifact_rendered_under_a_different_theme() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
+            shas: [
+                ("a".to_string(), "sha-a".to_string()),
+                ("b".to_string(), "sha-b".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            known_revs: vec!["a".into(), "b".into()],
+            ..Default::default()
+        };
+        let store = InMemoryArtifactStore::default();
+        store.range_hit_insert(
+            DiffKind::TwoDot,
+            "sha-a",
+            "sha-b",
+            Some("dark"),
+            &[],
+            "/store/dark.html",
+        );
+
+        let response = execute(
+            req(
+                "/repo",
+                &DiffTarget::Range {
+                    range: "a..b".into(),
+                    pinned: None,
+                },
+            ),
+            &FixedAppSettingsStore::new(AppSettings::new(
+                Some("light".to_string()),
+                true,
+                DiffExclusions::default(),
+            )),
+            &source,
+            &store,
+            &StubRenderer,
+            &FixedClock("2026-07-02T00:00:00Z".into()),
+        )
+        .expect("render succeeds");
+
+        assert!(matches!(
+            response.outcome,
+            RenderDiffOutcome::Rendered { reused: false, .. }
+        ));
+    }
+
+    #[test]
     fn fast_path_reuses_an_artifact_rendered_under_the_same_exclusion_set() {
         let source = FakeDiffSource {
             top_level: Some("/repo".into()),
@@ -727,27 +860,30 @@ index 111..222 100644\n\
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        store.range_hits.lock().unwrap().insert(
-            (
-                DiffKind::TwoDot,
-                "sha-a".to_string(),
-                "sha-b".to_string(),
-                vec!["md".to_string()],
-            ),
-            PathBuf::from("/store/filtered.html"),
+        store.range_hit_insert(
+            DiffKind::TwoDot,
+            "sha-a",
+            "sha-b",
+            None,
+            &["md"],
+            "/store/filtered.html",
         );
 
-        let mut request = req(
+        let request = req(
             "/repo",
-            DiffTarget::Range {
+            &DiffTarget::Range {
                 range: "a..b".into(),
                 pinned: None,
             },
         );
-        request.exclusions =
-            DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None);
+        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+            None,
+            true,
+            DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None),
+        ));
         let response = execute(
             request,
+            &app_settings,
             &source,
             &store,
             &StubRenderer,
@@ -769,8 +905,8 @@ index 111..222 100644\n\
         let source = FakeDiffSource {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             shas: [
                 ("a".to_string(), "sha-a".to_string()),
                 ("b".to_string(), "sha-b".to_string()),
@@ -782,19 +918,18 @@ index 111..222 100644\n\
         };
         let store = InMemoryArtifactStore::default();
         // A range hit exists, but a named run must ignore the fast-path entirely.
-        store.range_hits.lock().unwrap().insert(
-            (
-                DiffKind::TwoDot,
-                "sha-a".to_string(),
-                "sha-b".to_string(),
-                Vec::new(),
-            ),
-            PathBuf::from("/store/existing.html"),
+        store.range_hit_insert(
+            DiffKind::TwoDot,
+            "sha-a",
+            "sha-b",
+            None,
+            &[],
+            "/store/existing.html",
         );
 
         let mut request = req(
             "/repo",
-            DiffTarget::Range {
+            &DiffTarget::Range {
                 range: "a..b".into(),
                 pinned: None,
             },
@@ -802,6 +937,7 @@ index 111..222 100644\n\
         request.name = Some("custom".into());
         let response = execute(
             request,
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -826,14 +962,15 @@ index 111..222 100644\n\
             branch: "feature".into(),
             upstream: None,
             known_revs: vec!["main".into()],
-            commits: vec![one_commit()],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
 
         let response = execute(
-            req("/repo", DiffTarget::Unpushed { pinned: None }),
+            req("/repo", &DiffTarget::Unpushed { pinned: None }),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -866,7 +1003,8 @@ index 111..222 100644\n\
         let store = InMemoryArtifactStore::default();
 
         let error = execute(
-            req("/repo", DiffTarget::Base("nope".into())),
+            req("/repo", &DiffTarget::Base("nope".into())),
+            &FixedAppSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
@@ -874,7 +1012,9 @@ index 111..222 100644\n\
         )
         .expect_err("unknown base errors");
 
-        let RenderDiffError::Unexpected(err) = error;
+        let RenderDiffError::Unexpected(err) = error else {
+            panic!("an unknown revision is an execution error")
+        };
         assert_eq!(format!("{err:#}"), "unknown revision nope");
     }
 }

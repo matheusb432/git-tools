@@ -3,16 +3,19 @@
 //! restart-on-mismatch, autostart via the PAL's detached spawn).
 
 use std::{
+    fs::{File, OpenOptions, TryLockError},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
 use anyhow::Context as _;
+use application::diffs::{
+    render_diff::RenderDiff, render_diff_all::RenderDiffAll,
+    render_diff_subrepos::RenderDiffSubrepos, render_merge_diff::RenderMergeDiff,
+    render_squash_preview::RenderSquashPreview,
+};
 use contracts::{
-    diffs::{
-        RenderDiffAllRequest, RenderDiffData, RenderDiffRequest, RenderDiffSubreposRequest,
-        RenderMergeDiffRequest, RenderSquashPreviewRequest,
-    },
+    diffs::RenderDiffData,
     envelope::Envelope,
     live_views::{SaveLiveViewData, SaveLiveViewRequest},
     managed::{PullAllRequest, PushAllRequest, SyncData},
@@ -29,7 +32,7 @@ pub trait Backend {
     /// # Errors
     /// Returns an error only on transport/parse failure — an error *outcome* is
     /// carried inside the returned [`Envelope`], not as `Err`.
-    fn render_diff(&self, _req: &RenderDiffRequest) -> anyhow::Result<Envelope<RenderDiffData>> {
+    fn render_diff(&self, _req: &RenderDiff) -> anyhow::Result<Envelope<RenderDiffData>> {
         unimplemented!("render_diff")
     }
 
@@ -40,7 +43,7 @@ pub trait Backend {
     /// carried inside the returned [`Envelope`], not as `Err`.
     fn render_merge_diff(
         &self,
-        _req: &RenderMergeDiffRequest,
+        _req: &RenderMergeDiff,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
         unimplemented!("render_merge_diff")
     }
@@ -52,7 +55,7 @@ pub trait Backend {
     /// carried inside the returned [`Envelope`], not as `Err`.
     fn render_squash_preview(
         &self,
-        _req: &RenderSquashPreviewRequest,
+        _req: &RenderSquashPreview,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
         unimplemented!("render_squash_preview")
     }
@@ -64,7 +67,7 @@ pub trait Backend {
     /// carried inside the returned [`Envelope`], not as `Err`.
     fn render_diff_subrepos(
         &self,
-        _req: &RenderDiffSubreposRequest,
+        _req: &RenderDiffSubrepos,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
         unimplemented!("render_diff_subrepos")
     }
@@ -74,10 +77,7 @@ pub trait Backend {
     /// # Errors
     /// Returns an error only on transport/parse failure — an error *outcome* is
     /// carried inside the returned [`Envelope`], not as `Err`.
-    fn render_diff_all(
-        &self,
-        _req: &RenderDiffAllRequest,
-    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+    fn render_diff_all(&self, _req: &RenderDiffAll) -> anyhow::Result<Envelope<RenderDiffData>> {
         unimplemented!("render_diff_all")
     }
 
@@ -128,11 +128,61 @@ struct PortFile {
     pid: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DaemonLockOwnership {
+    Free,
+    Owned,
+}
+
+struct DaemonLockStartup {
+    file: File,
+}
+
+impl Drop for DaemonLockStartup {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
+}
+
+enum DaemonOwnerWait {
+    Healthy { port: u16, health: Health },
+    Released,
+}
+
+enum DaemonReplacementOutcome {
+    Healthy { port: u16, health: Health },
+    Released,
+}
+
 /// A running daemon's status, for `gtl daemon status`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaemonStatus {
+    /// Listening localhost port.
     pub port: u16,
+    /// Process identifier reported by the health endpoint.
     pub pid: u32,
+    /// Daemon package version.
     pub version: String,
+}
+
+/// Result of inspecting the resident daemon and its ownership lock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DaemonStatusOutcome {
+    /// A healthy daemon answered its identity endpoint.
+    Running(DaemonStatus),
+    /// No healthy daemon or lock owner exists.
+    NotRunning,
+    /// A process owns the daemon lock but does not answer health probes.
+    OwnedUnhealthy,
+}
+
+/// Result of asking the resident daemon to stop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DaemonStopOutcome {
+    /// A healthy daemon stopped and released ownership.
+    Stopped,
+    /// No healthy process or lock owner existed.
+    NotRunning,
 }
 
 /// The localhost-HTTP backend: a base URL resolved by [`HttpBackend::ensure_daemon`]
@@ -156,52 +206,44 @@ impl HttpBackend {
     /// a 5 s startup timeout) or the HTTP client cannot be built.
     pub fn ensure_daemon() -> anyhow::Result<Self> {
         let bin = daemon_bin();
-        let pre = read_port_file();
+        let mut stale_pid = read_port_file().map(|port_file| port_file.pid);
 
-        if let Some(port) = pinned_port() {
-            if let Some(health) = health(port, HEALTH_TIMEOUT) {
-                if identity_matches(&health, &bin) {
-                    return Self::connect(port);
-                }
-                // Mismatched identity on the pinned port: it must die before the
-                // fresh daemon can bind the same port.
-                shutdown(port);
-                wait_until_dead(port, STOP_BUDGET);
-            }
-        } else if let Some(pf) = read_port_file()
-            && let Some(health) = health(pf.port, HEALTH_TIMEOUT)
-        {
+        if let Some((port, health)) = daemon_candidate_or_wait()? {
             if identity_matches(&health, &bin) {
-                return Self::connect(pf.port);
+                return Self::connect(port);
             }
-            shutdown(pf.port);
-            wait_until_dead(pf.port, STOP_BUDGET);
+            stale_pid = Some(health.pid);
+            match replace_healthy_daemon(port, health.pid, &bin)? {
+                DaemonReplacementOutcome::Healthy { port, .. } => return Self::connect(port),
+                DaemonReplacementOutcome::Released => {}
+            }
         }
 
-        Self::spawn_and_connect(&bin, pre.map(|p| p.pid))
+        Self::spawn_and_connect(&bin, stale_pid).map(|(backend, _)| backend)
     }
 
     /// Spawn `gtl-daemon` detached and poll for it to publish a fresh, matching
     /// port file.
-    fn spawn_and_connect(bin: &Path, stale_pid: Option<u32>) -> anyhow::Result<Self> {
+    fn spawn_and_connect(
+        bin: &Path,
+        stale_pid: Option<u32>,
+    ) -> anyhow::Result<(Self, DaemonStatus)> {
         gtl_platform::spawn_detached(bin, &[])
             .with_context(|| format!("spawn gtl-daemon ({})", bin.display()))?;
 
-        let deadline = Instant::now() + SPAWN_DEADLINE;
-        while Instant::now() < deadline {
-            if let Some(pf) = read_port_file()
-                && stale_pid != Some(pf.pid)
-                && let Some(health) = health(pf.port, HEALTH_TIMEOUT)
-                && identity_matches(&health, bin)
-            {
-                return Self::connect(pf.port);
-            }
-            std::thread::sleep(SPAWN_POLL_STEP);
-        }
-        anyhow::bail!(
-            "gtl-daemon did not start within 5s (binary: {})",
-            bin.display()
-        )
+        let Some((port, health)) = wait_for_matching_daemon(bin, stale_pid, SPAWN_DEADLINE) else {
+            anyhow::bail!(
+                "gtl-daemon did not start within 5s (binary: {})",
+                bin.display()
+            );
+        };
+        let backend = Self::connect(port)?;
+        let status = DaemonStatus {
+            port,
+            pid: health.pid,
+            version: health.version,
+        };
+        Ok((backend, status))
     }
 
     /// Build the blocking client for a resolved port (connect-timeout only).
@@ -234,35 +276,29 @@ impl HttpBackend {
 }
 
 impl Backend for HttpBackend {
-    fn render_diff(&self, req: &RenderDiffRequest) -> anyhow::Result<Envelope<RenderDiffData>> {
+    fn render_diff(&self, req: &RenderDiff) -> anyhow::Result<Envelope<RenderDiffData>> {
         self.post_json("/diffs/render", req)
     }
 
-    fn render_merge_diff(
-        &self,
-        req: &RenderMergeDiffRequest,
-    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+    fn render_merge_diff(&self, req: &RenderMergeDiff) -> anyhow::Result<Envelope<RenderDiffData>> {
         self.post_json("/diffs/merge", req)
     }
 
     fn render_squash_preview(
         &self,
-        req: &RenderSquashPreviewRequest,
+        req: &RenderSquashPreview,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
         self.post_json("/diffs/squash-preview", req)
     }
 
     fn render_diff_subrepos(
         &self,
-        req: &RenderDiffSubreposRequest,
+        req: &RenderDiffSubrepos,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
         self.post_json("/diffs/subrepos", req)
     }
 
-    fn render_diff_all(
-        &self,
-        req: &RenderDiffAllRequest,
-    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+    fn render_diff_all(&self, req: &RenderDiffAll) -> anyhow::Result<Envelope<RenderDiffData>> {
         self.post_json("/diffs/all", req)
     }
 
@@ -282,28 +318,59 @@ impl Backend for HttpBackend {
     }
 }
 
-/// Report a running daemon's identity, or `None` when nothing answers.
-pub fn daemon_status() -> Option<DaemonStatus> {
-    let pf = read_port_file()?;
-    let health = health(pf.port, HEALTH_TIMEOUT)?;
-    Some(DaemonStatus {
-        port: pf.port,
-        pid: health.pid,
-        version: health.version,
-    })
+/// Inspect the running daemon and its ownership lock.
+///
+/// # Errors
+///
+/// Returns an error when lock ownership cannot be inspected.
+pub fn daemon_status() -> anyhow::Result<DaemonStatusOutcome> {
+    if let Some((port, health)) = daemon_candidate(HEALTH_TIMEOUT) {
+        return Ok(DaemonStatusOutcome::Running(status_from(port, health)));
+    }
+    match daemon_lock_ownership()? {
+        DaemonLockOwnership::Free => Ok(DaemonStatusOutcome::NotRunning),
+        DaemonLockOwnership::Owned => Ok(DaemonStatusOutcome::OwnedUnhealthy),
+    }
 }
 
-/// Ask a running daemon to exit; `false` when nothing was running.
-pub fn daemon_stop() -> bool {
-    let Some(pf) = read_port_file() else {
-        return false;
+/// Ask a running daemon to exit.
+///
+/// # Errors
+///
+/// Returns an error when startup cannot be quiesced, an unhealthy owner keeps
+/// the lock, the daemon misses the stop deadline, or lock ownership cannot be inspected.
+pub fn daemon_stop() -> anyhow::Result<DaemonStopOutcome> {
+    let started_at = Instant::now();
+    let Some(_daemon_lock_startup) = acquire_daemon_lock_startup(SPAWN_DEADLINE)? else {
+        anyhow::bail!("daemon startup did not release daemon.start.lock within 5s");
     };
-    if health(pf.port, HEALTH_TIMEOUT).is_none() {
-        return false;
+    let budget = SPAWN_DEADLINE.saturating_sub(started_at.elapsed());
+    let Some((port, health)) = daemon_candidate_or_wait_with_budget(budget)? else {
+        return Ok(DaemonStopOutcome::NotRunning);
+    };
+    stop_healthy_daemon(port, health.pid)?;
+    Ok(DaemonStopOutcome::Stopped)
+}
+
+/// Replace a healthy daemon, or start one when none owns the store.
+///
+/// # Errors
+///
+/// Returns an error when the current owner is unhealthy, does not stop within
+/// budget, the replacement cannot be spawned, or it misses the startup budget.
+pub fn daemon_restart() -> anyhow::Result<DaemonStatus> {
+    let bin = daemon_bin();
+    let mut stale_pid = read_port_file().map(|port_file| port_file.pid);
+    if let Some((port, health)) = daemon_candidate_or_wait()? {
+        stale_pid = Some(health.pid);
+        match replace_healthy_daemon(port, health.pid, &bin)? {
+            DaemonReplacementOutcome::Healthy { port, health } => {
+                return Ok(status_from(port, health));
+            }
+            DaemonReplacementOutcome::Released => {}
+        }
     }
-    shutdown(pf.port);
-    wait_until_dead(pf.port, STOP_BUDGET);
-    true
+    HttpBackend::spawn_and_connect(&bin, stale_pid).map(|(_, status)| status)
 }
 
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
@@ -340,6 +407,157 @@ fn read_port_file() -> Option<PortFile> {
     serde_json::from_str(&raw).ok()
 }
 
+fn daemon_candidate(timeout: Duration) -> Option<(u16, Health)> {
+    let deadline = Instant::now() + timeout;
+    let port_pinned = pinned_port();
+    let port_discovered = read_port_file().map(|port_file| port_file.port);
+    match (port_pinned, port_discovered) {
+        (Some(pinned), Some(discovered)) if pinned != discovered => {
+            let timeout_pinned = timeout / 2;
+            if !timeout_pinned.is_zero()
+                && let Some(health) = health(pinned, timeout_pinned)
+            {
+                return Some((pinned, health));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                None
+            } else {
+                health(discovered, remaining).map(|health| (discovered, health))
+            }
+        }
+        (Some(port), _) | (None, Some(port)) => health(port, timeout).map(|health| (port, health)),
+        (None, None) => None,
+    }
+}
+
+fn daemon_candidate_or_wait() -> anyhow::Result<Option<(u16, Health)>> {
+    daemon_candidate_or_wait_with_budget(SPAWN_DEADLINE)
+}
+
+fn daemon_candidate_or_wait_with_budget(budget: Duration) -> anyhow::Result<Option<(u16, Health)>> {
+    let started_at = Instant::now();
+    let health_budget = budget.min(HEALTH_TIMEOUT);
+    if !health_budget.is_zero()
+        && let Some(candidate) = daemon_candidate(health_budget)
+    {
+        return Ok(Some(candidate));
+    }
+    match daemon_lock_ownership()? {
+        DaemonLockOwnership::Free => Ok(None),
+        DaemonLockOwnership::Owned => {
+            let remaining = budget.saturating_sub(started_at.elapsed());
+            match wait_for_daemon_owner(remaining)? {
+                DaemonOwnerWait::Healthy { port, health } => Ok(Some((port, health))),
+                DaemonOwnerWait::Released => Ok(None),
+            }
+        }
+    }
+}
+
+fn wait_for_daemon_owner(budget: Duration) -> anyhow::Result<DaemonOwnerWait> {
+    let deadline = Instant::now() + budget;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if !remaining.is_zero()
+            && let Some((port, health)) = daemon_candidate(remaining.min(HEALTH_TIMEOUT))
+        {
+            return Ok(DaemonOwnerWait::Healthy { port, health });
+        }
+        if daemon_lock_ownership()? == DaemonLockOwnership::Free {
+            return Ok(DaemonOwnerWait::Released);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!(
+                "daemon lock is owned but no healthy daemon responded before the startup deadline"
+            );
+        }
+        std::thread::sleep(remaining.min(SPAWN_POLL_STEP));
+    }
+}
+
+fn wait_for_matching_daemon(
+    bin: &Path,
+    stale_pid: Option<u32>,
+    budget: Duration,
+) -> Option<(u16, Health)> {
+    let deadline = Instant::now() + budget;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        if let Some((port, health)) = daemon_candidate(remaining.min(HEALTH_TIMEOUT))
+            && stale_pid != Some(health.pid)
+            && identity_matches(&health, bin)
+        {
+            return Some((port, health));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        std::thread::sleep(remaining.min(SPAWN_POLL_STEP));
+    }
+}
+
+fn daemon_lock_ownership() -> anyhow::Result<DaemonLockOwnership> {
+    let store_root = gtl_platform::paths::store_root().context("resolve daemon store root")?;
+    std::fs::create_dir_all(&store_root)
+        .with_context(|| format!("create daemon store root at {}", store_root.display()))?;
+    let path = store_root.join("daemon.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("open daemon lock at {}", path.display()))?;
+    match file.try_lock_shared() {
+        Ok(()) => {
+            file.unlock()
+                .with_context(|| format!("unlock daemon ownership probe at {}", path.display()))?;
+            Ok(DaemonLockOwnership::Free)
+        }
+        Err(TryLockError::WouldBlock) => Ok(DaemonLockOwnership::Owned),
+        Err(TryLockError::Error(error)) => {
+            Err(error).with_context(|| format!("inspect daemon ownership at {}", path.display()))
+        }
+    }
+}
+
+fn acquire_daemon_lock_startup(budget: Duration) -> anyhow::Result<Option<DaemonLockStartup>> {
+    let store_root = gtl_platform::paths::store_root().context("resolve daemon store root")?;
+    std::fs::create_dir_all(&store_root)
+        .with_context(|| format!("create daemon store root at {}", store_root.display()))?;
+    let path = store_root.join("daemon.start.lock");
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)
+        .with_context(|| format!("open daemon startup lock at {}", path.display()))?;
+    let deadline = Instant::now() + budget;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(Some(DaemonLockStartup { file })),
+            Err(TryLockError::WouldBlock) => {}
+            Err(TryLockError::Error(error)) => {
+                return Err(error).with_context(|| {
+                    format!("lock daemon startup election at {}", path.display())
+                });
+            }
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(None);
+        }
+        std::thread::sleep(remaining.min(SPAWN_POLL_STEP));
+    }
+}
+
 /// `GET /health` with an overall `timeout`; `None` on any failure.
 fn health(port: u16, timeout: Duration) -> Option<Health> {
     let client = reqwest::blocking::Client::builder()
@@ -368,10 +586,21 @@ fn identity_matches(health: &Health, bin: &Path) -> bool {
     meta.len() == health.exe_len && modified_ms == health.exe_modified_ms
 }
 
+fn status_from(port: u16, health: Health) -> DaemonStatus {
+    DaemonStatus {
+        port,
+        pid: health.pid,
+        version: health.version,
+    }
+}
+
 /// Best-effort `POST /shutdown` to a daemon on `port`.
-fn shutdown(port: u16) {
+fn shutdown(port: u16, timeout: Duration) {
+    if timeout.is_zero() {
+        return;
+    }
     if let Ok(client) = reqwest::blocking::Client::builder()
-        .timeout(STOP_BUDGET)
+        .timeout(timeout)
         .build()
     {
         let _ = client
@@ -380,19 +609,121 @@ fn shutdown(port: u16) {
     }
 }
 
-/// Poll until `port` stops answering `/health`, or `budget` elapses.
-fn wait_until_dead(port: u16, budget: Duration) {
+/// Poll until `port` stops reporting `pid`, or `budget` elapses.
+fn wait_until_pid_gone(port: u16, pid: u32, budget: Duration) -> bool {
     let deadline = Instant::now() + budget;
-    while Instant::now() < deadline {
-        if health(port, Duration::from_millis(300)).is_none() {
-            return;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
         }
-        std::thread::sleep(SPAWN_POLL_STEP);
+        if health(port, remaining.min(Duration::from_millis(300)))
+            .is_none_or(|health| health.pid != pid)
+        {
+            return true;
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return false;
+        }
+        std::thread::sleep(remaining.min(SPAWN_POLL_STEP));
+    }
+}
+
+fn wait_for_replacement(
+    bin: &Path,
+    pid_stale: u32,
+    budget: Duration,
+) -> anyhow::Result<Option<(u16, Health)>> {
+    let deadline = Instant::now() + budget;
+    loop {
+        if daemon_lock_ownership()? == DaemonLockOwnership::Free {
+            return Ok(None);
+        }
+        if read_port_file().is_some_and(|port_file| port_file.pid != pid_stale) {
+            let Some(candidate) = wait_for_matching_daemon(bin, Some(pid_stale), SPAWN_DEADLINE)
+            else {
+                anyhow::bail!("gtl-daemon replacement did not become healthy within 5s");
+            };
+            return Ok(Some(candidate));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!(
+                "gtl-daemon did not release daemon.lock or yield to a healthy replacement within 2s"
+            );
+        }
+        if let Some((port, health)) = daemon_candidate(remaining.min(HEALTH_TIMEOUT))
+            && health.pid != pid_stale
+            && identity_matches(&health, bin)
+        {
+            return Ok(Some((port, health)));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            anyhow::bail!(
+                "gtl-daemon did not release daemon.lock or yield to a healthy replacement within 2s"
+            );
+        }
+        std::thread::sleep(remaining.min(SPAWN_POLL_STEP));
+    }
+}
+
+fn wait_until_lock_free(budget: Duration) -> anyhow::Result<bool> {
+    let deadline = Instant::now() + budget;
+    loop {
+        if daemon_lock_ownership()? == DaemonLockOwnership::Free {
+            return Ok(true);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Ok(false);
+        }
+        std::thread::sleep(remaining.min(SPAWN_POLL_STEP));
+    }
+}
+
+fn stop_daemon_process(port: u16, pid: u32) -> anyhow::Result<Duration> {
+    let started_at = Instant::now();
+    shutdown(port, STOP_BUDGET);
+    let remaining = STOP_BUDGET.saturating_sub(started_at.elapsed());
+    if !wait_until_pid_gone(port, pid, remaining) {
+        anyhow::bail!("gtl-daemon did not stop responding within 2s");
+    }
+    Ok(STOP_BUDGET.saturating_sub(started_at.elapsed()))
+}
+
+fn stop_healthy_daemon(port: u16, pid: u32) -> anyhow::Result<()> {
+    let remaining = stop_daemon_process(port, pid)?;
+    if !wait_until_lock_free(remaining)? {
+        anyhow::bail!("gtl-daemon did not release daemon.lock within 2s");
+    }
+    Ok(())
+}
+
+fn replace_healthy_daemon(
+    port: u16,
+    pid: u32,
+    bin: &Path,
+) -> anyhow::Result<DaemonReplacementOutcome> {
+    let remaining = stop_daemon_process(port, pid)?;
+    match wait_for_replacement(bin, pid, remaining)? {
+        Some((port, health)) => Ok(DaemonReplacementOutcome::Healthy { port, health }),
+        None => Ok(DaemonReplacementOutcome::Released),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::Read as _,
+        net::TcpListener,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+    };
+
     use super::*;
 
     #[test]
@@ -448,5 +779,50 @@ mod tests {
         let bin = daemon_bin();
         let name = bin.file_name().unwrap().to_str().unwrap();
         assert_eq!(name, format!("gtl-daemon{}", std::env::consts::EXE_SUFFIX));
+    }
+
+    #[test]
+    fn daemon_request_transport_failure_is_not_replayed() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let connections_count = Arc::new(AtomicUsize::new(0));
+        let connections_count_server = Arc::clone(&connections_count);
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut first_connection_at: Option<Instant> = None;
+            while Instant::now() < deadline
+                && first_connection_at.is_none_or(|at| at.elapsed() < Duration::from_millis(300))
+            {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        connections_count_server.fetch_add(1, Ordering::SeqCst);
+                        first_connection_at.get_or_insert_with(Instant::now);
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(1)))
+                            .unwrap();
+                        let mut request = [0_u8; 4096];
+                        let _ = stream.read(&mut request);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(error) => panic!("accept daemon request: {error}"),
+                }
+            }
+        });
+
+        let backend = HttpBackend::connect(port).unwrap();
+        let result = backend.post_json::<_, serde_json::Value>(
+            "/diffs/render",
+            &serde_json::json!({"request": "once"}),
+        );
+
+        assert!(
+            result.is_err(),
+            "a closed response must be a transport error"
+        );
+        server.join().unwrap();
+        assert_eq!(connections_count.load(Ordering::SeqCst), 1);
     }
 }

@@ -39,6 +39,16 @@ pub fn place(
     let json_path = dir.join(format!("{hash}.json"));
     // Reuse only when BOTH files exist; if the sidecar was lost, (re)write both.
     if html_path.exists() && json_path.exists() {
+        let theme_recorded = fs::read_to_string(&json_path)
+            .ok()
+            .and_then(|json| serde_json::from_str::<Sidecar>(&json).ok())
+            .is_some_and(|stored| stored.theme_recorded);
+        if !theme_recorded {
+            atomic_write(
+                &json_path,
+                serde_json::to_string_pretty(sidecar)?.as_bytes(),
+            )?;
+        }
         return Ok(Placed {
             path: html_path,
             reused: true,
@@ -75,14 +85,15 @@ fn atomic_write(final_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 /// Find an existing artifact for a pure commit range rendered under the same
-/// exclusion set. Returns `None` for `WorkTree` (never range-addressable) or on
-/// a miss. Scans the repo's sidecars.
+/// renderer theme and exclusion set. Returns `None` for `WorkTree` (never
+/// range-addressable) or on a miss. Scans the repo's sidecars.
 pub fn lookup_by_range(
     store_root: &Path,
     repo_id: &str,
     kind: DiffKind,
     base_sha: &str,
     head_sha: &str,
+    theme: Option<&str>,
     excluded_extensions: &[String],
 ) -> Option<PathBuf> {
     if kind == DiffKind::WorkTree {
@@ -93,6 +104,8 @@ pub fn lookup_by_range(
         if sidecar.kind == kind
             && sidecar.base_sha == base_sha
             && sidecar.head_sha == head_sha
+            && sidecar.theme_recorded
+            && sidecar.theme.as_deref() == theme
             && sidecar.excluded_extensions == excluded_extensions
         {
             return Some(dir.join(format!("{stem}.html")));
@@ -157,6 +170,8 @@ mod tests {
             generated_at: "t".into(),
             title: "diff".into(),
             byte_size: 0,
+            theme: None,
+            theme_recorded: true,
             excluded_extensions: Vec::new(),
         }
     }
@@ -171,6 +186,27 @@ mod tests {
         let second = place(tmp.path(), "repo0000", "<html>x</html>", &sc).unwrap();
         assert!(second.reused);
         assert_eq!(first.path, second.path);
+    }
+
+    #[test]
+    fn place_upgrades_legacy_theme_metadata_when_html_is_reused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut legacy = sidecar(DiffKind::TwoDot, "a", "b");
+        legacy.theme_recorded = false;
+        let first = place(tmp.path(), "repo0000", "<html>x</html>", &legacy).unwrap();
+        let mut current = legacy;
+        current.theme = Some("dark".to_string());
+        current.theme_recorded = true;
+
+        let second = place(tmp.path(), "repo0000", "<html>x</html>", &current).unwrap();
+
+        assert!(second.reused);
+        assert_eq!(second.path, first.path);
+        let stored: Sidecar =
+            serde_json::from_str(&fs::read_to_string(first.path.with_extension("json")).unwrap())
+                .unwrap();
+        assert_eq!(stored.theme, Some("dark".to_string()));
+        assert!(stored.theme_recorded);
     }
 
     #[test]
@@ -201,6 +237,7 @@ mod tests {
             DiffKind::TwoDot,
             "aaaa",
             "bbbb",
+            None,
             &[],
         );
         assert!(hit.is_some());
@@ -210,6 +247,7 @@ mod tests {
             DiffKind::TwoDot,
             "aaaa",
             "cccc",
+            None,
             &[],
         );
         assert!(miss.is_none());
@@ -229,6 +267,7 @@ mod tests {
             DiffKind::TwoDot,
             "aaaa",
             "bbbb",
+            None,
             &["md".to_string()],
         );
         assert!(filtered.is_none(), "stale unfiltered artifact was reused");
@@ -250,6 +289,7 @@ mod tests {
                 DiffKind::TwoDot,
                 "cccc",
                 "dddd",
+                None,
                 &["md".to_string()],
             )
             .is_some()
@@ -261,6 +301,7 @@ mod tests {
                 DiffKind::TwoDot,
                 "cccc",
                 "dddd",
+                None,
                 &[]
             )
             .is_none(),
@@ -269,9 +310,61 @@ mod tests {
     }
 
     #[test]
+    fn lookup_by_range_requires_the_same_recorded_theme() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut dark = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
+        dark.theme = Some("dark".to_string());
+        place(tmp.path(), "repo0000", "<html>dark</html>", &dark).unwrap();
+
+        assert!(
+            lookup_by_range(
+                tmp.path(),
+                "repo0000",
+                DiffKind::TwoDot,
+                "aaaa",
+                "bbbb",
+                Some("dark"),
+                &[],
+            )
+            .is_some()
+        );
+        assert!(
+            lookup_by_range(
+                tmp.path(),
+                "repo0000",
+                DiffKind::TwoDot,
+                "aaaa",
+                "bbbb",
+                Some("light"),
+                &[],
+            )
+            .is_none()
+        );
+
+        let mut legacy = sidecar(DiffKind::TwoDot, "cccc", "dddd");
+        legacy.theme_recorded = false;
+        place(tmp.path(), "repo0000", "<html>legacy</html>", &legacy).unwrap();
+        assert!(
+            lookup_by_range(
+                tmp.path(),
+                "repo0000",
+                DiffKind::TwoDot,
+                "cccc",
+                "dddd",
+                None,
+                &[],
+            )
+            .is_none(),
+            "sidecars without theme metadata must not satisfy range reuse"
+        );
+    }
+
+    #[test]
     fn worktree_is_never_range_addressable() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(lookup_by_range(tmp.path(), "r", DiffKind::WorkTree, "a", "b", &[]).is_none());
+        assert!(
+            lookup_by_range(tmp.path(), "r", DiffKind::WorkTree, "a", "b", None, &[]).is_none()
+        );
     }
 
     #[test]

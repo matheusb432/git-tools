@@ -52,7 +52,7 @@ pub enum PlanPushError {
 /// # Errors
 ///
 /// Returns [`PlanPushError`] when Git transport fails.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(query: PlanPush, git: &impl GitRunner) -> Result<PushPlan, PlanPushError> {
     let PlanPush { repo } = query;
     let top_args = ["rev-parse", "--show-toplevel"];

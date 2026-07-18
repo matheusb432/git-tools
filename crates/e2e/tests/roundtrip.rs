@@ -4,9 +4,10 @@
 //! across crates (this crate stays test-only, with no production `[lib]`).
 
 use std::{
+    fs::{OpenOptions, TryLockError},
     path::{Path, PathBuf},
-    process::Command as Git,
-    sync::OnceLock,
+    process::{Child, Command as Git, ExitStatus, Stdio},
+    sync::{Arc, Barrier, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -43,9 +44,126 @@ fn workspace_bin(name: &str) -> PathBuf {
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
+struct DaemonProcessGuard {
+    cli_path: PathBuf,
+    store_dir: PathBuf,
+}
+
+impl DaemonProcessGuard {
+    fn new(store_dir: &Path) -> Self {
+        Self {
+            cli_path: workspace_bin("git-tools"),
+            store_dir: store_dir.to_path_buf(),
+        }
+    }
+}
+
+impl Drop for DaemonProcessGuard {
+    fn drop(&mut self) {
+        match Git::new(&self.cli_path)
+            .args(["daemon", "stop"])
+            .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
+            .output()
+        {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => eprintln!(
+                "daemon cleanup failed ({}): {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            ),
+            Err(error) => eprintln!("daemon cleanup failed: {error}"),
+        }
+    }
+}
+
+struct DirectDaemonGuard {
+    child: Child,
+}
+
+impl DirectDaemonGuard {
+    fn spawn(store_root: &Path) -> Self {
+        let child = Git::new(workspace_bin("gtl-daemon"))
+            .env("GIT_TOOLS_DATA_DIR", store_root)
+            .env_remove("GIT_TOOLS_DAEMON_PORT")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn gtl-daemon");
+        Self { child }
+    }
+
+    fn id(&self) -> u32 {
+        self.child.id()
+    }
+
+    fn try_wait(&mut self) -> Option<ExitStatus> {
+        self.child.try_wait().expect("poll gtl-daemon")
+    }
+
+    fn kill_and_wait(&mut self) {
+        self.child.kill().expect("kill gtl-daemon test child");
+        self.child.wait().expect("wait for killed gtl-daemon");
+    }
+}
+
+impl Drop for DirectDaemonGuard {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+        }
+        let _ = self.child.wait();
+    }
+}
+
+struct UnhealthyLockOwnerGuard {
+    child: Child,
+}
+
+impl UnhealthyLockOwnerGuard {
+    fn spawn(store_root: &Path) -> Self {
+        let ready_path = store_root.join("lock-owner.ready");
+        let child = Git::new(std::env::current_exe().expect("resolve e2e test binary"))
+            .args([
+                "--ignored",
+                "--exact",
+                "daemon_lock_owner_process",
+                "--nocapture",
+            ])
+            .env("GIT_TOOLS_TEST_DAEMON_LOCK_OWNER", store_root)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn unhealthy lock owner");
+        let owner = Self { child };
+        assert!(
+            wait_for(Duration::from_secs(5), || ready_path.exists()),
+            "unhealthy lock owner must acquire daemon.lock"
+        );
+        owner
+    }
+
+    fn id(&self) -> u32 {
+        self.child.id()
+    }
+
+    fn try_wait(&mut self) -> Option<ExitStatus> {
+        self.child.try_wait().expect("poll unhealthy lock owner")
+    }
+}
+
+impl Drop for UnhealthyLockOwnerGuard {
+    fn drop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+        }
+        let _ = self.child.wait();
+    }
+}
+
 /// A throwaway git repo with one unpushed commit, and an isolated store dir.
 struct Fixture {
     _tmp: TempDir,
+    _daemon: DaemonProcessGuard,
     _store: TempDir,
     repo: PathBuf,
     store_dir: PathBuf,
@@ -60,9 +178,11 @@ impl Fixture {
         let repo = tmp.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
         let store_dir = store.path().to_path_buf();
+        let daemon = DaemonProcessGuard::new(&store_dir);
 
         let this = Self {
             _tmp: tmp,
+            _daemon: daemon,
             _store: store,
             repo,
             store_dir,
@@ -129,8 +249,7 @@ impl Fixture {
     }
 
     /// A `git-tools` invocation in the repo, with browser-open disabled and the
-    /// store pinned to this fixture's tempdir. The idle timeout is long enough
-    /// that only this test's explicit `daemon stop` ends the daemon.
+    /// store pinned to this fixture's tempdir.
     fn run(&self, args: &[&str]) -> Command {
         ensure_binaries_built();
         let mut cmd = Command::new(workspace_bin("git-tools"));
@@ -138,7 +257,6 @@ impl Fixture {
             .current_dir(&self.repo)
             .env("GIT_TOOLS_NO_OPEN", "1")
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
-            .env("GIT_TOOLS_DAEMON_IDLE_SECS", "30")
             // This suite pins the daemon/store round trip directly (autostart, sidecar
             // reuse); simulate headless so `diff`'s default degrades to that path
             // without needing `--raw` (Phase 5, Task 1.6).
@@ -147,17 +265,36 @@ impl Fixture {
         cmd
     }
 
+    fn spawn(&self, args: &[&str]) -> Child {
+        ensure_binaries_built();
+        Git::new(workspace_bin("git-tools"))
+            .args(args)
+            .current_dir(&self.repo)
+            .env("GIT_TOOLS_NO_OPEN", "1")
+            .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
+            .env_remove("DISPLAY")
+            .env_remove("WAYLAND_DISPLAY")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn git-tools")
+    }
+
     fn port_file_path(&self) -> PathBuf {
         self.store_dir.join("daemon.json")
     }
 
     /// Reads `<store>/daemon.json` and returns its `pid` field.
     fn daemon_pid(&self) -> u32 {
-        let raw = std::fs::read_to_string(self.port_file_path())
-            .expect("daemon.json must exist after the daemon autostarts");
-        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
-        u32::try_from(json["pid"].as_u64().expect("daemon.json has a pid field")).unwrap()
+        daemon_pid_from(&self.store_dir)
     }
+}
+
+fn daemon_pid_from(store_root: &Path) -> u32 {
+    let raw = std::fs::read_to_string(store_root.join("daemon.json"))
+        .expect("daemon.json must exist after the daemon autostarts");
+    let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    u32::try_from(json["pid"].as_u64().expect("daemon.json has a pid field")).unwrap()
 }
 
 /// Polls `check` every 50ms until it returns `true` or `deadline` elapses.
@@ -292,4 +429,414 @@ fn cli_autostarts_the_daemon_renders_and_stops() {
         .assert()
         .success()
         .stdout(contains("gtl-daemon not running"));
+}
+
+#[test]
+fn first_lazy_start_survives_concurrent_status_probes() {
+    let fixture = Fixture::new();
+    let workers_count = 4;
+    let barrier = Arc::new(Barrier::new(workers_count + 1));
+    let mut workers = Vec::new();
+    for _ in 0..workers_count {
+        let barrier = Arc::clone(&barrier);
+        let cli_path = workspace_bin("git-tools");
+        let repo = fixture.repo.clone();
+        let store_dir = fixture.store_dir.clone();
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            for _ in 0..10 {
+                Git::new(&cli_path)
+                    .args(["daemon", "status"])
+                    .current_dir(&repo)
+                    .env("GIT_TOOLS_DATA_DIR", &store_dir)
+                    .output()
+                    .expect("run concurrent daemon status");
+            }
+        }));
+    }
+
+    barrier.wait();
+    let diff = fixture.spawn(&["diff"]);
+    let output = diff.wait_with_output().expect("wait for lazy-start diff");
+    for worker in workers {
+        worker.join().unwrap();
+    }
+
+    assert!(
+        output.status.success(),
+        "lazy-start diff failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fixture
+        .run(&["daemon", "status"])
+        .assert()
+        .success()
+        .stdout(contains("gtl-daemon running"));
+}
+
+#[test]
+fn daemon_restart_replaces_a_healthy_process() {
+    let fixture = Fixture::new();
+    fixture.run(&["diff"]).assert().success();
+    let pid_before = fixture.daemon_pid();
+
+    fixture
+        .run(&["daemon", "restart"])
+        .assert()
+        .success()
+        .stdout(contains("gtl-daemon restarted"));
+
+    let pid_after = fixture.daemon_pid();
+    assert_ne!(pid_after, pid_before);
+    fixture
+        .run(&["daemon", "status"])
+        .assert()
+        .success()
+        .stdout(contains(format!("pid {pid_after}")));
+}
+
+#[test]
+fn simultaneous_restarts_accept_one_healthy_replacement() {
+    let fixture = Fixture::new();
+    fixture.run(&["diff"]).assert().success();
+
+    let first = fixture.spawn(&["daemon", "restart"]);
+    let second = fixture.spawn(&["daemon", "restart"]);
+    let first_output = first.wait_with_output().expect("wait for first restart");
+    let second_output = second.wait_with_output().expect("wait for second restart");
+
+    assert!(
+        first_output.status.success(),
+        "first restart failed: {}",
+        String::from_utf8_lossy(&first_output.stderr)
+    );
+    assert!(
+        second_output.status.success(),
+        "second restart failed: {}",
+        String::from_utf8_lossy(&second_output.stderr)
+    );
+    fixture
+        .run(&["daemon", "status"])
+        .assert()
+        .success()
+        .stdout(contains("gtl-daemon running"));
+    fixture
+        .run(&["daemon", "stop"])
+        .assert()
+        .success()
+        .stdout(contains("gtl-daemon stopped"));
+    std::thread::sleep(Duration::from_millis(700));
+    fixture
+        .run(&["daemon", "status"])
+        .assert()
+        .success()
+        .stdout(contains("gtl-daemon not running"));
+}
+
+#[test]
+fn daemon_restart_starts_a_process_when_none_is_running() {
+    let fixture = Fixture::new();
+
+    fixture
+        .run(&["daemon", "restart"])
+        .assert()
+        .success()
+        .stdout(contains("gtl-daemon restarted"));
+
+    let pid = fixture.daemon_pid();
+    fixture
+        .run(&["daemon", "status"])
+        .assert()
+        .success()
+        .stdout(contains(format!("pid {pid}")));
+}
+
+#[test]
+fn unavailable_pinned_port_falls_back_to_the_discovery_record() {
+    let fixture = Fixture::new();
+    fixture.run(&["diff"]).assert().success();
+    let pid = fixture.daemon_pid();
+    let port_unavailable = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+
+    fixture
+        .run(&["diff"])
+        .env("GIT_TOOLS_DAEMON_PORT", port_unavailable.to_string())
+        .assert()
+        .success();
+
+    assert_eq!(fixture.daemon_pid(), pid);
+}
+
+#[test]
+fn unresponsive_pinned_port_falls_back_to_the_discovery_record() {
+    let fixture = Fixture::new();
+    fixture.run(&["diff"]).assert().success();
+    let pid = fixture.daemon_pid();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let port_unresponsive = listener.local_addr().unwrap().port();
+    let (stop_sender, stop_receiver) = std::sync::mpsc::channel();
+    let blackhole = std::thread::spawn(move || {
+        let mut connections = Vec::new();
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => connections.push(stream),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => panic!("accept pinned health probe: {error}"),
+            }
+            if stop_receiver.try_recv().is_ok() {
+                break connections.len();
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    });
+
+    let started_at = Instant::now();
+    let assertion = fixture
+        .run(&["diff"])
+        .env("GIT_TOOLS_DAEMON_PORT", port_unresponsive.to_string())
+        .assert();
+    stop_sender.send(()).unwrap();
+    let connections_count = blackhole.join().unwrap();
+
+    assertion.success();
+    assert!(connections_count > 0, "the pinned listener was not probed");
+    assert!(started_at.elapsed() < Duration::from_secs(2));
+    assert_eq!(fixture.daemon_pid(), pid);
+}
+
+#[test]
+fn ordinary_command_recovers_after_the_daemon_crashes() {
+    let fixture = Fixture::new();
+    let mut daemon = DirectDaemonGuard::spawn(&fixture.store_dir);
+    let pid_before = daemon.id();
+    assert!(
+        wait_for(Duration::from_secs(5), || {
+            fixture.port_file_path().exists() && fixture.daemon_pid() == pid_before
+        }),
+        "direct daemon must publish its discovery record"
+    );
+    daemon.kill_and_wait();
+
+    fixture.run(&["diff"]).assert().success();
+
+    let pid_after = fixture.daemon_pid();
+    assert_ne!(pid_after, pid_before);
+    fixture
+        .run(&["daemon", "status"])
+        .assert()
+        .success()
+        .stdout(contains(format!("pid {pid_after}")));
+}
+
+#[test]
+fn unhealthy_lock_owner_blocks_restart_without_being_killed() {
+    ensure_binaries_built();
+    let store = tempfile::tempdir().unwrap();
+    let mut owner = UnhealthyLockOwnerGuard::spawn(store.path());
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    std::fs::write(
+        store.path().join("daemon.json"),
+        format!(r#"{{"port":{port},"pid":{}}}"#, owner.id()),
+    )
+    .unwrap();
+
+    let status_output = Git::new(workspace_bin("git-tools"))
+        .args(["daemon", "status"])
+        .env("GIT_TOOLS_DATA_DIR", store.path())
+        .output()
+        .expect("status with unhealthy lock owner");
+    assert_eq!(status_output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&status_output.stderr)
+            .contains("daemon lock is owned but no healthy daemon responded"),
+        "stderr: {}",
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    assert!(
+        owner.try_wait().is_none(),
+        "status must not kill the lock owner"
+    );
+
+    let started_at = Instant::now();
+    let output = Git::new(workspace_bin("git-tools"))
+        .args(["daemon", "restart"])
+        .env("GIT_TOOLS_DATA_DIR", store.path())
+        .output()
+        .expect("restart with unhealthy lock owner");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("daemon lock is owned but no healthy daemon responded"),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(started_at.elapsed() < Duration::from_secs(7));
+    assert!(
+        owner.try_wait().is_none(),
+        "the CLI must not kill a PID from daemon.json"
+    );
+    assert_eq!(daemon_pid_from(store.path()), owner.id());
+}
+
+#[test]
+#[ignore = "subprocess helper"]
+fn daemon_lock_owner_process() {
+    let Some(store_root) = std::env::var_os("GIT_TOOLS_TEST_DAEMON_LOCK_OWNER") else {
+        return;
+    };
+    let store_root = PathBuf::from(store_root);
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(store_root.join("daemon.lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    std::fs::write(store_root.join("lock-owner.ready"), b"ready").unwrap();
+    std::thread::sleep(Duration::from_secs(30));
+}
+
+#[test]
+fn simultaneous_daemon_starts_leave_one_healthy_owner() {
+    ensure_binaries_built();
+    let store = tempfile::tempdir().unwrap();
+    let mut first_daemon = DirectDaemonGuard::spawn(store.path());
+    let mut second_daemon = DirectDaemonGuard::spawn(store.path());
+
+    assert!(
+        wait_for(Duration::from_secs(5), || {
+            first_daemon.try_wait().is_some() || second_daemon.try_wait().is_some()
+        }),
+        "one competing daemon must yield within the startup budget"
+    );
+
+    let first_status = first_daemon.try_wait();
+    let second_status = second_daemon.try_wait();
+    let (loser_status, survivor_pid) = match (first_status, second_status) {
+        (Some(status), None) => (status, second_daemon.id()),
+        (None, Some(status)) => (status, first_daemon.id()),
+        pair => panic!("exactly one daemon must remain running, got {pair:?}"),
+    };
+    assert!(loser_status.success(), "the lock loser should exit cleanly");
+
+    assert!(
+        wait_for(Duration::from_secs(5), || {
+            std::fs::read_to_string(store.path().join("daemon.json"))
+                .ok()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .and_then(|json| json["pid"].as_u64())
+                == Some(u64::from(survivor_pid))
+        }),
+        "the surviving daemon must publish its own discovery record"
+    );
+
+    let status_output = Git::new(workspace_bin("git-tools"))
+        .args(["daemon", "status"])
+        .env("GIT_TOOLS_DATA_DIR", store.path())
+        .output()
+        .expect("query daemon status");
+    assert!(
+        status_output.status.success(),
+        "daemon status failed: {}",
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status_stdout = String::from_utf8(status_output.stdout).unwrap();
+    assert!(status_stdout.contains("gtl-daemon running"));
+    assert!(status_stdout.contains(&format!("pid {survivor_pid}")));
+
+    let stop_output = Git::new(workspace_bin("git-tools"))
+        .args(["daemon", "stop"])
+        .env("GIT_TOOLS_DATA_DIR", store.path())
+        .output()
+        .expect("stop surviving daemon");
+    assert!(
+        stop_output.status.success(),
+        "daemon stop failed: {}",
+        String::from_utf8_lossy(&stop_output.stderr)
+    );
+    assert!(
+        wait_for(Duration::from_secs(2), || {
+            first_daemon.try_wait().is_some() && second_daemon.try_wait().is_some()
+        }),
+        "both child handles must observe exit"
+    );
+}
+
+#[test]
+fn daemon_stop_quiesces_an_elected_startup() {
+    ensure_binaries_built();
+    let store = tempfile::tempdir().unwrap();
+    let ownership_probe = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(store.path().join("daemon.lock"))
+        .unwrap();
+    ownership_probe.lock_shared().unwrap();
+    let mut daemon = DirectDaemonGuard::spawn(store.path());
+    let startup_path = store.path().join("daemon.start.lock");
+    assert!(
+        wait_for(Duration::from_secs(2), || {
+            let Ok(startup_probe) = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&startup_path)
+            else {
+                return false;
+            };
+            match startup_probe.try_lock() {
+                Err(TryLockError::WouldBlock) => true,
+                Ok(()) => {
+                    startup_probe.unlock().unwrap();
+                    false
+                }
+                Err(TryLockError::Error(error)) => {
+                    panic!("inspect startup election: {error}")
+                }
+            }
+        }),
+        "daemon must own the startup election before stop begins"
+    );
+
+    let stop_output = Git::new(workspace_bin("git-tools"))
+        .args(["daemon", "stop"])
+        .env("GIT_TOOLS_DATA_DIR", store.path())
+        .output()
+        .expect("stop elected daemon startup");
+
+    assert!(
+        stop_output.status.success(),
+        "daemon stop failed: {}",
+        String::from_utf8_lossy(&stop_output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&stop_output.stdout).contains("gtl-daemon not running"),
+        "stdout: {}",
+        String::from_utf8_lossy(&stop_output.stdout)
+    );
+    drop(ownership_probe);
+    assert!(
+        wait_for(Duration::from_secs(2), || daemon.try_wait().is_some()),
+        "the elected daemon must not start after stop returns"
+    );
+
+    let status_output = Git::new(workspace_bin("git-tools"))
+        .args(["daemon", "status"])
+        .env("GIT_TOOLS_DATA_DIR", store.path())
+        .output()
+        .expect("query daemon status after stop");
+    assert!(status_output.status.success());
+    assert!(String::from_utf8_lossy(&status_output.stdout).contains("gtl-daemon not running"));
 }

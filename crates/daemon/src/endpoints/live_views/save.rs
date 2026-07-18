@@ -2,31 +2,40 @@
 //! live view for it, off the blocking pool (the probe shells out to git and the
 //! store hits `SQLite` synchronously).
 
-use application::live_views::save;
-use axum::{Json, extract::State, http::StatusCode};
+use axum::{
+    Json,
+    extract::{State, rejection::JsonRejection},
+};
 use contracts::{
     envelope::Envelope,
     live_views::{SaveLiveViewData, SaveLiveViewRequest},
 };
 
-use crate::state::DaemonState;
+use crate::{endpoints::EndpointError, state::DaemonState};
 
 /// Saves a live view for the request body, returning the wire envelope.
 ///
 /// - `200` with an `ok` envelope on a successful save.
 /// - `200` with an `error` envelope when the path is rejected (a domain outcome, not a request
 ///   failure) — the rejection message rides as the error note.
+/// - `400` with an error envelope when the JSON is invalid.
 /// - `500` with an error envelope when the handler (or its blocking task) fails.
 pub async fn handle(
     State(state): State<DaemonState>,
-    Json(dto): Json<SaveLiveViewRequest>,
-) -> (StatusCode, Json<Envelope<SaveLiveViewData>>) {
-    let shared = state.shared.clone();
-    crate::endpoints::run(
-        shared,
-        Ok(super::to_request(dto)),
-        move |request| save::execute(request, &state.probe, &state.app_state, &state.clock),
-        super::to_envelope,
-    )
+    request: Result<Json<SaveLiveViewRequest>, JsonRejection>,
+) -> Result<Json<Envelope<SaveLiveViewData>>, EndpointError> {
+    let Json(request) = request.map_err(|error| EndpointError::bad_request(error.body_text()))?;
+    let request = super::to_request(request);
+    let response = tokio::task::spawn_blocking(move || {
+        application::live_views::save::execute(
+            request,
+            &state.probe,
+            &state.app_state,
+            &state.clock,
+        )
+    })
     .await
+    .map_err(EndpointError::task_join)?
+    .map_err(EndpointError::unexpected)?;
+    Ok(Json(super::to_envelope(response)))
 }

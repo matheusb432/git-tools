@@ -3,11 +3,9 @@
 
 use std::path::PathBuf;
 
-use domain::diffs::DiffExclusions;
-
 use crate::{
     diffs::{PinnedRange, View, render_merge_diff::build_merge_view},
-    ports::DiffSource,
+    ports::{AppSettingsStore, DiffSource},
 };
 
 /// Compute the merge view of the current branch into `base` (default `main`),
@@ -17,7 +15,6 @@ pub struct ComputeMergeDiff {
     pub cwd: PathBuf,
     pub base: Option<String>,
     pub pinned: Option<PinnedRange>,
-    pub exclusions: DiffExclusions,
 }
 
 /// The computed merge view.
@@ -34,18 +31,22 @@ pub enum ComputeMergeDiffError {
 }
 
 /// Computes a merge diff via the shared merge view builder.
-#[cqrsy::handler(query)]
+#[cqrsy::query]
 pub fn execute(
     req: ComputeMergeDiff,
+    app_settings: &impl AppSettingsStore,
     source: &impl DiffSource,
 ) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
-    let ComputeMergeDiff {
-        cwd,
-        base,
-        pinned,
-        exclusions,
-    } = req;
-    let built = build_merge_view(source, &cwd, base.as_deref(), pinned.as_ref(), &exclusions)?;
+    let ComputeMergeDiff { cwd, base, pinned } = req;
+    let settings = app_settings.load();
+    let built = build_merge_view(
+        source,
+        &cwd,
+        base.as_deref(),
+        pinned.as_ref(),
+        None,
+        settings.diff_exclusions(),
+    )?;
     Ok(ComputeMergeDiffResponse { view: built.view })
 }
 
@@ -53,20 +54,77 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::Commit;
+    use domain::diffs::DiffExclusions;
 
     use super::*;
-    use crate::testing::FakeDiffSource;
+    use crate::{
+        ports::AppSettings,
+        testing::{
+            FakeDiffSource, FixedAppSettingsStore,
+            diffs::{DIFF_SINGLE_FILE, commit},
+        },
+    };
 
-    const SINGLE_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
+    const CODE_AND_NOTES_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
 index 111..222 100644\n\
 --- a/f.txt\n\
 +++ b/f.txt\n\
-@@ -1,2 +1,3 @@\n\
- keep\n\
--old line\n\
-+new line\n\
-+extra line\n";
+@@ -1 +1 @@\n\
+-old\n\
++new\n\
+diff --git a/docs/notes.md b/docs/notes.md\n\
+index 333..444 100644\n\
+--- a/docs/notes.md\n\
++++ b/docs/notes.md\n\
+@@ -1 +1 @@\n\
+-plan\n\
++more plan\n";
+
+    fn execute_default_settings(
+        request: ComputeMergeDiff,
+        source: &FakeDiffSource,
+    ) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
+        execute(request, &FixedAppSettingsStore::default(), source)
+    }
+
+    #[test]
+    fn app_settings_exclusions_apply_to_the_resolved_repository() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            known_revs: vec!["main".into()],
+            commits: vec![commit("abc1234")],
+            diff_output: CODE_AND_NOTES_DIFF.into(),
+            ..Default::default()
+        };
+        let app_settings = FixedAppSettingsStore::new(AppSettings::new(
+            None,
+            true,
+            DiffExclusions::new([("repo".into(), vec!["md"])], None),
+        ));
+
+        let response = execute(
+            ComputeMergeDiff {
+                cwd: PathBuf::from("/repo"),
+                base: None,
+                pinned: None,
+            },
+            &app_settings,
+            &source,
+        )
+        .expect("compute succeeds");
+
+        assert_eq!(response.view.files.len(), 1);
+        assert_eq!(response.view.files[0].path, "f.txt");
+        assert_eq!(
+            response
+                .view
+                .exclusions
+                .expect("exclusion summary")
+                .hidden_paths,
+            ["docs/notes.md"]
+        );
+    }
 
     #[test]
     fn computes_the_merge_view_with_the_default_base() {
@@ -74,18 +132,13 @@ index 111..222 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
-            commits: vec![Commit {
-                sha: "abc1234".into(),
-                subject: "feat: work".into(),
-                ..Default::default()
-            }],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
 
-        let response = execute(
+        let response = execute_default_settings(
             ComputeMergeDiff {
-                exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
                 base: None,
                 pinned: None,
@@ -105,18 +158,13 @@ index 111..222 100644\n\
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec![], // verify_commit would fail symbolically
-            commits: vec![Commit {
-                sha: "abc1234".into(),
-                subject: "feat: work".into(),
-                ..Default::default()
-            }],
-            diff_output: SINGLE_FILE_DIFF.into(),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
 
-        let response = execute(
+        let response = execute_default_settings(
             ComputeMergeDiff {
-                exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
                 base: None,
                 pinned: Some(PinnedRange {
@@ -141,9 +189,8 @@ index 111..222 100644\n\
             ..Default::default()
         };
 
-        let error = execute(
+        let error = execute_default_settings(
             ComputeMergeDiff {
-                exclusions: DiffExclusions::default(),
                 cwd: PathBuf::from("/repo"),
                 base: Some("nope".into()),
                 pinned: None,

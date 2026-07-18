@@ -38,7 +38,7 @@ pub enum AddAndPushTagError {
 /// # Errors
 ///
 /// Returns [`AddAndPushTagError`] when Git cannot be executed.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     command: AddAndPushTag,
     git: &impl GitRunner,

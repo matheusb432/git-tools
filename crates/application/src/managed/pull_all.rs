@@ -31,7 +31,7 @@ pub enum PullAllError {
 }
 
 /// Pulls every managed repository through the remote-sync ports.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub async fn execute(
     req: PullAll,
     remote: &impl RemoteSync,

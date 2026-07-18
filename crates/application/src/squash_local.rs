@@ -127,7 +127,7 @@ enum RestoreOutcome {
 ///
 /// Returns [`SquashLocalError`] when Git cannot be executed, including while restoring the
 /// pre-squash position after a destructive step.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(
     command: SquashLocal,
     git: &impl GitRunner,

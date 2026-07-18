@@ -87,7 +87,7 @@ enum RepositoryState {
 /// # Errors
 ///
 /// Returns [`ApplyPushError`] when Git transport fails.
-#[cqrsy::handler(command)]
+#[cqrsy::command]
 pub fn execute(command: ApplyPush, git: &impl GitRunner) -> Result<PushResult, ApplyPushError> {
     let ApplyPush { target, mode } = command;
     let mut progress = PushProgress::default();
