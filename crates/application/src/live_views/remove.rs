@@ -1,7 +1,5 @@
 //! The `live_views/remove` vertical slice: delete a saved live view by identity.
 
-use std::path::PathBuf;
-
 use rusqlite::{Connection, params};
 
 use crate::ports::AppStateStore;
@@ -9,7 +7,6 @@ use crate::ports::AppStateStore;
 /// Delete the saved live view identified by `(source_kind, source_value)`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RemoveLiveView {
-    pub data_root: PathBuf,
     pub source_kind: String,
     pub source_value: String,
 }
@@ -32,7 +29,6 @@ pub fn execute(
     store: &impl AppStateStore,
 ) -> Result<RemoveLiveViewResponse, RemoveLiveViewError> {
     let RemoveLiveView {
-        data_root: _,
         source_kind,
         source_value,
     } = req;
@@ -75,7 +71,6 @@ mod tests {
         seed_live_view(&store);
         let response = execute(
             RemoveLiveView {
-                data_root: "/data".into(),
                 source_kind: "LocalRepo".into(),
                 source_value: "/repos/gt".into(),
             },
@@ -91,7 +86,6 @@ mod tests {
         let store = store_test();
         let response = execute(
             RemoveLiveView {
-                data_root: "/data".into(),
                 source_kind: "LocalRepo".into(),
                 source_value: "/repos/unknown".into(),
             },
@@ -113,7 +107,6 @@ mod tests {
 
         let error = execute(
             RemoveLiveView {
-                data_root: "/data".into(),
                 source_kind: "LocalRepo".into(),
                 source_value: "/repos/gt".into(),
             },

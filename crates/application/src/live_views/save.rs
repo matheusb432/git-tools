@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use domain::live_views::LiveSource;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::{
     live_views::LiveViewRecord,
@@ -15,7 +15,6 @@ use crate::{
 /// Validate `path` as a git repo and save (or refresh) a live view for it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SaveLiveView {
-    pub data_root: PathBuf,
     pub path: PathBuf,
 }
 
@@ -72,7 +71,7 @@ pub fn execute(
     store: &impl AppStateStore,
     clock: &impl Clock,
 ) -> Result<SaveLiveViewResponse, SaveLiveViewError> {
-    let SaveLiveView { data_root: _, path } = req;
+    let SaveLiveView { path } = req;
     let top_level = match probe.probe(&path)? {
         RepoProbeResult::Repo { top_level } => top_level,
         RepoProbeResult::NotFound => {
@@ -115,26 +114,32 @@ pub fn execute(
 }
 
 fn save_live_view(connection: &mut Connection, record: &LiveViewRecord) -> anyhow::Result<bool> {
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let existed = {
-        let mut statement = connection.prepare_cached(
-            "SELECT COUNT(*) FROM live_views WHERE source_kind = ?1 AND source_value = ?2",
+        let mut statement = transaction.prepare_cached(
+            "SELECT EXISTS(
+               SELECT 1 FROM live_views WHERE source_kind = ?1 AND source_value = ?2
+             )",
         )?;
         statement.query_row(params![record.source_kind, record.source_value], |row| {
-            row.get::<_, i64>(0)
-        })? > 0
+            row.get::<_, bool>(0)
+        })?
     };
-    let mut statement = connection.prepare_cached(
-        "INSERT INTO live_views (source_kind, source_value, display_name, created_at, last_opened_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(source_kind, source_value) DO UPDATE SET display_name = excluded.display_name",
-    )?;
-    statement.execute(params![
-        record.source_kind,
-        record.source_value,
-        record.display_name,
-        record.created_at,
-        record.last_opened_at,
-    ])?;
+    {
+        let mut statement = transaction.prepare_cached(
+            "INSERT INTO live_views (source_kind, source_value, display_name, created_at, last_opened_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(source_kind, source_value) DO UPDATE SET display_name = excluded.display_name",
+        )?;
+        statement.execute(params![
+            record.source_kind,
+            record.source_value,
+            record.display_name,
+            record.created_at,
+            record.last_opened_at,
+        ])?;
+    }
+    transaction.commit()?;
     Ok(existed)
 }
 
@@ -170,14 +175,9 @@ mod tests {
     }
 
     fn list_views(store: &AppStateStoreTest) -> Vec<LiveViewRecord> {
-        list::execute(
-            list::ListLiveViews {
-                data_root: "/data".into(),
-            },
-            store,
-        )
-        .expect("list succeeds")
-        .views
+        list::execute(list::ListLiveViews, store)
+            .expect("list succeeds")
+            .views
     }
 
     #[test]
@@ -185,7 +185,6 @@ mod tests {
         let (probe, store, clock) = dependencies(RepoProbeResult::NotFound);
         let response = execute(
             SaveLiveView {
-                data_root: "/data".into(),
                 path: "/gone".into(),
             },
             &probe,
@@ -218,7 +217,6 @@ mod tests {
         let (probe, store, clock) = dependencies(RepoProbeResult::NotAGitRepo);
         let response = execute(
             SaveLiveView {
-                data_root: "/data".into(),
                 path: "/plain".into(),
             },
             &probe,
@@ -251,7 +249,6 @@ mod tests {
         });
         let response = execute(
             SaveLiveView {
-                data_root: "/data".into(),
                 path: "/repos/gt".into(),
             },
             &probe,
@@ -304,7 +301,6 @@ mod tests {
 
         let response = execute(
             SaveLiveView {
-                data_root: "/data".into(),
                 path: "/repos/gt".into(),
             },
             &probe,

@@ -17,7 +17,6 @@ pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
 
     remove_live_view::execute(
         remove_live_view::RemoveLiveView {
-            data_root: (*app.data_root).clone(),
             source_kind: source.kind().into(),
             source_value: source.value(),
         },

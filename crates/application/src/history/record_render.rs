@@ -1,7 +1,5 @@
 //! The `history/record_render` vertical slice: record one render in the app history log.
 
-use std::path::PathBuf;
-
 use rusqlite::{Connection, params};
 
 use crate::ports::{AppStateStore, Clock};
@@ -21,7 +19,6 @@ struct NewRecentRenderRecord {
 /// Record one render in the app history.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordRender {
-    pub data_root: PathBuf,
     pub recipe_json: String,
     pub title: String,
     pub repo_name: String,
@@ -64,8 +61,9 @@ fn record_render(
     connection: &mut Connection,
     record: &NewRecentRenderRecord,
 ) -> anyhow::Result<()> {
+    let transaction = connection.transaction()?;
     {
-        let mut statement = connection.prepare_cached(
+        let mut statement = transaction.prepare_cached(
             "INSERT INTO recent_renders \
              (recipe_json, title, repo_name, kind, range_label, rendered_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -79,11 +77,14 @@ fn record_render(
             record.rendered_at,
         ])?;
     }
-    let mut statement = connection.prepare_cached(
-        "DELETE FROM recent_renders WHERE id NOT IN
-         (SELECT id FROM recent_renders ORDER BY id DESC LIMIT ?1)",
-    )?;
-    statement.execute(params![i64::try_from(RECENT_RENDERS_CAP)?])?;
+    {
+        let mut statement = transaction.prepare_cached(
+            "DELETE FROM recent_renders WHERE id NOT IN
+             (SELECT id FROM recent_renders ORDER BY id DESC LIMIT ?1)",
+        )?;
+        statement.execute(params![i64::try_from(RECENT_RENDERS_CAP)?])?;
+    }
+    transaction.commit()?;
     Ok(())
 }
 
@@ -97,7 +98,6 @@ mod tests {
 
     fn command(title: impl Into<String>) -> RecordRender {
         RecordRender {
-            data_root: "/data".into(),
             recipe_json: r#"{"kind":"diff"}"#.into(),
             title: title.into(),
             repo_name: "gt".into(),
@@ -107,14 +107,9 @@ mod tests {
     }
 
     fn list_recent(store: &impl AppStateStore) -> Vec<RecentRenderRecord> {
-        list_recent::list::execute(
-            list_recent::ListRecentRenders {
-                data_root: "/data".into(),
-            },
-            store,
-        )
-        .expect("list succeeds")
-        .entries
+        list_recent::list::execute(list_recent::ListRecentRenders, store)
+            .expect("list succeeds")
+            .entries
     }
 
     #[test]

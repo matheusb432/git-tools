@@ -1,9 +1,6 @@
 //! Recipe compute orchestration through direct application operations.
 
-use std::{
-    path::Path,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use application::{
     diffs::{
@@ -81,7 +78,6 @@ pub(crate) struct RecipeContext<'a, Source, Probe, State, Time> {
     probe: &'a Probe,
     app_state: &'a State,
     clock: &'a Time,
-    data_root: &'a Path,
     user_settings: &'a TomlSettingsStore,
 }
 
@@ -99,7 +95,6 @@ impl<'a, Source, Probe, State, Time> RecipeContext<'a, Source, Probe, State, Tim
         probe: &'a Probe,
         app_state: &'a State,
         clock: &'a Time,
-        data_root: &'a Path,
         user_settings: &'a TomlSettingsStore,
     ) -> Self {
         Self {
@@ -107,7 +102,6 @@ impl<'a, Source, Probe, State, Time> RecipeContext<'a, Source, Probe, State, Tim
             probe,
             app_state,
             clock,
-            data_root,
             user_settings,
         }
     }
@@ -277,7 +271,7 @@ fn compute_and_publish(
     ticket: ComputeTicket,
 ) -> Result<ComputationOutcome, RecipeError> {
     if kind == ViewerTabKind::Live
-        && let Some(broken) = probe_live_source(context.probe, context.data_root, recipe)?
+        && let Some(broken) = probe_live_source(context.probe, recipe)?
     {
         let mut session = session
             .lock()
@@ -312,13 +306,7 @@ fn compute_and_publish(
         session.publish_if_current(ticket, CachedView::new(Arc::clone(&view)))
     };
     if published == PublishOutcome::Published {
-        record_render(
-            context.app_state,
-            context.clock,
-            context.data_root,
-            recipe,
-            &view,
-        );
+        record_render(context.app_state, context.clock, recipe, &view);
         return Ok(ComputationOutcome::Rendered(view));
     }
     Err(RecipeError::Stale)
@@ -346,13 +334,11 @@ fn publish_compute_error(
 
 fn probe_live_source(
     probe: &impl RepoProbe,
-    data_root: &Path,
     recipe: &Recipe,
 ) -> Result<Option<ViewerTabState>, String> {
     let RecipeSource::LocalRepo(path) = &recipe.source;
     let response = probe::execute(
         ProbeSource {
-            data_root: data_root.to_path_buf(),
             source_kind: "LocalRepo".into(),
             source_value: path.display().to_string(),
         },
@@ -368,19 +354,12 @@ fn probe_live_source(
     })
 }
 
-fn record_render(
-    app_state: &impl AppStateStore,
-    clock: &impl Clock,
-    data_root: &Path,
-    recipe: &Recipe,
-    view: &View,
-) {
+fn record_render(app_state: &impl AppStateStore, clock: &impl Clock, recipe: &Recipe, view: &View) {
     let Ok(recipe_json) = serde_json::to_string(recipe) else {
         return;
     };
     if let Err(error) = record_render::execute(
         RecordRender {
-            data_root: data_root.to_path_buf(),
             recipe_json,
             title: tab_label::computed(recipe, view),
             repo_name: view.repo_name.clone(),
@@ -423,29 +402,25 @@ index 111..222 100644\n\
 +new\n";
 
     struct RecipeFixture {
-        data_root: TempDir,
+        _app_state_directory: TempDir,
         app_state: SqliteAppState,
     }
 
     impl RecipeFixture {
         fn new() -> Self {
-            let data_root = tempfile::tempdir().expect("temporary data root");
-            let app_state = SqliteAppState::open(data_root.path()).expect("open app state");
+            let app_state_directory = tempfile::tempdir().expect("temporary app-state directory");
+            let app_state =
+                SqliteAppState::open(app_state_directory.path()).expect("open app state");
             Self {
-                data_root,
+                _app_state_directory: app_state_directory,
                 app_state,
             }
         }
 
         fn history(&self) -> Vec<RecentRenderRecord> {
-            list_recent_renders::execute(
-                list_recent_renders::ListRecentRenders {
-                    data_root: self.data_root.path().to_path_buf(),
-                },
-                &self.app_state,
-            )
-            .expect("list render history")
-            .entries
+            list_recent_renders::execute(list_recent_renders::ListRecentRenders, &self.app_state)
+                .expect("list render history")
+                .entries
         }
 
         fn history_clear(&self) {
@@ -518,7 +493,6 @@ index 111..222 100644\n\
                 &probe,
                 &fixture.app_state,
                 &clock,
-                fixture.data_root.path(),
                 &TomlSettingsStore::new(None),
             ),
             &session,
@@ -554,7 +528,6 @@ index 111..222 100644\n\
                 &probe,
                 &fixture.app_state,
                 &clock,
-                fixture.data_root.path(),
                 &TomlSettingsStore::new(None),
             ),
             &session,
@@ -599,7 +572,6 @@ index 111..222 100644\n\
                     &probe,
                     &fixture.app_state,
                     &clock,
-                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -642,7 +614,6 @@ index 111..222 100644\n\
                     &probe,
                     &fixture.app_state,
                     &clock,
-                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -675,7 +646,6 @@ index 111..222 100644\n\
                     &probe,
                     &fixture.app_state,
                     &clock,
-                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -713,7 +683,6 @@ index 111..222 100644\n\
                     &probe,
                     &fixture.app_state,
                     &clock,
-                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -753,7 +722,6 @@ index 111..222 100644\n\
                     &probe,
                     &fixture.app_state,
                     &clock,
-                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -793,7 +761,6 @@ index 111..222 100644\n\
                     &probe,
                     &fixture.app_state,
                     &clock,
-                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -816,7 +783,6 @@ index 111..222 100644\n\
                 &probe,
                 &fixture.app_state,
                 &clock,
-                fixture.data_root.path(),
                 &TomlSettingsStore::new(None),
             ),
             &session,
@@ -850,7 +816,6 @@ index 111..222 100644\n\
                     &probe,
                     &fixture.app_state,
                     &clock,
-                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -869,7 +834,6 @@ index 111..222 100644\n\
                 &probe,
                 &fixture.app_state,
                 &clock,
-                fixture.data_root.path(),
                 &TomlSettingsStore::new(None),
             ),
             &session,
@@ -899,7 +863,6 @@ index 111..222 100644\n\
                     &probe,
                     &fixture.app_state,
                     &clock,
-                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -918,7 +881,6 @@ index 111..222 100644\n\
                     &probe,
                     &fixture.app_state,
                     &clock,
-                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,

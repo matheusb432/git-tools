@@ -15,7 +15,6 @@ use contracts::{
 /// Map the wire request into the application command.
 pub(crate) fn to_request(dto: SaveLiveViewRequest) -> SaveLiveView {
     SaveLiveView {
-        data_root: dto.data_root.into(),
         path: dto.path.into(),
     }
 }

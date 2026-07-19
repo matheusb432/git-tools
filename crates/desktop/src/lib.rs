@@ -255,7 +255,7 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
 pub fn run() {
     let data_root = commands::data_root().expect("viewer data root resolves");
     let viewer_app = routes::ViewerApp::open(
-        data_root,
+        &data_root,
         infra::user_config::TomlSettingsStore::from_environment(),
         DEFAULT_VIEW_CACHE_WEIGHT,
     )

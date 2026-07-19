@@ -5,8 +5,6 @@
 //! `DirNotFound`/`DirNotGitRepo` rejection the daemon's `save_live_view`
 //! already surfaces.
 
-use std::path::PathBuf;
-
 use domain::live_views::LiveSource;
 
 use crate::{
@@ -14,12 +12,9 @@ use crate::{
     ports::{RepoProbe, RepoProbeResult},
 };
 
-/// Probe the directory identified by `source_kind`/`source_value` for git-repo
-/// validity. `data_root` is carried for parity with the other live-view
-/// operations even though probing itself never touches the app-state store.
+/// Probes the directory identified by `source_kind`/`source_value` for git-repo validity.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProbeSource {
-    pub data_root: PathBuf,
     pub source_kind: String,
     pub source_value: String,
 }
@@ -57,7 +52,6 @@ pub fn execute(
     let ProbeSource {
         source_kind,
         source_value,
-        ..
     } = req;
     let source = LiveSource::from_parts(&source_kind, &source_value)
         .ok_or_else(|| ProbeSourceError::UnknownSourceKind { kind: source_kind })?;
@@ -93,7 +87,6 @@ mod tests {
 
     fn request(source_value: &str) -> ProbeSource {
         ProbeSource {
-            data_root: "/data".into(),
             source_kind: "LocalRepo".into(),
             source_value: source_value.into(),
         }
@@ -148,7 +141,6 @@ mod tests {
         let probe = probe(RepoProbeResult::NotFound);
         let err = execute(
             ProbeSource {
-                data_root: "/data".into(),
                 source_kind: "GithubRepo".into(),
                 source_value: "owner/repo".into(),
             },

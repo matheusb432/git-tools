@@ -45,7 +45,7 @@ impl Fixture {
             std::fs::write(&config_path, raw).expect("write config");
         }
         let app = ViewerApp::open(
-            temp.path().join("data"),
+            &temp.path().join("data"),
             TomlSettingsStore::new(Some(config_path.clone())),
             128 * 1024 * 1024,
         )
@@ -263,7 +263,6 @@ fn saved_live_view_restores_and_deletes_through_real_persistence() {
     let fixture = Fixture::new();
     save_live_view::execute(
         save_live_view::SaveLiveView {
-            data_root: (*fixture.app.data_root).clone(),
             path: fixture.repo.clone(),
         },
         &fixture.app.probe,
@@ -291,13 +290,9 @@ fn saved_live_view_restores_and_deletes_through_real_persistence() {
         request_with_method(Method::DELETE, &format!("/tabs/{tab}/live-view")),
     );
     assert_eq!(deleted.status(), StatusCode::OK);
-    let remaining = list_live_views::execute(
-        list_live_views::ListLiveViews {
-            data_root: (*fixture.app.data_root).clone(),
-        },
-        &fixture.app.app_state,
-    )
-    .expect("list live views");
+    let remaining =
+        list_live_views::execute(list_live_views::ListLiveViews, &fixture.app.app_state)
+            .expect("list live views");
     assert!(remaining.views.is_empty());
 }
 
@@ -310,9 +305,7 @@ fn stable_history_id_reopens_a_recorded_recipe() {
         StatusCode::OK
     );
     let history = list_recent_renders::execute(
-        list_recent_renders::ListRecentRenders {
-            data_root: (*fixture.app.data_root).clone(),
-        },
+        list_recent_renders::ListRecentRenders,
         &fixture.app.app_state,
     )
     .expect("list history");

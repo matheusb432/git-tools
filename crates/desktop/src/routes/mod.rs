@@ -6,7 +6,7 @@ mod restoration;
 
 use std::{
     collections::VecDeque,
-    path::PathBuf,
+    path::Path,
     sync::{Arc, Mutex},
 };
 
@@ -100,18 +100,17 @@ pub(crate) struct ViewerApp {
     pub(crate) session: Arc<Mutex<ViewerSession>>,
     pending: Arc<PendingRecipes>,
     renderer: MaudViewerRenderer,
-    pub(crate) data_root: Arc<PathBuf>,
     user_settings: TomlSettingsStore,
     restoration: Arc<restoration::RestorationGate>,
 }
 
 impl ViewerApp {
     pub(crate) fn open(
-        data_root: PathBuf,
+        data_root: &Path,
         user_settings: TomlSettingsStore,
         max_cache_weight: usize,
     ) -> anyhow::Result<Self> {
-        let app_state = SqliteAppState::open(&data_root)?;
+        let app_state = SqliteAppState::open(data_root)?;
         Ok(Self {
             clock: SystemClock,
             probe: GitRepoProbe,
@@ -120,7 +119,6 @@ impl ViewerApp {
             session: Arc::new(Mutex::new(ViewerSession::new(max_cache_weight))),
             pending: Arc::new(PendingRecipes::default()),
             renderer: MaudViewerRenderer,
-            data_root: Arc::new(data_root),
             user_settings,
             restoration: Arc::new(restoration::RestorationGate::default()),
         })
@@ -144,7 +142,6 @@ fn recipe_context(
         &app.probe,
         &app.app_state,
         &app.clock,
-        &app.data_root,
         &app.user_settings,
     )
 }
@@ -303,15 +300,10 @@ fn history(app: &ViewerApp) -> RouteResult {
 }
 
 fn open_history(app: &ViewerApp, id: application::viewer::RenderHistoryId) -> RouteResult {
-    let Some(entry) = get_recent_render::execute(
-        get_recent_render::GetRecentRender {
-            data_root: (*app.data_root).clone(),
-            id,
-        },
-        &app.app_state,
-    )
-    .map_err(|error| format!("{error:#}"))?
-    .entry
+    let Some(entry) =
+        get_recent_render::execute(get_recent_render::GetRecentRender { id }, &app.app_state)
+            .map_err(|error| format!("{error:#}"))?
+            .entry
     else {
         return Ok(status_response(StatusCode::NOT_FOUND));
     };
@@ -461,14 +453,9 @@ const fn viewer_tab_kind(kind: RecipeBatchKind) -> ViewerTabKind {
 fn restore_live_views(app: &ViewerApp) -> Result<Option<render::VersionedView>, RouteError> {
     let mut transient = None;
     let owner = app.restoration.run_once(|| {
-        let records = list_live_views::execute(
-            list_live_views::ListLiveViews {
-                data_root: (*app.data_root).clone(),
-            },
-            &app.app_state,
-        )
-        .map_err(|error| format!("{error:#}"))?
-        .views;
+        let records = list_live_views::execute(list_live_views::ListLiveViews, &app.app_state)
+            .map_err(|error| format!("{error:#}"))?
+            .views;
         let mut newest = None;
         {
             let mut session = app.session.lock().map_err(|error| error.to_string())?;
@@ -537,14 +524,9 @@ fn tab_exists(app: &ViewerApp, id: ViewerTabId) -> Result<bool, String> {
 }
 
 fn load_history(app: &ViewerApp) -> Result<Vec<ViewerHistoryEntry>, String> {
-    list_recent_renders::execute(
-        list_recent_renders::ListRecentRenders {
-            data_root: (*app.data_root).clone(),
-        },
-        &app.app_state,
-    )
-    .map(|response| response.entries.into_iter().map(to_viewer_entry).collect())
-    .map_err(|error| format!("{error:#}"))
+    list_recent_renders::execute(list_recent_renders::ListRecentRenders, &app.app_state)
+        .map(|response| response.entries.into_iter().map(to_viewer_entry).collect())
+        .map_err(|error| format!("{error:#}"))
 }
 
 fn load_settings(app: &ViewerApp) -> ViewerSettings {

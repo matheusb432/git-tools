@@ -43,7 +43,12 @@ impl SqliteAppState {
     ///
     /// Returns an error when the directory, database, pragmas, or migrations fail.
     pub fn open(data_root: &Path) -> anyhow::Result<Self> {
-        let connection = open_app_db(data_root)?;
+        let connection = open_app_db(data_root).with_context(|| {
+            format!(
+                "failed to open app-state database at data root {}",
+                data_root.display()
+            )
+        })?;
         Ok(Self {
             inner: Arc::new(SqliteAppStateInner {
                 connection: Mutex::new(connection),
@@ -106,6 +111,27 @@ mod tests {
             .expect("read connection-local state");
 
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn open_error_identifies_app_state_data_root() {
+        let directory = tempfile::tempdir().expect("temporary parent directory");
+        let data_root = directory.path().join("not-a-directory");
+        std::fs::write(&data_root, "blocks directory creation").expect("write data-root blocker");
+
+        let error = SqliteAppState::open(&data_root).expect_err("app-state initialization fails");
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "failed to open app-state database at data root {}",
+                data_root.display()
+            )
+        );
+        assert!(
+            error.chain().nth(1).is_some(),
+            "initialization error must retain its source"
+        );
     }
 
     #[test]

@@ -474,12 +474,13 @@ async fn managed_push_all_missing_manifest_is_a_500_error_envelope() {
 }
 
 #[tokio::test]
-async fn live_view_save_happy_path_is_a_200_ok_envelope() {
+async fn live_view_save_ignores_legacy_data_root_and_uses_daemon_store() {
     let fixture = Fixture::new(false);
+    let redirected_root = fixture.data.with_file_name("redirected");
     let response = fixture
         .post(
             "/live-views/save",
-            json!({"data_root": fixture.data, "path": fixture.repo}),
+            json!({"data_root": redirected_root, "path": fixture.repo}),
         )
         .await;
 
@@ -489,6 +490,19 @@ async fn live_view_save_happy_path_is_a_200_ok_envelope() {
     assert_eq!(json["data"]["source_kind"], "LocalRepo");
     assert_eq!(json["data"]["display_name"], "repo");
     assert_eq!(json["data"]["already_saved"], false);
+
+    let connection =
+        rusqlite::Connection::open(fixture.data.join("gtl.db")).expect("open daemon app database");
+    let row_count: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM live_views \
+             WHERE source_kind = 'LocalRepo' AND source_value = ?1",
+            [fixture.repo.to_string_lossy().as_ref()],
+            |row| row.get(0),
+        )
+        .expect("count saved live view");
+    assert_eq!(row_count, 1);
+    assert!(!redirected_root.join("gtl.db").exists());
 }
 
 #[tokio::test]
@@ -496,10 +510,7 @@ async fn live_view_save_rejection_is_a_200_error_envelope_with_the_exact_message
     let fixture = Fixture::new(false);
     let gone = fixture.data.join("gone");
     let response = fixture
-        .post(
-            "/live-views/save",
-            json!({"data_root": fixture.data, "path": gone}),
-        )
+        .post("/live-views/save", json!({"path": gone}))
         .await;
 
     assert_eq!(response.status(), StatusCode::OK);
@@ -531,10 +542,7 @@ async fn live_view_save_with_a_malformed_body_is_a_400() {
 async fn health_remains_responsive_while_live_view_save_waits_on_the_database() {
     let fixture = Fixture::new(false);
     let warm_response = fixture
-        .post(
-            "/live-views/save",
-            json!({"data_root": fixture.data, "path": fixture.repo}),
-        )
+        .post("/live-views/save", json!({"path": fixture.repo}))
         .await;
     assert_eq!(warm_response.status(), StatusCode::OK);
 
@@ -545,7 +553,7 @@ async fn health_remains_responsive_while_live_view_save_waits_on_the_database() 
         .expect("hold app database write lock");
 
     let save_router = fixture.app.clone();
-    let save_body = json!({"data_root": fixture.data, "path": fixture.repo}).to_string();
+    let save_body = json!({"path": fixture.repo}).to_string();
     let save_task =
         tokio::spawn(async move { post(save_router, "/live-views/save", &save_body).await });
     tokio::time::sleep(Duration::from_millis(100)).await;

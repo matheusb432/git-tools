@@ -1,16 +1,12 @@
 //! The `live_views/list` vertical slice: every saved live view, creation order.
 
-use std::path::PathBuf;
-
 use rusqlite::Connection;
 
 use crate::{live_views::LiveViewRecord, ports::AppStateStore};
 
-/// List every saved live view under `data_root`.
+/// Lists every saved live view.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ListLiveViews {
-    pub data_root: PathBuf,
-}
+pub struct ListLiveViews;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListLiveViewsResponse {
@@ -24,16 +20,11 @@ pub enum ListLiveViewsError {
 }
 
 /// Lists saved live views through the app-state port.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "cqrsy consumes the request while its retained data_root is temporarily unused"
-)]
 #[cqrsy::query]
 pub fn execute(
-    req: ListLiveViews,
+    _query: ListLiveViews,
     store: &impl AppStateStore,
 ) -> Result<ListLiveViewsResponse, ListLiveViewsError> {
-    let ListLiveViews { data_root: _ } = req;
     let connection = store.connection_lock()?;
     let views = list_live_views(&connection)?;
     Ok(ListLiveViewsResponse { views })
@@ -75,13 +66,7 @@ mod tests {
             )
             .expect("seed live views");
         drop(connection);
-        let response = execute(
-            ListLiveViews {
-                data_root: "/data".into(),
-            },
-            &store,
-        )
-        .expect("list succeeds");
+        let response = execute(ListLiveViews, &store).expect("list succeeds");
 
         assert_eq!(
             response

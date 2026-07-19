@@ -125,9 +125,6 @@ fn run_managed_with_options(
 /// non-`Ok` outcome is treated the same way (the endpoint never returns `Empty`).
 fn save_one(backend: &impl Backend, path: &str) -> anyhow::Result<SaveLiveViewData> {
     let req = SaveLiveViewRequest {
-        data_root: gtl_platform::paths::store_root()?
-            .to_string_lossy()
-            .into_owned(),
         path: std::path::absolute(path)?.to_string_lossy().into_owned(),
     };
     let envelope = backend.save_live_view(&req)?;

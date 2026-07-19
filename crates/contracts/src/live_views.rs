@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 /// A request to validate and persist one live-view source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SaveLiveViewRequest {
-    pub data_root: String,
     pub path: String,
 }
 
@@ -23,15 +22,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_save_live_view_request_roundtrip() {
-        let original = SaveLiveViewRequest {
-            data_root: "/home/user/.local/share/git-tools".to_string(),
-            path: "/home/user/repo".to_string(),
+    fn save_live_view_request_serializes_path_only() {
+        let request = SaveLiveViewRequest {
+            path: "/home/user/repo".into(),
         };
 
-        let json = serde_json::to_string(&original).unwrap();
-        let deserialized: SaveLiveViewRequest = serde_json::from_str(&json).unwrap();
-        assert_eq!(original, deserialized);
+        assert_eq!(
+            serde_json::to_value(&request).unwrap(),
+            serde_json::json!({"path": "/home/user/repo"})
+        );
+    }
+
+    #[test]
+    fn save_live_view_request_accepts_legacy_data_root() {
+        let legacy: SaveLiveViewRequest = serde_json::from_value(serde_json::json!({
+            "data_root": "/redirected",
+            "path": "/home/user/repo"
+        }))
+        .unwrap();
+
+        assert_eq!(legacy.path, "/home/user/repo");
     }
 
     #[test]

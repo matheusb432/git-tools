@@ -1,8 +1,6 @@
 //! The recent-render history queries used to list and reopen persisted recipes.
 
 pub mod list {
-    use std::path::PathBuf;
-
     use rusqlite::Connection;
 
     use crate::{
@@ -15,9 +13,7 @@ pub mod list {
 
     /// Requests every recent render in the store's newest-first order.
     #[derive(Debug, Clone, PartialEq, Eq)]
-    pub struct ListRecentRenders {
-        pub data_root: PathBuf,
-    }
+    pub struct ListRecentRenders;
 
     /// Returns recent persisted recipes with their stable database identities.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,16 +31,11 @@ pub mod list {
     }
 
     /// Lists recent renders through the app-state persistence port.
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "cqrsy consumes the request while its retained data_root is temporarily unused"
-    )]
     #[cqrsy::query]
     pub fn execute(
-        query: ListRecentRenders,
+        _query: ListRecentRenders,
         store: &impl AppStateStore,
     ) -> Result<ListRecentRendersResponse, ListRecentRendersError> {
-        let ListRecentRenders { data_root: _ } = query;
         let connection = store.connection_lock()?;
         Ok(ListRecentRendersResponse {
             entries: list_recent_renders(&connection)?,
@@ -79,8 +70,6 @@ pub mod list {
 }
 
 pub mod get {
-    use std::path::PathBuf;
-
     use domain::viewer::RenderHistoryId;
     use rusqlite::{Connection, OptionalExtension, params};
 
@@ -95,7 +84,6 @@ pub mod get {
     /// Requests one recent render by its stable persisted-row identity.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct GetRecentRender {
-        pub data_root: PathBuf,
         pub id: RenderHistoryId,
     }
 
@@ -117,14 +105,14 @@ pub mod get {
     /// Gets a recent render through the app-state persistence port.
     #[expect(
         clippy::needless_pass_by_value,
-        reason = "cqrsy consumes the request while its retained data_root is temporarily unused"
+        reason = "cqrsy requires request-first operations to take requests by value"
     )]
     #[cqrsy::query]
     pub fn execute(
         query: GetRecentRender,
         store: &impl AppStateStore,
     ) -> Result<GetRecentRenderResponse, GetRecentRenderError> {
-        let GetRecentRender { data_root: _, id } = query;
+        let GetRecentRender { id } = query;
         let connection = store.connection_lock()?;
         Ok(GetRecentRenderResponse {
             entry: get_recent_render(&connection, id)?,
@@ -215,13 +203,7 @@ mod tests {
         seed_recent(&store, 10, "older");
         seed_recent(&store, 11, "newer");
 
-        let response = list::execute(
-            ListRecentRenders {
-                data_root: "/data".into(),
-            },
-            &store,
-        )
-        .expect("list succeeds");
+        let response = list::execute(ListRecentRenders, &store).expect("list succeeds");
 
         assert_eq!(
             response
@@ -239,14 +221,7 @@ mod tests {
         let store = store_test();
         seed_recent(&store, i64::from(id), "render");
 
-        let response = get::execute(
-            GetRecentRender {
-                data_root: "/data".into(),
-                id,
-            },
-            &store,
-        )
-        .expect("lookup succeeds");
+        let response = get::execute(GetRecentRender { id }, &store).expect("lookup succeeds");
 
         assert_eq!(response.entry.expect("record exists").id, id);
     }
@@ -256,14 +231,7 @@ mod tests {
         let id = RenderHistoryId::try_new(99).expect("positive id");
 
         let store = store_test();
-        let response = get::execute(
-            GetRecentRender {
-                data_root: "/data".into(),
-                id,
-            },
-            &store,
-        )
-        .expect("lookup succeeds");
+        let response = get::execute(GetRecentRender { id }, &store).expect("lookup succeeds");
 
         assert!(response.entry.is_none());
     }
@@ -273,13 +241,8 @@ mod tests {
         let store = store_test();
         seed_recent(&store, 0, "invalid");
 
-        let error = list::execute(
-            ListRecentRenders {
-                data_root: "/data".into(),
-            },
-            &store,
-        )
-        .expect_err("corrupt row identity rejects");
+        let error =
+            list::execute(ListRecentRenders, &store).expect_err("corrupt row identity rejects");
 
         assert!(matches!(
             error,

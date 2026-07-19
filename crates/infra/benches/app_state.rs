@@ -16,9 +16,8 @@ impl Clock for BenchmarkClock {
     }
 }
 
-fn request(data_root: &std::path::Path) -> RecordRender {
+fn request() -> RecordRender {
     RecordRender {
-        data_root: data_root.to_path_buf(),
         recipe_json: r#"{"kind":"diff"}"#.into(),
         title: "git-tools · unpushed".into(),
         repo_name: "git-tools".into(),
@@ -32,7 +31,7 @@ fn record_render(criterion: &mut Criterion) {
     let app_state = SqliteAppState::open(directory.path()).expect("open app state");
     criterion.bench_function("app-state-record-render", |bencher| {
         bencher.iter_batched(
-            || request(directory.path()),
+            request,
             |request| {
                 record_render::execute(black_box(request), &app_state, &BenchmarkClock)
                     .expect("record render");
