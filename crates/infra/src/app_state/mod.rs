@@ -1,7 +1,6 @@
-//! The app-state store: `SQLite` persistence for live views and the recent-render
-//! log (schema + connection policy in `db`, adapter in `store`).
+//! Process-owned `SQLite` app state and its connection initialization policy.
 
 mod db;
-mod store;
+mod state;
 
-pub use store::SqliteAppState;
+pub use state::SqliteAppState;

@@ -6,9 +6,8 @@ use std::{
 };
 
 use application::{
-    history::list_recent::list as list_recent_renders,
+    history::{RecentRenderRecord, list_recent::list as list_recent_renders},
     live_views::{list as list_live_views, save as save_live_view},
-    ports::RecentRenderRecord,
     viewer::{RenderHistoryId, ViewerTabKind},
 };
 use gtl_recipe::{
@@ -45,11 +44,12 @@ impl Fixture {
         if let Some(raw) = config_toml {
             std::fs::write(&config_path, raw).expect("write config");
         }
-        let app = ViewerApp::new(
+        let app = ViewerApp::open(
             temp.path().join("data"),
             TomlSettingsStore::new(Some(config_path.clone())),
             128 * 1024 * 1024,
-        );
+        )
+        .expect("open viewer app");
         Self {
             _temp: temp,
             app,

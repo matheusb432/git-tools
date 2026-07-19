@@ -396,17 +396,20 @@ fn record_render(
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, sync::Mutex};
+    use std::sync::Mutex;
 
     use application::{
-        ports::RepoProbeResult,
-        testing::{FakeDiffSource, FakeRepoProbe, FixedClock, InMemoryAppStateStore},
+        history::{RecentRenderRecord, list_recent::list as list_recent_renders},
+        ports::{AppStateStore, RepoProbeResult},
+        testing::{FakeDiffSource, FakeRepoProbe, FixedClock},
     };
     use domain::{
         diffs::Commit,
         viewer::{ViewerTabKind, ViewerTabState},
     };
     use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+    use infra::app_state::SqliteAppState;
+    use tempfile::TempDir;
 
     use super::*;
     use crate::session::ViewerSession;
@@ -418,6 +421,41 @@ index 111..222 100644\n\
 @@ -1 +1 @@\n\
 -old\n\
 +new\n";
+
+    struct RecipeFixture {
+        data_root: TempDir,
+        app_state: SqliteAppState,
+    }
+
+    impl RecipeFixture {
+        fn new() -> Self {
+            let data_root = tempfile::tempdir().expect("temporary data root");
+            let app_state = SqliteAppState::open(data_root.path()).expect("open app state");
+            Self {
+                data_root,
+                app_state,
+            }
+        }
+
+        fn history(&self) -> Vec<RecentRenderRecord> {
+            list_recent_renders::execute(
+                list_recent_renders::ListRecentRenders {
+                    data_root: self.data_root.path().to_path_buf(),
+                },
+                &self.app_state,
+            )
+            .expect("list render history")
+            .entries
+        }
+
+        fn history_clear(&self) {
+            self.app_state
+                .connection_lock()
+                .expect("connection lock")
+                .execute("DELETE FROM recent_renders", [])
+                .expect("clear render history");
+        }
+    }
 
     fn recipe() -> Recipe {
         Recipe {
@@ -464,7 +502,7 @@ index 111..222 100644\n\
 
     #[test]
     fn empty_snapshot_is_skipped_without_history() {
-        let app_state = InMemoryAppStateStore::default();
+        let fixture = RecipeFixture::new();
         let source = empty_source();
         let probe = FakeRepoProbe {
             result: RepoProbeResult::Repo {
@@ -478,9 +516,9 @@ index 111..222 100644\n\
             RecipeContext::new(
                 &source,
                 &probe,
-                &app_state,
+                &fixture.app_state,
                 &clock,
-                Path::new("/data"),
+                fixture.data_root.path(),
                 &TomlSettingsStore::new(None),
             ),
             &session,
@@ -495,12 +533,12 @@ index 111..222 100644\n\
         };
         assert_eq!(label, "repo: diff");
         assert!(session.lock().expect("session").tabs().next().is_none());
-        assert!(app_state.renders.lock().expect("renders").is_empty());
+        assert!(fixture.history().is_empty());
     }
 
     #[test]
     fn empty_live_view_remains_ready_and_refreshable() {
-        let app_state = InMemoryAppStateStore::default();
+        let fixture = RecipeFixture::new();
         let source = empty_source();
         let probe = FakeRepoProbe {
             result: RepoProbeResult::Repo {
@@ -514,9 +552,9 @@ index 111..222 100644\n\
             RecipeContext::new(
                 &source,
                 &probe,
-                &app_state,
+                &fixture.app_state,
                 &clock,
-                Path::new("/data"),
+                fixture.data_root.path(),
                 &TomlSettingsStore::new(None),
             ),
             &session,
@@ -544,7 +582,7 @@ index 111..222 100644\n\
 
     #[test]
     fn open_computes_publishes_and_records_only_the_current_view() {
-        let app_state = InMemoryAppStateStore::default();
+        let fixture = RecipeFixture::new();
         let source = source();
         let probe = FakeRepoProbe {
             result: RepoProbeResult::Repo {
@@ -559,9 +597,9 @@ index 111..222 100644\n\
                 RecipeContext::new(
                     &source,
                     &probe,
-                    &app_state,
+                    &fixture.app_state,
                     &clock,
-                    Path::new("/data"),
+                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -581,7 +619,7 @@ index 111..222 100644\n\
         );
         assert_eq!(session.cached_view(id).expect("view").view.files.len(), 1);
         drop(session);
-        let renders = app_state.renders.lock().expect("renders lock");
+        let renders = fixture.history();
         assert_eq!(renders.len(), 1);
         assert_eq!(renders[0].kind, "diff");
         assert_eq!(renders[0].title, "repo: 1 commit");
@@ -591,7 +629,7 @@ index 111..222 100644\n\
     fn failed_initial_compute_preserves_the_explicit_recipe_label() {
         let source = FakeDiffSource::default();
         let probe = FakeRepoProbe::default();
-        let app_state = InMemoryAppStateStore::default();
+        let fixture = RecipeFixture::new();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(1024));
         let mut named = recipe();
@@ -602,9 +640,9 @@ index 111..222 100644\n\
                 RecipeContext::new(
                     &source,
                     &probe,
-                    &app_state,
+                    &fixture.app_state,
                     &clock,
-                    Path::new("/data"),
+                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -626,7 +664,7 @@ index 111..222 100644\n\
     fn oversize_open_returns_the_view_without_retaining_it() {
         let source = source();
         let probe = FakeRepoProbe::default();
-        let app_state = InMemoryAppStateStore::default();
+        let fixture = RecipeFixture::new();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let session = Mutex::new(ViewerSession::new(1));
 
@@ -635,9 +673,9 @@ index 111..222 100644\n\
                 RecipeContext::new(
                     &source,
                     &probe,
-                    &app_state,
+                    &fixture.app_state,
                     &clock,
-                    Path::new("/data"),
+                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -660,7 +698,7 @@ index 111..222 100644\n\
 
     #[test]
     fn broken_live_source_is_published_without_invoking_diff_compute() {
-        let app_state = InMemoryAppStateStore::default();
+        let fixture = RecipeFixture::new();
         let source = FakeDiffSource::default();
         let probe = FakeRepoProbe {
             result: RepoProbeResult::NotFound,
@@ -673,9 +711,9 @@ index 111..222 100644\n\
                 RecipeContext::new(
                     &source,
                     &probe,
-                    &app_state,
+                    &fixture.app_state,
                     &clock,
-                    Path::new("/data"),
+                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -695,12 +733,12 @@ index 111..222 100644\n\
                 reason: "The git repo's directory at `/repo` was not found.".into(),
             }
         );
-        assert!(app_state.renders.lock().expect("renders lock").is_empty());
+        assert!(fixture.history().is_empty());
     }
 
     #[test]
     fn non_repo_live_source_is_published_without_invoking_diff_compute() {
-        let app_state = InMemoryAppStateStore::default();
+        let fixture = RecipeFixture::new();
         let source = FakeDiffSource::default();
         let probe = FakeRepoProbe {
             result: RepoProbeResult::NotAGitRepo,
@@ -713,9 +751,9 @@ index 111..222 100644\n\
                 RecipeContext::new(
                     &source,
                     &probe,
-                    &app_state,
+                    &fixture.app_state,
                     &clock,
-                    Path::new("/data"),
+                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -735,12 +773,12 @@ index 111..222 100644\n\
                 reason: "The directory `/repo` is not a git repository.".into(),
             }
         );
-        assert!(app_state.renders.lock().expect("renders lock").is_empty());
+        assert!(fixture.history().is_empty());
     }
 
     #[test]
     fn refresh_after_snapshot_to_live_reopen_probes_before_compute() {
-        let app_state = InMemoryAppStateStore::default();
+        let fixture = RecipeFixture::new();
         let recipe = recipe();
         let source = source();
         let probe = FakeRepoProbe {
@@ -753,9 +791,9 @@ index 111..222 100644\n\
                 RecipeContext::new(
                     &source,
                     &probe,
-                    &app_state,
+                    &fixture.app_state,
                     &clock,
-                    Path::new("/data"),
+                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -770,15 +808,15 @@ index 111..222 100644\n\
             let mut session = session.lock().expect("session lock");
             assert_eq!(session.open(recipe, "live".into(), ViewerTabKind::Live), id);
         }
-        app_state.renders.lock().expect("renders lock").clear();
+        fixture.history_clear();
 
         let refreshed = refresh_recipe(
             RecipeContext::new(
                 &source,
                 &probe,
-                &app_state,
+                &fixture.app_state,
                 &clock,
-                Path::new("/data"),
+                fixture.data_root.path(),
                 &TomlSettingsStore::new(None),
             ),
             &session,
@@ -795,12 +833,12 @@ index 111..222 100644\n\
                 reason: "The git repo's directory at `/repo` was not found.".into(),
             }
         );
-        assert!(app_state.renders.lock().expect("renders lock").is_empty());
+        assert!(fixture.history().is_empty());
     }
 
     #[test]
     fn refresh_recomputes_the_reserved_tab_and_records_the_current_result() {
-        let app_state = InMemoryAppStateStore::default();
+        let fixture = RecipeFixture::new();
         let source = source();
         let probe = FakeRepoProbe::default();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
@@ -810,9 +848,9 @@ index 111..222 100644\n\
                 RecipeContext::new(
                     &source,
                     &probe,
-                    &app_state,
+                    &fixture.app_state,
                     &clock,
-                    Path::new("/data"),
+                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -823,15 +861,15 @@ index 111..222 100644\n\
             .expect("open succeeds"),
         )
         .tab_id;
-        app_state.renders.lock().expect("renders lock").clear();
+        fixture.history_clear();
 
         refresh_recipe(
             RecipeContext::new(
                 &source,
                 &probe,
-                &app_state,
+                &fixture.app_state,
                 &clock,
-                Path::new("/data"),
+                fixture.data_root.path(),
                 &TomlSettingsStore::new(None),
             ),
             &session,
@@ -839,14 +877,14 @@ index 111..222 100644\n\
         )
         .expect("refresh succeeds");
 
-        assert_eq!(app_state.renders.lock().expect("renders lock").len(), 1);
+        assert_eq!(fixture.history().len(), 1);
         let mut session = session.lock().expect("session lock");
         assert!(session.cached_view(id).is_some());
     }
 
     #[test]
     fn failed_refresh_preserves_the_explicit_recipe_label() {
-        let app_state = InMemoryAppStateStore::default();
+        let fixture = RecipeFixture::new();
         let successful_source = source();
         let failing_source = FakeDiffSource::default();
         let probe = FakeRepoProbe::default();
@@ -859,9 +897,9 @@ index 111..222 100644\n\
                 RecipeContext::new(
                     &successful_source,
                     &probe,
-                    &app_state,
+                    &fixture.app_state,
                     &clock,
-                    Path::new("/data"),
+                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,
@@ -878,9 +916,9 @@ index 111..222 100644\n\
                 RecipeContext::new(
                     &failing_source,
                     &probe,
-                    &app_state,
+                    &fixture.app_state,
                     &clock,
-                    Path::new("/data"),
+                    fixture.data_root.path(),
                     &TomlSettingsStore::new(None),
                 ),
                 &session,

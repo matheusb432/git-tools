@@ -40,6 +40,7 @@ impl DaemonState {
         version: &'static str,
         pid: u32,
         shutdown_tx: watch::Sender<bool>,
+        app_state: SqliteAppState,
         user_settings: TomlSettingsStore,
     ) -> Self {
         Self {
@@ -55,7 +56,7 @@ impl DaemonState {
             manifest: TokioManagedManifest,
             ledger: NoOpPushLedger,
             probe: GitRepoProbe,
-            app_state: SqliteAppState,
+            app_state,
             user_settings,
         }
     }

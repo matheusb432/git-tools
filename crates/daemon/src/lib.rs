@@ -20,7 +20,7 @@ use crate::{
 ///
 /// # Errors
 /// Returns an error if the data dir cannot be resolved, the socket cannot be
-/// bound, or the port file cannot be written.
+/// bound, the app-state database cannot initialize, or the port file cannot be written.
 pub async fn run() -> anyhow::Result<()> {
     bootstrap::init_tracing();
     let store_root = gtl_platform::paths::store_root()?;
@@ -30,6 +30,7 @@ pub async fn run() -> anyhow::Result<()> {
         tracing::info!("daemon ownership is already held; exiting");
         return Ok(());
     };
+    let app_state = infra::app_state::SqliteAppState::open(&store_root)?;
     let exe = std::env::current_exe()?;
     let identity = ExeIdentity::of(&exe)?;
 
@@ -45,6 +46,7 @@ pub async fn run() -> anyhow::Result<()> {
         env!("CARGO_PKG_VERSION"),
         pid,
         shutdown_tx,
+        app_state,
         infra::user_config::TomlSettingsStore::from_environment(),
     ));
 

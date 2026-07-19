@@ -2,7 +2,9 @@
 
 use std::path::PathBuf;
 
-use crate::ports::{AppStateStore, LiveViewRecord};
+use rusqlite::Connection;
+
+use crate::{live_views::LiveViewRecord, ports::AppStateStore};
 
 /// List every saved live view under `data_root`.
 #[derive(Debug, Clone, PartialEq)]
@@ -22,36 +24,57 @@ pub enum ListLiveViewsError {
 }
 
 /// Lists saved live views through the app-state port.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "cqrsy consumes the request while its retained data_root is temporarily unused"
+)]
 #[cqrsy::query]
 pub fn execute(
     req: ListLiveViews,
     store: &impl AppStateStore,
 ) -> Result<ListLiveViewsResponse, ListLiveViewsError> {
-    let ListLiveViews { data_root } = req;
-    let views = store.list_live_views(&data_root)?;
+    let ListLiveViews { data_root: _ } = req;
+    let connection = store.connection_lock()?;
+    let views = list_live_views(&connection)?;
     Ok(ListLiveViewsResponse { views })
+}
+
+fn list_live_views(connection: &Connection) -> anyhow::Result<Vec<LiveViewRecord>> {
+    let mut statement = connection.prepare_cached(
+        "SELECT source_kind, source_value, display_name, created_at, last_opened_at
+         FROM live_views ORDER BY id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        Ok(LiveViewRecord {
+            source_kind: row.get(0)?,
+            source_value: row.get(1)?,
+            display_name: row.get(2)?,
+            created_at: row.get(3)?,
+            last_opened_at: row.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ports::LiveViewRecord, testing::InMemoryAppStateStore};
-
-    fn record(value: &str) -> LiveViewRecord {
-        LiveViewRecord {
-            source_kind: "LocalRepo".into(),
-            source_value: value.into(),
-            display_name: value.into(),
-            created_at: "2026-01-01T00:00:00Z".into(),
-            last_opened_at: None,
-        }
-    }
+    use crate::{live_views::persistence::store_test, ports::AppStateStore};
 
     #[test]
     fn lists_saved_views_in_creation_order() {
-        let store = InMemoryAppStateStore::default();
-        store.live_views.lock().unwrap().push(record("/repos/a"));
-        store.live_views.lock().unwrap().push(record("/repos/b"));
+        let store = store_test();
+        let connection = store.connection_lock().expect("connection lock");
+        connection
+            .execute(
+                "INSERT INTO live_views \
+                 (id, source_kind, source_value, display_name, created_at) VALUES \
+                 (2, 'LocalRepo', '/repos/b', 'b', '2026-01-02T00:00:00Z'), \
+                 (1, 'LocalRepo', '/repos/a', 'a', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("seed live views");
+        drop(connection);
         let response = execute(
             ListLiveViews {
                 data_root: "/data".into(),

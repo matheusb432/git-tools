@@ -3,7 +3,15 @@
 pub mod list {
     use std::path::PathBuf;
 
-    use crate::ports::{AppStateError, AppStateStore, RecentRenderRecord};
+    use rusqlite::Connection;
+
+    use crate::{
+        history::{
+            RecentRenderRecord,
+            persistence::{RecentRenderIdentityError, RecentRenderRow},
+        },
+        ports::AppStateStore,
+    };
 
     /// Requests every recent render in the store's newest-first order.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,23 +25,56 @@ pub mod list {
         pub entries: Vec<RecentRenderRecord>,
     }
 
-    /// Reports a typed app-state failure while listing recent renders.
+    /// Reports a recent-render listing failure.
     #[derive(Debug, thiserror::Error)]
     pub enum ListRecentRendersError {
+        #[error("recent_renders row id {id} violates the positive-ID invariant")]
+        InvalidRecentRenderId { id: i64 },
         #[error(transparent)]
-        AppState(#[from] AppStateError),
+        Unexpected(#[from] anyhow::Error),
     }
 
     /// Lists recent renders through the app-state persistence port.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "cqrsy consumes the request while its retained data_root is temporarily unused"
+    )]
     #[cqrsy::query]
     pub fn execute(
         query: ListRecentRenders,
         store: &impl AppStateStore,
     ) -> Result<ListRecentRendersResponse, ListRecentRendersError> {
-        let ListRecentRenders { data_root } = query;
+        let ListRecentRenders { data_root: _ } = query;
+        let connection = store.connection_lock()?;
         Ok(ListRecentRendersResponse {
-            entries: store.list_recent_renders(&data_root)?,
+            entries: list_recent_renders(&connection)?,
         })
+    }
+
+    fn list_recent_renders(
+        connection: &Connection,
+    ) -> Result<Vec<RecentRenderRecord>, ListRecentRendersError> {
+        let mut statement = connection
+            .prepare_cached(
+                "SELECT id, recipe_json, title, repo_name, kind, range_label, rendered_at
+                 FROM recent_renders ORDER BY id DESC",
+            )
+            .map_err(anyhow::Error::from)?;
+        let rows = statement
+            .query_map([], RecentRenderRow::from_row)
+            .map_err(anyhow::Error::from)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(anyhow::Error::from)?;
+        rows.into_iter().map(recent_render_from_row).collect()
+    }
+
+    fn recent_render_from_row(
+        row: RecentRenderRow,
+    ) -> Result<RecentRenderRecord, ListRecentRendersError> {
+        row.try_into_record()
+            .map_err(|RecentRenderIdentityError { id }| {
+                ListRecentRendersError::InvalidRecentRenderId { id }
+            })
     }
 }
 
@@ -41,8 +82,15 @@ pub mod get {
     use std::path::PathBuf;
 
     use domain::viewer::RenderHistoryId;
+    use rusqlite::{Connection, OptionalExtension, params};
 
-    use crate::ports::{AppStateError, AppStateStore, RecentRenderRecord};
+    use crate::{
+        history::{
+            RecentRenderRecord,
+            persistence::{RecentRenderIdentityError, RecentRenderRow},
+        },
+        ports::AppStateStore,
+    };
 
     /// Requests one recent render by its stable persisted-row identity.
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,20 +108,80 @@ pub mod get {
     /// Reports an unexpected stable-ID recent-render lookup failure.
     #[derive(Debug, thiserror::Error)]
     pub enum GetRecentRenderError {
+        #[error("recent_renders row id {id} violates the positive-ID invariant")]
+        InvalidRecentRenderId { id: i64 },
         #[error(transparent)]
-        AppState(#[from] AppStateError),
+        Unexpected(#[from] anyhow::Error),
     }
 
     /// Gets a recent render through the app-state persistence port.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "cqrsy consumes the request while its retained data_root is temporarily unused"
+    )]
     #[cqrsy::query]
     pub fn execute(
         query: GetRecentRender,
         store: &impl AppStateStore,
     ) -> Result<GetRecentRenderResponse, GetRecentRenderError> {
-        let GetRecentRender { data_root, id } = query;
+        let GetRecentRender { data_root: _, id } = query;
+        let connection = store.connection_lock()?;
         Ok(GetRecentRenderResponse {
-            entry: store.get_recent_render(&data_root, id)?,
+            entry: get_recent_render(&connection, id)?,
         })
+    }
+
+    fn get_recent_render(
+        connection: &Connection,
+        id: RenderHistoryId,
+    ) -> Result<Option<RecentRenderRecord>, GetRecentRenderError> {
+        let mut statement = connection
+            .prepare_cached(
+                "SELECT id, recipe_json, title, repo_name, kind, range_label, rendered_at
+                 FROM recent_renders WHERE id = ?1",
+            )
+            .map_err(anyhow::Error::from)?;
+        let row = statement
+            .query_row(params![i64::from(id)], RecentRenderRow::from_row)
+            .optional()
+            .map_err(anyhow::Error::from)?;
+        row.map(recent_render_from_row).transpose()
+    }
+
+    fn recent_render_from_row(
+        row: RecentRenderRow,
+    ) -> Result<RecentRenderRecord, GetRecentRenderError> {
+        row.try_into_record()
+            .map_err(|RecentRenderIdentityError { id }| {
+                GetRecentRenderError::InvalidRecentRenderId { id }
+            })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::history::persistence::RecentRenderRow;
+
+        #[test]
+        fn invalid_persisted_id_maps_to_the_get_operation_error() {
+            let connection = rusqlite::Connection::open_in_memory().expect("in-memory connection");
+            let row = connection
+                .query_row(
+                    "SELECT 0, '{}', 'invalid', 'repo', 'diff', \
+                     'main..HEAD', '2026-01-01T00:00:00Z'",
+                    [],
+                    RecentRenderRow::from_row,
+                )
+                .expect("decode corrupt row");
+
+            let error =
+                recent_render_from_row(row).expect_err("invalid persisted identity rejects");
+
+            assert!(matches!(
+                error,
+                GetRecentRenderError::InvalidRecentRenderId { id: 0 }
+            ));
+        }
     }
 }
 
@@ -85,30 +193,27 @@ mod tests {
     use domain::viewer::RenderHistoryId;
 
     use super::{GetRecentRender, ListRecentRenders, ListRecentRendersError, get, list};
-    use crate::{
-        ports::{AppStateError, RecentRenderRecord},
-        testing::InMemoryAppStateStore,
-    };
+    use crate::{history::persistence::store_test, ports::AppStateStore};
 
-    fn recent(id: RenderHistoryId, title: &str) -> RecentRenderRecord {
-        RecentRenderRecord {
-            id,
-            recipe_json: format!(r#"{{"title":"{title}"}}"#),
-            title: title.into(),
-            repo_name: "git-tools".into(),
-            kind: "diff".into(),
-            range_label: "main..HEAD".into(),
-            rendered_at: "2026-07-11T00:00:00Z".into(),
-        }
+    fn seed_recent(store: &impl AppStateStore, id: i64, title: &str) {
+        store
+            .connection_lock()
+            .expect("connection lock")
+            .execute(
+                "INSERT INTO recent_renders \
+                 (id, recipe_json, title, repo_name, kind, range_label, rendered_at) \
+                 VALUES (?1, ?2, ?3, 'git-tools', 'diff', 'main..HEAD', \
+                 '2026-07-11T00:00:00Z')",
+                rusqlite::params![id, format!(r#"{{"title":"{title}"}}"#), title],
+            )
+            .expect("seed recent render");
     }
 
     #[test]
     fn recent_history_exposes_stable_database_ids_newest_first() {
-        let store = InMemoryAppStateStore::default();
-        store.renders.lock().expect("renders lock").extend([
-            recent(RenderHistoryId::try_new(10).expect("positive id"), "older"),
-            recent(RenderHistoryId::try_new(11).expect("positive id"), "newer"),
-        ]);
+        let store = store_test();
+        seed_recent(&store, 10, "older");
+        seed_recent(&store, 11, "newer");
 
         let response = list::execute(
             ListRecentRenders {
@@ -131,12 +236,8 @@ mod tests {
     #[test]
     fn recent_render_is_looked_up_by_stable_id() {
         let id = RenderHistoryId::try_new(11).expect("positive id");
-        let store = InMemoryAppStateStore::default();
-        store
-            .renders
-            .lock()
-            .expect("renders lock")
-            .push(recent(id, "render"));
+        let store = store_test();
+        seed_recent(&store, i64::from(id), "render");
 
         let response = get::execute(
             GetRecentRender {
@@ -154,7 +255,7 @@ mod tests {
     fn absent_recent_render_is_a_successful_miss() {
         let id = RenderHistoryId::try_new(99).expect("positive id");
 
-        let store = InMemoryAppStateStore::default();
+        let store = store_test();
         let response = get::execute(
             GetRecentRender {
                 data_root: "/data".into(),
@@ -168,9 +269,9 @@ mod tests {
     }
 
     #[test]
-    fn recent_history_preserves_typed_store_corruption() {
-        let store = InMemoryAppStateStore::default();
-        *store.list_error_id.lock().expect("list error lock") = Some(0);
+    fn recent_history_maps_invalid_persisted_id_to_the_list_operation_error() {
+        let store = store_test();
+        seed_recent(&store, 0, "invalid");
 
         let error = list::execute(
             ListRecentRenders {
@@ -182,7 +283,7 @@ mod tests {
 
         assert!(matches!(
             error,
-            ListRecentRendersError::AppState(AppStateError::InvalidRecentRenderId { id: 0 })
+            ListRecentRendersError::InvalidRecentRenderId { id: 0 }
         ));
     }
 }

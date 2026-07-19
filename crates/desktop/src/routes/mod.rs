@@ -106,15 +106,16 @@ pub(crate) struct ViewerApp {
 }
 
 impl ViewerApp {
-    pub(crate) fn new(
+    pub(crate) fn open(
         data_root: PathBuf,
         user_settings: TomlSettingsStore,
         max_cache_weight: usize,
-    ) -> Self {
-        Self {
+    ) -> anyhow::Result<Self> {
+        let app_state = SqliteAppState::open(&data_root)?;
+        Ok(Self {
             clock: SystemClock,
             probe: GitRepoProbe,
-            app_state: SqliteAppState,
+            app_state,
             source: GitDiffSource,
             session: Arc::new(Mutex::new(ViewerSession::new(max_cache_weight))),
             pending: Arc::new(PendingRecipes::default()),
@@ -122,7 +123,7 @@ impl ViewerApp {
             data_root: Arc::new(data_root),
             user_settings,
             restoration: Arc::new(restoration::RestorationGate::default()),
-        }
+        })
     }
 
     pub(crate) fn pending(&self) -> &PendingRecipes {

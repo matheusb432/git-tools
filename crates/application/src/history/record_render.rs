@@ -2,7 +2,21 @@
 
 use std::path::PathBuf;
 
-use crate::ports::{AppStateStore, Clock, NewRecentRenderRecord};
+use rusqlite::{Connection, params};
+
+use crate::ports::{AppStateStore, Clock};
+
+const RECENT_RENDERS_CAP: usize = 500;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct NewRecentRenderRecord {
+    recipe_json: String,
+    title: String,
+    repo_name: String,
+    kind: String,
+    range_label: String,
+    rendered_at: String,
+}
 
 /// Record one render in the app history.
 #[derive(Debug, Clone, PartialEq)]
@@ -41,38 +55,79 @@ pub fn execute(
         range_label: req.range_label,
         rendered_at: clock.now_iso(),
     };
-    store.record_render(&req.data_root, &record)?;
+    let mut connection = store.connection_lock()?;
+    record_render(&mut connection, &record)?;
     Ok(RecordRenderResponse {})
+}
+
+fn record_render(
+    connection: &mut Connection,
+    record: &NewRecentRenderRecord,
+) -> anyhow::Result<()> {
+    {
+        let mut statement = connection.prepare_cached(
+            "INSERT INTO recent_renders \
+             (recipe_json, title, repo_name, kind, range_label, rendered_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        statement.execute(params![
+            record.recipe_json,
+            record.title,
+            record.repo_name,
+            record.kind,
+            record.range_label,
+            record.rendered_at,
+        ])?;
+    }
+    let mut statement = connection.prepare_cached(
+        "DELETE FROM recent_renders WHERE id NOT IN
+         (SELECT id FROM recent_renders ORDER BY id DESC LIMIT ?1)",
+    )?;
+    statement.execute(params![i64::try_from(RECENT_RENDERS_CAP)?])?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{FixedClock, InMemoryAppStateStore};
+    use crate::{
+        history::{RecentRenderRecord, list_recent, persistence::store_test},
+        testing::FixedClock,
+    };
+
+    fn command(title: impl Into<String>) -> RecordRender {
+        RecordRender {
+            data_root: "/data".into(),
+            recipe_json: r#"{"kind":"diff"}"#.into(),
+            title: title.into(),
+            repo_name: "gt".into(),
+            kind: "diff".into(),
+            range_label: "origin/main..HEAD".into(),
+        }
+    }
+
+    fn list_recent(store: &impl AppStateStore) -> Vec<RecentRenderRecord> {
+        list_recent::list::execute(
+            list_recent::ListRecentRenders {
+                data_root: "/data".into(),
+            },
+            store,
+        )
+        .expect("list succeeds")
+        .entries
+    }
 
     #[test]
     fn records_a_render_stamped_by_the_clock() {
-        let store = InMemoryAppStateStore::default();
+        let store = store_test();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
-        execute(
-            RecordRender {
-                data_root: "/data".into(),
-                recipe_json: r#"{"kind":"diff"}"#.into(),
-                title: "gt · unpushed".into(),
-                repo_name: "gt".into(),
-                kind: "diff".into(),
-                range_label: "origin/main..HEAD".into(),
-            },
-            &store,
-            &clock,
-        )
-        .expect("record succeeds");
+        execute(command("gt · unpushed"), &store, &clock).expect("record succeeds");
 
-        let renders = store.renders.lock().unwrap();
+        let renders = list_recent(&store);
         assert_eq!(renders.len(), 1);
         assert_eq!(
             renders[0],
-            crate::ports::RecentRenderRecord {
+            RecentRenderRecord {
                 id: domain::viewer::RenderHistoryId::try_new(1).expect("positive id"),
                 recipe_json: r#"{"kind":"diff"}"#.into(),
                 title: "gt · unpushed".into(),
@@ -82,5 +137,20 @@ mod tests {
                 rendered_at: "2026-07-07T00:00:00Z".into(),
             }
         );
+    }
+
+    #[test]
+    fn recording_past_the_cap_prunes_oldest_rows() {
+        let store = store_test();
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
+
+        for index in 0..(RECENT_RENDERS_CAP + 5) {
+            execute(command(format!("render {index}")), &store, &clock).expect("record succeeds");
+        }
+
+        let renders = list_recent(&store);
+        assert_eq!(renders.len(), RECENT_RENDERS_CAP);
+        assert_eq!(renders[0].title, "render 504");
+        assert_eq!(renders[RECENT_RENDERS_CAP - 1].title, "render 5");
     }
 }

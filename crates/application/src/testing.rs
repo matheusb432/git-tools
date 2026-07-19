@@ -13,13 +13,13 @@ use std::{
 use domain::{
     diffs::{Commit, DiffKind},
     managed::ManagedRepo,
-    viewer::RenderHistoryId,
 };
 
+#[cfg(test)]
+use crate::ports::AppStateStore;
 use crate::ports::{
-    AppSettings, AppStateError, AppStateStore, ArtifactMeta, ArtifactStore, Clock, DiffSource,
-    GitOutput, GitRunner, HistoryRecord, HtmlRenderer, LedgerEntry, LiveViewRecord,
-    ManagedManifest, NewRecentRenderRecord, PlacedArtifact, PushLedger, RecentRenderRecord,
+    AppSettings, ArtifactMeta, ArtifactStore, Clock, DiffSource, GitOutput, GitRunner,
+    HistoryRecord, HtmlRenderer, LedgerEntry, ManagedManifest, PlacedArtifact, PushLedger,
     RemoteSync, RepoDiscovery, RepoProbe, RepoProbeResult, SyncOutput, UserSettingsStore,
 };
 
@@ -398,92 +398,32 @@ impl PushLedger for FakePushLedger {
     async fn refresh(&self) {}
 }
 
-/// Records app state in shared memory so cloned test stores observe the same
-/// values.
-#[derive(Debug, Default, Clone)]
-pub struct InMemoryAppStateStore {
-    pub live_views: Arc<Mutex<Vec<LiveViewRecord>>>,
-    pub remove_live_view_error: Arc<Mutex<Option<String>>>,
-    pub renders: Arc<Mutex<Vec<RecentRenderRecord>>>,
-    pub list_error_id: Arc<Mutex<Option<i64>>>,
+/// Provides one clone-shared in-memory `SQLite` connection for application tests.
+#[derive(Debug, Clone)]
+#[cfg(test)]
+pub(crate) struct AppStateStoreTest {
+    connection: Arc<Mutex<rusqlite::Connection>>,
 }
 
-impl AppStateStore for InMemoryAppStateStore {
-    fn save_live_view(&self, _data_root: &Path, record: &LiveViewRecord) -> anyhow::Result<bool> {
-        let mut views = self.live_views.lock().unwrap();
-        if let Some(existing) = views
-            .iter_mut()
-            .find(|v| v.source_kind == record.source_kind && v.source_value == record.source_value)
-        {
-            existing.display_name.clone_from(&record.display_name);
-            return Ok(true);
-        }
-        views.push(record.clone());
-        Ok(false)
+#[cfg(test)]
+impl AppStateStoreTest {
+    pub(crate) fn new(schema: &str) -> anyhow::Result<Self> {
+        let connection = rusqlite::Connection::open_in_memory()?;
+        connection.execute_batch(schema)?;
+        Ok(Self {
+            connection: Arc::new(Mutex::new(connection)),
+        })
     }
-    fn list_live_views(&self, _data_root: &Path) -> anyhow::Result<Vec<LiveViewRecord>> {
-        Ok(self.live_views.lock().unwrap().clone())
-    }
-    fn remove_live_view(
+}
+
+#[cfg(test)]
+impl AppStateStore for AppStateStoreTest {
+    fn connection_lock(
         &self,
-        _data_root: &Path,
-        source_kind: &str,
-        source_value: &str,
-    ) -> anyhow::Result<bool> {
-        if let Some(message) = self.remove_live_view_error.lock().unwrap().as_ref() {
-            anyhow::bail!(message.clone());
-        }
-        let mut views = self.live_views.lock().unwrap();
-        let before = views.len();
-        views.retain(|v| !(v.source_kind == source_kind && v.source_value == source_value));
-        Ok(views.len() != before)
-    }
-    fn record_render(
-        &self,
-        _data_root: &Path,
-        record: &NewRecentRenderRecord,
-    ) -> anyhow::Result<()> {
-        let mut renders = self.renders.lock().unwrap();
-        let next_id = renders
-            .iter()
-            .map(|render| i64::from(render.id))
-            .max()
-            .unwrap_or(0)
-            + 1;
-        renders.push(RecentRenderRecord {
-            id: RenderHistoryId::try_new(next_id).expect("generated in-memory row id is positive"),
-            recipe_json: record.recipe_json.clone(),
-            title: record.title.clone(),
-            repo_name: record.repo_name.clone(),
-            kind: record.kind.clone(),
-            range_label: record.range_label.clone(),
-            rendered_at: record.rendered_at.clone(),
-        });
-        Ok(())
-    }
-    fn list_recent_renders(
-        &self,
-        _data_root: &Path,
-    ) -> Result<Vec<RecentRenderRecord>, AppStateError> {
-        if let Some(id) = *self.list_error_id.lock().unwrap() {
-            return Err(AppStateError::InvalidRecentRenderId { id });
-        }
-        let mut renders = self.renders.lock().unwrap().clone();
-        renders.reverse();
-        Ok(renders)
-    }
-    fn get_recent_render(
-        &self,
-        _data_root: &Path,
-        id: RenderHistoryId,
-    ) -> Result<Option<RecentRenderRecord>, AppStateError> {
-        Ok(self
-            .renders
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|render| render.id == id)
-            .cloned())
+    ) -> anyhow::Result<impl std::ops::DerefMut<Target = rusqlite::Connection> + '_> {
+        self.connection
+            .try_lock()
+            .map_err(|error| anyhow::anyhow!("locking app-state test connection failed: {error}"))
     }
 }
 

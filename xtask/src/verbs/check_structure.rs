@@ -21,6 +21,11 @@
 //! 4. **CLI operations are thin.** Production CLI Rust may compose application operations and pass
 //!    the concrete Git adapter, but may not reference or invoke the application Git port, use the
 //!    retired CLI Git shim, launch Git directly, or hide source behind symlinks.
+//! 5. **App state is a resource port.** `AppStateStore` exposes exactly `connection_lock`, keeping
+//!    operation-specific persistence in application slices.
+//! 6. **App-state infrastructure does not own runtime SQL.** Production Rust under
+//!    `crates/infra/src/app_state/` may initialize `SQLite`, but query and mutation operations
+//!    belong in application slices.
 
 use std::path::Path;
 
@@ -28,7 +33,9 @@ use anyhow::{Context as _, Result};
 
 mod rust_source;
 
-use rust_source::git_boundary_violations;
+use rust_source::{
+    git_boundary_violations, sqlite_operation_identifiers, trait_method_names_top_level,
+};
 
 /// Walk every `crates/*/src` and `shared/*/src` directory under `root` and exit 3 on any
 /// architecture violation.
@@ -51,7 +58,7 @@ pub(crate) fn run(root: Option<&Path>) -> Result<()> {
 
     if !violations.is_empty() {
         eprintln!(
-            "\n{} violation(s) — fix the directory structure and re-run `just check`",
+            "\n{} architecture violation(s): fix the reported violations and re-run `just check`",
             violations.len()
         );
         std::process::exit(3);
@@ -74,6 +81,9 @@ const DEPTH_EXEMPT_CRATES: [&str; 1] = ["cli"];
 const CLI_SOURCE_DIR: &str = "crates/cli/src";
 const CLI_SOURCE_SYMLINK_DESCRIPTION: &str = "production CLI source tree may not contain symlinks";
 const SOURCE_LAYOUT_SYMLINK_DESCRIPTION: &str = "source layout tree may not contain symlinks";
+const APP_STATE_PORTS_PATH: &str = "crates/application/src/ports.rs";
+const APP_STATE_SOURCE_DIR: &str = "crates/infra/src/app_state";
+const APP_STATE_STORE_METHOD_NAMES: [&str; 1] = ["connection_lock"];
 
 /// Collect every violation under `root/{crates,shared}/*/src`.
 fn collect_violations(root: &Path) -> Result<Vec<String>> {
@@ -82,7 +92,87 @@ fn collect_violations(root: &Path) -> Result<Vec<String>> {
         collect_member_violations(&root.join(member_dir), &mut violations)?;
     }
     collect_cli_source_violations(root, &mut violations)?;
+    collect_app_state_store_violations(root, &mut violations)?;
+    collect_app_state_sql_violations(root, &mut violations)?;
     Ok(violations)
+}
+
+/// Collects rule-5 violations from the application app-state port.
+fn collect_app_state_store_violations(root: &Path, violations: &mut Vec<String>) -> Result<()> {
+    let path = root.join(APP_STATE_PORTS_PATH);
+    let source = match std::fs::read_to_string(&path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("reading app-state port {}", path.display()));
+        }
+    };
+    let method_names = trait_method_names_top_level(&source, "AppStateStore").unwrap_or_default();
+
+    if method_names.as_slice() != APP_STATE_STORE_METHOD_NAMES {
+        violations.push(format!(
+            "[rule 5: AppStateStore exposes the connection resource only] {}: expected AppStateStore methods {:?}, found {method_names:?}",
+            path.display(),
+            APP_STATE_STORE_METHOD_NAMES,
+        ));
+    }
+
+    Ok(())
+}
+
+/// Collects rule-6 violations from production app-state infrastructure.
+fn collect_app_state_sql_violations(root: &Path, violations: &mut Vec<String>) -> Result<()> {
+    let source_dir = root.join(APP_STATE_SOURCE_DIR);
+    match std::fs::symlink_metadata(&source_dir) {
+        Ok(metadata) if metadata.file_type().is_dir() => {
+            walk_app_state_sources(&source_dir, violations)?;
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", source_dir.display()));
+        }
+    }
+    Ok(())
+}
+
+/// Recursively scans app-state Rust files in path order without following symlinks.
+fn walk_app_state_sources(current: &Path, violations: &mut Vec<String>) -> Result<()> {
+    let mut entries: Vec<_> = std::fs::read_dir(current)
+        .with_context(|| format!("reading {}", current.display()))?
+        .collect::<Result<_, _>>()?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+
+    for entry in entries {
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("reading file type for {}", entry.path().display()))?;
+        let path = entry.path();
+        if file_type.is_dir() {
+            walk_app_state_sources(&path, violations)?;
+        } else if file_type.is_file() && path.extension().is_some_and(|extension| extension == "rs")
+        {
+            collect_app_state_file_violations(&path, violations)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Collects forbidden `SQLite` operations from one production app-state source file.
+fn collect_app_state_file_violations(path: &Path, violations: &mut Vec<String>) -> Result<()> {
+    let source = std::fs::read_to_string(path)
+        .with_context(|| format!("reading app-state source {}", path.display()))?;
+
+    for identifier in sqlite_operation_identifiers(&source) {
+        violations.push(format!(
+            "[rule 6: app-state SQL belongs to application slices] {}: production app-state infrastructure may not call SQLite operation .{identifier}",
+            path.display(),
+        ));
+    }
+
+    Ok(())
 }
 
 /// Collects rule-4 violations from every production Rust source in the CLI crate.
@@ -452,6 +542,180 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let v = collect_violations(dir.path()).unwrap();
         assert!(v.is_empty());
+    }
+
+    fn rule_5_messages(root: &Path) -> Vec<String> {
+        collect_violations(root)
+            .unwrap()
+            .into_iter()
+            .filter(|message| message.contains("rule 5"))
+            .collect()
+    }
+
+    #[test]
+    fn app_state_store_cannot_expose_operation_methods() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/application/src/ports.rs",
+            r"
+pub trait AppStateStore: Clone + Send + Sync + 'static {
+    fn connection_lock(&self) -> anyhow::Result<ConnectionGuard<'_>>;
+    fn list_recent_renders(&self) -> anyhow::Result<Vec<RecentRender>>;
+}
+",
+        );
+
+        let violations = rule_5_messages(dir.path());
+
+        assert_eq!(violations.len(), 1, "violations: {violations:?}");
+        assert!(violations[0].contains("AppStateStore"));
+        assert!(violations[0].contains("list_recent_renders"));
+    }
+
+    #[test]
+    fn app_state_store_exposes_only_the_connection_resource() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/application/src/ports.rs",
+            r"
+pub trait AppStateStore: Clone + Send + Sync + 'static {
+    fn connection_lock(
+        &self,
+    ) -> anyhow::Result<impl std::ops::DerefMut<Target = rusqlite::Connection> + '_>;
+}
+",
+        );
+
+        let violations = rule_5_messages(dir.path());
+
+        assert!(violations.is_empty(), "violations: {violations:?}");
+    }
+
+    #[test]
+    fn app_state_store_const_generic_block_is_not_the_trait_body() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/application/src/ports.rs",
+            r"
+pub trait AppStateStore<const CONNECTION_COUNT: usize = { 1 }> {
+    fn connection_lock(&self);
+}
+",
+        );
+
+        let violations = rule_5_messages(dir.path());
+
+        assert!(violations.is_empty(), "violations: {violations:?}");
+    }
+
+    #[test]
+    fn app_state_store_parenthesized_comparison_is_not_a_generic_delimiter() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/application/src/ports.rs",
+            r"
+pub trait AppStateStore<T = [(); (1 < 2) as usize]> {
+    fn connection_lock(&self);
+}
+",
+        );
+
+        let violations = rule_5_messages(dir.path());
+
+        assert!(violations.is_empty(), "violations: {violations:?}");
+    }
+
+    fn rule_6_messages(root: &Path) -> Vec<String> {
+        collect_violations(root)
+            .unwrap()
+            .into_iter()
+            .filter(|message| message.contains("rule 6"))
+            .collect()
+    }
+
+    #[test]
+    fn app_state_infrastructure_cannot_execute_runtime_sql() {
+        for operation in [
+            "prepare",
+            "prepare_cached",
+            "query_row",
+            "execute",
+            "execute_batch",
+            "transaction",
+            "transaction_with_behavior",
+            "unchecked_transaction",
+            "unchecked_transaction_with_behavior",
+        ] {
+            let dir = TempDir::new().unwrap();
+            seed_with(
+                dir.path(),
+                "crates/infra/src/app_state/state.rs",
+                &format!("fn persist(connection: &Connection) {{ connection.{operation}(); }}\n"),
+            );
+
+            let violations = rule_6_messages(dir.path());
+
+            assert_eq!(
+                violations.len(),
+                1,
+                "operation {operation}, violations: {violations:?}"
+            );
+            assert!(
+                violations[0].contains(operation),
+                "operation {operation}, violations: {violations:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn app_state_sql_inside_a_trailing_test_module_is_ignored() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/infra/src/app_state/state.rs",
+            r#"
+pub struct SqliteAppState;
+
+#[cfg(test)]
+mod tests {
+    fn exercise(connection: &mut Connection) {
+        connection.prepare_cached("SELECT 1");
+        connection.query_row("SELECT 1", [], |_| Ok(()));
+        connection.execute("DELETE FROM recent_renders", []);
+        connection.transaction();
+    }
+}
+"#,
+        );
+
+        let violations = rule_6_messages(dir.path());
+
+        assert!(violations.is_empty(), "violations: {violations:?}");
+    }
+
+    #[test]
+    fn app_state_database_initialization_operations_are_allowed() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/infra/src/app_state/db.rs",
+            r#"
+fn open(path: &Path) {
+    let mut connection = Connection::open(path);
+    connection.busy_timeout(Duration::from_secs(5));
+    connection.pragma_update(None, "journal_mode", "WAL");
+    Migrations::to_latest(&mut connection);
+}
+"#,
+        );
+
+        let violations = rule_6_messages(dir.path());
+
+        assert!(violations.is_empty(), "violations: {violations:?}");
     }
 
     #[test]

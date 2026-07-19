@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use rusqlite::{Connection, params};
+
 use crate::ports::AppStateStore;
 
 /// Delete the saved live view identified by `(source_kind, source_value)`.
@@ -30,29 +32,47 @@ pub fn execute(
     store: &impl AppStateStore,
 ) -> Result<RemoveLiveViewResponse, RemoveLiveViewError> {
     let RemoveLiveView {
-        data_root,
+        data_root: _,
         source_kind,
         source_value,
     } = req;
-    let removed = store.remove_live_view(&data_root, &source_kind, &source_value)?;
+    let connection = store.connection_lock()?;
+    let removed = remove_live_view(&connection, &source_kind, &source_value)?;
     Ok(RemoveLiveViewResponse { removed })
+}
+
+fn remove_live_view(
+    connection: &Connection,
+    source_kind: &str,
+    source_value: &str,
+) -> anyhow::Result<bool> {
+    let mut statement = connection
+        .prepare_cached("DELETE FROM live_views WHERE source_kind = ?1 AND source_value = ?2")?;
+    Ok(statement.execute(params![source_kind, source_value])? > 0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ports::LiveViewRecord, testing::InMemoryAppStateStore};
+    use crate::{live_views::persistence::store_test, ports::AppStateStore};
+
+    fn seed_live_view(store: &impl AppStateStore) {
+        store
+            .connection_lock()
+            .expect("connection lock")
+            .execute(
+                "INSERT INTO live_views \
+                 (source_kind, source_value, display_name, created_at) \
+                 VALUES ('LocalRepo', '/repos/gt', 'gt', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("seed live view");
+    }
 
     #[test]
     fn remove_reports_true_when_a_row_was_removed() {
-        let store = InMemoryAppStateStore::default();
-        store.live_views.lock().unwrap().push(LiveViewRecord {
-            source_kind: "LocalRepo".into(),
-            source_value: "/repos/gt".into(),
-            display_name: "gt".into(),
-            created_at: "2026-01-01T00:00:00Z".into(),
-            last_opened_at: None,
-        });
+        let store = store_test();
+        seed_live_view(&store);
         let response = execute(
             RemoveLiveView {
                 data_root: "/data".into(),
@@ -64,12 +84,11 @@ mod tests {
         .expect("remove succeeds");
 
         assert!(response.removed);
-        assert!(store.live_views.lock().unwrap().is_empty());
     }
 
     #[test]
     fn remove_reports_false_for_unknown_identity() {
-        let store = InMemoryAppStateStore::default();
+        let store = store_test();
         let response = execute(
             RemoveLiveView {
                 data_root: "/data".into(),
@@ -81,5 +100,27 @@ mod tests {
         .expect("remove succeeds");
 
         assert!(!response.removed);
+    }
+
+    #[test]
+    fn delete_failure_is_an_unexpected_operation_error() {
+        let store = store_test();
+        store
+            .connection_lock()
+            .expect("connection lock")
+            .execute("DROP TABLE live_views", [])
+            .expect("drop live views table");
+
+        let error = execute(
+            RemoveLiveView {
+                data_root: "/data".into(),
+                source_kind: "LocalRepo".into(),
+                source_value: "/repos/gt".into(),
+            },
+            &store,
+        )
+        .expect_err("delete failure rejects");
+
+        assert!(matches!(error, RemoveLiveViewError::Unexpected(_)));
     }
 }

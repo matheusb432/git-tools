@@ -12,7 +12,7 @@ use std::{
 use domain::{
     diffs::{Commit, DiffExclusions, DiffKind},
     managed::ManagedRepo,
-    viewer::{RenderHistoryId, RenderOptions},
+    viewer::RenderOptions,
 };
 
 use crate::diffs::View;
@@ -183,53 +183,6 @@ pub struct HistoryRecord {
     pub byte_size: u64,
 }
 
-/// One saved live view, keyed by its adapter-shaped source identity.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LiveViewRecord {
-    pub source_kind: String,
-    pub source_value: String,
-    pub display_name: String,
-    pub created_at: String,
-    pub last_opened_at: Option<String>,
-}
-
-/// One new render recipe to append to app history, never a diff payload.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NewRecentRenderRecord {
-    pub recipe_json: String,
-    pub title: String,
-    pub repo_name: String,
-    pub kind: String,
-    pub range_label: String,
-    pub rendered_at: String,
-}
-
-/// One persisted render recipe read from app history with its stable row identity.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecentRenderRecord {
-    pub id: RenderHistoryId,
-    pub recipe_json: String,
-    pub title: String,
-    pub repo_name: String,
-    pub kind: String,
-    pub range_label: String,
-    pub rendered_at: String,
-}
-
-/// Describes typed failures surfaced by app-state persistence adapters.
-#[derive(Debug, thiserror::Error)]
-pub enum AppStateError {
-    /// Reports a persisted recent-render row whose identity violates the domain invariant.
-    #[error("recent_renders row id {id} violates the positive-ID invariant")]
-    InvalidRecentRenderId { id: i64 },
-    /// Reports an unexpected storage or migration failure.
-    #[error(transparent)]
-    Unexpected(#[from] anyhow::Error),
-}
-
-/// Cap on retained `recent_renders` rows; the adapter prunes past it on insert.
-pub const RECENT_RENDERS_CAP: usize = 500;
-
 /// What probing a directory for a git repository found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepoProbeResult {
@@ -355,38 +308,12 @@ pub trait RepoDiscovery: Clone + Send + Sync + 'static {
     fn find_repos(&self, root: &Path, include_worktrees: bool) -> anyhow::Result<Vec<PathBuf>>;
 }
 
-/// Stores saved live views and the recent-render log.
-/// One `SQLite` file under `data_root` in the real adapter; every method opens,
-/// migrates, and closes per call so callers stay hermetic (the `ArtifactStore`
-/// per-call `store_root` pattern).
+/// Provides bounded mutable access to one initialized app-state connection.
 pub trait AppStateStore: Clone + Send + Sync + 'static {
-    /// Upsert by `(source_kind, source_value)`: a new row keeps `record` as-is;
-    /// an existing row keeps its `created_at`/`last_opened_at` and takes only
-    /// the new `display_name`. Returns `true` when the view already existed.
-    fn save_live_view(&self, data_root: &Path, record: &LiveViewRecord) -> anyhow::Result<bool>;
-    /// Every saved live view, oldest first (creation order).
-    fn list_live_views(&self, data_root: &Path) -> anyhow::Result<Vec<LiveViewRecord>>;
-    /// Delete by identity; `true` when a row was actually removed.
-    fn remove_live_view(
+    /// Locks the process-owned connection for one synchronous application operation.
+    fn connection_lock(
         &self,
-        data_root: &Path,
-        source_kind: &str,
-        source_value: &str,
-    ) -> anyhow::Result<bool>;
-    /// Append one render record, pruning the log past [`RECENT_RENDERS_CAP`].
-    fn record_render(&self, data_root: &Path, record: &NewRecentRenderRecord)
-    -> anyhow::Result<()>;
-    /// Recorded renders, newest first.
-    fn list_recent_renders(
-        &self,
-        data_root: &Path,
-    ) -> Result<Vec<RecentRenderRecord>, AppStateError>;
-    /// The recorded render identified by `id`, or `None` when no such row exists.
-    fn get_recent_render(
-        &self,
-        data_root: &Path,
-        id: RenderHistoryId,
-    ) -> Result<Option<RecentRenderRecord>, AppStateError>;
+    ) -> anyhow::Result<impl std::ops::DerefMut<Target = rusqlite::Connection> + '_>;
 }
 
 /// One captured git invocation: stdout, stderr, and the exit code, exactly as the

@@ -4,9 +4,11 @@
 use std::path::PathBuf;
 
 use domain::live_views::LiveSource;
+use rusqlite::{Connection, params};
 
 use crate::{
-    ports::{AppStateStore, Clock, LiveViewRecord, RepoProbe, RepoProbeResult},
+    live_views::LiveViewRecord,
+    ports::{AppStateStore, Clock, RepoProbe, RepoProbeResult},
     shared::notes::Note,
 };
 
@@ -70,7 +72,7 @@ pub fn execute(
     store: &impl AppStateStore,
     clock: &impl Clock,
 ) -> Result<SaveLiveViewResponse, SaveLiveViewError> {
-    let SaveLiveView { data_root, path } = req;
+    let SaveLiveView { data_root: _, path } = req;
     let top_level = match probe.probe(&path)? {
         RepoProbeResult::Repo { top_level } => top_level,
         RepoProbeResult::NotFound => {
@@ -93,7 +95,8 @@ pub fn execute(
         created_at: clock.now_iso(),
         last_opened_at: None,
     };
-    let already_saved = store.save_live_view(&data_root, &record)?;
+    let mut connection = store.connection_lock()?;
+    let already_saved = save_live_view(&mut connection, &record)?;
     let text = if already_saved {
         format!(
             "live view for `{}` already saved — refreshed",
@@ -111,6 +114,30 @@ pub fn execute(
     })
 }
 
+fn save_live_view(connection: &mut Connection, record: &LiveViewRecord) -> anyhow::Result<bool> {
+    let existed = {
+        let mut statement = connection.prepare_cached(
+            "SELECT COUNT(*) FROM live_views WHERE source_kind = ?1 AND source_value = ?2",
+        )?;
+        statement.query_row(params![record.source_kind, record.source_value], |row| {
+            row.get::<_, i64>(0)
+        })? > 0
+    };
+    let mut statement = connection.prepare_cached(
+        "INSERT INTO live_views (source_kind, source_value, display_name, created_at, last_opened_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(source_kind, source_value) DO UPDATE SET display_name = excluded.display_name",
+    )?;
+    statement.execute(params![
+        record.source_kind,
+        record.source_value,
+        record.display_name,
+        record.created_at,
+        record.last_opened_at,
+    ])?;
+    Ok(existed)
+}
+
 /// Builds the rejected response: an [`SaveLiveViewOutcome::Rejected`] outcome
 /// carrying the rejection's `Display` text as a warn-level note.
 fn rejected(rejection: LiveViewRejection) -> SaveLiveViewResponse {
@@ -124,21 +151,33 @@ fn rejected(rejection: LiveViewRejection) -> SaveLiveViewResponse {
 mod tests {
     use super::*;
     use crate::{
-        ports::{LiveViewRecord, RepoProbeResult},
+        live_views::{list, persistence::store_test},
+        ports::{AppStateStore, RepoProbeResult},
         shared::notes::NoteLevel,
-        testing::{FakeRepoProbe, FixedClock, InMemoryAppStateStore},
+        testing::{AppStateStoreTest, FakeRepoProbe, FixedClock},
     };
 
     fn dependencies(
         probe_result: RepoProbeResult,
-    ) -> (FakeRepoProbe, InMemoryAppStateStore, FixedClock) {
+    ) -> (FakeRepoProbe, AppStateStoreTest, FixedClock) {
         (
             FakeRepoProbe {
                 result: probe_result,
             },
-            InMemoryAppStateStore::default(),
+            store_test(),
             FixedClock("2026-01-01T00:00:00Z".into()),
         )
+    }
+
+    fn list_views(store: &AppStateStoreTest) -> Vec<LiveViewRecord> {
+        list::execute(
+            list::ListLiveViews {
+                data_root: "/data".into(),
+            },
+            store,
+        )
+        .expect("list succeeds")
+        .views
     }
 
     #[test]
@@ -171,10 +210,7 @@ mod tests {
             response.notes[0].text,
             "The git repo's directory at `/gone` was not found."
         );
-        assert!(
-            store.live_views.lock().unwrap().is_empty(),
-            "nothing should be persisted on rejection"
-        );
+        assert!(list_views(&store).is_empty());
     }
 
     #[test]
@@ -205,10 +241,7 @@ mod tests {
             response.notes[0].text,
             "The directory `/plain` is not a git repository."
         );
-        assert!(
-            store.live_views.lock().unwrap().is_empty(),
-            "nothing should be persisted on rejection"
-        );
+        assert!(list_views(&store).is_empty());
     }
 
     #[test]
@@ -249,21 +282,25 @@ mod tests {
         assert_eq!(response.notes.len(), 1);
         assert_eq!(response.notes[0].level, NoteLevel::Info);
         assert_eq!(response.notes[0].text, "saved live view for `gt`");
-        assert_eq!(store.live_views.lock().unwrap().len(), 1);
+        assert_eq!(list_views(&store).len(), 1);
     }
 
     #[test]
-    fn resaving_reports_already_saved() {
+    fn resaving_reports_already_saved_and_updates_only_display_name() {
         let (probe, store, clock) = dependencies(RepoProbeResult::Repo {
             top_level: "/repos/gt".into(),
         });
-        store.live_views.lock().unwrap().push(LiveViewRecord {
-            source_kind: "LocalRepo".into(),
-            source_value: "/repos/gt".into(),
-            display_name: "gt".into(),
-            created_at: "2025-01-01T00:00:00Z".into(),
-            last_opened_at: None,
-        });
+        store
+            .connection_lock()
+            .expect("connection lock")
+            .execute(
+                "INSERT INTO live_views \
+                 (source_kind, source_value, display_name, created_at, last_opened_at) \
+                 VALUES ('LocalRepo', '/repos/gt', 'old name', \
+                 '2025-01-01T00:00:00Z', '2025-06-01T00:00:00Z')",
+                [],
+            )
+            .expect("seed live view");
 
         let response = execute(
             SaveLiveView {
@@ -284,6 +321,15 @@ mod tests {
             response.notes[0].text,
             "live view for `gt` already saved — refreshed"
         );
-        assert_eq!(store.live_views.lock().unwrap().len(), 1);
+        assert_eq!(
+            list_views(&store),
+            vec![LiveViewRecord {
+                source_kind: "LocalRepo".into(),
+                source_value: "/repos/gt".into(),
+                display_name: "gt".into(),
+                created_at: "2025-01-01T00:00:00Z".into(),
+                last_opened_at: Some("2025-06-01T00:00:00Z".into()),
+            }]
+        );
     }
 }

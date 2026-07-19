@@ -8,7 +8,7 @@
 - Inspect, commit, push, pull, prune, switch, tag, and squash local history without replacing Git's underlying repository model.
 - Run status, commit, push, pull, and diff operations across repositories declared in `repos.toml`.
 
-Run `gtl --help` and `gtl <command> --help` for the authoritative command reference. Functional requirements live in the [FSD](docs/business-requirements/git-tools-fsd.md), and architecture decisions are indexed in [docs/adr/adr.toml](docs/adr/adr.toml).
+Run `gtl --help` and `gtl <command> --help` for the authoritative command reference. Architecture decisions are indexed in [docs/adr/adr.toml](docs/adr/adr.toml).
 
 ## Install
 

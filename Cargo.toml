@@ -63,13 +63,17 @@ jiff = { version = "0.2", default-features = false, features = ["std"] }
 lru = "0.18.1"
 maud = "0.27"
 nutype = "0.7.0"
+parking_lot = "0.12.5"
 predicates = "3"
 raw-window-handle = "0.6"
 reqwest = { version = "0.13", default-features = false, features = [
   "blocking",
   "json",
 ] }
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.40", default-features = false, features = [
+  "bundled",
+  "cache",
+] }
 rusqlite_migration = "2.6"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"

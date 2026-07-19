@@ -24,6 +24,7 @@ toml.workspace = true
 url.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 application.workspace = true
 domain.workspace = true
 gtl-platform.workspace = true

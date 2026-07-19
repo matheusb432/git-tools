@@ -157,7 +157,7 @@ fn live_recipe(data: &SaveLiveViewData) -> Recipe {
 
 /// Forward `batch`; a forward failure (no viewer installed, spawn failed) is a
 /// low-noise degrade, not a command failure — every live view in the batch is
-/// already durably saved by the time this runs (FSD A-0002). Unlike the other
+/// already durably saved by the time this runs. Unlike the other
 /// `diff` family commands, `diff live` has no browser fallback (live views are
 /// app-only, by design), so it prints its own note rather than
 /// [`super::note_viewer_degrade`] — that shared note falsely claims a browser

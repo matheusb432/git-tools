@@ -251,15 +251,15 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
 /// Build and run the Tauri application. Called by `main.rs`.
 ///
 /// # Panics
-/// Panics when the Tauri runtime fails to build or start (no display, broken
-/// webview install) — fatal for a desktop app, so it surfaces as a crash.
+/// Panics when viewer storage cannot initialize or the Tauri runtime cannot start.
 pub fn run() {
     let data_root = commands::data_root().expect("viewer data root resolves");
-    let viewer_app = routes::ViewerApp::new(
+    let viewer_app = routes::ViewerApp::open(
         data_root,
         infra::user_config::TomlSettingsStore::from_environment(),
         DEFAULT_VIEW_CACHE_WEIGHT,
-    );
+    )
+    .expect("viewer app state opens");
     let cold_start_batches = recipes_from_argv(&std::env::args().collect::<Vec<_>>());
     tauri::Builder::default()
         .manage(viewer_app)

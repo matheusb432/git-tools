@@ -40,6 +40,7 @@ impl Fixture {
         init_repo(&repo, with_feature_commit);
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let app_state = infra::app_state::SqliteAppState::open(&data).expect("open app state");
         let app = daemon::state::router(DaemonState::new(
             ExeIdentity {
                 exe_len: 4242,
@@ -48,6 +49,7 @@ impl Fixture {
             "9.9.9",
             4242,
             shutdown_tx,
+            app_state,
             infra::user_config::TomlSettingsStore::new(None),
         ));
         Self {

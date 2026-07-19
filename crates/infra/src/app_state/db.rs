@@ -1,6 +1,4 @@
-//! The app-state database: one `SQLite` file under the data root, opened
-//! per call through [`open_app_db`] — the single place the connection
-//! pragmas (WAL, busy timeout, foreign keys) and migrations are applied.
+//! Initializes one process-owned app-state connection with its pragmas and migrations.
 
 use std::{path::Path, time::Duration};
 
@@ -48,8 +46,7 @@ const INIT_RETRY_ATTEMPTS: u32 = 8;
 /// ..., 350ms), for a worst-case total wait of ~1.4s.
 const INIT_RETRY_BACKOFF: Duration = Duration::from_millis(50);
 
-/// Open (creating if needed) the app-state db under `data_root`, apply the
-/// connection pragmas, and migrate to the latest schema version.
+/// Opens one app-state connection under `data_root` and initializes its schema policy.
 pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
     std::fs::create_dir_all(data_root)?;
     let mut conn = Connection::open(data_root.join("gtl.db"))?;
@@ -97,6 +94,102 @@ pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn migrations_apply_from_empty_and_land_on_v2() {
+        let directory = tempfile::tempdir().expect("temporary data root");
+        let connection = open_app_db(directory.path()).expect("open app database");
+
+        let user_version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("user version");
+        assert_eq!(user_version, 2);
+
+        for (table, expected_columns) in [
+            (
+                "live_views",
+                vec![
+                    "id",
+                    "source_kind",
+                    "source_value",
+                    "display_name",
+                    "created_at",
+                    "last_opened_at",
+                ],
+            ),
+            (
+                "recent_renders",
+                vec![
+                    "id",
+                    "recipe_json",
+                    "title",
+                    "repo_name",
+                    "kind",
+                    "range_label",
+                    "rendered_at",
+                ],
+            ),
+        ] {
+            let mut statement = connection
+                .prepare(&format!("PRAGMA table_info({table})"))
+                .expect("prepare table info");
+            let columns: Vec<String> = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .expect("query table info")
+                .collect::<Result<_, _>>()
+                .expect("decode columns");
+            assert_eq!(columns, expected_columns, "columns for {table}");
+        }
+    }
+
+    #[test]
+    fn strict_tables_reject_lossy_types() {
+        let directory = tempfile::tempdir().expect("temporary data root");
+        let connection = open_app_db(directory.path()).expect("open app database");
+
+        let error = connection
+            .execute(
+                "INSERT INTO live_views (source_kind, source_value, display_name, created_at)
+                 VALUES ('local', '/repo', x'00', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .expect_err("STRICT table rejects a BLOB in a TEXT column");
+        assert!(
+            matches!(
+                error,
+                rusqlite::Error::SqliteFailure(inner, _)
+                    if inner.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_DATATYPE
+            ),
+            "expected SQLITE_CONSTRAINT_DATATYPE, got: {error}"
+        );
+    }
+
+    #[test]
+    fn connection_pragmas_are_applied() {
+        let directory = tempfile::tempdir().expect("temporary data root");
+        let connection = open_app_db(directory.path()).expect("open app database");
+
+        let journal_mode: String = connection
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .expect("journal mode");
+        let foreign_keys: i64 = connection
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .expect("foreign keys");
+
+        assert_eq!(journal_mode, "wal");
+        assert_eq!(foreign_keys, 1);
+    }
+
+    #[test]
+    fn corrupt_database_open_returns_an_error() {
+        let directory = tempfile::tempdir().expect("temporary data root");
+        std::fs::write(directory.path().join("gtl.db"), "not a database")
+            .expect("write corrupt database");
+
+        let result = open_app_db(directory.path());
+
+        assert!(result.is_err());
+    }
 
     #[test]
     fn migration_v2_drops_settings_and_preserves_runtime_state() {

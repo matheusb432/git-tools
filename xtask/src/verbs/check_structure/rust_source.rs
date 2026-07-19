@@ -1,4 +1,16 @@
-//! Lightweight Rust token scanning for the CLI Git ownership boundary.
+//! Lightweight Rust token scanning for architecture ownership boundaries.
+
+const SQLITE_OPERATION_IDENTIFIERS: [&str; 9] = [
+    "prepare",
+    "prepare_cached",
+    "query_row",
+    "execute",
+    "execute_batch",
+    "transaction",
+    "transaction_with_behavior",
+    "unchecked_transaction",
+    "unchecked_transaction_with_behavior",
+];
 
 /// A forbidden production-CLI Git boundary marker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +72,112 @@ pub(super) fn git_boundary_violations(source: &str) -> Vec<GitBoundaryViolation>
         .into_iter()
         .filter_map(|(violation, present)| present.then_some(violation))
         .collect()
+}
+
+/// Finds top-level method names in a named production trait.
+pub(super) fn trait_method_names_top_level<'source>(
+    source: &'source str,
+    trait_name: &str,
+) -> Option<Vec<&'source str>> {
+    let tokens = production_tokens(source);
+    let body = named_trait_body(&tokens, trait_name)?;
+    let mut delimiters = Vec::new();
+    let mut method_names = Vec::new();
+
+    for (index, token) in body.iter().copied().enumerate() {
+        if delimiters.is_empty()
+            && token == Token::Identifier("fn")
+            && let Some(Token::Identifier(method_name)) = body.get(index + 1)
+        {
+            method_names.push(*method_name);
+        }
+        if !update_delimiters(&mut delimiters, token) {
+            break;
+        }
+    }
+
+    Some(method_names)
+}
+
+/// Finds forbidden `SQLite` receiver operations in production Rust source.
+pub(super) fn sqlite_operation_identifiers(source: &str) -> Vec<&'static str> {
+    let tokens = production_tokens(source);
+    SQLITE_OPERATION_IDENTIFIERS
+        .into_iter()
+        .filter(|identifier| {
+            contains_sequence(
+                &tokens,
+                &[
+                    ExpectedToken::Punctuation('.'),
+                    ExpectedToken::Identifier(identifier),
+                ],
+            )
+        })
+        .collect()
+}
+
+fn named_trait_body<'tokens, 'source>(
+    tokens: &'tokens [Token<'source>],
+    trait_name: &str,
+) -> Option<&'tokens [Token<'source>]> {
+    let mut delimiters = Vec::new();
+    let mut index = 0;
+
+    while index + 1 < tokens.len() {
+        if delimiters.is_empty()
+            && tokens[index] == Token::Identifier("trait")
+            && tokens[index + 1] == Token::Identifier(trait_name)
+        {
+            let body_start = trait_body_start(tokens, index + 2)?;
+            let body_end = delimiter_end(tokens, body_start)?;
+            return Some(&tokens[body_start + 1..body_end - 1]);
+        }
+
+        if !update_delimiters(&mut delimiters, tokens[index]) {
+            return None;
+        }
+        index += 1;
+    }
+
+    None
+}
+
+fn trait_body_start(tokens: &[Token<'_>], start: usize) -> Option<usize> {
+    let mut delimiters = Vec::new();
+
+    for (index, token) in tokens.iter().copied().enumerate().skip(start) {
+        if delimiters.is_empty() && token == Token::Punctuation('{') {
+            return Some(index);
+        }
+        let previous = index
+            .checked_sub(1)
+            .and_then(|index| tokens.get(index).copied());
+        if !update_trait_header_delimiters(&mut delimiters, token, previous) {
+            return None;
+        }
+    }
+
+    None
+}
+
+fn update_trait_header_delimiters(
+    delimiters: &mut Vec<char>,
+    token: Token<'_>,
+    previous: Option<Token<'_>>,
+) -> bool {
+    match token {
+        Token::Punctuation('<') if delimiters.iter().all(|delimiter| *delimiter == '<') => {
+            delimiters.push('<');
+            true
+        }
+        Token::Punctuation('>')
+            if previous != Some(Token::Punctuation('-')) && delimiters.last() == Some(&'<') =>
+        {
+            delimiters.pop();
+            true
+        }
+        _ => update_delimiters(delimiters, token),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
