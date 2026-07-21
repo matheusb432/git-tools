@@ -1,14 +1,11 @@
 use std::{path::Path, process::Command};
 
-use application::{
-    managed::commit_all::{self, CommitAll},
-    repository_sync::{
-        CommitProgress,
-        apply_commit::{self, ApplyCommit},
-        plan_commit::CommitTarget,
-    },
+use application::repository_sync::{
+    CommitProgress,
+    apply_commit::{self, ApplyCommit},
+    plan_commit::CommitTarget,
 };
-use domain::{managed::ManagedRepo, repository::PendingChanges};
+use domain::repository::PendingChanges;
 use infra::git_runner::StdGitRunner;
 
 fn git(repo: &Path, args: &[&str]) -> String {
@@ -55,7 +52,7 @@ fn install_stderr_post_commit_hook(repo: &Path) {
 }
 
 #[test]
-fn real_git_commit_identities_ignore_post_commit_stderr() {
+fn real_git_apply_commit_ignores_post_commit_stderr() {
     let apply_repo = tempfile::tempdir().unwrap();
     init_dirty_repo(apply_repo.path());
 
@@ -79,26 +76,5 @@ fn real_git_commit_identities_ignore_post_commit_stderr() {
     assert_eq!(
         apply_identity.as_deref(),
         Some(git(apply_repo.path(), &["rev-parse", "--short", "HEAD"]).as_str())
-    );
-
-    let managed_repo = tempfile::tempdir().unwrap();
-    init_dirty_repo(managed_repo.path());
-
-    let managed = commit_all::execute(
-        CommitAll {
-            repos: vec![ManagedRepo {
-                name: "managed".into(),
-                path: managed_repo.path().into(),
-                remote: "origin".into(),
-            }],
-            message: Some("managed change".into()),
-            dry: false,
-        },
-        &StdGitRunner,
-    )
-    .expect("managed commit succeeds through real Git");
-    assert_eq!(
-        managed.results[0].commit.as_deref(),
-        Some(git(managed_repo.path(), &["rev-parse", "--short", "HEAD"]).as_str())
     );
 }

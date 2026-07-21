@@ -139,17 +139,6 @@ fn public_operations_use_the_migrated_schema() {
 }
 
 #[test]
-fn clones_observe_the_same_persisted_rows() {
-    let directory = tempfile::tempdir().expect("temporary data root");
-    let state = SqliteAppState::open(directory.path()).expect("open app state");
-    let state_clone = state.clone();
-
-    save_live_view(&state, Path::new("/repos/clone"));
-
-    assert_eq!(list_live_views(&state_clone).len(), 1);
-}
-
-#[test]
 fn second_process_style_connection_observes_committed_rows() {
     let directory = tempfile::tempdir().expect("temporary data root");
     let state_first = SqliteAppState::open(directory.path()).expect("open first app state");

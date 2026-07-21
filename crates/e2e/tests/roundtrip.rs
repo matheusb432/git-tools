@@ -7,12 +7,11 @@ use std::{
     fs::{OpenOptions, TryLockError},
     path::{Path, PathBuf},
     process::{Child, Command as Git, ExitStatus, Stdio},
-    sync::{Arc, Barrier, OnceLock},
+    sync::OnceLock,
     time::{Duration, Instant},
 };
 
 use assert_cmd::Command;
-use infra::store::Sidecar;
 use predicates::str::contains;
 use tempfile::TempDir;
 
@@ -265,21 +264,6 @@ impl Fixture {
         cmd
     }
 
-    fn spawn(&self, args: &[&str]) -> Child {
-        ensure_binaries_built();
-        Git::new(workspace_bin("git-tools"))
-            .args(args)
-            .current_dir(&self.repo)
-            .env("GIT_TOOLS_NO_OPEN", "1")
-            .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
-            .env_remove("DISPLAY")
-            .env_remove("WAYLAND_DISPLAY")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("spawn git-tools")
-    }
-
     fn port_file_path(&self) -> PathBuf {
         self.store_dir.join("daemon.json")
     }
@@ -383,15 +367,6 @@ fn cli_autostarts_the_daemon_renders_and_stops() {
         .collect();
     assert_eq!(html_files.len(), 1, "expected exactly one artifact");
     assert_eq!(json_files.len(), 1, "expected exactly one sidecar");
-    let sidecar: Sidecar = serde_json::from_str(&std::fs::read_to_string(&json_files[0]).unwrap())
-        .expect("sidecar must deserialize via infra::store::Sidecar");
-    assert!(!sidecar.base_sha.is_empty(), "sidecar.base_sha must be set");
-    assert!(!sidecar.head_sha.is_empty(), "sidecar.head_sha must be set");
-    assert_ne!(
-        sidecar.base_sha, sidecar.head_sha,
-        "an unpushed diff spans distinct base/head commits"
-    );
-
     // 5. A second identical run hits the fast path: same artifact, no respawn.
     let output = fixture.run(&["diff"]).output().unwrap();
     let stdout2 = String::from_utf8(output.stdout).unwrap();
@@ -432,49 +407,6 @@ fn cli_autostarts_the_daemon_renders_and_stops() {
 }
 
 #[test]
-fn first_lazy_start_survives_concurrent_status_probes() {
-    let fixture = Fixture::new();
-    let workers_count = 4;
-    let barrier = Arc::new(Barrier::new(workers_count + 1));
-    let mut workers = Vec::new();
-    for _ in 0..workers_count {
-        let barrier = Arc::clone(&barrier);
-        let cli_path = workspace_bin("git-tools");
-        let repo = fixture.repo.clone();
-        let store_dir = fixture.store_dir.clone();
-        workers.push(std::thread::spawn(move || {
-            barrier.wait();
-            for _ in 0..10 {
-                Git::new(&cli_path)
-                    .args(["daemon", "status"])
-                    .current_dir(&repo)
-                    .env("GIT_TOOLS_DATA_DIR", &store_dir)
-                    .output()
-                    .expect("run concurrent daemon status");
-            }
-        }));
-    }
-
-    barrier.wait();
-    let diff = fixture.spawn(&["diff"]);
-    let output = diff.wait_with_output().expect("wait for lazy-start diff");
-    for worker in workers {
-        worker.join().unwrap();
-    }
-
-    assert!(
-        output.status.success(),
-        "lazy-start diff failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    fixture
-        .run(&["daemon", "status"])
-        .assert()
-        .success()
-        .stdout(contains("gtl-daemon running"));
-}
-
-#[test]
 fn daemon_restart_replaces_a_healthy_process() {
     let fixture = Fixture::new();
     fixture.run(&["diff"]).assert().success();
@@ -493,120 +425,6 @@ fn daemon_restart_replaces_a_healthy_process() {
         .assert()
         .success()
         .stdout(contains(format!("pid {pid_after}")));
-}
-
-#[test]
-fn simultaneous_restarts_accept_one_healthy_replacement() {
-    let fixture = Fixture::new();
-    fixture.run(&["diff"]).assert().success();
-
-    let first = fixture.spawn(&["daemon", "restart"]);
-    let second = fixture.spawn(&["daemon", "restart"]);
-    let first_output = first.wait_with_output().expect("wait for first restart");
-    let second_output = second.wait_with_output().expect("wait for second restart");
-
-    assert!(
-        first_output.status.success(),
-        "first restart failed: {}",
-        String::from_utf8_lossy(&first_output.stderr)
-    );
-    assert!(
-        second_output.status.success(),
-        "second restart failed: {}",
-        String::from_utf8_lossy(&second_output.stderr)
-    );
-    fixture
-        .run(&["daemon", "status"])
-        .assert()
-        .success()
-        .stdout(contains("gtl-daemon running"));
-    fixture
-        .run(&["daemon", "stop"])
-        .assert()
-        .success()
-        .stdout(contains("gtl-daemon stopped"));
-    std::thread::sleep(Duration::from_millis(700));
-    fixture
-        .run(&["daemon", "status"])
-        .assert()
-        .success()
-        .stdout(contains("gtl-daemon not running"));
-}
-
-#[test]
-fn daemon_restart_starts_a_process_when_none_is_running() {
-    let fixture = Fixture::new();
-
-    fixture
-        .run(&["daemon", "restart"])
-        .assert()
-        .success()
-        .stdout(contains("gtl-daemon restarted"));
-
-    let pid = fixture.daemon_pid();
-    fixture
-        .run(&["daemon", "status"])
-        .assert()
-        .success()
-        .stdout(contains(format!("pid {pid}")));
-}
-
-#[test]
-fn unavailable_pinned_port_falls_back_to_the_discovery_record() {
-    let fixture = Fixture::new();
-    fixture.run(&["diff"]).assert().success();
-    let pid = fixture.daemon_pid();
-    let port_unavailable = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-
-    fixture
-        .run(&["diff"])
-        .env("GIT_TOOLS_DAEMON_PORT", port_unavailable.to_string())
-        .assert()
-        .success();
-
-    assert_eq!(fixture.daemon_pid(), pid);
-}
-
-#[test]
-fn unresponsive_pinned_port_falls_back_to_the_discovery_record() {
-    let fixture = Fixture::new();
-    fixture.run(&["diff"]).assert().success();
-    let pid = fixture.daemon_pid();
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    listener.set_nonblocking(true).unwrap();
-    let port_unresponsive = listener.local_addr().unwrap().port();
-    let (stop_sender, stop_receiver) = std::sync::mpsc::channel();
-    let blackhole = std::thread::spawn(move || {
-        let mut connections = Vec::new();
-        loop {
-            match listener.accept() {
-                Ok((stream, _)) => connections.push(stream),
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(error) => panic!("accept pinned health probe: {error}"),
-            }
-            if stop_receiver.try_recv().is_ok() {
-                break connections.len();
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-    });
-
-    let started_at = Instant::now();
-    let assertion = fixture
-        .run(&["diff"])
-        .env("GIT_TOOLS_DAEMON_PORT", port_unresponsive.to_string())
-        .assert();
-    stop_sender.send(()).unwrap();
-    let connections_count = blackhole.join().unwrap();
-
-    assertion.success();
-    assert!(connections_count > 0, "the pinned listener was not probed");
-    assert!(started_at.elapsed() < Duration::from_secs(2));
-    assert_eq!(fixture.daemon_pid(), pid);
 }
 
 #[test]

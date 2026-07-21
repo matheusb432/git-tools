@@ -284,9 +284,10 @@ mod tests {
             SyncExitDto,
         },
     };
+    use tempfile::TempDir;
 
     use super::*;
-    use crate::{client::Backend, commands::managed::test_support::ManagedFixture};
+    use crate::client::Backend;
 
     #[derive(Default)]
     struct FakeBackend {
@@ -325,10 +326,10 @@ mod tests {
         }
     }
 
-    fn options(fixture: &ManagedFixture, dry: bool, json: bool) -> ManagedOptions {
+    fn options(directory: &TempDir, dry: bool, json: bool) -> ManagedOptions {
         ManagedOptions {
-            repos_file: Some(fixture.manifest.clone()),
-            home_dir: Some(fixture.home.clone()),
+            repos_file: Some(directory.path().join("repos.toml")),
+            home_dir: Some(directory.path().join("home")),
             dry,
             json,
             color: false,
@@ -339,8 +340,7 @@ mod tests {
 
     #[test]
     fn run_push_all_with_maps_the_envelope_into_a_managed_run() {
-        let fixture = ManagedFixture::new("push-thin");
-        fixture.write_manifest(&[("repo", "")]);
+        let directory = tempfile::tempdir().unwrap();
         let backend = FakeBackend {
             push_response: Some(ok_envelope(
                 &[("repo", RepoSyncStatusDto::Pushed)],
@@ -349,7 +349,7 @@ mod tests {
             ..Default::default()
         };
 
-        let run = run_push_all_with(&backend, &options(&fixture, false, false));
+        let run = run_push_all_with(&backend, &options(&directory, false, false));
 
         assert_eq!(run.exit, ManagedExit::Clean);
         assert_eq!(run.results[0].status, RepoSyncStatusDto::Pushed);
@@ -359,8 +359,7 @@ mod tests {
 
     #[test]
     fn run_pull_all_with_json_mode_prints_the_pascal_case_array() {
-        let fixture = ManagedFixture::new("pull-thin-json");
-        fixture.write_manifest(&[("repo", "")]);
+        let directory = tempfile::tempdir().unwrap();
         let backend = FakeBackend {
             pull_response: Some(ok_envelope(
                 &[("repo", RepoSyncStatusDto::Pulled)],
@@ -369,7 +368,7 @@ mod tests {
             ..Default::default()
         };
 
-        let run = run_pull_all_with(&backend, &options(&fixture, false, true));
+        let run = run_pull_all_with(&backend, &options(&directory, false, true));
 
         assert_eq!(run.exit, ManagedExit::Warn);
         assert!(run.stdout.contains("\"Name\": \"repo\""));
@@ -378,8 +377,7 @@ mod tests {
 
     #[test]
     fn managed_push_summary_reports_pushed_and_skipped_without_zero_noise() {
-        let fixture = ManagedFixture::new("push-summary-clean");
-        fixture.write_manifest(&[("repo", "")]);
+        let directory = tempfile::tempdir().unwrap();
         let backend = FakeBackend {
             push_response: Some(ok_envelope(
                 &[
@@ -392,7 +390,7 @@ mod tests {
             ..Default::default()
         };
 
-        let run = run_push_all_with(&backend, &options(&fixture, false, false));
+        let run = run_push_all_with(&backend, &options(&directory, false, false));
 
         assert!(
             run.stdout
@@ -404,8 +402,7 @@ mod tests {
 
     #[test]
     fn managed_push_summary_reports_dry_and_nonzero_problem_counts() {
-        let fixture = ManagedFixture::new("push-summary-dry");
-        fixture.write_manifest(&[("repo", "")]);
+        let directory = tempfile::tempdir().unwrap();
         let backend = FakeBackend {
             push_response: Some(ok_envelope(
                 &[
@@ -419,7 +416,7 @@ mod tests {
             ..Default::default()
         };
 
-        let run = run_push_all_with(&backend, &options(&fixture, true, false));
+        let run = run_push_all_with(&backend, &options(&directory, true, false));
 
         assert!(
             run.stdout
@@ -429,8 +426,7 @@ mod tests {
 
     #[test]
     fn pull_only_status_in_push_response_is_a_contextual_error() {
-        let fixture = ManagedFixture::new("push-summary-invalid");
-        fixture.write_manifest(&[("repo", "")]);
+        let directory = tempfile::tempdir().unwrap();
         let backend = FakeBackend {
             push_response: Some(ok_envelope(
                 &[("wrong-repo", RepoSyncStatusDto::Pulled)],
@@ -439,7 +435,7 @@ mod tests {
             ..Default::default()
         };
 
-        let run = run_push_all_with(&backend, &options(&fixture, false, false));
+        let run = run_push_all_with(&backend, &options(&directory, false, false));
 
         assert_eq!(run.exit, ManagedExit::Fail);
         assert!(run.stderr.contains("wrong-repo"), "{}", run.stderr);
@@ -448,8 +444,7 @@ mod tests {
 
     #[test]
     fn pull_only_status_in_json_push_response_is_a_contextual_error() {
-        let fixture = ManagedFixture::new("push-summary-invalid-json");
-        fixture.write_manifest(&[("repo", "")]);
+        let directory = tempfile::tempdir().unwrap();
         let backend = FakeBackend {
             push_response: Some(ok_envelope(
                 &[("wrong-json-repo", RepoSyncStatusDto::WouldPull)],
@@ -458,7 +453,7 @@ mod tests {
             ..Default::default()
         };
 
-        let run = run_push_all_with(&backend, &options(&fixture, false, true));
+        let run = run_push_all_with(&backend, &options(&directory, false, true));
 
         assert_eq!(run.exit, ManagedExit::Fail);
         assert!(run.stderr.contains("wrong-json-repo"), "{}", run.stderr);
@@ -490,8 +485,7 @@ mod tests {
 
     #[test]
     fn managed_pull_human_summary_remains_unchanged() {
-        let fixture = ManagedFixture::new("pull-summary-stable");
-        fixture.write_manifest(&[("repo", "")]);
+        let directory = tempfile::tempdir().unwrap();
         let backend = FakeBackend {
             pull_response: Some(ok_envelope(
                 &[("repo", RepoSyncStatusDto::Warn)],
@@ -500,7 +494,7 @@ mod tests {
             ..Default::default()
         };
 
-        let run = run_pull_all_with(&backend, &options(&fixture, false, false));
+        let run = run_pull_all_with(&backend, &options(&directory, false, false));
 
         let expected_row = format!("{:<30} {:<18} {:<12} {}", "repo", "main", "warn", "detail");
         let actual_row = run
@@ -514,8 +508,7 @@ mod tests {
 
     #[test]
     fn a_daemon_error_outcome_becomes_stderr_and_a_fail_exit() {
-        let fixture = ManagedFixture::new("push-error-outcome");
-        fixture.write_manifest(&[("repo", "")]);
+        let directory = tempfile::tempdir().unwrap();
         let backend = FakeBackend {
             push_response: Some(Envelope {
                 outcome: Outcome::Error,
@@ -528,7 +521,7 @@ mod tests {
             ..Default::default()
         };
 
-        let run = run_push_all_with(&backend, &options(&fixture, false, false));
+        let run = run_push_all_with(&backend, &options(&directory, false, false));
 
         assert_eq!(run.exit, ManagedExit::Fail);
         assert_eq!(run.stderr, "manifest exploded");
@@ -536,8 +529,8 @@ mod tests {
 
     #[test]
     fn a_manifest_resolution_error_never_reaches_the_backend() {
-        let fixture = ManagedFixture::new("push-no-manifest");
-        let options = options(&fixture, false, false);
+        let directory = tempfile::tempdir().unwrap();
+        let options = options(&directory, false, false);
         let backend = FakeBackend::default();
 
         let run = run_push_all_resolving_with(&backend, &options, |_| {

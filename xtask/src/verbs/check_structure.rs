@@ -31,6 +31,8 @@
 //!    server, so htmx wiring belongs exclusively to the desktop viewer shell.
 //! 8. **Infra owns no templates.** `crates/infra/Cargo.toml` may not depend on `maud`; presentation
 //!    lives in `crates/preview` and the process-root shells.
+//! 9. **E2E stays black-box.** The `e2e` crate may depend on wire contracts, test utilities, and
+//!    app-agnostic shared crates, but not product implementation crates.
 
 use std::path::Path;
 
@@ -90,6 +92,15 @@ const APP_STATE_PORTS_PATH: &str = "crates/application/src/ports.rs";
 const APP_STATE_SOURCE_DIR: &str = "crates/infra/src/app_state";
 const APP_STATE_STORE_METHOD_NAMES: [&str; 1] = ["connection_lock"];
 const PREVIEW_SOURCE_DIR: &str = "crates/preview/src";
+const END_TO_END_PACKAGE_NAMES_FORBIDDEN: [&str; 7] = [
+    "application",
+    "domain",
+    "infra",
+    "preview",
+    "cli",
+    "daemon",
+    "desktop",
+];
 
 /// Collect every violation under `root/{crates,shared}/*/src`.
 fn collect_violations(root: &Path) -> Result<Vec<String>> {
@@ -101,7 +112,7 @@ fn collect_violations(root: &Path) -> Result<Vec<String>> {
     collect_app_state_store_violations(root, &mut violations)?;
     collect_app_state_sql_violations(root, &mut violations)?;
     collect_preview_htmx_violations(root, &mut violations)?;
-    collect_infra_template_violations(root, &mut violations)?;
+    collect_dependency_violations(root, &mut violations);
     Ok(violations)
 }
 
@@ -151,20 +162,28 @@ fn walk_preview_sources(current: &Path, violations: &mut Vec<String>) -> Result<
     Ok(())
 }
 
-/// Collects rule-8 violations: a `maud` dependency edge creeping back into infra.
+/// Collects dependency-direction violations from one shared workspace metadata load.
 ///
-/// The invariant is a dependency direction, so it is read from `cargo metadata` package
-/// edges rather than manifest text. A root without readable workspace metadata (e.g. the
-/// layout fixtures) is allowed: ambiguity never blocks.
-fn collect_infra_template_violations(root: &Path, violations: &mut Vec<String>) -> Result<()> {
+/// A root without readable workspace metadata (e.g. the layout fixtures) is allowed: ambiguity
+/// never blocks.
+fn collect_dependency_violations(root: &Path, violations: &mut Vec<String>) {
     let Ok(metadata) = cargo_metadata::MetadataCommand::new()
         .manifest_path(root.join("Cargo.toml"))
         .no_deps()
         .exec()
     else {
-        return Ok(());
+        return;
     };
 
+    collect_infra_template_violations(&metadata, violations);
+    collect_end_to_end_dependency_violations(&metadata, violations);
+}
+
+/// Collects rule-8 violations: a `maud` dependency edge creeping back into infra.
+fn collect_infra_template_violations(
+    metadata: &cargo_metadata::Metadata,
+    violations: &mut Vec<String>,
+) {
     let templated_edge = metadata
         .packages
         .iter()
@@ -177,8 +196,26 @@ fn collect_infra_template_violations(root: &Path, violations: &mut Vec<String>) 
             "[rule 8: infra owns no templates] crates/infra depends on maud: presentation belongs to crates/preview, not the adapter layer".to_string(),
         );
     }
+}
 
-    Ok(())
+fn collect_end_to_end_dependency_violations(
+    metadata: &cargo_metadata::Metadata,
+    violations: &mut Vec<String>,
+) {
+    let forbidden = metadata
+        .packages
+        .iter()
+        .filter(|package| package.name.as_str() == "e2e")
+        .flat_map(|package| &package.dependencies)
+        .filter(|dependency| END_TO_END_PACKAGE_NAMES_FORBIDDEN.contains(&dependency.name.as_str()))
+        .map(|dependency| dependency.name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+
+    for package_name in forbidden {
+        violations.push(format!(
+            "[rule 9: e2e stays black-box] crates/e2e depends on {package_name}: black-box tests may use contracts and app-agnostic shared crates, not product internals"
+        ));
+    }
 }
 
 /// Collects rule-5 violations from the application app-state port.
@@ -536,6 +573,119 @@ mod tests {
             ),
         );
         seed_with(base, "crates/infra/src/lib.rs", "");
+    }
+
+    fn seed_end_to_end_workspace(base: &Path, dependencies: &[&str]) {
+        let members = std::iter::once("e2e")
+            .chain(dependencies.iter().copied())
+            .map(|name| format!("\"crates/{name}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        seed_with(
+            base,
+            "Cargo.toml",
+            &format!("[workspace]\nresolver = \"3\"\nmembers = [{members}]\n"),
+        );
+
+        let dependency_entries = dependencies
+            .iter()
+            .map(|name| format!("{name} = {{ path = \"../{name}\" }}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        seed_with(
+            base,
+            "crates/e2e/Cargo.toml",
+            &format!(
+                "[package]\nname = \"e2e\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dev-dependencies]\n{dependency_entries}\n"
+            ),
+        );
+        seed_with(base, "crates/e2e/src/lib.rs", "");
+
+        for dependency in dependencies {
+            seed_with(
+                base,
+                &format!("crates/{dependency}/Cargo.toml"),
+                &format!(
+                    "[package]\nname = \"{dependency}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
+                ),
+            );
+            seed_with(base, &format!("crates/{dependency}/src/lib.rs"), "");
+        }
+    }
+
+    #[test]
+    fn end_to_end_internal_dependency_edge_is_a_rule_9_violation() {
+        let directory = TempDir::new().unwrap();
+        seed_end_to_end_workspace(directory.path(), &["infra"]);
+
+        let violations = collect_violations(directory.path()).unwrap();
+
+        assert!(
+            violations
+                .iter()
+                .any(|violation| violation.contains("rule 9") && violation.contains("infra")),
+            "violations: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn end_to_end_contracts_and_shared_dependencies_pass_rule_9() {
+        let directory = TempDir::new().unwrap();
+        seed_end_to_end_workspace(directory.path(), &["contracts", "bootstrap"]);
+
+        let violations = collect_violations(directory.path()).unwrap();
+
+        assert!(
+            violations
+                .iter()
+                .all(|violation| !violation.contains("rule 9")),
+            "violations: {violations:?}"
+        );
+    }
+
+    #[test]
+    fn end_to_end_multiple_internal_dependency_edges_are_reported_in_name_order() {
+        let directory = TempDir::new().unwrap();
+        seed_end_to_end_workspace(directory.path(), &["desktop", "application"]);
+
+        let violations = collect_violations(directory.path()).unwrap();
+        let rule_9_violations = violations
+            .into_iter()
+            .filter(|violation| violation.contains("rule 9"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rule_9_violations,
+            [
+                "[rule 9: e2e stays black-box] crates/e2e depends on application: black-box tests may use contracts and app-agnostic shared crates, not product internals",
+                "[rule 9: e2e stays black-box] crates/e2e depends on desktop: black-box tests may use contracts and app-agnostic shared crates, not product internals",
+            ]
+        );
+    }
+
+    #[test]
+    fn workspace_without_an_end_to_end_package_passes_rule_9() {
+        let directory = TempDir::new().unwrap();
+        seed_with(
+            directory.path(),
+            "Cargo.toml",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"crates/contracts\"]\n",
+        );
+        seed_with(
+            directory.path(),
+            "crates/contracts/Cargo.toml",
+            "[package]\nname = \"contracts\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        );
+        seed_with(directory.path(), "crates/contracts/src/lib.rs", "");
+
+        let violations = collect_violations(directory.path()).unwrap();
+
+        assert!(
+            violations
+                .iter()
+                .all(|violation| !violation.contains("rule 9")),
+            "violations: {violations:?}"
+        );
     }
 
     #[test]

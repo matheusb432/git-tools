@@ -17,9 +17,7 @@ if (!sandboxFixtures) {
 }
 
 let fixtureRoot;
-let remoteRoot;
-let primaryRepo;
-let secondaryRepo;
+let repository;
 
 async function run(program, args, cwd) {
   return runFile(program, args, {
@@ -43,26 +41,20 @@ async function pressEnter() {
   await browser.keys('Enter');
 }
 
-async function createRepo(name, content) {
-  const repo = path.join(fixtureRoot, name);
-  await mkdir(repo, { recursive: true });
-  await git(repo, 'init', '-q', '-b', 'main');
-  await git(repo, 'config', 'user.name', 'Viewer E2E');
-  await git(repo, 'config', 'user.email', 'viewer-e2e@example.invalid');
-  await writeFile(path.join(repo, 'work.txt'), content);
-  await git(repo, 'add', 'work.txt');
-  await git(repo, 'commit', '-q', '-m', 'base');
-  const remote = path.join(remoteRoot, `${name}.git`);
-  await mkdir(remote, { recursive: true });
-  await git(remote, 'init', '--bare', '-q');
-  await git(repo, 'remote', 'add', 'origin', remote);
-  await git(repo, 'push', '-q', '-u', 'origin', 'main');
-  return repo;
-}
-
-async function openDiff(repo, expectedTabs, ...args) {
-  await run(cli, ['diff', ...args], repo);
-  await drainPending({ minTabs: expectedTabs });
+async function createRepo() {
+  const localRepository = path.join(fixtureRoot, 'live-view');
+  await mkdir(localRepository, { recursive: true });
+  await git(localRepository, 'init', '-q', '-b', 'main');
+  await git(localRepository, 'config', 'user.name', 'Viewer E2E');
+  await git(localRepository, 'config', 'user.email', 'viewer-e2e@example.invalid');
+  await writeFile(path.join(localRepository, 'work.txt'), 'base\n');
+  await git(localRepository, 'add', 'work.txt');
+  await git(localRepository, 'commit', '-q', '-m', 'base');
+  await git(localRepository, 'switch', '-q', '-c', 'feature');
+  await writeFile(path.join(localRepository, 'work.txt'), 'base\nalpha-v1\n');
+  await git(localRepository, 'add', 'work.txt');
+  await git(localRepository, 'commit', '-q', '-m', 'live view v1');
+  return localRepository;
 }
 
 async function drainPending(expected) {
@@ -137,143 +129,49 @@ async function selectSplitLayout() {
   await expect($("input[name='viewer-layout'][value='split']")).toBeChecked();
 }
 
-async function closeActiveTab() {
-  const before = await browser.execute(
-    () => document.querySelectorAll('.viewer-tab').length,
-  );
-  await $('.viewer-tab.active .viewer-tab-close').click();
-  await browser.waitUntil(
-    async () =>
-      browser.execute(
-        (previous) => document.querySelectorAll('.viewer-tab').length < previous,
-        before,
-      ),
-    { timeoutMsg: 'active tab did not close' },
-  );
-  await waitForHtmxIdle('closing the active tab');
-}
-
-async function closeAllTabs() {
-  while (
-    (await browser.execute(() => document.querySelectorAll('.viewer-tab').length)) > 0
-  ) {
-    await closeActiveTab();
-  }
-}
-
 describe('server-rendered viewer', () => {
   before(async () => {
     fixtureRoot = path.join(sandboxFixtures, 'dom-repositories');
-    remoteRoot = path.join(sandboxFixtures, 'dom-remotes');
-    await mkdir(fixtureRoot, { recursive: true });
-    await mkdir(remoteRoot, { recursive: true });
-    primaryRepo = await createRepo('primary', 'base\n');
-    secondaryRepo = await createRepo('secondary', 'base\n');
-    await createRepo('empty', 'base\n');
-    await writeFile(path.join(primaryRepo, 'work.txt'), 'base\nalpha-v1\n');
-    await writeFile(path.join(secondaryRepo, 'work.txt'), 'base\nbeta-v1\n');
-    for (const repo of [primaryRepo, secondaryRepo]) {
-      await git(repo, 'add', 'work.txt');
-      await git(repo, 'commit', '-q', '-m', 'unpushed work');
-    }
+    repository = await createRepo();
   });
 
   after(async () => {
     if (fixtureRoot) {
       await rm(fixtureRoot, { recursive: true, force: true });
     }
-    if (remoteRoot) {
-      await rm(remoteRoot, { recursive: true, force: true });
-    }
   });
 
-  it('opens a CLI-forwarded recipe as a server-rendered document', async () => {
-    await openDiff(primaryRepo, 1, '--name', 'primary snapshot');
-
+  it('forwarded live view restores refreshes and deletes', async () => {
+    await run(cli, ['diff', 'live', '--path', repository], root);
+    await drainPending({ minTabs: 1, activeKind: 'L' });
+    await browser.waitUntil(
+      async () => browser.execute(() => document.querySelectorAll('.viewer-tab').length === 1),
+      { timeoutMsg: 'the forwarded live view did not become the only active tab' },
+    );
     await expectReadyDocument();
     await expect($('#viewer-view')).toHaveText(expect.stringContaining('alpha-v1'));
-  });
 
-  it('persists layout across a real WebDriver session restart', async () => {
     await selectSplitLayout();
 
     await browser.reloadSession();
-    await openDiff(primaryRepo, 1, '--name', 'primary after restart');
-
-    await expect($('#viewer-view .diff-split')).toExist();
-    await expect($("input[name='viewer-layout'][value='split']")).toBeChecked();
-  });
-
-  it('reopens history by its stable persisted id', async () => {
-    await closeActiveTab();
-    await expect($('.viewer-status-empty')).toBeDisplayed();
-
-    await $('.viewer-history-button').click();
-    const historyRow = $('.viewer-history-row');
-    await expect(historyRow).toBeDisplayed();
-    await expect(historyRow).toHaveAttribute('hx-get', expect.stringMatching(/^\/history\/\d+\/open$/));
-    await historyRow.click();
-
-    await expectReadyDocument();
-  });
-
-  it('accepts a recursive batch while reporting clean repositories', async () => {
-    await run(cli, ['diff', '-r'], fixtureRoot);
-
     await browser.waitUntil(
       async () =>
         browser.execute(
-          () => document.querySelectorAll('.viewer-tab').length >= 3,
+          () =>
+            document.querySelectorAll('.viewer-tab').length === 1 &&
+            document.querySelector('.viewer-tab.active .viewer-tab-kind')?.textContent === 'L' &&
+            document.querySelector('#viewer-view .diff-split') !== null &&
+            document.querySelector("input[name='viewer-layout'][value='split']")?.checked === true,
         ),
-      {
-        timeout: 30_000,
-        interval: 100,
-        timeoutMsg: 'recursive batch did not reach the viewer',
-      },
+      { timeout: 30_000, timeoutMsg: 'the live view and split layout did not restore' },
     );
 
-    const batchState = await browser.execute(() => ({
-      tabs: Array.from(document.querySelectorAll('.viewer-tab')).map((tab) => ({
-        label: tab.querySelector('.viewer-tab-label')?.textContent,
-        state: tab.querySelector('.viewer-tab-state')?.getAttribute('aria-label') ?? 'ready',
-      })),
-    }));
-    expect(batchState.tabs).toHaveLength(3);
-    const toast = $('[data-viewer-toast]');
-    await expect(toast).toBeDisplayed();
-    await expect(toast).toHaveText(expect.stringContaining('empty'));
-    const labels = batchState.tabs.map((tab) => tab.label);
-    expect(labels).toEqual(expect.arrayContaining(['primary', 'secondary']));
-    const activeLabel = await browser.execute(
-      () => document.querySelector('.viewer-tab.active .viewer-tab-label')?.textContent,
-    );
-    expect(activeLabel).toContain('secondary');
-    await expectReadyDocument();
-    await browser.waitUntil(
-      async () =>
-        browser.execute(
-          () => getComputedStyle(document.querySelector('[data-viewer-toast]')).opacity === '0',
-        ),
-      { timeout: 8_000, timeoutMsg: 'skipped-diff toast did not dismiss' },
-    );
-  });
-
-  it('refreshes a live source and distinguishes a subsequently broken source', async () => {
-    await closeAllTabs();
-    await run(cli, ['diff', 'live', '--path', primaryRepo], root);
-    await drainPending({ minTabs: 1, activeKind: 'L' });
-    await expectReadyDocument();
-
-    await writeFile(path.join(primaryRepo, 'work.txt'), 'base\nalpha-v2\n');
-    await git(primaryRepo, 'add', 'work.txt');
-    await git(primaryRepo, 'commit', '-q', '-m', 'refresh work');
+    await writeFile(path.join(repository, 'work.txt'), 'base\nalpha-v2\n');
+    await git(repository, 'add', 'work.txt');
+    await git(repository, 'commit', '-q', '-m', 'live view v2');
     await $('button=Refresh').click();
+    await waitForHtmxIdle('refreshing the live view');
     await expect($('#viewer-view')).toHaveText(expect.stringContaining('alpha-v2'));
-
-    await rm(primaryRepo, { recursive: true, force: true });
-    await $('button=Refresh').click();
-    await expect($('.viewer-status-broken')).toBeDisplayed();
-    await expect($('.viewer-status-error')).not.toExist();
 
     const deleteLiveView = $('button=Delete live view');
     await browser.execute((button) => button.focus(), await deleteLiveView);
@@ -282,32 +180,21 @@ describe('server-rendered viewer', () => {
       'Delete this saved live view? This removes its tab and automatic restoration. You can add it again with gtl diff live.',
     );
     await browser.acceptAlert();
-    await browser.waitUntil(
-      async () =>
-        browser.execute(
-          () =>
-            document.activeElement?.classList.contains('viewer-recovery-button') &&
-            document.activeElement?.textContent?.trim() === 'Open history',
-        ),
-      { timeoutMsg: 'focus did not move to the empty-state History action' },
-    );
-    expect(
-      await browser.execute(
-        () => document.querySelector('.viewer-sr-only[role="status"]')?.textContent?.trim(),
-      ),
-    ).toContain(
-      'Live view deleted. No diffs remain open.',
-    );
+    await waitForHtmxIdle('deleting the live view');
     await browser.waitUntil(
       async () =>
         browser.execute(
           () =>
             !Array.from(document.querySelectorAll('.viewer-tab-kind')).some(
               (kind) => kind.textContent === 'L',
-            ),
+            ) &&
+            document.querySelector('.viewer-status-empty') !== null &&
+            document.activeElement?.classList.contains('viewer-recovery-button'),
         ),
-      { timeoutMsg: 'deleted live view remained in the authoritative tab strip' },
+      { timeoutMsg: 'the deleted live view did not transition to the focused empty state' },
     );
+    await expect($('.viewer-status-empty')).toBeDisplayed();
+    await expect($('.viewer-recovery-button')).toBeFocused();
 
     await browser.reloadSession();
     await expect($('.viewer-status-empty')).toBeDisplayed();

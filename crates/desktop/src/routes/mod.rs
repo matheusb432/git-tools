@@ -127,11 +127,6 @@ impl ViewerApp {
     pub(crate) fn pending(&self) -> &PendingRecipes {
         &self.pending
     }
-
-    #[cfg(test)]
-    fn active_tab(&self) -> Option<ViewerTabId> {
-        self.session.lock().expect("session lock").active()
-    }
 }
 
 fn recipe_context(

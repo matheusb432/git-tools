@@ -11,8 +11,6 @@ mod manifest;
 mod prune_all;
 mod push_pull;
 mod status;
-#[cfg(test)]
-mod test_support;
 
 pub use commit::{CommitFile, CommitResult, run_commit_all};
 /// The manifest entry shape — the domain type, shared with the application slices.

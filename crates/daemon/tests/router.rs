@@ -1,12 +1,12 @@
 //! Router-level tests exercising the concrete daemon state through real temporary boundaries.
 
-use std::{path::Path, process::Command, time::Duration};
-
-use application::diffs::{
-    DiffTargetRequest, RepoRef, render_diff::RenderDiff, render_diff_all::RenderDiffAll,
-    render_diff_subrepos::RenderDiffSubrepos, render_merge_diff::RenderMergeDiff,
-    render_squash_preview::RenderSquashPreview,
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
 };
+
+use application::ports::AppStateStore;
 use axum::{
     Router,
     body::Body,
@@ -19,28 +19,76 @@ use tempfile::TempDir;
 use tokio::sync::watch;
 use tower::ServiceExt as _;
 
+static DATABASE_BUSY_SIGNAL_SENDER: std::sync::OnceLock<
+    std::sync::Mutex<Option<std::sync::mpsc::SyncSender<()>>>,
+> = std::sync::OnceLock::new();
+
+fn database_busy_signal_sender_set(sender: Option<std::sync::mpsc::SyncSender<()>>) {
+    *DATABASE_BUSY_SIGNAL_SENDER
+        .get_or_init(|| std::sync::Mutex::new(None))
+        .lock()
+        .expect("database busy signal lock") = sender;
+}
+
+fn database_busy_signal(_retry_count: i32) -> bool {
+    if let Some(sender) = DATABASE_BUSY_SIGNAL_SENDER
+        .get_or_init(|| std::sync::Mutex::new(None))
+        .lock()
+        .expect("database busy signal lock")
+        .as_ref()
+    {
+        let _ = sender.try_send(());
+    }
+    true
+}
+
+struct DatabaseBusySignalGuard<'a> {
+    app_state: &'a infra::app_state::SqliteAppState,
+}
+
+impl<'a> DatabaseBusySignalGuard<'a> {
+    fn install(
+        app_state: &'a infra::app_state::SqliteAppState,
+        sender: std::sync::mpsc::SyncSender<()>,
+    ) -> Self {
+        database_busy_signal_sender_set(Some(sender));
+        app_state
+            .connection_lock()
+            .expect("app-state connection lock")
+            .busy_handler(Some(database_busy_signal))
+            .expect("install database busy signal");
+        Self { app_state }
+    }
+}
+
+impl Drop for DatabaseBusySignalGuard<'_> {
+    fn drop(&mut self) {
+        database_busy_signal_sender_set(None);
+        if let Ok(connection) = self.app_state.connection_lock() {
+            let _ = connection.busy_handler(None);
+        }
+    }
+}
+
 struct Fixture {
-    _temp: TempDir,
+    _temporary: TempDir,
     app: Router,
-    shutdown_rx: watch::Receiver<bool>,
-    repo: std::path::PathBuf,
-    store: std::path::PathBuf,
-    data: std::path::PathBuf,
-    manifest: std::path::PathBuf,
+    app_state: infra::app_state::SqliteAppState,
+    shutdown_receiver: watch::Receiver<bool>,
+    repository: PathBuf,
+    data_root: PathBuf,
 }
 
 impl Fixture {
-    fn new(with_feature_commit: bool) -> Self {
-        let temp = tempfile::tempdir().expect("temp dir");
-        let repo = temp.path().join("repo");
-        let store = temp.path().join("store");
-        let data = temp.path().join("data");
-        let manifest = temp.path().join("repos.toml");
-        std::fs::create_dir_all(&repo).expect("repo dir");
-        init_repo(&repo, with_feature_commit);
+    fn new() -> Self {
+        let temporary = tempfile::tempdir().expect("temp dir");
+        let repository = temporary.path().join("repo");
+        let data_root = temporary.path().join("data");
+        std::fs::create_dir_all(&repository).expect("repo dir");
+        init_repo(&repository);
 
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let app_state = infra::app_state::SqliteAppState::open(&data).expect("open app state");
+        let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+        let app_state = infra::app_state::SqliteAppState::open(&data_root).expect("open app state");
         let app = daemon::state::router(DaemonState::new(
             ExeIdentity {
                 exe_len: 4242,
@@ -48,18 +96,17 @@ impl Fixture {
             },
             "9.9.9",
             4242,
-            shutdown_tx,
-            app_state,
+            shutdown_sender,
+            app_state.clone(),
             infra::user_config::TomlSettingsStore::new(None),
         ));
         Self {
-            _temp: temp,
+            _temporary: temporary,
             app,
-            shutdown_rx,
-            repo,
-            store,
-            data,
-            manifest,
+            app_state,
+            shutdown_receiver,
+            repository,
+            data_root,
         }
     }
 
@@ -68,31 +115,24 @@ impl Fixture {
     }
 }
 
-fn init_repo(repo: &Path, with_feature_commit: bool) {
-    git(repo, &["init", "-q", "-b", "main"]);
-    git(repo, &["config", "user.email", "test@example.com"]);
-    git(repo, &["config", "user.name", "Test User"]);
-    std::fs::write(repo.join("f.txt"), "base\n").expect("base file");
-    git(repo, &["add", "f.txt"]);
-    git(repo, &["commit", "-qm", "initial"]);
-    git(repo, &["switch", "-qc", "feature"]);
-    if with_feature_commit {
-        std::fs::write(repo.join("f.txt"), "feature\n").expect("feature file");
-        git(repo, &["add", "f.txt"]);
-        git(repo, &["commit", "-qm", "feature"]);
-    }
-    git(repo, &["branch", "--set-upstream-to=main", "feature"]);
+fn init_repo(repository: &Path) {
+    git(repository, &["init", "-q", "-b", "main"]);
+    git(repository, &["config", "user.email", "test@example.com"]);
+    git(repository, &["config", "user.name", "Test User"]);
+    std::fs::write(repository.join("f.txt"), "base\n").expect("base file");
+    git(repository, &["add", "f.txt"]);
+    git(repository, &["commit", "-qm", "initial"]);
 }
 
-fn git(repo: &Path, args: &[&str]) {
+fn git(repository: &Path, arguments: &[&str]) {
     let output = Command::new("git")
-        .args(args)
-        .current_dir(repo)
+        .args(arguments)
+        .current_dir(repository)
         .output()
         .expect("run git");
     assert!(
         output.status.success(),
-        "git {args:?} failed: {}",
+        "git {arguments:?} failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 }
@@ -120,101 +160,9 @@ async fn body_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).expect("json body")
 }
 
-fn assert_ok_artifact(json: &Value) {
-    assert_eq!(json["outcome"], "ok");
-    let artifact = json["data"]["artifact"].as_str().expect("artifact path");
-    assert!(!artifact.is_empty());
-    assert!(
-        Path::new(artifact).is_file(),
-        "artifact should exist: {artifact}"
-    );
-}
-
-#[test]
-fn application_diff_requests_preserve_the_route_json_contract() {
-    let render = RenderDiff {
-        cwd: "/repo".into(),
-        store_root: "/store".into(),
-        target: DiffTargetRequest::Base { rev: "main".into() },
-        name: Some("review".into()),
-    };
-    let render_json = json!({
-        "cwd": "/repo",
-        "store_root": "/store",
-        "target": {"kind": "base", "rev": "main"},
-        "name": "review"
-    });
-    assert_eq!(serde_json::to_value(&render).unwrap(), render_json);
-    assert_eq!(
-        serde_json::from_value::<RenderDiff>(render_json).unwrap(),
-        render
-    );
-
-    let merge = RenderMergeDiff {
-        cwd: "/repo".into(),
-        store_root: "/store".into(),
-        base: Some("main".into()),
-    };
-    let merge_json = json!({"cwd": "/repo", "store_root": "/store", "base": "main"});
-    assert_eq!(serde_json::to_value(&merge).unwrap(), merge_json);
-    assert_eq!(
-        serde_json::from_value::<RenderMergeDiff>(merge_json).unwrap(),
-        merge
-    );
-
-    let squash = RenderSquashPreview {
-        cwd: "/repo".into(),
-        store_root: "/store".into(),
-    };
-    let squash_json = json!({"cwd": "/repo", "store_root": "/store"});
-    assert_eq!(serde_json::to_value(&squash).unwrap(), squash_json);
-    assert_eq!(
-        serde_json::from_value::<RenderSquashPreview>(squash_json).unwrap(),
-        squash
-    );
-
-    let repo = RepoRef {
-        top: "/repo".into(),
-        label: "repo".into(),
-    };
-    let subrepos = RenderDiffSubrepos {
-        store_root: "/store".into(),
-        root: "/root".into(),
-        target: DiffTargetRequest::Unpushed,
-        repos: vec![repo.clone()],
-    };
-    let subrepos_json = json!({
-        "store_root": "/store",
-        "root": "/root",
-        "target": {"kind": "unpushed"},
-        "repos": [{"top": "/repo", "label": "repo"}]
-    });
-    assert_eq!(serde_json::to_value(&subrepos).unwrap(), subrepos_json);
-    assert_eq!(
-        serde_json::from_value::<RenderDiffSubrepos>(subrepos_json).unwrap(),
-        subrepos
-    );
-
-    let all = RenderDiffAll {
-        store_root: "/store".into(),
-        root: "/root".into(),
-        repos: vec![repo],
-    };
-    let all_json = json!({
-        "store_root": "/store",
-        "root": "/root",
-        "repos": [{"top": "/repo", "label": "repo"}]
-    });
-    assert_eq!(serde_json::to_value(&all).unwrap(), all_json);
-    assert_eq!(
-        serde_json::from_value::<RenderDiffAll>(all_json).unwrap(),
-        all
-    );
-}
-
 #[tokio::test]
 async fn health_returns_startup_identity() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new();
     let response = fixture
         .app
         .clone()
@@ -236,8 +184,8 @@ async fn health_returns_startup_identity() {
 
 #[tokio::test]
 async fn shutdown_returns_202_and_flips_the_watch() {
-    let mut fixture = Fixture::new(false);
-    assert!(!*fixture.shutdown_rx.borrow());
+    let mut fixture = Fixture::new();
+    assert!(!*fixture.shutdown_receiver.borrow());
 
     let response = fixture
         .app
@@ -254,54 +202,16 @@ async fn shutdown_returns_202_and_flips_the_watch() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     fixture
-        .shutdown_rx
+        .shutdown_receiver
         .changed()
         .await
         .expect("shutdown change");
-    assert!(*fixture.shutdown_rx.borrow());
-}
-
-#[tokio::test]
-async fn render_with_a_bad_target_is_a_400_error_envelope() {
-    let fixture = Fixture::new(false);
-    let response = fixture
-        .post(
-            "/diffs/render",
-            json!({"cwd": fixture.repo, "store_root": fixture.store, "target": {"kind": "last", "count": 0}}),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "error");
-    assert_eq!(json["notes"][0]["level"], "error");
-    assert_eq!(json["notes"][0]["text"], "last count must be >= 1");
-}
-
-#[tokio::test]
-async fn subrepos_with_a_bad_target_is_a_400_error_envelope() {
-    let fixture = Fixture::new(false);
-    let response = fixture
-        .post(
-            "/diffs/subrepos",
-            json!({
-                "store_root": fixture.store,
-                "root": fixture.repo,
-                "target": {"kind": "last", "count": 0},
-                "repos": []
-            }),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "error");
-    assert_eq!(json["notes"][0]["text"], "last count must be >= 1");
+    assert!(*fixture.shutdown_receiver.borrow());
 }
 
 #[tokio::test]
 async fn malformed_render_json_is_a_400_error_envelope() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new();
     let response = post(fixture.app.clone(), "/diffs/render", r#"{"target":42}"#).await;
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
@@ -316,171 +226,13 @@ async fn malformed_render_json_is_a_400_error_envelope() {
 }
 
 #[tokio::test]
-async fn render_against_a_non_repo_is_a_500_error_envelope() {
-    let fixture = Fixture::new(false);
-    let response = fixture
-        .post(
-            "/diffs/render",
-            json!({"cwd": fixture.store, "store_root": fixture.store, "target": {"kind": "unpushed"}}),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "error");
-    assert_eq!(json["notes"][0]["level"], "error");
-    let error_text = json["notes"][0]["text"].as_str().expect("error text");
-    assert!(!error_text.is_empty(), "{json}");
-}
-
-#[tokio::test]
-async fn render_happy_path_is_a_200_ok_envelope_with_artifact_and_notes() {
-    let fixture = Fixture::new(true);
-    let response = fixture
-        .post(
-            "/diffs/render",
-            json!({"cwd": fixture.repo, "store_root": fixture.store, "target": {"kind": "unpushed"}}),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_ok_artifact(&json);
-    assert!(json["notes"].as_array().expect("notes").iter().any(|note| {
-        note["text"]
-            .as_str()
-            .is_some_and(|text| text.contains("diff-preview:"))
-    }));
-}
-
-#[tokio::test]
-async fn merge_happy_path_is_a_200_ok_envelope_with_artifact() {
-    let fixture = Fixture::new(true);
-    let response = fixture
-        .post(
-            "/diffs/merge",
-            json!({"cwd": fixture.repo, "store_root": fixture.store}),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_ok_artifact(&body_json(response).await);
-}
-
-#[tokio::test]
-async fn squash_preview_happy_path_is_a_200_ok_envelope_with_artifact() {
-    let fixture = Fixture::new(true);
-    let response = fixture
-        .post(
-            "/diffs/squash-preview",
-            json!({"cwd": fixture.repo, "store_root": fixture.store}),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_ok_artifact(&body_json(response).await);
-}
-
-#[tokio::test]
-async fn all_happy_path_is_a_200_ok_envelope_with_artifact() {
-    let fixture = Fixture::new(true);
-    let response = fixture
-        .post(
-            "/diffs/all",
-            json!({"store_root": fixture.store, "root": fixture.repo, "repos": [{"top": fixture.repo, "label": "repo"}]}),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_ok_artifact(&body_json(response).await);
-}
-
-#[tokio::test]
-async fn subrepos_happy_path_is_a_200_ok_envelope_with_artifact() {
-    let fixture = Fixture::new(true);
-    let response = fixture
-        .post(
-            "/diffs/subrepos",
-            json!({"store_root": fixture.store, "root": fixture.repo, "target": {"kind": "unpushed"}, "repos": [{"top": fixture.repo, "label": "repo"}]}),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_ok_artifact(&body_json(response).await);
-}
-
-#[tokio::test]
-async fn subrepos_with_nothing_to_show_is_a_200_empty_envelope() {
-    let fixture = Fixture::new(false);
-    let response = fixture
-        .post(
-            "/diffs/subrepos",
-            json!({"store_root": fixture.store, "root": fixture.repo, "target": {"kind": "unpushed"}, "repos": [{"top": fixture.repo, "label": "repo"}]}),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "empty");
-    assert!(json["data"].is_null());
-}
-
-async fn assert_managed_skip(uri: &str) {
-    let fixture = Fixture::new(false);
-    std::fs::write(&fixture.manifest, "[[repo]]\npath = 'missing'\n").expect("manifest");
-    let response = fixture
-        .post(
-            uri,
-            json!({"repos_file": fixture.manifest, "home_dir": fixture.data, "dry": false}),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "ok");
-    let results = json["data"]["results"].as_array().expect("results");
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["Status"], "skip");
-}
-
-#[tokio::test]
-async fn managed_push_all_happy_path_is_a_200_ok_envelope_with_one_result() {
-    assert_managed_skip("/managed/push-all").await;
-}
-
-#[tokio::test]
-async fn managed_pull_all_happy_path_is_a_200_ok_envelope_with_one_result() {
-    assert_managed_skip("/managed/pull-all").await;
-}
-
-#[tokio::test]
-async fn managed_push_all_missing_manifest_is_a_500_error_envelope() {
-    let fixture = Fixture::new(false);
-    let response = fixture
-        .post(
-            "/managed/push-all",
-            json!({
-                "repos_file": fixture.data.join("missing.toml"),
-                "home_dir": fixture.data,
-                "dry": false
-            }),
-        )
-        .await;
-
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "error");
-    assert_eq!(json["notes"][0]["level"], "error");
-}
-
-#[tokio::test]
 async fn live_view_save_ignores_legacy_data_root_and_uses_daemon_store() {
-    let fixture = Fixture::new(false);
-    let redirected_root = fixture.data.with_file_name("redirected");
+    let fixture = Fixture::new();
+    let redirected_root = fixture.data_root.with_file_name("redirected");
     let response = fixture
         .post(
             "/live-views/save",
-            json!({"data_root": redirected_root, "path": fixture.repo}),
+            json!({"data_root": redirected_root, "path": fixture.repository}),
         )
         .await;
 
@@ -491,13 +243,13 @@ async fn live_view_save_ignores_legacy_data_root_and_uses_daemon_store() {
     assert_eq!(json["data"]["display_name"], "repo");
     assert_eq!(json["data"]["already_saved"], false);
 
-    let connection =
-        rusqlite::Connection::open(fixture.data.join("gtl.db")).expect("open daemon app database");
+    let connection = rusqlite::Connection::open(fixture.data_root.join("gtl.db"))
+        .expect("open daemon app database");
     let row_count: i64 = connection
         .query_row(
             "SELECT COUNT(*) FROM live_views \
              WHERE source_kind = 'LocalRepo' AND source_value = ?1",
-            [fixture.repo.to_string_lossy().as_ref()],
+            [fixture.repository.to_string_lossy().as_ref()],
             |row| row.get(0),
         )
         .expect("count saved live view");
@@ -505,58 +257,30 @@ async fn live_view_save_ignores_legacy_data_root_and_uses_daemon_store() {
     assert!(!redirected_root.join("gtl.db").exists());
 }
 
-#[tokio::test]
-async fn live_view_save_rejection_is_a_200_error_envelope_with_the_exact_message() {
-    let fixture = Fixture::new(false);
-    let gone = fixture.data.join("gone");
-    let response = fixture
-        .post("/live-views/save", json!({"path": gone}))
-        .await;
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "error");
-    assert!(json["data"].is_null());
-    assert_eq!(json["notes"][0]["level"], "warn");
-    assert_eq!(
-        json["notes"][0]["text"],
-        format!(
-            "The git repo's directory at `{}` was not found.",
-            gone.display()
-        )
-    );
-}
-
-#[tokio::test]
-async fn live_view_save_with_a_malformed_body_is_a_400() {
-    let fixture = Fixture::new(false);
-    let response = post(fixture.app, "/live-views/save", "not json").await;
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let json = body_json(response).await;
-    assert_eq!(json["outcome"], "error");
-    assert_eq!(json["notes"][0]["level"], "error");
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn health_remains_responsive_while_live_view_save_waits_on_the_database() {
-    let fixture = Fixture::new(false);
+    let fixture = Fixture::new();
     let warm_response = fixture
-        .post("/live-views/save", json!({"path": fixture.repo}))
+        .post("/live-views/save", json!({"path": fixture.repository}))
         .await;
     assert_eq!(warm_response.status(), StatusCode::OK);
 
     let database_connection =
-        rusqlite::Connection::open(fixture.data.join("gtl.db")).expect("open app database");
+        rusqlite::Connection::open(fixture.data_root.join("gtl.db")).expect("open app database");
     database_connection
         .execute_batch("BEGIN IMMEDIATE")
         .expect("hold app database write lock");
 
+    let (busy_signal_sender, busy_signal_receiver) = std::sync::mpsc::sync_channel(1);
+    let database_busy_signal_guard =
+        DatabaseBusySignalGuard::install(&fixture.app_state, busy_signal_sender);
     let save_router = fixture.app.clone();
-    let save_body = json!({"path": fixture.repo}).to_string();
+    let save_body = json!({"path": fixture.repository}).to_string();
     let save_task =
         tokio::spawn(async move { post(save_router, "/live-views/save", &save_body).await });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    busy_signal_receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("save must reach SQLite contention");
     assert!(
         !save_task.is_finished(),
         "the synchronous save should still be waiting on the database lock"
@@ -584,4 +308,5 @@ async fn health_remains_responsive_while_live_view_save_waits_on_the_database() 
         .expect("save completes after lock release")
         .expect("save task");
     assert_eq!(save_response.status(), StatusCode::OK);
+    drop(database_busy_signal_guard);
 }

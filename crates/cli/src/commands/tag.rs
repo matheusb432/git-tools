@@ -63,3 +63,57 @@ fn render_message(tag: &Tag) -> String {
     tag.message()
         .map_or_else(String::new, |message| format!("  {message}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use application::tags::{TagGroup, TagList};
+    use domain::tags::Tag;
+
+    use super::render_list;
+
+    fn annotated(name: &str, commit_short: &str, message: &str) -> Tag {
+        Tag::annotated(
+            name.into(),
+            format!("{name}-object"),
+            format!("{commit_short}-full"),
+            commit_short.into(),
+            Some(100),
+            Some(message.into()),
+        )
+    }
+
+    fn lightweight(name: &str, commit_short: &str) -> Tag {
+        Tag::lightweight(
+            name.into(),
+            format!("{commit_short}-full"),
+            commit_short.into(),
+            Some(110),
+        )
+    }
+
+    #[test]
+    fn tag_list_rendering_preserves_state_messages_labels_and_commit_columns() {
+        let mut remote = annotated("v1.0.0", "abc1234", "release");
+        remote.mark_remote();
+        let canonical = annotated("v1.1.0", "def5678", "next");
+        let label = lightweight("stable", "def5678");
+        let list = TagList::Listed {
+            groups: vec![
+                TagGroup::Single(remote),
+                TagGroup::Canonical {
+                    canonical,
+                    labels: vec![label],
+                },
+            ],
+        };
+
+        assert_eq!(
+            render_list(&list, false),
+            "v1.0.0 [remote]  release\nv1.1.0 [local]  next\n  - stable [local]"
+        );
+        assert_eq!(
+            render_list(&list, true),
+            "abc1234 v1.0.0 [remote]  release\ndef5678 v1.1.0 [local]  next\n  - stable [local]"
+        );
+    }
+}

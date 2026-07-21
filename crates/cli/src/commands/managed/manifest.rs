@@ -176,7 +176,13 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::commands::managed::test_support::{ManagedFixture, touch};
+
+    fn touch(path: &Path) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(path, "").unwrap();
+    }
 
     #[test]
     fn parses_toml_manifest_with_comments_and_missing_remote() {
@@ -198,12 +204,14 @@ mod tests {
 
     #[test]
     fn resolve_repos_file_sources_respect_precedence() {
-        let fixture = ManagedFixture::new("resolve-precedence");
-        let explicit = fixture.root.join("explicit.txt");
-        let env_file = fixture.root.join("env.txt");
-        let cwd = fixture.root.join("workspace").join("repo");
-        let upward = fixture.root.join("workspace/repos.toml");
-        let home_default = fixture.home.join("tools/sample_project/repos.toml");
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let home = root.join("home");
+        let explicit = root.join("explicit.txt");
+        let env_file = root.join("env.txt");
+        let cwd = root.join("workspace").join("repo");
+        let upward = root.join("workspace/repos.toml");
+        let home_default = home.join("tools/sample_project/repos.toml");
         touch(&explicit);
         touch(&env_file);
         touch(&upward);
@@ -214,50 +222,44 @@ mod tests {
                 Some(&explicit),
                 Some(&env_file),
                 &cwd,
-                Some(&fixture.home),
+                Some(&home),
                 || None,
             )
             .unwrap(),
             explicit
         );
         assert_eq!(
-            resolve_repos_file_from_sources(
-                None,
-                Some(&env_file),
-                &cwd,
-                Some(&fixture.home),
-                || None
-            )
-            .unwrap(),
+            resolve_repos_file_from_sources(None, Some(&env_file), &cwd, Some(&home), || None)
+                .unwrap(),
             env_file
         );
         assert_eq!(
-            resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home), || None)
-                .unwrap(),
+            resolve_repos_file_from_sources(None, None, &cwd, Some(&home), || None).unwrap(),
             upward
         );
     }
 
     #[test]
     fn resolve_repos_file_uses_home_default_after_upward_search_misses() {
-        let fixture = ManagedFixture::new("resolve-home-default");
-        let cwd = fixture.root.join("elsewhere").join("repo");
-        let home_default = fixture.home.join("tools/sample_project/repos.toml");
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let cwd = directory.path().join("elsewhere").join("repo");
+        let home_default = home.join("tools/sample_project/repos.toml");
         touch(&home_default);
 
         assert_eq!(
-            resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home), || None)
-                .unwrap(),
+            resolve_repos_file_from_sources(None, None, &cwd, Some(&home), || None).unwrap(),
             home_default
         );
     }
 
     #[test]
     fn resolve_repos_file_errors_without_any_config_source() {
-        let fixture = ManagedFixture::new("resolve-missing");
-        let cwd = fixture.root.join("elsewhere").join("repo");
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let cwd = directory.path().join("elsewhere").join("repo");
 
-        let err = resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home), || None)
+        let err = resolve_repos_file_from_sources(None, None, &cwd, Some(&home), || None)
             .expect_err("no manifest should be resolvable");
         let message = err.to_string();
         assert!(
@@ -270,15 +272,16 @@ mod tests {
 
     #[test]
     fn resolve_repos_file_from_sources_prefers_sample_project_manifest_over_home_default() {
-        let fixture = ManagedFixture::new("resolve-prefers-sample_project");
-        let cwd = fixture.root.join("elsewhere").join("repo");
-        let home_default = fixture.home.join("tools/sample_project/repos.toml");
-        let sample_project_answer = fixture.root.join("live/repos.toml");
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path().join("home");
+        let cwd = directory.path().join("elsewhere").join("repo");
+        let home_default = home.join("tools/sample_project/repos.toml");
+        let sample_project_answer = directory.path().join("live/repos.toml");
         touch(&home_default);
         touch(&sample_project_answer);
 
         assert_eq!(
-            resolve_repos_file_from_sources(None, None, &cwd, Some(&fixture.home), || Some(
+            resolve_repos_file_from_sources(None, None, &cwd, Some(&home), || Some(
                 sample_project_answer.clone()
             ))
             .unwrap(),

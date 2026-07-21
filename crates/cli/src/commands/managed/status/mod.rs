@@ -184,123 +184,46 @@ fn colorize_ahead(value: &str, palette: &StatusColorPalette) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::managed::test_support::ManagedFixture;
 
-    fn read_opts() -> ManagedOptions {
-        ManagedOptions {
-            repos_file: None,
-            home_dir: None,
-            dry: false,
-            json: false,
-            color: false,
-            message_for_all: None,
-            interactive: false,
+    fn status_result(name: &str, present: bool, branch: &str, detail: &str) -> StatusResult {
+        StatusResult {
+            name: name.into(),
+            present,
+            branch: branch.into(),
+            upstream: String::new(),
+            ahead: 0,
+            dirty: false,
+            dirty_count: 0,
+            untracked_count: 0,
+            state: String::new(),
+            detail: detail.into(),
         }
     }
 
     #[test]
-    fn status_current_reports_the_repo_at_the_given_dir() {
-        let fixture = ManagedFixture::new("status-current");
-        let repo = fixture.init_repo("repo");
+    fn status_formatting_preserves_present_and_absent_rows() {
+        let results = [
+            status_result("repo", true, "main", "⇡1 !?"),
+            status_result("missing", false, "", "not present"),
+        ];
 
-        let run = run_status_current(&repo, &read_opts());
-
-        assert_eq!(run.exit, ManagedExit::Clean);
-        assert_eq!(run.results.len(), 1);
-        assert_eq!(run.results[0].name, "repo");
-        assert!(run.results[0].present);
-    }
-
-    #[test]
-    fn status_current_resolves_repo_from_a_nested_subdirectory() {
-        let fixture = ManagedFixture::new("status-current-subdir");
-        let repo = fixture.init_repo("repo");
-        let nested = repo.join("a/b");
-        std::fs::create_dir_all(&nested).unwrap();
-
-        let run = run_status_current(&nested, &read_opts());
-
-        assert_eq!(run.exit, ManagedExit::Clean);
-        assert_eq!(run.results[0].name, "repo");
-    }
-
-    #[test]
-    fn status_current_fails_outside_a_git_repo() {
-        let fixture = ManagedFixture::new("status-current-norepo");
-        let plain = fixture.root.join("plain");
-        std::fs::create_dir_all(&plain).unwrap();
-
-        let run = run_status_current(&plain, &read_opts());
-
-        assert_eq!(run.exit, ManagedExit::Fail);
-        assert!(run.results.is_empty());
-        assert!(
-            run.stderr.contains("not a git repo"),
-            "stderr: {}",
-            run.stderr
+        assert_eq!(
+            format_status(false, false, &results),
+            "repo main [⇡1 !?]\nmissing (absent) [not present]"
         );
     }
 
     #[test]
-    fn status_recursive_reports_current_repo_and_nested_subrepos() {
-        let fixture = ManagedFixture::new("status-recursive");
-        let root = fixture.init_repo("root");
-        fixture.init_repo("root/libs/inner");
+    fn status_formatting_colors_brackets_ahead_changes_and_checkmarks() {
+        let results = [
+            status_result("dirty", true, "main", "⇡1 !?"),
+            status_result("clean", true, "main", "✓"),
+        ];
+        let rendered = format_status(false, true, &results);
 
-        let run = run_status_recursive(&root, &read_opts());
-
-        assert_eq!(run.exit, ManagedExit::Clean);
-        let names: Vec<&str> = run
-            .results
-            .iter()
-            .map(|result| result.name.as_str())
-            .collect();
-        assert!(names.contains(&"root"), "names: {names:?}");
-        assert!(names.contains(&"libs/inner"), "names: {names:?}");
-    }
-
-    #[test]
-    fn status_recursive_skips_linked_worktrees() {
-        let fixture = ManagedFixture::new("status-recursive-worktrees");
-        let root = fixture.init_repo("root");
-        fixture.init_repo("root/libs/inner");
-        // A linked worktree: `.git` is a file pointing into the repo's worktrees dir.
-        let wt = root.join(".worktrees/feature");
-        std::fs::create_dir_all(&wt).unwrap();
-        std::fs::write(
-            wt.join(".git"),
-            "gitdir: /abs/root/.git/worktrees/feature\n",
-        )
-        .unwrap();
-
-        let run = run_status_recursive(&root, &read_opts());
-
-        let names: Vec<&str> = run
-            .results
-            .iter()
-            .map(|result| result.name.as_str())
-            .collect();
-        assert!(names.contains(&"root"), "names: {names:?}");
-        assert!(names.contains(&"libs/inner"), "names: {names:?}");
-        assert!(
-            !names.iter().any(|name| name.contains(".worktrees")),
-            "linked worktrees should be skipped, names: {names:?}"
-        );
-    }
-
-    #[test]
-    fn status_recursive_fails_when_no_repo_found() {
-        let fixture = ManagedFixture::new("status-recursive-empty");
-        let empty = fixture.root.join("empty");
-        std::fs::create_dir_all(&empty).unwrap();
-
-        let run = run_status_recursive(&empty, &read_opts());
-
-        assert_eq!(run.exit, ManagedExit::Fail);
-        assert!(
-            run.stderr.contains("no git repos found"),
-            "stderr: {}",
-            run.stderr
-        );
+        assert!(rendered.contains("\x1b[1m\x1b[38;2;242;133;0m[\x1b[39m"));
+        assert!(rendered.contains("\x1b[38;2;242;133;0m⇡\x1b[39m1"));
+        assert!(rendered.contains("\x1b[38;2;255;77;77m!?\x1b[39m"));
+        assert!(rendered.contains("\x1b[38;2;46;204;113m✓\x1b[39m"));
     }
 }

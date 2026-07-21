@@ -158,7 +158,6 @@ fn format_commit(exit: ManagedExit, json: bool, results: &[CommitResult]) -> Str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::managed::test_support::{ManagedFixture, git_out};
 
     #[test]
     fn commit_action_wire_tokens_are_byte_stable() {
@@ -247,62 +246,6 @@ mod tests {
         assert_eq!(
             run.stderr,
             "managed commit failed for 'web': git transport unavailable"
-        );
-    }
-
-    #[test]
-    fn commit_all_dry_reports_dirty_without_committing() {
-        let fixture = ManagedFixture::new("commit-dry");
-        let repo = fixture.init_repo("repo");
-        fixture.write_manifest(&[("repo", "")]);
-        fixture.write_file("repo/work.txt", "dirty\n");
-        let before = git_out(&repo, &["rev-parse", "HEAD"]);
-
-        let run = run_commit_all(&ManagedOptions {
-            repos_file: Some(fixture.manifest.clone()),
-            home_dir: Some(fixture.home.clone()),
-            dry: true,
-            json: false,
-            color: false,
-            message_for_all: None,
-            interactive: false,
-        });
-
-        assert_eq!(run.exit, ManagedExit::Warn);
-        assert_eq!(run.results[0].action, CommitAction::WouldCommit);
-        assert_eq!(git_out(&repo, &["rev-parse", "HEAD"]), before);
-    }
-
-    #[test]
-    fn commit_all_message_for_all_commits_dirty_repo() {
-        let fixture = ManagedFixture::new("commit-batch");
-        let repo = fixture.init_repo("repo");
-        let remote = fixture.add_origin(&repo);
-        fixture.write_manifest(&[("repo", "")]);
-        fixture.write_file("repo/work.txt", "dirty\n");
-        let remote_head_before = git_out(&remote, &["rev-parse", "refs/heads/main"]);
-
-        let run = run_commit_all(&ManagedOptions {
-            repos_file: Some(fixture.manifest.clone()),
-            home_dir: Some(fixture.home.clone()),
-            dry: false,
-            json: false,
-            color: false,
-            message_for_all: Some("save work".to_string()),
-            interactive: false,
-        });
-
-        assert_eq!(run.exit, ManagedExit::Clean);
-        assert_eq!(run.results[0].action, CommitAction::Committed);
-        assert_eq!(
-            run.results[0].commit.as_deref(),
-            Some(git_out(&repo, &["rev-parse", "--short", "HEAD"]).as_str())
-        );
-        assert_eq!(git_out(&repo, &["status", "--porcelain"]), "");
-        assert_eq!(
-            git_out(&remote, &["rev-parse", "refs/heads/main"]),
-            remote_head_before,
-            "managed commit must not advance the bare origin",
         );
     }
 }

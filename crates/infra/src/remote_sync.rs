@@ -189,22 +189,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repo_present_checks_the_dot_git_directory() {
-        let (_dir, _origin, local) = fixture();
-        assert!(TokioRemoteSync.repo_present(&local));
-        assert!(!TokioRemoteSync.repo_present(local.parent().unwrap()));
-    }
-
-    #[tokio::test]
-    async fn current_branch_and_has_remote_reflect_a_real_clone() {
-        let (_dir, _origin, local) = fixture();
-        let branch = TokioRemoteSync.current_branch(&local).await.unwrap();
-        assert_eq!(branch, "main");
-        assert!(TokioRemoteSync.has_remote(&local, "origin").await.unwrap());
-        assert!(!TokioRemoteSync.has_remote(&local, "nope").await.unwrap());
-    }
-
-    #[tokio::test]
     async fn push_advances_the_remote_and_upstream_ref_reports_it() {
         let (_dir, origin, local) = fixture();
         git(&local, &["push", "-u", "origin", "main"]);

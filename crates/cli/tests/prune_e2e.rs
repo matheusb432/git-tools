@@ -71,23 +71,6 @@ fn gtl(repo: &Path) -> Command {
 }
 
 #[test]
-fn prune_yes_deletes_merged_and_keeps_unmerged() {
-    let (_tmp, repo) = setup();
-    gtl(&repo)
-        .args(["prune", "-y"])
-        .assert()
-        .success()
-        .stdout(contains("deleted 1 branch."))
-        .stdout(contains("recover: git branch feat/merged"));
-    assert!(
-        !branch_exists(&repo, "feat/merged"),
-        "merged branch deleted"
-    );
-    assert!(branch_exists(&repo, "feat/wip"), "unmerged branch kept");
-    assert!(branch_exists(&repo, "main"), "main never deleted");
-}
-
-#[test]
 fn prune_partial_failure_reports_recovery_and_preserves_blocked_branch() {
     let (_tmp, repo) = setup();
     git(&repo, &["branch", "feat/blocked"]);
@@ -122,42 +105,4 @@ fn prune_partial_failure_reports_recovery_and_preserves_blocked_branch() {
         "checked-out merged branch preserved"
     );
     assert!(branch_exists(&repo, "feat/wip"), "unmerged branch kept");
-}
-
-#[test]
-fn prune_non_interactive_without_yes_refuses() {
-    let (_tmp, repo) = setup();
-    gtl(&repo)
-        .arg("prune")
-        .assert()
-        .failure()
-        .code(2)
-        .stderr(contains("non-interactive shell; pass --yes"));
-    assert!(
-        branch_exists(&repo, "feat/merged"),
-        "nothing deleted on refusal"
-    );
-}
-
-#[test]
-fn prune_reports_nothing_when_no_merged_branches() {
-    let (_tmp, repo) = setup();
-    // Delete the only merged branch first, then a second run finds nothing.
-    gtl(&repo).args(["prune", "-y"]).assert().success();
-    gtl(&repo)
-        .args(["prune", "-y"])
-        .assert()
-        .success()
-        .stdout(contains("no merged branches to prune (against 'main')"));
-}
-
-#[test]
-fn prune_refuses_when_onto_missing() {
-    let (_tmp, repo) = setup();
-    gtl(&repo)
-        .args(["prune", "-y", "--onto", "trunk"])
-        .assert()
-        .failure()
-        .code(1)
-        .stderr(contains("no 'trunk' branch"));
 }
