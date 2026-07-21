@@ -7,18 +7,17 @@ use maud::{Markup, html};
 
 use crate::text::plural;
 
-// ! `.titlebar` and `.branchline` stay as class anchors for the narrow-screen overrides in
-// ! styles/responsive.css; their base appearance is the utility classes here. `.foldall` and
-// ! `.ctx-toggle` are enhancer hooks whose JS-toggled states keep component styling in
-// ! styles/layout.css.
+const CONTROL_CLASSES: &str = "cursor-pointer rounded-sm border border-line-2 bg-surface-2 px-2.5 py-1.5 text-[12px] text-ink-2 [font:inherit] hover:border-acc-line hover:text-ink print:hidden!";
+
+// ! `.foldall` and `.ctx-toggle` remain enhancer hooks for their toggled states.
 pub(super) fn titlebar(view: &View) -> Markup {
     html! {
-        header class="titlebar [grid-column:1/4] flex items-center gap-4 border-b border-line bg-surface px-5 py-[13px]" {
-            div class="flex items-baseline gap-[9px] text-[18px] font-semibold tracking-[-0.01em]" {
+        header class="titlebar [grid-column:1/4] flex items-center gap-4 border-b border-line bg-surface px-5 py-3 [@media(max-width:1024px)]:flex-wrap [@media(max-width:1024px)]:gap-2.5 [@media(max-width:1024px)]:px-3 [@media(max-width:1024px)]:py-2.5 print:border-[#bbb] print:bg-[#f2f2f2]" {
+            div class="flex items-baseline gap-2 text-[18px] font-semibold tracking-[-0.01em]" {
                 span { "~/" b class="font-bold text-acc" { (view.repo_name) } }
                 span class="self-center rounded-sm border border-acc-line bg-acc-soft px-2 py-0.5 text-[12px] font-medium text-acc" { (view.title) }
             }
-            div class="branchline flex items-center gap-[7px] text-[12.5px] text-ink-2" {
+            div class="branchline flex items-center gap-1.5 text-[12.5px] text-ink-2 [@media(max-width:1024px)]:order-3 [@media(max-width:1024px)]:w-full" {
                 span class="text-acc" { (view.branch) }
                 span class="text-ink-3" { "→" }
                 span class="text-ink-3" { (view.upstream) }
@@ -33,8 +32,8 @@ pub(super) fn titlebar(view: &View) -> Markup {
                 // TODO: add button to enable file exclusion modification here. should open a dialog.
             }
             div class="flex-1" {}
-            button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
-            button type="button" class="ctx-toggle active" aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
+            button type="button" class={ "foldall " (CONTROL_CLASSES) } title="Collapse/expand all files" { "Collapse all" }
+            button type="button" class={ "ctx-toggle active " (CONTROL_CLASSES) " [&.active]:border-acc-line [&.active]:bg-acc-soft [&.active]:text-ink" } aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
         }
     }
 }

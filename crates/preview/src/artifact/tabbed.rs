@@ -10,9 +10,12 @@ use crate::{
     view_fragment,
 };
 
-// ? tab strip CSS stays its own sheet; tab logic is in the bundle (tabbed.ts, guarded to
-// no-op without .tabs)
-const TABBED_CSS: &str = include_str!("tabbed.css");
+const TABS_CLASSES: &str = "sticky top-0 z-60 flex items-center gap-1.5 overflow-x-auto border-b border-line bg-surface-2 px-3 py-2.5";
+const TAB_CLASSES: &str = concat!(
+    "max-w-[280px] flex-none cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap rounded-panel border border-line bg-surface px-2.5 py-1.5 text-ink-2 [font:inherit] ",
+    "hover:border-acc-line hover:text-ink [&.active]:border-acc-line [&.active]:text-acc",
+);
+const PANEL_CLASSES: &str = "[&[hidden]]:hidden";
 
 pub fn build_tabbed_html(
     title: &str,
@@ -31,12 +34,11 @@ pub fn build_tabbed_html(
                 title { (title) }
                 script { (PreEscaped(THEME_BOOT_JS)) }
                 style { (PreEscaped(preview_css())) }
-                style { (PreEscaped(TABBED_CSS)) }
             }
             body {
-                nav.tabs role="tablist" aria-label="Subrepo diffs" {
+                nav class={ "tabs " (TABS_CLASSES) } role="tablist" aria-label="Subrepo diffs" {
                     @for (index, view) in views.iter().enumerate() {
-                        button class=(if index == 0 { "tab active" } else { "tab" })
+                        button class={ (if index == 0 { "tab active " } else { "tab " }) (TAB_CLASSES) }
                             id={ "tab-" (index) }
                             role="tab"
                             aria-selected=(if index == 0 { "true" } else { "false" })
@@ -47,7 +49,7 @@ pub fn build_tabbed_html(
                     }
                 }
                 @for (index, view) in views.iter().enumerate() {
-                    section.panel id={ "panel-" (index) } role="tabpanel" aria-labelledby={ "tab-" (index) } hidden[index != 0] {
+                    section class={ "panel " (PANEL_CLASSES) } id={ "panel-" (index) } role="tabpanel" aria-labelledby={ "tab-" (index) } hidden[index != 0] {
                         (view_fragment(view, options))
                     }
                 }
@@ -56,4 +58,31 @@ pub fn build_tabbed_html(
         }
     }
     .into_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use application::viewer::RenderOptions;
+
+    use crate::{build_tabbed_html, fixtures::sample_view};
+
+    #[test]
+    fn tabbed_document_keeps_semantic_tab_hooks_in_one_shared_stylesheet() {
+        let html = build_tabbed_html(
+            "subrepo diff",
+            &[sample_view(), sample_view()],
+            RenderOptions::DEFAULT,
+            None,
+        );
+
+        assert_eq!(html.matches("<style>").count(), 1);
+        assert!(html.contains(r#"<nav class="tabs "#));
+        assert!(html.contains(r#"role="tablist" aria-label="Subrepo diffs""#));
+        assert!(html.contains(
+            r#"id="tab-0" role="tab" aria-selected="true" aria-controls="panel-0" data-tab="0""#
+        ));
+        assert!(html.contains(r#"<section class="panel "#));
+        assert!(html.contains(r#"id="panel-0" role="tabpanel" aria-labelledby="tab-0""#));
+        assert!(html.contains(r#"id="panel-1" role="tabpanel" aria-labelledby="tab-1" hidden>"#));
+    }
 }

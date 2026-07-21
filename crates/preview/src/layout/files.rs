@@ -14,6 +14,20 @@ use crate::{
 
 const GIANT_FILE_CHARS: usize = 250_000;
 const ROW_PX: usize = 22;
+const COPY_BUTTON_CLASSES: &str = concat!(
+    "copy-button cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-1.5 py-px text-[10px] tracking-[.04em] text-acc [font:inherit] ",
+    "hover:border-acc hover:bg-acc hover:text-bg ",
+    "[&[data-state=ok]]:border-add [&[data-state=ok]]:bg-add [&[data-state=ok]]:text-bg ",
+    "[&[data-state=err]]:border-del [&[data-state=err]]:bg-del [&[data-state=err]]:text-bg",
+);
+const DIFF_CLASSES: &str = concat!(
+    "overflow-x-hidden text-[14px] leading-[22px] ",
+    "[&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-track]:bg-surface ",
+    "[&::-webkit-scrollbar-thumb]:rounded-panel [&::-webkit-scrollbar-thumb]:border-2 ",
+    "[&::-webkit-scrollbar-thumb]:border-surface [&::-webkit-scrollbar-thumb]:bg-line-2 ",
+    "print:[&_.dl_code]:text-[#111]",
+);
+const STATUS_BADGE_CLASSES: &str = "inline-flex size-[15px] flex-none items-center justify-center rounded-sm border text-[9.5px] leading-none font-bold";
 
 #[derive(Clone, Copy)]
 struct FileStatusPresentation {
@@ -21,6 +35,7 @@ struct FileStatusPresentation {
     code: &'static str,
     label: &'static str,
     css_class: &'static str,
+    badge_classes: &'static str,
 }
 
 const STATUS_ADDED: FileStatusPresentation = FileStatusPresentation {
@@ -28,24 +43,28 @@ const STATUS_ADDED: FileStatusPresentation = FileStatusPresentation {
     code: "A",
     label: "Added file",
     css_class: "status-added",
+    badge_classes: "border-add-line bg-add-bg text-add",
 };
 const STATUS_DELETED: FileStatusPresentation = FileStatusPresentation {
     key: "deleted",
     code: "D",
     label: "Deleted file",
     css_class: "status-deleted",
+    badge_classes: "border-del-line bg-del-bg text-del",
 };
 const STATUS_RENAMED: FileStatusPresentation = FileStatusPresentation {
     key: "renamed",
     code: "R",
     label: "Renamed file",
     css_class: "status-renamed",
+    badge_classes: "border-acc-line bg-acc-soft text-acc",
 };
 const STATUS_MODIFIED: FileStatusPresentation = FileStatusPresentation {
     key: "modified",
     code: "M",
     label: "Modified file",
     css_class: "status-modified",
+    badge_classes: "border-line-2 bg-sunk text-ink-3",
 };
 
 fn file_status_presentation(status: FileStatus) -> FileStatusPresentation {
@@ -63,7 +82,7 @@ fn file_commits(file: &FileDiff) -> String {
 
 pub(super) fn file_blocks(view: &View, options: RenderOptions) -> Markup {
     if view.files.is_empty() {
-        return html! { div.empty { "no file changes" } };
+        return html! { div class="empty rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic" { "no file changes" } };
     }
 
     html! {
@@ -75,32 +94,35 @@ pub(super) fn file_blocks(view: &View, options: RenderOptions) -> Markup {
             @let intrinsic = format!("contain-intrinsic-size:auto {}px", rows * ROW_PX);
             details open[!giant]
                 id=(slug(&file.path))
-                class=(format!("file {}", status.css_class))
+                class={
+                    "file " (status.css_class) " group/file mb-2.5 rounded-panel border border-line bg-surface "
+                    "[&:not([open])>summary]:rounded-panel [&:not([open])>summary]:border-b-0 "
+                    "[&.status-added>summary]:bg-[color-mix(in_srgb,var(--add-bg)_34%,var(--surface-2))] "
+                    "[&.status-deleted>summary]:bg-[color-mix(in_srgb,var(--del-bg)_34%,var(--surface-2))] "
+                    "[&.flash]:outline [&.flash]:outline-acc [&.flash]:outline-offset-[-1px] "
+                    "print:break-inside-avoid print:[&[hidden]]:block!"
+                }
                 data-path=(file.path)
                 data-comment=(crate::comment_syntax::comment_leader(&file.path))
                 data-commits=(file_commits(file))
                 data-status=(status.key)
                 data-status-code=(status.code)
                 data-status-label=(status.label) {
-                // ! summary/caret/status styling stays component CSS in styles/panes.css (sticky +
-                // ! open/status states); `.copies` keeps its class as the print-rule anchor and
-                // ! `.copy-button` keeps component styling for its data-state feedback.
-                summary {
+                summary class="sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line bg-surface-2 px-2.5 py-2 text-[12.5px] hover:bg-line [&::-webkit-details-marker]:hidden print:static print:bg-[#f2f2f2]" {
+                    span class="file-caret size-0 flex-none border-y-4 border-y-transparent border-l-5 border-l-ink-3 group-open/file:rotate-90" aria-hidden="true" {}
                     span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink" { (file.path) }
-                    span class=(format!("status-badge {}", status.css_class)) title=(status.label) aria-label=(status.label) { (status.code) }
-                    span class="copies flex flex-none gap-[5px]" {
-                        button type="button" class="copy-button" data-copy-value=(file.path) data-copy-label="path" { "path" }
-                        button type="button" class="copy-button" data-copy-value=(absolute) data-copy-label="abs" { "abs" }
+                    span class={ "status-badge " (status.css_class) " " (STATUS_BADGE_CLASSES) " " (status.badge_classes) } title=(status.label) aria-label=(status.label) { (status.code) }
+                    span class="copies flex flex-none gap-[5px] print:hidden!" {
+                        button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(file.path) data-copy-label="path" { "path" }
+                        button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(absolute) data-copy-label="abs" { "abs" }
                         // ! mode="code" carries no payload: the button reads its own file's
                         // ! already-rendered diff rows at click time (no per-file content dupe).
-                        button type="button" class="copy-button" data-copy-mode="code" data-copy-label="code" { "code" }
+                        button type="button" class=(COPY_BUTTON_CLASSES) data-copy-mode="code" data-copy-label="code" { "code" }
                     }
                     span class="flex-none text-[12.5px]" { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
                 }
-                // ! Diff rows live in their own body so content-visibility virtualizes the
-                // ! heavy content here while the summary stays sticky against `.main` (size
-                // ! containment on `details.file` itself would trap the sticky in the box).
-                div class="filebody single-variant" style=(intrinsic) {
+                // ! Keep containment below the sticky summary so it can pin to `.main`.
+                div class="filebody single-variant [content-visibility:auto] overflow-hidden rounded-b-panel print:block! print:[content-visibility:visible] print:overflow-visible" style=(intrinsic) {
                     (file_diff(file, options))
                 }
             }
@@ -115,16 +137,16 @@ fn file_diff(file: &FileDiff, options: RenderOptions) -> Markup {
     };
     match (options.layout(), density) {
         (DiffLayout::Unified, DiffDensity::Compact) => html! {
-            div class="diff diff-unified diff-compact" { (PreEscaped(render_diff_lines(lines, &file.owners))) }
+            div class={ "diff diff-unified diff-compact " (DIFF_CLASSES) } { (PreEscaped(render_diff_lines(lines, &file.owners))) }
         },
         (DiffLayout::Split, DiffDensity::Compact) => html! {
-            div class="diff diff-split diff-compact" { (PreEscaped(render_diff_split(lines, &file.owners))) }
+            div class={ "diff diff-split diff-compact " (DIFF_CLASSES) } { (PreEscaped(render_diff_split(lines, &file.owners))) }
         },
         (DiffLayout::Unified, DiffDensity::Full) => html! {
-            div class="diff diff-unified diff-full" { (PreEscaped(render_diff_lines(lines, &file.owners))) }
+            div class={ "diff diff-unified diff-full " (DIFF_CLASSES) } { (PreEscaped(render_diff_lines(lines, &file.owners))) }
         },
         (DiffLayout::Split, DiffDensity::Full) => html! {
-            div class="diff diff-split diff-full" { (PreEscaped(render_diff_split(lines, &file.owners))) }
+            div class={ "diff diff-split diff-full " (DIFF_CLASSES) } { (PreEscaped(render_diff_split(lines, &file.owners))) }
         },
     }
 }
@@ -192,14 +214,22 @@ mod tests {
 
         assert!(html.contains(r#"data-status="added""#));
         assert!(html.contains(r#"data-status-label="Added file""#));
-        assert!(html.contains(r#"class="file status-added""#));
+        assert!(html.contains(r#"class="file status-added "#));
         assert!(html.contains(r#"data-status="deleted""#));
         assert!(html.contains(r#"data-status-label="Deleted file""#));
-        assert!(html.contains(r#"class="file status-deleted""#));
+        assert!(html.contains(r#"class="file status-deleted "#));
         assert!(html.contains(r#"data-status="renamed""#));
         assert!(html.contains(r#"data-status-label="Renamed file""#));
-        assert!(html.contains(r#"class="file status-renamed""#));
+        assert!(html.contains(r#"class="file status-renamed "#));
         assert!(html.contains("tstatus"));
+        assert!(html.contains(r#"class="status-badge status-added inline-flex size-[15px]"#));
+        assert!(html.contains("border-add-line bg-add-bg text-add"));
+        let added_badge = html
+            .split_once(r#"class="status-badge status-added "#)
+            .and_then(|(_, tail)| tail.split_once('"'))
+            .map(|(classes, _)| classes)
+            .expect("added badge classes");
+        assert!(!added_badge.contains("border-line-2"));
     }
 
     #[test]
@@ -210,9 +240,9 @@ mod tests {
         )
         .into_string();
 
-        assert!(html.contains(r#"class="diff diff-split diff-full""#));
-        assert!(!html.contains("diff-unified"));
-        assert!(!html.contains("diff-compact"));
+        assert!(html.contains(r#"class="diff diff-split diff-full "#));
+        assert!(!html.contains(r#"class="diff diff-unified"#));
+        assert!(!html.contains(r#"class="diff diff-split diff-compact"#));
     }
 
     #[test]
@@ -226,7 +256,7 @@ mod tests {
         )
         .into_string();
 
-        assert!(html.contains(r#"class="diff diff-unified diff-compact""#));
+        assert!(html.contains(r#"class="diff diff-unified diff-compact "#));
         assert!(html.contains("+extra"));
         assert!(!html.contains("diff-full"));
     }
@@ -241,7 +271,7 @@ mod tests {
         let html = build_html(&view, options, None);
 
         assert_eq!(
-            html.matches(r#"class="diff diff-split diff-full""#).count(),
+            html.matches(r#"class="diff diff-split diff-full "#).count(),
             2
         );
         assert_eq!(html.matches(r#"class="diff diff-unified"#).count(), 0);
@@ -307,9 +337,11 @@ mod tests {
 
     #[test]
     fn build_html_ships_content_visibility_perf_rule() {
-        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
+        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT).into_string();
 
-        assert!(html.contains("content-visibility:auto"));
+        assert!(html.contains("[content-visibility:auto]"));
+        assert!(html.contains("print:[content-visibility:visible]"));
+        assert!(html.contains("print:block!"));
     }
 
     #[test]
@@ -321,9 +353,9 @@ mod tests {
         // the old inline pattern must not appear (CSS rule contains this substring but not as an
         // inline style)
         assert!(!html.contains(r#"style="content-visibility:auto;contain-intrinsic-size"#));
-        // it still lives in the stylesheet, and the print override is present
-        assert!(html.contains("content-visibility:auto")); // base CSS rule
-        assert!(html.contains("content-visibility:visible")); // @media print override
+        // utilities keep both screen and print behavior discoverable in the file body markup
+        assert!(html.contains("[content-visibility:auto]"));
+        assert!(html.contains("print:[content-visibility:visible]"));
         // per-file intrinsic-size is still emitted inline
         assert!(html.contains(&format!("contain-intrinsic-size:auto {}px", 4 * ROW_PX)));
     }

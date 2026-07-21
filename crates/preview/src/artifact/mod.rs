@@ -172,14 +172,15 @@ mod tests {
         assert!(html.contains("@media print"));
 
         // native copy controls replace Lit custom elements
-        assert!(html.contains(r#"class="copy-button""#));
+        assert!(html.contains(r#"class="copy-button "#));
 
         // engine diff classes are styled (render_diff_lines emits these, untouched)
         assert!(html.contains(".dl-add"));
         assert!(html.contains(".dl-del"));
 
         // native popover machinery + Shelf landmarks
-        assert!(html.contains("[popover]"));
+        assert!(html.contains(" popover>"));
+        assert!(html.contains("[&amp;::backdrop]:bg-transparent"));
         assert!(html.contains(r#"<aside class="tree "#));
         assert!(html.contains(r#"<aside class="shelf"#));
         assert!(html.contains(r#"<footer class="keybar"#));
@@ -189,12 +190,14 @@ mod tests {
 
         // commit card body filters by commit; the hash tag copies the hash.
         assert!(html.contains(r#"title="focus this commit's changes""#));
-        assert!(html.contains(r#"<button class="sha" type="button" title="copy hash""#));
+        assert!(html.contains(r#"<button class="sha "#));
+        assert!(html.contains(r#"type="button" title="copy hash""#));
         // the timeline bead is a visual marker, not a separate click target.
-        assert!(html.contains(r#"<span class="bead" aria-hidden="true"></span>"#));
+        assert!(html.contains(r#"<span class="bead "#));
+        assert!(html.contains(r#"aria-hidden="true"></span>"#));
         assert!(!html.contains(r#"<button class="bead""#));
         // notes are flagged by a distinct, non-emoji notes indicator (not the bead)
-        assert!(html.contains(r#"<span class="notes-ico" aria-hidden="true""#));
+        assert!(html.contains(r#"<span class="notes-ico "#));
 
         // offline: no external resource loads (CDN scripts, stylesheets, fetches)
         assert!(
@@ -237,7 +240,7 @@ mod tests {
         let html = build_tabbed_html("subrepo diff", &[api, web], RenderOptions::DEFAULT, None);
 
         assert!(html.starts_with("<!DOCTYPE html>"));
-        assert_eq!(html.matches(r#"<section class="panel""#).count(), 2);
+        assert_eq!(html.matches(r#"<section class="panel "#).count(), 2);
         assert_eq!(html.matches(r#"role="tabpanel""#).count(), 2);
         assert!(html.contains("api"));
         assert!(html.contains("web"));
@@ -260,7 +263,7 @@ mod tests {
         let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         assert!(html.contains(r#"<html lang="en""#));
-        assert!(html.contains(r#"class="diff diff-unified diff-compact""#));
+        assert!(html.contains(r#"class="diff diff-unified diff-compact "#));
         assert!(!html.contains(r#"class="diff diff-split"#));
         assert!(!html.contains(r#"class="diff diff-unified diff-full"#));
     }
@@ -279,7 +282,7 @@ mod tests {
 
         for html in documents {
             assert_eq!(
-                html.matches(r#"class="diff diff-split diff-full""#).count(),
+                html.matches(r#"class="diff diff-split diff-full "#).count(),
                 1
             );
             assert!(!html.contains(r#"class="diff diff-unified"#));

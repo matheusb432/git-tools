@@ -1,12 +1,8 @@
-/* Tailwind theme mapping: utilities like bg-surface / text-ink-2 resolve through the
-   palette variables above, so every theme flip applies to utilities automatically.
-   `inline` emits nothing by itself; only utilities actually used reach the output.
-   Both entries import utilities.css without the default theme, so every scale utility
-   (px-5, rounded-sm, font-semibold) is silently dropped unless its backing token is
-   defined here. */
+/* Semantic Tailwind utilities resolve through the active theme values. */
 @theme inline {
   --spacing: 0.25rem;
   --radius-sm: var(--r-sm);
+  --radius-panel: var(--r);
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
   --font-weight-bold: 700;
@@ -27,9 +23,11 @@
   --color-del-line: var(--del-line);
   --color-add: var(--add);
   --color-add-bg: var(--add-bg);
+  --color-add-gut: var(--add-gut);
   --color-add-ink: var(--add-ink);
   --color-del: var(--del);
   --color-del-bg: var(--del-bg);
+  --color-del-gut: var(--del-gut);
   --color-del-ink: var(--del-ink);
   --color-code: var(--code);
   --font-mono: var(--mono);

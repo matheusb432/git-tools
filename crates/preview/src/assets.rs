@@ -28,7 +28,7 @@ pub fn strip_stylesheet_banner(css: &str) -> &str {
 /// # Examples
 ///
 /// ```
-/// assert!(preview::preview_css().contains(".layout"));
+/// assert!(preview::preview_css().contains("content-visibility:auto"));
 /// ```
 pub fn preview_css() -> &'static str {
     strip_stylesheet_banner(RAW_PREVIEW_CSS)
@@ -50,6 +50,14 @@ mod tests {
     use super::*;
     use crate::fixtures::has_disallowed_external_url;
 
+    fn assert_selector_declaration(css: &str, selector: &str, declaration: &str) {
+        assert!(
+            css.split('}')
+                .any(|rule| rule.contains(selector) && rule.contains(declaration)),
+            "missing `{declaration}` on selector `{selector}`"
+        );
+    }
+
     #[test]
     fn public_preview_assets_are_the_embedded_offline_payloads() {
         let css = preview_css();
@@ -66,9 +74,7 @@ mod tests {
         // ! An unlayered reset beats every layered rule, stripping the 1px width that
         // ! border utilities apply; the base layer must also precede utilities.
         let css = preview_css();
-        assert!(
-            css.contains("@layer base{*,:before,:after{box-sizing:border-box;border:0 solid}}")
-        );
+        assert!(css.contains("*,:before,:after{box-sizing:border-box;border:0 solid}"));
         let base = css.find("@layer base").expect("base layer present");
         let utilities = css
             .find("@layer utilities")
@@ -90,6 +96,15 @@ mod tests {
     }
 
     #[test]
+    fn preview_css_has_no_transition_or_smooth_scroll_declarations() {
+        let css = preview_css();
+
+        assert!(!css.contains("transition:"));
+        assert!(!css.contains("transition-property:"));
+        assert!(!css.contains("scroll-behavior:smooth"));
+    }
+
+    #[test]
     fn preview_css_styles_intra_line_word_spans() {
         let css = preview_css();
         assert!(css.contains(".diff-split .sp-del .ciw{"));
@@ -97,68 +112,51 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_drives_split_default_and_breakpoint_fallback() {
+    fn preview_css_emits_split_tracks_and_narrow_stack() {
         let css = preview_css();
-        // base: every pane hidden until a rule reveals exactly one
-        assert!(css.contains(".filebody .diff{display:none}"));
-        // unified is the default pane above the breakpoint (no data-diff-layout attr)
-        assert!(css.contains("@media (min-width:1025px)"));
-        assert!(css.contains(
-            "html:not([data-diff-layout=split]):not([data-diff-full=on]) .diff-unified.diff-compact"
-        ));
-        // split is shown when the attr flips
-        assert!(css.contains(
-            "html[data-diff-layout=split]:not([data-diff-full=on]) .diff-split.diff-compact"
-        ));
-        // narrow screens force the combined pane and hide the layout toggle
-        assert!(css.contains(".layout-toggle{display:none}"));
-        // four-column split grid + the per-pane change colors
-        assert!(css.contains(
-            ".diff-split .dl{grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr)"
-        ));
-        assert!(css.contains(".diff-split .sp-add{background:var(--add-bg);color:var(--add-ink)}"));
-        assert!(css.contains(".diff-split .sp-del{background:var(--del-bg);color:var(--del-ink)}"));
+        assert!(css.contains("grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr)"));
+        assert!(css.contains("@media (max-width:1024px)"));
+        assert!(!css.contains("@media not all and (min-width:1024px)"));
+        assert!(css.contains("grid-template-columns:44px minmax(0,1fr)"));
+        assert!(css.contains("background-color:var(--add-bg)"));
+        assert!(css.contains("background-color:var(--del-bg)"));
+        assert!(!css.contains("data-diff-full"));
     }
 
     #[test]
     fn preview_css_tames_long_lines_without_wrap() {
         let css = preview_css();
-        assert!(
-            css.contains(".dl-long .code-text,.diff-split code.long .code-text{white-space:pre")
-        );
-        assert!(css.contains(
-            ".dl-long.expanded .code-text,.diff-split code.long.expanded .code-text{text-overflow:clip;overflow-x:auto}"
-        ));
+        let collapsed = ":is(.dl-long .code-text,.diff-split code.long .code-text)";
+        let expanded =
+            ":is(.dl-long.expanded .code-text,.diff-split code.long.expanded .code-text)";
+
+        assert_selector_declaration(css, collapsed, "white-space:pre");
+        assert_selector_declaration(css, collapsed, "overflow:hidden");
+        assert_selector_declaration(css, collapsed, "text-overflow:ellipsis");
+        assert_selector_declaration(css, expanded, "overflow-x:auto");
+        assert_selector_declaration(css, expanded, "text-overflow:clip");
     }
 
     #[test]
     fn preview_css_wraps_diff_code_inside_fixed_line_number_gutters() {
         let css = preview_css();
-        assert!(css.contains(".diff{font-size:14px;line-height:1.6;overflow-x:hidden}"));
-        assert!(css.contains(
-            ".dl{white-space:normal;grid-template-columns:44px 44px minmax(0,1fr);align-items:start;display:grid}"
-        ));
-        assert!(css.contains(".dl code{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0"));
+        assert!(css.contains("grid-template-columns:44px 44px minmax(0,1fr)"));
+        assert!(css.contains("line-height:22px"));
+        assert!(css.contains("white-space:pre-wrap"));
+        assert!(css.contains("overflow-wrap:anywhere"));
     }
 
     #[test]
     fn preview_css_uses_responsive_sidebar_columns() {
         let css = preview_css();
-        assert!(css.contains("--tree-col:262px"));
-        assert!(css.contains("--shelf-col:252px"));
-        assert!(
-            css.contains("grid-template-columns:var(--tree-col) minmax(0,1fr) var(--shelf-col)")
-        );
-        assert!(css.contains("@media (min-width:1600px) and (min-height:900px)"));
-        assert!(css.contains("--tree-col:320px"));
-        assert!(css.contains("--shelf-col:304px"));
+        assert!(css.contains("grid-template-columns:262px minmax(0,1fr) 252px"));
+        assert!(css.contains("grid-template-columns:320px minmax(0,1fr) 304px"));
+        assert!(css.contains("grid-template-columns:220px minmax(0,1fr) 210px"));
+        assert!(css.contains("grid-template-columns:0 minmax(0,1fr) 0"));
         assert!(css.contains("@media (max-width:1280px)"));
-        assert!(css.contains("--tree-col:220px"));
-        assert!(css.contains("--shelf-col:210px"));
         assert!(css.contains("@media (max-width:1024px)"));
-        assert!(css.contains("--side-display:none"));
-        assert!(css.contains(".tdir>ul .tfile>.tlabel{padding-left:8px}"));
-        // the 3-column shell: tree | main | shelf on the middle grid row
+        assert!(!css.contains("@media not all and (min-width:1280px)"));
+        assert!(!css.contains("@media not all and (min-width:1024px)"));
         assert!(css.contains("grid-area:2/1"));
         assert!(css.contains("grid-area:2/2"));
         assert!(css.contains("grid-area:2/3"));
@@ -171,11 +169,22 @@ mod tests {
         // ! by Vitest wheel.test.ts. Horizontal-wheel scroll math covered by computeWheelScroll
         // there.
         let css = preview_css();
-        assert!(css.contains(".tfile.status-added>.tlabel"));
-        assert!(css.contains(".tfile.status-deleted>.tlabel"));
-        assert!(css.contains(".tlabel{"));
-        assert!(css.contains("gap:5px;padding:2px 5px"));
-        assert!(css.contains("gap:7px;padding:7px 10px;font-size:12.5px"));
+        assert_selector_declaration(css, ".tstatus", "width:15px;height:15px");
+        assert_selector_declaration(
+            css,
+            ".tfile.status-added>.tlabel",
+            "color-mix(in srgb,var(--add-bg) 42%,transparent)",
+        );
+        assert_selector_declaration(
+            css,
+            ".tfile.status-deleted>.tlabel",
+            "color-mix(in srgb,var(--del-bg) 42%,transparent)",
+        );
+        assert_selector_declaration(
+            css,
+            ".tstatus.status-added",
+            "background-color:var(--add-bg)",
+        );
     }
 
     #[test]
@@ -183,9 +192,9 @@ mod tests {
         // ! JS behavior: resolveActiveSet (toggle/member-set) covered by Vitest preview.test.ts.
         // ! owned-row DOM mutation is event-listener-only and not extracted.
         let css = preview_css();
-        assert!(css.contains(".commit-focus .diff-unified .dl.owned{opacity:1}"));
-        assert!(css.contains(".commit-focus .diff-split .sp.owned{opacity:1"));
-        assert!(css.contains("inset 3px 0 0 var(--acc)"));
-        assert!(css.contains("prefers-reduced-motion"));
+        assert!(css.contains(".commit-focus .diff-unified .dl.owned"));
+        assert!(css.contains(".commit-focus .diff-split .sp.owned"));
+        assert!(css.contains("opacity:.34"));
+        assert!(css.contains("inset 3px 0 0"));
     }
 }

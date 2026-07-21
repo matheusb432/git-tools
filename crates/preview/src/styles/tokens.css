@@ -1,4 +1,4 @@
-  /* === tokens: dark (default) · light · hearth. --acc is the semantic accent per theme. === */
+  /* Theme values: dark (default), light, and hearth. */
   :root{
     --bg:#0a0d13; --surface:#0d1117; --surface-2:#161b22; --sunk:#080a10;
     --ink:#c9d1d9; --ink-2:#768390; --ink-3:#545d68; --line:#21262d; --line-2:#2d333b;
@@ -7,7 +7,6 @@
     --del:#f85149; --del-bg:rgba(248,81,73,.14); --del-gut:rgba(248,81,73,.22); --del-ink:#ffa198; --del-line:rgba(248,81,73,.42);
     --code:#adbac7;
     --r:6px; --r-sm:4px;
-    --tree-col:262px; --shelf-col:252px; --side-display:block; --main-pad-x:22px; --main-pad-bottom:60px;
     --mono:'Maple Mono','Maple Mono NF',ui-monospace,'JetBrains Mono',SFMono-Regular,Menlo,monospace;
     color-scheme:dark;
   }
@@ -27,4 +26,3 @@
     --del:#DB6650; --del-bg:rgba(215,90,70,.12); --del-gut:rgba(215,90,70,.20); --del-ink:#EC9384; --del-line:rgba(219,102,80,.42);
     --code:#c8bca9; color-scheme:dark;
   }
-

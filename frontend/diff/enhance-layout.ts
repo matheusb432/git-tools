@@ -6,14 +6,17 @@ import { buildFileLeaf } from "./file-tree";
 import { toggleLongLine } from "./long-lines";
 import { computeWheelScroll } from "./wheel";
 
-// ! Singleton fade toast appended once to <body>; re-triggering restarts the timer.
+const TOAST_CLASSES =
+  "gtl-toast pointer-events-none fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 translate-y-3 items-center gap-2 rounded-panel border border-acc-line bg-surface px-3.5 py-2 text-[12.5px] text-ink opacity-0 shadow-[0_10px_30px_rgba(0,0,0,.45)] before:font-bold before:text-add before:content-['\\2713'] [&.show]:translate-y-0 [&.show]:opacity-100 print:hidden!";
+
+// ! Singleton toast appended once to <body>; re-triggering restarts the dismiss timer.
 let toastEl: HTMLElement | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
 function showToast(msg: string): void {
   if (!toastEl) {
     toastEl = document.createElement("div");
-    toastEl.className = "gtl-toast";
+    toastEl.className = TOAST_CLASSES;
     document.body.appendChild(toastEl);
   }
   toastEl.textContent = msg;

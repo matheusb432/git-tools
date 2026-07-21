@@ -1,10 +1,11 @@
-import { expect, test } from "vitest";
-import { navigateToFile } from "./enhance-layout";
-import { enhanceLayout } from "./enhance-layout";
+import { expect, test, vi } from "vitest";
+import { enhanceLayout, handleDocumentCopy, navigateToFile } from "./enhance-layout";
 import { enhanceControls } from "./controls";
 import { resolveActiveSet } from "./commit-focus";
+import { buildFileLeaf } from "./file-tree";
 import { toggleLongLine } from "./long-lines";
 import { captureSwapAnchor, createEnhancementLifecycle, installSwapLifecycle, restoreSwapAnchor } from "./swap";
+import { initTabs } from "./tabbed";
 
 // JS behavior contracts migrated from deleted Rust PREVIEW_JS.contains tests.
 // Covered here so the frontend unit suite owns the JS logic while cargo test stays JS-free.
@@ -64,6 +65,100 @@ test("toggleLongLine flips expanded + aria on the owning row", () => {
   toggleLongLine(btn);
   expect(row.classList.contains("expanded")).toBe(false);
   expect(btn.getAttribute("aria-expanded")).toBe("false");
+});
+
+test("file tree leaves emit semantic hooks without presentation utilities", () => {
+  const leaf = buildFileLeaf(document, {
+    name: "main.ts",
+    status: "added",
+    statusCode: "A",
+    statusLabel: "Added file",
+    el: { id: "file-main-ts" },
+  });
+
+  expect(leaf.className).toBe("tnode tfile status-added");
+  expect(leaf.querySelector<HTMLElement>(".tlabel")?.className).toBe("tlabel");
+  expect(leaf.querySelector<HTMLElement>(".tname")?.className).toBe("tname");
+  expect(leaf.querySelector<HTMLElement>(".tstatus")?.className).toBe("tstatus status-added");
+});
+
+test("tab hooks select one semantic panel at a time", () => {
+  document.body.replaceChildren();
+  const tabs = document.createElement("nav");
+  tabs.className = "tabs";
+  const tab0 = document.createElement("button");
+  tab0.className = "tab active";
+  tab0.id = "tab-0";
+  tab0.setAttribute("data-tab", "0");
+  tab0.setAttribute("aria-selected", "true");
+  const tab1 = document.createElement("button");
+  tab1.className = "tab";
+  tab1.id = "tab-1";
+  tab1.setAttribute("data-tab", "1");
+  tab1.setAttribute("aria-selected", "false");
+  tabs.appendChild(tab0);
+  tabs.appendChild(tab1);
+  const panel0 = document.createElement("section");
+  panel0.className = "panel";
+  panel0.id = "panel-0";
+  const panel1 = document.createElement("section");
+  panel1.className = "panel";
+  panel1.id = "panel-1";
+  panel1.hidden = true;
+  document.body.appendChild(tabs);
+  document.body.appendChild(panel0);
+  document.body.appendChild(panel1);
+
+  initTabs();
+  tab1.click();
+
+  expect(tab0.getAttribute("aria-selected")).toBe("false");
+  expect(tab1.getAttribute("aria-selected")).toBe("true");
+  expect(panel0.hidden).toBe(true);
+  expect(panel1.hidden).toBe(false);
+});
+
+test("copy context toast carries presentation without transition utilities", () => {
+  document.body.replaceChildren();
+  const root = document.createElement("div");
+  root.className = "layout copy-ctx";
+  const file = document.createElement("details");
+  file.className = "file";
+  file.setAttribute("data-comment", "//");
+  file.setAttribute("data-path", "src/main.ts");
+  const diff = document.createElement("div");
+  diff.className = "diff";
+  const row = document.createElement("div");
+  row.className = "dl-add";
+  const code = document.createElement("code");
+  code.textContent = "+const value = 1;";
+  row.appendChild(code);
+  diff.appendChild(row);
+  file.appendChild(diff);
+  root.appendChild(file);
+  document.body.appendChild(root);
+  Object.defineProperty(window, "getSelection", {
+    configurable: true,
+    value: () => ({
+      isCollapsed: false,
+      rangeCount: 1,
+      containsNode: () => true,
+      getRangeAt: () => ({ commonAncestorContainer: code }),
+    }),
+  });
+  const clipboardData = { setData: vi.fn() };
+  const event = new Event("copy", { cancelable: true });
+  Object.defineProperty(event, "clipboardData", { value: clipboardData });
+
+  handleDocumentCopy(event as ClipboardEvent);
+
+  const toast = document.querySelector<HTMLElement>(".gtl-toast");
+  expect(toast).not.toBeNull();
+  expect(toast?.classList.contains("fixed")).toBe(true);
+  expect(toast?.className).toContain("[&.show]:opacity-100");
+  expect(toast?.classList.contains("print:hidden!")).toBe(true);
+  expect(toast?.className).not.toMatch(/transition/);
+  expect(clipboardData.setData).toHaveBeenCalledWith("text/plain", "// * src/main.ts\nconst value = 1;");
 });
 
 function layout(name: string): HTMLElement {

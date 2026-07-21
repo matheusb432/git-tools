@@ -6,8 +6,7 @@ export type FileLeaf = {
   readonly el: { readonly id: string };
 };
 
-// * Builds the <li class="tnode tfile status-..."> leaf for the file tree.
-// * Pure: no event listeners, no closures. renderNode wires the click after.
+// * The Rust-rendered tree root owns presentation for these semantic hooks.
 export function buildFileLeaf(doc: Document, file: FileLeaf): HTMLElement {
   const li = doc.createElement("li");
   li.className = `tnode tfile status-${file.status}`;

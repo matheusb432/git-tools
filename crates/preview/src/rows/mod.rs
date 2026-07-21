@@ -1,8 +1,8 @@
 //! Diff row rendering: raw unified-diff lines to HTML row strings, in unified
 //! and side-by-side layouts. Row derivation and pairing live in the child
 //! modules; this module owns the HTML assembly shared by both layouts. Rows
-//! emit semantic classes (`.dl`, `.sp`, `.ln`, `.ciw`) defined once in the
-//! stylesheet, so per-row markup weight stays constant.
+//! emit semantic classes (`.dl`, `.sp`, `.ln`, `.ciw`) styled once by the
+//! layout root, so per-row markup weight stays constant.
 
 mod intraline;
 mod model;
@@ -16,6 +16,26 @@ use self::{
     split::{SplitRow, split_rows},
 };
 use crate::text::{escape_html, html_or_nbsp, push_escaped};
+
+pub(crate) const ROW_PRESENTATION_CLASSES: &str = concat!(
+    "[&_.dl]:grid [&_.dl]:grid-cols-[44px_44px_minmax(0,1fr)] [&_.dl]:items-start [&_.dl]:whitespace-normal ",
+    "[&_.dl_.ln]:select-none [&_.dl_.ln]:whitespace-nowrap [&_.dl_.ln]:px-2 [&_.dl_.ln]:text-right [&_.dl_.ln]:text-[12px] [&_.dl_.ln]:text-ink-3 [&_.dl_.ln]:[font-variant-numeric:tabular-nums] ",
+    "[&_.dl_code]:min-w-0 [&_.dl_code]:border-0 [&_.dl_code]:bg-transparent [&_.dl_code]:px-3 [&_.dl_code]:text-[14px] [&_.dl_code]:text-code [&_.dl_code]:whitespace-pre-wrap [&_.dl_code]:[overflow-wrap:anywhere] ",
+    "[&_:is(.dl-long_code.long,.diff-split_code.long)]:flex [&_:is(.dl-long_code.long,.diff-split_code.long)]:items-baseline [&_:is(.dl-long_code.long,.diff-split_code.long)]:gap-2 ",
+    "[&_:is(.dl-long_.code-text,.diff-split_code.long_.code-text)]:min-w-0 [&_:is(.dl-long_.code-text,.diff-split_code.long_.code-text)]:flex-1 [&_:is(.dl-long_.code-text,.diff-split_code.long_.code-text)]:overflow-hidden [&_:is(.dl-long_.code-text,.diff-split_code.long_.code-text)]:text-ellipsis [&_:is(.dl-long_.code-text,.diff-split_code.long_.code-text)]:whitespace-pre ",
+    "[&_:is(.dl-long.expanded_.code-text,.diff-split_code.long.expanded_.code-text)]:overflow-x-auto [&_:is(.dl-long.expanded_.code-text,.diff-split_code.long.expanded_.code-text)]:text-clip ",
+    "[&_.ln-more]:flex-none [&_.ln-more]:cursor-pointer [&_.ln-more]:select-none [&_.ln-more]:rounded-sm [&_.ln-more]:border [&_.ln-more]:border-acc-line [&_.ln-more]:bg-acc-soft [&_.ln-more]:px-1.5 [&_.ln-more]:text-[11px] [&_.ln-more]:text-acc [&_.ln-more]:[font:inherit] ",
+    "[&_.ln-more:hover]:bg-acc [&_.ln-more:hover]:text-bg ",
+    "[&_.dl-add]:bg-add-bg [&_.dl-add_.ln]:bg-add-gut [&_.dl-add_.ln]:text-add [&_.dl-add_code]:text-add-ink ",
+    "[&_.dl-del]:bg-del-bg [&_.dl-del_.ln]:bg-del-gut [&_.dl-del_.ln]:text-del [&_.dl-del_code]:text-del-ink ",
+    "[&_.dl-ctx_code]:text-ink-2 [&_.dl-hunk]:bg-sunk [&_.dl-hunk_code]:font-semibold [&_.dl-hunk_code]:text-ink-3 ",
+    "[&_.dl-meta]:opacity-60 [&_.dl-meta_code]:text-ink-3 ",
+    "[&.commit-focus_.diff-unified_.dl]:opacity-[.34] [&.commit-focus_.diff-unified_.dl.owned]:opacity-100 ",
+    "[&.commit-focus_.diff-unified_:is(.dl-add,.dl-del).owned]:shadow-[inset_3px_0_0_var(--acc)]",
+);
+
+pub(crate) const SPLIT_PRESENTATION_CLASSES: &str = split::PRESENTATION_CLASSES;
+pub(crate) const INTRALINE_PRESENTATION_CLASSES: &str = intraline::PRESENTATION_CLASSES;
 
 pub(crate) fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
     render_unified_rows(&derive_rows(lines, owners))
@@ -374,6 +394,49 @@ mod tests {
         }]);
         assert!(!html.contains("dl-long"));
         assert!(!html.contains("code-text"));
+    }
+
+    #[test]
+    fn rendered_rows_keep_enhancer_and_presentation_hooks() {
+        let unified = render_unified_rows(&[
+            Row {
+                kind: RowKind::Add,
+                old_no: None,
+                new_no: Some(1),
+                text: format!("+{}", "a".repeat(MAX_LINE_COLS + 5)),
+                owner: Some("abc123def".into()),
+            },
+            Row {
+                kind: RowKind::Del,
+                old_no: Some(1),
+                new_no: None,
+                text: "-old".into(),
+                owner: Some("abc123def".into()),
+            },
+        ]);
+        let split = render_split_rows(&[SplitRow::Pair {
+            old: Some(SplitCell {
+                no: 1,
+                text: "-old".into(),
+                owner: Some("abc123def".into()),
+                spans: vec![Span { start: 0, end: 1 }],
+            }),
+            new: Some(SplitCell {
+                no: 1,
+                text: "+new".into(),
+                owner: Some("abc123def".into()),
+                spans: vec![Span { start: 0, end: 1 }],
+            }),
+        }]);
+
+        for hook in ["dl", "dl-add", "dl-del", "dl-long", "ln", "code-text"] {
+            assert!(unified.contains(hook), "unified rows lost {hook}");
+        }
+        for hook in ["dl", "ln", "sp", "sp-add", "sp-del", "ciw"] {
+            assert!(split.contains(hook), "split rows lost {hook}");
+        }
+        assert!(unified.contains(r#"data-commit="abc123def""#));
+        assert!(split.contains(r#"data-commit="abc123def""#));
     }
 
     #[test]

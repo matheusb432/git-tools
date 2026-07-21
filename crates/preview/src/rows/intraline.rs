@@ -6,6 +6,12 @@
 
 use similar::{ChangeTag, TextDiff};
 
+pub(super) const PRESENTATION_CLASSES: &str = concat!(
+    "[&_.diff-split_:is(.sp-del,.sp-add)_.ciw]:rounded-[2px] ",
+    "[&_.diff-split_.sp-del_.ciw]:bg-[color-mix(in_srgb,var(--del)_34%,transparent)] ",
+    "[&_.diff-split_.sp-add_.ciw]:bg-[color-mix(in_srgb,var(--add)_34%,transparent)]",
+);
+
 /// A half-open `[start, end)` range of char indices within a line body marking a
 /// changed run. Indices count `char`s, matching the renderer's per-`char` walk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

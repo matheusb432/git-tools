@@ -423,20 +423,23 @@ mod tests {
     }
 
     #[test]
-    fn narrow_app_split_rows_stack_without_changing_raw_artifacts() {
+    fn narrow_split_rows_stack_in_the_shared_preview_styles() {
         let viewer = super::document::viewer_css();
         let shared = preview::preview_css();
 
-        // the app-only stacking rules live in the viewer sheet...
+        assert!(shared.contains("@media (max-width:1024px)"));
+        assert!(!shared.contains("@media not all and (min-width:1024px)"));
+        assert!(shared.contains("grid-template-columns:44px minmax(0,1fr)"));
+        assert!(!shared.contains("data-diff-full"));
+        assert!(!shared.contains("body.viewer-shell"));
+
+        // The viewer sheet retains its equivalent rule until viewer chrome migration.
         assert!(viewer.contains(
             "body.viewer-shell .diff-split .dl{grid-template-columns:44px minmax(0,1fr)}"
         ));
         assert!(viewer.contains(
             "body.viewer-shell .diff-split .dl-meta,body.viewer-shell .diff-split .dl-hunk{grid-template-columns:minmax(0,1fr)}"
         ));
-        assert!(!shared.contains("body.viewer-shell"));
-        // ...while the artifact narrow-screen pane fallback stays in the shared sheet
-        assert!(shared.contains("body:not(.viewer-shell) .diff-unified.diff-compact"));
         assert!(!viewer.contains("body:not(.viewer-shell)"));
     }
 
