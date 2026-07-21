@@ -16,7 +16,9 @@ pub(super) fn tree(view: &View) -> Markup {
     let total_del: u32 = view.files.iter().map(|f| f.removed).sum();
     let commit_count = view.commits.len();
     let file_count = view.files.len();
-    let stat = "rounded-sm border border-line-2 px-2 py-0.5 text-[11px] text-ink-2";
+    // ! One border-color and one text-color utility per chip: stacking a neutral and an
+    // ! accent utility of the same property leaves the winner to stylesheet order.
+    let stat = "rounded-sm border px-2 py-0.5 text-[11px]";
 
     html! {
         aside class="tree [grid-area:2/1] overflow-auto border-r border-line bg-surface p-[13px]" aria-label="Changed files tree" {
@@ -29,7 +31,7 @@ pub(super) fn tree(view: &View) -> Markup {
                 span { (view.commits_label) " · " (file_count) " file" (plural(file_count)) }
             }
             div class="mx-0.5 mb-3 flex flex-wrap gap-2" {
-                span class=(stat) { b class="font-bold text-ink" { (commit_count) } " commit" (plural(commit_count)) }
+                span class={ (stat) " border-line-2 text-ink-2" } { b class="font-bold text-ink" { (commit_count) } " commit" (plural(commit_count)) }
                 span class={ (stat) " border-add-line text-add" } { "+" (total_add) }
                 span class={ (stat) " border-del-line text-del" } { "−" (total_del) }
             }

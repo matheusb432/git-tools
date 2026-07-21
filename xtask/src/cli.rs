@@ -4,7 +4,10 @@
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::{verb::Verb, verbs::test::TestArguments};
+use crate::{
+    verb::Verb,
+    verbs::{format::FormatArguments, test::TestArguments},
+};
 
 /// xtask — this repo's embedded dev/release automation (xtask).
 #[derive(Parser)]
@@ -50,19 +53,23 @@ pub enum Command {
         force: bool,
     },
     /// Format Rust, TOML, Markdown, and frontend sources with the repository's complete pinned
-    /// formatter matrix, in place.
+    /// formatter matrix, in place. `--verbose` restores taplo's file-discovery logs.
     #[command(name = Verb::FORMAT.as_str())]
-    Fmt,
+    Fmt(FormatArguments),
     /// Check formatting without modifying files; exits non-zero on drift. Formatting only — the
-    /// linters live under `lint` and the aggregate `check` gate.
+    /// linters live under `lint` and the aggregate `check` gate. `--verbose` restores taplo's
+    /// file-discovery logs.
     #[command(name = Verb::FORMAT_CHECK.as_str())]
-    FmtCheck,
+    FmtCheck(FormatArguments),
     /// Run every repository linter (Oxlint, the architecture lints, and full-workspace Clippy).
     #[command(name = Verb::LINT.as_str())]
     Lint,
     /// Run the complete read-only quality gate: formatting drift, then every linter.
     #[command(name = Verb::CHECK.as_str())]
     Check,
+    /// Check staged whitespace, formatting, and frontend lint without scanning unrelated files.
+    #[command(name = Verb::PRE_COMMIT.as_str())]
+    PreCommit,
     /// Apply autofixable Rust and frontend lints, then run every configured formatter.
     #[command(name = Verb::FIX.as_str())]
     Fix {

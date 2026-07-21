@@ -1,5 +1,7 @@
 //! Markdown formatting plan (mdformat over tracked files).
 
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 
 use super::FormatMode;
@@ -26,6 +28,18 @@ pub(super) fn format_step(mode: FormatMode) -> Result<Option<Step>> {
             .with_arguments(mode.check_argument())
             .with_arguments(files),
     ))
+}
+
+pub(crate) fn check_step_for_files(files: Vec<PathBuf>, directory: &Path) -> Step {
+    Step::new("mdformat", "uvx", ["--python", "3.13"])
+        .with_arguments(PLUGINS.iter().flat_map(|plugin| ["--with", *plugin]))
+        .with_arguments(["mdformat", "--check"])
+        .with_arguments(
+            files
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned()),
+        )
+        .with_current_directory(directory)
 }
 
 /// Tracked Markdown files (NUL-split from `git ls-files`); gitignored paths are never returned.

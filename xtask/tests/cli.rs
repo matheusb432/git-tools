@@ -29,6 +29,7 @@ fn help_lists_the_verb_surface() {
         .stdout(predicates::str::contains("bootstrap"))
         .stdout(predicates::str::contains("install"))
         .stdout(predicates::str::contains("uninstall"))
+        .stdout(predicates::str::contains("pre-commit"))
         .stdout(predicates::str::contains("gen-icon"))
         .stdout(predicates::str::contains("ship"));
 }
@@ -38,6 +39,15 @@ fn bootstrap_is_a_known_verb() {
     Command::cargo_bin("xtask")
         .unwrap()
         .args(["bootstrap", "--help"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn pre_commit_is_a_known_verb() {
+    Command::cargo_bin("xtask")
+        .unwrap()
+        .args(["pre-commit", "--help"])
         .assert()
         .success();
 }

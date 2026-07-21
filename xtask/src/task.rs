@@ -5,15 +5,19 @@
 //! quality verbs build their plans as `Step` vectors so the read-only gate can name every drifted
 //! or failing tool at once.
 
+use std::path::{Path, PathBuf};
+
 use anyhow::{Result, bail};
 
 use crate::process;
 
-/// One labeled child process: `program arguments…`.
+/// One labeled child process: `program arguments…` with optional environment additions.
 pub(crate) struct Step {
     label: String,
     program: String,
     arguments: Vec<String>,
+    environment: Vec<(String, String)>,
+    current_directory: Option<PathBuf>,
 }
 
 impl Step {
@@ -26,6 +30,8 @@ impl Step {
             label: label.into(),
             program: program.into(),
             arguments: arguments.into_iter().map(Into::into).collect(),
+            environment: Vec::new(),
+            current_directory: None,
         }
     }
 
@@ -39,6 +45,21 @@ impl Step {
         self
     }
 
+    /// Set an environment variable applied when the step spawns.
+    pub(crate) fn with_environment(
+        mut self,
+        key: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        self.environment.push((key.into(), value.into()));
+        self
+    }
+
+    pub(crate) fn with_current_directory(mut self, directory: impl Into<PathBuf>) -> Self {
+        self.current_directory = Some(directory.into());
+        self
+    }
+
     pub(crate) fn label(&self) -> &str {
         &self.label
     }
@@ -49,6 +70,14 @@ impl Step {
 
     pub(crate) fn arguments(&self) -> &[String] {
         &self.arguments
+    }
+
+    pub(crate) fn environment(&self) -> &[(String, String)] {
+        &self.environment
+    }
+
+    pub(crate) fn current_directory(&self) -> Option<&Path> {
+        self.current_directory.as_deref()
     }
 }
 

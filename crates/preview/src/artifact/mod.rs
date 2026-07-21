@@ -129,9 +129,9 @@ mod tests {
 
         // three theme palettes: default :root (dark) + light + hearth, amber removed
         assert!(html.contains(":root{"));
-        assert!(html.contains(r#":root[data-theme=light]"#));
-        assert!(html.contains(r#":root[data-theme=hearth]"#));
-        assert!(!html.contains(r#":root[data-theme=amber]"#));
+        assert!(html.contains(r":root[data-theme=light]"));
+        assert!(html.contains(r":root[data-theme=hearth]"));
+        assert!(!html.contains(r":root[data-theme=amber]"));
 
         // perf + offline-theming guards survive the redesign
         assert!(html.contains("content-visibility:auto"));

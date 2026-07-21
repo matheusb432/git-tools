@@ -11,7 +11,7 @@ use crate::{
 
 /// Run the complete read-only gate: verify formatting, then run every linter.
 pub(crate) fn run() -> Result<()> {
-    task::check_all(&format::check_steps()?, "run `just fmt`")?;
+    task::check_all(&format::check_steps(false)?, "run `just fmt`")?;
     lint::linters()?;
     process::result(Verb::CHECK, Status::Pass);
     Ok(())

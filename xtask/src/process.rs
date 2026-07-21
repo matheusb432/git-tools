@@ -34,20 +34,35 @@ impl std::fmt::Display for Status {
 
 /// Run one command plan, tagging any non-zero exit with the step's label.
 pub(crate) fn run_step(step: &Step) -> Result<()> {
-    run(step.label(), step.program(), &argument_refs(step))
+    let status = step_command(step).status()?;
+    if !status.success() {
+        bail!(
+            "{} failed (exit {})",
+            step.label(),
+            status.code().unwrap_or(-1)
+        );
+    }
+    Ok(())
 }
 
 /// Run one command plan and report whether it succeeded (used by the read-only gate).
 pub(crate) fn step_succeeds(step: &Step) -> Result<bool> {
-    let status = Command::new(step.program())
-        .args(step.arguments())
+    let status = step_command(step)
         .status()
         .with_context(|| format!("spawning {}", step.label()))?;
     Ok(status.success())
 }
 
-fn argument_refs(step: &Step) -> Vec<&str> {
-    step.arguments().iter().map(String::as_str).collect()
+/// Build the child command for a step, applying its arguments and environment additions.
+fn step_command(step: &Step) -> Command {
+    let mut command = Command::new(step.program());
+    command
+        .args(step.arguments())
+        .envs(step.environment().iter().map(|(key, value)| (key, value)));
+    if let Some(directory) = step.current_directory() {
+        command.current_dir(directory);
+    }
+    command
 }
 
 /// Run `program args…`, returning an error tagged with `label` if it exits non-zero.
@@ -99,11 +114,18 @@ pub fn run_in(label: &str, dir: &str, program: &str, args: &[&str]) -> Result<()
 
 /// Run `program args…` and capture stdout as UTF-8; error on non-zero exit.
 pub fn capture(label: &str, program: &str, args: &[&str]) -> Result<String> {
-    let out = Command::new(program).args(args).output()?;
-    if !out.status.success() {
-        bail!("{label} failed (exit {})", out.status.code().unwrap_or(-1));
+    String::from_utf8(capture_bytes(label, program, args)?).context("non-UTF-8 output")
+}
+
+pub(crate) fn capture_bytes(label: &str, program: &str, args: &[&str]) -> Result<Vec<u8>> {
+    let output = Command::new(program).args(args).output()?;
+    if !output.status.success() {
+        bail!(
+            "{label} failed (exit {})",
+            output.status.code().unwrap_or(-1)
+        );
     }
-    String::from_utf8(out.stdout).context("non-UTF-8 output")
+    Ok(output.stdout)
 }
 
 /// Run a command with an optional working directory and explicit environment additions.

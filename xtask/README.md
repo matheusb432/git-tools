@@ -14,6 +14,7 @@
 | `fmt-check` | Verify formatting without writing (formatting only; exits non-zero on drift). | `just fmt-check` |
 | `lint` | Oxlint, the architecture lints, and full-workspace Clippy including desktop. | `just lint` |
 | `check` | Complete read-only gate: formatting drift, then every linter. | `just check` |
+| `pre-commit` | Check staged whitespace and run only the formatters or frontend linter owned by staged files. | tracked Git hook |
 | `fix [clippy args...]` | Apply Clippy and Oxlint fixes before normalizing every formatter. | `just fix` |
 | `build [--target cli\|viewer\|both]` | Build mandatory release artifact sets; the root build never soft-skips the viewer. | `just build` / scoped build recipes |
 | `frontend-test` | Type-check and unit-test the framework-free frontend. | `just cli test` |

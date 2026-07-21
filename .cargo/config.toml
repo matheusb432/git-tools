@@ -7,5 +7,7 @@
 # Scope: applies only to the x86_64-pc-windows-msvc target (both `just ship`
 # and `just ship --smoke`), so the compile smoke links exactly like the
 # shippable. Native Linux builds (the host target) are unaffected.
+# cargo-xwin's CRT archives reference unavailable Microsoft-internal PDBs;
+# LNK4099 reports only those missing debug references.
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/ignore:4099"]

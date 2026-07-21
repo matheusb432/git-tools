@@ -1,6 +1,7 @@
-  /* border-width utilities assume this Preflight reset; every legacy rule sets its full
-     border shorthand, so zeroing native borders here changes nothing already styled. */
-  *,::before,::after{box-sizing:border-box;border:0 solid}
+  /* Preflight reset. Must sit in the base layer: border-width utilities live in the later
+     utilities layer and only override the zeroed border from there; unlayered slice rules
+     keep winning over both layers. */
+  @layer base{*,::before,::after{box-sizing:border-box;border:0 solid}}
   html,body{margin:0;height:100%}
   body{
     background:var(--bg);color:var(--ink);

@@ -56,15 +56,15 @@ _preflight:
 test *args:
     cargo run --quiet -p xtask -- test {{ args }}
 
-# Apply pinned-nightly rustfmt, Taplo, mdformat, and Oxfmt across the repository.
+# Apply pinned-nightly rustfmt, Taplo, mdformat, and Oxfmt across the repository. --verbose restores taplo's file-discovery logs.
 [group('quality')]
-fmt:
-    cargo run --quiet -p xtask -- fmt
+fmt *args:
+    cargo run --quiet -p xtask -- fmt {{ args }}
 
-# Check formatting without modifying files (exits non-zero on drift); formatting only.
+# Check formatting without modifying files (exits non-zero on drift); formatting only. --verbose restores taplo's file-discovery logs.
 [group('quality')]
-fmt-check:
-    cargo run --quiet -p xtask -- fmt-check
+fmt-check *args:
+    cargo run --quiet -p xtask -- fmt-check {{ args }}
 
 # Run every repository linter: Oxlint, architecture constraints, and Clippy over the full workspace including desktop.
 [group('quality')]

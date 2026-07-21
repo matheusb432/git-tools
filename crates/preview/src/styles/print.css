@@ -3,7 +3,6 @@
     .layout{display:block;height:auto}
     .tree,.shelf,.keybar,.foldall,.layout-toggle,.view-toggle,.ctx-toggle,.search,.theme-control,.copies,[popover],.gtl-toast{display:none!important}
     .titlebar{background:#f2f2f2;border-color:#bbb}
-    .brand .repo b,.brand .kind{color:#111}
     .main{overflow:visible;padding:0}
     details.file{break-inside:avoid}details.file[hidden]{display:block}
     .filebody{content-visibility:visible;overflow:visible}

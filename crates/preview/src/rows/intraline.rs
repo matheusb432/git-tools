@@ -30,6 +30,7 @@ pub(super) struct LineSpans {
 pub(super) fn changed_spans(old: &str, new: &str) -> LineSpans {
     let diff = TextDiff::from_chars(old, new);
     let mut spans = LineSpans::default();
+    // TODO: why usize? could use u32, instead.
     let mut old_idx = 0usize;
     let mut new_idx = 0usize;
     let mut saw_common = false;

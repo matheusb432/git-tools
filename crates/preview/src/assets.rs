@@ -62,6 +62,21 @@ mod tests {
     }
 
     #[test]
+    fn preflight_reset_stays_layered_below_utilities() {
+        // ! An unlayered reset beats every layered rule, stripping the 1px width that
+        // ! border utilities apply; the base layer must also precede utilities.
+        let css = preview_css();
+        assert!(
+            css.contains("@layer base{*,:before,:after{box-sizing:border-box;border:0 solid}}")
+        );
+        let base = css.find("@layer base").expect("base layer present");
+        let utilities = css
+            .find("@layer utilities")
+            .expect("utilities layer present");
+        assert!(base < utilities);
+    }
+
+    #[test]
     fn preview_css_emits_theme_scale_utilities() {
         // ! The entry imports utilities.css without Tailwind's default theme, so any
         // ! scale utility compiles to nothing unless theme-map.css defines its token.

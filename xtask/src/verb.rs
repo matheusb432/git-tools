@@ -19,6 +19,7 @@ impl Verb {
     pub(crate) const FORMAT_CHECK: Self = Self("fmt-check");
     pub(crate) const FRONTEND_TEST: Self = Self("frontend-test");
     pub(crate) const LINT: Self = Self("lint");
+    pub(crate) const PRE_COMMIT: Self = Self("pre-commit");
     pub(crate) const GEN_ICON: Self = Self("gen-icon");
     pub(crate) const INSTALL: Self = Self("install");
     pub(crate) const SHIP: Self = Self("ship");
