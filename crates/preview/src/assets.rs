@@ -53,14 +53,25 @@ mod tests {
     #[test]
     fn public_preview_assets_are_the_embedded_offline_payloads() {
         let css = preview_css();
-        assert!(
-            css.starts_with(":root{"),
-            "compiler banner must be stripped"
-        );
+        assert!(!css.starts_with("/*!"), "compiler banner must be stripped");
         assert!(!css.contains("/*!"));
+        assert!(css.contains(":root{"));
         assert_eq!(preview_bundle(), PREVIEW_BUNDLE);
         assert!(!has_disallowed_external_url(css));
         assert!(!has_disallowed_external_url(preview_bundle()));
+    }
+
+    #[test]
+    fn preview_css_emits_theme_scale_utilities() {
+        // ! The entry imports utilities.css without Tailwind's default theme, so any
+        // ! scale utility compiles to nothing unless theme-map.css defines its token.
+        let css = preview_css();
+        assert!(css.contains(".px-5{padding-inline:1.25rem}"));
+        assert!(css.contains(".gap-4{gap:1rem}"));
+        assert!(css.contains(".rounded-sm{border-radius:var(--r-sm)}"));
+        assert!(css.contains(".font-semibold{"));
+        assert!(css.contains(".border-add-line{border-color:var(--add-line)}"));
+        assert!(css.contains(".border-del-line{border-color:var(--del-line)}"));
     }
 
     #[test]
@@ -133,9 +144,9 @@ mod tests {
         assert!(css.contains("--side-display:none"));
         assert!(css.contains(".tdir>ul .tfile>.tlabel{padding-left:8px}"));
         // the 3-column shell: tree | main | shelf on the middle grid row
-        assert!(css.contains(".tree{") && css.contains("grid-area:2/1"));
-        assert!(css.contains(".main{") && css.contains("grid-area:2/2"));
-        assert!(css.contains(".shelf{") && css.contains("grid-area:2/3"));
+        assert!(css.contains("grid-area:2/1"));
+        assert!(css.contains("grid-area:2/2"));
+        assert!(css.contains("grid-area:2/3"));
         assert!(!css.contains(".keybar{display:none}"));
     }
 

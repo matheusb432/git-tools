@@ -368,6 +368,15 @@ mod tests {
     }
 
     #[test]
+    fn viewer_css_emits_theme_scale_utilities() {
+        // ! The viewer entry imports utilities.css without Tailwind's default theme, so
+        // ! any scale utility compiles to nothing unless theme-map.css defines its token.
+        let css = super::document::viewer_css();
+
+        assert!(css.contains(".min-w-0{min-width:0}"));
+    }
+
+    #[test]
     fn live_delete_feedback_focuses_the_active_tab_and_announces_success() {
         let html = MaudViewerRenderer.build_tabs_with_view_after_live_delete(&sample_document());
         let active = html

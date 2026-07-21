@@ -9,27 +9,33 @@ use maud::{Markup, html};
 use super::Surface;
 use crate::text::plural;
 
+// ! `.titlebar` and `.branchline` stay as class anchors for the narrow-screen overrides in
+// ! styles/responsive.css, and `.theme-control` for the print rule; their base appearance is
+// ! the utility classes here. `.foldall`/`.layout-toggle`/`.view-toggle`/`.ctx-toggle`/
+// ! `.theme-select` are enhancer hooks whose JS-toggled states keep component styling in
+// ! styles/layout.css.
 pub(super) fn titlebar(view: &View, surface: Surface) -> Markup {
     html! {
-        header.titlebar {
-            div.brand {
-                span.repo { "~/" b { (view.repo_name) } }
-                span.kind { (view.title) }
+        header class="titlebar [grid-column:1/4] flex items-center gap-4 border-b border-line bg-surface px-5 py-[13px]" {
+            div class="flex items-baseline gap-[9px] text-[18px] font-semibold tracking-[-0.01em]" {
+                span { "~/" b class="font-bold text-acc" { (view.repo_name) } }
+                span class="self-center rounded-sm border border-acc-line bg-acc-soft px-2 py-0.5 text-[12px] font-medium text-acc" { (view.title) }
             }
-            div.branchline {
-                span.ref-branch { (view.branch) }
-                span.arr { "→" }
-                span.ref-up { (view.upstream) }
+            div class="branchline flex items-center gap-[7px] text-[12.5px] text-ink-2" {
+                span class="text-acc" { (view.branch) }
+                span class="text-ink-3" { "→" }
+                span class="text-ink-3" { (view.upstream) }
             }
             @if let Some(excluded) = &view.exclusions {
-                span.excl-chip title=(exclusion_tooltip(excluded)) {
+                span class="excl-chip flex-none cursor-help whitespace-nowrap rounded-sm border border-del-line bg-del-bg px-2 py-0.5 text-[12px] font-semibold text-del-ink"
+                    title=(exclusion_tooltip(excluded)) {
                     (excluded.hidden_paths.len())
                     " file" (plural(excluded.hidden_paths.len()))
                     " hidden · " (excluded.extensions_label())
                 }
                 // TODO: add button to enable file exclusion modification here. should open a dialog.
             }
-            div.spacer {}
+            div class="flex-1" {}
             button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
             @if matches!(surface, Surface::Artifact) {
                 button type="button" class="layout-toggle" aria-pressed="false" title="Side-by-side / unified diff" { "Side by side" }
@@ -37,8 +43,8 @@ pub(super) fn titlebar(view: &View, surface: Surface) -> Markup {
             }
             button type="button" class="ctx-toggle active" aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
             @if matches!(surface, Surface::Artifact) {
-                label.theme-control {
-                    span { "theme" }
+                label class="theme-control inline-flex items-center gap-1.5" {
+                    span class="text-[11px] tracking-[0.04em] text-ink-2" { "theme" }
                     select class="theme-select" aria-label="Theme" {
                         option value="dark" { "dark" }
                         option value="light" { "light" }
@@ -80,7 +86,7 @@ mod tests {
         let html = build_html(&view);
 
         assert!(
-            html.contains(r#"<span class="excl-chip""#),
+            html.contains(r#"<span class="excl-chip"#),
             "chip missing: {html}"
         );
         assert!(html.contains("2 files hidden · lock, md"));
@@ -93,7 +99,7 @@ mod tests {
     #[test]
     fn build_html_omits_the_exclusion_chip_without_hidden_files() {
         // ? the class name still appears once — in the inlined stylesheet
-        assert!(!build_html(&sample_view()).contains(r#"<span class="excl-chip""#));
+        assert!(!build_html(&sample_view()).contains(r#"<span class="excl-chip"#));
     }
 
     #[test]
@@ -103,7 +109,7 @@ mod tests {
 
         let fragment = view_fragment(&view, RenderOptions::DEFAULT).into_string();
 
-        assert!(fragment.contains(r#"<span class="excl-chip""#));
+        assert!(fragment.contains(r#"<span class="excl-chip"#));
     }
 
     #[test]

@@ -11,12 +11,12 @@ use crate::render::{ViewerRoute, ViewerSettingChange};
 pub(super) fn view_controls(view: &ViewerView, settings: &ViewerSettings) -> Markup {
     html! {
         header.viewer-controls aria-label="Diff display controls" {
-            div.viewer-control-group role="group" aria-label="Layout" {
+            div class="flex items-center gap-[3px]" role="group" aria-label="Layout" {
                 span.viewer-control-label { "Layout" }
                 (layout_choice(view, DiffLayout::Unified, "Unified"))
                 (layout_choice(view, DiffLayout::Split, "Side by side"))
             }
-            div.viewer-control-group role="group" aria-label="Density" {
+            div class="flex items-center gap-[3px]" role="group" aria-label="Density" {
                 span.viewer-control-label { "View" }
                 (density_choice(view, DiffDensity::Compact, "Changes"))
                 (density_choice(view, DiffDensity::Full, "Full file"))
@@ -29,8 +29,8 @@ pub(super) fn view_controls(view: &ViewerView, settings: &ViewerSettings) -> Mar
                     hx-swap="outerHTML" { "Refresh" }
                 (delete_live_view_button(view.tab_id()))
             }
-            div.viewer-spacer {}
-            div.viewer-control-group role="group" aria-label="Theme" {
+            div class="flex-1" {}
+            div class="flex items-center gap-[3px]" role="group" aria-label="Theme" {
                 span.viewer-control-label { "Theme" }
                 (theme_choice(settings, Theme::Dark, "Dark"))
                 (theme_choice(settings, Theme::Light, "Light"))

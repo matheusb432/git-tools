@@ -9,8 +9,6 @@
   details.file[open]>summary::before{transform:rotate(90deg)} details.file>summary:hover{background:var(--line)}
   details.file.status-added>summary{background:color-mix(in srgb,var(--add-bg) 34%,var(--surface-2))}
   details.file.status-deleted>summary{background:color-mix(in srgb,var(--del-bg) 34%,var(--surface-2))}
-  details.file>summary .path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
-  .copies{display:flex;gap:5px;flex:none} .filestat{flex:none;font-size:12.5px}
   .diff{overflow-x:hidden;font-size:14px;line-height:1.6}
   /* === which of the four panes shows: unified (default) vs split · compact vs full ===
      driven by the <html> data-diff-layout / data-diff-full attributes; :has() falls back

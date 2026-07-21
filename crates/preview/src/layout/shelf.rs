@@ -4,12 +4,18 @@
 use application::diffs::View;
 use maud::{Markup, html};
 
+// ! `.shelf` stays as the class anchor for the responsive column overrides, the print rule,
+// ! and the scrollbar styling. The `.cline` card family keeps component styling in
+// ! styles/shelf.css: its hover/active/copied states are toggled by the enhancer.
 pub(super) fn shelf(view: &View) -> Markup {
     html! {
-        aside.shelf aria-label="Commits in range" {
-            div.shelf-head {
-                h3 { (view.commits_label) }
-                p.hint { span.dot {} "click card = focus commit · hash = copy · hover = notes" }
+        aside class="shelf [grid-area:2/3] overflow-auto border-l border-line bg-surface p-[13px]" aria-label="Commits in range" {
+            div {
+                h3 class="mx-0.5 mt-1.5 mb-1 text-[11px] font-semibold tracking-[0.06em] text-ink-3 uppercase" { (view.commits_label) }
+                p class="mx-0.5 mt-0 mb-3 flex items-center gap-1.5 text-[11px] text-ink-3" {
+                    span class="size-[7px] flex-none rounded-full bg-acc shadow-[0_0_0_3px_var(--acc-soft)]" {}
+                    "click card = focus commit · hash = copy · hover = notes"
+                }
             }
             (commit_rows(view))
         }
@@ -66,14 +72,14 @@ pub(super) fn commit_popovers(view: &View) -> Markup {
         @for commit in &view.commits {
             @if !commit.body.trim().is_empty() {
                 div id={ "pop-" (commit.sha) } popover {
-                    div.pop-head {
-                        span.sha { (commit.sha) }
+                    div class="flex items-center gap-2 border-b border-line bg-surface-2 px-[13px] py-2.5" {
+                        span class="text-[12px] text-acc" { (commit.sha) }
                         @if !commit.date.is_empty() {
-                            span.when { (commit.date) }
+                            span class="ml-auto text-[11.5px] text-ink-3" { (commit.date) }
                         }
                     }
-                    div.pop-sub { (commit.subject) }
-                    div.pop-body { (commit.body.trim()) }
+                    div class="px-[13px] pt-2.5 pb-1 text-[13px] font-semibold text-ink" { (commit.subject) }
+                    div class="px-[13px] pt-1 pb-[13px] text-[12.5px] leading-[1.6] whitespace-pre-wrap text-ink-2" { (commit.body.trim()) }
                 }
             }
         }

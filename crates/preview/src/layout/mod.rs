@@ -53,8 +53,8 @@ mod tests {
         assert!(!html.contains(r#"class="view-toggle""#));
         assert!(!html.contains(r#"class="theme-select""#));
         assert!(!html.contains("localStorage"));
-        assert!(html.contains(r#"<aside class="tree""#));
-        assert!(html.contains(r#"<aside class="shelf""#));
+        assert!(html.contains(r#"<aside class="tree "#));
+        assert!(html.contains(r#"<aside class="shelf"#));
         assert!(html.contains(r#"<div id="pop-abc123def" popover>"#));
         assert!(preview_css().contains(".filebody.single-variant .diff"));
     }

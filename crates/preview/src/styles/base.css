@@ -1,4 +1,6 @@
-  *{box-sizing:border-box}
+  /* border-width utilities assume this Preflight reset; every legacy rule sets its full
+     border shorthand, so zeroing native borders here changes nothing already styled. */
+  *,::before,::after{box-sizing:border-box;border:0 solid}
   html,body{margin:0;height:100%}
   body{
     background:var(--bg);color:var(--ink);

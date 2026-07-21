@@ -90,7 +90,6 @@ const APP_STATE_PORTS_PATH: &str = "crates/application/src/ports.rs";
 const APP_STATE_SOURCE_DIR: &str = "crates/infra/src/app_state";
 const APP_STATE_STORE_METHOD_NAMES: [&str; 1] = ["connection_lock"];
 const PREVIEW_SOURCE_DIR: &str = "crates/preview/src";
-const INFRA_MANIFEST_PATH: &str = "crates/infra/Cargo.toml";
 
 /// Collect every violation under `root/{crates,shared}/*/src`.
 fn collect_violations(root: &Path) -> Result<Vec<String>> {
@@ -152,23 +151,31 @@ fn walk_preview_sources(current: &Path, violations: &mut Vec<String>) -> Result<
     Ok(())
 }
 
-/// Collects rule-8 violations: a `maud` dependency creeping back into infra.
+/// Collects rule-8 violations: a `maud` dependency edge creeping back into infra.
+///
+/// The invariant is a dependency direction, so it is read from `cargo metadata` package
+/// edges rather than manifest text. A root without readable workspace metadata (e.g. the
+/// layout fixtures) is allowed: ambiguity never blocks.
 fn collect_infra_template_violations(root: &Path, violations: &mut Vec<String>) -> Result<()> {
-    let path = root.join(INFRA_MANIFEST_PATH);
-    let manifest = match std::fs::read_to_string(&path) {
-        Ok(manifest) => manifest,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(error)
-                .with_context(|| format!("reading infra manifest {}", path.display()));
-        }
+    let Ok(metadata) = cargo_metadata::MetadataCommand::new()
+        .manifest_path(root.join("Cargo.toml"))
+        .no_deps()
+        .exec()
+    else {
+        return Ok(());
     };
 
-    if manifest.contains("maud") {
-        violations.push(format!(
-            "[rule 8: infra owns no templates] {}: presentation belongs to crates/preview, not the adapter layer",
-            path.display(),
-        ));
+    let templated_edge = metadata
+        .packages
+        .iter()
+        .filter(|package| package.name.as_str() == "infra")
+        .flat_map(|package| &package.dependencies)
+        .any(|dependency| dependency.name == "maud");
+
+    if templated_edge {
+        violations.push(
+            "[rule 8: infra owns no templates] crates/infra depends on maud: presentation belongs to crates/preview, not the adapter layer".to_string(),
+        );
     }
 
     Ok(())
@@ -514,26 +521,35 @@ mod tests {
         assert!(v.is_empty(), "unexpected violations: {v:?}");
     }
 
-    #[test]
-    fn infra_manifest_with_maud_is_a_rule_8_violation() {
-        let dir = TempDir::new().unwrap();
+    /// Minimal real workspace so rule 8 exercises actual `cargo metadata` edges.
+    fn seed_infra_workspace(base: &Path, infra_dependencies: &str) {
         seed_with(
-            dir.path(),
-            "crates/infra/Cargo.toml",
-            "[dependencies]\nmaud.workspace = true\n",
+            base,
+            "Cargo.toml",
+            "[workspace]\nresolver = \"3\"\nmembers = [\"crates/infra\"]\n",
         );
+        seed_with(
+            base,
+            "crates/infra/Cargo.toml",
+            &format!(
+                "[package]\nname = \"infra\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{infra_dependencies}"
+            ),
+        );
+        seed_with(base, "crates/infra/src/lib.rs", "");
+    }
+
+    #[test]
+    fn infra_maud_dependency_edge_is_a_rule_8_violation() {
+        let dir = TempDir::new().unwrap();
+        seed_infra_workspace(dir.path(), "maud = \"0.27\"\n");
         let v = collect_violations(dir.path()).unwrap();
         assert!(v.iter().any(|s| s.contains("rule 8")), "violations: {v:?}");
     }
 
     #[test]
-    fn maud_free_infra_manifest_passes_rule_8() {
+    fn maud_free_infra_passes_rule_8() {
         let dir = TempDir::new().unwrap();
-        seed_with(
-            dir.path(),
-            "crates/infra/Cargo.toml",
-            "[dependencies]\nanyhow.workspace = true\n",
-        );
+        seed_infra_workspace(dir.path(), "");
         let v = collect_violations(dir.path()).unwrap();
         assert!(v.is_empty(), "unexpected violations: {v:?}");
     }

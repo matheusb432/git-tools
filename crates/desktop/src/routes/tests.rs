@@ -217,7 +217,7 @@ fn configured_exclusions_hide_files_and_render_the_chip() {
         "excluded file must not render a file block"
     );
     assert!(
-        html.contains(r#"<span class="excl-chip""#),
+        html.contains(r#"<span class="excl-chip"#),
         "exclusion chip missing"
     );
     assert!(html.contains("1 file hidden · md"));

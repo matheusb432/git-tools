@@ -147,9 +147,9 @@ mod tests {
 
         // native popover machinery + Shelf landmarks
         assert!(html.contains("[popover]"));
-        assert!(html.contains(r#"<aside class="tree""#));
-        assert!(html.contains(r#"<aside class="shelf""#));
-        assert!(html.contains(r#"<footer class="keybar""#));
+        assert!(html.contains(r#"<aside class="tree "#));
+        assert!(html.contains(r#"<aside class="shelf"#));
+        assert!(html.contains(r#"<footer class="keybar"#));
 
         // commit-filter feature: files carry data-commits
         assert!(html.contains(r#"data-commits="abc123def""#));

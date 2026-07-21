@@ -55,7 +55,7 @@ impl MaudViewerRenderer {
                     script { (PreEscaped(THEME_CONTROL_JS)) }
                 }
                 body.viewer-shell {
-                    main.viewer-app {
+                    main class="grid h-screen min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-bg" {
                         (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::None))
                         (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
                     }

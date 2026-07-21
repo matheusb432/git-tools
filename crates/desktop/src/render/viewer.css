@@ -2,10 +2,11 @@
    sheet in the viewer document only. Owns every rule scoped to the app shell:
    `.viewer-*` chrome, `body.viewer-shell` overrides of shared row classes, and the
    viewer toast. Offline artifacts never ship any of this. */
+@import "../../../preview/src/styles/theme-map.css";
+@source "./";
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
   /* === app shell: server-authored tabs, controls, states, and history === */
   body.viewer-shell{overflow:hidden}
-  .viewer-app{display:grid;grid-template-rows:auto minmax(0,1fr);height:100vh;min-width:0;background:var(--bg)}
   .viewer-tabs{z-index:70;display:flex;min-width:0;align-items:flex-end;gap:10px;padding:8px 12px 0;background:var(--surface);border-bottom:1px solid var(--line)}
   .viewer-tab-list{display:flex;min-width:0;flex:1;align-items:flex-end;gap:4px;overflow-x:auto;scrollbar-width:thin;list-style:none;margin:0;padding:0}
   .viewer-tab{display:flex;min-width:112px;max-width:240px;align-items:center;border:1px solid transparent;border-bottom:0;border-radius:var(--r) var(--r) 0 0;background:var(--surface-2);color:var(--ink-2)}
@@ -29,22 +30,20 @@
   .viewer-view:has(>.layout){display:grid;grid-template-rows:auto minmax(0,1fr)}
   .viewer-view>.layout{height:100%;min-height:0}
   .viewer-controls{display:flex;min-width:0;align-items:center;gap:12px;padding:7px 12px;background:var(--surface);border-bottom:1px solid var(--line);color:var(--ink-2)}
-  .viewer-control-group{display:flex;align-items:center;gap:3px}
   .viewer-control-label{margin-right:3px;color:var(--ink-3);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
   .viewer-choice{position:relative;cursor:pointer}
   .viewer-choice input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
   .viewer-choice span,.viewer-control-button{display:inline-flex;min-height:27px;align-items:center;padding:4px 8px;border:1px solid transparent;border-radius:var(--r-sm);font-size:11.5px;white-space:nowrap}
   .viewer-choice:hover span,.viewer-control-button:hover{color:var(--ink);border-color:var(--line-2);background:var(--surface-2)}
-  body.viewer-shell .viewer-danger-button{margin-left:8px;color:var(--del);border-color:color-mix(in srgb,var(--del) 38%,transparent);background:var(--del-bg)}
+  body.viewer-shell .viewer-danger-button{margin-left:8px;color:var(--del);border-color:var(--del-line);background:var(--del-bg)}
   body.viewer-shell .viewer-danger-button:hover{color:var(--bg);border-color:var(--del);background:var(--del)}
   .viewer-choice input:checked+span{color:var(--acc);border-color:var(--acc-line);background:var(--acc-soft)}
   .viewer-choice input:focus-visible+span,.viewer-control-button:focus-visible,.viewer-tab-activate:focus-visible,.viewer-tab-close:focus-visible,.viewer-history-button:focus-visible,.viewer-icon-button:focus-visible,.viewer-recovery-button:focus-visible,.viewer-history-row:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
-  .viewer-spacer{flex:1}
   .hx-request{cursor:progress;opacity:.68}
 
   .viewer-status{display:grid;min-height:100%;place-content:center;grid-template-columns:auto minmax(0,520px);gap:18px;padding:32px;color:var(--ink-2)}
   .viewer-status-mark{display:flex;width:42px;height:42px;align-items:center;justify-content:center;border:1px solid var(--line-2);border-radius:50%;background:var(--surface);color:var(--acc);font-size:20px;font-weight:700}
-  .viewer-status-error .viewer-status-mark{color:var(--del);border-color:color-mix(in srgb,var(--del) 42%,transparent);background:var(--del-bg)}
+  .viewer-status-error .viewer-status-mark{color:var(--del);border-color:var(--del-line);background:var(--del-bg)}
   .viewer-status h1{margin:3px 0 7px;color:var(--ink);font-size:20px;line-height:1.25;letter-spacing:-.02em}
   .viewer-status p{margin:0;overflow-wrap:anywhere}
   .viewer-status code{padding:1px 5px;border:1px solid var(--line);border-radius:4px;background:var(--sunk);color:var(--ink);font:inherit}

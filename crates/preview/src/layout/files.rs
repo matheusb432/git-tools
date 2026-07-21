@@ -83,17 +83,20 @@ pub(super) fn file_blocks(view: &View, surface: Surface) -> Markup {
                 data-status=(status.key)
                 data-status-code=(status.code)
                 data-status-label=(status.label) {
+                // ! summary/caret/status styling stays component CSS in styles/panes.css (sticky +
+                // ! open/status states); `.copies` keeps its class as the print-rule anchor and
+                // ! `.copy-button` keeps component styling for its data-state feedback.
                 summary {
-                    span.path { (file.path) }
+                    span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink" { (file.path) }
                     span class=(format!("status-badge {}", status.css_class)) title=(status.label) aria-label=(status.label) { (status.code) }
-                    span.copies {
+                    span class="copies flex flex-none gap-[5px]" {
                         button type="button" class="copy-button" data-copy-value=(file.path) data-copy-label="path" { "path" }
                         button type="button" class="copy-button" data-copy-value=(absolute) data-copy-label="abs" { "abs" }
                         // ! mode="code" carries no payload: the button reads its own file's
                         // ! already-rendered diff rows at click time (no per-file content dupe).
                         button type="button" class="copy-button" data-copy-mode="code" data-copy-label="code" { "code" }
                     }
-                    span.filestat { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
+                    span class="flex-none text-[12.5px]" { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
                 }
                 // ! Diff rows live in their own body so content-visibility virtualizes the
                 // ! heavy content here while the summary stays sticky against `.main` (size

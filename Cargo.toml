@@ -45,6 +45,7 @@ assert_cmd = "2"
 axum = "0.8"
 base64 = "0.22.1"
 bootstrap = { path = "shared/bootstrap" }
+cargo_metadata = "0.23.1"
 clap = { version = "4", features = ["derive"] }
 # cargo's own clap help palette, applied to xtask so `--help` renders like cargo's.
 clap-cargo = "0.18.3"
