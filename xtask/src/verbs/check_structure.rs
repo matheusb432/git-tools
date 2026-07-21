@@ -26,6 +26,11 @@
 //! 6. **App-state infrastructure does not own runtime SQL.** Production Rust under
 //!    `crates/infra/src/app_state/` may initialize `SQLite`, but query and mutation operations
 //!    belong in application slices.
+//! 7. **Shared preview templates stay htmx-free.** Rust under `crates/preview/src` may not
+//!    contain `hx-` attribute strings: the shared diff body must render from `file://` with no
+//!    server, so htmx wiring belongs exclusively to the desktop viewer shell.
+//! 8. **Infra owns no templates.** `crates/infra/Cargo.toml` may not depend on `maud`; presentation
+//!    lives in `crates/preview` and the process-root shells.
 
 use std::path::Path;
 
@@ -84,6 +89,8 @@ const SOURCE_LAYOUT_SYMLINK_DESCRIPTION: &str = "source layout tree may not cont
 const APP_STATE_PORTS_PATH: &str = "crates/application/src/ports.rs";
 const APP_STATE_SOURCE_DIR: &str = "crates/infra/src/app_state";
 const APP_STATE_STORE_METHOD_NAMES: [&str; 1] = ["connection_lock"];
+const PREVIEW_SOURCE_DIR: &str = "crates/preview/src";
+const INFRA_MANIFEST_PATH: &str = "crates/infra/Cargo.toml";
 
 /// Collect every violation under `root/{crates,shared}/*/src`.
 fn collect_violations(root: &Path) -> Result<Vec<String>> {
@@ -94,7 +101,77 @@ fn collect_violations(root: &Path) -> Result<Vec<String>> {
     collect_cli_source_violations(root, &mut violations)?;
     collect_app_state_store_violations(root, &mut violations)?;
     collect_app_state_sql_violations(root, &mut violations)?;
+    collect_preview_htmx_violations(root, &mut violations)?;
+    collect_infra_template_violations(root, &mut violations)?;
     Ok(violations)
+}
+
+/// Collects rule-7 violations: `hx-` attribute strings inside the shared preview templates.
+fn collect_preview_htmx_violations(root: &Path, violations: &mut Vec<String>) -> Result<()> {
+    let source_dir = root.join(PREVIEW_SOURCE_DIR);
+    match std::fs::symlink_metadata(&source_dir) {
+        Ok(metadata) if metadata.file_type().is_dir() => {
+            walk_preview_sources(&source_dir, violations)?;
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", source_dir.display()));
+        }
+    }
+    Ok(())
+}
+
+/// Recursively scans preview Rust files in path order without following symlinks.
+fn walk_preview_sources(current: &Path, violations: &mut Vec<String>) -> Result<()> {
+    let mut entries: Vec<_> = std::fs::read_dir(current)
+        .with_context(|| format!("reading {}", current.display()))?
+        .collect::<Result<_, _>>()?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+
+    for entry in entries {
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("reading file type for {}", entry.path().display()))?;
+        let path = entry.path();
+        if file_type.is_dir() {
+            walk_preview_sources(&path, violations)?;
+        } else if file_type.is_file() && path.extension().is_some_and(|extension| extension == "rs")
+        {
+            let source = std::fs::read_to_string(&path)
+                .with_context(|| format!("reading preview source {}", path.display()))?;
+            if source.contains("hx-") {
+                violations.push(format!(
+                    "[rule 7: shared preview templates stay htmx-free] {}: `hx-` belongs to the desktop viewer shell, not the file://-safe shared body",
+                    path.display(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Collects rule-8 violations: a `maud` dependency creeping back into infra.
+fn collect_infra_template_violations(root: &Path, violations: &mut Vec<String>) -> Result<()> {
+    let path = root.join(INFRA_MANIFEST_PATH);
+    let manifest = match std::fs::read_to_string(&path) {
+        Ok(manifest) => manifest,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("reading infra manifest {}", path.display()));
+        }
+    };
+
+    if manifest.contains("maud") {
+        violations.push(format!(
+            "[rule 8: infra owns no templates] {}: presentation belongs to crates/preview, not the adapter layer",
+            path.display(),
+        ));
+    }
+
+    Ok(())
 }
 
 /// Collects rule-5 violations from the application app-state port.
@@ -409,6 +486,54 @@ mod tests {
         seed(dir.path(), "crates/domain/src/todos/item.rs");
         seed(dir.path(), "crates/api/src/endpoints/todos/create.rs");
         seed(dir.path(), "crates/domain/src/todos/errors.rs"); // file, not dir — fine
+        let v = collect_violations(dir.path()).unwrap();
+        assert!(v.is_empty(), "unexpected violations: {v:?}");
+    }
+
+    #[test]
+    fn preview_template_with_htmx_attribute_is_a_rule_7_violation() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/preview/src/layout/titlebar.rs",
+            r#"html! { button hx-get="/x" {} }"#,
+        );
+        let v = collect_violations(dir.path()).unwrap();
+        assert!(v.iter().any(|s| s.contains("rule 7")), "violations: {v:?}");
+    }
+
+    #[test]
+    fn htmx_free_preview_template_passes_rule_7() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/preview/src/layout/titlebar.rs",
+            "html! { header.titlebar {} }\n",
+        );
+        let v = collect_violations(dir.path()).unwrap();
+        assert!(v.is_empty(), "unexpected violations: {v:?}");
+    }
+
+    #[test]
+    fn infra_manifest_with_maud_is_a_rule_8_violation() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/infra/Cargo.toml",
+            "[dependencies]\nmaud.workspace = true\n",
+        );
+        let v = collect_violations(dir.path()).unwrap();
+        assert!(v.iter().any(|s| s.contains("rule 8")), "violations: {v:?}");
+    }
+
+    #[test]
+    fn maud_free_infra_manifest_passes_rule_8() {
+        let dir = TempDir::new().unwrap();
+        seed_with(
+            dir.path(),
+            "crates/infra/Cargo.toml",
+            "[dependencies]\nanyhow.workspace = true\n",
+        );
         let v = collect_violations(dir.path()).unwrap();
         assert!(v.is_empty(), "unexpected violations: {v:?}");
     }

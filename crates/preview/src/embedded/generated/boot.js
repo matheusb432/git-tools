@@ -1,0 +1,1 @@
+(function(){try{var d=document.documentElement.dataset;var t=localStorage.getItem('gtl-theme');if(t)d.theme=t;var l=localStorage.getItem('gtl-diff-layout');if(l==='split')d.diffLayout='split';else if(l==='unified')delete d.diffLayout;}catch(e){}})();

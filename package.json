@@ -3,18 +3,21 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build --config frontend/diff/vite.config.mjs",
-    "fix": "oxlint frontend/diff frontend/core --fix && oxfmt frontend/diff frontend/core .oxfmtrc.json .oxlintrc.json package.json tsconfig.json vitest.config.mjs",
+    "build": "vite build --config frontend/diff/vite.config.mjs && tailwindcss -i crates/preview/src/styles/preview.css -o crates/preview/src/embedded/generated/preview.css --minify && tailwindcss -i crates/desktop/src/render/viewer.css -o crates/desktop/src/embedded/generated/viewer.css --minify && cp frontend/inline/theme-boot.ts crates/preview/src/embedded/generated/boot.js && cp frontend/inline/theme-control.ts crates/desktop/src/embedded/generated/theme-control.js && cp frontend/inline/pending-recipes.ts crates/desktop/src/embedded/generated/pending-recipes.js",
+    "fix": "oxlint frontend/diff frontend/core frontend/inline --fix && oxfmt frontend/diff frontend/core .oxfmtrc.json .oxlintrc.json package.json tsconfig.json vitest.config.mjs",
     "format": "oxfmt frontend/diff frontend/core .oxfmtrc.json .oxlintrc.json package.json tsconfig.json vitest.config.mjs",
     "format:check": "oxfmt --check frontend/diff frontend/core .oxfmtrc.json .oxlintrc.json package.json tsconfig.json vitest.config.mjs",
-    "lint": "oxlint frontend/diff frontend/core --deny-warnings",
-    "lint:fix": "oxlint frontend/diff frontend/core --fix",
-    "test": "vitest run frontend/diff frontend/core",
+    "lint": "oxlint frontend/diff frontend/core frontend/inline --deny-warnings",
+    "lint:fix": "oxlint frontend/diff frontend/core frontend/inline --fix",
+    "test": "vitest run frontend/diff frontend/core frontend/inline",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/node": "^26.1.1",
     "oxfmt": "0.58.0",
     "oxlint": "1.73.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.1.0",
     "vitest": "4.1.10"

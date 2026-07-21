@@ -241,7 +241,7 @@ mod tests {
         assert!(!snapshot.contains("Delete live view"));
         assert!(!snapshot.contains("/live-view"));
 
-        let raw = infra::html_renderer::build_html(&view());
+        let raw = preview::build_html(&view());
         assert!(!raw.contains("Delete live view"));
         assert!(!raw.contains("/live-view"));
     }
@@ -359,10 +359,10 @@ mod tests {
 
     #[test]
     fn snapshot_skip_toast_has_a_bounded_reduced_motion_aware_lifetime() {
-        let css = infra::html_renderer::preview_css();
+        let css = super::document::viewer_css();
 
         assert!(css.contains("@keyframes viewer-toast-dismiss"));
-        assert!(css.contains("animation:viewer-toast-dismiss 5s ease forwards"));
+        assert!(css.contains("animation:5s forwards viewer-toast-dismiss"));
         assert!(css.contains("@media (prefers-reduced-motion:reduce)"));
         assert!(css.contains("animation-timing-function:step-end"));
     }
@@ -401,15 +401,20 @@ mod tests {
 
     #[test]
     fn narrow_app_split_rows_stack_without_changing_raw_artifacts() {
-        let css = infra::html_renderer::preview_css();
+        let viewer = super::document::viewer_css();
+        let shared = preview::preview_css();
 
-        assert!(css.contains(
+        // the app-only stacking rules live in the viewer sheet...
+        assert!(viewer.contains(
             "body.viewer-shell .diff-split .dl{grid-template-columns:44px minmax(0,1fr)}"
         ));
-        assert!(css.contains("body:not(.viewer-shell) .diff-unified.diff-compact"));
-        assert!(css.contains(
+        assert!(viewer.contains(
             "body.viewer-shell .diff-split .dl-meta,body.viewer-shell .diff-split .dl-hunk{grid-template-columns:minmax(0,1fr)}"
         ));
+        assert!(!shared.contains("body.viewer-shell"));
+        // ...while the artifact narrow-screen pane fallback stays in the shared sheet
+        assert!(shared.contains("body:not(.viewer-shell) .diff-unified.diff-compact"));
+        assert!(!viewer.contains("body:not(.viewer-shell)"));
     }
 
     #[test]

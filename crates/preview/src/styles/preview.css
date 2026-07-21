@@ -1,0 +1,13 @@
+/* Tailwind entry for the shared preview stylesheet. Import order is cascade order:
+   the plain slices stay unlayered (they always win over layered utilities), and the
+   utilities layer comes last. Chrome rules in layout.css/shelf.css migrate into
+   template utility classes region by region; rows/panes/print are permanent. */
+@import "./tokens.css";
+@import "./base.css";
+@import "./layout.css";
+@import "./panes.css";
+@import "./rows.css";
+@import "./shelf.css";
+@import "./responsive.css";
+@import "./print.css";
+@import "tailwindcss/utilities.css" layer(utilities) source(none);

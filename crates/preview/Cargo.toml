@@ -1,0 +1,14 @@
+[package]
+name = "preview"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+application.workspace = true
+domain.workspace = true
+maud.workspace = true
+similar.workspace = true
+
+[lints]
+workspace = true

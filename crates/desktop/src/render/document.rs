@@ -7,8 +7,18 @@ use super::{
 };
 use crate::protocol_config;
 
-const THEME_CONTROL_JS: &str = "(function(){document.addEventListener('change',function(event){var target=event.target;if(!(target instanceof HTMLInputElement))return;var theme=target.dataset.viewerTheme;if(theme)document.documentElement.dataset.theme=theme;});})();";
-const PENDING_RECIPES_JS: &str = r##"(async function(){var drain=function(){};await window.__TAURI__.event.listen("recipes-pending",function(){drain();});var chain=Promise.resolve();drain=function(){chain=chain.then(function(){return window.htmx.ajax("GET","/pending",{target:"#viewer-tabs",swap:"outerHTML"});}).catch(function(error){console.error("failed to drain pending recipes",error);});return chain;};await drain();})().catch(function(error){console.error("failed to subscribe to pending recipes",error);});"##;
+// ! Authored in frontend/inline/*.ts and shipped verbatim (the build copies the bytes;
+// ! inline.test.ts pins source/generated identity and plain-JS syntax).
+const THEME_CONTROL_JS: &str = include_str!("../embedded/generated/theme-control.js");
+const PENDING_RECIPES_JS: &str = include_str!("../embedded/generated/pending-recipes.js");
+
+// ! Compiled from render/viewer.css; appended after the shared preview sheet so
+// ! `.viewer-*` chrome and `body.viewer-shell` row overrides never ship in artifacts.
+const RAW_VIEWER_CSS: &str = include_str!("../embedded/generated/viewer.css");
+
+pub(super) fn viewer_css() -> &'static str {
+    preview::strip_stylesheet_banner(RAW_VIEWER_CSS)
+}
 
 /// Renders the server-authored viewer document and its independently swappable fragments.
 #[derive(Debug, Clone, Copy, Default)]
@@ -39,7 +49,8 @@ impl MaudViewerRenderer {
                     meta name="darkreader-lock";
                     base href=(protocol_config::APP_URL);
                     title { "git-tools viewer" }
-                    style { (PreEscaped(infra::html_renderer::preview_css())) }
+                    style { (PreEscaped(preview::preview_css())) }
+                    style { (PreEscaped(viewer_css())) }
                     script { (PreEscaped(htmx)) }
                     script { (PreEscaped(THEME_CONTROL_JS)) }
                 }
@@ -58,7 +69,7 @@ impl MaudViewerRenderer {
                         }
                         (fragments::history(document.history()))
                     }
-                    script { (PreEscaped(infra::html_renderer::preview_bundle())) }
+                    script { (PreEscaped(preview::preview_bundle())) }
                     script { (PreEscaped(PENDING_RECIPES_JS)) }
                 }
             }

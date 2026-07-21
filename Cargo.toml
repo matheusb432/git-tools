@@ -9,6 +9,7 @@ members = [
   "crates/domain",
   "crates/e2e",
   "crates/infra",
+  "crates/preview",
   "gate",
   "shared/bootstrap",
   "shared/gtl-platform",
@@ -25,6 +26,7 @@ default-members = [
   "crates/domain",
   "crates/e2e",
   "crates/infra",
+  "crates/preview",
   "gate",
   "shared/bootstrap",
   "shared/gtl-platform",
@@ -65,6 +67,7 @@ maud = "0.27"
 nutype = "0.7.0"
 parking_lot = "0.12.5"
 predicates = "3"
+preview = { path = "crates/preview" }
 raw-window-handle = "0.6"
 reqwest = { version = "0.13", default-features = false, features = [
   "blocking",

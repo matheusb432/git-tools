@@ -6,10 +6,11 @@ use axum::{
 };
 use infra::{
     app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
-    diff_source::GitDiffSource, html_renderer::MaudRenderer,
-    managed_manifest::TokioManagedManifest, push_ledger::NoOpPushLedger,
-    remote_sync::TokioRemoteSync, repo_probe::GitRepoProbe, user_config::TomlSettingsStore,
+    diff_source::GitDiffSource, managed_manifest::TokioManagedManifest,
+    push_ledger::NoOpPushLedger, remote_sync::TokioRemoteSync, repo_probe::GitRepoProbe,
+    user_config::TomlSettingsStore,
 };
+use preview::MaudRenderer;
 use tokio::sync::watch;
 
 use crate::{endpoints, lifecycle::ExeIdentity};

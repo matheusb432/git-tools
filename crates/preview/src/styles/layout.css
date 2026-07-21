@@ -1,0 +1,60 @@
+  /* === 3-column Shelf grid: titlebar + keybar span full width === */
+  .layout{display:grid;grid-template-columns:var(--tree-col) minmax(0,1fr) var(--shelf-col);grid-template-rows:auto 1fr auto;height:100vh}
+
+  .titlebar{grid-column:1/4;display:flex;align-items:center;gap:16px;padding:13px 20px;background:var(--surface);border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:baseline;gap:9px;font-size:18px;font-weight:600;letter-spacing:-.01em}
+  .brand .repo b{color:var(--acc);font-weight:700}
+  .brand .kind{font-size:12px;font-weight:500;color:var(--acc);background:var(--acc-soft);border:1px solid var(--acc-line);padding:2px 8px;border-radius:var(--r-sm);align-self:center}
+  .branchline{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2)}
+  .branchline .ref-branch{color:var(--acc)} .branchline .ref-up{color:var(--ink-3)} .branchline .arr{color:var(--ink-3)}
+  /* files hidden by [diff.exclude] — deliberately loud so a filtered diff never reads as complete */
+  .excl-chip{flex:none;font-size:12px;font-weight:600;color:var(--del-ink);background:var(--del-bg);border:1px solid color-mix(in srgb,var(--del) 45%,transparent);padding:2px 8px;border-radius:var(--r-sm);cursor:help;white-space:nowrap}
+  .spacer{flex:1}
+  .foldall,.layout-toggle,.view-toggle,.ctx-toggle{font:inherit;font-size:12px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:6px 10px;cursor:pointer;transition:.13s}
+  .foldall:hover,.layout-toggle:hover,.layout-toggle.active,.view-toggle:hover,.view-toggle.active,.ctx-toggle:hover,.ctx-toggle.active{color:var(--ink);border-color:var(--acc-line)}
+  .layout-toggle.active,.view-toggle.active,.ctx-toggle.active{background:var(--acc-soft)}
+  .theme-control{display:inline-flex;align-items:center;gap:6px}
+  .theme-control span{color:var(--ink-2);font-size:11px;letter-spacing:.04em}
+  .theme-select{
+    font:inherit;font-size:11px;color:var(--ink);background:var(--surface-2);
+    border:1px solid var(--line-2);border-radius:4px;padding:2px 6px;cursor:pointer;
+  }
+  .theme-select:hover{border-color:var(--acc-line)}
+  .copy-button{
+    font:inherit;font-size:10px;letter-spacing:.04em;color:var(--acc);
+    background:var(--acc-soft);border:1px solid var(--acc-line);border-radius:4px;
+    padding:1px 6px;cursor:pointer;
+  }
+  .copy-button:hover{color:var(--bg);background:var(--acc);border-color:var(--acc)}
+  .copy-button[data-state="ok"]{color:var(--bg);background:var(--add);border-color:var(--add)}
+  .copy-button[data-state="err"]{color:var(--bg);background:var(--del);border-color:var(--del)}
+
+  /* === left: file tree (sticky) === */
+  .tree{grid-column:1;grid-row:2;overflow:auto;border-right:1px solid var(--line);background:var(--surface);padding:13px}
+  .search{position:relative;margin-bottom:12px}
+  .search input{width:100%;font:inherit;font-size:13px;padding:8px 10px;border:1px solid var(--line-2);border-radius:var(--r-sm);background:var(--sunk);color:var(--ink)}
+  .search input:focus{outline:none;border-color:var(--acc-line);box-shadow:0 0 0 2px var(--acc-soft)}
+  .tree-head{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);margin:6px 4px 8px;display:flex;justify-content:space-between}
+  .tree .stats{display:flex;gap:8px;flex-wrap:wrap;margin:0 2px 12px}
+  .stat{border:1px solid var(--line-2);border-radius:var(--r-sm);padding:2px 8px;font-size:11px;color:var(--ink-2)}
+  .stat b{color:var(--ink);font-weight:700}
+  .stat.add{color:var(--add);border-color:color-mix(in srgb,var(--add) 40%,transparent)} .stat.del{color:var(--del);border-color:color-mix(in srgb,var(--del) 40%,transparent)}
+  .tree-body{font-size:12.5px;white-space:nowrap}
+  .tree-body ul{list-style:none;margin:0;padding-left:10px} .tree-body>ul{padding-left:0}
+  .tlabel{display:flex;align-items:center;gap:5px;padding:2px 5px;border-radius:var(--r-sm);cursor:pointer;color:var(--ink-2);line-height:1.35}
+  .tdir>ul .tfile>.tlabel{padding-left:8px}
+  .tlabel:hover{background:var(--surface-2);color:var(--ink)} .tdir>.tlabel{color:var(--ink-3)} .tdir>.tlabel .tname{color:var(--ink-3)}
+  .tfile.cur>.tlabel{background:var(--acc-soft);color:var(--ink);box-shadow:inset 2px 0 0 var(--acc)}
+  .tcaret{flex:none;width:0;height:0;border-left:5px solid var(--ink-3);border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .12s} .tdir.open>.tlabel .tcaret{transform:rotate(90deg)} .tdir:not(.open)>ul{display:none}
+  .tname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .tfile.status-added>.tlabel{background:color-mix(in srgb,var(--add-bg) 42%,transparent)}
+  .tfile.status-deleted>.tlabel{background:color-mix(in srgb,var(--del-bg) 42%,transparent)}
+  .tfile.status-added>.tlabel:hover{background:color-mix(in srgb,var(--add-bg) 62%,var(--surface-2))}
+  .tfile.status-deleted>.tlabel:hover{background:color-mix(in srgb,var(--del-bg) 62%,var(--surface-2))}
+  .tstatus,.status-badge{flex:none;display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:var(--r-sm);border:1px solid var(--line-2);font-size:9.5px;font-weight:700;line-height:1}
+  .tstatus.status-added,.status-badge.status-added{color:var(--add);border-color:color-mix(in srgb,var(--add) 45%,transparent);background:var(--add-bg)}
+  .tstatus.status-deleted,.status-badge.status-deleted{color:var(--del);border-color:color-mix(in srgb,var(--del) 45%,transparent);background:var(--del-bg)}
+  .tstatus.status-renamed,.status-badge.status-renamed{color:var(--acc);border-color:var(--acc-line);background:var(--acc-soft)}
+  .tstatus.status-modified,.status-badge.status-modified{color:var(--ink-3);background:var(--sunk)}
+  .tree::-webkit-scrollbar{width:9px} .tree::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:2px solid var(--surface)}
+

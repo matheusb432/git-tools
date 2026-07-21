@@ -1,0 +1,99 @@
+/* Tailwind entry for the viewer-shell stylesheet, appended after the shared preview
+   sheet in the viewer document only. Owns every rule scoped to the app shell:
+   `.viewer-*` chrome, `body.viewer-shell` overrides of shared row classes, and the
+   viewer toast. Offline artifacts never ship any of this. */
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+  /* === app shell: server-authored tabs, controls, states, and history === */
+  body.viewer-shell{overflow:hidden}
+  .viewer-app{display:grid;grid-template-rows:auto minmax(0,1fr);height:100vh;min-width:0;background:var(--bg)}
+  .viewer-tabs{z-index:70;display:flex;min-width:0;align-items:flex-end;gap:10px;padding:8px 12px 0;background:var(--surface);border-bottom:1px solid var(--line)}
+  .viewer-tab-list{display:flex;min-width:0;flex:1;align-items:flex-end;gap:4px;overflow-x:auto;scrollbar-width:thin;list-style:none;margin:0;padding:0}
+  .viewer-tab{display:flex;min-width:112px;max-width:240px;align-items:center;border:1px solid transparent;border-bottom:0;border-radius:var(--r) var(--r) 0 0;background:var(--surface-2);color:var(--ink-2)}
+  .viewer-tab:hover{color:var(--ink);border-color:var(--line-2)}
+  .viewer-tab.active{color:var(--ink);border-color:var(--line-2);background:var(--bg);box-shadow:inset 0 2px 0 var(--acc)}
+  .viewer-tab-activate,.viewer-tab-close,.viewer-history-button,.viewer-icon-button,.viewer-control-button,.viewer-recovery-button,.viewer-history-row{font:inherit;color:inherit;background:transparent;border:0;cursor:pointer}
+  .viewer-tab-activate{display:flex;min-width:0;flex:1;align-items:center;gap:7px;padding:8px 4px 8px 10px;text-align:left}
+  .viewer-tab-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+  .viewer-tab-kind{display:inline-flex;width:17px;height:17px;flex:none;align-items:center;justify-content:center;border:1px solid var(--line-2);border-radius:4px;color:var(--ink-3);font-size:9px;font-weight:700}
+  .viewer-tab-state{display:inline-flex;width:15px;height:15px;flex:none;align-items:center;justify-content:center;border-radius:50%;font-size:10px;font-weight:700}
+  .viewer-tab-state.broken{color:var(--acc);background:var(--acc-soft)}
+  .viewer-tab-state.error{color:var(--del);background:var(--del-bg)}
+  .viewer-tab-close{margin-right:3px;padding:3px 6px;border-radius:4px;color:var(--ink-3);font-size:17px;line-height:1}
+  .viewer-tab-close:hover{color:var(--del);background:var(--del-bg)}
+  .viewer-history-button{display:flex;flex:none;align-items:center;gap:7px;margin-bottom:7px;padding:6px 9px;border:1px solid transparent;border-radius:var(--r-sm);color:var(--ink-2);font-size:12px}
+  .viewer-history-button:hover{color:var(--ink);border-color:var(--line-2);background:var(--surface-2)}
+  .viewer-count{min-width:18px;padding:0 5px;border-radius:9px;background:var(--acc-soft);color:var(--acc);font-size:10px;text-align:center}
+  .viewer-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+
+  .viewer-view{min-width:0;min-height:0;overflow:hidden}
+  .viewer-view:has(>.layout){display:grid;grid-template-rows:auto minmax(0,1fr)}
+  .viewer-view>.layout{height:100%;min-height:0}
+  .viewer-controls{display:flex;min-width:0;align-items:center;gap:12px;padding:7px 12px;background:var(--surface);border-bottom:1px solid var(--line);color:var(--ink-2)}
+  .viewer-control-group{display:flex;align-items:center;gap:3px}
+  .viewer-control-label{margin-right:3px;color:var(--ink-3);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+  .viewer-choice{position:relative;cursor:pointer}
+  .viewer-choice input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  .viewer-choice span,.viewer-control-button{display:inline-flex;min-height:27px;align-items:center;padding:4px 8px;border:1px solid transparent;border-radius:var(--r-sm);font-size:11.5px;white-space:nowrap}
+  .viewer-choice:hover span,.viewer-control-button:hover{color:var(--ink);border-color:var(--line-2);background:var(--surface-2)}
+  body.viewer-shell .viewer-danger-button{margin-left:8px;color:var(--del);border-color:color-mix(in srgb,var(--del) 38%,transparent);background:var(--del-bg)}
+  body.viewer-shell .viewer-danger-button:hover{color:var(--bg);border-color:var(--del);background:var(--del)}
+  .viewer-choice input:checked+span{color:var(--acc);border-color:var(--acc-line);background:var(--acc-soft)}
+  .viewer-choice input:focus-visible+span,.viewer-control-button:focus-visible,.viewer-tab-activate:focus-visible,.viewer-tab-close:focus-visible,.viewer-history-button:focus-visible,.viewer-icon-button:focus-visible,.viewer-recovery-button:focus-visible,.viewer-history-row:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  .viewer-spacer{flex:1}
+  .hx-request{cursor:progress;opacity:.68}
+
+  .viewer-status{display:grid;min-height:100%;place-content:center;grid-template-columns:auto minmax(0,520px);gap:18px;padding:32px;color:var(--ink-2)}
+  .viewer-status-mark{display:flex;width:42px;height:42px;align-items:center;justify-content:center;border:1px solid var(--line-2);border-radius:50%;background:var(--surface);color:var(--acc);font-size:20px;font-weight:700}
+  .viewer-status-error .viewer-status-mark{color:var(--del);border-color:color-mix(in srgb,var(--del) 42%,transparent);background:var(--del-bg)}
+  .viewer-status h1{margin:3px 0 7px;color:var(--ink);font-size:20px;line-height:1.25;letter-spacing:-.02em}
+  .viewer-status p{margin:0;overflow-wrap:anywhere}
+  .viewer-status code{padding:1px 5px;border:1px solid var(--line);border-radius:4px;background:var(--sunk);color:var(--ink);font:inherit}
+  .viewer-status-eyebrow{color:var(--ink-3);font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+  .viewer-recovery-button{margin-top:16px;padding:7px 11px;border:1px solid var(--acc-line);border-radius:var(--r-sm);background:var(--acc-soft);color:var(--acc);font-size:12px}
+  .viewer-recovery-button:hover{background:var(--acc);color:var(--bg)}
+
+  .viewer-history-popover[popover]{inset:42px;width:min(1040px,calc(100vw - 48px));height:min(680px,calc(100vh - 84px));max-width:none;margin:auto;padding:0;background:var(--surface);border-color:var(--line-2);box-shadow:0 24px 80px rgba(0,0,0,.72)}
+  .viewer-history-popover[popover]::backdrop{background:rgba(0,0,0,.42)}
+  .viewer-history-header{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;border-bottom:1px solid var(--line);background:var(--surface-2)}
+  .viewer-history-header strong{display:block;color:var(--ink);font-size:13px}
+  .viewer-history-header span{display:block;color:var(--ink-3);font-size:11px}
+  .viewer-icon-button{width:30px;height:30px;border-radius:var(--r-sm);color:var(--ink-2);font-size:20px}
+  .viewer-icon-button:hover{background:var(--line);color:var(--ink)}
+  .viewer-history{height:calc(100% - 58px);overflow:auto;padding:14px 16px}
+  .viewer-history-columns,.viewer-history-row{display:grid;grid-template-columns:minmax(180px,1.5fr) minmax(130px,1fr) 90px minmax(130px,1fr) 170px;gap:12px;align-items:center}
+  .viewer-history-columns{padding:6px 10px 8px;border-bottom:1px solid var(--line);color:var(--ink-3);font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+  .viewer-history-list{padding-top:4px}
+  .viewer-history-row{width:100%;padding:9px 10px;border:1px solid transparent;border-radius:var(--r-sm);color:var(--ink-2);text-align:left}
+  .viewer-history-row:hover{border-color:var(--line);background:var(--surface-2);color:var(--ink)}
+  .viewer-history-row>span,.viewer-history-row time{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .viewer-history-title{color:var(--ink);font-weight:600}
+  .viewer-history-kind{width:max-content;padding:1px 6px;border:1px solid var(--line-2);border-radius:var(--r-sm);color:var(--acc);font-size:10px}
+  .viewer-history-range,.viewer-history-row time{font-size:11px;font-variant-numeric:tabular-nums}
+  .viewer-history-empty{display:grid;height:100%;place-content:center;text-align:center;color:var(--ink-2)}
+  .viewer-history-empty strong{color:var(--ink)}
+  .viewer-history-empty p{margin:4px 0 0}
+
+  @media (max-width:760px){
+    .viewer-tabs{padding-left:8px;padding-right:8px}
+    .viewer-tab{min-width:96px}
+    .viewer-controls{gap:7px;overflow-x:auto}
+    .viewer-control-label{display:none}
+    .viewer-history-popover[popover]{inset:12px;width:calc(100vw - 24px);height:calc(100vh - 24px)}
+    .viewer-history-columns{display:none}
+    .viewer-history-row{grid-template-columns:minmax(0,1fr) auto}
+    .viewer-history-row .viewer-history-repo,.viewer-history-row .viewer-history-range,.viewer-history-row time{display:none}
+  }
+
+  /* === viewer variant of the transient toast === */
+  @keyframes viewer-toast-dismiss{0%,80%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,8px)}}
+  .gtl-toast.viewer-toast-skip{max-width:min(760px,calc(100vw - 32px));overflow-wrap:anywhere;border-color:var(--acc-line);animation:viewer-toast-dismiss 5s ease forwards}
+  .gtl-toast.viewer-toast-skip::before{content:"!";color:var(--acc)}
+  @media (prefers-reduced-motion:reduce){.gtl-toast.viewer-toast-skip{animation-timing-function:step-end}}
+
+  /* === narrow shell: split pairs stack (the app ships one variant) === */
+  @media (max-width:1024px){
+    body.viewer-shell .diff-split .dl{grid-template-columns:44px minmax(0,1fr)}
+    body.viewer-shell .diff-split .dl>:nth-child(3),body.viewer-shell .diff-split .dl>:nth-child(4){border-top:1px solid var(--line)}
+    body.viewer-shell .diff-split .dl>:nth-child(3){border-left:0}
+    body.viewer-shell .diff-split .dl-meta,body.viewer-shell .diff-split .dl-hunk{grid-template-columns:minmax(0,1fr)}
+  }

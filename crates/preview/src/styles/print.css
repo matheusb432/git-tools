@@ -1,0 +1,17 @@
+  @media print{
+    body{background:#fff;color:#111;height:auto}
+    .layout{display:block;height:auto}
+    .tree,.shelf,.keybar,.foldall,.layout-toggle,.view-toggle,.ctx-toggle,.search,.theme-control,.copies,[popover],.gtl-toast{display:none!important}
+    .titlebar{background:#f2f2f2;border-color:#bbb}
+    .brand .repo b,.brand .kind{color:#111}
+    .main{overflow:visible;padding:0}
+    details.file{break-inside:avoid}details.file[hidden]{display:block}
+    .filebody{content-visibility:visible;overflow:visible}
+    .dl code{color:#111}details.file>summary{position:static;background:#f2f2f2}
+    /* print the combined pane regardless of on-screen layout (split is too wide for paper) */
+    .filebody .diff{display:none!important}
+    .filebody.single-variant .diff{display:block!important}
+    .diff-unified.diff-compact{display:block!important}
+    html[data-diff-full="on"] .diff-unified.diff-compact{display:none!important}
+    html[data-diff-full="on"] .filebody:has(.diff-unified.diff-full) .diff-unified.diff-full{display:block!important}
+  }

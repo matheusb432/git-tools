@@ -32,6 +32,7 @@ gtl-recipe.workspace = true
 infra.workspace = true
 lru.workspace = true
 maud.workspace = true
+preview.workspace = true
 raw-window-handle.workspace = true
 serde.workspace = true
 serde_json.workspace = true

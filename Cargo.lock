@@ -1064,6 +1064,7 @@ dependencies = [
  "gtl-platform",
  "http-body-util",
  "infra",
+ "preview",
  "rusqlite",
  "serde",
  "serde_json",
@@ -1194,6 +1195,7 @@ dependencies = [
  "infra",
  "lru",
  "maud",
+ "preview",
  "raw-window-handle",
  "serde",
  "serde_json",
@@ -2404,14 +2406,12 @@ dependencies = [
  "domain",
  "gtl-platform",
  "jiff",
- "maud",
  "parking_lot",
  "rusqlite",
  "rusqlite_migration",
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "similar",
  "tempfile",
  "tokio",
  "toml 1.1.2+spec-1.1.0",
@@ -3488,6 +3488,16 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "preview"
+version = "0.1.0"
+dependencies = [
+ "application",
+ "domain",
+ "maud",
+ "similar",
 ]
 
 [[package]]

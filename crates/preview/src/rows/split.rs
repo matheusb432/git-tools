@@ -5,7 +5,7 @@
 
 use super::{
     intraline::{LineSpans, Span, changed_spans},
-    rows::{Row, RowKind, line_body, long_line_len},
+    model::{Row, RowKind, line_body, long_line_len},
 };
 
 /// One side of a paired side-by-side row.
@@ -116,7 +116,7 @@ mod tests {
     use application::diffs::LineOwners;
 
     use super::{
-        super::rows::{MAX_LINE_COLS, derive_rows},
+        super::model::{MAX_LINE_COLS, derive_rows},
         *,
     };
 

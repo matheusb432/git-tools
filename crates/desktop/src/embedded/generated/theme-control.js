@@ -1,0 +1,1 @@
+(function(){document.addEventListener('change',function(event){var target=event.target;if(!(target instanceof HTMLInputElement))return;var theme=target.dataset.viewerTheme;if(theme)document.documentElement.dataset.theme=theme;});})();
