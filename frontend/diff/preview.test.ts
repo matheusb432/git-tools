@@ -127,10 +127,12 @@ const testLifecycle = createEnhancementLifecycle(
   (component) => component.cleanup(),
 );
 
-test("enhances a layout once, tears it down, and enhances a swapped subtree once", async () => {
+test("enhances and tears down each control-free layout independently", async () => {
   document.body.replaceChildren();
   const first = layout("first");
   document.body.appendChild(first);
+  expect(first.querySelector(".layout-toggle")).toBeNull();
+  expect(first.querySelector(".view-toggle")).toBeNull();
   testLifecycle.enhanceWithin(first);
   testLifecycle.enhanceWithin(first);
   await Promise.resolve();

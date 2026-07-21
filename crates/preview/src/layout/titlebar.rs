@@ -1,20 +1,17 @@
 //! Top titlebar: repo/branch identity, the exclusion chip, fold/copy-context
-//! toggles, and (artifact surface only) the layout/density toggles and theme
-//! select.
+//! toggles.
 
 use application::diffs::View;
 use domain::diffs::AppliedExclusions;
 use maud::{Markup, html};
 
-use super::Surface;
 use crate::text::plural;
 
 // ! `.titlebar` and `.branchline` stay as class anchors for the narrow-screen overrides in
-// ! styles/responsive.css, and `.theme-control` for the print rule; their base appearance is
-// ! the utility classes here. `.foldall`/`.layout-toggle`/`.view-toggle`/`.ctx-toggle`/
-// ! `.theme-select` are enhancer hooks whose JS-toggled states keep component styling in
+// ! styles/responsive.css; their base appearance is the utility classes here. `.foldall` and
+// ! `.ctx-toggle` are enhancer hooks whose JS-toggled states keep component styling in
 // ! styles/layout.css.
-pub(super) fn titlebar(view: &View, surface: Surface) -> Markup {
+pub(super) fn titlebar(view: &View) -> Markup {
     html! {
         header class="titlebar [grid-column:1/4] flex items-center gap-4 border-b border-line bg-surface px-5 py-[13px]" {
             div class="flex items-baseline gap-[9px] text-[18px] font-semibold tracking-[-0.01em]" {
@@ -37,21 +34,7 @@ pub(super) fn titlebar(view: &View, surface: Surface) -> Markup {
             }
             div class="flex-1" {}
             button type="button" class="foldall" title="Collapse/expand all files" { "Collapse all" }
-            @if matches!(surface, Surface::Artifact) {
-                button type="button" class="layout-toggle" aria-pressed="false" title="Side-by-side / unified diff" { "Side by side" }
-                button type="button" class="view-toggle" aria-pressed="false" title="Show full-file diffs" { "Full file" }
-            }
             button type="button" class="ctx-toggle active" aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
-            @if matches!(surface, Surface::Artifact) {
-                label class="theme-control inline-flex items-center gap-1.5" {
-                    span class="text-[11px] tracking-[0.04em] text-ink-2" { "theme" }
-                    select class="theme-select" aria-label="Theme" {
-                        option value="dark" { "dark" }
-                        option value="light" { "light" }
-                        option value="hearth" { "hearth" }
-                    }
-                }
-            }
         }
     }
 }
@@ -83,7 +66,7 @@ mod tests {
         let mut view = sample_view();
         view.exclusions = Some(applied_exclusions());
 
-        let html = build_html(&view);
+        let html = build_html(&view, RenderOptions::DEFAULT, None);
 
         assert!(
             html.contains(r#"<span class="excl-chip"#),
@@ -99,7 +82,10 @@ mod tests {
     #[test]
     fn build_html_omits_the_exclusion_chip_without_hidden_files() {
         // ? the class name still appears once — in the inlined stylesheet
-        assert!(!build_html(&sample_view()).contains(r#"<span class="excl-chip"#));
+        assert!(
+            !build_html(&sample_view(), RenderOptions::DEFAULT, None)
+                .contains(r#"<span class="excl-chip"#)
+        );
     }
 
     #[test]
@@ -120,7 +106,7 @@ mod tests {
             hidden_paths: vec!["a&b<script>.md".to_string()],
         });
 
-        let html = build_html(&view);
+        let html = build_html(&view, RenderOptions::DEFAULT, None);
 
         assert!(html.contains("a&amp;b&lt;script&gt;.md"));
         assert!(!html.contains("a&b<script>.md"));

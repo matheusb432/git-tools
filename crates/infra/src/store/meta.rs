@@ -1,6 +1,15 @@
 //! Per-artifact metadata (sidecar) and the diff kind that keys range lookups.
 pub use domain::diffs::DiffKind;
+use domain::viewer::RenderOptions;
 use serde::{Deserialize, Serialize};
+
+fn layout_default() -> String {
+    RenderOptions::DEFAULT.layout().to_string()
+}
+
+fn density_default() -> String {
+    RenderOptions::DEFAULT.density().to_string()
+}
 
 /// Metadata stored alongside each artifact as `<hash>.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -16,6 +25,10 @@ pub struct Sidecar {
     pub generated_at: String,
     pub title: String,
     pub byte_size: u64,
+    #[serde(default = "layout_default")]
+    pub layout: String,
+    #[serde(default = "density_default")]
+    pub density: String,
     /// Configured renderer theme used for this artifact. `None` means the
     /// renderer selected its default theme.
     #[serde(default)]
@@ -33,6 +46,8 @@ pub struct Sidecar {
 
 #[cfg(test)]
 mod tests {
+    use domain::viewer::{DiffDensity, DiffLayout, RenderOptions};
+
     use super::*;
 
     #[test]
@@ -49,6 +64,8 @@ mod tests {
             generated_at: "2026-06-22T10:01:00Z".into(),
             title: "diff".into(),
             byte_size: 1234,
+            layout: DiffLayout::Split.to_string(),
+            density: DiffDensity::Full.to_string(),
             theme: Some("dark".into()),
             theme_recorded: true,
             excluded_extensions: vec!["md".into()],
@@ -77,5 +94,30 @@ mod tests {
 
         assert_eq!(sidecar.theme, None);
         assert!(!sidecar.theme_recorded);
+    }
+
+    #[test]
+    fn sidecar_without_presentation_metadata_uses_default_render_options() {
+        let json = r#"{
+            "repo_id":"deadbeef00000000",
+            "repo_name":"git-tools",
+            "repo_root":"/repo",
+            "kind":"two_dot",
+            "base_sha":"aaaa",
+            "head_sha":"bbbb",
+            "range_label":"a..b",
+            "head_committed_at":"t",
+            "generated_at":"t",
+            "title":"diff",
+            "byte_size":1
+        }"#;
+
+        let sidecar = serde_json::from_str::<Sidecar>(json).unwrap();
+
+        assert_eq!(sidecar.layout, RenderOptions::DEFAULT.layout().to_string());
+        assert_eq!(
+            sidecar.density,
+            RenderOptions::DEFAULT.density().to_string()
+        );
     }
 }

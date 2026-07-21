@@ -87,7 +87,9 @@ pub fn execute(
     }
 
     let title = dated_title(clock, "diff-preview subrepos");
-    let html = renderer.build_tabbed_html(&title, &batch.views);
+    let render_options = settings.viewer_render_options();
+    let theme = settings.theme().map(str::to_owned);
+    let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme.as_deref());
     let meta = ArtifactMeta {
         repo_root: root,
         repo_name: "subrepos".to_string(),
@@ -98,7 +100,8 @@ pub fn execute(
         head_committed_at: String::new(),
         generated_at: clock.now_iso(),
         title: title.clone(),
-        theme: settings.theme().map(str::to_owned),
+        render_options,
+        theme,
         excluded_extensions: Vec::new(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
@@ -276,6 +279,6 @@ diff --git a/notes.md b/notes.md\n\
         let artifact = store
             .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
             .expect("artifact persisted");
-        assert!(artifact.html.contains("repo-a:night:1"));
+        assert!(artifact.html.contains("repo-a:night:unified:compact:1"));
     }
 }

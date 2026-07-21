@@ -70,7 +70,9 @@ pub fn execute(
     )?;
 
     let title = dated_title(clock, "diff-preview all");
-    let html = renderer.build_tabbed_html(&title, &batch.views);
+    let render_options = settings.viewer_render_options();
+    let theme = settings.theme().map(str::to_owned);
+    let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme.as_deref());
     let meta = ArtifactMeta {
         repo_root: root,
         repo_name: "all".to_string(),
@@ -81,7 +83,8 @@ pub fn execute(
         head_committed_at: String::new(),
         generated_at: clock.now_iso(),
         title: title.clone(),
-        theme: settings.theme().map(str::to_owned),
+        render_options,
+        theme,
         excluded_extensions: Vec::new(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
@@ -311,7 +314,11 @@ diff --git a/notes.md b/notes.md\n\
             .expect("second artifact persisted")
             .html;
 
-        assert!(first_html.contains("repo-a:first:1|repo-b:first:2"));
-        assert!(second_html.contains("repo-a:second:2|repo-b:second:1"));
+        assert!(
+            first_html.contains("repo-a:first:unified:compact:1|repo-b:first:unified:compact:2")
+        );
+        assert!(
+            second_html.contains("repo-a:second:unified:compact:2|repo-b:second:unified:compact:1")
+        );
     }
 }

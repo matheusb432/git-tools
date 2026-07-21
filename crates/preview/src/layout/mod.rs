@@ -1,7 +1,6 @@
 //! The shared `.layout` body: the Shelf 3-column grid (file tree left, diff
 //! center, commit shelf right) with titlebar and keybar spanning the full
-//! width. One module per region; this module owns the composition and the
-//! surface variation between raw artifacts and the app shell.
+//! width. One module per region; this module owns their composition.
 
 mod files;
 mod keybar;
@@ -12,25 +11,17 @@ mod tree;
 use application::{diffs::View, viewer::RenderOptions};
 use maud::{Markup, html};
 
-/// Which surface hosts the body: a raw offline artifact (own controls, all
-/// four diff panes) or the app shell (server-selected single pane).
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Surface {
-    Artifact,
-    App(RenderOptions),
-}
-
 // Body-only markup (the .layout block) shared by the single and tabbed views so the
 // document chrome — one <style>/<script> — lives only at the top level. Per-commit
 // [popover] elements live inside .layout so the per-layout JS scoping in preview.js
 // finds them.
-pub(crate) fn view_body(view: &View, surface: Surface) -> Markup {
+pub(crate) fn view_body(view: &View, options: RenderOptions) -> Markup {
     html! {
         div.layout.copy-ctx {
-            (titlebar::titlebar(view, surface))
+            (titlebar::titlebar(view))
             (tree::tree(view))
             main.main {
-                (files::file_blocks(view, surface))
+                (files::file_blocks(view, options))
             }
             (shelf::shelf(view))
             (keybar::keybar(view))
@@ -46,7 +37,7 @@ mod tests {
     use crate::{fixtures::sample_view, preview_css, view_fragment};
 
     #[test]
-    fn app_fragment_omits_artifact_owned_controls_and_theme_boot() {
+    fn view_fragment_omits_document_chrome_and_presentation_controls() {
         let html = view_fragment(&sample_view(), RenderOptions::DEFAULT).into_string();
 
         assert!(!html.contains(r#"class="layout-toggle""#));
@@ -61,7 +52,7 @@ mod tests {
 
     #[test]
     fn build_html_wires_copy_context_toggle_and_per_file_comment_leader() {
-        let html = crate::build_html(&sample_view());
+        let html = crate::build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         // context-on by default: the root carries the class the copy-button reads at click time
         assert!(html.contains(r#"class="layout copy-ctx""#));

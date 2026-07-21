@@ -4,38 +4,37 @@
 
 mod tabbed;
 
-use application::diffs::View;
+use application::{diffs::View, viewer::RenderOptions};
 use maud::{DOCTYPE, PreEscaped, html};
 pub use tabbed::build_tabbed_html;
 
 use crate::{
     assets::{PREVIEW_BUNDLE, preview_css},
-    layout::{Surface, view_body},
     text::plural,
+    view_fragment,
 };
 
-// ! Head boot: restore the saved theme and diff layout before paint to avoid a flash of the
-// ! default palette / a unified→split flip. IIFE-wrapped so the locals never leak to global
-// ! scope: a leaked var could clobber a minified bundle's single-letter globals.
+// ! Head boot: restore the saved theme before paint to avoid a palette flash. IIFE-wrapped so
+// ! locals never leak into the minified bundle's global scope.
 // ! Authored in frontend/inline/theme-boot.ts and shipped verbatim (build copies the bytes).
 const THEME_BOOT_JS: &str = include_str!("../embedded/generated/boot.js");
 
-pub fn build_html(view: &View) -> String {
+pub fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> String {
     let count = view.commits.len();
     html! {
         (DOCTYPE)
-        html lang="en" data-theme=[view.theme.as_deref()] {
+        html lang="en" data-theme=[theme] {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                // ! page ships its own dark theme + switcher — tell Dark Reader to leave it alone.
+                // ! The page ships its own palette, so Dark Reader must leave it alone.
                 meta name="darkreader-lock";
                 title { (view.repo_name) " — " (view.title) " · " (count) " commit" (plural(count)) }
                 script { (PreEscaped(THEME_BOOT_JS)) }
                 style { (PreEscaped(preview_css())) }
             }
             body {
-                (view_body(view, Surface::Artifact))
+                (view_fragment(view, options))
                 script { (PreEscaped(PREVIEW_BUNDLE)) }
             }
         }
@@ -45,14 +44,50 @@ pub fn build_html(view: &View) -> String {
 
 #[cfg(test)]
 mod tests {
-    use application::diffs::{Cmd, FileDiff, Foot, LineOwners, View};
+    use application::{
+        diffs::{Cmd, FileDiff, Foot, LineOwners, View},
+        viewer::RenderOptions,
+    };
     use domain::diffs::Commit;
 
     use super::THEME_BOOT_JS;
     use crate::{
         build_html, build_tabbed_html,
         fixtures::{has_disallowed_external_url, sample_view},
+        view_fragment,
     };
+
+    #[test]
+    fn artifact_contains_the_exact_shared_layout_once() {
+        let view = sample_view();
+        let options = RenderOptions::DEFAULT;
+        let fragment = view_fragment(&view, options).into_string();
+        let html = build_html(&view, options, None);
+
+        assert_eq!(html.matches(&fragment).count(), 1);
+    }
+
+    #[test]
+    fn raw_and_viewer_layout_markup_is_byte_identical() {
+        let view = sample_view();
+        let options = RenderOptions::DEFAULT;
+        let fragment = view_fragment(&view, options).into_string();
+        let html = build_html(&view, options, None);
+        let start = html
+            .find(&fragment)
+            .expect("artifact contains viewer layout");
+
+        assert_eq!(&html[start..start + fragment.len()], fragment);
+    }
+
+    #[test]
+    fn raw_layout_has_no_presentation_controls() {
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
+
+        assert!(!html.contains(r#"class="layout-toggle""#));
+        assert!(!html.contains(r#"class="view-toggle""#));
+        assert!(!html.contains(r#"class="theme-select""#));
+    }
 
     #[test]
     fn build_html_renders_offline_document_with_core_diff_data() {
@@ -103,10 +138,9 @@ mod tests {
                 cmd: "git diff origin/main..HEAD".to_string(),
                 note: "# read-only preview".to_string(),
             },
-            theme: None,
         };
 
-        let html = build_html(&view);
+        let html = build_html(&view, RenderOptions::DEFAULT, None);
 
         assert!(html.starts_with("<!DOCTYPE html>"));
         assert!(
@@ -122,7 +156,7 @@ mod tests {
 
     #[test]
     fn build_html_guards_shelf_structural_contract() {
-        let html = build_html(&sample_view());
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         // title reflects repo, view, and commit count
         assert!(html.contains("<title>api — diff · 1 commit</title>"));
@@ -137,8 +171,7 @@ mod tests {
         assert!(html.contains("content-visibility:auto"));
         assert!(html.contains("@media print"));
 
-        // native controls replace Lit custom elements
-        assert!(html.contains(r#"class="theme-select""#));
+        // native copy controls replace Lit custom elements
         assert!(html.contains(r#"class="copy-button""#));
 
         // engine diff classes are styled (render_diff_lines emits these, untouched)
@@ -183,7 +216,7 @@ mod tests {
             "+<script>x</script>".to_string(),
         ];
 
-        let html = build_html(&view);
+        let html = build_html(&view, RenderOptions::DEFAULT, None);
 
         assert!(html.contains("a&amp;b&lt;repo&gt;&quot;"));
         assert!(html.contains("main&lt;script&gt;"));
@@ -201,7 +234,7 @@ mod tests {
         let mut web = sample_view();
         web.repo_name = "web".to_string();
 
-        let html = build_tabbed_html("subrepo diff", &[api, web]);
+        let html = build_tabbed_html("subrepo diff", &[api, web], RenderOptions::DEFAULT, None);
 
         assert!(html.starts_with("<!DOCTYPE html>"));
         assert_eq!(html.matches(r#"<section class="panel""#).count(), 2);
@@ -212,10 +245,9 @@ mod tests {
     }
 
     #[test]
-    fn build_html_theme_select_is_offline() {
-        let html = build_html(&sample_view());
+    fn build_html_is_offline() {
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
-        assert!(html.contains(r#"class="theme-select""#));
         // no external resource loads (CDN scripts, stylesheets, fetches)
         assert!(
             !has_disallowed_external_url(&html),
@@ -224,47 +256,44 @@ mod tests {
     }
 
     #[test]
-    fn build_html_defaults_to_unified_layout_and_ships_all_four_panes() {
-        let html = build_html(&sample_view());
+    fn build_html_defaults_to_one_unified_compact_variant() {
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
-        // both header toggles: unified is the default, full file is not
         assert!(html.contains(r#"<html lang="en""#));
-        assert!(!html.contains(r#"<html lang="en" data-diff-layout="#));
-        assert!(html.contains(r#"class="layout-toggle" aria-pressed="false""#));
-        assert!(html.contains(r#"class="view-toggle" aria-pressed="false""#));
-        // all four diff renderings ship; CSS reveals one (no `hidden` plumbing)
-        assert!(html.contains(r#"class="diff diff-split diff-compact""#));
         assert!(html.contains(r#"class="diff diff-unified diff-compact""#));
-        assert!(html.contains(r#"class="diff diff-split diff-full""#));
-        assert!(html.contains(r#"class="diff diff-unified diff-full""#));
-        // visibility is CSS-driven now; the diff blocks carry no `hidden` attribute
-        assert!(!html.contains(r#"diff-full" hidden"#));
-        assert!(!html.contains(r#"diff-compact" hidden"#));
+        assert!(!html.contains(r#"class="diff diff-split"#));
+        assert!(!html.contains(r#"class="diff diff-unified diff-full"#));
     }
 
     #[test]
-    fn raw_documents_still_emit_all_four_variants_and_artifact_controls() {
+    fn raw_documents_emit_only_the_requested_variant_without_presentation_controls() {
         let view = sample_view();
-        let documents = [build_html(&view), build_tabbed_html("diffs", &[view])];
+        let options = RenderOptions::new(
+            application::viewer::DiffLayout::Split,
+            application::viewer::DiffDensity::Full,
+        );
+        let documents = [
+            build_html(&view, options, None),
+            build_tabbed_html("diffs", &[view], options, None),
+        ];
 
         for html in documents {
-            for class in [
-                "diff-split diff-compact",
-                "diff-unified diff-compact",
-                "diff-split diff-full",
-                "diff-unified diff-full",
-            ] {
-                assert!(html.contains(class), "missing {class}");
-            }
-            assert!(html.contains(r#"class="layout-toggle""#));
-            assert!(html.contains(r#"class="view-toggle""#));
-            assert!(html.contains(r#"class="theme-select""#));
+            assert_eq!(
+                html.matches(r#"class="diff diff-split diff-full""#).count(),
+                1
+            );
+            assert!(!html.contains(r#"class="diff diff-unified"#));
+            assert!(!html.contains(r#"class="diff diff-split diff-compact"#));
+            assert!(!html.contains(r#"class="layout-toggle""#));
+            assert!(!html.contains(r#"class="view-toggle""#));
+            assert!(!html.contains(r#"class="theme-select""#));
             assert!(html.contains(THEME_BOOT_JS));
         }
     }
 
     #[test]
-    fn layout_boot_script_preserves_saved_split_preference() {
-        assert!(THEME_BOOT_JS.contains("if(l==='split')d.diffLayout='split';"));
+    fn theme_boot_script_reads_only_the_saved_theme() {
+        assert!(THEME_BOOT_JS.contains("gtl-theme"));
+        assert!(!THEME_BOOT_JS.contains("gtl-diff-layout"));
     }
 }

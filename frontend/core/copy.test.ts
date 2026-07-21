@@ -74,17 +74,35 @@ function makeFileStub(rowsHtml: string, attrs: Record<string, string> = {}): obj
     },
   };
 
-  // The unified pane holds the canonical .dl-add/.dl-ctx rows; copy reads it regardless of
-  // the on-screen layout. Returning it only for the .diff-unified selectors guards against a
-  // regression that copied from the split panes (which carry no such rows).
+  // The unified pane holds the rendered .dl-add/.dl-ctx rows.
   const unifiedEl = {
     querySelectorAll: (sel: string): object[] => (sel.includes("dl-add") || sel.includes("dl-ctx") ? rowEls : []),
   };
 
   return {
-    querySelector: (sel: string): object | null =>
-      sel === ".diff-unified.diff-compact" || sel === ".diff-unified.diff-full" ? unifiedEl : null,
+    querySelector: (sel: string): object | null => (sel === ".diff-unified" ? unifiedEl : null),
     closest: (sel: string): object | null => (sel === ".layout" ? layoutEl : null),
+    getAttribute: (name: string): string | null => attrs[name] ?? null,
+  };
+}
+
+function makeSplitFileStub(attrs: Record<string, string> = {}): object {
+  const lineNumber = { textContent: "12", matches: (selector: string) => selector === ".ln" };
+  const code = {
+    textContent: "+const x = 1",
+    previousElementSibling: lineNumber,
+    querySelector: (_selector: string): object | null => null,
+  };
+  const split = {
+    querySelectorAll: (selector: string): object[] => (selector === ".sp-add, .dl > .sp-ctx:last-child" ? [code] : []),
+  };
+  const layoutEl = {
+    classList: { contains: (name: string): boolean => name === "copy-ctx" },
+  };
+
+  return {
+    querySelector: (selector: string): object | null => (selector === ".diff-split" ? split : null),
+    closest: (selector: string): object | null => (selector === ".layout" ? layoutEl : null),
     getAttribute: (name: string): string | null => attrs[name] ?? null,
   };
 }
@@ -110,4 +128,10 @@ test("extractCopyText collapses a single-line marker to one line number, keeps t
 test("extractCopyText prefers .code-text over code when a long line is split-clipped", () => {
   const file = makeFileStub(`<row codeText="+data:font/woff;base64,AAAA" lns="0,1"/>`, { "data-path": "f.css" });
   expect(extractCopyText(file as Element)).toContain("data:font/woff;base64,AAAA");
+});
+
+test("extractCopyText reads the rendered split pane when no unified pane exists", () => {
+  const file = makeSplitFileStub({ "data-comment": "//", "data-path": "src/a.ts" });
+
+  expect(extractCopyText(file as Element)).toBe("// * src/a.ts, lines: 12\nconst x = 1");
 });

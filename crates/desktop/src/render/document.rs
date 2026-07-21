@@ -51,6 +51,7 @@ impl MaudViewerRenderer {
                     title { "git-tools viewer" }
                     style { (PreEscaped(preview::preview_css())) }
                     style { (PreEscaped(viewer_css())) }
+                    meta name="htmx-config" content=r#"{"includeIndicatorStyles":false,"scrollBehavior":"instant","globalViewTransitions":false}"#;
                     script { (PreEscaped(htmx)) }
                     script { (PreEscaped(THEME_CONTROL_JS)) }
                 }

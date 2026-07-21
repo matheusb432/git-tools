@@ -152,6 +152,7 @@ pub struct ArtifactMeta {
     pub head_committed_at: String,
     pub generated_at: String,
     pub title: String,
+    pub render_options: RenderOptions,
     /// The configured renderer theme used to build the artifact. `None` means
     /// the renderer selected its default theme.
     pub theme: Option<String>,
@@ -256,8 +257,8 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
         html: &str,
     ) -> anyhow::Result<PlacedArtifact>;
     /// Find an existing artifact for a pure commit range rendered under the same
-    /// renderer theme and exclusion set, or `None` on a miss (always `None` for
-    /// `WorkTree`, which is never range-addressable).
+    /// renderer layout, density, theme, and exclusion set, or `None` on a miss
+    /// (always `None` for `WorkTree`, which is never range-addressable).
     #[allow(
         clippy::too_many_arguments,
         reason = "the explicit fields are the persisted range-reuse key"
@@ -269,6 +270,7 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
         kind: DiffKind,
         base_sha: &str,
         head_sha: &str,
+        render_options: RenderOptions,
         theme: Option<&str>,
         excluded_extensions: &[String],
     ) -> anyhow::Result<Option<PathBuf>>;
@@ -280,9 +282,15 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
 /// Renders a diff [`View`] to a self-contained HTML document.
 pub trait HtmlRenderer: Clone + Send + Sync + 'static {
     /// The complete `file://`-ready HTML for `view`.
-    fn build_html(&self, view: &View) -> String;
+    fn build_html(&self, view: &View, options: RenderOptions, theme: Option<&str>) -> String;
     /// Renders several views as one tab-stripped document (diff-subrepos / diff --all).
-    fn build_tabbed_html(&self, title: &str, views: &[View]) -> String;
+    fn build_tabbed_html(
+        &self,
+        title: &str,
+        views: &[View],
+        options: RenderOptions,
+        theme: Option<&str>,
+    ) -> String;
 }
 
 /// A source of the current time as an ISO-8601 string.

@@ -24,4 +24,12 @@ describe("server-inlined scripts", () => {
       expect(readFileSync(generated, "utf8")).toBe(readFileSync(source, "utf8"));
     });
   }
+
+  it("theme boot does not read or write layout and density preferences", () => {
+    const body = readFileSync("frontend/inline/theme-boot.ts", "utf8");
+
+    expect(body).not.toContain("gtl-diff-layout");
+    expect(body).not.toContain("diffLayout");
+    expect(body).not.toContain("diffFull");
+  });
 });

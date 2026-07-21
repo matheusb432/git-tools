@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use application::ports::{ArtifactMeta, ArtifactStore, HistoryRecord, PlacedArtifact};
-use domain::diffs::DiffKind;
+use domain::{diffs::DiffKind, viewer::RenderOptions};
 
 /// The default store adapter: places artifacts into and looks them up out of the
 /// on-disk content-addressed store.
@@ -37,6 +37,8 @@ impl ArtifactStore for StoreArtifacts {
             generated_at: meta.generated_at.clone(),
             title: meta.title.clone(),
             byte_size: html.len() as u64,
+            layout: meta.render_options.layout().to_string(),
+            density: meta.render_options.density().to_string(),
             theme: meta.theme.clone(),
             theme_recorded: true,
             excluded_extensions: meta.excluded_extensions.clone(),
@@ -55,6 +57,7 @@ impl ArtifactStore for StoreArtifacts {
         kind: DiffKind,
         base_sha: &str,
         head_sha: &str,
+        render_options: RenderOptions,
         theme: Option<&str>,
         excluded_extensions: &[String],
     ) -> anyhow::Result<Option<PathBuf>> {
@@ -70,6 +73,7 @@ impl ArtifactStore for StoreArtifacts {
             kind,
             base_sha,
             head_sha,
+            render_options,
             theme,
             excluded_extensions,
         ))
@@ -96,8 +100,40 @@ impl ArtifactStore for StoreArtifacts {
 
 #[cfg(test)]
 mod tests {
+    use domain::viewer::{DiffDensity, DiffLayout, RenderOptions};
+
     use super::*;
     use crate::store::Sidecar;
+
+    #[test]
+    fn place_persists_render_options_from_artifact_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let meta = ArtifactMeta {
+            repo_root: dir.path().to_path_buf(),
+            repo_name: "git-tools".into(),
+            kind: DiffKind::TwoDot,
+            base_sha: "aaa".into(),
+            head_sha: "bbb".into(),
+            range_label: "main..HEAD".into(),
+            head_committed_at: "2026-07-03T00:00:00Z".into(),
+            generated_at: "2026-07-03T00:01:00Z".into(),
+            title: "diff".into(),
+            render_options: RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
+            theme: Some("dark".into()),
+            excluded_extensions: Vec::new(),
+        };
+
+        let placed = StoreArtifacts
+            .place(dir.path(), &meta, "<html></html>")
+            .unwrap();
+        let sidecar: Sidecar = serde_json::from_str(
+            &std::fs::read_to_string(placed.path.with_extension("json")).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(sidecar.layout, "split");
+        assert_eq!(sidecar.density, "full");
+    }
 
     #[test]
     fn list_history_reads_back_placed_sidecars() {
@@ -115,6 +151,8 @@ mod tests {
             excluded_extensions: Vec::new(),
             title: "diff".into(),
             byte_size: 42,
+            layout: RenderOptions::DEFAULT.layout().to_string(),
+            density: RenderOptions::DEFAULT.density().to_string(),
             theme: None,
             theme_recorded: true,
         };

@@ -3,7 +3,7 @@ use domain::diffs::{AppliedExclusions, Commit};
 use super::FileDiff;
 
 /// The `$ <lead><range><trail>` command line shown at the top of the screen.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Cmd {
     pub lead: String,
     pub range: String,
@@ -11,7 +11,7 @@ pub struct Cmd {
 }
 
 /// The footer prompt line (command + muted note).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Foot {
     pub cmd: String,
     pub note: String,
@@ -19,7 +19,7 @@ pub struct Foot {
 
 /// Everything `build_html` needs. In JS these were the destructured params of
 /// `buildHtml({...})`, with defaults the caller supplies before rendering.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct View {
     pub repo_name: String,
     /// Absolute path to the repo root (git top-level), used to compose copy-able
@@ -33,8 +33,6 @@ pub struct View {
     pub cmd: Cmd,
     pub commits_label: String,
     pub foot: Foot,
-    /// Diff-preview theme read from config; `None` = default.
-    pub theme: Option<String>,
     /// `Some` when the config's `[diff.exclude]` filter hid files from this
     /// view — every surface must show it so hidden files never read as missing.
     pub exclusions: Option<AppliedExclusions>,
@@ -61,7 +59,6 @@ impl View {
     /// #     cmd: Cmd { lead: String::new(), range: String::new(), trail: String::new() },
     /// #     commits_label: "Commits".into(),
     /// #     foot: Foot { cmd: "git diff".into(), note: String::new() },
-    /// #     theme: None,
     /// #     exclusions: None,
     /// # };
     /// assert!(!view.has_diff_content());
@@ -125,7 +122,6 @@ mod tests {
                 cmd: "git diff".into(),
                 note: String::new(),
             },
-            theme: None,
             exclusions: None,
         }
     }

@@ -50,7 +50,6 @@ mod tests {
                 cmd: "git diff".into(),
                 note: String::new(),
             },
-            theme: None,
         })
     }
 
@@ -151,6 +150,21 @@ mod tests {
     }
 
     #[test]
+    fn document_disables_htmx_runtime_transition_styles_and_smooth_scrolling() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+        let config = r#"<meta name="htmx-config" content="{&quot;includeIndicatorStyles&quot;:false,&quot;scrollBehavior&quot;:&quot;instant&quot;,&quot;globalViewTransitions&quot;:false}">"#;
+
+        let config_position = html
+            .find(config)
+            .expect("document carries the exact htmx config");
+        let htmx_position = html
+            .find("window.htmx=htmx")
+            .expect("document loads the vendored htmx runtime");
+
+        assert!(config_position < htmx_position);
+    }
+
+    #[test]
     fn user_controlled_shell_values_are_escaped() {
         let tab = ViewerTab::new(
             tab_id(1),
@@ -241,7 +255,7 @@ mod tests {
         assert!(!snapshot.contains("Delete live view"));
         assert!(!snapshot.contains("/live-view"));
 
-        let raw = preview::build_html(&view());
+        let raw = preview::build_html(&view(), RenderOptions::DEFAULT, None);
         assert!(!raw.contains("Delete live view"));
         assert!(!raw.contains("/live-view"));
     }

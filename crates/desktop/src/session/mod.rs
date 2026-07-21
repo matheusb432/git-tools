@@ -351,7 +351,6 @@ mod tests {
                 cmd: String::new(),
                 note: String::new(),
             },
-            theme: None,
         })
     }
 

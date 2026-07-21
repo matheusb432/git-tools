@@ -130,7 +130,6 @@ fn view_weight(view: &View) -> usize {
         + string_weight(&view.commits_label)
         + string_weight(&view.foot.cmd)
         + string_weight(&view.foot.note)
-        + view.theme.as_ref().map_or(0, string_weight)
         + view.exclusions.as_ref().map_or(0, |applied| {
             applied
                 .extensions
@@ -207,7 +206,6 @@ mod tests {
                 cmd: String::new(),
                 note: String::new(),
             },
-            theme: None,
         }))
     }
 
@@ -370,7 +368,6 @@ mod tests {
                 cmd: "git diff origin/main..HEAD".into(),
                 note: "cache fixture".into(),
             },
-            theme: None,
         });
         let mut cache = WeightedViewCache::new(crate::DEFAULT_VIEW_CACHE_WEIGHT);
 

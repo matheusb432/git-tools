@@ -1,13 +1,12 @@
 //! Center column: one `<details>` block per changed file, carrying the copy
-//! buttons, status badge, and the diff pane(s) for the hosting surface.
+//! buttons, status badge, and selected diff pane.
 
 use application::{
     diffs::{FileDiff, FileStatus, View},
-    viewer::{DiffDensity, DiffLayout},
+    viewer::{DiffDensity, DiffLayout, RenderOptions},
 };
 use maud::{Markup, PreEscaped, html};
 
-use super::Surface;
 use crate::{
     rows::{render_diff_lines, render_diff_split},
     text::slug,
@@ -62,7 +61,7 @@ fn file_commits(file: &FileDiff) -> String {
     file.commits.join(" ")
 }
 
-pub(super) fn file_blocks(view: &View, surface: Surface) -> Markup {
+pub(super) fn file_blocks(view: &View, options: RenderOptions) -> Markup {
     if view.files.is_empty() {
         return html! { div.empty { "no file changes" } };
     }
@@ -101,46 +100,32 @@ pub(super) fn file_blocks(view: &View, surface: Surface) -> Markup {
                 // ! Diff rows live in their own body so content-visibility virtualizes the
                 // ! heavy content here while the summary stays sticky against `.main` (size
                 // ! containment on `details.file` itself would trap the sticky in the box).
-                // ! Artifacts ship four variants selected by <html> data attributes; app
-                // ! fragments ship one visible variant selected by validated server options.
-                div class=(if matches!(surface, Surface::Artifact) { "filebody" } else { "filebody single-variant" }) style=(intrinsic) {
-                    (file_diff(file, surface))
+                div class="filebody single-variant" style=(intrinsic) {
+                    (file_diff(file, options))
                 }
             }
         }
     }
 }
 
-fn file_diff(file: &FileDiff, surface: Surface) -> Markup {
-    match surface {
-        Surface::Artifact => html! {
-            div class="diff diff-split diff-compact" { (PreEscaped(render_diff_split(&file.lines, &file.owners))) }
-            div class="diff diff-unified diff-compact" { (PreEscaped(render_diff_lines(&file.lines, &file.owners))) }
-            @if let Some(full_lines) = &file.full_lines {
-                div class="diff diff-split diff-full" { (PreEscaped(render_diff_split(full_lines, &file.owners))) }
-                div class="diff diff-unified diff-full" { (PreEscaped(render_diff_lines(full_lines, &file.owners))) }
-            }
+fn file_diff(file: &FileDiff, options: RenderOptions) -> Markup {
+    let (lines, density) = match (options.density(), file.full_lines.as_ref()) {
+        (DiffDensity::Full, Some(full_lines)) => (full_lines, DiffDensity::Full),
+        (DiffDensity::Full | DiffDensity::Compact, _) => (&file.lines, DiffDensity::Compact),
+    };
+    match (options.layout(), density) {
+        (DiffLayout::Unified, DiffDensity::Compact) => html! {
+            div class="diff diff-unified diff-compact" { (PreEscaped(render_diff_lines(lines, &file.owners))) }
         },
-        Surface::App(options) => {
-            let lines = match options.density() {
-                DiffDensity::Compact => &file.lines,
-                DiffDensity::Full => file.full_lines.as_ref().unwrap_or(&file.lines),
-            };
-            match (options.layout(), options.density()) {
-                (DiffLayout::Unified, DiffDensity::Compact) => html! {
-                    div class="diff diff-unified diff-compact" { (PreEscaped(render_diff_lines(lines, &file.owners))) }
-                },
-                (DiffLayout::Split, DiffDensity::Compact) => html! {
-                    div class="diff diff-split diff-compact" { (PreEscaped(render_diff_split(lines, &file.owners))) }
-                },
-                (DiffLayout::Unified, DiffDensity::Full) => html! {
-                    div class="diff diff-unified diff-full" { (PreEscaped(render_diff_lines(lines, &file.owners))) }
-                },
-                (DiffLayout::Split, DiffDensity::Full) => html! {
-                    div class="diff diff-split diff-full" { (PreEscaped(render_diff_split(lines, &file.owners))) }
-                },
-            }
-        }
+        (DiffLayout::Split, DiffDensity::Compact) => html! {
+            div class="diff diff-split diff-compact" { (PreEscaped(render_diff_split(lines, &file.owners))) }
+        },
+        (DiffLayout::Unified, DiffDensity::Full) => html! {
+            div class="diff diff-unified diff-full" { (PreEscaped(render_diff_lines(lines, &file.owners))) }
+        },
+        (DiffLayout::Split, DiffDensity::Full) => html! {
+            div class="diff diff-split diff-full" { (PreEscaped(render_diff_split(lines, &file.owners))) }
+        },
     }
 }
 
@@ -203,7 +188,7 @@ mod tests {
             },
         ];
 
-        let html = build_html(&view);
+        let html = build_html(&view, RenderOptions::DEFAULT, None);
 
         assert!(html.contains(r#"data-status="added""#));
         assert!(html.contains(r#"data-status-label="Added file""#));
@@ -241,14 +226,35 @@ mod tests {
         )
         .into_string();
 
-        assert!(html.contains(r#"class="diff diff-unified diff-full""#));
+        assert!(html.contains(r#"class="diff diff-unified diff-compact""#));
         assert!(html.contains("+extra"));
-        assert!(!html.contains("diff-compact"));
+        assert!(!html.contains("diff-full"));
+    }
+
+    #[test]
+    fn each_file_emits_exactly_one_requested_layout_and_density_block() {
+        let mut view = sample_view();
+        view.files.push(view.files[0].clone());
+        view.files[1].path = "src/second.rs".to_string();
+        let options = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
+
+        let html = build_html(&view, options, None);
+
+        assert_eq!(
+            html.matches(r#"class="diff diff-split diff-full""#).count(),
+            2
+        );
+        assert_eq!(html.matches(r#"class="diff diff-unified"#).count(), 0);
+        assert_eq!(
+            html.matches(r#"class="diff diff-split diff-compact"#)
+                .count(),
+            0
+        );
     }
 
     #[test]
     fn build_html_file_block_carries_copy_buttons() {
-        let html = build_html(&sample_view());
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         // relative path copy button: data-copy-value attribute
         assert!(html.contains(r#"data-copy-value="src/a b.rs" data-copy-label="path""#));
@@ -266,7 +272,7 @@ mod tests {
         view.repo_root = "/tmp/<r>".to_string();
         view.files[0].path = "src/<x>&\".rs".to_string();
 
-        let html = build_html(&view);
+        let html = build_html(&view, RenderOptions::DEFAULT, None);
 
         // both relative and absolute data-copy-value attributes stay Maud-escaped
         assert!(
@@ -286,7 +292,7 @@ mod tests {
         let huge = "+".to_string() + &"x".repeat(GIANT_FILE_CHARS);
         view.files[0].lines = vec!["@@ -0,0 +1 @@".to_string(), huge];
         view.files[0].full_lines = None;
-        let html = build_html(&view);
+        let html = build_html(&view, RenderOptions::DEFAULT, None);
         // the giant file's <details> renders WITHOUT `open` (Maud emits `open` before `id`)
         assert!(html.contains(r#"<details id="f-src-a-b-rs""#));
         assert!(!html.contains(r#"<details open id="f-src-a-b-rs""#));
@@ -294,21 +300,21 @@ mod tests {
 
     #[test]
     fn file_blocks_emits_per_file_intrinsic_size() {
-        let html = build_html(&sample_view());
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
         // sample file renders 4 rows -> 4 * ROW_PX
         assert!(html.contains(&format!("contain-intrinsic-size:auto {}px", 4 * ROW_PX)));
     }
 
     #[test]
     fn build_html_ships_content_visibility_perf_rule() {
-        let html = build_html(&sample_view());
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         assert!(html.contains("content-visibility:auto"));
     }
 
     #[test]
     fn content_visibility_stays_in_css_not_inline_so_print_override_wins() {
-        let html = build_html(&sample_view());
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
         // content-visibility must NOT be inline (an inline style out-specifies the @media print
         // override)
         assert!(!html.contains(r#"style="content-visibility"#));

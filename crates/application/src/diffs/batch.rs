@@ -1,12 +1,12 @@
 //! Shared multi-repo render helper for the diff-subrepos and diff-all slices:
-//! builds one [`View`] per repo via [`build_view`], with `skip_empty` controlling
+//! builds one [`View`] per repo through the normal diff compute core, with `skip_empty` controlling
 //! whether an empty or errored view is skipped-and-counted (diff-subrepos) or kept
 //! and propagated (diff-all).
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    diffs::{DiffTarget, View, render_diff::build_view},
+    diffs::{DiffTarget, View, compute_diff},
     ports::{AppSettings, Clock, DiffSource},
     shared::notes::Note,
 };
@@ -25,7 +25,7 @@ pub(crate) struct BatchBuild {
     pub skipped: usize,
 }
 
-/// Builds one [`View`] per repo via [`build_view`], accumulating every note into
+/// Builds one [`View`] per repo through the normal diff compute core, accumulating every note into
 /// `notes` in repo order. `skip_empty`: when true, an error or an empty view is
 /// counted as a skip (diff-subrepos); when false, a build error propagates and every
 /// view is kept regardless of emptiness (diff --all -- matches its current no-skip
@@ -41,24 +41,25 @@ pub(crate) fn render_batch(
     let mut views = Vec::with_capacity(repos.len());
     let mut skipped = 0usize;
     for repo in repos {
-        let built = build_view(
-            source,
-            &repo.top,
-            target,
-            settings.theme().map(str::to_owned),
-            settings.diff_exclusions(),
-            notes,
-        );
+        let built = compute_diff::compute(&repo.top, target, settings, source);
         if skip_empty {
             match built {
-                Ok((mut view, _)) if view.has_diff_content() => {
+                Ok(mut response) if response.view.has_diff_content() => {
+                    notes.append(&mut response.notes);
+                    let mut view = response.view;
                     view.repo_name.clone_from(&repo.label);
                     views.push(view);
                 }
-                Ok(_) | Err(_) => skipped += 1,
+                Ok(mut response) => {
+                    notes.append(&mut response.notes);
+                    skipped += 1;
+                }
+                Err(_) => skipped += 1,
             }
         } else {
-            let (mut view, _) = built?;
+            let mut response = built?;
+            notes.append(&mut response.notes);
+            let mut view = response.view;
             view.repo_name.clone_from(&repo.label);
             views.push(view);
         }
@@ -246,7 +247,7 @@ diff --git a/notes.md b/notes.md\n\
     }
 
     #[test]
-    fn settings_value_supplies_theme_and_project_exclusions_to_every_view() {
+    fn settings_value_supplies_project_exclusions_to_each_view() {
         const TWO_FILE_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
 --- a/f.txt\n\
 +++ b/f.txt\n\
@@ -273,7 +274,7 @@ diff --git a/notes.md b/notes.md\n\
             );
         }
         let settings = AppSettings::new(
-            Some("night".into()),
+            None,
             true,
             DiffExclusions::new([("repo-a".to_string(), vec!["md"])], None),
         );
@@ -289,12 +290,6 @@ diff --git a/notes.md b/notes.md\n\
         )
         .expect("batch succeeds");
 
-        assert!(
-            batch
-                .views
-                .iter()
-                .all(|view| view.theme.as_deref() == Some("night"))
-        );
         assert_eq!(batch.views[0].files.len(), 1);
         assert_eq!(batch.views[1].files.len(), 2);
     }

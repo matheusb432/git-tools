@@ -5,22 +5,19 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind};
+use domain::diffs::DiffKind;
 use serde::{Deserialize, Serialize};
 
+pub use crate::diffs::compute_merge_diff::DEFAULT_BASE;
 use crate::{
     diffs::{
-        PinnedRange, View,
-        range::DiffRanges,
-        range_view::{RangePresentation, RangeView, TITLE_MERGE_DIFF},
-        util::{DiffData, assemble, exclusion_note, repo_name},
+        compute_merge_diff::{self, ComputeMergeDiff},
+        range_view::TITLE_MERGE_DIFF,
+        util::exclusion_note,
     },
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
 };
-
-/// Falls back to this base when `base` is `None` or blank.
-pub const DEFAULT_BASE: &str = "main";
 
 /// Render the merge-diff of the current branch into `base` (default `main`)
 /// under `store_root`, resolving the repo from `cwd`.
@@ -47,80 +44,6 @@ pub enum RenderMergeDiffError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// The computed merge view plus the range facts the artifact path still needs.
-pub(crate) struct MergeViewBuild {
-    pub view: View,
-    pub top: String,
-    pub base: String,
-    pub diff_range: String,
-}
-
-/// Shared with `compute_merge_diff`: builds the merge [`View`] for the repo at
-/// `cwd` into `base` (default [`DEFAULT_BASE`]). `pinned: Some` computes over
-/// its resolved SHA range instead, skipping the symbolic `verify_commit`. No
-/// HTML, no store.
-pub(crate) fn build_merge_view(
-    source: &impl DiffSource,
-    cwd: &Path,
-    base: Option<&str>,
-    pinned: Option<&PinnedRange>,
-    theme: Option<String>,
-    exclusions: &DiffExclusions,
-) -> anyhow::Result<MergeViewBuild> {
-    let top = source.top_level(cwd)?;
-    let branch = source.current_branch(Path::new(&top))?;
-    let repo_name = repo_name(&top);
-    let excluded = exclusions.for_project_or_default(&repo_name);
-    let base = base
-        .map(str::trim)
-        .filter(|b| !b.is_empty())
-        .unwrap_or(DEFAULT_BASE);
-
-    let (io_ranges, view_ranges) = if let Some(pin) = pinned {
-        (
-            DiffRanges::exact(pin.git_range()),
-            DiffRanges::exact(pin.display_range()),
-        )
-    } else {
-        source.verify_commit(Path::new(&top), base)?;
-        let symbolic = DiffRanges::merge(base);
-        (symbolic.clone(), symbolic)
-    };
-    let range_view = RangeView::new(&view_ranges.diff, RangePresentation::Merge);
-    let DiffData {
-        commits,
-        files,
-        hidden_paths,
-    } = assemble(
-        source,
-        Path::new(&top),
-        &io_ranges.diff,
-        &io_ranges.log,
-        excluded,
-    )?;
-
-    let view = View {
-        repo_name,
-        repo_root: top.clone(),
-        branch,
-        upstream: base.to_string(),
-        title: range_view.title,
-        cmd: range_view.cmd,
-        commits_label: range_view.commits_label,
-        foot: range_view.foot,
-        commits,
-        files,
-        theme,
-        exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
-    };
-    Ok(MergeViewBuild {
-        view,
-        top,
-        base: base.to_string(),
-        diff_range: io_ranges.diff,
-    })
-}
-
 /// Renders a merge diff through the diff ports.
 #[cqrsy::command]
 pub fn execute(
@@ -137,18 +60,21 @@ pub fn execute(
         base,
     } = req;
     let settings = app_settings.load();
-    let built = build_merge_view(
+    let built = compute_merge_diff::compute(
+        ComputeMergeDiff {
+            cwd,
+            base,
+            pinned: None,
+        },
+        &settings,
         source,
-        &cwd,
-        base.as_deref(),
-        None,
-        settings.theme().map(str::to_owned),
-        settings.diff_exclusions(),
     )?;
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
-    let html = renderer.build_html(&view);
+    let render_options = settings.viewer_render_options();
+    let theme = settings.theme().map(str::to_owned);
+    let html = renderer.build_html(&view, render_options, theme.as_deref());
 
     let meta = ArtifactMeta {
         repo_root: PathBuf::from(&built.top),
@@ -164,7 +90,8 @@ pub fn execute(
         head_committed_at: source.committed_at(Path::new(&built.top), "HEAD"),
         generated_at: clock.now_iso(),
         title: TITLE_MERGE_DIFF.to_string(),
-        theme: settings.theme().map(str::to_owned),
+        render_options,
+        theme,
         excluded_extensions: settings
             .diff_exclusions()
             .for_project_or_default(&view.repo_name)

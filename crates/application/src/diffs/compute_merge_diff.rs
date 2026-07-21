@@ -1,12 +1,27 @@
 //! The `compute_merge_diff` vertical slice: the structured merge [`View`] for
 //! the native viewer — no HTML, no artifact store.
 
+mod view;
+
 use std::path::PathBuf;
 
+pub(crate) use view::MergeViewBuild;
+
 use crate::{
-    diffs::{PinnedRange, View, render_merge_diff::build_merge_view},
-    ports::{DiffSource, UserSettingsStore},
+    diffs::{PinnedRange, View},
+    ports::{AppSettings, DiffSource, UserSettingsStore},
 };
+
+/// Falls back to this base when a merge request omits `base` or supplies a blank value.
+///
+/// # Examples
+///
+/// ```
+/// use application::diffs::compute_merge_diff::DEFAULT_BASE;
+///
+/// assert_eq!(DEFAULT_BASE, "main");
+/// ```
+pub const DEFAULT_BASE: &str = "main";
 
 /// Compute the merge view of the current branch into `base` (default `main`),
 /// resolving the repo from `cwd`.
@@ -37,17 +52,24 @@ pub fn execute(
     app_settings: &impl UserSettingsStore,
     source: &impl DiffSource,
 ) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
-    let ComputeMergeDiff { cwd, base, pinned } = req;
     let settings = app_settings.load();
-    let built = build_merge_view(
+    let built = compute(req, &settings, source)?;
+    Ok(ComputeMergeDiffResponse { view: built.view })
+}
+
+pub(crate) fn compute(
+    req: ComputeMergeDiff,
+    settings: &AppSettings,
+    source: &impl DiffSource,
+) -> anyhow::Result<MergeViewBuild> {
+    let ComputeMergeDiff { cwd, base, pinned } = req;
+    view::build(
         source,
         &cwd,
         base.as_deref(),
         pinned.as_ref(),
-        None,
         settings.diff_exclusions(),
-    )?;
-    Ok(ComputeMergeDiffResponse { view: built.view })
+    )
 }
 
 #[cfg(test)]
@@ -85,6 +107,34 @@ index 333..444 100644\n\
         source: &FakeDiffSource,
     ) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
         execute(request, &FixedUserSettingsStore::default(), source)
+    }
+
+    #[test]
+    fn viewer_and_raw_computation_share_the_same_view() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            known_revs: vec!["main".into()],
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
+            ..Default::default()
+        };
+        let settings = AppSettings::default();
+        let request = ComputeMergeDiff {
+            cwd: PathBuf::from("/repo"),
+            base: None,
+            pinned: None,
+        };
+
+        let viewer = execute(
+            request.clone(),
+            &FixedUserSettingsStore::new(settings.clone()),
+            &source,
+        )
+        .expect("viewer compute succeeds");
+        let raw = compute(request, &settings, &source).expect("raw compute succeeds");
+
+        assert_eq!(viewer.view, raw.view);
     }
 
     #[test]

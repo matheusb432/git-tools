@@ -76,6 +76,22 @@ impl ViewerRenderBenchmark {
         .expect("benchmark render options preserve document invariants");
         MaudViewerRenderer.build_view(&document)
     }
+
+    /// Renders the fixture as a self-contained raw artifact.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use desktop::benchmark_support::ViewerRenderBenchmark;
+    ///
+    /// let fixture = ViewerRenderBenchmark::fixture_45k();
+    /// let html = fixture.render_raw();
+    /// assert!(html.starts_with("<!DOCTYPE html>"));
+    /// ```
+    #[must_use]
+    pub fn render_raw(&self) -> String {
+        preview::build_html(&self.view, RenderOptions::DEFAULT, Some("dark"))
+    }
 }
 
 fn large_view() -> View {
@@ -89,6 +105,7 @@ fn large_view() -> View {
     );
 
     View {
+        exclusions: None,
         repo_name: "benchmark".into(),
         repo_root: "/fixtures/benchmark".into(),
         branch: "main".into(),
@@ -114,7 +131,6 @@ fn large_view() -> View {
             cmd: "git diff origin/main..HEAD".into(),
             note: "benchmark fixture".into(),
         },
-        theme: None,
     }
 }
 
@@ -127,6 +143,7 @@ mod tests {
     #[test]
     fn fixture_renders_both_benchmark_variants() {
         let fixture = ViewerRenderBenchmark::fixture_45k();
+        assert!(fixture.view.exclusions.is_none());
 
         let unified = fixture.render(RenderOptions::new(
             DiffLayout::Unified,
@@ -134,7 +151,9 @@ mod tests {
         ));
         let split = fixture.render(RenderOptions::new(DiffLayout::Split, DiffDensity::Full));
 
-        assert!(unified.contains("diff-unified diff-compact"));
-        assert!(split.contains("diff-split diff-full"));
+        assert_eq!(unified.matches("diff-unified diff-compact").count(), 1);
+        assert_eq!(unified.matches("diff-split diff-full").count(), 0);
+        assert_eq!(split.matches("diff-unified diff-compact").count(), 0);
+        assert_eq!(split.matches("diff-split diff-full").count(), 1);
     }
 }

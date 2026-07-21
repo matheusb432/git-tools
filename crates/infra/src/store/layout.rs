@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::Context;
+use domain::viewer::RenderOptions;
 
 use crate::store::{
     id::content_hash,
@@ -85,25 +86,34 @@ fn atomic_write(final_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 /// Find an existing artifact for a pure commit range rendered under the same
-/// renderer theme and exclusion set. Returns `None` for `WorkTree` (never
-/// range-addressable) or on a miss. Scans the repo's sidecars.
+/// layout, density, theme, and exclusion set. Returns `None` for `WorkTree`
+/// (never range-addressable) or on a miss. Scans the repo's sidecars.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the explicit fields are the persisted range-reuse key"
+)]
 pub fn lookup_by_range(
     store_root: &Path,
     repo_id: &str,
     kind: DiffKind,
     base_sha: &str,
     head_sha: &str,
+    render_options: RenderOptions,
     theme: Option<&str>,
     excluded_extensions: &[String],
 ) -> Option<PathBuf> {
     if kind == DiffKind::WorkTree {
         return None;
     }
+    let layout = render_options.layout().to_string();
+    let density = render_options.density().to_string();
     let dir = repo_dir(store_root, repo_id);
     for (stem, sidecar) in read_sidecars_paired(&dir) {
         if sidecar.kind == kind
             && sidecar.base_sha == base_sha
             && sidecar.head_sha == head_sha
+            && sidecar.layout == layout
+            && sidecar.density == density
             && sidecar.theme_recorded
             && sidecar.theme.as_deref() == theme
             && sidecar.excluded_extensions == excluded_extensions
@@ -155,6 +165,8 @@ fn read_sidecars_paired(dir: &Path) -> Vec<(String, Sidecar)> {
 
 #[cfg(test)]
 mod tests {
+    use domain::viewer::{DiffDensity, DiffLayout, RenderOptions};
+
     use super::*;
 
     fn sidecar(kind: DiffKind, base: &str, head: &str) -> Sidecar {
@@ -170,6 +182,8 @@ mod tests {
             generated_at: "t".into(),
             title: "diff".into(),
             byte_size: 0,
+            layout: RenderOptions::DEFAULT.layout().to_string(),
+            density: RenderOptions::DEFAULT.density().to_string(),
             theme: None,
             theme_recorded: true,
             excluded_extensions: Vec::new(),
@@ -237,6 +251,7 @@ mod tests {
             DiffKind::TwoDot,
             "aaaa",
             "bbbb",
+            RenderOptions::DEFAULT,
             None,
             &[],
         );
@@ -247,6 +262,7 @@ mod tests {
             DiffKind::TwoDot,
             "aaaa",
             "cccc",
+            RenderOptions::DEFAULT,
             None,
             &[],
         );
@@ -267,6 +283,7 @@ mod tests {
             DiffKind::TwoDot,
             "aaaa",
             "bbbb",
+            RenderOptions::DEFAULT,
             None,
             &["md".to_string()],
         );
@@ -289,6 +306,7 @@ mod tests {
                 DiffKind::TwoDot,
                 "cccc",
                 "dddd",
+                RenderOptions::DEFAULT,
                 None,
                 &["md".to_string()],
             )
@@ -301,6 +319,7 @@ mod tests {
                 DiffKind::TwoDot,
                 "cccc",
                 "dddd",
+                RenderOptions::DEFAULT,
                 None,
                 &[]
             )
@@ -313,7 +332,10 @@ mod tests {
     fn lookup_by_range_requires_the_same_recorded_theme() {
         let tmp = tempfile::tempdir().unwrap();
         let mut dark = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
+        dark.layout = DiffLayout::Split.to_string();
+        dark.density = DiffDensity::Full.to_string();
         dark.theme = Some("dark".to_string());
+        dark.excluded_extensions = vec!["md".to_string()];
         place(tmp.path(), "repo0000", "<html>dark</html>", &dark).unwrap();
 
         assert!(
@@ -323,8 +345,9 @@ mod tests {
                 DiffKind::TwoDot,
                 "aaaa",
                 "bbbb",
+                RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
                 Some("dark"),
-                &[],
+                &["md".to_string()],
             )
             .is_some()
         );
@@ -335,8 +358,9 @@ mod tests {
                 DiffKind::TwoDot,
                 "aaaa",
                 "bbbb",
+                RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
                 Some("light"),
-                &[],
+                &["md".to_string()],
             )
             .is_none()
         );
@@ -351,6 +375,7 @@ mod tests {
                 DiffKind::TwoDot,
                 "cccc",
                 "dddd",
+                RenderOptions::DEFAULT,
                 None,
                 &[],
             )
@@ -360,10 +385,84 @@ mod tests {
     }
 
     #[test]
+    fn lookup_by_range_requires_the_same_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut split = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
+        split.layout = DiffLayout::Split.to_string();
+        place(tmp.path(), "repo0000", "<html>split</html>", &split).unwrap();
+
+        let hit = lookup_by_range(
+            tmp.path(),
+            "repo0000",
+            DiffKind::TwoDot,
+            "aaaa",
+            "bbbb",
+            RenderOptions::new(DiffLayout::Split, DiffDensity::Compact),
+            None,
+            &[],
+        );
+        let miss = lookup_by_range(
+            tmp.path(),
+            "repo0000",
+            DiffKind::TwoDot,
+            "aaaa",
+            "bbbb",
+            RenderOptions::DEFAULT,
+            None,
+            &[],
+        );
+
+        assert!(hit.is_some());
+        assert!(miss.is_none());
+    }
+
+    #[test]
+    fn lookup_by_range_requires_the_same_density() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut full = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
+        full.density = DiffDensity::Full.to_string();
+        place(tmp.path(), "repo0000", "<html>full</html>", &full).unwrap();
+
+        let hit = lookup_by_range(
+            tmp.path(),
+            "repo0000",
+            DiffKind::TwoDot,
+            "aaaa",
+            "bbbb",
+            RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
+            None,
+            &[],
+        );
+        let miss = lookup_by_range(
+            tmp.path(),
+            "repo0000",
+            DiffKind::TwoDot,
+            "aaaa",
+            "bbbb",
+            RenderOptions::DEFAULT,
+            None,
+            &[],
+        );
+
+        assert!(hit.is_some());
+        assert!(miss.is_none());
+    }
+
+    #[test]
     fn worktree_is_never_range_addressable() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(
-            lookup_by_range(tmp.path(), "r", DiffKind::WorkTree, "a", "b", None, &[]).is_none()
+            lookup_by_range(
+                tmp.path(),
+                "r",
+                DiffKind::WorkTree,
+                "a",
+                "b",
+                RenderOptions::DEFAULT,
+                None,
+                &[],
+            )
+            .is_none()
         );
     }
 

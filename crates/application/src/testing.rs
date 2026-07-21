@@ -13,6 +13,7 @@ use std::{
 use domain::{
     diffs::{Commit, DiffKind},
     managed::ManagedRepo,
+    viewer::RenderOptions,
 };
 
 #[cfg(test)]
@@ -167,9 +168,22 @@ impl DiffSource for FakeDiffSource {
 }
 
 /// In-memory artifact store with deterministic paths and scripted range hits.
-/// Scripted range-lookup hits keyed by range, renderer theme, and exclusions.
-pub type RangeHits =
-    Arc<Mutex<HashMap<(DiffKind, String, String, Option<String>, Vec<String>), PathBuf>>>;
+/// Scripted range-lookup hits keyed by range, layout, density, theme, and exclusions.
+pub type RangeHits = Arc<
+    Mutex<
+        HashMap<
+            (
+                DiffKind,
+                String,
+                String,
+                RenderOptions,
+                Option<String>,
+                Vec<String>,
+            ),
+            PathBuf,
+        >,
+    >,
+>;
 
 /// Artifact content observable through [`InMemoryArtifactStore`].
 #[derive(Debug, Clone, PartialEq)]
@@ -195,11 +209,16 @@ impl InMemoryArtifactStore {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the explicit fields are the persisted range-reuse key"
+    )]
     pub(crate) fn range_hit_insert(
         &self,
         kind: DiffKind,
         base_sha: &str,
         head_sha: &str,
+        render_options: RenderOptions,
         theme: Option<&str>,
         excluded_extensions: &[&str],
         artifact_path: &str,
@@ -209,6 +228,7 @@ impl InMemoryArtifactStore {
                 kind,
                 base_sha.to_owned(),
                 head_sha.to_owned(),
+                render_options,
                 theme.map(str::to_owned),
                 excluded_extensions
                     .iter()
@@ -247,6 +267,7 @@ impl ArtifactStore for InMemoryArtifactStore {
         kind: DiffKind,
         base_sha: &str,
         head_sha: &str,
+        render_options: RenderOptions,
         theme: Option<&str>,
         excluded_extensions: &[String],
     ) -> anyhow::Result<Option<PathBuf>> {
@@ -258,6 +279,7 @@ impl ArtifactStore for InMemoryArtifactStore {
                 kind,
                 base_sha.to_string(),
                 head_sha.to_string(),
+                render_options,
                 theme.map(str::to_owned),
                 excluded_extensions.to_vec(),
             ))
@@ -273,21 +295,36 @@ impl ArtifactStore for InMemoryArtifactStore {
 pub struct StubRenderer;
 
 impl HtmlRenderer for StubRenderer {
-    fn build_html(&self, view: &crate::diffs::View) -> String {
+    fn build_html(
+        &self,
+        view: &crate::diffs::View,
+        options: RenderOptions,
+        theme: Option<&str>,
+    ) -> String {
         format!(
-            "<html data-theme=\"{}\"><title>{}</title></html>",
-            view.theme.as_deref().unwrap_or_default(),
+            "<html data-theme=\"{}\" data-layout=\"{}\" data-density=\"{}\"><title>{}</title></html>",
+            theme.unwrap_or_default(),
+            options.layout(),
+            options.density(),
             view.title
         )
     }
-    fn build_tabbed_html(&self, title: &str, views: &[crate::diffs::View]) -> String {
+    fn build_tabbed_html(
+        &self,
+        title: &str,
+        views: &[crate::diffs::View],
+        options: RenderOptions,
+        theme: Option<&str>,
+    ) -> String {
         let view_summaries = views
             .iter()
             .map(|view| {
                 format!(
-                    "{}:{}:{}",
+                    "{}:{}:{}:{}:{}",
                     view.repo_name,
-                    view.theme.as_deref().unwrap_or_default(),
+                    theme.unwrap_or_default(),
+                    options.layout(),
+                    options.density(),
                     view.files.len()
                 )
             })

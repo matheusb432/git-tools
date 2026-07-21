@@ -31,7 +31,7 @@ use maud::Markup;
 /// assert!(fragment.into_string().contains("diff-unified diff-compact"));
 /// ```
 pub fn view_fragment(view: &View, options: RenderOptions) -> Markup {
-    layout::view_body(view, layout::Surface::App(options))
+    layout::view_body(view, options)
 }
 
 /// The Maud-backed [`HtmlRenderer`](application::ports::HtmlRenderer) adapter.
@@ -39,11 +39,17 @@ pub fn view_fragment(view: &View, options: RenderOptions) -> Markup {
 pub struct MaudRenderer;
 
 impl application::ports::HtmlRenderer for MaudRenderer {
-    fn build_html(&self, view: &View) -> String {
-        build_html(view)
+    fn build_html(&self, view: &View, options: RenderOptions, theme: Option<&str>) -> String {
+        build_html(view, options, theme)
     }
-    fn build_tabbed_html(&self, title: &str, views: &[View]) -> String {
-        build_tabbed_html(title, views)
+    fn build_tabbed_html(
+        &self,
+        title: &str,
+        views: &[View],
+        options: RenderOptions,
+        theme: Option<&str>,
+    ) -> String {
+        build_tabbed_html(title, views, options, theme)
     }
 }
 
@@ -115,7 +121,6 @@ pub(crate) mod fixtures {
                 cmd: "git diff origin/main..HEAD".to_string(),
                 note: "# read-only preview".to_string(),
             },
-            theme: None,
         }
     }
 }

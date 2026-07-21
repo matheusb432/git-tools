@@ -3,11 +3,13 @@
 //! The desktop's in-process mediator dispatches this for recipe tabs; the
 //! daemon's `--raw` path keeps using `render_diff`.
 
+mod view;
+
 use std::path::PathBuf;
 
 use crate::{
-    diffs::{DiffTarget, View, render_diff::build_view},
-    ports::{DiffSource, UserSettingsStore},
+    diffs::{DiffTarget, View},
+    ports::{AppSettings, DiffSource, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -42,17 +44,19 @@ pub fn execute(
     source: &impl DiffSource,
 ) -> Result<ComputeDiffResponse, ComputeDiffError> {
     let ComputeDiff { cwd, target } = req;
-    let mut notes = Vec::new();
     let settings = app_settings.load();
     let top = source.top_level(&cwd)?;
-    let (view, summary) = build_view(
-        source,
-        &top,
-        &target,
-        None,
-        settings.diff_exclusions(),
-        &mut notes,
-    )?;
+    Ok(compute(&top, &target, &settings, source)?)
+}
+
+pub(crate) fn compute(
+    top: &str,
+    target: &DiffTarget,
+    settings: &AppSettings,
+    source: &impl DiffSource,
+) -> anyhow::Result<ComputeDiffResponse> {
+    let mut notes = Vec::new();
+    let (view, summary) = view::build(source, top, target, settings.diff_exclusions(), &mut notes)?;
     Ok(ComputeDiffResponse {
         view,
         summary,
@@ -91,6 +95,33 @@ mod tests {
         source: &FakeDiffSource,
     ) -> Result<ComputeDiffResponse, ComputeDiffError> {
         execute(request, &FixedUserSettingsStore::default(), source)
+    }
+
+    #[test]
+    fn viewer_and_raw_computation_share_the_same_result() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
+            ..Default::default()
+        };
+        let settings = AppSettings::default();
+        let request = req(DiffTarget::Unpushed { pinned: None });
+
+        let viewer = execute(
+            request.clone(),
+            &FixedUserSettingsStore::new(settings.clone()),
+            &source,
+        )
+        .expect("viewer compute succeeds");
+        let raw =
+            compute("/repo", &request.target, &settings, &source).expect("raw compute succeeds");
+
+        assert_eq!(viewer.view, raw.view);
+        assert_eq!(viewer.summary, raw.summary);
+        assert_eq!(viewer.notes, raw.notes);
     }
 
     fn pin() -> PinnedRange {

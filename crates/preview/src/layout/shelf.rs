@@ -93,6 +93,7 @@ fn merge_members_attr(commit: &domain::diffs::Commit) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use application::viewer::RenderOptions;
     use domain::diffs::Commit;
 
     use crate::{build_html, fixtures::sample_view, preview_css};
@@ -101,7 +102,7 @@ mod tests {
     fn commit_shelf_click_contract_focuses_card_and_copies_hash_tag() {
         // ! JS behavior: sha-guard predicate (isShaTarget) covered by Vitest wheel.test.ts.
         // ! copyText + stopPropagation wiring is event-listener-only and not extracted.
-        let html = build_html(&sample_view());
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         assert!(html.contains(r#"title="focus this commit's changes""#));
         assert!(html.contains(r#"<button class="sha" type="button" title="copy hash""#));
@@ -134,7 +135,7 @@ mod tests {
             },
         ];
 
-        let html = build_html(&view);
+        let html = build_html(&view, RenderOptions::DEFAULT, None);
 
         assert!(html.contains(r#"data-members="aaa111aaa bbb222bbb""#));
         assert!(html.contains("merge · 2"));
@@ -158,7 +159,7 @@ mod tests {
             members: Vec::new(), // base-bounded walk found nothing in range
         }];
 
-        let html = build_html(&view);
+        let html = build_html(&view, RenderOptions::DEFAULT, None);
 
         assert!(!html.contains("merge · "));
         assert!(!html.contains("data-members="));

@@ -4,16 +4,13 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind};
+use domain::{diffs::DiffKind, viewer::RenderOptions};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{
-        DiffTarget, DiffTargetRequest, DiffTargetRequestError, PinnedRange, View,
-        range::DiffRanges,
-        range_view::{RangePresentation, RangeView},
-        sort_files_tree_order,
-        util::{DiffData, assemble, exclusion_note, repo_name},
+        DiffTarget, DiffTargetRequest, DiffTargetRequestError, compute_diff, range::DiffRanges,
+        util::repo_name,
     },
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
@@ -54,12 +51,17 @@ pub enum RenderDiffError {
     Unexpected(#[from] anyhow::Error),
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the explicit fields are the persisted range-reuse key"
+)]
 fn range_fast_path(
     source: &impl DiffSource,
     store: &impl ArtifactStore,
     top: &str,
     store_root: &Path,
     target: &DiffTarget,
+    render_options: RenderOptions,
     theme: Option<&str>,
     excluded_extensions: &[String],
 ) -> anyhow::Result<Option<PathBuf>> {
@@ -72,13 +74,14 @@ fn range_fast_path(
         kind,
         &base_sha,
         &head_sha,
+        render_options,
         theme,
         excluded_extensions,
     )
 }
 
 // ! Returns (kind, base_sha, head_sha) only for pure commit ranges; None for
-// ! worktree (Hash) mode. Mirrors build_view's range selection but skips assemble.
+// ! worktree (Hash) mode. It follows compute target resolution without assembling a view.
 fn resolved_range(
     source: &impl DiffSource,
     top: &str,
@@ -96,7 +99,7 @@ fn resolved_range(
         } => DiffRanges::exact(format!("HEAD~{count}..HEAD")).diff,
         DiffTarget::Merge { base, pinned: None } => DiffRanges::merge(base).diff,
         DiffTarget::Unpushed { pinned: None } => {
-            // No upstream ⇒ build_view falls back to Hash (worktree) mode; not fast-path
+            // No upstream means the compute core falls back to Hash (worktree) mode; not fast-path
             // eligible, and the fallback warning is emitted there (once), not here.
             let upstream = source.upstream(repo).ok()?;
             DiffRanges::unpushed(&upstream).diff
@@ -158,6 +161,7 @@ pub fn execute(
     let target = DiffTarget::try_from(target)?;
     let mut notes = Vec::new();
     let settings = app_settings.load();
+    let render_options = settings.viewer_render_options();
     let theme = settings.theme().map(str::to_owned);
     let top = source.top_level(&cwd)?;
     let excluded = settings
@@ -174,6 +178,7 @@ pub fn execute(
             &top,
             &store_root,
             &target,
+            render_options,
             theme.as_deref(),
             excluded.extensions(),
         )?
@@ -191,14 +196,10 @@ pub fn execute(
         });
     }
 
-    let (mut view, summary) = build_view(
-        source,
-        &top,
-        &target,
-        theme.clone(),
-        settings.diff_exclusions(),
-        &mut notes,
-    )?;
+    let computed = compute_diff::compute(&top, &target, &settings, source)?;
+    let mut view = computed.view;
+    let summary = computed.summary;
+    notes.extend(computed.notes);
     if let Some(name) = &name {
         view.title.clone_from(name);
     }
@@ -212,7 +213,7 @@ pub fn execute(
         });
     }
     let file_count = view.files.len();
-    let html = renderer.build_html(&view);
+    let html = renderer.build_html(&view, render_options, theme.as_deref());
 
     let repo = Path::new(&top);
     let meta = ArtifactMeta {
@@ -227,6 +228,7 @@ pub fn execute(
         head_committed_at: source.committed_at(repo, "HEAD"),
         generated_at: clock.now_iso(),
         title: view.title.clone(),
+        render_options,
         theme,
         excluded_extensions: excluded.extensions().to_vec(),
     };
@@ -246,242 +248,6 @@ pub fn execute(
     })
 }
 
-/// The resolved base label plus the io (real SHAs/refs) and view (display-safe)
-/// ranges for a target, and whether it silently fell back to `main`.
-struct ResolvedTarget {
-    base_ref: String,
-    io_ranges: DiffRanges,
-    view_ranges: DiffRanges,
-    presentation: RangePresentation,
-    fallback_to_main: bool,
-}
-
-impl ResolvedTarget {
-    fn pinned(pin: &PinnedRange, base_ref: String, presentation: RangePresentation) -> Self {
-        Self {
-            base_ref,
-            io_ranges: DiffRanges::exact(pin.git_range()),
-            view_ranges: DiffRanges::exact(pin.display_range()),
-            presentation,
-            fallback_to_main: false,
-        }
-    }
-
-    fn same_ranges(
-        base_ref: String,
-        ranges: DiffRanges,
-        presentation: RangePresentation,
-        fallback_to_main: bool,
-    ) -> Self {
-        Self {
-            base_ref,
-            io_ranges: ranges.clone(),
-            view_ranges: ranges,
-            presentation,
-            fallback_to_main,
-        }
-    }
-}
-
-/// Resolves `target` to its ranges: a pinned target computes verbatim over its
-/// resolved SHAs (skipping symbolic verification entirely); an unpinned target
-/// verifies/resolves symbolically as before, emitting the "no upstream"
-/// fallback warning into `notes` when it applies.
-fn resolve_target_ranges(
-    source: &impl DiffSource,
-    top: &str,
-    target: &DiffTarget,
-    notes: &mut Vec<Note>,
-) -> anyhow::Result<ResolvedTarget> {
-    let repo = Path::new(top);
-    let resolved = match target {
-        // Range, Last, and Unpushed pins are all exact ranges. Only their summary/upstream label
-        // differs; range computation and presentation stay identical.
-        DiffTarget::Range {
-            pinned: Some(pin), ..
-        }
-        | DiffTarget::Last {
-            pinned: Some(pin), ..
-        } => ResolvedTarget::pinned(pin, pin.display_range(), RangePresentation::Exact),
-        DiffTarget::Range {
-            range,
-            pinned: None,
-        } => {
-            verify_exact_range(source, top, range)?;
-            ResolvedTarget::same_ranges(
-                range.clone(),
-                DiffRanges::exact(range),
-                RangePresentation::Exact,
-                false,
-            )
-        }
-        DiffTarget::Base(base) => {
-            source.verify_commit(repo, base)?;
-            let short = source.short_ref(repo, base)?;
-            ResolvedTarget {
-                base_ref: short.clone(),
-                io_ranges: DiffRanges::working_tree(base),
-                view_ranges: DiffRanges::working_tree(&short),
-                presentation: RangePresentation::WorkingTree,
-                fallback_to_main: false,
-            }
-        }
-        DiffTarget::Merge {
-            base,
-            pinned: Some(pin),
-        } => ResolvedTarget::pinned(pin, base.clone(), RangePresentation::Merge),
-        DiffTarget::Merge { base, pinned: None } => {
-            source.verify_commit(repo, base)?;
-            ResolvedTarget::same_ranges(
-                base.clone(),
-                DiffRanges::merge(base),
-                RangePresentation::Merge,
-                false,
-            )
-        }
-        DiffTarget::Unpushed { pinned: Some(pin) } => {
-            ResolvedTarget::pinned(pin, pin.display_base(), RangePresentation::Exact)
-        }
-        DiffTarget::Unpushed { pinned: None } => {
-            let base = unpushed_or_main_base(source, top, notes)?;
-            let (ranges, presentation) = if base.is_upstream {
-                (
-                    DiffRanges::unpushed(&base.ref_name),
-                    RangePresentation::Unpushed,
-                )
-            } else {
-                (
-                    DiffRanges::working_tree(&base.ref_name),
-                    RangePresentation::WorkingTree,
-                )
-            };
-            ResolvedTarget::same_ranges(base.ref_name, ranges, presentation, !base.is_upstream)
-        }
-        DiffTarget::Last {
-            count,
-            pinned: None,
-        } => {
-            // * "last N" is just the HEAD~N..HEAD range; reuse the verified ExactRange plumbing.
-            let range = format!("HEAD~{count}..HEAD");
-            verify_exact_range(source, top, &range)?;
-            ResolvedTarget::same_ranges(
-                range.clone(),
-                DiffRanges::exact(range),
-                RangePresentation::Exact,
-                false,
-            )
-        }
-    };
-    Ok(resolved)
-}
-
-/// Shared with diff-subrepos: builds the [`View`] + human summary for a target.
-/// Emits the "no upstream" fallback warning and the exclusion note into `notes`.
-pub fn build_view(
-    source: &impl DiffSource,
-    top: &str,
-    target: &DiffTarget,
-    theme: Option<String>,
-    exclusions: &DiffExclusions,
-    notes: &mut Vec<Note>,
-) -> anyhow::Result<(View, String)> {
-    let repo = Path::new(top);
-    let branch = source.current_branch(repo)?;
-    let repo_name = repo_name(top);
-    let excluded = exclusions.for_project_or_default(&repo_name);
-
-    let ResolvedTarget {
-        base_ref,
-        io_ranges,
-        view_ranges,
-        presentation,
-        fallback_to_main,
-    } = resolve_target_ranges(source, top, target, notes)?;
-    let range_view = RangeView::new(&view_ranges.diff, presentation);
-
-    let DiffData {
-        commits,
-        mut files,
-        hidden_paths,
-    } = assemble(source, repo, &io_ranges.diff, &io_ranges.log, excluded)?;
-    sort_files_tree_order(&mut files);
-
-    let view = View {
-        repo_name: repo_name.clone(),
-        repo_root: top.to_string(),
-        branch,
-        upstream: base_ref.clone(),
-        title: range_view.title,
-        cmd: range_view.cmd,
-        commits_label: range_view.commits_label,
-        foot: range_view.foot,
-        commits,
-        files,
-        theme,
-        exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
-    };
-    notes.extend(exclusion_note("diff-preview", &view));
-
-    let summary = match target {
-        DiffTarget::Range { .. } => base_ref.clone(),
-        DiffTarget::Base(_) => format!("{base_ref}..working"),
-        DiffTarget::Merge { .. } => format!("to merge into {base_ref}"),
-        DiffTarget::Unpushed { .. } if fallback_to_main => format!("{base_ref}..working"),
-        DiffTarget::Unpushed { .. } => legacy_unpushed_commit_label(view.commits.len()),
-        DiffTarget::Last { count, .. } => {
-            format!(
-                "last {}",
-                legacy_count_label(count.get() as usize, "commit")
-            )
-        }
-    };
-    Ok((view, summary))
-}
-
-struct DiffBase {
-    ref_name: String,
-    is_upstream: bool,
-}
-
-fn unpushed_or_main_base(
-    source: &impl DiffSource,
-    top: &str,
-    notes: &mut Vec<Note>,
-) -> anyhow::Result<DiffBase> {
-    let repo = Path::new(top);
-    match source.upstream(repo) {
-        Ok(upstream) => Ok(DiffBase {
-            ref_name: upstream,
-            is_upstream: true,
-        }),
-        Err(upstream_error) => {
-            source
-                .verify_commit(repo, "main")
-                .map_err(|_| upstream_error)?;
-            notes.push(Note::warn(
-                "diff-preview: no upstream; falling back to main",
-            ));
-            Ok(DiffBase {
-                ref_name: "main".to_string(),
-                is_upstream: false,
-            })
-        }
-    }
-}
-
-fn verify_exact_range(source: &impl DiffSource, top: &str, range: &str) -> anyhow::Result<()> {
-    let Some((start, end)) = range.split_once("..") else {
-        anyhow::bail!("range must use <start>..<end>");
-    };
-    if start.trim().is_empty() || end.trim().is_empty() {
-        anyhow::bail!("range must use <start>..<end>");
-    }
-    let repo = Path::new(top);
-    source.verify_commit(repo, start)?;
-    source.verify_commit(repo, end)?;
-    Ok(())
-}
-
 // ! base = text before `..`/`...`; for worktree mode (no `..`) the whole string is the base.
 fn range_base(range: &str) -> &str {
     range
@@ -495,15 +261,14 @@ fn legacy_count_label(count: usize, noun: &str) -> String {
     format!("{count} {noun}(s)")
 }
 
-fn legacy_unpushed_commit_label(count: usize) -> String {
-    format!("{count} unpushed commit(s)")
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use domain::diffs::{DiffExclusions, DiffKind};
+    use domain::{
+        diffs::{DiffExclusions, DiffKind},
+        viewer::RenderOptions,
+    };
 
     use super::{RenderDiff, RenderDiffError, RenderDiffOutcome, execute};
     use crate::{
@@ -665,6 +430,7 @@ mod tests {
             DiffKind::TwoDot,
             "sha-a",
             "sha-b",
+            RenderOptions::DEFAULT,
             None,
             &[],
             "/store/existing.html",
@@ -721,6 +487,7 @@ mod tests {
             DiffKind::TwoDot,
             "sha-a",
             "sha-b",
+            RenderOptions::DEFAULT,
             None,
             &[],
             "/store/unfiltered.html",
@@ -785,6 +552,7 @@ mod tests {
             DiffKind::TwoDot,
             "sha-a",
             "sha-b",
+            RenderOptions::DEFAULT,
             Some("dark"),
             &[],
             "/store/dark.html",
@@ -835,6 +603,7 @@ mod tests {
             DiffKind::TwoDot,
             "sha-a",
             "sha-b",
+            RenderOptions::DEFAULT,
             None,
             &["md"],
             "/store/filtered.html",
@@ -893,6 +662,7 @@ mod tests {
             DiffKind::TwoDot,
             "sha-a",
             "sha-b",
+            RenderOptions::DEFAULT,
             None,
             &[],
             "/store/existing.html",

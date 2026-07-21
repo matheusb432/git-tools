@@ -17,7 +17,6 @@ function showToast(msg: string): void {
     document.body.appendChild(toastEl);
   }
   toastEl.textContent = msg;
-  void toastEl.offsetWidth; // reflow so the transition re-runs on rapid copies
   toastEl.classList.add("show");
   if (toastTimer !== null) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
@@ -121,9 +120,6 @@ export function enhanceLayout(root: HTMLElement): () => void {
   const treeBody = root.querySelector<HTMLElement>(".tree-body");
   const filterInput = root.querySelector<HTMLInputElement>(".search input");
   const foldAll = root.querySelector<HTMLElement>(".foldall");
-  const viewToggle = root.querySelector<HTMLElement>(".view-toggle");
-  const layoutToggle = root.querySelector<HTMLElement>(".layout-toggle");
-  const docEl = document.documentElement;
   let activeSha: string | null = null;
   let activeSet: string[] | null = null;
   let filterText = "";
@@ -192,42 +188,6 @@ export function enhanceLayout(root: HTMLElement): () => void {
       fileEls.forEach((el) => {
         el.open = !anyOpen;
       });
-    });
-
-  // ! Layout (split vs unified) and full-file mode are global view preferences on the <html>
-  // ! data-attrs (like the theme): CSS reveals the right pane, and the choice is shared across
-  // ! tabbed panels. Layout persists per-device; full-file resets each artifact.
-  function syncToggles(): void {
-    const full = docEl.dataset["diffFull"] === "on";
-    const split = docEl.dataset["diffLayout"] === "split";
-    document.querySelectorAll<HTMLElement>(".view-toggle").forEach((b) => {
-      b.setAttribute("aria-pressed", full ? "true" : "false");
-      b.classList.toggle("active", full);
-    });
-    document.querySelectorAll<HTMLElement>(".layout-toggle").forEach((b) => {
-      b.setAttribute("aria-pressed", split ? "true" : "false");
-      b.classList.toggle("active", split);
-    });
-  }
-
-  if (viewToggle)
-    listen(viewToggle, "click", () => {
-      if (docEl.dataset["diffFull"] === "on") delete docEl.dataset["diffFull"];
-      else docEl.dataset["diffFull"] = "on";
-      syncToggles();
-    });
-
-  if (layoutToggle)
-    listen(layoutToggle, "click", () => {
-      const split = docEl.dataset["diffLayout"] !== "split"; // currently unified -> switch to split
-      if (split) docEl.dataset["diffLayout"] = "split";
-      else delete docEl.dataset["diffLayout"];
-      try {
-        localStorage.setItem("gtl-diff-layout", split ? "split" : "unified");
-      } catch {
-        /* storage unavailable (private mode / file://) — the in-page toggle still works */
-      }
-      syncToggles();
     });
 
   // ! Context toggle drives the `.copy-ctx` class on this view's root; the copy-button
@@ -462,7 +422,6 @@ export function enhanceLayout(root: HTMLElement): () => void {
   });
 
   buildTree();
-  syncToggles();
   return () => {
     cleanups.reverse().forEach((cleanup) => cleanup());
     timers.forEach(clearTimeout);

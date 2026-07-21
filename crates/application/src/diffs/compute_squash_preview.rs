@@ -1,11 +1,15 @@
 //! The `compute_squash_preview` vertical slice: the structured squash-preview
 //! [`View`] for the native viewer — no HTML, no artifact store.
 
+mod view;
+
 use std::path::PathBuf;
 
+pub(crate) use view::SquashViewBuild;
+
 use crate::{
-    diffs::{PinnedRange, View, render_squash_preview::build_squash_view},
-    ports::{DiffSource, UserSettingsStore},
+    diffs::{PinnedRange, View},
+    ports::{AppSettings, DiffSource, UserSettingsStore},
 };
 
 /// Compute the squash-preview view of the current branch's unpushed commits
@@ -36,16 +40,18 @@ pub fn execute(
     app_settings: &impl UserSettingsStore,
     source: &impl DiffSource,
 ) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
-    let ComputeSquashPreview { cwd, pinned } = req;
     let settings = app_settings.load();
-    let built = build_squash_view(
-        source,
-        &cwd,
-        pinned.as_ref(),
-        None,
-        settings.diff_exclusions(),
-    )?;
+    let built = compute(req, &settings, source)?;
     Ok(ComputeSquashPreviewResponse { view: built.view })
+}
+
+pub(crate) fn compute(
+    req: ComputeSquashPreview,
+    settings: &AppSettings,
+    source: &impl DiffSource,
+) -> anyhow::Result<SquashViewBuild> {
+    let ComputeSquashPreview { cwd, pinned } = req;
+    view::build(source, &cwd, pinned.as_ref(), settings.diff_exclusions())
 }
 
 #[cfg(test)]
@@ -83,6 +89,33 @@ index 333..444 100644\n\
         source: &FakeDiffSource,
     ) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
         execute(request, &FixedUserSettingsStore::default(), source)
+    }
+
+    #[test]
+    fn viewer_and_raw_computation_share_the_same_view() {
+        let source = FakeDiffSource {
+            top_level: Some("/repo".into()),
+            branch: "feature".into(),
+            upstream: Some("origin/main".into()),
+            commits: vec![commit("abc1234")],
+            diff_output: DIFF_SINGLE_FILE.into(),
+            ..Default::default()
+        };
+        let settings = AppSettings::default();
+        let request = ComputeSquashPreview {
+            cwd: PathBuf::from("/repo"),
+            pinned: None,
+        };
+
+        let viewer = execute(
+            request.clone(),
+            &FixedUserSettingsStore::new(settings.clone()),
+            &source,
+        )
+        .expect("viewer compute succeeds");
+        let raw = compute(request, &settings, &source).expect("raw compute succeeds");
+
+        assert_eq!(viewer.view, raw.view);
     }
 
     #[test]

@@ -6,14 +6,13 @@
 
 use std::path::{Path, PathBuf};
 
-use domain::diffs::{AppliedExclusions, DiffExclusions, DiffKind};
+use domain::diffs::DiffKind;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{
-        Cmd, Foot, PinnedRange, View,
-        range::DiffRanges,
-        util::{DiffData, assemble, exclusion_note, repo_name},
+        compute_squash_preview::{self, ComputeSquashPreview},
+        util::exclusion_note,
     },
     ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
@@ -55,17 +54,17 @@ pub fn execute(
 ) -> Result<RenderSquashPreviewResponse, RenderSquashPreviewError> {
     let RenderSquashPreview { cwd, store_root } = req;
     let settings = app_settings.load();
-    let built = build_squash_view(
+    let built = compute_squash_preview::compute(
+        ComputeSquashPreview { cwd, pinned: None },
+        &settings,
         source,
-        &cwd,
-        None,
-        settings.theme().map(str::to_owned),
-        settings.diff_exclusions(),
     )?;
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
-    let html = renderer.build_html(&view);
+    let render_options = settings.viewer_render_options();
+    let theme = settings.theme().map(str::to_owned);
+    let html = renderer.build_html(&view, render_options, theme.as_deref());
 
     let meta = ArtifactMeta {
         repo_root: PathBuf::from(&built.top),
@@ -81,7 +80,8 @@ pub fn execute(
         head_committed_at: source.committed_at(Path::new(&built.top), "HEAD"),
         generated_at: clock.now_iso(),
         title: "squash-preview".to_string(),
-        theme: settings.theme().map(str::to_owned),
+        render_options,
+        theme,
         excluded_extensions: settings
             .diff_exclusions()
             .for_project_or_default(&view.repo_name)
@@ -101,88 +101,6 @@ pub fn execute(
         reused: placed.reused,
         notes,
     })
-}
-
-/// The computed squash-preview view plus the facts the artifact path still needs.
-pub(crate) struct SquashViewBuild {
-    pub view: View,
-    pub top: String,
-    pub log_range: String,
-}
-
-/// Shared with `compute_squash_preview`: builds the squash-preview [`View`]
-/// for the repo at `cwd` (base is always the configured upstream, unless
-/// `pinned` supplies a resolved SHA range). No HTML, no store.
-pub(crate) fn build_squash_view(
-    source: &impl DiffSource,
-    cwd: &Path,
-    pinned: Option<&PinnedRange>,
-    theme: Option<String>,
-    exclusions: &DiffExclusions,
-) -> anyhow::Result<SquashViewBuild> {
-    let top = source.top_level(cwd)?;
-    let branch = source.current_branch(Path::new(&top))?;
-    let repo_name = repo_name(&top);
-    let excluded = exclusions.for_project_or_default(&repo_name);
-
-    let (upstream, io_ranges, view_ranges) = if let Some(pin) = pinned {
-        (
-            pin.display_base(),
-            DiffRanges::exact(pin.git_range()),
-            DiffRanges::exact(pin.display_range()),
-        )
-    } else {
-        let upstream = source.upstream(Path::new(&top))?;
-        let symbolic = DiffRanges::unpushed(&upstream);
-        (upstream, symbolic.clone(), symbolic)
-    };
-
-    let DiffData {
-        commits,
-        files,
-        hidden_paths,
-    } = assemble(
-        source,
-        Path::new(&top),
-        &io_ranges.diff,
-        &io_ranges.log,
-        excluded,
-    )?;
-
-    let view = View {
-        repo_name,
-        repo_root: top.clone(),
-        branch,
-        upstream,
-        title: "squash-preview".to_string(),
-        cmd: Cmd {
-            lead: "git log ".to_string(),
-            range: view_ranges.log.clone(),
-            trail: " --stat".to_string(),
-        },
-        commits_label: "# commits — collapse into 1".to_string(),
-        foot: Foot {
-            cmd: "squash-local".to_string(),
-            note: collapse_note(commits.len()),
-        },
-        commits,
-        files,
-        theme,
-        exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
-    };
-    Ok(SquashViewBuild {
-        view,
-        top,
-        log_range: io_ranges.log,
-    })
-}
-
-fn collapse_note(commit_count: usize) -> String {
-    if commit_count == 1 {
-        "# would collapse this commit into one — read-only preview".to_string()
-    } else {
-        format!("# would collapse these {commit_count} commits into one — read-only preview")
-    }
 }
 
 #[cfg(test)]
