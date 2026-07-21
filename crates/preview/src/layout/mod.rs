@@ -14,7 +14,7 @@ use maud::{Markup, html};
 const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
     "layout copy-ctx grid h-screen grid-cols-[262px_minmax(0,1fr)_252px] grid-rows-[auto_1fr_auto] ",
     "[@media(min-width:1600px)_and_(min-height:900px)]:grid-cols-[320px_minmax(0,1fr)_304px] ",
-    "[@media(max-width:1280px)]:grid-cols-[220px_minmax(0,1fr)_210px] ",
+    "[@media(min-width:1025px)_and_(max-width:1280px)]:grid-cols-[220px_minmax(0,1fr)_210px] ",
     "[@media(max-width:1024px)]:grid-cols-[0_minmax(0,1fr)_0] ",
     "print:block print:h-auto print:bg-white print:text-[#111]",
 );
@@ -33,7 +33,7 @@ pub(crate) fn view_body(view: &View, options: RenderOptions) -> Markup {
         } {
             (titlebar::titlebar(view))
             (tree::tree(view))
-            main class="main [grid-area:2/2] overflow-auto px-[22px] pt-4 pb-[60px] [@media(min-width:1600px)_and_(min-height:900px)]:px-7 [@media(max-width:1280px)]:px-4 [@media(max-width:1024px)]:px-3 [@media(max-width:1024px)]:pb-12 print:overflow-visible print:p-0" {
+            main class="main [grid-area:2/2] overflow-auto px-[22px] pt-4 pb-[60px] [@media(min-width:1600px)_and_(min-height:900px)]:px-7 [@media(min-width:1025px)_and_(max-width:1280px)]:px-4 [@media(max-width:1024px)]:px-3 [@media(max-width:1024px)]:pb-12 print:overflow-visible print:p-0" {
                 (files::file_blocks(view, options))
             }
             (shelf::shelf(view))

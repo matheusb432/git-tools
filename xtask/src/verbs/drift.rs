@@ -1,5 +1,5 @@
-//! `xtask drift-check` — rebuild the committed frontend bundle and fail if it drifts from
-//! its TypeScript sources, then diffs the committed output.
+//! `xtask drift-check` rebuilds the committed frontend bundle, validates its presentation policy,
+//! and fails if the generated output drifts from its sources.
 
 use std::process::Command;
 
@@ -33,12 +33,13 @@ fn git_clean(dir: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Rebuilds the bundle via the existing Deno recipe, then diffs the committed output.
+/// Rebuilds the bundle, validates its presentation policy, then diffs the committed output.
 pub fn run() -> Result<()> {
     which::which("deno").context(
         "required tool `deno` is missing; install it through the declarative host configuration",
     )?;
     frontend::build()?;
+    super::presentation::run()?;
     check_drift(BUNDLES, &git_clean)
 }
 

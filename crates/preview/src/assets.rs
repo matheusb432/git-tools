@@ -124,6 +124,34 @@ mod tests {
     }
 
     #[test]
+    fn preview_css_keeps_mid_width_layout_rules_out_of_narrow_viewports() {
+        let css = preview_css();
+
+        assert!(css.contains("@media (min-width:1025px) and (max-width:1280px)"));
+        assert!(css.contains("grid-template-columns:220px minmax(0,1fr) 210px"));
+        assert!(css.contains("@media (max-width:1024px)"));
+        assert!(css.contains("grid-template-columns:0 minmax(0,1fr) 0"));
+    }
+
+    #[test]
+    fn preview_css_keeps_narrow_split_metadata_rows_full_width() {
+        let css = preview_css();
+        let narrow = css
+            .split_once("@media (max-width:1024px)")
+            .and_then(|(_, tail)| tail.split_once("}@media"))
+            .map(|(block, _)| block)
+            .expect("narrow media block");
+        let stacked_rows = narrow
+            .find(".diff-split .dl{grid-template-columns:44px minmax(0,1fr)")
+            .expect("stacked split rows");
+        let metadata_rows = narrow
+            .find(".diff-split :is(.dl-meta,.dl-hunk){grid-template-columns:minmax(0,1fr)")
+            .expect("full-width split metadata rows");
+
+        assert!(stacked_rows < metadata_rows);
+    }
+
+    #[test]
     fn preview_css_tames_long_lines_without_wrap() {
         let css = preview_css();
         let collapsed = ":is(.dl-long .code-text,.diff-split code.long .code-text)";
@@ -161,6 +189,17 @@ mod tests {
         assert!(css.contains("grid-area:2/2"));
         assert!(css.contains("grid-area:2/3"));
         assert!(!css.contains(".keybar{display:none}"));
+    }
+
+    #[test]
+    fn preview_css_styles_the_route_recovery_grid() {
+        let css = preview_css();
+
+        assert_selector_declaration(
+            css,
+            ".grid-cols-\\[minmax\\(0\\,520px\\)\\]",
+            "grid-template-columns:minmax(0,520px)",
+        );
     }
 
     #[test]

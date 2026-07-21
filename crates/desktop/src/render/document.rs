@@ -12,14 +12,6 @@ use crate::protocol_config;
 const THEME_CONTROL_JS: &str = include_str!("../embedded/generated/theme-control.js");
 const PENDING_RECIPES_JS: &str = include_str!("../embedded/generated/pending-recipes.js");
 
-// ! Compiled from render/viewer.css; appended after the shared preview sheet so
-// ! `.viewer-*` chrome and `body.viewer-shell` row overrides never ship in artifacts.
-const RAW_VIEWER_CSS: &str = include_str!("../embedded/generated/viewer.css");
-
-pub(super) fn viewer_css() -> &'static str {
-    preview::strip_stylesheet_banner(RAW_VIEWER_CSS)
-}
-
 /// Renders the server-authored viewer document and its independently swappable fragments.
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct MaudViewerRenderer;
@@ -50,23 +42,22 @@ impl MaudViewerRenderer {
                     base href=(protocol_config::APP_URL);
                     title { "git-tools viewer" }
                     style { (PreEscaped(preview::preview_css())) }
-                    style { (PreEscaped(viewer_css())) }
                     meta name="htmx-config" content=r#"{"includeIndicatorStyles":false,"scrollBehavior":"instant","globalViewTransitions":false}"#;
                     script { (PreEscaped(htmx)) }
                     script { (PreEscaped(THEME_CONTROL_JS)) }
                 }
-                body.viewer-shell {
+                body class="viewer-shell overflow-hidden" {
                     main class="grid h-screen min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-bg" {
                         (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::None))
                         (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
                     }
-                    aside id="viewer-history-popover" class="viewer-history-popover" popover {
-                        header.viewer-history-header {
+                    aside id="viewer-history-popover" class="viewer-history-popover m-auto h-[min(680px,calc(100vh_-_84px))] w-[min(1040px,calc(100vw_-_48px))] max-w-none border-line-2 bg-surface p-0 inset-[42px] shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)] [@media(max-width:760px)]:h-[calc(100vh_-_24px)] [@media(max-width:760px)]:w-[calc(100vw_-_24px)] [@media(max-width:760px)]:inset-3" popover {
+                        header class="viewer-history-header flex items-center justify-between border-b border-line bg-surface-2 px-4 py-[13px]" {
                             div {
-                                strong { "Render history" }
-                                span { "Recent diff previews" }
+                                strong class="block text-[13px] text-ink" { "Render history" }
+                                span class="block text-[11px] text-ink-3" { "Recent diff previews" }
                             }
-                            button type="button" class="viewer-icon-button" popovertarget="viewer-history-popover" popovertargetaction="hide" aria-label="Close history" title="Close history" { "×" }
+                            button type="button" class="viewer-icon-button size-[30px] cursor-pointer rounded-sm border-0 bg-transparent text-xl text-ink-2 [font:inherit] hover:bg-line hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc" popovertarget="viewer-history-popover" popovertargetaction="hide" aria-label="Close history" title="Close history" { "×" }
                         }
                         (fragments::history(document.history()))
                     }

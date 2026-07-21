@@ -137,47 +137,38 @@ fn render_split_rows(parsed: &[SplitRow]) -> String {
                 text,
             } => {
                 let long = long_line_len(text);
-                let _ = write!(
-                    rows,
-                    r#"<div class="dl"><span class="ln">{}</span>{}<span class="ln">{}</span>{}</div>"#,
-                    old_no,
-                    split_code(text, long, "sp-ctx", None, &[]),
-                    new_no,
-                    split_code(text, long, "sp-ctx", None, &[]),
-                );
+                let _ = write!(rows, r#"<div class="dl"><span class="ln">{old_no}</span>"#);
+                push_split_code(&mut rows, text, long, "sp-ctx", None, &[]);
+                let _ = write!(rows, r#"<span class="ln">{new_no}</span>"#);
+                push_split_code(&mut rows, text, long, "sp-ctx", None, &[]);
+                rows.push_str("</div>");
             }
             SplitRow::Pair { old, new } => {
                 rows.push_str(r#"<div class="dl">"#);
                 match &old {
                     Some(cell) => {
-                        let _ = write!(
-                            rows,
-                            r#"<span class="ln">{}</span>{}"#,
-                            cell.no,
-                            split_code(
-                                &cell.text,
-                                long_line_len(&cell.text),
-                                "sp-del",
-                                cell.owner.as_ref(),
-                                &cell.spans
-                            ),
+                        let _ = write!(rows, r#"<span class="ln">{}</span>"#, cell.no);
+                        push_split_code(
+                            &mut rows,
+                            &cell.text,
+                            long_line_len(&cell.text),
+                            "sp-del",
+                            cell.owner.as_ref(),
+                            &cell.spans,
                         );
                     }
                     None => rows.push_str(SPLIT_PAD),
                 }
                 match &new {
                     Some(cell) => {
-                        let _ = write!(
-                            rows,
-                            r#"<span class="ln">{}</span>{}"#,
-                            cell.no,
-                            split_code(
-                                &cell.text,
-                                long_line_len(&cell.text),
-                                "sp-add",
-                                cell.owner.as_ref(),
-                                &cell.spans
-                            ),
+                        let _ = write!(rows, r#"<span class="ln">{}</span>"#, cell.no);
+                        push_split_code(
+                            &mut rows,
+                            &cell.text,
+                            long_line_len(&cell.text),
+                            "sp-add",
+                            cell.owner.as_ref(),
+                            &cell.spans,
                         );
                     }
                     None => rows.push_str(SPLIT_PAD),
@@ -196,9 +187,8 @@ fn commit_attr(sha: Option<&String>) -> String {
         .unwrap_or_default()
 }
 
-// ! Inner content of a `<code>` cell: the bare body, or — for a tamed long line — the copy-safe
-// ! `.code-text` span plus the expander button. Shared by the unified `code_cell` and the
-// ! side-by-side `split_code` so the long-line taming lives in exactly one place.
+// ! Inner content of a `<code>` cell: the bare body, or for a tamed long line, the copy-safe
+// ! `.code-text` span plus the expander button. Shared by `code_cell` and `push_split_code`.
 fn code_inner(raw: &str, long: Option<usize>) -> String {
     let body = html_or_nbsp(raw);
     match long {
@@ -221,30 +211,42 @@ fn code_cell(raw: &str, long: Option<usize>) -> String {
     }
 }
 
-// ! One side of a side-by-side row: a `<code>` carrying the change color (`side` is
-// ! `sp-del`/`sp-add`/`sp-ctx`) and, for changed lines, the owning-commit attribute that
-// ! drives the per-commit focus highlight. Long lines reuse `code_inner`'s taming; a paired
-// ! changed line with `spans` gets its differing chars wrapped (the intra-line highlight).
-fn split_code(
+// ! Append one side of a side-by-side row directly to the shared row buffer.
+fn push_split_code(
+    out: &mut String,
     raw: &str,
     long: Option<usize>,
     side: &str,
     commit: Option<&String>,
     spans: &[Span],
-) -> String {
-    let inner = if long.is_some() {
-        code_inner(raw, long)
-    } else if spans.is_empty() {
-        html_or_nbsp(raw)
-    } else {
-        mark_spans(raw, spans)
-    };
-    let attr = commit_attr(commit);
+) {
+    out.push_str(r#"<code class="sp "#);
+    out.push_str(side);
     if long.is_some() {
-        format!(r#"<code class="sp {side} long"{attr}>{inner}</code>"#)
-    } else {
-        format!(r#"<code class="sp {side}"{attr}>{inner}</code>"#)
+        out.push_str(" long");
     }
+    out.push('"');
+    if let Some(commit) = commit {
+        out.push_str(" data-commit=\"");
+        out.push_str(commit);
+        out.push('"');
+    }
+    out.push('>');
+
+    if long.is_some() {
+        out.push_str(&code_inner(raw, long));
+    } else if spans.is_empty() {
+        if raw.is_empty() {
+            out.push_str("&nbsp;");
+        } else {
+            for ch in raw.chars() {
+                push_escaped(out, ch);
+            }
+        }
+    } else {
+        out.push_str(&mark_spans(raw, spans));
+    }
+    out.push_str("</code>");
 }
 
 // ! Escape a changed line body char by char, wrapping the `spans` (char-index ranges into the
@@ -514,6 +516,25 @@ mod tests {
 
         assert!(html.contains(r#"<code class="sp sp-del" data-commit="fff000aaa">-old</code>"#));
         assert!(html.contains(r#"<code class="sp sp-add" data-commit="abc123def">+new</code>"#));
+    }
+
+    #[test]
+    fn split_code_appends_exact_markup_to_the_row_buffer() {
+        let mut html = String::from("prefix");
+
+        push_split_code(
+            &mut html,
+            "+new<&",
+            None,
+            "sp-add",
+            Some(&"abc123def".to_string()),
+            &[],
+        );
+
+        assert_eq!(
+            html,
+            r#"prefix<code class="sp sp-add" data-commit="abc123def">+new&lt;&amp;</code>"#
+        );
     }
 
     #[test]

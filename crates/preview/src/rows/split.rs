@@ -17,6 +17,7 @@ pub(super) const PRESENTATION_CLASSES: &str = concat!(
     "[&_.diff-split_.sp-ctx]:text-ink-2 [&_.diff-split_.sp-pad]:bg-sunk ",
     "[&.commit-focus_.diff-split_.sp]:opacity-[.34] [&.commit-focus_.diff-split_.sp.owned]:opacity-100 [&.commit-focus_.diff-split_.sp.owned]:shadow-[inset_3px_0_0_var(--acc)] ",
     "[@media(max-width:1024px)]:[&_.diff-split_.dl]:grid-cols-[44px_minmax(0,1fr)] ",
+    "[@media(max-width:1024px)]:[&_.diff-split_:is(.dl-meta,.dl-hunk)]:grid-cols-[minmax(0,1fr)] ",
     "[@media(max-width:1024px)]:[&_.diff-split_.dl>:is(:nth-child(3),:nth-child(4))]:border-t ",
     "[@media(max-width:1024px)]:[&_.diff-split_.dl>:is(:nth-child(3),:nth-child(4))]:border-line ",
     "[@media(max-width:1024px)]:[&_.diff-split_.dl>:nth-child(3)]:border-l-0",

@@ -17,10 +17,11 @@ pub(crate) fn run() -> Result<()> {
     Ok(())
 }
 
-/// The read-only linter sweep: Oxlint, the architecture lints, and full-workspace Clippy (warnings
-/// governed by the workspace lint policy). Shared with the aggregate `check` gate.
+/// The read-only linter sweep: frontend lint and presentation policy, architecture lints, and
+/// full-workspace Clippy. Shared with the aggregate `check` gate.
 pub(super) fn linters() -> Result<()> {
     process::run("frontend-lint", "deno", &["task", "--frozen", "lint"])?;
+    super::presentation::run()?;
     super::check_structure::run(None)?;
     super::check_deps::run(None)?;
     process::run(

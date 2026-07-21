@@ -6,6 +6,7 @@
 @source "../artifact";
 @source "../../../../frontend/diff/enhance-layout.ts";
 @source "../../../desktop/src/render";
+@source "../../../desktop/src/routes/render.rs";
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 
 @layer base {

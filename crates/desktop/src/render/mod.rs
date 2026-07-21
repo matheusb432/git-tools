@@ -150,6 +150,121 @@ mod tests {
     }
 
     #[test]
+    fn document_embeds_one_shared_preview_stylesheet() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+        let stylesheet = html
+            .split_once("<style>")
+            .and_then(|(_, tail)| tail.split_once("</style>"))
+            .map(|(stylesheet, _)| stylesheet)
+            .expect("document embeds a stylesheet");
+
+        assert_eq!(html.matches("<style>").count(), 1);
+        assert_eq!(stylesheet, preview::preview_css());
+        assert!(!stylesheet.contains("viewer-toast-dismiss"));
+    }
+
+    #[test]
+    fn document_keeps_server_owned_controls_outside_the_shared_layout() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+        let controls = html
+            .find("aria-label=\"Diff display controls\"")
+            .expect("ready view renders controls");
+        let layout = html
+            .find("class=\"layout")
+            .expect("ready view renders a layout");
+
+        assert!(controls < layout);
+        assert!(html.contains("name=\"viewer-layout\""));
+        assert!(html.contains("name=\"viewer-density\""));
+        assert!(html.contains("hx-get=\"/settings?layout="));
+        assert!(html.contains("hx-get=\"/settings?density="));
+    }
+
+    #[test]
+    fn viewer_fragments_keep_stable_htmx_and_inline_script_hooks() {
+        let document = sample_document();
+        let html = MaudViewerRenderer.build_document(&document);
+        let feedback = MaudViewerRenderer
+            .build_tabs_with_view_after_snapshot_skips(&document, &["api".into()]);
+
+        assert!(html.contains("id=\"viewer-tabs\""));
+        assert!(html.contains("id=\"viewer-view\""));
+        assert!(html.contains("id=\"viewer-history\""));
+        assert!(html.contains("hx-target=\"#viewer-view\""));
+        assert!(html.contains("hx-target=\"#viewer-tabs\""));
+        assert!(html.contains("hx-target=\"#viewer-history\""));
+        assert!(html.contains("data-viewer-theme="));
+        assert!(html.contains("event.listen(\"recipes-pending\""));
+        assert!(html.contains("window.htmx.ajax(\"GET\",\"/pending\""));
+        assert!(feedback.contains("data-viewer-toast"));
+    }
+
+    #[test]
+    fn viewer_view_marks_each_server_rendered_state_explicitly() {
+        let ready = MaudViewerRenderer.build_view(&sample_document());
+        let empty = ViewerDocument::new(vec![], None, None, vec![], settings())
+            .expect("empty viewer is valid");
+        let empty = MaudViewerRenderer.build_view(&empty);
+
+        assert!(ready.contains("data-viewer-state=\"ready\""));
+        assert!(empty.contains("data-viewer-state=\"empty\""));
+
+        for (state, expected) in [
+            (
+                ViewerTabState::Broken {
+                    code: "missing".into(),
+                    reason: "artifact gone".into(),
+                },
+                "broken",
+            ),
+            (
+                ViewerTabState::Error {
+                    reason: "render failed".into(),
+                },
+                "error",
+            ),
+        ] {
+            let id = tab_id(3);
+            let document = ViewerDocument::new(
+                vec![ViewerTab::new(
+                    id,
+                    "unavailable".into(),
+                    ViewerTabKind::Live,
+                    state,
+                )],
+                Some(id),
+                None,
+                vec![],
+                settings(),
+            )
+            .expect("non-ready active tabs intentionally have no view");
+            let html = MaudViewerRenderer.build_view(&document);
+
+            assert!(
+                html.contains(&format!("data-viewer-state=\"{expected}\"")),
+                "{html}"
+            );
+        }
+    }
+
+    #[test]
+    fn viewer_fragment_owners_render_immediate_request_and_swap_feedback() {
+        let document = sample_document();
+        let tabs = MaudViewerRenderer.build_tabs(document.tabs(), document.active_tab_id());
+        let view = MaudViewerRenderer.build_view(&document);
+        let history = MaudViewerRenderer.build_history(document.history());
+        let motion_class = ["trans", "ition"].concat();
+
+        assert!(view.contains("htmx-request"));
+        for fragment in [tabs, view, history] {
+            assert!(fragment.contains("htmx-swapping"), "{fragment}");
+            assert!(fragment.contains("htmx-settling"), "{fragment}");
+            assert!(!fragment.contains(&motion_class), "{fragment}");
+            assert!(!fragment.contains("animate-"), "{fragment}");
+        }
+    }
+
+    #[test]
     fn document_disables_htmx_runtime_transition_styles_and_smooth_scrolling() {
         let html = MaudViewerRenderer.build_document(&sample_document());
         let config = r#"<meta name="htmx-config" content="{&quot;includeIndicatorStyles&quot;:false,&quot;scrollBehavior&quot;:&quot;instant&quot;,&quot;globalViewTransitions&quot;:false}">"#;
@@ -227,7 +342,7 @@ mod tests {
     #[test]
     fn destructive_live_action_is_accessible_and_never_appears_for_snapshots_or_raw_artifacts() {
         let live = MaudViewerRenderer.build_document(&sample_document());
-        assert!(live.contains("class=\"viewer-control-button viewer-danger-button\""));
+        assert!(live.contains("class=\"viewer-control-button viewer-danger-button "));
         assert!(live.contains("aria-label=\"Delete saved live view\""));
         assert!(live.contains("hx-delete=\"/tabs/1/live-view\""));
         assert!(live.contains("hx-target=\"#viewer-tabs\""));
@@ -362,7 +477,7 @@ mod tests {
         let html = MaudViewerRenderer
             .build_tabs_with_view_after_snapshot_skips(&sample_document(), &labels);
 
-        assert!(html.contains("class=\"gtl-toast viewer-toast-skip show\""));
+        assert!(html.contains("class=\"gtl-toast viewer-toast-skip show "));
         assert!(html.contains("data-viewer-toast"));
         assert!(html.contains("role=\"status\" aria-live=\"polite\" aria-atomic=\"true\""));
         assert!(html.contains(
@@ -372,29 +487,38 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_skip_toast_has_a_bounded_reduced_motion_aware_lifetime() {
-        let css = super::document::viewer_css();
+    fn viewer_stylesheet_uses_immediate_feedback_without_motion_declarations() {
+        let css = preview::preview_css();
 
-        assert!(css.contains("@keyframes viewer-toast-dismiss"));
-        assert!(css.contains("animation:5s forwards viewer-toast-dismiss"));
-        assert!(css.contains("@media (prefers-reduced-motion:reduce)"));
-        assert!(css.contains("animation-timing-function:step-end"));
+        assert!(!css.contains("transition:"));
+        assert!(!css.contains("transition-property:"));
+        assert!(!css.contains("animation:"));
+        assert!(!css.contains("animation-name:"));
+        assert!(!css.contains("scroll-behavior:smooth"));
     }
 
     #[test]
-    fn viewer_css_emits_theme_scale_utilities() {
-        // ! The viewer entry imports utilities.css without Tailwind's default theme, so
-        // ! any scale utility compiles to nothing unless theme-map.css defines its token.
-        let css = super::document::viewer_css();
+    fn shared_stylesheet_emits_viewer_theme_scale_utilities() {
+        let css = preview::preview_css();
 
         assert!(css.contains(".min-w-0{min-width:0}"));
+        assert!(css.contains(".bg-surface{background-color:var(--surface)}"));
+        assert!(css.contains(".text-ink-2{color:var(--ink-2)}"));
+    }
+
+    #[test]
+    fn viewer_narrow_layout_includes_the_760px_boundary() {
+        let css = preview::preview_css();
+
+        assert!(css.contains("@media (max-width:760px)"));
+        assert!(!css.contains("@media not all and (min-width:760px)"));
     }
 
     #[test]
     fn live_delete_feedback_focuses_the_active_tab_and_announces_success() {
         let html = MaudViewerRenderer.build_tabs_with_view_after_live_delete(&sample_document());
         let active = html
-            .split_once("class=\"viewer-tab-activate\"")
+            .split_once("class=\"viewer-tab-activate ")
             .and_then(|(_, tail)| tail.split_once('>'))
             .map(|(tag, _)| tag)
             .expect("active tab button renders");
@@ -411,7 +535,7 @@ mod tests {
             .expect("empty viewer is valid");
         let html = MaudViewerRenderer.build_tabs_with_view_after_live_delete(&empty);
         let history = html
-            .split_once("class=\"viewer-recovery-button\"")
+            .split_once("class=\"viewer-recovery-button ")
             .and_then(|(_, tail)| tail.split_once('>'))
             .map(|(tag, _)| tag)
             .expect("empty-state History action renders");
@@ -424,7 +548,6 @@ mod tests {
 
     #[test]
     fn narrow_split_rows_stack_in_the_shared_preview_styles() {
-        let viewer = super::document::viewer_css();
         let shared = preview::preview_css();
 
         assert!(shared.contains("@media (max-width:1024px)"));
@@ -432,15 +555,6 @@ mod tests {
         assert!(shared.contains("grid-template-columns:44px minmax(0,1fr)"));
         assert!(!shared.contains("data-diff-full"));
         assert!(!shared.contains("body.viewer-shell"));
-
-        // The viewer sheet retains its equivalent rule until viewer chrome migration.
-        assert!(viewer.contains(
-            "body.viewer-shell .diff-split .dl{grid-template-columns:44px minmax(0,1fr)}"
-        ));
-        assert!(viewer.contains(
-            "body.viewer-shell .diff-split .dl-meta,body.viewer-shell .diff-split .dl-hunk{grid-template-columns:minmax(0,1fr)}"
-        ));
-        assert!(!viewer.contains("body:not(.viewer-shell)"));
     }
 
     #[test]
@@ -449,7 +563,7 @@ mod tests {
         let html = MaudViewerRenderer.build_tabs(document.tabs(), Some(tab_id(1)));
 
         assert!(html.contains("<nav id=\"viewer-tabs\""));
-        assert!(html.contains("<ul class=\"viewer-tab-list\""));
+        assert!(html.contains("<ul class=\"viewer-tab-list "));
         assert!(html.contains("aria-current=\"page\""));
         assert!(!html.contains("role=\"tablist\""));
         assert!(!html.contains("role=\"tab\""));

@@ -15,6 +15,7 @@ pub(crate) mod icon;
 pub(crate) mod install;
 pub(crate) mod lint;
 pub(crate) mod pre_commit;
+pub(crate) mod presentation;
 pub(crate) mod ship;
 pub(crate) mod status_notifier;
 pub(crate) mod test;

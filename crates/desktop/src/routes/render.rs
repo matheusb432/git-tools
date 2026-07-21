@@ -241,15 +241,38 @@ pub(super) fn error_document() -> String {
 }
 
 pub(super) fn error_view() -> String {
-    html! { section id="viewer-view" class="viewer-view" { div role="alert" { strong { "The view could not be updated" } p { "Please retry the operation." } } } }.into_string()
+    html! {
+        section id="viewer-view" class="viewer-view min-h-0 min-w-0 overflow-hidden [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft" data-viewer-state="error" {
+            div class="viewer-status grid min-h-full grid-cols-[minmax(0,520px)] place-content-center p-8 text-ink-2" role="alert" {
+                strong class="text-ink" { "The view could not be updated" }
+                p class="mt-1 mb-0" { "Please retry the operation." }
+            }
+        }
+    }
+    .into_string()
 }
 
 pub(super) fn error_tabs() -> String {
-    html! { nav id="viewer-tabs" class="viewer-tabs" aria-label="Open diffs" { div role="alert" { strong { "The tabs could not be updated" } span { " Please retry the operation." } } } }.into_string()
+    html! {
+        nav id="viewer-tabs" class="viewer-tabs z-[70] flex min-w-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2 [&.htmx-swapping]:border-acc-line [&.htmx-settling]:border-acc-line [@media(max-width:760px)]:px-2" aria-label="Open diffs" {
+            div class="mb-2 rounded-sm border border-del-line bg-del-bg px-2.5 py-1.5 text-xs text-del" role="alert" {
+                strong { "The tabs could not be updated" }
+                span { " Please retry the operation." }
+            }
+        }
+    }
+    .into_string()
 }
 
 pub(super) fn error_history() -> String {
-    html! { section id="viewer-history" class="viewer-history" { div role="alert" { "History could not be loaded. Please retry." } } }.into_string()
+    html! {
+        section id="viewer-history" class="viewer-history h-[calc(100%-58px)] overflow-auto px-4 py-3.5 [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft" {
+            div class="rounded-sm border border-del-line bg-del-bg px-2.5 py-2 text-xs text-del" role="alert" {
+                "History could not be loaded. Please retry."
+            }
+        }
+    }
+    .into_string()
 }
 
 fn snapshot(

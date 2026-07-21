@@ -127,3 +127,17 @@ fn conflict_and_internal_errors_keep_target_roots_and_hide_details() {
         assert!(!html.contains("/secret/path"));
     }
 }
+
+#[test]
+fn recovery_fragments_own_their_error_presentation() {
+    let view = super::render::error_view();
+    let tabs = super::render::error_tabs();
+    let history = super::render::error_history();
+
+    assert!(view.contains("data-viewer-state=\"error\""));
+    assert!(view.contains("class=\"viewer-status "));
+    assert!(tabs.contains("class=\"viewer-tabs "));
+    assert!(tabs.contains("border-del-line"));
+    assert!(history.contains("class=\"viewer-history "));
+    assert!(history.contains("border-del-line"));
+}
