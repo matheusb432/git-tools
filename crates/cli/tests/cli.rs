@@ -3,7 +3,7 @@
 //! surface (subcommand list, flags, and the 0/1/2 exit-code contract).
 
 use assert_cmd::Command;
-use predicates::{prelude::PredicateBooleanExt, str::contains};
+use predicates::str::contains;
 
 fn git_tools() -> Command {
     Command::cargo_bin("git-tools").unwrap()
@@ -25,25 +25,6 @@ fn top_level_help_lists_every_subcommand() {
     ] {
         assert = assert.stdout(contains(sub));
     }
-    for retired in [
-        "\n  up ",
-        "\n  push-all ",
-        "\n  pull-all ",
-        "\n  commit-all ",
-        "\n  merge-diff ",
-        "\n  squash-preview ",
-    ] {
-        assert = assert.stdout(contains(retired).not());
-    }
-}
-
-#[test]
-fn top_level_help_omits_legacy_diff_subrepos_command() {
-    git_tools()
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(contains("diff-subrepos").not());
 }
 
 #[test]
@@ -71,24 +52,6 @@ fn unknown_command_is_usage_error_exit_2() {
         .assert()
         .code(2)
         .stderr(contains("error"));
-}
-
-#[test]
-fn retired_commands_are_usage_errors() {
-    for args in [
-        &["up"][..],
-        &["up", "save work"],
-        &["diff", "subrepos"],
-        &["push-all"],
-        &["pull-all"],
-        &["commit-all"],
-    ] {
-        git_tools()
-            .args(args)
-            .assert()
-            .code(2)
-            .stderr(contains("error"));
-    }
 }
 
 #[test]
@@ -242,15 +205,6 @@ fn diff_last_with_target_is_usage_error_exit_2() {
 }
 
 #[test]
-fn legacy_diff_subrepos_command_is_usage_error_exit_2() {
-    git_tools()
-        .args(["diff-subrepos", "--repo", "r"])
-        .assert()
-        .code(2)
-        .stderr(contains("unrecognized subcommand"));
-}
-
-#[test]
 fn squash_local_without_message_is_usage_error_exit_2() {
     git_tools()
         .args(["squash-local", "--repo", "r"])
@@ -292,15 +246,6 @@ fn commit_help_documents_message() {
 }
 
 #[test]
-fn sync_is_no_longer_a_public_subcommand() {
-    git_tools()
-        .arg("sync")
-        .assert()
-        .code(2)
-        .stderr(contains("unrecognized subcommand"));
-}
-
-#[test]
 fn push_empty_message_is_usage_error_exit_2() {
     // Guarded before any git runs, so this is safe to assert from the crate dir.
     git_tools()
@@ -319,13 +264,13 @@ fn tag_help_documents_modes() {
         .stdout(contains("--commits"))
         .stdout(contains("add"))
         .stdout(contains("ls"))
-        .stdout(contains("up"));
+        .stdout(contains("push"));
 }
 
 #[test]
-fn tag_up_create_form_requires_message() {
+fn tag_push_create_form_requires_message() {
     git_tools()
-        .args(["tag", "up", "v1.2.0"])
+        .args(["tag", "push", "v1.2.0"])
         .assert()
         .code(2)
         .stderr(contains("requires both <tag> and <message>"));

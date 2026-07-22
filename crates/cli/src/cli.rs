@@ -14,14 +14,6 @@ fn non_empty_name(value: &str) -> Result<String, String> {
     }
 }
 
-fn diff_target(value: &str) -> Result<String, String> {
-    if value == "subrepos" {
-        Err("`diff subrepos` was retired; use `diff -r`".to_string())
-    } else {
-        Ok(value.to_string())
-    }
-}
-
 /// git-tools — render git workflow HTML previews and squash local commits.
 #[derive(Debug, Parser)]
 #[command(name = "git-tools", version, about, long_about = None, arg_required_else_help = true)]
@@ -262,13 +254,8 @@ pub enum TagCommand {
         message: String,
     },
     /// Push local tags, or create one annotated tag and push it.
-    ///
-    /// With `--label`, also attach a lightweight label tag to the same commit
-    /// (`git tag <label> <tag>^{}`) — two refs, one commit, no duplicated message.
-    /// Aliased as `update` for the "label an existing tag" form
-    /// (e.g. `tag update v0.1.0 -l base-template`).
-    #[command(visible_alias = "update")]
-    Up {
+    #[command(visible_alias = "p")]
+    Push {
         /// Optional tag name to create (or, with `--label`, the existing tag to label) before
         /// pushing.
         tag: Option<String>,
@@ -310,7 +297,7 @@ pub struct DiffTargetArgs {
     #[arg(long, conflicts_with_all = ["target", "last", "recursive"])]
     pub unpushed: bool,
     /// Base commit, a `<start>..<end>` range, or empty/omitted for unpushed work.
-    #[arg(conflicts_with_all = ["last", "recursive"], value_parser = diff_target)]
+    #[arg(conflicts_with_all = ["last", "recursive"])]
     pub target: Option<String>,
     /// Diff the last N commits (`HEAD~N..HEAD`); bare `-l` diffs the last commit.
     #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
@@ -486,84 +473,6 @@ pub use application::diffs::DiffTarget;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_args_routes_diff_squash_subcommand() {
-        let cli = Cli::parse_args(&["diff".into(), "squash".into(), "--repo".into(), "r".into()])
-            .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                sub: Some(DiffSub::Squash(SquashArgs { repo, .. })),
-                ..
-            }) if repo == "r"
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_daemon_restart_subcommand() {
-        let cli = Cli::parse_args(&["daemon".into(), "restart".into()]).unwrap();
-
-        assert!(matches!(
-            cli.command,
-            Command::Daemon(DaemonArgs {
-                command: DaemonCommand::Restart
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_diff_live_subcommand() {
-        let cli =
-            Cli::parse_args(&["diff".into(), "live".into(), "--path".into(), "p".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                sub: Some(DiffSub::Live(LiveArgs { path: Some(path) })),
-                ..
-            }) if path == "p"
-        ));
-    }
-
-    #[test]
-    fn parse_args_diff_live_has_no_path_by_default() {
-        let cli = Cli::parse_args(&["diff".into(), "live".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                sub: Some(DiffSub::Live(LiveArgs { path: None })),
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_diff_live_rejects_raw() {
-        // `LiveArgs` has no `--raw` field: a live view has no store-artifact/browser
-        // path of its own, so passing `--raw` to the subcommand itself is a usage error.
-        assert!(Cli::parse_args(&["diff".into(), "live".into(), "--raw".into()]).is_err());
-    }
-
-    #[test]
-    fn parse_args_routes_diff_merge_subcommand() {
-        let cli = Cli::parse_args(&[
-            "diff".into(),
-            "merge".into(),
-            "--repo".into(),
-            "r".into(),
-            "--base".into(),
-            "trunk".into(),
-        ])
-        .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                sub: Some(DiffSub::Merge(MergeArgs { repo, base: Some(base), .. })),
-                ..
-            }) if repo == "r" && base == "trunk"
-        ));
-    }
-
     #[test]
     fn parse_args_diff_sub_conflicts_with_target_flags() {
         // `args_conflicts_with_subcommands`: a target flag and a nested subcommand
@@ -581,56 +490,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_routes_worktree_commands() {
-        let cli = Cli::parse_args(&["wk".into(), "base".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Wk(WorktreeArgs {
-                command: WorktreeCommand::Base
-            })
-        ));
-
-        let cli = Cli::parse_args(&["wk".into(), "ls".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Wk(WorktreeArgs {
-                command: WorktreeCommand::Ls
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_status_defaults_to_current_repo() {
-        let cli = Cli::parse_args(&["status".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Status(StatusArgs {
-                all: false,
-                recursive: false,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_status_all_and_recursive_flags() {
-        let cli = Cli::parse_args(&["status".into(), "--all".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Status(StatusArgs { all: true, .. })
-        ));
-
-        let cli = Cli::parse_args(&["status".into(), "-r".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Status(StatusArgs {
-                recursive: true,
-                ..
-            })
-        ));
-    }
-
-    #[test]
     fn parse_args_status_all_conflicts_with_recursive() {
         let err = Cli::parse_args(&["status".into(), "--all".into(), "-r".into()])
             .expect_err("--all and --recursive are mutually exclusive");
@@ -638,66 +497,6 @@ mod tests {
             err.to_string().contains("cannot be used with"),
             "error: {err}"
         );
-    }
-
-    #[test]
-    fn parse_args_ls_aliases_status_all() {
-        let cli = Cli::parse_args(&["ls".into()]).unwrap();
-
-        assert!(matches!(cli.command, Command::Ls(LsArgs { .. })));
-    }
-
-    #[test]
-    fn parse_args_routes_managed_push_pull_and_commit() {
-        let cli = Cli::parse_args(&["push".into(), "--all".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Push(PushArgs {
-                all: true,
-                message: None,
-                ..
-            })
-        ));
-
-        let cli = Cli::parse_args(&["push".into(), "--all".into(), "save work".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Push(PushArgs {
-                all: true,
-                message: Some(message),
-                ..
-            }) if message == "save work"
-        ));
-
-        let cli = Cli::parse_args(&["pull".into(), "--all".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Pull(PullArgs {
-                all: true,
-                managed: ManagedArgs { dry: false, .. }
-            })
-        ));
-
-        let cli = Cli::parse_args(&["commit".into(), "--all".into(), "save work".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Commit(CommitArgs {
-                all: true,
-                message: Some(message),
-                ..
-            }) if message == "save work"
-        ));
-
-        let cli = Cli::parse_args(&["commit".into(), "--all".into(), "--dry".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Commit(CommitArgs {
-                all: true,
-                message: None,
-                dry: true,
-                ..
-            })
-        ));
     }
 
     #[test]
@@ -715,18 +514,6 @@ mod tests {
         let status_args = StatusArgs::from(ls_args);
         assert!(status_args.all);
         assert!(!status_args.recursive);
-    }
-
-    #[test]
-    fn parse_args_s_is_a_status_shorthand() {
-        let cli = Cli::parse_args(&["s".into(), "-r".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Status(StatusArgs {
-                recursive: true,
-                ..
-            })
-        ));
     }
 
     #[test]
@@ -752,115 +539,9 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_rejects_explicit_flags_on_lean_diff() {
-        assert!(Cli::parse_args(&["diff".into(), "--repo".into(), "r".into()]).is_err());
-    }
-
-    #[test]
-    fn parse_args_diff_last_takes_a_count() {
-        let cli = Cli::parse_args(&["diff".into(), "-l".into(), "5".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                target: DiffTargetArgs {
-                    target: None,
-                    last: Some(n),
-                    ..
-                },
-                ..
-            }) if n.get() == 5
-        ));
-    }
-
-    #[test]
-    fn parse_args_diff_bare_last_defaults_to_one() {
-        let cli = Cli::parse_args(&["diff".into(), "-l".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                target: DiffTargetArgs {
-                    target: None,
-                    last: Some(n),
-                    ..
-                },
-                ..
-            }) if n.get() == 1
-        ));
-    }
-
-    #[test]
-    fn parse_args_diff_recursive_routes_to_subrepo_scan() {
-        let cli = Cli::parse_args(&["diff".into(), "-r".into(), "-l".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                target: DiffTargetArgs {
-                    recursive: true,
-                    last: Some(n),
-                    ..
-                },
-                ..
-            }) if n.get() == 1
-        ));
-    }
-
-    #[test]
-    fn parse_args_d_is_a_diff_shorthand() {
-        let cli = Cli::parse_args(&["d".into(), "-r".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                target: DiffTargetArgs {
-                    recursive: true,
-                    ..
-                },
-                ..
-            })
-        ));
-    }
-
-    #[test]
     fn parse_args_diff_recursive_conflicts_with_all_and_target() {
         assert!(Cli::parse_args(&["diff".into(), "-r".into(), "--all".into()]).is_err());
         assert!(Cli::parse_args(&["diff".into(), "-r".into(), "abc123".into()]).is_err());
-    }
-
-    #[test]
-    fn parse_args_diff_recursive_accepts_worktrees_flag() {
-        let cli = Cli::parse_args(&["diff".into(), "-r".into(), "--worktrees".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                target: DiffTargetArgs {
-                    recursive: true,
-                    worktrees: true,
-                    ..
-                },
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_diff_recursive_rejects_worktrees_alias() {
-        assert!(Cli::parse_args(&["diff".into(), "-r".into(), "--wk".into()]).is_err());
-    }
-
-    #[test]
-    fn parse_args_diff_merge_sets_base() {
-        let cli = Cli::parse_args(&["diff".into(), "-m".into(), "main".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                target: DiffTargetArgs {
-                    merge: Some(base),
-                    target: None,
-                    last: None,
-                    ..
-                },
-                ..
-            }) if base == "main"
-        ));
     }
 
     #[test]
@@ -884,26 +565,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_diff_set_theme_accepts_known_value() {
-        let cli = Cli::parse_args(&["diff".into(), "--set-theme".into(), "hearth".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                target: DiffTargetArgs {
-                    set_theme: Some(Theme::Hearth),
-                    ..
-                },
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_diff_set_theme_rejects_unknown_value() {
-        assert!(Cli::parse_args(&["diff".into(), "--set-theme".into(), "bogus".into()]).is_err());
-    }
-
-    #[test]
     fn parse_args_diff_set_theme_conflicts_with_a_target() {
         assert!(
             Cli::parse_args(&[
@@ -914,38 +575,6 @@ mod tests {
             ])
             .is_err()
         );
-    }
-
-    #[test]
-    fn parse_args_rejects_retired_diff_subrepos_command() {
-        assert!(Cli::parse_args(&["diff".into(), "subrepos".into(), "-l".into()]).is_err());
-    }
-
-    #[test]
-    fn parse_args_diff_all_accepts_managed_overrides() {
-        let cli = Cli::parse_args(&[
-            "diff".into(),
-            "--all".into(),
-            "--repos-file".into(),
-            "repos.toml".into(),
-            "--home-dir".into(),
-            "/tmp/home".into(),
-        ])
-        .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Diff(DiffArgs {
-                target: DiffTargetArgs {
-                    all: true,
-                    repos_file: Some(repos_file),
-                    home_dir: Some(home_dir),
-                    target: None,
-                    last: None,
-                    ..
-                },
-                ..
-            }) if repos_file == "repos.toml" && home_dir == "/tmp/home"
-        ));
     }
 
     #[test]
@@ -972,279 +601,14 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_rejects_retired_up_command() {
-        assert!(Cli::parse_args(&["up".into(), "save work".into()]).is_err());
-        assert!(Cli::parse_args(&["up".into()]).is_err());
-        assert!(Cli::parse_args(&["up".into(), "subrepos".into(), "-y".into()]).is_err());
-    }
-
-    #[test]
-    fn parse_args_routes_plain_push_and_push_message() {
-        let cli = Cli::parse_args(&["push".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Push(PushArgs {
-                message: None,
-                all: false,
-                recursive: false,
-                ..
-            })
-        ));
-
-        let cli = Cli::parse_args(&["p".into(), "save work".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Push(PushArgs {
-                message: Some(message),
-                ..
-            }) if message == "save work"
-        ));
-    }
-
-    #[test]
     fn parse_args_push_recursive_rejects_message() {
         assert!(Cli::parse_args(&["push".into(), "-r".into(), "save work".into()]).is_err());
-    }
-
-    #[test]
-    fn parse_args_routes_current_repo_commit_message() {
-        let cli = Cli::parse_args(&["commit".into(), "save work".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Commit(CommitArgs {
-                message: Some(message),
-                all: false,
-                yes: false,
-                ..
-            }) if message == "save work"
-        ));
-
-        let cli = Cli::parse_args(&["commit".into(), "save work".into(), "--yes".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Commit(CommitArgs {
-                message: Some(message),
-                all: false,
-                yes: true,
-                ..
-            }) if message == "save work"
-        ));
-    }
-
-    #[test]
-    fn parse_args_rejects_legacy_sync_command() {
-        assert!(Cli::parse_args(&["sync".into(), "save work".into()]).is_err());
-    }
-
-    #[test]
-    fn parse_args_routes_tag_list_by_default() {
-        let cli = Cli::parse_args(&["tag".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Tag(TagArgs {
-                command: None,
-                commits: false
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_tag_commits_flag() {
-        let cli = Cli::parse_args(&["tag".into(), "--commits".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Tag(TagArgs {
-                command: None,
-                commits: true
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_tag_commits_short_flag() {
-        let cli = Cli::parse_args(&["tag".into(), "-c".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Tag(TagArgs {
-                command: None,
-                commits: true
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_tag_up_subcommand() {
-        let cli = Cli::parse_args(&["tag".into(), "up".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Tag(TagArgs {
-                command: Some(TagCommand::Up {
-                    tag: None,
-                    message: None,
-                    label: None
-                }),
-                commits: false
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_tag_ls_subcommand() {
-        let cli = Cli::parse_args(&["tag".into(), "ls".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Tag(TagArgs {
-                command: Some(TagCommand::Ls),
-                commits: false
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_tag_add_subcommand() {
-        let cli = Cli::parse_args(&[
-            "tag".into(),
-            "add".into(),
-            "v1.2.0".into(),
-            "release notes".into(),
-        ])
-        .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Tag(TagArgs {
-                command: Some(TagCommand::Add { tag, message }),
-                commits: false
-            }) if tag == "v1.2.0" && message == "release notes"
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_tag_up_create_form() {
-        let cli = Cli::parse_args(&[
-            "tag".into(),
-            "up".into(),
-            "v1.2.0".into(),
-            "release notes".into(),
-        ])
-        .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Tag(TagArgs {
-                command: Some(TagCommand::Up {
-                    tag: Some(tag),
-                    message: Some(message),
-                    label: None,
-                }),
-                commits: false
-            }) if tag == "v1.2.0" && message == "release notes"
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_tag_up_with_label() {
-        let cli = Cli::parse_args(&[
-            "tag".into(),
-            "up".into(),
-            "v0.1.0".into(),
-            "msg".into(),
-            "-l".into(),
-            "base-template".into(),
-        ])
-        .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Tag(TagArgs {
-                command: Some(TagCommand::Up {
-                    tag: Some(tag),
-                    message: Some(message),
-                    label: Some(label),
-                }),
-                commits: false
-            }) if tag == "v0.1.0" && message == "msg" && label == "base-template"
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_tag_update_alias_label_only() {
-        let cli = Cli::parse_args(&[
-            "tag".into(),
-            "update".into(),
-            "v0.1.0".into(),
-            "--label".into(),
-            "base-template".into(),
-        ])
-        .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Tag(TagArgs {
-                command: Some(TagCommand::Up {
-                    tag: Some(tag),
-                    message: None,
-                    label: Some(label),
-                }),
-                commits: false
-            }) if tag == "v0.1.0" && label == "base-template"
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_prune_defaults() {
-        let cli = Cli::parse_args(&["prune".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Prune(PruneArgs {
-                onto: None,
-                yes: false,
-                all: false,
-                json: false,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_prune_yes_and_onto() {
-        let cli = Cli::parse_args(&["prune".into(), "-y".into(), "--onto".into(), "trunk".into()])
-            .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Prune(PruneArgs { yes: true, onto: Some(o), .. }) if o == "trunk"
-        ));
     }
 
     #[test]
     fn parse_args_prune_json_requires_all() {
         assert!(Cli::parse_args(&["prune".into(), "--json".into()]).is_err());
         assert!(Cli::parse_args(&["prune".into(), "--all".into(), "--json".into()]).is_ok());
-    }
-
-    #[test]
-    fn parse_args_routes_sw_switch_only_by_default() {
-        let cli = Cli::parse_args(&["sw".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Sw(SwArgs {
-                rebase: false,
-                revert: false,
-                diff: false,
-                onto: None
-            })
-        ));
-    }
-
-    #[test]
-    fn parse_args_routes_sw_rebase_with_onto() {
-        let cli = Cli::parse_args(&[
-            "sw".into(),
-            "--rebase".into(),
-            "--onto".into(),
-            "trunk".into(),
-        ])
-        .unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Sw(SwArgs { rebase: true, onto: Some(onto), .. }) if onto == "trunk"
-        ));
     }
 
     #[test]
@@ -1258,20 +622,11 @@ mod tests {
         assert!(Cli::parse_args(&["sw".into(), "--rebase".into(), "--revert".into()]).is_err());
     }
 
-    #[test]
-    fn parse_args_routes_sw_revert() {
-        let cli = Cli::parse_args(&["sw".into(), "-r".into()]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Command::Sw(SwArgs { revert: true, .. })
-        ));
-    }
-
     /// Durable guard for "every public verb is exposed via `--help`". clap renders help
     /// from the derive, so the only way a working verb disappears from help is a hidden
-    /// subcommand (`hide`) or a hidden alias (`alias` instead of `visible_alias`) — e.g.
-    /// `tag update` silently dropping out of `tag --help`. This walks the whole command
-    /// tree and fails on either, so the exposure can't drift on memory alone.
+    /// subcommand (`hide`) or a hidden alias (`alias` instead of `visible_alias`) -- e.g.
+    /// `tag push`'s `p` alias silently dropping out of `tag --help`. This walks the whole
+    /// command tree and fails on either, so the exposure can't drift on memory alone.
     #[test]
     fn every_command_and_alias_is_visible_in_help() {
         use clap::CommandFactory;

@@ -931,7 +931,7 @@ fn run_tag(command: Option<TagCommand>, commits: bool) -> ExitCode {
         Some(TagCommand::Add { tag, message }) => {
             finish_tag_action(add::execute(AddTag { repo, tag, message }, &runner))
         }
-        Some(TagCommand::Up {
+        Some(TagCommand::Push {
             tag: Some(tag),
             message: Some(message),
             label,
@@ -944,22 +944,22 @@ fn run_tag(command: Option<TagCommand>, commits: bool) -> ExitCode {
             },
             &runner,
         )),
-        Some(TagCommand::Up {
+        Some(TagCommand::Push {
             tag: Some(tag),
             message: None,
             label: Some(label),
         }) => finish_tag_action(label::execute(LabelTag { repo, tag, label }, &runner)),
-        Some(TagCommand::Up {
+        Some(TagCommand::Push {
             tag: None,
             message: None,
             label: None,
         }) => finish_tag_action(push::execute(PushTags { repo }, &runner)),
-        Some(TagCommand::Up { tag: None, .. }) => {
-            eprintln!("tag: tag up --label requires a <tag> to label");
+        Some(TagCommand::Push { tag: None, .. }) => {
+            eprintln!("tag: tag push --label requires a <tag> to label");
             ExitCode::Usage
         }
-        Some(TagCommand::Up { .. }) => {
-            eprintln!("tag: tag up requires both <tag> and <message> when creating a tag");
+        Some(TagCommand::Push { .. }) => {
+            eprintln!("tag: tag push requires both <tag> and <message> when creating a tag");
             ExitCode::Usage
         }
         Some(TagCommand::Ls) | None => {
