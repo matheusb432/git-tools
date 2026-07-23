@@ -16,6 +16,7 @@ path = "src/lib.rs"
 anyhow.workspace = true
 application.workspace = true
 clap.workspace = true
+clap-cargo.workspace = true
 contracts.workspace = true
 domain.workspace = true
 gtl-platform.workspace = true

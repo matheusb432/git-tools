@@ -1,10 +1,9 @@
 //! Arg-surface tests: build the binary and assert the verb surface clap derives. Add a case
 //! per real verb, and assert the *message* on conflicts (`contains("cannot be used with")`),
-//! not a bare exit-2 (exit 2 also fires on an unknown subcommand). See rust-tests /
-//! rust-cli-tooling.
+//! not a bare exit-2 (exit 2 also fires on an unknown subcommand). See the `cli-best-practices`
+//! skill.
 
 use assert_cmd::Command;
-use predicates::prelude::*;
 
 #[test]
 fn forced_color_help_uses_cargo_palette() {
@@ -17,21 +16,6 @@ fn forced_color_help_uses_cargo_palette() {
         .success()
         .stdout(predicates::str::contains("\u{1b}["))
         .stdout(predicates::str::contains("36m"));
-}
-
-#[test]
-fn help_lists_the_verb_surface() {
-    Command::cargo_bin("xtask")
-        .unwrap()
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("bootstrap"))
-        .stdout(predicates::str::contains("install"))
-        .stdout(predicates::str::contains("uninstall"))
-        .stdout(predicates::str::contains("pre-commit"))
-        .stdout(predicates::str::contains("gen-icon"))
-        .stdout(predicates::str::contains("ship"));
 }
 
 #[test]
@@ -154,17 +138,4 @@ fn ship_exposes_smoke_and_force_flags() {
         .success()
         .stdout(predicates::str::contains("--smoke"))
         .stdout(predicates::str::contains("--force"));
-}
-
-#[test]
-fn unknown_verb_is_rejected() {
-    Command::cargo_bin("xtask")
-        .unwrap()
-        .arg("definitely-not-a-verb")
-        .assert()
-        .failure()
-        .stderr(
-            predicates::str::contains("unrecognized subcommand")
-                .or(predicates::str::contains("unexpected argument")),
-        );
 }

@@ -174,7 +174,7 @@ fn dispatch(command: Command) -> ExitCode {
         Command::Commit(args) => run_commit(args),
         Command::Sw(args) => run_sw(&args),
         Command::Prune(args) => run_prune(args),
-        Command::Tag(args) => run_tag(args.command, args.commits),
+        Command::Tag(args) => run_tag(args.command, args.commits, args.state),
         Command::Wk(args) => run_worktree(&args.command),
         Command::Status(args) => managed_exit(&run_status(args)),
         Command::Ls(args) => managed_exit(&run_status(args.into())),
@@ -916,7 +916,7 @@ fn run_prune(args: PruneArgs) -> ExitCode {
     }
 }
 
-fn run_tag(command: Option<TagCommand>, commits: bool) -> ExitCode {
+fn run_tag(command: Option<TagCommand>, commits: bool, state: bool) -> ExitCode {
     use application::tags::{
         add::{self, AddTag},
         add_and_push::{self, AddAndPushTag},
@@ -962,9 +962,16 @@ fn run_tag(command: Option<TagCommand>, commits: bool) -> ExitCode {
             eprintln!("tag: tag push requires both <tag> and <message> when creating a tag");
             ExitCode::Usage
         }
-        Some(TagCommand::Ls) | None => {
-            finish_tag_list(list::execute(ListTags { repo }, &runner), commits)
-        }
+        Some(TagCommand::Ls) | None => finish_tag_list(
+            list::execute(
+                ListTags {
+                    repo,
+                    include_state: state,
+                },
+                &runner,
+            ),
+            commits,
+        ),
     }
 }
 

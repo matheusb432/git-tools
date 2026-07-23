@@ -36,3 +36,9 @@ pub fn test() -> Result<()> {
     )?;
     process::run("frontend-test", "deno", &["task", "--frozen", "test"])
 }
+
+/// Run the frontend compute benchmarks and stream their tables.
+pub fn bench() -> Result<()> {
+    require_deno()?;
+    process::run("frontend-bench", "deno", &["task", "--frozen", "bench"])
+}

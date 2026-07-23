@@ -1,11 +1,11 @@
 //! Structured local tag values independent of Git transport and presentation.
 
-/// Identifies whether a local tag object is known by the origin tracking refs.
+/// Identifies whether a local tag object is known by origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TagState {
-    /// The tag object is absent from origin's local tracking refs.
+    /// Origin does not hold this tag object.
     Local,
-    /// Origin's local tracking ref points to the same tag object.
+    /// Origin's tag ref points to the same tag object.
     Remote,
 }
 
@@ -26,7 +26,7 @@ pub struct Tag {
     commit_short: String,
     created_at: Option<i64>,
     kind: TagKind,
-    state: TagState,
+    state: Option<TagState>,
 }
 
 impl Tag {
@@ -45,7 +45,7 @@ impl Tag {
             commit_short,
             created_at,
             kind: TagKind::Annotated { object, message },
-            state: TagState::Local,
+            state: None,
         }
     }
 
@@ -62,7 +62,7 @@ impl Tag {
             commit_short,
             created_at,
             kind: TagKind::Lightweight,
-            state: TagState::Local,
+            state: None,
         }
     }
 
@@ -107,14 +107,14 @@ impl Tag {
         matches!(self.kind, TagKind::Annotated { .. })
     }
 
-    /// Returns whether the tag is local-only or known by origin.
-    pub fn state(&self) -> TagState {
+    /// Returns the tag's origin state, or `None` when origin was not queried.
+    pub fn state(&self) -> Option<TagState> {
         self.state
     }
 
-    /// Marks the local tag object as known by origin.
-    pub fn mark_remote(&mut self) {
-        self.state = TagState::Remote;
+    /// Records whether origin holds this tag object.
+    pub fn set_state(&mut self, state: TagState) {
+        self.state = Some(state);
     }
 }
 
@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(tag.object(), "commit-a");
         assert_eq!(tag.message(), None);
         assert!(!tag.is_annotated());
-        assert_eq!(tag.state(), TagState::Local);
+        assert_eq!(tag.state(), None);
     }
 
     #[test]
@@ -155,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_tracking_transition_changes_only_the_tag_state() {
+    fn state_transition_changes_only_the_tag_state() {
         let mut tag = Tag::lightweight(
             "stable".into(),
             "commit-a".into(),
@@ -164,9 +164,9 @@ mod tests {
         );
         let original_object = tag.object().to_string();
 
-        tag.mark_remote();
+        tag.set_state(TagState::Remote);
 
-        assert_eq!(tag.state(), TagState::Remote);
+        assert_eq!(tag.state(), Some(TagState::Remote));
         assert_eq!(tag.object(), original_object);
     }
 }

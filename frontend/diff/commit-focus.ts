@@ -1,11 +1,9 @@
-// * Returns true when the event target is (or is inside) the .sha copy button, so
-// * the card's keydown/click handler can bail before re-focusing the card.
+/** True when the event target sits inside the .sha copy button, so card handlers bail. */
 export function isShaTarget(target: { closest?: (selector: string) => unknown } | null): boolean {
   return !!(target && target.closest && target.closest(".sha"));
 }
 
-// ! Pure helper: compute the next (activeSha, activeSet) after a card click, so the
-// ! toggle/merge logic can be unit-tested without a DOM. Returns null for both when toggling off.
+/** Next (activeSha, activeSet) after a card click; both null when the click toggles off. */
 export function resolveActiveSet(
   clickedSha: string,
   membersAttr: string,

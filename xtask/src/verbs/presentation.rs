@@ -140,6 +140,11 @@ fn check_compiled_css(path: &Path, css: &str) -> Result<()> {
     Ok(())
 }
 
+/// Compositor-only animatable properties (plus `none`): the toast fade may
+/// transition these; anything else repaints per frame in the WebKitGTK webview.
+const TRANSITION_PROPERTIES_ALLOWED: &[&str] =
+    &["none", "opacity", "scale", "translate", "transform"];
+
 fn forbidden_declaration(css: &str) -> Option<(String, usize)> {
     let (normalized, byte_offsets) = lex_css_code(css);
     let bytes = normalized.as_bytes();
@@ -155,8 +160,24 @@ fn forbidden_declaration(css: &str) -> Option<(String, usize)> {
             .map_or(0, |offset| offset + 1);
         let property = &normalized[declaration_offset..colon_offset];
 
-        if property == "transition" || property.starts_with("transition-") {
+        if property == "transition" {
             return Some((property.to_owned(), byte_offsets[declaration_offset]));
+        }
+        if property == "transition-property" {
+            let value_end = bytes[colon_offset + 1..]
+                .iter()
+                .position(|byte| matches!(byte, b';' | b'}'))
+                .map_or(normalized.len(), |offset| colon_offset + 1 + offset);
+            let value = &normalized[colon_offset + 1..value_end];
+            if value
+                .split(',')
+                .any(|part| !TRANSITION_PROPERTIES_ALLOWED.contains(&part))
+            {
+                return Some((
+                    format!("transition-property:{value}"),
+                    byte_offsets[declaration_offset],
+                ));
+            }
         }
         if property == "scroll-behavior" && normalized[colon_offset + 1..].starts_with("smooth") {
             return Some((
@@ -356,23 +377,35 @@ mod tests {
     }
 
     #[test]
-    fn compiled_css_rejects_transition_declarations() {
+    fn compiled_css_rejects_repaint_transition_declarations() {
         for (css, declaration, offset) in [
             (".x { transition : opacity; }", "transition", 5),
             (
-                ".x { transition-property : opacity; }",
-                "transition-property",
+                ".x { transition-property : box-shadow; }",
+                "transition-property:box-shadow",
                 5,
+            ),
+            (
+                ".x{transition-property:opacity,box-shadow}",
+                "transition-property:opacity,box-shadow",
+                3,
             ),
         ] {
             let error = check_compiled_css(Path::new(GENERATED_CSS_PATH), css)
-                .expect_err("transition declaration should fail")
+                .expect_err("repaint transition declaration should fail")
                 .to_string();
 
             assert!(error.contains(GENERATED_CSS_PATH), "{error}");
             assert!(error.contains(&format!("'{declaration}'")), "{error}");
             assert!(error.contains(&format!("byte offset {offset}")), "{error}");
         }
+    }
+
+    #[test]
+    fn compiled_css_accepts_compositor_only_transitions() {
+        let css = ".x{transition-property:opacity,scale;transition-duration:.2s}.y{transition-property:none}";
+
+        assert!(check_compiled_css(Path::new(GENERATED_CSS_PATH), css).is_ok());
     }
 
     #[test]

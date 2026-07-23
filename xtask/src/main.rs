@@ -1,4 +1,4 @@
-//! `xtask` — this repo's embedded dev/release automation harness (ADR-0010).
+//! `xtask` — this repo's embedded dev/release automation harness.
 //!
 //! Invoked as `cargo run -p xtask -- <verb>` from the justfile; never installed (it is a
 //! workspace member built on demand). Recipe bodies stay one-line forwarders into these verbs;
@@ -9,6 +9,7 @@ use anyhow::Result;
 use clap::Parser;
 
 mod cli;
+mod gate;
 mod process;
 mod task;
 mod verb;
@@ -33,6 +34,7 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::Test(arguments) => verbs::test::run(arguments.scope, arguments.verbose),
         cli::Command::Build { target } => verbs::build::run(target),
         cli::Command::FrontendTest => verbs::frontend::test(),
+        cli::Command::FrontendBench => verbs::frontend::bench(),
         cli::Command::DesktopBench => verbs::bench::run(),
         cli::Command::Fmt(arguments) => verbs::format::run(arguments.verbose),
         cli::Command::FmtCheck(arguments) => verbs::format::check(arguments.verbose),
@@ -41,8 +43,14 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::PreCommit => verbs::pre_commit::run(),
         cli::Command::Fix { extra } => verbs::fix::run(&extra),
         cli::Command::DriftCheck => verbs::drift::run(),
-        cli::Command::CheckStructure => verbs::check_structure::run(None),
-        cli::Command::CheckDeps => verbs::check_deps::run(None),
+        cli::Command::CheckStructure => {
+            verbs::check_structure::run(None);
+            Ok(())
+        }
+        cli::Command::CheckDeps => {
+            verbs::check_deps::run(None);
+            Ok(())
+        }
         cli::Command::GenIcon => verbs::icon::run(),
         cli::Command::Ship { smoke, force } => verbs::ship::run(smoke, force),
     }

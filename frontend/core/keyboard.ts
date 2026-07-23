@@ -9,20 +9,24 @@ export type KeyboardEventLike = {
 };
 
 export function keyboardCommand(event: KeyboardEventLike): KeyboardCommand {
-  const t = event.target;
-  const tag =
-    t !== null &&
-    typeof t === "object" &&
-    "tagName" in t &&
-    typeof (t as Record<string, unknown>)["tagName"] === "string"
-      ? ((t as Record<string, unknown>)["tagName"] as string).toLowerCase()
-      : "";
-  if (tag === "input" || tag === "textarea" || tag === "select") {
-    return event.key === "Escape" ? "blur-input" : "none";
-  }
+  if (isFormField(event.target)) return event.key === "Escape" ? "blur-input" : "none";
   if (event.altKey && event.shiftKey && event.code === "KeyC") return "fold-all";
-  if (event.key === "/") return "focus-filter";
-  if (event.key === "j") return "next-file";
-  if (event.key === "k") return "previous-file";
-  return "none";
+  switch (event.key) {
+    case "/":
+      return "focus-filter";
+    case "j":
+      return "next-file";
+    case "k":
+      return "previous-file";
+    default:
+      return "none";
+  }
+}
+
+// HTML elements report an uppercase tagName; comparing directly avoids allocating
+// a lowercase copy on every document keydown.
+function isFormField(target: EventTarget | null): boolean {
+  if (target === null || !("tagName" in target)) return false;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }

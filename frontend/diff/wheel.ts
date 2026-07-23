@@ -1,4 +1,4 @@
-// * Returns clamped next scrollLeft, or null to bail (ctrlKey zoom, no overflow, zero delta, already there).
+/** Returns the clamped next scrollLeft, or null to bail (ctrl zoom, no overflow, zero delta, already there). */
 export function computeWheelScroll(
   scroller: { readonly scrollWidth: number; readonly clientWidth: number; readonly scrollLeft: number },
   event: { readonly deltaX: number; readonly deltaY: number; readonly ctrlKey: boolean },

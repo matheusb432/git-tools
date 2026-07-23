@@ -40,8 +40,7 @@ fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The workspace member directories scanned for OS `#[cfg]` violations — mirrors
-/// `check_structure`'s `MEMBER_DIRS`.
+/// The workspace member directories scanned for OS `#[cfg]` violations.
 const MEMBER_DIRS: [&str; 2] = ["crates", "shared"];
 
 #[test]

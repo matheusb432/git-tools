@@ -7,7 +7,7 @@ use maud::{DOCTYPE, PreEscaped, html};
 use super::THEME_BOOT_JS;
 use crate::{
     assets::{PREVIEW_BUNDLE, preview_css},
-    view_fragment,
+    layout::{Surface, view_body},
 };
 
 const TABS_CLASSES: &str = "sticky top-0 z-60 flex items-center gap-1.5 overflow-x-auto border-b border-line bg-surface-2 px-3 py-2.5";
@@ -50,7 +50,7 @@ pub fn build_tabbed_html(
                 }
                 @for (index, view) in views.iter().enumerate() {
                     section class={ "panel " (PANEL_CLASSES) } id={ "panel-" (index) } role="tabpanel" aria-labelledby={ "tab-" (index) } hidden[index != 0] {
-                        (view_fragment(view, options))
+                        (view_body(view, options, Surface::Artifact))
                     }
                 }
                 script { (PreEscaped(PREVIEW_BUNDLE)) }

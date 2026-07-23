@@ -2,7 +2,7 @@
 name = "xtask"
 version = "0.1.0"
 edition.workspace = true
-# Embedded dev-automation crate (ADR-0010): never published, never installed. It is a
+# Embedded dev-automation crate: never published, never installed. It is a
 # workspace member built on demand via `cargo run -p xtask -- <verb>`. Add it to the
 # host workspace's root `Cargo.toml` `members` list (e.g. `xtask`).
 publish.workspace = true
@@ -30,8 +30,7 @@ zbus.workspace = true
 # Cross-platform directory symlink for the `bootstrap` skills-link. The OS `#[cfg]` lives in the
 # PAL (ADR-0003), so the bootstrap verb stays cfg-free.
 gtl-platform.workspace = true
-# TOML parsing for `check-deps` verb.
-toml.workspace = true
+# Workspace package-graph reads for the `check-deps` and `check-structure` verbs.
 cargo_metadata.workspace = true
 
 [dev-dependencies]

@@ -6,7 +6,7 @@ export type FileLeaf = {
   readonly el: { readonly id: string };
 };
 
-// * The Rust-rendered tree root owns presentation for these semantic hooks.
+// The class names are presentation hooks owned by the Rust-rendered stylesheet.
 export function buildFileLeaf(doc: Document, file: FileLeaf): HTMLElement {
   const li = doc.createElement("li");
   li.className = `tnode tfile status-${file.status}`;

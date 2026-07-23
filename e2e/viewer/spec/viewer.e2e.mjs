@@ -151,6 +151,16 @@ describe('server-rendered viewer', () => {
     await expectReadyDocument();
     await expect($('#viewer-view')).toHaveText(expect.stringContaining('alpha-v1'));
 
+    // Text assertions pass without layout, so pin the first paint directly: the
+    // webview skips content-visibility:auto subtrees, and a regression leaves
+    // every diff row at zero height until an unrelated style invalidation.
+    const firstRenderRows = await browser.execute(() => {
+      const rows = document.querySelectorAll('#viewer-view .filebody .dl');
+      return { count: rows.length, firstHeight: rows[0]?.offsetHeight ?? 0 };
+    });
+    expect(firstRenderRows.count).toBeGreaterThan(0);
+    expect(firstRenderRows.firstHeight).toBeGreaterThan(0);
+
     await selectSplitLayout();
 
     await browser.reloadSession();

@@ -1,5 +1,5 @@
 //! Command-line surface for `xtask`. clap derives `--help` from these doc comments,
-//! so they are the single source of truth for the verb documentation (ADR-0002). Add each
+//! so they are the single source of truth for the verb documentation. Add each
 //! new automation verb here as a `Command` arm; let clap validate, don't hand-roll guards.
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -91,6 +91,9 @@ pub enum Command {
     /// Type-check and test the framework-free frontend sources.
     #[command(name = Verb::FRONTEND_TEST.as_str())]
     FrontendTest,
+    /// Run the frontend compute benchmarks (tinybench through vitest bench).
+    #[command(name = Verb::FRONTEND_BENCH.as_str())]
+    FrontendBench,
     /// Run the pure viewer-render benchmark without a host display.
     #[command(name = Verb::DESKTOP_BENCH.as_str())]
     DesktopBench,

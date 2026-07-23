@@ -127,6 +127,7 @@ impl ViewerView {
 ///     "diff".into(),
 ///     "main..HEAD".into(),
 ///     "2026-07-11T00:00:00Z".into(),
+///     r#"{"op":"diff"}"#.into(),
 /// );
 /// assert_eq!(entry.id(), id);
 /// ```
@@ -138,6 +139,7 @@ pub struct ViewerHistoryEntry {
     kind: String,
     range_label: String,
     rendered_at: String,
+    recipe_json: String,
 }
 
 impl ViewerHistoryEntry {
@@ -156,6 +158,7 @@ impl ViewerHistoryEntry {
     ///     "diff".into(),
     ///     "main..HEAD".into(),
     ///     "2026-07-11T00:00:00Z".into(),
+    ///     r#"{"op":"diff"}"#.into(),
     /// );
     /// assert_eq!(entry.id(), id);
     /// ```
@@ -166,6 +169,7 @@ impl ViewerHistoryEntry {
         kind: String,
         range_label: String,
         rendered_at: String,
+        recipe_json: String,
     ) -> Self {
         Self {
             id,
@@ -174,6 +178,7 @@ impl ViewerHistoryEntry {
             kind,
             range_label,
             rendered_at,
+            recipe_json,
         }
     }
 
@@ -256,6 +261,19 @@ impl ViewerHistoryEntry {
     /// ```
     pub fn rendered_at(&self) -> &str {
         &self.rendered_at
+    }
+
+    /// Returns the persisted recipe JSON that reproduces this render.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use application::viewer::ViewerHistoryEntry;
+    /// # fn entry() -> ViewerHistoryEntry { unimplemented!() }
+    /// assert_eq!(entry().recipe_json(), r#"{"op":"diff"}"#);
+    /// ```
+    pub fn recipe_json(&self) -> &str {
+        &self.recipe_json
     }
 }
 

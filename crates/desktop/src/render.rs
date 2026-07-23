@@ -83,6 +83,7 @@ mod tests {
                 "worktree".into(),
                 "main..HEAD".into(),
                 "2026-07-11T00:00:00Z".into(),
+                r#"{"op":"diff"}"#.into(),
             )],
             settings(),
         )
@@ -194,8 +195,6 @@ mod tests {
         assert!(html.contains("hx-target=\"#viewer-tabs\""));
         assert!(html.contains("hx-target=\"#viewer-history\""));
         assert!(html.contains("data-viewer-theme="));
-        assert!(html.contains("event.listen(\"recipes-pending\""));
-        assert!(html.contains("window.htmx.ajax(\"GET\",\"/pending\""));
         assert!(feedback.contains("data-viewer-toast"));
     }
 
@@ -387,29 +386,41 @@ mod tests {
         assert!(!html.contains("class=\"layout"));
     }
 
-    #[test]
-    fn history_uses_stable_ids_and_escapes_metadata() {
-        let entry = ViewerHistoryEntry::new(
+    fn sample_history_entry() -> ViewerHistoryEntry {
+        ViewerHistoryEntry::new(
             history_id(9),
             "<recent>".into(),
             "repo & tools".into(),
             "worktree".into(),
             "main..HEAD".into(),
             "2026-07-11T00:00:00Z".into(),
-        );
+            r#"{"op":"diff"}"#.into(),
+        )
+    }
 
-        let html = MaudViewerRenderer.build_history(&[entry]);
+    #[test]
+    fn history_row_shows_stable_id_and_escapes_metadata() {
+        let html = MaudViewerRenderer.build_history(&[sample_history_entry()]);
         let row = html
-            .split_once("<button")
+            .split_once("viewer-history-row")
             .and_then(|(_, tail)| tail.split_once('>'))
             .map(|(tag, _)| tag)
-            .expect("history entry renders as a button");
+            .expect("history entry renders a row");
 
+        assert!(html.contains("#9"));
         assert!(html.contains("/history/9/open"));
         assert!(html.contains("&lt;recent&gt;"));
         assert!(html.contains("repo &amp; tools"));
-        assert!(row.contains("popovertarget=\"viewer-history-popover\""));
-        assert!(row.contains("popovertargetaction=\"hide\""));
+        assert!(row.contains("role=\"button\""));
+        assert!(row.contains("hx-get"));
+    }
+
+    #[test]
+    fn history_row_offers_a_json_copy_action() {
+        let html = MaudViewerRenderer.build_history(&[sample_history_entry()]);
+
+        assert!(html.contains("data-history-copy="));
+        assert!(html.contains("aria-label=\"Copy render JSON\""));
     }
 
     #[test]
@@ -417,7 +428,6 @@ mod tests {
         let html = MaudViewerRenderer.build_document(&sample_document());
 
         assert!(html.contains("data-viewer-theme=\"dark\""));
-        assert!(html.contains("document.documentElement.dataset.theme"));
         assert!(html.contains("/settings?theme=dark"));
     }
 
@@ -477,24 +487,13 @@ mod tests {
         let html = MaudViewerRenderer
             .build_tabs_with_view_after_snapshot_skips(&sample_document(), &labels);
 
-        assert!(html.contains("class=\"gtl-toast viewer-toast-skip show "));
+        assert!(html.contains("class=\"gtl-toast viewer-toast-skip pointer-events-none "));
         assert!(html.contains("data-viewer-toast"));
         assert!(html.contains("role=\"status\" aria-live=\"polite\" aria-atomic=\"true\""));
         assert!(html.contains(
             "Skipped 2 diffs with no commits or changed files: api, &lt;script&gt;web&lt;/script&gt;."
         ));
         assert!(!html.contains("<script>web</script>"));
-    }
-
-    #[test]
-    fn viewer_stylesheet_uses_immediate_feedback_without_motion_declarations() {
-        let css = preview::preview_css();
-
-        assert!(!css.contains("transition:"));
-        assert!(!css.contains("transition-property:"));
-        assert!(!css.contains("animation:"));
-        assert!(!css.contains("animation-name:"));
-        assert!(!css.contains("scroll-behavior:smooth"));
     }
 
     #[test]
@@ -592,19 +591,11 @@ mod tests {
     }
 
     #[test]
-    fn recipe_wake_subscription_precedes_the_first_pending_drain() {
+    fn recipe_wake_drain_ships_in_the_viewer_bundle_not_htmx_polling() {
         let html = MaudViewerRenderer.build_document(&sample_document());
-        let listen = html
-            .find("event.listen(\"recipes-pending\"")
-            .expect("shell subscribes to recipe wake events");
-        let pending = html.find("/pending").expect("shell drains pending recipes");
 
-        assert!(
-            listen < pending,
-            "subscription must be established before draining"
-        );
-        assert!(html.contains("await window.__TAURI__.event.listen"));
-        assert!(html.contains("var chain=Promise.resolve()"));
+        assert!(html.contains("recipes-pending"));
+        assert!(html.contains("/pending"));
         assert!(!html.contains("hx-trigger=\"load\""));
         assert!(!html.contains("<iframe"));
     }

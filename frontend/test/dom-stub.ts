@@ -338,6 +338,10 @@ if (typeof globalThis.document === "undefined") {
       return this.querySelectorAll(selector)[0] ?? null;
     }
 
+    getElementById(id: string): StubElement | null {
+      return this.querySelector(`#${id}`);
+    }
+
     execCommand(): boolean {
       return false;
     }
@@ -348,6 +352,7 @@ if (typeof globalThis.document === "undefined") {
     Element: { value: StubElement },
     HTMLElement: { value: StubElement },
     HTMLDetailsElement: { value: StubElement },
+    HTMLInputElement: { value: StubElement },
     document: { value: new StubDocument(), writable: true },
   });
 

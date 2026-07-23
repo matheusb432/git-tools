@@ -23,3 +23,8 @@ update: build install
 [group('cli')]
 test:
     cargo run --quiet -p xtask -- frontend-test
+
+# Run the frontend compute benchmarks (tinybench through vitest bench). Needs Deno.
+[group('cli')]
+bench:
+    cargo run --quiet -p xtask -- frontend-bench

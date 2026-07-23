@@ -37,25 +37,26 @@ fn render_tag(tag: &Tag, commits: bool) -> String {
     let state = render_state(tag.state());
     let message = render_message(tag);
     if commits {
-        format!("{} {} [{state}]{message}", tag.commit_short(), tag.name())
+        format!("{} {}{state}{message}", tag.commit_short(), tag.name())
     } else {
-        format!("{} [{state}]{message}", tag.name())
+        format!("{}{state}{message}", tag.name())
     }
 }
 
 fn render_label(tag: &Tag) -> String {
     format!(
-        "  - {} [{}]{}",
+        "  - {}{}{}",
         tag.name(),
         render_state(tag.state()),
         render_message(tag)
     )
 }
 
-fn render_state(state: TagState) -> &'static str {
+fn render_state(state: Option<TagState>) -> &'static str {
     match state {
-        TagState::Local => "local",
-        TagState::Remote => "remote",
+        None => "",
+        Some(TagState::Local) => " [local]",
+        Some(TagState::Remote) => " [remote]",
     }
 }
 
@@ -67,7 +68,7 @@ fn render_message(tag: &Tag) -> String {
 #[cfg(test)]
 mod tests {
     use application::tags::{TagGroup, TagList};
-    use domain::tags::Tag;
+    use domain::tags::{Tag, TagState};
 
     use super::render_list;
 
@@ -94,9 +95,11 @@ mod tests {
     #[test]
     fn tag_list_rendering_preserves_state_messages_labels_and_commit_columns() {
         let mut remote = annotated("v1.0.0", "abc1234", "release");
-        remote.mark_remote();
-        let canonical = annotated("v1.1.0", "def5678", "next");
-        let label = lightweight("stable", "def5678");
+        remote.set_state(TagState::Remote);
+        let mut canonical = annotated("v1.1.0", "def5678", "next");
+        canonical.set_state(TagState::Local);
+        let mut label = lightweight("stable", "def5678");
+        label.set_state(TagState::Local);
         let list = TagList::Listed {
             groups: vec![
                 TagGroup::Single(remote),
@@ -115,5 +118,17 @@ mod tests {
             render_list(&list, true),
             "abc1234 v1.0.0 [remote]  release\ndef5678 v1.1.0 [local]  next\n  - stable [local]"
         );
+    }
+
+    #[test]
+    fn tags_without_a_queried_state_render_no_state_column() {
+        let list = TagList::Listed {
+            groups: vec![TagGroup::Canonical {
+                canonical: annotated("v1.1.0", "def5678", "next"),
+                labels: vec![lightweight("stable", "def5678")],
+            }],
+        };
+
+        assert_eq!(render_list(&list, false), "v1.1.0  next\n  - stable");
     }
 }

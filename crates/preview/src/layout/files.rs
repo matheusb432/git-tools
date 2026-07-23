@@ -8,6 +8,7 @@ use application::{
 use maud::{Markup, PreEscaped, html};
 
 use crate::{
+    layout::Surface,
     rows::{render_diff_lines, render_diff_split},
     text::slug,
 };
@@ -80,7 +81,26 @@ fn file_commits(file: &FileDiff) -> String {
     file.commits.join(" ")
 }
 
-pub(super) fn file_blocks(view: &View, options: RenderOptions) -> Markup {
+// ! The app webview (wry/WebKitGTK) never marks swapped-in content-visibility:auto
+// ! subtrees relevant, so their rows would stay unpainted; only browser artifacts
+// ! opt into the offscreen-skip optimization (and its print escape hatches).
+fn filebody_presentation(surface: Surface, file: &FileDiff) -> (&'static str, Option<String>) {
+    match surface {
+        Surface::App => (
+            "filebody single-variant overflow-hidden rounded-b-panel",
+            None,
+        ),
+        Surface::Artifact => {
+            let rows = file.lines.iter().filter(|l| !l.is_empty()).count();
+            (
+                "filebody single-variant [content-visibility:auto] overflow-hidden rounded-b-panel print:block! print:[content-visibility:visible] print:overflow-visible",
+                Some(format!("contain-intrinsic-size:auto {}px", rows * ROW_PX)),
+            )
+        }
+    }
+}
+
+pub(super) fn file_blocks(view: &View, options: RenderOptions, surface: Surface) -> Markup {
     if view.files.is_empty() {
         return html! { div class="empty rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic" { "no file changes" } };
     }
@@ -90,8 +110,7 @@ pub(super) fn file_blocks(view: &View, options: RenderOptions) -> Markup {
             @let absolute = format!("{}/{}", view.repo_root, file.path);
             @let status = file_status_presentation(file.status());
             @let giant = file.lines.iter().map(String::len).sum::<usize>() > GIANT_FILE_CHARS;
-            @let rows = file.lines.iter().filter(|l| !l.is_empty()).count();
-            @let intrinsic = format!("contain-intrinsic-size:auto {}px", rows * ROW_PX);
+            @let (filebody_classes, intrinsic) = filebody_presentation(surface, file);
             details open[!giant]
                 id=(slug(&file.path))
                 class={
@@ -122,7 +141,7 @@ pub(super) fn file_blocks(view: &View, options: RenderOptions) -> Markup {
                     span class="flex-none text-[12.5px]" { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
                 }
                 // ! Keep containment below the sticky summary so it can pin to `.main`.
-                div class="filebody single-variant [content-visibility:auto] overflow-hidden rounded-b-panel print:block! print:[content-visibility:visible] print:overflow-visible" style=(intrinsic) {
+                div class=(filebody_classes) style=[intrinsic] {
                     (file_diff(file, options))
                 }
             }
@@ -337,11 +356,19 @@ mod tests {
 
     #[test]
     fn build_html_ships_content_visibility_perf_rule() {
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT).into_string();
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         assert!(html.contains("[content-visibility:auto]"));
         assert!(html.contains("print:[content-visibility:visible]"));
         assert!(html.contains("print:block!"));
+    }
+
+    #[test]
+    fn app_fragment_omits_content_visibility_for_the_webview() {
+        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT).into_string();
+
+        assert!(!html.contains("content-visibility"));
+        assert!(!html.contains("contain-intrinsic-size"));
     }
 
     #[test]

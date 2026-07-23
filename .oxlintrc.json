@@ -6,13 +6,5 @@
     "crates/desktop/src/embedded/generated",
     "node_modules",
     "target"
-  ],
-  "overrides": [
-    {
-      "files": ["frontend/inline/*.ts"],
-      "rules": {
-        "no-unused-vars": "off"
-      }
-    }
   ]
 }

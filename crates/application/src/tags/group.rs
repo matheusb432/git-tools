@@ -70,6 +70,7 @@ pub(super) fn group(tags: Vec<Tag>) -> Vec<TagGroup> {
 }
 
 fn classify(mut tags: Vec<Tag>) -> TagGroup {
+    tags.sort_by(compare_tags);
     if tags.len() == 1 {
         return TagGroup::Single(tags.remove(0));
     }
@@ -92,10 +93,10 @@ fn classify(mut tags: Vec<Tag>) -> TagGroup {
     }
 }
 
-fn compare_tags(left: &Tag, right: &Tag) -> Ordering {
+pub(super) fn compare_tags(left: &Tag, right: &Tag) -> Ordering {
     left.created_at()
         .cmp(&right.created_at())
-        .then_with(|| left.name().cmp(right.name()))
+        .then_with(|| natord::compare(left.name(), right.name()))
 }
 
 #[cfg(test)]
@@ -178,6 +179,36 @@ mod tests {
                 canonical,
                 labels: vec![label],
             }]
+        );
+    }
+
+    #[test]
+    fn creation_date_ties_order_version_tags_by_numeric_segments() {
+        let ninth = lightweight_tag("v0.9.0", "commit-a", 100);
+        let tenth = lightweight_tag("v0.10.0", "commit-b", 100);
+        let second = lightweight_tag("v0.2.0", "commit-c", 100);
+
+        assert_eq!(
+            group(vec![tenth.clone(), ninth.clone(), second.clone()]),
+            vec![
+                TagGroup::Single(second),
+                TagGroup::Single(ninth),
+                TagGroup::Single(tenth),
+            ]
+        );
+    }
+
+    #[test]
+    fn tags_inside_one_group_order_like_the_groups_themselves() {
+        let ninth = annotated_tag("v0.9.0", "tag-a", "commit-a", 100, "ninth");
+        let tenth = annotated_tag("v0.10.0", "tag-b", "commit-a", 100, "tenth");
+        let second = annotated_tag("v0.2.0", "tag-c", "commit-a", 100, "second");
+
+        assert_eq!(
+            group(vec![tenth.clone(), ninth.clone(), second.clone()]),
+            vec![TagGroup::MoreThanOneTagHasMessage(vec![
+                second, ninth, tenth
+            ])]
         );
     }
 

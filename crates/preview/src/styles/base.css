@@ -4,6 +4,7 @@
 @source "../layout";
 @source "../rows";
 @source "../artifact";
+@source "../../../../frontend/core/toast.ts";
 @source "../../../../frontend/diff/enhance-layout.ts";
 @source "../../../desktop/src/render";
 @source "../../../desktop/src/routes/render.rs";

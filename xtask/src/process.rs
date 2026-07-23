@@ -74,14 +74,9 @@ pub fn run(label: &str, program: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Delegate a captured command to the workspace gate runner.
+/// Run a captured command through the terse gate runner (see [`crate::gate`]).
 pub fn gate(scope: &str, command: &str, verbose: bool) -> Result<()> {
-    let mut args = vec!["run", "--quiet", "-p", "gate", "--"];
-    if verbose {
-        args.push("--verbose");
-    }
-    args.extend_from_slice(&[scope, command]);
-    run(&format!("gate:{scope}"), "cargo", &args)
+    crate::gate::run(None, scope, command, verbose)
 }
 
 /// Run a command after removing environment variables that could leak host GUI state.

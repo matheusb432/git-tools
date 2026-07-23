@@ -31,7 +31,7 @@ use maud::Markup;
 /// assert!(fragment.into_string().contains("diff-unified diff-compact"));
 /// ```
 pub fn view_fragment(view: &View, options: RenderOptions) -> Markup {
-    layout::view_body(view, options)
+    layout::view_body(view, options, layout::Surface::App)
 }
 
 /// The Maud-backed [`HtmlRenderer`](application::ports::HtmlRenderer) adapter.

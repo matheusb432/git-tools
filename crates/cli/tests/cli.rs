@@ -10,6 +10,18 @@ fn git_tools() -> Command {
 }
 
 #[test]
+fn forced_color_help_uses_cargo_palette() {
+    git_tools()
+        .arg("--help")
+        .env_remove("NO_COLOR")
+        .env("CLICOLOR_FORCE", "1")
+        .assert()
+        .success()
+        .stdout(contains("\u{1b}["))
+        .stdout(contains("36m"));
+}
+
+#[test]
 fn top_level_help_lists_every_subcommand() {
     let mut assert = git_tools().arg("--help").assert().success();
     for sub in [

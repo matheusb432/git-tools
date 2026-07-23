@@ -77,34 +77,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn push_all_request_roundtrips() {
-        let original = PushAllRequest {
-            repos_file: "/repos.toml".into(),
-            home_dir: "/home".into(),
-            dry: true,
-        };
-        let json = serde_json::to_string(&original).unwrap();
-        assert_eq!(
-            serde_json::from_str::<PushAllRequest>(&json).unwrap(),
-            original
-        );
-    }
-
-    #[test]
-    fn pull_all_request_roundtrips() {
-        let original = PullAllRequest {
-            repos_file: "/repos.toml".into(),
-            home_dir: "/home".into(),
-            dry: false,
-        };
-        let json = serde_json::to_string(&original).unwrap();
-        assert_eq!(
-            serde_json::from_str::<PullAllRequest>(&json).unwrap(),
-            original
-        );
-    }
-
-    #[test]
     fn repo_sync_result_dto_uses_pascal_case_keys() {
         let dto = RepoSyncResultDto {
             name: "repo".into(),

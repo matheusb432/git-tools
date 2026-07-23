@@ -8,5 +8,6 @@ pub(super) fn to_viewer_entry(record: RecentRenderRecord) -> ViewerHistoryEntry 
         record.kind,
         record.range_label,
         record.rendered_at,
+        record.recipe_json,
     )
 }

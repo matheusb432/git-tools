@@ -127,6 +127,7 @@ dependencies = [
  "domain",
  "futures-util",
  "gtl-recipe",
+ "natord",
  "rusqlite",
  "serde",
  "thiserror 2.0.18",
@@ -782,6 +783,7 @@ dependencies = [
  "application",
  "assert_cmd",
  "clap",
+ "clap-cargo",
  "contracts",
  "domain",
  "gtl-platform",
@@ -1721,17 +1723,6 @@ dependencies = [
  "memchr",
  "pin-project-lite",
  "slab",
-]
-
-[[package]]
-name = "gate"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "clap",
- "predicates",
- "tempfile",
 ]
 
 [[package]]
@@ -2863,6 +2854,12 @@ dependencies = [
  "thiserror 2.0.18",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "natord"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "308d96db8debc727c3fd9744aac51751243420e46edf401010908da7f8d5e57c"
 
 [[package]]
 name = "ndk"
@@ -6213,7 +6210,6 @@ dependencies = [
  "predicates",
  "tempfile",
  "tiny-skia",
- "toml 1.1.2+spec-1.1.0",
  "which",
  "zbus",
 ]

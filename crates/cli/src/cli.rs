@@ -16,7 +16,14 @@ fn non_empty_name(value: &str) -> Result<String, String> {
 
 /// git-tools — render git workflow HTML previews and squash local commits.
 #[derive(Debug, Parser)]
-#[command(name = "git-tools", version, about, long_about = None, arg_required_else_help = true)]
+#[command(
+    name = "git-tools",
+    version,
+    about,
+    long_about = None,
+    arg_required_else_help = true,
+    styles = clap_cargo::style::CLAP_STYLING
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
@@ -238,13 +245,15 @@ pub struct TagArgs {
     /// Show the commit each tag points at.
     #[arg(short = 'c', long = "commits")]
     pub commits: bool,
+    /// Query origin and mark each tag [local] or [remote].
+    #[arg(short = 's', long = "state")]
+    pub state: bool,
 }
 
 /// Nested commands under `tag`.
 #[derive(Debug, Subcommand)]
 pub enum TagCommand {
-    /// List local tags, whether each is already known on origin, and each
-    /// annotated tag's message (first line).
+    /// List local tags and each annotated tag's message (first line).
     Ls,
     /// Create an annotated tag.
     Add {

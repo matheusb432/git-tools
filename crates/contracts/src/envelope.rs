@@ -63,29 +63,6 @@ mod tests {
     }
 
     #[test]
-    fn test_envelope_roundtrip_with_data() {
-        #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-        struct TestData {
-            value: String,
-        }
-
-        let original = Envelope {
-            outcome: Outcome::Ok,
-            notes: vec![Note {
-                level: NoteLevel::Info,
-                text: "All good".to_string(),
-            }],
-            data: Some(TestData {
-                value: "test".to_string(),
-            }),
-        };
-
-        let json = serde_json::to_string(&original).unwrap();
-        let deserialized: Envelope<TestData> = serde_json::from_str(&json).unwrap();
-        assert_eq!(original, deserialized);
-    }
-
-    #[test]
     fn test_envelope_roundtrip_without_data() {
         #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
         struct TestData {

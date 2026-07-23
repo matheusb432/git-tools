@@ -41,7 +41,7 @@ fn is_frontend_format_path(path: &Path) -> bool {
     ROOT_PATHS
         .iter()
         .any(|candidate| path == Path::new(candidate))
-        || (is_frontend_source_path(path, &["core", "diff"])
+        || (is_frontend_source_path(path, &["boot", "core", "diff", "viewer"])
             && extension_matches(
                 path,
                 &["js", "jsx", "ts", "tsx", "mjs", "cjs", "json", "jsonc"],
@@ -49,7 +49,7 @@ fn is_frontend_format_path(path: &Path) -> bool {
 }
 
 fn is_frontend_lint_path(path: &Path) -> bool {
-    is_frontend_source_path(path, &["core", "diff", "inline"])
+    is_frontend_source_path(path, &["boot", "core", "diff", "viewer"])
         && extension_matches(path, &["js", "jsx", "ts", "tsx", "mjs", "cjs"])
 }
 
@@ -83,7 +83,8 @@ mod tests {
             "docs/Guide Name.md",
             "frontend/core/copy.ts",
             "frontend/diff/vite.config.mjs",
-            "frontend/inline/theme-boot.ts",
+            "frontend/boot/theme-boot.ts",
+            "frontend/viewer/toast.ts",
             ".oxfmtrc.json",
             ".oxlintrc.json",
             "package.json",
@@ -102,6 +103,8 @@ mod tests {
             paths(&[
                 "frontend/core/copy.ts",
                 "frontend/diff/vite.config.mjs",
+                "frontend/boot/theme-boot.ts",
+                "frontend/viewer/toast.ts",
                 ".oxfmtrc.json",
                 ".oxlintrc.json",
                 "package.json",
@@ -114,7 +117,8 @@ mod tests {
             paths(&[
                 "frontend/core/copy.ts",
                 "frontend/diff/vite.config.mjs",
-                "frontend/inline/theme-boot.ts",
+                "frontend/boot/theme-boot.ts",
+                "frontend/viewer/toast.ts",
             ])
         );
     }

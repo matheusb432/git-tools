@@ -1,1 +1,1 @@
-(function(){try{var t=localStorage.getItem('gtl-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}})();
+(function(){function e(e,t){let n=e.getItem(`gtl-theme`);n&&(t.dataset.theme=n)}try{e(localStorage,document.documentElement)}catch{}})();

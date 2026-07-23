@@ -10,7 +10,6 @@ members = [
   "crates/e2e",
   "crates/infra",
   "crates/preview",
-  "gate",
   "shared/bootstrap",
   "shared/gtl-platform",
   "shared/gtl-recipe",
@@ -27,7 +26,6 @@ default-members = [
   "crates/e2e",
   "crates/infra",
   "crates/preview",
-  "gate",
   "shared/bootstrap",
   "shared/gtl-platform",
   "shared/gtl-recipe",
@@ -47,7 +45,7 @@ base64 = "0.22.1"
 bootstrap = { path = "shared/bootstrap" }
 cargo_metadata = "0.23.1"
 clap = { version = "4", features = ["derive"] }
-# cargo's own clap help palette, applied to xtask so `--help` renders like cargo's.
+# cargo's own clap help palette, so every workspace binary's `--help` renders like cargo's.
 clap-cargo = "0.18.3"
 command-group = "5.0.1"
 contracts = { path = "crates/contracts" }
@@ -65,6 +63,7 @@ infra = { path = "crates/infra" }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 lru = "0.18.1"
 maud = "0.27"
+natord = "1.0.9"
 nutype = "0.7.0"
 parking_lot = "0.12.5"
 predicates = "3"

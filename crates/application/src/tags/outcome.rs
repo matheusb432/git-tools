@@ -10,13 +10,11 @@ pub enum TagRemotePushProgress {
     Indeterminate { attempted_refs: Vec<String> },
 }
 
-/// Reports refs created, published, tracked, and still needing tracking recovery.
+/// Reports refs created and published before an outcome or error was reached.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TagOperationProgress {
     pub created_refs: Vec<String>,
     pub remote_push: TagRemotePushProgress,
-    pub tracking_refs_updated: Vec<String>,
-    pub tracking_refs_pending: Vec<String>,
 }
 
 impl TagOperationProgress {
@@ -42,19 +40,6 @@ impl TagOperationProgress {
         self.remote_push = TagRemotePushProgress::Completed {
             pushed_refs: names.iter().map(|name| local_ref(name)).collect(),
         };
-        for name in names {
-            let tracking_ref = tracking_ref(name);
-            if !self.tracking_refs_updated.contains(&tracking_ref) {
-                push_unique(&mut self.tracking_refs_pending, tracking_ref);
-            }
-        }
-    }
-
-    pub(super) fn record_tracking_updated(&mut self, name: &str) {
-        let tracking_ref = tracking_ref(name);
-        push_unique(&mut self.tracking_refs_updated, tracking_ref.clone());
-        self.tracking_refs_pending
-            .retain(|pending| pending != &tracking_ref);
     }
 
     pub(super) fn merge(&mut self, prior: Self) {
@@ -63,16 +48,6 @@ impl TagOperationProgress {
         }
         if self.remote_push == TagRemotePushProgress::NotStarted {
             self.remote_push = prior.remote_push;
-        }
-        for name in prior.tracking_refs_updated {
-            push_unique(&mut self.tracking_refs_updated, name.clone());
-            self.tracking_refs_pending
-                .retain(|pending| pending != &name);
-        }
-        for name in prior.tracking_refs_pending {
-            if !self.tracking_refs_updated.contains(&name) {
-                push_unique(&mut self.tracking_refs_pending, name);
-            }
         }
     }
 }
@@ -87,18 +62,14 @@ fn local_ref(name: &str) -> String {
     format!("refs/tags/{name}")
 }
 
-fn tracking_ref(name: &str) -> String {
-    format!("refs/remotes/origin/tags/{name}")
-}
-
 /// Classifies a tag creation or publication attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TagActionStatus {
     /// An annotated tag was created locally.
     Created,
-    /// The requested refs already matched the tracked remote state.
+    /// Origin already held every requested tag object.
     Noop,
-    /// One or more tag refs were published and tracked locally.
+    /// One or more tag refs were published.
     Pushed,
     /// Validation or a Git operation failed.
     Failed,

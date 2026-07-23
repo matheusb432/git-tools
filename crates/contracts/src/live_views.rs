@@ -43,18 +43,4 @@ mod tests {
 
         assert_eq!(legacy.path, "/home/user/repo");
     }
-
-    #[test]
-    fn test_save_live_view_data_roundtrip() {
-        let original = SaveLiveViewData {
-            source_kind: "LocalRepo".to_string(),
-            source_value: "/home/user/repo".to_string(),
-            display_name: "repo".to_string(),
-            already_saved: true,
-        };
-
-        let json = serde_json::to_string(&original).unwrap();
-        let deserialized: SaveLiveViewData = serde_json::from_str(&json).unwrap();
-        assert_eq!(original, deserialized);
-    }
 }

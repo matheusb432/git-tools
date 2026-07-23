@@ -36,6 +36,7 @@ This is the embedded kind, not an installable tool. It deliberately ships **no i
 - `src/cli.rs` — the clap-derive `Subcommand` verb surface; doc comments are the `--help` SSOT and each arm's name comes from a `Verb` constant.
 - `src/verb.rs` — the `Verb` name constants shared by the clap surface and the `RESULT` scopes.
 - `src/process.rs` — shared child-process execution and the `RESULT scope=… status=…` contract helpers.
+- `src/gate.rs` — captures a bash command's combined output into `.artifacts/logs/<scope>.log`, printing a terse PASS/FAIL line plus the `RESULT` contract line and tailing the log on failure.
 - `src/task.rs` — labeled command steps (`Step`) plus `run_all` / `check_all` plan orchestration.
 - `src/verbs/` — one module per verb, each owning its flags and workflow with pure helpers where command planning needs unit coverage; `format/` is the formatter matrix and linter gate, `install/` adds the Linux desktop-entry/icon submodule, and `check_structure/` is the architecture lint.
 - `tests/cli.rs` — `assert_cmd` arg-surface tests.
@@ -43,7 +44,7 @@ This is the embedded kind, not an installable tool. It deliberately ships **no i
 
 ## Adding a verb
 
-Add an arm to `cli::Command` (its doc comment is the `--help` text) named via a `Verb` constant, a module under `src/verbs/`, and an arg-surface test. Express mutually-exclusive flags with clap's `conflicts_with`, not a runtime guard. Route child processes through `src/process.rs` (command plans through `src/task.rs`); captured runs delegate to the `gate` binary rather than reimplementing capture.
+Add an arm to `cli::Command` (its doc comment is the `--help` text) named via a `Verb` constant, a module under `src/verbs/`, and an arg-surface test. Express mutually-exclusive flags with clap's `conflicts_with`, not a runtime guard. Route child processes through `src/process.rs` (command plans through `src/task.rs`); captured runs delegate to `src/gate.rs` rather than reimplementing capture.
 
 ## Build & test
 

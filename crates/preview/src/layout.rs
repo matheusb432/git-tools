@@ -11,6 +11,20 @@ mod tree;
 use application::{diffs::View, viewer::RenderOptions};
 use maud::{Markup, html};
 
+/// The host that consumes one rendered `.layout` body.
+///
+/// The two hosts share every region, but file bodies diverge: the desktop app's
+/// wry/WebKitGTK webview never marks swapped-in `content-visibility:auto`
+/// subtrees relevant, leaving them permanently unpainted, so only browser
+/// artifacts opt into that offscreen-skip optimization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Surface {
+    /// The desktop viewer's embedded webview.
+    App,
+    /// Self-contained offline documents opened in a browser.
+    Artifact,
+}
+
 const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
     "layout copy-ctx grid h-screen grid-cols-[262px_minmax(0,1fr)_252px] grid-rows-[auto_1fr_auto] ",
     "[@media(min-width:1600px)_and_(min-height:900px)]:grid-cols-[320px_minmax(0,1fr)_304px] ",
@@ -23,7 +37,7 @@ const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
 // document chrome — one <style>/<script> — lives only at the top level. Per-commit
 // [popover] elements live inside .layout so the per-layout JS scoping in preview.js
 // finds them.
-pub(crate) fn view_body(view: &View, options: RenderOptions) -> Markup {
+pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -> Markup {
     html! {
         div class={
             (LAYOUT_PRESENTATION_CLASSES) " "
@@ -34,7 +48,7 @@ pub(crate) fn view_body(view: &View, options: RenderOptions) -> Markup {
             (titlebar::titlebar(view))
             (tree::tree(view))
             main class="main [grid-area:2/2] overflow-auto px-[22px] pt-4 pb-[60px] [@media(min-width:1600px)_and_(min-height:900px)]:px-7 [@media(min-width:1025px)_and_(max-width:1280px)]:px-4 [@media(max-width:1024px)]:px-3 [@media(max-width:1024px)]:pb-12 print:overflow-visible print:p-0" {
-                (files::file_blocks(view, options))
+                (files::file_blocks(view, options, surface))
             }
             (shelf::shelf(view))
             (keybar::keybar(view))
@@ -104,7 +118,6 @@ mod tests {
         assert!(html.contains("print:block"));
         assert!(html.contains(r#"<aside class="tree "#));
         assert!(html.contains("print:hidden!"));
-        assert!(html.contains("print:block!"));
 
         for static_selector in [
             "[&_.tree]",

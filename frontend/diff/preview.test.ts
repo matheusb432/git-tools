@@ -118,7 +118,7 @@ test("tab hooks select one semantic panel at a time", () => {
   expect(panel1.hidden).toBe(false);
 });
 
-test("copy context toast carries presentation without transition utilities", () => {
+test("copy context toast fades in and out on the compositor", () => {
   document.body.replaceChildren();
   const root = document.createElement("div");
   root.className = "layout copy-ctx";
@@ -155,9 +155,9 @@ test("copy context toast carries presentation without transition utilities", () 
   const toast = document.querySelector<HTMLElement>(".gtl-toast");
   expect(toast).not.toBeNull();
   expect(toast?.classList.contains("fixed")).toBe(true);
-  expect(toast?.className).toContain("[&.show]:opacity-100");
+  expect(toast?.className).toContain("transition-[opacity,scale]");
+  expect(toast?.className).toContain("[&[data-leaving]]:opacity-0");
   expect(toast?.classList.contains("print:hidden!")).toBe(true);
-  expect(toast?.className).not.toMatch(/transition/);
   expect(clipboardData.setData).toHaveBeenCalledWith("text/plain", "// * src/main.ts\nconst value = 1;");
 });
 

@@ -7,10 +7,9 @@ use super::{
 };
 use crate::protocol_config;
 
-// ! Authored in frontend/inline/*.ts and shipped verbatim (the build copies the bytes;
-// ! inline.test.ts pins source/generated identity and plain-JS syntax).
-const THEME_CONTROL_JS: &str = include_str!("../embedded/generated/theme-control.js");
-const PENDING_RECIPES_JS: &str = include_str!("../embedded/generated/pending-recipes.js");
+// ! Built by `deno task build` from frontend/viewer/ (Vite lib IIFE); the drift gate
+// ! pins the output to its sources.
+const VIEWER_JS: &str = include_str!("../embedded/generated/viewer.js");
 
 /// Renders the server-authored viewer document and its independently swappable fragments.
 #[derive(Debug, Clone, Copy, Default)]
@@ -44,14 +43,13 @@ impl MaudViewerRenderer {
                     style { (PreEscaped(preview::preview_css())) }
                     meta name="htmx-config" content=r#"{"includeIndicatorStyles":false,"scrollBehavior":"instant","globalViewTransitions":false}"#;
                     script { (PreEscaped(htmx)) }
-                    script { (PreEscaped(THEME_CONTROL_JS)) }
                 }
                 body class="viewer-shell overflow-hidden" {
                     main class="grid h-screen min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-bg" {
                         (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::None))
                         (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
                     }
-                    aside id="viewer-history-popover" class="viewer-history-popover m-auto h-[min(680px,calc(100vh_-_84px))] w-[min(1040px,calc(100vw_-_48px))] max-w-none border-line-2 bg-surface p-0 inset-[42px] shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)] [@media(max-width:760px)]:h-[calc(100vh_-_24px)] [@media(max-width:760px)]:w-[calc(100vw_-_24px)] [@media(max-width:760px)]:inset-3" popover {
+                    aside id="viewer-history-popover" class="viewer-history-popover m-auto h-[min(680px,calc(100vh_-_84px))] w-[min(1040px,calc(100vw_-_48px))] max-w-none overflow-hidden border-line-2 bg-surface p-0 inset-[42px] shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)] [@media(max-width:760px)]:h-[calc(100vh_-_24px)] [@media(max-width:760px)]:w-[calc(100vw_-_24px)] [@media(max-width:760px)]:inset-3" popover {
                         header class="viewer-history-header flex items-center justify-between border-b border-line bg-surface-2 px-4 py-[13px]" {
                             div {
                                 strong class="block text-[13px] text-ink" { "Render history" }
@@ -62,7 +60,7 @@ impl MaudViewerRenderer {
                         (fragments::history(document.history()))
                     }
                     script { (PreEscaped(preview::preview_bundle())) }
-                    script { (PreEscaped(PENDING_RECIPES_JS)) }
+                    script { (PreEscaped(VIEWER_JS)) }
                 }
             }
         }

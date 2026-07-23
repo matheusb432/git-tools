@@ -10,14 +10,14 @@ pub use tabbed::build_tabbed_html;
 
 use crate::{
     assets::{PREVIEW_BUNDLE, preview_css},
+    layout::{Surface, view_body},
     text::plural,
-    view_fragment,
 };
 
-// ! Head boot: restore the saved theme before paint to avoid a palette flash. IIFE-wrapped so
-// ! locals never leak into the minified bundle's global scope.
-// ! Authored in frontend/inline/theme-boot.ts and shipped verbatim (build copies the bytes).
-const THEME_BOOT_JS: &str = include_str!("../embedded/generated/boot.js");
+// ! Head boot: restore the saved theme before paint to avoid a palette flash. Built by
+// ! `deno task build` from frontend/boot/ (Vite lib IIFE), so locals never leak into the
+// ! minified bundle's global scope.
+const THEME_BOOT_JS: &str = include_str!("embedded/generated/boot.js");
 
 pub fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> String {
     let count = view.commits.len();
@@ -34,7 +34,7 @@ pub fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> S
                 style { (PreEscaped(preview_css())) }
             }
             body {
-                (view_fragment(view, options))
+                (view_body(view, options, Surface::Artifact))
                 script { (PreEscaped(PREVIEW_BUNDLE)) }
             }
         }
@@ -58,26 +58,19 @@ mod tests {
     };
 
     #[test]
-    fn artifact_contains_the_exact_shared_layout_once() {
+    fn artifact_and_app_fragment_differ_only_in_filebody_presentation() {
         let view = sample_view();
         let options = RenderOptions::DEFAULT;
         let fragment = view_fragment(&view, options).into_string();
         let html = build_html(&view, options, None);
+        let artifact_as_app = html
+            .replace(
+                "filebody single-variant [content-visibility:auto] overflow-hidden rounded-b-panel print:block! print:[content-visibility:visible] print:overflow-visible",
+                "filebody single-variant overflow-hidden rounded-b-panel",
+            )
+            .replace(r#" style="contain-intrinsic-size:auto 88px""#, "");
 
-        assert_eq!(html.matches(&fragment).count(), 1);
-    }
-
-    #[test]
-    fn raw_and_viewer_layout_markup_is_byte_identical() {
-        let view = sample_view();
-        let options = RenderOptions::DEFAULT;
-        let fragment = view_fragment(&view, options).into_string();
-        let html = build_html(&view, options, None);
-        let start = html
-            .find(&fragment)
-            .expect("artifact contains viewer layout");
-
-        assert_eq!(&html[start..start + fragment.len()], fragment);
+        assert_eq!(artifact_as_app.matches(&fragment).count(), 1);
     }
 
     #[test]
