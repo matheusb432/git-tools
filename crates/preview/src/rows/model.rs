@@ -1,8 +1,8 @@
-//! Structured diff rows: the line-level model derived from a file's raw
-//! unified-diff text, consumed by every renderer (Maud HTML and the native
-//! viewer) so hunk/gutter parsing exists in exactly one place.
+//! Structured diff rows derived from classified unified-diff text. Every
+//! renderer consumes this model so gutter and ownership derivation exist in
+//! one place.
 
-use application::diffs::LineOwners;
+use application::diffs::{LineOwners, UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 
 /// Char length (marker excluded) beyond which a line is "long" and is exempt
 /// from intra-line diffing and wrap layout. Shared presentation rule for all
@@ -33,22 +33,6 @@ pub(super) struct Row {
     pub(super) owner: Option<String>,
 }
 
-/// True for git's non-code diff lines (file headers, mode/rename/similarity
-/// markers, binary notices, the `\ No newline` marker).
-pub(super) fn is_meta_line(raw: &str) -> bool {
-    raw.starts_with("index ")
-        || raw.starts_with("--- ")
-        || raw.starts_with("+++ ")
-        || raw.starts_with("new file")
-        || raw.starts_with("deleted file")
-        || raw.starts_with("old mode")
-        || raw.starts_with("new mode")
-        || raw.starts_with("similarity ")
-        || raw.starts_with("rename ")
-        || raw.starts_with("Binary ")
-        || raw.starts_with('\\')
-}
-
 /// Derive structured rows from a file's raw diff lines, tracking absolute
 /// gutter numbers from hunk headers and attaching per-line commit ownership.
 /// Empty lines are skipped; a malformed hunk header degrades to a context row
@@ -57,64 +41,66 @@ pub(super) fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
     let mut old_no = 0u32;
     let mut new_no = 0u32;
     let mut rows = Vec::with_capacity(lines.len());
+    let mut line_classifier = UnifiedDiffLineClassifier::default();
 
     for raw in lines {
         if raw.is_empty() {
             continue;
         }
 
-        if is_meta_line(raw) {
-            rows.push(Row {
+        match line_classifier.classify(raw) {
+            UnifiedDiffLineKind::Meta => rows.push(Row {
                 kind: RowKind::Meta,
                 old_no: None,
                 new_no: None,
                 text: raw.clone(),
                 owner: None,
-            });
-            continue;
-        }
-
-        if let Some((old_start, new_start)) = hunk_starts(raw) {
-            old_no = old_start;
-            new_no = new_start;
-            rows.push(Row {
-                kind: RowKind::Hunk,
-                old_no: None,
-                new_no: None,
-                text: raw.clone(),
-                owner: None,
-            });
-            continue;
-        }
-
-        if raw.starts_with('+') && !raw.starts_with("+++") {
-            rows.push(Row {
-                kind: RowKind::Add,
-                old_no: None,
-                new_no: Some(new_no),
-                text: raw.clone(),
-                owner: owners.added.get(&new_no).cloned(),
-            });
-            new_no += 1;
-        } else if raw.starts_with('-') && !raw.starts_with("---") {
-            rows.push(Row {
-                kind: RowKind::Del,
-                old_no: Some(old_no),
-                new_no: None,
-                text: raw.clone(),
-                owner: owners.deleted.get(&old_no).cloned(),
-            });
-            old_no += 1;
-        } else {
-            rows.push(Row {
-                kind: RowKind::Context,
-                old_no: Some(old_no),
-                new_no: Some(new_no),
-                text: raw.clone(),
-                owner: None,
-            });
-            old_no += 1;
-            new_no += 1;
+            }),
+            UnifiedDiffLineKind::Hunk {
+                line_number_old,
+                line_number_new,
+            } => {
+                old_no = line_number_old;
+                new_no = line_number_new;
+                rows.push(Row {
+                    kind: RowKind::Hunk,
+                    old_no: None,
+                    new_no: None,
+                    text: raw.clone(),
+                    owner: None,
+                });
+            }
+            UnifiedDiffLineKind::Added => {
+                rows.push(Row {
+                    kind: RowKind::Add,
+                    old_no: None,
+                    new_no: Some(new_no),
+                    text: raw.clone(),
+                    owner: owners.added.get(&new_no).cloned(),
+                });
+                new_no += 1;
+            }
+            UnifiedDiffLineKind::Removed => {
+                rows.push(Row {
+                    kind: RowKind::Del,
+                    old_no: Some(old_no),
+                    new_no: None,
+                    text: raw.clone(),
+                    owner: owners.deleted.get(&old_no).cloned(),
+                });
+                old_no += 1;
+            }
+            UnifiedDiffLineKind::Context => {
+                rows.push(Row {
+                    kind: RowKind::Context,
+                    old_no: Some(old_no),
+                    new_no: Some(new_no),
+                    text: raw.clone(),
+                    owner: None,
+                });
+                old_no += 1;
+                new_no += 1;
+            }
         }
     }
 
@@ -135,30 +121,6 @@ pub(super) fn long_line_len(raw: &str) -> Option<usize> {
     let marker = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
     let len = raw.chars().count().saturating_sub(marker);
     (len > MAX_LINE_COLS).then_some(len)
-}
-
-/// Parse `@@ -a[,b] +c[,d] @@ …` into the two start line numbers.
-fn hunk_starts(raw: &str) -> Option<(u32, u32)> {
-    let rest = raw.strip_prefix("@@ -")?;
-    let (old_part, rest) = rest.split_once(" +")?;
-    let (new_part, _) = rest.split_once(" @@")?;
-    Some((parse_hunk_range(old_part)?, parse_hunk_range(new_part)?))
-}
-
-fn parse_hunk_range(s: &str) -> Option<u32> {
-    let (start, len) = match s.split_once(',') {
-        Some((start, len)) => (start, Some(len)),
-        None => (s, None),
-    };
-
-    if start.is_empty()
-        || !start.chars().all(|ch| ch.is_ascii_digit())
-        || len.is_some_and(|value| value.is_empty() || !value.chars().all(|ch| ch.is_ascii_digit()))
-    {
-        return None;
-    }
-
-    start.parse().ok()
 }
 
 #[cfg(test)]
@@ -193,6 +155,42 @@ mod tests {
         assert_eq!(rows[4].kind, RowKind::Add);
         assert_eq!((rows[4].old_no, rows[4].new_no), (None, Some(8)));
         assert_eq!(rows[4].text, "+new");
+    }
+
+    #[test]
+    fn header_like_hunk_content_keeps_changed_rows_and_gutters() {
+        let rows = derive_rows(
+            &lines(&[
+                "--- a/a.sql",
+                "+++ b/a.sql",
+                "@@ -1,2 +1,3 @@",
+                "--- old heading",
+                "+-- new heading",
+                "+++ literal",
+                " keep",
+            ]),
+            &LineOwners::default(),
+        );
+
+        assert_eq!(rows[0].kind, RowKind::Meta);
+        assert_eq!(rows[1].kind, RowKind::Meta);
+        assert_eq!(rows[2].kind, RowKind::Hunk);
+        assert_eq!(
+            (rows[3].kind, rows[3].old_no, rows[3].new_no),
+            (RowKind::Del, Some(1), None)
+        );
+        assert_eq!(
+            (rows[4].kind, rows[4].old_no, rows[4].new_no),
+            (RowKind::Add, None, Some(1))
+        );
+        assert_eq!(
+            (rows[5].kind, rows[5].old_no, rows[5].new_no),
+            (RowKind::Add, None, Some(2))
+        );
+        assert_eq!(
+            (rows[6].kind, rows[6].old_no, rows[6].new_no),
+            (RowKind::Context, Some(2), Some(3))
+        );
     }
 
     #[test]

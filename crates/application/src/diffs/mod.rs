@@ -17,10 +17,12 @@ pub mod render_diff_subrepos;
 pub mod render_merge_diff;
 pub mod render_squash_preview;
 mod target;
+mod unified_diff;
 pub mod util;
 mod view;
 
 pub use batch::RepoRef;
 pub use file::{FileDiff, FileStatus, LineOwners};
 pub use target::{DiffTarget, DiffTargetRequest, DiffTargetRequestError, PinnedRange};
+pub use unified_diff::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 pub use view::{Cmd, Foot, View, sort_files_tree_order};
