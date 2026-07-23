@@ -1,13 +1,13 @@
 @layer base, utilities;
 @import "./tokens.css";
 @import "./theme-map.css";
-@source "../layout";
-@source "../rows";
-@source "../artifact";
-@source "../../../../frontend/core/toast.ts";
-@source "../../../../frontend/diff/enhance-layout.ts";
-@source "../../../desktop/src/render";
-@source "../../../desktop/src/routes/render.rs";
+@source "../";
+@source not "../embedded";
+@source not "../styles";
+@source "../../../../frontend/core";
+@source "../../../../frontend/diff";
+@source "../../../desktop/src";
+@source not "../../../desktop/src/embedded";
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 
 @layer base {
@@ -36,4 +36,15 @@
   ::selection {
     background: var(--acc-soft);
   }
+
+  .sy-kw { color: var(--sy-kw); }
+  .sy-str { color: var(--sy-str); }
+  .sy-com { color: var(--sy-com); }
+  .sy-typ { color: var(--sy-typ); }
+  .sy-fn { color: var(--sy-fn); }
+  .sy-num { color: var(--sy-num); }
+  .sy-con { color: var(--sy-con); }
+  .sy-op { color: var(--sy-op); }
+  .sy-tag { color: var(--sy-tag); }
+  .sy-var { color: var(--sy-var); }
 }

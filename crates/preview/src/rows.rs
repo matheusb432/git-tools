@@ -4,18 +4,23 @@
 //! emit semantic classes (`.dl`, `.sp`, `.ln`, `.ciw`) styled once by the
 //! layout root, so per-row markup weight stays constant.
 
+mod highlight;
 mod intraline;
 mod model;
 mod split;
 
 use application::diffs::LineOwners;
+use syntect::parsing::SyntaxReference;
 
 use self::{
     intraline::Span,
     model::{Row, RowKind, derive_rows, long_line_len},
     split::{SplitRow, split_rows},
 };
-use crate::text::{escape_html, html_or_nbsp, push_escaped};
+use crate::{
+    syntax::Token,
+    text::{escape_html, html_or_nbsp, push_escaped},
+};
 
 pub(crate) const ROW_PRESENTATION_CLASSES: &str = concat!(
     "[&_.dl]:grid [&_.dl]:grid-cols-[44px_44px_minmax(0,1fr)] [&_.dl]:items-start [&_.dl]:whitespace-normal ",
@@ -26,9 +31,9 @@ pub(crate) const ROW_PRESENTATION_CLASSES: &str = concat!(
     "[&_:is(.dl-long.expanded_.code-text,.diff-split_code.long.expanded_.code-text)]:overflow-x-auto [&_:is(.dl-long.expanded_.code-text,.diff-split_code.long.expanded_.code-text)]:text-clip ",
     "[&_.ln-more]:flex-none [&_.ln-more]:cursor-pointer [&_.ln-more]:select-none [&_.ln-more]:rounded-sm [&_.ln-more]:border [&_.ln-more]:border-acc-line [&_.ln-more]:bg-acc-soft [&_.ln-more]:px-1.5 [&_.ln-more]:text-[11px] [&_.ln-more]:text-acc [&_.ln-more]:[font:inherit] ",
     "[&_.ln-more:hover]:bg-acc [&_.ln-more:hover]:text-bg ",
-    "[&_.dl-add]:bg-add-bg [&_.dl-add_.ln]:bg-add-gut [&_.dl-add_.ln]:text-add [&_.dl-add_code]:text-add-ink ",
-    "[&_.dl-del]:bg-del-bg [&_.dl-del_.ln]:bg-del-gut [&_.dl-del_.ln]:text-del [&_.dl-del_code]:text-del-ink ",
-    "[&_.dl-ctx_code]:text-ink-2 [&_.dl-hunk]:bg-sunk [&_.dl-hunk_code]:font-semibold [&_.dl-hunk_code]:text-ink-3 ",
+    "[&_.dl-add]:bg-add-bg [&_.dl-add_.ln]:bg-add-gut [&_.dl-add_.ln]:text-add ",
+    "[&_.dl-del]:bg-del-bg [&_.dl-del_.ln]:bg-del-gut [&_.dl-del_.ln]:text-del ",
+    "[&_.dl-hunk]:bg-sunk [&_.dl-hunk_code]:font-semibold [&_.dl-hunk_code]:text-ink-3 ",
     "[&_.dl-meta]:opacity-60 [&_.dl-meta_code]:text-ink-3 ",
     "[&.commit-focus_.diff-unified_.dl]:opacity-[.34] [&.commit-focus_.diff-unified_.dl.owned]:opacity-100 ",
     "[&.commit-focus_.diff-unified_:is(.dl-add,.dl-del).owned]:shadow-[inset_3px_0_0_var(--acc)]",
@@ -37,17 +42,23 @@ pub(crate) const ROW_PRESENTATION_CLASSES: &str = concat!(
 pub(crate) const SPLIT_PRESENTATION_CLASSES: &str = split::PRESENTATION_CLASSES;
 pub(crate) const INTRALINE_PRESENTATION_CLASSES: &str = intraline::PRESENTATION_CLASSES;
 
-pub(crate) fn render_diff_lines(lines: &[String], owners: &LineOwners) -> String {
-    render_unified_rows(&derive_rows(lines, owners))
+pub(crate) fn render_diff_lines(
+    lines: &[String],
+    owners: &LineOwners,
+    syntax: Option<&SyntaxReference>,
+) -> String {
+    let rows = derive_rows(lines, owners);
+    let tokens = highlight::row_tokens(&rows, syntax);
+    render_unified_rows(&rows, &tokens)
 }
 
-fn render_unified_rows(parsed: &[Row]) -> String {
+fn render_unified_rows(parsed: &[Row], tokens: &[Vec<Token>]) -> String {
     use std::fmt::Write;
 
     let mut rows =
         String::with_capacity(parsed.iter().map(|row| row.text.len()).sum::<usize>() * 2);
 
-    for row in parsed {
+    for (row, row_tokens) in parsed.iter().zip(tokens) {
         match row.kind {
             RowKind::Meta => {
                 let _ = write!(
@@ -71,7 +82,7 @@ fn render_unified_rows(parsed: &[Row]) -> String {
                     if long.is_some() { " dl-long" } else { "" },
                     commit_attr(row.owner.as_ref()),
                     row.new_no.unwrap_or(0),
-                    code_cell(&row.text, long),
+                    code_cell(&row.text, long, row_tokens),
                 );
             }
             RowKind::Del => {
@@ -82,7 +93,7 @@ fn render_unified_rows(parsed: &[Row]) -> String {
                     if long.is_some() { " dl-long" } else { "" },
                     commit_attr(row.owner.as_ref()),
                     row.old_no.unwrap_or(0),
-                    code_cell(&row.text, long),
+                    code_cell(&row.text, long, row_tokens),
                 );
             }
             RowKind::Context => {
@@ -93,7 +104,7 @@ fn render_unified_rows(parsed: &[Row]) -> String {
                     if long.is_some() { " dl-long" } else { "" },
                     row.old_no.unwrap_or(0),
                     row.new_no.unwrap_or(0),
-                    code_cell(&row.text, long),
+                    code_cell(&row.text, long, row_tokens),
                 );
             }
         }
@@ -106,8 +117,14 @@ fn render_unified_rows(parsed: &[Row]) -> String {
 // out as old | new panes. Within a hunk, a run of deletions is paired index-wise with the
 // following run of additions (the shorter side padded), context lines mirror on both panes,
 // and meta/hunk headers span the full width. Same gutter-number tracking and owner tagging.
-pub(crate) fn render_diff_split(lines: &[String], owners: &LineOwners) -> String {
-    render_split_rows(&split_rows(&derive_rows(lines, owners)))
+pub(crate) fn render_diff_split(
+    lines: &[String],
+    owners: &LineOwners,
+    syntax: Option<&SyntaxReference>,
+) -> String {
+    let rows = derive_rows(lines, owners);
+    let tokens = highlight::row_tokens(&rows, syntax);
+    render_split_rows(&split_rows(&rows, &tokens))
 }
 
 fn render_split_rows(parsed: &[SplitRow]) -> String {
@@ -135,12 +152,13 @@ fn render_split_rows(parsed: &[SplitRow]) -> String {
                 old_no,
                 new_no,
                 text,
+                tokens,
             } => {
                 let long = long_line_len(text);
                 let _ = write!(rows, r#"<div class="dl"><span class="ln">{old_no}</span>"#);
-                push_split_code(&mut rows, text, long, "sp-ctx", None, &[]);
+                push_split_code(&mut rows, text, long, "sp-ctx", None, tokens, &[]);
                 let _ = write!(rows, r#"<span class="ln">{new_no}</span>"#);
-                push_split_code(&mut rows, text, long, "sp-ctx", None, &[]);
+                push_split_code(&mut rows, text, long, "sp-ctx", None, tokens, &[]);
                 rows.push_str("</div>");
             }
             SplitRow::Pair { old, new } => {
@@ -154,6 +172,7 @@ fn render_split_rows(parsed: &[SplitRow]) -> String {
                             long_line_len(&cell.text),
                             "sp-del",
                             cell.owner.as_ref(),
+                            &cell.tokens,
                             &cell.spans,
                         );
                     }
@@ -168,6 +187,7 @@ fn render_split_rows(parsed: &[SplitRow]) -> String {
                             long_line_len(&cell.text),
                             "sp-add",
                             cell.owner.as_ref(),
+                            &cell.tokens,
                             &cell.spans,
                         );
                     }
@@ -189,12 +209,17 @@ fn commit_attr(sha: Option<&String>) -> String {
 
 // ! Inner content of a `<code>` cell: the bare body, or for a tamed long line, the copy-safe
 // ! `.code-text` span plus the expander button. Shared by `code_cell` and `push_split_code`.
-fn code_inner(raw: &str, long: Option<usize>) -> String {
-    let body = html_or_nbsp(raw);
+fn code_inner(raw: &str, long: Option<usize>, tokens: &[Token]) -> String {
     match long {
-        None => body,
+        None if tokens.is_empty() => html_or_nbsp(raw),
+        None => {
+            let mut body = String::with_capacity(raw.len() * 2);
+            push_marked_body(&mut body, raw, tokens, &[]);
+            body
+        }
         Some(len) => format!(
-            r#"<span class="code-text">{body}</span><button class="ln-more" type="button" aria-expanded="false">⋯ {len} chars</button>"#
+            r#"<span class="code-text">{}</span><button class="ln-more" type="button" aria-expanded="false">⋯ {len} chars</button>"#,
+            html_or_nbsp(raw)
         ),
     }
 }
@@ -202,8 +227,8 @@ fn code_inner(raw: &str, long: Option<usize>) -> String {
 // ! Long lines (e.g. base64 data URIs) would force char-by-char wrap layout and freeze the
 // ! page. Tame them: full text stays in `.code-text` (copy-safe) but renders clipped/no-wrap,
 // ! with an expander that reveals horizontal scroll. `long` is the precomputed Some(len).
-fn code_cell(raw: &str, long: Option<usize>) -> String {
-    let inner = code_inner(raw, long);
+fn code_cell(raw: &str, long: Option<usize>, tokens: &[Token]) -> String {
+    let inner = code_inner(raw, long, tokens);
     if long.is_some() {
         format!(r#"<code class="long">{inner}</code>"#)
     } else {
@@ -218,6 +243,7 @@ fn push_split_code(
     long: Option<usize>,
     side: &str,
     commit: Option<&String>,
+    tokens: &[Token],
     spans: &[Span],
 ) {
     out.push_str(r#"<code class="sp "#);
@@ -234,8 +260,8 @@ fn push_split_code(
     out.push('>');
 
     if long.is_some() {
-        out.push_str(&code_inner(raw, long));
-    } else if spans.is_empty() {
+        out.push_str(&code_inner(raw, long, &[]));
+    } else if tokens.is_empty() && spans.is_empty() {
         if raw.is_empty() {
             out.push_str("&nbsp;");
         } else {
@@ -244,37 +270,61 @@ fn push_split_code(
             }
         }
     } else {
-        out.push_str(&mark_spans(raw, spans));
+        push_marked_body(out, raw, tokens, spans);
     }
     out.push_str("</code>");
 }
 
-// ! Escape a changed line body char by char, wrapping the `spans` (char-index ranges into the
-// ! body, i.e. after the leading +/- marker) in `.ciw` so CSS can paint the VS Code-style
-// ! intra-line highlight. The marker char is ASCII +/- (never escaped) and is never wrapped.
-fn mark_spans(raw: &str, spans: &[Span]) -> String {
-    let mut out = String::with_capacity(raw.len() + spans.len() * 26);
+// ! Escape a line body char by char, wrapping syntax token runs and intra-line
+// ! changed runs in flat spans. A span closes and reopens wherever either
+// ! range set changes, so tags never nest or overlap; both spans and tokens
+// ! are char-indexed into the body (after the leading +/- /space marker),
+// ! which is emitted bare first.
+fn push_marked_body(out: &mut String, raw: &str, tokens: &[Token], spans: &[Span]) {
     let mut chars = raw.chars();
     if let Some(marker) = chars.next() {
         out.push(marker);
     }
 
     let mut open = false;
+    let mut current: (Option<&'static str>, bool) = (None, false);
     for (i, ch) in chars.enumerate() {
-        let inside = spans.iter().any(|span| i >= span.start && i < span.end);
-        if inside && !open {
-            out.push_str(r#"<span class="ciw">"#);
-            open = true;
-        } else if !inside && open {
-            out.push_str("</span>");
-            open = false;
+        let class = tokens
+            .iter()
+            .find(|token| i >= token.start && i < token.end)
+            .map(|token| token.class.css_class());
+        let ciw = spans.iter().any(|span| i >= span.start && i < span.end);
+        if (class, ciw) != current {
+            if open {
+                out.push_str("</span>");
+                open = false;
+            }
+            current = (class, ciw);
+            match (class, ciw) {
+                (None, false) => {}
+                (Some(class), false) => {
+                    out.push_str(r#"<span class=""#);
+                    out.push_str(class);
+                    out.push_str(r#"">"#);
+                    open = true;
+                }
+                (Some(class), true) => {
+                    out.push_str(r#"<span class=""#);
+                    out.push_str(class);
+                    out.push_str(r#" ciw">"#);
+                    open = true;
+                }
+                (None, true) => {
+                    out.push_str(r#"<span class="ciw">"#);
+                    open = true;
+                }
+            }
         }
-        push_escaped(&mut out, ch);
+        push_escaped(out, ch);
     }
     if open {
         out.push_str("</span>");
     }
-    out
 }
 
 // ! An empty side of a side-by-side row — no line on this pane, so a blank gutter and a
@@ -288,46 +338,50 @@ mod tests {
         split::{SplitCell, SplitRow},
         *,
     };
+    use crate::syntax::{TokenClass, syntax_for_path};
 
     #[test]
     fn render_unified_rows_maps_each_row_kind_and_gutter() {
-        let html = render_unified_rows(&[
-            Row {
-                kind: RowKind::Meta,
-                old_no: None,
-                new_no: None,
-                text: "index 111..222 100644".into(),
-                owner: None,
-            },
-            Row {
-                kind: RowKind::Hunk,
-                old_no: None,
-                new_no: None,
-                text: "@@ -3,2 +7,2 @@".into(),
-                owner: None,
-            },
-            Row {
-                kind: RowKind::Context,
-                old_no: Some(3),
-                new_no: Some(7),
-                text: " keep".into(),
-                owner: None,
-            },
-            Row {
-                kind: RowKind::Del,
-                old_no: Some(4),
-                new_no: None,
-                text: "-old".into(),
-                owner: None,
-            },
-            Row {
-                kind: RowKind::Add,
-                old_no: None,
-                new_no: Some(8),
-                text: "+new".into(),
-                owner: None,
-            },
-        ]);
+        let html = render_unified_rows(
+            &[
+                Row {
+                    kind: RowKind::Meta,
+                    old_no: None,
+                    new_no: None,
+                    text: "index 111..222 100644".into(),
+                    owner: None,
+                },
+                Row {
+                    kind: RowKind::Hunk,
+                    old_no: None,
+                    new_no: None,
+                    text: "@@ -3,2 +7,2 @@".into(),
+                    owner: None,
+                },
+                Row {
+                    kind: RowKind::Context,
+                    old_no: Some(3),
+                    new_no: Some(7),
+                    text: " keep".into(),
+                    owner: None,
+                },
+                Row {
+                    kind: RowKind::Del,
+                    old_no: Some(4),
+                    new_no: None,
+                    text: "-old".into(),
+                    owner: None,
+                },
+                Row {
+                    kind: RowKind::Add,
+                    old_no: None,
+                    new_no: Some(8),
+                    text: "+new".into(),
+                    owner: None,
+                },
+            ],
+            &vec![Vec::new(); 5],
+        );
 
         assert!(html.contains(r#"<div class="dl dl-meta"><span class="ln"></span><span class="ln"></span><code>index 111..222 100644</code></div>"#));
         assert!(html.contains(r#"<div class="dl dl-hunk"><span class="ln"></span><span class="ln"></span><code>@@ -3,2 +7,2 @@</code></div>"#));
@@ -338,29 +392,32 @@ mod tests {
 
     #[test]
     fn render_unified_rows_maps_commit_owners_to_attributes() {
-        let html = render_unified_rows(&[
-            Row {
-                kind: RowKind::Context,
-                old_no: Some(3),
-                new_no: Some(7),
-                text: " keep".into(),
-                owner: None,
-            },
-            Row {
-                kind: RowKind::Del,
-                old_no: Some(4),
-                new_no: None,
-                text: "-old".into(),
-                owner: Some("fff000aaa".into()),
-            },
-            Row {
-                kind: RowKind::Add,
-                old_no: None,
-                new_no: Some(8),
-                text: "+new".into(),
-                owner: Some("abc123def".into()),
-            },
-        ]);
+        let html = render_unified_rows(
+            &[
+                Row {
+                    kind: RowKind::Context,
+                    old_no: Some(3),
+                    new_no: Some(7),
+                    text: " keep".into(),
+                    owner: None,
+                },
+                Row {
+                    kind: RowKind::Del,
+                    old_no: Some(4),
+                    new_no: None,
+                    text: "-old".into(),
+                    owner: Some("fff000aaa".into()),
+                },
+                Row {
+                    kind: RowKind::Add,
+                    old_no: None,
+                    new_no: Some(8),
+                    text: "+new".into(),
+                    owner: Some("abc123def".into()),
+                },
+            ],
+            &vec![Vec::new(); 3],
+        );
         assert!(html.contains(r#"<div class="dl dl-del" data-commit="fff000aaa">"#));
         assert!(html.contains(r#"<div class="dl dl-add" data-commit="abc123def">"#));
         // context rows carry no owner attribute
@@ -370,13 +427,16 @@ mod tests {
     #[test]
     fn render_unified_rows_tames_overlong_lines() {
         let long = format!("+{}", "a".repeat(MAX_LINE_COLS + 5));
-        let html = render_unified_rows(&[Row {
-            kind: RowKind::Add,
-            old_no: None,
-            new_no: Some(1),
-            text: long,
-            owner: None,
-        }]);
+        let html = render_unified_rows(
+            &[Row {
+                kind: RowKind::Add,
+                old_no: None,
+                new_no: Some(1),
+                text: long,
+                owner: None,
+            }],
+            &vec![Vec::new(); 1],
+        );
         assert!(html.contains(r#"class="dl dl-add dl-long""#));
         assert!(html.contains(r#"<span class="code-text">"#));
         assert!(html.contains(&format!(
@@ -387,46 +447,54 @@ mod tests {
 
     #[test]
     fn render_unified_rows_leaves_normal_lines_untamed() {
-        let html = render_unified_rows(&[Row {
-            kind: RowKind::Add,
-            old_no: None,
-            new_no: Some(1),
-            text: "+short".into(),
-            owner: None,
-        }]);
+        let html = render_unified_rows(
+            &[Row {
+                kind: RowKind::Add,
+                old_no: None,
+                new_no: Some(1),
+                text: "+short".into(),
+                owner: None,
+            }],
+            &vec![Vec::new(); 1],
+        );
         assert!(!html.contains("dl-long"));
         assert!(!html.contains("code-text"));
     }
 
     #[test]
     fn rendered_rows_keep_enhancer_and_presentation_hooks() {
-        let unified = render_unified_rows(&[
-            Row {
-                kind: RowKind::Add,
-                old_no: None,
-                new_no: Some(1),
-                text: format!("+{}", "a".repeat(MAX_LINE_COLS + 5)),
-                owner: Some("abc123def".into()),
-            },
-            Row {
-                kind: RowKind::Del,
-                old_no: Some(1),
-                new_no: None,
-                text: "-old".into(),
-                owner: Some("abc123def".into()),
-            },
-        ]);
+        let unified = render_unified_rows(
+            &[
+                Row {
+                    kind: RowKind::Add,
+                    old_no: None,
+                    new_no: Some(1),
+                    text: format!("+{}", "a".repeat(MAX_LINE_COLS + 5)),
+                    owner: Some("abc123def".into()),
+                },
+                Row {
+                    kind: RowKind::Del,
+                    old_no: Some(1),
+                    new_no: None,
+                    text: "-old".into(),
+                    owner: Some("abc123def".into()),
+                },
+            ],
+            &vec![Vec::new(); 2],
+        );
         let split = render_split_rows(&[SplitRow::Pair {
             old: Some(SplitCell {
                 no: 1,
                 text: "-old".into(),
                 owner: Some("abc123def".into()),
+                tokens: vec![],
                 spans: vec![Span { start: 0, end: 1 }],
             }),
             new: Some(SplitCell {
                 no: 1,
                 text: "+new".into(),
                 owner: Some("abc123def".into()),
+                tokens: vec![],
                 spans: vec![Span { start: 0, end: 1 }],
             }),
         }]);
@@ -454,18 +522,21 @@ mod tests {
                 old_no: 3,
                 new_no: 7,
                 text: " keep".into(),
+                tokens: vec![],
             },
             SplitRow::Pair {
                 old: Some(SplitCell {
                     no: 4,
                     text: "-old".into(),
                     owner: None,
+                    tokens: vec![],
                     spans: vec![],
                 }),
                 new: Some(SplitCell {
                     no: 8,
                     text: "+new".into(),
                     owner: None,
+                    tokens: vec![],
                     spans: vec![],
                 }),
             },
@@ -489,6 +560,7 @@ mod tests {
                 no: 2,
                 text: "-b".into(),
                 owner: None,
+                tokens: vec![],
                 spans: vec![],
             }),
             new: None,
@@ -504,12 +576,14 @@ mod tests {
                 no: 4,
                 text: "-old".into(),
                 owner: Some("fff000aaa".into()),
+                tokens: vec![],
                 spans: vec![],
             }),
             new: Some(SplitCell {
                 no: 8,
                 text: "+new".into(),
                 owner: Some("abc123def".into()),
+                tokens: vec![],
                 spans: vec![],
             }),
         }]);
@@ -529,6 +603,7 @@ mod tests {
             "sp-add",
             Some(&"abc123def".to_string()),
             &[],
+            &[],
         );
 
         assert_eq!(
@@ -546,6 +621,7 @@ mod tests {
                 no: 1,
                 text: long,
                 owner: None,
+                tokens: vec![],
                 spans: vec![],
             }),
         }]);
@@ -564,12 +640,14 @@ mod tests {
                 no: 1,
                 text: "-let x = 1;".into(),
                 owner: None,
+                tokens: vec![],
                 spans: vec![Span { start: 8, end: 9 }],
             }),
             new: Some(SplitCell {
                 no: 1,
                 text: "+let x = 2;".into(),
                 owner: None,
+                tokens: vec![],
                 spans: vec![Span { start: 8, end: 9 }],
             }),
         }]);
@@ -590,6 +668,7 @@ mod tests {
                 no: 1,
                 text: "-a<b>&1".into(),
                 owner: None,
+                tokens: vec![],
                 spans: vec![Span { start: 5, end: 6 }],
             }),
             new: None,
@@ -598,5 +677,91 @@ mod tests {
         // the marked char stays escaped inside the span; no raw `<b>` leaks
         assert!(html.contains(r#"a&lt;b&gt;&amp;<span class="ciw">1</span>"#));
         assert!(!html.contains("<b>"));
+    }
+
+    fn diff_lines(raw: &[&str]) -> Vec<String> {
+        raw.iter().map(ToString::to_string).collect()
+    }
+
+    /// Parse a rendered rows fragment, failing on any HTML parse error, and
+    /// return the entity-decoded text of every element matching `selector`.
+    fn select_texts(html: &str, selector: &str) -> Vec<String> {
+        let fragment = scraper::Html::parse_fragment(html);
+        assert!(
+            fragment.errors.is_empty(),
+            "invalid html: {:?}\n{html}",
+            fragment.errors
+        );
+        let selector = scraper::Selector::parse(selector).unwrap();
+        fragment
+            .select(&selector)
+            .map(|element| element.text().collect::<String>())
+            .collect()
+    }
+
+    fn token_texts(html: &str, class: TokenClass) -> Vec<String> {
+        select_texts(html, &format!("span.{}", class.css_class()))
+    }
+
+    #[test]
+    fn unified_rows_carry_syntax_token_spans() {
+        let html = render_diff_lines(
+            &diff_lines(&["@@ -1 +1 @@", "+let x = 1; // note"]),
+            &LineOwners::default(),
+            syntax_for_path("a.rs"),
+        );
+        assert!(
+            token_texts(&html, TokenClass::Number).contains(&"1".to_string()),
+            "{html}"
+        );
+        assert!(
+            token_texts(&html, TokenClass::Comment).contains(&"// note".to_string()),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn token_spans_escape_their_content() {
+        let html = render_diff_lines(
+            &diff_lines(&["@@ -1 +1 @@", r#"+let s = "<&>";"#]),
+            &LineOwners::default(),
+            syntax_for_path("a.rs"),
+        );
+        // element text is entity-decoded: recovering the raw metacharacters
+        // proves they were escaped in the markup, and a leaked `<` fails the
+        // helper's parse-error assertion.
+        assert!(
+            token_texts(&html, TokenClass::String).contains(&r#""<&>""#.to_string()),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn split_rows_combine_token_and_intraline_classes_on_one_flat_span() {
+        let html = render_diff_split(
+            &diff_lines(&["@@ -1 +1 @@", "-let x = 1;", "+let x = 2;"]),
+            &LineOwners::default(),
+            syntax_for_path("a.rs"),
+        );
+        let combined = select_texts(
+            &html,
+            &format!("span.{}.ciw", TokenClass::Number.css_class()),
+        );
+        assert!(combined.contains(&"1".to_string()), "{html}");
+        assert!(combined.contains(&"2".to_string()), "{html}");
+    }
+
+    #[test]
+    fn unknown_syntax_renders_exactly_plain_rows() {
+        let html = render_diff_lines(
+            &diff_lines(&["@@ -1 +1 @@", "+let x = 1;"]),
+            &LineOwners::default(),
+            None,
+        );
+        assert!(
+            select_texts(&html, r#"span[class*="sy-"]"#).is_empty(),
+            "{html}"
+        );
+        assert!(html.contains(r"<code>+let x = 1;</code>"), "{html}");
     }
 }

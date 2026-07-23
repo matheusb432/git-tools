@@ -1,4 +1,4 @@
-//! Markdown formatting plan (mdformat over tracked files).
+//! Markdown formatting plan (rumdl over tracked files).
 
 use std::path::{Path, PathBuf};
 
@@ -7,33 +7,21 @@ use anyhow::Result;
 use super::FormatMode;
 use crate::{process, task::Step};
 
-/// mdformat plugin set, kept in lockstep with `.mdformat.toml`.
-const PLUGINS: &[&str] = &[
-    "mdformat-gfm",
-    "mdformat-gfm-alerts",
-    "mdformat-wikilink",
-    "mdformat-frontmatter",
-];
-
-/// `uvx … mdformat [--check] <files>` over tracked Markdown, or `None` when the repo tracks none.
+/// `rumdl fmt [--check] <files>` over tracked Markdown, or `None` when the repo tracks none.
 pub(super) fn format_step(mode: FormatMode) -> Result<Option<Step>> {
     let files = tracked_files()?;
     if files.is_empty() {
         return Ok(None);
     }
     Ok(Some(
-        Step::new("mdformat", "uvx", ["--python", "3.13"])
-            .with_arguments(PLUGINS.iter().flat_map(|plugin| ["--with", *plugin]))
-            .with_arguments(["mdformat"])
+        Step::new("rumdl", "rumdl", ["fmt"])
             .with_arguments(mode.check_argument())
             .with_arguments(files),
     ))
 }
 
 pub(crate) fn check_step_for_files(files: Vec<PathBuf>, directory: &Path) -> Step {
-    Step::new("mdformat", "uvx", ["--python", "3.13"])
-        .with_arguments(PLUGINS.iter().flat_map(|plugin| ["--with", *plugin]))
-        .with_arguments(["mdformat", "--check"])
+    Step::new("rumdl", "rumdl", ["fmt", "--check"])
         .with_arguments(
             files
                 .into_iter()

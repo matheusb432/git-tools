@@ -1,7 +1,7 @@
 //! Formatting verbs.
 //!
 //! `run`/`check` drive the repository's complete formatter matrix (pinned-nightly rustfmt, Taplo,
-//! mdformat, and the Deno frontend formatter) as a [`Step`] plan. The aggregate read-only gate
+//! rumdl, and the Deno frontend formatter) as a [`Step`] plan. The aggregate read-only gate
 //! (`check`) and `fix` reuse the same plan through `check_steps` / `write_steps`; the linters live
 //! in the sibling `lint` module.
 

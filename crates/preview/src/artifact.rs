@@ -219,8 +219,22 @@ mod tests {
         assert!(html.contains("origin/feat&quot;x"));
         assert!(html.contains("feat: a&amp;b&lt;x&gt;"));
         assert!(html.contains("src/&lt;x&gt;&amp;&quot;.rs"));
-        assert!(!html.contains("<script>x</script>"));
-        assert!(html.contains("+&lt;script&gt;x&lt;/script&gt;"));
+        // content is escaped even when interleaved with syntax token spans:
+        // no raw script element can exist, and the code cell's entity-decoded
+        // text still carries the exact user content.
+        assert!(
+            !html.contains("<script>x</script>"),
+            "raw script tag leaked: {html}"
+        );
+        let fragment = scraper::Html::parse_fragment(&html);
+        let code = scraper::Selector::parse("code").unwrap();
+        assert!(
+            fragment.select(&code).any(|cell| cell
+                .text()
+                .collect::<String>()
+                .contains("+<script>x</script>")),
+            "escaped diff content lost: {html}"
+        );
     }
 
     #[test]

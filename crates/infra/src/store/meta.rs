@@ -11,6 +11,10 @@ fn density_default() -> String {
     RenderOptions::DEFAULT.density().to_string()
 }
 
+/// Bumped when the renderer's HTML output changes materially so range reuse never serves an
+/// artifact rendered by an older renderer.
+pub const RENDERER_VERSION: u32 = 2;
+
 /// Metadata stored alongside each artifact as `<hash>.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sidecar {
@@ -37,6 +41,12 @@ pub struct Sidecar {
     /// predate theme metadata and must not satisfy range reuse.
     #[serde(default)]
     pub theme_recorded: bool,
+    /// Renderer version that produced this artifact, compared against
+    /// [`RENDERER_VERSION`] to gate range reuse. Missing (pre-feature)
+    /// sidecars default to `0`. Content reuse in `place` refreshes a stale
+    /// stored version to the current one.
+    #[serde(default)]
+    pub renderer_version: u32,
     /// Extension set in force at render time (normalized, sorted; empty =
     /// unfiltered). Defaults keep pre-exclusion sidecars readable, and their
     /// empty set correctly means "rendered without exclusions".
@@ -68,6 +78,7 @@ mod tests {
             density: DiffDensity::Full.to_string(),
             theme: Some("dark".into()),
             theme_recorded: true,
+            renderer_version: RENDERER_VERSION,
             excluded_extensions: vec!["md".into()],
         };
         let json = serde_json::to_string(&sc).unwrap();
@@ -94,6 +105,27 @@ mod tests {
 
         assert_eq!(sidecar.theme, None);
         assert!(!sidecar.theme_recorded);
+    }
+
+    #[test]
+    fn sidecar_without_renderer_version_defaults_to_zero() {
+        let json = r#"{
+            "repo_id":"deadbeef00000000",
+            "repo_name":"git-tools",
+            "repo_root":"/repo",
+            "kind":"two_dot",
+            "base_sha":"aaaa",
+            "head_sha":"bbbb",
+            "range_label":"a..b",
+            "head_committed_at":"t",
+            "generated_at":"t",
+            "title":"diff",
+            "byte_size":1
+        }"#;
+
+        let sidecar = serde_json::from_str::<Sidecar>(json).unwrap();
+
+        assert_eq!(sidecar.renderer_version, 0);
     }
 
     #[test]

@@ -7,14 +7,15 @@ use super::{
     intraline::{LineSpans, Span, changed_spans},
     model::{Row, RowKind, line_body, long_line_len},
 };
+use crate::syntax::Token;
 
 pub(super) const PRESENTATION_CLASSES: &str = concat!(
     "[&_.diff-split_.dl]:grid-cols-[44px_minmax(0,1fr)_44px_minmax(0,1fr)] [&_.diff-split_.dl]:items-stretch ",
     "[&_.diff-split_:is(.dl-meta,.dl-hunk)]:grid-cols-[minmax(0,1fr)] ",
     "[&_.diff-split_.dl>:nth-child(3)]:border-l [&_.diff-split_.dl>:nth-child(3)]:border-line ",
-    "[&_.diff-split_.sp-del]:bg-del-bg [&_.diff-split_.sp-del]:text-del-ink ",
-    "[&_.diff-split_.sp-add]:bg-add-bg [&_.diff-split_.sp-add]:text-add-ink ",
-    "[&_.diff-split_.sp-ctx]:text-ink-2 [&_.diff-split_.sp-pad]:bg-sunk ",
+    "[&_.diff-split_.sp-del]:bg-del-bg ",
+    "[&_.diff-split_.sp-add]:bg-add-bg ",
+    "[&_.diff-split_.sp-pad]:bg-sunk ",
     "[&.commit-focus_.diff-split_.sp]:opacity-[.34] [&.commit-focus_.diff-split_.sp.owned]:opacity-100 [&.commit-focus_.diff-split_.sp.owned]:shadow-[inset_3px_0_0_var(--acc)] ",
     "[@media(max-width:1024px)]:[&_.diff-split_.dl]:grid-cols-[44px_minmax(0,1fr)] ",
     "[@media(max-width:1024px)]:[&_.diff-split_:is(.dl-meta,.dl-hunk)]:grid-cols-[minmax(0,1fr)] ",
@@ -29,6 +30,7 @@ pub(super) struct SplitCell {
     pub(super) no: u32,
     pub(super) text: String,
     pub(super) owner: Option<String>,
+    pub(super) tokens: Vec<Token>,
     pub(super) spans: Vec<Span>,
 }
 
@@ -46,6 +48,7 @@ pub(super) enum SplitRow {
         old_no: u32,
         new_no: u32,
         text: String,
+        tokens: Vec<Token>,
     },
     Pair {
         old: Option<SplitCell>,
@@ -53,16 +56,16 @@ pub(super) enum SplitRow {
     },
 }
 
-/// Pair structured rows into side-by-side rows.
-pub(super) fn split_rows(rows: &[Row]) -> Vec<SplitRow> {
+/// Pair structured rows into side-by-side rows. `tokens` is parallel to `rows`.
+pub(super) fn split_rows(rows: &[Row], tokens: &[Vec<Token>]) -> Vec<SplitRow> {
     let mut out = Vec::with_capacity(rows.len());
-    let mut dels: Vec<&Row> = Vec::new();
-    let mut adds: Vec<&Row> = Vec::new();
+    let mut dels: Vec<(&Row, &[Token])> = Vec::new();
+    let mut adds: Vec<(&Row, &[Token])> = Vec::new();
 
-    for row in rows {
+    for (row, row_tokens) in rows.iter().zip(tokens) {
         match row.kind {
-            RowKind::Del => dels.push(row),
-            RowKind::Add => adds.push(row),
+            RowKind::Del => dels.push((row, row_tokens)),
+            RowKind::Add => adds.push((row, row_tokens)),
             RowKind::Meta => {
                 flush_pairs(&mut out, &mut dels, &mut adds);
                 out.push(SplitRow::Meta {
@@ -81,6 +84,7 @@ pub(super) fn split_rows(rows: &[Row]) -> Vec<SplitRow> {
                     old_no: row.old_no.unwrap_or(0),
                     new_no: row.new_no.unwrap_or(0),
                     text: row.text.clone(),
+                    tokens: row_tokens.clone(),
                 });
             }
         }
@@ -93,13 +97,17 @@ pub(super) fn split_rows(rows: &[Row]) -> Vec<SplitRow> {
 /// Emit the buffered deletion/addition runs as index-paired rows (shorter side
 /// padded), computing intra-line spans only for short paired lines, then clear
 /// both buffers.
-fn flush_pairs(out: &mut Vec<SplitRow>, dels: &mut Vec<&Row>, adds: &mut Vec<&Row>) {
+fn flush_pairs(
+    out: &mut Vec<SplitRow>,
+    dels: &mut Vec<(&Row, &[Token])>,
+    adds: &mut Vec<(&Row, &[Token])>,
+) {
     for i in 0..dels.len().max(adds.len()) {
         let del = dels.get(i).copied();
         let add = adds.get(i).copied();
 
         let spans = match (del, add) {
-            (Some(d), Some(a))
+            (Some((d, _)), Some((a, _)))
                 if long_line_len(&d.text).is_none() && long_line_len(&a.text).is_none() =>
             {
                 changed_spans(line_body(&d.text), line_body(&a.text))
@@ -108,16 +116,18 @@ fn flush_pairs(out: &mut Vec<SplitRow>, dels: &mut Vec<&Row>, adds: &mut Vec<&Ro
         };
 
         out.push(SplitRow::Pair {
-            old: del.map(|d| SplitCell {
+            old: del.map(|(d, row_tokens)| SplitCell {
                 no: d.old_no.unwrap_or(0),
                 text: d.text.clone(),
                 owner: d.owner.clone(),
+                tokens: row_tokens.to_vec(),
                 spans: spans.old.clone(),
             }),
-            new: add.map(|a| SplitCell {
+            new: add.map(|(a, row_tokens)| SplitCell {
                 no: a.new_no.unwrap_or(0),
                 text: a.text.clone(),
                 owner: a.owner.clone(),
+                tokens: row_tokens.to_vec(),
                 spans: spans.new.clone(),
             }),
         });
@@ -137,7 +147,9 @@ mod tests {
 
     fn split(raw: &[&str]) -> Vec<SplitRow> {
         let lines: Vec<String> = raw.iter().map(ToString::to_string).collect();
-        split_rows(&derive_rows(&lines, &LineOwners::default()))
+        let rows = derive_rows(&lines, &LineOwners::default());
+        let tokens = vec![Vec::new(); rows.len()];
+        split_rows(&rows, &tokens)
     }
 
     #[test]
@@ -183,6 +195,7 @@ mod tests {
             old_no,
             new_no,
             text,
+            ..
         } = &rows[2]
         else {
             panic!("context row expected");
@@ -245,7 +258,9 @@ mod tests {
             .iter()
             .map(ToString::to_string)
             .collect();
-        let rows = split_rows(&derive_rows(&lines, &owners));
+        let derived = derive_rows(&lines, &owners);
+        let tokens = vec![Vec::new(); derived.len()];
+        let rows = split_rows(&derived, &tokens);
         let SplitRow::Pair { old: Some(o), .. } = &rows[1] else {
             panic!("pair expected");
         };

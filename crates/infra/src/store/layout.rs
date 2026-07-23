@@ -11,7 +11,7 @@ use domain::viewer::RenderOptions;
 
 use crate::store::{
     id::content_hash,
-    meta::{DiffKind, Sidecar},
+    meta::{DiffKind, RENDERER_VERSION, Sidecar},
 };
 
 /// Result of placing an artifact: where it landed and whether it already existed.
@@ -40,11 +40,13 @@ pub fn place(
     let json_path = dir.join(format!("{hash}.json"));
     // Reuse only when BOTH files exist; if the sidecar was lost, (re)write both.
     if html_path.exists() && json_path.exists() {
-        let theme_recorded = fs::read_to_string(&json_path)
+        let stored = fs::read_to_string(&json_path)
             .ok()
-            .and_then(|json| serde_json::from_str::<Sidecar>(&json).ok())
-            .is_some_and(|stored| stored.theme_recorded);
-        if !theme_recorded {
+            .and_then(|json| serde_json::from_str::<Sidecar>(&json).ok());
+        let needs_upgrade = stored.is_none_or(|stored| {
+            !stored.theme_recorded || stored.renderer_version != RENDERER_VERSION
+        });
+        if needs_upgrade {
             atomic_write(
                 &json_path,
                 serde_json::to_string_pretty(sidecar)?.as_bytes(),
@@ -115,6 +117,7 @@ pub fn lookup_by_range(
             && sidecar.layout == layout
             && sidecar.density == density
             && sidecar.theme_recorded
+            && sidecar.renderer_version == RENDERER_VERSION
             && sidecar.theme.as_deref() == theme
             && sidecar.excluded_extensions == excluded_extensions
         {
@@ -186,6 +189,7 @@ mod tests {
             density: RenderOptions::DEFAULT.density().to_string(),
             theme: None,
             theme_recorded: true,
+            renderer_version: RENDERER_VERSION,
             excluded_extensions: Vec::new(),
         }
     }
@@ -221,6 +225,24 @@ mod tests {
                 .unwrap();
         assert_eq!(stored.theme, Some("dark".to_string()));
         assert!(stored.theme_recorded);
+    }
+
+    #[test]
+    fn place_upgrades_stale_renderer_version_when_html_is_reused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut legacy = sidecar(DiffKind::TwoDot, "a", "b");
+        legacy.renderer_version = 0;
+        let first = place(tmp.path(), "repo0000", "<html>x</html>", &legacy).unwrap();
+        let current = sidecar(DiffKind::TwoDot, "a", "b");
+
+        let second = place(tmp.path(), "repo0000", "<html>x</html>", &current).unwrap();
+
+        assert!(second.reused);
+        assert_eq!(second.path, first.path);
+        let stored: Sidecar =
+            serde_json::from_str(&fs::read_to_string(first.path.with_extension("json")).unwrap())
+                .unwrap();
+        assert_eq!(stored.renderer_version, RENDERER_VERSION);
     }
 
     #[test]
@@ -446,6 +468,43 @@ mod tests {
 
         assert!(hit.is_some());
         assert!(miss.is_none());
+    }
+
+    #[test]
+    fn lookup_by_range_skips_sidecars_from_older_renderers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut legacy = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
+        legacy.renderer_version = 0;
+        place(tmp.path(), "repo0000", "<html>old</html>", &legacy).unwrap();
+
+        let miss = lookup_by_range(
+            tmp.path(),
+            "repo0000",
+            DiffKind::TwoDot,
+            "aaaa",
+            "bbbb",
+            RenderOptions::DEFAULT,
+            None,
+            &[],
+        );
+        assert!(
+            miss.is_none(),
+            "legacy renderer artifact must not satisfy reuse"
+        );
+
+        let current = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
+        place(tmp.path(), "repo0000", "<html>new</html>", &current).unwrap();
+        let hit = lookup_by_range(
+            tmp.path(),
+            "repo0000",
+            DiffKind::TwoDot,
+            "aaaa",
+            "bbbb",
+            RenderOptions::DEFAULT,
+            None,
+            &[],
+        );
+        assert!(hit.is_some(), "current renderer artifact must hit");
     }
 
     #[test]

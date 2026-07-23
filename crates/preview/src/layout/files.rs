@@ -150,22 +150,23 @@ pub(super) fn file_blocks(view: &View, options: RenderOptions, surface: Surface)
 }
 
 fn file_diff(file: &FileDiff, options: RenderOptions) -> Markup {
+    let syntax = crate::syntax::syntax_for_path(&file.path);
     let (lines, density) = match (options.density(), file.full_lines.as_ref()) {
         (DiffDensity::Full, Some(full_lines)) => (full_lines, DiffDensity::Full),
         (DiffDensity::Full | DiffDensity::Compact, _) => (&file.lines, DiffDensity::Compact),
     };
     match (options.layout(), density) {
         (DiffLayout::Unified, DiffDensity::Compact) => html! {
-            div class={ "diff diff-unified diff-compact " (DIFF_CLASSES) } { (PreEscaped(render_diff_lines(lines, &file.owners))) }
+            div class={ "diff diff-unified diff-compact " (DIFF_CLASSES) } { (PreEscaped(render_diff_lines(lines, &file.owners, syntax))) }
         },
         (DiffLayout::Split, DiffDensity::Compact) => html! {
-            div class={ "diff diff-split diff-compact " (DIFF_CLASSES) } { (PreEscaped(render_diff_split(lines, &file.owners))) }
+            div class={ "diff diff-split diff-compact " (DIFF_CLASSES) } { (PreEscaped(render_diff_split(lines, &file.owners, syntax))) }
         },
         (DiffLayout::Unified, DiffDensity::Full) => html! {
-            div class={ "diff diff-unified diff-full " (DIFF_CLASSES) } { (PreEscaped(render_diff_lines(lines, &file.owners))) }
+            div class={ "diff diff-unified diff-full " (DIFF_CLASSES) } { (PreEscaped(render_diff_lines(lines, &file.owners, syntax))) }
         },
         (DiffLayout::Split, DiffDensity::Full) => html! {
-            div class={ "diff diff-split diff-full " (DIFF_CLASSES) } { (PreEscaped(render_diff_split(lines, &file.owners))) }
+            div class={ "diff diff-split diff-full " (DIFF_CLASSES) } { (PreEscaped(render_diff_split(lines, &file.owners, syntax))) }
         },
     }
 }

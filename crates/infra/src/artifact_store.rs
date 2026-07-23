@@ -41,6 +41,7 @@ impl ArtifactStore for StoreArtifacts {
             density: meta.render_options.density().to_string(),
             theme: meta.theme.clone(),
             theme_recorded: true,
+            renderer_version: crate::store::RENDERER_VERSION,
             excluded_extensions: meta.excluded_extensions.clone(),
         };
         let placed = crate::store::place(store_root, &repo_id, html, &sidecar)?;
@@ -155,6 +156,7 @@ mod tests {
             density: RenderOptions::DEFAULT.density().to_string(),
             theme: None,
             theme_recorded: true,
+            renderer_version: crate::store::RENDERER_VERSION,
         };
         let placed = crate::store::place(dir.path(), "repo123", "<html></html>", &sidecar).unwrap();
         let expected_hash = placed.path.file_stem().unwrap().to_str().unwrap();

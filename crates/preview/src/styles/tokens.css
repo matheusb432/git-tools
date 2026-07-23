@@ -3,9 +3,10 @@
     --bg:#0a0d13; --surface:#0d1117; --surface-2:#161b22; --sunk:#080a10;
     --ink:#c9d1d9; --ink-2:#768390; --ink-3:#545d68; --line:#21262d; --line-2:#2d333b;
     --acc:#b69bff; --acc-2:#cbb4ff; --acc-soft:rgba(182,155,255,.14); --acc-line:rgba(182,155,255,.42);
-    --add:#3fb950; --add-bg:rgba(46,160,67,.14); --add-gut:rgba(46,160,67,.22); --add-ink:#56d364; --add-line:rgba(63,185,80,.42);
-    --del:#f85149; --del-bg:rgba(248,81,73,.14); --del-gut:rgba(248,81,73,.22); --del-ink:#ffa198; --del-line:rgba(248,81,73,.42);
+    --add:#3fb950; --add-bg:rgba(46,160,67,.20); --add-gut:rgba(46,160,67,.28); --add-ink:#56d364; --add-line:rgba(63,185,80,.42);
+    --del:#f85149; --del-bg:rgba(248,81,73,.20); --del-gut:rgba(248,81,73,.28); --del-ink:#ffa198; --del-line:rgba(248,81,73,.42);
     --code:#adbac7;
+    --sy-kw:#ff7b72; --sy-str:#a5d6ff; --sy-com:#8b949e; --sy-typ:#ffa657; --sy-fn:#d2a8ff; --sy-num:#79c0ff; --sy-con:#79c0ff; --sy-op:#ff7b72; --sy-tag:#7ee787; --sy-var:#ffa657;
     --r:6px; --r-sm:4px;
     --mono:'Maple Mono','Maple Mono NF',ui-monospace,'JetBrains Mono',SFMono-Regular,Menlo,monospace;
     color-scheme:dark;
@@ -14,15 +15,19 @@
     --bg:#f6f8fa; --surface:#ffffff; --surface-2:#f0f3f6; --sunk:#eaeef2;
     --ink:#1f2328; --ink-2:#656d76; --ink-3:#8b949e; --line:#d0d7de; --line-2:#d8dee4;
     --acc:#9a6700; --acc-2:#7a5200; --acc-soft:rgba(154,103,0,.10); --acc-line:rgba(154,103,0,.35);
-    --add:#1a7f37; --add-bg:rgba(46,160,67,.12); --add-gut:rgba(46,160,67,.18); --add-ink:#1a7f37; --add-line:rgba(26,127,55,.35);
-    --del:#cf222e; --del-bg:rgba(248,81,73,.12); --del-gut:rgba(248,81,73,.18); --del-ink:#cf222e; --del-line:rgba(207,34,46,.35);
-    --code:#24292f; color-scheme:light;
+    --add:#1a7f37; --add-bg:rgba(46,160,67,.16); --add-gut:rgba(46,160,67,.24); --add-ink:#1a7f37; --add-line:rgba(26,127,55,.35);
+    --del:#cf222e; --del-bg:rgba(248,81,73,.16); --del-gut:rgba(248,81,73,.24); --del-ink:#cf222e; --del-line:rgba(207,34,46,.35);
+    --code:#24292f;
+    --sy-kw:#cf222e; --sy-str:#0a3069; --sy-com:#6e7781; --sy-typ:#953800; --sy-fn:#8250df; --sy-num:#0550ae; --sy-con:#0550ae; --sy-op:#cf222e; --sy-tag:#116329; --sy-var:#953800;
+    color-scheme:light;
   }
   :root[data-theme="hearth"]{
     --bg:#0C0A08; --surface:#141110; --surface-2:#1B1714; --sunk:#070605;
     --ink:#EAE0D2; --ink-2:#9C8F7E; --ink-3:#645A4D; --line:#241F1A; --line-2:#332B24;
     --acc:#e8730c; --acc-2:#FF8C2E; --acc-soft:rgba(232,115,12,.14); --acc-line:rgba(232,115,12,.42);
-    --add:#7FB05C; --add-bg:rgba(120,170,80,.12); --add-gut:rgba(120,170,80,.20); --add-ink:#9DC47C; --add-line:rgba(127,176,92,.42);
-    --del:#DB6650; --del-bg:rgba(215,90,70,.12); --del-gut:rgba(215,90,70,.20); --del-ink:#EC9384; --del-line:rgba(219,102,80,.42);
-    --code:#c8bca9; color-scheme:dark;
+    --add:#7FB05C; --add-bg:rgba(120,170,80,.18); --add-gut:rgba(120,170,80,.26); --add-ink:#9DC47C; --add-line:rgba(127,176,92,.42);
+    --del:#DB6650; --del-bg:rgba(215,90,70,.18); --del-gut:rgba(215,90,70,.26); --del-ink:#EC9384; --del-line:rgba(219,102,80,.42);
+    --code:#c8bca9;
+    --sy-kw:#FF9E4A; --sy-str:#A9C77F; --sy-com:#94876F; --sy-typ:#E7C267; --sy-fn:#E8A0B4; --sy-num:#8FB8D8; --sy-con:#8FB8D8; --sy-op:#FF9E4A; --sy-tag:#9DC47C; --sy-var:#D8B08C;
+    color-scheme:dark;
   }

@@ -8,6 +8,7 @@ mod assets;
 mod comment_syntax;
 mod layout;
 mod rows;
+mod syntax;
 mod text;
 
 use application::{diffs::View, viewer::RenderOptions};

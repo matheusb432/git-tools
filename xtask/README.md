@@ -10,7 +10,7 @@
 | `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the viewer on PATH (idempotent byte-compare → installed/updated/unchanged; atomic replace is warm-tray-safe). Migrates `scripts/install.sh`. | `just install` / `just cli install` / `just desktop install` |
 | `uninstall [--remove-config] [--force]` | Remove the CLI, alias, daemon, viewer, desktop entry, and icon; optionally delete repo-local config. | `just uninstall` / `just purge` |
 | `test [--verbose] [--scope unit\|e2e\|all]` | Default (`unit`): `check` plus default-member Rust tests. `--e2e`: hermetic desktop E2E only. `--all`: all Rust, frontend, drift, and desktop E2E. `--e2e`/`--all` are shorthands for `--scope`. | `just test` |
-| `fmt` | Pinned-nightly rustfmt, Taplo, mdformat, and Oxfmt, in place. | `just fmt` |
+| `fmt` | Pinned-nightly rustfmt, Taplo, rumdl, and Oxfmt, in place. | `just fmt` |
 | `fmt-check` | Verify formatting without writing (formatting only; exits non-zero on drift). | `just fmt-check` |
 | `lint` | Oxlint, the architecture lints, and full-workspace Clippy including desktop. | `just lint` |
 | `check` | Complete read-only gate: formatting drift, then every linter. | `just check` |
