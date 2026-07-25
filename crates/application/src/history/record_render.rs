@@ -77,7 +77,8 @@ fn record_render(
                (?1,
                 (SELECT id FROM render_operations WHERE name = ?2),
                 (SELECT id FROM render_targets WHERE name = ?3),
-                ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT DO NOTHING",
         )?;
         statement.execute(params![
             source_id,
@@ -115,7 +116,7 @@ fn record_render(
 
 #[cfg(test)]
 mod tests {
-    use gtl_recipe::{RecipeOp, RecipeSource, RecipeTarget};
+    use gtl_recipe::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::*;
     use crate::{
@@ -133,15 +134,38 @@ mod tests {
         }
     }
 
+    fn pinned_recipe(repo: &str, base: &str, head: &str) -> Recipe {
+        Recipe {
+            source: RecipeSource::LocalRepo(repo.into()),
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Unpushed {
+                    pinned: Some(PinnedRange {
+                        base: base.into(),
+                        head: head.into(),
+                    }),
+                },
+            },
+            name: None,
+        }
+    }
+
     fn command(title: impl Into<String>) -> RecordRender {
         command_for_repo(title, "/repos/gt")
     }
 
     fn command_for_repo(title: impl Into<String>, repo: &str) -> RecordRender {
+        command_for_recipe(title, "gt", recipe(repo))
+    }
+
+    fn command_for_recipe(
+        title: impl Into<String>,
+        repo_name: impl Into<String>,
+        recipe: Recipe,
+    ) -> RecordRender {
         RecordRender {
-            recipe: recipe(repo),
+            recipe,
             title: title.into(),
-            repo_name: "gt".into(),
+            repo_name: repo_name.into(),
             range_label: "origin/main..HEAD".into(),
         }
     }
@@ -208,6 +232,55 @@ mod tests {
     }
 
     #[test]
+    fn repeated_fingerprint_preserves_the_original_render() {
+        let store = store_test();
+        let first = command_for_recipe("first", "gt", pinned_recipe("/repos/gt", "base", "head"));
+        let mut repeated = first.clone();
+        repeated.title = "repeated".into();
+
+        execute(first, &store, &FixedClock("2026-07-07T00:00:00Z".into()))
+            .expect("first record succeeds");
+        execute(repeated, &store, &FixedClock("2026-07-08T00:00:00Z".into()))
+            .expect("repeated fingerprint is a successful no-op");
+
+        let renders = list_recent(&store);
+        assert_eq!(renders.len(), 1);
+        assert_eq!(renders[0].title, "first");
+        assert_eq!(renders[0].rendered_at, "2026-07-07T00:00:00Z");
+    }
+
+    #[test]
+    fn every_fingerprint_field_distinguishes_a_render() {
+        let store = store_test();
+        let clock = FixedClock("2026-07-07T00:00:00Z".into());
+        let commands = [
+            command_for_recipe("original", "gt", pinned_recipe("/repos/gt", "base", "head")),
+            command_for_recipe(
+                "source",
+                "gt",
+                pinned_recipe("/repos/other", "base", "head"),
+            ),
+            command_for_recipe("repo", "other", pinned_recipe("/repos/gt", "base", "head")),
+            command_for_recipe(
+                "base",
+                "gt",
+                pinned_recipe("/repos/gt", "other-base", "head"),
+            ),
+            command_for_recipe(
+                "head",
+                "gt",
+                pinned_recipe("/repos/gt", "base", "other-head"),
+            ),
+        ];
+
+        for command in commands {
+            execute(command, &store, &clock).expect("distinct record succeeds");
+        }
+
+        assert_eq!(list_recent(&store).len(), 5);
+    }
+
+    #[test]
     fn recording_past_the_cap_prunes_oldest_rows_and_orphaned_sources() {
         let store = store_test();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
@@ -216,14 +289,35 @@ mod tests {
         // so pruning them must also collect its project_sources row.
         for index in 0..5 {
             execute(
-                command_for_repo(format!("render {index}"), "/repos/old"),
+                command_for_recipe(
+                    format!("render {index}"),
+                    "gt",
+                    pinned_recipe(
+                        "/repos/old",
+                        &format!("base-{index}"),
+                        &format!("head-{index}"),
+                    ),
+                ),
                 &store,
                 &clock,
             )
             .expect("record succeeds");
         }
         for index in 5..(RECENT_RENDERS_CAP + 5) {
-            execute(command(format!("render {index}")), &store, &clock).expect("record succeeds");
+            execute(
+                command_for_recipe(
+                    format!("render {index}"),
+                    "gt",
+                    pinned_recipe(
+                        "/repos/gt",
+                        &format!("base-{index}"),
+                        &format!("head-{index}"),
+                    ),
+                ),
+                &store,
+                &clock,
+            )
+            .expect("record succeeds");
         }
 
         let renders = list_recent(&store);

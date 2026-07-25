@@ -283,9 +283,10 @@ fn prune_failure_rolls_back_the_render_insertion() {
                SELECT value + 1 FROM render_number WHERE value < 500
              )
              INSERT INTO recent_renders
-               (source_id, operation_id, target_id, title, repo_name, range_label, rendered_at)
-             SELECT 1, 1, 1, 'seed ' || value, 'fixture', 'main..HEAD',
-                    '2026-07-18T00:00:00Z'
+               (source_id, operation_id, target_id, pinned_base, pinned_head,
+                title, repo_name, range_label, rendered_at)
+             SELECT 1, 1, 1, 'base-' || value, 'head-' || value,
+                    'seed ' || value, 'fixture', 'main..HEAD', '2026-07-18T00:00:00Z'
              FROM render_number;
              CREATE TRIGGER recent_renders_prune_abort
              BEFORE DELETE ON recent_renders

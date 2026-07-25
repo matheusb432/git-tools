@@ -1,0 +1,3 @@
+/crates/desktop/src/embedded/generated/
+/crates/desktop/src/embedded/*.min.js
+/crates/preview/src/embedded/generated/

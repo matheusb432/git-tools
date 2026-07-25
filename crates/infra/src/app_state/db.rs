@@ -159,7 +159,42 @@ DROP TABLE recent_renders;
 ALTER TABLE recent_renders_next RENAME TO recent_renders;
 ";
 
-const MIGRATIONS_SLICE: &[M<'_>] = &[M::up(SCHEMA_V1), M::up(SCHEMA_V2), M::up(SCHEMA_V3)];
+/// Schema v4 defines recent-render identity and its lookup indexes.
+const SCHEMA_V4: &str = "
+DELETE FROM recent_renders
+WHERE id NOT IN (
+  SELECT MAX(id)
+  FROM recent_renders
+  GROUP BY source_id,
+           repo_name,
+           coalesce(pinned_base, X''),
+           coalesce(pinned_head, X'')
+);
+
+DELETE FROM project_sources
+WHERE id NOT IN (SELECT source_id FROM recent_renders);
+
+CREATE UNIQUE INDEX recent_renders_fingerprint_idx
+ON recent_renders (
+  source_id,
+  repo_name,
+  coalesce(pinned_base, X''),
+  coalesce(pinned_head, X'')
+);
+
+CREATE INDEX recent_renders_repo_name_idx
+ON recent_renders (repo_name);
+
+CREATE INDEX project_sources_value_idx
+ON project_sources (value);
+";
+
+const MIGRATIONS_SLICE: &[M<'_>] = &[
+    M::up(SCHEMA_V1),
+    M::up(SCHEMA_V2),
+    M::up(SCHEMA_V3),
+    M::up(SCHEMA_V4),
+];
 const MIGRATIONS: Migrations<'_> = Migrations::from_slice(MIGRATIONS_SLICE);
 
 /// Init-sequence retry ceiling: bounded well under the 5s `busy_timeout` so a
@@ -291,7 +326,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .expect("recent render count");
 
-        assert_eq!(user_version, 3);
+        assert_eq!(user_version, 4);
         assert_eq!(settings_table_count, 0);
         assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
@@ -442,6 +477,91 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn migration_v4_deduplicates_fingerprints_and_adds_indexes() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("gtl.db");
+        let mut connection = Connection::open(path).expect("open v3 database");
+        Migrations::from_slice(&MIGRATIONS_SLICE[..3])
+            .to_latest(&mut connection)
+            .expect("apply v3");
+        connection
+            .execute_batch(
+                "INSERT INTO project_sources (id, kind, value, created_at) VALUES
+                   (1, 'directory', '/repos/gt', '2026-07-01T00:00:00Z'),
+                   (2, 'remote', '/repos/gt', '2026-07-01T00:00:00Z'),
+                   (3, 'directory', '/repos/other', '2026-07-01T00:00:00Z'),
+                   (4, 'directory', '/repos/orphan', '2026-07-01T00:00:00Z');
+                 INSERT INTO recent_renders
+                   (id, source_id, operation_id, target_id, pinned_base, pinned_head,
+                    title, repo_name, range_label, rendered_at)
+                 VALUES
+                   (1, 1, 1, 1, 'base', 'head', 'older duplicate', 'gt', 'base..head',
+                    '2026-07-01T00:00:00Z'),
+                   (2, 1, 1, 1, 'base', 'head', 'newer duplicate', 'gt', 'base..head',
+                    '2026-07-02T00:00:00Z'),
+                   (3, 2, 1, 1, 'base', 'head', 'source kind', 'gt', 'base..head',
+                    '2026-07-02T00:00:00Z'),
+                   (4, 3, 1, 1, 'base', 'head', 'source value', 'gt', 'base..head',
+                    '2026-07-02T00:00:00Z'),
+                   (5, 1, 1, 1, 'base', 'head', 'repository', 'other', 'base..head',
+                    '2026-07-02T00:00:00Z'),
+                   (6, 1, 1, 1, 'other-base', 'head', 'base', 'gt', 'base..head',
+                    '2026-07-02T00:00:00Z'),
+                   (7, 1, 1, 1, 'base', 'other-head', 'head', 'gt', 'base..head',
+                    '2026-07-02T00:00:00Z');",
+            )
+            .expect("seed v3 fingerprints");
+        drop(connection);
+
+        let connection = open_app_db(directory.path()).expect("apply v4");
+        let render_ids = connection
+            .prepare("SELECT id FROM recent_renders ORDER BY id")
+            .expect("prepare render ids")
+            .query_map([], |row| row.get::<_, i64>(0))
+            .expect("query render ids")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode render ids");
+        let source_ids = connection
+            .prepare("SELECT id FROM project_sources ORDER BY id")
+            .expect("prepare source ids")
+            .query_map([], |row| row.get::<_, i64>(0))
+            .expect("query source ids")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode source ids");
+        let index_names = connection
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'index'
+                   AND name IN (
+                     'project_sources_value_idx',
+                     'recent_renders_fingerprint_idx',
+                     'recent_renders_repo_name_idx'
+                   )
+                 ORDER BY name",
+            )
+            .expect("prepare index names")
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("query index names")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("decode index names");
+        let user_version: i64 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .expect("user version");
+
+        assert_eq!(render_ids, vec![2, 3, 4, 5, 6, 7]);
+        assert_eq!(source_ids, vec![1, 2, 3]);
+        assert_eq!(
+            index_names,
+            vec![
+                "project_sources_value_idx".to_owned(),
+                "recent_renders_fingerprint_idx".to_owned(),
+                "recent_renders_repo_name_idx".to_owned(),
+            ]
+        );
+        assert_eq!(user_version, 4);
     }
 
     /// Two processes (daemon + viewer) can open a fresh db concurrently; both

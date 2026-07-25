@@ -254,7 +254,18 @@ pub(crate) fn store_test() -> AppStateStoreTest {
           rendered_at  TEXT NOT NULL,
           CHECK ((pinned_base IS NULL) = (pinned_head IS NULL)),
           CHECK ((operation_id = 1) = (target_id IS NOT NULL))
-        ) STRICT;",
+        ) STRICT;
+        CREATE UNIQUE INDEX recent_renders_fingerprint_idx
+        ON recent_renders (
+          source_id,
+          repo_name,
+          coalesce(pinned_base, X''),
+          coalesce(pinned_head, X'')
+        );
+        CREATE INDEX recent_renders_repo_name_idx
+        ON recent_renders (repo_name);
+        CREATE INDEX project_sources_value_idx
+        ON project_sources (value);",
     )
     .expect("history test store")
 }
@@ -270,9 +281,10 @@ pub(crate) fn seed_recent_render(store: &impl AppStateStore, id: i64, title: &st
             "INSERT OR IGNORE INTO project_sources (id, kind, value, created_at) \
              VALUES (7, 'directory', '/repos/gt', '2026-07-11T00:00:00Z');
              INSERT INTO recent_renders \
-             (id, source_id, operation_id, target_id, title, repo_name, range_label, rendered_at) \
-             VALUES ({id}, 7, 1, 1, '{title}', 'git-tools', 'main..HEAD', \
-             '2026-07-11T00:00:00Z');"
+             (id, source_id, operation_id, target_id, pinned_base, pinned_head, \
+              title, repo_name, range_label, rendered_at) \
+             VALUES ({id}, 7, 1, 1, 'base-{id}', 'head-{id}', '{title}', \
+             'git-tools', 'main..HEAD', '2026-07-11T00:00:00Z');"
         ))
         .expect("seed recent render");
 }

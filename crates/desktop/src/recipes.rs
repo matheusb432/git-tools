@@ -594,6 +594,57 @@ index 111..222 100644\n\
     }
 
     #[test]
+    fn reopening_a_history_recipe_does_not_grow_history() {
+        let fixture = RecipeFixture::new();
+        let source = source();
+        let probe = FakeRepoProbe::default();
+        let session = Mutex::new(ViewerSession::new(128 * 1024 * 1024));
+        let first_clock = FixedClock("2026-07-07T00:00:00Z".into());
+
+        expect_opened(
+            open_recipe(
+                RecipeContext::new(
+                    &source,
+                    &probe,
+                    &fixture.app_state,
+                    &first_clock,
+                    &TomlSettingsStore::new(None),
+                ),
+                &session,
+                &recipe(),
+                "snapshot".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("first open succeeds"),
+        );
+        let original = fixture
+            .history()
+            .into_iter()
+            .next()
+            .expect("first open records history");
+        let reopened_clock = FixedClock("2026-07-08T00:00:00Z".into());
+
+        expect_opened(
+            open_recipe(
+                RecipeContext::new(
+                    &source,
+                    &probe,
+                    &fixture.app_state,
+                    &reopened_clock,
+                    &TomlSettingsStore::new(None),
+                ),
+                &session,
+                &original.recipe,
+                format!("history-{}", i64::from(original.id)),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("history reopen succeeds"),
+        );
+
+        assert_eq!(fixture.history(), vec![original]);
+    }
+
+    #[test]
     fn failed_initial_compute_preserves_the_explicit_recipe_label() {
         let source = FakeDiffSource::default();
         let probe = FakeRepoProbe::default();
