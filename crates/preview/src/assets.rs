@@ -228,8 +228,8 @@ mod tests {
     #[test]
     fn file_status_indicators_stay_compact_trailing_and_discreet() {
         // ! JS behavior: buildFileLeaf (li class, [name,status] child order, no icon) covered
-        // ! by Vitest wheel.test.ts. Horizontal-wheel scroll math covered by computeWheelScroll
-        // there.
+        // ! by Vitest diff/file-tree.test.ts. Horizontal-wheel scroll math covered by
+        // ! shared/wheel.test.ts.
         let css = preview_css();
         assert_selector_declaration(css, ".tstatus", "width:15px;height:15px");
         assert_selector_declaration(
@@ -282,7 +282,8 @@ mod tests {
 
     #[test]
     fn commit_focus_highlight_is_wired() {
-        // ! JS behavior: resolveActiveSet (toggle/member-set) covered by Vitest preview.test.ts.
+        // ! JS behavior: resolveActiveSet (toggle/member-set) covered by Vitest
+        // ! diff/model/commit-focus.test.ts.
         // ! owned-row DOM mutation is event-listener-only and not extracted.
         let css = preview_css();
         assert!(css.contains(".commit-focus .diff-unified .dl.owned"));

@@ -1,11 +1,11 @@
 import { copyText } from "./clipboard";
-import { copyContextEnabled, copyHeader, readCopiedRows } from "./copy";
-import { keyboardCommand } from "./keyboard";
+import { copyContextEnabled, copyHeader, readCopiedRows } from "./model/copy";
+import { keyboardCommand } from "./model/keyboard";
 import { scrollLandOn } from "./scroll";
 import { createTeardown } from "./teardown";
 import { showToast } from "../shared/toast";
-import { type CommitFocus, isShaTarget, resolveActiveSet } from "./commit-focus";
-import { planFileVisibility } from "./file-filter";
+import { type CommitFocus, isShaTarget, resolveActiveSet } from "./model/commit-focus";
+import { planFileVisibility } from "./model/file-filter";
 import { buildFileLeaf } from "./file-tree";
 import { toggleLongLine } from "./long-lines";
 import { computeWheelScroll } from "../shared/wheel";

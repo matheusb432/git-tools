@@ -45,6 +45,20 @@ describe("installHistoryActions", () => {
     expect(writes).toEqual(['{"id":9}']);
   });
 
+  test("copying never reaches the row's bubbling open handler", () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: (): Promise<void> => Promise.resolve() },
+    });
+    const { row, copyButton } = historyRow();
+    let opens = 0;
+    row.addEventListener("click", () => (opens += 1));
+
+    copyButton.dispatchEvent(new Event("click", { bubbles: true }));
+
+    expect(opens).toBe(0);
+  });
+
   test("Enter on a focused row activates it", () => {
     const { row } = historyRow();
     let clicks = 0;

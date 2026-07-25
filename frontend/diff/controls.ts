@@ -1,5 +1,5 @@
 import { copyText } from "./clipboard";
-import { extractCopyText } from "./copy";
+import { extractCopyText } from "./model/copy";
 import { createTeardown } from "./teardown";
 
 type CopyState = "ok" | "err";

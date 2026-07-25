@@ -139,8 +139,9 @@ mod tests {
 
     #[test]
     fn commit_shelf_click_contract_focuses_card_and_copies_hash_tag() {
-        // ! JS behavior: sha-guard predicate (isShaTarget) covered by Vitest wheel.test.ts.
-        // ! copyText + stopPropagation wiring is event-listener-only and not extracted.
+        // ! JS behavior: the sha-guard predicate (isShaTarget) is owned by
+        // ! frontend/diff/model/commit-focus.ts. copyText + stopPropagation wiring is
+        // ! event-listener-only and not extracted.
         let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         assert!(html.contains(r#"title="focus this commit's changes""#));

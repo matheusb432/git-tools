@@ -58,8 +58,15 @@ if (typeof globalThis.document === "undefined") {
     }
   }
 
+  type Registration = { readonly listener: EventListenerOrEventListenerObject; readonly capture: boolean };
+  type DispatchPhase = "capture" | "target" | "bubble";
+
+  function capturesEvent(options?: boolean | AddEventListenerOptions | EventListenerOptions): boolean {
+    return typeof options === "boolean" ? options : (options?.capture ?? false);
+  }
+
   class StubNode extends EventTarget {
-    readonly #listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+    readonly #listeners = new Map<string, Registration[]>();
     parentNode: StubNode | null = null;
     childNodes: StubNode[] = [];
     textContent: string | null = "";
@@ -106,31 +113,56 @@ if (typeof globalThis.document === "undefined") {
     override addEventListener(
       type: string,
       listener: EventListenerOrEventListenerObject | null,
-      _options?: boolean | AddEventListenerOptions,
+      options?: boolean | AddEventListenerOptions,
     ): void {
       if (!listener) return;
-      const listeners = this.#listeners.get(type) ?? new Set<EventListenerOrEventListenerObject>();
-      listeners.add(listener);
-      this.#listeners.set(type, listeners);
+      const capture = capturesEvent(options);
+      const registrations = this.#listeners.get(type) ?? [];
+      if (registrations.some((entry) => entry.listener === listener && entry.capture === capture)) return;
+      registrations.push({ listener, capture });
+      this.#listeners.set(type, registrations);
     }
 
     override removeEventListener(
       type: string,
       listener: EventListenerOrEventListenerObject | null,
-      _options?: boolean | EventListenerOptions,
+      options?: boolean | EventListenerOptions,
     ): void {
-      if (listener) this.#listeners.get(type)?.delete(listener);
+      if (!listener) return;
+      const capture = capturesEvent(options);
+      const registrations = this.#listeners.get(type);
+      const index = registrations?.findIndex((entry) => entry.listener === listener && entry.capture === capture) ?? -1;
+      if (registrations && index !== -1) registrations.splice(index, 1);
     }
 
+    // Capture runs root-first and bubble runs target-first, so a capture listener on the document
+    // sees a click before any ancestor's bubbling handler and stopPropagation there is decisive.
     override dispatchEvent(event: Event): boolean {
       if (event.target === null) Object.defineProperty(event, "target", { configurable: true, value: this });
-      Object.defineProperty(event, "currentTarget", { configurable: true, value: this });
-      this.#listeners.get(event.type)?.forEach((listener) => {
-        if (typeof listener === "function") listener.call(this, event);
-        else listener.handleEvent(event);
-      });
-      if (event.bubbles && !event.cancelBubble) this.parentNode?.dispatchEvent(event);
+      const path: StubNode[] = [];
+      for (let node: StubNode | null = this; node !== null; node = node.parentNode) path.push(node);
+
+      for (let index = path.length - 1; index >= 1 && !event.cancelBubble; index--) {
+        const ancestor = path[index];
+        if (ancestor) ancestor.#fire(event, "capture");
+      }
+      if (!event.cancelBubble) this.#fire(event, "target");
+      for (let index = 1; event.bubbles && index < path.length && !event.cancelBubble; index++) {
+        const ancestor = path[index];
+        if (ancestor) ancestor.#fire(event, "bubble");
+      }
       return !event.defaultPrevented;
+    }
+
+    // stopPropagation halts later nodes but not the remaining listeners on this one.
+    #fire(event: Event, phase: DispatchPhase): void {
+      Object.defineProperty(event, "currentTarget", { configurable: true, value: this });
+      for (const entry of [...(this.#listeners.get(event.type) ?? [])]) {
+        if (phase === "capture" && !entry.capture) continue;
+        if (phase === "bubble" && entry.capture) continue;
+        if (typeof entry.listener === "function") entry.listener.call(this, event);
+        else entry.listener.handleEvent(event);
+      }
     }
   }
 

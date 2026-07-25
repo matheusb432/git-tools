@@ -1,4 +1,4 @@
-import "../test/dom-stub";
+import "../../test/dom-stub";
 import { bench } from "vitest";
 import { keyboardCommand, type KeyboardEventLike } from "./keyboard";
 

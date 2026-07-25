@@ -9,5 +9,89 @@
     "crates/desktop/src/embedded/generated",
     "node_modules",
     "target"
+  ],
+  "overrides": [
+    {
+      "files": ["frontend/shared/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/boot", "**/boot/**", "**/diff", "**/diff/**", "**/viewer", "**/viewer/**"],
+                "message": "shared is the bottom layer: a bundle imports shared, never the other way round."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["frontend/diff/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/boot", "**/boot/**", "**/viewer", "**/viewer/**"],
+                "message": "diff and viewer are sibling bundles; share through frontend/shared."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["frontend/viewer/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/boot", "**/boot/**", "**/diff", "**/diff/**"],
+                "message": "diff and viewer are sibling bundles; share through frontend/shared."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["frontend/diff/model/**"],
+      "excludeFiles": ["**/*.test.ts", "**/*.bench.ts"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["..", "../**"],
+                "message": "diff/model holds the view's pure decisions and imports nothing."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["frontend/**"],
+      "excludeFiles": ["frontend/viewer/**"],
+      "rules": {
+        "no-restricted-globals": [
+          "error",
+          {
+            "name": "__TAURI__",
+            "message": "the Tauri host exists only in the viewer document."
+          },
+          {
+            "name": "htmx",
+            "message": "the htmx bootstrap runs only in the viewer document."
+          }
+        ]
+      }
+    }
   ]
 }
