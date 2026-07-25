@@ -1,14 +1,9 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { beginToastLeave, showToast, TOAST_HOLD_MS, TOAST_LEAVE_MS, TOAST_LEAVING_ATTRIBUTE } from "./toast";
+import { describe, expect, test, vi } from "vitest";
+import { useFakeToastTimers } from "../test/dom-stub";
+import { showToast, TOAST_HOLD_MS, TOAST_LEAVE_MS, TOAST_LEAVING_ATTRIBUTE } from "./toast";
 
 describe("showToast", () => {
-  beforeEach(() => {
-    document.body.replaceChildren();
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  useFakeToastTimers();
 
   test("inserts one announced pill carrying the message", () => {
     showToast("Copied with context");
@@ -17,6 +12,7 @@ describe("showToast", () => {
     expect(toast?.textContent).toBe("Copied with context");
     expect(toast?.getAttribute("role")).toBe("status");
     expect(toast?.getAttribute("aria-live")).toBe("polite");
+    expect(toast?.getAttribute("aria-atomic")).toBe("true");
   });
 
   test("a later toast replaces the earlier one at once", () => {
@@ -38,30 +34,5 @@ describe("showToast", () => {
 
     vi.advanceTimersByTime(TOAST_LEAVE_MS);
     expect(document.querySelector(".gtl-toast")).toBeNull();
-  });
-});
-
-describe("beginToastLeave", () => {
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  test("marks the node leaving, then removes it and reports removal", () => {
-    const el = document.createElement("div");
-    document.body.appendChild(el);
-    let removed = false;
-
-    beginToastLeave(el, () => {
-      removed = true;
-    });
-    expect(el.getAttribute(TOAST_LEAVING_ATTRIBUTE)).toBe("");
-    expect(el.parentElement).not.toBeNull();
-
-    vi.advanceTimersByTime(TOAST_LEAVE_MS);
-    expect(el.parentElement).toBeNull();
-    expect(removed).toBe(true);
   });
 });

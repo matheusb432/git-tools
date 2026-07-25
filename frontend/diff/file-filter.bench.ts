@@ -1,25 +1,19 @@
-import "../test/dom-stub";
 import { bench, describe } from "vitest";
-import { planFileVisibility } from "./file-filter";
+import { type FileFacts, planFileVisibility } from "./file-filter";
 
 // Models the hot per-keystroke and per-card-click pass of a large diff: every
 // visibility recomputation scans all files against the active filters.
 const COMMIT_POOL = Array.from({ length: 40 }, (_, index) => `sha${index.toString(16).padStart(7, "0")}`);
 
-function syntheticFiles(count: number): Element[] {
-  return Array.from({ length: count }, (_, index) => {
-    const file = document.createElement("details");
-    file.setAttribute("data-path", `crates/module-${index % 12}/src/deeply/nested/file-${index}.rs`);
-    file.setAttribute(
-      "data-commits",
-      [index % 40, (index * 7) % 40, (index * 13) % 40].map((commit) => COMMIT_POOL[commit]).join(" "),
-    );
-    return file;
-  });
+function syntheticFiles(count: number): FileFacts[] {
+  return Array.from({ length: count }, (_, index) => ({
+    pathLower: `crates/module-${index % 12}/src/deeply/nested/file-${index}.rs`,
+    commitShas: [index % 40, (index * 7) % 40, (index * 13) % 40].map((commit) => COMMIT_POOL[commit] ?? ""),
+  }));
 }
 
 const files = syntheticFiles(500);
-const selection = COMMIT_POOL.filter((_, index) => index % 13 === 3);
+const selection = new Set(COMMIT_POOL.filter((_, index) => index % 13 === 3));
 
 describe("planFileVisibility over 500 files", () => {
   bench("name-filter keystroke", () => {

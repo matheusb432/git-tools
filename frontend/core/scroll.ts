@@ -4,11 +4,14 @@ export type ScrollLandOptions = {
   readonly maxFrames?: number;
 };
 
+type Measurable = { getBoundingClientRect(): { readonly top: number } };
+type ScrollContainer = Measurable & { scrollTop: number };
+
 /**
  * Lands scroll exactly on `target`: content-visibility boxes realize their true height
  * mid-scroll and shift it, so re-measure and re-align each frame until stable.
  */
-export function scrollLandOn(target: HTMLElement, scroller: HTMLElement, opts: ScrollLandOptions): void {
+export function scrollLandOn(target: Measurable, scroller: ScrollContainer, opts: ScrollLandOptions): void {
   const raf = opts.raf ?? ((cb) => requestAnimationFrame(cb));
   const maxFrames = opts.maxFrames ?? 12;
   let frames = 0;

@@ -13,8 +13,8 @@ export const TOAST_LEAVE_MS = 200;
 export const TOAST_HOLD_MS = 1600;
 
 let activeToast: HTMLElement | null = null;
-let holdTimer: ReturnType<typeof setTimeout> | null = null;
-let leaveTimer: ReturnType<typeof setTimeout> | null = null;
+// The hold and the leave are consecutive phases of one dismissal, never concurrent.
+let dismissTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Fades `toast` out, then removes it and runs `onRemoved`. Returns the removal timer. */
 export function beginToastLeave(toast: Element, onRemoved: () => void = () => {}): ReturnType<typeof setTimeout> {
@@ -30,8 +30,7 @@ export function beginToastLeave(toast: Element, onRemoved: () => void = () => {}
  * the enter animation replays, replacing any toast still on screen at once.
  */
 export function showToast(message: string): void {
-  if (holdTimer !== null) clearTimeout(holdTimer);
-  if (leaveTimer !== null) clearTimeout(leaveTimer);
+  if (dismissTimer !== null) clearTimeout(dismissTimer);
   activeToast?.remove();
 
   const el = document.createElement("div");
@@ -42,11 +41,10 @@ export function showToast(message: string): void {
   el.textContent = message;
   document.body.appendChild(el);
   activeToast = el;
-  holdTimer = setTimeout(() => {
-    holdTimer = null;
-    leaveTimer = beginToastLeave(el, () => {
-      leaveTimer = null;
-      if (activeToast === el) activeToast = null;
+  dismissTimer = setTimeout(() => {
+    dismissTimer = beginToastLeave(el, () => {
+      dismissTimer = null;
+      activeToast = null;
     });
   }, TOAST_HOLD_MS);
 }

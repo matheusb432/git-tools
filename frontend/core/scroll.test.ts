@@ -5,9 +5,8 @@ test("scrollLandOn converges target top to stickyTop despite estimate drift", ()
   let scrollTop = 0;
   let realized = 0; // grows each frame: intervening content gets taller as it realizes
   const target = {
-    open: true,
     getBoundingClientRect: () => ({ top: 800 - scrollTop + realized * 40 }),
-  } as unknown as HTMLElement;
+  };
   const scroller = {
     get scrollTop() {
       return scrollTop;
@@ -16,9 +15,7 @@ test("scrollLandOn converges target top to stickyTop despite estimate drift", ()
       scrollTop = v;
     },
     getBoundingClientRect: () => ({ top: 0 }),
-    scrollHeight: 100000,
-    clientHeight: 900,
-  } as unknown as HTMLElement;
+  };
   const queue: FrameRequestCallback[] = [];
   const raf = (cb: FrameRequestCallback) => {
     queue.push(cb);

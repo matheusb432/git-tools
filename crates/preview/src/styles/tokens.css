@@ -39,8 +39,8 @@
     color-scheme:dark;
   }
   [data-theme="mirage"]{
-    --bg:#1a1f29; --surface:#1f2430; --surface-2:#242936; --sunk:#171b24;
-    --ink:#cccac2; --ink-2:#8a97a6; --ink-3:#6b7789; --line:#2a3140; --line-2:#343c4d;
+    --bg:#141820; --surface:#1a202a; --surface-2:#222936; --sunk:#0f131a;
+    --ink:#cccac2; --ink-2:#82909f; --ink-3:#667384; --line:#252c39; --line-2:#303949;
     --acc:#e8730c; --acc-2:#f5832b; --acc-soft:rgba(232,115,12,.14); --acc-line:rgba(232,115,12,.42);
     --add:#87d96c; --add-bg:rgba(135,217,108,.16); --add-gut:rgba(135,217,108,.26); --add-ink:#a5e88f; --add-line:rgba(135,217,108,.42);
     --del:#f27983; --del-bg:rgba(242,121,131,.16); --del-gut:rgba(242,121,131,.26); --del-ink:#f7a0a7; --del-line:rgba(242,121,131,.42);

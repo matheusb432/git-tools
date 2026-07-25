@@ -1,97 +1,55 @@
 import { expect, test } from "vitest";
 import { extractCopyText } from "./copy";
 
-// Row descriptor parsed from a minimal XML-like mini-DSL:
-//   <row code="+const x = 1" lns="0,12"/>          → normal row; code is raw marker+text
-//   <row codeText="+data:font/woff;base64,AAAA" lns="0,1"/>  → row with .code-text child
-type RowDesc =
-  | { kind: "code"; marker: string; text: string; lns: [number, number] }
-  | { kind: "codeText"; marker: string; text: string; lns: [number, number] };
-
-function parseRows(html: string): RowDesc[] {
-  const rows: RowDesc[] = [];
-  // Match <row ... /> where attr values may contain '/' (e.g. data: URIs)
-  const re = /<row\s+((?:[a-zA-Z-]+="[^"]*"\s*)*)\s*\/>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html)) !== null) {
-    const attrs = m[1] ?? "";
-    const getAttr = (name: string): string | undefined => {
-      const am = new RegExp(`${name}="([^"]*)"`, "").exec(attrs);
-      return am ? am[1] : undefined;
-    };
-    const lnsRaw = getAttr("lns") ?? "0,0";
-    const parts = lnsRaw.split(",");
-    const lns: [number, number] = [parseInt(parts[0] ?? "0", 10), parseInt(parts[1] ?? "0", 10)];
-    const code = getAttr("code");
-    const codeText = getAttr("codeText");
-    if (code !== undefined) {
-      rows.push({ kind: "code", marker: code[0] ?? "", text: code.slice(1), lns });
-    } else if (codeText !== undefined) {
-      rows.push({ kind: "codeText", marker: codeText[0] ?? "", text: codeText.slice(1), lns });
-    }
-  }
-  return rows;
-}
-
-function makeLnEl(n: number): object {
-  return { textContent: String(n) };
-}
+type RowDesc = {
+  /** Rendered marker column: "+" for additions, " " for context. */
+  readonly marker: string;
+  readonly text: string;
+  readonly newLine: number;
+  /** Long-line rows nest the raw text in .code-text while <code> also carries the expander. */
+  readonly expander?: string;
+};
 
 function makeRowEl(desc: RowDesc): object {
-  const [oldLn, newLn] = desc.lns;
-  const lnEls = [makeLnEl(oldLn), makeLnEl(newLn)];
-  const rawText = desc.marker + desc.text;
-
-  let codeEl: object;
-  if (desc.kind === "codeText") {
-    const codeTextEl = { textContent: rawText };
-    codeEl = {
-      textContent: rawText + "[expand]", // simulates extra label text on the outer code
-      querySelector: (sel: string): object | null => (sel === ".code-text" ? codeTextEl : null),
-    };
-  } else {
-    codeEl = {
-      textContent: rawText,
-      querySelector: (_sel: string): object | null => null,
-    };
-  }
+  const lnEls = [{ textContent: "0" }, { textContent: String(desc.newLine) }];
+  const raw = desc.marker + desc.text;
+  const codeTextEl = { textContent: raw };
+  const codeEl =
+    desc.expander === undefined
+      ? { textContent: raw, querySelector: (): object | null => null }
+      : {
+          textContent: raw + desc.expander,
+          querySelector: (selector: string): object | null => (selector === ".code-text" ? codeTextEl : null),
+        };
 
   return {
-    querySelector: (sel: string): object | null => (sel === "code" ? codeEl : null),
-    querySelectorAll: (sel: string): object[] => (sel === ".ln" ? lnEls : []),
+    querySelector: (selector: string): object | null => (selector === "code" ? codeEl : null),
+    querySelectorAll: (selector: string): object[] => (selector === ".ln" ? lnEls : []),
   };
 }
 
-function makeFileStub(rowsHtml: string, attrs: Record<string, string> = {}): object {
-  const descs = parseRows(rowsHtml);
-  const rowEls = descs.map(makeRowEl);
-
-  // The .layout element: present when attrs has "copy-ctx"
-  const hasCopyCtx = "copy-ctx" in attrs;
+function makeFileStub(rows: readonly RowDesc[], attrs: Record<string, string>, contextOn: boolean): object {
+  const rowEls = rows.map(makeRowEl);
   const layoutEl = {
-    classList: {
-      contains: (cls: string): boolean => (cls === "copy-ctx" ? hasCopyCtx : false),
-    },
+    classList: { contains: (name: string): boolean => name === "copy-ctx" && contextOn },
   };
-
-  // The unified pane holds the rendered .dl-add/.dl-ctx rows.
   const unifiedEl = {
-    querySelectorAll: (sel: string): object[] => (sel.includes("dl-add") || sel.includes("dl-ctx") ? rowEls : []),
+    querySelectorAll: (selector: string): object[] => (selector.includes("dl-add") ? rowEls : []),
   };
 
   return {
-    querySelector: (sel: string): object | null => (sel === ".diff-unified" ? unifiedEl : null),
-    closest: (sel: string): object | null => (sel === ".layout" ? layoutEl : null),
+    querySelector: (selector: string): object | null => (selector === ".diff-unified" ? unifiedEl : null),
+    closest: (selector: string): object | null => (selector === ".layout" ? layoutEl : null),
     getAttribute: (name: string): string | null => attrs[name] ?? null,
   };
 }
 
-function makeSplitFileStub(attrs: Record<string, string> = {}): object {
+function makeSplitFileStub(attrs: Record<string, string>): object {
   const lineNumber = { textContent: "12", matches: (selector: string) => selector === ".ln" };
   const code = {
     textContent: "+const x = 1",
     previousElementSibling: lineNumber,
-    querySelector: (_selector: string): object | null => null,
+    querySelector: (): object | null => null,
   };
   const split = {
     querySelectorAll: (selector: string): object[] => (selector === ".sp-add, .dl > .sp-ctx:last-child" ? [code] : []),
@@ -107,27 +65,27 @@ function makeSplitFileStub(attrs: Record<string, string> = {}): object {
   };
 }
 
-test("extractCopyText reads .code-text (not the expander label) and strips markers", () => {
-  const file = makeFileStub(`<row code="+const x = 1" lns="0,12"/>`, {
-    "data-comment": "//",
-    "data-path": "src/a.ts",
-    "copy-ctx": "true",
-  });
-  expect(extractCopyText(file as Element)).toBe("// * src/a.ts, lines: 12\nconst x = 1");
-});
+test("extractCopyText headers the copy with the span the rows cover", () => {
+  const multi = makeFileStub(
+    [
+      { marker: "+", text: "const x = 1", newLine: 12 },
+      { marker: "+", text: "const y = 2", newLine: 13 },
+    ],
+    { "data-comment": "//", "data-path": "src/a.ts" },
+    true,
+  );
 
-test("extractCopyText collapses a single-line marker to one line number, keeps the range for spans", () => {
-  const multi = makeFileStub(`<row code="+const x = 1" lns="0,12"/><row code="+const y = 2" lns="0,13"/>`, {
-    "data-comment": "//",
-    "data-path": "src/a.ts",
-    "copy-ctx": "true",
-  });
   expect(extractCopyText(multi as Element)).toBe("// * src/a.ts, lines: 12..13\nconst x = 1\nconst y = 2");
 });
 
 test("extractCopyText prefers .code-text over code when a long line is split-clipped", () => {
-  const file = makeFileStub(`<row codeText="+data:font/woff;base64,AAAA" lns="0,1"/>`, { "data-path": "f.css" });
-  expect(extractCopyText(file as Element)).toContain("data:font/woff;base64,AAAA");
+  const file = makeFileStub(
+    [{ marker: "+", text: "data:font/woff;base64,AAAA", newLine: 1, expander: "[expand]" }],
+    { "data-path": "f.css" },
+    false,
+  );
+
+  expect(extractCopyText(file as Element)).toBe("data:font/woff;base64,AAAA");
 });
 
 test("extractCopyText reads the rendered split pane when no unified pane exists", () => {

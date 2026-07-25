@@ -1,6 +1,5 @@
+import { installOnce } from "../core/install-once";
 import { computeWheelScroll } from "../core/wheel";
-
-const installedDocuments = new WeakSet<Document>();
 
 /**
  * Vertical wheel over the tab strip scrolls it horizontally, so an overflowing
@@ -8,9 +7,7 @@ const installedDocuments = new WeakSet<Document>();
  * listener is delegated on the document because the strip is replaced wholesale
  * by out-of-band swaps; a single non-passive listener survives every swap.
  */
-export function installTabWheel(root: Document): void {
-  if (installedDocuments.has(root)) return;
-  installedDocuments.add(root);
+export const installTabWheel = installOnce((root: Document): void => {
   root.addEventListener(
     "wheel",
     (event) => {
@@ -25,4 +22,4 @@ export function installTabWheel(root: Document): void {
     },
     { passive: false },
   );
-}
+});

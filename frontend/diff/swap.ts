@@ -1,23 +1,22 @@
+import { installOnce } from "../core/install-once";
 import { scrollLandOn } from "../core/scroll";
 import { enhanceControls } from "./controls";
 import { enhanceLayout } from "./enhance-layout";
-
-type Teardown = { readonly destroy: () => void };
 
 export type EnhancementLifecycle = {
   readonly enhanceWithin: (scope: ParentNode) => void;
   readonly destroyWithin: (scope: ParentNode) => void;
 };
 
-export type SwapAnchor = {
-  readonly path: string | null;
-  readonly offset: number;
-  readonly scrollTop: number;
-};
+/** Where the view was reading before a swap: a file plus its viewport offset, or bare scroll. */
+export type SwapAnchor =
+  | { readonly path: string; readonly offset: number; readonly scrollTop: number }
+  | { readonly path: null; readonly scrollTop: number };
+
+type ResponseHeaderReader = { readonly getResponseHeader: (name: string) => string | null };
 
 type LandOnAnchor = (target: HTMLDetailsElement, scroller: HTMLElement, offset: number) => void;
 
-const installedDocuments = new WeakSet<Document>();
 const pendingAnchors = new WeakMap<HTMLElement, SwapAnchor>();
 const RECOVERY_HEADER = "X-GTL-Recovery";
 
@@ -26,25 +25,21 @@ function layoutsWithin(scope: ParentNode): readonly HTMLElement[] {
   return [...scope.querySelectorAll<HTMLElement>(".layout")];
 }
 
-export function createEnhancementLifecycle<Handle extends object>(
-  mountRoot: (root: HTMLElement) => Handle,
-  unmountRoot: (handle: Handle) => void,
-): EnhancementLifecycle {
-  const mounted = new WeakMap<HTMLElement, Handle>();
+export function createEnhancementLifecycle(mountRoot: (root: HTMLElement) => () => void): EnhancementLifecycle {
+  const mounted = new WeakMap<HTMLElement, () => void>();
   return {
     enhanceWithin(scope) {
       layoutsWithin(scope).forEach((root) => {
         if (mounted.has(root)) return;
-        const component = mountRoot(root);
-        mounted.set(root, component);
+        mounted.set(root, mountRoot(root));
         root.dataset["gtlEnhanced"] = "true";
       });
     },
     destroyWithin(scope) {
       layoutsWithin(scope).forEach((root) => {
-        const component = mounted.get(root);
-        if (!component) return;
-        unmountRoot(component);
+        const unmount = mounted.get(root);
+        if (!unmount) return;
+        unmount();
         mounted.delete(root);
         delete root.dataset["gtlEnhanced"];
       });
@@ -52,35 +47,30 @@ export function createEnhancementLifecycle<Handle extends object>(
   };
 }
 
-const enhancementLifecycle = createEnhancementLifecycle<Teardown>(
-  (root) => {
-    const cleanups = [enhanceControls(root), enhanceLayout(root)];
-    return {
-      destroy: () => {
-        cleanups.reverse().forEach((cleanup) => cleanup());
-      },
-    };
-  },
-  (handle) => {
-    handle.destroy();
-  },
-);
+const enhancementLifecycle = createEnhancementLifecycle((root) => {
+  const cleanups = [enhanceControls(root), enhanceLayout(root)];
+  return () => {
+    cleanups.reverse().forEach((cleanup) => cleanup());
+  };
+});
 
 export const enhanceWithin = enhancementLifecycle.enhanceWithin;
 export const destroyWithin = enhancementLifecycle.destroyWithin;
 
 export function captureSwapAnchor(view: ParentNode): SwapAnchor {
   const scroller = view.querySelector<HTMLElement>(".main");
-  if (!scroller) return { path: null, offset: 0, scrollTop: 0 };
+  if (!scroller) return { path: null, scrollTop: 0 };
   const scrollerTop = scroller.getBoundingClientRect().top;
-  const topFile = [...view.querySelectorAll<HTMLDetailsElement>("details.file[data-path]")].find(
-    (file) => !file.hidden && file.getBoundingClientRect().bottom > scrollerTop,
-  );
-  return {
-    path: topFile?.getAttribute("data-path") ?? null,
-    offset: topFile ? topFile.getBoundingClientRect().top - scrollerTop : 0,
-    scrollTop: scroller.scrollTop,
-  };
+  // One forced layout per candidate is the cost here, so each file's rect is read once.
+  for (const file of view.querySelectorAll<HTMLDetailsElement>("details.file[data-path]")) {
+    if (file.hidden) continue;
+    const rect = file.getBoundingClientRect();
+    if (rect.bottom <= scrollerTop) continue;
+    const path = file.getAttribute("data-path");
+    if (path === null) continue;
+    return { path, offset: rect.top - scrollerTop, scrollTop: scroller.scrollTop };
+  }
+  return { path: null, scrollTop: scroller.scrollTop };
 }
 
 export function restoreSwapAnchor(
@@ -90,15 +80,15 @@ export function restoreSwapAnchor(
 ): void {
   const scroller = view.querySelector<HTMLElement>(".main");
   if (!scroller) return;
-  const target = anchor.path
-    ? [...view.querySelectorAll<HTMLDetailsElement>("details.file[data-path]")].find(
-        (file) => file.getAttribute("data-path") === anchor.path,
-      )
-    : undefined;
-  if (target) {
-    target.open = true;
-    land(target, scroller, anchor.offset);
-    return;
+  if (anchor.path !== null) {
+    const target = [...view.querySelectorAll<HTMLDetailsElement>("details.file[data-path]")].find(
+      (file) => file.getAttribute("data-path") === anchor.path,
+    );
+    if (target) {
+      target.open = true;
+      land(target, scroller, anchor.offset);
+      return;
+    }
   }
   scroller.scrollTop = Math.min(
     Math.max(anchor.scrollTop, 0),
@@ -119,6 +109,15 @@ function swapWillRun(event: Event): boolean {
   return typeof detail === "object" && detail !== null && (!("shouldSwap" in detail) || detail.shouldSwap !== false);
 }
 
+function readsResponseHeaders(value: unknown): value is ResponseHeaderReader {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "getResponseHeader" in value &&
+    typeof value.getResponseHeader === "function"
+  );
+}
+
 function optIntoMarkedRecoverySwap(event: Event): void {
   if (!("detail" in event)) return;
   const detail = event.detail;
@@ -132,15 +131,7 @@ function optIntoMarkedRecoverySwap(event: Event): void {
     return;
   }
   const xhr = detail.xhr;
-  if (
-    typeof xhr !== "object" ||
-    xhr === null ||
-    !("getResponseHeader" in xhr) ||
-    typeof xhr.getResponseHeader !== "function" ||
-    xhr.getResponseHeader(RECOVERY_HEADER) !== "true"
-  ) {
-    return;
-  }
+  if (!readsResponseHeaders(xhr) || xhr.getResponseHeader(RECOVERY_HEADER) !== "true") return;
   detail.shouldSwap = true;
   detail.isError = false;
 }
@@ -153,32 +144,29 @@ function isViewerView(target: HTMLElement): boolean {
   return target.id === "viewer-view";
 }
 
-export function installSwapLifecycle(
-  targetDocument: Document,
-  lifecycle: EnhancementLifecycle = enhancementLifecycle,
-): void {
-  if (installedDocuments.has(targetDocument)) return;
-  installedDocuments.add(targetDocument);
-  const beforeSwap = (event: Event): void => {
-    optIntoMarkedRecoverySwap(event);
-    const target = eventTarget(event);
-    if (!target || !isViewerView(target) || !swapWillRun(event)) return;
-    if (!pendingAnchors.has(target)) pendingAnchors.set(target, captureSwapAnchor(target));
-    lifecycle.destroyWithin(target);
-  };
-  const afterSwap = (event: Event): void => {
-    const oldTarget = eventTarget(event);
-    const replacement = replacementTarget(event);
-    if (!oldTarget || !isViewerView(oldTarget) || !replacement || !isViewerView(replacement)) return;
-    lifecycle.enhanceWithin(replacement);
-    const anchor = pendingAnchors.get(oldTarget);
-    if (anchor) {
-      restoreSwapAnchor(replacement, anchor);
-      pendingAnchors.delete(oldTarget);
-    }
-  };
-  targetDocument.addEventListener("htmx:beforeSwap", beforeSwap);
-  targetDocument.addEventListener("htmx:afterSwap", afterSwap);
-  targetDocument.addEventListener("htmx:oobBeforeSwap", beforeSwap);
-  targetDocument.addEventListener("htmx:oobAfterSwap", afterSwap);
-}
+export const installSwapLifecycle = installOnce(
+  (targetDocument: Document, lifecycle: EnhancementLifecycle = enhancementLifecycle): void => {
+    const beforeSwap = (event: Event): void => {
+      optIntoMarkedRecoverySwap(event);
+      const target = eventTarget(event);
+      if (!target || !isViewerView(target) || !swapWillRun(event)) return;
+      if (!pendingAnchors.has(target)) pendingAnchors.set(target, captureSwapAnchor(target));
+      lifecycle.destroyWithin(target);
+    };
+    const afterSwap = (event: Event): void => {
+      const oldTarget = eventTarget(event);
+      const replacement = replacementTarget(event);
+      if (!oldTarget || !isViewerView(oldTarget) || !replacement || !isViewerView(replacement)) return;
+      lifecycle.enhanceWithin(replacement);
+      const anchor = pendingAnchors.get(oldTarget);
+      if (anchor) {
+        restoreSwapAnchor(replacement, anchor);
+        pendingAnchors.delete(oldTarget);
+      }
+    };
+    targetDocument.addEventListener("htmx:beforeSwap", beforeSwap);
+    targetDocument.addEventListener("htmx:afterSwap", afterSwap);
+    targetDocument.addEventListener("htmx:oobBeforeSwap", beforeSwap);
+    targetDocument.addEventListener("htmx:oobAfterSwap", afterSwap);
+  },
+);

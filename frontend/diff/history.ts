@@ -1,4 +1,5 @@
 import { copyText } from "../core/clipboard";
+import { installOnce } from "../core/install-once";
 
 const COPY_FLASH_MS = 1200;
 
@@ -18,17 +19,13 @@ export function classifyHistoryClick(
   return selectingInRow ? { kind: "select" } : { kind: "open" };
 }
 
-const installedDocuments = new WeakSet<Document>();
-
 // Rows are server-rendered role=button divs carrying an hx-get. A plain click opens the render;
 // the copy button and text-drag selections must not. Listening in the capture phase stops those
 // before the row's bubbling hx-get fires.
-export function installHistoryActions(root: Document): void {
-  if (installedDocuments.has(root)) return;
-  installedDocuments.add(root);
+export const installHistoryActions = installOnce((root: Document): void => {
   root.addEventListener("click", (event) => onClick(root, event), true);
   root.addEventListener("keydown", onKeydown);
-}
+});
 
 function onClick(root: Document, event: MouseEvent): void {
   const target = event.target;

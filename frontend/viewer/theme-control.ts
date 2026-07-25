@@ -1,6 +1,6 @@
-export const THEME_INPUT_ATTRIBUTE = "data-viewer-theme";
+import { installOnce } from "../core/install-once";
 
-const installedDocuments = new WeakSet<Document>();
+export const THEME_INPUT_ATTRIBUTE = "data-viewer-theme";
 
 // The picked radio's option row carries the palette's rendered name as the last
 // span in its label; reading it back keeps the trigger copy server-authored
@@ -16,9 +16,7 @@ function optionName(input: HTMLInputElement): string | undefined {
 // hx-swap="none" pick also leaves the trigger name and the panel's autofocus target
 // stale, since both are rendered once per document load and never swapped -- this
 // mirrors the picked row's server-rendered name and autofocus state onto both.
-export function installThemeControl(root: Document): void {
-  if (installedDocuments.has(root)) return;
-  installedDocuments.add(root);
+export const installThemeControl = installOnce((root: Document): void => {
   root.addEventListener("change", (event) => {
     const input = event.target;
     if (!(input instanceof HTMLInputElement)) return;
@@ -35,4 +33,4 @@ export function installThemeControl(root: Document): void {
     }
     input.setAttribute("autofocus", "");
   });
-}
+});

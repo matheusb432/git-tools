@@ -7,8 +7,8 @@ interface TauriEventApi {
 }
 
 interface HtmxAjaxContext {
-  target: string;
-  swap: string;
+  readonly target: string;
+  readonly swap: string;
 }
 
 interface HtmxApi {

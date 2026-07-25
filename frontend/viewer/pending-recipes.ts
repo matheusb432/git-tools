@@ -1,7 +1,7 @@
-export const PENDING_RECIPES_EVENT = "recipes-pending";
-export const PENDING_RECIPES_ROUTE = "/pending";
-export const PENDING_TABS_TARGET = "#viewer-tabs";
-export const PENDING_TABS_SWAP = "outerHTML";
+const PENDING_RECIPES_EVENT = "recipes-pending";
+const PENDING_RECIPES_ROUTE = "/pending";
+const PENDING_TABS_TARGET = "#viewer-tabs";
+const PENDING_TABS_SWAP = "outerHTML";
 
 type ViewerRuntime = Pick<Window, "__TAURI__" | "htmx">;
 

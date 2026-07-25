@@ -1,5 +1,7 @@
 // Minimal DOM for frontend tests. It models the tree, selector, event, and geometry behavior
 // needed to exercise progressive enhancement without a browser dependency.
+import { afterEach, beforeEach, vi } from "vitest";
+
 if (typeof globalThis.document === "undefined") {
   const rectangles = new WeakMap<object, DOMRect>();
 
@@ -60,30 +62,16 @@ if (typeof globalThis.document === "undefined") {
     readonly #listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
     parentNode: StubNode | null = null;
     childNodes: StubNode[] = [];
-    nodeType = 1;
     textContent: string | null = "";
 
     get parentElement(): StubElement | null {
       return this.parentNode instanceof StubElement ? this.parentNode : null;
     }
 
-    get firstChild(): StubNode | null {
-      return this.childNodes[0] ?? null;
-    }
-
     appendChild<T extends StubNode>(child: T): T {
       child.remove();
       child.parentNode = this;
       this.childNodes.push(child);
-      return child;
-    }
-
-    insertBefore<T extends StubNode>(child: T, before: StubNode | null): T {
-      child.remove();
-      child.parentNode = this;
-      const index = before === null ? -1 : this.childNodes.indexOf(before);
-      if (index === -1) this.childNodes.push(child);
-      else this.childNodes.splice(index, 0, child);
       return child;
     }
 
@@ -183,19 +171,29 @@ if (typeof globalThis.document === "undefined") {
     hidden = false;
     open = false;
     scrollTop = 0;
-    scrollLeft = 0;
     scrollHeight = 0;
-    scrollWidth = 0;
     clientHeight = 0;
-    clientWidth = 0;
     offsetHeight = 0;
-    offsetWidth = 0;
     value = "";
     #innerHTML = "";
 
     constructor(tagName: string) {
       super();
       this.tagName = tagName.toUpperCase();
+    }
+
+    get previousElementSibling(): StubElement | null {
+      return this.#siblingAt(-1);
+    }
+
+    get nextElementSibling(): StubElement | null {
+      return this.#siblingAt(1);
+    }
+
+    #siblingAt(step: number): StubElement | null {
+      const siblings = this.parentNode?.childNodes ?? [];
+      const sibling = siblings[siblings.indexOf(this) + step];
+      return sibling instanceof StubElement ? sibling : null;
     }
 
     set className(value: string) {
@@ -302,10 +300,6 @@ if (typeof globalThis.document === "undefined") {
     select(): void {}
   }
 
-  class StubComment extends StubNode {
-    override nodeType = 8;
-  }
-
   class StubDocument extends StubNode {
     readonly documentElement = new StubElement("html");
     readonly body = new StubElement("body");
@@ -318,14 +312,6 @@ if (typeof globalThis.document === "undefined") {
 
     createElement(tagName: string): StubElement {
       return new StubElement(tagName);
-    }
-
-    createComment(): StubComment {
-      return new StubComment();
-    }
-
-    createTreeWalker(): { nextNode(): null } {
-      return { nextNode: () => null };
     }
 
     querySelectorAll(selector: string): StubElement[] {
@@ -381,8 +367,23 @@ if (typeof globalThis.requestAnimationFrame === "undefined") {
   });
 }
 
+// The stub document is a singleton, so every case inherits whatever the last one left in the
+// body. Clearing it here is the only teardown a case needs; document-level listeners installed
+// through the install-once guards deliberately survive, one install per test file.
+beforeEach(() => {
+  document.body.replaceChildren();
+});
+
+/** Drives the toast's hold and leave timers by hand; every other clock stays real. */
+export function useFakeToastTimers(): void {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+}
+
 declare global {
   function setTestRect(element: object, rect: DOMRectInit): void;
 }
-
-export {};

@@ -8,12 +8,11 @@ describe("classifyHistoryClick", () => {
     expect(classifyHistoryClick(button, null, false)).toEqual({ kind: "copy", payload: '{"id":9}' });
   });
 
-  test("a live selection in the row suppresses opening", () => {
-    expect(classifyHistoryClick(null, document.createElement("div"), true)).toEqual({ kind: "select" });
-  });
+  test("a row click opens unless a live selection ends inside the row", () => {
+    const row = document.createElement("div");
 
-  test("a plain click on the row opens", () => {
-    expect(classifyHistoryClick(null, document.createElement("div"), false)).toEqual({ kind: "open" });
+    expect(classifyHistoryClick(null, row, false)).toEqual({ kind: "open" });
+    expect(classifyHistoryClick(null, row, true)).toEqual({ kind: "select" });
   });
 
   test("a click outside any row is ignored", () => {

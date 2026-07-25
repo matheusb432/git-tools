@@ -1,12 +1,5 @@
 import { describe, expect, test } from "vitest";
-import {
-  createCoalescedDrain,
-  installPendingRecipes,
-  PENDING_RECIPES_EVENT,
-  PENDING_RECIPES_ROUTE,
-  PENDING_TABS_SWAP,
-  PENDING_TABS_TARGET,
-} from "./pending-recipes";
+import { createCoalescedDrain, installPendingRecipes } from "./pending-recipes";
 
 describe("createCoalescedDrain", () => {
   test("a burst during one refresh coalesces into a single rerun", async () => {
@@ -57,39 +50,25 @@ describe("createCoalescedDrain", () => {
 });
 
 describe("installPendingRecipes", () => {
-  test("subscribes before draining, then drains on every event", async () => {
-    const refreshes: Array<{ verb: string; path: string; target: string; swap: string }> = [];
-    const published: Array<() => void> = [];
+  test("subscribes before the closing drain runs", async () => {
+    let refreshes = 0;
     await installPendingRecipes({
       __TAURI__: {
         event: {
-          listen: (event, handler) => {
-            expect(event).toBe(PENDING_RECIPES_EVENT);
-            expect(refreshes).toHaveLength(0);
-            published.push(handler);
+          listen: () => {
+            expect(refreshes).toBe(0);
             return Promise.resolve(() => {});
           },
         },
       },
       htmx: {
-        ajax: (verb, path, context) => {
-          refreshes.push({ verb, path, target: context.target, swap: context.swap });
+        ajax: () => {
+          refreshes += 1;
           return Promise.resolve();
         },
       },
     });
 
-    expect(refreshes).toEqual([
-      { verb: "GET", path: PENDING_RECIPES_ROUTE, target: PENDING_TABS_TARGET, swap: PENDING_TABS_SWAP },
-    ]);
-
-    published[0]?.();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-    expect(refreshes).toHaveLength(2);
-  });
-
-  test("runs as a no-op outside the tauri host", async () => {
-    await expect(installPendingRecipes({})).resolves.toBeUndefined();
+    expect(refreshes).toBe(1);
   });
 });

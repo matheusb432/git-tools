@@ -1,8 +1,10 @@
 import { copyText } from "../core/clipboard";
+import { copyContextEnabled, copyHeader, readCopiedRows } from "../core/copy";
 import { keyboardCommand } from "../core/keyboard";
 import { scrollLandOn } from "../core/scroll";
+import { createTeardown } from "../core/teardown";
 import { showToast } from "../core/toast";
-import { isShaTarget, resolveActiveSet } from "./commit-focus";
+import { type CommitFocus, isShaTarget, resolveActiveSet } from "./commit-focus";
 import { planFileVisibility } from "./file-filter";
 import { buildFileLeaf } from "./file-tree";
 import { toggleLongLine } from "./long-lines";
@@ -20,79 +22,29 @@ export function handleDocumentCopy(e: ClipboardEvent): void {
   const node = sel.getRangeAt(0).commonAncestorContainer;
   const el = node instanceof Element ? node : node.parentElement;
   const file = el?.closest ? el.closest("details.file") : null;
-  if (!file) return;
-  const layout = file.closest(".layout");
-  if (layout && !layout.classList.contains("copy-ctx")) return;
+  if (!file || !copyContextEnabled(file)) return;
   // Pane visibility is CSS-driven, so read rows from the pane the selection sits in. Split
   // panes carry no .dl-add rows; their selections fall through to the native copy.
   const diffBlock = el?.closest ? el.closest(".diff") : null;
-  const rows = diffBlock ? Array.from(diffBlock.querySelectorAll(".dl-add, .dl-ctx")) : [];
-  const out: string[] = [];
-  let first: number | null = null;
-  let last: number | null = null;
-  rows.forEach((row) => {
-    if (!sel.containsNode(row, true)) return;
-    const code = row.querySelector("code");
-    if (!code) return;
-    // .code-text keeps long-line expander chrome out of the copied text.
-    const text = (code.querySelector(".code-text") ?? code).textContent ?? "";
-    out.push(text.length && (text[0] === "+" || text[0] === " ") ? text.slice(1) : text);
-    const lns = row.querySelectorAll(".ln");
-    const n = lns.length > 1 ? parseInt(lns[1]?.textContent ?? "", 10) : NaN;
-    if (!Number.isNaN(n)) {
-      if (first === null) first = n;
-      last = n;
-    }
-  });
-  if (!out.length || !e.clipboardData) return;
-  const leader = file.getAttribute("data-comment") || "//";
-  const path = file.getAttribute("data-path") || "";
-  const range = first === last ? `${first}` : `${first}..${last}`;
-  const header = `${leader} * ${path}` + (first !== null ? `, lines: ${range}` : "");
-  e.clipboardData.setData("text/plain", `${header}\n${out.join("\n")}`);
+  if (!diffBlock) return;
+  const copied = readCopiedRows(diffBlock.querySelectorAll(".dl-add, .dl-ctx"), (row) => sel.containsNode(row, true));
+  if (!copied.lines.length || !e.clipboardData) return;
+  e.clipboardData.setData("text/plain", `${copyHeader(file, copied.lineRange)}\n${copied.lines.join("\n")}`);
   e.preventDefault();
-  showToast(first !== null ? `Copied with context · lines ${range}` : "Copied with context");
+  showToast(copied.lineRange === null ? "Copied with context" : `Copied with context · lines ${copied.lineRange}`);
 }
 
 /**
- * Opens `target`, then schedules `land` in the next animation frame so a collapsed
+ * Opens `target`, then lands on it in the next animation frame so a collapsed
  * content-visibility giant materializes before the landing correction loop runs.
  */
-export function navigateToFile(
-  target: HTMLDetailsElement,
-  scroller: HTMLElement,
-  opts: {
-    raf?: (cb: FrameRequestCallback) => number;
-    land?: (t: HTMLDetailsElement, s: HTMLElement) => void;
-    stickyTop?: number;
-  },
-): void {
-  const raf = opts.raf ?? ((cb) => requestAnimationFrame(cb));
-  const land = opts.land ?? ((t, s) => scrollLandOn(t, s, { stickyTop: opts.stickyTop ?? 0 }));
+function navigateToFile(target: HTMLDetailsElement, scroller: HTMLElement, stickyTop: number): void {
   target.open = true;
-  raf(() => land(target, scroller));
+  requestAnimationFrame(() => scrollLandOn(target, scroller, { stickyTop }));
 }
 
 export function enhanceLayout(root: HTMLElement): () => void {
-  const cleanups: Array<() => void> = [];
-  const timers = new Set<ReturnType<typeof setTimeout>>();
-  const listen = (
-    target: EventTarget,
-    type: string,
-    listener: EventListener,
-    options?: AddEventListenerOptions,
-  ): void => {
-    target.addEventListener(type, listener, options);
-    cleanups.push(() => target.removeEventListener(type, listener, options));
-  };
-  const later = (callback: () => void, delay: number): ReturnType<typeof setTimeout> => {
-    const timer = setTimeout(() => {
-      timers.delete(timer);
-      callback();
-    }, delay);
-    timers.add(timer);
-    return timer;
-  };
+  const { listen, later, cancel, destroy } = createTeardown();
   // Query within `root`, never document: the tabbed view inlines one .layout per panel in a
   // single document, and document-level queries would only ever wire the first panel.
   const fileEls = Array.from(root.querySelectorAll<HTMLDetailsElement>("details.file"));
@@ -104,19 +56,25 @@ export function enhanceLayout(root: HTMLElement): () => void {
   // instead of on every filter pass.
   const dlCommits = dlEls.map((row) => row.getAttribute("data-commit") ?? "");
   const clineShas = clineEls.map((card) => card.getAttribute("data-sha") ?? "");
-  const fileTreeMeta = fileEls.map((el) => ({
-    parts: (el.getAttribute("data-path") || "").split("/"),
-    status: el.getAttribute("data-status") || "modified",
-    statusCode: el.getAttribute("data-status-code") || "M",
-    statusLabel: el.getAttribute("data-status-label") || "Modified file",
-  }));
+  const fileTreeMeta = fileEls.map((el) => {
+    const path = el.getAttribute("data-path") || "";
+    const parts = path.split("/");
+    return {
+      dirs: parts.slice(0, -1).filter(Boolean),
+      name: parts[parts.length - 1] ?? "",
+      pathLower: path.toLowerCase(),
+      commitShas: (el.getAttribute("data-commits") || "").split(" ").filter(Boolean),
+      status: el.getAttribute("data-status") || "modified",
+      statusCode: el.getAttribute("data-status-code") || "M",
+      statusLabel: el.getAttribute("data-status-label") || "Modified file",
+    };
+  });
   let ownedRows: HTMLElement[] = [];
   let treeFileLeaves: Array<{ readonly leaf: HTMLElement; readonly targetId: string | null }> = [];
   const treeBody = root.querySelector<HTMLElement>(".tree-body");
   const filterInput = root.querySelector<HTMLInputElement>(".search input");
   const foldAll = root.querySelector<HTMLElement>(".foldall");
-  let activeSha: string | null = null;
-  let activeSet: string[] | null = null;
+  let focus: CommitFocus | null = null;
   let filterText = "";
 
   const mainScroller = root.querySelector<HTMLElement>(".main") ?? root;
@@ -139,7 +97,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
   function openAndScrollTo(t: HTMLDetailsElement): void {
     const summaryEl = t.querySelector<HTMLElement>("summary");
     const stickyTop = summaryEl ? summaryEl.offsetHeight : 0;
-    navigateToFile(t, mainScroller, { stickyTop });
+    navigateToFile(t, mainScroller, stickyTop);
     t.classList.add("flash");
     later(() => {
       t.classList.remove("flash");
@@ -148,10 +106,10 @@ export function enhanceLayout(root: HTMLElement): () => void {
   }
 
   function applyFilter(): void {
-    const selected = activeSet === null ? null : new Set(activeSet);
-    const hidden = planFileVisibility(fileEls, { filterText, activeShas: activeSet });
-    fileEls.forEach((el, index) => {
-      el.hidden = hidden[index] ?? false;
+    const selected = focus === null ? null : focus.shas;
+    planFileVisibility(fileTreeMeta, { filterText, activeShas: selected }).forEach((isHidden, index) => {
+      const el = fileEls[index];
+      if (el) el.hidden = isHidden;
     });
     syncBeads(selected);
     syncOwned(selected);
@@ -182,12 +140,12 @@ export function enhanceLayout(root: HTMLElement): () => void {
       ctxToggle.classList.toggle("active", on);
     });
 
-  function bindHorizontalWheel(scroller: Element): void {
+  function bindHorizontalWheel(scroller: HTMLElement): void {
     listen(
       scroller,
       "wheel",
       (ev) => {
-        if (!(ev instanceof WheelEvent) || !(scroller instanceof HTMLElement)) return;
+        if (!(ev instanceof WheelEvent)) return;
         const next = computeWheelScroll(scroller, ev);
         if (next === null) return;
         ev.stopPropagation();
@@ -197,42 +155,42 @@ export function enhanceLayout(root: HTMLElement): () => void {
       { passive: false },
     );
   }
-  root.querySelectorAll(".diff").forEach(bindHorizontalWheel);
+  root.querySelectorAll<HTMLElement>(".diff").forEach(bindHorizontalWheel);
+
+  interface TreeFile {
+    readonly name: string;
+    readonly el: HTMLDetailsElement;
+    readonly status: string;
+    readonly statusCode: string;
+    readonly statusLabel: string;
+  }
 
   // The tree follows DOM order, never re-sorts: the server already tree-sorted the files,
-  // and the sidebar must match the center pane exactly.
+  // and the sidebar must match the center pane exactly. A Map keyed by path segment carries
+  // that insertion order, and keeps a directory named `constructor` or `__proto__` from
+  // resolving to an Object.prototype member.
   interface TreeNode {
-    dirs: Record<string, TreeNode>;
-    dirOrder: string[];
-    files: Array<{
-      name: string;
-      el: HTMLDetailsElement;
-      status: string;
-      statusCode: string;
-      statusLabel: string;
-    }>;
+    readonly dirs: Map<string, TreeNode>;
+    readonly files: TreeFile[];
   }
 
   function buildTree(): void {
     if (!treeBody) return;
-    const treeRoot: TreeNode = { dirs: {}, dirOrder: [], files: [] };
+    const treeRoot: TreeNode = { dirs: new Map(), files: [] };
     fileEls.forEach((el, index) => {
       const meta = fileTreeMeta[index];
       if (el.hidden || !meta) return;
-      const parts = meta.parts;
       let node = treeRoot;
-      for (let i = 0; i < parts.length - 1; i++) {
-        const part = parts[i];
-        if (!part) continue;
-        if (!node.dirs[part]) {
-          node.dirs[part] = { dirs: {}, dirOrder: [], files: [] };
-          node.dirOrder.push(part);
+      for (const dir of meta.dirs) {
+        let child = node.dirs.get(dir);
+        if (!child) {
+          child = { dirs: new Map(), files: [] };
+          node.dirs.set(dir, child);
         }
-        const child = node.dirs[part];
-        if (child) node = child;
+        node = child;
       }
       node.files.push({
-        name: parts[parts.length - 1] ?? "",
+        name: meta.name,
         el,
         status: meta.status,
         statusCode: meta.statusCode,
@@ -249,7 +207,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
 
   function renderNode(node: TreeNode): HTMLUListElement {
     const ul = document.createElement("ul");
-    node.dirOrder.forEach((name) => {
+    node.dirs.forEach((child, name) => {
       const li = document.createElement("li");
       li.className = "tnode tdir open";
       const label = document.createElement("div");
@@ -262,8 +220,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
       label.appendChild(caret);
       label.appendChild(dirName);
       li.appendChild(label);
-      const child = node.dirs[name];
-      if (child) li.appendChild(renderNode(child));
+      li.appendChild(renderNode(child));
       ul.appendChild(li);
     });
     node.files.forEach((f) => {
@@ -273,8 +230,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
     return ul;
   }
 
-  function markCurrent(el: HTMLElement | null): void {
-    if (!el) return;
+  function markCurrent(el: HTMLElement): void {
     treeFileLeaves.forEach(({ leaf, targetId }) => {
       leaf.classList.toggle("cur", targetId === el.id);
     });
@@ -293,11 +249,12 @@ export function enhanceLayout(root: HTMLElement): () => void {
     });
     ownedRows = [];
     if (selected) {
-      dlEls.forEach((r, index) => {
-        if (selected.has(dlCommits[index] ?? "")) {
-          r.classList.add("owned");
-          ownedRows.push(r);
-        }
+      dlCommits.forEach((commit, index) => {
+        if (!selected.has(commit)) return;
+        const row = dlEls[index];
+        if (!row) return;
+        row.classList.add("owned");
+        ownedRows.push(row);
       });
     }
     root.classList.toggle("commit-focus", selected !== null);
@@ -306,7 +263,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
   clineEls.forEach((c) => {
     const sha = c.getAttribute("data-sha") ?? "";
     listen(c, "click", () => {
-      ({ sha: activeSha, set: activeSet } = resolveActiveSet(sha, c.getAttribute("data-members") || "", activeSha));
+      focus = resolveActiveSet(sha, c.getAttribute("data-members") || "", focus === null ? null : focus.sha);
       applyFilter();
     });
     listen(c, "keydown", (event) => {
@@ -337,10 +294,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
     const popover = pop;
     let hideTimer: ReturnType<typeof setTimeout> | undefined;
     function show(): void {
-      if (hideTimer !== undefined) {
-        clearTimeout(hideTimer);
-        timers.delete(hideTimer);
-      }
+      if (hideTimer !== undefined) cancel(hideTimer);
       const r = c.getBoundingClientRect();
       let left = r.left - 338;
       if (left < 8) left = r.right + 6;
@@ -358,8 +312,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
     listen(c, "mouseleave", hide);
     listen(popover, "mouseenter", () => {
       if (hideTimer === undefined) return;
-      clearTimeout(hideTimer);
-      timers.delete(hideTimer);
+      cancel(hideTimer);
       hideTimer = undefined;
     });
     listen(popover, "mouseleave", hide);
@@ -367,13 +320,21 @@ export function enhanceLayout(root: HTMLElement): () => void {
 
   let curFile = -1;
 
-  function focusFile(i: number): void {
-    const visible = fileEls.filter((el) => !el.hidden);
-    if (!visible.length) return;
-    curFile = Math.max(0, Math.min(i, visible.length - 1));
-    const t = visible[curFile];
-    if (!t) return;
-    openAndScrollTo(t);
+  // Scan for the wanted visible file instead of materializing the visible subset: j and k
+  // must allocate nothing per keypress, however many files the diff carries.
+  function focusFile(index: number): void {
+    const wanted = Math.max(index, 0);
+    let visibleIndex = -1;
+    let target: HTMLDetailsElement | null = null;
+    for (const el of fileEls) {
+      if (el.hidden) continue;
+      visibleIndex += 1;
+      target = el;
+      if (visibleIndex >= wanted) break;
+    }
+    if (!target) return;
+    curFile = Math.min(wanted, visibleIndex);
+    openAndScrollTo(target);
   }
 
   // Listen on document (a div gets no keydown without focus) but ignore events while this
@@ -383,22 +344,32 @@ export function enhanceLayout(root: HTMLElement): () => void {
     const panel = root.closest<HTMLElement>(".panel");
     if (panel && panel.hidden) return;
     const command = keyboardCommand(event);
-    if (command === "blur-input") {
-      if (event.target instanceof HTMLElement) event.target.blur();
-      return;
-    }
-    if (command === "fold-all") {
-      event.preventDefault();
-      foldAll?.click();
-    } else if (command === "focus-filter") {
-      event.preventDefault();
-      filterInput?.focus();
-    } else if (command === "next-file") {
-      event.preventDefault();
-      focusFile(curFile + 1);
-    } else if (command === "previous-file") {
-      event.preventDefault();
-      focusFile(curFile - 1);
+    switch (command) {
+      case "blur-input":
+        if (event.target instanceof HTMLElement) event.target.blur();
+        return;
+      case "fold-all":
+        event.preventDefault();
+        foldAll?.click();
+        return;
+      case "focus-filter":
+        event.preventDefault();
+        filterInput?.focus();
+        return;
+      case "next-file":
+        event.preventDefault();
+        focusFile(curFile + 1);
+        return;
+      case "previous-file":
+        event.preventDefault();
+        focusFile(curFile - 1);
+        return;
+      case "none":
+        return;
+      default: {
+        const unreachable: never = command;
+        return unreachable;
+      }
     }
   });
 
@@ -407,9 +378,5 @@ export function enhanceLayout(root: HTMLElement): () => void {
   });
 
   buildTree();
-  return () => {
-    cleanups.reverse().forEach((cleanup) => cleanup());
-    timers.forEach(clearTimeout);
-    timers.clear();
-  };
+  return destroy;
 }

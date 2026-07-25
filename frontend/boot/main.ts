@@ -1,7 +1,7 @@
 import { applyStoredTheme } from "./theme-boot";
 
 try {
-  applyStoredTheme(localStorage, document.documentElement);
+  applyStoredTheme();
 } catch {
   // No usable storage (hardened file:// contexts): the server default stands.
 }
