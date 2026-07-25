@@ -63,10 +63,28 @@ mod tests {
         let css = preview_css();
         assert!(!css.starts_with("/*!"), "compiler banner must be stripped");
         assert!(!css.contains("/*!"));
-        assert!(css.contains(":root{"));
+        assert!(css.contains(":root,[data-theme=dark]{"));
         assert_eq!(preview_bundle(), PREVIEW_BUNDLE);
         assert!(!has_disallowed_external_url(css));
         assert!(!has_disallowed_external_url(preview_bundle()));
+    }
+
+    #[test]
+    fn every_non_dark_theme_variant_has_a_token_block() {
+        // ! A palette added to `Theme::VARIANTS` without a matching token block
+        // ! renders silently as dark: nothing else in the compile graph catches
+        // ! a missing block, so this reds instead.
+        use domain::viewer::Theme;
+        use strum::VariantArray as _;
+
+        let css = preview_css();
+        for theme in Theme::VARIANTS {
+            if *theme == Theme::Dark {
+                continue;
+            }
+            let selector = format!("[data-theme={theme}]{{");
+            assert!(css.contains(&selector), "missing token block for `{theme}`");
+        }
     }
 
     #[test]
@@ -97,9 +115,11 @@ mod tests {
 
     #[test]
     fn preview_css_carries_no_keyframe_animation() {
-        // ! Transitions and smooth scrolling are the xtask presentation gate's
-        // ! to police; animations are not, and a per-frame repaint in the
-        // ! WebKitGTK webview is what the row budget cannot absorb.
+        // ! An animation repaints every frame for as long as it runs, which the
+        // ! diff rows cannot absorb: they are the render hot path, and any rule
+        // ! reaching them costs per-row work on every paint. Transitions and
+        // ! smooth scrolling are the xtask presentation gate's to police;
+        // ! animations are not, so this is where the ban lives.
         let css = preview_css();
 
         assert!(!css.contains("animation:"));
@@ -226,6 +246,37 @@ mod tests {
             css,
             ".tstatus.status-added",
             "background-color:var(--add-bg)",
+        );
+    }
+
+    #[test]
+    fn theme_token_blocks_are_scoped_to_any_subtree() {
+        // ! A nested swatch (e.g. `<span data-theme="hearth">`) must resolve that
+        // ! theme's own tokens, not whatever palette is active on the document
+        // ! root. `:root`-qualified selectors only ever match the root, so the
+        // ! attribute selector must stand alone. The base block keeps `:root` in
+        // ! its selector list (alongside `[data-theme="dark"]`) because dark has
+        // ! no themed block of its own to fall back to on a nested element.
+        let css = preview_css();
+        assert!(css.contains("[data-theme=hearth]{"));
+        assert!(css.contains("[data-theme=light]{"));
+        assert!(!css.contains(":root[data-theme="));
+
+        let base = css
+            .find(":root,[data-theme=dark]{")
+            .or_else(|| css.find("[data-theme=dark],:root{"))
+            .expect(
+                "base block must also match `[data-theme=dark]` so a nested dark swatch resolves",
+            );
+        let hearth = css
+            .find("[data-theme=hearth]{")
+            .expect("hearth block present");
+        let light = css
+            .find("[data-theme=light]{")
+            .expect("light block present");
+        assert!(
+            base < hearth && base < light,
+            "themed blocks must follow the base block so they win on the root at equal specificity"
         );
     }
 

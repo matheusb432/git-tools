@@ -6,6 +6,7 @@
 mod controls;
 mod history;
 mod tabs;
+pub(super) mod theme;
 mod view;
 
 pub(super) use history::history;

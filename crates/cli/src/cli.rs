@@ -348,6 +348,10 @@ pub enum Theme {
     Dark,
     Light,
     Hearth,
+    Mirage,
+    Glacier,
+    Noir,
+    Graphite,
 }
 
 impl Theme {
@@ -357,6 +361,10 @@ impl Theme {
             Self::Dark => "dark",
             Self::Light => "light",
             Self::Hearth => "hearth",
+            Self::Mirage => "mirage",
+            Self::Glacier => "glacier",
+            Self::Noir => "noir",
+            Self::Graphite => "graphite",
         }
     }
 }
@@ -482,6 +490,30 @@ pub use application::diffs::DiffTarget;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The clap `Theme` enum duplicates `domain::viewer::Theme` because clap can't
+    /// derive `--set-theme`'s possible-values help from a foreign type. Nothing else
+    /// catches the two drifting apart, so pin them here: same tokens, same order.
+    #[test]
+    fn set_theme_value_enum_pins_to_domain_theme_variants() {
+        use clap::ValueEnum as _;
+        use strum::VariantArray as _;
+
+        let domain_tokens: Vec<String> = domain::viewer::Theme::VARIANTS
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let cli_tokens: Vec<&str> = Theme::value_variants()
+            .iter()
+            .map(|theme| theme.as_config_str())
+            .collect();
+
+        assert_eq!(
+            cli_tokens, domain_tokens,
+            "clap --set-theme enum must mirror domain::viewer::Theme::VARIANTS"
+        );
+    }
+
     #[test]
     fn parse_args_diff_sub_conflicts_with_target_flags() {
         // `args_conflicts_with_subcommands`: a target flag and a nested subcommand

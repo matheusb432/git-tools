@@ -17,6 +17,7 @@ mod tests {
             ViewerTabState, ViewerView,
         },
     };
+    use strum::VariantArray as _;
 
     use super::{MaudViewerRenderer, ViewerRoute, ViewerSettingChange};
 
@@ -258,7 +259,11 @@ mod tests {
     #[test]
     fn viewer_fragment_owners_render_immediate_request_and_swap_feedback() {
         let document = sample_document();
-        let tabs = MaudViewerRenderer.build_tabs(document.tabs(), document.active_tab_id());
+        let tabs = MaudViewerRenderer.build_tabs(
+            document.tabs(),
+            document.active_tab_id(),
+            settings().theme(),
+        );
         let view = MaudViewerRenderer.build_view(&document);
         let history = MaudViewerRenderer.build_history(document.history());
         let motion_class = ["trans", "ition"].concat();
@@ -298,7 +303,7 @@ mod tests {
             },
         );
 
-        let html = MaudViewerRenderer.build_tabs(&[tab], None);
+        let html = MaudViewerRenderer.build_tabs(&[tab], None, settings().theme());
 
         assert!(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"));
         assert!(!html.contains("<script>alert(1)</script>"));
@@ -439,6 +444,69 @@ mod tests {
         assert!(html.contains("/settings?theme=dark"));
     }
 
+    /// Splits the theme panel out of a rendered document into its opening tag
+    /// and the option rows it holds.
+    fn theme_panel(html: &str) -> (&str, &str) {
+        let (_, tail) = html
+            .split_once("<div id=\"viewer-theme-popover\"")
+            .expect("document renders the theme panel");
+        let (tag, tail) = tail.split_once('>').expect("the panel tag closes");
+        let (options, _) = tail
+            .split_once("</div>")
+            .expect("the theme panel renders its options");
+        (tag, options)
+    }
+
+    #[test]
+    fn theme_picker_opens_from_the_tab_strip_into_the_top_layer() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+        let (panel, options) = theme_panel(&html);
+        let active = options
+            .split_once("data-viewer-theme=\"hearth\"")
+            .and_then(|(_, tail)| tail.split_once('>'))
+            .map(|(tag, _)| tag)
+            .expect("the active palette renders an option");
+
+        assert!(html.contains("popovertarget=\"viewer-theme-popover\""));
+        assert!(panel.contains(" popover"), "{panel}");
+        assert!(html.contains("id=\"viewer-theme-name\">Hearth</span>"));
+        assert_eq!(
+            html.matches("data-viewer-theme=").count(),
+            Theme::VARIANTS.len()
+        );
+        assert!(active.contains("checked"), "{active}");
+        assert!(active.contains("autofocus"), "{active}");
+        assert_eq!(options.matches("autofocus").count(), 1);
+    }
+
+    #[test]
+    fn every_theme_option_carries_its_own_palette_on_its_swatch() {
+        // ! `data-theme` on the swatch is what makes each row paint its own
+        // ! accent while another palette is active on the document root; the
+        // ! unqualified token blocks it relies on are pinned in
+        // ! `preview::assets::tests::theme_token_blocks_are_scoped_to_any_subtree`.
+        let html = MaudViewerRenderer.build_document(&sample_document());
+        let (_, options) = theme_panel(&html);
+
+        for theme in Theme::VARIANTS {
+            assert!(
+                options.contains(&format!("data-theme=\"{theme}\"")),
+                "{options}"
+            );
+        }
+        assert_eq!(
+            options.matches("data-theme=\"").count(),
+            Theme::VARIANTS.len()
+        );
+    }
+
+    #[test]
+    fn theme_picker_stays_out_of_the_swapped_view_fragment() {
+        let view = MaudViewerRenderer.build_view(&sample_document());
+
+        assert!(!view.contains("data-viewer-theme="));
+    }
+
     #[test]
     fn layout_and_density_swaps_follow_native_radio_changes() {
         let html = MaudViewerRenderer.build_document(&sample_document());
@@ -460,7 +528,7 @@ mod tests {
             .filter(|input| input.contains("hx-get=\"/settings?"))
             .collect();
 
-        assert_eq!(settings_inputs.len(), 7);
+        assert_eq!(settings_inputs.len(), 4 + Theme::VARIANTS.len());
         for input in settings_inputs {
             assert!(input.contains("hx-params=\"none\""), "{input}");
         }
@@ -567,7 +635,8 @@ mod tests {
     #[test]
     fn open_diff_navigation_uses_buttons_without_partial_tab_aria() {
         let document = sample_document();
-        let html = MaudViewerRenderer.build_tabs(document.tabs(), Some(tab_id(1)));
+        let html =
+            MaudViewerRenderer.build_tabs(document.tabs(), Some(tab_id(1)), settings().theme());
 
         assert!(html.contains("<nav id=\"viewer-tabs\""));
         assert!(html.contains("<ul class=\"viewer-tab-list "));

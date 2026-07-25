@@ -170,11 +170,19 @@ mod tests {
 
     #[test]
     fn validation_accepts_every_supported_value() {
-        for (key, values) in [
-            ("theme", &["dark", "light", "hearth"][..]),
-            ("layout", &["unified", "split"][..]),
-            ("density", &["compact", "full"][..]),
-        ] {
+        use strum::VariantArray as _;
+
+        let theme_tokens: Vec<String> = domain::viewer::Theme::VARIANTS
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let supported: [(&str, Vec<&str>); 3] = [
+            ("theme", theme_tokens.iter().map(String::as_str).collect()),
+            ("layout", vec!["unified", "split"]),
+            ("density", vec!["compact", "full"]),
+        ];
+
+        for (key, values) in supported {
             for value in values {
                 validate(key, value).expect("supported value");
             }

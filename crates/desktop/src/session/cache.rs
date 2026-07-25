@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use application::{
     diffs::{FileDiff, View},
-    viewer::{RenderOptions, Theme, ViewerTabId},
+    viewer::{RenderOptions, ViewerTabId},
 };
 use domain::diffs::Commit;
 use lru::LruCache;
@@ -11,7 +11,7 @@ use lru::LruCache;
 #[derive(Debug, Clone)]
 pub(crate) struct CachedView {
     pub(crate) view: Arc<View>,
-    pub(crate) fragments: HashMap<(RenderOptions, Theme), Arc<str>>,
+    pub(crate) fragments: HashMap<RenderOptions, Arc<str>>,
     weight: usize,
 }
 
@@ -29,8 +29,8 @@ impl CachedView {
         self.weight
     }
 
-    fn insert_fragment(&mut self, options: RenderOptions, theme: Theme, fragment: Arc<str>) {
-        self.fragments.insert((options, theme), fragment);
+    fn insert_fragment(&mut self, options: RenderOptions, fragment: Arc<str>) {
+        self.fragments.insert(options, fragment);
         self.weight = view_weight(&self.view)
             + self
                 .fragments
@@ -79,14 +79,13 @@ impl WeightedViewCache {
         &mut self,
         id: ViewerTabId,
         options: RenderOptions,
-        theme: Theme,
         fragment: Arc<str>,
     ) -> CacheDisposition {
         let Some(mut value) = self.entries.pop(&id) else {
             return CacheDisposition::Oversize;
         };
         self.weight -= value.weight();
-        value.insert_fragment(options, theme, fragment);
+        value.insert_fragment(options, fragment);
         self.insert(id, value)
     }
 
@@ -270,7 +269,7 @@ mod tests {
         let fragment: Arc<str> = Arc::from("12345");
 
         assert_eq!(
-            cache.insert_fragment(id(1), options, Theme::Dark, Arc::clone(&fragment)),
+            cache.insert_fragment(id(1), options, Arc::clone(&fragment)),
             CacheDisposition::Oversize
         );
         assert!(cache.get(id(1)).is_none());
@@ -285,12 +284,12 @@ mod tests {
         cache.insert(id(1), value);
         let options = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
         assert_eq!(
-            cache.insert_fragment(id(1), options, Theme::Dark, Arc::from("1234")),
+            cache.insert_fragment(id(1), options, Arc::from("1234")),
             CacheDisposition::Cached
         );
 
         assert_eq!(
-            cache.insert_fragment(id(1), options, Theme::Dark, Arc::from("12")),
+            cache.insert_fragment(id(1), options, Arc::from("12")),
             CacheDisposition::Cached
         );
         assert_eq!(cache.weight(), base_weight + 2);
@@ -299,7 +298,7 @@ mod tests {
                 .get(id(1))
                 .expect("cached view")
                 .fragments
-                .get(&(options, Theme::Dark))
+                .get(&options)
                 .expect("replacement fragment")
                 .as_ref(),
             "12"
@@ -307,32 +306,35 @@ mod tests {
     }
 
     #[test]
-    fn theme_variants_are_distinct_and_each_counts_toward_weight() {
+    fn fragments_under_distinct_options_are_kept_apart_and_weighed_together() {
+        // One tab holds a fragment per live option set, so the weight has to sum
+        // across keys rather than track the newest insertion.
         let value = cached("small");
-        let base = value.weight();
-        let mut cache = WeightedViewCache::new(base + 8);
-        let options = RenderOptions::DEFAULT;
+        let base_weight = value.weight();
+        let mut cache = WeightedViewCache::new(base_weight + 16);
+        let compact = RenderOptions::DEFAULT;
+        let full = compact.with_density(DiffDensity::Full);
         cache.insert(id(1), value);
-        cache.insert_fragment(id(1), options, Theme::Dark, Arc::from("dark"));
-        cache.insert_fragment(id(1), options, Theme::Light, Arc::from("lite"));
 
-        let cached = cache.get(id(1)).expect("both variants fit");
-        assert_eq!(cached.fragments.len(), 2);
         assert_eq!(
-            cached
-                .fragments
-                .get(&(options, Theme::Dark))
-                .map(AsRef::as_ref),
-            Some("dark")
+            cache.insert_fragment(id(1), compact, Arc::from("1234")),
+            CacheDisposition::Cached
         );
         assert_eq!(
-            cached
-                .fragments
-                .get(&(options, Theme::Light))
-                .map(AsRef::as_ref),
-            Some("lite")
+            cache.insert_fragment(id(1), full, Arc::from("123456")),
+            CacheDisposition::Cached
         );
-        assert_eq!(cache.weight(), base + 8);
+
+        assert_eq!(cache.weight(), base_weight + 10);
+        let cached = cache.get(id(1)).expect("inserted entry stays cached");
+        assert_eq!(
+            cached.fragments.get(&compact).map(AsRef::as_ref),
+            Some("1234")
+        );
+        assert_eq!(
+            cached.fragments.get(&full).map(AsRef::as_ref),
+            Some("123456")
+        );
     }
 
     #[test]
@@ -380,7 +382,7 @@ mod tests {
             assert!(cache.weight() <= crate::DEFAULT_VIEW_CACHE_WEIGHT);
 
             let fragment: Arc<str> = Arc::from("x".repeat(512 * 1024));
-            let _ = cache.insert_fragment(tab_id, RenderOptions::DEFAULT, Theme::Dark, fragment);
+            let _ = cache.insert_fragment(tab_id, RenderOptions::DEFAULT, fragment);
             assert!(cache.weight() <= crate::DEFAULT_VIEW_CACHE_WEIGHT);
 
             if raw_id > 2 {

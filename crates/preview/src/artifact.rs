@@ -154,11 +154,13 @@ mod tests {
         // title reflects repo, view, and commit count
         assert!(html.contains("<title>api — diff · 1 commit</title>"));
 
-        // three theme palettes: default :root (dark) + light + hearth, amber removed
-        assert!(html.contains(":root{"));
-        assert!(html.contains(r":root[data-theme=light]"));
-        assert!(html.contains(r":root[data-theme=hearth]"));
-        assert!(!html.contains(r":root[data-theme=amber]"));
+        // theme palettes: default :root,[data-theme=dark] plus every other
+        // palette (assets.rs asserts every `Theme::VARIANTS` entry has a
+        // token block; this spot-checks a couple survive into the document).
+        assert!(html.contains(":root,[data-theme=dark]{"));
+        assert!(html.contains(r"[data-theme=light]"));
+        assert!(html.contains(r"[data-theme=hearth]"));
+        assert!(!html.contains(r"[data-theme=amber]"));
 
         // perf + offline-theming guards survive the redesign
         assert!(html.contains("content-visibility:auto"));

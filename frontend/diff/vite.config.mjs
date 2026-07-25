@@ -17,10 +17,5 @@ export default defineConfig({
       formats: ["iife"],
       fileName: () => "preview.js",
     },
-    rollupOptions: {
-      output: {
-        inlineDynamicImports: true,
-      },
-    },
   },
 });

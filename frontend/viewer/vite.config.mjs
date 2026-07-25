@@ -17,10 +17,5 @@ export default defineConfig({
       formats: ["iife"],
       fileName: () => "viewer.js",
     },
-    rollupOptions: {
-      output: {
-        inlineDynamicImports: true,
-      },
-    },
   },
 });

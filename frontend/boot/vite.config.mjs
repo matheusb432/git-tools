@@ -17,10 +17,5 @@ export default defineConfig({
       formats: ["iife"],
       fileName: () => "boot.js",
     },
-    rollupOptions: {
-      output: {
-        inlineDynamicImports: true,
-      },
-    },
   },
 });

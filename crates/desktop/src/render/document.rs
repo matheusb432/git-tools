@@ -3,7 +3,7 @@ use maud::{DOCTYPE, PreEscaped, html};
 
 use super::{
     fragments,
-    fragments::{SwapFeedback, SwapMode},
+    fragments::{SwapFeedback, SwapMode, theme},
 };
 use crate::protocol_config;
 
@@ -46,7 +46,7 @@ impl MaudViewerRenderer {
                 }
                 body class="viewer-shell overflow-hidden" {
                     main class="grid h-screen min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-bg" {
-                        (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::None))
+                        (fragments::tabs(document.tabs(), document.active_tab_id(), settings.theme(), SwapMode::Primary, SwapFeedback::None))
                         (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
                     }
                     aside id="viewer-history-popover" class="viewer-history-popover m-auto h-[min(680px,calc(100vh_-_84px))] w-[min(1040px,calc(100vw_-_48px))] max-w-none overflow-hidden border-line-2 bg-surface p-0 inset-[42px] shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)] [@media(max-width:760px)]:h-[calc(100vh_-_24px)] [@media(max-width:760px)]:w-[calc(100vw_-_24px)] [@media(max-width:760px)]:inset-3" popover {
@@ -59,6 +59,7 @@ impl MaudViewerRenderer {
                         }
                         (fragments::history(document.history()))
                     }
+                    (theme::popover(settings.theme()))
                     script { (PreEscaped(preview::preview_bundle())) }
                     script { (PreEscaped(VIEWER_JS)) }
                 }
@@ -76,8 +77,16 @@ impl MaudViewerRenderer {
         self,
         tabs: &[application::viewer::ViewerTab],
         active_tab_id: Option<application::viewer::ViewerTabId>,
+        active_theme: application::viewer::Theme,
     ) -> String {
-        fragments::tabs(tabs, active_tab_id, SwapMode::Primary, SwapFeedback::None).into_string()
+        fragments::tabs(
+            tabs,
+            active_tab_id,
+            active_theme,
+            SwapMode::Primary,
+            SwapFeedback::None,
+        )
+        .into_string()
     }
 
     pub(crate) fn build_history(
@@ -90,7 +99,7 @@ impl MaudViewerRenderer {
     pub(crate) fn build_view_with_tabs(self, document: &ViewerDocument) -> String {
         html! {
             (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
-            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::OutOfBand, SwapFeedback::None))
+            (fragments::tabs(document.tabs(), document.active_tab_id(), document.settings().theme(), SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
     }
@@ -102,14 +111,14 @@ impl MaudViewerRenderer {
     ) -> String {
         html! {
             (PreEscaped(view))
-            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::OutOfBand, SwapFeedback::None))
+            (fragments::tabs(document.tabs(), document.active_tab_id(), document.settings().theme(), SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
     }
 
     pub(crate) fn build_tabs_with_view(self, document: &ViewerDocument) -> String {
         html! {
-            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::None))
+            (fragments::tabs(document.tabs(), document.active_tab_id(), document.settings().theme(), SwapMode::Primary, SwapFeedback::None))
             (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
@@ -121,7 +130,7 @@ impl MaudViewerRenderer {
         labels: &[String],
     ) -> String {
         html! {
-            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::SnapshotRecipesSkipped(labels)))
+            (fragments::tabs(document.tabs(), document.active_tab_id(), document.settings().theme(), SwapMode::Primary, SwapFeedback::SnapshotRecipesSkipped(labels)))
             (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
@@ -132,7 +141,7 @@ impl MaudViewerRenderer {
         document: &ViewerDocument,
     ) -> String {
         html! {
-            (fragments::tabs(document.tabs(), document.active_tab_id(), SwapMode::Primary, SwapFeedback::LiveViewDeleted))
+            (fragments::tabs(document.tabs(), document.active_tab_id(), document.settings().theme(), SwapMode::Primary, SwapFeedback::LiveViewDeleted))
             (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::LiveViewDeleted))
         }
         .into_string()

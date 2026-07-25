@@ -1,14 +1,12 @@
-//! The display controls header: layout/density radios scoped to the active
-//! view, theme radios scoped to the app, and the live-view actions.
+//! The display controls header: the layout and density radios scoped to the
+//! active view, plus the live-view actions.
 
-use application::viewer::{
-    DiffDensity, DiffLayout, Theme, ViewerSettings, ViewerTabId, ViewerTabKind, ViewerView,
-};
+use application::viewer::{DiffDensity, DiffLayout, ViewerTabId, ViewerTabKind, ViewerView};
 use maud::{Markup, html};
 
 use crate::render::{ViewerRoute, ViewerSettingChange};
 
-pub(super) fn view_controls(view: &ViewerView, settings: &ViewerSettings) -> Markup {
+pub(super) fn view_controls(view: &ViewerView) -> Markup {
     html! {
         header class="viewer-controls gtl-scroll flex min-w-0 items-center gap-3 border-b border-line bg-surface px-3 py-[7px] text-ink-2 [@media(max-width:760px)]:gap-[7px] [@media(max-width:760px)]:overflow-x-auto" aria-label="Diff display controls" {
             div class="flex items-center gap-[3px]" role="group" aria-label="Layout" {
@@ -28,13 +26,6 @@ pub(super) fn view_controls(view: &ViewerView, settings: &ViewerSettings) -> Mar
                     hx-target="#viewer-view"
                     hx-swap="outerHTML" { "Refresh" }
                 (delete_live_view_button(view.tab_id()))
-            }
-            div class="flex-1" {}
-            div class="flex items-center gap-[3px]" role="group" aria-label="Theme" {
-                span class="viewer-control-label mr-[3px] text-[10px] font-bold tracking-[.06em] text-ink-3 uppercase [@media(max-width:760px)]:hidden" { "Theme" }
-                (theme_choice(settings, Theme::Dark, "Dark"))
-                (theme_choice(settings, Theme::Light, "Light"))
-                (theme_choice(settings, Theme::Hearth, "Hearth"))
             }
         }
     }
@@ -72,21 +63,6 @@ fn density_choice(view: &ViewerView, density: DiffDensity, label: &str) -> Marku
             input type="radio" class="peer pointer-events-none absolute size-px opacity-0" name="viewer-density" value=(density)
                 checked[view.options().density() == density]
                 hx-get=(ViewerRoute::Settings(ViewerSettingChange::Density(density)))
-                hx-trigger="change"
-                hx-params="none"
-                hx-swap="none";
-            span class="inline-flex min-h-[27px] items-center whitespace-nowrap rounded-sm border border-transparent px-2 py-1 text-[11.5px] group-hover:border-line-2 group-hover:bg-surface-2 group-hover:text-ink peer-checked:border-acc-line peer-checked:bg-acc-soft peer-checked:text-acc peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-acc" { (label) }
-        }
-    }
-}
-
-fn theme_choice(settings: &ViewerSettings, theme: Theme, label: &str) -> Markup {
-    html! {
-        label class="viewer-choice group relative cursor-pointer" {
-            input type="radio" class="peer pointer-events-none absolute size-px opacity-0" name="viewer-theme" value=(theme)
-                data-viewer-theme=(theme)
-                checked[settings.theme() == theme]
-                hx-get=(ViewerRoute::Settings(ViewerSettingChange::Theme(theme)))
                 hx-trigger="change"
                 hx-params="none"
                 hx-swap="none";

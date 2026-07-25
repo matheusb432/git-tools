@@ -1,5 +1,7 @@
 use std::{fmt, str::FromStr};
 
+use strum::VariantArray as _;
+
 /// Selects the structural arrangement used to render diff rows.
 ///
 /// # Examples
@@ -82,14 +84,20 @@ impl fmt::Display for DiffDensity {
 
 /// Selects the viewer's visual color theme.
 ///
+/// `VARIANTS` lists every theme in declaration order, so the theme picker
+/// renders one option per palette without a hand-maintained list that a new
+/// palette could miss.
+///
 /// # Examples
 ///
 /// ```
 /// use domain::viewer::Theme;
+/// use strum::VariantArray;
 ///
 /// assert_eq!("hearth".parse(), Ok(Theme::Hearth));
+/// assert_eq!(Theme::VARIANTS.first(), Some(&Theme::Dark));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 pub enum Theme {
     /// Uses the dark neutral palette.
     Dark,
@@ -97,31 +105,60 @@ pub enum Theme {
     Light,
     /// Uses the warm hearth palette.
     Hearth,
+    /// Uses the desaturated blue-grey palette with a warm amber accent.
+    Mirage,
+    /// Uses the deep indigo palette with an ice-blue accent.
+    Glacier,
+    /// Uses the true-black palette with a magenta accent.
+    Noir,
+    /// Uses the neutral grey palette with a muted steel-blue accent.
+    Graphite,
+}
+
+impl Theme {
+    /// Names the persisted token for one palette. The exhaustive match makes a
+    /// new variant a compile error until it is given a token, and every other
+    /// token site reads it from here.
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+            Self::Hearth => "hearth",
+            Self::Mirage => "mirage",
+            Self::Glacier => "glacier",
+            Self::Noir => "noir",
+            Self::Graphite => "graphite",
+        }
+    }
 }
 
 impl FromStr for Theme {
     type Err = ParseRenderOptionError;
 
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        match raw {
-            "dark" => Ok(Self::Dark),
-            "light" => Ok(Self::Light),
-            "hearth" => Ok(Self::Hearth),
-            value => Err(ParseRenderOptionError::Theme {
-                value: value.to_owned(),
-            }),
-        }
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|theme| theme.as_str() == raw)
+            .ok_or_else(|| ParseRenderOptionError::Theme {
+                value: raw.to_owned(),
+            })
     }
 }
 
 impl fmt::Display for Theme {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Dark => "dark",
-            Self::Light => "light",
-            Self::Hearth => "hearth",
-        })
+        formatter.write_str(self.as_str())
     }
+}
+
+/// Lists every theme token for a rejection message.
+fn theme_tokens() -> String {
+    Theme::VARIANTS
+        .iter()
+        .map(|theme| format!("`{theme}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Describes a rejected closed-set viewer rendering option.
@@ -143,7 +180,7 @@ pub enum ParseRenderOptionError {
     #[error("unknown diff density `{value}`; expected `compact` or `full`")]
     Density { value: String },
     /// Reports an unknown viewer theme token.
-    #[error("unknown viewer theme `{value}`; expected `dark`, `light`, or `hearth`")]
+    #[error("unknown viewer theme `{value}`; expected one of {}", theme_tokens())]
     Theme { value: String },
 }
 
@@ -271,6 +308,8 @@ impl TryFrom<(&str, &str)> for RenderOptions {
 
 #[cfg(test)]
 mod tests {
+    use strum::VariantArray as _;
+
     use super::super::{DiffDensity, DiffLayout, RenderOptions, Theme};
 
     #[test]
@@ -298,5 +337,30 @@ mod tests {
         assert_eq!(DiffLayout::Unified.to_string(), "unified");
         assert_eq!(DiffDensity::Compact.to_string(), "compact");
         assert_eq!(Theme::Hearth.to_string(), "hearth");
+    }
+
+    #[test]
+    fn every_theme_variant_parses_back_from_its_rendered_token() {
+        for theme in Theme::VARIANTS {
+            let token = theme.to_string();
+
+            assert_eq!(
+                token.parse::<Theme>(),
+                Ok(*theme),
+                "{token} must round-trip"
+            );
+        }
+    }
+
+    #[test]
+    fn theme_rejection_names_every_known_token() {
+        let error = "sunset"
+            .parse::<Theme>()
+            .expect_err("unknown theme rejects");
+        let message = error.to_string();
+
+        for theme in Theme::VARIANTS {
+            assert!(message.contains(&format!("`{theme}`")), "{message}");
+        }
     }
 }

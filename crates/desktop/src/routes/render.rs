@@ -117,7 +117,7 @@ fn view_with_tabs_using(
             let mut session = session
                 .lock()
                 .map_err(|_| RenderError::State("session lock poisoned".into()))?;
-            session.cached_fragment_if_current(ticket, options, settings.theme())
+            session.cached_fragment_if_current(ticket, options)
         };
         if let Some(cached) = cached {
             let html = renderer.build_cached_view_with_tabs(&cached, &snapshot.document);
@@ -131,7 +131,7 @@ fn view_with_tabs_using(
         let published = session
             .lock()
             .map_err(|_| RenderError::State("session lock poisoned".into()))?
-            .cache_fragment_if_current(ticket, options, settings.theme(), Arc::clone(&fragment));
+            .cache_fragment_if_current(ticket, options, Arc::clone(&fragment));
         if published == PublishOutcome::Published {
             let html = renderer.build_cached_view_with_tabs(&fragment, &snapshot.document);
             if snapshot_is_current(session, Some(ticket), snapshot.revision)? {
@@ -399,7 +399,7 @@ mod tests {
         let current = session.current_ticket(id).expect("ticket");
         assert!(
             session
-                .cached_fragment_if_current(current, RenderOptions::DEFAULT, Theme::Dark)
+                .cached_fragment_if_current(current, RenderOptions::DEFAULT)
                 .is_none()
         );
     }
@@ -424,7 +424,7 @@ mod tests {
         let current = session.current_ticket(id).expect("ticket");
         assert!(
             session
-                .cached_fragment_if_current(current, RenderOptions::DEFAULT, Theme::Dark)
+                .cached_fragment_if_current(current, RenderOptions::DEFAULT)
                 .is_none()
         );
     }
@@ -527,6 +527,47 @@ mod tests {
     }
 
     #[test]
+    fn cached_view_fragment_survives_a_settings_theme_change() {
+        let (session, _id) = ready_session();
+        let mut renders = 0;
+        let dark_settings = ViewerSettings::new(RenderOptions::DEFAULT, Theme::Dark);
+        let first_html =
+            view_with_tabs_using(MaudViewerRenderer, &session, None, dark_settings, || {
+                renders += 1;
+            })
+            .expect("first render populates the fragment cache");
+        assert_eq!(renders, 1, "cache miss renders the fragment once");
+        assert!(first_html.contains("id=\"viewer-theme-name\">Dark<"));
+
+        let light_settings = ViewerSettings::new(RenderOptions::DEFAULT, Theme::Light);
+        let second_html =
+            view_with_tabs_using(MaudViewerRenderer, &session, None, light_settings, || {
+                renders += 1;
+            })
+            .expect("second render reuses the cached fragment");
+
+        // The tab strip is rendered fresh every time and legitimately reflects
+        // the new theme; only the swapped `#viewer-view` fragment must survive
+        // the theme change unchanged.
+        assert_eq!(
+            renders, 1,
+            "the settings theme changing must not force a fresh render: \
+             the cached fragment is served instead"
+        );
+        assert!(second_html.contains("id=\"viewer-theme-name\">Light<"));
+        let (first_view, _) = first_html
+            .split_once("<nav id=\"viewer-tabs\"")
+            .expect("the view fragment precedes the tab strip");
+        let (second_view, _) = second_html
+            .split_once("<nav id=\"viewer-tabs\"")
+            .expect("the view fragment precedes the tab strip");
+        assert_eq!(
+            first_view, second_view,
+            "the cached view bytes are served verbatim across the theme change"
+        );
+    }
+
+    #[test]
     fn stale_transient_followed_by_current_oversize_view_is_bounded_conflict() {
         let recipe = Recipe {
             source: RecipeSource::LocalRepo("/repo".into()),
@@ -559,7 +600,7 @@ mod tests {
         assert!(state.cached_view_snapshot(id).is_none());
         assert!(
             state
-                .cached_fragment_if_current(current, RenderOptions::DEFAULT, Theme::Dark)
+                .cached_fragment_if_current(current, RenderOptions::DEFAULT)
                 .is_none()
         );
     }

@@ -1,16 +1,17 @@
-//! The tab strip: one tab per open diff, the History button, and the
+//! The tab strip: one tab per open diff, the History and Theme buttons, and the
 //! accessible feedback (skip toast, deletion announcement) a compound
 //! response attaches to it.
 
-use application::viewer::{ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState};
+use application::viewer::{Theme, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState};
 use maud::{Markup, html};
 
-use super::{SwapFeedback, SwapMode};
+use super::{SwapFeedback, SwapMode, theme};
 use crate::render::ViewerRoute;
 
 pub(in crate::render) fn tabs(
     tabs: &[ViewerTab],
     active_tab_id: Option<ViewerTabId>,
+    active_theme: Theme,
     swap: SwapMode,
     feedback: SwapFeedback<'_>,
 ) -> Markup {
@@ -57,6 +58,7 @@ pub(in crate::render) fn tabs(
                     span class="viewer-count min-w-[18px] rounded-[9px] bg-acc-soft px-[5px] text-center text-[10px] text-acc" { (tabs.len()) }
                 }
             }
+            (theme::trigger(active_theme))
             @if let SwapFeedback::SnapshotRecipesSkipped(labels) = feedback {
                 div class="gtl-toast viewer-toast-skip pointer-events-none fixed bottom-6 left-1/2 z-50 flex max-w-[min(760px,calc(100vw-32px))] -translate-x-1/2 items-center gap-2 rounded-panel border border-acc-line bg-surface px-3.5 py-2 text-[12.5px] text-ink opacity-100 shadow-[0_6px_18px_rgba(0,0,0,.22)] transition-[opacity,scale] duration-200 ease-out starting:scale-95 starting:opacity-0 motion-reduce:transition-none [overflow-wrap:anywhere] before:font-bold before:text-acc before:content-['!'] [&[data-leaving]]:scale-95 [&[data-leaving]]:opacity-0"
                     data-viewer-toast

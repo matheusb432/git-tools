@@ -5,7 +5,7 @@ pub(crate) use cache::CachedView;
 use cache::WeightedViewCache;
 use domain::{
     live_views::LiveSource,
-    viewer::{RenderOptions, Theme, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState},
+    viewer::{RenderOptions, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState},
 };
 use gtl_recipe::{Recipe, RecipeSource};
 pub(crate) use pending::{PendingRecipes, PendingRecipesError};
@@ -280,21 +280,19 @@ impl ViewerSession {
         &mut self,
         ticket: ComputeTicket,
         options: RenderOptions,
-        theme: Theme,
     ) -> Option<std::sync::Arc<str>> {
         if self.current_ticket(ticket.tab_id) != Some(ticket) {
             return None;
         }
         self.cache
             .get(ticket.tab_id)
-            .and_then(|cached| cached.fragments.get(&(options, theme)).cloned())
+            .and_then(|cached| cached.fragments.get(&options).cloned())
     }
 
     pub(crate) fn cache_fragment_if_current(
         &mut self,
         ticket: ComputeTicket,
         options: RenderOptions,
-        theme: Theme,
         fragment: std::sync::Arc<str>,
     ) -> PublishOutcome {
         let current = self.current_ticket(ticket.tab_id) == Some(ticket)
@@ -304,8 +302,7 @@ impl ViewerSession {
         if !current {
             return PublishOutcome::Stale;
         }
-        self.cache
-            .insert_fragment(ticket.tab_id, options, theme, fragment);
+        self.cache.insert_fragment(ticket.tab_id, options, fragment);
         PublishOutcome::Published
     }
 }

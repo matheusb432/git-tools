@@ -16,3 +16,4 @@ workspace = true
 
 [dev-dependencies]
 scraper.workspace = true
+strum.workspace = true
