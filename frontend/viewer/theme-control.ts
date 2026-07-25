@@ -1,4 +1,4 @@
-import { installOnce } from "../core/install-once";
+import { installOnce } from "../shared/install-once";
 
 export const THEME_INPUT_ATTRIBUTE = "data-viewer-theme";
 

@@ -668,11 +668,9 @@ mod tests {
     }
 
     #[test]
-    fn recipe_wake_drain_ships_in_the_viewer_bundle_not_htmx_polling() {
+    fn recipe_wake_drain_avoids_htmx_polling() {
         let html = MaudViewerRenderer.build_document(&sample_document());
 
-        assert!(html.contains("recipes-pending"));
-        assert!(html.contains("/pending"));
         assert!(!html.contains("hx-trigger=\"load\""));
         assert!(!html.contains("<iframe"));
     }

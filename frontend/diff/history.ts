@@ -1,5 +1,5 @@
-import { copyText } from "../core/clipboard";
-import { installOnce } from "../core/install-once";
+import { copyText } from "./clipboard";
+import { installOnce } from "../shared/install-once";
 
 const COPY_FLASH_MS = 1200;
 

@@ -1,14 +1,14 @@
-import { copyText } from "../core/clipboard";
-import { copyContextEnabled, copyHeader, readCopiedRows } from "../core/copy";
-import { keyboardCommand } from "../core/keyboard";
-import { scrollLandOn } from "../core/scroll";
-import { createTeardown } from "../core/teardown";
-import { showToast } from "../core/toast";
+import { copyText } from "./clipboard";
+import { copyContextEnabled, copyHeader, readCopiedRows } from "./copy";
+import { keyboardCommand } from "./keyboard";
+import { scrollLandOn } from "./scroll";
+import { createTeardown } from "./teardown";
+import { showToast } from "../shared/toast";
 import { type CommitFocus, isShaTarget, resolveActiveSet } from "./commit-focus";
 import { planFileVisibility } from "./file-filter";
 import { buildFileLeaf } from "./file-tree";
 import { toggleLongLine } from "./long-lines";
-import { computeWheelScroll } from "../core/wheel";
+import { computeWheelScroll } from "../shared/wheel";
 
 /**
  * Rebuilds a native copy of a selection inside a diff as clean source (whole lines, markers

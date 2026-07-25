@@ -7,5 +7,10 @@
   "sortPackageJson": {
     "sortScripts": true
   },
-  "ignorePatterns": ["crates/infra/src/embedded/generated", "node_modules", "target"]
+  "ignorePatterns": [
+    "crates/preview/src/embedded/generated",
+    "crates/desktop/src/embedded/generated",
+    "node_modules",
+    "target"
+  ]
 }

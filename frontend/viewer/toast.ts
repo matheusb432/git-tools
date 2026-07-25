@@ -1,5 +1,5 @@
-import { installOnce } from "../core/install-once";
-import { beginToastLeave } from "../core/toast";
+import { installOnce } from "../shared/install-once";
+import { beginToastLeave } from "../shared/toast";
 
 export const TOAST_ATTRIBUTE = "data-viewer-toast";
 export const TOAST_DISMISS_DELAY_MS = 5000;

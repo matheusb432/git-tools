@@ -1,6 +1,9 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["unicorn", "typescript", "oxc", "import"],
+  "rules": {
+    "import/no-cycle": "error"
+  },
   "ignorePatterns": [
     "crates/preview/src/embedded/generated",
     "crates/desktop/src/embedded/generated",

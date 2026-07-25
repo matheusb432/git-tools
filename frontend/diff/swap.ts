@@ -1,5 +1,5 @@
-import { installOnce } from "../core/install-once";
-import { scrollLandOn } from "../core/scroll";
+import { installOnce } from "../shared/install-once";
+import { scrollLandOn } from "./scroll";
 import { enhanceControls } from "./controls";
 import { enhanceLayout } from "./enhance-layout";
 

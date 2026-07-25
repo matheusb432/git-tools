@@ -1,5 +1,5 @@
-import { installOnce } from "../core/install-once";
-import { computeWheelScroll } from "../core/wheel";
+import { installOnce } from "../shared/install-once";
+import { computeWheelScroll } from "../shared/wheel";
 
 /**
  * Vertical wheel over the tab strip scrolls it horizontally, so an overflowing

@@ -1,5 +1,5 @@
 import { bench } from "vitest";
-import { computeWheelScroll } from "../core/wheel";
+import { computeWheelScroll } from "./wheel";
 
 // Models a horizontal scroll burst over wide diff panes: wheel events fire per
 // frame, so the decision must stay allocation-free.

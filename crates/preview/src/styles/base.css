@@ -4,7 +4,7 @@
 @source "../";
 @source not "../embedded";
 @source not "../styles";
-@source "../../../../frontend/core";
+@source "../../../../frontend/shared";
 @source "../../../../frontend/diff";
 @source "../../../desktop/src";
 @source not "../../../desktop/src/embedded";

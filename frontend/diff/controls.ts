@@ -1,6 +1,6 @@
-import { copyText } from "../core/clipboard";
-import { extractCopyText } from "../core/copy";
-import { createTeardown } from "../core/teardown";
+import { copyText } from "./clipboard";
+import { extractCopyText } from "./copy";
+import { createTeardown } from "./teardown";
 
 type CopyState = "ok" | "err";
 

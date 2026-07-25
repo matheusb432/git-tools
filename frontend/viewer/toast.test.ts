@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { TOAST_LEAVE_MS, TOAST_LEAVING_ATTRIBUTE } from "../core/toast";
+import { TOAST_LEAVE_MS, TOAST_LEAVING_ATTRIBUTE } from "../shared/toast";
 import { useFakeToastTimers } from "../test/dom-stub";
 import { installToastDismiss, TOAST_ATTRIBUTE, TOAST_DISMISS_DELAY_MS } from "./toast";
 

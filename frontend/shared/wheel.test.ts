@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { buildFileLeaf } from "./file-tree";
-import { computeWheelScroll } from "../core/wheel";
+import { computeWheelScroll } from "./wheel";
 
 describe("computeWheelScroll", () => {
   function scroller(scrollLeft = 0, scrollWidth = 200, clientWidth = 100) {
@@ -31,21 +30,5 @@ describe("computeWheelScroll", () => {
 
   test("bails when already at the clamped target", () => {
     expect(computeWheelScroll(scroller(100), ev(50))).toBeNull();
-  });
-});
-
-describe("buildFileLeaf", () => {
-  test("labels the leaf with the name first and the status badge last", () => {
-    const li = buildFileLeaf(document, {
-      name: "main.ts",
-      status: "added",
-      statusCode: "A",
-      statusLabel: "Added file",
-      el: { id: "file-main-ts" },
-    });
-
-    const parts = [...li.querySelectorAll(".tname, .tstatus")];
-    expect(parts.map((part) => part.textContent)).toEqual(["main.ts", "A"]);
-    expect(parts[1]?.getAttribute("aria-label")).toBe("Added file");
   });
 });

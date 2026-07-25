@@ -41,7 +41,7 @@ fn is_frontend_format_path(path: &Path) -> bool {
     ROOT_PATHS
         .iter()
         .any(|candidate| path == Path::new(candidate))
-        || (is_frontend_source_path(path, &["boot", "core", "diff", "viewer"])
+        || (is_frontend_source_path(path, &["boot", "diff", "shared", "viewer"])
             && extension_matches(
                 path,
                 &["js", "jsx", "ts", "tsx", "mjs", "cjs", "json", "jsonc"],
@@ -49,7 +49,7 @@ fn is_frontend_format_path(path: &Path) -> bool {
 }
 
 fn is_frontend_lint_path(path: &Path) -> bool {
-    is_frontend_source_path(path, &["boot", "core", "diff", "viewer"])
+    is_frontend_source_path(path, &["boot", "diff", "shared", "viewer"])
         && extension_matches(path, &["js", "jsx", "ts", "tsx", "mjs", "cjs"])
 }
 
@@ -81,7 +81,7 @@ mod tests {
             "crates/domain/src/lib.rs",
             "Cargo.toml",
             "docs/Guide Name.md",
-            "frontend/core/copy.ts",
+            "frontend/shared/wheel.ts",
             "frontend/diff/vite.config.mjs",
             "frontend/boot/theme-boot.ts",
             "frontend/viewer/toast.ts",
@@ -101,7 +101,7 @@ mod tests {
         assert_eq!(
             classified.frontend_format,
             paths(&[
-                "frontend/core/copy.ts",
+                "frontend/shared/wheel.ts",
                 "frontend/diff/vite.config.mjs",
                 "frontend/boot/theme-boot.ts",
                 "frontend/viewer/toast.ts",
@@ -115,7 +115,7 @@ mod tests {
         assert_eq!(
             classified.frontend_lint,
             paths(&[
-                "frontend/core/copy.ts",
+                "frontend/shared/wheel.ts",
                 "frontend/diff/vite.config.mjs",
                 "frontend/boot/theme-boot.ts",
                 "frontend/viewer/toast.ts",

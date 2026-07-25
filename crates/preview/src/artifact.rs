@@ -308,4 +308,13 @@ mod tests {
         assert!(THEME_BOOT_JS.contains("gtl-theme"));
         assert!(!THEME_BOOT_JS.contains("gtl-diff-layout"));
     }
+
+    #[test]
+    fn theme_boot_script_stays_within_its_pre_paint_budget() {
+        assert!(
+            THEME_BOOT_JS.len() <= 160,
+            "the boot script blocks the first paint; it is {} bytes",
+            THEME_BOOT_JS.len()
+        );
+    }
 }
