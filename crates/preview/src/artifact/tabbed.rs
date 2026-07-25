@@ -10,7 +10,7 @@ use crate::{
     layout::{Surface, view_body},
 };
 
-const TABS_CLASSES: &str = "sticky top-0 z-60 flex items-center gap-1.5 overflow-x-auto border-b border-line bg-surface-2 px-3 py-2.5";
+const TABS_CLASSES: &str = "gtl-scroll-rail sticky top-0 z-60 flex items-center gap-1.5 overflow-x-auto border-b border-line bg-surface-2 px-3 py-2.5";
 const TAB_CLASSES: &str = concat!(
     "max-w-[280px] flex-none cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap rounded-panel border border-line bg-surface px-2.5 py-1.5 text-ink-2 [font:inherit] ",
     "hover:border-acc-line hover:text-ink [&.active]:border-acc-line [&.active]:text-acc",

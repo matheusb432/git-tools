@@ -2,7 +2,7 @@
 //! branches, run the built binary against it, and assert exit code, stdout/stderr, and the
 //! surviving branch set. Local-only — no network.
 
-use std::{path::Path, process::Command as Git};
+use std::{path::Path, process};
 
 use assert_cmd::Command;
 use predicates::str::contains;
@@ -10,7 +10,7 @@ use tempfile::TempDir;
 
 /// Run a git command in `repo`, asserting success.
 fn git(repo: &Path, args: &[&str]) {
-    let out = Git::new("git")
+    let out = process::Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(args)
@@ -25,7 +25,7 @@ fn git(repo: &Path, args: &[&str]) {
 
 /// True when `branch` still exists locally in `repo`.
 fn branch_exists(repo: &Path, branch: &str) -> bool {
-    Git::new("git")
+    process::Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(["rev-parse", "--verify", &format!("refs/heads/{branch}")])

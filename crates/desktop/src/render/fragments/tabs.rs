@@ -16,7 +16,7 @@ pub(in crate::render) fn tabs(
 ) -> Markup {
     html! {
         nav id="viewer-tabs" hx-swap-oob=[swap.out_of_band()] class="viewer-tabs z-[70] flex min-w-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2 [&.htmx-swapping]:border-acc-line [&.htmx-settling]:border-acc-line [@media(max-width:760px)]:px-2" aria-label="Open diffs" {
-            ul class="viewer-tab-list m-0 flex min-w-0 flex-1 list-none items-end gap-1 overflow-x-auto p-0 [scrollbar-width:thin]" {
+            ul class="viewer-tab-list gtl-scroll-rail m-0 flex min-w-0 flex-1 list-none items-end gap-1 overflow-x-auto p-0" {
                 @for tab in tabs {
                     @let active = Some(tab.id()) == active_tab_id;
                     li class=(if active {

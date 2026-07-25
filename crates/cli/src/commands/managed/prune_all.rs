@@ -198,9 +198,7 @@ mod tests {
             apply_prune::{PruneFailure, PruneResult, PruneStatus},
             plan_prune::PruneBranch,
         },
-        managed::prune_all::{
-            PruneAction, PruneAllResult, PruneExit, PruneRepoResult as ApplicationPruneRepoResult,
-        },
+        managed::prune_all::{self, PruneAction, PruneAllResult, PruneExit},
     };
 
     use super::*;
@@ -209,7 +207,7 @@ mod tests {
     fn application_results_project_to_the_existing_json_shape() {
         let execution = PruneAllResult {
             exit: PruneExit::Warn,
-            results: vec![ApplicationPruneRepoResult {
+            results: vec![prune_all::PruneRepoResult {
                 name: "api".into(),
                 action: PruneAction::Applied(PruneResult {
                     status: PruneStatus::Partial,
@@ -253,7 +251,7 @@ mod tests {
 
     #[test]
     fn transport_failure_projection_preserves_completed_stdout_and_stderr() {
-        let completed_result = ApplicationPruneRepoResult {
+        let completed_result = prune_all::PruneRepoResult {
             name: "api".into(),
             action: PruneAction::Applied(PruneResult {
                 status: PruneStatus::Ok,
@@ -264,7 +262,7 @@ mod tests {
                 failed: Vec::new(),
             }),
         };
-        let failed_result = ApplicationPruneRepoResult {
+        let failed_result = prune_all::PruneRepoResult {
             name: "web".into(),
             action: PruneAction::Applied(PruneResult {
                 status: PruneStatus::Ok,

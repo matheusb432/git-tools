@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { isShaTarget } from "./commit-focus";
 import { buildFileLeaf } from "./file-tree";
-import { computeWheelScroll } from "./wheel";
+import { computeWheelScroll } from "../core/wheel";
 
 describe("computeWheelScroll", () => {
   function scroller(scrollLeft = 0, scrollWidth = 200, clientWidth = 100) {

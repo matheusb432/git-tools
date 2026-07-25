@@ -30,6 +30,16 @@ mod tests {
         RenderHistoryId::try_new(raw).expect("positive history id")
     }
 
+    fn sample_recipe() -> gtl_recipe::Recipe {
+        gtl_recipe::Recipe {
+            source: gtl_recipe::RecipeSource::LocalRepo("/repos/gt".into()),
+            op: gtl_recipe::RecipeOp::Diff {
+                target: gtl_recipe::RecipeTarget::Unpushed { pinned: None },
+            },
+            name: None,
+        }
+    }
+
     fn view() -> Arc<View> {
         Arc::new(View {
             exclusions: None,
@@ -80,10 +90,9 @@ mod tests {
                 history_id(7),
                 "Recent changes".into(),
                 "git-tools".into(),
-                "worktree".into(),
                 "main..HEAD".into(),
                 "2026-07-11T00:00:00Z".into(),
-                r#"{"op":"diff"}"#.into(),
+                sample_recipe(),
             )],
             settings(),
         )
@@ -391,10 +400,9 @@ mod tests {
             history_id(9),
             "<recent>".into(),
             "repo & tools".into(),
-            "worktree".into(),
             "main..HEAD".into(),
             "2026-07-11T00:00:00Z".into(),
-            r#"{"op":"diff"}"#.into(),
+            sample_recipe(),
         )
     }
 

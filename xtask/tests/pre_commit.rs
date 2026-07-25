@@ -1,11 +1,11 @@
-use std::{fs, path::Path, process::Command as ProcessCommand};
+use std::{fs, path::Path, process};
 
 use assert_cmd::Command;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
 fn run_git(repository_directory: &Path, arguments: &[&str]) {
-    let status = ProcessCommand::new("git")
+    let status = process::Command::new("git")
         .current_dir(repository_directory)
         .args(arguments)
         .status()
@@ -192,7 +192,7 @@ fn pre_commit_reports_a_non_utf8_staged_path() {
     run_git(repository.path(), &["init", "--quiet"]);
     let file_name = OsString::from_vec(b"invalid-\xff.txt".to_vec());
     fs::write(repository.path().join(&file_name), "content\n").expect("write non-UTF-8 path");
-    let status = ProcessCommand::new("git")
+    let status = process::Command::new("git")
         .current_dir(repository.path())
         .arg("add")
         .arg(&file_name)

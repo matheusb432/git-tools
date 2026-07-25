@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::Command as Git};
+use std::{path::PathBuf, process};
 
 use assert_cmd::Command;
 use predicates::{prelude::PredicateBooleanExt as _, str::contains};
@@ -27,7 +27,7 @@ impl PushFixture {
         fixture.git(&["config", "core.autocrlf", "false"]);
         fixture.commit("base\n", "chore: base");
 
-        let output = Git::new("git")
+        let output = process::Command::new("git")
             .args(["init", "--bare", "-q"])
             .arg(&remote)
             .output()
@@ -44,7 +44,7 @@ impl PushFixture {
     }
 
     fn git(&self, arguments: &[&str]) -> String {
-        let output = Git::new("git")
+        let output = process::Command::new("git")
             .arg("-C")
             .arg(&self.repository)
             .args(arguments)
@@ -64,7 +64,7 @@ impl PushFixture {
     fn commit(&self, contents: &str, message: &str) {
         std::fs::write(self.repository.join("work.txt"), contents).expect("write fixture file");
         self.git(&["add", "work.txt"]);
-        let output = Git::new("git")
+        let output = process::Command::new("git")
             .arg("-C")
             .arg(&self.repository)
             .args(["commit", "-q", "-m", message])

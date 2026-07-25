@@ -36,15 +36,20 @@ pub(super) fn build(
         .filter(|base| !base.is_empty())
         .unwrap_or(DEFAULT_BASE);
 
-    let (io_ranges, view_ranges) = if let Some(pin) = pinned {
-        (
+    #[expect(
+        clippy::single_match_else,
+        reason = "the repository rule requires match for conditional initializers"
+    )]
+    let (io_ranges, view_ranges) = match pinned {
+        Some(pin) => (
             DiffRanges::exact(pin.git_range()),
             DiffRanges::exact(pin.display_range()),
-        )
-    } else {
-        source.verify_commit(Path::new(&top), base)?;
-        let symbolic = DiffRanges::merge(base);
-        (symbolic.clone(), symbolic)
+        ),
+        None => {
+            source.verify_commit(Path::new(&top), base)?;
+            let symbolic = DiffRanges::merge(base);
+            (symbolic.clone(), symbolic)
+        }
     };
     let range_view = RangeView::new(&view_ranges.diff, RangePresentation::Merge);
     let DiffData {

@@ -118,67 +118,53 @@ impl ViewerView {
 ///
 /// ```
 /// use application::viewer::{RenderHistoryId, ViewerHistoryEntry};
+/// use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 ///
 /// let id = RenderHistoryId::try_new(1).expect("positive id");
 /// let entry = ViewerHistoryEntry::new(
 ///     id,
 ///     "Changes".into(),
 ///     "git-tools".into(),
-///     "diff".into(),
 ///     "main..HEAD".into(),
 ///     "2026-07-11T00:00:00Z".into(),
-///     r#"{"op":"diff"}"#.into(),
+///     Recipe {
+///         source: RecipeSource::LocalRepo("/repos/gt".into()),
+///         op: RecipeOp::Diff {
+///             target: RecipeTarget::Unpushed { pinned: None },
+///         },
+///         name: None,
+///     },
 /// );
 /// assert_eq!(entry.id(), id);
+/// assert_eq!(entry.kind(), "diff");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewerHistoryEntry {
     id: RenderHistoryId,
     title: String,
     repo_name: String,
-    kind: String,
     range_label: String,
     rendered_at: String,
-    recipe_json: String,
+    recipe: gtl_recipe::Recipe,
 }
 
 impl ViewerHistoryEntry {
     /// Creates a history entry from one validated persisted row identity.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use application::viewer::{RenderHistoryId, ViewerHistoryEntry};
-    ///
-    /// let id = RenderHistoryId::try_new(1).expect("positive id");
-    /// let entry = ViewerHistoryEntry::new(
-    ///     id,
-    ///     "Changes".into(),
-    ///     "git-tools".into(),
-    ///     "diff".into(),
-    ///     "main..HEAD".into(),
-    ///     "2026-07-11T00:00:00Z".into(),
-    ///     r#"{"op":"diff"}"#.into(),
-    /// );
-    /// assert_eq!(entry.id(), id);
-    /// ```
     pub fn new(
         id: RenderHistoryId,
         title: String,
         repo_name: String,
-        kind: String,
         range_label: String,
         rendered_at: String,
-        recipe_json: String,
+        recipe: gtl_recipe::Recipe,
     ) -> Self {
         Self {
             id,
             title,
             repo_name,
-            kind,
             range_label,
             rendered_at,
-            recipe_json,
+            recipe,
         }
     }
 
@@ -233,8 +219,8 @@ impl ViewerHistoryEntry {
     /// # fn entry() -> ViewerHistoryEntry { unimplemented!() }
     /// assert_eq!(entry().kind(), "diff");
     /// ```
-    pub fn kind(&self) -> &str {
-        &self.kind
+    pub fn kind(&self) -> &'static str {
+        self.recipe.kind_tag()
     }
 
     /// Returns the range label displayed for the render.
@@ -263,17 +249,17 @@ impl ViewerHistoryEntry {
         &self.rendered_at
     }
 
-    /// Returns the persisted recipe JSON that reproduces this render.
+    /// Returns the persisted recipe that reproduces this render.
     ///
     /// # Examples
     ///
     /// ```no_run
     /// # use application::viewer::ViewerHistoryEntry;
     /// # fn entry() -> ViewerHistoryEntry { unimplemented!() }
-    /// assert_eq!(entry().recipe_json(), r#"{"op":"diff"}"#);
+    /// assert_eq!(entry().recipe().kind_tag(), "diff");
     /// ```
-    pub fn recipe_json(&self) -> &str {
-        &self.recipe_json
+    pub fn recipe(&self) -> &gtl_recipe::Recipe {
+        &self.recipe
     }
 }
 

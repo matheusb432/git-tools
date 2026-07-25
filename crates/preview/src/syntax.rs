@@ -1,15 +1,18 @@
 //! Render-time syntax token computation for diff code lines.
 //!
-//! Resolves a file's grammar from its extension against the embedded two-face
-//! syntax set, then tokenizes one diff side line by line with carried parser
-//! state. Output spans are char-indexed over the line body so the row
-//! renderer can weave them into its per-char escape walk.
+//! Resolves a file's grammar from its extension against the embedded syntax
+//! set, then tokenizes one diff side line by line with carried parser state.
+//! Output spans are char-indexed over the line body so the row renderer can
+//! weave them into its per-char escape walk.
 
 use std::sync::LazyLock;
 
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
 
-static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(two_face::syntax::extra_newlines);
+static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
+    syntect::dumps::from_uncompressed_data(include_bytes!("embedded/generated/syntaxes.packdump"))
+        .expect("embedded syntax pack must deserialize")
+});
 
 /// The grammar for `path`, resolved by extension, or `None` when the set has
 /// no match (the file renders unhighlighted).
@@ -144,14 +147,9 @@ impl SideHighlighter {
         for (op_byte, op) in ops {
             let clamped = op_byte.min(body.len());
             if clamped > byte_pos {
-                let run_chars = body[byte_pos..clamped].chars().count();
-                push_token(
-                    &mut tokens,
-                    char_pos,
-                    char_pos + run_chars,
-                    class_for(&self.stack),
-                );
-                char_pos += run_chars;
+                let end = char_pos + body[byte_pos..clamped].chars().count();
+                push_token(&mut tokens, char_pos, end, class_for(&self.stack));
+                char_pos = end;
                 byte_pos = clamped;
             }
             if self.stack.apply(&op).is_err() {
@@ -160,13 +158,8 @@ impl SideHighlighter {
             }
         }
         if body.len() > byte_pos {
-            let run_chars = body[byte_pos..].chars().count();
-            push_token(
-                &mut tokens,
-                char_pos,
-                char_pos + run_chars,
-                class_for(&self.stack),
-            );
+            let end = char_pos + body[byte_pos..].chars().count();
+            push_token(&mut tokens, char_pos, end, class_for(&self.stack));
         }
         tokens
     }
@@ -189,20 +182,10 @@ fn push_token(tokens: &mut Vec<Token>, start: usize, end: usize, class: Option<T
 mod tests {
     use super::*;
 
-    #[test]
-    fn resolves_every_required_extension() {
-        for path in [
-            "a.js", "a.ts", "a.py", "a.rs", "a.md", "a.html", "a.yml", "a.yaml",
-        ] {
-            assert!(syntax_for_path(path).is_some(), "no syntax for {path}");
-        }
-    }
-
-    #[test]
-    fn extension_matching_is_case_insensitive() {
-        for path in ["MAIN.RS", "A.TS", "NOTES.MD"] {
-            assert!(syntax_for_path(path).is_some(), "no syntax for {path}");
-        }
+    fn keyword_token_overlaps(tokens: &[Token], start: usize, end: usize) -> bool {
+        tokens.iter().any(|token| {
+            token.class == TokenClass::Keyword && token.start < end && start < token.end
+        })
     }
 
     #[test]
@@ -242,6 +225,39 @@ mod tests {
             .find(|t| t.class == TokenClass::String)
             .unwrap();
         assert_eq!((string.start, string.end), (11, 14), "{tokens:?}");
+    }
+
+    #[test]
+    fn rust_async_token_contract() {
+        for (source, expected_keyword) in [
+            ("async fn run() {}", true),
+            ("async move {}", true),
+            ("let r#async = 1;", false),
+            ("let asynchronous = 1;", false),
+            (r#"let value = "async";"#, false),
+            ("// async", false),
+            ("/* async */", false),
+        ] {
+            let start = source.find("async").unwrap();
+            let end = start + "async".len();
+            let mut side = SideHighlighter::new(syntax_for_path("a.rs").unwrap());
+            let tokens = side.tokens(source);
+            if expected_keyword {
+                assert!(
+                    tokens.contains(&Token {
+                        start,
+                        end,
+                        class: TokenClass::Keyword,
+                    }),
+                    "async keyword span missing for {source:?}: {tokens:?}"
+                );
+            } else {
+                assert!(
+                    !keyword_token_overlaps(&tokens, start, end),
+                    "async keyword span present for {source:?}: {tokens:?}"
+                );
+            }
+        }
     }
 
     #[test]

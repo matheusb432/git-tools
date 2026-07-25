@@ -28,6 +28,7 @@ walkdir.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 gtl-platform.workspace = true
+gtl-recipe.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt"] }
 
 [lints]

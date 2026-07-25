@@ -7,11 +7,10 @@ use crate::render::ViewerRoute;
 
 const COPY_ICON: &str = r#"<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"></rect><path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"></path></svg>"#;
 
-/// Builds the JSON object the copy button writes to the clipboard: the record with its recipe
-/// parsed into a nested object, or kept as a string when the recipe is not valid JSON.
+/// Builds the JSON object the copy button writes to the clipboard: the record
+/// with its recipe serialized as a nested object.
 fn history_copy_json(entry: &ViewerHistoryEntry) -> String {
-    let recipe = serde_json::from_str::<serde_json::Value>(entry.recipe_json())
-        .unwrap_or_else(|_| serde_json::Value::String(entry.recipe_json().to_owned()));
+    let recipe = serde_json::to_value(entry.recipe()).unwrap_or(serde_json::Value::Null);
     let payload = serde_json::json!({
         "id": i64::from(entry.id()),
         "title": entry.title(),
@@ -26,7 +25,7 @@ fn history_copy_json(entry: &ViewerHistoryEntry) -> String {
 
 pub(in crate::render) fn history(entries: &[ViewerHistoryEntry]) -> Markup {
     html! {
-        section id="viewer-history" class="viewer-history h-[calc(100%-58px)] overflow-auto px-4 py-3.5 [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft" aria-label="Recent diff previews" {
+        section id="viewer-history" class="viewer-history gtl-scroll h-[calc(100%-58px)] overflow-auto px-4 py-3.5 [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft" aria-label="Recent diff previews" {
             @if entries.is_empty() {
                 div class="viewer-history-empty grid h-full place-content-center text-center text-ink-2" {
                     strong class="text-ink" { "No history yet" }
@@ -74,42 +73,43 @@ pub(in crate::render) fn history(entries: &[ViewerHistoryEntry]) -> Markup {
 #[cfg(test)]
 mod tests {
     use application::viewer::{RenderHistoryId, ViewerHistoryEntry};
+    use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::history_copy_json;
 
-    fn entry(recipe_json: &str) -> ViewerHistoryEntry {
+    fn entry() -> ViewerHistoryEntry {
         ViewerHistoryEntry::new(
             RenderHistoryId::try_new(9).expect("positive id"),
             "Recent changes".into(),
             "git-tools".into(),
-            "diff".into(),
             "main..HEAD".into(),
             "2026-07-11T00:00:00Z".into(),
-            recipe_json.into(),
+            Recipe {
+                source: RecipeSource::LocalRepo("/repos/gt".into()),
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
+                name: None,
+            },
         )
     }
 
     #[test]
     fn copy_json_wraps_the_record_with_a_nested_recipe_object() {
         let payload: serde_json::Value =
-            serde_json::from_str(&history_copy_json(&entry(r#"{"op":"diff"}"#)))
-                .expect("copy payload is valid json");
+            serde_json::from_str(&history_copy_json(&entry())).expect("copy payload is valid json");
 
         assert_eq!(payload["id"], 9);
         assert_eq!(payload["title"], "Recent changes");
         assert_eq!(payload["repo_name"], "git-tools");
         assert_eq!(payload["kind"], "diff");
         assert_eq!(payload["range_label"], "main..HEAD");
-        assert_eq!(payload["rendered_at"], "2026-07-11T00:00:00Z");
-        assert_eq!(payload["recipe"], serde_json::json!({ "op": "diff" }));
-    }
-
-    #[test]
-    fn copy_json_keeps_an_unparseable_recipe_as_a_string() {
-        let payload: serde_json::Value =
-            serde_json::from_str(&history_copy_json(&entry("not json")))
-                .expect("copy payload is valid json");
-
-        assert_eq!(payload["recipe"], "not json");
+        assert_eq!(
+            payload["recipe"],
+            serde_json::json!({
+                "source": { "kind": "local_repo", "value": "/repos/gt" },
+                "op": { "op": "diff", "target": { "target": "unpushed" } },
+            })
+        );
     }
 }

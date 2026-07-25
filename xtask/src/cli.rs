@@ -61,10 +61,10 @@ pub enum Command {
     /// file-discovery logs.
     #[command(name = Verb::FORMAT_CHECK.as_str())]
     FmtCheck(FormatArguments),
-    /// Run every repository linter (Oxlint, the architecture lints, and full-workspace Clippy).
+    /// Run Oxlint, presentation and architecture policy, dependency checks, and workspace Clippy.
     #[command(name = Verb::LINT.as_str())]
     Lint,
-    /// Run the complete read-only quality gate: formatting drift, then every linter.
+    /// Run formatting checks, the lint sweep, and configured ast-grep rules.
     #[command(name = Verb::CHECK.as_str())]
     Check,
     /// Check staged whitespace, formatting, and frontend lint without scanning unrelated files.

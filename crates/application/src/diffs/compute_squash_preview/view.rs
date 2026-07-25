@@ -28,16 +28,21 @@ pub(super) fn build(
     let repo_name = repo_name(&top);
     let excluded = exclusions.for_project_or_default(&repo_name);
 
-    let (upstream, io_ranges, view_ranges) = if let Some(pin) = pinned {
-        (
+    #[expect(
+        clippy::single_match_else,
+        reason = "the repository rule requires match for conditional initializers"
+    )]
+    let (upstream, io_ranges, view_ranges) = match pinned {
+        Some(pin) => (
             pin.display_base(),
             DiffRanges::exact(pin.git_range()),
             DiffRanges::exact(pin.display_range()),
-        )
-    } else {
-        let upstream = source.upstream(Path::new(&top))?;
-        let symbolic = DiffRanges::unpushed(&upstream);
-        (upstream, symbolic.clone(), symbolic)
+        ),
+        None => {
+            let upstream = source.upstream(Path::new(&top))?;
+            let symbolic = DiffRanges::unpushed(&upstream);
+            (upstream, symbolic.clone(), symbolic)
+        }
     };
 
     let DiffData {

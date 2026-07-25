@@ -1,6 +1,7 @@
 //! The recipe DTO: a serializable descriptor of *how to produce* a view —
 //! source identity + operation — never view data. Crosses the Tauri IPC
-//! boundary and, serialized, the app-history log (`recent_renders.recipe_json`).
+//! boundary as JSON; the app-history log persists it relationally through
+//! `application::history`.
 //! `Recipe::unpinned()` equality is the snapshot-tab dedupe identity (pins
 //! differ across runs of the same repo + operation); live recipes are always
 //! unpinned, so full `Recipe` equality still governs their identity.
@@ -18,7 +19,7 @@
 //!
 //! Every enum serializes its wire tag in `snake_case`. Deserialization also
 //! accepts the legacy `PascalCase` source and `kebab-case` operation tags so
-//! persisted history rows and argv tokens remain readable across the migration.
+//! argv tokens remain readable across the migration.
 
 use std::{num::NonZeroU32, path::PathBuf};
 

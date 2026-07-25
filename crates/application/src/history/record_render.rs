@@ -1,28 +1,21 @@
 //! The `history/record_render` vertical slice: record one render in the app history log.
 
+use gtl_recipe::Recipe;
 use rusqlite::{Connection, params};
 
-use crate::ports::{AppStateStore, Clock};
+use crate::{
+    history::persistence::RecipeColumns,
+    ports::{AppStateStore, Clock},
+};
 
 const RECENT_RENDERS_CAP: usize = 500;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct NewRecentRenderRecord {
-    recipe_json: String,
-    title: String,
-    repo_name: String,
-    kind: String,
-    range_label: String,
-    rendered_at: String,
-}
 
 /// Record one render in the app history.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordRender {
-    pub recipe_json: String,
+    pub recipe: Recipe,
     pub title: String,
     pub repo_name: String,
-    pub kind: String,
     pub range_label: String,
 }
 
@@ -38,43 +31,66 @@ pub enum RecordRenderError {
 }
 
 /// Records a render through the app-state port.
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "cqrsy requires request-first operations to take requests by value"
+)]
 #[cqrsy::command]
 pub fn execute(
     req: RecordRender,
     store: &impl AppStateStore,
     clock: &impl Clock,
 ) -> Result<RecordRenderResponse, RecordRenderError> {
-    let record = NewRecentRenderRecord {
-        recipe_json: req.recipe_json,
-        title: req.title,
-        repo_name: req.repo_name,
-        kind: req.kind,
-        range_label: req.range_label,
-        rendered_at: clock.now_iso(),
-    };
+    let rendered_at = clock.now_iso();
     let mut connection = store.connection_lock()?;
-    record_render(&mut connection, &record)?;
+    record_render(&mut connection, &req, &rendered_at)?;
     Ok(RecordRenderResponse {})
 }
 
 fn record_render(
     connection: &mut Connection,
-    record: &NewRecentRenderRecord,
+    request: &RecordRender,
+    rendered_at: &str,
 ) -> anyhow::Result<()> {
+    let columns = RecipeColumns::from_recipe(&request.recipe);
     let transaction = connection.transaction()?;
+    // The upsert touches updated_at so a source row tracks when a render last
+    // used it; created_at keeps the first sighting.
+    let source_id: i64 = transaction
+        .prepare_cached(
+            "INSERT INTO project_sources (kind, value, created_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT (kind, value) DO UPDATE SET updated_at = excluded.created_at
+             RETURNING id",
+        )?
+        .query_row(
+            params![columns.source_kind, columns.source_value, rendered_at],
+            |row| row.get(0),
+        )?;
     {
         let mut statement = transaction.prepare_cached(
-            "INSERT INTO recent_renders \
-             (recipe_json, title, repo_name, kind, range_label, rendered_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO recent_renders
+               (source_id, operation_id, target_id, argument,
+                pinned_base, pinned_head, recipe_name,
+                title, repo_name, range_label, rendered_at)
+             VALUES
+               (?1,
+                (SELECT id FROM render_operations WHERE name = ?2),
+                (SELECT id FROM render_targets WHERE name = ?3),
+                ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         )?;
         statement.execute(params![
-            record.recipe_json,
-            record.title,
-            record.repo_name,
-            record.kind,
-            record.range_label,
-            record.rendered_at,
+            source_id,
+            columns.operation,
+            columns.target,
+            columns.argument,
+            columns.pinned.as_ref().map(|pin| pin.base.as_str()),
+            columns.pinned.as_ref().map(|pin| pin.head.as_str()),
+            columns.recipe_name,
+            request.title,
+            request.repo_name,
+            request.range_label,
+            rendered_at,
         ])?;
     }
     {
@@ -84,32 +100,68 @@ fn record_render(
         )?;
         statement.execute(params![i64::try_from(RECENT_RENDERS_CAP)?])?;
     }
+    {
+        // Pruning can orphan a source; collect it in the same transaction so
+        // project_sources never grows past what recent_renders references.
+        let mut statement = transaction.prepare_cached(
+            "DELETE FROM project_sources WHERE id NOT IN
+             (SELECT source_id FROM recent_renders)",
+        )?;
+        statement.execute([])?;
+    }
     transaction.commit()?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use gtl_recipe::{RecipeOp, RecipeSource, RecipeTarget};
+
     use super::*;
     use crate::{
-        history::{RecentRenderRecord, list_recent, persistence::store_test},
+        history::{RecentRenderRecord, list_recent_renders, persistence::store_test},
         testing::FixedClock,
     };
 
+    fn recipe(repo: &str) -> Recipe {
+        Recipe {
+            source: RecipeSource::LocalRepo(repo.into()),
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Unpushed { pinned: None },
+            },
+            name: None,
+        }
+    }
+
     fn command(title: impl Into<String>) -> RecordRender {
+        command_for_repo(title, "/repos/gt")
+    }
+
+    fn command_for_repo(title: impl Into<String>, repo: &str) -> RecordRender {
         RecordRender {
-            recipe_json: r#"{"kind":"diff"}"#.into(),
+            recipe: recipe(repo),
             title: title.into(),
             repo_name: "gt".into(),
-            kind: "diff".into(),
             range_label: "origin/main..HEAD".into(),
         }
     }
 
     fn list_recent(store: &impl AppStateStore) -> Vec<RecentRenderRecord> {
-        list_recent::list::execute(list_recent::ListRecentRenders, store)
+        list_recent_renders::execute(list_recent_renders::ListRecentRenders, store)
             .expect("list succeeds")
             .entries
+    }
+
+    fn project_sources(store: &impl AppStateStore) -> Vec<(String, Option<String>)> {
+        store
+            .connection_lock()
+            .expect("connection lock")
+            .prepare("SELECT value, updated_at FROM project_sources ORDER BY value")
+            .expect("prepare sources")
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query sources")
+            .collect::<Result<_, _>>()
+            .expect("decode sources")
     }
 
     #[test]
@@ -124,10 +176,9 @@ mod tests {
             renders[0],
             RecentRenderRecord {
                 id: domain::viewer::RenderHistoryId::try_new(1).expect("positive id"),
-                recipe_json: r#"{"kind":"diff"}"#.into(),
+                recipe: recipe("/repos/gt"),
                 title: "gt · unpushed".into(),
                 repo_name: "gt".into(),
-                kind: "diff".into(),
                 range_label: "origin/main..HEAD".into(),
                 rendered_at: "2026-07-07T00:00:00Z".into(),
             }
@@ -135,11 +186,43 @@ mod tests {
     }
 
     #[test]
-    fn recording_past_the_cap_prunes_oldest_rows() {
+    fn repeated_renders_share_one_touched_project_source() {
+        let store = store_test();
+        execute(
+            command("first"),
+            &store,
+            &FixedClock("2026-07-07T00:00:00Z".into()),
+        )
+        .expect("record succeeds");
+        execute(
+            command("second"),
+            &store,
+            &FixedClock("2026-07-08T00:00:00Z".into()),
+        )
+        .expect("record succeeds");
+
+        assert_eq!(
+            project_sources(&store),
+            vec![("/repos/gt".into(), Some("2026-07-08T00:00:00Z".into()))]
+        );
+    }
+
+    #[test]
+    fn recording_past_the_cap_prunes_oldest_rows_and_orphaned_sources() {
         let store = store_test();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
 
-        for index in 0..(RECENT_RENDERS_CAP + 5) {
+        // The first five renders come from a repo no later render references,
+        // so pruning them must also collect its project_sources row.
+        for index in 0..5 {
+            execute(
+                command_for_repo(format!("render {index}"), "/repos/old"),
+                &store,
+                &clock,
+            )
+            .expect("record succeeds");
+        }
+        for index in 5..(RECENT_RENDERS_CAP + 5) {
             execute(command(format!("render {index}")), &store, &clock).expect("record succeeds");
         }
 
@@ -147,5 +230,12 @@ mod tests {
         assert_eq!(renders.len(), RECENT_RENDERS_CAP);
         assert_eq!(renders[0].title, "render 504");
         assert_eq!(renders[RECENT_RENDERS_CAP - 1].title, "render 5");
+        assert_eq!(
+            project_sources(&store)
+                .into_iter()
+                .map(|(value, _)| value)
+                .collect::<Vec<_>>(),
+            vec!["/repos/gt".to_owned()]
+        );
     }
 }

@@ -22,10 +22,7 @@ const COPY_BUTTON_CLASSES: &str = concat!(
     "[&[data-state=err]]:border-del [&[data-state=err]]:bg-del [&[data-state=err]]:text-bg",
 );
 const DIFF_CLASSES: &str = concat!(
-    "overflow-x-hidden text-[14px] leading-[22px] ",
-    "[&::-webkit-scrollbar]:h-2.5 [&::-webkit-scrollbar-track]:bg-surface ",
-    "[&::-webkit-scrollbar-thumb]:rounded-panel [&::-webkit-scrollbar-thumb]:border-2 ",
-    "[&::-webkit-scrollbar-thumb]:border-surface [&::-webkit-scrollbar-thumb]:bg-line-2 ",
+    "gtl-scroll-rail overflow-x-hidden text-[14px] leading-[22px] ",
     "print:[&_.dl_code]:text-[#111]",
 );
 const STATUS_BADGE_CLASSES: &str = "inline-flex size-[15px] flex-none items-center justify-center rounded-sm border text-[9.5px] leading-none font-bold";

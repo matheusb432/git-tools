@@ -1,4 +1,4 @@
-use application::{live_views::remove as remove_live_view, viewer::ViewerTabId};
+use application::{live_views, viewer::ViewerTabId};
 use tauri::http::StatusCode;
 
 use super::{
@@ -15,8 +15,8 @@ pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
         return Ok(status_response(StatusCode::NOT_FOUND));
     };
 
-    remove_live_view::execute(
-        remove_live_view::RemoveLiveView {
+    live_views::remove::execute(
+        live_views::remove::RemoveLiveView {
             source_kind: source.kind().into(),
             source_value: source.value(),
         },

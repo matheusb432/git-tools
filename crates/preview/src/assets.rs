@@ -96,32 +96,15 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_confines_motion_to_the_compositor_only_toast_fade() {
+    fn preview_css_carries_no_keyframe_animation() {
+        // ! Transitions and smooth scrolling are the xtask presentation gate's
+        // ! to police; animations are not, and a per-frame repaint in the
+        // ! WebKitGTK webview is what the row budget cannot absorb.
         let css = preview_css();
 
-        // The toast fade is the sole motion: it animates only compositor-only
-        // properties, so rows never repaint. No keyframes, no smooth scroll, and
-        // no shorthand that could smuggle box-shadow or filter.
-        assert!(css.contains("transition-property:opacity,scale"));
-        assert!(!css.contains("transition:"));
         assert!(!css.contains("animation:"));
         assert!(!css.contains("animation-name:"));
-        assert!(!css.contains("scroll-behavior:smooth"));
-
-        const PREFIX: &str = "transition-property:";
-        for (index, _) in css.match_indices(PREFIX) {
-            let value = css[index + PREFIX.len()..]
-                .split([';', '}'])
-                .next()
-                .unwrap_or_default();
-            assert!(
-                value.split(',').all(|property| matches!(
-                    property,
-                    "opacity" | "scale" | "translate" | "transform" | "none"
-                )),
-                "repaint-inducing transition-property in preview CSS: {value}"
-            );
-        }
+        assert!(!css.contains("@keyframes"));
     }
 
     #[test]

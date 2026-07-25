@@ -101,9 +101,6 @@ toml_edit = "0.25.12"
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-two-face = { version = "0.5.1", default-features = false, features = [
-  "syntect-fancy",
-] }
 url = "2.5.8"
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2.5.0"

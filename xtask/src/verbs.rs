@@ -1,5 +1,6 @@
 //! Automation verbs — one module per verb; each owns its flags and workflow.
 
+pub(crate) mod ast_grep;
 pub(crate) mod bench;
 pub(crate) mod bootstrap;
 pub(crate) mod build;

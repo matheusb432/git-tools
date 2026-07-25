@@ -18,10 +18,15 @@ impl Clock for BenchmarkClock {
 
 fn request() -> RecordRender {
     RecordRender {
-        recipe_json: r#"{"kind":"diff"}"#.into(),
+        recipe: gtl_recipe::Recipe {
+            source: gtl_recipe::RecipeSource::LocalRepo("/repos/gt".into()),
+            op: gtl_recipe::RecipeOp::Diff {
+                target: gtl_recipe::RecipeTarget::Unpushed { pinned: None },
+            },
+            name: None,
+        },
         title: "git-tools · unpushed".into(),
         repo_name: "git-tools".into(),
-        kind: "diff".into(),
         range_label: "origin/main..HEAD".into(),
     }
 }

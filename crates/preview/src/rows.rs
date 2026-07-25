@@ -218,7 +218,7 @@ fn code_inner(raw: &str, long: Option<usize>, tokens: &[Token]) -> String {
             body
         }
         Some(len) => format!(
-            r#"<span class="code-text">{}</span><button class="ln-more" type="button" aria-expanded="false">⋯ {len} chars</button>"#,
+            r#"<span class="code-text gtl-scroll-rail">{}</span><button class="ln-more" type="button" aria-expanded="false">⋯ {len} chars</button>"#,
             html_or_nbsp(raw)
         ),
     }
@@ -438,7 +438,7 @@ mod tests {
             &vec![Vec::new(); 1],
         );
         assert!(html.contains(r#"class="dl dl-add dl-long""#));
-        assert!(html.contains(r#"<span class="code-text">"#));
+        assert!(html.contains(r#"<span class="code-text gtl-scroll-rail">"#));
         assert!(html.contains(&format!(
             r#"<button class="ln-more" type="button" aria-expanded="false">⋯ {} chars</button>"#,
             MAX_LINE_COLS + 5
@@ -626,7 +626,7 @@ mod tests {
             }),
         }]);
         assert!(html.contains(r#"<code class="sp sp-add long">"#));
-        assert!(html.contains(r#"<span class="code-text">"#));
+        assert!(html.contains(r#"<span class="code-text gtl-scroll-rail">"#));
         assert!(html.contains(&format!(
             r#"<button class="ln-more" type="button" aria-expanded="false">⋯ {} chars</button>"#,
             MAX_LINE_COLS + 5

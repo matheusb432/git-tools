@@ -2,7 +2,7 @@
 //! `main`, run the built binary against it, and assert exit code, stdout/stderr, and the
 //! resulting ref topology. Local-only — no network.
 
-use std::{path::Path, process::Command as Git};
+use std::{path::Path, process};
 
 use assert_cmd::Command;
 use predicates::str::contains;
@@ -10,7 +10,7 @@ use tempfile::TempDir;
 
 /// Run a git command in `repo`, asserting success.
 fn git(repo: &Path, args: &[&str]) {
-    let out = Git::new("git")
+    let out = process::Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(args)
@@ -25,7 +25,7 @@ fn git(repo: &Path, args: &[&str]) {
 
 /// `git rev-parse <rev>` (trimmed) in `repo`.
 fn rev(repo: &Path, r: &str) -> String {
-    let out = Git::new("git")
+    let out = process::Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(["rev-parse", r])
@@ -37,7 +37,7 @@ fn rev(repo: &Path, r: &str) -> String {
 
 /// The currently checked-out branch name in `repo`.
 fn current_branch(repo: &Path) -> String {
-    let out = Git::new("git")
+    let out = process::Command::new("git")
         .arg("-C")
         .arg(repo)
         .args(["rev-parse", "--abbrev-ref", "HEAD"])

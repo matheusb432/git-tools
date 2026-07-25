@@ -10,7 +10,6 @@ domain.workspace = true
 maud.workspace = true
 similar.workspace = true
 syntect.workspace = true
-two-face.workspace = true
 
 [lints]
 workspace = true

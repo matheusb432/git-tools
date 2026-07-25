@@ -5,9 +5,8 @@ use application::diffs::View;
 use maud::{Markup, html};
 
 const SHELF_CLASSES: &str = concat!(
-    "[grid-area:2/3] overflow-auto border-l border-line bg-surface p-3 ",
-    "[@media(max-width:1280px)]:p-2.5 [@media(max-width:1024px)]:hidden print:hidden! ",
-    "[&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-panel [&::-webkit-scrollbar-thumb]:border-2 [&::-webkit-scrollbar-thumb]:border-surface [&::-webkit-scrollbar-thumb]:bg-line-2",
+    "gtl-scroll [grid-area:2/3] overflow-auto border-l border-line bg-surface p-3 ",
+    "[@media(max-width:1280px)]:p-2.5 [@media(max-width:1024px)]:hidden print:hidden!",
 );
 const SHELF_STATE_CLASSES: &str = concat!(
     "[&_.cline:hover_.bead::before]:border-acc [&_.cline.active_.bead::before]:border-acc [&_.cline.active_.bead::before]:bg-acc [&_.cline.active_.bead::before]:shadow-[0_0_0_3px_var(--acc-soft)] ",

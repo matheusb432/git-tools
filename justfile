@@ -66,12 +66,12 @@ fmt *args:
 fmt-check *args:
     cargo run --quiet -p xtask -- fmt-check {{ args }}
 
-# Run every repository linter: Oxlint, architecture constraints, and Clippy over the full workspace including desktop.
+# Run Oxlint, presentation and architecture policy, dependency checks, and workspace Clippy.
 [group('quality')]
 lint:
     cargo run --quiet -p xtask -- lint
 
-# Complete read-only quality gate: formatting drift, then every linter.
+# Complete read-only quality gate: formatting, lint, and configured ast-grep rules.
 [group('quality')]
 check:
     cargo run --quiet -p xtask -- check

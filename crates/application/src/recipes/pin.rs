@@ -6,7 +6,7 @@ use gtl_recipe::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
 use super::RecipeRequest;
 use crate::{
-    diffs::{DiffTarget, PinnedRange as DiffPinnedRange},
+    diffs::{self, DiffTarget},
     discovery::resolve_repo_top,
     ports::GitRunner,
     shared::git::{capture_checked, command_label},
@@ -110,7 +110,7 @@ fn target_to_recipe(target: DiffTarget) -> RecipeTarget {
     }
 }
 
-fn pin_to_recipe(pin: DiffPinnedRange) -> PinnedRange {
+fn pin_to_recipe(pin: diffs::PinnedRange) -> PinnedRange {
     PinnedRange {
         base: pin.base,
         head: pin.head,
@@ -241,7 +241,7 @@ mod tests {
 
     use super::{PinRecipe, execute};
     use crate::{
-        diffs::{DiffTarget, PinnedRange as DiffPinnedRange},
+        diffs::{self, DiffTarget},
         recipes::RecipeRequest,
         testing::FakeGitRunner,
     };
@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn base_and_existing_pins_are_preserved_without_resolution() {
-        let pinned = DiffPinnedRange {
+        let pinned = diffs::PinnedRange {
             base: "already-base".into(),
             head: "already-head".into(),
         };

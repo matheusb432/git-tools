@@ -47,7 +47,7 @@ pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -
         } {
             (titlebar::titlebar(view))
             (tree::tree(view))
-            main class="main [grid-area:2/2] overflow-auto px-[22px] pt-4 pb-[60px] [@media(min-width:1600px)_and_(min-height:900px)]:px-7 [@media(min-width:1025px)_and_(max-width:1280px)]:px-4 [@media(max-width:1024px)]:px-3 [@media(max-width:1024px)]:pb-12 print:overflow-visible print:p-0" {
+            main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-4 pb-[60px] [@media(min-width:1600px)_and_(min-height:900px)]:px-7 [@media(min-width:1025px)_and_(max-width:1280px)]:px-4 [@media(max-width:1024px)]:px-3 [@media(max-width:1024px)]:pb-12 print:overflow-visible print:p-0" {
                 (files::file_blocks(view, options, surface))
             }
             (shelf::shelf(view))

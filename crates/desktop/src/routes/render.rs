@@ -266,7 +266,7 @@ pub(super) fn error_tabs() -> String {
 
 pub(super) fn error_history() -> String {
     html! {
-        section id="viewer-history" class="viewer-history h-[calc(100%-58px)] overflow-auto px-4 py-3.5 [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft" {
+        section id="viewer-history" class="viewer-history gtl-scroll h-[calc(100%-58px)] overflow-auto px-4 py-3.5 [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft" {
             div class="rounded-sm border border-del-line bg-del-bg px-2.5 py-2 text-xs text-del" role="alert" {
                 "History could not be loaded. Please retry."
             }

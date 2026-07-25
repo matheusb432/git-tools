@@ -1,8 +1,9 @@
 //! The history feature: the desktop viewer's history-panel query.
 
+pub mod get_recent_render;
 pub mod list;
-pub mod list_recent;
+pub mod list_recent_renders;
 mod persistence;
 pub mod record_render;
 
-pub use persistence::RecentRenderRecord;
+pub use persistence::{RecentRenderRecord, RecentRenderRowError};

@@ -7,7 +7,8 @@ use std::{
 
 use application::{
     history::{
-        list_recent::{self, GetRecentRender, ListRecentRenders},
+        get_recent_render::{self, GetRecentRender},
+        list_recent_renders::{self, ListRecentRenders},
         record_render::{self, RecordRender, RecordRenderError},
     },
     live_views::{
@@ -17,6 +18,7 @@ use application::{
     },
     ports::{AppStateStore, Clock, RepoProbe, RepoProbeResult},
 };
+use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 use infra::app_state::SqliteAppState;
 use rusqlite::Connection;
 
@@ -65,6 +67,16 @@ impl RepoProbe for RepoProbeTest {
     }
 }
 
+fn unpushed_diff_recipe() -> Recipe {
+    Recipe {
+        source: RecipeSource::LocalRepo("/repos/alpha".into()),
+        op: RecipeOp::Diff {
+            target: RecipeTarget::Unpushed { pinned: None },
+        },
+        name: None,
+    }
+}
+
 fn save_live_view(state: &SqliteAppState, top_level: &Path) {
     let response = save::execute(
         SaveLiveView {
@@ -105,10 +117,9 @@ fn public_operations_use_the_migrated_schema() {
 
     record_render::execute(
         RecordRender {
-            recipe_json: r#"{"kind":"diff"}"#.into(),
+            recipe: unpushed_diff_recipe(),
             title: "alpha · unpushed".into(),
             repo_name: "alpha".into(),
-            kind: "diff".into(),
             range_label: "origin/main..HEAD".into(),
         },
         &state,
@@ -116,11 +127,11 @@ fn public_operations_use_the_migrated_schema() {
     )
     .expect("record render");
     let history =
-        list_recent::list::execute(ListRecentRenders, &state).expect("list recent renders");
+        list_recent_renders::execute(ListRecentRenders, &state).expect("list recent renders");
     assert_eq!(history.entries.len(), 1);
     let id = history.entries[0].id;
     let found =
-        list_recent::get::execute(GetRecentRender { id }, &state).expect("get recent render");
+        get_recent_render::execute(GetRecentRender { id }, &state).expect("get recent render");
     assert_eq!(
         found.entry.expect("recent render").title,
         "alpha · unpushed"
@@ -264,14 +275,16 @@ fn prune_failure_rolls_back_the_render_insertion() {
         .connection_lock()
         .expect("lock fixture connection")
         .execute_batch(
-            "WITH RECURSIVE render_number(value) AS (
+            "INSERT INTO project_sources (id, kind, value, created_at)
+             VALUES (1, 'directory', '/repos/fixture', '2026-07-18T00:00:00Z');
+             WITH RECURSIVE render_number(value) AS (
                SELECT 1
                UNION ALL
                SELECT value + 1 FROM render_number WHERE value < 500
              )
              INSERT INTO recent_renders
-               (recipe_json, title, repo_name, kind, range_label, rendered_at)
-             SELECT '{}', 'seed ' || value, 'fixture', 'diff', 'main..HEAD',
+               (source_id, operation_id, target_id, title, repo_name, range_label, rendered_at)
+             SELECT 1, 1, 1, 'seed ' || value, 'fixture', 'main..HEAD',
                     '2026-07-18T00:00:00Z'
              FROM render_number;
              CREATE TRIGGER recent_renders_prune_abort
@@ -284,10 +297,9 @@ fn prune_failure_rolls_back_the_render_insertion() {
 
     let result = record_render::execute(
         RecordRender {
-            recipe_json: r#"{"kind":"diff"}"#.into(),
+            recipe: unpushed_diff_recipe(),
             title: "failed insertion".into(),
             repo_name: "alpha".into(),
-            kind: "diff".into(),
             range_label: "origin/main..HEAD".into(),
         },
         &state,

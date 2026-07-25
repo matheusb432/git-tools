@@ -6,7 +6,7 @@
 use std::{
     fs::{OpenOptions, TryLockError},
     path::{Path, PathBuf},
-    process::{Child, Command as Git, ExitStatus, Stdio},
+    process::{self, Child, ExitStatus, Stdio},
     sync::OnceLock,
     time::{Duration, Instant},
 };
@@ -59,7 +59,7 @@ impl DaemonProcessGuard {
 
 impl Drop for DaemonProcessGuard {
     fn drop(&mut self) {
-        match Git::new(&self.cli_path)
+        match process::Command::new(&self.cli_path)
             .args(["daemon", "stop"])
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
             .output()
@@ -81,7 +81,7 @@ struct DirectDaemonGuard {
 
 impl DirectDaemonGuard {
     fn spawn(store_root: &Path) -> Self {
-        let child = Git::new(workspace_bin("gtl-daemon"))
+        let child = process::Command::new(workspace_bin("gtl-daemon"))
             .env("GIT_TOOLS_DATA_DIR", store_root)
             .env_remove("GIT_TOOLS_DAEMON_PORT")
             .stdout(Stdio::null())
@@ -121,18 +121,19 @@ struct UnhealthyLockOwnerGuard {
 impl UnhealthyLockOwnerGuard {
     fn spawn(store_root: &Path) -> Self {
         let ready_path = store_root.join("lock-owner.ready");
-        let child = Git::new(std::env::current_exe().expect("resolve e2e test binary"))
-            .args([
-                "--ignored",
-                "--exact",
-                "daemon_lock_owner_process",
-                "--nocapture",
-            ])
-            .env("GIT_TOOLS_TEST_DAEMON_LOCK_OWNER", store_root)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn unhealthy lock owner");
+        let child =
+            process::Command::new(std::env::current_exe().expect("resolve e2e test binary"))
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "daemon_lock_owner_process",
+                    "--nocapture",
+                ])
+                .env("GIT_TOOLS_TEST_DAEMON_LOCK_OWNER", store_root)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn unhealthy lock owner");
         let owner = Self { child };
         assert!(
             wait_for(Duration::from_secs(5), || ready_path.exists()),
@@ -199,7 +200,7 @@ impl Fixture {
 
     /// Runs `git -C <repo> <args>`, asserting success, and returns trimmed stdout.
     fn git(&self, args: &[&str]) -> String {
-        let out = Git::new("git")
+        let out = process::Command::new("git")
             .arg("-C")
             .arg(&self.repo)
             .args(args)
@@ -218,7 +219,7 @@ impl Fixture {
         let path = self.repo.join(file);
         std::fs::write(&path, contents).unwrap();
         self.git(&["add", "-A"]);
-        let out = Git::new("git")
+        let out = process::Command::new("git")
             .arg("-C")
             .arg(&self.repo)
             .args(["commit", "-m", message])
@@ -237,7 +238,7 @@ impl Fixture {
     /// Adds a bare `origin` and pushes `main`, establishing an upstream (`@{u}`).
     fn add_upstream(&self) {
         let remote = self.repo.parent().unwrap().join("origin.git");
-        let out = Git::new("git")
+        let out = process::Command::new("git")
             .args(["init", "--bare"])
             .arg(&remote)
             .output()
@@ -467,7 +468,7 @@ fn unhealthy_lock_owner_blocks_restart_without_being_killed() {
     )
     .unwrap();
 
-    let status_output = Git::new(workspace_bin("git-tools"))
+    let status_output = process::Command::new(workspace_bin("git-tools"))
         .args(["daemon", "status"])
         .env("GIT_TOOLS_DATA_DIR", store.path())
         .output()
@@ -485,7 +486,7 @@ fn unhealthy_lock_owner_blocks_restart_without_being_killed() {
     );
 
     let started_at = Instant::now();
-    let output = Git::new(workspace_bin("git-tools"))
+    let output = process::Command::new(workspace_bin("git-tools"))
         .args(["daemon", "restart"])
         .env("GIT_TOOLS_DATA_DIR", store.path())
         .output()
@@ -559,7 +560,7 @@ fn simultaneous_daemon_starts_leave_one_healthy_owner() {
         "the surviving daemon must publish its own discovery record"
     );
 
-    let status_output = Git::new(workspace_bin("git-tools"))
+    let status_output = process::Command::new(workspace_bin("git-tools"))
         .args(["daemon", "status"])
         .env("GIT_TOOLS_DATA_DIR", store.path())
         .output()
@@ -573,7 +574,7 @@ fn simultaneous_daemon_starts_leave_one_healthy_owner() {
     assert!(status_stdout.contains("gtl-daemon running"));
     assert!(status_stdout.contains(&format!("pid {survivor_pid}")));
 
-    let stop_output = Git::new(workspace_bin("git-tools"))
+    let stop_output = process::Command::new(workspace_bin("git-tools"))
         .args(["daemon", "stop"])
         .env("GIT_TOOLS_DATA_DIR", store.path())
         .output()
@@ -628,7 +629,7 @@ fn daemon_stop_quiesces_an_elected_startup() {
         "daemon must own the startup election before stop begins"
     );
 
-    let stop_output = Git::new(workspace_bin("git-tools"))
+    let stop_output = process::Command::new(workspace_bin("git-tools"))
         .args(["daemon", "stop"])
         .env("GIT_TOOLS_DATA_DIR", store.path())
         .output()
@@ -650,7 +651,7 @@ fn daemon_stop_quiesces_an_elected_startup() {
         "the elected daemon must not start after stop returns"
     );
 
-    let status_output = Git::new(workspace_bin("git-tools"))
+    let status_output = process::Command::new(workspace_bin("git-tools"))
         .args(["daemon", "status"])
         .env("GIT_TOOLS_DATA_DIR", store.path())
         .output()

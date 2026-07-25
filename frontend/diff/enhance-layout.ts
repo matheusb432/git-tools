@@ -6,7 +6,7 @@ import { isShaTarget, resolveActiveSet } from "./commit-focus";
 import { planFileVisibility } from "./file-filter";
 import { buildFileLeaf } from "./file-tree";
 import { toggleLongLine } from "./long-lines";
-import { computeWheelScroll } from "./wheel";
+import { computeWheelScroll } from "../core/wheel";
 
 /**
  * Rebuilds a native copy of a selection inside a diff as clean source (whole lines, markers

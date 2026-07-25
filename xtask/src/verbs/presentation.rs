@@ -140,8 +140,7 @@ fn check_compiled_css(path: &Path, css: &str) -> Result<()> {
     Ok(())
 }
 
-/// Compositor-only animatable properties (plus `none`): the toast fade may
-/// transition these; anything else repaints per frame in the WebKitGTK webview.
+/// Allows compositor-only toast transitions and `none` in the `WebKitGTK` webview.
 const TRANSITION_PROPERTIES_ALLOWED: &[&str] =
     &["none", "opacity", "scale", "translate", "transform"];
 

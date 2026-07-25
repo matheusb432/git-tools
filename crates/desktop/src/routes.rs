@@ -11,8 +11,7 @@ use std::{
 };
 
 use application::{
-    history::list_recent::{get as get_recent_render, list as list_recent_renders},
-    live_views::list as list_live_views,
+    history::{get_recent_render, list_recent_renders},
     ports::UserSettingsStore,
     viewer::{
         RenderOptions, Theme, ViewerHistoryEntry, ViewerSettings, ViewerTabId, ViewerTabKind,
@@ -302,12 +301,10 @@ fn open_history(app: &ViewerApp, id: application::viewer::RenderHistoryId) -> Ro
     else {
         return Ok(status_response(StatusCode::NOT_FOUND));
     };
-    let recipe: Recipe = serde_json::from_str(&entry.recipe_json)
-        .map_err(|error| format!("invalid saved recipe for history {id}: {error}"))?;
     let opened = open_recipe(
         recipe_context(app),
         &app.session,
-        &recipe,
+        &entry.recipe,
         format!("history-{id}"),
         ViewerTabKind::Snapshot,
     )?;
@@ -448,9 +445,12 @@ const fn viewer_tab_kind(kind: RecipeBatchKind) -> ViewerTabKind {
 fn restore_live_views(app: &ViewerApp) -> Result<Option<render::VersionedView>, RouteError> {
     let mut transient = None;
     let owner = app.restoration.run_once(|| {
-        let records = list_live_views::execute(list_live_views::ListLiveViews, &app.app_state)
-            .map_err(|error| format!("{error:#}"))?
-            .views;
+        let records = application::live_views::list::execute(
+            application::live_views::list::ListLiveViews,
+            &app.app_state,
+        )
+        .map_err(|error| format!("{error:#}"))?
+        .views;
         let mut newest = None;
         {
             let mut session = app.session.lock().map_err(|error| error.to_string())?;

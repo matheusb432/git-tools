@@ -24,10 +24,16 @@ fn recent_render_mapping_preserves_viewer_fields() {
         id,
         title: "Named diff".into(),
         repo_name: "git-tools".into(),
-        kind: "merge-diff".into(),
         range_label: "main...feature".into(),
         rendered_at: "2026-07-11T10:00:00Z".into(),
-        recipe_json: "{}".into(),
+        recipe: gtl_recipe::Recipe {
+            source: gtl_recipe::RecipeSource::LocalRepo("/repos/gt".into()),
+            op: gtl_recipe::RecipeOp::MergeDiff {
+                base: None,
+                pinned: None,
+            },
+            name: None,
+        },
     });
 
     assert_eq!(entry.id(), id);

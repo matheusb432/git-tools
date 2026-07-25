@@ -355,15 +355,11 @@ fn probe_live_source(
 }
 
 fn record_render(app_state: &impl AppStateStore, clock: &impl Clock, recipe: &Recipe, view: &View) {
-    let Ok(recipe_json) = serde_json::to_string(recipe) else {
-        return;
-    };
     if let Err(error) = record_render::execute(
         RecordRender {
-            recipe_json,
+            recipe: recipe.clone(),
             title: tab_label::computed(recipe, view),
             repo_name: view.repo_name.clone(),
-            kind: recipe.kind_tag().into(),
             range_label: view.cmd.range.clone(),
         },
         app_state,
@@ -378,7 +374,7 @@ mod tests {
     use std::sync::Mutex;
 
     use application::{
-        history::{RecentRenderRecord, list_recent::list as list_recent_renders},
+        history::{RecentRenderRecord, list_recent_renders},
         ports::{AppStateStore, RepoProbeResult},
         testing::{FakeDiffSource, FakeRepoProbe, FixedClock},
     };
@@ -593,7 +589,7 @@ index 111..222 100644\n\
         drop(session);
         let renders = fixture.history();
         assert_eq!(renders.len(), 1);
-        assert_eq!(renders[0].kind, "diff");
+        assert_eq!(renders[0].recipe.kind_tag(), "diff");
         assert_eq!(renders[0].title, "repo: 1 commit");
     }
 

@@ -5,7 +5,7 @@ pub mod save;
 
 use application::{
     live_views::save::{SaveLiveView, SaveLiveViewOutcome, SaveLiveViewResponse},
-    shared::notes as app_notes,
+    shared::notes,
 };
 use contracts::{
     envelope::{Envelope, Note, NoteLevel, Outcome},
@@ -46,11 +46,11 @@ pub(crate) fn to_envelope(resp: SaveLiveViewResponse) -> Envelope<SaveLiveViewDa
 }
 
 /// Map an application note (Info/Warn only) onto its wire counterpart.
-fn to_note(n: &app_notes::Note) -> Note {
+fn to_note(n: &notes::Note) -> Note {
     Note {
         level: match n.level {
-            app_notes::NoteLevel::Info => NoteLevel::Info,
-            app_notes::NoteLevel::Warn => NoteLevel::Warn,
+            notes::NoteLevel::Info => NoteLevel::Info,
+            notes::NoteLevel::Warn => NoteLevel::Warn,
         },
         text: n.text.clone(),
     }

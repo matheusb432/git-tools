@@ -14,7 +14,7 @@ use application::{
         render_merge_diff::RenderMergeDiffResponse,
         render_squash_preview::RenderSquashPreviewResponse,
     },
-    shared::notes as app_notes,
+    shared::notes,
 };
 use contracts::{
     diffs::RenderDiffData,
@@ -45,7 +45,7 @@ pub(crate) fn to_envelope(resp: RenderDiffResponse) -> Envelope<RenderDiffData> 
 fn ok_envelope(
     artifact: &std::path::Path,
     reused: bool,
-    notes: &[app_notes::Note],
+    notes: &[notes::Note],
 ) -> Envelope<RenderDiffData> {
     Envelope {
         outcome: Outcome::Ok,
@@ -93,11 +93,11 @@ pub(crate) fn to_subrepos_envelope(resp: RenderDiffSubreposResponse) -> Envelope
 }
 
 /// Map an application note (Info/Warn only) onto its wire counterpart.
-fn to_note(n: &app_notes::Note) -> Note {
+fn to_note(n: &notes::Note) -> Note {
     Note {
         level: match n.level {
-            app_notes::NoteLevel::Info => NoteLevel::Info,
-            app_notes::NoteLevel::Warn => NoteLevel::Warn,
+            notes::NoteLevel::Info => NoteLevel::Info,
+            notes::NoteLevel::Warn => NoteLevel::Warn,
         },
         text: n.text.clone(),
     }
