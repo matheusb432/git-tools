@@ -9,6 +9,7 @@ pub mod compute_diff;
 pub mod compute_merge_diff;
 pub mod compute_squash_preview;
 mod file;
+pub mod open_diff_file_in_configured_editor;
 mod range;
 mod range_view;
 pub mod render_diff;

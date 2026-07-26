@@ -3,4 +3,4 @@ pub mod focus;
 pub mod spawn;
 
 pub use focus::activate_window;
-pub use spawn::spawn_detached;
+pub use spawn::{spawn_detached, spawn_detached_in};

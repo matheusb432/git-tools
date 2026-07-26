@@ -9,11 +9,31 @@ use std::{
 /// Spawn `program args…` detached: own process group so the CLI's Ctrl-C does
 /// not reach it, null stdio, and we never wait. Fire-and-forget.
 pub fn spawn_detached(program: &Path, args: &[&str]) -> std::io::Result<()> {
-    let mut cmd = Command::new(program);
-    cmd.args(args)
+    spawn(program, args, None)
+}
+
+pub fn spawn_detached_in(
+    program: &Path,
+    arguments: &[&str],
+    working_directory: &Path,
+) -> std::io::Result<()> {
+    spawn(program, arguments, Some(working_directory))
+}
+
+fn spawn(
+    program: &Path,
+    arguments: &[&str],
+    working_directory: Option<&Path>,
+) -> std::io::Result<()> {
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    cmd.process_group(0);
-    cmd.spawn().map(|_child| ())
+    if let Some(working_directory) = working_directory {
+        command.current_dir(working_directory);
+    }
+    command.process_group(0);
+    command.spawn().map(|_child| ())
 }

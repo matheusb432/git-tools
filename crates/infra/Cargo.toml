@@ -12,6 +12,7 @@ harness = false
 anyhow.workspace = true
 application.workspace = true
 domain.workspace = true
+gtl-platform.workspace = true
 jiff.workspace = true
 parking_lot.workspace = true
 rusqlite.workspace = true
@@ -23,11 +24,11 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["fs", "process"] }
 toml.workspace = true
 toml_edit.workspace = true
+wait-timeout.workspace = true
 walkdir.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
-gtl-platform.workspace = true
 gtl-recipe.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt"] }
 

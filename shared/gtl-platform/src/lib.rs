@@ -30,6 +30,16 @@ mod sys {
             "detached viewer spawn is not implemented for this OS",
         ))
     }
+    pub fn spawn_detached_in(
+        _program: &Path,
+        _arguments: &[&str],
+        _working_directory: &Path,
+    ) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "detached viewer spawn is not implemented for this OS",
+        ))
+    }
     pub fn activate_window(_xid: u64) {}
 }
 
@@ -37,6 +47,14 @@ mod sys {
 /// OS backend; best-effort daemon launch for the desktop viewer. See ADR-0003.
 pub fn spawn_detached(program: &Path, args: &[&str]) -> std::io::Result<()> {
     sys::spawn_detached(program, args)
+}
+
+pub fn spawn_detached_in(
+    program: &Path,
+    arguments: &[&str],
+    working_directory: &Path,
+) -> std::io::Result<()> {
+    sys::spawn_detached_in(program, arguments, working_directory)
 }
 
 /// Raises and focuses the native window `xid`, even over a focused fullscreen

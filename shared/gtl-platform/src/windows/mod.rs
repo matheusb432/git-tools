@@ -4,7 +4,7 @@
 //! both pure and OS-total, so neither needs a Windows applier.
 pub mod spawn;
 
-pub use spawn::spawn_detached;
+pub use spawn::{spawn_detached, spawn_detached_in};
 
 /// Window activation is a no-op on Windows: Tauri's `set_focus` owns foreground
 /// raising, and the desktop crate's `window_xid` only yields X11 handles, so the

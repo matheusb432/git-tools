@@ -17,11 +17,31 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Spawn `program args…` detached: no inherited console, null stdio, never waited
 /// on. Fire-and-forget — the Windows analogue of the Linux `process_group(0)`.
 pub fn spawn_detached(program: &Path, args: &[&str]) -> std::io::Result<()> {
-    let mut cmd = Command::new(program);
-    cmd.args(args)
+    spawn(program, args, None)
+}
+
+pub fn spawn_detached_in(
+    program: &Path,
+    arguments: &[&str],
+    working_directory: &Path,
+) -> std::io::Result<()> {
+    spawn(program, arguments, Some(working_directory))
+}
+
+fn spawn(
+    program: &Path,
+    arguments: &[&str],
+    working_directory: Option<&Path>,
+) -> std::io::Result<()> {
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW);
-    cmd.spawn().map(|_child| ())
+    if let Some(working_directory) = working_directory {
+        command.current_dir(working_directory);
+    }
+    command.spawn().map(|_child| ())
 }
