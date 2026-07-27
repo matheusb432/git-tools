@@ -21,24 +21,46 @@ use tempfile::TempDir;
 fn ensure_binaries_built() {
     static BUILT: OnceLock<()> = OnceLock::new();
     BUILT.get_or_init(|| {
-        let status = std::process::Command::new(env!("CARGO"))
-            .args(["build", "-p", "cli", "-p", "daemon"])
-            .status()
-            .expect("cargo build -p cli -p daemon");
+        let mut command = std::process::Command::new(env!("CARGO"));
+        command.args(["build", "-p", "cli", "-p", "daemon"]);
+        if coverage_is_enabled() {
+            command
+                .arg("--target-dir")
+                .arg(workspace_target_dir().join("e2e-llvm-cov-target"));
+        }
+        let status = command.status().expect("cargo build -p cli -p daemon");
         assert!(status.success(), "building cli + daemon failed");
     });
 }
 
-/// Absolute path of a workspace-built debug binary. Explicit because this
-/// crate drives sibling-crate binaries: `CARGO_BIN_EXE_*` is never set for
-/// them, and `assert_cmd`'s current-exe inference breaks under a shared
-/// cargo `build-dir` (final binaries still land in `./target/debug`).
-fn workspace_bin(name: &str) -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+fn coverage_is_enabled() -> bool {
+    std::env::var_os("CARGO_LLVM_COV").is_some()
+}
+
+fn workspace_root() -> &'static Path {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
-        .expect("workspace root");
-    root.join("target")
+        .expect("workspace root")
+}
+
+fn workspace_target_dir() -> PathBuf {
+    workspace_root().join("target")
+}
+
+/// Absolute path of a workspace-built debug binary. Explicit because this
+/// crate drives sibling-crate binaries: `CARGO_BIN_EXE_*` is never set for
+/// them, and `assert_cmd`'s current-exe inference breaks under a shared Cargo
+/// build directory. Coverage uses a separate nested target so instrumented
+/// binaries cannot replace the ordinary `target/debug` artifacts.
+fn workspace_bin(name: &str) -> PathBuf {
+    ensure_binaries_built();
+    let target_dir = if coverage_is_enabled() {
+        workspace_target_dir().join("e2e-llvm-cov-target")
+    } else {
+        workspace_target_dir()
+    };
+    target_dir
         .join("debug")
         .join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
 }
@@ -251,7 +273,6 @@ impl Fixture {
     /// A `git-tools` invocation in the repo, with browser-open disabled and the
     /// store pinned to this fixture's tempdir.
     fn run(&self, args: &[&str]) -> Command {
-        ensure_binaries_built();
         let mut cmd = Command::new(workspace_bin("git-tools"));
         cmd.args(args)
             .current_dir(&self.repo)
@@ -454,7 +475,6 @@ fn ordinary_command_recovers_after_the_daemon_crashes() {
 
 #[test]
 fn unhealthy_lock_owner_blocks_restart_without_being_killed() {
-    ensure_binaries_built();
     let store = tempfile::tempdir().unwrap();
     let mut owner = UnhealthyLockOwnerGuard::spawn(store.path());
     let port = std::net::TcpListener::bind("127.0.0.1:0")
@@ -528,7 +548,6 @@ fn daemon_lock_owner_process() {
 
 #[test]
 fn simultaneous_daemon_starts_leave_one_healthy_owner() {
-    ensure_binaries_built();
     let store = tempfile::tempdir().unwrap();
     let mut first_daemon = DirectDaemonGuard::spawn(store.path());
     let mut second_daemon = DirectDaemonGuard::spawn(store.path());
@@ -594,7 +613,6 @@ fn simultaneous_daemon_starts_leave_one_healthy_owner() {
 
 #[test]
 fn daemon_stop_quiesces_an_elected_startup() {
-    ensure_binaries_built();
     let store = tempfile::tempdir().unwrap();
     let ownership_probe = OpenOptions::new()
         .create(true)

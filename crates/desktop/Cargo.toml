@@ -17,6 +17,11 @@ name = "viewer_render"
 harness = false
 required-features = ["benchmark-support"]
 
+[[bench]]
+name = "view_cache"
+harness = false
+required-features = ["benchmark-support"]
+
 [build-dependencies]
 serde.workspace = true
 tauri-build.workspace = true
@@ -26,9 +31,9 @@ url.workspace = true
 [dependencies]
 anyhow.workspace = true
 application.workspace = true
+contracts.workspace = true
 domain.workspace = true
 gtl-platform.workspace = true
-gtl-recipe.workspace = true
 infra.workspace = true
 lru.workspace = true
 maud.workspace = true
@@ -50,7 +55,6 @@ benchmark-support = []
 custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
-application = { workspace = true, features = ["testing"] }
 criterion.workspace = true
 sha2.workspace = true
 tempfile.workspace = true

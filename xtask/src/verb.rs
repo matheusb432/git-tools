@@ -11,6 +11,7 @@ impl Verb {
     pub(crate) const CHECK: Self = Self("check");
     pub(crate) const CHECK_DEPS: Self = Self("check-deps");
     pub(crate) const CHECK_STRUCTURE: Self = Self("check-structure");
+    pub(crate) const COV: Self = Self("cov");
     pub(crate) const DESKTOP_BENCH: Self = Self("desktop-bench");
     pub(crate) const DESKTOP_E2E: Self = Self("desktop-e2e");
     pub(crate) const DRIFT_CHECK: Self = Self("drift-check");

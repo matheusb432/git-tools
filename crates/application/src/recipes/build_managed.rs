@@ -1,7 +1,7 @@
 //! Builds snapshot recipes for managed repositories with unpushed commits.
 
+use contracts::recipes::Recipe;
 use domain::managed::ManagedRepo;
-use gtl_recipe::Recipe;
 
 use super::{RecipeRequest, pin};
 use crate::{managed::select_unpushed, ports::GitRunner};
@@ -48,8 +48,8 @@ pub fn execute(
 mod tests {
     use std::{error::Error as _, path::PathBuf};
 
+    use contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
     use domain::managed::ManagedRepo;
-    use gtl_recipe::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::{BuildManagedRecipes, execute};
     use crate::{diffs::DiffTarget, recipes::RecipeRequest, testing::FakeGitRunner};

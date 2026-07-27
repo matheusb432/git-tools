@@ -8,8 +8,10 @@ use application::diffs::{
     DiffTargetRequest, RepoRef, render_diff_all::RenderDiffAll,
     render_diff_subrepos::RenderDiffSubrepos,
 };
-use contracts::envelope::Outcome;
-use gtl_recipe::{OpenRecipes, RecipeBatchKind};
+use contracts::{
+    envelope::Outcome,
+    recipes::{OpenRecipes, RecipeBatchKind},
+};
 
 use crate::{
     cli::DiffTarget,
@@ -192,7 +194,7 @@ pub(crate) fn forward_managed_all(
 }
 
 fn forward_batch(
-    recipes: Vec<gtl_recipe::Recipe>,
+    recipes: Vec<contracts::recipes::Recipe>,
     forward: impl FnOnce(&OpenRecipes) -> anyhow::Result<()>,
     degrade: impl FnOnce() -> anyhow::Result<DiffOutcome>,
 ) -> anyhow::Result<DiffOutcome> {

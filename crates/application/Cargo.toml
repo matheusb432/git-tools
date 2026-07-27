@@ -10,9 +10,9 @@ testing = []
 [dependencies]
 anyhow.workspace = true
 cqrsy.workspace = true
+contracts.workspace = true
 domain.workspace = true
 futures-util.workspace = true
-gtl-recipe.workspace = true
 natord.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

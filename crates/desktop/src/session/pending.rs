@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, sync::Mutex};
 
-use gtl_recipe::OpenRecipes;
+use contracts::recipes::OpenRecipes;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PendingRecipesError {
@@ -71,7 +71,7 @@ impl PendingRecipes {
 mod tests {
     use std::sync::{Arc, Barrier};
 
-    use gtl_recipe::{OpenRecipes, RecipeBatchKind};
+    use contracts::recipes::{OpenRecipes, RecipeBatchKind};
 
     use super::*;
     use crate::{ForwardRecipesError, enqueue_and_wake};

@@ -328,7 +328,7 @@ mod tests {
             RenderOptions, Theme, ViewerSettings, ViewerTabId, ViewerTabKind, ViewerTabState,
         },
     };
-    use gtl_recipe::{Recipe, RecipeOp, RecipeSource};
+    use contracts::recipes::{Recipe, RecipeOp, RecipeSource};
 
     use super::*;
     use crate::session::{CachedView, ViewerSession};
@@ -365,7 +365,11 @@ mod tests {
         let mut session = ViewerSession::new(1024 * 1024);
         let id = session.open(recipe, "batch".into(), ViewerTabKind::Snapshot);
         let ticket = session.begin_compute(id).expect("ticket");
-        session.publish_if_current(ticket, CachedView::new(view("stale secret")));
+        session.publish_labeled_if_current(
+            ticket,
+            CachedView::new(view("stale secret")),
+            "ready".into(),
+        );
         (Mutex::new(session), id)
     }
 
@@ -412,9 +416,10 @@ mod tests {
             generation += 1;
             let mut session = session.lock().expect("session lock");
             let ticket = session.refresh(id).expect("refresh ticket");
-            session.publish_if_current(
+            session.publish_labeled_if_current(
                 ticket,
                 CachedView::new(view(&format!("fresh {generation}"))),
+                "ready".into(),
             );
         })
         .expect_err("continuous refresh exhausts bounded retry");
@@ -468,7 +473,11 @@ mod tests {
                 ViewerTabKind::Snapshot,
             );
             let ticket = state.begin_compute(id).expect("ticket");
-            state.publish_if_current(ticket, CachedView::new(view("second")));
+            state.publish_labeled_if_current(
+                ticket,
+                CachedView::new(view("second")),
+                "ready".into(),
+            );
             state.activate(first);
             id
         };
@@ -502,7 +511,11 @@ mod tests {
                 ViewerTabKind::Snapshot,
             );
             let ticket = state.begin_compute(id).expect("ticket");
-            state.publish_if_current(ticket, CachedView::new(view("second")));
+            state.publish_labeled_if_current(
+                ticket,
+                CachedView::new(view("second")),
+                "ready".into(),
+            );
             state.activate(first);
             id
         };
@@ -578,9 +591,13 @@ mod tests {
         let id = state.open(recipe, "batch".into(), ViewerTabKind::Snapshot);
         let old = state.begin_compute(id).expect("old ticket");
         let old_view = view("old transient");
-        state.publish_if_current(old, CachedView::new(Arc::clone(&old_view)));
+        state.publish_labeled_if_current(old, CachedView::new(Arc::clone(&old_view)), "old".into());
         let current = state.begin_compute(id).expect("current ticket");
-        state.publish_if_current(current, CachedView::new(view("current oversize")));
+        state.publish_labeled_if_current(
+            current,
+            CachedView::new(view("current oversize")),
+            "current".into(),
+        );
         let session = Mutex::new(state);
 
         let error = view_with_tabs_using(

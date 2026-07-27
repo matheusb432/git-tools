@@ -12,7 +12,6 @@ members = [
   "crates/preview",
   "shared/bootstrap",
   "shared/gtl-platform",
-  "shared/gtl-recipe",
   "xtask",
 ]
 # Everything except `desktop`, which needs webkit2gtk headers and stays opt-in
@@ -28,7 +27,6 @@ default-members = [
   "crates/preview",
   "shared/bootstrap",
   "shared/gtl-platform",
-  "shared/gtl-recipe",
   "xtask",
 ]
 
@@ -55,7 +53,6 @@ directories = "6.0.0"
 domain = { path = "crates/domain" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gtl-platform = { path = "shared/gtl-platform" }
-gtl-recipe = { path = "shared/gtl-recipe" }
 http-body-util = "0.1"
 ico = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }

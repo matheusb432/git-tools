@@ -1,5 +1,11 @@
 use std::{collections::HashSet, sync::Arc};
 
+pub mod complete_recipe_computation;
+pub mod compute_recipe;
+pub mod initial_recipe_label;
+pub mod probe_recipe;
+mod recipe_label;
+
 pub use domain::viewer::{
     DiffDensity, DiffLayout, ParseRenderOptionError, RenderHistoryId, RenderOptions, Theme,
     ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState,
@@ -118,7 +124,7 @@ impl ViewerView {
 ///
 /// ```
 /// use application::viewer::{RenderHistoryId, ViewerHistoryEntry};
-/// use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+/// use contracts::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 ///
 /// let id = RenderHistoryId::try_new(1).expect("positive id");
 /// let entry = ViewerHistoryEntry::new(
@@ -145,7 +151,7 @@ pub struct ViewerHistoryEntry {
     repo_name: String,
     range_label: String,
     rendered_at: String,
-    recipe: gtl_recipe::Recipe,
+    recipe: contracts::recipes::Recipe,
 }
 
 impl ViewerHistoryEntry {
@@ -156,7 +162,7 @@ impl ViewerHistoryEntry {
         repo_name: String,
         range_label: String,
         rendered_at: String,
-        recipe: gtl_recipe::Recipe,
+        recipe: contracts::recipes::Recipe,
     ) -> Self {
         Self {
             id,
@@ -258,7 +264,7 @@ impl ViewerHistoryEntry {
     /// # fn entry() -> ViewerHistoryEntry { unimplemented!() }
     /// assert_eq!(entry().recipe().kind_tag(), "diff");
     /// ```
-    pub fn recipe(&self) -> &gtl_recipe::Recipe {
+    pub fn recipe(&self) -> &contracts::recipes::Recipe {
         &self.recipe
     }
 }

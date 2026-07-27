@@ -32,6 +32,7 @@ fn run(command: cli::Command) -> Result<()> {
             force,
         } => verbs::install::run_uninstall(remove_config, force),
         cli::Command::Test(arguments) => verbs::test::run(arguments.scope, arguments.verbose),
+        cli::Command::Cov => verbs::cov::run(),
         cli::Command::Build { target } => verbs::build::run(target),
         cli::Command::FrontendTest => verbs::frontend::test(),
         cli::Command::FrontendBench => verbs::frontend::bench(),

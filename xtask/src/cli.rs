@@ -81,6 +81,10 @@ pub enum Command {
     /// `--e2e` is hermetic viewer E2E only; `--all` is the complete repository gate.
     #[command(name = Verb::TEST.as_str())]
     Test(TestArguments),
+    /// Run the complete Rust workspace under LLVM coverage. Writes per-line reports to
+    /// `.artifacts/coverage/text/` and excludes dedicated test files from the report.
+    #[command(name = Verb::COV.as_str())]
+    Cov,
     /// Build the CLI engine, desktop viewer, or both release artifacts.
     #[command(name = Verb::BUILD.as_str())]
     Build {

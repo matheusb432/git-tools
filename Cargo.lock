@@ -123,10 +123,10 @@ name = "application"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "contracts",
  "cqrsy",
  "domain",
  "futures-util",
- "gtl-recipe",
  "natord",
  "rusqlite",
  "serde",
@@ -798,7 +798,6 @@ dependencies = [
  "contracts",
  "domain",
  "gtl-platform",
- "gtl-recipe",
  "infra",
  "jiff",
  "predicates",
@@ -857,8 +856,10 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 name = "contracts"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "serde",
  "serde_json",
+ "serde_with",
 ]
 
 [[package]]
@@ -1249,10 +1250,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "application",
+ "contracts",
  "criterion",
  "domain",
  "gtl-platform",
- "gtl-recipe",
  "infra",
  "lru",
  "maud",
@@ -2094,16 +2095,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gtl-recipe"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "serde",
- "serde_json",
- "serde_with",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2491,10 +2482,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "application",
+ "contracts",
  "criterion",
  "domain",
  "gtl-platform",
- "gtl-recipe",
  "jiff",
  "parking_lot",
  "rusqlite",

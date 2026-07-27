@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gtl_recipe::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
+use contracts::recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
 use super::RecipeRequest;
 use crate::{
@@ -237,7 +237,7 @@ fn capture_pin(
 mod tests {
     use std::{error::Error as _, num::NonZeroU32, path::PathBuf};
 
-    use gtl_recipe::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
+    use contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::{PinRecipe, execute};
     use crate::{
@@ -246,7 +246,10 @@ mod tests {
         testing::FakeGitRunner,
     };
 
-    fn pin(operation: RecipeRequest, outputs: Vec<crate::ports::GitOutput>) -> gtl_recipe::Recipe {
+    fn pin(
+        operation: RecipeRequest,
+        outputs: Vec<crate::ports::GitOutput>,
+    ) -> contracts::recipes::Recipe {
         execute(
             PinRecipe {
                 repo: "/work/repo/nested".into(),
@@ -274,7 +277,7 @@ mod tests {
 
         assert_eq!(
             recipe,
-            gtl_recipe::Recipe {
+            contracts::recipes::Recipe {
                 source: RecipeSource::LocalRepo(PathBuf::from("/work/repo")),
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Range {

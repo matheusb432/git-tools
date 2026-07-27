@@ -73,7 +73,7 @@ pub(in crate::render) fn history(entries: &[ViewerHistoryEntry]) -> Markup {
 #[cfg(test)]
 mod tests {
     use application::viewer::{RenderHistoryId, ViewerHistoryEntry};
-    use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+    use contracts::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::history_copy_json;
 

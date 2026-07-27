@@ -18,10 +18,10 @@ impl Clock for BenchmarkClock {
 
 fn request() -> RecordRender {
     RecordRender {
-        recipe: gtl_recipe::Recipe {
-            source: gtl_recipe::RecipeSource::LocalRepo("/repos/gt".into()),
-            op: gtl_recipe::RecipeOp::Diff {
-                target: gtl_recipe::RecipeTarget::Unpushed { pinned: None },
+        recipe: contracts::recipes::Recipe {
+            source: contracts::recipes::RecipeSource::LocalRepo("/repos/gt".into()),
+            op: contracts::recipes::RecipeOp::Diff {
+                target: contracts::recipes::RecipeTarget::Unpushed { pinned: None },
             },
             name: None,
         },

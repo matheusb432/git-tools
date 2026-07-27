@@ -2,19 +2,19 @@
 #[cfg(feature = "benchmark-support")]
 pub mod benchmark_support;
 mod commands;
+mod presentation;
 mod protocol_config;
 mod recipes;
 mod render;
 mod routes;
 mod session;
-mod tab_label;
 
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 
-use gtl_recipe::{OpenRecipes, decode_token};
+use contracts::recipes::{OpenRecipes, decode_token};
 use tauri::{
     Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
     menu::{Menu, MenuItem},
@@ -254,7 +254,7 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
 /// Panics when viewer storage cannot initialize or the Tauri runtime cannot start.
 pub fn run() {
     let data_root = commands::data_root().expect("viewer data root resolves");
-    let viewer_app = routes::ViewerApp::open(
+    let viewer_app = presentation::ViewerApp::open(
         &data_root,
         infra::user_config::TomlSettingsStore::from_environment(),
         DEFAULT_VIEW_CACHE_WEIGHT,
@@ -266,7 +266,7 @@ pub fn run() {
         .manage(MainWindowLifecycle::default())
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let batches = recipes_from_argv(&argv);
-            let viewer = app.state::<routes::ViewerApp>();
+            let viewer = app.state::<presentation::ViewerApp>();
             let window = app.get_webview_window("main");
             if let Err(error) = forward_recipes(
                 viewer.pending(),
@@ -286,7 +286,7 @@ pub fn run() {
             |ctx, request, responder| {
                 let app = ctx
                     .app_handle()
-                    .state::<routes::ViewerApp>()
+                    .state::<presentation::ViewerApp>()
                     .inner()
                     .clone();
                 tauri::async_runtime::spawn_blocking(move || {
@@ -296,7 +296,7 @@ pub fn run() {
         )
         .setup(move |app| {
             if let Err(error) = enqueue_batches(
-                app.state::<routes::ViewerApp>().pending(),
+                app.state::<presentation::ViewerApp>().pending(),
                 cold_start_batches,
             ) {
                 eprintln!("gtl-viewer: failed to enqueue cold-start recipes: {error}");
@@ -348,10 +348,10 @@ mod tests {
         }
     }
 
-    fn recipe_batch(id: &str) -> gtl_recipe::OpenRecipes {
-        gtl_recipe::OpenRecipes {
+    fn recipe_batch(id: &str) -> contracts::recipes::OpenRecipes {
+        contracts::recipes::OpenRecipes {
             batch_id: id.into(),
-            kind: gtl_recipe::RecipeBatchKind::Snapshot,
+            kind: contracts::recipes::RecipeBatchKind::Snapshot,
             recipes: Vec::new(),
         }
     }
@@ -362,10 +362,10 @@ mod tests {
         let second = recipe_batch("second");
         let argv = vec![
             "gtl-viewer".into(),
-            gtl_recipe::encode_token(&first),
+            contracts::recipes::encode_token(&first),
             "gtl-recipe://malformed".into(),
             "--flag".into(),
-            gtl_recipe::encode_token(&second),
+            contracts::recipes::encode_token(&second),
         ];
 
         assert_eq!(recipes_from_argv(&argv), vec![first, second]);
@@ -376,7 +376,7 @@ mod tests {
         let batch = recipe_batch("warm");
 
         assert_eq!(
-            recipes_from_argv(&[gtl_recipe::encode_token(&batch)]),
+            recipes_from_argv(&[contracts::recipes::encode_token(&batch)]),
             vec![batch]
         );
     }

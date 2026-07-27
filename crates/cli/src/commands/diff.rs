@@ -2,8 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
 use application::{diffs::render_diff::RenderDiff, recipes::RecipeRequest};
-use contracts::envelope::Outcome;
-use gtl_recipe::{OpenRecipes, RecipeBatchKind};
+use contracts::{
+    envelope::Outcome,
+    recipes::{OpenRecipes, RecipeBatchKind},
+};
 
 use crate::{cli::DiffTarget, client::Backend, viewer};
 
@@ -166,7 +168,9 @@ mod tests {
         assert_eq!(batch.recipes[0].name.as_deref(), Some("release review"));
         assert_eq!(
             batch.recipes[0].source,
-            gtl_recipe::RecipeSource::LocalRepo(std::fs::canonicalize(repo.path()).unwrap())
+            contracts::recipes::RecipeSource::LocalRepo(
+                std::fs::canonicalize(repo.path()).unwrap()
+            )
         );
     }
 

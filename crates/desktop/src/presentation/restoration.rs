@@ -8,7 +8,7 @@ enum RestoreState {
 }
 
 #[derive(Debug)]
-pub(super) struct RestorationGate {
+pub(crate) struct RestorationGate {
     state: Mutex<RestoreState>,
     changed: Condvar,
 }
@@ -23,7 +23,7 @@ impl Default for RestorationGate {
 }
 
 impl RestorationGate {
-    pub(super) fn run_once(
+    pub(crate) fn run_once(
         &self,
         operation: impl FnOnce() -> Result<(), String>,
     ) -> Result<bool, String> {

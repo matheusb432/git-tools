@@ -27,8 +27,8 @@ toml_edit.workspace = true
 walkdir.workspace = true
 
 [dev-dependencies]
+contracts.workspace = true
 criterion.workspace = true
-gtl-recipe.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt"] }
 
 [lints]

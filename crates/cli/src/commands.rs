@@ -38,7 +38,7 @@ pub(crate) fn open_artifact(path: &Path) {
 pub(crate) fn do_not_open(_path: &Path) {}
 
 /// Forward one recipe batch to the single-instance viewer as one argv token.
-pub(crate) fn forward_recipes(batch: &gtl_recipe::OpenRecipes) -> anyhow::Result<()> {
+pub(crate) fn forward_recipes(batch: &contracts::recipes::OpenRecipes) -> anyhow::Result<()> {
     use crate::viewer::{no_open_requested, resolve_viewer_bin};
 
     if no_open_requested() {
@@ -46,7 +46,7 @@ pub(crate) fn forward_recipes(batch: &gtl_recipe::OpenRecipes) -> anyhow::Result
     }
     let bin = resolve_viewer_bin()
         .context("gtl-viewer is not installed; cannot forward the recipe batch")?;
-    let token = gtl_recipe::encode_token(batch);
+    let token = contracts::recipes::encode_token(batch);
     gtl_platform::spawn_detached(&bin, &[token.as_str()])
         .context("failed to spawn gtl-viewer to forward the recipe batch")
 }

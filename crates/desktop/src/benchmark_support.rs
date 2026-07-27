@@ -1,5 +1,7 @@
 //! Stable benchmark fixtures for the server-rendered viewer.
 
+mod cache;
+
 use std::sync::Arc;
 
 use application::{
@@ -9,6 +11,7 @@ use application::{
         ViewerTabKind, ViewerTabState, ViewerView,
     },
 };
+pub use cache::{CacheBenchmarkCase, ViewCacheBenchmark};
 
 use crate::render::MaudViewerRenderer;
 
@@ -95,13 +98,14 @@ impl ViewerRenderBenchmark {
 }
 
 fn large_view() -> View {
-    let mut lines = Vec::with_capacity(FIXTURE_LINE_COUNT);
-    lines.push(format!(
-        "@@ -1,{FIXTURE_LINE_COUNT} +1,{FIXTURE_LINE_COUNT} @@"
-    ));
+    view_with_lines(FIXTURE_LINE_COUNT)
+}
+
+fn view_with_lines(line_count: usize) -> View {
+    let mut lines = Vec::with_capacity(line_count);
+    lines.push(format!("@@ -1,{line_count} +1,{line_count} @@"));
     lines.extend(
-        (1..FIXTURE_LINE_COUNT)
-            .map(|line| format!(" line {line:05}: deterministic benchmark payload")),
+        (1..line_count).map(|line| format!(" line {line:05}: deterministic benchmark payload")),
     );
 
     View {
@@ -139,6 +143,30 @@ mod tests {
     use application::viewer::{DiffDensity, DiffLayout};
 
     use super::*;
+
+    #[test]
+    fn cache_weight_cases_measure_the_selected_fixture() {
+        let mut small = ViewCacheBenchmark::fixture_small().view_weight_case();
+        let mut large = ViewCacheBenchmark::fixture_45k().view_weight_case();
+
+        assert!(large.execute() > small.execute());
+    }
+
+    #[test]
+    fn fragment_cases_surface_cache_disposition() {
+        let fixture = ViewCacheBenchmark::fixture_45k();
+
+        assert!(fixture.fragment_insert_case().execute());
+        assert!(fixture.fragment_replace_case().execute());
+        assert!(!fixture.fragment_oversize_case().execute());
+    }
+
+    #[test]
+    fn view_replacement_case_updates_the_cached_entry() {
+        let fixture = ViewCacheBenchmark::fixture_45k();
+
+        assert!(fixture.view_replace_case().execute());
+    }
 
     #[test]
     fn fixture_renders_both_benchmark_variants() {

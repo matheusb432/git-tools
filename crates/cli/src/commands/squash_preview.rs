@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use application::{diffs::render_squash_preview::RenderSquashPreview, recipes::RecipeRequest};
-use gtl_recipe::{OpenRecipes, RecipeBatchKind};
+use contracts::recipes::{OpenRecipes, RecipeBatchKind};
 
 use crate::{
     client::Backend,

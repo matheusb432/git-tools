@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use application::{history::RecentRenderRecord, viewer::RenderHistoryId};
-use gtl_recipe::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource};
+use contracts::recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource};
 use tauri::http::StatusCode;
 
 use super::{
@@ -26,9 +26,9 @@ fn recent_render_mapping_preserves_viewer_fields() {
         repo_name: "git-tools".into(),
         range_label: "main...feature".into(),
         rendered_at: "2026-07-11T10:00:00Z".into(),
-        recipe: gtl_recipe::Recipe {
-            source: gtl_recipe::RecipeSource::LocalRepo("/repos/gt".into()),
-            op: gtl_recipe::RecipeOp::MergeDiff {
+        recipe: contracts::recipes::Recipe {
+            source: contracts::recipes::RecipeSource::LocalRepo("/repos/gt".into()),
+            op: contracts::recipes::RecipeOp::MergeDiff {
                 base: None,
                 pinned: None,
             },

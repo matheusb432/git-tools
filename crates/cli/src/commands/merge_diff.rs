@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use application::{diffs::render_merge_diff::RenderMergeDiff, recipes::RecipeRequest};
-use gtl_recipe::{OpenRecipes, RecipeBatchKind};
+use contracts::recipes::{OpenRecipes, RecipeBatchKind};
 
 use crate::{
     client::Backend,

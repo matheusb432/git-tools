@@ -1,6 +1,6 @@
 //! The `history/record_render` vertical slice: record one render in the app history log.
 
-use gtl_recipe::Recipe;
+use contracts::recipes::Recipe;
 use rusqlite::{Connection, params};
 
 use crate::{
@@ -116,7 +116,7 @@ fn record_render(
 
 #[cfg(test)]
 mod tests {
-    use gtl_recipe::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
+    use contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::*;
     use crate::{

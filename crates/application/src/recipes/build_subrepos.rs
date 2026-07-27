@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use gtl_recipe::Recipe;
+use contracts::recipes::Recipe;
 
 use super::{RecipeRequest, pin};
 use crate::{
@@ -60,7 +60,7 @@ pub fn execute(
 mod tests {
     use std::{error::Error as _, num::NonZeroU32, path::PathBuf};
 
-    use gtl_recipe::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
+    use contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::{BuildSubrepoRecipes, execute};
     use crate::{
@@ -118,7 +118,7 @@ mod tests {
         );
         assert_eq!(
             recipes[0],
-            gtl_recipe::Recipe {
+            contracts::recipes::Recipe {
                 source: RecipeSource::LocalRepo("/real/api".into()),
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Last {

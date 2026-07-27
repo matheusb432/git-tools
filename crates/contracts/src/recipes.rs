@@ -1,4 +1,4 @@
-//! The recipe DTO: a serializable descriptor of *how to produce* a view —
+//! Recipe wire values describe *how to produce* a view -
 //! source identity + operation — never view data. Crosses the Tauri IPC
 //! boundary as JSON; the app-history log persists it relationally through
 //! `application::history`.
@@ -6,13 +6,12 @@
 //! differ across runs of the same repo + operation); live recipes are always
 //! unpinned, so full `Recipe` equality still governs their identity.
 //!
-//! This crate is deliberately app-agnostic: it holds only pure serde DTOs and
+//! This module is deliberately app-agnostic: it holds only pure serde DTOs and
 //! the codec, with no dependency on `domain`. [`RecipeTarget`] mirrors
-//! `application::diffs::DiffTarget`'s shape by hand; consumers that need the application
-//! type map it locally (the mapping lives in the crate that owns both types —
-//! e.g. `crates/desktop`).
+//! `application::diffs::DiffTarget`'s shape by hand; the application viewer
+//! slice owns the mapping between them.
 //!
-//! This crate also hosts the argv-token codec Phase 5 uses to hand a batch of
+//! This module also hosts the argv-token codec Phase 5 uses to hand a batch of
 //! recipes from the CLI to the single-instance viewer: [`OpenRecipes`] is a
 //! named batch, [`encode_token`]/[`decode_token`] round-trip it through a
 //! `gtl-recipe://`-prefixed, base64url-encoded argv string.

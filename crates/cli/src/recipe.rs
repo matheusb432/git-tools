@@ -11,8 +11,8 @@ use application::{
         pin::{self, PinRecipe},
     },
 };
+use contracts::recipes::Recipe;
 use domain::{discovery::DiscoveredRepo, managed::ManagedRepo};
-use gtl_recipe::Recipe;
 
 use crate::commands::managed::{self, ManagedOptions};
 

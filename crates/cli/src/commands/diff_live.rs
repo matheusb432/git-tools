@@ -7,8 +7,8 @@ use anyhow::Context as _;
 use contracts::{
     envelope::Outcome,
     live_views::{SaveLiveViewData, SaveLiveViewRequest},
+    recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget},
 };
-use gtl_recipe::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
 
 use crate::{
     client::{Backend, HttpBackend},

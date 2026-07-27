@@ -5,8 +5,8 @@
 
 use std::{num::NonZeroU32, path::PathBuf};
 
+use contracts::recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
 use domain::viewer::RenderHistoryId;
-use gtl_recipe::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
 #[cfg(test)]
 use crate::{ports::AppStateStore, testing::AppStateStoreTest};

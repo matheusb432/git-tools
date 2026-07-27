@@ -5,7 +5,7 @@
 //! its signature at compile time and generates no dispatch runtime. Callers
 //! import the operation module and invoke `operation::execute(...)` directly.
 //! This crate depends on the inward-facing domain and operation crates plus the
-//! app-agnostic `gtl-recipe` DTO shared with process adapters.
+//! app-agnostic recipe DTOs from `contracts` shared with process adapters.
 
 pub mod branches;
 pub mod diffs;

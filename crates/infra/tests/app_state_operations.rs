@@ -18,7 +18,7 @@ use application::{
     },
     ports::{AppStateStore, Clock, RepoProbe, RepoProbeResult},
 };
-use gtl_recipe::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+use contracts::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 use infra::app_state::SqliteAppState;
 use rusqlite::Connection;
 

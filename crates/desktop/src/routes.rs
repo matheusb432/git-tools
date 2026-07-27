@@ -3,13 +3,8 @@ mod live_views;
 mod open_diff_file;
 mod parse;
 mod render;
-mod restoration;
 
-use std::{
-    collections::VecDeque,
-    path::Path,
-    sync::{Arc, Mutex},
-};
+use std::collections::VecDeque;
 
 use application::{
     history::{get_recent_render, list_recent_renders},
@@ -19,22 +14,15 @@ use application::{
         ViewerTabState,
     },
 };
-use gtl_recipe::{Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
+use contracts::recipes::{Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
 use history::to_viewer_entry;
-use infra::{
-    app_state::SqliteAppState, clock::SystemClock, configured_editor::GitConfiguredEditorClient,
-    diff_source::GitDiffSource, file_system::LocalFileSystemClient, repo_probe::GitRepoProbe,
-    user_config::TomlSettingsStore,
-};
 pub(crate) use parse::{ResumeNonce, Route, SettingChange, parse};
 use tauri::http::{Request, Response, StatusCode};
 
 use crate::{
-    recipes::{
-        OpenRecipeOutcome, RecipeContext, RecipeError, open_recipe, refresh_recipe_versioned,
-    },
-    render::MaudViewerRenderer,
-    session::{PendingRecipes, PendingRecipesError, ViewerSession},
+    presentation::ViewerApp,
+    recipes::{OpenRecipeOutcome, RecipeError},
+    session::PendingRecipesError,
 };
 
 const HTML_CONTENT_TYPE: &str = "text/html; charset=utf-8";
@@ -93,60 +81,6 @@ impl From<RecipeError> for RouteError {
 }
 
 type RouteResult = Result<Response<Vec<u8>>, RouteError>;
-
-#[derive(Clone)]
-pub(crate) struct ViewerApp {
-    pub(crate) clock: SystemClock,
-    pub(crate) probe: GitRepoProbe,
-    pub(crate) app_state: SqliteAppState,
-    pub(crate) source: GitDiffSource,
-    file_system: LocalFileSystemClient,
-    configured_editor: GitConfiguredEditorClient,
-    pub(crate) session: Arc<Mutex<ViewerSession>>,
-    pending: Arc<PendingRecipes>,
-    renderer: MaudViewerRenderer,
-    user_settings: TomlSettingsStore,
-    restoration: Arc<restoration::RestorationGate>,
-}
-
-impl ViewerApp {
-    pub(crate) fn open(
-        data_root: &Path,
-        user_settings: TomlSettingsStore,
-        max_cache_weight: usize,
-    ) -> anyhow::Result<Self> {
-        let app_state = SqliteAppState::open(data_root)?;
-        Ok(Self {
-            clock: SystemClock,
-            probe: GitRepoProbe,
-            app_state,
-            source: GitDiffSource,
-            file_system: LocalFileSystemClient,
-            configured_editor: GitConfiguredEditorClient,
-            session: Arc::new(Mutex::new(ViewerSession::new(max_cache_weight))),
-            pending: Arc::new(PendingRecipes::default()),
-            renderer: MaudViewerRenderer,
-            user_settings,
-            restoration: Arc::new(restoration::RestorationGate::default()),
-        })
-    }
-
-    pub(crate) fn pending(&self) -> &PendingRecipes {
-        &self.pending
-    }
-}
-
-fn recipe_context(
-    app: &ViewerApp,
-) -> RecipeContext<'_, GitDiffSource, GitRepoProbe, SqliteAppState, SystemClock> {
-    RecipeContext::new(
-        &app.source,
-        &app.probe,
-        &app.app_state,
-        &app.clock,
-        &app.user_settings,
-    )
-}
 
 #[expect(
     clippy::needless_pass_by_value,
@@ -260,7 +194,7 @@ fn refresh(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     if !tab_exists(app, tab)? {
         return Ok(status_response(StatusCode::NOT_FOUND));
     }
-    let result = refresh_recipe_versioned(recipe_context(app), &app.session, tab)?;
+    let result = app.refresh_recipe(tab)?;
     let transient = result.view.map(|view| render::VersionedView {
         ticket: result.ticket,
         view,
@@ -316,9 +250,7 @@ fn open_history(app: &ViewerApp, id: application::viewer::RenderHistoryId) -> Ro
     else {
         return Ok(status_response(StatusCode::NOT_FOUND));
     };
-    let opened = open_recipe(
-        recipe_context(app),
-        &app.session,
+    let opened = app.open_recipe(
         &entry.recipe,
         format!("history-{id}"),
         ViewerTabKind::Snapshot,
@@ -350,23 +282,17 @@ fn settings(app: &ViewerApp, change: SettingChange) -> RouteResult {
 }
 
 fn pending(app: &ViewerApp) -> RouteResult {
-    app.pending.with_consumer(|| pending_transaction(app))?
+    app.pending().with_consumer(|| pending_transaction(app))?
 }
 
 fn pending_transaction(app: &ViewerApp) -> RouteResult {
-    let batches = app.pending.try_drain()?;
+    let batches = app.pending().try_drain()?;
     match process_pending(batches, |recipe, batch_id, kind| {
-        open_recipe(
-            recipe_context(app),
-            &app.session,
-            recipe,
-            batch_id.into(),
-            viewer_tab_kind(kind),
-        )
-        .map(|outcome| match outcome {
-            OpenRecipeOutcome::Opened(opened) => PendingRecipeOutcome::Opened(opened),
-            OpenRecipeOutcome::Skipped { label } => PendingRecipeOutcome::Skipped(label),
-        })
+        app.open_recipe(recipe, batch_id.into(), viewer_tab_kind(kind))
+            .map(|outcome| match outcome {
+                OpenRecipeOutcome::Opened(opened) => PendingRecipeOutcome::Opened(opened),
+                OpenRecipeOutcome::Skipped { label } => PendingRecipeOutcome::Skipped(label),
+            })
     }) {
         Ok(processed) => {
             let PendingProcess {
@@ -395,7 +321,7 @@ fn pending_transaction(app: &ViewerApp) -> RouteResult {
             Ok(html_response(html))
         }
         Err(failure) => {
-            app.pending.prepend(failure.remainder)?;
+            app.pending().prepend(failure.remainder)?;
             Err(RouteError::from(failure.reason))
         }
     }
@@ -416,11 +342,11 @@ struct PendingProcess<T> {
 #[derive(Debug)]
 struct PendingFailure<E> {
     reason: E,
-    remainder: Vec<gtl_recipe::OpenRecipes>,
+    remainder: Vec<contracts::recipes::OpenRecipes>,
 }
 
 fn process_pending<T, E>(
-    batches: Vec<gtl_recipe::OpenRecipes>,
+    batches: Vec<contracts::recipes::OpenRecipes>,
     mut open: impl FnMut(&Recipe, &str, RecipeBatchKind) -> Result<PendingRecipeOutcome<T>, E>,
 ) -> Result<PendingProcess<T>, PendingFailure<E>> {
     let mut batches = VecDeque::from(batches);
@@ -484,8 +410,7 @@ fn restore_live_views(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
             }
         }
         if let Some(tab) = newest {
-            let result = refresh_recipe_versioned(recipe_context(app), &app.session, tab)
-                .map_err(|error| error.to_string())?;
+            let result = app.refresh_recipe(tab).map_err(|error| error.to_string())?;
             transient = result.view.map(|view| render::VersionedView {
                 ticket: result.ticket,
                 view,
@@ -517,7 +442,7 @@ fn ensure_active_view(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
     let Some(id) = refresh else {
         return Ok(None);
     };
-    let result = refresh_recipe_versioned(recipe_context(app), &app.session, id)?;
+    let result = app.refresh_recipe(id)?;
     Ok(result.view.map(|view| render::VersionedView {
         ticket: result.ticket,
         view,

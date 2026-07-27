@@ -3,6 +3,8 @@
 
 #[cfg(test)]
 pub(crate) mod diffs;
+#[cfg(test)]
+pub(crate) mod viewer;
 
 use std::{
     collections::{BTreeMap, HashMap},

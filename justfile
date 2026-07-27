@@ -56,6 +56,11 @@ _preflight:
 test *args:
     cargo run --quiet -p xtask -- test {{ args }}
 
+# Run the complete Rust workspace with LLVM line coverage. The report excludes dedicated test files and writes per-line output under .artifacts/coverage/text/.
+[group('quality')]
+cov:
+    cargo run --quiet -p xtask -- cov
+
 # Apply pinned-nightly rustfmt, Taplo, rumdl, and Oxfmt across the repository. --verbose restores taplo's file-discovery logs.
 [group('quality')]
 fmt *args:
