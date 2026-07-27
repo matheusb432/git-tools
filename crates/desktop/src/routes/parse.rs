@@ -1,4 +1,4 @@
-use std::{collections::HashMap, num::NonZeroU64};
+use std::{collections::HashMap, num::NonZeroU64, path::PathBuf};
 
 use application::viewer::{
     DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerTabId,
@@ -6,6 +6,8 @@ use application::viewer::{
 use tauri::http::{Method, Request, StatusCode};
 
 use crate::protocol_config;
+
+const OPEN_DIFF_FILE_QUERY_BYTES_MAX: usize = 16 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SettingChange {
@@ -27,7 +29,7 @@ impl ResumeNonce {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Route {
     Document {
         resume: Option<ResumeNonce>,
@@ -54,6 +56,10 @@ pub(crate) enum Route {
     },
     Settings(SettingChange),
     Pending,
+    OpenDiffFile {
+        tab: ViewerTabId,
+        diff_file_path: PathBuf,
+    },
 }
 
 pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
@@ -78,16 +84,17 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
         ["tabs", _, "close"] => RouteShape::Close,
         ["tabs", _, "live-view"] => RouteShape::DeleteLiveView,
         ["tabs", _, "activate"] => RouteShape::Activate,
+        ["tabs", _, "files", "open"] => RouteShape::OpenDiffFile,
         ["history"] => RouteShape::History,
         ["history", _, "open"] => RouteShape::OpenHistory,
         ["settings"] => RouteShape::Settings,
         ["pending"] => RouteShape::Pending,
         _ => return Err(StatusCode::NOT_FOUND),
     };
-    let expected_method = if matches!(shape, RouteShape::DeleteLiveView) {
-        Method::DELETE
-    } else {
-        Method::GET
+    let expected_method = match shape {
+        RouteShape::DeleteLiveView => Method::DELETE,
+        RouteShape::OpenDiffFile => Method::POST,
+        _ => Method::GET,
     };
     if request.method() != expected_method {
         return Err(StatusCode::METHOD_NOT_ALLOWED);
@@ -116,6 +123,7 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
             Route::DeleteLiveView { tab }
         }),
         RouteShape::Activate => tab_route(uri.query(), segments[1], |tab| Route::Activate { tab }),
+        RouteShape::OpenDiffFile => parse_open_diff_file(uri.query(), segments[1]),
         RouteShape::History => {
             reject_query(uri.query())?;
             Ok(Route::History)
@@ -159,6 +167,7 @@ enum RouteShape {
     Close,
     DeleteLiveView,
     Activate,
+    OpenDiffFile,
     History,
     OpenHistory,
     Settings,
@@ -197,6 +206,25 @@ fn parse_settings(query: Option<&str>) -> Result<Route, StatusCode> {
     Ok(Route::Settings(setting))
 }
 
+fn parse_open_diff_file(query: Option<&str>, raw_tab: &str) -> Result<Route, StatusCode> {
+    let query = query.ok_or(StatusCode::BAD_REQUEST)?;
+    if query.len() > OPEN_DIFF_FILE_QUERY_BYTES_MAX {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let mut pairs = url::form_urlencoded::parse(query.as_bytes());
+    let (key, value) = pairs.next().ok_or(StatusCode::BAD_REQUEST)?;
+    if pairs.next().is_some() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if key != "path" || value.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    Ok(Route::OpenDiffFile {
+        tab: parse_tab_id(raw_tab)?,
+        diff_file_path: PathBuf::from(value.as_ref()),
+    })
+}
+
 fn reject_query(query: Option<&str>) -> Result<(), StatusCode> {
     if query.is_some() {
         return Err(StatusCode::BAD_REQUEST);
@@ -221,12 +249,14 @@ fn parse_query(query: Option<&str>) -> Result<HashMap<&str, &str>, StatusCode> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use application::viewer::{
         DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, ViewerTabId,
     };
     use tauri::http::{Method, Request, StatusCode};
 
-    use super::{ResumeNonce, Route, parse};
+    use super::{OPEN_DIFF_FILE_QUERY_BYTES_MAX, ResumeNonce, Route, parse};
     use crate::protocol_config;
 
     fn app_uri(path_and_query: &str) -> String {
@@ -269,6 +299,14 @@ mod tests {
                 Method::DELETE,
                 Route::DeleteLiveView { tab },
             ),
+            (
+                app_uri("/tabs/7/files/open?path=src%2Fa+b.rs"),
+                Method::POST,
+                Route::OpenDiffFile {
+                    tab,
+                    diff_file_path: PathBuf::from("src/a b.rs"),
+                },
+            ),
             (app_uri("/history"), Method::GET, Route::History),
             (
                 app_uri("/history/42/open"),
@@ -303,6 +341,52 @@ mod tests {
                 "{query}"
             );
         }
+    }
+
+    #[test]
+    fn open_diff_file_requires_post_one_positive_tab_and_one_nonempty_path() {
+        assert_eq!(
+            parse(&request(
+                Method::GET,
+                &app_uri("/tabs/7/files/open?path=src%2Fa.rs")
+            )),
+            Err(StatusCode::METHOD_NOT_ALLOWED)
+        );
+
+        for route in [
+            "/tabs/0/files/open?path=src%2Fa.rs",
+            "/tabs/7/files/open",
+            "/tabs/7/files/open?path=",
+            "/tabs/7/files/open?path=src%2Fa.rs&path=src%2Fb.rs",
+            "/tabs/7/files/open?unknown=value",
+        ] {
+            assert_eq!(
+                parse(&request(Method::POST, &app_uri(route))),
+                Err(StatusCode::BAD_REQUEST),
+                "{route}"
+            );
+        }
+    }
+
+    #[test]
+    fn open_diff_file_query_accepts_the_limit_and_rejects_one_byte_over() {
+        let query_prefix = "path=";
+        let value = "a".repeat(OPEN_DIFF_FILE_QUERY_BYTES_MAX - query_prefix.len());
+        let route = format!("/tabs/7/files/open?{query_prefix}{value}");
+
+        assert_eq!(
+            parse(&request(Method::POST, &app_uri(&route))),
+            Ok(Route::OpenDiffFile {
+                tab: ViewerTabId::try_new(7).expect("positive id"),
+                diff_file_path: PathBuf::from(&value),
+            })
+        );
+
+        let route = format!("/tabs/7/files/open?{query_prefix}{value}a");
+        assert_eq!(
+            parse(&request(Method::POST, &app_uri(&route))),
+            Err(StatusCode::BAD_REQUEST)
+        );
     }
 
     #[test]

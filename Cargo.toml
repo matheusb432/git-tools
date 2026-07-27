@@ -62,6 +62,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 infra = { path = "crates/infra" }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 lru = "0.18.1"
+libc = "0.2.186"
 maud = "0.27"
 natord = "1.0.9"
 nutype = "0.7.0"
@@ -106,7 +107,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2.5.8"
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2.5.0"
-wait-timeout = "0.2.1"
 which = "8.0.4"
 x11-dl = "2.21.0"
 zbus = "5.16.0"

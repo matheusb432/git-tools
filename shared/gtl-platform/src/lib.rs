@@ -8,6 +8,10 @@ use std::{
 pub mod paths;
 pub mod policy;
 
+mod bounded_command;
+
+pub use bounded_command::run_command_with_bounded_stdout_in;
+
 // OS backend selection (ADR-0003): folders named by `target_os`; one sibling per
 // OS, existing arms untouched. Linux + Windows have effectful backends; other OSes
 // (macOS dev) fall through to the stub and degrade to the browser path.

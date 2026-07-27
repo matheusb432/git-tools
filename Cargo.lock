@@ -2086,7 +2086,9 @@ name = "gtl-platform"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "command-group",
  "directories",
+ "libc",
  "tempfile",
  "x11-dl",
 ]
@@ -2504,7 +2506,6 @@ dependencies = [
  "tokio",
  "toml 1.1.2+spec-1.1.0",
  "toml_edit 0.25.12+spec-1.1.0",
- "wait-timeout",
  "walkdir",
 ]
 
@@ -3607,6 +3608,7 @@ dependencies = [
  "similar",
  "strum",
  "syntect",
+ "url",
 ]
 
 [[package]]

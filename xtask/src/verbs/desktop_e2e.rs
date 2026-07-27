@@ -24,6 +24,8 @@ use crate::{
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const WINDOW_TITLE_PATTERN: &str = "^git-tools diff viewer$";
+const HOST_ENVIRONMENT_VARIABLE_NAMES: &[&str] =
+    &["PATH", "SystemRoot", "WINDIR", "PATHEXT", "COMSPEC"];
 
 #[derive(Debug)]
 struct Sandbox {
@@ -39,6 +41,10 @@ struct Sandbox {
     logs: PathBuf,
     native_data: PathBuf,
     dom_data: PathBuf,
+    editor_recorder: PathBuf,
+    editor_record: PathBuf,
+    editor_release: PathBuf,
+    editor_exit: PathBuf,
 }
 
 impl Sandbox {
@@ -60,6 +66,12 @@ impl Sandbox {
             logs: root.join("logs"),
             native_data: root.join("git-tools/native"),
             dom_data: root.join("git-tools/dom"),
+            editor_recorder: root
+                .join("fixtures")
+                .join(format!("code{}", std::env::consts::EXE_SUFFIX)),
+            editor_record: root.join("logs/editor-record.json"),
+            editor_release: root.join("logs/editor-release"),
+            editor_exit: root.join("logs/editor-exit"),
             root,
         };
         for path in [
@@ -105,12 +117,18 @@ impl Sandbox {
             ("GIT_TOOLS_DATA_DIR", data_root.as_os_str()),
             ("GTL_E2E_DATA_ROOT", data_root.as_os_str()),
             ("GTL_E2E_FIXTURE_ROOT", self.fixtures.as_os_str()),
+            ("GTL_E2E_EDITOR_RECORDER", self.editor_recorder.as_os_str()),
+            ("GTL_E2E_EDITOR_RECORD", self.editor_record.as_os_str()),
+            ("GTL_E2E_EDITOR_RELEASE", self.editor_release.as_os_str()),
+            ("GTL_E2E_EDITOR_EXIT", self.editor_exit.as_os_str()),
         ]
         .into_iter()
         .map(|(name, value)| (OsString::from(name), value.to_os_string()))
         .collect::<Vec<_>>();
-        if let Some(path) = std::env::var_os("PATH") {
-            pairs.push((OsString::from("PATH"), path));
+        for name in HOST_ENVIRONMENT_VARIABLE_NAMES {
+            if let Some(value) = std::env::var_os(name) {
+                pairs.push((OsString::from(name), value));
+            }
         }
         IsolatedEnv { pairs }
     }
@@ -129,11 +147,7 @@ impl IsolatedEnv {
     }
 
     fn apply(&self, command: &mut Command) {
-        command
-            .env_remove("DISPLAY")
-            .env_remove("WAYLAND_DISPLAY")
-            .env_remove("DBUS_SESSION_BUS_ADDRESS")
-            .envs(self.pairs.iter().cloned());
+        command.env_clear().envs(self.pairs.iter().cloned());
     }
 }
 
@@ -277,8 +291,22 @@ fn workflow() -> Result<()> {
     )?;
     build::run(BuildTarget::Cli)?;
     build::run(BuildTarget::Viewer)?;
+    process::run(
+        "viewer-e2e-editor-recorder-build",
+        "cargo",
+        &[
+            "build",
+            "--release",
+            "-p",
+            "e2e",
+            "--bin",
+            "editor-recorder",
+        ],
+    )?;
 
     let sandbox = Sandbox::create()?;
+    fs::copy(release_binary("editor-recorder")?, &sandbox.editor_recorder)
+        .context("copy editor recorder fixture")?;
     let mut daemon_cleanup = DaemonCleanupGuard::new(&sandbox)?;
     let result = match std::env::consts::OS {
         "linux" => run_linux(&sandbox),
@@ -287,9 +315,11 @@ fn workflow() -> Result<()> {
             "hermetic desktop E2E is not configured for {unsupported}; Linux and Windows are supported"
         ),
     };
+    let editor_cleanup_result = release_editor_recorder(&sandbox);
     let cleanup_result = daemon_cleanup.stop();
     let logs_result = preserve_logs(&sandbox);
     result?;
+    editor_cleanup_result?;
     cleanup_result?;
     logs_result
 }
@@ -500,12 +530,12 @@ fn run_native_phase(
 
 fn run_dom_phase(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
     let log = sandbox.logs.join("webdriver.log");
-    let result = output(
-        env,
-        "deno",
-        &["task", "--frozen", "--cwd", "e2e/viewer", "test:e2e"],
-        Path::new("."),
-    )?;
+    let arguments = ["task", "--frozen", "--cwd", "e2e/viewer", "test:e2e"];
+    let mut command = Command::new("deno");
+    command.args(arguments).current_dir(".");
+    seed_hostile_git_environment(&mut command, sandbox);
+    env.apply(&mut command);
+    let result = command.output().context("run deno viewer E2E")?;
     let mut bytes = result.stdout;
     bytes.extend_from_slice(&result.stderr);
     fs::write(&log, &bytes)?;
@@ -514,6 +544,47 @@ fn run_dom_phase(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
         bail!("viewer WebDriver DOM phase failed");
     }
     Ok(())
+}
+
+fn seed_hostile_git_environment(command: &mut Command, sandbox: &Sandbox) {
+    command
+        .env("GIT_EDITOR", sandbox.root.join("host-editor"))
+        .env("VISUAL", sandbox.root.join("host-visual"))
+        .env("EDITOR", sandbox.root.join("host-default-editor"))
+        .env(
+            "GIT_SEQUENCE_EDITOR",
+            sandbox.root.join("host-sequence-editor"),
+        )
+        .env("GIT_DIR", sandbox.root.join("host-git-dir"))
+        .env("GIT_COMMON_DIR", sandbox.root.join("host-git-common-dir"))
+        .env("GIT_WORK_TREE", sandbox.root.join("host-work-tree"))
+        .env(
+            "GIT_CONFIG_SYSTEM",
+            sandbox.root.join("host-system.gitconfig"),
+        )
+        .env(
+            "GIT_CONFIG_GLOBAL",
+            sandbox.root.join("host-global.gitconfig"),
+        )
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_COUNT", "2")
+        .env("GIT_CONFIG_KEY_0", "core.editor")
+        .env("GIT_CONFIG_VALUE_0", "host-config-editor")
+        .env("GIT_CONFIG_KEY_1", "core.worktree")
+        .env(
+            "GIT_CONFIG_VALUE_1",
+            sandbox.root.join("host-config-work-tree"),
+        );
+}
+
+fn release_editor_recorder(sandbox: &Sandbox) -> Result<()> {
+    fs::write(&sandbox.editor_release, b"release").context("release editor recorder")?;
+    if !sandbox.editor_record.is_file() {
+        return Ok(());
+    }
+    retry("editor recorder exit", READY_TIMEOUT, || {
+        sandbox.editor_exit.is_file()
+    })
 }
 
 fn create_native_fixture(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<PathBuf> {
@@ -668,4 +739,66 @@ fn preserve_logs(sandbox: &Sandbox) -> Result<()> {
 fn require_tool(name: &str, hint: &str) -> Result<()> {
     which::which(name).with_context(|| format!("required tool `{name}` is missing; {hint}"))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        ffi::OsString,
+        fs,
+        process::{Command, Stdio},
+    };
+
+    use super::IsolatedEnv;
+
+    #[test]
+    fn isolated_environment_rejects_host_git_overrides() {
+        let repository = tempfile::tempdir().expect("temporary repository");
+        assert!(
+            Command::new("git")
+                .args(["init", "-q"])
+                .current_dir(repository.path())
+                .status()
+                .expect("initialize repository")
+                .success()
+        );
+        assert!(
+            Command::new("git")
+                .args(["config", "core.editor", "repository-editor"])
+                .current_dir(repository.path())
+                .status()
+                .expect("configure repository editor")
+                .success()
+        );
+        let pairs = super::HOST_ENVIRONMENT_VARIABLE_NAMES
+            .iter()
+            .filter_map(|name| std::env::var_os(name).map(|value| (OsString::from(name), value)))
+            .collect();
+        let environment = IsolatedEnv { pairs };
+        let hostile_git_directory = repository.path().join("host-git-dir");
+        fs::create_dir(&hostile_git_directory).expect("create hostile Git directory");
+        let mut command = Command::new("git");
+        command
+            .args(["var", "GIT_EDITOR"])
+            .current_dir(repository.path())
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .env("GIT_EDITOR", "host-editor")
+            .env("GIT_DIR", &hostile_git_directory)
+            .env("GIT_WORK_TREE", repository.path().join("host-work-tree"))
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "core.editor")
+            .env("GIT_CONFIG_VALUE_0", "injected-editor");
+        environment.apply(&mut command);
+
+        let output = command.output().expect("query configured editor");
+
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout)
+                .expect("UTF-8 editor")
+                .trim(),
+            "repository-editor"
+        );
+    }
 }

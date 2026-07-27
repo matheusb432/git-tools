@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -11,9 +11,16 @@ const executableSuffix = process.platform === 'win32' ? '.exe' : '';
 const cli = path.join(root, 'target', 'release', `git-tools${executableSuffix}`);
 const dataRoot = process.env.GTL_E2E_DATA_ROOT;
 const sandboxFixtures = process.env.GTL_E2E_FIXTURE_ROOT;
+const editorRecorder = process.env.GTL_E2E_EDITOR_RECORDER;
+const editorRecord = process.env.GTL_E2E_EDITOR_RECORD;
+const editorRelease = process.env.GTL_E2E_EDITOR_RELEASE;
+const editorExit = process.env.GTL_E2E_EDITOR_EXIT;
 
 if (!sandboxFixtures) {
   throw new Error('GTL_E2E_FIXTURE_ROOT must be set by the xtask e2e harness');
+}
+if (!editorRecorder || !editorRecord || !editorRelease || !editorExit) {
+  throw new Error('editor recorder environment is missing');
 }
 
 let fixtureRoot;
@@ -47,6 +54,12 @@ async function createRepo() {
   await git(localRepository, 'init', '-q', '-b', 'main');
   await git(localRepository, 'config', 'user.name', 'Viewer E2E');
   await git(localRepository, 'config', 'user.email', 'viewer-e2e@example.invalid');
+  await git(
+    localRepository,
+    'config',
+    'core.editor',
+    `"${editorRecorder}" "${editorRecord}" "${editorRelease}" "${editorExit}" --wait --profile "Viewer E2E"`,
+  );
   await writeFile(path.join(localRepository, 'work.txt'), 'base\n');
   await git(localRepository, 'add', 'work.txt');
   await git(localRepository, 'commit', '-q', '-m', 'base');
@@ -116,6 +129,59 @@ async function waitForHtmxIdle(label) {
   );
 }
 
+async function readEditorRecord() {
+  return JSON.parse(await readFile(editorRecord, 'utf8'));
+}
+
+async function waitForEditorRecord() {
+  await browser.waitUntil(
+    async () => {
+      try {
+        await readEditorRecord();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    {
+      timeout: 15_000,
+      interval: 100,
+      timeoutMsg: 'the configured editor launch record was not written',
+    },
+  );
+  return readEditorRecord();
+}
+
+async function pathExists(filePath) {
+  try {
+    await readFile(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function processIsAlive(processId) {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function releaseEditorRecorder(processId) {
+  await writeFile(editorRelease, 'release');
+  await browser.waitUntil(
+    async () => (await pathExists(editorExit)) && !processIsAlive(processId),
+    {
+      timeout: 15_000,
+      interval: 100,
+      timeoutMsg: `editor recorder ${processId} did not exit after release`,
+    },
+  );
+}
+
 async function selectSplitLayout() {
   await browser.execute(() => {
     const input = document.querySelector("input[name='viewer-layout'][value='split']");
@@ -136,6 +202,7 @@ describe('server-rendered viewer', () => {
   });
 
   after(async () => {
+    await writeFile(editorRelease, 'release');
     if (fixtureRoot) {
       await rm(fixtureRoot, { recursive: true, force: true });
     }
@@ -150,6 +217,32 @@ describe('server-rendered viewer', () => {
     );
     await expectReadyDocument();
     await expect($('#viewer-view')).toHaveText(expect.stringContaining('alpha-v1'));
+
+    const openInIde = $('button[aria-label="Open in IDE"]');
+    await expect(openInIde).toBeDisplayed();
+    await openInIde.click();
+    await waitForHtmxIdle('opening the diff file');
+
+    const canonicalRepository = await realpath(repository);
+    const editorLaunch = await waitForEditorRecord();
+    expect(Number.isInteger(editorLaunch.pid)).toBe(true);
+    expect(processIsAlive(editorLaunch.pid)).toBe(true);
+    expect(await pathExists(editorExit)).toBe(false);
+    expect({
+      working_directory: editorLaunch.working_directory,
+      arguments: editorLaunch.arguments,
+    }).toEqual({
+      working_directory: canonicalRepository,
+      arguments: [
+        '--profile',
+        'Viewer E2E',
+        '--reuse-window',
+        canonicalRepository,
+        '--goto',
+        path.join(canonicalRepository, 'work.txt'),
+      ],
+    });
+    await releaseEditorRecorder(editorLaunch.pid);
 
     // Text assertions pass without layout, so pin the first paint directly: the
     // webview skips content-visibility:auto subtrees, and a regression leaves

@@ -21,6 +21,13 @@ const COPY_BUTTON_CLASSES: &str = concat!(
     "[&[data-state=ok]]:border-add [&[data-state=ok]]:bg-add [&[data-state=ok]]:text-bg ",
     "[&[data-state=err]]:border-del [&[data-state=err]]:bg-del [&[data-state=err]]:text-bg",
 );
+const OPEN_IN_EDITOR_BUTTON_CLASSES: &str = concat!(
+    "open-in-editor cursor-pointer flex size-[22px] flex-none items-center justify-center rounded-sm border border-transparent bg-transparent text-ink-2 [font:inherit] ",
+    "hover:border-acc-line hover:bg-acc-soft hover:text-acc active:bg-acc-soft ",
+    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc ",
+    "disabled:pointer-events-none disabled:cursor-progress disabled:border-line-2 disabled:bg-surface-2 disabled:text-ink",
+);
+const OPEN_IN_EDITOR_ICON: &str = r#"<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M9 2.5h4.5V7"></path><path d="m13.5 2.5-7 7"></path><path d="M7 4H3.5A1.5 1.5 0 0 0 2 5.5v7A1.5 1.5 0 0 0 3.5 14h7a1.5 1.5 0 0 0 1.5-1.5V9"></path></svg>"#;
 const DIFF_CLASSES: &str = concat!(
     "gtl-scroll-rail overflow-x-hidden text-[14px] leading-[22px] ",
     "print:[&_.dl_code]:text-[#111]",
@@ -83,7 +90,7 @@ fn file_commits(file: &FileDiff) -> String {
 // ! opt into the offscreen-skip optimization (and its print escape hatches).
 fn filebody_presentation(surface: Surface, file: &FileDiff) -> (&'static str, Option<String>) {
     match surface {
-        Surface::App => (
+        Surface::App { .. } => (
             "filebody single-variant overflow-hidden rounded-b-panel",
             None,
         ),
@@ -136,6 +143,20 @@ pub(super) fn file_blocks(view: &View, options: RenderOptions, surface: Surface)
                         button type="button" class=(COPY_BUTTON_CLASSES) data-copy-mode="code" data-copy-label="code" { "code" }
                     }
                     span class="flex-none text-[12.5px]" { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
+                    @if let Surface::App { tab_id } = surface {
+                        @if file.status() != FileStatus::Deleted {
+                            button type="button"
+                                class=(OPEN_IN_EDITOR_BUTTON_CLASSES)
+                                aria-label="Open in IDE"
+                                title="Open in IDE"
+                                hx-post=(open_diff_file_route(tab_id, &file.path))
+                                hx-disabled-elt="this"
+                                hx-sync="this:drop"
+                                hx-swap="none" {
+                                (PreEscaped(OPEN_IN_EDITOR_ICON))
+                            }
+                        }
+                    }
                 }
                 // ! Keep containment below the sticky summary so it can pin to `.main`.
                 div class=(filebody_classes) style=[intrinsic] {
@@ -144,6 +165,13 @@ pub(super) fn file_blocks(view: &View, options: RenderOptions, surface: Surface)
             }
         }
     }
+}
+
+fn open_diff_file_route(tab_id: application::viewer::ViewerTabId, path: &str) -> String {
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("path", path)
+        .finish();
+    format!("/tabs/{tab_id}/files/open?{query}")
 }
 
 fn file_diff(file: &FileDiff, options: RenderOptions) -> Markup {
@@ -172,11 +200,70 @@ fn file_diff(file: &FileDiff, options: RenderOptions) -> Markup {
 mod tests {
     use application::{
         diffs::{FileDiff, LineOwners},
-        viewer::{DiffDensity, DiffLayout, RenderOptions},
+        viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabId},
     };
 
     use super::{GIANT_FILE_CHARS, ROW_PX};
     use crate::{build_html, fixtures::sample_view, view_fragment};
+
+    fn tab_id(raw: u64) -> ViewerTabId {
+        ViewerTabId::try_new(raw).expect("positive tab id")
+    }
+
+    fn file(path: &str, status_line: &str) -> FileDiff {
+        FileDiff {
+            path: path.to_string(),
+            added: 1,
+            removed: 1,
+            lines: vec![status_line.to_string(), "@@ -1 +1 @@".to_string()],
+            full_lines: None,
+            commits: vec!["abc123def".to_string()],
+            owners: LineOwners::default(),
+        }
+    }
+
+    fn added_file(path: &str) -> FileDiff {
+        file(path, "new file mode 100644")
+    }
+
+    fn modified_file(path: &str) -> FileDiff {
+        file(path, "index abc1234..def5678 100644")
+    }
+
+    fn renamed_file(path: &str) -> FileDiff {
+        file(path, "rename from src/old.rs")
+    }
+
+    fn deleted_file(path: &str) -> FileDiff {
+        file(path, "deleted file mode 100644")
+    }
+
+    #[test]
+    fn app_fragment_renders_one_accessible_open_action_for_each_non_deleted_file() {
+        let mut view = sample_view();
+        view.files = vec![
+            added_file("src/added.rs"),
+            modified_file("src/modified.rs"),
+            renamed_file("src/renamed.rs"),
+            deleted_file("src/deleted.rs"),
+        ];
+
+        let html = view_fragment(&view, RenderOptions::DEFAULT, tab_id(7)).into_string();
+
+        assert_eq!(html.matches(r#"aria-label="Open in IDE""#).count(), 3);
+        assert_eq!(html.matches(r#"title="Open in IDE""#).count(), 3);
+        assert_eq!(html.matches(r#"hx-disabled-elt="this""#).count(), 3);
+        assert_eq!(html.matches(r#"hx-sync="this:drop""#).count(), 3);
+        assert!(html.contains("disabled:pointer-events-none"));
+        assert!(!html.contains("path=src%2Fdeleted.rs"));
+    }
+
+    #[test]
+    fn app_fragment_encodes_the_tab_and_repository_relative_path() {
+        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id(7)).into_string();
+
+        assert!(html.contains(r#"hx-post="/tabs/7/files/open?path=src%2Fa+b.rs""#));
+    }
 
     #[test]
     fn build_html_marks_file_status_for_sidebar_tree() {
@@ -254,6 +341,7 @@ mod tests {
         let html = view_fragment(
             &sample_view(),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
+            tab_id(1),
         )
         .into_string();
 
@@ -270,6 +358,7 @@ mod tests {
         let html = view_fragment(
             &view,
             RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
+            tab_id(1),
         )
         .into_string();
 
@@ -363,7 +452,7 @@ mod tests {
 
     #[test]
     fn app_fragment_omits_content_visibility_for_the_webview() {
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT).into_string();
+        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id(1)).into_string();
 
         assert!(!html.contains("content-visibility"));
         assert!(!html.contains("contain-intrinsic-size"));

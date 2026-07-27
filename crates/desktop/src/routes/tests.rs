@@ -135,6 +135,23 @@ fn conflict_and_internal_errors_keep_target_roots_and_hide_details() {
 }
 
 #[test]
+fn action_errors_return_empty_non_swappable_responses() {
+    for (error, expected_status) in [
+        (RouteError::NotFound, StatusCode::NOT_FOUND),
+        (
+            RouteError::Internal("editor /secret/path".into()),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+    ] {
+        let response = error_response(ErrorTarget::Action, &error);
+        assert_eq!(response.status(), expected_status);
+        assert!(response.body().is_empty());
+        assert!(!response.headers().contains_key("X-GTL-Recovery"));
+        assert!(!response.headers().contains_key("HX-Reswap"));
+    }
+}
+
+#[test]
 fn recovery_fragments_own_their_error_presentation() {
     let view = super::render::error_view();
     let tabs = super::render::error_tabs();

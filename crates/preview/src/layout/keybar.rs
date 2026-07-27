@@ -21,13 +21,14 @@ pub(super) fn keybar(view: &View) -> Markup {
 
 #[cfg(test)]
 mod tests {
-    use application::viewer::RenderOptions;
+    use application::viewer::{RenderOptions, ViewerTabId};
 
     use crate::{fixtures::sample_view, view_fragment};
 
     #[test]
     fn keybar_keeps_the_keyboard_command_contract() {
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT).into_string();
+        let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
+        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id).into_string();
 
         assert!(html.contains(r#"<footer class="keybar "#));
         assert!(html.contains(">j</kbd> <kbd"));

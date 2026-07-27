@@ -24,7 +24,6 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["fs", "process"] }
 toml.workspace = true
 toml_edit.workspace = true
-wait-timeout.workspace = true
 walkdir.workspace = true
 
 [dev-dependencies]

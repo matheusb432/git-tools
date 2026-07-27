@@ -46,7 +46,7 @@ pub fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> S
 mod tests {
     use application::{
         diffs::{Cmd, FileDiff, Foot, LineOwners, View},
-        viewer::RenderOptions,
+        viewer::{RenderOptions, ViewerTabId},
     };
     use domain::diffs::Commit;
 
@@ -58,19 +58,17 @@ mod tests {
     };
 
     #[test]
-    fn artifact_and_app_fragment_differ_only_in_filebody_presentation() {
+    fn artifact_and_app_fragment_keep_their_surface_presentation_distinct() {
         let view = sample_view();
         let options = RenderOptions::DEFAULT;
-        let fragment = view_fragment(&view, options).into_string();
+        let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
+        let fragment = view_fragment(&view, options, tab_id).into_string();
         let html = build_html(&view, options, None);
-        let artifact_as_app = html
-            .replace(
-                "filebody single-variant [content-visibility:auto] overflow-hidden rounded-b-panel print:block! print:[content-visibility:visible] print:overflow-visible",
-                "filebody single-variant overflow-hidden rounded-b-panel",
-            )
-            .replace(r#" style="contain-intrinsic-size:auto 88px""#, "");
 
-        assert_eq!(artifact_as_app.matches(&fragment).count(), 1);
+        assert!(fragment.contains("files/open"));
+        assert!(!html.contains("files/open"));
+        assert!(!fragment.contains("content-visibility"));
+        assert!(html.contains("content-visibility"));
     }
 
     #[test]
@@ -265,6 +263,14 @@ mod tests {
             !has_disallowed_external_url(&html),
             "artifact must not reference any external http(s) resource"
         );
+    }
+
+    #[test]
+    fn offline_artifact_omits_configured_editor_actions() {
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
+
+        assert!(!html.contains("files/open"));
+        assert!(!html.contains("Open in IDE"));
     }
 
     #[test]

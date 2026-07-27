@@ -63,13 +63,14 @@ pub(super) fn tree(view: &View) -> Markup {
 
 #[cfg(test)]
 mod tests {
-    use application::viewer::RenderOptions;
+    use application::viewer::{RenderOptions, ViewerTabId};
 
     use crate::{fixtures::sample_view, view_fragment};
 
     #[test]
     fn tree_root_owns_client_rendered_node_presentation() {
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT)
+        let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
+        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id)
             .into_string()
             .replace("&amp;", "&");
         let tree_classes = html

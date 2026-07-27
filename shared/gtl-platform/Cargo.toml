@@ -6,11 +6,13 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+command-group.workspace = true
 directories.workspace = true
 
 # X11 EWMH window activation (focus over fullscreen). Runtime dlopen of libX11 —
 # no link-time X headers. Already in the tree via the desktop viewer's tao/wry.
 [target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
 x11-dl.workspace = true
 
 [dev-dependencies]

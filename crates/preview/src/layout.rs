@@ -8,7 +8,10 @@ mod shelf;
 mod titlebar;
 mod tree;
 
-use application::{diffs::View, viewer::RenderOptions};
+use application::{
+    diffs::View,
+    viewer::{RenderOptions, ViewerTabId},
+};
 use maud::{Markup, html};
 
 /// The host that consumes one rendered `.layout` body.
@@ -20,7 +23,7 @@ use maud::{Markup, html};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Surface {
     /// The desktop viewer's embedded webview.
-    App,
+    App { tab_id: ViewerTabId },
     /// Self-contained offline documents opened in a browser.
     Artifact,
 }
@@ -59,9 +62,13 @@ pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -
 
 #[cfg(test)]
 mod tests {
-    use application::viewer::RenderOptions;
+    use application::viewer::{RenderOptions, ViewerTabId};
 
     use crate::{fixtures::sample_view, view_fragment};
+
+    fn tab_id(raw: u64) -> ViewerTabId {
+        ViewerTabId::try_new(raw).expect("positive tab id")
+    }
 
     fn layout_classes(html: &str) -> &str {
         html.split_once(r#"<div class="layout "#)
@@ -72,7 +79,7 @@ mod tests {
 
     #[test]
     fn view_fragment_omits_document_chrome_and_presentation_controls() {
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT).into_string();
+        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id(1)).into_string();
 
         assert!(!html.contains(r#"class="layout-toggle""#));
         assert!(!html.contains(r#"class="view-toggle""#));
@@ -101,7 +108,7 @@ mod tests {
 
     #[test]
     fn view_body_carries_grid_scroll_and_print_contracts() {
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT)
+        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id(1))
             .into_string()
             .replace("&amp;", "&");
         let layout = layout_classes(&html);

@@ -33,9 +33,9 @@ pub fn opener_command(os: Os, is_wsl: bool, path: &str) -> OpenerCommand {
 /// effectful applier in `<os>/spawn.rs` turns this into a real spawn flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DetachStrategy {
-    /// Unix: own process group (`process_group(0)`) + null stdio.
+    /// Unix: start a new session, double-fork, and reap the intermediate child.
     Unix,
-    /// Windows: `DETACHED_PROCESS | CREATE_NO_WINDOW` (wired in Phase 3).
+    /// Windows: create the child with `DETACHED_PROCESS | CREATE_NO_WINDOW`.
     Windows,
 }
 

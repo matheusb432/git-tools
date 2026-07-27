@@ -1,5 +1,6 @@
 mod history;
 mod live_views;
+mod open_diff_file;
 mod parse;
 mod render;
 mod restoration;
@@ -21,8 +22,9 @@ use application::{
 use gtl_recipe::{Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget};
 use history::to_viewer_entry;
 use infra::{
-    app_state::SqliteAppState, clock::SystemClock, diff_source::GitDiffSource,
-    repo_probe::GitRepoProbe, user_config::TomlSettingsStore,
+    app_state::SqliteAppState, clock::SystemClock, configured_editor::GitConfiguredEditorClient,
+    diff_source::GitDiffSource, file_system::LocalFileSystemClient, repo_probe::GitRepoProbe,
+    user_config::TomlSettingsStore,
 };
 pub(crate) use parse::{ResumeNonce, Route, SettingChange, parse};
 use tauri::http::{Request, Response, StatusCode};
@@ -50,12 +52,14 @@ enum ErrorTarget {
     View,
     Tabs,
     History,
+    Action,
 }
 
 #[derive(Debug)]
 enum RouteError {
     Internal(String),
     Conflict,
+    NotFound,
 }
 
 impl From<String> for RouteError {
@@ -96,6 +100,8 @@ pub(crate) struct ViewerApp {
     pub(crate) probe: GitRepoProbe,
     pub(crate) app_state: SqliteAppState,
     pub(crate) source: GitDiffSource,
+    file_system: LocalFileSystemClient,
+    configured_editor: GitConfiguredEditorClient,
     pub(crate) session: Arc<Mutex<ViewerSession>>,
     pending: Arc<PendingRecipes>,
     renderer: MaudViewerRenderer,
@@ -115,6 +121,8 @@ impl ViewerApp {
             probe: GitRepoProbe,
             app_state,
             source: GitDiffSource,
+            file_system: LocalFileSystemClient,
+            configured_editor: GitConfiguredEditorClient,
             session: Arc::new(Mutex::new(ViewerSession::new(max_cache_weight))),
             pending: Arc::new(PendingRecipes::default()),
             renderer: MaudViewerRenderer,
@@ -165,6 +173,7 @@ fn error_target(route: &Route) -> ErrorTarget {
         | Route::OpenHistory { .. }
         | Route::Pending => ErrorTarget::Tabs,
         Route::History => ErrorTarget::History,
+        Route::OpenDiffFile { .. } => ErrorTarget::Action,
     }
 }
 
@@ -172,23 +181,25 @@ fn error_response(target: ErrorTarget, error: &RouteError) -> Response<Vec<u8>> 
     match &error {
         RouteError::Internal(reason) => eprintln!("gtl-viewer route failure: {reason}"),
         RouteError::Conflict => eprintln!("gtl-viewer route failure: fragment generation conflict"),
+        RouteError::NotFound => {}
     }
-    let status = if matches!(error, RouteError::Conflict) {
-        StatusCode::CONFLICT
-    } else {
-        StatusCode::INTERNAL_SERVER_ERROR
+    let status = match error {
+        RouteError::Conflict => StatusCode::CONFLICT,
+        RouteError::NotFound => StatusCode::NOT_FOUND,
+        RouteError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
     };
     let body = match target {
         ErrorTarget::Document => render::error_document(),
         ErrorTarget::View => render::error_view(),
         ErrorTarget::Tabs => render::error_tabs(),
         ErrorTarget::History => render::error_history(),
+        ErrorTarget::Action => String::new(),
     };
     let builder = Response::builder()
         .status(status)
         .header("Content-Type", HTML_CONTENT_TYPE)
         .header("Cache-Control", DYNAMIC_CACHE_CONTROL);
-    let builder = if matches!(target, ErrorTarget::Document) {
+    let builder = if matches!(target, ErrorTarget::Document | ErrorTarget::Action) {
         builder
     } else {
         builder
@@ -212,6 +223,10 @@ fn serve_route(app: &ViewerApp, route: Route) -> RouteResult {
         Route::OpenHistory { render } => open_history(app, render),
         Route::Settings(change) => settings(app, change),
         Route::Pending => pending(app),
+        Route::OpenDiffFile {
+            tab,
+            diff_file_path,
+        } => open_diff_file::serve(app, tab, diff_file_path),
     }
 }
 

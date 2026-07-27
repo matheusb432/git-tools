@@ -11,12 +11,15 @@ mod rows;
 mod syntax;
 mod text;
 
-use application::{diffs::View, viewer::RenderOptions};
+use application::{
+    diffs::View,
+    viewer::{RenderOptions, ViewerTabId},
+};
 pub use artifact::{build_html, build_tabbed_html};
 pub use assets::{preview_bundle, preview_css, strip_stylesheet_banner};
 use maud::Markup;
 
-/// Builds one app-hosted diff view using only the requested layout and density variant.
+/// Builds one app-hosted diff view using the requested layout and density variant.
 ///
 /// The fragment retains the server-rendered file tree, commit shelf, popovers, and diff rows,
 /// while leaving layout, density, and theme controls to the surrounding app shell.
@@ -24,15 +27,19 @@ use maud::Markup;
 /// # Examples
 ///
 /// ```no_run
-/// use application::{diffs::View, viewer::RenderOptions};
+/// use application::{
+///     diffs::View,
+///     viewer::{RenderOptions, ViewerTabId},
+/// };
 /// use preview::view_fragment;
 ///
 /// # fn load_view() -> View { todo!() }
-/// let fragment = view_fragment(&load_view(), RenderOptions::DEFAULT);
+/// # let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
+/// let fragment = view_fragment(&load_view(), RenderOptions::DEFAULT, tab_id);
 /// assert!(fragment.into_string().contains("diff-unified diff-compact"));
 /// ```
-pub fn view_fragment(view: &View, options: RenderOptions) -> Markup {
-    layout::view_body(view, options, layout::Surface::App)
+pub fn view_fragment(view: &View, options: RenderOptions, tab_id: ViewerTabId) -> Markup {
+    layout::view_body(view, options, layout::Surface::App { tab_id })
 }
 
 /// The Maud-backed [`HtmlRenderer`](application::ports::HtmlRenderer) adapter.

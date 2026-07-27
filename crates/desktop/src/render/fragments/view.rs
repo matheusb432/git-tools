@@ -35,7 +35,7 @@ pub(in crate::render) fn view(
                     ViewerTabState::Ready => {
                         @let view = document.active_view().expect("ViewerDocument guarantees a view for the ready active tab");
                         (controls::view_controls(view))
-                        (preview::view_fragment(view.view(), view.options()))
+                        (preview::view_fragment(view.view(), view.options(), view.tab_id()))
                     },
                     ViewerTabState::Broken { code, reason } => (broken_view(tab, code, reason)),
                     ViewerTabState::Error { reason } => (error_view(tab, reason)),

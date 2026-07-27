@@ -10,7 +10,7 @@ mod tests {
     use std::sync::Arc;
 
     use application::{
-        diffs::{Cmd, Foot, View},
+        diffs::{Cmd, FileDiff, Foot, LineOwners, View},
         viewer::{
             DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerDocument,
             ViewerHistoryEntry, ViewerSettings, ViewerTab, ViewerTabId, ViewerTabKind,
@@ -49,7 +49,15 @@ mod tests {
             branch: "feature/htmx".into(),
             upstream: "origin/main".into(),
             commits: vec![],
-            files: vec![],
+            files: vec![FileDiff {
+                path: "src/a b.rs".into(),
+                added: 1,
+                removed: 0,
+                lines: vec!["@@ -0,0 +1 @@".into(), "+new".into()],
+                full_lines: None,
+                commits: vec![],
+                owners: LineOwners::default(),
+            }],
             title: "Working tree".into(),
             cmd: Cmd {
                 lead: String::new(),
@@ -158,6 +166,7 @@ mod tests {
         assert!(!html.contains("<link "));
         assert!(!html.contains("hx-swap-oob="));
         assert_eq!(html.matches("class=\"layout").count(), 1);
+        assert!(html.contains("hx-post=\"/tabs/1/files/open?path="));
     }
 
     #[test]

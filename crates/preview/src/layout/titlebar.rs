@@ -51,7 +51,7 @@ fn exclusion_tooltip(excluded: &AppliedExclusions) -> String {
 
 #[cfg(test)]
 mod tests {
-    use application::viewer::RenderOptions;
+    use application::viewer::{RenderOptions, ViewerTabId};
     use domain::diffs::AppliedExclusions;
 
     use crate::{
@@ -92,7 +92,8 @@ mod tests {
         let mut view = sample_view();
         view.exclusions = Some(applied_exclusions());
 
-        let fragment = view_fragment(&view, RenderOptions::DEFAULT).into_string();
+        let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
+        let fragment = view_fragment(&view, RenderOptions::DEFAULT, tab_id).into_string();
 
         assert!(fragment.contains(r#"<span class="excl-chip"#));
     }
