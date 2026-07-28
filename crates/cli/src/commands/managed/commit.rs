@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 pub use application::managed::commit_all::CommitResult;
 use application::managed::commit_all::{self, CommitAction, CommitExit};
 pub use domain::managed::working_tree::CommitFile;
-use infra::git_runner::StdGitRunner;
+use infra::git_client::HybridGitClient;
 use serde::Serialize;
 
 use super::{ManagedExit, ManagedOptions, ManagedRun};
@@ -69,7 +69,7 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
                     message: options.message_for_all.clone(),
                     dry: options.dry,
                 },
-                &StdGitRunner,
+                &HybridGitClient,
             );
             project_commit_execution(options.json, execution)
         }
@@ -84,7 +84,7 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
 
 fn project_commit_execution(
     json: bool,
-    execution: Result<commit_all::CommitAllResult, commit_all::CommitAllError>,
+    execution: Result<commit_all::CommitAllOk, commit_all::CommitAllError>,
 ) -> ManagedRun<CommitResult> {
     match execution {
         Ok(result) => {

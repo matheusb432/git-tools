@@ -4,8 +4,7 @@ use std::path::PathBuf;
 
 use domain::worktrees::Worktree;
 
-use super::porcelain;
-use crate::ports::GitRunner;
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests every worktree registered for one repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,7 +14,7 @@ pub struct ListWorktrees {
 
 /// Reports either structured worktrees or the Git failure that prevented listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorktreeListResult {
+pub enum ListWorktreesOk {
     /// Git listed at least one worktree.
     Listed { worktrees: Vec<Worktree> },
     /// Git rejected the query or returned no worktrees.
@@ -39,25 +38,22 @@ pub enum ListWorktreesError {
 #[cqrsy::query]
 pub fn execute(
     query: ListWorktrees,
-    git: &impl GitRunner,
-) -> Result<WorktreeListResult, ListWorktreesError> {
+    git: &impl GitClient,
+) -> Result<ListWorktreesOk, ListWorktreesError> {
     let ListWorktrees { repo } = query;
-    let output = git
-        .run(&repo, &["worktree", "list", "--porcelain"])
+    let worktrees = git
+        .worktrees(&repo)
         .map_err(ListWorktreesError::Unexpected)?;
-    if output.exit_code != 0 {
-        return Ok(WorktreeListResult::Failed {
-            detail: format!("git worktree list failed (exit {})", output.exit_code),
-        });
-    }
-
-    let worktrees = porcelain::parse(&output.stdout);
+    let worktrees = match worktrees {
+        GitEffect::Applied(worktrees) => worktrees,
+        GitEffect::Rejected(detail) => return Ok(ListWorktreesOk::Failed { detail }),
+    };
     if worktrees.is_empty() {
-        Ok(WorktreeListResult::Failed {
+        Ok(ListWorktreesOk::Failed {
             detail: "git returned no worktrees".into(),
         })
     } else {
-        Ok(WorktreeListResult::Listed { worktrees })
+        Ok(ListWorktreesOk::Listed { worktrees })
     }
 }
 
@@ -65,12 +61,12 @@ pub fn execute(
 mod tests {
     use std::error::Error as _;
 
-    use super::{ListWorktrees, WorktreeListResult, execute};
-    use crate::testing::FakeGitRunner;
+    use super::{ListWorktrees, ListWorktreesOk, execute};
+    use crate::testing::ScriptedGitClient;
 
     #[test]
     fn list_parses_branch_detached_locked_and_prunable_values() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok(concat!(
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied(concat!(
             "worktree /repo\nHEAD 123456789abcdef\nbranch refs/heads/main\n\n",
             "worktree /linked\nHEAD abcdef123456789\ndetached\nlocked maintenance\nprunable gone\n\n",
         ))]);
@@ -78,7 +74,7 @@ mod tests {
         let result = execute(ListWorktrees { repo: ".".into() }, &git)
             .expect("porcelain output should produce a structured list");
 
-        let WorktreeListResult::Listed { worktrees } = result else {
+        let ListWorktreesOk::Listed { worktrees } = result else {
             panic!("Git output should produce listed worktrees");
         };
         assert_eq!(worktrees.len(), 2);
@@ -89,26 +85,26 @@ mod tests {
     }
 
     #[test]
-    fn nonzero_exit_remains_the_exact_closed_failure() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::exit_err("fatal: not a repo", 128)]);
+    fn rejected_listing_preserves_the_adapter_diagnostic() {
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: not a repo")]);
 
         assert_eq!(
             execute(ListWorktrees { repo: ".".into() }, &git)
                 .expect("a Git rejection is a closed list failure"),
-            WorktreeListResult::Failed {
-                detail: "git worktree list failed (exit 128)".into(),
+            ListWorktreesOk::Failed {
+                detail: "fatal: not a repo".into(),
             }
         );
     }
 
     #[test]
     fn empty_porcelain_output_remains_the_exact_closed_failure() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok("")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
 
         assert_eq!(
             execute(ListWorktrees { repo: ".".into() }, &git)
                 .expect("empty Git output is a closed list failure"),
-            WorktreeListResult::Failed {
+            ListWorktreesOk::Failed {
                 detail: "git returned no worktrees".into(),
             }
         );
@@ -116,8 +112,9 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_an_error_with_its_source() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(ListWorktrees { repo: ".".into() }, &git)
             .expect_err("transport failure must remain an error");

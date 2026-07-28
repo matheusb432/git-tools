@@ -3,9 +3,10 @@ use std::{collections::BTreeMap, path::Path};
 use domain::tags::{Tag, TagState};
 
 use super::{git_command_error::GitCommandError, group};
-use crate::ports::GitRunner;
+use crate::ports::{GitClient, GitEffect};
 
-pub(super) const LOCAL_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=2)\t%(contents:lines=1)\t%(creatordate:unix)";
+#[cfg(any(test, feature = "testing"))]
+pub(crate) const LOCAL_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=2)\t%(contents:lines=1)\t%(creatordate:unix)";
 
 pub(super) struct TagRefs {
     local: BTreeMap<String, Tag>,
@@ -62,43 +63,40 @@ impl TagRefs {
     }
 }
 
-pub(super) fn load(git: &impl GitRunner, repo: &Path) -> Result<TagRefs, GitCommandError> {
+pub(super) fn load(git: &impl GitClient, repo: &Path) -> Result<TagRefs, GitCommandError> {
     Ok(TagRefs::new(
         local_refs(git, repo)?,
         Some(remote_refs(git, repo)?),
     ))
 }
 
-pub(super) fn load_local(git: &impl GitRunner, repo: &Path) -> Result<TagRefs, GitCommandError> {
+pub(super) fn load_local(git: &impl GitClient, repo: &Path) -> Result<TagRefs, GitCommandError> {
     Ok(TagRefs::new(local_refs(git, repo)?, None))
 }
 
-fn local_refs(git: &impl GitRunner, repo: &Path) -> Result<BTreeMap<String, Tag>, GitCommandError> {
-    let output = git.run(repo, &["for-each-ref", LOCAL_TAG_FORMAT_ARG, "refs/tags"])?;
-    if output.exit_code == 0 {
-        Ok(parse_refs(&output.stdout))
-    } else {
-        Err(GitCommandError::rejected(
-            output.fail_detail("git for-each-ref failed"),
-        ))
+fn local_refs(git: &impl GitClient, repo: &Path) -> Result<BTreeMap<String, Tag>, GitCommandError> {
+    match git.local_tags(repo)? {
+        GitEffect::Applied(tags) => Ok(tags),
+        GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
+            "git for-each-ref failed: {detail}"
+        ))),
     }
 }
 
 fn remote_refs(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     repo: &Path,
 ) -> Result<BTreeMap<String, String>, GitCommandError> {
-    let output = git.run(repo, &["ls-remote", "--tags", "origin"])?;
-    if output.exit_code == 0 {
-        Ok(parse_remote_refs(&output.stdout))
-    } else {
-        Err(GitCommandError::rejected(
-            output.fail_detail("git ls-remote failed"),
-        ))
+    match git.remote_tags(repo, "origin")? {
+        GitEffect::Applied(tags) => Ok(tags),
+        GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
+            "git ls-remote failed: {detail}"
+        ))),
     }
 }
 
-pub(super) fn parse_remote_refs(stdout: &str) -> BTreeMap<String, String> {
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn parse_remote_refs(stdout: &str) -> BTreeMap<String, String> {
     stdout
         .lines()
         .filter_map(|line| {
@@ -112,7 +110,8 @@ pub(super) fn parse_remote_refs(stdout: &str) -> BTreeMap<String, String> {
         .collect()
 }
 
-pub(super) fn parse_refs(stdout: &str) -> BTreeMap<String, Tag> {
+#[cfg(any(test, feature = "testing"))]
+pub(crate) fn parse_refs(stdout: &str) -> BTreeMap<String, Tag> {
     stdout
         .lines()
         .filter_map(|line| {

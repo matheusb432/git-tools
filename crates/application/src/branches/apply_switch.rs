@@ -1,7 +1,7 @@
 //! Applies a planned branch switch.
 
 use super::plan_switch::SwitchTarget;
-use crate::{ports::GitRunner, shared::git::command_label};
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests applying one confirmed branch switch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,12 +18,12 @@ pub enum SwitchStatus {
 
 /// Reports the closed branch switch status and its user-facing detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SwitchResult {
+pub struct ApplySwitchOk {
     pub status: SwitchStatus,
     pub detail: String,
 }
 
-impl SwitchResult {
+impl ApplySwitchOk {
     fn new(status: SwitchStatus, detail: impl Into<String>) -> Self {
         Self {
             status,
@@ -53,18 +53,17 @@ pub enum ApplySwitchError {
 #[cqrsy::command]
 pub fn execute(
     command: ApplySwitch,
-    git: &impl GitRunner,
-) -> Result<SwitchResult, ApplySwitchError> {
+    git: &impl GitClient,
+) -> Result<ApplySwitchOk, ApplySwitchError> {
     let ApplySwitch { target } = command;
-    let args = ["switch", target.onto.as_str()];
-    match git.run(&target.top, &args) {
-        Ok(output) if output.exit_code == 0 => Ok(SwitchResult::new(
+    match git.switch(&target.top, &target.onto) {
+        Ok(GitEffect::Applied(())) => Ok(ApplySwitchOk::new(
             SwitchStatus::Switched,
             format!("switched to '{}' from '{}'", target.onto, target.from),
         )),
-        Ok(output) => Ok(SwitchResult::new(SwitchStatus::Failed, output.error_line())),
+        Ok(GitEffect::Rejected(detail)) => Ok(ApplySwitchOk::new(SwitchStatus::Failed, detail)),
         Err(source) => Err(ApplySwitchError::Transport {
-            command: command_label(&args),
+            command: format!("switch to {}", target.onto),
             source,
         }),
     }
@@ -75,7 +74,7 @@ mod tests {
     use std::error::Error as _;
 
     use super::*;
-    use crate::{branches::plan_switch::SwitchTarget, testing::FakeGitRunner};
+    use crate::{branches::plan_switch::SwitchTarget, testing::ScriptedGitClient};
 
     fn target() -> SwitchTarget {
         SwitchTarget {
@@ -87,14 +86,14 @@ mod tests {
 
     #[test]
     fn successful_switch_reports_the_transition() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok("")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
 
         let result =
             execute(ApplySwitch { target: target() }, &git).expect("switch application succeeds");
 
         assert_eq!(
             result,
-            SwitchResult {
+            ApplySwitchOk {
                 status: SwitchStatus::Switched,
                 detail: "switched to 'main' from 'feat/x'".into(),
             }
@@ -103,9 +102,8 @@ mod tests {
 
     #[test]
     fn failed_switch_surfaces_git_error() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::exit_err(
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected(
             "error: Your local changes would be overwritten",
-            1,
         )]);
 
         let result = execute(ApplySwitch { target: target() }, &git)
@@ -117,15 +115,16 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_a_sourced_apply_error() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(ApplySwitch { target: target() }, &git)
             .expect_err("transport failure must remain an error");
 
         assert_eq!(
             error.to_string(),
-            "git switch main: git transport unavailable"
+            "switch to main: git transport unavailable"
         );
         assert_eq!(
             error.source().map(ToString::to_string),

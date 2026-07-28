@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use application::branches::{apply_prune::PruneResult, plan_prune::PruneBranch};
+use application::branches::{apply_prune::ApplyPruneOk, plan_prune::PruneBranch};
 
 /// Renders the destructive branch-prune confirmation block.
 pub fn confirmation(onto: &str, branches: &[PruneBranch]) -> String {
@@ -17,7 +17,7 @@ pub fn confirmation(onto: &str, branches: &[PruneBranch]) -> String {
 }
 
 /// Renders deleted-branch recovery commands and per-branch failures.
-pub fn render_result(result: &PruneResult) -> String {
+pub fn render_result(result: &ApplyPruneOk) -> String {
     let mut detail = format!(
         "deleted {} branch{}.",
         result.deleted.len(),
@@ -43,7 +43,7 @@ fn plural(count: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use application::branches::{
-        apply_prune::{PruneFailure, PruneResult, PruneStatus},
+        apply_prune::{ApplyPruneOk, PruneFailure, PruneStatus},
         plan_prune::PruneBranch,
     };
 
@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn result_rendering_includes_recovery_and_failure_lines() {
-        let result = PruneResult {
+        let result = ApplyPruneOk {
             status: PruneStatus::Partial,
             deleted: vec![
                 PruneBranch {

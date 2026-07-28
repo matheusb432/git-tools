@@ -13,21 +13,21 @@ pub struct CompleteRecipeComputation {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum CompleteRecipeComputationResponse {
+pub enum CompleteRecipeComputationOk {
     Publish { label: String, view: Arc<View> },
     Skipped { label: String },
 }
 
 #[cqrsy::command]
-pub fn execute(command: CompleteRecipeComputation) -> CompleteRecipeComputationResponse {
+pub fn execute(command: CompleteRecipeComputation) -> CompleteRecipeComputationOk {
     let CompleteRecipeComputation { recipe, kind, view } = command;
     if kind == ViewerTabKind::Snapshot && !view.has_diff_content() {
-        return CompleteRecipeComputationResponse::Skipped {
+        return CompleteRecipeComputationOk::Skipped {
             label: recipe_label::initial(&recipe),
         };
     }
 
-    CompleteRecipeComputationResponse::Publish {
+    CompleteRecipeComputationOk::Publish {
         label: recipe_label::computed(&recipe, &view),
         view: Arc::new(view),
     }
@@ -57,7 +57,7 @@ mod tests {
 
         assert_eq!(
             response,
-            CompleteRecipeComputationResponse::Skipped {
+            CompleteRecipeComputationOk::Skipped {
                 label: "project: squash".into(),
             }
         );
@@ -74,7 +74,7 @@ mod tests {
 
         assert_eq!(
             response,
-            CompleteRecipeComputationResponse::Publish {
+            CompleteRecipeComputationOk::Publish {
                 label: "project: squash 0 commits".into(),
                 view: Arc::new(view),
             }
@@ -151,7 +151,7 @@ mod tests {
                 kind: ViewerTabKind::Live,
                 view,
             });
-            let CompleteRecipeComputationResponse::Publish { label, .. } = response else {
+            let CompleteRecipeComputationOk::Publish { label, .. } = response else {
                 panic!("live recipe must publish");
             };
 
@@ -172,7 +172,7 @@ mod tests {
 
         assert!(matches!(
             response,
-            CompleteRecipeComputationResponse::Publish { label, .. }
+        CompleteRecipeComputationOk::Publish { label, .. }
                 if label == "Release review"
         ));
     }

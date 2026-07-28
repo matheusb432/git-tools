@@ -1,3 +1,4 @@
 pub mod get_base;
 pub mod list;
-mod porcelain;
+#[cfg(any(test, feature = "testing"))]
+pub(crate) mod porcelain;

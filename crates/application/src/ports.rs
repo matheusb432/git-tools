@@ -7,15 +7,13 @@ mod app_state_store;
 mod artifact_store;
 mod clock;
 mod configured_editor_client;
-mod diff_source;
+mod diff_viewer_client;
 mod file_system_client;
-mod git_runner;
+mod git_client;
 mod html_renderer;
 mod managed_manifest;
 mod push_ledger;
-mod remote_sync;
 mod repo_discovery;
-mod repo_probe;
 mod user_settings_editor;
 mod user_settings_store;
 
@@ -23,16 +21,20 @@ pub use app_state_store::AppStateStore;
 pub use artifact_store::{ArtifactMeta, ArtifactStore, HistoryRecord, PlacedArtifact};
 pub use clock::Clock;
 pub use configured_editor_client::ConfiguredEditorClient;
-pub use diff_source::DiffSource;
+pub use diff_viewer_client::{
+    DiffRenderOutcome, DiffRenderRequest, DiffRenderResponse, DiffViewerBatch, DiffViewerClient,
+    DiffViewerRecipe, DiffViewerRecipeOperation,
+};
 pub use file_system_client::{
     FileSystemClient, FileSystemClientError, FileSystemClientErrorKind, FileSystemEntryKind,
 };
-pub use git_runner::{GitOutput, GitRunner};
+pub use git_client::{
+    BlameLines, GitClient, GitCommitReceipt, GitDiffFormat, GitDiffRequest, GitEffect,
+    GitPushReceipt, GitRepositoryState, GitWorkingTree, MergedBranch,
+};
 pub use html_renderer::HtmlRenderer;
 pub use managed_manifest::ManagedManifest;
 pub use push_ledger::{LedgerEntry, PushLedger};
-pub use remote_sync::{RemoteSync, SyncOutput};
 pub use repo_discovery::RepoDiscovery;
-pub use repo_probe::{RepoProbe, RepoProbeResult};
 pub use user_settings_editor::{UserSettingsEditError, UserSettingsEditor};
 pub use user_settings_store::{AppSettings, UserSettingsStore};

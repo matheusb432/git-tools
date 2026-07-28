@@ -1,7 +1,7 @@
 //! Applies a planned recovery of a branch's prior position.
 
 use super::{branch_recovery::BranchRecovery, plan_revert::RevertTarget};
-use crate::{ports::GitRunner, shared::git::command_label};
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests applying one confirmed branch recovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,7 +18,7 @@ pub enum RevertStatus {
 
 /// Reports the closed branch recovery status and its user-facing detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RevertResult {
+pub struct ApplyRevertOk {
     pub status: RevertStatus,
     pub detail: String,
     pub progress: RevertProgress,
@@ -32,7 +32,7 @@ pub struct RevertProgress {
     pub recovery: Option<BranchRecovery>,
 }
 
-impl RevertResult {
+impl ApplyRevertOk {
     fn new(status: RevertStatus, detail: impl Into<String>, progress: RevertProgress) -> Self {
         Self {
             status,
@@ -64,36 +64,25 @@ pub enum ApplyRevertError {
 #[cqrsy::command]
 pub fn execute(
     command: ApplyRevert,
-    git: &impl GitRunner,
-) -> Result<RevertResult, ApplyRevertError> {
+    git: &impl GitClient,
+) -> Result<ApplyRevertOk, ApplyRevertError> {
     let ApplyRevert { target } = command;
     let mut progress = RevertProgress::default();
-    let switch_args = ["switch", "-"];
-    match git.run(&target.top, &switch_args) {
-        Ok(output) if output.exit_code == 0 => {}
-        Ok(output) => {
-            return Ok(RevertResult::new(
-                RevertStatus::Failed,
-                output.error_line(),
-                progress,
-            ));
+    match git.switch_previous(&target.top) {
+        Ok(GitEffect::Applied(())) => {}
+        Ok(GitEffect::Rejected(detail)) => {
+            return Ok(ApplyRevertOk::new(RevertStatus::Failed, detail, progress));
         }
-        Err(source) => return Err(transport(&switch_args, progress, source)),
+        Err(source) => return Err(transport("switch to previous branch", progress, source)),
     }
     progress.branch_switched = true;
     progress.recovery = Some(BranchRecovery::switch_to(&target.onto));
 
-    let branch_args = [
-        "branch",
-        "-f",
-        target.onto.as_str(),
-        target.prior_sha.as_str(),
-    ];
-    match git.run(&target.top, &branch_args) {
-        Ok(output) if output.exit_code == 0 => {
+    match git.move_branch(&target.top, &target.onto, &target.prior_sha) {
+        Ok(GitEffect::Applied(())) => {
             progress.force_move_done = true;
             progress.recovery = None;
-            Ok(RevertResult::new(
+            Ok(ApplyRevertOk::new(
                 RevertStatus::Reverted,
                 format!(
                     "reverted '{}' to {} and switched back",
@@ -102,18 +91,16 @@ pub fn execute(
                 progress,
             ))
         }
-        Ok(output) => Ok(RevertResult::new(
-            RevertStatus::Failed,
-            output.error_line(),
-            progress,
-        )),
-        Err(source) => Err(transport(&branch_args, progress, source)),
+        Ok(GitEffect::Rejected(detail)) => {
+            Ok(ApplyRevertOk::new(RevertStatus::Failed, detail, progress))
+        }
+        Err(source) => Err(transport("move branch", progress, source)),
     }
 }
 
-fn transport(args: &[&str], progress: RevertProgress, source: anyhow::Error) -> ApplyRevertError {
+fn transport(command: &str, progress: RevertProgress, source: anyhow::Error) -> ApplyRevertError {
     ApplyRevertError::Transport {
-        command: command_label(args),
+        command: command.to_string(),
         progress,
         source,
     }
@@ -124,11 +111,14 @@ mod tests {
     use std::error::Error as _;
 
     use super::*;
-    use crate::{branches::plan_revert::RevertTarget, testing::FakeGitRunner};
+    use crate::{branches::plan_revert::RevertTarget, testing::ScriptedGitClient};
 
     #[test]
     fn successful_revert_reports_the_recovery_position() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok("switched\n"), FakeGitRunner::ok("")]);
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("switched\n"),
+            ScriptedGitClient::applied(""),
+        ]);
         let target = RevertTarget {
             top: ".".into(),
             onto: "main".into(),
@@ -140,7 +130,7 @@ mod tests {
 
         assert_eq!(
             result,
-            RevertResult {
+            ApplyRevertOk {
                 status: RevertStatus::Reverted,
                 detail: "reverted 'main' to abc123 and switched back".into(),
                 progress: RevertProgress {
@@ -154,8 +144,9 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_a_sourced_apply_error() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
         let target = RevertTarget {
             top: ".".into(),
             onto: "main".into(),
@@ -165,7 +156,10 @@ mod tests {
         let error = execute(ApplyRevert { target }, &git)
             .expect_err("transport failure must remain an error");
 
-        assert_eq!(error.to_string(), "git switch -: git transport unavailable");
+        assert_eq!(
+            error.to_string(),
+            "switch to previous branch: git transport unavailable"
+        );
         assert_eq!(
             error.source().map(ToString::to_string),
             Some("git transport unavailable".into())
@@ -174,9 +168,9 @@ mod tests {
 
     #[test]
     fn failed_force_move_reports_switch_and_recovery_command() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("switched\n"),
-            FakeGitRunner::exit_err("branch locked", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("switched\n"),
+            ScriptedGitClient::rejected("branch locked"),
         ]);
         let target = RevertTarget {
             top: ".".into(),
@@ -203,8 +197,8 @@ mod tests {
 
     #[test]
     fn force_move_transport_reports_switch_recovery_and_source() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok("switched\n")),
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied("switched\n")),
             Err(anyhow::anyhow!("branch transport unavailable")),
         ]);
         let target = RevertTarget {

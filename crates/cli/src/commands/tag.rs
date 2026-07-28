@@ -1,10 +1,10 @@
-use application::tags::{TagGroup, TagList};
+use application::tags::{ListTagsOk, TagGroup};
 use domain::tags::{Tag, TagState};
 
-pub fn render_list(list: &TagList, commits: bool) -> String {
+pub fn render_list(list: &ListTagsOk, commits: bool) -> String {
     let groups = match list {
-        TagList::Listed { groups } => groups,
-        TagList::Failed { detail } => return detail.clone(),
+        ListTagsOk::Listed { groups } => groups,
+        ListTagsOk::Failed { detail } => return detail.clone(),
     };
 
     groups
@@ -67,7 +67,7 @@ fn render_message(tag: &Tag) -> String {
 
 #[cfg(test)]
 mod tests {
-    use application::tags::{TagGroup, TagList};
+    use application::tags::{ListTagsOk, TagGroup};
     use domain::tags::{Tag, TagState};
 
     use super::render_list;
@@ -100,7 +100,7 @@ mod tests {
         canonical.set_state(TagState::Local);
         let mut label = lightweight("stable", "def5678");
         label.set_state(TagState::Local);
-        let list = TagList::Listed {
+        let list = ListTagsOk::Listed {
             groups: vec![
                 TagGroup::Single(remote),
                 TagGroup::Canonical {
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn tags_without_a_queried_state_render_no_state_column() {
-        let list = TagList::Listed {
+        let list = ListTagsOk::Listed {
             groups: vec![TagGroup::Canonical {
                 canonical: annotated("v1.1.0", "def5678", "next"),
                 labels: vec![lightweight("stable", "def5678")],

@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 
 use super::{branch_recovery::BranchRecovery, plan_rebase::RebaseTarget};
-use crate::{ports::GitRunner, shared::git::command_label};
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests applying one confirmed fast-forward.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +20,7 @@ pub enum RebaseStatus {
 
 /// Reports the closed fast-forward status and its user-facing detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RebaseResult {
+pub struct ApplyRebaseOk {
     pub status: RebaseStatus,
     pub detail: String,
     pub progress: RebaseProgress,
@@ -35,7 +35,7 @@ pub struct RebaseProgress {
     pub recovery: Option<BranchRecovery>,
 }
 
-impl RebaseResult {
+impl ApplyRebaseOk {
     fn new(status: RebaseStatus, detail: impl Into<String>, progress: RebaseProgress) -> Self {
         Self {
             status,
@@ -88,21 +88,16 @@ pub enum ApplyRebaseError {
 #[cqrsy::command]
 pub fn execute(
     command: ApplyRebase,
-    git: &impl GitRunner,
-) -> Result<RebaseResult, ApplyRebaseError> {
+    git: &impl GitClient,
+) -> Result<ApplyRebaseOk, ApplyRebaseError> {
     let ApplyRebase { target } = command;
     let mut progress = RebaseProgress::default();
-    let switch_args = ["switch", target.onto.as_str()];
-    match git.run(&target.top, &switch_args) {
-        Ok(output) if output.exit_code == 0 => {}
-        Ok(output) => {
-            return Ok(RebaseResult::new(
-                RebaseStatus::Failed,
-                output.error_line(),
-                progress,
-            ));
+    match git.switch(&target.top, &target.onto) {
+        Ok(GitEffect::Applied(())) => {}
+        Ok(GitEffect::Rejected(detail)) => {
+            return Ok(ApplyRebaseOk::new(RebaseStatus::Failed, detail, progress));
         }
-        Err(source) => return Err(transport(&switch_args, progress, source)),
+        Err(source) => return Err(transport("switch branch", progress, source)),
     }
     progress.branch_switched = true;
     progress.recovery = Some(BranchRecovery::switch_to(&target.feature));
@@ -110,65 +105,55 @@ pub fn execute(
     // The range becomes empty after the fast-forward, so select promoted commits first.
     let commits = promoted_commits(git, &target, &progress)?;
     progress.promoted_commits.clone_from(&commits);
-    let merge_args = ["merge", "--ff-only", target.feature.as_str()];
-    match git.run(&target.top, &merge_args) {
-        Ok(output) if output.exit_code == 0 => {
+    match git.fast_forward(&target.top, &target.feature) {
+        Ok(GitEffect::Applied(_)) => {
             progress.fast_forwarded = true;
             progress.recovery = None;
-            Ok(RebaseResult::new(
+            Ok(ApplyRebaseOk::new(
                 RebaseStatus::FastForwarded,
                 rebase_log(&target, commits.as_deref().unwrap_or_default()),
                 progress,
             ))
         }
-        Ok(output) => Ok(RebaseResult::new(
-            RebaseStatus::Failed,
-            output.error_line(),
-            progress,
-        )),
-        Err(source) => Err(transport(&merge_args, progress, source)),
+        Ok(GitEffect::Rejected(detail)) => {
+            Ok(ApplyRebaseOk::new(RebaseStatus::Failed, detail, progress))
+        }
+        Err(source) => Err(transport("fast-forward branch", progress, source)),
     }
 }
 
 fn promoted_commits(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     target: &RebaseTarget,
     progress: &RebaseProgress,
 ) -> Result<Option<Vec<PromotedCommit>>, ApplyRebaseError> {
     let range = target.range();
-    let args = [
-        "log",
-        "--date=format:%Y-%m-%d %H:%M",
-        "--format=%H%x1f%s%x1f%b%x1f%ad%x1f%aI%x1f%P%x1e",
-        &range,
-    ];
-    match git.run(&target.top, &args) {
-        Ok(output) if output.exit_code == 0 => Ok(Some(parse_promoted_commits(&output.stdout))),
-        Ok(_) => Ok(None),
-        Err(source) => Err(transport(&args, progress.clone(), source)),
+    match git
+        .brief_log(&target.top, &range)
+        .map_err(|source| transport("read promoted commits", progress.clone(), source))?
+    {
+        GitEffect::Rejected(_) => Ok(None),
+        GitEffect::Applied(lines) => Ok(Some(
+            lines
+                .into_iter()
+                .filter_map(|line| {
+                    let (sha, subject) = line.split_once(char::is_whitespace)?;
+                    Some(PromotedCommit {
+                        sha: sha.to_string(),
+                        subject: subject.trim().to_string(),
+                    })
+                })
+                .collect(),
+        )),
     }
 }
 
-fn transport(args: &[&str], progress: RebaseProgress, source: anyhow::Error) -> ApplyRebaseError {
+fn transport(command: &str, progress: RebaseProgress, source: anyhow::Error) -> ApplyRebaseError {
     ApplyRebaseError::Transport {
-        command: command_label(args),
+        command: command.to_string(),
         progress,
         source,
     }
-}
-
-fn parse_promoted_commits(raw: &str) -> Vec<PromotedCommit> {
-    raw.split('\x1e')
-        .map(str::trim)
-        .filter(|record| !record.is_empty())
-        .map(|record| {
-            let mut fields = record.split('\x1f');
-            PromotedCommit {
-                sha: fields.next().unwrap_or("").chars().take(9).collect(),
-                subject: fields.next().unwrap_or("").to_string(),
-            }
-        })
-        .collect()
 }
 
 fn rebase_log(target: &RebaseTarget, commits: &[PromotedCommit]) -> String {
@@ -190,7 +175,7 @@ mod tests {
     use std::error::Error as _;
 
     use super::*;
-    use crate::{branches::plan_rebase::RebaseTarget, testing::FakeGitRunner};
+    use crate::{branches::plan_rebase::RebaseTarget, testing::ScriptedGitClient};
 
     fn target() -> RebaseTarget {
         RebaseTarget {
@@ -202,13 +187,10 @@ mod tests {
 
     #[test]
     fn successful_fast_forward_reports_promoted_commits() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("switched\n"),
-            FakeGitRunner::ok(
-                "123456789abcdef\u{1f}feat: add a\u{1f}\u{1f}\u{1f}\u{1f}\u{1e}\n\
-                 abcdef123456789\u{1f}feat: add b\u{1f}\u{1f}\u{1f}\u{1f}\u{1e}\n",
-            ),
-            FakeGitRunner::ok("Fast-forward\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("switched\n"),
+            ScriptedGitClient::applied("123456789 feat: add a\nabcdef123 feat: add b\n"),
+            ScriptedGitClient::applied("Fast-forward\n"),
         ]);
 
         let result = execute(ApplyRebase { target: target() }, &git)
@@ -228,10 +210,10 @@ mod tests {
 
     #[test]
     fn failed_merge_surfaces_git_error() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("switched\n"),
-            FakeGitRunner::exit_err("log unavailable", 1),
-            FakeGitRunner::exit_err("fatal: not ff", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("switched\n"),
+            ScriptedGitClient::rejected("log unavailable"),
+            ScriptedGitClient::rejected("fatal: not ff"),
         ]);
 
         let result = execute(ApplyRebase { target: target() }, &git)
@@ -255,15 +237,15 @@ mod tests {
 
     #[test]
     fn promoted_commit_transport_failure_remains_a_sourced_apply_error() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok("switched\n")),
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied("switched\n")),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
         let error = execute(ApplyRebase { target: target() }, &git)
             .expect_err("transport failure must remain an error");
 
-        assert!(error.to_string().starts_with("git log "));
+        assert!(error.to_string().starts_with("read promoted commits:"));
         assert!(error.to_string().ends_with(": git transport unavailable"));
         assert_eq!(
             error.source().map(ToString::to_string),

@@ -10,7 +10,7 @@ use crate::{
         sort_files_tree_order,
         util::{DiffData, assemble, exclusion_note, repo_name},
     },
-    ports::DiffSource,
+    ports::GitClient,
     shared::notes::Note,
 };
 
@@ -50,7 +50,7 @@ impl ResolvedTarget {
 }
 
 pub(super) fn build(
-    source: &impl DiffSource,
+    source: &impl GitClient,
     top: &str,
     target: &DiffTarget,
     exclusions: &domain::diffs::DiffExclusions,
@@ -104,7 +104,7 @@ pub(super) fn build(
 }
 
 fn resolve_target_ranges(
-    source: &impl DiffSource,
+    source: &impl GitClient,
     top: &str,
     target: &DiffTarget,
     notes: &mut Vec<Note>,
@@ -194,20 +194,20 @@ struct DiffBase {
 }
 
 fn unpushed_or_main_base(
-    source: &impl DiffSource,
+    source: &impl GitClient,
     top: &str,
     notes: &mut Vec<Note>,
 ) -> anyhow::Result<DiffBase> {
     let repo = Path::new(top);
     match source.upstream(repo) {
-        Ok(upstream) => Ok(DiffBase {
+        Ok(crate::ports::GitEffect::Applied(upstream)) => Ok(DiffBase {
             ref_name: upstream,
             is_upstream: true,
         }),
-        Err(upstream_error) => {
+        Ok(crate::ports::GitEffect::Rejected(upstream_error)) => {
             source
                 .verify_commit(repo, "main")
-                .map_err(|_| upstream_error)?;
+                .map_err(|_| anyhow::anyhow!(upstream_error))?;
             notes.push(Note::warn(
                 "diff-preview: no upstream; falling back to main",
             ));
@@ -216,10 +216,11 @@ fn unpushed_or_main_base(
                 is_upstream: false,
             })
         }
+        Err(error) => Err(error),
     }
 }
 
-fn verify_exact_range(source: &impl DiffSource, top: &str, range: &str) -> anyhow::Result<()> {
+fn verify_exact_range(source: &impl GitClient, top: &str, range: &str) -> anyhow::Result<()> {
     let Some((start, end)) = range.split_once("..") else {
         anyhow::bail!("range must use <start>..<end>");
     };

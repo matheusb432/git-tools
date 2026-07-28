@@ -4,7 +4,7 @@ use contracts::recipes::Recipe;
 use domain::managed::ManagedRepo;
 
 use super::{RecipeRequest, pin};
-use crate::{managed::select_unpushed, ports::GitRunner};
+use crate::{managed::select_unpushed, ports::GitClient};
 
 /// Requests recipes for ahead repositories from an already-resolved manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +13,8 @@ pub struct BuildManagedRecipes {
     pub operation: RecipeRequest,
 }
 
+pub type BuildManagedRecipesOk = Vec<Recipe>;
+
 /// Reports a failure while selecting managed repositories.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -20,39 +22,35 @@ pub enum BuildManagedRecipesError {
     /// Managed-repository selection failed.
     #[error(transparent)]
     Select(#[from] select_unpushed::SelectUnpushedError),
-    /// Immutable pin resolution failed after repository selection.
-    #[error(transparent)]
-    Pin(#[from] pin::PinRecipeError),
 }
 
 /// Builds one complete recipe per present managed repository ahead of upstream.
 ///
 /// # Errors
 ///
-/// Returns [`BuildManagedRecipesError`] when selection or immutable pin resolution fails.
+/// Returns [`BuildManagedRecipesError`] when repository selection fails.
 #[cqrsy::query]
 pub fn execute(
     query: BuildManagedRecipes,
-    git: &impl GitRunner,
-) -> Result<Vec<Recipe>, BuildManagedRecipesError> {
+    git: &impl GitClient,
+) -> Result<BuildManagedRecipesOk, BuildManagedRecipesError> {
     let selected =
         select_unpushed::execute(select_unpushed::SelectUnpushed { repos: query.repos }, git)?;
-    selected
+    Ok(selected
         .into_iter()
         .map(|repo| pin::build_resolved(repo.path, query.operation.clone(), Some(repo.label), git))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(Into::into)
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{error::Error as _, path::PathBuf};
+    use std::path::PathBuf;
 
     use contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
     use domain::managed::ManagedRepo;
 
     use super::{BuildManagedRecipes, execute};
-    use crate::{diffs::DiffTarget, recipes::RecipeRequest, testing::FakeGitRunner};
+    use crate::{diffs::DiffTarget, recipes::RecipeRequest, testing::ScriptedGitClient};
 
     fn repo(name: &str) -> ManagedRepo {
         ManagedRepo {
@@ -64,19 +62,19 @@ mod tests {
 
     #[test]
     fn managed_build_selects_only_ahead_repositories_and_keeps_manifest_order() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("origin/main\n"),
-            FakeGitRunner::ok("2\n"),
-            FakeGitRunner::ok("/real/api\n"),
-            FakeGitRunner::ok("origin/main\n"),
-            FakeGitRunner::ok("0\n"),
-            FakeGitRunner::ok("origin/main\n"),
-            FakeGitRunner::ok("1\n"),
-            FakeGitRunner::ok("/real/web\n"),
-            FakeGitRunner::ok("api-base\n"),
-            FakeGitRunner::ok("api-head\n"),
-            FakeGitRunner::ok("web-base\n"),
-            FakeGitRunner::ok("web-head\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("origin/main\n"),
+            ScriptedGitClient::applied("2\n"),
+            ScriptedGitClient::applied("/real/api\n"),
+            ScriptedGitClient::applied("origin/main\n"),
+            ScriptedGitClient::applied("0\n"),
+            ScriptedGitClient::applied("origin/main\n"),
+            ScriptedGitClient::applied("1\n"),
+            ScriptedGitClient::applied("/real/web\n"),
+            ScriptedGitClient::applied("api-base\n"),
+            ScriptedGitClient::applied("api-head\n"),
+            ScriptedGitClient::applied("web-base\n"),
+            ScriptedGitClient::applied("web-head\n"),
         ]);
 
         let recipes = execute(
@@ -113,30 +111,28 @@ mod tests {
     }
 
     #[test]
-    fn pin_transport_propagates_through_the_managed_operation_error() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok("origin/main\n")),
-            Ok(FakeGitRunner::ok("1\n")),
-            Ok(FakeGitRunner::ok("/real/api\n")),
+    fn pin_resolution_failure_keeps_the_managed_recipe_symbolic() {
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied("origin/main\n")),
+            Ok(ScriptedGitClient::applied("1\n")),
+            Ok(ScriptedGitClient::applied("/real/api\n")),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
-        let error = execute(
+        let recipes = execute(
             BuildManagedRecipes {
                 repos: vec![repo("api")],
                 operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
             },
             &git,
         )
-        .expect_err("pin transport failure must propagate");
+        .expect("pin failure is an optional optimization");
 
         assert_eq!(
-            error.to_string(),
-            "git rev-parse @{u}: git transport unavailable"
-        );
-        assert_eq!(
-            error.source().map(ToString::to_string),
-            Some("git transport unavailable".into())
+            recipes[0].op,
+            RecipeOp::Diff {
+                target: RecipeTarget::Unpushed { pinned: None }
+            }
         );
     }
 }

@@ -1,10 +1,7 @@
 //! Applies a confirmed current-repository push plan.
 
 use super::{commit_progress::CommitProgress, plan_push::PushTarget};
-use crate::{
-    ports::GitRunner,
-    shared::git::{capture_checked, command_label, created_commit_identity},
-};
+use crate::ports::{GitClient, GitEffect};
 
 /// Selects whether a push may create a commit or may push existing commits only.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,7 +28,7 @@ pub enum PushStatus {
 
 /// Reports the closed push status and its user-facing detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PushResult {
+pub struct ApplyPushOk {
     pub status: PushStatus,
     pub detail: String,
     pub progress: PushProgress,
@@ -44,7 +41,7 @@ pub struct PushProgress {
     pub pushed: bool,
 }
 
-impl PushResult {
+impl ApplyPushOk {
     fn new(status: PushStatus, detail: impl Into<String>, progress: PushProgress) -> Self {
         Self {
             status,
@@ -88,17 +85,16 @@ enum RepositoryState {
 ///
 /// Returns [`ApplyPushError`] when Git transport fails.
 #[cqrsy::command]
-pub fn execute(command: ApplyPush, git: &impl GitRunner) -> Result<PushResult, ApplyPushError> {
+pub fn execute(command: ApplyPush, git: &impl GitClient) -> Result<ApplyPushOk, ApplyPushError> {
     let ApplyPush { target, mode } = command;
     let mut progress = PushProgress::default();
-    let status_args = ["status", "--porcelain"];
-    let porcelain = match git
-        .run(&target.top, &status_args)
-        .map_err(|source| transport(&status_args, progress.clone(), source))?
+    let working_tree = match git
+        .working_tree(&target.top)
+        .map_err(|source| transport("read working tree", progress.clone(), source))?
     {
-        output if output.exit_code == 0 => output.stdout,
-        _ => {
-            return Ok(PushResult::new(
+        GitEffect::Applied(working_tree) => working_tree,
+        GitEffect::Rejected(_) => {
+            return Ok(ApplyPushOk::new(
                 PushStatus::Failed,
                 "git status failed",
                 progress,
@@ -106,17 +102,14 @@ pub fn execute(command: ApplyPush, git: &impl GitRunner) -> Result<PushResult, A
         }
     };
 
-    let state = if porcelain.trim().is_empty() {
-        let ahead_args = ["rev-list", "--count", "@{u}..HEAD"];
-        match capture_checked(git, &target.top, &ahead_args)
-            .map_err(|source| transport(&ahead_args, progress.clone(), source))?
-            .filter(|count| !count.is_empty())
+    let state = if working_tree.files.is_empty() {
+        match git
+            .commit_count(&target.top, "@{u}..HEAD")
+            .map_err(|source| transport("count unpushed commits", progress.clone(), source))?
         {
-            Some(count) => RepositoryState::Clean {
-                ahead: count.parse::<usize>().unwrap_or(0),
-            },
+            Some(ahead) => RepositoryState::Clean { ahead },
             None => {
-                return Ok(PushResult::new(
+                return Ok(ApplyPushOk::new(
                     PushStatus::Failed,
                     "rev-list failed",
                     progress,
@@ -128,56 +121,57 @@ pub fn execute(command: ApplyPush, git: &impl GitRunner) -> Result<PushResult, A
     };
 
     match classify(state, mode) {
-        PushAction::Refuse => Ok(PushResult::new(
+        PushAction::Refuse => Ok(ApplyPushOk::new(
             PushStatus::Refused,
             "working tree has uncommitted changes",
             progress,
         )),
-        PushAction::Noop { detail } => Ok(PushResult::new(PushStatus::Noop, detail, progress)),
+        PushAction::Noop { detail } => Ok(ApplyPushOk::new(PushStatus::Noop, detail, progress)),
         PushAction::Push { detail } => match push(git, &target, &progress)? {
             None => {
                 progress.pushed = true;
-                Ok(PushResult::new(PushStatus::Pushed, detail, progress))
+                Ok(ApplyPushOk::new(PushStatus::Pushed, detail, progress))
             }
-            Some(detail) => Ok(PushResult::new(PushStatus::Failed, detail, progress)),
+            Some(detail) => Ok(ApplyPushOk::new(PushStatus::Failed, detail, progress)),
         },
         PushAction::CommitAndPush { message } => {
-            let add_args = ["add", "-A"];
-            let add = git
-                .run(&target.top, &add_args)
-                .map_err(|source| transport(&add_args, progress.clone(), source))?;
-            if !add.success() {
-                return Ok(PushResult::new(
+            if let GitEffect::Rejected(_) = git
+                .stage_all(&target.top)
+                .map_err(|source| transport("stage changes", progress.clone(), source))?
+            {
+                return Ok(ApplyPushOk::new(
                     PushStatus::Failed,
                     "git add failed",
                     progress,
                 ));
             }
             progress.commit = CommitProgress::Staged;
-            let commit_args = ["commit", "-m", message.as_str()];
-            let commit = git
-                .run(&target.top, &commit_args)
-                .map_err(|source| transport(&commit_args, progress.clone(), source))?;
-            if !commit.success() {
-                return Ok(PushResult::new(
-                    PushStatus::Failed,
-                    "git commit failed",
-                    progress,
-                ));
-            }
+            let receipt = match git
+                .commit(&target.top, &message)
+                .map_err(|source| transport("create commit", progress.clone(), source))?
+            {
+                GitEffect::Applied(receipt) => receipt,
+                GitEffect::Rejected(_) => {
+                    return Ok(ApplyPushOk::new(
+                        PushStatus::Failed,
+                        "git commit failed",
+                        progress,
+                    ));
+                }
+            };
             progress.commit = CommitProgress::Created {
-                identity: created_commit_identity(&commit),
+                identity: receipt.identity,
             };
             match push(git, &target, &progress)? {
                 None => {
                     progress.pushed = true;
-                    Ok(PushResult::new(
+                    Ok(ApplyPushOk::new(
                         PushStatus::Pushed,
                         "staged, committed, and pushed",
                         progress,
                     ))
                 }
-                Some(detail) => Ok(PushResult::new(PushStatus::Failed, detail, progress)),
+                Some(detail) => Ok(ApplyPushOk::new(PushStatus::Failed, detail, progress)),
             }
         }
     }
@@ -214,23 +208,26 @@ fn classify(state: RepositoryState, mode: PushMode) -> PushAction {
 }
 
 fn push(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     target: &PushTarget,
     progress: &PushProgress,
 ) -> Result<Option<String>, ApplyPushError> {
-    let args = ["push", target.remote.as_str(), target.branch.as_str()];
     match git
-        .run(&target.top, &args)
-        .map_err(|source| transport(&args, progress.clone(), source))?
+        .push_branch(&target.top, &target.remote, &target.branch, false)
+        .map_err(|source| transport("push branch", progress.clone(), source))?
     {
-        output if output.exit_code == 0 => Ok(None),
-        output => Ok(Some(output.fail_detail("push failed"))),
+        GitEffect::Applied(_) => Ok(None),
+        GitEffect::Rejected(detail) => Ok(Some(if detail.is_empty() {
+            "push failed".into()
+        } else {
+            detail
+        })),
     }
 }
 
-fn transport(args: &[&str], progress: PushProgress, source: anyhow::Error) -> ApplyPushError {
+fn transport(command: &str, progress: PushProgress, source: anyhow::Error) -> ApplyPushError {
     ApplyPushError::Transport {
-        command: command_label(args),
+        command: command.into(),
         progress,
         source,
     }
@@ -243,7 +240,7 @@ mod tests {
     use domain::repository::PendingChanges;
 
     use super::*;
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     fn target() -> PushTarget {
         PushTarget {
@@ -287,7 +284,10 @@ mod tests {
 
     #[test]
     fn unavailable_ahead_count_returns_a_closed_failure() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok(""), FakeGitRunner::ok("")]);
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied(""),
+        ]);
 
         let result = execute(
             ApplyPush {
@@ -300,7 +300,7 @@ mod tests {
 
         assert_eq!(
             result,
-            PushResult {
+            ApplyPushOk {
                 status: PushStatus::Failed,
                 detail: "rev-list failed".into(),
                 progress: PushProgress::default(),
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn dirty_existing_only_push_returns_a_closed_refusal() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok(" M src/lib.rs\n")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied(" M src/lib.rs\n")]);
 
         let result = execute(
             ApplyPush {
@@ -323,7 +323,7 @@ mod tests {
 
         assert_eq!(
             result,
-            PushResult {
+            ApplyPushOk {
                 status: PushStatus::Refused,
                 detail: "working tree has uncommitted changes".into(),
                 progress: PushProgress::default(),
@@ -333,10 +333,10 @@ mod tests {
 
     #[test]
     fn failed_commit_returns_a_closed_failure() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(" M src/lib.rs\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::exit_err("commit rejected", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::rejected("commit rejected"),
         ]);
 
         let result = execute(
@@ -352,7 +352,7 @@ mod tests {
 
         assert_eq!(
             result,
-            PushResult {
+            ApplyPushOk {
                 status: PushStatus::Failed,
                 detail: "git commit failed".into(),
                 progress: PushProgress {
@@ -365,11 +365,11 @@ mod tests {
 
     #[test]
     fn rejected_push_preserves_the_created_commit_identity() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(" M src/lib.rs\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::ok("[main abc1234] save work\n"),
-            FakeGitRunner::exit_err("remote rejected", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied("[main abc1234] save work\n"),
+            ScriptedGitClient::rejected("remote rejected"),
         ]);
 
         let result = execute(
@@ -397,10 +397,10 @@ mod tests {
 
     #[test]
     fn push_transport_after_commit_preserves_completed_progress_and_source() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok(" M src/lib.rs\n")),
-            Ok(FakeGitRunner::ok("")),
-            Ok(FakeGitRunner::ok("[main abc1234] save work\n")),
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied(" M src/lib.rs\n")),
+            Ok(ScriptedGitClient::applied("")),
+            Ok(ScriptedGitClient::applied("[main abc1234] save work\n")),
             Err(anyhow::anyhow!("push transport unavailable")),
         ]);
 
@@ -432,8 +432,9 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_a_sourced_apply_error() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(
             ApplyPush {
@@ -446,7 +447,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "git status --porcelain: git transport unavailable"
+            "read working tree: git transport unavailable"
         );
         assert_eq!(
             error.source().map(ToString::to_string),

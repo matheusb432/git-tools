@@ -8,11 +8,11 @@ pub mod subrepos;
 
 use application::{
     diffs::{
-        render_diff::{RenderDiffOutcome, RenderDiffResponse},
-        render_diff_all::RenderDiffAllResponse,
-        render_diff_subrepos::{RenderDiffSubreposOutcome, RenderDiffSubreposResponse},
-        render_merge_diff::RenderMergeDiffResponse,
-        render_squash_preview::RenderSquashPreviewResponse,
+        render_diff::{RenderDiffOk, RenderDiffOutcome},
+        render_diff_all::RenderDiffAllOk,
+        render_diff_subrepos::{RenderDiffSubreposOk, RenderDiffSubreposOutcome},
+        render_merge_diff::RenderMergeDiffOk,
+        render_squash_preview::RenderSquashPreviewOk,
     },
     shared::notes,
 };
@@ -22,7 +22,7 @@ use contracts::{
 };
 
 /// Project a successful application response onto the wire envelope.
-pub(crate) fn to_envelope(resp: RenderDiffResponse) -> Envelope<RenderDiffData> {
+pub(crate) fn to_envelope(resp: RenderDiffOk) -> Envelope<RenderDiffData> {
     let notes = resp.notes.iter().map(to_note).collect();
     match resp.outcome {
         RenderDiffOutcome::Rendered { artifact, reused } => Envelope {
@@ -58,22 +58,22 @@ fn ok_envelope(
 }
 
 /// Project a successful application response onto the wire envelope.
-pub(crate) fn to_merge_envelope(resp: &RenderMergeDiffResponse) -> Envelope<RenderDiffData> {
+pub(crate) fn to_merge_envelope(resp: &RenderMergeDiffOk) -> Envelope<RenderDiffData> {
     ok_envelope(&resp.artifact, resp.reused, &resp.notes)
 }
 
 /// Project a successful application response onto the wire envelope.
-pub(crate) fn to_squash_envelope(resp: &RenderSquashPreviewResponse) -> Envelope<RenderDiffData> {
+pub(crate) fn to_squash_envelope(resp: &RenderSquashPreviewOk) -> Envelope<RenderDiffData> {
     ok_envelope(&resp.artifact, resp.reused, &resp.notes)
 }
 
 /// Project a successful application response onto the wire envelope.
-pub(crate) fn to_all_envelope(resp: &RenderDiffAllResponse) -> Envelope<RenderDiffData> {
+pub(crate) fn to_all_envelope(resp: &RenderDiffAllOk) -> Envelope<RenderDiffData> {
     ok_envelope(&resp.artifact, resp.reused, &resp.notes)
 }
 
 /// Project a successful application response onto the wire envelope.
-pub(crate) fn to_subrepos_envelope(resp: RenderDiffSubreposResponse) -> Envelope<RenderDiffData> {
+pub(crate) fn to_subrepos_envelope(resp: RenderDiffSubreposOk) -> Envelope<RenderDiffData> {
     let notes = resp.notes.iter().map(to_note).collect();
     match resp.outcome {
         RenderDiffSubreposOutcome::Rendered { artifact, reused } => Envelope {

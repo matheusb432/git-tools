@@ -3,10 +3,7 @@
 use domain::managed::{ManagedRepo, working_tree::CommitFile};
 
 use super::working_tree;
-use crate::{
-    ports::GitRunner,
-    shared::git::{created_commit_identity, last_non_empty_line},
-};
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests one local commit attempt for every resolved managed repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +54,7 @@ pub enum CommitExit {
 
 /// Reports every repository result and the aggregate exit classification.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommitAllResult {
+pub struct CommitAllOk {
     pub exit: CommitExit,
     pub results: Vec<CommitResult>,
 }
@@ -93,10 +90,7 @@ struct CommitAttemptError {
 ///
 /// Returns [`CommitAllError`] when Git cannot be executed while staging or committing.
 #[cqrsy::command]
-pub fn execute(
-    command: CommitAll,
-    git: &impl GitRunner,
-) -> Result<CommitAllResult, CommitAllError> {
+pub fn execute(command: CommitAll, git: &impl GitClient) -> Result<CommitAllOk, CommitAllError> {
     let CommitAll {
         repos,
         message,
@@ -117,14 +111,14 @@ pub fn execute(
         }
     }
 
-    Ok(CommitAllResult {
+    Ok(CommitAllOk {
         exit: classify_exit(&results, dry),
         results,
     })
 }
 
 fn commit_one(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     repo: &ManagedRepo,
     message: Option<&str>,
     dry: bool,
@@ -166,7 +160,7 @@ fn commit_one(
         return Ok(result);
     };
 
-    let output = match git.run(&repo.path, &["add", "-A"]) {
+    let output = match git.stage_all(&repo.path) {
         Ok(output) => output,
         Err(source) => {
             result.action = CommitAction::Fail;
@@ -177,14 +171,14 @@ fn commit_one(
             });
         }
     };
-    if !output.success() {
+    if let GitEffect::Rejected(_) = output {
         result.action = CommitAction::Fail;
         result.detail = "git add failed".into();
         return Ok(result);
     }
     result.staged = true;
 
-    let output = match git.run(&repo.path, &["commit", "-m", message]) {
+    let output = match git.commit(&repo.path, message) {
         Ok(output) => output,
         Err(source) => {
             result.action = CommitAction::Fail;
@@ -195,16 +189,16 @@ fn commit_one(
             });
         }
     };
-    let combined = output.combined();
-    if output.success() {
-        result.action = CommitAction::Committed;
-        result.detail = last_non_empty_line(&combined).unwrap_or("committed").into();
-        result.commit = created_commit_identity(&output);
-    } else {
-        result.action = CommitAction::Fail;
-        result.detail = last_non_empty_line(&combined)
-            .unwrap_or("commit failed")
-            .into();
+    match output {
+        GitEffect::Applied(receipt) => {
+            result.action = CommitAction::Committed;
+            result.detail = receipt.detail;
+            result.commit = receipt.identity;
+        }
+        GitEffect::Rejected(detail) => {
+            result.action = CommitAction::Fail;
+            result.detail = detail;
+        }
     }
     Ok(result)
 }
@@ -240,7 +234,7 @@ mod tests {
     use domain::managed::{ManagedRepo, working_tree::CommitFile};
 
     use super::{CommitAction, CommitAll, CommitAllError, CommitExit, CommitResult, execute};
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     fn repo(name: &str) -> ManagedRepo {
         ManagedRepo {
@@ -260,10 +254,10 @@ mod tests {
 
     #[test]
     fn successful_managed_commit_reports_the_created_commit() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(" M src/lib.rs\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::ok("[main abc1234] save\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied("[main abc1234] save\n"),
         ]);
 
         let result = execute(commit(vec![repo("api")], Some("save"), false), &git)
@@ -290,10 +284,10 @@ mod tests {
 
     #[test]
     fn commit_metadata_skips_bracketed_hook_noise() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(" M src/lib.rs\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::ok("[lint passed]\n[main abc1234] save\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied("[lint passed]\n[main abc1234] save\n"),
         ]);
 
         let result = execute(commit(vec![repo("api")], Some("save"), false), &git)
@@ -304,10 +298,10 @@ mod tests {
 
     #[test]
     fn commit_metadata_accepts_ansi_colored_git_summary() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(" M src/lib.rs\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::ok(
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied(
                 "\u{1b}[1m[\u{1b}[m\u{1b}[36mmain\u{1b}[m \u{1b}[33mabc1234\u{1b}[m\u{1b}[1m]\u{1b}[m save\n",
             ),
         ]);
@@ -320,7 +314,7 @@ mod tests {
 
     #[test]
     fn absent_and_clean_repositories_are_closed_clean_results() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok("")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
         git.absent_repos.lock().unwrap().push("/repos/api".into());
 
         let result = execute(
@@ -338,7 +332,7 @@ mod tests {
 
     #[test]
     fn dry_run_reports_dirty_files_and_warns_without_a_message() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok("?? notes.txt\n")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("?? notes.txt\n")]);
 
         let result = execute(commit(vec![repo("api")], None, true), &git)
             .expect("Git transport remains available");
@@ -351,7 +345,7 @@ mod tests {
 
     #[test]
     fn missing_real_message_is_a_closed_skip_and_warn() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok(" M src/lib.rs\n")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied(" M src/lib.rs\n")]);
 
         let result = execute(commit(vec![repo("api")], None, false), &git)
             .expect("Git transport remains available");
@@ -363,9 +357,9 @@ mod tests {
 
     #[test]
     fn git_add_rejection_is_a_closed_failure_and_fail_exit() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(" M src/lib.rs\n"),
-            FakeGitRunner::exit_err("fatal: index locked", 128),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
+            ScriptedGitClient::rejected("fatal: index locked"),
         ]);
 
         let result = execute(commit(vec![repo("api")], Some("save"), false), &git)
@@ -378,10 +372,10 @@ mod tests {
 
     #[test]
     fn git_commit_rejection_preserves_the_last_detail_line() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(" M src/lib.rs\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::exit_err("hint: resolve it\nfatal: commit rejected\n", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::rejected("hint: resolve it\nfatal: commit rejected\n"),
         ]);
 
         let result = execute(commit(vec![repo("api")], Some("save"), false), &git)
@@ -395,8 +389,9 @@ mod tests {
 
     #[test]
     fn working_tree_transport_failure_remains_an_error_with_its_source() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(commit(vec![repo("api")], Some("save"), false), &git)
             .expect_err("transport failure must remain an error");
@@ -413,10 +408,10 @@ mod tests {
 
     #[test]
     fn later_transport_failure_preserves_completed_results_and_failed_repo() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok(" M src/lib.rs\n")),
-            Ok(FakeGitRunner::ok("")),
-            Ok(FakeGitRunner::ok("[main abc1234] save\n")),
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied(" M src/lib.rs\n")),
+            Ok(ScriptedGitClient::applied("")),
+            Ok(ScriptedGitClient::applied("[main abc1234] save\n")),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
@@ -443,9 +438,9 @@ mod tests {
 
     #[test]
     fn commit_transport_failure_preserves_the_staged_repo_state() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok(" M src/lib.rs\n")),
-            Ok(FakeGitRunner::ok("")),
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied(" M src/lib.rs\n")),
+            Ok(ScriptedGitClient::applied("")),
             Err(anyhow::anyhow!("commit transport unavailable")),
         ]);
 

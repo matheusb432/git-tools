@@ -23,7 +23,7 @@ pub async fn handle(
         application::diffs::render_diff_subrepos::execute(
             request,
             &state.user_settings,
-            &state.source,
+            &state.git,
             &state.artifacts,
             &state.renderer,
             &state.clock,

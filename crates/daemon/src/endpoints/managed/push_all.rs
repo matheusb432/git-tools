@@ -1,5 +1,5 @@
 //! `POST /managed/push-all`. Genuinely async (real `.await` inside the handler,
-//! per `RemoteSync`'s `tokio::process::Command` adapter) — no `spawn_blocking`.
+//! through the consolidated Git client.
 
 use axum::{
     Json,
@@ -20,7 +20,7 @@ pub async fn handle(
     let request = super::to_push_all_request(request);
     let response = application::managed::push_all::execute(
         request,
-        &state.remote,
+        &state.git,
         &state.manifest,
         &state.ledger,
         &state.clock,

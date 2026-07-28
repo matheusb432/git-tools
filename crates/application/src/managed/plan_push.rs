@@ -11,7 +11,7 @@ pub struct PlanPush {
 
 /// Describes the bounded managed actions to execute.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PushPlan {
+pub enum PlanPushOk {
     /// Push existing commits without first creating managed commits.
     PushOnly { dry: bool },
     /// Commit managed changes, then push only when that commit action is clean.
@@ -20,17 +20,17 @@ pub enum PushPlan {
 
 /// Selects the managed push mode without performing external actions.
 #[cqrsy::query]
-pub fn execute(query: PlanPush) -> PushPlan {
+pub fn execute(query: PlanPush) -> PlanPushOk {
     let PlanPush { message, dry } = query;
     match message {
-        Some(message) => PushPlan::CommitThenPush { message, dry },
-        None => PushPlan::PushOnly { dry },
+        Some(message) => PlanPushOk::CommitThenPush { message, dry },
+        None => PlanPushOk::PushOnly { dry },
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PlanPush, PushPlan, execute};
+    use super::{PlanPush, PlanPushOk, execute};
 
     #[test]
     fn absent_message_plans_push_only() {
@@ -39,7 +39,7 @@ mod tests {
                 message: None,
                 dry: true,
             }),
-            PushPlan::PushOnly { dry: true }
+            PlanPushOk::PushOnly { dry: true }
         );
     }
 
@@ -50,7 +50,7 @@ mod tests {
                 message: Some("save managed work".into()),
                 dry: true,
             }),
-            PushPlan::CommitThenPush {
+            PlanPushOk::CommitThenPush {
                 message: "save managed work".into(),
                 dry: true,
             }

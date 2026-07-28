@@ -10,7 +10,7 @@ use crate::{
         range_view::{RangePresentation, RangeView},
         util::{DiffData, assemble, repo_name},
     },
-    ports::DiffSource,
+    ports::GitClient,
 };
 
 pub(crate) struct MergeViewBuild {
@@ -21,7 +21,7 @@ pub(crate) struct MergeViewBuild {
 }
 
 pub(super) fn build(
-    source: &impl DiffSource,
+    source: &impl GitClient,
     cwd: &Path,
     base: Option<&str>,
     pinned: Option<&PinnedRange>,

@@ -5,11 +5,14 @@
 use std::path::PathBuf;
 
 use domain::managed::ManagedRepo;
+use futures_util::{StreamExt as _, stream};
 
 use crate::{
     managed::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
-    ports::{ManagedManifest, RemoteSync},
+    ports::{GitClient, GitEffect, ManagedManifest},
 };
+
+const MAX_CONCURRENT_GIT_OPERATIONS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PullAll {
@@ -19,7 +22,7 @@ pub struct PullAll {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PullAllResponse {
+pub struct PullAllOk {
     pub results: Vec<RepoSyncResult>,
     pub exit: SyncExit,
 }
@@ -30,36 +33,47 @@ pub enum PullAllError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Pulls every managed repository through the remote-sync ports.
+/// Pulls every managed repository through the Git capability.
 #[cqrsy::command]
 pub async fn execute(
     req: PullAll,
-    remote: &impl RemoteSync,
+    git: &impl GitClient,
     manifest: &impl ManagedManifest,
-) -> Result<PullAllResponse, PullAllError> {
+) -> Result<PullAllOk, PullAllError> {
     let repos = manifest.load(&req.repos_file, &req.home_dir).await?;
-    let results =
-        futures_util::future::join_all(repos.iter().map(|repo| pull_one(remote, repo, req.dry)))
-            .await;
+    let dry = req.dry;
+    let tasks = stream::iter(repos.into_iter().enumerate())
+        .map(|(index, repo)| {
+            let git = git.clone();
+            async move {
+                tokio::task::spawn_blocking(move || (index, pull_one(&git, &repo, dry)))
+                    .await
+                    .map_err(anyhow::Error::from)
+            }
+        })
+        .buffer_unordered(MAX_CONCURRENT_GIT_OPERATIONS)
+        .collect::<Vec<_>>()
+        .await;
+    let mut completed = tasks.into_iter().collect::<anyhow::Result<Vec<_>>>()?;
+    completed.sort_by_key(|(index, _)| *index);
+    let results = completed
+        .into_iter()
+        .map(|(_, result)| result)
+        .collect::<Vec<_>>();
     let exit = service::classify_exit(&results);
-    Ok(PullAllResponse { results, exit })
+    Ok(PullAllOk { results, exit })
 }
 
-async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> RepoSyncResult {
-    let branch =
-        match service::preflight(remote, repo, "detached HEAD - nothing to pull onto").await {
-            Preflight::Done(result) => return result,
-            Preflight::Ready { branch } => branch,
-        };
+fn pull_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> RepoSyncResult {
+    let branch = match service::preflight(git, repo, "detached HEAD - nothing to pull onto") {
+        Preflight::Done(result) => return result,
+        Preflight::Ready { branch } => branch,
+    };
 
-    match remote.fetch(&repo.path, "origin").await {
-        Ok(outcome) if outcome.success => {}
-        Ok(outcome) => {
-            let detail = format!(
-                "fetch failed: {}",
-                crate::shared::git::last_non_empty_line(&outcome.combined)
-                    .unwrap_or("fetch failed")
-            );
+    match git.fetch(&repo.path, "origin") {
+        Ok(GitEffect::Applied(_)) => {}
+        Ok(GitEffect::Rejected(detail)) => {
+            let detail = format!("fetch failed: {detail}");
             return service::result(repo, &branch, SyncStatus::Fail, &detail);
         }
         Err(error) => {
@@ -73,7 +87,7 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
     }
 
     let remote_branch = format!("refs/remotes/origin/{branch}");
-    match remote.verify_ref(&repo.path, &remote_branch).await {
+    match git.revision_exists(&repo.path, &remote_branch) {
         Ok(true) => {}
         _ => {
             return service::result(
@@ -86,7 +100,7 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
     }
 
     let range = format!("origin/{branch}...{branch}");
-    let Ok((behind, ahead)) = remote.rev_list_left_right(&repo.path, &range).await else {
+    let Ok(Some((behind, ahead))) = git.ahead_behind(&repo.path, &range) else {
         return service::result(repo, &branch, SyncStatus::Fail, "rev-list failed");
     };
 
@@ -108,17 +122,16 @@ async fn pull_one(remote: &impl RemoteSync, repo: &ManagedRepo, dry: bool) -> Re
     }
 
     let merge_ref = format!("origin/{branch}");
-    match remote.merge_ff_only(&repo.path, &merge_ref).await {
-        Ok(outcome) if outcome.success => {
+    match git.fast_forward(&repo.path, &merge_ref) {
+        Ok(GitEffect::Applied(_)) => {
             let detail = format!(
                 "fast-forwarded {behind} commit{}",
                 if behind == 1 { "" } else { "s" }
             );
             service::result(repo, &branch, SyncStatus::Pulled, &detail)
         }
-        Ok(outcome) => {
-            let detail = outcome
-                .combined
+        Ok(GitEffect::Rejected(detail)) => {
+            let detail = detail
                 .lines()
                 .find(|line| line.starts_with("error:") || line.starts_with("fatal:"))
                 .map_or("ff merge failed", str::trim)
@@ -134,10 +147,7 @@ mod tests {
     use domain::managed::ManagedRepo;
 
     use super::*;
-    use crate::{
-        ports::SyncOutput,
-        testing::{FakeManagedManifest, FakeRemoteSync},
-    };
+    use crate::testing::{FakeManagedManifest, ManagedGitScript, SyncOutput};
 
     fn repo(name: &str) -> ManagedRepo {
         ManagedRepo {
@@ -148,12 +158,12 @@ mod tests {
     }
 
     async fn execute_with(
-        remote: FakeRemoteSync,
+        remote: ManagedGitScript,
         repos: Vec<ManagedRepo>,
         request: PullAll,
-    ) -> Result<PullAllResponse, PullAllError> {
+    ) -> Result<PullAllOk, PullAllError> {
         let manifest = FakeManagedManifest { repos, error: None };
-        execute(request, &remote, &manifest).await
+        execute(request, &remote.git_client(), &manifest).await
     }
 
     fn req() -> PullAll {
@@ -164,8 +174,8 @@ mod tests {
         }
     }
 
-    fn ready_remote() -> FakeRemoteSync {
-        FakeRemoteSync {
+    fn ready_remote() -> ManagedGitScript {
+        ManagedGitScript {
             present: true,
             branch: "main".into(),
             has_remote: true,
@@ -180,7 +190,7 @@ mod tests {
 
     #[tokio::test]
     async fn dry_run_reports_would_pull_without_merging() {
-        let remote = FakeRemoteSync {
+        let remote = ManagedGitScript {
             rev_list_left_right: (3, 0),
             ..ready_remote()
         };
@@ -198,7 +208,7 @@ mod tests {
     #[tokio::test]
     async fn diverged_repos_fail_without_merging() {
         let response = execute_with(
-            FakeRemoteSync {
+            ManagedGitScript {
                 rev_list_left_right: (2, 1),
                 ..ready_remote()
             },
@@ -219,7 +229,7 @@ mod tests {
     #[tokio::test]
     async fn already_up_to_date_with_local_ahead_reports_push_pending() {
         let response = execute_with(
-            FakeRemoteSync {
+            ManagedGitScript {
                 rev_list_left_right: (0, 2),
                 ..ready_remote()
             },
@@ -239,7 +249,7 @@ mod tests {
     #[tokio::test]
     async fn a_fast_forward_merge_succeeds() {
         let response = execute_with(
-            FakeRemoteSync {
+            ManagedGitScript {
                 rev_list_left_right: (1, 0),
                 merge_result: SyncOutput {
                     success: true,
@@ -260,7 +270,7 @@ mod tests {
     #[tokio::test]
     async fn a_fetch_failure_is_reported_as_fail() {
         let response = execute_with(
-            FakeRemoteSync {
+            ManagedGitScript {
                 fetch_result: SyncOutput {
                     success: false,
                     combined: "fatal: unable to access origin\n".into(),
@@ -283,7 +293,7 @@ mod tests {
     #[tokio::test]
     async fn a_missing_remote_branch_is_a_warning() {
         let response = execute_with(
-            FakeRemoteSync {
+            ManagedGitScript {
                 verify_ref: false,
                 ..ready_remote()
             },

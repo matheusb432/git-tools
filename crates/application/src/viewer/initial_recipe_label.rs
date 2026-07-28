@@ -8,14 +8,14 @@ pub struct InitialRecipeLabel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InitialRecipeLabelResponse {
+pub struct InitialRecipeLabelOk {
     pub label: String,
 }
 
 #[cqrsy::query]
-pub fn execute(query: InitialRecipeLabel) -> InitialRecipeLabelResponse {
+pub fn execute(query: InitialRecipeLabel) -> InitialRecipeLabelOk {
     let InitialRecipeLabel { recipe } = query;
-    InitialRecipeLabelResponse {
+    InitialRecipeLabelOk {
         label: recipe_label::initial(&recipe),
     }
 }

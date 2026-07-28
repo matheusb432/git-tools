@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 
 use application::managed::prune_all::{self, PruneAction, PruneExit};
-use infra::git_runner::StdGitRunner;
+use infra::git_client::HybridGitClient;
 use serde::Serialize;
 
 use super::{ManagedExit, ManagedOptions, ManagedRun};
@@ -39,7 +39,7 @@ pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRe
                     onto: onto.into(),
                     dry: options.dry,
                 },
-                &StdGitRunner,
+                &HybridGitClient,
             );
             project_prune_execution(onto, options.dry, options.json, execution)
         }
@@ -56,7 +56,7 @@ fn project_prune_execution(
     onto: &str,
     dry: bool,
     json: bool,
-    execution: Result<prune_all::PruneAllResult, prune_all::PruneAllError>,
+    execution: Result<prune_all::PruneAllOk, prune_all::PruneAllError>,
 ) -> ManagedRun<PruneRepoResult> {
     match execution {
         Ok(execution) => {
@@ -195,21 +195,21 @@ fn format_prune(onto: &str, dry: bool, json: bool, results: &[PruneRepoResult]) 
 mod tests {
     use application::{
         branches::{
-            apply_prune::{PruneFailure, PruneResult, PruneStatus},
+            apply_prune::{ApplyPruneOk, PruneFailure, PruneStatus},
             plan_prune::PruneBranch,
         },
-        managed::prune_all::{self, PruneAction, PruneAllResult, PruneExit},
+        managed::prune_all::{self, PruneAction, PruneAllOk, PruneExit},
     };
 
     use super::*;
 
     #[test]
     fn application_results_project_to_the_existing_json_shape() {
-        let execution = PruneAllResult {
+        let execution = PruneAllOk {
             exit: PruneExit::Warn,
             results: vec![prune_all::PruneRepoResult {
                 name: "api".into(),
-                action: PruneAction::Applied(PruneResult {
+                action: PruneAction::Applied(ApplyPruneOk {
                     status: PruneStatus::Partial,
                     deleted: vec![PruneBranch {
                         name: "feature/done".into(),
@@ -253,7 +253,7 @@ mod tests {
     fn transport_failure_projection_preserves_completed_stdout_and_stderr() {
         let completed_result = prune_all::PruneRepoResult {
             name: "api".into(),
-            action: PruneAction::Applied(PruneResult {
+            action: PruneAction::Applied(ApplyPruneOk {
                 status: PruneStatus::Ok,
                 deleted: vec![PruneBranch {
                     name: "feature/api".into(),
@@ -264,7 +264,7 @@ mod tests {
         };
         let failed_result = prune_all::PruneRepoResult {
             name: "web".into(),
-            action: PruneAction::Applied(PruneResult {
+            action: PruneAction::Applied(ApplyPruneOk {
                 status: PruneStatus::Ok,
                 deleted: vec![PruneBranch {
                     name: "feature/web".into(),

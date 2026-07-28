@@ -9,7 +9,7 @@ pub(crate) use view::SquashViewBuild;
 
 use crate::{
     diffs::{PinnedRange, View},
-    ports::{AppSettings, DiffSource, UserSettingsStore},
+    ports::{AppSettings, GitClient, UserSettingsStore},
 };
 
 /// Compute the squash-preview view of the current branch's unpushed commits
@@ -22,7 +22,7 @@ pub struct ComputeSquashPreview {
 
 /// The computed squash-preview view.
 #[derive(Debug, Clone)]
-pub struct ComputeSquashPreviewResponse {
+pub struct ComputeSquashPreviewOk {
     pub view: View,
 }
 
@@ -38,17 +38,17 @@ pub enum ComputeSquashPreviewError {
 pub fn execute(
     req: ComputeSquashPreview,
     app_settings: &impl UserSettingsStore,
-    source: &impl DiffSource,
-) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
+    source: &impl GitClient,
+) -> Result<ComputeSquashPreviewOk, ComputeSquashPreviewError> {
     let settings = app_settings.load();
     let built = compute(req, &settings, source)?;
-    Ok(ComputeSquashPreviewResponse { view: built.view })
+    Ok(ComputeSquashPreviewOk { view: built.view })
 }
 
 pub(crate) fn compute(
     req: ComputeSquashPreview,
     settings: &AppSettings,
-    source: &impl DiffSource,
+    source: &impl GitClient,
 ) -> anyhow::Result<SquashViewBuild> {
     let ComputeSquashPreview { cwd, pinned } = req;
     view::build(source, &cwd, pinned.as_ref(), settings.diff_exclusions())
@@ -64,7 +64,7 @@ mod tests {
     use crate::{
         ports::AppSettings,
         testing::{
-            FakeDiffSource, FixedUserSettingsStore,
+            FakeGitClient, FixedUserSettingsStore,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -86,14 +86,14 @@ index 333..444 100644\n\
 
     fn execute_default_settings(
         request: ComputeSquashPreview,
-        source: &FakeDiffSource,
-    ) -> Result<ComputeSquashPreviewResponse, ComputeSquashPreviewError> {
+        source: &FakeGitClient,
+    ) -> Result<ComputeSquashPreviewOk, ComputeSquashPreviewError> {
         execute(request, &FixedUserSettingsStore::default(), source)
     }
 
     #[test]
     fn viewer_and_raw_computation_share_the_same_view() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -120,7 +120,7 @@ index 333..444 100644\n\
 
     #[test]
     fn app_settings_exclusions_apply_to_the_resolved_repository() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -158,7 +158,7 @@ index 333..444 100644\n\
 
     #[test]
     fn computes_the_squash_view_from_the_upstream() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -183,7 +183,7 @@ index 333..444 100644\n\
 
     #[test]
     fn pinned_squash_preview_computes_without_an_upstream() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: None, // symbolic squash preview errors with "no upstream"
@@ -210,7 +210,7 @@ index 333..444 100644\n\
 
     #[test]
     fn missing_upstream_is_an_error() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: None,

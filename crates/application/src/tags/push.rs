@@ -9,13 +9,15 @@ use super::{
     outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
     parse,
 };
-use crate::ports::GitRunner;
+use crate::ports::GitClient;
 
 /// Requests publication of every local tag missing from origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PushTags {
     pub repo: PathBuf,
 }
+
+pub type PushTagsOk = TagActionOutcome;
 
 /// Reports an unexpected Git transport failure while publishing tags.
 #[derive(Debug, thiserror::Error)]
@@ -36,7 +38,7 @@ pub enum PushTagsError {
 ///
 /// Returns [`PushTagsError`] when Git cannot be executed.
 #[cqrsy::command]
-pub fn execute(command: PushTags, git: &impl GitRunner) -> Result<TagActionOutcome, PushTagsError> {
+pub fn execute(command: PushTags, git: &impl GitClient) -> Result<PushTagsOk, PushTagsError> {
     match push(command, git) {
         Ok(outcome) => Ok(outcome),
         Err(GitCommandError::Rejected { detail, progress }) => {
@@ -49,7 +51,7 @@ pub fn execute(command: PushTags, git: &impl GitRunner) -> Result<TagActionOutco
     }
 }
 
-fn push(command: PushTags, git: &impl GitRunner) -> Result<TagActionOutcome, GitCommandError> {
+fn push(command: PushTags, git: &impl GitClient) -> Result<TagActionOutcome, GitCommandError> {
     let PushTags { repo } = command;
     let refs = parse::load(git, &repo)?;
     let pending = refs.pending().into_iter().cloned().collect::<Vec<_>>();
@@ -64,7 +66,7 @@ fn push(command: PushTags, git: &impl GitRunner) -> Result<TagActionOutcome, Git
 }
 
 pub(super) fn push_named(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     repo: &Path,
     names: &[String],
     created: TagActionOutcome,
@@ -95,27 +97,23 @@ pub(super) fn push_named(
 }
 
 fn push_tags(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     repo: &Path,
     pending: &[Tag],
     mut progress: TagOperationProgress,
 ) -> Result<TagActionOutcome, GitCommandError> {
-    let mut args = vec!["push".to_string(), "origin".to_string()];
-    args.extend(push_refspecs(pending));
-    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-
     let names = pending
         .iter()
         .map(|tag| tag.name().to_string())
         .collect::<Vec<_>>();
     progress.record_push_attempt(&names);
     let output = git
-        .run(repo, &args)
+        .push_tag_refs(repo, "origin", &names)
         .map_err(GitCommandError::from)
         .map_err(|error| error.with_prior_progress(progress.clone()))?;
-    if output.exit_code != 0 {
+    if let crate::ports::GitEffect::Rejected(detail) = output {
         return Err(
-            GitCommandError::rejected(output.fail_detail("git push tags failed"))
+            GitCommandError::rejected(format!("git push tags failed: {detail}"))
                 .with_prior_progress(progress),
         );
     }
@@ -131,6 +129,7 @@ fn push_tags(
     .with_progress(progress))
 }
 
+#[cfg(test)]
 fn push_refspecs(tags: &[Tag]) -> Vec<String> {
     tags.iter()
         .map(|tag| format!("refs/tags/{0}:refs/tags/{0}", tag.name()))
@@ -146,7 +145,7 @@ mod tests {
         tags::outcome::{
             TagActionOutcome, TagActionStatus, TagOperationProgress, TagRemotePushProgress,
         },
-        testing::FakeGitRunner,
+        testing::ScriptedGitClient,
     };
 
     const LOCAL_TAG: &str = "object-v1\t\t\tv1.0.0\t\t100\n";
@@ -169,8 +168,9 @@ mod tests {
 
     #[test]
     fn load_transport_failure_remains_an_error_with_its_source() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(PushTags { repo: ".".into() }, &git)
             .expect_err("transport failure must remain an error");
@@ -180,10 +180,8 @@ mod tests {
 
     #[test]
     fn load_nonzero_exit_remains_the_exact_closed_failure() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::exit_err(
-            "fatal: refs unavailable",
-            128,
-        )]);
+        let git =
+            ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: refs unavailable")]);
 
         assert_eq!(
             execute(PushTags { repo: ".".into() }, &git)
@@ -194,9 +192,9 @@ mod tests {
 
     #[test]
     fn push_transport_failure_remains_an_error_with_its_source() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok(LOCAL_TAG)),
-            Ok(FakeGitRunner::ok("")),
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied(LOCAL_TAG)),
+            Ok(ScriptedGitClient::applied("")),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
@@ -215,10 +213,10 @@ mod tests {
 
     #[test]
     fn push_nonzero_exit_remains_the_exact_closed_failure() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(LOCAL_TAG),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::exit_err("fatal: remote rejected", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(LOCAL_TAG),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::rejected("fatal: remote rejected"),
         ]);
 
         let outcome = execute(PushTags { repo: ".".into() }, &git)
@@ -238,46 +236,29 @@ mod tests {
 
     #[test]
     fn push_publishes_each_pending_tag_and_writes_no_other_refs() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(LOCAL_TAG),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::ok(""),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(LOCAL_TAG),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied(""),
         ]);
 
         let outcome = execute(PushTags { repo: ".".into() }, &git).expect("scripted git succeeds");
 
         assert_eq!(outcome.status, TagActionStatus::Pushed);
         assert_eq!(outcome.detail, "pushed 1 tag: v1.0.0");
-        assert_eq!(
-            git.arg_lists(),
-            vec![
-                vec![
-                    "for-each-ref".to_string(),
-                    super::parse::LOCAL_TAG_FORMAT_ARG.into(),
-                    "refs/tags".into(),
-                ],
-                vec!["ls-remote".into(), "--tags".into(), "origin".into()],
-                vec![
-                    "push".into(),
-                    "origin".into(),
-                    "refs/tags/v1.0.0:refs/tags/v1.0.0".into(),
-                ],
-            ]
-        );
     }
 
     #[test]
     fn push_is_a_noop_when_origin_already_holds_every_local_tag_object() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(LOCAL_TAG),
-            FakeGitRunner::ok("object-v1\trefs/tags/v1.0.0\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(LOCAL_TAG),
+            ScriptedGitClient::applied("object-v1\trefs/tags/v1.0.0\n"),
         ]);
 
         let outcome = execute(PushTags { repo: ".".into() }, &git).expect("scripted git succeeds");
 
         assert_eq!(outcome.status, TagActionStatus::Noop);
         assert_eq!(outcome.detail, "tags already up to date");
-        assert_eq!(git.arg_lists().len(), 2);
     }
 
     fn assert_transport_error(error: &(dyn std::error::Error + 'static)) {

@@ -4,8 +4,8 @@ pub mod pull_all;
 pub mod push_all;
 
 use application::managed::{
-    pull_all::{PullAll, PullAllResponse},
-    push_all::{PushAll, PushAllResponse},
+    pull_all::{PullAll, PullAllOk},
+    push_all::{PushAll, PushAllOk},
     service::{RepoSyncResult, SyncExit, SyncStatus},
 };
 use contracts::{
@@ -72,10 +72,10 @@ fn ok_envelope(results: Vec<RepoSyncResult>, exit: SyncExit) -> Envelope<SyncDat
     }
 }
 
-pub(crate) fn to_push_all_envelope(resp: PushAllResponse) -> Envelope<SyncData> {
+pub(crate) fn to_push_all_envelope(resp: PushAllOk) -> Envelope<SyncData> {
     ok_envelope(resp.results, resp.exit)
 }
 
-pub(crate) fn to_pull_all_envelope(resp: PullAllResponse) -> Envelope<SyncData> {
+pub(crate) fn to_pull_all_envelope(resp: PullAllOk) -> Envelope<SyncData> {
     ok_envelope(resp.results, resp.exit)
 }

@@ -4,10 +4,10 @@ use domain::managed::ManagedRepo;
 
 use crate::{
     branches::{
-        apply_prune::{self, ApplyPrune, ApplyPruneError, PruneResult},
-        plan_prune::{self, PlanPrune, PlanPruneError, PruneBranch, PrunePlan},
+        apply_prune::{self, ApplyPrune, ApplyPruneError, ApplyPruneOk},
+        plan_prune::{self, PlanPrune, PlanPruneError, PlanPruneOk, PruneBranch},
     },
-    ports::GitRunner,
+    ports::GitClient,
 };
 
 /// Requests one branch-prune attempt for every resolved managed repository.
@@ -30,7 +30,7 @@ pub enum PruneAction {
     /// A dry run found branches that a real run would delete.
     WouldDelete(Vec<PruneBranch>),
     /// Git attempted every planned deletion and returned their structured outcomes.
-    Applied(PruneResult),
+    Applied(ApplyPruneOk),
 }
 
 /// Reports one managed repository's prune decision.
@@ -49,7 +49,7 @@ pub enum PruneExit {
 
 /// Reports every repository result and the aggregate exit classification.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PruneAllResult {
+pub struct PruneAllOk {
     pub exit: PruneExit,
     pub results: Vec<PruneRepoResult>,
 }
@@ -86,7 +86,7 @@ struct PruneAttemptError {
 /// Returns [`PruneAllError`] when Git cannot be executed. Results completed before the transport
 /// failure remain available on the error.
 #[cqrsy::command]
-pub fn execute(command: PruneAll, git: &impl GitRunner) -> Result<PruneAllResult, PruneAllError> {
+pub fn execute(command: PruneAll, git: &impl GitClient) -> Result<PruneAllOk, PruneAllError> {
     let PruneAll { repos, onto, dry } = command;
     let mut results = Vec::with_capacity(repos.len());
     for repo in repos {
@@ -118,14 +118,14 @@ pub fn execute(command: PruneAll, git: &impl GitRunner) -> Result<PruneAllResult
         PruneExit::Clean
     };
 
-    Ok(PruneAllResult { exit, results })
+    Ok(PruneAllOk { exit, results })
 }
 
 fn prune_one(
     repo: &std::path::Path,
     onto: &str,
     dry: bool,
-    git: &impl GitRunner,
+    git: &impl GitClient,
 ) -> Result<PruneAction, PruneAttemptError> {
     if !git.repo_present(repo) {
         return Ok(PruneAction::Absent);
@@ -145,10 +145,10 @@ fn prune_one(
         },
     })?;
     match plan {
-        PrunePlan::Refused(detail) => Ok(PruneAction::Refused(detail)),
-        PrunePlan::Nothing(detail) => Ok(PruneAction::Nothing(detail)),
-        PrunePlan::Ready { branches, .. } if dry => Ok(PruneAction::WouldDelete(branches)),
-        PrunePlan::Ready { top, branches, .. } => {
+        PlanPruneOk::Refused(detail) => Ok(PruneAction::Refused(detail)),
+        PlanPruneOk::Nothing(detail) => Ok(PruneAction::Nothing(detail)),
+        PlanPruneOk::Ready { branches, .. } if dry => Ok(PruneAction::WouldDelete(branches)),
+        PlanPruneOk::Ready { top, branches, .. } => {
             apply_prune::execute(ApplyPrune { top, branches }, git)
                 .map(PruneAction::Applied)
                 .map_err(|error| match error {
@@ -176,7 +176,7 @@ mod tests {
             apply_prune::{PruneFailure, PruneStatus},
             plan_prune::PruneBranch,
         },
-        testing::FakeGitRunner,
+        testing::ScriptedGitClient,
     };
 
     fn repo(name: &str) -> ManagedRepo {
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn absent_repository_is_a_closed_clean_result() {
-        let git = FakeGitRunner::default();
+        let git = ScriptedGitClient::default();
         git.absent_repos.lock().unwrap().push("/repos/api".into());
 
         let result = execute(prune(vec![repo("api")], false), &git)
@@ -210,11 +210,11 @@ mod tests {
 
     #[test]
     fn dry_run_returns_the_branch_plan_without_deleting() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/repos/api\n"),
-            FakeGitRunner::ok("main\n"),
-            FakeGitRunner::ok("refs/heads/main\n"),
-            FakeGitRunner::ok("main aaaaaaa\nfeature/done bbbbbbb\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied("refs/heads/main\n"),
+            ScriptedGitClient::applied("main aaaaaaa\nfeature/done bbbbbbb\n"),
         ]);
 
         let result = execute(prune(vec![repo("api")], true), &git)
@@ -232,12 +232,14 @@ mod tests {
 
     #[test]
     fn later_plan_transport_failure_preserves_earlier_repository_deletions() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok("/repos/api\n")),
-            Ok(FakeGitRunner::ok("main\n")),
-            Ok(FakeGitRunner::ok("refs/heads/main\n")),
-            Ok(FakeGitRunner::ok("main aaaaaaa\nfeature/api bbbbbbb\n")),
-            Ok(FakeGitRunner::ok("")),
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied("/repos/api\n")),
+            Ok(ScriptedGitClient::applied("main\n")),
+            Ok(ScriptedGitClient::applied("refs/heads/main\n")),
+            Ok(ScriptedGitClient::applied(
+                "main aaaaaaa\nfeature/api bbbbbbb\n",
+            )),
+            Ok(ScriptedGitClient::applied("")),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
@@ -270,14 +272,14 @@ mod tests {
 
     #[test]
     fn apply_transport_preserves_partial_current_repository_deletions() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok("/repos/api\n")),
-            Ok(FakeGitRunner::ok("main\n")),
-            Ok(FakeGitRunner::ok("refs/heads/main\n")),
-            Ok(FakeGitRunner::ok(
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied("/repos/api\n")),
+            Ok(ScriptedGitClient::applied("main\n")),
+            Ok(ScriptedGitClient::applied("refs/heads/main\n")),
+            Ok(ScriptedGitClient::applied(
                 "main aaaaaaa\nfeature/first bbbbbbb\nfeature/second ccccccc\n",
             )),
-            Ok(FakeGitRunner::ok("")),
+            Ok(ScriptedGitClient::applied("")),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 

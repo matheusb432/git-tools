@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::ports::GitRunner;
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests collapsing every unpushed commit into one commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +29,7 @@ pub enum SquashStatus {
 
 /// Reports the squash status, selected commits, and recovery position.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SquashResult {
+pub struct SquashLocalOk {
     pub status: SquashStatus,
     pub count: usize,
     pub commits: Vec<String>,
@@ -37,7 +37,7 @@ pub struct SquashResult {
     pub detail: String,
 }
 
-impl SquashResult {
+impl SquashLocalOk {
     fn new(status: SquashStatus, detail: impl Into<String>) -> Self {
         Self {
             status,
@@ -57,12 +57,12 @@ pub enum SquashLocalError {
     #[error("{0}")]
     Unexpected(#[source] anyhow::Error),
     /// Git rejected recovery after the primary transport failure.
-    #[error("{source:#}; recovery `git reset --soft {pre}` failed (exit {exit_code})")]
+    #[error("{source:#}; recovery `git reset --soft {pre}` was rejected: {detail}")]
     RecoveryRejected {
         /// The pre-squash commit recovery attempted to restore.
         pre: String,
-        /// The recovery command's nonzero exit code.
-        exit_code: i32,
+        /// Git's diagnostic for the rejected recovery.
+        detail: String,
         /// The primary Git transport failure.
         #[source]
         source: anyhow::Error,
@@ -80,24 +80,24 @@ pub enum SquashLocalError {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ClosedFailure {
-    CommitRejected { exit_code: i32 },
+    CommitRejected { detail: String },
     ByteCheckFailed,
 }
 
 impl ClosedFailure {
-    fn primary_detail(self) -> String {
+    fn primary_detail(&self) -> String {
         match self {
-            Self::CommitRejected { exit_code } => format!("commit failed (exit {exit_code})"),
+            Self::CommitRejected { detail } => format!("commit failed: {detail}"),
             Self::ByteCheckFailed => "BYTE-CHECK FAILED. Tree differed".into(),
         }
     }
 
-    fn restored_detail(self, pre: &str) -> String {
+    fn restored_detail(&self, pre: &str) -> String {
         match self {
-            Self::CommitRejected { exit_code } => {
-                format!("commit failed (exit {exit_code}) — restored to {pre}")
+            Self::CommitRejected { detail } => {
+                format!("commit failed: {detail} — restored to {pre}")
             }
             Self::ByteCheckFailed => {
                 format!("BYTE-CHECK FAILED — restored to {pre}. Tree differed; nothing changed.")
@@ -117,7 +117,7 @@ struct ClosedFailureContext {
 #[derive(Debug)]
 enum RestoreOutcome {
     Restored,
-    Rejected { exit_code: i32 },
+    Rejected { detail: String },
     Transport(anyhow::Error),
 }
 
@@ -130,84 +130,73 @@ enum RestoreOutcome {
 #[cqrsy::command]
 pub fn execute(
     command: SquashLocal,
-    git: &impl GitRunner,
-) -> Result<SquashResult, SquashLocalError> {
+    git: &impl GitClient,
+) -> Result<SquashLocalOk, SquashLocalError> {
     let SquashLocal { repo, message, dry } = command;
-    let output = git
-        .run(&repo, &["rev-parse", "--show-toplevel"])
-        .map_err(SquashLocalError::Unexpected)?;
-    if !output.success() || output.stdout.trim().is_empty() {
-        return Ok(SquashResult::new(SquashStatus::Refused, "not a git repo"));
-    }
-    let top = PathBuf::from(output.stdout.trim());
+    let Some(top) = git
+        .discover_top(&repo)
+        .map_err(SquashLocalError::Unexpected)?
+    else {
+        return Ok(SquashLocalOk::new(SquashStatus::Refused, "not a git repo"));
+    };
 
-    let output = git
-        .run(
-            &top,
-            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-        )
-        .map_err(SquashLocalError::Unexpected)?;
-    if !output.success() || output.stdout.trim().is_empty() {
-        return Ok(SquashResult::new(
-            SquashStatus::Refused,
-            "no upstream tracking branch (run: git push -u origin <branch>)",
-        ));
-    }
-    let upstream = output.stdout.trim().to_string();
+    let upstream = match git.upstream(&top) {
+        Ok(GitEffect::Applied(upstream)) if !upstream.is_empty() => upstream,
+        Ok(GitEffect::Applied(_) | GitEffect::Rejected(_)) => {
+            return Ok(SquashLocalOk::new(
+                SquashStatus::Refused,
+                "no upstream tracking branch (run: git push -u origin <branch>)",
+            ));
+        }
+        Err(source) => return Err(SquashLocalError::Unexpected(source)),
+    };
 
     if message.is_empty() {
-        return Ok(SquashResult::new(
+        return Ok(SquashLocalOk::new(
             SquashStatus::Refused,
             "commit message is required",
         ));
     }
 
     let range = format!("{upstream}..HEAD");
-    let output = git
-        .run(&top, &["rev-list", "--count", &range])
-        .map_err(SquashLocalError::Unexpected)?;
-    if !output.success() {
-        return Ok(SquashResult::new(
-            SquashStatus::Failed,
-            format!("rev-list failed (exit {})", output.exit_code),
-        ));
-    }
-    let Ok(count) = output.stdout.trim().parse::<usize>() else {
-        return Ok(SquashResult::new(
+    let Some(count) = git
+        .commit_count(&top, &range)
+        .map_err(SquashLocalError::Unexpected)?
+    else {
+        return Ok(SquashLocalOk::new(
             SquashStatus::Failed,
             "rev-list returned invalid count",
         ));
     };
 
     if count == 0 {
-        return Ok(SquashResult {
+        return Ok(SquashLocalOk {
             count,
-            ..SquashResult::new(
+            ..SquashLocalOk::new(
                 SquashStatus::Noop,
                 format!("nothing unpushed (HEAD == {upstream})"),
             )
         });
     }
 
-    let output = git
-        .run(&top, &["log", "--format=%h %s", &range])
-        .map_err(SquashLocalError::Unexpected)?;
-    if !output.success() {
-        return Ok(SquashResult {
-            count,
-            ..SquashResult::new(
-                SquashStatus::Failed,
-                format!("log failed (exit {})", output.exit_code),
-            )
-        });
-    }
-    let commits = lines(&output.stdout);
+    let commits = match git
+        .brief_log(&top, &range)
+        .map_err(SquashLocalError::Unexpected)?
+    {
+        GitEffect::Applied(commits) => commits,
+        GitEffect::Rejected(detail) => {
+            return Ok(SquashLocalOk {
+                count,
+                ..SquashLocalOk::new(SquashStatus::Failed, format!("log failed: {detail}"))
+            });
+        }
+    };
 
     if count == 1 {
-        return Ok(SquashResult {
+        return Ok(SquashLocalOk {
             count,
             commits,
-            ..SquashResult::new(
+            ..SquashLocalOk::new(
                 SquashStatus::Noop,
                 "already one commit ahead — nothing to collapse",
             )
@@ -215,10 +204,10 @@ pub fn execute(
     }
 
     if dry {
-        return Ok(SquashResult {
+        return Ok(SquashLocalOk {
             count,
             commits,
-            ..SquashResult::new(
+            ..SquashLocalOk::new(
                 SquashStatus::WouldSquash,
                 format!("would collapse {count} commits into one"),
             )
@@ -229,58 +218,42 @@ pub fn execute(
 }
 
 fn collapse(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     top: &Path,
     upstream: &str,
     message: &str,
     count: usize,
     commits: Vec<String>,
-) -> Result<SquashResult, SquashLocalError> {
-    let output = git
-        .run(top, &["rev-parse", "HEAD"])
+) -> Result<SquashLocalOk, SquashLocalError> {
+    let pre = git
+        .resolve_sha(top, "HEAD")
         .map_err(SquashLocalError::Unexpected)?;
-    if !output.success() || output.stdout.trim().is_empty() {
-        return Ok(SquashResult {
-            count,
-            commits,
-            ..SquashResult::new(
-                SquashStatus::Failed,
-                format!("rev-parse HEAD failed (exit {})", output.exit_code),
-            )
-        });
-    }
-    let pre = output.stdout.trim().to_string();
 
-    let output = git
-        .run(top, &["reset", "--soft", upstream])
-        .map_err(SquashLocalError::Unexpected)?;
-    if !output.success() {
-        return Ok(SquashResult {
+    if let GitEffect::Rejected(detail) = git
+        .soft_reset(top, upstream)
+        .map_err(SquashLocalError::Unexpected)?
+    {
+        return Ok(SquashLocalOk {
             status: SquashStatus::Failed,
             count,
             commits,
             pre,
-            detail: format!(
-                "reset --soft failed (exit {}); no changes made.",
-                output.exit_code
-            ),
+            detail: format!("reset --soft failed: {detail}; no changes made."),
         });
     }
 
-    let output = match git.run(top, &["commit", "-m", message]) {
-        Ok(output) => output,
+    let commit = match git.commit(top, message) {
+        Ok(commit) => commit,
         Err(source) => {
             return Err(restore_after_transport_failure(git, top, &pre, source));
         }
     };
-    if !output.success() {
+    if let GitEffect::Rejected(detail) = commit {
         return restore_closed_failure(
             git,
             top,
             ClosedFailureContext {
-                failure: ClosedFailure::CommitRejected {
-                    exit_code: output.exit_code,
-                },
+                failure: ClosedFailure::CommitRejected { detail },
                 count,
                 commits,
                 pre,
@@ -288,14 +261,14 @@ fn collapse(
         );
     }
 
-    let output = match git.run(top, &["diff", "--stat", &pre, "HEAD"]) {
-        Ok(output) => output,
+    let diff = match git.diff_stat(top, &pre, "HEAD") {
+        Ok(diff) => diff,
         Err(source) => {
             return Err(restore_after_transport_failure(git, top, &pre, source));
         }
     };
-    if output.success() && output.stdout.trim().is_empty() {
-        return Ok(SquashResult {
+    if matches!(diff, GitEffect::Applied(ref stat) if stat.trim().is_empty()) {
+        return Ok(SquashLocalOk {
             status: SquashStatus::Squashed,
             count,
             commits,
@@ -319,10 +292,10 @@ fn collapse(
 }
 
 fn restore_closed_failure(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     top: &Path,
     context: ClosedFailureContext,
-) -> Result<SquashResult, SquashLocalError> {
+) -> Result<SquashLocalOk, SquashLocalError> {
     let ClosedFailureContext {
         failure,
         count,
@@ -331,9 +304,9 @@ fn restore_closed_failure(
     } = context;
     let detail = match restore(git, top, &pre) {
         RestoreOutcome::Restored => failure.restored_detail(&pre),
-        RestoreOutcome::Rejected { exit_code } => {
+        RestoreOutcome::Rejected { detail: rejected } => {
             format!(
-                "{}; recovery `git reset --soft {}` failed (exit {exit_code})",
+                "{}; recovery `git reset --soft {}` was rejected: {rejected}",
                 failure.primary_detail(),
                 pre
             )
@@ -346,7 +319,7 @@ fn restore_closed_failure(
             });
         }
     };
-    Ok(SquashResult {
+    Ok(SquashLocalOk {
         status: SquashStatus::Failed,
         count,
         commits,
@@ -356,16 +329,16 @@ fn restore_closed_failure(
 }
 
 fn restore_after_transport_failure(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     top: &Path,
     pre: &str,
     source: anyhow::Error,
 ) -> SquashLocalError {
     match restore(git, top, pre) {
         RestoreOutcome::Restored => SquashLocalError::Unexpected(source),
-        RestoreOutcome::Rejected { exit_code } => SquashLocalError::RecoveryRejected {
+        RestoreOutcome::Rejected { detail } => SquashLocalError::RecoveryRejected {
             pre: pre.into(),
-            exit_code,
+            detail,
             source,
         },
         RestoreOutcome::Transport(restore_source) => SquashLocalError::RecoveryTransport {
@@ -376,30 +349,20 @@ fn restore_after_transport_failure(
     }
 }
 
-fn restore(git: &impl GitRunner, top: &Path, pre: &str) -> RestoreOutcome {
-    match git.run(top, &["reset", "--soft", pre]) {
-        Ok(output) if output.success() => RestoreOutcome::Restored,
-        Ok(output) => RestoreOutcome::Rejected {
-            exit_code: output.exit_code,
-        },
+fn restore(git: &impl GitClient, top: &Path, pre: &str) -> RestoreOutcome {
+    match git.soft_reset(top, pre) {
+        Ok(GitEffect::Applied(())) => RestoreOutcome::Restored,
+        Ok(GitEffect::Rejected(detail)) => RestoreOutcome::Rejected { detail },
         Err(source) => RestoreOutcome::Transport(source),
     }
-}
-
-fn lines(raw: &str) -> Vec<String> {
-    raw.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use std::error::Error as _;
 
-    use super::{SquashLocal, SquashResult, SquashStatus, execute};
-    use crate::testing::FakeGitRunner;
+    use super::{SquashLocal, SquashLocalOk, SquashStatus, execute};
+    use crate::testing::ScriptedGitClient;
 
     fn command(dry: bool) -> SquashLocal {
         SquashLocal {
@@ -409,23 +372,23 @@ mod tests {
         }
     }
 
-    fn preflight(count: &str) -> Vec<crate::ports::GitOutput> {
+    fn preflight(count: &str) -> Vec<crate::testing::GitResponse> {
         vec![
-            FakeGitRunner::ok("/repo\n"),
-            FakeGitRunner::ok("origin/main\n"),
-            FakeGitRunner::ok(count),
+            ScriptedGitClient::applied("/repo\n"),
+            ScriptedGitClient::applied("origin/main\n"),
+            ScriptedGitClient::applied(count),
         ]
     }
 
     #[test]
     fn one_unpushed_commit_is_a_closed_noop_value() {
         let mut outputs = preflight("1\n");
-        outputs.push(FakeGitRunner::ok("abc1234 one commit\n"));
-        let git = FakeGitRunner::new(outputs);
+        outputs.push(ScriptedGitClient::applied("abc1234 one commit\n"));
+        let git = ScriptedGitClient::new(outputs);
 
         assert_eq!(
             execute(command(false), &git).expect("Git transport should remain available"),
-            SquashResult {
+            SquashLocalOk {
                 status: SquashStatus::Noop,
                 count: 1,
                 commits: vec!["abc1234 one commit".into()],
@@ -437,11 +400,11 @@ mod tests {
 
     #[test]
     fn invalid_count_is_a_closed_failed_value() {
-        let git = FakeGitRunner::new(preflight("not-a-count\n"));
+        let git = ScriptedGitClient::new(preflight("not-a-count\n"));
 
         assert_eq!(
             execute(command(false), &git).expect("Git transport should remain available"),
-            SquashResult {
+            SquashLocalOk {
                 status: SquashStatus::Failed,
                 count: 0,
                 commits: Vec::new(),
@@ -455,18 +418,18 @@ mod tests {
     fn byte_check_failure_is_a_closed_restored_value() {
         let mut outputs = preflight("2\n");
         outputs.extend([
-            FakeGitRunner::ok("abc1234 first\nfed5678 second\n"),
-            FakeGitRunner::ok("pre123\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::ok(" changed.txt | 1 +\n"),
-            FakeGitRunner::ok(""),
+            ScriptedGitClient::applied("abc1234 first\nfed5678 second\n"),
+            ScriptedGitClient::applied("pre123\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied(" changed.txt | 1 +\n"),
+            ScriptedGitClient::applied(""),
         ]);
-        let git = FakeGitRunner::new(outputs);
+        let git = ScriptedGitClient::new(outputs);
 
         assert_eq!(
             execute(command(false), &git).expect("Git transport should remain available"),
-            SquashResult {
+            SquashLocalOk {
                 status: SquashStatus::Failed,
                 count: 2,
                 commits: vec!["abc1234 first".into(), "fed5678 second".into()],
@@ -481,22 +444,22 @@ mod tests {
     fn commit_failure_is_a_closed_restored_value() {
         let mut outputs = preflight("2\n");
         outputs.extend([
-            FakeGitRunner::ok("abc1234 first\nfed5678 second\n"),
-            FakeGitRunner::ok("pre123\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::exit_err("commit rejected", 17),
-            FakeGitRunner::ok(""),
+            ScriptedGitClient::applied("abc1234 first\nfed5678 second\n"),
+            ScriptedGitClient::applied("pre123\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::rejected("commit rejected"),
+            ScriptedGitClient::applied(""),
         ]);
-        let git = FakeGitRunner::new(outputs);
+        let git = ScriptedGitClient::new(outputs);
 
         assert_eq!(
             execute(command(false), &git).expect("Git transport should remain available"),
-            SquashResult {
+            SquashLocalOk {
                 status: SquashStatus::Failed,
                 count: 2,
                 commits: vec!["abc1234 first".into(), "fed5678 second".into()],
                 pre: "pre123".into(),
-                detail: "commit failed (exit 17) — restored to pre123".into(),
+                detail: "commit failed: commit rejected — restored to pre123".into(),
             }
         );
     }
@@ -505,24 +468,24 @@ mod tests {
     fn commit_failure_preserves_primary_and_pre_when_restore_is_rejected() {
         let mut results = preflight("2\n").into_iter().map(Ok).collect::<Vec<_>>();
         results.extend([
-            Ok(FakeGitRunner::ok("abc1234 first\nfed5678 second\n")),
-            Ok(FakeGitRunner::ok("pre123\n")),
-            Ok(FakeGitRunner::ok("")),
-            Ok(FakeGitRunner::exit_err("commit rejected", 17)),
-            Ok(FakeGitRunner::exit_err("restore rejected", 23)),
+            Ok(ScriptedGitClient::applied(
+                "abc1234 first\nfed5678 second\n",
+            )),
+            Ok(ScriptedGitClient::applied("pre123\n")),
+            Ok(ScriptedGitClient::applied("")),
+            Ok(ScriptedGitClient::rejected("commit rejected")),
+            Ok(ScriptedGitClient::rejected("restore rejected")),
         ]);
-        let git = FakeGitRunner::with_results(results);
+        let git = ScriptedGitClient::with_results(results);
 
         assert_eq!(
             execute(command(false), &git).expect("Git transport should remain available"),
-            SquashResult {
+            SquashLocalOk {
                 status: SquashStatus::Failed,
                 count: 2,
                 commits: vec!["abc1234 first".into(), "fed5678 second".into()],
                 pre: "pre123".into(),
-                detail:
-                    "commit failed (exit 17); recovery `git reset --soft pre123` failed (exit 23)"
-                        .into(),
+                detail: "commit failed: commit rejected; recovery `git reset --soft pre123` was rejected: restore rejected".into(),
             }
         );
     }
@@ -531,14 +494,16 @@ mod tests {
     fn byte_check_failure_preserves_primary_and_pre_when_restore_transport_fails() {
         let mut results = preflight("2\n").into_iter().map(Ok).collect::<Vec<_>>();
         results.extend([
-            Ok(FakeGitRunner::ok("abc1234 first\nfed5678 second\n")),
-            Ok(FakeGitRunner::ok("pre123\n")),
-            Ok(FakeGitRunner::ok("")),
-            Ok(FakeGitRunner::ok("")),
-            Ok(FakeGitRunner::ok(" changed.txt | 1 +\n")),
+            Ok(ScriptedGitClient::applied(
+                "abc1234 first\nfed5678 second\n",
+            )),
+            Ok(ScriptedGitClient::applied("pre123\n")),
+            Ok(ScriptedGitClient::applied("")),
+            Ok(ScriptedGitClient::applied("")),
+            Ok(ScriptedGitClient::applied(" changed.txt | 1 +\n")),
             Err(anyhow::anyhow!("restore pipe closed").context("restore transport failed")),
         ]);
-        let git = FakeGitRunner::with_results(results);
+        let git = ScriptedGitClient::with_results(results);
 
         let error =
             execute(command(false), &git).expect_err("restore transport must remain an error");
@@ -559,20 +524,22 @@ mod tests {
     fn transport_failure_preserves_primary_source_when_restore_is_rejected() {
         let mut results = preflight("2\n").into_iter().map(Ok).collect::<Vec<_>>();
         results.extend([
-            Ok(FakeGitRunner::ok("abc1234 first\nfed5678 second\n")),
-            Ok(FakeGitRunner::ok("pre123\n")),
-            Ok(FakeGitRunner::ok("")),
+            Ok(ScriptedGitClient::applied(
+                "abc1234 first\nfed5678 second\n",
+            )),
+            Ok(ScriptedGitClient::applied("pre123\n")),
+            Ok(ScriptedGitClient::applied("")),
             Err(anyhow::anyhow!("commit pipe closed").context("commit transport failed")),
-            Ok(FakeGitRunner::exit_err("restore rejected", 23)),
+            Ok(ScriptedGitClient::rejected("restore rejected")),
         ]);
-        let git = FakeGitRunner::with_results(results);
+        let git = ScriptedGitClient::with_results(results);
 
         let error =
             execute(command(false), &git).expect_err("primary transport must remain an error");
 
         assert_eq!(
             error.to_string(),
-            "commit transport failed: commit pipe closed; recovery `git reset --soft pre123` failed (exit 23)"
+            "commit transport failed: commit pipe closed; recovery `git reset --soft pre123` was rejected: restore rejected"
         );
         let primary_source = error.source().expect("primary source should be retained");
         assert_eq!(primary_source.to_string(), "commit transport failed");
@@ -586,13 +553,15 @@ mod tests {
     fn both_transport_failures_preserve_primary_context_and_recovery_source() {
         let mut results = preflight("2\n").into_iter().map(Ok).collect::<Vec<_>>();
         results.extend([
-            Ok(FakeGitRunner::ok("abc1234 first\nfed5678 second\n")),
-            Ok(FakeGitRunner::ok("pre123\n")),
-            Ok(FakeGitRunner::ok("")),
+            Ok(ScriptedGitClient::applied(
+                "abc1234 first\nfed5678 second\n",
+            )),
+            Ok(ScriptedGitClient::applied("pre123\n")),
+            Ok(ScriptedGitClient::applied("")),
             Err(anyhow::anyhow!("commit pipe closed").context("commit transport failed")),
             Err(anyhow::anyhow!("restore pipe closed").context("restore transport failed")),
         ]);
-        let git = FakeGitRunner::with_results(results);
+        let git = ScriptedGitClient::with_results(results);
 
         let error =
             execute(command(false), &git).expect_err("transport failures must remain errors");
@@ -611,8 +580,9 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_an_error_with_its_source() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(command(false), &git).expect_err("transport failure must be an error");
 

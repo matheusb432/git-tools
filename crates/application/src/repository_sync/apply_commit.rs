@@ -1,10 +1,7 @@
 //! Applies a confirmed local-only commit plan.
 
 use super::{commit_progress::CommitProgress, plan_commit::CommitTarget};
-use crate::{
-    ports::GitRunner,
-    shared::git::{command_label, created_commit_identity},
-};
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests staging and committing the confirmed target without pushing it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,13 +20,13 @@ pub enum CommitStatus {
 
 /// Reports the closed local commit status and its user-facing detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommitResult {
+pub struct ApplyCommitOk {
     pub status: CommitStatus,
     pub detail: String,
     pub progress: CommitProgress,
 }
 
-impl CommitResult {
+impl ApplyCommitOk {
     fn new(status: CommitStatus, detail: impl Into<String>, progress: CommitProgress) -> Self {
         Self {
             status,
@@ -61,18 +58,17 @@ pub enum ApplyCommitError {
 #[cqrsy::command]
 pub fn execute(
     command: ApplyCommit,
-    git: &impl GitRunner,
-) -> Result<CommitResult, ApplyCommitError> {
+    git: &impl GitClient,
+) -> Result<ApplyCommitOk, ApplyCommitError> {
     let ApplyCommit { target, message } = command;
     let mut progress = CommitProgress::Unchanged;
-    let status_args = ["status", "--porcelain"];
     let dirty = match git
-        .run(&target.top, &status_args)
-        .map_err(|source| transport(&status_args, progress.clone(), source))?
+        .working_tree(&target.top)
+        .map_err(|source| transport("read working tree", progress.clone(), source))?
     {
-        output if output.exit_code == 0 => !output.stdout.trim().is_empty(),
-        _ => {
-            return Ok(CommitResult::new(
+        GitEffect::Applied(tree) => !tree.files.is_empty(),
+        GitEffect::Rejected(_) => {
+            return Ok(ApplyCommitOk::new(
                 CommitStatus::Failed,
                 "git status failed",
                 progress,
@@ -81,49 +77,50 @@ pub fn execute(
     };
 
     if !dirty {
-        return Ok(CommitResult::new(
+        return Ok(ApplyCommitOk::new(
             CommitStatus::Noop,
             "nothing to commit",
             progress,
         ));
     }
-    let add_args = ["add", "-A"];
-    let add = git
-        .run(&target.top, &add_args)
-        .map_err(|source| transport(&add_args, progress.clone(), source))?;
-    if !add.success() {
-        return Ok(CommitResult::new(
+    if let GitEffect::Rejected(_) = git
+        .stage_all(&target.top)
+        .map_err(|source| transport("stage changes", progress.clone(), source))?
+    {
+        return Ok(ApplyCommitOk::new(
             CommitStatus::Failed,
             "git add failed",
             progress,
         ));
     }
     progress = CommitProgress::Staged;
-    let commit_args = ["commit", "-m", message.as_str()];
-    let commit = git
-        .run(&target.top, &commit_args)
-        .map_err(|source| transport(&commit_args, progress.clone(), source))?;
-    if !commit.success() {
-        return Ok(CommitResult::new(
-            CommitStatus::Failed,
-            "git commit failed",
-            progress,
-        ));
-    }
+    let receipt = match git
+        .commit(&target.top, &message)
+        .map_err(|source| transport("create commit", progress.clone(), source))?
+    {
+        GitEffect::Applied(receipt) => receipt,
+        GitEffect::Rejected(_) => {
+            return Ok(ApplyCommitOk::new(
+                CommitStatus::Failed,
+                "git commit failed",
+                progress,
+            ));
+        }
+    };
     progress = CommitProgress::Created {
-        identity: created_commit_identity(&commit),
+        identity: receipt.identity,
     };
 
-    Ok(CommitResult::new(
+    Ok(ApplyCommitOk::new(
         CommitStatus::Committed,
         "staged and committed",
         progress,
     ))
 }
 
-fn transport(args: &[&str], progress: CommitProgress, source: anyhow::Error) -> ApplyCommitError {
+fn transport(command: &str, progress: CommitProgress, source: anyhow::Error) -> ApplyCommitError {
     ApplyCommitError::Transport {
-        command: command_label(args),
+        command: command.into(),
         progress,
         source,
     }
@@ -136,7 +133,7 @@ mod tests {
     use domain::repository::PendingChanges;
 
     use super::*;
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     fn target() -> CommitTarget {
         CommitTarget {
@@ -149,7 +146,7 @@ mod tests {
 
     #[test]
     fn clean_commit_returns_a_closed_noop() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok("")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
 
         let result = execute(
             ApplyCommit {
@@ -162,7 +159,7 @@ mod tests {
 
         assert_eq!(
             result,
-            CommitResult {
+            ApplyCommitOk {
                 status: CommitStatus::Noop,
                 detail: "nothing to commit".into(),
                 progress: CommitProgress::Unchanged,
@@ -172,9 +169,9 @@ mod tests {
 
     #[test]
     fn failed_add_returns_a_closed_failure() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(" M src/lib.rs\n"),
-            FakeGitRunner::exit_err("add rejected", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
+            ScriptedGitClient::rejected("add rejected"),
         ]);
 
         let result = execute(
@@ -188,7 +185,7 @@ mod tests {
 
         assert_eq!(
             result,
-            CommitResult {
+            ApplyCommitOk {
                 status: CommitStatus::Failed,
                 detail: "git add failed".into(),
                 progress: CommitProgress::Unchanged,
@@ -198,10 +195,10 @@ mod tests {
 
     #[test]
     fn rejected_commit_reports_that_staging_completed() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(" M src/lib.rs\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::exit_err("commit rejected", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::rejected("commit rejected"),
         ]);
 
         let result = execute(
@@ -220,10 +217,10 @@ mod tests {
 
     #[test]
     fn successful_commit_reports_creation_with_parsed_identity() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(" M src/lib.rs\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::ok("[main abc1234] save work\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied("[main abc1234] save work\n"),
         ]);
 
         let result = execute(
@@ -245,9 +242,9 @@ mod tests {
 
     #[test]
     fn commit_transport_after_staging_preserves_progress_and_source() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok(" M src/lib.rs\n")),
-            Ok(FakeGitRunner::ok("")),
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied(" M src/lib.rs\n")),
+            Ok(ScriptedGitClient::applied("")),
             Err(anyhow::anyhow!("commit transport unavailable")),
         ]);
 
@@ -269,8 +266,9 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_a_sourced_apply_error() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(
             ApplyCommit {
@@ -283,7 +281,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "git status --porcelain: git transport unavailable"
+            "read working tree: git transport unavailable"
         );
         assert_eq!(
             error.source().map(ToString::to_string),

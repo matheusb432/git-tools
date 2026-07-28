@@ -7,7 +7,7 @@ use super::{
     outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
     push,
 };
-use crate::ports::GitRunner;
+use crate::ports::GitClient;
 
 /// Requests a lightweight label that resolves through an existing tag to its commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +16,8 @@ pub struct LabelTag {
     pub tag: String,
     pub label: String,
 }
+
+pub type LabelTagOk = TagActionOutcome;
 
 /// Reports an unexpected Git transport failure while labeling a tag.
 #[derive(Debug, thiserror::Error)]
@@ -36,7 +38,7 @@ pub enum LabelTagError {
 ///
 /// Returns [`LabelTagError`] when Git cannot be executed.
 #[cqrsy::command]
-pub fn execute(command: LabelTag, git: &impl GitRunner) -> Result<TagActionOutcome, LabelTagError> {
+pub fn execute(command: LabelTag, git: &impl GitClient) -> Result<LabelTagOk, LabelTagError> {
     match label(command, git) {
         Ok(outcome) => Ok(outcome),
         Err(GitCommandError::Rejected { detail, progress }) => {
@@ -49,7 +51,7 @@ pub fn execute(command: LabelTag, git: &impl GitRunner) -> Result<TagActionOutco
     }
 }
 
-fn label(command: LabelTag, git: &impl GitRunner) -> Result<TagActionOutcome, GitCommandError> {
+fn label(command: LabelTag, git: &impl GitClient) -> Result<TagActionOutcome, GitCommandError> {
     if let Some(failure) = validate(&command) {
         return Ok(failure);
     }
@@ -62,19 +64,16 @@ fn label(command: LabelTag, git: &impl GitRunner) -> Result<TagActionOutcome, Gi
 }
 
 pub(super) fn create(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     repo: &Path,
     target: &str,
     label: &str,
 ) -> Result<(), GitCommandError> {
-    let peeled = format!("{target}^{{}}");
-    let output = git.run(repo, &["tag", label, &peeled])?;
-    if output.exit_code == 0 {
-        Ok(())
-    } else {
-        Err(GitCommandError::rejected(
-            output.fail_detail(&format!("git tag label failed for {label}")),
-        ))
+    match git.create_lightweight_tag(repo, label, target)? {
+        crate::ports::GitEffect::Applied(()) => Ok(()),
+        crate::ports::GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
+            "git tag label failed for {label}: {detail}"
+        ))),
     }
 }
 
@@ -95,7 +94,7 @@ mod tests {
     use super::{LabelTag, execute, validate};
     use crate::{
         tags::outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
-        testing::FakeGitRunner,
+        testing::ScriptedGitClient,
     };
 
     #[test]
@@ -132,8 +131,9 @@ mod tests {
 
     #[test]
     fn creation_transport_failure_remains_an_error_with_its_source() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(
             LabelTag {
@@ -154,7 +154,8 @@ mod tests {
 
     #[test]
     fn creation_nonzero_exit_remains_the_exact_closed_failure() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::exit_err("fatal: invalid target", 128)]);
+        let git =
+            ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: invalid target")]);
 
         assert_eq!(
             execute(

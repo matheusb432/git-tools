@@ -51,6 +51,7 @@ criterion = "0.8.2"
 directories = "6.0.0"
 domain = { path = "crates/domain" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+gix = { version = "0.56", default-features = false, features = ["revision"] }
 http-body-util = "0.1"
 ico = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }

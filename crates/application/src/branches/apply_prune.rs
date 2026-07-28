@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use super::plan_prune::PruneBranch;
-use crate::ports::GitRunner;
+use crate::ports::GitClient;
 
 /// Requests deletion of the selected local branches.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +29,7 @@ pub enum PruneStatus {
 
 /// Reports deleted branches and failures without presentation-specific text.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PruneResult {
+pub struct ApplyPruneOk {
     pub status: PruneStatus,
     pub deleted: Vec<PruneBranch>,
     pub failed: Vec<PruneFailure>,
@@ -43,7 +43,7 @@ pub enum ApplyPruneError {
     #[error("branch prune application failed: {source}")]
     Transport {
         /// Preserves completed deletion and rejection outcomes, when any exist.
-        completed_result: Option<Box<PruneResult>>,
+        completed_result: Option<Box<ApplyPruneOk>>,
         /// Preserves the original Git transport failure.
         #[source]
         source: anyhow::Error,
@@ -57,17 +57,17 @@ pub enum ApplyPruneError {
 /// Returns [`ApplyPruneError`] when Git cannot be executed before every selected branch is
 /// attempted. Completed branch outcomes remain available on the error.
 #[cqrsy::command]
-pub fn execute(command: ApplyPrune, git: &impl GitRunner) -> Result<PruneResult, ApplyPruneError> {
+pub fn execute(command: ApplyPrune, git: &impl GitClient) -> Result<ApplyPruneOk, ApplyPruneError> {
     let ApplyPrune { top, branches } = command;
     let mut deleted = Vec::new();
     let mut failed = Vec::new();
 
     for branch in branches {
-        match git.run(&top, &["branch", "-D", &branch.name]) {
-            Ok(output) if output.success() => deleted.push(branch),
-            Ok(output) => failed.push(PruneFailure {
+        match git.delete_branch(&top, &branch.name) {
+            Ok(crate::ports::GitEffect::Applied(())) => deleted.push(branch),
+            Ok(crate::ports::GitEffect::Rejected(reason)) => failed.push(PruneFailure {
                 name: branch.name,
-                reason: output.error_line(),
+                reason,
             }),
             Err(source) => {
                 let completed_result = (!deleted.is_empty() || !failed.is_empty())
@@ -83,14 +83,14 @@ pub fn execute(command: ApplyPrune, git: &impl GitRunner) -> Result<PruneResult,
     Ok(classify_result(deleted, failed))
 }
 
-fn classify_result(deleted: Vec<PruneBranch>, failed: Vec<PruneFailure>) -> PruneResult {
+fn classify_result(deleted: Vec<PruneBranch>, failed: Vec<PruneFailure>) -> ApplyPruneOk {
     let status = match (deleted.is_empty(), failed.is_empty()) {
         (_, true) => PruneStatus::Ok,
         (true, false) => PruneStatus::Fail,
         (false, false) => PruneStatus::Partial,
     };
 
-    PruneResult {
+    ApplyPruneOk {
         status,
         deleted,
         failed,
@@ -100,13 +100,13 @@ fn classify_result(deleted: Vec<PruneBranch>, failed: Vec<PruneFailure>) -> Prun
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{branches::plan_prune::PruneBranch, testing::FakeGitRunner};
+    use crate::{branches::plan_prune::PruneBranch, testing::ScriptedGitClient};
 
     #[test]
     fn apply_reports_deleted_and_failed_branches_as_values() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(""),
-            FakeGitRunner::exit_err("error: branch 'fix/z' is checked out", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::rejected("error: branch 'fix/z' is checked out"),
         ]);
         let deleted = PruneBranch {
             name: "feature/done".into(),
@@ -128,7 +128,7 @@ mod tests {
 
         assert_eq!(
             result,
-            PruneResult {
+            ApplyPruneOk {
                 status: PruneStatus::Partial,
                 deleted: vec![deleted],
                 failed: vec![PruneFailure {
@@ -141,7 +141,10 @@ mod tests {
 
     #[test]
     fn apply_preserves_plan_order_in_deleted_recovery_values() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok(""), FakeGitRunner::ok("")]);
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied(""),
+        ]);
         let branches = vec![
             PruneBranch {
                 name: "feature/first".into(),
@@ -164,7 +167,7 @@ mod tests {
 
         assert_eq!(
             result,
-            PruneResult {
+            ApplyPruneOk {
                 status: PruneStatus::Ok,
                 deleted: branches,
                 failed: Vec::new(),
@@ -174,7 +177,7 @@ mod tests {
 
     #[test]
     fn apply_reports_fail_when_every_deletion_fails() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::exit_err("deletion rejected", 1)]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("deletion rejected")]);
 
         let result = execute(
             ApplyPrune {
@@ -201,8 +204,9 @@ mod tests {
 
     #[test]
     fn apply_transport_failure_remains_an_error_with_its_source() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(
             ApplyPrune {

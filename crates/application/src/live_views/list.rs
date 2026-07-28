@@ -9,7 +9,7 @@ use crate::{live_views::LiveViewRecord, ports::AppStateStore};
 pub struct ListLiveViews;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ListLiveViewsResponse {
+pub struct ListLiveViewsOk {
     pub views: Vec<LiveViewRecord>,
 }
 
@@ -24,10 +24,10 @@ pub enum ListLiveViewsError {
 pub fn execute(
     _query: ListLiveViews,
     store: &impl AppStateStore,
-) -> Result<ListLiveViewsResponse, ListLiveViewsError> {
+) -> Result<ListLiveViewsOk, ListLiveViewsError> {
     let connection = store.connection_lock()?;
     let views = list_live_views(&connection)?;
-    Ok(ListLiveViewsResponse { views })
+    Ok(ListLiveViewsOk { views })
 }
 
 fn list_live_views(connection: &Connection) -> anyhow::Result<Vec<LiveViewRecord>> {

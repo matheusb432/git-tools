@@ -41,7 +41,7 @@ impl TagGroup {
 
 /// Reports either structured local tag groups or the Git failure that prevented listing.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TagList {
+pub enum ListTagsOk {
     /// Git refs loaded and grouped successfully.
     Listed { groups: Vec<TagGroup> },
     /// Git refs could not be loaded.

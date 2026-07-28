@@ -5,8 +5,8 @@ mod group;
 pub mod label;
 pub mod list;
 mod outcome;
-mod parse;
+pub(crate) mod parse;
 pub mod push;
 
-pub use group::{TagGroup, TagList};
+pub use group::{ListTagsOk, TagGroup};
 pub use outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress, TagRemotePushProgress};

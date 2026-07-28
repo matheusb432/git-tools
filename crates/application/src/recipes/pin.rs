@@ -8,8 +8,7 @@ use super::RecipeRequest;
 use crate::{
     diffs::{self, DiffTarget},
     discovery::resolve_repo_top,
-    ports::GitRunner,
-    shared::git::{capture_checked, command_label},
+    ports::GitClient,
 };
 
 /// Requests one complete snapshot recipe for a repository path.
@@ -19,6 +18,8 @@ pub struct PinRecipe {
     pub operation: RecipeRequest,
     pub name: Option<String>,
 }
+
+pub type PinRecipeOk = Recipe;
 
 /// Reports a failure to resolve the recipe source repository.
 #[derive(Debug, thiserror::Error)]
@@ -31,27 +32,18 @@ pub enum PinRecipeError {
         #[source]
         source: resolve_repo_top::ResolveRepoTopError,
     },
-    /// Git transport failed while resolving an immutable pin.
-    #[error("{command}: {source}")]
-    Transport {
-        command: String,
-        #[source]
-        source: anyhow::Error,
-    },
 }
 
 /// Builds a complete snapshot recipe and pins its symbolic range when possible.
 ///
-/// Pin probes that Git rejects with a nonzero exit deliberately leave the
-/// operation symbolic. Git transport failures reject construction.
+/// Pin probes that cannot resolve deliberately leave the operation symbolic.
 ///
 /// # Errors
 ///
 /// Returns [`PinRecipeError::TopLevel`] when Git cannot resolve `query.repo` to
-/// a repository top level. Returns [`PinRecipeError::Transport`] when Git
-/// transport fails while resolving an immutable pin.
+/// a repository top level.
 #[cqrsy::query]
-pub fn execute(query: PinRecipe, git: &impl GitRunner) -> Result<Recipe, PinRecipeError> {
+pub fn execute(query: PinRecipe, git: &impl GitClient) -> Result<PinRecipeOk, PinRecipeError> {
     let top = resolve_repo_top::execute(
         resolve_repo_top::ResolveRepoTop {
             repo: query.repo.clone(),
@@ -63,20 +55,20 @@ pub fn execute(query: PinRecipe, git: &impl GitRunner) -> Result<Recipe, PinReci
         source,
     })?;
 
-    build_resolved(top, query.operation, query.name, git)
+    Ok(build_resolved(top, query.operation, query.name, git))
 }
 
 pub(super) fn build_resolved(
     repo_top: PathBuf,
     operation: RecipeRequest,
     name: Option<String>,
-    git: &impl GitRunner,
-) -> Result<Recipe, PinRecipeError> {
-    Ok(Recipe {
-        op: pin_operation(&repo_top, operation_to_op(operation), git)?,
+    git: &impl GitClient,
+) -> Recipe {
+    Recipe {
+        op: pin_operation(&repo_top, operation_to_op(operation), git),
         source: RecipeSource::LocalRepo(repo_top),
         name,
-    })
+    }
 }
 
 fn operation_to_op(operation: RecipeRequest) -> RecipeOp {
@@ -117,125 +109,83 @@ fn pin_to_recipe(pin: diffs::PinnedRange) -> PinnedRange {
     }
 }
 
-fn pin_operation(
-    repo_top: &Path,
-    operation: RecipeOp,
-    git: &impl GitRunner,
-) -> Result<RecipeOp, PinRecipeError> {
-    Ok(match operation {
+fn pin_operation(repo_top: &Path, operation: RecipeOp, git: &impl GitClient) -> RecipeOp {
+    match operation {
         RecipeOp::Diff { target } => RecipeOp::Diff {
-            target: pin_target(repo_top, target, git)?,
+            target: pin_target(repo_top, target, git),
         },
         RecipeOp::MergeDiff { base, pinned: None } => RecipeOp::MergeDiff {
-            pinned: pin_merge(repo_top, base.as_deref(), git)?,
+            pinned: pin_merge(repo_top, base.as_deref(), git),
             base,
         },
         RecipeOp::SquashPreview { pinned: None } => RecipeOp::SquashPreview {
-            pinned: pin_range(repo_top, "@{u}", "HEAD", git)?,
+            pinned: pin_range(repo_top, "@{u}", "HEAD", git),
         },
         operation => operation,
-    })
+    }
 }
 
-fn pin_target(
-    repo_top: &Path,
-    target: RecipeTarget,
-    git: &impl GitRunner,
-) -> Result<RecipeTarget, PinRecipeError> {
-    Ok(match target {
+fn pin_target(repo_top: &Path, target: RecipeTarget, git: &impl GitClient) -> RecipeTarget {
+    match target {
         RecipeTarget::Unpushed { pinned: None } => RecipeTarget::Unpushed {
-            pinned: pin_range(repo_top, "@{u}", "HEAD", git)?,
+            pinned: pin_range(repo_top, "@{u}", "HEAD", git),
         },
         RecipeTarget::Last {
             count,
             pinned: None,
         } => RecipeTarget::Last {
             count,
-            pinned: pin_range(repo_top, &format!("HEAD~{count}"), "HEAD", git)?,
+            pinned: pin_range(repo_top, &format!("HEAD~{count}"), "HEAD", git),
         },
         RecipeTarget::Range {
             range,
             pinned: None,
         } => RecipeTarget::Range {
-            pinned: pin_exact_range(repo_top, &range, git)?,
+            pinned: pin_exact_range(repo_top, &range, git),
             range,
         },
         RecipeTarget::Merge { base, pinned: None } => RecipeTarget::Merge {
-            pinned: pin_merge(repo_top, Some(&base), git)?,
+            pinned: pin_merge(repo_top, Some(&base), git),
             base,
         },
         target => target,
-    })
-}
-
-fn pin_range(
-    repo_top: &Path,
-    base: &str,
-    head: &str,
-    git: &impl GitRunner,
-) -> Result<Option<PinnedRange>, PinRecipeError> {
-    let base_args = ["rev-parse", base];
-    let Some(base) = capture_pin(git, repo_top, &base_args)? else {
-        return Ok(None);
-    };
-    let head_args = ["rev-parse", head];
-    let Some(head) = capture_pin(git, repo_top, &head_args)? else {
-        return Ok(None);
-    };
-    Ok(Some(PinnedRange { base, head }))
-}
-
-fn pin_exact_range(
-    repo_top: &Path,
-    range: &str,
-    git: &impl GitRunner,
-) -> Result<Option<PinnedRange>, PinRecipeError> {
-    if range.contains("...") {
-        return Ok(None);
     }
-    let Some((base, head)) = range.split_once("..") else {
-        return Ok(None);
-    };
+}
+
+fn pin_range(repo_top: &Path, base: &str, head: &str, git: &impl GitClient) -> Option<PinnedRange> {
+    let base = capture_pin(git.resolve_sha(repo_top, base))?;
+    let head = capture_pin(git.resolve_sha(repo_top, head))?;
+    Some(PinnedRange { base, head })
+}
+
+fn pin_exact_range(repo_top: &Path, range: &str, git: &impl GitClient) -> Option<PinnedRange> {
+    if range.contains("...") {
+        return None;
+    }
+    let (base, head) = range.split_once("..")?;
     if base.is_empty() || head.is_empty() {
-        return Ok(None);
+        return None;
     }
     pin_range(repo_top, base, head, git)
 }
 
-fn pin_merge(
-    repo_top: &Path,
-    base: Option<&str>,
-    git: &impl GitRunner,
-) -> Result<Option<PinnedRange>, PinRecipeError> {
+fn pin_merge(repo_top: &Path, base: Option<&str>, git: &impl GitClient) -> Option<PinnedRange> {
     let base = base
         .map(str::trim)
         .filter(|base| !base.is_empty())
         .unwrap_or(crate::diffs::render_merge_diff::DEFAULT_BASE);
-    let base_args = ["merge-base", base, "HEAD"];
-    let Some(base) = capture_pin(git, repo_top, &base_args)? else {
-        return Ok(None);
-    };
-    let head_args = ["rev-parse", "HEAD"];
-    let Some(head) = capture_pin(git, repo_top, &head_args)? else {
-        return Ok(None);
-    };
-    Ok(Some(PinnedRange { base, head }))
+    let base = capture_pin(git.merge_base(repo_top, base, "HEAD"))?;
+    let head = capture_pin(git.resolve_sha(repo_top, "HEAD"))?;
+    Some(PinnedRange { base, head })
 }
 
-fn capture_pin(
-    git: &impl GitRunner,
-    repo: &Path,
-    args: &[&str],
-) -> Result<Option<String>, PinRecipeError> {
-    capture_checked(git, repo, args).map_err(|source| PinRecipeError::Transport {
-        command: command_label(args),
-        source,
-    })
+fn capture_pin(result: anyhow::Result<String>) -> Option<String> {
+    result.ok()
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{error::Error as _, num::NonZeroU32, path::PathBuf};
+    use std::{num::NonZeroU32, path::PathBuf};
 
     use contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
@@ -243,12 +193,12 @@ mod tests {
     use crate::{
         diffs::{self, DiffTarget},
         recipes::RecipeRequest,
-        testing::FakeGitRunner,
+        testing::ScriptedGitClient,
     };
 
     fn pin(
         operation: RecipeRequest,
-        outputs: Vec<crate::ports::GitOutput>,
+        outputs: Vec<crate::testing::GitResponse>,
     ) -> contracts::recipes::Recipe {
         execute(
             PinRecipe {
@@ -256,7 +206,7 @@ mod tests {
                 operation,
                 name: Some("repo".into()),
             },
-            &FakeGitRunner::new(outputs),
+            &ScriptedGitClient::new(outputs),
         )
         .expect("recipe is built")
     }
@@ -269,9 +219,9 @@ mod tests {
                 pinned: None,
             }),
             vec![
-                FakeGitRunner::ok("/work/repo\n"),
-                FakeGitRunner::ok("base-sha\n"),
-                FakeGitRunner::ok("head-sha\n"),
+                ScriptedGitClient::applied("/work/repo\n"),
+                ScriptedGitClient::applied("base-sha\n"),
+                ScriptedGitClient::applied("head-sha\n"),
             ],
         );
 
@@ -374,9 +324,9 @@ mod tests {
             let recipe = pin(
                 operation,
                 vec![
-                    FakeGitRunner::ok("/work/repo\n"),
-                    FakeGitRunner::ok("base-sha\n"),
-                    FakeGitRunner::ok("head-sha\n"),
+                    ScriptedGitClient::applied("/work/repo\n"),
+                    ScriptedGitClient::applied("base-sha\n"),
+                    ScriptedGitClient::applied("head-sha\n"),
                 ],
             );
             assert_eq!(recipe.op, expected);
@@ -391,13 +341,13 @@ mod tests {
         };
         let base = pin(
             RecipeRequest::Diff(DiffTarget::Base("main".into())),
-            vec![FakeGitRunner::ok("/work/repo\n")],
+            vec![ScriptedGitClient::applied("/work/repo\n")],
         );
         let existing = pin(
             RecipeRequest::Diff(DiffTarget::Unpushed {
                 pinned: Some(pinned),
             }),
-            vec![FakeGitRunner::ok("/work/repo\n")],
+            vec![ScriptedGitClient::applied("/work/repo\n")],
         );
 
         assert_eq!(
@@ -424,8 +374,8 @@ mod tests {
         let unresolved = pin(
             RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
             vec![
-                FakeGitRunner::ok("/work/repo\n"),
-                FakeGitRunner::exit_err("no upstream", 128),
+                ScriptedGitClient::applied("/work/repo\n"),
+                ScriptedGitClient::rejected("no upstream"),
             ],
         );
         let three_dot = pin(
@@ -433,7 +383,7 @@ mod tests {
                 range: "main...HEAD".into(),
                 pinned: None,
             }),
-            vec![FakeGitRunner::ok("/work/repo\n")],
+            vec![ScriptedGitClient::applied("/work/repo\n")],
         );
 
         assert_eq!(
@@ -454,13 +404,13 @@ mod tests {
     }
 
     #[test]
-    fn pin_transport_failure_remains_a_sourced_error() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok("/work/repo\n")),
+    fn pin_resolution_failure_leaves_the_recipe_symbolic() {
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied("/work/repo\n")),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
-        let error = execute(
+        let recipe = execute(
             PinRecipe {
                 repo: "/work/repo".into(),
                 operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
@@ -468,15 +418,13 @@ mod tests {
             },
             &git,
         )
-        .expect_err("transport failure must remain an error");
+        .expect("pin failure is an optional optimization");
 
         assert_eq!(
-            error.to_string(),
-            "git rev-parse @{u}: git transport unavailable"
-        );
-        assert_eq!(
-            error.source().map(ToString::to_string),
-            Some("git transport unavailable".into())
+            recipe.op,
+            RecipeOp::Diff {
+                target: RecipeTarget::Unpushed { pinned: None }
+            }
         );
     }
 }

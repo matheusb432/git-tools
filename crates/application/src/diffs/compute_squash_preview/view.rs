@@ -8,7 +8,7 @@ use crate::{
         range::DiffRanges,
         util::{DiffData, assemble, repo_name},
     },
-    ports::DiffSource,
+    ports::GitClient,
 };
 
 pub(crate) struct SquashViewBuild {
@@ -18,7 +18,7 @@ pub(crate) struct SquashViewBuild {
 }
 
 pub(super) fn build(
-    source: &impl DiffSource,
+    source: &impl GitClient,
     cwd: &Path,
     pinned: Option<&PinnedRange>,
     exclusions: &domain::diffs::DiffExclusions,
@@ -39,7 +39,10 @@ pub(super) fn build(
             DiffRanges::exact(pin.display_range()),
         ),
         None => {
-            let upstream = source.upstream(Path::new(&top))?;
+            let upstream = match source.upstream(Path::new(&top))? {
+                crate::ports::GitEffect::Applied(upstream) => upstream,
+                crate::ports::GitEffect::Rejected(detail) => anyhow::bail!(detail),
+            };
             let symbolic = DiffRanges::unpushed(&upstream);
             (upstream, symbolic.clone(), symbolic)
         }

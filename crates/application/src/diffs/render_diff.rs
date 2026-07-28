@@ -12,7 +12,7 @@ use crate::{
         DiffTarget, DiffTargetRequest, DiffTargetRequestError, compute_diff, range::DiffRanges,
         util::repo_name,
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
+    ports::{ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -27,7 +27,7 @@ pub struct RenderDiff {
 
 /// The outcome plus every message the render wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RenderDiffResponse {
+pub struct RenderDiffOk {
     pub outcome: RenderDiffOutcome,
     pub notes: Vec<Note>,
 }
@@ -55,7 +55,7 @@ pub enum RenderDiffError {
     reason = "the explicit fields are the persisted range-reuse key"
 )]
 fn range_fast_path(
-    source: &impl DiffSource,
+    source: &impl GitClient,
     store: &impl ArtifactStore,
     top: &str,
     store_root: &Path,
@@ -82,7 +82,7 @@ fn range_fast_path(
 // ! Returns (kind, base_sha, head_sha) only for pure commit ranges; None for
 // ! worktree (Hash) mode. It follows compute target resolution without assembling a view.
 fn resolved_range(
-    source: &impl DiffSource,
+    source: &impl GitClient,
     top: &str,
     target: &DiffTarget,
 ) -> Option<(DiffKind, String, String)> {
@@ -100,7 +100,9 @@ fn resolved_range(
         DiffTarget::Unpushed { pinned: None } => {
             // No upstream means the compute core falls back to Hash (worktree) mode; not fast-path
             // eligible, and the fallback warning is emitted there (once), not here.
-            let upstream = source.upstream(repo).ok()?;
+            let crate::ports::GitEffect::Applied(upstream) = source.upstream(repo).ok()? else {
+                return None;
+            };
             DiffRanges::unpushed(&upstream).diff
         }
         // Pinned targets already carry resolved SHAs, but the fast path keys on
@@ -132,7 +134,7 @@ fn resolved_range(
 }
 
 // ! head = text after the last `..`; worktree mode has no commit head ⇒ sentinel.
-fn head_sha_for(source: &impl DiffSource, top: &str, range: &str) -> String {
+fn head_sha_for(source: &impl GitClient, top: &str, range: &str) -> String {
     if range.contains("..") {
         let tip = range.rsplit("..").next().unwrap_or("HEAD");
         source.resolve_sha(Path::new(top), tip).unwrap_or_default()
@@ -146,11 +148,11 @@ fn head_sha_for(source: &impl DiffSource, top: &str, range: &str) -> String {
 pub fn execute(
     req: RenderDiff,
     app_settings: &impl UserSettingsStore,
-    source: &impl DiffSource,
+    source: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-) -> Result<RenderDiffResponse, RenderDiffError> {
+) -> Result<RenderDiffOk, RenderDiffError> {
     let RenderDiff { cwd, target, name } = req;
     let target = DiffTarget::try_from(target)?;
     let mut notes = Vec::new();
@@ -182,7 +184,7 @@ pub fn execute(
             "diff-preview: reusing {}",
             hit.display()
         )));
-        return Ok(RenderDiffResponse {
+        return Ok(RenderDiffOk {
             outcome: RenderDiffOutcome::Rendered {
                 artifact: hit,
                 reused: true,
@@ -202,7 +204,7 @@ pub fn execute(
         notes.push(Note::warn(format!(
             "diff-preview: {summary} — nothing to show (no commits or changes); skipping"
         )));
-        return Ok(RenderDiffResponse {
+        return Ok(RenderDiffOk {
             outcome: RenderDiffOutcome::Empty,
             notes,
         });
@@ -234,7 +236,7 @@ pub fn execute(
         legacy_count_label(file_count, "file")
     )));
     notes.push(Note::info(format!("wrote {}", placed.path.display())));
-    Ok(RenderDiffResponse {
+    Ok(RenderDiffOk {
         outcome: RenderDiffOutcome::Rendered {
             artifact: placed.path,
             reused: placed.reused,
@@ -271,8 +273,7 @@ mod tests {
         ports::AppSettings,
         shared::notes::Note,
         testing::{
-            FakeDiffSource, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
-            StubRenderer,
+            FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -287,7 +288,7 @@ mod tests {
 
     #[test]
     fn renders_and_stores_an_artifact_with_the_summary_notes() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -331,7 +332,7 @@ mod tests {
 
     #[test]
     fn render_uses_the_resolved_projects_settings_snapshot() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -375,7 +376,7 @@ mod tests {
 
     #[test]
     fn empty_view_returns_empty_with_the_skip_warning() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -406,7 +407,7 @@ mod tests {
 
     #[test]
     fn pure_range_reuses_an_existing_artifact() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             shas: [
@@ -460,7 +461,7 @@ mod tests {
 
     #[test]
     fn fast_path_never_reuses_an_artifact_rendered_under_a_different_exclusion_set() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             commits: vec![commit("abc1234")],
@@ -526,7 +527,7 @@ mod tests {
 
     #[test]
     fn fast_path_never_reuses_an_artifact_rendered_under_a_different_theme() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             commits: vec![commit("abc1234")],
@@ -579,7 +580,7 @@ mod tests {
 
     #[test]
     fn fast_path_reuses_an_artifact_rendered_under_the_same_exclusion_set() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             shas: [
@@ -635,7 +636,7 @@ mod tests {
 
     #[test]
     fn named_run_skips_the_fast_path_and_overrides_the_title() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             commits: vec![commit("abc1234")],
@@ -691,7 +692,7 @@ mod tests {
 
     #[test]
     fn unpushed_without_upstream_warns_and_falls_back_to_main() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: None,
@@ -728,7 +729,7 @@ mod tests {
 
     #[test]
     fn unknown_base_is_an_error() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],

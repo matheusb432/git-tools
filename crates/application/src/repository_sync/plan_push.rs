@@ -4,11 +4,7 @@ use std::path::{Path, PathBuf};
 
 use domain::repository::PendingChanges;
 
-use super::pending_changes;
-use crate::{
-    ports::GitRunner,
-    shared::git::{capture_checked, command_label},
-};
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests a read-only push plan for one repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +25,7 @@ pub struct PushTarget {
 
 /// Represents either a refused push or a target ready for confirmation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PushPlan {
+pub enum PlanPushOk {
     Refused(String),
     Ready(PushTarget),
 }
@@ -53,73 +49,70 @@ pub enum PlanPushError {
 ///
 /// Returns [`PlanPushError`] when Git transport fails.
 #[cqrsy::query]
-pub fn execute(query: PlanPush, git: &impl GitRunner) -> Result<PushPlan, PlanPushError> {
+pub fn execute(query: PlanPush, git: &impl GitClient) -> Result<PlanPushOk, PlanPushError> {
     let PlanPush { repo } = query;
-    let top_args = ["rev-parse", "--show-toplevel"];
-    let Some(top) = capture_non_empty(git, &repo, &top_args)? else {
-        return Ok(PushPlan::Refused("not a git repo".into()));
+    let Some(top) = git
+        .discover_top(&repo)
+        .map_err(|source| transport("discover repository", source))?
+    else {
+        return Ok(PlanPushOk::Refused("not a git repo".into()));
     };
-    let top = PathBuf::from(top);
 
-    let branch_args = ["rev-parse", "--abbrev-ref", "HEAD"];
-    let branch = match capture_non_empty(git, &top, &branch_args)? {
-        Some(branch) if branch != "HEAD" => branch,
+    let branch = match git
+        .current_branch(&top)
+        .map_err(|source| transport("read current branch", source))?
+    {
+        branch if branch != "HEAD" => branch,
         _ => {
-            return Ok(PushPlan::Refused(
+            return Ok(PlanPushOk::Refused(
                 "detached HEAD — checkout a branch first".into(),
             ));
         }
     };
 
-    let remote_key = format!("branch.{branch}.remote");
-    let remote_args = ["config", remote_key.as_str()];
-    let Some(remote) = capture_non_empty(git, &top, &remote_args)? else {
-        return Ok(PushPlan::Refused(format!(
+    let Some(remote) = git
+        .branch_remote(&top, &branch)
+        .map_err(|source| transport("read branch remote", source))?
+    else {
+        return Ok(PlanPushOk::Refused(format!(
             "no upstream tracking branch (run: git push -u origin {branch})"
         )));
     };
 
-    let remote_url_args = ["remote", "get-url", remote.as_str()];
-    let remote_url = capture_checked(git, &top, &remote_url_args)
-        .map_err(|source| transport(&remote_url_args, source))?
+    let remote_url = git
+        .remote_url(&top, &remote)
+        .map_err(|source| transport("read remote URL", source))?
         .unwrap_or_default();
-    let status_args = ["status", "--porcelain"];
-    let porcelain = match git
-        .run(&top, &status_args)
-        .map_err(|source| transport(&status_args, source))?
+    let working_tree = match git
+        .working_tree(&top)
+        .map_err(|source| transport("read working tree", source))?
     {
-        output if output.exit_code == 0 => output.stdout,
-        _ => return Ok(PushPlan::Refused("git status failed".into())),
+        GitEffect::Applied(working_tree) => working_tree,
+        GitEffect::Rejected(_) => return Ok(PlanPushOk::Refused("git status failed".into())),
     };
-    let ahead_args = ["rev-list", "--count", "@{u}..HEAD"];
-    let ahead = capture_checked(git, &top, &ahead_args)
-        .map_err(|source| transport(&ahead_args, source))?
-        .and_then(|count| count.parse::<usize>().ok())
+    let ahead = git
+        .commit_count(&top, "@{u}..HEAD")
+        .map_err(|source| transport("count unpushed commits", source))?
         .unwrap_or(0);
 
-    Ok(PushPlan::Ready(PushTarget {
+    Ok(PlanPushOk::Ready(PushTarget {
         name: repo_name(&top),
         top,
         branch,
         remote,
         remote_url,
-        pending: pending_changes::classify(&porcelain, ahead),
+        pending: PendingChanges {
+            changed: working_tree.files.len(),
+            staged: working_tree.staged,
+            unprepared: working_tree.unprepared,
+            ahead,
+        },
     }))
 }
 
-fn capture_non_empty(
-    git: &impl GitRunner,
-    repo: &Path,
-    args: &[&str],
-) -> Result<Option<String>, PlanPushError> {
-    capture_checked(git, repo, args)
-        .map(|captured| captured.filter(|value| !value.is_empty()))
-        .map_err(|source| transport(args, source))
-}
-
-fn transport(args: &[&str], source: anyhow::Error) -> PlanPushError {
+fn transport(command: &str, source: anyhow::Error) -> PlanPushError {
     PlanPushError::Transport {
-        command: command_label(args),
+        command: command.into(),
         source,
     }
 }
@@ -137,13 +130,13 @@ mod tests {
     use std::error::Error as _;
 
     use super::*;
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     #[test]
     fn detached_head_is_a_refused_push_plan() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/repos/api\n"),
-            FakeGitRunner::ok("HEAD\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("HEAD\n"),
         ]);
 
         let plan = execute(PlanPush { repo: ".".into() }, &git)
@@ -151,16 +144,16 @@ mod tests {
 
         assert_eq!(
             plan,
-            PushPlan::Refused("detached HEAD — checkout a branch first".into())
+            PlanPushOk::Refused("detached HEAD — checkout a branch first".into())
         );
     }
 
     #[test]
     fn missing_upstream_is_a_refused_push_plan() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/repos/api\n"),
-            FakeGitRunner::ok("feature\n"),
-            FakeGitRunner::exit_err("no upstream", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("feature\n"),
+            ScriptedGitClient::rejected("no upstream"),
         ]);
 
         let plan = execute(PlanPush { repo: ".".into() }, &git)
@@ -168,7 +161,7 @@ mod tests {
 
         assert_eq!(
             plan,
-            PushPlan::Refused(
+            PlanPushOk::Refused(
                 "no upstream tracking branch (run: git push -u origin feature)".into()
             )
         );
@@ -176,20 +169,20 @@ mod tests {
 
     #[test]
     fn ready_plan_includes_remote_and_pending_changes() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/repos/api\n"),
-            FakeGitRunner::ok("main\n"),
-            FakeGitRunner::ok("origin\n"),
-            FakeGitRunner::ok("git@example.com:team/api.git\n"),
-            FakeGitRunner::ok(" M a.txt\n?? b.txt\n"),
-            FakeGitRunner::ok("2\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied("origin\n"),
+            ScriptedGitClient::applied("git@example.com:team/api.git\n"),
+            ScriptedGitClient::applied(" M a.txt\n?? b.txt\n"),
+            ScriptedGitClient::applied("2\n"),
         ]);
 
         let plan = execute(PlanPush { repo: ".".into() }, &git).expect("push plan is built");
 
         assert_eq!(
             plan,
-            PushPlan::Ready(PushTarget {
+            PlanPushOk::Ready(PushTarget {
                 name: "api".into(),
                 top: "/repos/api".into(),
                 branch: "main".into(),
@@ -207,15 +200,16 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_a_sourced_plan_error() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(PlanPush { repo: ".".into() }, &git)
             .expect_err("transport failure must remain an error");
 
         assert_eq!(
             error.to_string(),
-            "git rev-parse --show-toplevel: git transport unavailable"
+            "discover repository: git transport unavailable"
         );
         assert_eq!(
             error.source().map(ToString::to_string),

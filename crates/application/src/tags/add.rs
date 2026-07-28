@@ -6,7 +6,7 @@ use super::{
     git_command_error::GitCommandError,
     outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
 };
-use crate::ports::GitRunner;
+use crate::ports::GitClient;
 
 /// Requests creation of one annotated tag in a repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +15,8 @@ pub struct AddTag {
     pub tag: String,
     pub message: String,
 }
+
+pub type AddTagOk = TagActionOutcome;
 
 /// Reports an unexpected Git transport failure while adding a tag.
 #[derive(Debug, thiserror::Error)]
@@ -35,7 +37,7 @@ pub enum AddTagError {
 ///
 /// Returns [`AddTagError`] when Git cannot be executed.
 #[cqrsy::command]
-pub fn execute(command: AddTag, git: &impl GitRunner) -> Result<TagActionOutcome, AddTagError> {
+pub fn execute(command: AddTag, git: &impl GitClient) -> Result<AddTagOk, AddTagError> {
     match create(command, git) {
         Ok(outcome) => Ok(outcome),
         Err(GitCommandError::Rejected { detail, progress }) => {
@@ -50,24 +52,22 @@ pub fn execute(command: AddTag, git: &impl GitRunner) -> Result<TagActionOutcome
 
 pub(super) fn create(
     command: AddTag,
-    git: &impl GitRunner,
+    git: &impl GitClient,
 ) -> Result<TagActionOutcome, GitCommandError> {
     if let Some(failure) = validate(&command) {
         return Ok(failure);
     }
 
     let AddTag { repo, tag, message } = command;
-    let output = git.run(&repo, &["tag", "-a", &tag, "-m", &message])?;
-
-    if output.exit_code == 0 {
-        Ok(
-            TagActionOutcome::new(TagActionStatus::Created, format!("created tag {tag}"))
-                .with_progress(TagOperationProgress::created(tag)),
+    match git.create_annotated_tag(&repo, &tag, &message)? {
+        crate::ports::GitEffect::Applied(()) => Ok(TagActionOutcome::new(
+            TagActionStatus::Created,
+            format!("created tag {tag}"),
         )
-    } else {
-        Err(GitCommandError::rejected(
-            output.fail_detail(&format!("git tag add failed for {tag}")),
-        ))
+        .with_progress(TagOperationProgress::created(tag))),
+        crate::ports::GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
+            "git tag add failed for {tag}: {detail}"
+        ))),
     }
 }
 
@@ -90,7 +90,7 @@ mod tests {
         tags::outcome::{
             TagActionOutcome, TagActionStatus, TagOperationProgress, TagRemotePushProgress,
         },
-        testing::FakeGitRunner,
+        testing::ScriptedGitClient,
     };
 
     #[test]
@@ -127,8 +127,9 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_an_error_with_its_source() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(
             AddTag {
@@ -149,9 +150,8 @@ mod tests {
 
     #[test]
     fn nonzero_exit_remains_the_exact_closed_failure() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::exit_err(
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected(
             "fatal: tag already exists",
-            128,
         )]);
 
         assert_eq!(
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn successful_add_reports_the_created_ref() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok("")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
 
         let outcome = execute(
             AddTag {

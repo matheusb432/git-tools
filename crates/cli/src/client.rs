@@ -22,65 +22,8 @@ use contracts::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-/// The swap-later seam: `gtl diff` and its siblings render through whatever
-/// backend they are handed. The production impl talks to the resident daemon
-/// over localhost HTTP; tests substitute an in-memory fake that only overrides
-/// the method(s) it exercises.
+/// Transport for managed synchronization and live-view persistence.
 pub trait Backend {
-    /// Render a diff preview, returning the service-composed wire envelope.
-    ///
-    /// # Errors
-    /// Returns an error only on transport/parse failure — an error *outcome* is
-    /// carried inside the returned [`Envelope`], not as `Err`.
-    fn render_diff(&self, _req: &RenderDiff) -> anyhow::Result<Envelope<RenderDiffData>> {
-        unimplemented!("render_diff")
-    }
-
-    /// Render a merge-diff preview, returning the service-composed wire envelope.
-    ///
-    /// # Errors
-    /// Returns an error only on transport/parse failure — an error *outcome* is
-    /// carried inside the returned [`Envelope`], not as `Err`.
-    fn render_merge_diff(
-        &self,
-        _req: &RenderMergeDiff,
-    ) -> anyhow::Result<Envelope<RenderDiffData>> {
-        unimplemented!("render_merge_diff")
-    }
-
-    /// Render a squash-preview artifact, returning the service-composed wire envelope.
-    ///
-    /// # Errors
-    /// Returns an error only on transport/parse failure — an error *outcome* is
-    /// carried inside the returned [`Envelope`], not as `Err`.
-    fn render_squash_preview(
-        &self,
-        _req: &RenderSquashPreview,
-    ) -> anyhow::Result<Envelope<RenderDiffData>> {
-        unimplemented!("render_squash_preview")
-    }
-
-    /// Render a diff-subrepos artifact, returning the service-composed wire envelope.
-    ///
-    /// # Errors
-    /// Returns an error only on transport/parse failure — an error *outcome* is
-    /// carried inside the returned [`Envelope`], not as `Err`.
-    fn render_diff_subrepos(
-        &self,
-        _req: &RenderDiffSubrepos,
-    ) -> anyhow::Result<Envelope<RenderDiffData>> {
-        unimplemented!("render_diff_subrepos")
-    }
-
-    /// Render a diff-all artifact, returning the service-composed wire envelope.
-    ///
-    /// # Errors
-    /// Returns an error only on transport/parse failure — an error *outcome* is
-    /// carried inside the returned [`Envelope`], not as `Err`.
-    fn render_diff_all(&self, _req: &RenderDiffAll) -> anyhow::Result<Envelope<RenderDiffData>> {
-        unimplemented!("render_diff_all")
-    }
-
     /// Push every managed repo, returning the service-composed wire envelope.
     ///
     /// # Errors
@@ -273,35 +216,44 @@ impl HttpBackend {
             .json::<Res>()
             .context("daemon request failed")
     }
+
+    pub(crate) fn render_diff(
+        &self,
+        request: &RenderDiff,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        self.post_json("/diffs/render", request)
+    }
+
+    pub(crate) fn render_merge_diff(
+        &self,
+        request: &RenderMergeDiff,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        self.post_json("/diffs/merge", request)
+    }
+
+    pub(crate) fn render_squash_preview(
+        &self,
+        request: &RenderSquashPreview,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        self.post_json("/diffs/squash-preview", request)
+    }
+
+    pub(crate) fn render_diff_subrepos(
+        &self,
+        request: &RenderDiffSubrepos,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        self.post_json("/diffs/subrepos", request)
+    }
+
+    pub(crate) fn render_diff_all(
+        &self,
+        request: &RenderDiffAll,
+    ) -> anyhow::Result<Envelope<RenderDiffData>> {
+        self.post_json("/diffs/all", request)
+    }
 }
 
 impl Backend for HttpBackend {
-    fn render_diff(&self, req: &RenderDiff) -> anyhow::Result<Envelope<RenderDiffData>> {
-        self.post_json("/diffs/render", req)
-    }
-
-    fn render_merge_diff(&self, req: &RenderMergeDiff) -> anyhow::Result<Envelope<RenderDiffData>> {
-        self.post_json("/diffs/merge", req)
-    }
-
-    fn render_squash_preview(
-        &self,
-        req: &RenderSquashPreview,
-    ) -> anyhow::Result<Envelope<RenderDiffData>> {
-        self.post_json("/diffs/squash-preview", req)
-    }
-
-    fn render_diff_subrepos(
-        &self,
-        req: &RenderDiffSubrepos,
-    ) -> anyhow::Result<Envelope<RenderDiffData>> {
-        self.post_json("/diffs/subrepos", req)
-    }
-
-    fn render_diff_all(&self, req: &RenderDiffAll) -> anyhow::Result<Envelope<RenderDiffData>> {
-        self.post_json("/diffs/all", req)
-    }
-
     fn push_all(&self, req: &PushAllRequest) -> anyhow::Result<Envelope<SyncData>> {
         self.post_json("/managed/push-all", req)
     }

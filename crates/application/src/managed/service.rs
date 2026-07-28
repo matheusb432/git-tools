@@ -2,7 +2,7 @@
 
 use domain::managed::ManagedRepo;
 
-use crate::ports::RemoteSync;
+use crate::ports::GitClient;
 
 /// One repo's push/pull outcome — the exact shape `push_pull.rs`'s retired
 /// `PushPullResult` had, now living server-side.
@@ -79,12 +79,12 @@ pub(crate) enum Preflight {
     Done(RepoSyncResult),
 }
 
-pub(crate) async fn preflight(
-    remote: &impl RemoteSync,
+pub(crate) fn preflight(
+    git: &impl GitClient,
     repo: &ManagedRepo,
     detached_detail: &str,
 ) -> Preflight {
-    if !remote.repo_present(&repo.path) {
+    if !git.repo_present(&repo.path) {
         return Preflight::Done(result(
             repo,
             "",
@@ -92,12 +92,12 @@ pub(crate) async fn preflight(
             "not present on this machine",
         ));
     }
-    let branch = remote.current_branch(&repo.path).await.unwrap_or_default();
+    let branch = git.current_branch(&repo.path).unwrap_or_default();
     if branch.is_empty() || branch == "HEAD" {
         return Preflight::Done(result(repo, &branch, SyncStatus::Warn, detached_detail));
     }
-    match remote.has_remote(&repo.path, "origin").await {
-        Ok(true) => Preflight::Ready { branch },
+    match git.remote_url(&repo.path, "origin") {
+        Ok(Some(_)) => Preflight::Ready { branch },
         _ => Preflight::Done(result(
             repo,
             &branch,
@@ -112,7 +112,7 @@ mod tests {
     use domain::managed::ManagedRepo;
 
     use super::*;
-    use crate::testing::FakeRemoteSync;
+    use crate::testing::ManagedGitScript;
 
     fn repo() -> ManagedRepo {
         ManagedRepo {
@@ -143,11 +143,11 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_skips_a_repo_not_present_on_this_machine() {
-        let remote = FakeRemoteSync {
+        let remote = ManagedGitScript {
             present: false,
             ..Default::default()
         };
-        let outcome = preflight(&remote, &repo(), "detached").await;
+        let outcome = preflight(&remote.git_client(), &repo(), "detached");
         match outcome {
             Preflight::Done(r) => {
                 assert_eq!(r.status, SyncStatus::Skip);
@@ -159,12 +159,16 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_warns_on_detached_head() {
-        let remote = FakeRemoteSync {
+        let remote = ManagedGitScript {
             present: true,
             branch: "HEAD".into(),
             ..Default::default()
         };
-        let outcome = preflight(&remote, &repo(), "detached HEAD - nothing to push").await;
+        let outcome = preflight(
+            &remote.git_client(),
+            &repo(),
+            "detached HEAD - nothing to push",
+        );
         match outcome {
             Preflight::Done(r) => {
                 assert_eq!(r.status, SyncStatus::Warn);
@@ -176,13 +180,13 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_warns_when_no_origin_remote() {
-        let remote = FakeRemoteSync {
+        let remote = ManagedGitScript {
             present: true,
             branch: "main".into(),
             has_remote: false,
             ..Default::default()
         };
-        let outcome = preflight(&remote, &repo(), "detached").await;
+        let outcome = preflight(&remote.git_client(), &repo(), "detached");
         match outcome {
             Preflight::Done(r) => {
                 assert_eq!(r.status, SyncStatus::Warn);
@@ -194,13 +198,13 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_is_ready_when_every_check_passes() {
-        let remote = FakeRemoteSync {
+        let remote = ManagedGitScript {
             present: true,
             branch: "main".into(),
             has_remote: true,
             ..Default::default()
         };
-        let outcome = preflight(&remote, &repo(), "detached").await;
+        let outcome = preflight(&remote.git_client(), &repo(), "detached");
         match outcome {
             Preflight::Ready { branch } => assert_eq!(branch, "main"),
             Preflight::Done(r) => panic!("expected Ready, got {r:?}"),

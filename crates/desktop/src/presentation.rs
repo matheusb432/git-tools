@@ -7,7 +7,7 @@ use std::{
 
 use infra::{
     app_state::SqliteAppState, clock::SystemClock, configured_editor::GitConfiguredEditorClient,
-    diff_source::GitDiffSource, file_system::LocalFileSystemClient, repo_probe::GitRepoProbe,
+    file_system::LocalFileSystemClient, git_client::HybridGitClient,
     user_config::TomlSettingsStore,
 };
 pub(crate) use restoration::RestorationGate;
@@ -20,9 +20,8 @@ use crate::{
 #[derive(Clone)]
 pub(crate) struct ViewerApp {
     pub(crate) clock: SystemClock,
-    pub(crate) probe: GitRepoProbe,
     pub(crate) app_state: SqliteAppState,
-    pub(crate) source: GitDiffSource,
+    pub(crate) git: HybridGitClient,
     pub(crate) file_system: LocalFileSystemClient,
     pub(crate) configured_editor: GitConfiguredEditorClient,
     pub(crate) session: Arc<Mutex<ViewerSession>>,
@@ -41,9 +40,8 @@ impl ViewerApp {
         let app_state = SqliteAppState::open(data_root)?;
         Ok(Self {
             clock: SystemClock,
-            probe: GitRepoProbe,
             app_state,
-            source: GitDiffSource,
+            git: HybridGitClient,
             file_system: LocalFileSystemClient,
             configured_editor: GitConfiguredEditorClient,
             session: Arc::new(Mutex::new(ViewerSession::new(max_cache_weight))),

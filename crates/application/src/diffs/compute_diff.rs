@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use crate::{
     diffs::{DiffTarget, View},
-    ports::{AppSettings, DiffSource, UserSettingsStore},
+    ports::{AppSettings, GitClient, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -23,7 +23,7 @@ pub struct ComputeDiff {
 /// The computed view plus the human summary and every surfaced message.
 /// A view without diff content is a legitimate outcome; tab policy is the caller's concern.
 #[derive(Debug, Clone)]
-pub struct ComputeDiffResponse {
+pub struct ComputeDiffOk {
     pub view: View,
     pub summary: String,
     pub notes: Vec<Note>,
@@ -41,8 +41,8 @@ pub enum ComputeDiffError {
 pub fn execute(
     req: ComputeDiff,
     app_settings: &impl UserSettingsStore,
-    source: &impl DiffSource,
-) -> Result<ComputeDiffResponse, ComputeDiffError> {
+    source: &impl GitClient,
+) -> Result<ComputeDiffOk, ComputeDiffError> {
     let ComputeDiff { cwd, target } = req;
     let settings = app_settings.load();
     let top = source.top_level(&cwd)?;
@@ -53,11 +53,11 @@ pub(crate) fn compute(
     top: &str,
     target: &DiffTarget,
     settings: &AppSettings,
-    source: &impl DiffSource,
-) -> anyhow::Result<ComputeDiffResponse> {
+    source: &impl GitClient,
+) -> anyhow::Result<ComputeDiffOk> {
     let mut notes = Vec::new();
     let (view, summary) = view::build(source, top, target, settings.diff_exclusions(), &mut notes)?;
-    Ok(ComputeDiffResponse {
+    Ok(ComputeDiffOk {
         view,
         summary,
         notes,
@@ -78,7 +78,7 @@ mod tests {
         },
         ports::AppSettings,
         testing::{
-            FakeDiffSource, FixedUserSettingsStore,
+            FakeGitClient, FixedUserSettingsStore,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -92,14 +92,14 @@ mod tests {
 
     fn execute_default_settings(
         request: ComputeDiff,
-        source: &FakeDiffSource,
-    ) -> Result<ComputeDiffResponse, ComputeDiffError> {
+        source: &FakeGitClient,
+    ) -> Result<ComputeDiffOk, ComputeDiffError> {
         execute(request, &FixedUserSettingsStore::default(), source)
     }
 
     #[test]
     fn viewer_and_raw_computation_share_the_same_result() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn computes_the_view_without_touching_store_or_renderer() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn empty_range_returns_an_empty_view_not_an_error() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn no_upstream_falls_back_to_main_with_the_warning_note() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: None,
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn pinned_unpushed_computes_without_an_upstream() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: None, // would warn-and-fallback (or error) symbolically
@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     fn pinned_merge_target_skips_symbolic_verification() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec![], // symbolic verify_commit("main") would error
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn pinned_range_target_computes_over_the_pin_with_exact_range_labels() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec![], // symbolic verify_exact_range would error
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn unknown_base_is_an_error() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],
@@ -319,7 +319,7 @@ index 333..444 100644\n\
 
     #[test]
     fn configured_extensions_are_hidden_and_reported() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -357,7 +357,7 @@ index 333..444 100644\n\
 
     #[test]
     fn exclusions_for_another_project_do_not_apply() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),
@@ -381,7 +381,7 @@ index 333..444 100644\n\
 
     #[test]
     fn idle_exclusions_matching_nothing_stay_invisible() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             upstream: Some("origin/main".into()),

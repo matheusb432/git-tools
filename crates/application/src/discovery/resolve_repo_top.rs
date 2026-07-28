@@ -2,13 +2,15 @@
 
 use std::path::PathBuf;
 
-use crate::ports::GitRunner;
+use crate::ports::GitClient;
 
 /// Requests the repository top level containing `repo`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolveRepoTop {
     pub repo: PathBuf,
 }
+
+pub type ResolveRepoTopOk = PathBuf;
 
 /// Reports a failure to resolve a repository top level.
 #[derive(Debug, thiserror::Error)]
@@ -35,32 +37,21 @@ pub enum ResolveRepoTopError {
 #[cqrsy::query]
 pub fn execute(
     query: ResolveRepoTop,
-    git: &impl GitRunner,
-) -> Result<PathBuf, ResolveRepoTopError> {
-    let output = git
-        .run(&query.repo, &["rev-parse", "--show-toplevel"])
+    git: &impl GitClient,
+) -> Result<ResolveRepoTopOk, ResolveRepoTopError> {
+    let top = git
+        .discover_top(&query.repo)
         .map_err(|source| ResolveRepoTopError::Transport {
             repo: query.repo.clone(),
             source,
         })?;
-    let top = output.stdout.trim();
-    if output.success() && !top.is_empty() {
-        return Ok(PathBuf::from(top));
+    if let Some(top) = top {
+        return Ok(top);
     }
 
-    let diagnostic = output.diagnostic();
-    let detail = if diagnostic.is_empty() {
-        format!(
-            "git exited with exit status: {}\nnot a git repo: {}",
-            output.exit_code,
-            query.repo.display()
-        )
-    } else {
-        format!("{diagnostic}\nnot a git repo: {}", query.repo.display())
-    };
     Err(ResolveRepoTopError::Rejected {
+        detail: format!("not a git repo: {}", query.repo.display()),
         repo: query.repo,
-        detail,
     })
 }
 
@@ -69,11 +60,11 @@ mod tests {
     use std::error::Error as _;
 
     use super::{ResolveRepoTop, ResolveRepoTopError, execute};
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     #[test]
     fn resolves_a_nested_path_to_its_repository_top() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok("/repos/api\n")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("/repos/api\n")]);
 
         let top = execute(
             ResolveRepoTop {
@@ -88,7 +79,7 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_the_error_source() {
-        let git = FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!("git unavailable"))]);
 
         let error = execute(
             ResolveRepoTop {
@@ -106,12 +97,9 @@ mod tests {
     }
 
     #[test]
-    fn silent_git_rejection_keeps_the_exit_status_in_its_detail() {
-        let git = FakeGitRunner::new(vec![crate::ports::GitOutput {
-            stdout: String::new(),
-            stderr: String::new(),
-            exit_code: 128,
-        }]);
+    fn silent_git_rejection_reports_the_semantic_failure() {
+        let git =
+            ScriptedGitClient::new(vec![crate::testing::GitResponse::Rejected(String::new())]);
 
         let error = execute(
             ResolveRepoTop {
@@ -121,9 +109,6 @@ mod tests {
         )
         .expect_err("silent rejection fails");
 
-        assert_eq!(
-            error.to_string(),
-            "git exited with exit status: 128\nnot a git repo: /repos/api"
-        );
+        assert_eq!(error.to_string(), "not a git repo: /repos/api");
     }
 }

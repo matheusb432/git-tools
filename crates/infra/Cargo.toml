@@ -14,6 +14,7 @@ application.workspace = true
 command-group.workspace = true
 directories.workspace = true
 domain.workspace = true
+gix.workspace = true
 jiff.workspace = true
 parking_lot.workspace = true
 rusqlite.workspace = true
@@ -31,6 +32,7 @@ walkdir.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+application = { workspace = true, features = ["testing"] }
 contracts.workspace = true
 criterion.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt"] }

@@ -17,7 +17,7 @@ pub struct ListRecentRenders;
 
 /// Returns recent persisted recipes with their stable database identities.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ListRecentRendersResponse {
+pub struct ListRecentRendersOk {
     pub entries: Vec<RecentRenderRecord>,
 }
 
@@ -35,9 +35,9 @@ pub enum ListRecentRendersError {
 pub fn execute(
     _query: ListRecentRenders,
     store: &impl AppStateStore,
-) -> Result<ListRecentRendersResponse, ListRecentRendersError> {
+) -> Result<ListRecentRendersOk, ListRecentRendersError> {
     let connection = store.connection_lock()?;
-    Ok(ListRecentRendersResponse {
+    Ok(ListRecentRendersOk {
         entries: list_recent_renders(&connection)?,
     })
 }

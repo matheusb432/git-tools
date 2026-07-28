@@ -4,7 +4,7 @@
 pub mod save;
 
 use application::{
-    live_views::save::{SaveLiveView, SaveLiveViewOutcome, SaveLiveViewResponse},
+    live_views::save::{SaveLiveView, SaveLiveViewOk, SaveLiveViewOutcome},
     shared::notes,
 };
 use contracts::{
@@ -21,7 +21,7 @@ pub(crate) fn to_request(dto: SaveLiveViewRequest) -> SaveLiveView {
 
 /// Map the slice response into the wire envelope. A `Rejected` outcome needs no
 /// extra mapping — the rejection message already rides in `resp.notes`.
-pub(crate) fn to_envelope(resp: SaveLiveViewResponse) -> Envelope<SaveLiveViewData> {
+pub(crate) fn to_envelope(resp: SaveLiveViewOk) -> Envelope<SaveLiveViewData> {
     let notes = resp.notes.iter().map(to_note).collect();
     match resp.outcome {
         SaveLiveViewOutcome::Saved {

@@ -12,7 +12,7 @@ pub struct ListHistory {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ListHistoryResponse {
+pub struct ListHistoryOk {
     pub entries: Vec<HistoryRecord>,
 }
 
@@ -36,7 +36,7 @@ fn recency(r: &HistoryRecord) -> &str {
 pub fn execute(
     req: ListHistory,
     store: &impl ArtifactStore,
-) -> Result<ListHistoryResponse, ListHistoryError> {
+) -> Result<ListHistoryOk, ListHistoryError> {
     let ListHistory { store_root } = req;
     let mut entries = store.list_history(&store_root)?;
     entries.sort_by(|a, b| {
@@ -44,7 +44,7 @@ pub fn execute(
             .cmp(recency(a))
             .then_with(|| b.generated_at.cmp(&a.generated_at))
     });
-    Ok(ListHistoryResponse { entries })
+    Ok(ListHistoryOk { entries })
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::ports::GitRunner;
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests a read-only branch-prune plan for one repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,7 +20,7 @@ pub struct PruneBranch {
 
 /// Represents a refused, unnecessary, or ready branch prune.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PrunePlan {
+pub enum PlanPruneOk {
     Refused(String),
     Nothing(String),
     Ready {
@@ -49,82 +49,63 @@ pub enum PlanPruneError {
 ///
 /// Returns [`PlanPruneError`] when Git cannot be executed.
 #[cqrsy::query]
-pub fn execute(query: PlanPrune, git: &impl GitRunner) -> Result<PrunePlan, PlanPruneError> {
+pub fn execute(query: PlanPrune, git: &impl GitClient) -> Result<PlanPruneOk, PlanPruneError> {
     let PlanPrune { repo, onto } = query;
     let top = git
-        .run(&repo, &["rev-parse", "--show-toplevel"])
+        .discover_top(&repo)
         .map_err(|source| PlanPruneError::Transport { source })?;
-    if !top.success() || top.stdout.trim().is_empty() {
-        return Ok(PrunePlan::Refused("not a git repo".into()));
-    }
-    let top = PathBuf::from(top.stdout.trim());
+    let Some(top) = top else {
+        return Ok(PlanPruneOk::Refused("not a git repo".into()));
+    };
 
     let current = git
-        .run(&top, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_branch(&top)
         .map_err(|source| PlanPruneError::Transport { source })?;
-    let current = match (current.success(), current.stdout.trim()) {
-        (true, "HEAD") => {
-            return Ok(PrunePlan::Refused(
+    let current = match current.as_str() {
+        "HEAD" => {
+            return Ok(PlanPruneOk::Refused(
                 "detached HEAD — checkout a branch first".into(),
             ));
         }
-        (true, branch) => branch.to_string(),
-        (false, _) => return Ok(PrunePlan::Refused("not a git repo".into())),
+        branch => branch.to_string(),
     };
 
     let target = git
-        .run(
-            &top,
-            &["rev-parse", "--verify", &format!("refs/heads/{onto}")],
-        )
+        .revision_exists(&top, &format!("refs/heads/{onto}"))
         .map_err(|source| PlanPruneError::Transport { source })?;
-    if !target.success() {
-        return Ok(PrunePlan::Refused(format!(
+    if !target {
+        return Ok(PlanPruneOk::Refused(format!(
             "no '{onto}' branch (use --onto <branch>)"
         )));
     }
 
     let listing = git
-        .run(
-            &top,
-            &[
-                "for-each-ref",
-                "--merged",
-                &onto,
-                "--format=%(refname:short) %(objectname:short)",
-                "refs/heads/",
-            ],
-        )
+        .merged_branches(&top, &onto)
         .map_err(|source| PlanPruneError::Transport { source })?;
-    if !listing.success() {
-        return Ok(PrunePlan::Refused("git for-each-ref failed".into()));
-    }
-
+    let GitEffect::Applied(listing) = listing else {
+        return Ok(PlanPruneOk::Refused("git for-each-ref failed".into()));
+    };
     let branches = listing
-        .stdout
-        .lines()
-        .filter_map(|line| {
-            let (name, sha) = line.trim().split_once(char::is_whitespace)?;
-            let name = name.trim();
-            let sha = sha.trim();
-            if name.is_empty() || name == onto || name == current {
+        .into_iter()
+        .filter_map(|branch| {
+            if branch.name == onto || branch.name == current {
                 None
             } else {
                 Some(PruneBranch {
-                    name: name.into(),
-                    sha: sha.into(),
+                    name: branch.name,
+                    sha: branch.sha,
                 })
             }
         })
         .collect::<Vec<_>>();
 
     if branches.is_empty() {
-        return Ok(PrunePlan::Nothing(format!(
+        return Ok(PlanPruneOk::Nothing(format!(
             "no merged branches to prune (against '{onto}')"
         )));
     }
 
-    Ok(PrunePlan::Ready {
+    Ok(PlanPruneOk::Ready {
         top,
         onto,
         branches,
@@ -136,15 +117,17 @@ mod tests {
     use std::error::Error as _;
 
     use super::*;
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     #[test]
     fn plan_excludes_target_and_current_branches() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/repo\n"),
-            FakeGitRunner::ok("feature/current\n"),
-            FakeGitRunner::ok("refs/heads/main\n"),
-            FakeGitRunner::ok("main aaaaaaa\nfeature/current bbbbbbb\nfeature/done ccccccc\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repo\n"),
+            ScriptedGitClient::applied("feature/current\n"),
+            ScriptedGitClient::applied("refs/heads/main\n"),
+            ScriptedGitClient::applied(
+                "main aaaaaaa\nfeature/current bbbbbbb\nfeature/done ccccccc\n",
+            ),
         ]);
         let plan = execute(
             PlanPrune {
@@ -154,7 +137,7 @@ mod tests {
             &git,
         )
         .expect("a successful Git plan remains a closed value");
-        assert!(matches!(plan, PrunePlan::Ready { branches, .. }
+        assert!(matches!(plan, PlanPruneOk::Ready { branches, .. }
         if branches == vec![PruneBranch {
             name: "feature/done".into(),
             sha: "ccccccc".into()
@@ -163,11 +146,11 @@ mod tests {
 
     #[test]
     fn plan_reports_nothing_when_only_target_and_current_are_merged() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/repo\n"),
-            FakeGitRunner::ok("feature/current\n"),
-            FakeGitRunner::ok("refs/heads/main\n"),
-            FakeGitRunner::ok("main aaaaaaa\nfeature/current bbbbbbb\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repo\n"),
+            ScriptedGitClient::applied("feature/current\n"),
+            ScriptedGitClient::applied("refs/heads/main\n"),
+            ScriptedGitClient::applied("main aaaaaaa\nfeature/current bbbbbbb\n"),
         ]);
 
         let plan = execute(
@@ -181,15 +164,15 @@ mod tests {
 
         assert_eq!(
             plan,
-            PrunePlan::Nothing("no merged branches to prune (against 'main')".into())
+            PlanPruneOk::Nothing("no merged branches to prune (against 'main')".into())
         );
     }
 
     #[test]
     fn detached_head_is_refused() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/repo\n"),
-            FakeGitRunner::ok("HEAD\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repo\n"),
+            ScriptedGitClient::applied("HEAD\n"),
         ]);
 
         let plan = execute(
@@ -203,16 +186,16 @@ mod tests {
 
         assert_eq!(
             plan,
-            PrunePlan::Refused("detached HEAD — checkout a branch first".into())
+            PlanPruneOk::Refused("detached HEAD — checkout a branch first".into())
         );
     }
 
     #[test]
     fn missing_target_branch_is_refused() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/repo\n"),
-            FakeGitRunner::ok("feature/current\n"),
-            FakeGitRunner::exit_err("", 128),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repo\n"),
+            ScriptedGitClient::applied("feature/current\n"),
+            ScriptedGitClient::rejected(""),
         ]);
 
         let plan = execute(
@@ -226,13 +209,13 @@ mod tests {
 
         assert_eq!(
             plan,
-            PrunePlan::Refused("no 'main' branch (use --onto <branch>)".into())
+            PlanPruneOk::Refused("no 'main' branch (use --onto <branch>)".into())
         );
     }
 
     #[test]
     fn non_repository_path_is_refused() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::exit_err("", 128)]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("")]);
 
         let plan = execute(
             PlanPrune {
@@ -243,13 +226,14 @@ mod tests {
         )
         .expect("a non-repository Git exit remains a closed refusal");
 
-        assert_eq!(plan, PrunePlan::Refused("not a git repo".into()));
+        assert_eq!(plan, PlanPruneOk::Refused("not a git repo".into()));
     }
 
     #[test]
     fn plan_transport_failure_remains_an_error_with_its_source() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(
             PlanPrune {

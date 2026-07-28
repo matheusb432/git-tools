@@ -2,10 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::{
-    ports::GitRunner,
-    shared::git::{capture_checked, command_label, onto_exists_checked},
-};
+use crate::ports::GitClient;
 
 /// Requests a read-only switch plan for one repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +21,7 @@ pub struct SwitchTarget {
 
 /// Represents a refused, unnecessary, or ready branch switch.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SwitchPlan {
+pub enum PlanSwitchOk {
     Refused(String),
     Ready(SwitchTarget),
     AlreadyThere(String),
@@ -49,41 +46,36 @@ pub enum PlanSwitchError {
 ///
 /// Returns [`PlanSwitchError`] when Git transport fails.
 #[cqrsy::query]
-pub fn execute(query: PlanSwitch, git: &impl GitRunner) -> Result<SwitchPlan, PlanSwitchError> {
+pub fn execute(query: PlanSwitch, git: &impl GitClient) -> Result<PlanSwitchOk, PlanSwitchError> {
     let PlanSwitch { repo, onto } = query;
-    let top_args = ["rev-parse", "--show-toplevel"];
-    let Some(top) = capture_checked(git, &repo, &top_args)
-        .map_err(|source| transport(&top_args, source))?
-        .filter(|top| !top.is_empty())
-        .map(PathBuf::from)
+    let Some(top) = git
+        .discover_top(&repo)
+        .map_err(|source| transport("discover repository", source))?
     else {
-        return Ok(SwitchPlan::Refused("not a git repo".into()));
+        return Ok(PlanSwitchOk::Refused("not a git repo".into()));
     };
 
-    let branch_args = ["rev-parse", "--abbrev-ref", "HEAD"];
-    let Some(from) = capture_checked(git, &top, &branch_args)
-        .map_err(|source| transport(&branch_args, source))?
-    else {
-        return Ok(SwitchPlan::Refused("not a git repo".into()));
-    };
+    let from = git
+        .current_branch(&top)
+        .map_err(|source| transport("read current branch", source))?;
     if from == onto {
-        return Ok(SwitchPlan::AlreadyThere(onto));
+        return Ok(PlanSwitchOk::AlreadyThere(onto));
     }
-    if !onto_exists_checked(git, &top, &onto).map_err(|source| {
-        let target = format!("refs/heads/{onto}");
-        transport(&["rev-parse", "--verify", &target], source)
-    })? {
-        return Ok(SwitchPlan::Refused(format!(
+    if !git
+        .revision_exists(&top, &format!("refs/heads/{onto}"))
+        .map_err(|source| transport("find target branch", source))?
+    {
+        return Ok(PlanSwitchOk::Refused(format!(
             "no '{onto}' branch (use --onto <branch>)"
         )));
     }
 
-    Ok(SwitchPlan::Ready(SwitchTarget { top, onto, from }))
+    Ok(PlanSwitchOk::Ready(SwitchTarget { top, onto, from }))
 }
 
-fn transport(args: &[&str], source: anyhow::Error) -> PlanSwitchError {
+fn transport(command: &str, source: anyhow::Error) -> PlanSwitchError {
     PlanSwitchError::Transport {
-        command: command_label(args),
+        command: command.to_string(),
         source,
     }
 }
@@ -93,14 +85,14 @@ mod tests {
     use std::error::Error as _;
 
     use super::*;
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     #[test]
     fn ready_plan_reports_target_and_current_branch() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/home/me/repo\n"),
-            FakeGitRunner::ok("feat/x\n"),
-            FakeGitRunner::ok("refs/heads/main\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/home/me/repo\n"),
+            ScriptedGitClient::applied("feat/x\n"),
+            ScriptedGitClient::applied("refs/heads/main\n"),
         ]);
 
         let plan = execute(
@@ -114,7 +106,7 @@ mod tests {
 
         assert_eq!(
             plan,
-            SwitchPlan::Ready(SwitchTarget {
+            PlanSwitchOk::Ready(SwitchTarget {
                 top: "/home/me/repo".into(),
                 onto: "main".into(),
                 from: "feat/x".into(),
@@ -124,9 +116,9 @@ mod tests {
 
     #[test]
     fn target_branch_is_a_closed_noop() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/home/me/repo\n"),
-            FakeGitRunner::ok("main\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/home/me/repo\n"),
+            ScriptedGitClient::applied("main\n"),
         ]);
 
         let plan = execute(
@@ -138,15 +130,15 @@ mod tests {
         )
         .expect("the target branch is an expected no-op");
 
-        assert_eq!(plan, SwitchPlan::AlreadyThere("main".into()));
+        assert_eq!(plan, PlanSwitchOk::AlreadyThere("main".into()));
     }
 
     #[test]
     fn missing_target_branch_is_refused() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/home/me/repo\n"),
-            FakeGitRunner::ok("feat/x\n"),
-            FakeGitRunner::exit_err("", 128),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/home/me/repo\n"),
+            ScriptedGitClient::applied("feat/x\n"),
+            ScriptedGitClient::rejected(""),
         ]);
 
         let plan = execute(
@@ -160,14 +152,15 @@ mod tests {
 
         assert_eq!(
             plan,
-            SwitchPlan::Refused("no 'main' branch (use --onto <branch>)".into())
+            PlanSwitchOk::Refused("no 'main' branch (use --onto <branch>)".into())
         );
     }
 
     #[test]
     fn transport_failure_remains_a_sourced_plan_error() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(
             PlanSwitch {
@@ -180,7 +173,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "git rev-parse --show-toplevel: git transport unavailable"
+            "discover repository: git transport unavailable"
         );
         assert_eq!(
             error.source().map(ToString::to_string),

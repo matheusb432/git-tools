@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{DiffTarget, View, compute_diff},
-    ports::{AppSettings, Clock, DiffSource},
+    ports::{AppSettings, Clock, GitClient},
     shared::notes::Note,
 };
 
@@ -31,7 +31,7 @@ pub(crate) struct BatchBuild {
 /// view is kept regardless of emptiness (diff --all -- matches its current no-skip
 /// behavior exactly, do not "fix" this asymmetry).
 pub(crate) fn render_batch(
-    source: &impl DiffSource,
+    source: &impl GitClient,
     target: &DiffTarget,
     settings: &AppSettings,
     repos: &[RepoRef],
@@ -83,7 +83,7 @@ mod tests {
         diffs::DiffTarget,
         ports::AppSettings,
         testing::{
-            FakeDiffSource, FixedClock, RepoOverride,
+            FakeGitClient, FixedClock, RepoOverride,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn skip_empty_true_skips_the_empty_view_and_keeps_the_non_empty_one() {
-        let mut source = FakeDiffSource {
+        let mut source = FakeGitClient {
             upstream: Some("origin/main".into()),
             ..Default::default()
         };
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn skip_empty_true_counts_a_build_error_as_a_skip() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             upstream: None,
             known_revs: vec![], // no "main" fallback either
             ..Default::default()
@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn skip_empty_false_keeps_an_empty_view() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             upstream: Some("origin/main".into()),
             ..Default::default()
         };
@@ -208,7 +208,7 @@ diff --git a/notes.md b/notes.md\n\
 @@ -1 +1 @@\n\
 -plan\n\
 +more plan\n";
-        let mut source = FakeDiffSource {
+        let mut source = FakeGitClient {
             upstream: Some("origin/main".into()),
             ..Default::default()
         };
@@ -260,7 +260,7 @@ diff --git a/notes.md b/notes.md\n\
 @@ -1 +1 @@\n\
 -plan\n\
 +more plan\n";
-        let mut source = FakeDiffSource {
+        let mut source = FakeGitClient {
             upstream: Some("origin/main".into()),
             ..Default::default()
         };
@@ -296,7 +296,7 @@ diff --git a/notes.md b/notes.md\n\
 
     #[test]
     fn skip_empty_false_propagates_a_build_error() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             upstream: None,
             known_revs: vec![],
             ..Default::default()

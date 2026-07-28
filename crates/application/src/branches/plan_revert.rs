@@ -2,10 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::{
-    ports::GitRunner,
-    shared::git::{capture_checked, command_label, succeeds_checked},
-};
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests a read-only branch recovery plan for one repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +21,7 @@ pub struct RevertTarget {
 
 /// Represents a refused or ready branch recovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RevertPlan {
+pub enum PlanRevertOk {
     Refused(String),
     Ready(RevertTarget),
 }
@@ -48,66 +45,59 @@ pub enum PlanRevertError {
 ///
 /// Returns [`PlanRevertError`] when Git transport fails.
 #[cqrsy::query]
-pub fn execute(query: PlanRevert, git: &impl GitRunner) -> Result<RevertPlan, PlanRevertError> {
+pub fn execute(query: PlanRevert, git: &impl GitClient) -> Result<PlanRevertOk, PlanRevertError> {
     let PlanRevert { repo, onto } = query;
-    let top_args = ["rev-parse", "--show-toplevel"];
-    let Some(top) = capture_checked(git, &repo, &top_args)
-        .map_err(|source| transport(&top_args, source))?
-        .filter(|top| !top.is_empty())
-        .map(PathBuf::from)
+    let Some(top) = git
+        .discover_top(&repo)
+        .map_err(|source| transport("discover repository", source))?
     else {
-        return Ok(RevertPlan::Refused("not a git repo".into()));
+        return Ok(PlanRevertOk::Refused("not a git repo".into()));
     };
 
-    let branch_args = ["rev-parse", "--abbrev-ref", "HEAD"];
-    match capture_checked(git, &top, &branch_args)
-        .map_err(|source| transport(&branch_args, source))?
+    match git
+        .current_branch(&top)
+        .map_err(|source| transport("read current branch", source))?
     {
-        Some(branch) if branch == onto => {}
-        Some(branch) if branch == "HEAD" => {
-            return Ok(RevertPlan::Refused(
+        branch if branch == onto => {}
+        branch if branch == "HEAD" => {
+            return Ok(PlanRevertOk::Refused(
                 "detached HEAD — checkout a branch first".into(),
             ));
         }
-        Some(_) => {
-            return Ok(RevertPlan::Refused(format!(
+        _ => {
+            return Ok(PlanRevertOk::Refused(format!(
                 "revert expects to be on '{onto}' (the branch the last sw rebased)"
             )));
         }
-        None => return Ok(RevertPlan::Refused("not a git repo".into())),
     }
 
-    let status_args = ["status", "--porcelain"];
-    match capture_checked(git, &top, &status_args)
-        .map_err(|source| transport(&status_args, source))?
+    match git
+        .working_tree(&top)
+        .map_err(|source| transport("read working tree", source))?
     {
-        Some(status) if !status.is_empty() => {
-            return Ok(RevertPlan::Refused(
+        GitEffect::Applied(tree) if !tree.files.is_empty() => {
+            return Ok(PlanRevertOk::Refused(
                 "working tree not clean — commit or stash first".into(),
             ));
         }
-        None => return Ok(RevertPlan::Refused("git status failed".into())),
-        Some(_) => {}
+        GitEffect::Rejected(_) => return Ok(PlanRevertOk::Refused("git status failed".into())),
+        GitEffect::Applied(_) => {}
     }
 
     let prior_ref = format!("{onto}@{{1}}");
-    let prior_args = ["rev-parse", prior_ref.as_str()];
-    let Some(prior_sha) = capture_checked(git, &top, &prior_args)
-        .map_err(|source| transport(&prior_args, source))?
-        .filter(|prior_sha| !prior_sha.is_empty())
-    else {
-        return Ok(RevertPlan::Refused(format!(
+    let Some(prior_sha) = git.resolve_sha(&top, &prior_ref).ok() else {
+        return Ok(PlanRevertOk::Refused(format!(
             "no prior position for '{onto}' in the reflog"
         )));
     };
 
     if !is_ancestor(git, &top, &prior_ref, &onto)? {
-        return Ok(RevertPlan::Refused(format!(
+        return Ok(PlanRevertOk::Refused(format!(
             "'{onto}' moved in a way that isn't a simple fast-forward; refusing to auto-revert"
         )));
     }
 
-    Ok(RevertPlan::Ready(RevertTarget {
+    Ok(PlanRevertOk::Ready(RevertTarget {
         top,
         onto,
         prior_sha,
@@ -115,18 +105,18 @@ pub fn execute(query: PlanRevert, git: &impl GitRunner) -> Result<RevertPlan, Pl
 }
 
 fn is_ancestor(
-    git: &impl GitRunner,
+    git: &impl GitClient,
     repo: &Path,
     ancestor: &str,
     descendant: &str,
 ) -> Result<bool, PlanRevertError> {
-    let args = ["merge-base", "--is-ancestor", ancestor, descendant];
-    succeeds_checked(git, repo, &args).map_err(|source| transport(&args, source))
+    git.is_ancestor(repo, ancestor, descendant)
+        .map_err(|source| transport("check ancestry", source))
 }
 
-fn transport(args: &[&str], source: anyhow::Error) -> PlanRevertError {
+fn transport(command: &str, source: anyhow::Error) -> PlanRevertError {
     PlanRevertError::Transport {
-        command: command_label(args),
+        command: command.to_string(),
         source,
     }
 }
@@ -136,9 +126,9 @@ mod tests {
     use std::error::Error as _;
 
     use super::*;
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
-    fn plan(git: &FakeGitRunner) -> RevertPlan {
+    fn plan(git: &ScriptedGitClient) -> PlanRevertOk {
         execute(
             PlanRevert {
                 repo: ".".into(),
@@ -151,17 +141,17 @@ mod tests {
 
     #[test]
     fn prior_fast_forward_position_is_ready() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/home/me/repo\n"),
-            FakeGitRunner::ok("main\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::ok("abc123\n"),
-            FakeGitRunner::ok(""),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/home/me/repo\n"),
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied("abc123\n"),
+            ScriptedGitClient::applied(""),
         ]);
 
         assert_eq!(
             plan(&git),
-            RevertPlan::Ready(RevertTarget {
+            PlanRevertOk::Ready(RevertTarget {
                 top: "/home/me/repo".into(),
                 onto: "main".into(),
                 prior_sha: "abc123".into(),
@@ -171,14 +161,14 @@ mod tests {
 
     #[test]
     fn different_current_branch_is_refused() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/home/me/repo\n"),
-            FakeGitRunner::ok("feat/x\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/home/me/repo\n"),
+            ScriptedGitClient::applied("feat/x\n"),
         ]);
 
         assert_eq!(
             plan(&git),
-            RevertPlan::Refused(
+            PlanRevertOk::Refused(
                 "revert expects to be on 'main' (the branch the last sw rebased)".into()
             )
         );
@@ -186,59 +176,59 @@ mod tests {
 
     #[test]
     fn detached_head_is_refused() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/home/me/repo\n"),
-            FakeGitRunner::ok("HEAD\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/home/me/repo\n"),
+            ScriptedGitClient::applied("HEAD\n"),
         ]);
 
         assert_eq!(
             plan(&git),
-            RevertPlan::Refused("detached HEAD — checkout a branch first".into())
+            PlanRevertOk::Refused("detached HEAD — checkout a branch first".into())
         );
     }
 
     #[test]
     fn dirty_tree_is_refused() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/home/me/repo\n"),
-            FakeGitRunner::ok("main\n"),
-            FakeGitRunner::ok(" M a.rs\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/home/me/repo\n"),
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied(" M a.rs\n"),
         ]);
 
         assert_eq!(
             plan(&git),
-            RevertPlan::Refused("working tree not clean — commit or stash first".into())
+            PlanRevertOk::Refused("working tree not clean — commit or stash first".into())
         );
     }
 
     #[test]
     fn missing_prior_reflog_position_is_refused() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/home/me/repo\n"),
-            FakeGitRunner::ok("main\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::exit_err("", 128),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/home/me/repo\n"),
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::rejected(""),
         ]);
 
         assert_eq!(
             plan(&git),
-            RevertPlan::Refused("no prior position for 'main' in the reflog".into())
+            PlanRevertOk::Refused("no prior position for 'main' in the reflog".into())
         );
     }
 
     #[test]
     fn non_fast_forward_move_is_refused() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/home/me/repo\n"),
-            FakeGitRunner::ok("main\n"),
-            FakeGitRunner::ok(""),
-            FakeGitRunner::ok("abc123\n"),
-            FakeGitRunner::exit_err("", 1),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/home/me/repo\n"),
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied("abc123\n"),
+            ScriptedGitClient::rejected(""),
         ]);
 
         assert_eq!(
             plan(&git),
-            RevertPlan::Refused(
+            PlanRevertOk::Refused(
                 "'main' moved in a way that isn't a simple fast-forward; refusing to auto-revert"
                     .into()
             )
@@ -247,8 +237,9 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_a_sourced_plan_error() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(
             PlanRevert {
@@ -261,7 +252,7 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "git rev-parse --show-toplevel: git transport unavailable"
+            "discover repository: git transport unavailable"
         );
         assert_eq!(
             error.source().map(ToString::to_string),

@@ -1,16 +1,16 @@
 //! Selects present managed repositories whose HEAD is ahead of its upstream.
 
-use std::path::PathBuf;
-
 use domain::{discovery::DiscoveredRepo, managed::ManagedRepo};
 
-use crate::ports::{GitOutput, GitRunner};
+use crate::ports::GitClient;
 
 /// Requests unpushed selection across already-resolved managed repositories.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectUnpushed {
     pub repos: Vec<ManagedRepo>,
 }
+
+pub type SelectUnpushedOk = Vec<DiscoveredRepo>;
 
 /// Reports an unexpected Git failure while selecting unpushed repositories.
 #[derive(Debug, thiserror::Error)]
@@ -51,65 +51,53 @@ pub enum SelectUnpushedError {
 #[cqrsy::query]
 pub fn execute(
     query: SelectUnpushed,
-    git: &impl GitRunner,
-) -> Result<Vec<DiscoveredRepo>, SelectUnpushedError> {
+    git: &impl GitClient,
+) -> Result<SelectUnpushedOk, SelectUnpushedError> {
     let mut selected = Vec::new();
     for repo in query.repos {
         if !git.repo_present(&repo.path) {
             continue;
         }
 
-        let upstream = git
-            .run(
-                &repo.path,
-                &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-            )
+        match git
+            .upstream(&repo.path)
             .map_err(|source| SelectUnpushedError::Upstream {
                 repo: repo.name.clone(),
                 source,
-            })?;
-        if !upstream.success() {
-            continue;
+            })? {
+            crate::ports::GitEffect::Applied(_) => {}
+            crate::ports::GitEffect::Rejected(_) => continue,
         }
 
         let count = git
-            .run(&repo.path, &["rev-list", "--count", "@{u}..HEAD"])
+            .commit_count(&repo.path, "@{u}..HEAD")
             .map_err(|source| SelectUnpushedError::Count {
                 repo: repo.name.clone(),
                 source,
             })?;
-        if !count.success() {
-            return Err(SelectUnpushedError::Count {
-                repo: repo.name,
-                source: command_error(&count),
-            });
-        }
-        if count.stdout.trim().parse::<usize>().unwrap_or(0) == 0 {
+        let Some(count) = count else { continue };
+        if count == 0 {
             continue;
         }
 
         let top = git
-            .run(&repo.path, &["rev-parse", "--show-toplevel"])
+            .discover_top(&repo.path)
             .map_err(|source| SelectUnpushedError::TopLevel {
                 repo: repo.name.clone(),
                 source,
             })?;
-        if !top.success() || top.stdout.trim().is_empty() {
+        let Some(top) = top else {
             return Err(SelectUnpushedError::TopLevel {
                 repo: repo.name,
-                source: command_error(&top),
+                source: anyhow::anyhow!("not a git repository"),
             });
-        }
+        };
         selected.push(DiscoveredRepo {
-            path: PathBuf::from(top.stdout.trim()),
+            path: top,
             label: repo.name,
         });
     }
     Ok(selected)
-}
-
-fn command_error(output: &GitOutput) -> anyhow::Error {
-    anyhow::anyhow!(output.error_line())
 }
 
 #[cfg(test)]
@@ -119,7 +107,7 @@ mod tests {
     use domain::{discovery::DiscoveredRepo, managed::ManagedRepo};
 
     use super::{SelectUnpushed, SelectUnpushedError, execute};
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     fn repo(name: &str) -> ManagedRepo {
         ManagedRepo {
@@ -131,15 +119,15 @@ mod tests {
 
     #[test]
     fn select_unpushed_keeps_only_present_ahead_repositories() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("origin/main\n"),
-            FakeGitRunner::ok("2\n"),
-            FakeGitRunner::ok("/repos/api\n"),
-            FakeGitRunner::ok("origin/main\n"),
-            FakeGitRunner::ok("0\n"),
-            FakeGitRunner::exit_err("no upstream", 128),
-            FakeGitRunner::ok("origin/main\n"),
-            FakeGitRunner::ok("invalid\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("origin/main\n"),
+            ScriptedGitClient::applied("2\n"),
+            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("origin/main\n"),
+            ScriptedGitClient::applied("0\n"),
+            ScriptedGitClient::rejected("no upstream"),
+            ScriptedGitClient::applied("origin/main\n"),
+            ScriptedGitClient::applied("invalid\n"),
         ]);
         git.absent_repos
             .lock()
@@ -171,8 +159,9 @@ mod tests {
 
     #[test]
     fn transport_failure_preserves_the_source_and_repository() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(
             SelectUnpushed {

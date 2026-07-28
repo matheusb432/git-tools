@@ -1,6 +1,6 @@
 //! The `live_views/probe` vertical slice: classify a live-view source's
-//! directory (found / missing / not a repo) through the same [`RepoProbe`]
-//! port `save` validates against, without persisting anything. This gives the
+//! directory (found / missing / not a repo) through the same [`GitClient`]
+//! capability `save` validates against, without persisting anything. This gives the
 //! app-render path (`open_recipe`/restoring a live view) the same typed
 //! `DirNotFound`/`DirNotGitRepo` rejection the daemon's `save_live_view`
 //! already surfaces.
@@ -9,7 +9,7 @@ use domain::live_views::LiveSource;
 
 use crate::{
     live_views::save::LiveViewRejection,
-    ports::{RepoProbe, RepoProbeResult},
+    ports::{GitClient, GitRepositoryState},
 };
 
 /// Probes the directory identified by `source_kind`/`source_value` for git-repo validity.
@@ -20,7 +20,7 @@ pub struct ProbeSource {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ProbeSourceResponse {
+pub struct ProbeSourceOk {
     pub outcome: ProbeOutcome,
 }
 
@@ -43,12 +43,9 @@ pub enum ProbeSourceError {
 }
 
 /// Probes a source by rebuilding its [`LiveSource`] identity and
-/// probing its directory through the [`RepoProbe`] port.
+/// probing its directory through the [`GitClient`] capability.
 #[cqrsy::query]
-pub fn execute(
-    req: ProbeSource,
-    probe: &impl RepoProbe,
-) -> Result<ProbeSourceResponse, ProbeSourceError> {
+pub fn execute(req: ProbeSource, git: &impl GitClient) -> Result<ProbeSourceOk, ProbeSourceError> {
     let ProbeSource {
         source_kind,
         source_value,
@@ -57,31 +54,32 @@ pub fn execute(
         .ok_or_else(|| ProbeSourceError::UnknownSourceKind { kind: source_kind })?;
     let LiveSource::LocalRepo { path } = source;
 
-    let outcome = match probe.probe(&path)? {
-        RepoProbeResult::Repo { .. } => ProbeOutcome::Ok,
-        RepoProbeResult::NotFound => ProbeOutcome::Broken {
+    let outcome = match git.probe_repository(&path)? {
+        GitRepositoryState::Repository { .. } => ProbeOutcome::Ok,
+        GitRepositoryState::NotFound => ProbeOutcome::Broken {
             rejection: LiveViewRejection::DirNotFound {
                 path: path.display().to_string(),
             },
         },
-        RepoProbeResult::NotAGitRepo => ProbeOutcome::Broken {
+        GitRepositoryState::NotARepository => ProbeOutcome::Broken {
             rejection: LiveViewRejection::DirNotGitRepo {
                 path: path.display().to_string(),
             },
         },
     };
 
-    Ok(ProbeSourceResponse { outcome })
+    Ok(ProbeSourceOk { outcome })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ports::RepoProbeResult, testing::FakeRepoProbe};
+    use crate::{ports::GitRepositoryState, testing::FakeGitClient};
 
-    fn probe(probe_result: RepoProbeResult) -> FakeRepoProbe {
-        FakeRepoProbe {
-            result: probe_result,
+    fn git(repository_state: GitRepositoryState) -> FakeGitClient {
+        FakeGitClient {
+            repository_state: Some(repository_state),
+            ..Default::default()
         }
     }
 
@@ -94,8 +92,8 @@ mod tests {
 
     #[test]
     fn missing_dir_reports_broken_with_dir_not_found() {
-        let probe = probe(RepoProbeResult::NotFound);
-        let response = execute(request("/gone"), &probe).expect("probe succeeds");
+        let git = git(GitRepositoryState::NotFound);
+        let response = execute(request("/gone"), &git).expect("probe succeeds");
 
         match response.outcome {
             ProbeOutcome::Broken { rejection } => {
@@ -111,8 +109,8 @@ mod tests {
 
     #[test]
     fn non_repo_dir_reports_broken_with_dir_not_git_repo() {
-        let probe = probe(RepoProbeResult::NotAGitRepo);
-        let response = execute(request("/plain"), &probe).expect("probe succeeds");
+        let git = git(GitRepositoryState::NotARepository);
+        let response = execute(request("/plain"), &git).expect("probe succeeds");
 
         match response.outcome {
             ProbeOutcome::Broken { rejection } => {
@@ -128,23 +126,23 @@ mod tests {
 
     #[test]
     fn valid_repo_reports_ok() {
-        let probe = probe(RepoProbeResult::Repo {
+        let git = git(GitRepositoryState::Repository {
             top_level: "/repos/gt".into(),
         });
-        let response = execute(request("/repos/gt"), &probe).expect("probe succeeds");
+        let response = execute(request("/repos/gt"), &git).expect("probe succeeds");
 
         assert_eq!(response.outcome, ProbeOutcome::Ok);
     }
 
     #[test]
     fn unknown_source_kind_errors() {
-        let probe = probe(RepoProbeResult::NotFound);
+        let git = git(GitRepositoryState::NotFound);
         let err = execute(
             ProbeSource {
                 source_kind: "GithubRepo".into(),
                 source_value: "owner/repo".into(),
             },
-            &probe,
+            &git,
         )
         .expect_err("unknown kind rejects");
 

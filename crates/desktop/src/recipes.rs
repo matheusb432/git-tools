@@ -8,7 +8,7 @@ use application::{
     viewer::{
         ViewerTabId, ViewerTabKind, ViewerTabState,
         complete_recipe_computation::{
-            self, CompleteRecipeComputation, CompleteRecipeComputationResponse,
+            self, CompleteRecipeComputation, CompleteRecipeComputationOk,
         },
         compute_recipe::{self, ComputeRecipe},
         probe_recipe::{self, ProbeRecipe, ProbeRecipeOutcome},
@@ -184,7 +184,7 @@ impl ViewerApp {
                 recipe: recipe.clone(),
                 kind,
             },
-            &self.probe,
+            &self.git,
         )
         .map_err(|error| RecipeError::Failed(format!("{error:#}")))?;
         if let ProbeRecipeOutcome::Broken { state } = probe.outcome {
@@ -203,7 +203,7 @@ impl ViewerApp {
                 recipe: recipe.clone(),
             },
             &self.user_settings,
-            &self.source,
+            &self.git,
         ) {
             Ok(response) => response.view,
             Err(reason) => {
@@ -217,7 +217,7 @@ impl ViewerApp {
             kind,
             view,
         }) {
-            CompleteRecipeComputationResponse::Skipped { label } => {
+            CompleteRecipeComputationOk::Skipped { label } => {
                 let mut session = self
                     .session
                     .lock()
@@ -227,7 +227,7 @@ impl ViewerApp {
                     PublishOutcome::Stale => Err(RecipeError::Stale),
                 }
             }
-            CompleteRecipeComputationResponse::Publish { label, view } => {
+            CompleteRecipeComputationOk::Publish { label, view } => {
                 let published = {
                     let mut session = self
                         .session

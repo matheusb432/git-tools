@@ -2,8 +2,7 @@
 
 use std::path::PathBuf;
 
-use super::porcelain;
-use crate::ports::GitRunner;
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests the primary worktree path for one repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,7 +12,7 @@ pub struct GetWorktreeBase {
 
 /// Reports either the primary worktree path or the Git failure that prevented discovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WorktreeBaseResult {
+pub enum GetWorktreeBaseOk {
     /// Git listed a primary worktree path.
     Found { path: String },
     /// Git rejected the query or returned no worktrees.
@@ -37,23 +36,21 @@ pub enum GetWorktreeBaseError {
 #[cqrsy::query]
 pub fn execute(
     query: GetWorktreeBase,
-    git: &impl GitRunner,
-) -> Result<WorktreeBaseResult, GetWorktreeBaseError> {
+    git: &impl GitClient,
+) -> Result<GetWorktreeBaseOk, GetWorktreeBaseError> {
     let GetWorktreeBase { repo } = query;
-    let output = git
-        .run(&repo, &["worktree", "list", "--porcelain"])
+    let worktrees = git
+        .worktrees(&repo)
         .map_err(GetWorktreeBaseError::Unexpected)?;
-    if output.exit_code != 0 {
-        return Ok(WorktreeBaseResult::Failed {
-            detail: format!("git worktree list failed (exit {})", output.exit_code),
-        });
-    }
-
-    match porcelain::parse(&output.stdout).into_iter().next() {
-        Some(worktree) => Ok(WorktreeBaseResult::Found {
+    let worktrees = match worktrees {
+        GitEffect::Applied(worktrees) => worktrees,
+        GitEffect::Rejected(detail) => return Ok(GetWorktreeBaseOk::Failed { detail }),
+    };
+    match worktrees.into_iter().next() {
+        Some(worktree) => Ok(GetWorktreeBaseOk::Found {
             path: worktree.path,
         }),
-        None => Ok(WorktreeBaseResult::Failed {
+        None => Ok(GetWorktreeBaseOk::Failed {
             detail: "git returned no worktrees".into(),
         }),
     }
@@ -63,12 +60,12 @@ pub fn execute(
 mod tests {
     use std::error::Error as _;
 
-    use super::{GetWorktreeBase, WorktreeBaseResult, execute};
-    use crate::testing::FakeGitRunner;
+    use super::{GetWorktreeBase, GetWorktreeBaseOk, execute};
+    use crate::testing::ScriptedGitClient;
 
     #[test]
     fn base_returns_the_first_porcelain_worktree_path() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok(concat!(
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied(concat!(
             "worktree /repo\nHEAD 123456789abcdef\nbranch refs/heads/main\n\n",
             "worktree /linked\nHEAD abcdef123456789\nbranch refs/heads/feature\n\n",
         ))]);
@@ -76,33 +73,33 @@ mod tests {
         assert_eq!(
             execute(GetWorktreeBase { repo: ".".into() }, &git)
                 .expect("porcelain output should produce a base path"),
-            WorktreeBaseResult::Found {
+            GetWorktreeBaseOk::Found {
                 path: "/repo".into(),
             }
         );
     }
 
     #[test]
-    fn nonzero_exit_remains_the_exact_closed_failure() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::exit_err("fatal: not a repo", 128)]);
+    fn rejected_listing_preserves_the_adapter_diagnostic() {
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: not a repo")]);
 
         assert_eq!(
             execute(GetWorktreeBase { repo: ".".into() }, &git)
                 .expect("a Git rejection is a closed base failure"),
-            WorktreeBaseResult::Failed {
-                detail: "git worktree list failed (exit 128)".into(),
+            GetWorktreeBaseOk::Failed {
+                detail: "fatal: not a repo".into(),
             }
         );
     }
 
     #[test]
     fn empty_porcelain_output_remains_the_exact_closed_failure() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok("")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
 
         assert_eq!(
             execute(GetWorktreeBase { repo: ".".into() }, &git)
                 .expect("empty Git output is a closed base failure"),
-            WorktreeBaseResult::Failed {
+            GetWorktreeBaseOk::Failed {
                 detail: "git returned no worktrees".into(),
             }
         );
@@ -110,8 +107,9 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_an_error_with_its_source() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(GetWorktreeBase { repo: ".".into() }, &git)
             .expect_err("transport failure must remain an error");

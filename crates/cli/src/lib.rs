@@ -3,11 +3,11 @@
 use std::path::Path;
 
 use application::{
-    managed::plan_push::{self, PlanPush, PushPlan},
+    managed::plan_push::{self, PlanPush, PlanPushOk},
     ports::UserSettingsStore,
-    squash_local::{self, SquashLocal, SquashResult, SquashStatus},
+    squash_local::{self, SquashLocal, SquashLocalOk, SquashStatus},
 };
-use infra::git_runner::StdGitRunner;
+use infra::git_client::HybridGitClient;
 
 use crate::{
     cli::{
@@ -27,6 +27,7 @@ pub(crate) mod recipe;
 pub mod viewer;
 
 mod confirm;
+mod diff_viewer_client;
 
 /// Process exit codes. Stable contract every caller (and justfile shim) depends on.
 /// Extend with command-specific codes as the tool grows (keep 0/1/2 stable).
@@ -124,14 +125,14 @@ fn dispatch(command: Command) -> ExitCode {
             }
         },
         Command::SquashLocal { repo, message, dry } => {
-            let runner = StdGitRunner;
+            let git = HybridGitClient;
             match squash_local::execute(
                 SquashLocal {
                     repo: repo.into(),
                     message: message.clone(),
                     dry,
                 },
-                &runner,
+                &git,
             ) {
                 Ok(result) => {
                     print_squash_local_result(&result, &message);
@@ -270,23 +271,23 @@ fn run_set_theme(theme: Theme) -> ExitCode {
 
 fn run_worktree(command: &WorktreeCommand) -> ExitCode {
     use application::worktrees::{
-        get_base::{self, GetWorktreeBase, WorktreeBaseResult},
-        list::{self, ListWorktrees, WorktreeListResult},
+        get_base::{self, GetWorktreeBase, GetWorktreeBaseOk},
+        list::{self, ListWorktrees, ListWorktreesOk},
     };
 
     use crate::commands::worktree;
 
-    let runner = StdGitRunner;
+    let git = HybridGitClient;
     let repo = std::path::PathBuf::from(".");
     match command {
-        WorktreeCommand::Base => match get_base::execute(GetWorktreeBase { repo }, &runner) {
-            Ok(WorktreeBaseResult::Found { path }) => {
+        WorktreeCommand::Base => match get_base::execute(GetWorktreeBase { repo }, &git) {
+            Ok(GetWorktreeBaseOk::Found { path }) => {
                 if !path.is_empty() {
                     println!("{path}");
                 }
                 ExitCode::Ok
             }
-            Ok(WorktreeBaseResult::Failed { detail }) => {
+            Ok(GetWorktreeBaseOk::Failed { detail }) => {
                 eprintln!("wk: {detail}");
                 ExitCode::Internal
             }
@@ -295,15 +296,15 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
                 ExitCode::Internal
             }
         },
-        WorktreeCommand::Ls => match list::execute(ListWorktrees { repo }, &runner) {
-            Ok(WorktreeListResult::Listed { worktrees }) => {
+        WorktreeCommand::Ls => match list::execute(ListWorktrees { repo }, &git) {
+            Ok(ListWorktreesOk::Listed { worktrees }) => {
                 let detail = worktree::render_list(&worktrees);
                 if !detail.is_empty() {
                     println!("{detail}");
                 }
                 ExitCode::Ok
             }
-            Ok(WorktreeListResult::Failed { detail }) => {
+            Ok(ListWorktreesOk::Failed { detail }) => {
                 eprintln!("wk: {detail}");
                 ExitCode::Internal
             }
@@ -380,8 +381,8 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
     let home_dir = home_dir.map(Into::into);
     let interactive = confirm::stdin_is_terminal();
     let dry = match plan_push::execute(PlanPush { message, dry }) {
-        PushPlan::PushOnly { dry } => dry,
-        PushPlan::CommitThenPush { message, dry } => {
+        PlanPushOk::PushOnly { dry } => dry,
+        PlanPushOk::CommitThenPush { message, dry } => {
             let run = commands::managed::run_commit_all(&ManagedOptions {
                 repos_file: repos_file.clone(),
                 home_dir: home_dir.clone(),
@@ -434,13 +435,13 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
         return ExitCode::Usage;
     }
 
-    let runner = StdGitRunner;
-    let target = match plan_push::execute(plan_push::PlanPush { repo: ".".into() }, &runner) {
-        Ok(plan_push::PushPlan::Refused(detail)) => {
+    let git = HybridGitClient;
+    let target = match plan_push::execute(plan_push::PlanPush { repo: ".".into() }, &git) {
+        Ok(plan_push::PlanPushOk::Refused(detail)) => {
             eprintln!("push: {detail}");
             return ExitCode::Internal;
         }
-        Ok(plan_push::PushPlan::Ready(target)) => target,
+        Ok(plan_push::PlanPushOk::Ready(target)) => target,
         Err(error) => {
             eprintln!("push: {error}");
             return ExitCode::Internal;
@@ -472,7 +473,7 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
                 message: message.into(),
             },
         },
-        &runner,
+        &git,
     ) {
         Ok(result) => result,
         Err(error) => {
@@ -498,13 +499,13 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
 
     use crate::commands::sync;
 
-    let runner = StdGitRunner;
-    let target = match plan_push::execute(plan_push::PlanPush { repo: ".".into() }, &runner) {
-        Ok(plan_push::PushPlan::Refused(detail)) => {
+    let git = HybridGitClient;
+    let target = match plan_push::execute(plan_push::PlanPush { repo: ".".into() }, &git) {
+        Ok(plan_push::PlanPushOk::Refused(detail)) => {
             eprintln!("push: {detail}");
             return ExitCode::Internal;
         }
-        Ok(plan_push::PushPlan::Ready(target)) => target,
+        Ok(plan_push::PlanPushOk::Ready(target)) => target,
         Err(error) => {
             eprintln!("push: {error}");
             return ExitCode::Internal;
@@ -541,7 +542,7 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
             target,
             mode: apply_push::PushMode::ExistingOnly,
         },
-        &runner,
+        &git,
     ) {
         Ok(result) => result,
         Err(error) => {
@@ -574,13 +575,13 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
         return ExitCode::Usage;
     }
 
-    let runner = StdGitRunner;
-    let target = match plan_commit::execute(plan_commit::PlanCommit { repo: ".".into() }, &runner) {
-        Ok(plan_commit::CommitPlan::Refused(detail)) => {
+    let git = HybridGitClient;
+    let target = match plan_commit::execute(plan_commit::PlanCommit { repo: ".".into() }, &git) {
+        Ok(plan_commit::PlanCommitOk::Refused(detail)) => {
             eprintln!("commit: {detail}");
             return ExitCode::Internal;
         }
-        Ok(plan_commit::CommitPlan::Ready(target)) => target,
+        Ok(plan_commit::PlanCommitOk::Ready(target)) => target,
         Err(error) => {
             eprintln!("commit: {error}");
             return ExitCode::Internal;
@@ -610,7 +611,7 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
             target,
             message: message.into(),
         },
-        &runner,
+        &git,
     ) {
         Ok(result) => result,
         Err(error) => {
@@ -640,7 +641,7 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
     use application::push_subrepos;
     use domain::managed::push_subrepos::SubreposPlan;
 
-    let runner = StdGitRunner;
+    let git = HybridGitClient;
     // Canonicalize first (like `diff -r`) so repo labels read off real path segments
     // — the root repo is named for its directory, not the bare ".".
     let root = std::fs::canonicalize(".").unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -648,7 +649,7 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
     let targets = match push_subrepos::plan::execute(
         push_subrepos::plan::PlanPush { root: root.clone() },
         &infra::repo_discovery::WalkdirRepoDiscovery,
-        &runner,
+        &git,
     ) {
         Ok(SubreposPlan::Ready(targets)) => targets,
         Ok(SubreposPlan::Refused(detail)) => {
@@ -679,8 +680,7 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
         Confirmation::Proceed => {}
     }
 
-    let result =
-        push_subrepos::apply::execute(push_subrepos::apply::ApplyPush { targets }, &runner);
+    let result = push_subrepos::apply::execute(push_subrepos::apply::ApplyPush { targets }, &git);
     match result.status {
         domain::managed::push_subrepos::Status::Ok => {
             println!("{}", result.detail);
@@ -701,12 +701,12 @@ fn run_sw(args: &SwArgs) -> ExitCode {
         apply_rebase::{self, ApplyRebase, RebaseStatus},
         apply_revert::{self, ApplyRevert, RevertStatus},
         apply_switch::{self, ApplySwitch, SwitchStatus},
-        plan_rebase::{self, PlanRebase, RebasePlan},
-        plan_revert::{self, PlanRevert, RevertPlan},
-        plan_switch::{self, PlanSwitch, SwitchPlan},
+        plan_rebase::{self, PlanRebase, PlanRebaseOk},
+        plan_revert::{self, PlanRevert, PlanRevertOk},
+        plan_switch::{self, PlanSwitch, PlanSwitchOk},
     };
 
-    let runner = StdGitRunner;
+    let git = HybridGitClient;
     let onto = args.onto.as_deref().unwrap_or("main");
 
     if args.revert {
@@ -715,14 +715,14 @@ fn run_sw(args: &SwArgs) -> ExitCode {
                 repo: ".".into(),
                 onto: onto.into(),
             },
-            &runner,
+            &git,
         ) {
-            Ok(RevertPlan::Refused(detail)) => {
+            Ok(PlanRevertOk::Refused(detail)) => {
                 eprintln!("sw: {detail}");
                 ExitCode::Internal
             }
-            Ok(RevertPlan::Ready(target)) => {
-                let result = match apply_revert::execute(ApplyRevert { target }, &runner) {
+            Ok(PlanRevertOk::Ready(target)) => {
+                let result = match apply_revert::execute(ApplyRevert { target }, &git) {
                     Ok(result) => result,
                     Err(error) => return finish_sw_error(&error),
                 };
@@ -741,20 +741,20 @@ fn run_sw(args: &SwArgs) -> ExitCode {
                 repo: ".".into(),
                 onto: onto.into(),
             },
-            &runner,
+            &git,
         ) {
-            Ok(RebasePlan::Refused(detail)) => {
+            Ok(PlanRebaseOk::Refused(detail)) => {
                 eprintln!("sw: {detail}");
                 return ExitCode::Internal;
             }
-            Ok(RebasePlan::Noop(detail)) => {
+            Ok(PlanRebaseOk::Noop(detail)) => {
                 println!("{detail}");
                 return ExitCode::Ok;
             }
-            Ok(RebasePlan::Ready(target)) => target,
+            Ok(PlanRebaseOk::Ready(target)) => target,
             Err(error) => return finish_sw_error(&error),
         };
-        let result = match apply_rebase::execute(ApplyRebase { target }, &runner) {
+        let result = match apply_rebase::execute(ApplyRebase { target }, &git) {
             Ok(result) => result,
             Err(error) => return finish_sw_error(&error),
         };
@@ -777,18 +777,18 @@ fn run_sw(args: &SwArgs) -> ExitCode {
             repo: ".".into(),
             onto: onto.into(),
         },
-        &runner,
+        &git,
     ) {
-        Ok(SwitchPlan::Refused(detail)) => {
+        Ok(PlanSwitchOk::Refused(detail)) => {
             eprintln!("sw: {detail}");
             ExitCode::Internal
         }
-        Ok(SwitchPlan::AlreadyThere(onto)) => {
+        Ok(PlanSwitchOk::AlreadyThere(onto)) => {
             println!("already on '{onto}'");
             ExitCode::Ok
         }
-        Ok(SwitchPlan::Ready(target)) => {
-            let result = match apply_switch::execute(ApplySwitch { target }, &runner) {
+        Ok(PlanSwitchOk::Ready(target)) => {
+            let result = match apply_switch::execute(ApplySwitch { target }, &git) {
                 Ok(result) => result,
                 Err(error) => return finish_sw_error(&error),
             };
@@ -826,7 +826,7 @@ fn finish_sw(result: Result<&str, &str>) -> ExitCode {
 fn run_prune(args: PruneArgs) -> ExitCode {
     use application::branches::{
         apply_prune::{self, ApplyPrune, ApplyPruneError, PruneStatus},
-        plan_prune::{self, PlanPrune, PrunePlan},
+        plan_prune::{self, PlanPrune, PlanPruneOk},
     };
 
     use crate::commands::prune;
@@ -846,24 +846,24 @@ fn run_prune(args: PruneArgs) -> ExitCode {
         return managed_exit(&commands::managed::run_prune_all(onto, &options));
     }
 
-    let runner = StdGitRunner;
+    let git = HybridGitClient;
 
     let (top, branches) = match plan_prune::execute(
         PlanPrune {
             repo: ".".into(),
             onto: onto.into(),
         },
-        &runner,
+        &git,
     ) {
-        Ok(PrunePlan::Refused(detail)) => {
+        Ok(PlanPruneOk::Refused(detail)) => {
             eprintln!("prune: {detail}");
             return ExitCode::Internal;
         }
-        Ok(PrunePlan::Nothing(detail)) => {
+        Ok(PlanPruneOk::Nothing(detail)) => {
             println!("{detail}");
             return ExitCode::Ok;
         }
-        Ok(PrunePlan::Ready { top, branches, .. }) => (top, branches),
+        Ok(PlanPruneOk::Ready { top, branches, .. }) => (top, branches),
         Err(error) => {
             eprintln!("prune: {error:#}");
             return ExitCode::Internal;
@@ -888,7 +888,7 @@ fn run_prune(args: PruneArgs) -> ExitCode {
         Confirmation::Proceed => {}
     }
 
-    match apply_prune::execute(ApplyPrune { top, branches }, &runner) {
+    match apply_prune::execute(ApplyPrune { top, branches }, &git) {
         Ok(result) => {
             let detail = prune::render_result(&result);
             match result.status {
@@ -925,11 +925,11 @@ fn run_tag(command: Option<TagCommand>, commits: bool, state: bool) -> ExitCode 
         push::{self, PushTags},
     };
 
-    let runner = StdGitRunner;
+    let git = HybridGitClient;
     let repo = std::path::PathBuf::from(".");
     match command {
         Some(TagCommand::Add { tag, message }) => {
-            finish_tag_action(add::execute(AddTag { repo, tag, message }, &runner))
+            finish_tag_action(add::execute(AddTag { repo, tag, message }, &git))
         }
         Some(TagCommand::Push {
             tag: Some(tag),
@@ -942,18 +942,18 @@ fn run_tag(command: Option<TagCommand>, commits: bool, state: bool) -> ExitCode 
                 message,
                 label,
             },
-            &runner,
+            &git,
         )),
         Some(TagCommand::Push {
             tag: Some(tag),
             message: None,
             label: Some(label),
-        }) => finish_tag_action(label::execute(LabelTag { repo, tag, label }, &runner)),
+        }) => finish_tag_action(label::execute(LabelTag { repo, tag, label }, &git)),
         Some(TagCommand::Push {
             tag: None,
             message: None,
             label: None,
-        }) => finish_tag_action(push::execute(PushTags { repo }, &runner)),
+        }) => finish_tag_action(push::execute(PushTags { repo }, &git)),
         Some(TagCommand::Push { tag: None, .. }) => {
             eprintln!("tag: tag push --label requires a <tag> to label");
             ExitCode::Usage
@@ -968,30 +968,30 @@ fn run_tag(command: Option<TagCommand>, commits: bool, state: bool) -> ExitCode 
                     repo,
                     include_state: state,
                 },
-                &runner,
+                &git,
             ),
             commits,
         ),
     }
 }
 
-fn finish_tag_list<E>(result: Result<application::tags::TagList, E>, commits: bool) -> ExitCode
+fn finish_tag_list<E>(result: Result<application::tags::ListTagsOk, E>, commits: bool) -> ExitCode
 where
     E: std::fmt::Display,
 {
-    use application::tags::TagList;
+    use application::tags::ListTagsOk;
 
     use crate::commands::tag;
 
     match result {
-        Ok(list @ TagList::Listed { .. }) => {
+        Ok(list @ ListTagsOk::Listed { .. }) => {
             let detail = tag::render_list(&list, commits);
             if !detail.is_empty() {
                 println!("{detail}");
             }
             ExitCode::Ok
         }
-        Ok(TagList::Failed { detail }) => {
+        Ok(ListTagsOk::Failed { detail }) => {
             eprintln!("tag: {detail}");
             ExitCode::Internal
         }
@@ -1131,7 +1131,7 @@ fn diff_live_exit(result: anyhow::Result<()>) -> ExitCode {
     }
 }
 
-fn print_squash_local_result(result: &SquashResult, message: &str) {
+fn print_squash_local_result(result: &SquashLocalOk, message: &str) {
     let stream = squash_local_output_stream(result.status);
     match result.status {
         SquashStatus::Refused => {

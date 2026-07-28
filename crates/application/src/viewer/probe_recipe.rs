@@ -3,7 +3,7 @@ use contracts::recipes::{Recipe, RecipeSource};
 use super::{ViewerTabKind, ViewerTabState};
 use crate::{
     live_views::probe::{self, ProbeOutcome, ProbeSource},
-    ports::RepoProbe,
+    ports::GitClient,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,7 +13,7 @@ pub struct ProbeRecipe {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProbeRecipeResponse {
+pub struct ProbeRecipeOk {
     pub outcome: ProbeRecipeOutcome,
 }
 
@@ -32,10 +32,10 @@ pub enum ProbeRecipeError {
 #[cqrsy::query]
 pub fn execute(
     query: ProbeRecipe,
-    probe: &impl RepoProbe,
-) -> Result<ProbeRecipeResponse, ProbeRecipeError> {
+    git: &impl GitClient,
+) -> Result<ProbeRecipeOk, ProbeRecipeError> {
     if query.kind == ViewerTabKind::Snapshot {
-        return Ok(ProbeRecipeResponse {
+        return Ok(ProbeRecipeOk {
             outcome: ProbeRecipeOutcome::Ready,
         });
     }
@@ -46,7 +46,7 @@ pub fn execute(
             source_kind: "LocalRepo".into(),
             source_value: path.display().to_string(),
         },
-        probe,
+        git,
     )?;
     let outcome = match response.outcome {
         ProbeOutcome::Ok => ProbeRecipeOutcome::Ready,
@@ -58,27 +58,23 @@ pub fn execute(
         },
     };
 
-    Ok(ProbeRecipeResponse { outcome })
+    Ok(ProbeRecipeOk { outcome })
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use contracts::recipes::RecipeOp;
 
     use super::*;
     use crate::{
-        ports::{RepoProbe, RepoProbeResult},
-        testing::{FakeRepoProbe, viewer::recipe},
+        ports::GitRepositoryState,
+        testing::{FakeGitClient, viewer::recipe},
     };
 
-    #[derive(Clone)]
-    struct FailingRepoProbe;
-
-    impl RepoProbe for FailingRepoProbe {
-        fn probe(&self, _dir: &Path) -> anyhow::Result<RepoProbeResult> {
-            anyhow::bail!("probe failed")
+    fn git(repository_state: GitRepositoryState) -> FakeGitClient {
+        FakeGitClient {
+            repository_state: Some(repository_state),
+            ..Default::default()
         }
     }
 
@@ -89,9 +85,7 @@ mod tests {
                 recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
                 kind: ViewerTabKind::Snapshot,
             },
-            &FakeRepoProbe {
-                result: RepoProbeResult::NotFound,
-            },
+            &git(GitRepositoryState::NotFound),
         )
         .expect("snapshot probe policy succeeds");
 
@@ -105,9 +99,7 @@ mod tests {
                 recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
                 kind: ViewerTabKind::Live,
             },
-            &FakeRepoProbe {
-                result: RepoProbeResult::NotFound,
-            },
+            &git(GitRepositoryState::NotFound),
         )
         .expect("live probe succeeds");
 
@@ -129,9 +121,7 @@ mod tests {
                 recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
                 kind: ViewerTabKind::Live,
             },
-            &FakeRepoProbe {
-                result: RepoProbeResult::NotAGitRepo,
-            },
+            &git(GitRepositoryState::NotARepository),
         )
         .expect("live probe succeeds");
 
@@ -153,11 +143,9 @@ mod tests {
                 recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
                 kind: ViewerTabKind::Live,
             },
-            &FakeRepoProbe {
-                result: RepoProbeResult::Repo {
-                    top_level: "/repos/project".into(),
-                },
-            },
+            &git(GitRepositoryState::Repository {
+                top_level: "/repos/project".into(),
+            }),
         )
         .expect("live probe succeeds");
 
@@ -171,7 +159,10 @@ mod tests {
                 recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
                 kind: ViewerTabKind::Live,
             },
-            &FailingRepoProbe,
+            &FakeGitClient {
+                repository_probe_error: Some("probe failed".into()),
+                ..Default::default()
+            },
         )
         .expect_err("unexpected probe failure returns");
 

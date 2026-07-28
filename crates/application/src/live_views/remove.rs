@@ -12,7 +12,7 @@ pub struct RemoveLiveView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RemoveLiveViewResponse {
+pub struct RemoveLiveViewOk {
     pub removed: bool,
 }
 
@@ -27,14 +27,14 @@ pub enum RemoveLiveViewError {
 pub fn execute(
     req: RemoveLiveView,
     store: &impl AppStateStore,
-) -> Result<RemoveLiveViewResponse, RemoveLiveViewError> {
+) -> Result<RemoveLiveViewOk, RemoveLiveViewError> {
     let RemoveLiveView {
         source_kind,
         source_value,
     } = req;
     let connection = store.connection_lock()?;
     let removed = remove_live_view(&connection, &source_kind, &source_value)?;
-    Ok(RemoveLiveViewResponse { removed })
+    Ok(RemoveLiveViewOk { removed })
 }
 
 fn remove_live_view(

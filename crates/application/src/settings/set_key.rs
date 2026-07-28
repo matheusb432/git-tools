@@ -49,7 +49,7 @@ pub struct SetSettingKey {
 /// ```
 #[derive(Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub struct SetSettingKeyResult {
+pub struct SetSettingKeyOk {
     pub key: String,
     pub value_old: Option<String>,
     pub value_new: String,
@@ -130,7 +130,7 @@ fn validate(key: &str, value_new: &str) -> Result<(), SetSettingKeyError> {
 pub fn execute(
     command: SetSettingKey,
     settings_store: &impl UserSettingsEditor,
-) -> Result<SetSettingKeyResult, SetSettingKeyError> {
+) -> Result<SetSettingKeyOk, SetSettingKeyError> {
     let SetSettingKey { key, value_new } = command;
     validate(&key, &value_new)?;
     let value_old = settings_store
@@ -144,7 +144,7 @@ pub fn execute(
             }
         })?;
 
-    Ok(SetSettingKeyResult {
+    Ok(SetSettingKeyOk {
         key,
         value_old,
         value_new,

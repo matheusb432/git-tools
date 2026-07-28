@@ -3,15 +3,16 @@ use std::{
     process::{Command, Stdio},
 };
 
-pub(super) fn open(path: &Path) {
+pub(super) fn open(path: &Path) -> anyhow::Result<()> {
     let is_wsl = std::env::var_os("WSL_DISTRO_NAME").is_some();
     let path = path.to_string_lossy();
-    let _ = Command::new(opener_program(std::env::consts::OS, is_wsl))
+    Command::new(opener_program(std::env::consts::OS, is_wsl))
         .arg(path.as_ref())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn();
+        .spawn()?;
+    Ok(())
 }
 
 fn opener_program(operating_system: &str, is_wsl: bool) -> &'static str {

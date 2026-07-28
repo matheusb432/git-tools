@@ -1,63 +1,23 @@
-use std::{collections::HashMap, path::Path, process::Command};
+use std::{collections::HashMap, path::Path};
 
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
+use application::ports::{BlameLines, GitDiffFormat, GitDiffRequest};
 use domain::diffs::Commit;
 
-pub fn run_git(repo: impl AsRef<Path>, args: &[&str]) -> anyhow::Result<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo.as_ref())
-        .args(args)
-        .output()
-        .with_context(|| format!("failed to run git in {}", repo.as_ref().display()))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+pub(crate) fn run_git(repo: impl AsRef<Path>, args: &[&str]) -> anyhow::Result<String> {
+    let output = crate::git_process::run(repo.as_ref(), args)?;
+    if !output.success() {
+        let stderr = output.stderr.trim().to_string();
         if stderr.is_empty() {
-            return Err(anyhow!("git exited with {}", output.status));
+            return Err(anyhow!("git exited with {}", output.exit_code));
         }
         return Err(anyhow!(stderr));
     }
 
-    String::from_utf8(output.stdout).context("git stdout was not valid UTF-8")
+    Ok(output.stdout)
 }
 
-pub fn top_level(repo: impl AsRef<Path>) -> anyhow::Result<String> {
-    run_git(repo.as_ref(), &["rev-parse", "--show-toplevel"])
-        .map(|s| s.trim().to_string())
-        .map_err(|error| {
-            legacy_script_error(
-                error.to_string(),
-                format!("not a git repo: {}", repo.as_ref().display()),
-            )
-        })
-}
-
-pub fn current_branch(repo: impl AsRef<Path>) -> anyhow::Result<String> {
-    run_git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]).map(|s| s.trim().to_string())
-}
-
-pub fn upstream(repo: impl AsRef<Path>) -> anyhow::Result<String> {
-    run_git(
-        repo.as_ref(),
-        &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-    )
-    .map(|s| s.trim().to_string())
-    .map_err(|error| no_upstream_error(&error.to_string()))
-}
-
-pub fn verify_commit(repo: impl AsRef<Path>, base: &str) -> anyhow::Result<()> {
-    let rev = format!("{base}^{{commit}}");
-    run_git(repo, &["rev-parse", "--verify", &rev])
-        .map(|_| ())
-        .map_err(|error| legacy_script_error(error.to_string(), format!("not a commit: {base}")))
-}
-
-pub fn short_ref(repo: impl AsRef<Path>, base: &str) -> anyhow::Result<String> {
-    run_git(repo, &["rev-parse", "--short", base]).map(|s| s.trim().to_string())
-}
-
-pub fn log_commits(repo: impl AsRef<Path>, range: &str) -> anyhow::Result<Vec<Commit>> {
+pub(crate) fn log_commits(repo: impl AsRef<Path>, range: &str) -> anyhow::Result<Vec<Commit>> {
     let raw = run_git(
         repo,
         &[
@@ -70,7 +30,7 @@ pub fn log_commits(repo: impl AsRef<Path>, range: &str) -> anyhow::Result<Vec<Co
     Ok(parse_commit_log(&raw))
 }
 
-pub fn file_commit_map(
+pub(crate) fn file_commit_map(
     repo: impl AsRef<Path>,
     range: &str,
 ) -> anyhow::Result<HashMap<String, Vec<String>>> {
@@ -82,7 +42,7 @@ pub fn file_commit_map(
 // ! brought into the previewed range: reachable from the merge, not from its first parent,
 // ! and not from the base. `^<base>` prunes the walk to the range (a merge of `main` into
 // ! the branch returns nothing — it introduces nothing to the preview).
-pub fn merge_members(
+pub(crate) fn merge_members(
     repo: impl AsRef<Path>,
     merge: &str,
     base: &str,
@@ -109,18 +69,34 @@ fn parse_rev_list(raw: &str, merge: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn diff_raw(repo: impl AsRef<Path>, args: &[String]) -> anyhow::Result<String> {
+pub(crate) fn diff(repo: impl AsRef<Path>, request: &GitDiffRequest) -> anyhow::Result<String> {
+    let mut args = vec!["diff".to_string()];
+    match request.format {
+        GitDiffFormat::NamesOnly => args.push("--name-only".to_string()),
+        GitDiffFormat::Unified => {}
+        GitDiffFormat::FullContext => args.push("--unified=2147483647".to_string()),
+    }
+    args.push(request.range.clone());
+    if !request.excluded_paths.is_empty() {
+        args.push("--".to_string());
+        args.extend(
+            request
+                .excluded_paths
+                .iter()
+                .map(|path| format!(":(exclude,literal){path}")),
+        );
+    }
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
     run_git(repo, &args)
 }
 
 // ! Range-bounded forward blame of the tip: new-side line -> last commit that touched it.
-pub fn blame_forward(
+pub(crate) fn blame_forward(
     repo: impl AsRef<Path>,
     base: &str,
     tip: &str,
     path: &str,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<BlameLines> {
     run_git(
         repo,
         &[
@@ -131,21 +107,25 @@ pub fn blame_forward(
             path,
         ],
     )
+    .map(|raw| parse_forward_blame(&raw))
 }
 
 // ! Working-tree blame for hash mode (diff is base -> worktree): aligns with worktree
 // ! line numbers; uncommitted lines come back as the all-zero sha (out of range).
-pub fn blame_forward_worktree(repo: impl AsRef<Path>, path: &str) -> anyhow::Result<String> {
-    run_git(repo, &["blame", "--porcelain", "--", path])
+pub(crate) fn blame_forward_worktree(
+    repo: impl AsRef<Path>,
+    path: &str,
+) -> anyhow::Result<BlameLines> {
+    run_git(repo, &["blame", "--porcelain", "--", path]).map(|raw| parse_forward_blame(&raw))
 }
 
 // ! Reverse blame over the range: each deleted base line carries `previous <sha>` = its deleter.
-pub fn blame_reverse(
+pub(crate) fn blame_reverse(
     repo: impl AsRef<Path>,
     base: &str,
     tip: &str,
     path: &str,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<BlameLines> {
     run_git(
         repo,
         &[
@@ -157,11 +137,54 @@ pub fn blame_reverse(
             path,
         ],
     )
+    .map(|raw| parse_reverse_blame(&raw))
+}
+
+fn blame_header(line: &str) -> Option<(String, u32)> {
+    let mut fields = line.split(' ');
+    let sha = fields.next()?;
+    if sha.len() != 40 || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let _original_line = fields.next()?;
+    let final_line = fields.next()?.parse().ok()?;
+    Some((short_sha(sha), final_line))
+}
+
+fn parse_forward_blame(raw: &str) -> BlameLines {
+    raw.lines()
+        .filter_map(blame_header)
+        .map(|(sha, line)| (line, sha))
+        .collect()
+}
+
+fn parse_reverse_blame(raw: &str) -> BlameLines {
+    let mut lines = HashMap::new();
+    let mut deleter_by_sha = HashMap::new();
+    let mut current_sha = None;
+    let mut current_line = None;
+    for line in raw.lines() {
+        if let Some((sha, line_number)) = blame_header(line) {
+            current_sha = Some(sha);
+            current_line = Some(line_number);
+        } else if let Some(rest) = line.strip_prefix("previous ")
+            && let Some(sha) = current_sha.as_ref()
+            && let Some(deleter) = rest.split(' ').next()
+        {
+            deleter_by_sha.insert(sha.clone(), short_sha(deleter));
+        } else if line.starts_with('\t')
+            && let (Some(sha), Some(line_number)) = (current_sha.as_ref(), current_line)
+            && let Some(deleter) = deleter_by_sha.get(sha)
+        {
+            lines.insert(line_number, deleter.clone());
+        }
+    }
+    lines
 }
 
 /// The repo's oldest root-commit sha (lexicographically smallest when several
 /// roots exist), or `None` for a repo with no commits. Stable repo identity.
-pub fn root_commit(repo: impl AsRef<Path>) -> Option<String> {
+pub(crate) fn root_commit(repo: impl AsRef<Path>) -> Option<String> {
     let out = run_git(repo, &["rev-list", "--max-parents=0", "HEAD"]).ok()?;
     out.lines()
         .map(str::trim)
@@ -170,42 +193,19 @@ pub fn root_commit(repo: impl AsRef<Path>) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Resolve a revision to its full 40-char sha.
-pub fn resolve_sha(repo: impl AsRef<Path>, rev: &str) -> anyhow::Result<String> {
-    Ok(run_git(repo, &["rev-parse", rev])?.trim().to_string())
-}
-
 /// The merge base of `a` and `b` as a full sha.
-pub fn merge_base(repo: impl AsRef<Path>, a: &str, b: &str) -> anyhow::Result<String> {
+pub(crate) fn merge_base(repo: impl AsRef<Path>, a: &str, b: &str) -> anyhow::Result<String> {
     Ok(run_git(repo, &["merge-base", a, b])?.trim().to_string())
 }
 
 /// The committer date of `rev` as a strict ISO-8601 string (empty on failure).
-pub fn committed_at(repo: impl AsRef<Path>, rev: &str) -> String {
+pub(crate) fn committed_at(repo: impl AsRef<Path>, rev: &str) -> String {
     run_git(repo, &["show", "-s", "--format=%cI", rev])
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
 }
 
-fn no_upstream_error(git_stderr: &str) -> anyhow::Error {
-    legacy_script_error(
-        git_stderr,
-        "no upstream tracking branch (run: git push -u origin <branch>)",
-    )
-}
-
-fn legacy_script_error(
-    git_stderr: impl AsRef<str>,
-    script_message: impl AsRef<str>,
-) -> anyhow::Error {
-    let git_stderr = git_stderr.as_ref().trim();
-    if git_stderr.is_empty() {
-        return anyhow!("{}", script_message.as_ref());
-    }
-    anyhow!("{}\n{}", git_stderr, script_message.as_ref())
-}
-
-pub fn parse_commit_log(raw: &str) -> Vec<Commit> {
+pub(crate) fn parse_commit_log(raw: &str) -> Vec<Commit> {
     raw.split('\x1e')
         .map(str::trim)
         .filter(|record| !record.is_empty())
@@ -229,7 +229,7 @@ pub fn parse_commit_log(raw: &str) -> Vec<Commit> {
         .collect()
 }
 
-pub fn parse_file_commit_map(raw: &str) -> HashMap<String, Vec<String>> {
+pub(crate) fn parse_file_commit_map(raw: &str) -> HashMap<String, Vec<String>> {
     let mut map: HashMap<String, Vec<String>> = HashMap::new();
 
     for record in raw.split('\x1e').map(str::trim).filter(|s| !s.is_empty()) {
@@ -336,24 +336,6 @@ mod tests {
     }
 
     #[test]
-    fn no_upstream_error_preserves_js_literal_branch_placeholder() {
-        assert_eq!(
-            no_upstream_error("fatal: no upstream configured for branch 'main'").to_string(),
-            "fatal: no upstream configured for branch 'main'\nno upstream tracking branch (run: git push -u origin <branch>)"
-        );
-    }
-
-    #[test]
-    fn legacy_error_shape_keeps_git_stderr_before_script_message() {
-        let error = legacy_script_error("fatal: Needed a single revision", "not a commit: nope");
-
-        assert_eq!(
-            error.to_string(),
-            "fatal: Needed a single revision\nnot a commit: nope"
-        );
-    }
-
-    #[test]
     fn root_commit_returns_oldest_root_sha() {
         let tmp = tempfile::tempdir().unwrap();
         let d = tmp.path();
@@ -376,7 +358,10 @@ mod tests {
         g(&["commit", "-qm", "first"]);
         let root = root_commit(d.to_str().unwrap()).unwrap();
         assert_eq!(root.len(), 40);
-        let head = resolve_sha(d.to_str().unwrap(), "HEAD").unwrap();
+        let head = run_git(d, &["rev-parse", "HEAD"])
+            .unwrap()
+            .trim()
+            .to_string();
         assert_eq!(root, head); // single commit ⇒ root == HEAD
     }
 }

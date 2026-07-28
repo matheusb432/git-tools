@@ -23,7 +23,7 @@ pub async fn handle(
         application::diffs::render_squash_preview::execute(
             request,
             &state.user_settings,
-            &state.source,
+            &state.git,
             &state.artifacts,
             &state.renderer,
             &state.clock,

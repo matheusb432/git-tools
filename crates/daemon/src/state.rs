@@ -6,9 +6,8 @@ use axum::{
 };
 use infra::{
     app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
-    diff_source::GitDiffSource, managed_manifest::TokioManagedManifest,
-    push_ledger::NoOpPushLedger, remote_sync::TokioRemoteSync, repo_probe::GitRepoProbe,
-    user_config::TomlSettingsStore,
+    git_client::HybridGitClient, managed_manifest::TokioManagedManifest,
+    push_ledger::NoOpPushLedger, user_config::TomlSettingsStore,
 };
 use preview::MaudRenderer;
 use tokio::sync::watch;
@@ -22,14 +21,12 @@ pub struct DaemonState {
     pub(crate) version: &'static str,
     pub(crate) pid: u32,
     pub(crate) shutdown_tx: watch::Sender<bool>,
-    pub(crate) source: GitDiffSource,
+    pub(crate) git: HybridGitClient,
     pub(crate) artifacts: StoreArtifacts,
     pub(crate) renderer: MaudRenderer,
     pub(crate) clock: SystemClock,
-    pub(crate) remote: TokioRemoteSync,
     pub(crate) manifest: TokioManagedManifest,
     pub(crate) ledger: NoOpPushLedger,
-    pub(crate) probe: GitRepoProbe,
     pub(crate) app_state: SqliteAppState,
     pub(crate) user_settings: TomlSettingsStore,
 }
@@ -49,14 +46,12 @@ impl DaemonState {
             version,
             pid,
             shutdown_tx,
-            source: GitDiffSource,
+            git: HybridGitClient,
             artifacts: StoreArtifacts,
             renderer: MaudRenderer,
             clock: SystemClock,
-            remote: TokioRemoteSync,
             manifest: TokioManagedManifest,
             ledger: NoOpPushLedger,
-            probe: GitRepoProbe,
             app_state,
             user_settings,
         }

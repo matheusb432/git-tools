@@ -1,6 +1,6 @@
 //! The `push_subrepos/plan` query: discover every git repo under a root through
 //! the [`RepoDiscovery`] port and resolve each one's push destination from local
-//! refs through the [`GitRunner`] port — read-only, never fetches or pushes.
+//! refs through the [`GitClient`] port — read-only, never fetches or pushes.
 
 use std::path::{Path, PathBuf};
 
@@ -8,7 +8,7 @@ use domain::managed::push_subrepos::{Dest, RepoTarget, SubreposPlan};
 
 use crate::{
     discovery::find_repos,
-    ports::{GitRunner, RepoDiscovery},
+    ports::{GitClient, RepoDiscovery},
 };
 
 /// Plan a recursive push of every git repo under `root`.
@@ -16,6 +16,8 @@ use crate::{
 pub struct PlanPush {
     pub root: PathBuf,
 }
+
+pub type PlanPushOk = SubreposPlan;
 
 /// Everything that can go wrong planning a recursive push.
 #[derive(Debug, thiserror::Error)]
@@ -30,8 +32,8 @@ pub enum PlanPushError {
 pub fn execute(
     req: PlanPush,
     discovery: &impl RepoDiscovery,
-    git: &impl GitRunner,
-) -> Result<SubreposPlan, PlanPushError> {
+    git: &impl GitClient,
+) -> Result<PlanPushOk, PlanPushError> {
     let PlanPush { root } = req;
     let discovered = find_repos::execute(
         find_repos::DiscoverRepos {
@@ -42,7 +44,7 @@ pub fn execute(
     )
     .map_err(anyhow::Error::from)?;
     if discovered.is_empty() {
-        return Ok(SubreposPlan::Refused(format!(
+        return Ok(PlanPushOk::Refused(format!(
             "no git repos found under {}",
             root.display()
         )));
@@ -51,37 +53,21 @@ pub fn execute(
         .into_iter()
         .map(|repo| inspect(git, &repo.path, repo.label))
         .collect();
-    Ok(SubreposPlan::Ready(targets))
-}
-
-/// Runs git and returns trimmed stdout on a clean, non-empty exit, else `None`.
-fn capture_non_empty(runner: &impl GitRunner, repo: &Path, args: &[&str]) -> Option<String> {
-    match runner.run(repo, args) {
-        Ok(out) if out.exit_code == 0 && !out.stdout.trim().is_empty() => {
-            Some(out.stdout.trim().to_string())
-        }
-        _ => None,
-    }
+    Ok(PlanPushOk::Ready(targets))
 }
 
 /// Resolves one repo's push destination from local refs only — never fetches. A detached
 /// HEAD or a branch with no `branch.<name>.remote` becomes a [`Dest::Skip`]; a branch with
 /// no unpushed commits becomes a [`Dest::Synced`] so the push is skipped entirely.
-fn inspect(runner: &impl GitRunner, path: &Path, label: String) -> RepoTarget {
-    let dest = match capture_non_empty(runner, path, &["rev-parse", "--abbrev-ref", "HEAD"]) {
-        Some(branch) if branch != "HEAD" => {
-            match capture_non_empty(
-                runner,
-                path,
-                &["config", &format!("branch.{branch}.remote")],
-            ) {
-                Some(remote) if is_synced(runner, path) => Dest::Synced { branch, remote },
-                Some(remote) => Dest::Push { branch, remote },
-                None => Dest::Skip {
-                    reason: "no upstream tracking branch".to_string(),
-                },
-            }
-        }
+fn inspect(git: &impl GitClient, path: &Path, label: String) -> RepoTarget {
+    let dest = match git.current_branch(path).ok() {
+        Some(branch) if branch != "HEAD" => match git.branch_remote(path, &branch).ok().flatten() {
+            Some(remote) if is_synced(git, path) => Dest::Synced { branch, remote },
+            Some(remote) => Dest::Push { branch, remote },
+            None => Dest::Skip {
+                reason: "no upstream tracking branch".to_string(),
+            },
+        },
         _ => Dest::Skip {
             reason: "detached HEAD".to_string(),
         },
@@ -97,23 +83,22 @@ fn inspect(runner: &impl GitRunner, path: &Path, label: String) -> RepoTarget {
 /// exactly `0`. This mirrors the ahead-count `gtl status --all` reports and the sibling
 /// `diff -r` uses to spot synced repos, and stays purely local (no fetch). An unavailable
 /// count (e.g. no `@{u}` merge ref) is never read as synced — we fall back to pushing.
-fn is_synced(runner: &impl GitRunner, path: &Path) -> bool {
-    capture_non_empty(runner, path, &["rev-list", "--count", "@{u}..HEAD"])
-        .and_then(|count| count.parse::<usize>().ok())
-        == Some(0)
+fn is_synced(git: &impl GitClient, path: &Path) -> bool {
+    git.commit_count(path, "@{u}..HEAD").ok().flatten() == Some(0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{FakeGitRunner, FakeRepoDiscovery};
+    use crate::testing::{FakeRepoDiscovery, ScriptedGitClient};
 
     #[test]
     fn inspect_resolves_push_when_branch_is_ahead() {
-        let runner = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("main\n"),
-            FakeGitRunner::ok("origin\n"),
-            FakeGitRunner::ok("2\n"), // rev-list --count @{u}..HEAD — two unpushed commits
+        let runner = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied("origin\n"),
+            ScriptedGitClient::applied("2\n"), /* rev-list --count @{u}..HEAD — two unpushed
+                                                * commits */
         ]);
         let target = inspect(&runner, Path::new("/repos/api"), "api".into());
         assert_eq!(
@@ -123,22 +108,14 @@ mod tests {
                 remote: "origin".into(),
             }
         );
-        assert_eq!(
-            runner.arg_lists(),
-            vec![
-                vec!["rev-parse", "--abbrev-ref", "HEAD"],
-                vec!["config", "branch.main.remote"],
-                vec!["rev-list", "--count", "@{u}..HEAD"],
-            ]
-        );
     }
 
     #[test]
     fn inspect_marks_synced_when_no_unpushed_commits() {
-        let runner = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("main\n"),
-            FakeGitRunner::ok("origin\n"),
-            FakeGitRunner::ok("0\n"), // rev-list --count @{u}..HEAD — nothing to push
+        let runner = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied("origin\n"),
+            ScriptedGitClient::applied("0\n"), // rev-list --count @{u}..HEAD — nothing to push
         ]);
         let target = inspect(&runner, Path::new("/repos/api"), "api".into());
         assert_eq!(
@@ -154,10 +131,10 @@ mod tests {
     fn inspect_pushes_when_ahead_count_is_unavailable() {
         // A failed `rev-list --count` must never read as "0 / already synced" — fall back to
         // attempting the push, exactly as the sibling checks do (`sw`, `diff -r`).
-        let runner = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("main\n"),
-            FakeGitRunner::ok("origin\n"),
-            FakeGitRunner::exit_err("", 1),
+        let runner = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied("origin\n"),
+            ScriptedGitClient::rejected(""),
         ]);
         let target = inspect(&runner, Path::new("/repos/api"), "api".into());
         assert_eq!(
@@ -171,9 +148,9 @@ mod tests {
 
     #[test]
     fn inspect_skips_branch_without_upstream() {
-        let runner = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("feat\n"),
-            FakeGitRunner::exit_err("", 1),
+        let runner = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("feat\n"),
+            ScriptedGitClient::rejected(""),
         ]);
         let target = inspect(&runner, Path::new("/repos/api"), "api".into());
         assert_eq!(
@@ -186,7 +163,7 @@ mod tests {
 
     #[test]
     fn inspect_skips_detached_head() {
-        let runner = FakeGitRunner::new(vec![FakeGitRunner::ok("HEAD\n")]);
+        let runner = ScriptedGitClient::new(vec![ScriptedGitClient::applied("HEAD\n")]);
         let target = inspect(&runner, Path::new("/repos/api"), "api".into());
         assert_eq!(
             target.dest,
@@ -203,13 +180,13 @@ mod tests {
                 root: "/work".into(),
             },
             &FakeRepoDiscovery::default(),
-            &FakeGitRunner::default(),
+            &ScriptedGitClient::default(),
         )
         .expect("planning succeeds");
 
         assert_eq!(
             plan,
-            SubreposPlan::Refused("no git repos found under /work".into())
+            PlanPushOk::Refused("no git repos found under /work".into())
         );
     }
 
@@ -219,9 +196,9 @@ mod tests {
             repos: vec!["/work/api".into(), "/work/libs/inner".into()],
         };
         // Both repos detached: one scripted rev-parse per repo keeps the fixture minimal.
-        let runner = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("HEAD\n"),
-            FakeGitRunner::ok("HEAD\n"),
+        let runner = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("HEAD\n"),
+            ScriptedGitClient::applied("HEAD\n"),
         ]);
 
         let plan = execute(
@@ -233,7 +210,7 @@ mod tests {
         )
         .expect("planning succeeds");
 
-        let SubreposPlan::Ready(targets) = plan else {
+        let PlanPushOk::Ready(targets) = plan else {
             panic!("expected a ready plan, got {plan:?}");
         };
         let labels: Vec<&str> = targets.iter().map(|target| target.label.as_str()).collect();

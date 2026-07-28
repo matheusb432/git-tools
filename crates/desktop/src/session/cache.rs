@@ -96,10 +96,16 @@ impl WeightedViewCache {
         self.entries.get(&id)
     }
 
-    pub fn remove(&mut self, id: ViewerTabId) -> Option<CachedView> {
+    pub fn remove(&mut self, id: ViewerTabId) -> Option<()> {
         let removed = self.entries.pop(&id)?;
         self.weight -= removed.weight();
-        Some(removed)
+        Some(())
+    }
+
+    pub fn demote(&mut self, id: ViewerTabId) -> bool {
+        let did_demote = self.entries.demote(&id);
+        // TODO: use enum
+        did_demote
     }
 
     #[cfg(test)]

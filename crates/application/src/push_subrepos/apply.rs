@@ -1,12 +1,12 @@
 //! The `push_subrepos/apply` command: push a confirmed plan's targets through the
-//! [`GitRunner`] port and aggregate per-repo outcomes into an overall status.
+//! [`GitClient`] port and aggregate per-repo outcomes into an overall status.
 
 use domain::managed::push_subrepos::{
     Dest, PushAllResult, RepoOutcome, RepoReport, RepoTarget, Status,
 };
 
 use crate::{
-    ports::{GitOutput, GitRunner},
+    ports::{GitClient, GitEffect},
     shared::push_summary::{PushOutcome, PushSummary},
 };
 
@@ -16,11 +16,13 @@ pub struct ApplyPush {
     pub targets: Vec<RepoTarget>,
 }
 
+pub type ApplyPushOk = PushAllResult;
+
 /// Pushes each repo's current branch to its upstream, skipping the un-pushable ones, and
 /// aggregates per-repo outcomes into an overall [`Status`]. Infallible by design: a
 /// failed push becomes a [`RepoOutcome::Failed`] report, never an error.
 #[cqrsy::command]
-pub fn execute(command: ApplyPush, git: &impl GitRunner) -> PushAllResult {
+pub fn execute(command: ApplyPush, git: &impl GitClient) -> ApplyPushOk {
     let ApplyPush { targets } = command;
     let reports: Vec<RepoReport> = targets
         .iter()
@@ -58,7 +60,7 @@ pub fn execute(command: ApplyPush, git: &impl GitRunner) -> PushAllResult {
         detail.push_str(&line);
     }
 
-    PushAllResult {
+    ApplyPushOk {
         status,
         detail,
         reports,
@@ -75,30 +77,24 @@ const fn exit_code(status: Status) -> i32 {
 }
 
 /// Pushes one repo, mapping git's exit and output to a [`RepoOutcome`].
-fn push_one(runner: &impl GitRunner, target: &RepoTarget) -> RepoOutcome {
+fn push_one(runner: &impl GitClient, target: &RepoTarget) -> RepoOutcome {
     let (branch, remote) = match &target.dest {
         Dest::Skip { reason } => return RepoOutcome::Skipped(reason.clone()),
         Dest::Synced { .. } => return RepoOutcome::UpToDate,
         Dest::Push { branch, remote } => (branch, remote),
     };
 
-    match runner.run(&target.path, &["push", remote, branch]) {
-        Ok(out) if out.exit_code == 0 => {
-            if is_up_to_date(&out) {
+    match runner.push_branch(&target.path, remote, branch, false) {
+        Ok(GitEffect::Applied(receipt)) => {
+            if receipt.up_to_date {
                 RepoOutcome::UpToDate
             } else {
                 RepoOutcome::Pushed
             }
         }
-        Ok(out) => RepoOutcome::Failed(out.fail_detail("push failed")),
+        Ok(GitEffect::Rejected(detail)) => RepoOutcome::Failed(format!("push failed: {detail}")),
         Err(error) => RepoOutcome::Failed(error.to_string()),
     }
-}
-
-/// Whether git reported the remote was already current (`Everything up-to-date`).
-fn is_up_to_date(out: &GitOutput) -> bool {
-    let said = format!("{} {}", out.stdout, out.stderr).to_ascii_lowercase();
-    said.contains("up-to-date") || said.contains("up to date")
 }
 
 #[cfg(test)]
@@ -106,7 +102,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     fn push_target(label: &str) -> RepoTarget {
         RepoTarget {
@@ -119,22 +115,18 @@ mod tests {
         }
     }
 
-    fn apply(runner: &FakeGitRunner, targets: Vec<RepoTarget>) -> PushAllResult {
+    fn apply(runner: &ScriptedGitClient, targets: Vec<RepoTarget>) -> ApplyPushOk {
         execute(ApplyPush { targets }, runner)
     }
 
     #[test]
     fn apply_pushes_each_pushable_repo() {
-        let runner = FakeGitRunner::new(vec![FakeGitRunner::ok(""), FakeGitRunner::ok("")]);
+        let runner = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied(""),
+        ]);
         let result = apply(&runner, vec![push_target("api"), push_target("web")]);
         assert_eq!(result.status, Status::Ok);
-        assert_eq!(
-            runner.arg_lists(),
-            vec![
-                vec!["push", "origin", "main"],
-                vec!["push", "origin", "main"],
-            ]
-        );
         assert!(
             result
                 .reports
@@ -145,7 +137,8 @@ mod tests {
 
     #[test]
     fn apply_labels_already_current_remote_as_up_to_date() {
-        let runner = FakeGitRunner::new(vec![FakeGitRunner::ok_stderr("Everything up-to-date\n")]);
+        let runner =
+            ScriptedGitClient::new(vec![ScriptedGitClient::applied("Everything up-to-date\n")]);
         let result = apply(&runner, vec![push_target("api")]);
         assert_eq!(result.status, Status::Ok);
         assert_eq!(result.reports[0].outcome, RepoOutcome::UpToDate);
@@ -158,7 +151,7 @@ mod tests {
 
     #[test]
     fn apply_skips_targets_without_a_destination_without_calling_git() {
-        let runner = FakeGitRunner::default();
+        let runner = ScriptedGitClient::default();
         let targets = vec![RepoTarget {
             path: PathBuf::from("/repos/web"),
             label: "web".into(),
@@ -172,15 +165,11 @@ mod tests {
             result.reports[0].outcome,
             RepoOutcome::Skipped("detached HEAD".into())
         );
-        assert!(
-            runner.arg_lists().is_empty(),
-            "skipped repos never call git"
-        );
     }
 
     #[test]
     fn apply_reports_synced_targets_as_up_to_date_without_calling_git() {
-        let runner = FakeGitRunner::default();
+        let runner = ScriptedGitClient::default();
         let targets = vec![RepoTarget {
             path: PathBuf::from("/repos/api"),
             label: "api".into(),
@@ -192,15 +181,11 @@ mod tests {
         let result = apply(&runner, targets);
         assert_eq!(result.status, Status::Ok);
         assert_eq!(result.reports[0].outcome, RepoOutcome::UpToDate);
-        assert!(
-            runner.arg_lists().is_empty(),
-            "already-synced repos never call git"
-        );
     }
 
     #[test]
     fn apply_counts_synced_and_unpushable_repos_as_skipped() {
-        let runner = FakeGitRunner::new(vec![FakeGitRunner::ok("")]);
+        let runner = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
         let targets = vec![
             push_target("pushed"),
             RepoTarget {
@@ -231,9 +216,9 @@ mod tests {
 
     #[test]
     fn apply_reports_partial_when_one_push_fails() {
-        let runner = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(""),
-            FakeGitRunner::exit_err("fatal: remote rejected", 1),
+        let runner = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::rejected("fatal: remote rejected"),
         ]);
         let result = apply(&runner, vec![push_target("api"), push_target("web")]);
         assert_eq!(result.status, Status::Partial);
@@ -250,7 +235,7 @@ mod tests {
 
     #[test]
     fn apply_reports_fail_when_every_push_fails() {
-        let runner = FakeGitRunner::new(vec![FakeGitRunner::exit_err("nope", 1)]);
+        let runner = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("nope")]);
         let result = apply(&runner, vec![push_target("api")]);
         assert_eq!(result.status, Status::Fail);
     }

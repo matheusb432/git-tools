@@ -1,15 +1,15 @@
-//! Reading a repo's working-tree state through the [`GitRunner`] port — the
+//! Reading a repo's working-tree state through the [`GitClient`] port — the
 //! `git status --porcelain` fan-in shared by the `commit` and `status` flows.
 
 use std::path::Path;
 
-use domain::managed::working_tree::{CommitFile, DirtyState};
+use domain::managed::working_tree::DirtyState;
 
-use crate::ports::GitRunner;
+use crate::ports::GitClient;
 
 /// The repo's working-tree state: absent when its `.git` entry is missing, else
 /// the parsed `git status --porcelain` file list (empty on a git failure).
-pub fn dirty_state(git: &impl GitRunner, repo: &Path) -> DirtyState {
+pub fn dirty_state(git: &impl GitClient, repo: &Path) -> DirtyState {
     dirty_state_checked(git, repo).unwrap_or(DirtyState {
         present: true,
         dirty: false,
@@ -17,7 +17,7 @@ pub fn dirty_state(git: &impl GitRunner, repo: &Path) -> DirtyState {
     })
 }
 
-pub(super) fn dirty_state_checked(git: &impl GitRunner, repo: &Path) -> anyhow::Result<DirtyState> {
+pub(super) fn dirty_state_checked(git: &impl GitClient, repo: &Path) -> anyhow::Result<DirtyState> {
     if !git.repo_present(repo) {
         return Ok(DirtyState {
             present: false,
@@ -26,13 +26,10 @@ pub(super) fn dirty_state_checked(git: &impl GitRunner, repo: &Path) -> anyhow::
         });
     }
 
-    let output = git.run(repo, &["status", "--porcelain"])?;
-    let porcelain = if output.success() {
-        output.stdout
-    } else {
-        String::new()
+    let files = match git.working_tree(repo)? {
+        crate::ports::GitEffect::Applied(tree) => tree.files,
+        crate::ports::GitEffect::Rejected(_) => Vec::new(),
     };
-    let files = parse_porcelain(&porcelain);
 
     Ok(DirtyState {
         present: true,
@@ -41,26 +38,16 @@ pub(super) fn dirty_state_checked(git: &impl GitRunner, repo: &Path) -> anyhow::
     })
 }
 
-/// Parses `git status --porcelain` output into the changed-file list.
-fn parse_porcelain(output: &str) -> Vec<CommitFile> {
-    output
-        .lines()
-        .filter(|line| !line.is_empty())
-        .map(|line| CommitFile {
-            status: line.get(0..2).unwrap_or("").trim().to_string(),
-            path: line.get(3..).unwrap_or("").to_string(),
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
+    use domain::managed::working_tree::CommitFile;
+
     use super::*;
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     #[test]
     fn absent_repo_reports_not_present() {
-        let runner = FakeGitRunner::default();
+        let runner = ScriptedGitClient::default();
         runner
             .absent_repos
             .lock()
@@ -81,8 +68,9 @@ mod tests {
 
     #[test]
     fn porcelain_lines_parse_into_status_and_path() {
-        let runner =
-            FakeGitRunner::new(vec![FakeGitRunner::ok(" M src/lib.rs\n?? new-file.txt\n")]);
+        let runner = ScriptedGitClient::new(vec![ScriptedGitClient::applied(
+            " M src/lib.rs\n?? new-file.txt\n",
+        )]);
 
         let state = dirty_state(&runner, Path::new("/repos/api"));
 
@@ -105,10 +93,10 @@ mod tests {
 
     #[test]
     fn clean_tree_and_git_failure_both_read_as_not_dirty() {
-        let clean = FakeGitRunner::new(vec![FakeGitRunner::ok("")]);
+        let clean = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
         assert!(!dirty_state(&clean, Path::new("/repos/api")).dirty);
 
-        let failing = FakeGitRunner::new(vec![FakeGitRunner::exit_err("boom", 1)]);
+        let failing = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("boom")]);
         let state = dirty_state(&failing, Path::new("/repos/api"));
         assert!(state.present);
         assert!(!state.dirty);

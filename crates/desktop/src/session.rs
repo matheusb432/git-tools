@@ -212,11 +212,21 @@ impl ViewerSession {
         let Some(index) = self.tabs.iter().position(|tab| tab.tab.id() == id) else {
             return false;
         };
-        self.tabs.remove(index);
-        self.cache.remove(id);
+        // TODO: mover antes de fechar
         if self.active == Some(id) {
-            self.active = self.tabs.last().map(|tab| tab.tab.id());
+            // moves tab before closing it, last or second-to-last.
+            self.active = self
+                .tabs
+                .iter()
+                .rev()
+                .find(|t| t.tab.id() != id)
+                .map(|t| t.tab.id());
+            // self.active = self.tabs.last().map(|tab| tab.tab.id());
         }
+        self.tabs.remove(index);
+        // TODO: disparar thread pra isso
+        // TODO: remover isso? pq o cache sequer eh removido?
+        self.cache.demote(id);
         self.bump_revision();
         true
     }

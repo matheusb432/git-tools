@@ -43,7 +43,7 @@ pub struct RemoveSettingKey {
 /// ```
 #[derive(Debug, Eq, PartialEq)]
 #[non_exhaustive]
-pub struct RemoveSettingKeyResult {
+pub struct RemoveSettingKeyOk {
     pub key: String,
     pub value_old: Option<String>,
 }
@@ -110,7 +110,7 @@ fn validate(key: &str) -> Result<(), RemoveSettingKeyError> {
 pub fn execute(
     command: RemoveSettingKey,
     settings_store: &impl UserSettingsEditor,
-) -> Result<RemoveSettingKeyResult, RemoveSettingKeyError> {
+) -> Result<RemoveSettingKeyOk, RemoveSettingKeyError> {
     let RemoveSettingKey { key } = command;
     validate(&key)?;
     let value_old = settings_store
@@ -124,7 +124,7 @@ pub fn execute(
             ),
         })?;
 
-    Ok(RemoveSettingKeyResult { key, value_old })
+    Ok(RemoveSettingKeyOk { key, value_old })
 }
 
 #[cfg(test)]

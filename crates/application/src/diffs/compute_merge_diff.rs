@@ -9,7 +9,7 @@ pub(crate) use view::MergeViewBuild;
 
 use crate::{
     diffs::{PinnedRange, View},
-    ports::{AppSettings, DiffSource, UserSettingsStore},
+    ports::{AppSettings, GitClient, UserSettingsStore},
 };
 
 /// Falls back to this base when a merge request omits `base` or supplies a blank value.
@@ -34,7 +34,7 @@ pub struct ComputeMergeDiff {
 
 /// The computed merge view.
 #[derive(Debug, Clone)]
-pub struct ComputeMergeDiffResponse {
+pub struct ComputeMergeDiffOk {
     pub view: View,
 }
 
@@ -50,17 +50,17 @@ pub enum ComputeMergeDiffError {
 pub fn execute(
     req: ComputeMergeDiff,
     app_settings: &impl UserSettingsStore,
-    source: &impl DiffSource,
-) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
+    source: &impl GitClient,
+) -> Result<ComputeMergeDiffOk, ComputeMergeDiffError> {
     let settings = app_settings.load();
     let built = compute(req, &settings, source)?;
-    Ok(ComputeMergeDiffResponse { view: built.view })
+    Ok(ComputeMergeDiffOk { view: built.view })
 }
 
 pub(crate) fn compute(
     req: ComputeMergeDiff,
     settings: &AppSettings,
-    source: &impl DiffSource,
+    source: &impl GitClient,
 ) -> anyhow::Result<MergeViewBuild> {
     let ComputeMergeDiff { cwd, base, pinned } = req;
     view::build(
@@ -82,7 +82,7 @@ mod tests {
     use crate::{
         ports::AppSettings,
         testing::{
-            FakeDiffSource, FixedUserSettingsStore,
+            FakeGitClient, FixedUserSettingsStore,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -104,14 +104,14 @@ index 333..444 100644\n\
 
     fn execute_default_settings(
         request: ComputeMergeDiff,
-        source: &FakeDiffSource,
-    ) -> Result<ComputeMergeDiffResponse, ComputeMergeDiffError> {
+        source: &FakeGitClient,
+    ) -> Result<ComputeMergeDiffOk, ComputeMergeDiffError> {
         execute(request, &FixedUserSettingsStore::default(), source)
     }
 
     #[test]
     fn viewer_and_raw_computation_share_the_same_view() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
@@ -139,7 +139,7 @@ index 333..444 100644\n\
 
     #[test]
     fn app_settings_exclusions_apply_to_the_resolved_repository() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
@@ -178,7 +178,7 @@ index 333..444 100644\n\
 
     #[test]
     fn computes_the_merge_view_with_the_default_base() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
@@ -204,7 +204,7 @@ index 333..444 100644\n\
 
     #[test]
     fn pinned_merge_diff_computes_over_the_pinned_range_without_verification() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec![], // verify_commit would fail symbolically
@@ -232,7 +232,7 @@ index 333..444 100644\n\
 
     #[test]
     fn unknown_base_is_an_error() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],

@@ -19,9 +19,9 @@ pub struct RecordRender {
     pub range_label: String,
 }
 
-/// Response when a render is recorded.
+/// Successful result when a render is recorded.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordRenderResponse {}
+pub struct RecordRenderOk {}
 
 /// Error when recording a render fails.
 #[derive(Debug, thiserror::Error)]
@@ -40,11 +40,11 @@ pub fn execute(
     req: RecordRender,
     store: &impl AppStateStore,
     clock: &impl Clock,
-) -> Result<RecordRenderResponse, RecordRenderError> {
+) -> Result<RecordRenderOk, RecordRenderError> {
     let rendered_at = clock.now_iso();
     let mut connection = store.connection_lock()?;
     record_render(&mut connection, &req, &rendered_at)?;
-    Ok(RecordRenderResponse {})
+    Ok(RecordRenderOk {})
 }
 
 fn record_render(

@@ -61,6 +61,7 @@ pub(in crate::render) fn tabs(
                             class="viewer-tab-close mr-[3px] cursor-pointer rounded-sm border-0 bg-transparent px-1.5 py-[3px] text-[17px] leading-none text-ink-3 [font:inherit] hover:bg-del-bg hover:text-del focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc"
                             aria-label={ "Close " (tab.label()) }
                             title="Close tab"
+                            // TODO: fix, really slow!
                             hx-get=(ViewerRoute::Close { tab: tab.id() })
                             hx-target="#viewer-tabs"
                             hx-swap="outerHTML" { "×" }

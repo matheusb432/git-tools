@@ -4,11 +4,7 @@ use std::path::{Path, PathBuf};
 
 use domain::repository::PendingChanges;
 
-use super::pending_changes;
-use crate::{
-    ports::GitRunner,
-    shared::git::{capture_checked, command_label},
-};
+use crate::ports::{GitClient, GitEffect};
 
 /// Requests a read-only local commit plan for one repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,7 +23,7 @@ pub struct CommitTarget {
 
 /// Represents either a refused commit or a target ready for confirmation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CommitPlan {
+pub enum PlanCommitOk {
     Refused(String),
     Ready(CommitTarget),
 }
@@ -51,54 +47,51 @@ pub enum PlanCommitError {
 ///
 /// Returns [`PlanCommitError`] when Git transport fails.
 #[cqrsy::query]
-pub fn execute(query: PlanCommit, git: &impl GitRunner) -> Result<CommitPlan, PlanCommitError> {
+pub fn execute(query: PlanCommit, git: &impl GitClient) -> Result<PlanCommitOk, PlanCommitError> {
     let PlanCommit { repo } = query;
-    let top_args = ["rev-parse", "--show-toplevel"];
-    let Some(top) = capture_non_empty(git, &repo, &top_args)? else {
-        return Ok(CommitPlan::Refused("not a git repo".into()));
+    let Some(top) = git
+        .discover_top(&repo)
+        .map_err(|source| transport("discover repository", source))?
+    else {
+        return Ok(PlanCommitOk::Refused("not a git repo".into()));
     };
-    let top = PathBuf::from(top);
 
-    let branch_args = ["rev-parse", "--abbrev-ref", "HEAD"];
-    let branch = match capture_non_empty(git, &top, &branch_args)? {
-        Some(branch) if branch != "HEAD" => branch,
+    let branch = match git
+        .current_branch(&top)
+        .map_err(|source| transport("read current branch", source))?
+    {
+        branch if branch != "HEAD" => branch,
         _ => {
-            return Ok(CommitPlan::Refused(
+            return Ok(PlanCommitOk::Refused(
                 "detached HEAD — checkout a branch first".into(),
             ));
         }
     };
 
-    let status_args = ["status", "--porcelain"];
-    let porcelain = match git
-        .run(&top, &status_args)
-        .map_err(|source| transport(&status_args, source))?
+    let working_tree = match git
+        .working_tree(&top)
+        .map_err(|source| transport("read working tree", source))?
     {
-        output if output.exit_code == 0 => output.stdout,
-        _ => return Ok(CommitPlan::Refused("git status failed".into())),
+        GitEffect::Applied(working_tree) => working_tree,
+        GitEffect::Rejected(_) => return Ok(PlanCommitOk::Refused("git status failed".into())),
     };
 
-    Ok(CommitPlan::Ready(CommitTarget {
+    Ok(PlanCommitOk::Ready(CommitTarget {
         name: repo_name(&top),
         top,
         branch,
-        pending: pending_changes::classify(&porcelain, 0),
+        pending: PendingChanges {
+            changed: working_tree.files.len(),
+            staged: working_tree.staged,
+            unprepared: working_tree.unprepared,
+            ahead: 0,
+        },
     }))
 }
 
-fn capture_non_empty(
-    git: &impl GitRunner,
-    repo: &Path,
-    args: &[&str],
-) -> Result<Option<String>, PlanCommitError> {
-    capture_checked(git, repo, args)
-        .map(|captured| captured.filter(|value| !value.is_empty()))
-        .map_err(|source| transport(args, source))
-}
-
-fn transport(args: &[&str], source: anyhow::Error) -> PlanCommitError {
+fn transport(command: &str, source: anyhow::Error) -> PlanCommitError {
     PlanCommitError::Transport {
-        command: command_label(args),
+        command: command.into(),
         source,
     }
 }
@@ -116,21 +109,21 @@ mod tests {
     use std::error::Error as _;
 
     use super::*;
-    use crate::testing::FakeGitRunner;
+    use crate::testing::ScriptedGitClient;
 
     #[test]
     fn commit_plan_does_not_require_an_upstream() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/repos/api\n"),
-            FakeGitRunner::ok("main\n"),
-            FakeGitRunner::ok(" M src/lib.rs\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repos/api\n"),
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied(" M src/lib.rs\n"),
         ]);
 
         let plan = execute(PlanCommit { repo: ".".into() }, &git).expect("commit plan is built");
 
         assert_eq!(
             plan,
-            CommitPlan::Ready(CommitTarget {
+            PlanCommitOk::Ready(CommitTarget {
                 name: "api".into(),
                 top: "/repos/api".into(),
                 branch: "main".into(),
@@ -146,15 +139,16 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_a_sourced_plan_error() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error = execute(PlanCommit { repo: ".".into() }, &git)
             .expect_err("transport failure must remain an error");
 
         assert_eq!(
             error.to_string(),
-            "git rev-parse --show-toplevel: git transport unavailable"
+            "discover repository: git transport unavailable"
         );
         assert_eq!(
             error.source().map(ToString::to_string),

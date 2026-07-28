@@ -7,7 +7,7 @@ use std::path::Path;
 
 use application::managed::status_repos;
 pub use domain::managed::status::StatusResult;
-use infra::git_runner::StdGitRunner;
+use infra::git_client::HybridGitClient;
 
 use self::palette::StatusColorPalette;
 use super::{ManagedExit, ManagedOptions, ManagedRepo, ManagedRun};
@@ -16,7 +16,7 @@ mod palette;
 pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
     match super::manifest::load_repos(options) {
         Ok(repos) => status_run(
-            status_repos::execute(status_repos::StatusRepos { repos }, &StdGitRunner),
+            status_repos::execute(status_repos::StatusRepos { repos }, &HybridGitClient),
             options,
         ),
         Err(error) => status_fail(format!("{error:#}")),
@@ -31,7 +31,7 @@ pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<St
         application::discovery::resolve_repo_top::ResolveRepoTop {
             repo: dir.to_path_buf(),
         },
-        &StdGitRunner,
+        &HybridGitClient,
     ) {
         Ok(top) => top,
         Err(error) => return status_fail(format!("status: {error:#}")),
@@ -44,7 +44,7 @@ pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<St
     status_run(
         status_repos::execute(
             status_repos::StatusRepos { repos: vec![repo] },
-            &StdGitRunner,
+            &HybridGitClient,
         ),
         options,
     )
@@ -89,7 +89,7 @@ pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun
         })
         .collect::<Vec<_>>();
     status_run(
-        status_repos::execute(status_repos::StatusRepos { repos }, &StdGitRunner),
+        status_repos::execute(status_repos::StatusRepos { repos }, &HybridGitClient),
         options,
     )
 }

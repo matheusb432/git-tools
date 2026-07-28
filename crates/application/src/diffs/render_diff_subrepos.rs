@@ -15,7 +15,7 @@ use crate::{
         DiffTarget, DiffTargetRequest, DiffTargetRequestError,
         batch::{RepoRef, dated_title, render_batch},
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
+    ports::{ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -30,7 +30,7 @@ pub struct RenderDiffSubrepos {
 
 /// The outcome plus every message the render wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RenderDiffSubreposResponse {
+pub struct RenderDiffSubreposOk {
     pub outcome: RenderDiffSubreposOutcome,
     pub notes: Vec<Note>,
 }
@@ -58,11 +58,11 @@ pub enum RenderDiffSubreposError {
 pub fn execute(
     req: RenderDiffSubrepos,
     app_settings: &impl UserSettingsStore,
-    source: &impl DiffSource,
+    source: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-) -> Result<RenderDiffSubreposResponse, RenderDiffSubreposError> {
+) -> Result<RenderDiffSubreposOk, RenderDiffSubreposError> {
     let RenderDiffSubrepos {
         root,
         repos,
@@ -79,7 +79,7 @@ pub fn execute(
             "diff -r: nothing to show across {} repo(s); no preview written",
             repos.len()
         )));
-        return Ok(RenderDiffSubreposResponse {
+        return Ok(RenderDiffSubreposOk {
             outcome: RenderDiffSubreposOutcome::Empty,
             notes,
         });
@@ -116,7 +116,7 @@ pub fn execute(
         )));
     }
     notes.push(Note::info(format!("wrote {}", placed.path.display())));
-    Ok(RenderDiffSubreposResponse {
+    Ok(RenderDiffSubreposOk {
         outcome: RenderDiffSubreposOutcome::Rendered {
             artifact: placed.path,
             reused: placed.reused,
@@ -137,8 +137,7 @@ mod tests {
         ports::AppSettings,
         shared::notes::Note,
         testing::{
-            FakeDiffSource, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
-            StubRenderer,
+            FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -153,7 +152,7 @@ mod tests {
 
     #[test]
     fn renders_a_tabbed_artifact_and_reports_the_skip_count() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
@@ -198,7 +197,7 @@ mod tests {
 
     #[test]
     fn all_empty_returns_empty_with_the_summary_warning() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             upstream: Some("origin/main".into()),
             commits: vec![],
             diff_output: String::new(),
@@ -243,7 +242,7 @@ diff --git a/notes.md b/notes.md\n\
 @@ -1 +1 @@\n\
 -plan\n\
 +more plan\n";
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
             diff_output: TWO_FILE_DIFF.into(),

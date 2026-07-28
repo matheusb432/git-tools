@@ -7,7 +7,7 @@ use crate::{
         compute_merge_diff::{self, ComputeMergeDiff},
         compute_squash_preview::{self, ComputeSquashPreview},
     },
-    ports::{DiffSource, UserSettingsStore},
+    ports::{GitClient, UserSettingsStore},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,7 +16,7 @@ pub struct ComputeRecipe {
 }
 
 #[derive(Debug, Clone)]
-pub struct ComputeRecipeResponse {
+pub struct ComputeRecipeOk {
     pub view: View,
 }
 
@@ -34,8 +34,8 @@ pub enum ComputeRecipeError {
 pub fn execute(
     query: ComputeRecipe,
     user_settings: &impl UserSettingsStore,
-    source: &impl DiffSource,
-) -> Result<ComputeRecipeResponse, ComputeRecipeError> {
+    source: &impl GitClient,
+) -> Result<ComputeRecipeOk, ComputeRecipeError> {
     let recipe = query.recipe;
     let cwd = recipe.cwd();
     let view = match recipe.op {
@@ -75,7 +75,7 @@ pub fn execute(
         }
     };
 
-    Ok(ComputeRecipeResponse { view })
+    Ok(ComputeRecipeOk { view })
 }
 
 fn diff_target(target: RecipeTarget) -> DiffTarget {
@@ -111,10 +111,10 @@ mod tests {
     use std::num::NonZeroU32;
 
     use super::*;
-    use crate::testing::{FakeDiffSource, FixedUserSettingsStore, viewer::recipe};
+    use crate::testing::{FakeGitClient, FixedUserSettingsStore, viewer::recipe};
 
-    fn source() -> FakeDiffSource {
-        FakeDiffSource {
+    fn source() -> FakeGitClient {
+        FakeGitClient {
             top_level: Some("/repos/project".into()),
             branch: "feature".into(),
             upstream: Some("main".into()),
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn pinned_diff_recipe_maps_the_contract_pin() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repos/project".into()),
             branch: "feature".into(),
             ..Default::default()
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn recipe_operations_dispatch_to_their_view_queries() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repos/project".into()),
             branch: "feature".into(),
             ..Default::default()
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn operation_errors_identify_the_failed_recipe_kind() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repos/project".into()),
             branch: "feature".into(),
             ..Default::default()

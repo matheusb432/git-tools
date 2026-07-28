@@ -15,6 +15,8 @@ pub struct DiscoverRepos {
     pub include_worktrees: bool,
 }
 
+pub type DiscoverReposOk = Vec<DiscoveredRepo>;
+
 /// Everything that can go wrong discovering repos.
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoverError {
@@ -27,7 +29,7 @@ pub enum DiscoverError {
 pub fn execute(
     req: DiscoverRepos,
     discovery: &impl RepoDiscovery,
-) -> Result<Vec<DiscoveredRepo>, DiscoverError> {
+) -> Result<DiscoverReposOk, DiscoverError> {
     let DiscoverRepos {
         root,
         include_worktrees,

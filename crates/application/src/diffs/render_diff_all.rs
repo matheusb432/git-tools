@@ -14,7 +14,7 @@ use crate::{
         DiffTarget,
         batch::{RepoRef, dated_title, render_batch},
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
+    ports::{ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -29,7 +29,7 @@ pub struct RenderDiffAll {
 
 /// The stored artifact plus every message the render wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RenderDiffAllResponse {
+pub struct RenderDiffAllOk {
     pub artifact: PathBuf,
     pub reused: bool,
     pub notes: Vec<Note>,
@@ -47,11 +47,11 @@ pub enum RenderDiffAllError {
 pub fn execute(
     req: RenderDiffAll,
     app_settings: &impl UserSettingsStore,
-    source: &impl DiffSource,
+    source: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-) -> Result<RenderDiffAllResponse, RenderDiffAllError> {
+) -> Result<RenderDiffAllOk, RenderDiffAllError> {
     let RenderDiffAll { root, repos } = req;
     let store_root = super::artifacts::root(&root);
     let settings = app_settings.load();
@@ -90,7 +90,7 @@ pub fn execute(
         batch.views.len()
     )));
     notes.push(Note::info(format!("wrote {}", placed.path.display())));
-    Ok(RenderDiffAllResponse {
+    Ok(RenderDiffAllOk {
         artifact: placed.path,
         reused: placed.reused,
         notes,
@@ -112,8 +112,8 @@ mod tests {
         ports::{AppSettings, UserSettingsStore},
         shared::notes::Note,
         testing::{
-            FakeDiffSource, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
-            RepoOverride, StubRenderer,
+            FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, RepoOverride,
+            StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn renders_every_repo_without_skipping_empties() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn a_build_error_propagates_instead_of_being_skipped() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             upstream: None,
             known_revs: vec![],
             ..Default::default()
@@ -236,7 +236,7 @@ diff --git a/notes.md b/notes.md\n\
 @@ -1 +1 @@\n\
 -plan\n\
 +more plan\n";
-        let mut source = FakeDiffSource {
+        let mut source = FakeGitClient {
             upstream: Some("origin/main".into()),
             ..Default::default()
         };

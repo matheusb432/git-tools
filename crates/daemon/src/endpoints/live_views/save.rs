@@ -1,6 +1,6 @@
 //! `POST /live-views/save` — validate a directory as a git repo and persist a
-//! live view for it, off the blocking pool (the probe shells out to git and the
-//! store hits `SQLite` synchronously).
+//! live view for it, off the blocking pool because repository discovery and
+//! `SQLite` access are synchronous.
 
 use axum::{
     Json,
@@ -27,12 +27,7 @@ pub async fn handle(
     let Json(request) = request.map_err(|error| EndpointError::bad_request(error.body_text()))?;
     let request = super::to_request(request);
     let response = tokio::task::spawn_blocking(move || {
-        application::live_views::save::execute(
-            request,
-            &state.probe,
-            &state.app_state,
-            &state.clock,
-        )
+        application::live_views::save::execute(request, &state.git, &state.app_state, &state.clock)
     })
     .await
     .map_err(EndpointError::task_join)?

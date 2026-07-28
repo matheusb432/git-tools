@@ -10,7 +10,7 @@ use crate::{
         FileDiff, FileStatus, LineOwners, UnifiedDiffLineClassifier, UnifiedDiffLineKind, View,
         attribution::{self, NewSide},
     },
-    ports::DiffSource,
+    ports::{GitClient, GitDiffFormat, GitDiffRequest},
     shared::notes::Note,
 };
 
@@ -113,13 +113,12 @@ pub struct DiffData {
 /// `:(exclude,literal)` pathspecs, so git never computes — and this module
 /// never parses, counts, or blames — an excluded file's line diffs.
 pub fn assemble(
-    source: &impl DiffSource,
+    source: &impl GitClient,
     repo: &Path,
     diff_range: &str,
     log_range: &str,
     excluded: &ExcludedExtensions,
 ) -> anyhow::Result<DiffData> {
-    let diff_args = vec!["diff".to_string(), diff_range.to_string()];
     let mut commits = source.log_commits(repo, log_range)?;
     let (base, new_side) = blame_targets(diff_range, log_range);
 
@@ -133,15 +132,23 @@ pub fn assemble(
         }
     }
 
-    let hidden_paths = hidden_paths(source, repo, &diff_args, excluded)?;
-    let content_args = with_exclude_pathspecs(&diff_args, &hidden_paths);
+    let hidden_paths = hidden_paths(source, repo, diff_range, excluded)?;
+    let content_request = GitDiffRequest {
+        range: diff_range.to_string(),
+        format: GitDiffFormat::Unified,
+        excluded_paths: hidden_paths.clone(),
+    };
     // ? partition again after parsing: a source that ignores the exclude
     // ? pathspecs (the scripted test fake) must still never leak hidden files.
     let (mut files, _) =
-        partition_excluded(parse_diff(&source.diff_raw(repo, &content_args)?), excluded);
+        partition_excluded(parse_diff(&source.diff(repo, &content_request)?), excluded);
+    let full_context_request = GitDiffRequest {
+        format: GitDiffFormat::FullContext,
+        ..content_request
+    };
     attach_full_context(
         &mut files,
-        parse_diff(&source.diff_raw(repo, &full_context_args(&content_args))?),
+        parse_diff(&source.diff(repo, &full_context_request)?),
     );
     let file_commits = source.file_commit_map(repo, log_range)?;
     attach_commits(&mut files, &file_commits);
@@ -160,50 +167,28 @@ pub fn assemble(
 /// content-free `--name-only` pass. Skips the extra git call entirely when
 /// nothing is excluded.
 fn hidden_paths(
-    source: &impl DiffSource,
+    source: &impl GitClient,
     repo: &Path,
-    diff_args: &[String],
+    range: &str,
     excluded: &ExcludedExtensions,
 ) -> anyhow::Result<Vec<String>> {
     if excluded.is_empty() {
         return Ok(Vec::new());
     }
     Ok(source
-        .diff_raw(repo, &name_only_args(diff_args))?
+        .diff(
+            repo,
+            &GitDiffRequest {
+                range: range.to_string(),
+                format: GitDiffFormat::NamesOnly,
+                excluded_paths: Vec::new(),
+            },
+        )?
         .lines()
         .map(str::trim)
         .filter(|path| !path.is_empty() && excluded.matches(path))
         .map(String::from)
         .collect())
-}
-
-/// The `--name-only` variant of a diff invocation (mirrors [`full_context_args`]).
-fn name_only_args(args: &[String]) -> Vec<String> {
-    let mut name_only = Vec::with_capacity(args.len() + 1);
-    if let Some((cmd, rest)) = args.split_first() {
-        name_only.push(cmd.clone());
-        name_only.push("--name-only".to_string());
-        name_only.extend(rest.iter().cloned());
-    }
-    name_only
-}
-
-/// Append one `:(exclude,literal)` pathspec per hidden path so git never emits
-/// (nor computes) those files' content. `literal` keeps glob characters in
-/// filenames inert. No hidden paths → the args pass through untouched.
-fn with_exclude_pathspecs(args: &[String], hidden_paths: &[String]) -> Vec<String> {
-    if hidden_paths.is_empty() {
-        return args.to_vec();
-    }
-    let mut excluded_args = Vec::with_capacity(args.len() + 1 + hidden_paths.len());
-    excluded_args.extend(args.iter().cloned());
-    excluded_args.push("--".to_string());
-    excluded_args.extend(
-        hidden_paths
-            .iter()
-            .map(|path| format!(":(exclude,literal){path}")),
-    );
-    excluded_args
 }
 
 /// Split parsed files into (kept, hidden paths) under the exclusion set (pure).
@@ -258,16 +243,6 @@ pub(crate) fn repo_name(top: &str) -> String {
         .filter(|name| !name.is_empty())
         .unwrap_or("repo")
         .to_string()
-}
-
-pub fn full_context_args(args: &[String]) -> Vec<String> {
-    let mut full_args = Vec::with_capacity(args.len() + 1);
-    if let Some((cmd, rest)) = args.split_first() {
-        full_args.push(cmd.clone());
-        full_args.push("--unified=2147483647".to_string());
-        full_args.extend(rest.iter().cloned());
-    }
-    full_args
 }
 
 #[cfg(test)]
@@ -390,48 +365,5 @@ index 000..333\n\
         let (base, side) = blame_targets("a1..b2", "a1..b2"); // exact range
         assert_eq!(base, "a1");
         assert!(matches!(side, NewSide::Commit(ref tip) if tip == "b2"));
-    }
-
-    #[test]
-    fn full_context_args_inserts_unified_context_after_diff_command() {
-        let args = vec!["diff".to_string(), "main..HEAD".to_string()];
-
-        assert_eq!(
-            full_context_args(&args),
-            vec!["diff", "--unified=2147483647", "main..HEAD"]
-        );
-    }
-
-    #[test]
-    fn name_only_args_inserts_the_flag_after_the_diff_command() {
-        let args = vec!["diff".to_string(), "main..HEAD".to_string()];
-
-        assert_eq!(
-            name_only_args(&args),
-            vec!["diff", "--name-only", "main..HEAD"]
-        );
-    }
-
-    #[test]
-    fn with_exclude_pathspecs_appends_literal_excludes_after_a_separator() {
-        let args = vec!["diff".to_string(), "main..HEAD".to_string()];
-
-        assert_eq!(
-            with_exclude_pathspecs(&args, &["docs/plan.md".to_string(), "a[1].md".to_string()]),
-            vec![
-                "diff",
-                "main..HEAD",
-                "--",
-                ":(exclude,literal)docs/plan.md",
-                ":(exclude,literal)a[1].md",
-            ]
-        );
-    }
-
-    #[test]
-    fn with_exclude_pathspecs_passes_args_through_when_nothing_is_hidden() {
-        let args = vec!["diff".to_string(), "main..HEAD".to_string()];
-
-        assert_eq!(with_exclude_pathspecs(&args, &[]), args);
     }
 }

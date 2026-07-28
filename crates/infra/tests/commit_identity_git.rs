@@ -6,7 +6,7 @@ use application::repository_sync::{
     plan_commit::CommitTarget,
 };
 use domain::repository::PendingChanges;
-use infra::git_runner::StdGitRunner;
+use infra::git_client::HybridGitClient;
 
 fn git(repo: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -66,7 +66,7 @@ fn real_git_apply_commit_ignores_post_commit_stderr() {
             },
             message: "apply change".into(),
         },
-        &StdGitRunner,
+        &HybridGitClient,
     )
     .expect("current-repository commit succeeds through real Git");
     let apply_identity = match applied.progress {

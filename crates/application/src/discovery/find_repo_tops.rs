@@ -1,6 +1,6 @@
 //! The `discovery/find_repo_tops` query: discover every git repo under a root
 //! (via [`find_repos`]) and resolve each to its canonical top-level path through
-//! the [`GitRunner`](crate::ports::GitRunner) port — the unit the `diff -r` wire
+//! the [`GitClient`](crate::ports::GitClient) port — the unit the `diff -r` wire
 //! paths hand to the daemon.
 
 use std::path::PathBuf;
@@ -9,7 +9,7 @@ use domain::discovery::DiscoveredRepo;
 
 use crate::{
     discovery::{find_repos, resolve_repo_top},
-    ports::{GitRunner, RepoDiscovery},
+    ports::{GitClient, RepoDiscovery},
 };
 
 /// Discover every git repo under `root`, resolved to its canonical top level and
@@ -19,6 +19,8 @@ pub struct FindRepoTops {
     pub root: PathBuf,
     pub include_worktrees: bool,
 }
+
+pub type FindRepoTopsOk = Vec<DiscoveredRepo>;
 
 /// Everything that can go wrong discovering and resolving repo tops.
 #[derive(Debug, thiserror::Error)]
@@ -44,8 +46,8 @@ pub enum FindRepoTopsError {
 pub fn execute(
     req: FindRepoTops,
     discovery: &impl RepoDiscovery,
-    git: &impl GitRunner,
-) -> Result<Vec<DiscoveredRepo>, FindRepoTopsError> {
+    git: &impl GitClient,
+) -> Result<FindRepoTopsOk, FindRepoTopsError> {
     let FindRepoTops {
         root,
         include_worktrees,
@@ -74,16 +76,16 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{FakeGitRunner, FakeRepoDiscovery};
+    use crate::testing::{FakeRepoDiscovery, ScriptedGitClient};
 
     #[test]
     fn resolves_each_discovered_repo_to_its_top_level() {
         let discovery = FakeRepoDiscovery {
             repos: vec!["/work/api".into(), "/work/libs/inner".into()],
         };
-        let runner = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/real/api\n"),
-            FakeGitRunner::ok("/real/libs/inner\n"),
+        let runner = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/real/api\n"),
+            ScriptedGitClient::applied("/real/libs/inner\n"),
         ]);
 
         let tops = execute(
@@ -116,7 +118,7 @@ mod tests {
         let discovery = FakeRepoDiscovery {
             repos: vec!["/work/api".into()],
         };
-        let runner = FakeGitRunner::new(vec![FakeGitRunner::exit_err("fatal: not a repo", 128)]);
+        let runner = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: not a repo")]);
 
         let error = execute(
             FindRepoTops {
@@ -128,9 +130,6 @@ mod tests {
         )
         .expect_err("resolution fails");
 
-        assert_eq!(
-            error.to_string(),
-            "fatal: not a repo\nnot a git repo: /work/api"
-        );
+        assert_eq!(error.to_string(), "not a git repo: /work/api");
     }
 }

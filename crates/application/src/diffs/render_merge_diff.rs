@@ -15,7 +15,7 @@ use crate::{
         range_view::TITLE_MERGE_DIFF,
         util::exclusion_note,
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, DiffSource, HtmlRenderer, UserSettingsStore},
+    ports::{ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -30,7 +30,7 @@ pub struct RenderMergeDiff {
 
 /// The stored artifact plus every message the render wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
-pub struct RenderMergeDiffResponse {
+pub struct RenderMergeDiffOk {
     pub artifact: PathBuf,
     pub reused: bool,
     pub notes: Vec<Note>,
@@ -48,11 +48,11 @@ pub enum RenderMergeDiffError {
 pub fn execute(
     req: RenderMergeDiff,
     app_settings: &impl UserSettingsStore,
-    source: &impl DiffSource,
+    source: &impl GitClient,
     store: &impl ArtifactStore,
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
-) -> Result<RenderMergeDiffResponse, RenderMergeDiffError> {
+) -> Result<RenderMergeDiffOk, RenderMergeDiffError> {
     let RenderMergeDiff { cwd, base } = req;
     let settings = app_settings.load();
     let built = compute_merge_diff::compute(
@@ -105,7 +105,7 @@ pub fn execute(
         plural(file_count),
     )));
     notes.push(Note::info(format!("wrote {}", placed.path.display())));
-    Ok(RenderMergeDiffResponse {
+    Ok(RenderMergeDiffOk {
         artifact: placed.path,
         reused: placed.reused,
         notes,
@@ -127,8 +127,7 @@ mod tests {
         ports::AppSettings,
         shared::notes::Note,
         testing::{
-            FakeDiffSource, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore,
-            StubRenderer,
+            FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -142,7 +141,7 @@ mod tests {
 
     #[test]
     fn renders_and_stores_an_artifact_with_the_summary_notes() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
@@ -183,7 +182,7 @@ mod tests {
 
     #[test]
     fn render_uses_the_settings_theme_and_resolved_project_exclusions() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
@@ -220,7 +219,7 @@ mod tests {
 
     #[test]
     fn blank_base_falls_back_to_default() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec!["main".into()],
@@ -248,7 +247,7 @@ mod tests {
 
     #[test]
     fn unknown_base_is_an_error() {
-        let source = FakeDiffSource {
+        let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             known_revs: vec![],

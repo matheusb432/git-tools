@@ -9,7 +9,7 @@ use super::{
     outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
     push,
 };
-use crate::ports::GitRunner;
+use crate::ports::GitClient;
 
 /// Requests creation and publication of an annotated tag and optional lightweight label.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +19,8 @@ pub struct AddAndPushTag {
     pub message: String,
     pub label: Option<String>,
 }
+
+pub type AddAndPushTagOk = TagActionOutcome;
 
 /// Reports an unexpected Git transport failure while adding and publishing a tag.
 #[derive(Debug, thiserror::Error)]
@@ -41,8 +43,8 @@ pub enum AddAndPushTagError {
 #[cqrsy::command]
 pub fn execute(
     command: AddAndPushTag,
-    git: &impl GitRunner,
-) -> Result<TagActionOutcome, AddAndPushTagError> {
+    git: &impl GitClient,
+) -> Result<AddAndPushTagOk, AddAndPushTagError> {
     match add_and_push(command, git) {
         Ok(outcome) => Ok(outcome),
         Err(GitCommandError::Rejected { detail, progress }) => {
@@ -59,7 +61,7 @@ pub fn execute(
 
 fn add_and_push(
     command: AddAndPushTag,
-    git: &impl GitRunner,
+    git: &impl GitClient,
 ) -> Result<TagActionOutcome, GitCommandError> {
     let add = AddTag {
         repo: command.repo.clone(),
@@ -89,12 +91,12 @@ mod tests {
     use std::error::Error as _;
 
     use super::{AddAndPushTag, AddAndPushTagError, execute};
-    use crate::{tags::TagRemotePushProgress, testing::FakeGitRunner};
+    use crate::{tags::TagRemotePushProgress, testing::ScriptedGitClient};
 
     #[test]
     fn transitive_label_transport_failure_uses_the_operation_error_surface() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok("")),
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied("")),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 

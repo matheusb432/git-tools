@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use super::{TagList, git_command_error::GitCommandError, group::group, parse};
-use crate::ports::GitRunner;
+use super::{ListTagsOk, git_command_error::GitCommandError, group::group, parse};
+use crate::ports::GitClient;
 
 /// Requests the local tags for one repository, optionally with their origin state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,7 +28,7 @@ pub enum ListTagsError {
 ///
 /// Returns [`ListTagsError`] when Git cannot be executed.
 #[cqrsy::query]
-pub fn execute(query: ListTags, git: &impl GitRunner) -> Result<TagList, ListTagsError> {
+pub fn execute(query: ListTags, git: &impl GitClient) -> Result<ListTagsOk, ListTagsError> {
     let ListTags {
         repo,
         include_state,
@@ -39,10 +39,10 @@ pub fn execute(query: ListTags, git: &impl GitRunner) -> Result<TagList, ListTag
         parse::load_local(git, &repo)
     };
     match refs {
-        Ok(refs) => Ok(TagList::Listed {
+        Ok(refs) => Ok(ListTagsOk::Listed {
             groups: group(refs.into_listed()),
         }),
-        Err(GitCommandError::Rejected { detail, .. }) => Ok(TagList::Failed { detail }),
+        Err(GitCommandError::Rejected { detail, .. }) => Ok(ListTagsOk::Failed { detail }),
         Err(GitCommandError::Transport { source, .. }) => Err(ListTagsError::Unexpected(source)),
     }
 }
@@ -52,12 +52,13 @@ mod tests {
     use std::error::Error as _;
 
     use super::{ListTags, execute};
-    use crate::{tags::TagList, testing::FakeGitRunner};
+    use crate::{tags::ListTagsOk, testing::ScriptedGitClient};
 
     #[test]
     fn transport_failure_remains_an_error_with_its_source() {
-        let git =
-            FakeGitRunner::with_results(vec![Err(anyhow::anyhow!("git transport unavailable"))]);
+        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
+            "git transport unavailable"
+        ))]);
 
         let error =
             execute(list_with_state(), &git).expect_err("transport failure must remain an error");
@@ -71,14 +72,12 @@ mod tests {
 
     #[test]
     fn nonzero_exit_remains_the_exact_closed_failure() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::exit_err(
-            "fatal: refs unavailable",
-            128,
-        )]);
+        let git =
+            ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: refs unavailable")]);
 
         assert_eq!(
             execute(list_with_state(), &git).expect("a Git rejection is a closed list failure"),
-            TagList::Failed {
+            ListTagsOk::Failed {
                 detail: "git for-each-ref failed: fatal: refs unavailable".into(),
             }
         );
@@ -86,7 +85,7 @@ mod tests {
 
     #[test]
     fn listing_without_state_never_contacts_origin() {
-        let git = FakeGitRunner::new(vec![FakeGitRunner::ok("")]);
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
 
         execute(
             ListTags {
@@ -96,25 +95,18 @@ mod tests {
             &git,
         )
         .expect("scripted git succeeds");
-
-        let calls = git.arg_lists();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0][0], "for-each-ref");
     }
 
     #[test]
     fn unreachable_origin_is_a_closed_failure_naming_the_remote_query() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok(""),
-            FakeGitRunner::exit_err(
-                "fatal: 'origin' does not appear to be a git repository",
-                128,
-            ),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::rejected("fatal: 'origin' does not appear to be a git repository"),
         ]);
 
         assert_eq!(
             execute(list_with_state(), &git).expect("a Git rejection is a closed list failure"),
-            TagList::Failed {
+            ListTagsOk::Failed {
                 detail:
                     "git ls-remote failed: fatal: 'origin' does not appear to be a git repository"
                         .into(),

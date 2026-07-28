@@ -8,7 +8,7 @@ use rusqlite::{Connection, TransactionBehavior, params};
 
 use crate::{
     live_views::LiveViewRecord,
-    ports::{AppStateStore, Clock, RepoProbe, RepoProbeResult},
+    ports::{AppStateStore, Clock, GitClient, GitRepositoryState},
     shared::notes::Note,
 };
 
@@ -20,7 +20,7 @@ pub struct SaveLiveView {
 
 /// The outcome plus every message the save wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SaveLiveViewResponse {
+pub struct SaveLiveViewOk {
     pub outcome: SaveLiveViewOutcome,
     pub notes: Vec<Note>,
 }
@@ -67,19 +67,19 @@ pub enum SaveLiveViewError {
 #[cqrsy::command]
 pub fn execute(
     req: SaveLiveView,
-    probe: &impl RepoProbe,
+    git: &impl GitClient,
     store: &impl AppStateStore,
     clock: &impl Clock,
-) -> Result<SaveLiveViewResponse, SaveLiveViewError> {
+) -> Result<SaveLiveViewOk, SaveLiveViewError> {
     let SaveLiveView { path } = req;
-    let top_level = match probe.probe(&path)? {
-        RepoProbeResult::Repo { top_level } => top_level,
-        RepoProbeResult::NotFound => {
+    let top_level = match git.probe_repository(&path)? {
+        GitRepositoryState::Repository { top_level } => top_level,
+        GitRepositoryState::NotFound => {
             return Ok(rejected(LiveViewRejection::DirNotFound {
                 path: path.display().to_string(),
             }));
         }
-        RepoProbeResult::NotAGitRepo => {
+        GitRepositoryState::NotARepository => {
             return Ok(rejected(LiveViewRejection::DirNotGitRepo {
                 path: path.display().to_string(),
             }));
@@ -104,7 +104,7 @@ pub fn execute(
     } else {
         format!("saved live view for `{}`", record.display_name)
     };
-    Ok(SaveLiveViewResponse {
+    Ok(SaveLiveViewOk {
         outcome: SaveLiveViewOutcome::Saved {
             record,
             already_saved,
@@ -145,8 +145,8 @@ fn save_live_view(connection: &mut Connection, record: &LiveViewRecord) -> anyho
 
 /// Builds the rejected response: an [`SaveLiveViewOutcome::Rejected`] outcome
 /// carrying the rejection's `Display` text as a warn-level note.
-fn rejected(rejection: LiveViewRejection) -> SaveLiveViewResponse {
-    SaveLiveViewResponse {
+fn rejected(rejection: LiveViewRejection) -> SaveLiveViewOk {
+    SaveLiveViewOk {
         notes: vec![Note::warn(rejection.to_string())],
         outcome: SaveLiveViewOutcome::Rejected { rejection },
     }
@@ -157,17 +157,18 @@ mod tests {
     use super::*;
     use crate::{
         live_views::{list, persistence::store_test},
-        ports::{AppStateStore, RepoProbeResult},
+        ports::{AppStateStore, GitRepositoryState},
         shared::notes::NoteLevel,
-        testing::{AppStateStoreTest, FakeRepoProbe, FixedClock},
+        testing::{AppStateStoreTest, FakeGitClient, FixedClock},
     };
 
     fn dependencies(
-        probe_result: RepoProbeResult,
-    ) -> (FakeRepoProbe, AppStateStoreTest, FixedClock) {
+        repository_state: GitRepositoryState,
+    ) -> (FakeGitClient, AppStateStoreTest, FixedClock) {
         (
-            FakeRepoProbe {
-                result: probe_result,
+            FakeGitClient {
+                repository_state: Some(repository_state),
+                ..Default::default()
             },
             store_test(),
             FixedClock("2026-01-01T00:00:00Z".into()),
@@ -182,12 +183,12 @@ mod tests {
 
     #[test]
     fn missing_dir_rejects_with_dir_not_found() {
-        let (probe, store, clock) = dependencies(RepoProbeResult::NotFound);
+        let (git, store, clock) = dependencies(GitRepositoryState::NotFound);
         let response = execute(
             SaveLiveView {
                 path: "/gone".into(),
             },
-            &probe,
+            &git,
             &store,
             &clock,
         )
@@ -214,12 +215,12 @@ mod tests {
 
     #[test]
     fn non_repo_dir_rejects_with_dir_not_git_repo() {
-        let (probe, store, clock) = dependencies(RepoProbeResult::NotAGitRepo);
+        let (git, store, clock) = dependencies(GitRepositoryState::NotARepository);
         let response = execute(
             SaveLiveView {
                 path: "/plain".into(),
             },
-            &probe,
+            &git,
             &store,
             &clock,
         )
@@ -244,14 +245,14 @@ mod tests {
 
     #[test]
     fn valid_repo_saves_a_record_with_canonical_identity_and_clock_time() {
-        let (probe, store, clock) = dependencies(RepoProbeResult::Repo {
+        let (git, store, clock) = dependencies(GitRepositoryState::Repository {
             top_level: "/repos/gt".into(),
         });
         let response = execute(
             SaveLiveView {
                 path: "/repos/gt".into(),
             },
-            &probe,
+            &git,
             &store,
             &clock,
         )
@@ -284,7 +285,7 @@ mod tests {
 
     #[test]
     fn resaving_reports_already_saved_and_updates_only_display_name() {
-        let (probe, store, clock) = dependencies(RepoProbeResult::Repo {
+        let (git, store, clock) = dependencies(GitRepositoryState::Repository {
             top_level: "/repos/gt".into(),
         });
         store
@@ -303,7 +304,7 @@ mod tests {
             SaveLiveView {
                 path: "/repos/gt".into(),
             },
-            &probe,
+            &git,
             &store,
             &clock,
         )

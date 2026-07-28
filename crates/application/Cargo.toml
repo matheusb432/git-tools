@@ -18,11 +18,12 @@ rusqlite.workspace = true
 serde.workspace = true
 shlex.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt"] }
 toml.workspace = true
 
 [dev-dependencies]
 strum.workspace = true
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros"] }
 
 [lints]
 workspace = true

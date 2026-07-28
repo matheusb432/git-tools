@@ -1,10 +1,8 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::Context as _;
-use contracts::{
-    diffs::RenderDiffData,
-    envelope::{Envelope, Note, NoteLevel, Outcome},
-};
+use application::diffs::present_diff::{PresentDiff, PresentDiffOk};
+use contracts::envelope::{Note, NoteLevel};
 
 pub mod daemon_ctl;
 pub mod diff;
@@ -17,27 +15,6 @@ pub mod squash_preview;
 pub mod sync;
 pub mod tag;
 pub mod worktree;
-
-mod browser;
-
-/// Announce an artifact on the `--raw` path and the headless/viewer-unavailable
-/// fallback. The browser
-/// shows raw HTML artifacts, so the terminal's `file://` link is the only way a
-/// `--raw`/headless caller learns where the preview landed: always printed to stdout,
-/// even under `GIT_TOOLS_NO_OPEN`. Additionally opens the artifact in the OS browser
-/// unless `GIT_TOOLS_NO_OPEN` is truthy. Best-effort — never fails the command.
-pub(crate) fn open_artifact(path: &Path) {
-    use crate::viewer::is_no_open;
-    println!("{}", file_url(path));
-    if is_no_open(std::env::var("GIT_TOOLS_NO_OPEN").ok().as_deref()) {
-        return;
-    }
-    browser::open(path);
-}
-
-/// Consume a rendered artifact without opening it. Used only after
-/// `GIT_TOOLS_NO_OPEN` selected the daemon/store compatibility path.
-pub(crate) fn do_not_open(_path: &Path) {}
 
 /// Forward one recipe batch to the single-instance viewer as one argv token.
 pub(crate) fn forward_recipes(batch: &contracts::recipes::OpenRecipes) -> anyhow::Result<()> {
@@ -53,10 +30,6 @@ pub(crate) fn forward_recipes(batch: &contracts::recipes::OpenRecipes) -> anyhow
         .context("failed to spawn gtl-viewer to forward the recipe batch")
 }
 
-pub(crate) fn note_viewer_degrade(error: &anyhow::Error) {
-    eprintln!("diff: viewer unavailable ({error:#}); rendering via the browser instead");
-}
-
 /// Renders `path` as a `file://` URL for the terminal. Not full RFC 8089
 /// percent-encoding — store artifact paths are built from repo names/content
 /// hashes, never arbitrary user input — just forward-slash normalization so a
@@ -67,6 +40,29 @@ fn file_url(path: &Path) -> String {
         format!("file:///{rest}")
     } else {
         format!("file:///{normalized}")
+    }
+}
+
+pub(crate) fn present(command: PresentDiff) -> anyhow::Result<diff::DiffOutcome> {
+    let outcome = application::diffs::present_diff::execute(
+        command,
+        &crate::diff_viewer_client::CliDiffViewerClient,
+        &infra::git_client::HybridGitClient,
+    )?;
+    Ok(finish_presentation(outcome))
+}
+
+fn finish_presentation(outcome: PresentDiffOk) -> diff::DiffOutcome {
+    crate::diff_viewer_client::print_notes(&outcome.notes);
+    match (outcome.surface, outcome.artifact) {
+        (application::diffs::present_diff::DiffSurface::Viewer, None) => {
+            diff::DiffOutcome::Forwarded
+        }
+        (_, Some(artifact)) => {
+            println!("{}", file_url(&artifact));
+            diff::DiffOutcome::Rendered(artifact)
+        }
+        (_, None) => diff::DiffOutcome::Empty,
     }
 }
 
@@ -100,27 +96,6 @@ pub(crate) fn error_text(notes: &[Note]) -> String {
             || "daemon reported an error".to_string(),
             |n| n.text.clone(),
         )
-}
-
-/// Finish a single-artifact render: print the envelope's wire notes, then on a
-/// successful outcome hand the artifact to `open` and return its path; any non-`Ok`
-/// outcome becomes the service-composed error. `open` is the caller's chosen artifact
-/// effect: browser open or an intentional no-op. Shared by `diff merge` and `diff
-/// squash`, whose success path is identical.
-pub(crate) fn finish_single_render(
-    envelope: Envelope<RenderDiffData>,
-    open: impl FnOnce(&Path),
-) -> anyhow::Result<PathBuf> {
-    print_wire_notes(&envelope.notes);
-    match envelope.outcome {
-        Outcome::Ok => {
-            let data = envelope.data.context("daemon returned ok without data")?;
-            let artifact = PathBuf::from(data.artifact);
-            open(&artifact);
-            Ok(artifact)
-        }
-        _ => Err(anyhow::anyhow!(error_text(&envelope.notes))),
-    }
 }
 
 #[cfg(test)]

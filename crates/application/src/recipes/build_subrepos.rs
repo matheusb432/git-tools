@@ -7,7 +7,7 @@ use contracts::recipes::Recipe;
 use super::{RecipeRequest, pin};
 use crate::{
     discovery::find_repo_tops,
-    ports::{GitRunner, RepoDiscovery},
+    ports::{GitClient, RepoDiscovery},
 };
 
 /// Requests recipes for every repository discovered under a root.
@@ -18,6 +18,8 @@ pub struct BuildSubrepoRecipes {
     pub include_worktrees: bool,
 }
 
+pub type BuildSubrepoRecipesOk = Vec<Recipe>;
+
 /// Reports a failure while discovering recursive repositories.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -25,22 +27,19 @@ pub enum BuildSubrepoRecipesError {
     /// Recursive repository discovery or top-level resolution failed.
     #[error(transparent)]
     Discover(#[from] find_repo_tops::FindRepoTopsError),
-    /// Immutable pin resolution failed after repository discovery.
-    #[error(transparent)]
-    Pin(#[from] pin::PinRecipeError),
 }
 
 /// Builds one complete recipe per repository discovered under `query.root`.
 ///
 /// # Errors
 ///
-/// Returns [`BuildSubrepoRecipesError`] when discovery, top-level resolution, or pinning fails.
+/// Returns [`BuildSubrepoRecipesError`] when repository discovery or top-level resolution fails.
 #[cqrsy::query]
 pub fn execute(
     query: BuildSubrepoRecipes,
     discovery: &impl RepoDiscovery,
-    git: &impl GitRunner,
-) -> Result<Vec<Recipe>, BuildSubrepoRecipesError> {
+    git: &impl GitClient,
+) -> Result<BuildSubrepoRecipesOk, BuildSubrepoRecipesError> {
     let repos = find_repo_tops::execute(
         find_repo_tops::FindRepoTops {
             root: query.root,
@@ -49,22 +48,21 @@ pub fn execute(
         discovery,
         git,
     )?;
-    repos
+    Ok(repos
         .into_iter()
         .map(|repo| pin::build_resolved(repo.path, query.operation.clone(), Some(repo.label), git))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(Into::into)
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{error::Error as _, num::NonZeroU32, path::PathBuf};
+    use std::{num::NonZeroU32, path::PathBuf};
 
     use contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::{BuildSubrepoRecipes, execute};
     use crate::{
-        diffs::DiffTarget, ports::RepoDiscovery, recipes::RecipeRequest, testing::FakeGitRunner,
+        diffs::DiffTarget, ports::RepoDiscovery, recipes::RecipeRequest, testing::ScriptedGitClient,
     };
 
     #[derive(Clone)]
@@ -86,13 +84,13 @@ mod tests {
 
     #[test]
     fn recursive_build_preserves_discovery_order_labels_and_last_target() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/real/api\n"),
-            FakeGitRunner::ok("/real/web\n"),
-            FakeGitRunner::ok("api-base\n"),
-            FakeGitRunner::ok("api-head\n"),
-            FakeGitRunner::ok("web-base\n"),
-            FakeGitRunner::ok("web-head\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/real/api\n"),
+            ScriptedGitClient::applied("/real/web\n"),
+            ScriptedGitClient::applied("api-base\n"),
+            ScriptedGitClient::applied("api-head\n"),
+            ScriptedGitClient::applied("web-base\n"),
+            ScriptedGitClient::applied("web-head\n"),
         ]);
 
         let recipes = execute(
@@ -136,10 +134,10 @@ mod tests {
 
     #[test]
     fn recursive_build_includes_worktrees_when_requested() {
-        let git = FakeGitRunner::new(vec![
-            FakeGitRunner::ok("/real/api\n"),
-            FakeGitRunner::ok("/real/web\n"),
-            FakeGitRunner::ok("/real/api-worktree\n"),
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/real/api\n"),
+            ScriptedGitClient::applied("/real/web\n"),
+            ScriptedGitClient::applied("/real/api-worktree\n"),
         ]);
 
         let recipes = execute(
@@ -158,14 +156,15 @@ mod tests {
     }
 
     #[test]
-    fn pin_transport_propagates_through_the_subrepo_operation_error() {
-        let git = FakeGitRunner::with_results(vec![
-            Ok(FakeGitRunner::ok("/real/api\n")),
-            Ok(FakeGitRunner::ok("/real/web\n")),
+    fn pin_resolution_failures_keep_subrepo_recipes_symbolic() {
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied("/real/api\n")),
+            Ok(ScriptedGitClient::applied("/real/web\n")),
+            Err(anyhow::anyhow!("git transport unavailable")),
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
-        let error = execute(
+        let recipes = execute(
             BuildSubrepoRecipes {
                 root: "/scan".into(),
                 operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
@@ -174,15 +173,11 @@ mod tests {
             &WorktreeAwareDiscovery,
             &git,
         )
-        .expect_err("pin transport failure must propagate");
+        .expect("pin failures are optional optimizations");
 
-        assert_eq!(
-            error.to_string(),
-            "git rev-parse @{u}: git transport unavailable"
-        );
-        assert_eq!(
-            error.source().map(ToString::to_string),
-            Some("git transport unavailable".into())
-        );
+        assert!(recipes.iter().all(|recipe| recipe.op
+            == RecipeOp::Diff {
+                target: RecipeTarget::Unpushed { pinned: None }
+            }));
     }
 }

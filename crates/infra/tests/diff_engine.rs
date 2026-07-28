@@ -1,5 +1,5 @@
 //! Real-git integration tests for the diff engine (`application::diffs`) driven
-//! through the `GitDiffSource` adapter. The pure parsing paths are unit-tested in
+//! through the `HybridGitClient` adapter. The pure parsing paths are unit-tested in
 //! `application`; here we prove the engine against actual `git log`/`git blame`
 //! output on fixture repos.
 
@@ -11,7 +11,7 @@ use application::diffs::{
     util::assemble,
 };
 use domain::diffs::ExcludedExtensions;
-use infra::diff_source::GitDiffSource;
+use infra::git_client::HybridGitClient;
 
 fn git(dir: &Path, args: &[&str]) {
     let ok = Command::new("git")
@@ -61,7 +61,7 @@ fn assemble_attaches_brought_in_members_to_a_merge() {
     );
 
     let data = assemble(
-        &GitDiffSource,
+        &HybridGitClient,
         d,
         "main...HEAD",
         "main..HEAD",
@@ -109,7 +109,7 @@ fn assemble_excludes_extensions_at_the_git_level() {
     git(d, &["commit", "-qm", "feat: work"]);
 
     let data = assemble(
-        &GitDiffSource,
+        &HybridGitClient,
         d,
         "main...HEAD",
         "main..HEAD",
@@ -163,7 +163,7 @@ fn attribute_owns_added_and_deleted_lines_by_commit() {
     let in_range: std::collections::HashSet<String> =
         [c1.clone(), c2.clone()].into_iter().collect();
     attribute(
-        &GitDiffSource,
+        &HybridGitClient,
         d,
         &base,
         &NewSide::Commit("HEAD".to_string()),

@@ -20,7 +20,7 @@ pub struct GetRecentRender {
 
 /// Returns the matching render or a successful miss when it no longer exists.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GetRecentRenderResponse {
+pub struct GetRecentRenderOk {
     pub entry: Option<RecentRenderRecord>,
 }
 
@@ -42,10 +42,10 @@ pub enum GetRecentRenderError {
 pub fn execute(
     query: GetRecentRender,
     store: &impl AppStateStore,
-) -> Result<GetRecentRenderResponse, GetRecentRenderError> {
+) -> Result<GetRecentRenderOk, GetRecentRenderError> {
     let GetRecentRender { id } = query;
     let connection = store.connection_lock()?;
-    Ok(GetRecentRenderResponse {
+    Ok(GetRecentRenderOk {
         entry: get_recent_render(&connection, id)?,
     })
 }

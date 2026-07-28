@@ -2,7 +2,7 @@
 
 use domain::worktrees::Worktree;
 
-pub(super) fn parse(raw: &str) -> Vec<Worktree> {
+pub(crate) fn parse(raw: &str) -> Vec<Worktree> {
     let mut worktrees = Vec::new();
     let mut current: Option<Worktree> = None;
 

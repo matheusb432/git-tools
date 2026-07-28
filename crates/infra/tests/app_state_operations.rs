@@ -16,7 +16,8 @@ use application::{
         remove::{self, RemoveLiveView},
         save::{self, SaveLiveView, SaveLiveViewOutcome},
     },
-    ports::{AppStateStore, Clock, RepoProbe, RepoProbeResult},
+    ports::{AppStateStore, Clock, GitRepositoryState},
+    testing::FakeGitClient,
 };
 use contracts::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 use infra::app_state::SqliteAppState;
@@ -54,16 +55,12 @@ impl Clock for ClockTest {
     }
 }
 
-#[derive(Clone)]
-struct RepoProbeTest {
-    top_level: PathBuf,
-}
-
-impl RepoProbe for RepoProbeTest {
-    fn probe(&self, _directory: &Path) -> anyhow::Result<RepoProbeResult> {
-        Ok(RepoProbeResult::Repo {
-            top_level: self.top_level.clone(),
-        })
+fn git(top_level: impl Into<PathBuf>) -> FakeGitClient {
+    FakeGitClient {
+        repository_state: Some(GitRepositoryState::Repository {
+            top_level: top_level.into(),
+        }),
+        ..Default::default()
     }
 }
 
@@ -82,9 +79,7 @@ fn save_live_view(state: &SqliteAppState, top_level: &Path) {
         SaveLiveView {
             path: top_level.to_path_buf(),
         },
-        &RepoProbeTest {
-            top_level: top_level.to_path_buf(),
-        },
+        &git(top_level),
         state,
         &ClockTest,
     )
@@ -195,9 +190,7 @@ fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
                     SaveLiveView {
                         path: "/repos/concurrent".into(),
                     },
-                    &RepoProbeTest {
-                        top_level: "/repos/concurrent".into(),
-                    },
+                    &git("/repos/concurrent"),
                     &state,
                     &ClockTest,
                 )

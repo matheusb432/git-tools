@@ -7,7 +7,7 @@ use application::{
         build_subrepos::{self, BuildSubrepoRecipes},
     },
 };
-use infra::{git_runner::StdGitRunner, repo_discovery::WalkdirRepoDiscovery};
+use infra::{git_client::HybridGitClient, repo_discovery::WalkdirRepoDiscovery};
 
 fn git(repository: &Path, arguments: &[&str]) -> String {
     let output = Command::new("git")
@@ -77,7 +77,7 @@ fn real_git_subrepo_build_pins_each_repository_independently() {
             include_worktrees: false,
         },
         &WalkdirRepoDiscovery,
-        &StdGitRunner,
+        &HybridGitClient,
     )
     .expect("subrepo recipes build through real Git");
     let json = serde_json::to_value(recipes).unwrap();

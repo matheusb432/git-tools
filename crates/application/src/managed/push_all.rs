@@ -4,11 +4,14 @@
 use std::path::PathBuf;
 
 use domain::managed::ManagedRepo;
+use futures_util::{StreamExt as _, stream};
 
 use crate::{
     managed::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
-    ports::{Clock, ManagedManifest, PushLedger, RemoteSync},
+    ports::{Clock, GitClient, GitEffect, ManagedManifest, PushLedger},
 };
+
+const MAX_CONCURRENT_GIT_OPERATIONS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PushAll {
@@ -18,7 +21,7 @@ pub struct PushAll {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PushAllResponse {
+pub struct PushAllOk {
     pub results: Vec<RepoSyncResult>,
     pub exit: SyncExit,
 }
@@ -29,86 +32,117 @@ pub enum PushAllError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Pushes every managed repository through the remote-sync ports.
+/// Pushes every managed repository through the Git capability.
 #[cqrsy::command]
 pub async fn execute(
     req: PushAll,
-    remote: &impl RemoteSync,
+    git: &impl GitClient,
     manifest: &impl ManagedManifest,
     ledger: &impl PushLedger,
     clock: &impl Clock,
-) -> Result<PushAllResponse, PushAllError> {
+) -> Result<PushAllOk, PushAllError> {
     let repos = manifest.load(&req.repos_file, &req.home_dir).await?;
-    let results = futures_util::future::join_all(
-        repos
-            .iter()
-            .map(|repo| push_one(remote, ledger, clock, repo, req.dry)),
-    )
-    .await;
+    let dry = req.dry;
+    let tasks = stream::iter(repos.into_iter().enumerate())
+        .map(|(index, repo)| {
+            let git = git.clone();
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    let outcome = push_one(&git, &repo, dry);
+                    (index, repo.name, outcome)
+                })
+                .await
+                .map_err(anyhow::Error::from)
+            }
+        })
+        .buffer_unordered(MAX_CONCURRENT_GIT_OPERATIONS)
+        .collect::<Vec<_>>()
+        .await;
+    let mut completed = tasks.into_iter().collect::<anyhow::Result<Vec<_>>>()?;
+    completed.sort_by_key(|(index, _, _)| *index);
+    let mut results = Vec::with_capacity(completed.len());
+    for (_, repo_name, outcome) in completed {
+        if let Some(ahead) = outcome.ledger_ahead {
+            ledger.record(&repo_name, ahead, &clock.now_iso()).await;
+        }
+        results.push(outcome.result);
+    }
     let exit = service::classify_exit(&results);
-    Ok(PushAllResponse { results, exit })
+    Ok(PushAllOk { results, exit })
 }
 
-async fn push_one(
-    remote: &impl RemoteSync,
-    ledger: &impl PushLedger,
-    clock: &impl Clock,
-    repo: &ManagedRepo,
-    dry: bool,
-) -> RepoSyncResult {
-    let branch = match service::preflight(remote, repo, "detached HEAD - nothing to push").await {
-        Preflight::Done(result) => return result,
+struct PushOneOutcome {
+    result: RepoSyncResult,
+    ledger_ahead: Option<usize>,
+}
+
+fn push_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> PushOneOutcome {
+    let branch = match service::preflight(git, repo, "detached HEAD - nothing to push") {
+        Preflight::Done(result) => {
+            return PushOneOutcome {
+                result,
+                ledger_ahead: None,
+            };
+        }
         Preflight::Ready { branch } => branch,
     };
 
-    let ahead = synced_ahead(remote, repo).await;
+    let ahead = synced_ahead(git, repo);
     if ahead == Some(0) {
-        ledger.record(&repo.name, 0, &clock.now_iso()).await;
-        return service::result(
-            repo,
-            &branch,
-            SyncStatus::UpToDate,
-            "up to date (already synced)",
-        );
+        return PushOneOutcome {
+            result: service::result(
+                repo,
+                &branch,
+                SyncStatus::UpToDate,
+                "up to date (already synced)",
+            ),
+            ledger_ahead: Some(0),
+        };
     }
 
-    let outcome = match remote.push(&repo.path, "origin", &branch, dry).await {
+    let outcome = match git.push_branch(&repo.path, "origin", &branch, dry) {
         Ok(outcome) => outcome,
-        Err(error) => return service::result(repo, &branch, SyncStatus::Fail, &error.to_string()),
+        Err(error) => {
+            return PushOneOutcome {
+                result: service::result(repo, &branch, SyncStatus::Fail, &error.to_string()),
+                ledger_ahead: None,
+            };
+        }
     };
-    ledger
-        .record(&repo.name, ahead.unwrap_or(0), &clock.now_iso())
-        .await;
-
-    if !outcome.success {
-        return service::result(
+    let result = match outcome {
+        GitEffect::Rejected(detail) => service::result(
             repo,
             &branch,
             SyncStatus::Fail,
-            &push_failure_detail(&outcome.combined),
-        );
-    }
-    if outcome.combined.contains("Everything up-to-date") {
-        return service::result(repo, &branch, SyncStatus::UpToDate, "up to date");
-    }
-    let status = if dry {
-        SyncStatus::WouldPush
-    } else {
-        SyncStatus::Pushed
+            &push_failure_detail(&detail),
+        ),
+        GitEffect::Applied(receipt) if receipt.up_to_date => {
+            service::result(repo, &branch, SyncStatus::UpToDate, "up to date")
+        }
+        GitEffect::Applied(receipt) => {
+            let status = if dry {
+                SyncStatus::WouldPush
+            } else {
+                SyncStatus::Pushed
+            };
+            service::result(repo, &branch, status, &receipt.detail)
+        }
     };
-    let detail = crate::shared::git::last_non_empty_line(&outcome.combined).unwrap_or("up to date");
-    service::result(repo, &branch, status, detail)
+    PushOneOutcome {
+        result,
+        ledger_ahead: Some(ahead.unwrap_or(0)),
+    }
 }
 
 /// `Some(ahead)` when an upstream exists (mirrors the CLI's retired
 /// `status::upstream_ahead`, including its "a rev-list failure counts as 0"
 /// quirk); `None` when there is no upstream at all, so push always proceeds.
-async fn synced_ahead(remote: &impl RemoteSync, repo: &ManagedRepo) -> Option<usize> {
-    match remote.upstream_ref(&repo.path).await {
-        Ok(Some(_)) => Some(
-            remote
-                .rev_list_count(&repo.path, "@{u}..HEAD")
-                .await
+fn synced_ahead(git: &impl GitClient, repo: &ManagedRepo) -> Option<usize> {
+    match git.upstream(&repo.path) {
+        Ok(GitEffect::Applied(_)) => Some(
+            git.commit_count(&repo.path, "@{u}..HEAD")
+                .ok()
+                .flatten()
                 .unwrap_or(0),
         ),
         _ => None,
@@ -135,7 +169,9 @@ mod tests {
     use domain::managed::ManagedRepo;
 
     use super::*;
-    use crate::testing::{FakeManagedManifest, FakePushLedger, FakeRemoteSync, FixedClock};
+    use crate::testing::{
+        FakeManagedManifest, FakePushLedger, FixedClock, ManagedGitScript, SyncOutput,
+    };
 
     fn repo(name: &str) -> ManagedRepo {
         ManagedRepo {
@@ -146,14 +182,15 @@ mod tests {
     }
 
     async fn execute_with(
-        remote: FakeRemoteSync,
+        remote: ManagedGitScript,
         repos: Vec<ManagedRepo>,
         request: PushAll,
-    ) -> Result<PushAllResponse, PushAllError> {
+    ) -> Result<PushAllOk, PushAllError> {
         let manifest = FakeManagedManifest { repos, error: None };
+        let git = remote.git_client();
         execute(
             request,
-            &remote,
+            &git,
             &manifest,
             &FakePushLedger::default(),
             &FixedClock("2026-07-03T00:00:00Z".into()),
@@ -172,7 +209,7 @@ mod tests {
     #[tokio::test]
     async fn skips_a_repo_already_synced_with_its_upstream() {
         let response = execute_with(
-            FakeRemoteSync {
+            ManagedGitScript {
                 present: true,
                 branch: "main".into(),
                 has_remote: true,
@@ -195,13 +232,13 @@ mod tests {
     #[tokio::test]
     async fn pushes_a_repo_with_unpushed_commits() {
         let response = execute_with(
-            FakeRemoteSync {
+            ManagedGitScript {
                 present: true,
                 branch: "main".into(),
                 has_remote: true,
                 upstream: Some("origin/main".into()),
                 rev_list_count: 2,
-                push_result: crate::ports::SyncOutput {
+                push_result: SyncOutput {
                     success: true,
                     combined: "\n   abc..def  main -> main\n".into(),
                 },
@@ -220,12 +257,12 @@ mod tests {
 
     #[tokio::test]
     async fn dry_run_reports_would_push_without_treating_it_as_pushed() {
-        let remote = FakeRemoteSync {
+        let remote = ManagedGitScript {
             present: true,
             branch: "main".into(),
             has_remote: true,
             rev_list_count: 1,
-            push_result: crate::ports::SyncOutput {
+            push_result: SyncOutput {
                 success: true,
                 combined: "would push".into(),
             },
@@ -244,12 +281,12 @@ mod tests {
     #[tokio::test]
     async fn a_rejected_push_reports_fail_and_the_exit_precedence_wins() {
         let response = execute_with(
-            FakeRemoteSync {
+            ManagedGitScript {
                 present: true,
                 branch: "main".into(),
                 has_remote: true,
                 rev_list_count: 1,
-                push_result: crate::ports::SyncOutput {
+                push_result: SyncOutput {
                     success: false,
                     combined: "! [rejected]  main -> main (fetch first)\nerror: failed to push"
                         .into(),
@@ -273,7 +310,7 @@ mod tests {
     #[tokio::test]
     async fn a_detached_head_repo_is_reported_as_a_warning_without_touching_the_remote() {
         let response = execute_with(
-            FakeRemoteSync {
+            ManagedGitScript {
                 present: true,
                 branch: "HEAD".into(),
                 ..Default::default()
@@ -295,7 +332,7 @@ mod tests {
     #[tokio::test]
     async fn fanning_out_over_multiple_repos_preserves_each_repos_identity() {
         let response = execute_with(
-            FakeRemoteSync {
+            ManagedGitScript {
                 present: false,
                 ..Default::default()
             },
@@ -320,7 +357,7 @@ mod tests {
     async fn a_manifest_load_failure_propagates_as_an_error() {
         let error = execute(
             req(),
-            &FakeRemoteSync::default(),
+            &ManagedGitScript::default().git_client(),
             &FakeManagedManifest {
                 repos: Vec::new(),
                 error: Some("boom".into()),
