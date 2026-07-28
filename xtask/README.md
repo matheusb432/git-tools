@@ -6,7 +6,7 @@
 
 | Verb | What it does | Justfile entry |
 | -- | -- | -- |
-| `bootstrap` | Full post-toolchain bring-up: link `.claude/skills`, configure the tracked `.githooks` directory, build + install both artifacts, and ensure `~/.local/bin` is on PATH. | `just bootstrap` |
+| `bootstrap` | Full post-toolchain bring-up: configure the tracked `.githooks` directory, install frontend dependencies, build and install both artifacts, and ensure `~/.local/bin` is on PATH. | `just bootstrap` |
 | `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the viewer on PATH (idempotent byte-compare → installed/updated/unchanged; atomic replace is warm-tray-safe). Migrates `scripts/install.sh`. | `just install` / `just cli install` / `just desktop install` |
 | `uninstall [--remove-config] [--force]` | Remove the CLI, alias, daemon, viewer, desktop entry, and icon; optionally delete repo-local config. | `just uninstall` / `just purge` |
 | `test [--verbose] [--scope unit\|e2e\|all]` | Default (`unit`): `check` plus default-member Rust tests. `--e2e`: hermetic native and browser E2E. `--all`: all Rust, frontend, drift, and E2E. `--e2e`/`--all` are shorthands for `--scope`. | `just test` |
@@ -20,8 +20,7 @@
 | `build [--target cli\|viewer\|both]` | Build mandatory release artifact sets; the root build never soft-skips the viewer. | `just build` / scoped build recipes |
 | `frontend-test` | Type-check and unit-test the framework-free frontend. | `just cli test` |
 | `desktop-bench` | Run the pure viewer-render benchmark with host display variables removed. | `just desktop bench` |
-| `check-structure` | Mechanical layout lint over `crates/*/src` and `shared/*/src`: max dir depth 2, no nested `errors/`/`events/` dirs, no `services/` dir. Wired into `lint` / `check`; also runnable standalone. | (via `just check`) |
-| `check-deps` | Dependency-direction lint over every `crates/*/Cargo.toml` and `shared/*/Cargo.toml` dependency table (`dependencies`, `dev-dependencies`, `build-dependencies`, and their `target.<cfg>` forms): `shared/*` never depends on an app crate, and the core crates (`domain`, `application`, `contracts`) never depend outward. Wired into `lint` / `check`; also runnable standalone. | (via `just check`) |
+| `check-structure` | Cargo dependency-direction policy for core, shared, adapter, and black-box test packages. Wired into `lint` / `check`; also runnable standalone. | (via `just check`) |
 | `drift-check` | Rebuild the committed diff-preview JS bundle and fail if it drifts from its TypeScript sources. | `just drift-check` |
 | `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |
 | `ship [--smoke] [--force]` | Run `just test --all` unless forced, then cross-build the three Win11 exes. `--smoke --force` is the fast linkage-only path. | `just ship` |
@@ -39,7 +38,7 @@ This is the embedded kind, not an installable tool. It deliberately ships **no i
 - `src/process.rs` - shared child-process execution and the non-test `RESULT` contract helpers.
 - `src/gate.rs` — captures a bash command's combined output into `.artifacts/logs/<scope>.log`, printing a terse PASS/FAIL line plus the `RESULT` contract line and tailing the log on failure.
 - `src/task.rs` — labeled command steps (`Step`) plus `run_all` / `check_all` plan orchestration.
-- `src/verbs/` — one module per verb, each owning its flags and workflow with pure helpers where command planning needs unit coverage; `format/` is the formatter matrix and linter gate, `install/` adds the Linux desktop-entry/icon submodule, and `check_structure/` is the architecture lint.
+- `src/verbs/` — one module per verb, each owning its flags and workflow with pure helpers where command planning needs unit coverage; `format/` is the formatter matrix and linter gate, `install/` adds the Linux desktop-entry/icon submodule, and `check_structure.rs` is the Cargo architecture policy.
 - `tests/cli.rs` — `assert_cmd` arg-surface tests.
 - `bootstrap.sh` — the one POSIX-shell seam: installs the Rust toolchain, then `exec`s `cargo run -p xtask -- bootstrap`.
 

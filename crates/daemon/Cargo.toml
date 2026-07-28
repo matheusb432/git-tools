@@ -12,9 +12,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 application.workspace = true
 axum.workspace = true
-bootstrap.workspace = true
 contracts.workspace = true
-gtl-platform.workspace = true
 infra.workspace = true
 preview.workspace = true
 serde.workspace = true
@@ -24,9 +22,11 @@ tokio = { workspace = true, features = [
   "macros",
   "net",
   "rt-multi-thread",
+  "signal",
   "sync",
 ] }
 tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 application = { workspace = true, features = ["testing"] }

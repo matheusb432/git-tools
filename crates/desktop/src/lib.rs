@@ -10,6 +10,7 @@ mod recipes;
 mod render;
 mod routes;
 mod session;
+mod window_activation;
 
 use std::sync::{
     Arc,
@@ -28,7 +29,7 @@ use crate::session::{PendingRecipes, PendingRecipesError};
 const DEFAULT_VIEW_CACHE_WEIGHT: usize = 128 * 1024 * 1024;
 const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
 const MAIN_WINDOW_SIZE: (f64, f64) = (1200.0, 800.0);
-const MAIN_WINDOW_MIN_SIZE: (f64, f64) = (720.0, 480.0);
+const MAIN_WINDOW_MIN_SIZE: (f64, f64) = (390.0, 480.0);
 
 #[derive(Clone, Default)]
 struct MainWindowLifecycle {
@@ -155,11 +156,11 @@ fn forward_recipes<E>(
 /// `set_focus` alone is enough when no other window is fullscreen, but under
 /// mutter/GNOME a `gtk_window_present` is demoted to a taskbar flash when a
 /// fullscreen peer (e.g. a fullscreen terminal) holds focus. So we also send an
-/// EWMH pager-sourced `_NET_ACTIVE_WINDOW` via the PAL, which bypasses
+/// EWMH pager-sourced `_NET_ACTIVE_WINDOW`, which bypasses
 /// focus-stealing-prevention. That message only lands on a *mapped* window, and
 /// `show()` is processed by the GTK loop only after this callback returns — so
-/// we defer the activation on a worker thread (the PAL opens its own X display,
-/// so this is thread-safe) and retry a few times to outlast the map latency.
+/// we defer activation on a worker thread and retry a few times to outlast the
+/// map latency.
 fn focus_main(window: &tauri::WebviewWindow, has_queued_work: bool) {
     let app_handle = window.app_handle();
     let lifecycle = app_handle.state::<MainWindowLifecycle>();
@@ -208,7 +209,7 @@ fn focus_main(window: &tauri::WebviewWindow, has_queued_work: bool) {
         std::thread::spawn(move || {
             for _ in 0..3 {
                 std::thread::sleep(std::time::Duration::from_millis(60));
-                gtl_platform::activate_window(xid);
+                window_activation::activate(xid);
             }
         });
     }
@@ -224,7 +225,7 @@ fn resume_url(nonce: routes::ResumeNonce) -> Result<tauri::Url, String> {
 }
 
 /// Returns the native X11 window id of `window` when this is an X11 session, or
-/// `None` on Wayland/Windows/macOS, where `activate_window` is a no-op anyway.
+/// `None` on Wayland, Windows, and macOS.
 fn window_xid(window: &tauri::WebviewWindow) -> Option<u64> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match window.window_handle().ok()?.as_raw() {
@@ -464,7 +465,7 @@ mod tests {
     fn programmatic_main_window_contract_is_pinned() {
         assert_eq!(MAIN_WINDOW_TITLE, "git-tools diff viewer");
         assert_eq!(MAIN_WINDOW_SIZE, (1200.0, 800.0));
-        assert_eq!(MAIN_WINDOW_MIN_SIZE, (720.0, 480.0));
+        assert_eq!(MAIN_WINDOW_MIN_SIZE, (390.0, 480.0));
     }
 
     #[test]

@@ -23,7 +23,6 @@ pub(super) fn linters() -> Result<()> {
     process::run("frontend-lint", "deno", &["task", "--frozen", "lint"])?;
     super::presentation::run()?;
     super::check_structure::run(None);
-    super::check_deps::run(None);
     process::run(
         "clippy",
         "cargo",

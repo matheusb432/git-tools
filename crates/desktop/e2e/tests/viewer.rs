@@ -8,7 +8,7 @@ async fn viewer_live_lifecycle() -> anyhow::Result<()> {
         Box::pin(async move {
             let fixture = support::fixture::ViewerFixture::create()?;
             fixture.forward_live_view()?;
-            support::assert_forwarded_live_view(session, &fixture)
+            support::assert_forwarded_live_view(session, "alpha-v1")
                 .await
                 .context("assert forwarded live view")?;
             support::assert_configured_editor_launch(session, &fixture)
@@ -26,7 +26,14 @@ async fn viewer_live_lifecycle() -> anyhow::Result<()> {
                 .context("refresh and assert alpha-v2")?;
             support::delete_and_restore_empty_state(session)
                 .await
-                .context("delete and restore empty state")
+                .context("delete and restore empty state")?;
+            fixture.forward_live_view()?;
+            support::assert_forwarded_live_view(session, "alpha-v2")
+                .await
+                .context("restore forwarded live view")?;
+            support::assert_mobile_navigation(session)
+                .await
+                .context("assert mobile navigation")
         })
     })
     .await

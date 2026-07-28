@@ -158,8 +158,8 @@ mod tests {
             theme_recorded: true,
             renderer_version: crate::store::RENDERER_VERSION,
         };
-        let placed = crate::store::place(dir.path(), "repo123", "<html></html>", &sidecar).unwrap();
-        let expected_hash = placed.path.file_stem().unwrap().to_str().unwrap();
+        crate::store::place(dir.path(), "repo123", "<html></html>", &sidecar).unwrap();
+        let expected_hash = crate::store::content_hash("<html></html>");
 
         let entries = StoreArtifacts.list_history(dir.path()).unwrap();
 

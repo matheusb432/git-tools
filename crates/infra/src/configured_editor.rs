@@ -4,6 +4,7 @@ use anyhow::Context;
 use application::ports::ConfiguredEditorClient;
 
 mod git;
+mod process;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GitConfiguredEditorClient;
@@ -20,7 +21,7 @@ impl ConfiguredEditorClient for GitConfiguredEditorClient {
         working_directory: &Path,
     ) -> anyhow::Result<()> {
         let argument_refs = arguments.iter().map(String::as_str).collect::<Vec<_>>();
-        gtl_platform::spawn_detached_in(program, &argument_refs, working_directory)
+        crate::detached_process::spawn_in(program, &argument_refs, working_directory)
             .with_context(|| format!("launch configured editor {}", program.display()))
     }
 }

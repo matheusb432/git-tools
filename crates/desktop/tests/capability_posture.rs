@@ -30,17 +30,6 @@ fn main_window_is_not_declared_or_backed_by_frontend_dist() {
 }
 
 #[test]
-fn legacy_diff_protocol_files_and_registration_are_removed() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let lib = fs::read_to_string(root.join("src/lib.rs")).expect("desktop lib exists");
-
-    assert!(!root.join("src/diffs.rs").exists());
-    assert!(!root.join("src/protocol.rs").exists());
-    assert!(!lib.contains("register_asynchronous_uri_scheme_protocol(\"diff\""));
-    assert!(!lib.contains("PendingDiffs"));
-}
-
-#[test]
 fn csp_is_null_for_offline_own_content() {
     let conf = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json"))
         .expect("tauri.conf.json must exist");

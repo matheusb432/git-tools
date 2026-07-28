@@ -16,11 +16,10 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Render a diff preview for `target` under `store_root`, resolving the repo from `cwd`.
+/// Render a diff preview for `target`, resolving the repository from `cwd`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiff {
     pub cwd: PathBuf,
-    pub store_root: PathBuf,
     pub target: DiffTargetRequest,
     #[serde(default)]
     pub name: Option<String>,
@@ -152,18 +151,14 @@ pub fn execute(
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
 ) -> Result<RenderDiffResponse, RenderDiffError> {
-    let RenderDiff {
-        cwd,
-        store_root,
-        target,
-        name,
-    } = req;
+    let RenderDiff { cwd, target, name } = req;
     let target = DiffTarget::try_from(target)?;
     let mut notes = Vec::new();
     let settings = app_settings.load();
     let render_options = settings.viewer_render_options();
     let theme = settings.theme().map(str::to_owned);
     let top = source.top_level(&cwd)?;
+    let store_root = super::artifacts::root(Path::new(&top));
     let excluded = settings
         .diff_exclusions()
         .for_project_or_default(&repo_name(&top));
@@ -285,7 +280,6 @@ mod tests {
     fn req(source_top: &str, target: &DiffTarget) -> RenderDiff {
         RenderDiff {
             cwd: PathBuf::from(source_top),
-            store_root: PathBuf::from("/store"),
             target: DiffTargetRequest::from(target),
             name: None,
         }
@@ -317,12 +311,12 @@ mod tests {
         assert_eq!(
             response.outcome,
             RenderDiffOutcome::Rendered {
-                artifact: PathBuf::from("/store/diffs/fake/artifact.html"),
+                artifact: PathBuf::from("/repo/.artifacts/gtl/artifact.html"),
                 reused: false,
             }
         );
         let artifact = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.title, "diff");
         assert_eq!(artifact.meta.repo_name, "repo");
@@ -330,7 +324,7 @@ mod tests {
             response.notes,
             vec![
                 Note::info("diff-preview: 1 unpushed commit(s), 1 file(s)"),
-                Note::info("wrote /store/diffs/fake/artifact.html"),
+                Note::info("wrote /repo/.artifacts/gtl/artifact.html"),
             ]
         );
     }
@@ -361,7 +355,6 @@ mod tests {
         execute(
             RenderDiff {
                 cwd: PathBuf::from("/repo"),
-                store_root: PathBuf::from("/store"),
                 target: DiffTargetRequest::Unpushed,
                 name: None,
             },
@@ -374,7 +367,7 @@ mod tests {
         .expect("render succeeds");
 
         let artifact = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.excluded_extensions, vec!["md"]);
         assert!(artifact.html.contains("night"));
@@ -522,7 +515,7 @@ mod tests {
             RenderDiffOutcome::Rendered { reused: false, .. }
         ));
         let artifact = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(
             artifact.meta.excluded_extensions,
@@ -691,7 +684,7 @@ mod tests {
             RenderDiffOutcome::Rendered { reused: false, .. }
         ));
         let artifact = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.title, "custom");
     }
@@ -728,7 +721,7 @@ mod tests {
             vec![
                 Note::warn("diff-preview: no upstream; falling back to main"),
                 Note::info("diff-preview: main..working, 1 file(s)"),
-                Note::info("wrote /store/diffs/fake/artifact.html"),
+                Note::info("wrote /repo/.artifacts/gtl/artifact.html"),
             ]
         );
     }

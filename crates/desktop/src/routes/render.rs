@@ -398,7 +398,8 @@ mod tests {
         .expect("fresh error snapshot renders");
 
         assert!(html.contains("current failure"));
-        assert!(!html.contains("viewer-controls"));
+        assert!(!html.contains("aria-label=\"Diff display controls\""));
+        assert!(!html.contains("id=\"viewer-controls-popover\""));
         let mut session = session.lock().expect("session lock");
         let current = session.current_ticket(id).expect("ticket");
         assert!(

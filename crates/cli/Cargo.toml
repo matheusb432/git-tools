@@ -19,7 +19,6 @@ clap.workspace = true
 clap-cargo.workspace = true
 contracts.workspace = true
 domain.workspace = true
-gtl-platform.workspace = true
 infra.workspace = true
 jiff.workspace = true
 reqwest.workspace = true

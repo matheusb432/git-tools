@@ -5,7 +5,8 @@
 use application::diffs::View;
 use maud::{Markup, html};
 
-use crate::text::plural;
+use super::files::file_status_presentation;
+use crate::text::{plural, slug};
 
 const TREE_PRESENTATION_CLASSES: &str = concat!(
     "tree gtl-scroll [grid-area:2/1] overflow-auto border-r border-line bg-surface p-3 ",
@@ -57,6 +58,47 @@ pub(super) fn tree(view: &View) -> Markup {
                 span class={ (stat) " border-del-line text-del" } { "−" (total_del) }
             }
             div class="tree-body text-[12.5px] whitespace-nowrap" {}
+        }
+    }
+}
+
+pub(super) fn mobile_popover(view: &View) -> Markup {
+    let total_add: u32 = view.files.iter().map(|file| file.added).sum();
+    let total_del: u32 = view.files.iter().map(|file| file.removed).sum();
+
+    html! {
+        aside id="viewer-files-popover"
+            class="fixed inset-3 m-0 h-[calc(100vh_-_24px)] w-[calc(100vw_-_24px)] max-w-none overflow-hidden rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)]"
+            aria-label="Changed files"
+            popover {
+            header class="flex items-center justify-between border-b border-line bg-surface-2 px-4 py-3" {
+                div {
+                    strong class="block text-[13px]" { "Changed files" }
+                    span class="text-[11px] text-ink-3" {
+                        (view.files.len()) " file" (plural(view.files.len())) " · "
+                        span class="text-add" { "+" (total_add) } " "
+                        span class="text-del" { "−" (total_del) }
+                    }
+                }
+                button type="button" class="size-[30px] cursor-pointer rounded-sm border-0 bg-transparent text-xl text-ink-2 [font:inherit] hover:bg-line hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
+                    popovertarget="viewer-files-popover" popovertargetaction="hide" aria-label="Close changed files" { "×" }
+            }
+            div class="gtl-scroll h-[calc(100%_-_57px)] overflow-y-auto p-2" {
+                @for file in &view.files {
+                    @let status = file_status_presentation(file.status());
+                    button type="button"
+                        class="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-2 text-left text-[12.5px] text-ink-2 [font:inherit] hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc"
+                        data-file-target=(slug(&file.path)) {
+                        span class={ "inline-flex size-[17px] flex-none items-center justify-center rounded-sm border text-[9.5px] font-bold " (status.badge_classes) }
+                            title=(status.label) { (status.code) }
+                        span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" { (file.path) }
+                        span class="flex-none text-[11px]" {
+                            span class="text-add" { "+" (file.added) } " "
+                            span class="text-del" { "−" (file.removed) }
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -68,7 +68,6 @@ pub(crate) fn render(
     let cwd = std::path::absolute(repo.as_ref())?;
     let request = RenderMergeDiff {
         cwd,
-        store_root: gtl_platform::paths::store_root()?,
         base: base.map(str::to_string),
     };
     let artifact = super::finish_single_render(backend.render_merge_diff(&request)?, open)?;

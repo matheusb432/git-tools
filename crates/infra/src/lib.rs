@@ -7,6 +7,8 @@ pub mod app_state;
 pub mod artifact_store;
 pub mod clock;
 pub mod configured_editor;
+pub mod data_root;
+pub mod detached_process;
 pub mod diff_source;
 pub mod file_system;
 pub mod git_capture;

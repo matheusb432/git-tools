@@ -1,5 +1,5 @@
 use application::viewer::{DiffDensity, ViewerDocument};
-use maud::{DOCTYPE, PreEscaped, html};
+use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use super::{
     fragments,
@@ -46,7 +46,7 @@ impl MaudViewerRenderer {
                 }
                 body class="viewer-shell overflow-hidden" {
                     main class="grid h-screen min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-bg" {
-                        (fragments::tabs(document.tabs(), document.active_tab_id(), settings.theme(), SwapMode::Primary, SwapFeedback::None))
+                        (tabs(document, SwapMode::Primary, SwapFeedback::None))
                         (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
                     }
                     aside id="viewer-history-popover" class="viewer-history-popover m-auto h-[min(680px,calc(100vh_-_84px))] w-[min(1040px,calc(100vw_-_48px))] max-w-none overflow-hidden border-line-2 bg-surface p-0 inset-[42px] shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)] [@media(max-width:760px)]:h-[calc(100vh_-_24px)] [@media(max-width:760px)]:w-[calc(100vw_-_24px)] [@media(max-width:760px)]:inset-3" popover {
@@ -83,6 +83,7 @@ impl MaudViewerRenderer {
             tabs,
             active_tab_id,
             active_theme,
+            None,
             SwapMode::Primary,
             SwapFeedback::None,
         )
@@ -99,7 +100,7 @@ impl MaudViewerRenderer {
     pub(crate) fn build_view_with_tabs(self, document: &ViewerDocument) -> String {
         html! {
             (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
-            (fragments::tabs(document.tabs(), document.active_tab_id(), document.settings().theme(), SwapMode::OutOfBand, SwapFeedback::None))
+            (tabs(document, SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
     }
@@ -111,14 +112,14 @@ impl MaudViewerRenderer {
     ) -> String {
         html! {
             (PreEscaped(view))
-            (fragments::tabs(document.tabs(), document.active_tab_id(), document.settings().theme(), SwapMode::OutOfBand, SwapFeedback::None))
+            (tabs(document, SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
     }
 
     pub(crate) fn build_tabs_with_view(self, document: &ViewerDocument) -> String {
         html! {
-            (fragments::tabs(document.tabs(), document.active_tab_id(), document.settings().theme(), SwapMode::Primary, SwapFeedback::None))
+            (tabs(document, SwapMode::Primary, SwapFeedback::None))
             (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
@@ -130,7 +131,7 @@ impl MaudViewerRenderer {
         labels: &[String],
     ) -> String {
         html! {
-            (fragments::tabs(document.tabs(), document.active_tab_id(), document.settings().theme(), SwapMode::Primary, SwapFeedback::SnapshotRecipesSkipped(labels)))
+            (tabs(document, SwapMode::Primary, SwapFeedback::SnapshotRecipesSkipped(labels)))
             (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
@@ -141,9 +142,26 @@ impl MaudViewerRenderer {
         document: &ViewerDocument,
     ) -> String {
         html! {
-            (fragments::tabs(document.tabs(), document.active_tab_id(), document.settings().theme(), SwapMode::Primary, SwapFeedback::LiveViewDeleted))
+            (tabs(document, SwapMode::Primary, SwapFeedback::LiveViewDeleted))
             (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::LiveViewDeleted))
         }
         .into_string()
     }
+}
+
+fn tabs(document: &ViewerDocument, swap: SwapMode, feedback: SwapFeedback<'_>) -> Markup {
+    let mobile_counts = document
+        .active_view()
+        .map(|view| fragments::MobileNavigationCounts {
+            files: view.view().files.len(),
+            commits: view.view().commits.len(),
+        });
+    fragments::tabs(
+        document.tabs(),
+        document.active_tab_id(),
+        document.settings().theme(),
+        mobile_counts,
+        swap,
+        feedback,
+    )
 }

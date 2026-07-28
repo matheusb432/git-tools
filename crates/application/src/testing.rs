@@ -249,7 +249,7 @@ impl ArtifactStore for InMemoryArtifactStore {
         meta: &ArtifactMeta,
         html: &str,
     ) -> anyhow::Result<PlacedArtifact> {
-        let path = store_root.join("diffs/fake/artifact.html");
+        let path = store_root.join("artifact.html");
         self.artifacts.lock().unwrap().insert(
             path.clone(),
             StoredArtifact {

@@ -53,10 +53,6 @@ fn run(command: cli::Command) -> Result<()> {
             verbs::check_structure::run(None);
             Ok(())
         }
-        cli::Command::CheckDeps => {
-            verbs::check_deps::run(None);
-            Ok(())
-        }
         cli::Command::GenIcon => verbs::icon::run(),
         cli::Command::Ship { smoke, force } => verbs::ship::run(smoke, force),
     }

@@ -4,6 +4,7 @@
 
 mod endpoints;
 pub mod lifecycle;
+mod startup;
 pub mod state;
 
 use std::time::Duration;
@@ -22,8 +23,8 @@ use crate::{
 /// Returns an error if the data dir cannot be resolved, the socket cannot be
 /// bound, the app-state database cannot initialize, or the port file cannot be written.
 pub async fn run() -> anyhow::Result<()> {
-    bootstrap::init_tracing();
-    let store_root = gtl_platform::paths::store_root()?;
+    startup::init_tracing();
+    let store_root = infra::data_root::resolve()?;
     let Some(daemon_lock) =
         lifecycle::acquire_daemon_lock(&store_root, Duration::from_millis(500))?
     else {
@@ -34,7 +35,7 @@ pub async fn run() -> anyhow::Result<()> {
     let exe = std::env::current_exe()?;
     let identity = ExeIdentity::of(&exe)?;
 
-    let port: u16 = bootstrap::parse_env_or("GIT_TOOLS_DAEMON_PORT", 0)?;
+    let port = startup::daemon_port()?;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     let bound = listener.local_addr()?.port();
     let pid = std::process::id();
@@ -52,7 +53,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     tracing::info!(port = bound, "gtl-daemon listening on 127.0.0.1");
     let graceful = async move {
-        let signal = bootstrap::shutdown_signal();
+        let signal = startup::shutdown_signal();
         tokio::select! {
             _ = signal => {}
             _ = shutdown_rx.changed() => {}

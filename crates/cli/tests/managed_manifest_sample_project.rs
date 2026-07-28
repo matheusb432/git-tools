@@ -1,7 +1,4 @@
-//! Integration coverage for `sample_project_manifest_path`'s unix-specific stub-script fixtures —
-//! kept out of `crates/cli/src` because ADR-0003 confines OS `#[cfg]` to `gtl-platform`;
-//! `tests/` isn't scanned by that guard (`shared/gtl-platform/tests/cfg_guard.rs` only
-//! walks each member's `src/`).
+//! Integration coverage for `sample_project_manifest_path` with Unix stub scripts.
 
 use std::path::PathBuf;
 

@@ -11,8 +11,9 @@ harness = false
 [dependencies]
 anyhow.workspace = true
 application.workspace = true
+command-group.workspace = true
+directories.workspace = true
 domain.workspace = true
-gtl-platform.workspace = true
 jiff.workspace = true
 parking_lot.workspace = true
 rusqlite.workspace = true
@@ -25,6 +26,9 @@ tokio = { workspace = true, features = ["fs", "process"] }
 toml.workspace = true
 toml_edit.workspace = true
 walkdir.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 contracts.workspace = true

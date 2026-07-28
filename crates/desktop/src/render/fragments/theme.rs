@@ -12,7 +12,7 @@ const POPOVER_ID: &str = "viewer-theme-popover";
 
 /// Names one palette. The exhaustive match makes a new [`Theme`] variant a
 /// compile error until it is named here.
-fn label(theme: Theme) -> &'static str {
+pub(super) fn label(theme: Theme) -> &'static str {
     match theme {
         Theme::Dark => "Dark",
         Theme::Light => "Light",
@@ -27,7 +27,7 @@ fn label(theme: Theme) -> &'static str {
 pub(in crate::render) fn trigger(active: Theme) -> Markup {
     html! {
         button type="button"
-            class="viewer-theme-button mb-[7px] flex flex-none cursor-pointer items-center gap-[7px] rounded-sm border border-transparent bg-transparent px-[9px] py-1.5 text-xs text-ink-2 [font:inherit] hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
+            class="viewer-theme-button mb-[7px] flex flex-none cursor-pointer items-center gap-[7px] rounded-sm border border-transparent bg-transparent px-[9px] py-1.5 text-xs text-ink-2 [font:inherit] hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [@media(max-width:760px)]:hidden"
             popovertarget=(POPOVER_ID) {
             span class="sr-only" { "Theme: " }
             // The dot needs no update path: `--acc` re-resolves from the root

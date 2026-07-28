@@ -12,28 +12,7 @@ use command_group::CommandGroup;
 const COMMAND_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const COMMAND_CLEANUP_RESERVE_MAX: Duration = Duration::from_millis(250);
 
-/// Runs a command in an owned process tree and collects bounded stdout.
-///
-/// # Examples
-///
-/// ```no_run
-/// use std::{path::Path, time::Duration};
-///
-/// let output = gtl_platform::run_command_with_bounded_stdout_in(
-///     Path::new("git"),
-///     &["--version"],
-///     Path::new("."),
-///     Duration::from_secs(3),
-///     16 * 1024,
-/// )?;
-/// # Ok::<(), std::io::Error>(())
-/// ```
-///
-/// # Errors
-///
-/// Returns an error when the command cannot start, exceeds the time or stdout
-/// bounds, or its process tree cannot be terminated.
-pub fn run_command_with_bounded_stdout_in(
+pub(super) fn run_command_with_bounded_stdout_in(
     program: &Path,
     arguments: &[&str],
     working_directory: &Path,

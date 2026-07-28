@@ -78,7 +78,6 @@ pub(crate) fn render(
 ) -> anyhow::Result<DiffOutcome> {
     let request = RenderDiff {
         cwd: std::env::current_dir()?,
-        store_root: gtl_platform::paths::store_root()?,
         target: target.into(),
         name: name.map(str::to_string),
     };

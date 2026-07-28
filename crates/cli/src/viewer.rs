@@ -11,9 +11,7 @@ pub fn has_display() -> bool {
 }
 
 /// Returns true if the given env-var value is a truthy `NO_OPEN` sentinel
-/// (`1 | true | TRUE | yes | YES`, after trimming). Mirrors gtl-platform's
-/// `no_open_requested` but kept local to avoid a cross-crate dep for a
-/// pure predicate.
+/// (`1 | true | TRUE | yes | YES`, after trimming).
 pub(crate) fn is_no_open(value: Option<&str>) -> bool {
     matches!(
         value.map(str::trim),

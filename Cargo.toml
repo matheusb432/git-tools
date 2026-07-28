@@ -12,8 +12,6 @@ members = [
   "crates/e2e",
   "crates/infra",
   "crates/preview",
-  "shared/bootstrap",
-  "shared/gtl-platform",
   "xtask",
 ]
 # Everything except `desktop`, which needs webkit2gtk headers and stays opt-in
@@ -27,8 +25,6 @@ default-members = [
   "crates/e2e",
   "crates/infra",
   "crates/preview",
-  "shared/bootstrap",
-  "shared/gtl-platform",
   "xtask",
 ]
 
@@ -43,7 +39,6 @@ application = { path = "crates/application" }
 assert_cmd = "2"
 axum = "0.8"
 base64 = "0.22.1"
-bootstrap = { path = "shared/bootstrap" }
 cargo_metadata = "0.23.1"
 clap = { version = "4", features = ["derive"] }
 # cargo's own clap help palette, so every workspace binary's `--help` renders like cargo's.
@@ -56,7 +51,6 @@ criterion = "0.8.2"
 directories = "6.0.0"
 domain = { path = "crates/domain" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-gtl-platform = { path = "shared/gtl-platform" }
 http-body-util = "0.1"
 ico = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }

@@ -18,11 +18,10 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Render a tabbed diff preview across every repo in `repos` (already filtered
-/// by the caller to upstream-present + unpushed > 0) under `store_root`.
+/// Render a tabbed diff preview across every repo in `repos`, which the caller
+/// already filtered to upstream-present and unpushed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiffAll {
-    pub store_root: PathBuf,
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
     pub root: PathBuf,
     pub repos: Vec<RepoRef>,
@@ -53,11 +52,8 @@ pub fn execute(
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
 ) -> Result<RenderDiffAllResponse, RenderDiffAllError> {
-    let RenderDiffAll {
-        root,
-        store_root,
-        repos,
-    } = req;
+    let RenderDiffAll { root, repos } = req;
+    let store_root = super::artifacts::root(&root);
     let settings = app_settings.load();
     let mut notes = Vec::new();
     let batch = render_batch(
@@ -147,7 +143,6 @@ mod tests {
 
     fn req(repos: Vec<RepoRef>) -> RenderDiffAll {
         RenderDiffAll {
-            store_root: PathBuf::from("/store"),
             root: PathBuf::from("/scan-root"),
             repos,
         }
@@ -185,18 +180,18 @@ mod tests {
 
         assert_eq!(
             response.artifact,
-            PathBuf::from("/store/diffs/fake/artifact.html")
+            PathBuf::from("/scan-root/.artifacts/gtl/artifact.html")
         );
         assert!(!response.reused);
         assert_eq!(
             response.notes,
             vec![
                 Note::info("diff-all: 2 repo(s)"),
-                Note::info("wrote /store/diffs/fake/artifact.html"),
+                Note::info("wrote /scan-root/.artifacts/gtl/artifact.html"),
             ]
         );
         let artifact = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.repo_name, "all");
         assert_eq!(artifact.meta.kind, DiffKind::WorkTree);
@@ -280,7 +275,6 @@ diff --git a/notes.md b/notes.md\n\
 
         execute(
             RenderDiffAll {
-                store_root: PathBuf::from("/store"),
                 root: PathBuf::from("/scan-root"),
                 repos: repos.clone(),
             },
@@ -292,13 +286,12 @@ diff --git a/notes.md b/notes.md\n\
         )
         .expect("first render succeeds");
         let first_html = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .expect("first artifact persisted")
             .html;
 
         execute(
             RenderDiffAll {
-                store_root: PathBuf::from("/store"),
                 root: PathBuf::from("/scan-root"),
                 repos,
             },
@@ -310,7 +303,7 @@ diff --git a/notes.md b/notes.md\n\
         )
         .expect("second render succeeds");
         let second_html = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .expect("second artifact persisted")
             .html;
 

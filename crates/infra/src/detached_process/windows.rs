@@ -1,6 +1,3 @@
-//! Windows effectful spawn applier. The OS-bound primitive is `creation_flags`
-//! (windows `CommandExt`); the *decision* (`DetachStrategy::Windows`) lives in
-//! `policy.rs`. The Windows analogue of Linux's `process_group(0)`.
 use std::{
     os::windows::process::CommandExt,
     path::Path,
@@ -14,21 +11,19 @@ const DETACHED_PROCESS: u32 = 0x0000_0008;
 /// `DETACHED_PROCESS` so launching the GUI viewer never flashes a console.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// Spawn `program args…` detached: no inherited console, null stdio, never waited
-/// on. Fire-and-forget — the Windows analogue of the Linux `process_group(0)`.
-pub fn spawn_detached(program: &Path, args: &[&str]) -> std::io::Result<()> {
-    spawn(program, args, None)
+pub(super) fn spawn(program: &Path, args: &[&str]) -> std::io::Result<()> {
+    spawn_command(program, args, None)
 }
 
-pub fn spawn_detached_in(
+pub(super) fn spawn_in(
     program: &Path,
     arguments: &[&str],
     working_directory: &Path,
 ) -> std::io::Result<()> {
-    spawn(program, arguments, Some(working_directory))
+    spawn_command(program, arguments, Some(working_directory))
 }
 
-fn spawn(
+fn spawn_command(
     program: &Path,
     arguments: &[&str],
     working_directory: Option<&Path>,

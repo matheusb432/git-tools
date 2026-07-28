@@ -128,7 +128,6 @@ pub(crate) fn run_scan_with(
         .collect();
 
     let request = RenderDiffSubrepos {
-        store_root: gtl_platform::paths::store_root()?,
         root,
         target: last.map_or(DiffTargetRequest::Unpushed, |count| {
             DiffTargetRequest::Last { count: count.get() }
@@ -232,7 +231,6 @@ pub(crate) fn run_managed_all_with(
         .collect();
 
     let request = RenderDiffAll {
-        store_root: gtl_platform::paths::store_root()?,
         root,
         repos: repo_refs,
     };

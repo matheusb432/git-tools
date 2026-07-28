@@ -204,6 +204,45 @@ mod tests {
     }
 
     #[test]
+    fn ready_document_connects_mobile_navigation_to_server_owned_popovers() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+
+        for (label, target) in [
+            ("Changed files", "viewer-files-popover"),
+            ("Commits in range", "viewer-commits-popover"),
+            ("View settings", "viewer-controls-popover"),
+        ] {
+            let button = html
+                .split_once(&format!("aria-label=\"{label}\""))
+                .and_then(|(head, _)| head.rsplit_once("<button"))
+                .map(|(_, tag)| tag)
+                .expect("mobile navigation button");
+
+            assert!(button.contains(&format!("popovertarget=\"{target}\"")));
+            assert!(html.contains(&format!("id=\"{target}\"")));
+        }
+
+        assert!(html.contains(">1</span>"));
+    }
+
+    #[test]
+    fn empty_document_disables_mobile_view_navigation() {
+        let document = ViewerDocument::new(vec![], None, None, vec![], settings())
+            .expect("empty viewer is valid");
+        let html = MaudViewerRenderer.build_document(&document);
+
+        for label in ["Changed files", "Commits in range", "View settings"] {
+            let button = html
+                .split_once(&format!("aria-label=\"{label}\""))
+                .and_then(|(head, _)| head.rsplit_once("<button"))
+                .map(|(_, tag)| tag)
+                .expect("mobile navigation button");
+
+            assert!(button.contains(" disabled"));
+        }
+    }
+
+    #[test]
     fn viewer_fragments_keep_stable_htmx_and_inline_script_hooks() {
         let document = sample_document();
         let html = MaudViewerRenderer.build_document(&document);
@@ -526,7 +565,7 @@ mod tests {
         assert_eq!(
             html.matches("hx-trigger=\"change from:find input\"")
                 .count(),
-            4
+            8
         );
     }
 
@@ -540,7 +579,7 @@ mod tests {
             .filter(|input| input.contains("hx-get=\"/settings?"))
             .collect();
 
-        assert_eq!(settings_inputs.len(), 4 + Theme::VARIANTS.len());
+        assert_eq!(settings_inputs.len(), 8 + Theme::VARIANTS.len());
         for input in settings_inputs {
             assert!(input.contains("hx-params=\"none\""), "{input}");
         }

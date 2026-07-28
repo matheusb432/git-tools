@@ -242,6 +242,16 @@ mod tests {
     const LOCK_HELD_OBSERVATION_WAIT: Duration = Duration::from_millis(50);
     const RESULT_WAIT_TEST_MAX: Duration = Duration::from_secs(2);
 
+    #[cfg(unix)]
+    fn create_file_symbolic_link(original: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(original, link)
+    }
+
+    #[cfg(windows)]
+    fn create_file_symbolic_link(original: &Path, link: &Path) -> std::io::Result<()> {
+        std::os::windows::fs::symlink_file(original, link)
+    }
+
     fn hold_settings_lock(path: &Path) -> File {
         let lock = OpenOptions::new()
             .create(true)
@@ -284,7 +294,7 @@ mod tests {
         let target = managed_directory.join("settings.toml");
         let path = config_directory.join("config.toml");
         std::fs::write(&target, "theme = \"dark\"\n").expect("seed managed config");
-        gtl_platform::symlink_file(Path::new("../managed/settings.toml"), &path)
+        create_file_symbolic_link(Path::new("../managed/settings.toml"), &path)
             .expect("link managed config");
 
         let outcome = edit(&path, "theme", StringEdit::Set("light")).expect("set theme");
@@ -312,7 +322,7 @@ mod tests {
         std::fs::create_dir_all(&managed_directory).expect("create managed directory");
         let target = managed_directory.join("settings.toml");
         let path = config_directory.join("config.toml");
-        gtl_platform::symlink_file(Path::new("../managed/settings.toml"), &path)
+        create_file_symbolic_link(Path::new("../managed/settings.toml"), &path)
             .expect("link managed config");
 
         let outcome = edit(&path, "theme", StringEdit::Set("light")).expect("set theme");
@@ -336,8 +346,8 @@ mod tests {
         let directory = tempfile::tempdir().expect("temp directory");
         let path = directory.path().join("config.toml");
         let path_other = directory.path().join("config-other.toml");
-        gtl_platform::symlink_file(Path::new("config-other.toml"), &path).expect("link config");
-        gtl_platform::symlink_file(Path::new("config.toml"), &path_other)
+        create_file_symbolic_link(Path::new("config-other.toml"), &path).expect("link config");
+        create_file_symbolic_link(Path::new("config.toml"), &path_other)
             .expect("link other config");
 
         let error = edit(&path, "theme", StringEdit::Set("light"))

@@ -28,9 +28,9 @@ pub struct Cli {
 /// `conflicts_with` (see the commented `--all` example), never a runtime `if a && b`.
 #[derive(Subcommand)]
 pub enum Command {
-    /// Full post-toolchain dev-host bring-up: link `.claude/skills`, build + install both
-    /// artifacts, ensure `~/.local/bin` is on PATH. Migrates `install-git-tools.sh` + the old
-    /// skills-link recipe. The toolchain install itself stays in `bootstrap.sh` — see that file.
+    /// Full post-toolchain dev-host bring-up: configure hooks, install frontend dependencies,
+    /// build and install both artifacts, and ensure `~/.local/bin` is on PATH. The toolchain
+    /// install itself stays in `bootstrap.sh`.
     #[command(name = Verb::BOOTSTRAP.as_str())]
     Bootstrap,
     /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the
@@ -123,14 +123,9 @@ pub enum Command {
     /// sources. Requires Deno.
     #[command(name = Verb::DRIFT_CHECK.as_str())]
     DriftCheck,
-    /// Mechanical architecture lint: walks `crates/*/src` and `shared/*/src` and exits 3 on
-    /// layout violations (max dir depth 2, flat feature folders, no `services/` dir).
+    /// Reject forbidden outward Cargo dependency edges.
     #[command(name = Verb::CHECK_STRUCTURE.as_str())]
     CheckStructure,
-    /// Dependency-direction lint: exits 3 when `shared/*` depends on app crates or a core
-    /// crate (`domain`/`application`/`contracts`) depends on outer crates/frameworks.
-    #[command(name = Verb::CHECK_DEPS.as_str())]
-    CheckDeps,
     /// Render the gtl-viewer icon assets (`crates/desktop/icons/icon.{png,ico}`) from code.
     /// Ports the retired Python generator; the multi-res `.ico` is required by tauri-build on
     /// Windows.

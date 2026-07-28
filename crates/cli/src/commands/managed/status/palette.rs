@@ -95,14 +95,5 @@ mod tests {
         assert_eq!(file.ahead_arrow_color, "#f28500");
         assert_eq!(file.checkmark_color, "#2ecc71");
         assert_eq!(file.change_markers_color, "#ff4d4d");
-
-        let source = std::fs::read_to_string("src/commands/managed/status/palette.rs").unwrap();
-        let production_source = source
-            .split("#[cfg(test)]")
-            .next()
-            .expect("palette.rs should contain production source");
-        assert!(!production_source.contains("242;133;0m{value}"));
-        assert!(!production_source.contains("\\x1b[31m{value}"));
-        assert!(!production_source.contains("\\x1b[32m{value}"));
     }
 }

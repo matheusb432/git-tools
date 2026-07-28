@@ -10,7 +10,7 @@ pub(super) mod theme;
 mod view;
 
 pub(super) use history::history;
-pub(super) use tabs::tabs;
+pub(super) use tabs::{MobileNavigationCounts, tabs};
 pub(super) use view::view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

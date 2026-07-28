@@ -58,10 +58,7 @@ pub(crate) fn render(
     // Lexical, no filesystem access — the daemon process's own cwd is unrelated
     // to the caller's shell, so `cwd` must already be absolute on the wire.
     let cwd = std::path::absolute(repo.as_ref())?;
-    let request = RenderSquashPreview {
-        cwd,
-        store_root: gtl_platform::paths::store_root()?,
-    };
+    let request = RenderSquashPreview { cwd };
     let artifact = super::finish_single_render(backend.render_squash_preview(&request)?, open)?;
     Ok(DiffOutcome::Rendered(artifact))
 }

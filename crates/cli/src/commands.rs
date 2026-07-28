@@ -18,6 +18,8 @@ pub mod sync;
 pub mod tag;
 pub mod worktree;
 
+mod browser;
+
 /// Announce an artifact on the `--raw` path and the headless/viewer-unavailable
 /// fallback. The browser
 /// shows raw HTML artifacts, so the terminal's `file://` link is the only way a
@@ -30,7 +32,7 @@ pub(crate) fn open_artifact(path: &Path) {
     if is_no_open(std::env::var("GIT_TOOLS_NO_OPEN").ok().as_deref()) {
         return;
     }
-    gtl_platform::open_in_browser(path);
+    browser::open(path);
 }
 
 /// Consume a rendered artifact without opening it. Used only after
@@ -47,7 +49,7 @@ pub(crate) fn forward_recipes(batch: &contracts::recipes::OpenRecipes) -> anyhow
     let bin = resolve_viewer_bin()
         .context("gtl-viewer is not installed; cannot forward the recipe batch")?;
     let token = contracts::recipes::encode_token(batch);
-    gtl_platform::spawn_detached(&bin, &[token.as_str()])
+    infra::detached_process::spawn(&bin, &[token.as_str()])
         .context("failed to spawn gtl-viewer to forward the recipe batch")
 }
 

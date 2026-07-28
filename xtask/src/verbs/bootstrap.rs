@@ -1,15 +1,14 @@
 //! `xtask bootstrap` — the full post-toolchain dev-host bring-up. `bootstrap.sh` installs *only*
 //! the Rust toolchain (the chicken-and-egg seam), then `exec`s this verb, which does every other
-//! automation. Migrates `install-git-tools.sh` (build + install + ensure PATH) and the old
-//! `just bootstrap` skills-link into one Rust verb.
+//! automation. Migrates `install-git-tools.sh` (build + install + ensure PATH) into one Rust
+//! verb.
 //!
 //! Steps (CWD is the repo root — `bootstrap.sh` cds there, and `just bootstrap` runs from root):
-//! 1. link `.claude/skills` -> `../.agents/skills` (cross-platform via the PAL symlink primitive);
-//! 2. configure the tracked `.githooks` directory for this clone;
-//! 3. install the pinned Deno dependencies;
-//! 4. build both artifacts (`just build`);
-//! 5. install both onto PATH (`install::run_install`);
-//! 6. ensure `~/.local/bin` is on PATH (append to `~/.bashrc` once, when absent).
+//! 1. configure the tracked `.githooks` directory for this clone;
+//! 2. install the pinned Deno dependencies;
+//! 3. build both artifacts (`just build`);
+//! 4. install both onto PATH (`install::run_install`);
+//! 5. ensure `~/.local/bin` is on PATH (append to `~/.bashrc` once, when absent).
 
 use std::{
     env, fs,
@@ -35,7 +34,6 @@ pub fn run() -> Result<()> {
     which::which("deno").context(
         "required tool `deno` is missing; install it through the declarative host configuration",
     )?;
-    link_skills()?;
     configure_git_hooks()?;
     process::run("frontend-dependencies", "deno", &["install", "--frozen"])?;
     process::run("build", "just", &["build"])?;
@@ -51,16 +49,6 @@ fn configure_git_hooks() -> Result<()> {
         "git",
         &["config", "core.hooksPath", ".githooks"],
     )
-}
-
-/// Link `.claude/skills` -> `../.agents/skills` so Claude Code sees the cross-agent skills
-/// (Codex reads `.agents/` directly). Idempotent — `symlink_dir` replaces an existing link.
-fn link_skills() -> Result<()> {
-    fs::create_dir_all(".claude").context("creating .claude/")?;
-    gtl_platform::symlink_dir(Path::new("../.agents/skills"), Path::new(".claude/skills"))
-        .context("linking .claude/skills -> ../.agents/skills")?;
-    println!("linked .claude/skills -> ../.agents/skills");
-    Ok(())
 }
 
 /// Whether `bindir` is absent from the colon-separated `path_var` (so it must be added to the rc).

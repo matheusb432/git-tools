@@ -49,6 +49,27 @@ pub(super) fn shelf(view: &View) -> Markup {
     }
 }
 
+pub(super) fn mobile_popover(view: &View) -> Markup {
+    html! {
+        aside id="viewer-commits-popover"
+            class={ "fixed inset-3 m-0 h-[calc(100vh_-_24px)] w-[calc(100vw_-_24px)] max-w-none overflow-hidden rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)] " (SHELF_STATE_CLASSES) }
+            aria-label="Commits in range"
+            popover {
+            header class="flex items-center justify-between border-b border-line bg-surface-2 px-4 py-3" {
+                div {
+                    strong class="block text-[13px]" { "Commit history" }
+                    span class="text-[11px] text-ink-3" { (view.commits_label) }
+                }
+                button type="button" class="size-[30px] cursor-pointer rounded-sm border-0 bg-transparent text-xl text-ink-2 [font:inherit] hover:bg-line hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
+                    popovertarget="viewer-commits-popover" popovertargetaction="hide" aria-label="Close commits in range" { "×" }
+            }
+            div class="gtl-scroll h-[calc(100%_-_57px)] overflow-y-auto p-3" {
+                (commit_rows(view))
+            }
+        }
+    }
+}
+
 // Right-hand commit shelf cards. The card filters files by commit; the hash tag copies its sha.
 // A card with a body also gets a distinct `notes-ico` glyph + a `data-pop` pointer to its sibling
 // [popover] (emitted by commit_popovers). The always-visible body `pre` of the old terminal layout

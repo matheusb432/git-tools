@@ -270,15 +270,15 @@ impl Fixture {
         self.git(&["push", "-u", "origin", "HEAD"]);
     }
 
-    /// A `git-tools` invocation in the repo, with browser-open disabled and the
-    /// store pinned to this fixture's tempdir.
+    /// A `git-tools` invocation in the repo, with browser opening disabled and
+    /// daemon data isolated in this fixture.
     fn run(&self, args: &[&str]) -> Command {
         let mut cmd = Command::new(workspace_bin("git-tools"));
         cmd.args(args)
             .current_dir(&self.repo)
             .env("GIT_TOOLS_NO_OPEN", "1")
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
-            // This suite pins the daemon/store round trip directly (autostart, sidecar
+            // This suite pins the daemon/render round trip directly (autostart, sidecar
             // reuse); simulate headless so `diff`'s default degrades to that path
             // without needing `--raw` (Phase 5, Task 1.6).
             .env_remove("DISPLAY")
@@ -327,21 +327,6 @@ fn artifact_from_stdout(stdout: &str) -> PathBuf {
     panic!("no 'wrote <path>' line found in stdout:\n{stdout}");
 }
 
-/// The single repo dir under `<store>/diffs/`, panicking if there isn't exactly one.
-fn only_repo_diffs_dir(store_dir: &Path) -> PathBuf {
-    let mut dirs: Vec<PathBuf> = std::fs::read_dir(store_dir.join("diffs"))
-        .expect("diffs/ must exist after a render")
-        .filter_map(std::result::Result::ok)
-        .map(|e| e.path())
-        .collect();
-    assert_eq!(
-        dirs.len(),
-        1,
-        "expected exactly one repo dir under diffs/, found {dirs:?}"
-    );
-    dirs.pop().unwrap()
-}
-
 #[test]
 fn cli_autostarts_the_daemon_renders_and_stops() {
     // 1. Fixture repo with one unpushed commit; fresh tempdir data dir.
@@ -371,17 +356,32 @@ fn cli_autostarts_the_daemon_renders_and_stops() {
         .stdout(contains("gtl-daemon running"))
         .stdout(contains(format!("pid {first_pid}")));
 
-    // 4. Exactly one artifact + sidecar landed under the content-addressed store.
+    // 4. Exactly one artifact + sidecar landed in the repository-local store.
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists(), "artifact must exist at {artifact:?}");
-    let repo_dir = only_repo_diffs_dir(&fixture.store_dir);
-    let html_files: Vec<PathBuf> = std::fs::read_dir(&repo_dir)
+    let artifact_root = fixture.repo.join(".artifacts/gtl");
+    assert!(
+        artifact
+            .parent()
+            .is_some_and(|parent| parent == artifact_root),
+        "artifact must be directly under the repository-local root: {artifact:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(artifact_root.join(".gitignore")).unwrap(),
+        "*\n"
+    );
+    assert_eq!(
+        fixture.git(&["status", "--short"]),
+        "",
+        "raw artifacts must not pollute Git status"
+    );
+    let html_files: Vec<PathBuf> = std::fs::read_dir(&artifact_root)
         .unwrap()
         .filter_map(std::result::Result::ok)
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == "html"))
         .collect();
-    let json_files: Vec<PathBuf> = std::fs::read_dir(&repo_dir)
+    let json_files: Vec<PathBuf> = std::fs::read_dir(&artifact_root)
         .unwrap()
         .filter_map(std::result::Result::ok)
         .map(|e| e.path())

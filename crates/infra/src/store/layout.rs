@@ -1,7 +1,8 @@
-//! On-disk store layout: `<root>/diffs/<repo_id>/<content-hash>.{html,json}`.
+//! On-disk store layout: `<root>/<datetime>-<content-hash>.{html,json}`.
 //! Writes are temp-file + atomic rename, so concurrent runs never corrupt state.
 use std::{
-    fs,
+    fs::{self, OpenOptions},
+    io::{ErrorKind, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -21,11 +22,13 @@ pub struct Placed {
     pub reused: bool,
 }
 
-fn repo_dir(store_root: &Path, repo_id: &str) -> PathBuf {
-    store_root.join("diffs").join(repo_id)
+struct StoredArtifact {
+    content_hash: String,
+    html_path: PathBuf,
+    sidecar: Sidecar,
 }
 
-/// Write `html` + its `sidecar` under the repo dir, addressed by content hash.
+/// Write `html` and its sidecar directly under the store root.
 /// Idempotent: if the artifact already exists, nothing is written.
 pub fn place(
     store_root: &Path,
@@ -33,13 +36,9 @@ pub fn place(
     html: &str,
     sidecar: &Sidecar,
 ) -> anyhow::Result<Placed> {
+    ensure_gitignore(store_root)?;
     let hash = content_hash(html);
-    let dir = repo_dir(store_root, repo_id);
-    fs::create_dir_all(&dir).with_context(|| format!("create {}", dir.display()))?;
-    let html_path = dir.join(format!("{hash}.html"));
-    let json_path = dir.join(format!("{hash}.json"));
-    // Reuse only when BOTH files exist; if the sidecar was lost, (re)write both.
-    if html_path.exists() && json_path.exists() {
+    if let Some((html_path, json_path)) = existing_pair(store_root, repo_id, &hash) {
         let stored = fs::read_to_string(&json_path)
             .ok()
             .and_then(|json| serde_json::from_str::<Sidecar>(&json).ok());
@@ -57,6 +56,12 @@ pub fn place(
             reused: true,
         });
     }
+    let stem = format!(
+        "{}-{hash}",
+        filename_datetime(sidecar.generated_at.as_str())
+    );
+    let html_path = store_root.join(format!("{stem}.html"));
+    let json_path = store_root.join(format!("{stem}.json"));
     atomic_write(&html_path, html.as_bytes())?;
     atomic_write(
         &json_path,
@@ -66,6 +71,71 @@ pub fn place(
         path: html_path,
         reused: false,
     })
+}
+
+fn filename_datetime(generated_at: &str) -> String {
+    let datetime: String = generated_at
+        .trim()
+        .chars()
+        .map(|character| match character {
+            '0'..='9' | 'A'..='Z' | 'a'..='z' | '-' => character,
+            _ => '-',
+        })
+        .collect();
+    if datetime.is_empty() {
+        "unknown-time".to_string()
+    } else {
+        datetime
+    }
+}
+
+fn existing_pair(
+    store_root: &Path,
+    repo_id: &str,
+    content_hash: &str,
+) -> Option<(PathBuf, PathBuf)> {
+    let mut candidates: Vec<(PathBuf, PathBuf)> = fs::read_dir(store_root)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "html")
+        })
+        .filter(|path| {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(content_hash_from_stem)
+                .is_some_and(|candidate| candidate == content_hash)
+        })
+        .filter_map(|html_path| {
+            let json_path = html_path.with_extension("json");
+            if !json_path.exists() {
+                return None;
+            }
+            let matches_repo = fs::read_to_string(&json_path)
+                .ok()
+                .and_then(|json| serde_json::from_str::<Sidecar>(&json).ok())
+                .is_none_or(|stored| stored.repo_id == repo_id);
+            matches_repo.then_some((html_path, json_path))
+        })
+        .collect();
+    candidates.sort_by(|left, right| left.0.cmp(&right.0));
+    candidates.into_iter().next()
+}
+
+fn ensure_gitignore(store_root: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(store_root).with_context(|| format!("create {}", store_root.display()))?;
+    let path = store_root.join(".gitignore");
+    let mut file = match OpenOptions::new().write(true).create_new(true).open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("create {}", path.display()));
+        }
+    };
+    file.write_all(b"*\n")
+        .with_context(|| format!("write {}", path.display()))
 }
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -89,7 +159,7 @@ fn atomic_write(final_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 
 /// Find an existing artifact for a pure commit range rendered under the same
 /// layout, density, theme, and exclusion set. Returns `None` for `WorkTree`
-/// (never range-addressable) or on a miss. Scans the repo's sidecars.
+/// (never range-addressable) or on a miss. Scans the flat store's sidecars.
 #[allow(
     clippy::too_many_arguments,
     reason = "the explicit fields are the persisted range-reuse key"
@@ -109,61 +179,73 @@ pub fn lookup_by_range(
     }
     let layout = render_options.layout().to_string();
     let density = render_options.density().to_string();
-    let dir = repo_dir(store_root, repo_id);
-    for (stem, sidecar) in read_sidecars_paired(&dir) {
-        if sidecar.kind == kind
-            && sidecar.base_sha == base_sha
-            && sidecar.head_sha == head_sha
-            && sidecar.layout == layout
-            && sidecar.density == density
-            && sidecar.theme_recorded
-            && sidecar.renderer_version == RENDERER_VERSION
-            && sidecar.theme.as_deref() == theme
-            && sidecar.excluded_extensions == excluded_extensions
+    for artifact in read_sidecars_paired(store_root) {
+        if artifact.sidecar.repo_id == repo_id
+            && artifact.sidecar.kind == kind
+            && artifact.sidecar.base_sha == base_sha
+            && artifact.sidecar.head_sha == head_sha
+            && artifact.sidecar.layout == layout
+            && artifact.sidecar.density == density
+            && artifact.sidecar.theme_recorded
+            && artifact.sidecar.renderer_version == RENDERER_VERSION
+            && artifact.sidecar.theme.as_deref() == theme
+            && artifact.sidecar.excluded_extensions == excluded_extensions
         {
-            return Some(dir.join(format!("{stem}.html")));
+            return Some(artifact.html_path);
         }
     }
     None
 }
 
 /// All sidecars across all repos, for the viewer's history.
-/// Each entry pairs the sidecar with its content hash (the filename stem), so
-/// callers can build `diff://` URLs without re-reading the filesystem.
+/// Each entry pairs the sidecar with its content hash.
 pub fn list_history_with_hash(store_root: &Path) -> Vec<(String, Sidecar)> {
-    let diffs = store_root.join("diffs");
-    let mut all = Vec::new();
-    let Ok(repos) = fs::read_dir(&diffs) else {
-        return all;
-    };
-    for repo in repos.flatten() {
-        all.extend(read_sidecars_paired(&repo.path()));
-    }
-    all
+    read_sidecars_paired(store_root)
+        .into_iter()
+        .map(|artifact| (artifact.content_hash, artifact.sidecar))
+        .collect()
 }
 
-fn read_sidecars_paired(dir: &Path) -> Vec<(String, Sidecar)> {
+fn read_sidecars_paired(store_root: &Path) -> Vec<StoredArtifact> {
     let mut out = Vec::new();
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = fs::read_dir(store_root) else {
         return out;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "json") {
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            let Some(content_hash) = content_hash_from_stem(stem) else {
+                continue;
+            };
+            let html_path = path.with_extension("html");
+            if !html_path.exists() {
+                continue;
+            }
             let Ok(text) = fs::read_to_string(&path) else {
                 continue;
             };
-            if let Ok(sc) = serde_json::from_str::<Sidecar>(&text) {
-                out.push((stem, sc));
+            if let Ok(sidecar) = serde_json::from_str::<Sidecar>(&text) {
+                out.push(StoredArtifact {
+                    content_hash: content_hash.to_string(),
+                    html_path,
+                    sidecar,
+                });
             }
         }
     }
     out
+}
+
+fn content_hash_from_stem(stem: &str) -> Option<&str> {
+    let (_, content_hash) = stem.rsplit_once('-')?;
+    (content_hash.len() == 16
+        && content_hash
+            .chars()
+            .all(|character| character.is_ascii_hexdigit()))
+    .then_some(content_hash)
 }
 
 #[cfg(test)]
@@ -195,13 +277,63 @@ mod tests {
     }
 
     #[test]
-    fn place_writes_then_is_idempotent() {
+    fn place_creates_a_companion_gitignore() {
         let tmp = tempfile::tempdir().unwrap();
-        let sc = sidecar(DiffKind::TwoDot, "a", "b");
-        let first = place(tmp.path(), "repo0000", "<html>x</html>", &sc).unwrap();
+
+        place(
+            tmp.path(),
+            "repo0000",
+            "<html>x</html>",
+            &sidecar(DiffKind::TwoDot, "a", "b"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(tmp.path().join(".gitignore")).unwrap(),
+            "*\n"
+        );
+    }
+
+    #[test]
+    fn place_leaves_an_existing_gitignore_unchanged() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join(".gitignore"), "custom\n").unwrap();
+
+        place(
+            tmp.path(),
+            "repo0000",
+            "<html>x</html>",
+            &sidecar(DiffKind::TwoDot, "a", "b"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(tmp.path().join(".gitignore")).unwrap(),
+            "custom\n"
+        );
+    }
+
+    #[test]
+    fn place_writes_a_flat_datetime_named_pair_then_reuses_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let html = "<html>x</html>";
+        let mut sc = sidecar(DiffKind::TwoDot, "a", "b");
+        sc.generated_at = "2026-07-28T12:34:56Z".into();
+
+        let first = place(tmp.path(), "repo0000", html, &sc).unwrap();
+
         assert!(!first.reused);
-        assert!(first.path.exists());
-        let second = place(tmp.path(), "repo0000", "<html>x</html>", &sc).unwrap();
+        assert_eq!(
+            first.path,
+            tmp.path()
+                .join(format!("2026-07-28T12-34-56Z-{}.html", content_hash(html)))
+        );
+        assert!(first.path.with_extension("json").exists());
+        assert!(!tmp.path().join("diffs").exists());
+
+        sc.generated_at = "2026-07-28T13:00:00Z".into();
+        let second = place(tmp.path(), "repo0000", html, &sc).unwrap();
+
         assert!(second.reused);
         assert_eq!(first.path, second.path);
     }
@@ -289,6 +421,41 @@ mod tests {
             &[],
         );
         assert!(miss.is_none());
+    }
+
+    #[test]
+    fn lookup_by_range_uses_sidecar_repo_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut sc = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
+        sc.repo_id = "repoBBBB".into();
+        place(tmp.path(), "repoBBBB", "<html>x</html>", &sc).unwrap();
+
+        assert!(
+            lookup_by_range(
+                tmp.path(),
+                "repoAAAA",
+                DiffKind::TwoDot,
+                "aaaa",
+                "bbbb",
+                RenderOptions::DEFAULT,
+                None,
+                &[],
+            )
+            .is_none()
+        );
+        assert!(
+            lookup_by_range(
+                tmp.path(),
+                "repoBBBB",
+                DiffKind::TwoDot,
+                "aaaa",
+                "bbbb",
+                RenderOptions::DEFAULT,
+                None,
+                &[],
+            )
+            .is_some()
+        );
     }
 
     #[test]
@@ -546,24 +713,17 @@ mod tests {
     }
 
     #[test]
-    fn list_history_with_hash_pairs_stem_to_sidecar() {
+    fn list_history_with_hash_pairs_content_hash_to_sidecar() {
         let tmp = tempfile::tempdir().unwrap();
-        let placed = place(
+        place(
             tmp.path(),
             "repoAAAA",
             "<a/>",
             &sidecar(DiffKind::TwoDot, "a", "b"),
         )
         .unwrap();
-        let stem = placed
-            .path
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
         let got = list_history_with_hash(tmp.path());
         assert_eq!(got.len(), 1);
-        assert_eq!(got[0].0, stem);
+        assert_eq!(got[0].0, content_hash("<a/>"));
     }
 }

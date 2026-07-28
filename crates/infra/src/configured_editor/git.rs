@@ -6,7 +6,7 @@ const GIT_EDITOR_QUERY_TIMEOUT: Duration = Duration::from_secs(3);
 const GIT_EDITOR_COMMAND_BYTES_MAX: usize = 16 * 1024;
 
 pub(super) fn read_configured_command(repository_root: &Path) -> Result<String> {
-    let output = gtl_platform::run_command_with_bounded_stdout_in(
+    let output = super::process::run_command_with_bounded_stdout_in(
         Path::new("git"),
         &["var", "GIT_EDITOR"],
         repository_root,

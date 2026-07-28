@@ -506,16 +506,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bootstrap"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "brotli"
 version = "8.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -859,7 +849,6 @@ dependencies = [
  "clap-cargo",
  "contracts",
  "domain",
- "gtl-platform",
  "infra",
  "jiff",
  "predicates",
@@ -1224,9 +1213,7 @@ dependencies = [
  "anyhow",
  "application",
  "axum",
- "bootstrap",
  "contracts",
- "gtl-platform",
  "http-body-util",
  "infra",
  "preview",
@@ -1238,6 +1225,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1362,7 +1350,6 @@ dependencies = [
  "contracts",
  "criterion",
  "domain",
- "gtl-platform",
  "infra",
  "lru",
  "maud",
@@ -1378,6 +1365,7 @@ dependencies = [
  "tempfile",
  "toml 1.1.3+spec-1.1.0",
  "url",
+ "x11-dl",
 ]
 
 [[package]]
@@ -2249,18 +2237,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gtl-platform"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "command-group",
- "directories",
- "libc",
- "tempfile",
- "x11-dl",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2674,11 +2650,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "application",
+ "command-group",
  "contracts",
  "criterion",
+ "directories",
  "domain",
- "gtl-platform",
  "jiff",
+ "libc",
  "parking_lot",
  "rusqlite",
  "rusqlite_migration",
@@ -7192,7 +7170,6 @@ dependencies = [
  "clap",
  "clap-cargo",
  "command-group",
- "gtl-platform",
  "ico",
  "image",
  "tempfile",

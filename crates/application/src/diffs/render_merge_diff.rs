@@ -19,12 +19,11 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Render the merge-diff of the current branch into `base` (default `main`)
-/// under `store_root`, resolving the repo from `cwd`.
+/// Render the merge-diff of the current branch into `base` (default `main`),
+/// resolving the repository from `cwd`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderMergeDiff {
     pub cwd: PathBuf,
-    pub store_root: PathBuf,
     #[serde(default)]
     pub base: Option<String>,
 }
@@ -54,11 +53,7 @@ pub fn execute(
     renderer: &impl HtmlRenderer,
     clock: &impl Clock,
 ) -> Result<RenderMergeDiffResponse, RenderMergeDiffError> {
-    let RenderMergeDiff {
-        cwd,
-        store_root,
-        base,
-    } = req;
+    let RenderMergeDiff { cwd, base } = req;
     let settings = app_settings.load();
     let built = compute_merge_diff::compute(
         ComputeMergeDiff {
@@ -69,6 +64,7 @@ pub fn execute(
         &settings,
         source,
     )?;
+    let store_root = super::artifacts::root(Path::new(&built.top));
     let view = built.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
@@ -140,7 +136,6 @@ mod tests {
     fn req(source_top: &str, base: Option<&str>) -> RenderMergeDiff {
         RenderMergeDiff {
             cwd: PathBuf::from(source_top),
-            store_root: PathBuf::from("/store"),
             base: base.map(str::to_string),
         }
     }
@@ -169,18 +164,18 @@ mod tests {
 
         assert_eq!(
             response.artifact,
-            PathBuf::from("/store/diffs/fake/artifact.html")
+            PathBuf::from("/repo/.artifacts/gtl/artifact.html")
         );
         assert!(!response.reused);
         assert_eq!(
             response.notes,
             vec![
                 Note::info("merge-diff: 1 commit to merge into main, 1 file"),
-                Note::info("wrote /store/diffs/fake/artifact.html"),
+                Note::info("wrote /repo/.artifacts/gtl/artifact.html"),
             ]
         );
         let artifact = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.title, "merge-diff");
         assert_eq!(artifact.meta.repo_name, "repo");
@@ -206,7 +201,6 @@ mod tests {
         execute(
             RenderMergeDiff {
                 cwd: PathBuf::from("/repo"),
-                store_root: PathBuf::from("/store"),
                 base: None,
             },
             &app_settings,
@@ -218,7 +212,7 @@ mod tests {
         .expect("render succeeds");
 
         let artifact = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.excluded_extensions, vec!["md"]);
         assert!(artifact.html.contains("night"));

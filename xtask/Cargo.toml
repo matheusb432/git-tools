@@ -2,9 +2,6 @@
 name = "xtask"
 version = "0.1.0"
 edition.workspace = true
-# Embedded dev-automation crate: never published, never installed. It is a
-# workspace member built on demand via `cargo run -p xtask -- <verb>`. Add it to the
-# host workspace's root `Cargo.toml` `members` list (e.g. `xtask`).
 publish.workspace = true
 
 [package.metadata.sample_project.evidences]
@@ -19,21 +16,12 @@ anyhow.workspace = true
 clap.workspace = true
 clap-cargo.workspace = true
 tempfile.workspace = true
-# Icon generation (`gen-icon` verb): render with tiny-skia (analytic AA), resize/encode PNG via
-# image, pack the multi-res .ico via ico. Dev-only — this crate is never shipped or installed.
 ico.workspace = true
 image.workspace = true
 tiny-skia.workspace = true
-# PATH probe for the `ship` preflight (no `sh -c` interpolation; cross-platform).
 which.workspace = true
-# Own complete native desktop process trees on Unix and Windows so failed E2E runs cannot leak.
 command-group.workspace = true
-# Minimal in-process StatusNotifierWatcher for asserting the production AppIndicator tray path.
 zbus.workspace = true
-# Cross-platform directory symlink for the `bootstrap` skills-link. The OS `#[cfg]` lives in the
-# PAL (ADR-0003), so the bootstrap verb stays cfg-free.
-gtl-platform.workspace = true
-# Workspace package-graph reads for the `check-deps` and `check-structure` verbs.
 cargo_metadata.workspace = true
 sample_project.workspace = true
 

@@ -72,6 +72,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
   let ownedRows: HTMLElement[] = [];
   let treeFileLeaves: Array<{ readonly leaf: HTMLElement; readonly targetId: string | null }> = [];
   const treeBody = root.querySelector<HTMLElement>(".tree-body");
+  const mobileFileMenu = root.querySelector<HTMLElement>("#viewer-files-popover");
   const filterInput = root.querySelector<HTMLInputElement>(".search input");
   const foldAll = root.querySelector<HTMLElement>(".foldall");
   let focus: CommitFocus | null = null;
@@ -92,6 +93,18 @@ export function enhanceLayout(root: HTMLElement): () => void {
         return;
       }
       label.closest<HTMLElement>(".tdir")?.classList.toggle("open");
+    });
+
+  if (mobileFileMenu)
+    listen(mobileFileMenu, "click", (event) => {
+      if (!(event.target instanceof Element)) return;
+      const button = event.target.closest<HTMLElement>("[data-file-target]");
+      if (!button || !mobileFileMenu.contains(button)) return;
+      const targetId = button.getAttribute("data-file-target");
+      const file = targetId ? fileEls.find((candidate) => candidate.id === targetId) : undefined;
+      if (!file) return;
+      openAndScrollTo(file);
+      mobileFileMenu.hidePopover?.();
     });
 
   function openAndScrollTo(t: HTMLDetailsElement): void {

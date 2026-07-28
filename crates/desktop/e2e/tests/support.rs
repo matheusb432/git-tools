@@ -16,7 +16,8 @@ mod refresh_delivery;
 
 pub use journey::{
     assert_configured_editor_launch, assert_first_paint, assert_forwarded_live_view,
-    delete_and_restore_empty_state, refresh_and_assert_alpha_v2, select_and_restore_split_layout,
+    assert_mobile_navigation, delete_and_restore_empty_state, refresh_and_assert_alpha_v2,
+    select_and_restore_split_layout,
 };
 
 pub async fn run_test<F>(name: &'static str, body: F) -> Result<()>

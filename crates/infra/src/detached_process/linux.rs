@@ -1,35 +1,22 @@
-//! Linux effectful spawn applier.
 use std::{
     os::unix::process::CommandExt,
     path::Path,
     process::{Command, Stdio},
 };
 
-/// Spawns `program` detached through a reaped intermediate process.
-///
-/// # Examples
-///
-/// ```no_run
-/// gtl_platform::spawn_detached(std::path::Path::new("gtl-viewer"), &[])?;
-/// # Ok::<(), std::io::Error>(())
-/// ```
-///
-/// # Errors
-///
-/// Returns an error when the intermediate process cannot start or be reaped.
-pub fn spawn_detached(program: &Path, args: &[&str]) -> std::io::Result<()> {
-    spawn(program, args, None)
+pub(super) fn spawn(program: &Path, args: &[&str]) -> std::io::Result<()> {
+    spawn_command(program, args, None)
 }
 
-pub fn spawn_detached_in(
+pub(super) fn spawn_in(
     program: &Path,
     arguments: &[&str],
     working_directory: &Path,
 ) -> std::io::Result<()> {
-    spawn(program, arguments, Some(working_directory))
+    spawn_command(program, arguments, Some(working_directory))
 }
 
-fn spawn(
+fn spawn_command(
     program: &Path,
     arguments: &[&str],
     working_directory: Option<&Path>,
@@ -74,7 +61,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use super::spawn_detached_in;
+    use super::spawn_in;
 
     const DETACHED_CHILD_MARKER: &str = "detached-child.marker";
     const DETACHED_CHILD_PID: &str = "detached-child.pid";
@@ -86,7 +73,7 @@ mod tests {
             .expect("write child marker");
         let current_executable = std::env::current_exe().expect("current test executable");
 
-        spawn_detached_in(
+        spawn_in(
             &current_executable,
             &[
                 "detached_child_records_pid_and_exits",

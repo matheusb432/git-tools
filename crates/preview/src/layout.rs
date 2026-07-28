@@ -50,12 +50,16 @@ pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -
         } {
             (titlebar::titlebar(view))
             (tree::tree(view))
-            main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-4 pb-[60px] [@media(min-width:1600px)_and_(min-height:900px)]:px-7 [@media(min-width:1025px)_and_(max-width:1280px)]:px-4 [@media(max-width:1024px)]:px-3 [@media(max-width:1024px)]:pb-12 print:overflow-visible print:p-0" {
+            main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-0 pb-[60px] [@media(min-width:1600px)_and_(min-height:900px)]:px-7 [@media(min-width:1025px)_and_(max-width:1280px)]:px-4 [@media(max-width:1024px)]:px-3 [@media(max-width:760px)]:px-1 [@media(max-width:1024px)]:pb-12 print:overflow-visible print:p-0" {
                 (files::file_blocks(view, options, surface))
             }
             (shelf::shelf(view))
             (keybar::keybar(view))
             (shelf::commit_popovers(view))
+            @if let Surface::App { .. } = surface {
+                (tree::mobile_popover(view))
+                (shelf::mobile_popover(view))
+            }
         }
     }
 }
@@ -159,6 +163,12 @@ mod tests {
             main.split_ascii_whitespace()
                 .any(|class| class == "overflow-auto")
         );
+        assert!(main.split_ascii_whitespace().any(|class| class == "pt-0"));
+        assert!(
+            main.split_ascii_whitespace()
+                .any(|class| class == "[@media(max-width:760px)]:px-1")
+        );
+        assert!(!main.split_ascii_whitespace().any(|class| class == "pt-4"));
         assert!(!main.contains(concat!("scroll-", "smooth")));
         assert_eq!(html.matches(r"<main class=").count(), 1);
     }

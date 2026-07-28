@@ -19,10 +19,9 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Render a tabbed diff preview across `repos` under `store_root`.
+/// Render a tabbed diff preview across `repos`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiffSubrepos {
-    pub store_root: PathBuf,
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
     pub root: PathBuf,
     pub target: DiffTargetRequest,
@@ -66,10 +65,10 @@ pub fn execute(
 ) -> Result<RenderDiffSubreposResponse, RenderDiffSubreposError> {
     let RenderDiffSubrepos {
         root,
-        store_root,
         repos,
         target,
     } = req;
+    let store_root = super::artifacts::root(&root);
     let target = DiffTarget::try_from(target)?;
     let settings = app_settings.load();
     let mut notes = Vec::new();
@@ -146,7 +145,6 @@ mod tests {
 
     fn req(repos: Vec<RepoRef>) -> RenderDiffSubrepos {
         RenderDiffSubrepos {
-            store_root: PathBuf::from("/store"),
             root: PathBuf::from("/scan-root"),
             target: DiffTargetRequest::Unpushed,
             repos,
@@ -180,7 +178,7 @@ mod tests {
         assert_eq!(
             response.outcome,
             RenderDiffSubreposOutcome::Rendered {
-                artifact: PathBuf::from("/store/diffs/fake/artifact.html"),
+                artifact: PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"),
                 reused: false,
             }
         );
@@ -188,11 +186,11 @@ mod tests {
             response.notes,
             vec![
                 Note::info("diff -r: 1 repo(s)"),
-                Note::info("wrote /store/diffs/fake/artifact.html"),
+                Note::info("wrote /scan-root/.artifacts/gtl/artifact.html"),
             ]
         );
         let artifact = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.title, "2026-07-02 diff-preview subrepos");
         assert_eq!(artifact.meta.repo_name, "subrepos");
@@ -260,7 +258,6 @@ diff --git a/notes.md b/notes.md\n\
 
         execute(
             RenderDiffSubrepos {
-                store_root: PathBuf::from("/store"),
                 root: PathBuf::from("/scan-root"),
                 target: DiffTargetRequest::Unpushed,
                 repos: vec![RepoRef {
@@ -277,7 +274,7 @@ diff --git a/notes.md b/notes.md\n\
         .expect("render succeeds");
 
         let artifact = store
-            .artifact(&PathBuf::from("/store/diffs/fake/artifact.html"))
+            .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert!(artifact.html.contains("repo-a:night:unified:compact:1"));
     }

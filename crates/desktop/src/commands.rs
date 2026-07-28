@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
-/// The app-state data root (`GIT_TOOLS_DATA_DIR` override honored by the PAL) —
-/// the same resolution the daemon uses, so both processes share one `gtl.db`.
+/// The app-state data root shared with the daemon.
 pub(crate) fn data_root() -> Result<PathBuf, String> {
-    gtl_platform::paths::store_root().map_err(|err| err.to_string())
+    infra::data_root::resolve().map_err(|error| error.to_string())
 }

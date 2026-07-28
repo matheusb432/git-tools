@@ -35,12 +35,12 @@ const DIFF_CLASSES: &str = concat!(
 const STATUS_BADGE_CLASSES: &str = "inline-flex size-[15px] flex-none items-center justify-center rounded-sm border text-[9.5px] leading-none font-bold";
 
 #[derive(Clone, Copy)]
-struct FileStatusPresentation {
-    key: &'static str,
-    code: &'static str,
-    label: &'static str,
-    css_class: &'static str,
-    badge_classes: &'static str,
+pub(super) struct FileStatusPresentation {
+    pub(super) key: &'static str,
+    pub(super) code: &'static str,
+    pub(super) label: &'static str,
+    pub(super) css_class: &'static str,
+    pub(super) badge_classes: &'static str,
 }
 
 const STATUS_ADDED: FileStatusPresentation = FileStatusPresentation {
@@ -72,7 +72,7 @@ const STATUS_MODIFIED: FileStatusPresentation = FileStatusPresentation {
     badge_classes: "border-line-2 bg-sunk text-ink-3",
 };
 
-fn file_status_presentation(status: FileStatus) -> FileStatusPresentation {
+pub(super) fn file_status_presentation(status: FileStatus) -> FileStatusPresentation {
     match status {
         FileStatus::Added => STATUS_ADDED,
         FileStatus::Deleted => STATUS_DELETED,
@@ -131,29 +131,31 @@ pub(super) fn file_blocks(view: &View, options: RenderOptions, surface: Surface)
                 data-status=(status.key)
                 data-status-code=(status.code)
                 data-status-label=(status.label) {
-                summary class="sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line bg-surface-2 px-2.5 py-2 text-[12.5px] hover:bg-line [&::-webkit-details-marker]:hidden print:static print:bg-[#f2f2f2]" {
+                summary class="sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line bg-surface-2 px-2.5 py-2 text-[12.5px] hover:bg-line [&::-webkit-details-marker]:hidden [@media(max-width:760px)]:flex-wrap [@media(max-width:760px)]:gap-x-1.5 [@media(max-width:760px)]:px-2 [@media(max-width:760px)]:py-1.5 print:static print:bg-[#f2f2f2]" {
                     span class="file-caret size-0 flex-none border-y-4 border-y-transparent border-l-5 border-l-ink-3 group-open/file:rotate-90" aria-hidden="true" {}
                     span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink" { (file.path) }
                     span class={ "status-badge " (status.css_class) " " (STATUS_BADGE_CLASSES) " " (status.badge_classes) } title=(status.label) aria-label=(status.label) { (status.code) }
-                    span class="copies flex flex-none gap-[5px] print:hidden!" {
-                        button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(file.path) data-copy-label="path" { "path" }
-                        button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(absolute) data-copy-label="abs" { "abs" }
-                        // ! mode="code" carries no payload: the button reads its own file's
-                        // ! already-rendered diff rows at click time (no per-file content dupe).
-                        button type="button" class=(COPY_BUTTON_CLASSES) data-copy-mode="code" data-copy-label="code" { "code" }
-                    }
-                    span class="flex-none text-[12.5px]" { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
-                    @if let Surface::App { tab_id } = surface {
-                        @if file.status() != FileStatus::Deleted {
-                            button type="button"
-                                class=(OPEN_IN_EDITOR_BUTTON_CLASSES)
-                                aria-label="Open in IDE"
-                                title="Open in IDE"
-                                hx-post=(open_diff_file_route(tab_id, &file.path))
-                                hx-disabled-elt="this"
-                                hx-sync="this:drop"
-                                hx-swap="none" {
-                                (PreEscaped(OPEN_IN_EDITOR_ICON))
+                    span class="file-actions flex flex-none items-center gap-2 [@media(max-width:760px)]:basis-full [@media(max-width:760px)]:justify-end" {
+                        span class="copies flex flex-none gap-[5px] print:hidden!" {
+                            button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(file.path) data-copy-label="path" { "path" }
+                            button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(absolute) data-copy-label="abs" { "abs" }
+                            // ! mode="code" carries no payload: the button reads its own file's
+                            // ! already-rendered diff rows at click time (no per-file content dupe).
+                            button type="button" class=(COPY_BUTTON_CLASSES) data-copy-mode="code" data-copy-label="code" { "code" }
+                        }
+                        span class="flex-none text-[12.5px]" { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
+                        @if let Surface::App { tab_id } = surface {
+                            @if file.status() != FileStatus::Deleted {
+                                button type="button"
+                                    class=(OPEN_IN_EDITOR_BUTTON_CLASSES)
+                                    aria-label="Open in IDE"
+                                    title="Open in IDE"
+                                    hx-post=(open_diff_file_route(tab_id, &file.path))
+                                    hx-disabled-elt="this"
+                                    hx-sync="this:drop"
+                                    hx-swap="none" {
+                                    (PreEscaped(OPEN_IN_EDITOR_ICON))
+                                }
                             }
                         }
                     }

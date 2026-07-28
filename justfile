@@ -108,6 +108,6 @@ ship *args:
 win-release-checklist:
     @cat docs/windows-release-checklist.md
 
-# Full dev-host bring-up: link skills, configure hooks, build + install both artifacts, ensure ~/.local/bin on PATH (fresh machine: `sh xtask/bootstrap.sh`).
+# Full dev-host bring-up: configure hooks, build + install both artifacts, ensure ~/.local/bin on PATH (fresh machine: `sh xtask/bootstrap.sh`).
 bootstrap:
     cargo run --quiet -p xtask -- bootstrap

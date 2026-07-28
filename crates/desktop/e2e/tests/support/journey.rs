@@ -18,7 +18,7 @@ const DELETE_CONFIRMATION: &str = "Delete this saved live view? This removes its
 
 pub async fn assert_forwarded_live_view(
     session: &TestSession,
-    _fixture: &ViewerFixture,
+    expected_content: &str,
 ) -> Result<()> {
     let driver = session.driver();
     driver
@@ -44,10 +44,158 @@ pub async fn assert_forwarded_live_view(
             .await?
             .text()
             .await?
-            .contains("alpha-v1"),
-        "forwarded live view did not render alpha-v1"
+            .contains(expected_content),
+        "forwarded live view did not render {expected_content}"
     );
     Ok(())
+}
+
+pub async fn assert_mobile_navigation(session: &TestSession) -> Result<()> {
+    let driver = session.driver();
+    driver
+        .set_window_rect(0, 0, 390, 844)
+        .await
+        .context("resize viewer to the mobile viewport")?;
+
+    by_accessible_name(driver, "Changed files")
+        .await?
+        .click()
+        .await
+        .context("open changed files")?;
+    by_css(
+        driver,
+        "#viewer-files-popover:popover-open [data-file-target]",
+        "changed file in the open mobile popover",
+    )
+    .await?;
+    let changed_file_text = driver
+        .execute(
+            "return document.querySelector('#viewer-files-popover:popover-open [data-file-target]')?.textContent ?? '';",
+            Vec::new(),
+        )
+        .await
+        .context("read changed file text")?
+        .json()
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    ensure!(
+        changed_file_text.contains("work.txt"),
+        "mobile changed-files popover omitted work.txt"
+    );
+    by_accessible_name(driver, "Close changed files")
+        .await?
+        .click()
+        .await
+        .context("close changed files")?;
+    assert_popover_closed(driver, "viewer-files-popover").await?;
+
+    by_accessible_name(driver, "Commits in range")
+        .await?
+        .click()
+        .await
+        .context("open commits in range")?;
+    by_css(
+        driver,
+        "#viewer-commits-popover:popover-open .cline .sub",
+        "commit in the open mobile popover",
+    )
+    .await?;
+    let commit_text = driver
+        .execute(
+            "return document.querySelector('#viewer-commits-popover:popover-open .cline .sub')?.textContent ?? '';",
+            Vec::new(),
+        )
+        .await
+        .context("read commit subject")?
+        .json()
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    ensure!(
+        commit_text.contains("live view v2"),
+        "mobile commits popover omitted live view v2"
+    );
+    by_accessible_name(driver, "Close commits in range")
+        .await?
+        .click()
+        .await
+        .context("close commits in range")?;
+    assert_popover_closed(driver, "viewer-commits-popover").await?;
+
+    by_accessible_name(driver, "View settings")
+        .await?
+        .click()
+        .await
+        .context("open mobile view settings")?;
+    by_css(
+        driver,
+        "#viewer-controls-popover:popover-open",
+        "open mobile view settings",
+    )
+    .await?;
+    by_accessible_name(driver, "Close view settings")
+        .await?
+        .click()
+        .await
+        .context("close mobile view settings")?;
+    assert_popover_closed(driver, "viewer-controls-popover").await?;
+
+    let metrics = driver
+        .execute(
+            r"
+const main = document.querySelector('#viewer-view .main');
+const summary = main?.querySelector('details.file > summary');
+if (!(main instanceof HTMLElement) || !(summary instanceof HTMLElement)) {
+  return null;
+}
+const style = getComputedStyle(main);
+return {
+  paddingLeft: Number.parseFloat(style.paddingLeft),
+  paddingRight: Number.parseFloat(style.paddingRight),
+  stickyGap: summary.getBoundingClientRect().top - main.getBoundingClientRect().top
+};
+",
+            Vec::new(),
+        )
+        .await
+        .context("measure mobile diff spacing")?;
+    let metrics = metrics.json();
+    ensure!(
+        !metrics.is_null(),
+        "mobile diff spacing targets are missing"
+    );
+    let padding_left = metrics["paddingLeft"].as_f64().unwrap_or(f64::INFINITY);
+    let padding_right = metrics["paddingRight"].as_f64().unwrap_or(f64::INFINITY);
+    let sticky_gap = metrics["stickyGap"].as_f64().unwrap_or(f64::INFINITY);
+    ensure!(
+        padding_left <= 4.0 && padding_right <= 4.0,
+        "mobile diff padding is {padding_left}px left and {padding_right}px right"
+    );
+    ensure!(
+        sticky_gap.abs() <= 1.0,
+        "sticky file header starts {sticky_gap}px below the diff viewport"
+    );
+    driver
+        .execute(
+            "if (document.activeElement instanceof HTMLElement) document.activeElement.blur();",
+            Vec::new(),
+        )
+        .await
+        .context("normalize focus before mobile evidence capture")?;
+    Ok(())
+}
+
+async fn assert_popover_closed(driver: &WebDriver, id: &str) -> Result<()> {
+    let selector = format!("#{id}:popover-open");
+    wait::until(&format!("{id} to close"), ASSERTION_TIMEOUT, || async {
+        Ok(driver
+            .find_all(By::Css(&selector))
+            .await?
+            .is_empty()
+            .then_some(()))
+    })
+    .await
 }
 
 pub async fn assert_configured_editor_launch(

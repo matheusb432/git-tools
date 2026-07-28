@@ -129,4 +129,26 @@ describe("enhanceLayout", () => {
     expect(beta.open).toBe(true);
     cleanup();
   });
+
+  test("the mobile changed-files menu navigates to its server-rendered file and closes", () => {
+    const root = layout("mobile");
+    const file = must(root.querySelector<HTMLDetailsElement>("details.file"), "the layout file");
+    file.id = "file-mobile";
+    file.open = false;
+    const popover = document.createElement("aside");
+    popover.id = "viewer-files-popover";
+    const hidePopover = vi.fn();
+    Object.defineProperty(popover, "hidePopover", { value: hidePopover });
+    const button = document.createElement("button");
+    button.setAttribute("data-file-target", file.id);
+    popover.appendChild(button);
+    root.appendChild(popover);
+
+    const cleanup = enhanceLayout(root);
+    button.click();
+
+    expect(file.open).toBe(true);
+    expect(hidePopover).toHaveBeenCalledOnce();
+    cleanup();
+  });
 });

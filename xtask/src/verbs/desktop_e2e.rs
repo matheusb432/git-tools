@@ -23,6 +23,7 @@ use crate::{
 };
 
 mod playwright;
+mod stable_runner;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -119,7 +120,7 @@ impl Sandbox {
         let runtime_runner = sandbox
             .root
             .join(format!("xtask-e2e-runner{}", env::consts::EXE_SUFFIX));
-        gtl_platform::copy_current_executable(&runtime_runner)
+        stable_runner::copy_current_executable(&runtime_runner)
             .context("copy stable E2E runtime runner")?;
         fs::write(
             &sandbox.cargo_runner_config,

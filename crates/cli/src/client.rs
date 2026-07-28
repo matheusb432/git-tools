@@ -1,6 +1,6 @@
 //! The daemon client: the swap-later `Backend` trait and its localhost-HTTP
 //! implementation (discovery via the port file, exe-identity handshake with
-//! restart-on-mismatch, autostart via the PAL's detached spawn).
+//! restart-on-mismatch, and detached autostart).
 
 use std::{
     fs::{File, OpenOptions, TryLockError},
@@ -228,7 +228,7 @@ impl HttpBackend {
         bin: &Path,
         stale_pid: Option<u32>,
     ) -> anyhow::Result<(Self, DaemonStatus)> {
-        gtl_platform::spawn_detached(bin, &[])
+        infra::detached_process::spawn(bin, &[])
             .with_context(|| format!("spawn gtl-daemon ({})", bin.display()))?;
 
         let Some((port, health)) = wait_for_matching_daemon(bin, stale_pid, SPAWN_DEADLINE) else {
@@ -402,7 +402,7 @@ fn daemon_bin() -> PathBuf {
 
 /// Read `<store_root>/daemon.json`, `None` when absent or malformed.
 fn read_port_file() -> Option<PortFile> {
-    let root = gtl_platform::paths::store_root().ok()?;
+    let root = infra::data_root::resolve().ok()?;
     let raw = std::fs::read_to_string(root.join("daemon.json")).ok()?;
     serde_json::from_str(&raw).ok()
 }
@@ -503,7 +503,7 @@ fn wait_for_matching_daemon(
 }
 
 fn daemon_lock_ownership() -> anyhow::Result<DaemonLockOwnership> {
-    let store_root = gtl_platform::paths::store_root().context("resolve daemon store root")?;
+    let store_root = infra::data_root::resolve().context("resolve daemon store root")?;
     std::fs::create_dir_all(&store_root)
         .with_context(|| format!("create daemon store root at {}", store_root.display()))?;
     let path = store_root.join("daemon.lock");
@@ -528,7 +528,7 @@ fn daemon_lock_ownership() -> anyhow::Result<DaemonLockOwnership> {
 }
 
 fn acquire_daemon_lock_startup(budget: Duration) -> anyhow::Result<Option<DaemonLockStartup>> {
-    let store_root = gtl_platform::paths::store_root().context("resolve daemon store root")?;
+    let store_root = infra::data_root::resolve().context("resolve daemon store root")?;
     std::fs::create_dir_all(&store_root)
         .with_context(|| format!("create daemon store root at {}", store_root.display()))?;
     let path = store_root.join("daemon.start.lock");
