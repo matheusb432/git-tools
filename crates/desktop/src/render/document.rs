@@ -13,7 +13,7 @@ const VIEWER_JS: &str = include_str!("../embedded/generated/viewer.js");
 
 /// Renders the server-authored viewer document and its independently swappable fragments.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct MaudViewerRenderer;
+pub struct MaudViewerRenderer;
 
 #[allow(
     clippy::unused_self,
@@ -68,7 +68,7 @@ impl MaudViewerRenderer {
         .into_string()
     }
 
-    pub(crate) fn build_view(self, document: &ViewerDocument) -> String {
+    pub fn build_view(self, document: &ViewerDocument) -> String {
         fragments::view(document, SwapMode::Primary, SwapFeedback::None).into_string()
     }
 

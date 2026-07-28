@@ -9,7 +9,7 @@
 | `bootstrap` | Full post-toolchain bring-up: link `.claude/skills`, configure the tracked `.githooks` directory, build + install both artifacts, and ensure `~/.local/bin` is on PATH. | `just bootstrap` |
 | `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the viewer on PATH (idempotent byte-compare → installed/updated/unchanged; atomic replace is warm-tray-safe). Migrates `scripts/install.sh`. | `just install` / `just cli install` / `just desktop install` |
 | `uninstall [--remove-config] [--force]` | Remove the CLI, alias, daemon, viewer, desktop entry, and icon; optionally delete repo-local config. | `just uninstall` / `just purge` |
-| `test [--verbose] [--scope unit\|e2e\|all]` | Default (`unit`): `check` plus default-member Rust tests. `--e2e`: hermetic desktop E2E only. `--all`: all Rust, frontend, drift, and desktop E2E. `--e2e`/`--all` are shorthands for `--scope`. | `just test` |
+| `test [--verbose] [--scope unit\|e2e\|all]` | Default (`unit`): `check` plus default-member Rust tests. `--e2e`: hermetic native and browser E2E. `--all`: all Rust, frontend, drift, and E2E. `--e2e`/`--all` are shorthands for `--scope`. | `just test` |
 | `cov` | Run the complete Rust workspace under LLVM coverage. Requires `cargo llvm-cov`; per-line reports live in `.artifacts/coverage/text/`, and dedicated test files are excluded from the report but still execute. | `just cov` |
 | `fmt` | Pinned-nightly rustfmt, Taplo, rumdl, and Oxfmt, in place. | `just fmt` |
 | `fmt-check` | Verify formatting without writing (formatting only; exits non-zero on drift). | `just fmt-check` |
@@ -36,7 +36,7 @@ This is the embedded kind, not an installable tool. It deliberately ships **no i
 - `src/main.rs` — thin facade: parse argv, dispatch one verb, map any `Err` to a nonzero exit.
 - `src/cli.rs` — the clap-derive `Subcommand` verb surface; doc comments are the `--help` SSOT and each arm's name comes from a `Verb` constant.
 - `src/verb.rs` — the `Verb` name constants shared by the clap surface and the `RESULT` scopes.
-- `src/process.rs` — shared child-process execution and the `RESULT scope=… status=…` contract helpers.
+- `src/process.rs` - shared child-process execution and the non-test `RESULT` contract helpers.
 - `src/gate.rs` — captures a bash command's combined output into `.artifacts/logs/<scope>.log`, printing a terse PASS/FAIL line plus the `RESULT` contract line and tailing the log on failure.
 - `src/task.rs` — labeled command steps (`Step`) plus `run_all` / `check_all` plan orchestration.
 - `src/verbs/` — one module per verb, each owning its flags and workflow with pure helpers where command planning needs unit coverage; `format/` is the formatter matrix and linter gate, `install/` adds the Linux desktop-entry/icon submodule, and `check_structure/` is the architecture lint.
@@ -53,3 +53,16 @@ Add an arm to `cli::Command` (its doc comment is the `--help` text) named via a 
 cargo run -p xtask -- gen-icon     # run a verb (or: ship --smoke)
 cargo test -p xtask                # arg-surface + unit tests
 ```
+
+## Browser E2E
+
+Thirtyfour owns the release Tauri/WebKit DOM lifecycle journey. Playwright-Rust owns one Chromium interaction with a production-generated `file://` diff artifact. The typed xtask installs browser assets, isolates each suite, runs them in order, reaps their process trees, and writes logs and `report.json`.
+
+```bash
+just test --e2e
+just test --e2e --evidences
+just test --all
+just test --all --evidences
+```
+
+`--evidences` writes the browser PNG evidence under `.artifacts/e2e`.

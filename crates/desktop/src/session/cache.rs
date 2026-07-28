@@ -9,14 +9,14 @@ use lru::LruCache;
 
 /// A computed view and any server-rendered option variants retained with it.
 #[derive(Debug, Clone)]
-pub(crate) struct CachedView {
+pub struct CachedView {
     pub(crate) view: Arc<View>,
     pub(crate) fragments: HashMap<RenderOptions, Arc<str>>,
     weight: usize,
 }
 
 impl CachedView {
-    pub(crate) fn new(view: Arc<View>) -> Self {
+    pub fn new(view: Arc<View>) -> Self {
         let weight = view_weight(&view);
         Self {
             view,
@@ -25,37 +25,40 @@ impl CachedView {
         }
     }
 
-    pub(crate) const fn weight(&self) -> usize {
+    pub const fn weight(&self) -> usize {
         self.weight
     }
 
     fn insert_fragment(&mut self, options: RenderOptions, fragment: Arc<str>) {
-        self.fragments.insert(options, fragment);
-        self.weight = view_weight(&self.view)
-            + self
-                .fragments
-                .values()
-                .map(|fragment| fragment.len())
-                .sum::<usize>();
+        let inserted_weight = fragment.len();
+        let replaced_weight = self
+            .fragments
+            .insert(options, fragment)
+            .map_or(0, |replaced| replaced.len());
+        self.weight = self
+            .weight
+            .checked_sub(replaced_weight)
+            .and_then(|weight| weight.checked_add(inserted_weight))
+            .expect("cached view fragment weights preserve the total");
     }
 }
 
 /// Whether an inserted value remains within the configured hard bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CacheDisposition {
+pub enum CacheDisposition {
     Cached,
     Oversize,
 }
 
 /// LRU storage bounded by the estimated bytes of views and rendered fragments.
-pub(crate) struct WeightedViewCache {
+pub struct WeightedViewCache {
     entries: LruCache<ViewerTabId, CachedView>,
     max_weight: usize,
     weight: usize,
 }
 
 impl WeightedViewCache {
-    pub(crate) fn new(max_weight: usize) -> Self {
+    pub fn new(max_weight: usize) -> Self {
         Self {
             entries: LruCache::unbounded(),
             max_weight,
@@ -63,7 +66,7 @@ impl WeightedViewCache {
         }
     }
 
-    pub(crate) fn insert(&mut self, id: ViewerTabId, value: CachedView) -> CacheDisposition {
+    pub fn insert(&mut self, id: ViewerTabId, value: CachedView) -> CacheDisposition {
         self.remove(id);
         if value.weight() > self.max_weight {
             return CacheDisposition::Oversize;
@@ -75,7 +78,7 @@ impl WeightedViewCache {
         CacheDisposition::Cached
     }
 
-    pub(crate) fn insert_fragment(
+    pub fn insert_fragment(
         &mut self,
         id: ViewerTabId,
         options: RenderOptions,
@@ -93,7 +96,7 @@ impl WeightedViewCache {
         self.entries.get(&id)
     }
 
-    pub(crate) fn remove(&mut self, id: ViewerTabId) -> Option<CachedView> {
+    pub fn remove(&mut self, id: ViewerTabId) -> Option<CachedView> {
         let removed = self.entries.pop(&id)?;
         self.weight -= removed.weight();
         Some(removed)

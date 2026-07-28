@@ -2,8 +2,10 @@
 //! Only `spawn` is genuinely OS-bound here: `%LOCALAPPDATA%` paths resolve via the
 //! `directories` crate (`paths.rs`) and the `explorer.exe` opener via `policy.rs`,
 //! both pure and OS-total, so neither needs a Windows applier.
+pub mod current_executable;
 pub mod spawn;
 
+pub use current_executable::copy_current_executable;
 pub use spawn::{spawn_detached, spawn_detached_in};
 
 /// Window activation is a no-op on Windows: Tauri's `set_focus` owns foreground

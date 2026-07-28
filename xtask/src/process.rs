@@ -59,6 +59,9 @@ fn step_command(step: &Step) -> Command {
     command
         .args(step.arguments())
         .envs(step.environment().iter().map(|(key, value)| (key, value)));
+    for name in step.removed_environment() {
+        command.env_remove(name);
+    }
     if let Some(directory) = step.current_directory() {
         command.current_dir(directory);
     }
@@ -68,39 +71,6 @@ fn step_command(step: &Step) -> Command {
 /// Run `program args…`, returning an error tagged with `label` if it exits non-zero.
 pub fn run(label: &str, program: &str, args: &[&str]) -> Result<()> {
     let status = Command::new(program).args(args).status()?;
-    if !status.success() {
-        bail!("{label} failed (exit {})", status.code().unwrap_or(-1));
-    }
-    Ok(())
-}
-
-/// Run a captured command through the terse gate runner (see [`crate::gate`]).
-pub fn gate(scope: &str, command: &str, verbose: bool) -> Result<()> {
-    crate::gate::run(None, scope, command, verbose)
-}
-
-/// Run a command after removing environment variables that could leak host GUI state.
-pub fn run_with_removed_env(
-    label: &str,
-    program: &str,
-    args: &[&str],
-    removed: &[&str],
-) -> Result<()> {
-    let mut command = Command::new(program);
-    command.args(args);
-    for name in removed {
-        command.env_remove(name);
-    }
-    let status = command.status()?;
-    if !status.success() {
-        bail!("{label} failed (exit {})", status.code().unwrap_or(-1));
-    }
-    Ok(())
-}
-
-/// Run `program args…` in `dir`, returning an error tagged with `label` on non-zero exit.
-pub fn run_in(label: &str, dir: &str, program: &str, args: &[&str]) -> Result<()> {
-    let status = Command::new(program).current_dir(dir).args(args).status()?;
     if !status.success() {
         bail!("{label} failed (exit {})", status.code().unwrap_or(-1));
     }
@@ -166,17 +136,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn run_ok_on_true() {
-        assert!(run("noop", "true", &[]).is_ok());
-    }
-
-    #[test]
-    fn run_err_on_false() {
-        let err = run("boom", "false", &[]).unwrap_err();
-        assert!(err.to_string().contains("boom failed"));
-    }
-
-    #[test]
     fn captured_helper_propagates_environment_and_working_directory() {
         let executable = std::env::current_exe().expect("test executable resolves");
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -204,5 +163,32 @@ mod tests {
             std::env::current_dir().expect("current directory"),
             Path::new(&expected)
         );
+    }
+
+    #[test]
+    fn step_command_removes_environment_before_spawn() {
+        let executable = std::env::current_exe().expect("test executable resolves");
+        let step = Step::new(
+            "removed environment child",
+            executable.to_string_lossy().into_owned(),
+            [
+                "--exact",
+                "proc::tests::removed_environment_child_does_not_observe_variable",
+            ],
+        )
+        .with_environment("XTASK_PROC_REMOVED", "present")
+        .without_environment(["XTASK_PROC_REMOVED"]);
+
+        assert!(
+            step_command(&step)
+                .status()
+                .expect("child starts")
+                .success()
+        );
+    }
+
+    #[test]
+    fn removed_environment_child_does_not_observe_variable() {
+        assert!(std::env::var_os("XTASK_PROC_REMOVED").is_none());
     }
 }

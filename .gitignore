@@ -29,6 +29,7 @@ node_modules/
 *:Zone.Identifier
 
 .playwright-mcp
+/.cache/playwright-driver/
 .artifacts/
 testResults.xml
 

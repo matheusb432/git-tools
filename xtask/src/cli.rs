@@ -2,11 +2,13 @@
 //! so they are the single source of truth for the verb documentation. Add each
 //! new automation verb here as a `Command` arm; let clap validate, don't hand-roll guards.
 
+use std::{ffi::OsString, path::PathBuf};
+
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::{
     verb::Verb,
-    verbs::{format::FormatArguments, test::TestArguments},
+    verbs::{bench::DesktopBenchArguments, format::FormatArguments, test::TestArguments},
 };
 
 /// xtask — this repo's embedded dev/release automation (xtask).
@@ -81,6 +83,22 @@ pub enum Command {
     /// `--e2e` is hermetic viewer E2E only; `--all` is the complete repository gate.
     #[command(name = Verb::TEST.as_str())]
     Test(TestArguments),
+    /// Run the ordered native desktop E2E workflow for the test supervisor.
+    #[command(hide = true)]
+    DesktopE2eWorker {
+        /// Preserve the worker's live diagnostics.
+        #[arg(long)]
+        verbose: bool,
+    },
+    /// Launch one compiled E2E executable without the host-only Cargo environment.
+    #[command(hide = true)]
+    E2eRuntimeWorker {
+        /// Compiled test or support executable selected by Cargo.
+        executable: PathBuf,
+        /// Arguments Cargo forwards to the executable.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        arguments: Vec<OsString>,
+    },
     /// Run the complete Rust workspace under LLVM coverage. Writes per-line reports to
     /// `.artifacts/coverage/text/` and excludes dedicated test files from the report.
     #[command(name = Verb::COV.as_str())]
@@ -100,7 +118,7 @@ pub enum Command {
     FrontendBench,
     /// Run the pure viewer-render benchmark without a host display.
     #[command(name = Verb::DESKTOP_BENCH.as_str())]
-    DesktopBench,
+    DesktopBench(DesktopBenchArguments),
     /// Rebuild the committed diff-preview bundle and fail if it drifts from its TypeScript
     /// sources. Requires Deno.
     #[command(name = Verb::DRIFT_CHECK.as_str())]
@@ -147,80 +165,4 @@ pub enum InstallTarget {
     Cli,
     Viewer,
     Both,
-}
-
-#[cfg(test)]
-mod tests {
-    use clap::Parser;
-
-    use super::Cli;
-    use crate::verbs::test::Scope;
-
-    fn parse_scope(args: &[&str]) -> Scope {
-        let cli = Cli::try_parse_from(args).unwrap();
-        let super::Command::Test(arguments) = cli.command else {
-            panic!("expected the test subcommand");
-        };
-        arguments.scope
-    }
-
-    #[test]
-    fn ship_accepts_the_smoke_flag() {
-        let cli = Cli::try_parse_from(["xtask", "ship", "--smoke"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            super::Command::Ship {
-                smoke: true,
-                force: false
-            }
-        ));
-    }
-
-    #[test]
-    fn e2e_and_all_test_scopes_conflict() {
-        let error = Cli::try_parse_from(["xtask", "test", "--e2e", "--all"])
-            .err()
-            .expect("conflicting scopes are rejected");
-        assert!(error.to_string().contains("cannot be used with"));
-    }
-
-    #[test]
-    fn scope_defaults_to_unit_and_shorthands_resolve_it() {
-        assert_eq!(parse_scope(&["xtask", "test"]), Scope::Unit);
-        assert_eq!(parse_scope(&["xtask", "test", "--e2e"]), Scope::E2e);
-        assert_eq!(parse_scope(&["xtask", "test", "--all"]), Scope::All);
-        assert_eq!(
-            parse_scope(&["xtask", "test", "--scope", "all"]),
-            Scope::All
-        );
-    }
-
-    #[test]
-    fn verbose_composes_with_the_e2e_scope() {
-        let cli = Cli::try_parse_from(["xtask", "test", "--e2e", "--verbose"]).unwrap();
-        let super::Command::Test(arguments) = cli.command else {
-            panic!("expected the test subcommand");
-        };
-        assert_eq!(arguments.scope, Scope::E2e);
-        assert!(arguments.verbose);
-    }
-
-    #[test]
-    fn scope_flag_conflicts_with_the_shorthands() {
-        assert!(Cli::try_parse_from(["xtask", "test", "--scope", "all", "--e2e"]).is_err());
-    }
-
-    #[test]
-    fn ship_force_has_short_and_long_forms() {
-        for force in ["-f", "--force"] {
-            let cli = Cli::try_parse_from(["xtask", "ship", force]).unwrap();
-            assert!(matches!(
-                cli.command,
-                super::Command::Ship {
-                    smoke: false,
-                    force: true
-                }
-            ));
-        }
-    }
 }

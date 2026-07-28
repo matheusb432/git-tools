@@ -17,6 +17,7 @@ pub(crate) struct Step {
     program: String,
     arguments: Vec<String>,
     environment: Vec<(String, String)>,
+    removed_environment: Vec<String>,
     current_directory: Option<PathBuf>,
 }
 
@@ -31,6 +32,7 @@ impl Step {
             program: program.into(),
             arguments: arguments.into_iter().map(Into::into).collect(),
             environment: Vec::new(),
+            removed_environment: Vec::new(),
             current_directory: None,
         }
     }
@@ -55,6 +57,16 @@ impl Step {
         self
     }
 
+    /// Remove inherited environment variables before the step spawns.
+    pub(crate) fn without_environment(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.removed_environment
+            .extend(names.into_iter().map(Into::into));
+        self
+    }
+
     pub(crate) fn with_current_directory(mut self, directory: impl Into<PathBuf>) -> Self {
         self.current_directory = Some(directory.into());
         self
@@ -74,6 +86,10 @@ impl Step {
 
     pub(crate) fn environment(&self) -> &[(String, String)] {
         &self.environment
+    }
+
+    pub(crate) fn removed_environment(&self) -> &[String] {
+        &self.removed_environment
     }
 
     pub(crate) fn current_directory(&self) -> Option<&Path> {

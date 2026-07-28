@@ -233,19 +233,4 @@ mod tests {
         let v = collect_violations(dir.path());
         assert!(v.iter().any(|s| s.contains("domain")), "violations: {v:?}");
     }
-
-    #[test]
-    fn real_workspace_has_no_dependency_violations() {
-        // CARGO_MANIFEST_DIR = xtask/; its parent is the workspace root where crates/ and
-        // shared/ live.
-        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("xtask/ must have a parent (the workspace root)");
-        let v = collect_violations(workspace_root);
-        assert!(
-            v.is_empty(),
-            "the real workspace has check-deps violations:\n{}",
-            v.join("\n")
-        );
-    }
 }

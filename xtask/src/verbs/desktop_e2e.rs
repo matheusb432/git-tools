@@ -2,6 +2,7 @@
 //! for native lifecycle assertions, then runs the `WebDriver` DOM suite in the same sandbox.
 
 use std::{
+    env,
     ffi::{OsStr, OsString},
     fs::{self, File},
     io::Write as _,
@@ -21,11 +22,17 @@ use crate::{
     verb::Verb,
 };
 
+mod playwright;
+
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const WINDOW_TITLE_PATTERN: &str = "^git-tools diff viewer$";
 const HOST_ENVIRONMENT_VARIABLE_NAMES: &[&str] =
     &["PATH", "SystemRoot", "WINDIR", "PATHEXT", "COMSPEC"];
+#[cfg(not(windows))]
+const HOST_HOME_ENVIRONMENT_VARIABLE: &str = "HOME";
+#[cfg(windows)]
+const HOST_HOME_ENVIRONMENT_VARIABLE: &str = "USERPROFILE";
 
 #[derive(Debug)]
 struct Sandbox {
@@ -41,10 +48,15 @@ struct Sandbox {
     logs: PathBuf,
     native_data: PathBuf,
     dom_data: PathBuf,
+    browser_data: PathBuf,
     editor_recorder: PathBuf,
     editor_record: PathBuf,
     editor_release: PathBuf,
     editor_exit: PathBuf,
+    cli_binary: PathBuf,
+    viewer_binary: PathBuf,
+    cargo_runner_config: PathBuf,
+    evidence_root: Option<PathBuf>,
 }
 
 impl Sandbox {
@@ -66,12 +78,17 @@ impl Sandbox {
             logs: root.join("logs"),
             native_data: root.join("git-tools/native"),
             dom_data: root.join("git-tools/dom"),
+            browser_data: root.join("git-tools/browser"),
             editor_recorder: root
                 .join("fixtures")
                 .join(format!("code{}", std::env::consts::EXE_SUFFIX)),
             editor_record: root.join("logs/editor-record.json"),
             editor_release: root.join("logs/editor-release"),
             editor_exit: root.join("logs/editor-exit"),
+            cli_binary: release_binary("git-tools")?,
+            viewer_binary: release_binary("gtl-viewer")?,
+            cargo_runner_config: root.join("cargo-runner.toml"),
+            evidence_root: env::var_os("TEST_EVIDENCES_OUTPUT_PATH").map(PathBuf::from),
             root,
         };
         for path in [
@@ -85,6 +102,7 @@ impl Sandbox {
             &sandbox.logs,
             &sandbox.native_data,
             &sandbox.dom_data,
+            &sandbox.browser_data,
         ] {
             fs::create_dir_all(path)
                 .with_context(|| format!("create sandbox directory {}", path.display()))?;
@@ -98,6 +116,16 @@ impl Sandbox {
                 bail!("chmod 700 for XDG_RUNTIME_DIR failed");
             }
         }
+        let runtime_runner = sandbox
+            .root
+            .join(format!("xtask-e2e-runner{}", env::consts::EXE_SUFFIX));
+        gtl_platform::copy_current_executable(&runtime_runner)
+            .context("copy stable E2E runtime runner")?;
+        fs::write(
+            &sandbox.cargo_runner_config,
+            cargo_runner_config(&runtime_runner),
+        )
+        .context("write E2E Cargo runner configuration")?;
         Ok(sandbox)
     }
 
@@ -121,6 +149,8 @@ impl Sandbox {
             ("GTL_E2E_EDITOR_RECORD", self.editor_record.as_os_str()),
             ("GTL_E2E_EDITOR_RELEASE", self.editor_release.as_os_str()),
             ("GTL_E2E_EDITOR_EXIT", self.editor_exit.as_os_str()),
+            ("GTL_E2E_CLI_BINARY", self.cli_binary.as_os_str()),
+            ("GTL_E2E_VIEWER_BINARY", self.viewer_binary.as_os_str()),
         ]
         .into_iter()
         .map(|(name, value)| (OsString::from(name), value.to_os_string()))
@@ -129,6 +159,12 @@ impl Sandbox {
             if let Some(value) = std::env::var_os(name) {
                 pairs.push((OsString::from(name), value));
             }
+        }
+        if let Some(evidence_root) = &self.evidence_root {
+            pairs.push((
+                OsString::from("TEST_EVIDENCES_OUTPUT_PATH"),
+                evidence_root.as_os_str().to_os_string(),
+            ));
         }
         IsolatedEnv { pairs }
     }
@@ -140,14 +176,75 @@ struct IsolatedEnv {
 }
 
 impl IsolatedEnv {
-    fn set(&mut self, name: &str, value: impl AsRef<OsStr>) {
+    pub(super) fn set(&mut self, name: &str, value: impl AsRef<OsStr>) {
         let name = OsString::from(name);
         self.pairs.retain(|(current, _)| current != &name);
         self.pairs.push((name, value.as_ref().to_os_string()));
     }
 
-    fn apply(&self, command: &mut Command) {
+    pub(super) fn apply(&self, command: &mut Command) {
         command.env_clear().envs(self.pairs.iter().cloned());
+    }
+
+    pub(super) fn apply_cargo(
+        &self,
+        command: &mut Command,
+        host_environment: &HostCargoEnvironment,
+    ) {
+        self.apply(command);
+        host_environment.apply(command);
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct HostCargoEnvironment {
+    pairs: Vec<(OsString, OsString)>,
+}
+
+impl HostCargoEnvironment {
+    pub(super) fn capture() -> Result<Self> {
+        Self::from_environment(|name| env::var_os(name))
+    }
+
+    fn from_environment(mut value: impl FnMut(&str) -> Option<OsString>) -> Result<Self> {
+        Self::from_environment_with_home_variable(&mut value, HOST_HOME_ENVIRONMENT_VARIABLE)
+    }
+
+    fn from_environment_with_home_variable(
+        mut value: impl FnMut(&str) -> Option<OsString>,
+        home_variable: &str,
+    ) -> Result<Self> {
+        let host_home = value(home_variable);
+        let cargo_home = value("CARGO_HOME")
+            .or_else(|| {
+                host_home
+                    .as_ref()
+                    .map(|home| Path::new(home).join(".cargo").into())
+            })
+            .with_context(|| {
+                format!("resolve host Cargo home from CARGO_HOME or {home_variable}")
+            })?;
+        let rustup_home = value("RUSTUP_HOME")
+            .or_else(|| {
+                host_home
+                    .as_ref()
+                    .map(|home| Path::new(home).join(".rustup").into())
+            })
+            .with_context(|| {
+                format!("resolve host rustup home from RUSTUP_HOME or {home_variable}")
+            })?;
+        let mut pairs = vec![
+            (OsString::from("CARGO_HOME"), cargo_home),
+            (OsString::from("RUSTUP_HOME"), rustup_home),
+        ];
+        if let Some(agent_socket) = value("SSH_AUTH_SOCK") {
+            pairs.push((OsString::from("SSH_AUTH_SOCK"), agent_socket));
+        }
+        Ok(Self { pairs })
+    }
+
+    fn apply(&self, command: &mut Command) {
+        command.envs(self.pairs.iter().cloned());
     }
 }
 
@@ -228,6 +325,7 @@ impl DaemonCleanupGuard {
             environments: vec![
                 ("native", sandbox.environment(&sandbox.native_data)),
                 ("dom", sandbox.environment(&sandbox.dom_data)),
+                ("browser", sandbox.environment(&sandbox.browser_data)),
             ],
             stopped: false,
         })
@@ -277,17 +375,44 @@ pub fn run() -> Result<()> {
     result
 }
 
+pub(crate) fn run_worker(_verbose: bool) -> Result<()> {
+    run()
+}
+
+pub(crate) fn run_runtime(executable: &Path, arguments: &[OsString]) -> Result<()> {
+    let mut command = runtime_command(executable, arguments);
+    let status = command
+        .status()
+        .with_context(|| format!("run isolated E2E executable {}", executable.display()))?;
+    if !status.success() {
+        bail!(
+            "isolated E2E executable failed (exit {})",
+            status.code().unwrap_or(-1)
+        );
+    }
+    Ok(())
+}
+
+fn runtime_command(executable: &Path, arguments: &[OsString]) -> Command {
+    let mut command = Command::new(executable);
+    command.args(arguments).env("GTL_E2E_RUNTIME_ISOLATED", "1");
+    for name in ["CARGO_HOME", "RUSTUP_HOME", "SSH_AUTH_SOCK"] {
+        command.env_remove(name);
+    }
+    command
+}
+
+fn cargo_runner_config(executable: &Path) -> String {
+    format!(
+        "[target.'cfg(all())']\nrunner = [{:?}, \"e2e-runtime-worker\"]\n",
+        executable.to_string_lossy()
+    )
+}
+
 fn workflow() -> Result<()> {
-    require_tool("deno", "install Deno through sample_project provisioning")?;
     require_tool(
         "tauri-driver",
         "install tauri-driver through sample_project provisioning",
-    )?;
-    process::run_in(
-        "viewer-e2e-dependencies",
-        "e2e/viewer",
-        "deno",
-        &["install", "--frozen"],
     )?;
     build::run(BuildTarget::Cli)?;
     build::run(BuildTarget::Viewer)?;
@@ -305,12 +430,13 @@ fn workflow() -> Result<()> {
     )?;
 
     let sandbox = Sandbox::create()?;
+    clear_evidence_outcomes(sandbox.evidence_root.as_deref())?;
     fs::copy(release_binary("editor-recorder")?, &sandbox.editor_recorder)
         .context("copy editor recorder fixture")?;
     let mut daemon_cleanup = DaemonCleanupGuard::new(&sandbox)?;
     let result = match std::env::consts::OS {
         "linux" => run_linux(&sandbox),
-        "windows" => run_dom_phase(&sandbox, &sandbox.environment(&sandbox.dom_data)),
+        "windows" => run_browser_phases(&sandbox, &sandbox.environment(&sandbox.dom_data)),
         unsupported => bail!(
             "hermetic desktop E2E is not configured for {unsupported}; Linux and Windows are supported"
         ),
@@ -404,7 +530,7 @@ fn run_linux(sandbox: &Sandbox) -> Result<()> {
         let mut dom_env = env.clone();
         dom_env.set("GIT_TOOLS_DATA_DIR", sandbox.dom_data.as_os_str());
         dom_env.set("GTL_E2E_DATA_ROOT", sandbox.dom_data.as_os_str());
-        run_dom_phase(sandbox, &dom_env)
+        run_browser_phases(sandbox, &dom_env)
     });
     if result.is_err() {
         capture_diagnostics(sandbox, &env);
@@ -528,43 +654,86 @@ fn run_native_phase(
     Ok(())
 }
 
-fn run_dom_phase(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
-    let log = sandbox.logs.join("webdriver.log");
-    let arguments = ["task", "--frozen", "--cwd", "e2e/viewer", "test:e2e"];
-    let mut command = Command::new("deno");
-    command.args(arguments).current_dir(".");
-    seed_hostile_git_environment(&mut command, sandbox);
-    env.apply(&mut command);
-    let result = command.output().context("run deno viewer E2E")?;
+fn run_dom_phase(
+    sandbox: &Sandbox,
+    env: &IsolatedEnv,
+    host_environment: &HostCargoEnvironment,
+) -> Result<()> {
+    let log = sandbox.logs.join("thirtyfour.log");
+    let arguments = [
+        "test",
+        "-p",
+        "desktop-e2e",
+        "--features",
+        "e2e",
+        "--test",
+        "viewer",
+        "--",
+        "--test-threads",
+        "1",
+    ];
+    let mut command = Command::new("cargo");
+    command
+        .arg("--config")
+        .arg(&sandbox.cargo_runner_config)
+        .args(arguments)
+        .current_dir(".");
+    seed_hostile_git_environment(&mut command, &sandbox.root);
+    env.apply_cargo(&mut command, host_environment);
+    let result = command.output().context("run Thirtyfour viewer E2E")?;
     let mut bytes = result.stdout;
     bytes.extend_from_slice(&result.stderr);
     fs::write(&log, &bytes)?;
     if !result.status.success() {
         std::io::stderr().write_all(&bytes)?;
-        bail!("viewer WebDriver DOM phase failed");
+        bail!("viewer Thirtyfour DOM phase failed");
     }
     Ok(())
 }
 
-fn seed_hostile_git_environment(command: &mut Command, sandbox: &Sandbox) {
+fn run_browser_phases(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
+    let host_environment = HostCargoEnvironment::capture()?;
+    run_dom_phase(sandbox, env, &host_environment)?;
+    playwright::run(
+        sandbox,
+        &sandbox.environment(&sandbox.browser_data),
+        &host_environment,
+    )
+}
+
+fn clear_evidence_outcomes(evidence_root: Option<&Path>) -> Result<()> {
+    let Some(evidence_root) = evidence_root else {
+        return Ok(());
+    };
+    for outcome in ["success", "fail"] {
+        let outcome_path = evidence_root.join(outcome);
+        if outcome_path.exists() {
+            fs::remove_dir_all(&outcome_path)
+                .with_context(|| format!("clear stale evidence {}", outcome_path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn seed_hostile_git_environment(command: &mut Command, sandbox_root: &Path) {
     command
-        .env("GIT_EDITOR", sandbox.root.join("host-editor"))
-        .env("VISUAL", sandbox.root.join("host-visual"))
-        .env("EDITOR", sandbox.root.join("host-default-editor"))
+        .env("GIT_EDITOR", sandbox_root.join("host-editor"))
+        .env("VISUAL", sandbox_root.join("host-visual"))
+        .env("EDITOR", sandbox_root.join("host-default-editor"))
         .env(
             "GIT_SEQUENCE_EDITOR",
-            sandbox.root.join("host-sequence-editor"),
+            sandbox_root.join("host-sequence-editor"),
         )
-        .env("GIT_DIR", sandbox.root.join("host-git-dir"))
-        .env("GIT_COMMON_DIR", sandbox.root.join("host-git-common-dir"))
-        .env("GIT_WORK_TREE", sandbox.root.join("host-work-tree"))
+        .env("GIT_DIR", sandbox_root.join("host-git-dir"))
+        .env("GIT_COMMON_DIR", sandbox_root.join("host-git-common-dir"))
+        .env("GIT_WORK_TREE", sandbox_root.join("host-work-tree"))
         .env(
             "GIT_CONFIG_SYSTEM",
-            sandbox.root.join("host-system.gitconfig"),
+            sandbox_root.join("host-system.gitconfig"),
         )
         .env(
             "GIT_CONFIG_GLOBAL",
-            sandbox.root.join("host-global.gitconfig"),
+            sandbox_root.join("host-global.gitconfig"),
         )
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_COUNT", "2")
@@ -573,7 +742,7 @@ fn seed_hostile_git_environment(command: &mut Command, sandbox: &Sandbox) {
         .env("GIT_CONFIG_KEY_1", "core.worktree")
         .env(
             "GIT_CONFIG_VALUE_1",
-            sandbox.root.join("host-config-work-tree"),
+            sandbox_root.join("host-config-work-tree"),
         );
 }
 
@@ -744,12 +913,45 @@ fn require_tool(name: &str, hint: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use std::{
-        ffi::OsString,
+        ffi::{OsStr, OsString},
         fs,
+        path::{Path, PathBuf},
         process::{Command, Stdio},
     };
 
-    use super::IsolatedEnv;
+    use super::{
+        HostCargoEnvironment, IsolatedEnv, cargo_runner_config, clear_evidence_outcomes,
+        runtime_command,
+    };
+
+    #[test]
+    fn absent_evidence_root_preserves_existing_outcomes() {
+        let evidence_root = tempfile::tempdir().expect("temporary evidence root");
+        let screenshot = evidence_root.path().join("success/thirtyfour/viewer.png");
+        fs::create_dir_all(screenshot.parent().expect("screenshot parent"))
+            .expect("create stale success evidence");
+        fs::write(&screenshot, b"stale").expect("write stale success evidence");
+
+        clear_evidence_outcomes(None).expect("skip evidence cleanup");
+
+        assert!(screenshot.is_file());
+    }
+
+    #[test]
+    fn enabled_evidence_root_removes_stale_outcomes() {
+        let evidence_root = tempfile::tempdir().expect("temporary evidence root");
+        for outcome in ["success", "fail"] {
+            let screenshot = evidence_root.path().join(outcome).join("stale.png");
+            fs::create_dir_all(screenshot.parent().expect("screenshot parent"))
+                .expect("create stale evidence parent");
+            fs::write(screenshot, b"stale").expect("write stale evidence");
+        }
+
+        clear_evidence_outcomes(Some(evidence_root.path())).expect("clear stale evidence");
+
+        assert!(!evidence_root.path().join("success").exists());
+        assert!(!evidence_root.path().join("fail").exists());
+    }
 
     #[test]
     fn isolated_environment_rejects_host_git_overrides() {
@@ -775,6 +977,15 @@ mod tests {
             .filter_map(|name| std::env::var_os(name).map(|value| (OsString::from(name), value)))
             .collect();
         let environment = IsolatedEnv { pairs };
+        let host_environment = HostCargoEnvironment::from_environment_with_home_variable(
+            |name| match name {
+                "HOME" => Some(OsString::from("/host/home")),
+                "SSH_AUTH_SOCK" => Some(OsString::from("/host/agent.sock")),
+                _ => None,
+            },
+            "HOME",
+        )
+        .expect("derive host build environment");
         let hostile_git_directory = repository.path().join("host-git-dir");
         fs::create_dir(&hostile_git_directory).expect("create hostile Git directory");
         let mut command = Command::new("git");
@@ -789,7 +1000,7 @@ mod tests {
             .env("GIT_CONFIG_COUNT", "1")
             .env("GIT_CONFIG_KEY_0", "core.editor")
             .env("GIT_CONFIG_VALUE_0", "injected-editor");
-        environment.apply(&mut command);
+        environment.apply_cargo(&mut command, &host_environment);
 
         let output = command.output().expect("query configured editor");
 
@@ -800,5 +1011,163 @@ mod tests {
                 .trim(),
             "repository-editor"
         );
+    }
+
+    #[test]
+    fn cargo_environment_uses_unix_home_for_default_build_paths_and_agent() {
+        let host_environment = HostCargoEnvironment::from_environment_with_home_variable(
+            |name| match name {
+                "HOME" => Some(OsString::from("/host/home")),
+                "SSH_AUTH_SOCK" => Some(OsString::from("/host/agent.sock")),
+                _ => None,
+            },
+            "HOME",
+        )
+        .expect("derive host build environment");
+        let environment = IsolatedEnv {
+            pairs: vec![
+                (OsString::from("HOME"), OsString::from("/sandbox/home")),
+                (
+                    OsString::from("XDG_CACHE_HOME"),
+                    OsString::from("/sandbox/cache"),
+                ),
+            ],
+        };
+        let mut command = Command::new("cargo");
+
+        environment.apply_cargo(&mut command, &host_environment);
+
+        let values = command.get_envs().collect::<Vec<_>>();
+        assert_eq!(
+            command_environment_value(&values, "HOME"),
+            Some(OsStr::new("/sandbox/home"))
+        );
+        assert_eq!(
+            command_environment_value(&values, "XDG_CACHE_HOME"),
+            Some(OsStr::new("/sandbox/cache"))
+        );
+        assert_eq!(
+            command_environment_value(&values, "CARGO_HOME"),
+            Some(OsStr::new("/host/home/.cargo"))
+        );
+        assert_eq!(
+            command_environment_value(&values, "RUSTUP_HOME"),
+            Some(OsStr::new("/host/home/.rustup"))
+        );
+        assert_eq!(
+            command_environment_value(&values, "SSH_AUTH_SOCK"),
+            Some(OsStr::new("/host/agent.sock"))
+        );
+    }
+
+    #[test]
+    fn cargo_environment_uses_explicit_host_build_paths() {
+        let host_environment = HostCargoEnvironment::from_environment(|name| match name {
+            "HOME" => Some(OsString::from("/host/home")),
+            "CARGO_HOME" => Some(OsString::from("/host/cargo")),
+            "RUSTUP_HOME" => Some(OsString::from("/host/rustup")),
+            _ => None,
+        })
+        .expect("capture explicit host build environment");
+        let environment = IsolatedEnv { pairs: Vec::new() };
+        let mut command = Command::new("cargo");
+
+        environment.apply_cargo(&mut command, &host_environment);
+
+        let values = command.get_envs().collect::<Vec<_>>();
+        assert_eq!(
+            command_environment_value(&values, "CARGO_HOME"),
+            Some(OsStr::new("/host/cargo"))
+        );
+        assert_eq!(
+            command_environment_value(&values, "RUSTUP_HOME"),
+            Some(OsStr::new("/host/rustup"))
+        );
+        assert_eq!(command_environment_value(&values, "SSH_AUTH_SOCK"), None);
+    }
+
+    #[test]
+    fn cargo_environment_uses_windows_user_profile_for_default_build_paths() {
+        let host_environment = HostCargoEnvironment::from_environment_with_home_variable(
+            |name| match name {
+                "HOME" => Some(OsString::from("/git-bash/home")),
+                "USERPROFILE" => Some(OsString::from(r"C:\Users\developer")),
+                _ => None,
+            },
+            "USERPROFILE",
+        )
+        .expect("derive Windows host build environment");
+        let environment = IsolatedEnv { pairs: Vec::new() };
+        let mut command = Command::new("cargo");
+
+        environment.apply_cargo(&mut command, &host_environment);
+
+        let values = command.get_envs().collect::<Vec<_>>();
+        assert_eq!(
+            command_environment_value(&values, "CARGO_HOME"),
+            Some(
+                PathBuf::from(r"C:\Users\developer")
+                    .join(".cargo")
+                    .as_os_str()
+            )
+        );
+        assert_eq!(
+            command_environment_value(&values, "RUSTUP_HOME"),
+            Some(
+                PathBuf::from(r"C:\Users\developer")
+                    .join(".rustup")
+                    .as_os_str()
+            )
+        );
+    }
+
+    #[test]
+    fn cargo_runner_uses_xtask_as_the_runtime_boundary() {
+        let config = cargo_runner_config(Path::new("/repo/target/debug/xtask"));
+
+        assert_eq!(
+            config,
+            "[target.'cfg(all())']\nrunner = [\"/repo/target/debug/xtask\", \"e2e-runtime-worker\"]\n"
+        );
+    }
+
+    #[test]
+    fn runtime_boundary_removes_host_build_environment() {
+        let command = runtime_command(
+            Path::new("/repo/target/debug/deps/viewer"),
+            &[OsString::from("--test-threads"), OsString::from("1")],
+        );
+        let values = command.get_envs().collect::<Vec<_>>();
+
+        assert_eq!(
+            command.get_program(),
+            OsStr::new("/repo/target/debug/deps/viewer")
+        );
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [OsStr::new("--test-threads"), OsStr::new("1")]
+        );
+        for name in ["CARGO_HOME", "RUSTUP_HOME", "SSH_AUTH_SOCK"] {
+            assert_eq!(command_environment_value(&values, name), None);
+            assert!(
+                values
+                    .iter()
+                    .any(|(current, value)| *current == OsStr::new(name) && value.is_none())
+            );
+        }
+        assert_eq!(
+            command_environment_value(&values, "GTL_E2E_RUNTIME_ISOLATED"),
+            Some(OsStr::new("1"))
+        );
+    }
+
+    fn command_environment_value<'a>(
+        values: &'a [(&'a OsStr, Option<&'a OsStr>)],
+        name: &str,
+    ) -> Option<&'a OsStr> {
+        values
+            .iter()
+            .find(|(current, _)| *current == OsStr::new(name))
+            .and_then(|(_, value)| value.as_deref())
     }
 }

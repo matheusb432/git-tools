@@ -26,5 +26,5 @@ gen-icon:
 
 # Run the pure viewer-render benchmark with host display variables removed.
 [group('desktop')]
-bench:
-    cargo run --quiet -p xtask -- desktop-bench
+bench *args:
+    cargo run --quiet -p xtask -- desktop-bench {{ args }}

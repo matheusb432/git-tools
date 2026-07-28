@@ -2,7 +2,13 @@ use std::hint::black_box;
 
 use application::viewer::{DiffDensity, DiffLayout, RenderOptions};
 use criterion::{Criterion, criterion_group, criterion_main};
-use desktop::benchmark_support::ViewerRenderBenchmark;
+
+#[path = "viewer_render/fixture.rs"]
+mod fixture;
+#[path = "fixtures/view.rs"]
+mod view_fixture;
+
+use fixture::ViewerRenderBenchmark;
 
 fn render_large_viewer(c: &mut Criterion) {
     let fixture = ViewerRenderBenchmark::fixture_45k();

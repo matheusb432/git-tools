@@ -1,7 +1,13 @@
 use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use desktop::benchmark_support::ViewCacheBenchmark;
+
+#[path = "view_cache/cases.rs"]
+mod cases;
+#[path = "fixtures/view.rs"]
+mod view_fixture;
+
+use cases::ViewCacheBenchmark;
 
 fn cache_operations(c: &mut Criterion) {
     let small = ViewCacheBenchmark::fixture_small();

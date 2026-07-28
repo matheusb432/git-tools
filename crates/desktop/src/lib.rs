@@ -1,6 +1,8 @@
 //! gtl-viewer: the custom-origin htmx desktop viewer.
 #[cfg(feature = "benchmark-support")]
-pub mod benchmark_support;
+pub use render::MaudViewerRenderer;
+#[cfg(feature = "benchmark-support")]
+pub use session::{CacheDisposition, CachedView, WeightedViewCache};
 mod commands;
 mod presentation;
 mod protocol_config;

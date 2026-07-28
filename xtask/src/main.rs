@@ -9,8 +9,8 @@ use anyhow::Result;
 use clap::Parser;
 
 mod cli;
-mod gate;
 mod process;
+mod project;
 mod task;
 mod verb;
 mod verbs;
@@ -31,12 +31,17 @@ fn run(command: cli::Command) -> Result<()> {
             remove_config,
             force,
         } => verbs::install::run_uninstall(remove_config, force),
-        cli::Command::Test(arguments) => verbs::test::run(arguments.scope, arguments.verbose),
+        cli::Command::Test(arguments) => verbs::test::run(&arguments),
+        cli::Command::DesktopE2eWorker { verbose } => verbs::desktop_e2e::run_worker(verbose),
+        cli::Command::E2eRuntimeWorker {
+            executable,
+            arguments,
+        } => verbs::desktop_e2e::run_runtime(&executable, &arguments),
         cli::Command::Cov => verbs::cov::run(),
         cli::Command::Build { target } => verbs::build::run(target),
         cli::Command::FrontendTest => verbs::frontend::test(),
         cli::Command::FrontendBench => verbs::frontend::bench(),
-        cli::Command::DesktopBench => verbs::bench::run(),
+        cli::Command::DesktopBench(arguments) => verbs::bench::run(&arguments),
         cli::Command::Fmt(arguments) => verbs::format::run(arguments.verbose),
         cli::Command::FmtCheck(arguments) => verbs::format::check(arguments.verbose),
         cli::Command::Lint => verbs::lint::run(),

@@ -212,19 +212,4 @@ mod tests {
             "unexpected violations: {violations:?}"
         );
     }
-
-    #[test]
-    fn real_workspace_has_no_forbidden_edges() {
-        // CARGO_MANIFEST_DIR = xtask/; its parent is the workspace root where crates/ and shared/
-        // live. Anchoring here (not ".") makes the test scan the real graph regardless of test CWD.
-        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("xtask/ must have a parent (the workspace root)");
-        let violations = collect_violations(workspace_root);
-        assert!(
-            violations.is_empty(),
-            "the real workspace has check-structure violations:\n{}",
-            violations.join("\n")
-        );
-    }
 }

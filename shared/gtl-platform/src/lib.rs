@@ -28,6 +28,9 @@ mod sys {
     //! Stub for OSes without an effectful backend (macOS dev). The CLI degrades to
     //! the browser path when `spawn_detached` returns `Unsupported`.
     use std::path::Path;
+    pub fn copy_current_executable(destination: &Path) -> std::io::Result<u64> {
+        std::fs::copy(std::env::current_exe()?, destination)
+    }
     pub fn spawn_detached(_program: &Path, _args: &[&str]) -> std::io::Result<()> {
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
@@ -45,6 +48,27 @@ mod sys {
         ))
     }
     pub fn activate_window(_xid: u64) {}
+}
+
+/// Copies the bytes of the currently running executable to `destination`.
+///
+/// On Linux, this remains valid when an atomic rebuild has already unlinked the executable's
+/// original path.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use std::path::Path;
+/// gtl_platform::copy_current_executable(Path::new("runner-copy"))?;
+/// # Ok::<(), std::io::Error>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns an error when the current executable cannot be resolved or read, or when
+/// `destination` cannot be created.
+pub fn copy_current_executable(destination: &Path) -> std::io::Result<u64> {
+    sys::copy_current_executable(destination)
 }
 
 /// Spawn `program args…` detached (fire-and-forget). Delegates to the cfg-selected
@@ -160,6 +184,17 @@ mod tests {
         assert!(no_open_requested(Some("true")));
         assert!(!no_open_requested(Some("0")));
         assert!(!no_open_requested(None));
+    }
+
+    #[test]
+    fn current_executable_can_be_copied_to_a_stable_path() {
+        let temporary_directory = tempfile::tempdir().unwrap();
+        let destination = temporary_directory.path().join("executable-copy");
+
+        let copied = copy_current_executable(&destination).unwrap();
+
+        assert!(copied > 0);
+        assert!(destination.is_file());
     }
 
     #[test]

@@ -3,7 +3,8 @@ mod pending;
 
 use application::viewer::initial_recipe_label::{self, InitialRecipeLabel};
 #[cfg(feature = "benchmark-support")]
-pub(crate) use cache::CacheDisposition;
+pub use cache::{CacheDisposition, CachedView, WeightedViewCache};
+#[cfg(not(feature = "benchmark-support"))]
 pub(crate) use cache::{CachedView, WeightedViewCache};
 use contracts::recipes::{Recipe, RecipeSource};
 use domain::{

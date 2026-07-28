@@ -1,19 +1,27 @@
-//! Typed test-scope orchestration. The `unit` scope intentionally uses workspace default-members
-//! so desktop Rust tests remain opt-in behind `all`; `e2e` runs only the hermetic viewer suite.
+//! Test runner.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Args, ValueEnum};
+use sample_project::Run;
 
-use crate::process;
+use crate::project;
 
-/// `test` flags. `--e2e` / `--all` are shorthands that resolve `--scope` through
-/// `default_value_ifs`.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "CLI flags map directly to Clap arguments"
+)]
 #[derive(Args)]
 pub(crate) struct TestArguments {
-    /// Stream full test output (`cargo test -- --nocapture`) instead of the terse default.
+    /// Stream full test output live; the log still captures it.
     #[arg(long)]
     pub(crate) verbose: bool,
-    /// Test scope: `unit` (default; desktop excluded), `e2e` (hermetic viewer only), or `all`.
+    /// Emit one JSON report to stdout.
+    #[arg(long)]
+    pub(crate) json: bool,
+    /// Provide an evidence directory to E2E tests and save report.json.
+    #[arg(long)]
+    pub(crate) evidences: bool,
+    /// Test scope.
     #[arg(
         long,
         value_enum,
@@ -29,12 +37,35 @@ pub(crate) struct TestArguments {
     all: bool,
 }
 
-/// Which part of the suite runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Scope {
     Unit,
     E2e,
     All,
+}
+
+pub(crate) fn run(arguments: &TestArguments) -> Result<()> {
+    let executable = std::env::current_exe().context("resolve the xtask executable")?;
+    let declarations = selected_tests(arguments.scope, executable.into_os_string());
+    let tests = declarations
+        .into_iter()
+        .map(project::TestDeclaration::into_test);
+
+    Run::new(arguments.scope.to_string(), tests)
+        .verbose(arguments.verbose)
+        .json(arguments.json)
+        .evidences_from_cargo_manifest(arguments.evidences, include_str!("../../Cargo.toml"))?
+        .execute()?;
+
+    Ok(())
+}
+
+fn selected_tests(scope: Scope, executable: std::ffi::OsString) -> Vec<project::TestDeclaration> {
+    match scope {
+        Scope::Unit => project::tests_unit(&executable),
+        Scope::E2e => project::tests_e2e(executable),
+        Scope::All => project::tests_all(executable),
+    }
 }
 
 impl std::fmt::Display for Scope {
@@ -47,35 +78,12 @@ impl std::fmt::Display for Scope {
     }
 }
 
-fn cargo_test_command(verbose: bool, workspace: bool) -> String {
-    let workspace = if workspace { " --workspace" } else { "" };
-    if verbose {
-        format!("cargo test{workspace} -- --nocapture")
-    } else {
-        format!("cargo test{workspace} --quiet")
-    }
-}
-
-/// Run the selected test scope.
-pub(crate) fn run(scope: Scope, verbose: bool) -> Result<()> {
-    match scope {
-        Scope::E2e => super::desktop_e2e::run(),
-        Scope::Unit => {
-            process::gate("check", "just check", verbose)?;
-            process::gate("rust_tests", &cargo_test_command(verbose, false), verbose)
-        }
-        Scope::All => {
-            process::gate("check", "just check", verbose)?;
-            process::gate(
-                "rust_tests_all",
-                &cargo_test_command(verbose, true),
-                verbose,
-            )?;
-            process::gate("frontend_tests", "just cli test", verbose)?;
-            process::gate("bundle_drift", "just drift-check", verbose)?;
-            super::desktop_e2e::run()
-        }
-    }
+#[cfg(test)]
+fn selected_test_labels(scope: Scope) -> Vec<&'static str> {
+    selected_tests(scope, "xtask".into())
+        .iter()
+        .map(project::TestDeclaration::label)
+        .collect()
 }
 
 #[cfg(test)]
@@ -83,15 +91,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cargo_test_is_quiet_and_uses_default_members_by_default() {
-        assert_eq!(cargo_test_command(false, false), "cargo test --quiet");
+    fn unit_selects_check_and_default_member_tests() {
+        assert_eq!(selected_test_labels(Scope::Unit), ["check", "unit"]);
     }
 
     #[test]
-    fn full_cargo_test_selects_the_workspace_and_streams_when_verbose() {
+    fn e2e_selects_only_the_desktop_worker() {
+        assert_eq!(selected_test_labels(Scope::E2e), ["e2e"]);
+    }
+
+    #[test]
+    fn all_selects_the_complete_gate_in_declaration_order() {
         assert_eq!(
-            cargo_test_command(true, true),
-            "cargo test --workspace -- --nocapture"
+            selected_test_labels(Scope::All),
+            ["check", "unit", "web", "drift", "e2e"]
         );
     }
 }

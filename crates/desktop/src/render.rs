@@ -2,6 +2,9 @@ mod document;
 mod fragments;
 mod routes;
 
+#[cfg(feature = "benchmark-support")]
+pub use document::MaudViewerRenderer;
+#[cfg(not(feature = "benchmark-support"))]
 pub(crate) use document::MaudViewerRenderer;
 use routes::{ViewerRoute, ViewerSettingChange};
 
