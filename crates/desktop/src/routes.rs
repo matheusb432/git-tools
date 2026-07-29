@@ -22,7 +22,8 @@ use tauri::http::{Request, Response, StatusCode};
 use crate::{
     presentation::ViewerApp,
     recipes::{OpenRecipeOutcome, RecipeError},
-    session::PendingRecipesError,
+    render::SwapFeedback,
+    session::{CloseOutcome, PendingRecipesError},
 };
 
 const HTML_CONTENT_TYPE: &str = "text/html; charset=utf-8";
@@ -206,19 +207,29 @@ fn refresh(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
 }
 
 fn close(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
-    let closed = app
-        .session
-        .lock()
-        .map_err(|error| error.to_string())?
-        .close(tab);
-    if !closed {
+    let outcome = {
+        let mut session = app.session.lock().map_err(|error| error.to_string())?;
+        session.close(tab)
+    };
+    let Some(outcome) = outcome else {
         return Ok(status_response(StatusCode::NOT_FOUND));
+    };
+    let settings = load_settings(app);
+    if outcome == CloseOutcome::ActiveUnchanged {
+        return render::tabs_only(app.renderer, &app.session, settings, SwapFeedback::None)
+            .map(html_response)
+            .map_err(Into::into);
     }
     let transient = ensure_active_view(app)?;
-    let settings = load_settings(app);
-    render::tabs_with_view(app.renderer, &app.session, transient, settings)
-        .map(html_response)
-        .map_err(Into::into)
+    render::tabs_with_view(
+        app.renderer,
+        &app.session,
+        transient,
+        settings,
+        SwapFeedback::None,
+    )
+    .map(html_response)
+    .map_err(Into::into)
 }
 
 fn activate(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
@@ -266,9 +277,15 @@ fn open_history(app: &ViewerApp, id: application::viewer::RenderHistoryId) -> Ro
         OpenRecipeOutcome::Skipped { .. } => None,
     };
     let settings = load_settings(app);
-    render::tabs_with_view(app.renderer, &app.session, transient, settings)
-        .map(html_response)
-        .map_err(Into::into)
+    render::tabs_with_view(
+        app.renderer,
+        &app.session,
+        transient,
+        settings,
+        SwapFeedback::None,
+    )
+    .map(html_response)
+    .map_err(Into::into)
 }
 
 fn settings(app: &ViewerApp, change: SettingChange) -> RouteResult {
@@ -308,14 +325,20 @@ fn pending_transaction(app: &ViewerApp) -> RouteResult {
             });
             let settings = load_settings(app);
             let html = if skipped_labels.is_empty() {
-                render::tabs_with_view(app.renderer, &app.session, transient, settings)
-            } else {
-                render::tabs_with_view_after_snapshot_skips(
+                render::tabs_with_view(
                     app.renderer,
                     &app.session,
                     transient,
                     settings,
-                    &skipped_labels,
+                    SwapFeedback::None,
+                )
+            } else {
+                render::tabs_with_view(
+                    app.renderer,
+                    &app.session,
+                    transient,
+                    settings,
+                    SwapFeedback::SnapshotRecipesSkipped(&skipped_labels),
                 )
             }?;
             Ok(html_response(html))

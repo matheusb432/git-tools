@@ -5,6 +5,7 @@ use super::{
     RouteError, RouteResult, ViewerApp, ensure_active_view, html_response, load_settings, render,
     status_response,
 };
+use crate::render::SwapFeedback;
 
 pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     let source = {
@@ -35,7 +36,13 @@ pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
 
     let transient = ensure_active_view(app)?;
     let settings = load_settings(app);
-    render::tabs_with_view_after_live_delete(app.renderer, &app.session, transient, settings)
-        .map(html_response)
-        .map_err(Into::into)
+    render::tabs_with_view(
+        app.renderer,
+        &app.session,
+        transient,
+        settings,
+        SwapFeedback::LiveViewDeleted,
+    )
+    .map(html_response)
+    .map_err(Into::into)
 }

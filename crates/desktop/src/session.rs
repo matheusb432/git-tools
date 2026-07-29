@@ -9,7 +9,7 @@ pub(crate) use cache::{CachedView, WeightedViewCache};
 use contracts::recipes::{Recipe, RecipeSource};
 use domain::{
     live_views::LiveSource,
-    viewer::{RenderOptions, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState},
+    viewer::{ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState},
 };
 pub(crate) use pending::{PendingRecipes, PendingRecipesError};
 
@@ -25,6 +25,12 @@ pub(crate) struct ComputeTicket {
 pub(crate) enum PublishOutcome {
     Published,
     Stale,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CloseOutcome {
+    ActiveChanged,
+    ActiveUnchanged,
 }
 
 /// Session-owned metadata for one recipe tab.
@@ -204,31 +210,27 @@ impl ViewerSession {
             return PublishOutcome::Stale;
         }
         let closed = self.close(ticket.tab_id);
-        debug_assert!(closed);
+        debug_assert!(closed.is_some());
         PublishOutcome::Published
     }
 
-    pub(crate) fn close(&mut self, id: ViewerTabId) -> bool {
-        let Some(index) = self.tabs.iter().position(|tab| tab.tab.id() == id) else {
-            return false;
-        };
-        // TODO: mover antes de fechar
-        if self.active == Some(id) {
-            // moves tab before closing it, last or second-to-last.
+    pub(crate) fn close(&mut self, id: ViewerTabId) -> Option<CloseOutcome> {
+        let index = self.tabs.iter().position(|tab| tab.tab.id() == id)?;
+        let outcome = if self.active == Some(id) {
             self.active = self
                 .tabs
                 .iter()
                 .rev()
                 .find(|t| t.tab.id() != id)
                 .map(|t| t.tab.id());
-            // self.active = self.tabs.last().map(|tab| tab.tab.id());
-        }
+            CloseOutcome::ActiveChanged
+        } else {
+            CloseOutcome::ActiveUnchanged
+        };
         self.tabs.remove(index);
-        // TODO: disparar thread pra isso
-        // TODO: remover isso? pq o cache sequer eh removido?
-        self.cache.demote(id);
+        self.cache.remove(id);
         self.bump_revision();
-        true
+        Some(outcome)
     }
 
     pub(crate) fn live_source(&self, id: ViewerTabId) -> Option<LiveSource> {
@@ -245,7 +247,7 @@ impl ViewerSession {
         if self.live_source(id).as_ref() != Some(source) {
             return false;
         }
-        self.close(id)
+        self.close(id).is_some()
     }
 
     pub(crate) fn activate(&mut self, id: ViewerTabId) -> bool {
@@ -298,36 +300,6 @@ impl ViewerSession {
                 tab_id: id,
                 generation: tab.generation,
             })
-    }
-
-    pub(crate) fn cached_fragment_if_current(
-        &mut self,
-        ticket: ComputeTicket,
-        options: RenderOptions,
-    ) -> Option<std::sync::Arc<str>> {
-        if self.current_ticket(ticket.tab_id) != Some(ticket) {
-            return None;
-        }
-        self.cache
-            .get(ticket.tab_id)
-            .and_then(|cached| cached.fragments.get(&options).cloned())
-    }
-
-    pub(crate) fn cache_fragment_if_current(
-        &mut self,
-        ticket: ComputeTicket,
-        options: RenderOptions,
-        fragment: std::sync::Arc<str>,
-    ) -> PublishOutcome {
-        let current = self.current_ticket(ticket.tab_id) == Some(ticket)
-            && self
-                .tab(ticket.tab_id)
-                .is_some_and(|tab| matches!(tab.tab.state(), ViewerTabState::Ready));
-        if !current {
-            return PublishOutcome::Stale;
-        }
-        self.cache.insert_fragment(ticket.tab_id, options, fragment);
-        PublishOutcome::Published
     }
 }
 
@@ -526,7 +498,7 @@ mod tests {
         );
         assert!(session.revision() > pending);
         let failed = session.revision();
-        assert!(session.close(id));
+        assert_eq!(session.close(id), Some(CloseOutcome::ActiveChanged));
         assert!(session.revision() > failed);
     }
 
@@ -535,7 +507,7 @@ mod tests {
         let (mut session, id) = ready_session();
         let ticket = session.begin_compute(id).expect("tab exists");
 
-        assert!(session.close(id));
+        assert_eq!(session.close(id), Some(CloseOutcome::ActiveChanged));
         assert_eq!(
             session.publish_labeled_if_current(
                 ticket,

@@ -20,7 +20,7 @@ pub(super) enum SwapMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SwapFeedback<'a> {
+pub(crate) enum SwapFeedback<'a> {
     None,
     LiveViewDeleted,
     SnapshotRecipesSkipped(&'a [String]),

@@ -6,6 +6,7 @@ mod routes;
 pub use document::MaudViewerRenderer;
 #[cfg(not(feature = "benchmark-support"))]
 pub(crate) use document::MaudViewerRenderer;
+pub(crate) use fragments::SwapFeedback;
 use routes::{ViewerRoute, ViewerSettingChange};
 
 #[cfg(test)]
@@ -22,7 +23,7 @@ mod tests {
     };
     use strum::VariantArray as _;
 
-    use super::{MaudViewerRenderer, ViewerRoute, ViewerSettingChange};
+    use super::{MaudViewerRenderer, SwapFeedback, ViewerRoute, ViewerSettingChange};
 
     const HTMX_SHA256: &str = "71ea67185bfa8c98c39d31717c6fce5d852370fcdfd129db4543774d3145c0de";
 
@@ -246,8 +247,10 @@ mod tests {
     fn viewer_fragments_keep_stable_htmx_and_inline_script_hooks() {
         let document = sample_document();
         let html = MaudViewerRenderer.build_document(&document);
-        let feedback = MaudViewerRenderer
-            .build_tabs_with_view_after_snapshot_skips(&document, &["api".into()]);
+        let feedback = MaudViewerRenderer.build_tabs_with_view(
+            &document,
+            SwapFeedback::SnapshotRecipesSkipped(&["api".into()]),
+        );
 
         assert!(html.contains("id=\"viewer-tabs\""));
         assert!(html.contains("id=\"viewer-view\""));
@@ -598,7 +601,7 @@ mod tests {
 
     #[test]
     fn tabs_primary_response_updates_view_out_of_band() {
-        let html = MaudViewerRenderer.build_tabs_with_view(&sample_document());
+        let html = MaudViewerRenderer.build_tabs_with_view(&sample_document(), SwapFeedback::None);
 
         assert_eq!(html.matches("id=\"viewer-tabs\"").count(), 1);
         assert_eq!(html.matches("id=\"viewer-view\"").count(), 1);
@@ -611,8 +614,10 @@ mod tests {
     fn snapshot_skips_render_one_accessible_escaped_toast() {
         let labels = vec!["api".into(), "<script>web</script>".into()];
 
-        let html = MaudViewerRenderer
-            .build_tabs_with_view_after_snapshot_skips(&sample_document(), &labels);
+        let html = MaudViewerRenderer.build_tabs_with_view(
+            &sample_document(),
+            SwapFeedback::SnapshotRecipesSkipped(&labels),
+        );
 
         assert!(html.contains("class=\"gtl-toast viewer-toast-skip pointer-events-none "));
         assert!(html.contains("data-viewer-toast"));
@@ -642,7 +647,8 @@ mod tests {
 
     #[test]
     fn live_delete_feedback_focuses_the_active_tab_and_announces_success() {
-        let html = MaudViewerRenderer.build_tabs_with_view_after_live_delete(&sample_document());
+        let html = MaudViewerRenderer
+            .build_tabs_with_view(&sample_document(), SwapFeedback::LiveViewDeleted);
         let active = html
             .split_once("class=\"viewer-tab-activate ")
             .and_then(|(_, tail)| tail.split_once('>'))
@@ -659,7 +665,7 @@ mod tests {
     fn live_delete_feedback_focuses_history_when_no_tabs_remain() {
         let empty = ViewerDocument::new(vec![], None, None, vec![], settings())
             .expect("empty viewer is valid");
-        let html = MaudViewerRenderer.build_tabs_with_view_after_live_delete(&empty);
+        let html = MaudViewerRenderer.build_tabs_with_view(&empty, SwapFeedback::LiveViewDeleted);
         let history = html
             .split_once("class=\"viewer-recovery-button ")
             .and_then(|(_, tail)| tail.split_once('>'))

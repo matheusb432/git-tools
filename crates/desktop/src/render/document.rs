@@ -68,6 +68,7 @@ impl MaudViewerRenderer {
         .into_string()
     }
 
+    #[cfg(any(test, feature = "benchmark-support"))]
     pub fn build_view(self, document: &ViewerDocument) -> String {
         fragments::view(document, SwapMode::Primary, SwapFeedback::None).into_string()
     }
@@ -90,6 +91,14 @@ impl MaudViewerRenderer {
         .into_string()
     }
 
+    pub(crate) fn build_tabs_only(
+        self,
+        document: &ViewerDocument,
+        feedback: SwapFeedback<'_>,
+    ) -> String {
+        tabs(document, SwapMode::Primary, feedback).into_string()
+    }
+
     pub(crate) fn build_history(
         self,
         history: &[application::viewer::ViewerHistoryEntry],
@@ -105,45 +114,24 @@ impl MaudViewerRenderer {
         .into_string()
     }
 
-    pub(crate) fn build_cached_view_with_tabs(
-        self,
-        view: &str,
-        document: &ViewerDocument,
-    ) -> String {
-        html! {
-            (PreEscaped(view))
-            (tabs(document, SwapMode::OutOfBand, SwapFeedback::None))
-        }
-        .into_string()
-    }
-
-    pub(crate) fn build_tabs_with_view(self, document: &ViewerDocument) -> String {
-        html! {
-            (tabs(document, SwapMode::Primary, SwapFeedback::None))
-            (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::None))
-        }
-        .into_string()
-    }
-
-    pub(crate) fn build_tabs_with_view_after_snapshot_skips(
+    pub(crate) fn build_tabs_with_view(
         self,
         document: &ViewerDocument,
-        labels: &[String],
+        feedback: SwapFeedback<'_>,
     ) -> String {
+        let (tabs_feedback, view_feedback) = match feedback {
+            SwapFeedback::None => (SwapFeedback::None, SwapFeedback::None),
+            SwapFeedback::LiveViewDeleted => {
+                (SwapFeedback::LiveViewDeleted, SwapFeedback::LiveViewDeleted)
+            }
+            SwapFeedback::SnapshotRecipesSkipped(labels) => (
+                SwapFeedback::SnapshotRecipesSkipped(labels),
+                SwapFeedback::None,
+            ),
+        };
         html! {
-            (tabs(document, SwapMode::Primary, SwapFeedback::SnapshotRecipesSkipped(labels)))
-            (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::None))
-        }
-        .into_string()
-    }
-
-    pub(crate) fn build_tabs_with_view_after_live_delete(
-        self,
-        document: &ViewerDocument,
-    ) -> String {
-        html! {
-            (tabs(document, SwapMode::Primary, SwapFeedback::LiveViewDeleted))
-            (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::LiveViewDeleted))
+            (tabs(document, SwapMode::Primary, tabs_feedback))
+            (fragments::view(document, SwapMode::OutOfBand, view_feedback))
         }
         .into_string()
     }

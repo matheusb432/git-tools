@@ -1,45 +1,27 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use application::{
     diffs::{FileDiff, View},
-    viewer::{RenderOptions, ViewerTabId},
+    viewer::ViewerTabId,
 };
 use domain::diffs::Commit;
 use lru::LruCache;
 
-/// A computed view and any server-rendered option variants retained with it.
+/// A computed semantic view retained independently from rendered responses.
 #[derive(Debug, Clone)]
 pub struct CachedView {
     pub(crate) view: Arc<View>,
-    pub(crate) fragments: HashMap<RenderOptions, Arc<str>>,
     weight: usize,
 }
 
 impl CachedView {
     pub fn new(view: Arc<View>) -> Self {
         let weight = view_weight(&view);
-        Self {
-            view,
-            fragments: HashMap::new(),
-            weight,
-        }
+        Self { view, weight }
     }
 
     pub const fn weight(&self) -> usize {
         self.weight
-    }
-
-    fn insert_fragment(&mut self, options: RenderOptions, fragment: Arc<str>) {
-        let inserted_weight = fragment.len();
-        let replaced_weight = self
-            .fragments
-            .insert(options, fragment)
-            .map_or(0, |replaced| replaced.len());
-        self.weight = self
-            .weight
-            .checked_sub(replaced_weight)
-            .and_then(|weight| weight.checked_add(inserted_weight))
-            .expect("cached view fragment weights preserve the total");
     }
 }
 
@@ -50,7 +32,7 @@ pub enum CacheDisposition {
     Oversize,
 }
 
-/// LRU storage bounded by the estimated bytes of views and rendered fragments.
+/// LRU storage bounded by the estimated bytes of semantic views.
 pub struct WeightedViewCache {
     entries: LruCache<ViewerTabId, CachedView>,
     max_weight: usize,
@@ -78,20 +60,6 @@ impl WeightedViewCache {
         CacheDisposition::Cached
     }
 
-    pub fn insert_fragment(
-        &mut self,
-        id: ViewerTabId,
-        options: RenderOptions,
-        fragment: Arc<str>,
-    ) -> CacheDisposition {
-        let Some(mut value) = self.entries.pop(&id) else {
-            return CacheDisposition::Oversize;
-        };
-        self.weight -= value.weight();
-        value.insert_fragment(options, fragment);
-        self.insert(id, value)
-    }
-
     pub(crate) fn get(&mut self, id: ViewerTabId) -> Option<&CachedView> {
         self.entries.get(&id)
     }
@@ -100,12 +68,6 @@ impl WeightedViewCache {
         let removed = self.entries.pop(&id)?;
         self.weight -= removed.weight();
         Some(())
-    }
-
-    pub fn demote(&mut self, id: ViewerTabId) -> bool {
-        let did_demote = self.entries.demote(&id);
-        // TODO: use enum
-        did_demote
     }
 
     #[cfg(test)]
@@ -185,7 +147,7 @@ mod tests {
 
     use application::{
         diffs::{Cmd, Foot, LineOwners, View},
-        viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabId},
+        viewer::ViewerTabId,
     };
 
     use super::*;
@@ -269,85 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn fragment_bytes_contribute_to_the_weight_bound() {
-        let value = cached("small");
-        let base_weight = value.weight();
-        let mut cache = WeightedViewCache::new(base_weight + 4);
-        cache.insert(id(1), value);
-        let options = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
-        let fragment: Arc<str> = Arc::from("12345");
-
-        assert_eq!(
-            cache.insert_fragment(id(1), options, Arc::clone(&fragment)),
-            CacheDisposition::Oversize
-        );
-        assert!(cache.get(id(1)).is_none());
-        assert_eq!(&*fragment, "12345");
-    }
-
-    #[test]
-    fn replacing_a_fragment_subtracts_its_previous_weight_before_reweighting() {
-        let value = cached("small");
-        let base_weight = value.weight();
-        let mut cache = WeightedViewCache::new(base_weight + 4);
-        cache.insert(id(1), value);
-        let options = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
-        assert_eq!(
-            cache.insert_fragment(id(1), options, Arc::from("1234")),
-            CacheDisposition::Cached
-        );
-
-        assert_eq!(
-            cache.insert_fragment(id(1), options, Arc::from("12")),
-            CacheDisposition::Cached
-        );
-        assert_eq!(cache.weight(), base_weight + 2);
-        assert_eq!(
-            cache
-                .get(id(1))
-                .expect("cached view")
-                .fragments
-                .get(&options)
-                .expect("replacement fragment")
-                .as_ref(),
-            "12"
-        );
-    }
-
-    #[test]
-    fn fragments_under_distinct_options_are_kept_apart_and_weighed_together() {
-        // One tab holds a fragment per live option set, so the weight has to sum
-        // across keys rather than track the newest insertion.
-        let value = cached("small");
-        let base_weight = value.weight();
-        let mut cache = WeightedViewCache::new(base_weight + 16);
-        let compact = RenderOptions::DEFAULT;
-        let full = compact.with_density(DiffDensity::Full);
-        cache.insert(id(1), value);
-
-        assert_eq!(
-            cache.insert_fragment(id(1), compact, Arc::from("1234")),
-            CacheDisposition::Cached
-        );
-        assert_eq!(
-            cache.insert_fragment(id(1), full, Arc::from("123456")),
-            CacheDisposition::Cached
-        );
-
-        assert_eq!(cache.weight(), base_weight + 10);
-        let cached = cache.get(id(1)).expect("inserted entry stays cached");
-        assert_eq!(
-            cached.fragments.get(&compact).map(AsRef::as_ref),
-            Some("1234")
-        );
-        assert_eq!(
-            cached.fragments.get(&full).map(AsRef::as_ref),
-            Some("123456")
-        );
-    }
-
-    #[test]
-    fn repeated_large_view_and_fragment_churn_never_crosses_the_hard_bound() {
+    fn repeated_large_view_churn_never_crosses_the_hard_bound() {
         const LINE_COUNT: usize = 45_000;
         let lines = std::iter::once(format!("@@ -1,{LINE_COUNT} +1,{LINE_COUNT} @@"))
             .chain((1..LINE_COUNT).map(|line| format!(" line {line:05}: cache churn payload")))
@@ -388,10 +272,6 @@ mod tests {
                 cache.insert(tab_id, CachedView::new(Arc::clone(&view))),
                 CacheDisposition::Cached
             );
-            assert!(cache.weight() <= crate::DEFAULT_VIEW_CACHE_WEIGHT);
-
-            let fragment: Arc<str> = Arc::from("x".repeat(512 * 1024));
-            let _ = cache.insert_fragment(tab_id, RenderOptions::DEFAULT, fragment);
             assert!(cache.weight() <= crate::DEFAULT_VIEW_CACHE_WEIGHT);
 
             if raw_id > 2 {
