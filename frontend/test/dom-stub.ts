@@ -93,6 +93,17 @@ if (typeof globalThis.document === "undefined") {
       this.parentNode?.removeChild(this);
     }
 
+    replaceWith(replacement: StubNode): void {
+      const parent = this.parentNode;
+      if (!parent) return;
+      const index = parent.childNodes.indexOf(this);
+      if (index === -1) return;
+      replacement.remove();
+      this.parentNode = null;
+      replacement.parentNode = parent;
+      parent.childNodes[index] = replacement;
+    }
+
     replaceChildren(...children: StubNode[]): void {
       this.childNodes.forEach((child) => {
         child.parentNode = null;
@@ -245,6 +256,20 @@ if (typeof globalThis.document === "undefined") {
       return this.#innerHTML;
     }
 
+    cloneNode(deep = false): StubElement {
+      const clone = new StubElement(this.tagName);
+      this.#attributes.forEach((value, name) => clone.setAttribute(name, value));
+      clone.className = this.className;
+      clone.id = this.id;
+      clone.textContent = this.textContent;
+      if (deep) {
+        this.childNodes.forEach((child) => {
+          if (child instanceof StubElement) clone.appendChild(child.cloneNode(true));
+        });
+      }
+      return clone;
+    }
+
     setAttribute(name: string, value: string): void {
       this.#attributes.set(name, value);
       if (name === "id") this.id = value;
@@ -369,6 +394,7 @@ if (typeof globalThis.document === "undefined") {
     Node: { value: StubNode },
     Element: { value: StubElement },
     HTMLElement: { value: StubElement },
+    HTMLTemplateElement: { value: StubElement },
     HTMLDetailsElement: { value: StubElement },
     HTMLInputElement: { value: StubElement },
     document: { value: new StubDocument(), writable: true },

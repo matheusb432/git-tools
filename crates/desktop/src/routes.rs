@@ -21,7 +21,7 @@ use tauri::http::{Request, Response, StatusCode};
 
 use crate::{
     presentation::ViewerApp,
-    recipes::{OpenRecipeOutcome, RecipeError},
+    recipes::RecipeError,
     render::SwapFeedback,
     session::{CloseOutcome, PendingRecipesError},
 };
@@ -102,7 +102,9 @@ pub(crate) fn serve_app(app: &ViewerApp, request: Request<Vec<u8>>) -> Response<
 fn error_target(route: &Route) -> ErrorTarget {
     match route {
         Route::Document { .. } | Route::Settings(_) => ErrorTarget::Document,
-        Route::View { .. } | Route::Refresh { .. } | Route::Activate { .. } => ErrorTarget::View,
+        Route::View { .. } | Route::Refresh { .. } | Route::Activate { .. } | Route::Ready => {
+            ErrorTarget::View
+        }
         Route::Close { .. }
         | Route::DeleteLiveView { .. }
         | Route::OpenHistory { .. }
@@ -158,11 +160,32 @@ fn serve_route(app: &ViewerApp, route: Route) -> RouteResult {
         Route::OpenHistory { render } => open_history(app, render),
         Route::Settings(change) => settings(app, change),
         Route::Pending => pending(app),
+        Route::Ready => ready(app),
         Route::OpenDiffFile {
             tab,
             diff_file_path,
         } => open_diff_file::serve(app, tab, diff_file_path),
     }
+}
+
+fn ready(app: &ViewerApp) -> RouteResult {
+    let state = {
+        let session = app.session.lock().map_err(|error| error.to_string())?;
+        session
+            .active()
+            .and_then(|id| session.tab(id))
+            .map(|tab| tab.tab.state().clone())
+    };
+    if matches!(
+        state,
+        Some(ViewerTabState::Error { ref reason }) if reason == "render pending"
+    ) {
+        return Ok(status_response(StatusCode::NO_CONTENT));
+    }
+    let settings = load_settings(app);
+    render::view_with_tabs(app.renderer, &app.session, None, settings)
+        .map(html_response)
+        .map_err(Into::into)
 }
 
 fn document(app: &ViewerApp) -> RouteResult {
@@ -195,15 +218,8 @@ fn refresh(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     if !tab_exists(app, tab)? {
         return Ok(status_response(StatusCode::NOT_FOUND));
     }
-    let result = app.refresh_recipe(tab)?;
-    let transient = result.view.map(|view| render::VersionedView {
-        ticket: result.ticket,
-        view,
-    });
-    let settings = load_settings(app);
-    render::view_with_tabs(app.renderer, &app.session, transient, settings)
-        .map(html_response)
-        .map_err(Into::into)
+    app.refresh_recipe(tab)?;
+    Ok(status_response(StatusCode::NO_CONTENT))
 }
 
 fn close(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
@@ -261,31 +277,15 @@ fn open_history(app: &ViewerApp, id: application::viewer::RenderHistoryId) -> Ro
     else {
         return Ok(status_response(StatusCode::NOT_FOUND));
     };
-    let opened = app.open_recipe(
+    app.open_recipe(
         &entry.recipe,
         format!("history-{id}"),
         ViewerTabKind::Snapshot,
     )?;
-    let transient = match opened {
-        OpenRecipeOutcome::Opened(opened) => {
-            debug_assert_eq!(opened.tab_id, opened.ticket.tab_id);
-            opened.view.map(|view| render::VersionedView {
-                ticket: opened.ticket,
-                view,
-            })
-        }
-        OpenRecipeOutcome::Skipped { .. } => None,
-    };
     let settings = load_settings(app);
-    render::tabs_with_view(
-        app.renderer,
-        &app.session,
-        transient,
-        settings,
-        SwapFeedback::None,
-    )
-    .map(html_response)
-    .map_err(Into::into)
+    render::tabs_only(app.renderer, &app.session, settings, SwapFeedback::None)
+        .map(html_response)
+        .map_err(Into::into)
 }
 
 fn settings(app: &ViewerApp, change: SettingChange) -> RouteResult {
@@ -306,41 +306,20 @@ fn pending_transaction(app: &ViewerApp) -> RouteResult {
     let batches = app.pending().try_drain()?;
     match process_pending(batches, |recipe, batch_id, kind| {
         app.open_recipe(recipe, batch_id.into(), viewer_tab_kind(kind))
-            .map(|outcome| match outcome {
-                OpenRecipeOutcome::Opened(opened) => PendingRecipeOutcome::Opened(opened),
-                OpenRecipeOutcome::Skipped { label } => PendingRecipeOutcome::Skipped(label),
-            })
+            .map(PendingRecipeOutcome::Opened)
     }) {
         Ok(processed) => {
             let PendingProcess {
-                latest_opened,
+                latest_opened: _,
                 skipped_labels,
             } = processed;
-            let transient = latest_opened.and_then(|opened| {
-                debug_assert_eq!(opened.tab_id, opened.ticket.tab_id);
-                opened.view.map(|view| render::VersionedView {
-                    ticket: opened.ticket,
-                    view,
-                })
-            });
             let settings = load_settings(app);
-            let html = if skipped_labels.is_empty() {
-                render::tabs_with_view(
-                    app.renderer,
-                    &app.session,
-                    transient,
-                    settings,
-                    SwapFeedback::None,
-                )
+            let feedback = if skipped_labels.is_empty() {
+                SwapFeedback::None
             } else {
-                render::tabs_with_view(
-                    app.renderer,
-                    &app.session,
-                    transient,
-                    settings,
-                    SwapFeedback::SnapshotRecipesSkipped(&skipped_labels),
-                )
-            }?;
+                SwapFeedback::SnapshotRecipesSkipped(&skipped_labels)
+            };
+            let html = render::tabs_only(app.renderer, &app.session, settings, feedback)?;
             Ok(html_response(html))
         }
         Err(failure) => {
@@ -353,6 +332,7 @@ fn pending_transaction(app: &ViewerApp) -> RouteResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PendingRecipeOutcome<T> {
     Opened(T),
+    #[cfg(test)]
     Skipped(String),
 }
 
@@ -384,6 +364,7 @@ fn process_pending<T, E>(
                 Ok(PendingRecipeOutcome::Opened(value)) => {
                     processed.latest_opened = Some(value);
                 }
+                #[cfg(test)]
                 Ok(PendingRecipeOutcome::Skipped(label)) => {
                     processed.skipped_labels.push(label);
                 }
@@ -407,7 +388,6 @@ const fn viewer_tab_kind(kind: RecipeBatchKind) -> ViewerTabKind {
 }
 
 fn restore_live_views(app: &ViewerApp) -> Result<Option<render::VersionedView>, RouteError> {
-    let mut transient = None;
     let owner = app.restoration.run_once(|| {
         let records = application::live_views::list::execute(
             application::live_views::list::ListLiveViews,
@@ -433,16 +413,12 @@ fn restore_live_views(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
             }
         }
         if let Some(tab) = newest {
-            let result = app.refresh_recipe(tab).map_err(|error| error.to_string())?;
-            transient = result.view.map(|view| render::VersionedView {
-                ticket: result.ticket,
-                view,
-            });
+            app.refresh_recipe(tab).map_err(|error| error.to_string())?;
         }
         Ok(())
     })?;
     if owner {
-        Ok(transient)
+        Ok(None)
     } else {
         ensure_active_view(app)
     }
@@ -465,11 +441,8 @@ fn ensure_active_view(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
     let Some(id) = refresh else {
         return Ok(None);
     };
-    let result = app.refresh_recipe(id)?;
-    Ok(result.view.map(|view| render::VersionedView {
-        ticket: result.ticket,
-        view,
-    }))
+    app.refresh_recipe(id)?;
+    Ok(None)
 }
 
 fn tab_exists(app: &ViewerApp, id: ViewerTabId) -> Result<bool, String> {

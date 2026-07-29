@@ -6,6 +6,7 @@ pub use session::{CacheDisposition, CachedView, WeightedViewCache};
 mod commands;
 mod presentation;
 mod protocol_config;
+mod recipe_worker;
 mod recipes;
 mod render;
 mod routes;
@@ -27,6 +28,7 @@ use tauri::{
 use crate::session::{PendingRecipes, PendingRecipesError};
 
 const DEFAULT_VIEW_CACHE_WEIGHT: usize = 128 * 1024 * 1024;
+const RECIPE_COMPLETED_EVENT: &str = "recipe-completed";
 const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
 const MAIN_WINDOW_SIZE: (f64, f64) = (1200.0, 800.0);
 const MAIN_WINDOW_MIN_SIZE: (f64, f64) = (390.0, 480.0);
@@ -298,6 +300,19 @@ pub fn run() {
             },
         )
         .setup(move |app| {
+            if let Some(completions) = app
+                .state::<presentation::ViewerApp>()
+                .take_recipe_completions()
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    while let Ok(completion) = completions.recv() {
+                        if app_handle.emit(RECIPE_COMPLETED_EVENT, completion).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
             if let Err(error) = enqueue_batches(
                 app.state::<presentation::ViewerApp>().pending(),
                 cold_start_batches,

@@ -56,6 +56,7 @@ pub(crate) enum Route {
     },
     Settings(SettingChange),
     Pending,
+    Ready,
     OpenDiffFile {
         tab: ViewerTabId,
         diff_file_path: PathBuf,
@@ -89,6 +90,7 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
         ["history", _, "open"] => RouteShape::OpenHistory,
         ["settings"] => RouteShape::Settings,
         ["pending"] => RouteShape::Pending,
+        ["ready"] => RouteShape::Ready,
         _ => return Err(StatusCode::NOT_FOUND),
     };
     let expected_method = match shape {
@@ -141,6 +143,10 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
             reject_query(uri.query())?;
             Ok(Route::Pending)
         }
+        RouteShape::Ready => {
+            reject_query(uri.query())?;
+            Ok(Route::Ready)
+        }
     }
 }
 
@@ -172,6 +178,7 @@ enum RouteShape {
     OpenHistory,
     Settings,
     Pending,
+    Ready,
 }
 
 fn tab_route(
@@ -308,6 +315,7 @@ mod tests {
                 },
             ),
             (app_uri("/history"), Method::GET, Route::History),
+            (app_uri("/ready"), Method::GET, Route::Ready),
             (
                 app_uri("/history/42/open"),
                 Method::GET,
@@ -401,6 +409,7 @@ mod tests {
             "/history/42/open",
             "/settings?theme=dark",
             "/pending",
+            "/ready",
         ] {
             assert_eq!(
                 parse(&request(Method::POST, &app_uri(route))),

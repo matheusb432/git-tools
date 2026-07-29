@@ -13,18 +13,19 @@ use infra::{
 pub(crate) use restoration::RestorationGate;
 
 use crate::{
+    recipe_worker::{RecipeCompletion, RecipeWorker},
+    recipes::RecipeExecutor,
     render::MaudViewerRenderer,
     session::{PendingRecipes, ViewerSession},
 };
 
 #[derive(Clone)]
 pub(crate) struct ViewerApp {
-    pub(crate) clock: SystemClock,
     pub(crate) app_state: SqliteAppState,
-    pub(crate) git: HybridGitClient,
     pub(crate) file_system: LocalFileSystemClient,
     pub(crate) configured_editor: GitConfiguredEditorClient,
     pub(crate) session: Arc<Mutex<ViewerSession>>,
+    pub(crate) recipe_worker: RecipeWorker,
     pending: Arc<PendingRecipes>,
     pub(crate) renderer: MaudViewerRenderer,
     pub(crate) user_settings: TomlSettingsStore,
@@ -38,13 +39,23 @@ impl ViewerApp {
         max_cache_weight: usize,
     ) -> anyhow::Result<Self> {
         let app_state = SqliteAppState::open(data_root)?;
+        let clock = SystemClock;
+        let git = HybridGitClient;
+        let session = Arc::new(Mutex::new(ViewerSession::new(max_cache_weight)));
+        let recipe_worker = RecipeWorker::start(RecipeExecutor::new(
+            app_state.clone(),
+            clock,
+            git,
+            Arc::clone(&session),
+            user_settings.clone(),
+        ))
+        .map_err(anyhow::Error::msg)?;
         Ok(Self {
-            clock: SystemClock,
             app_state,
-            git: HybridGitClient,
             file_system: LocalFileSystemClient,
             configured_editor: GitConfiguredEditorClient,
-            session: Arc::new(Mutex::new(ViewerSession::new(max_cache_weight))),
+            session,
+            recipe_worker,
             pending: Arc::new(PendingRecipes::default()),
             renderer: MaudViewerRenderer,
             user_settings,
@@ -54,5 +65,11 @@ impl ViewerApp {
 
     pub(crate) fn pending(&self) -> &PendingRecipes {
         &self.pending
+    }
+
+    pub(crate) fn take_recipe_completions(
+        &self,
+    ) -> Option<std::sync::mpsc::Receiver<RecipeCompletion>> {
+        self.recipe_worker.take_completions()
     }
 }

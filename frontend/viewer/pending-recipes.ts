@@ -76,7 +76,12 @@ export async function installPendingRecipes(host: unknown): Promise<void> {
   const runtime = readViewerRuntime(host);
   if (!runtime) return;
   const drain = createCoalescedDrain(
-    () => runtime.htmx.ajax("GET", PENDING_RECIPES_ROUTE, { target: PENDING_TABS_TARGET, swap: PENDING_TABS_SWAP }),
+    () => {
+      if (typeof host === "object" && host !== null && "document" in host && host.document instanceof Document) {
+        showViewerLoading(host.document);
+      }
+      return runtime.htmx.ajax("GET", PENDING_RECIPES_ROUTE, { target: PENDING_TABS_TARGET, swap: PENDING_TABS_SWAP });
+    },
     (error) => console.error("failed to drain pending recipes", error),
   );
   try {
@@ -87,3 +92,4 @@ export async function installPendingRecipes(host: unknown): Promise<void> {
   }
   await drain();
 }
+import { showViewerLoading } from "./view-loading";

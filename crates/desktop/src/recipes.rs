@@ -45,45 +45,10 @@ impl From<String> for RecipeError {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OpenedRecipe {
-    pub(crate) tab_id: ViewerTabId,
+pub(crate) struct ReservedRecipeComputation {
+    pub(crate) recipe: Recipe,
+    pub(crate) kind: ViewerTabKind,
     pub(crate) ticket: ComputeTicket,
-    pub(crate) view: Option<Arc<View>>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum OpenRecipeOutcome {
-    Opened(OpenedRecipe),
-    Skipped { label: String },
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct RefreshedRecipe {
-    pub(crate) ticket: ComputeTicket,
-    pub(crate) view: Option<Arc<View>>,
-}
-
-#[derive(Debug, Clone)]
-enum ComputationOutcome {
-    Rendered(Arc<View>),
-    Skipped { label: String },
-    StateOnly,
-}
-
-impl ComputationOutcome {
-    fn into_view(self) -> Option<Arc<View>> {
-        match self {
-            Self::Rendered(view) => Some(view),
-            Self::Skipped { .. } | Self::StateOnly => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct ReservedRecipeComputation {
-    recipe: Recipe,
-    kind: ViewerTabKind,
-    ticket: ComputeTicket,
 }
 
 impl ReservedRecipeComputation {
@@ -134,46 +99,36 @@ impl ReservedRecipeComputation {
     }
 }
 
-impl ViewerApp {
-    pub(crate) fn open_recipe(
-        &self,
-        recipe: &Recipe,
-        batch_id: String,
-        kind: ViewerTabKind,
-    ) -> Result<OpenRecipeOutcome, RecipeError> {
-        let (tab_id, reserved) =
-            ReservedRecipeComputation::reserve_open(&self.session, recipe, batch_id, kind)?;
-        let ticket = reserved.ticket;
+#[derive(Clone)]
+pub(crate) struct RecipeExecutor {
+    app_state: infra::app_state::SqliteAppState,
+    clock: infra::clock::SystemClock,
+    git: infra::git_client::HybridGitClient,
+    session: Arc<Mutex<ViewerSession>>,
+    user_settings: infra::user_config::TomlSettingsStore,
+}
 
-        match self.compute_and_publish(reserved)? {
-            ComputationOutcome::Rendered(view) => Ok(OpenRecipeOutcome::Opened(OpenedRecipe {
-                tab_id,
-                ticket,
-                view: Some(view),
-            })),
-            ComputationOutcome::StateOnly => Ok(OpenRecipeOutcome::Opened(OpenedRecipe {
-                tab_id,
-                ticket,
-                view: None,
-            })),
-            ComputationOutcome::Skipped { label } => Ok(OpenRecipeOutcome::Skipped { label }),
+impl RecipeExecutor {
+    pub(crate) fn new(
+        app_state: infra::app_state::SqliteAppState,
+        clock: infra::clock::SystemClock,
+        git: infra::git_client::HybridGitClient,
+        session: Arc<Mutex<ViewerSession>>,
+        user_settings: infra::user_config::TomlSettingsStore,
+    ) -> Self {
+        Self {
+            app_state,
+            clock,
+            git,
+            session,
+            user_settings,
         }
     }
 
-    pub(crate) fn refresh_recipe(
-        &self,
-        tab_id: ViewerTabId,
-    ) -> Result<RefreshedRecipe, RecipeError> {
-        let reserved = ReservedRecipeComputation::reserve_refresh(&self.session, tab_id)?;
-        let ticket = reserved.ticket;
-        let view = self.compute_and_publish(reserved)?.into_view();
-        Ok(RefreshedRecipe { ticket, view })
-    }
-
-    fn compute_and_publish(
+    pub(crate) fn compute_and_publish(
         &self,
         reserved: ReservedRecipeComputation,
-    ) -> Result<ComputationOutcome, RecipeError> {
+    ) -> Result<(), RecipeError> {
         let ReservedRecipeComputation {
             recipe,
             kind,
@@ -195,7 +150,7 @@ impl ViewerApp {
             if session.set_state_if_current(ticket, state) == PublishOutcome::Stale {
                 return Err(RecipeError::Stale);
             }
-            return Ok(ComputationOutcome::StateOnly);
+            return Ok(());
         }
 
         let view = match compute_recipe::execute(
@@ -208,7 +163,7 @@ impl ViewerApp {
             Ok(response) => response.view,
             Err(reason) => {
                 publish_compute_error(&self.session, ticket, &format!("{reason:#}"))?;
-                return Ok(ComputationOutcome::StateOnly);
+                return Ok(());
             }
         };
 
@@ -217,14 +172,13 @@ impl ViewerApp {
             kind,
             view,
         }) {
-            CompleteRecipeComputationOk::Skipped { label } => {
+            CompleteRecipeComputationOk::Skipped { .. } => {
                 let mut session = self
                     .session
                     .lock()
                     .map_err(|error| RecipeError::Failed(error.to_string()))?;
-                match session.close_if_current(ticket) {
-                    PublishOutcome::Published => Ok(ComputationOutcome::Skipped { label }),
-                    PublishOutcome::Stale => Err(RecipeError::Stale),
+                if session.close_if_current(ticket) == PublishOutcome::Stale {
+                    return Err(RecipeError::Stale);
                 }
             }
             CompleteRecipeComputationOk::Publish { label, view } => {
@@ -243,9 +197,59 @@ impl ViewerApp {
                     return Err(RecipeError::Stale);
                 }
                 record_render(&self.app_state, &self.clock, recipe, &view, label);
-                Ok(ComputationOutcome::Rendered(view))
             }
         }
+        Ok(())
+    }
+
+    pub(crate) fn publish_failure(&self, ticket: ComputeTicket, reason: &str) {
+        if let Err(error) = publish_compute_error(&self.session, ticket, reason)
+            && error != RecipeError::Stale
+        {
+            eprintln!("gtl-viewer: failed to publish recipe error: {error}");
+        }
+    }
+}
+
+impl ViewerApp {
+    pub(crate) fn open_recipe(
+        &self,
+        recipe: &Recipe,
+        batch_id: String,
+        kind: ViewerTabKind,
+    ) -> Result<ViewerTabId, RecipeError> {
+        let (tab_id, reserved) =
+            ReservedRecipeComputation::reserve_open(&self.session, recipe, batch_id, kind)?;
+        self.enqueue(reserved)?;
+        Ok(tab_id)
+    }
+
+    pub(crate) fn refresh_recipe(&self, tab_id: ViewerTabId) -> Result<(), RecipeError> {
+        let reserved = ReservedRecipeComputation::reserve_refresh(&self.session, tab_id)?;
+        self.enqueue(reserved)?;
+        Ok(())
+    }
+
+    fn enqueue(&self, reserved: ReservedRecipeComputation) -> Result<(), RecipeError> {
+        let ticket = reserved.ticket;
+        let active = self
+            .session
+            .lock()
+            .map_err(|error| RecipeError::Failed(error.to_string()))?
+            .active()
+            == Some(ticket.tab_id);
+        self.recipe_worker
+            .submit(reserved, active)
+            .map_err(|error| {
+                publish_compute_error(&self.session, ticket, &error.to_string()).unwrap_or_else(
+                    |publish_error| {
+                        eprintln!(
+                            "gtl-viewer: failed to publish recipe queue error: {publish_error}"
+                        );
+                    },
+                );
+                RecipeError::Failed(error.to_string())
+            })
     }
 }
 

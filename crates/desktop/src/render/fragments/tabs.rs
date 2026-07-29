@@ -44,7 +44,8 @@ pub(in crate::render) fn tabs(
                         "viewer-tab active flex min-w-[112px] max-w-60 items-center rounded-t-panel border border-b-0 border-line-2 bg-bg text-ink shadow-[inset_0_2px_0_var(--acc)] [@media(max-width:760px)]:min-w-24 [@media(max-width:760px)]:rounded-none [@media(max-width:760px)]:border-0 [@media(max-width:760px)]:bg-transparent [@media(max-width:760px)]:shadow-[inset_0_-2px_0_var(--acc)]"
                     } else {
                         "viewer-tab flex min-w-[112px] max-w-60 items-center rounded-t-panel border border-b-0 border-transparent bg-surface-2 text-ink-2 hover:border-line-2 hover:text-ink [@media(max-width:760px)]:min-w-24 [@media(max-width:760px)]:rounded-none [@media(max-width:760px)]:border-0 [@media(max-width:760px)]:bg-transparent"
-                    }) {
+                    })
+                        aria-busy=[matches!(tab.state(), ViewerTabState::Error { reason } if reason == "render pending").then_some("true")] {
                         button type="button"
                             class="viewer-tab-activate flex min-w-0 flex-1 cursor-pointer items-center gap-[7px] border-0 bg-transparent py-2 pr-1 pl-2.5 text-left text-inherit [font:inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc"
                             aria-current=[active.then_some("page")]

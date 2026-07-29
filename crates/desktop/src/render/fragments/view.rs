@@ -16,6 +16,7 @@ pub(in crate::render) fn view(
         None => "empty",
         Some(ViewerTabState::Ready) => "ready",
         Some(ViewerTabState::Broken { .. }) => "broken",
+        Some(ViewerTabState::Error { reason }) if reason == "render pending" => "loading",
         Some(ViewerTabState::Error { .. }) => "error",
     };
 
@@ -38,6 +39,7 @@ pub(in crate::render) fn view(
                         (preview::view_fragment(view.view(), view.options(), view.tab_id()))
                     },
                     ViewerTabState::Broken { code, reason } => (broken_view(tab, code, reason)),
+                    ViewerTabState::Error { reason } if reason == "render pending" => {},
                     ViewerTabState::Error { reason } => (error_view(tab, reason)),
                 }
             }
