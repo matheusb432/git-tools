@@ -20,10 +20,11 @@ pub(crate) use parse::{ResumeNonce, Route, SettingChange, parse};
 use tauri::http::{Request, Response, StatusCode};
 
 use crate::{
+    materialization::{MaterializationError, ViewLoadId},
     presentation::ViewerApp,
     recipes::RecipeError,
     render::SwapFeedback,
-    session::{CloseOutcome, PendingRecipesError},
+    session::{CloseOutcome, PendingRecipesError, RENDER_PENDING_REASON},
 };
 
 const HTML_CONTENT_TYPE: &str = "text/html; charset=utf-8";
@@ -72,6 +73,17 @@ impl From<PendingRecipesError> for RouteError {
     }
 }
 
+impl From<MaterializationError> for RouteError {
+    fn from(value: MaterializationError) -> Self {
+        match value {
+            MaterializationError::Conflict => Self::Conflict,
+            MaterializationError::ExhaustedIds | MaterializationError::StatePoisoned => {
+                Self::Internal(value.to_string())
+            }
+        }
+    }
+}
+
 impl From<RecipeError> for RouteError {
     fn from(value: RecipeError) -> Self {
         match value {
@@ -110,7 +122,7 @@ fn error_target(route: &Route) -> ErrorTarget {
         | Route::OpenHistory { .. }
         | Route::Pending => ErrorTarget::Tabs,
         Route::History => ErrorTarget::History,
-        Route::OpenDiffFile { .. } => ErrorTarget::Action,
+        Route::OpenDiffFile { .. } | Route::LoadNext { .. } => ErrorTarget::Action,
     }
 }
 
@@ -161,6 +173,7 @@ fn serve_route(app: &ViewerApp, route: Route) -> RouteResult {
         Route::Settings(change) => settings(app, change),
         Route::Pending => pending(app),
         Route::Ready => ready(app),
+        Route::LoadNext { load } => load_next(app, load),
         Route::OpenDiffFile {
             tab,
             diff_file_path,
@@ -169,32 +182,47 @@ fn serve_route(app: &ViewerApp, route: Route) -> RouteResult {
 }
 
 fn ready(app: &ViewerApp) -> RouteResult {
-    let state = {
+    let render_pending = {
         let session = app.session.lock().map_err(|error| error.to_string())?;
         session
             .active()
             .and_then(|id| session.tab(id))
-            .map(|tab| tab.tab.state().clone())
+            .is_some_and(|tab| {
+                matches!(
+                    tab.tab.state(),
+                    ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON
+                )
+            })
     };
-    if matches!(
-        state,
-        Some(ViewerTabState::Error { ref reason }) if reason == "render pending"
-    ) {
+    if render_pending {
         return Ok(status_response(StatusCode::NO_CONTENT));
     }
     let settings = load_settings(app);
-    render::view_with_tabs(app.renderer, &app.session, None, settings)
+    let load_id = prepare_materialization(app, settings.options())?;
+    render::view_with_tabs(app.renderer, &app.session, None, settings, load_id)
         .map(html_response)
         .map_err(Into::into)
+}
+
+fn load_next(app: &ViewerApp, load: ViewLoadId) -> RouteResult {
+    let page = app.materializations.next(&app.session, load)?;
+    Ok(html_response(render::chunk(load, page)))
 }
 
 fn document(app: &ViewerApp) -> RouteResult {
     let transient = restore_live_views(app)?;
     let settings = load_settings(app);
     let history = load_history(app)?;
-    render::document(app.renderer, &app.session, transient, history, settings)
-        .map(html_response)
-        .map_err(Into::into)
+    render::document(
+        app.renderer,
+        &app.session,
+        transient,
+        history,
+        settings,
+        true,
+    )
+    .map(html_response)
+    .map_err(Into::into)
 }
 
 fn view(app: &ViewerApp, tab: ViewerTabId, options: RenderOptions) -> RouteResult {
@@ -209,7 +237,8 @@ fn view(app: &ViewerApp, tab: ViewerTabId, options: RenderOptions) -> RouteResul
     let transient = ensure_active_view(app)?;
     let theme = load_settings(app).theme();
     let settings = ViewerSettings::new(options, theme);
-    render::view_with_tabs(app.renderer, &app.session, transient, settings)
+    let load_id = prepare_materialization(app, settings.options())?;
+    render::view_with_tabs(app.renderer, &app.session, transient, settings, load_id)
         .map(html_response)
         .map_err(Into::into)
 }
@@ -237,15 +266,10 @@ fn close(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
             .map_err(Into::into);
     }
     let transient = ensure_active_view(app)?;
-    render::tabs_with_view(
-        app.renderer,
-        &app.session,
-        transient,
-        settings,
-        SwapFeedback::None,
-    )
-    .map(html_response)
-    .map_err(Into::into)
+    let load_id = prepare_materialization(app, settings.options())?;
+    render::view_with_tabs(app.renderer, &app.session, transient, settings, load_id)
+        .map(html_response)
+        .map_err(Into::into)
 }
 
 fn activate(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
@@ -259,7 +283,8 @@ fn activate(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     }
     let transient = ensure_active_view(app)?;
     let settings = load_settings(app);
-    render::view_with_tabs(app.renderer, &app.session, transient, settings)
+    let load_id = prepare_materialization(app, settings.options())?;
+    render::view_with_tabs(app.renderer, &app.session, transient, settings, load_id)
         .map(html_response)
         .map_err(Into::into)
 }
@@ -433,7 +458,7 @@ fn ensure_active_view(app: &ViewerApp) -> Result<Option<render::VersionedView>, 
         let state = session.tab(id).map(|tab| tab.tab.state().clone());
         let needs_compute = match state {
             Some(ViewerTabState::Ready) => session.cached_view_snapshot(id).is_none(),
-            Some(ViewerTabState::Error { reason }) => reason == "render pending",
+            Some(ViewerTabState::Error { reason }) => reason == RENDER_PENDING_REASON,
             _ => false,
         };
         needs_compute.then_some(id)
@@ -452,6 +477,15 @@ fn tab_exists(app: &ViewerApp, id: ViewerTabId) -> Result<bool, String> {
         .map_err(|error| error.to_string())?
         .tab(id)
         .is_some())
+}
+
+fn prepare_materialization(
+    app: &ViewerApp,
+    options: RenderOptions,
+) -> Result<Option<ViewLoadId>, RouteError> {
+    app.materializations
+        .prepare(&app.session, options)
+        .map_err(Into::into)
 }
 
 fn load_history(app: &ViewerApp) -> Result<Vec<ViewerHistoryEntry>, String> {

@@ -13,6 +13,7 @@ use infra::{
 pub(crate) use restoration::RestorationGate;
 
 use crate::{
+    materialization::ViewMaterializations,
     recipe_worker::{RecipeCompletion, RecipeWorker},
     recipes::RecipeExecutor,
     render::MaudViewerRenderer,
@@ -26,6 +27,7 @@ pub(crate) struct ViewerApp {
     pub(crate) configured_editor: GitConfiguredEditorClient,
     pub(crate) session: Arc<Mutex<ViewerSession>>,
     pub(crate) recipe_worker: RecipeWorker,
+    pub(crate) materializations: Arc<ViewMaterializations>,
     pending: Arc<PendingRecipes>,
     pub(crate) renderer: MaudViewerRenderer,
     pub(crate) user_settings: TomlSettingsStore,
@@ -56,6 +58,7 @@ impl ViewerApp {
             configured_editor: GitConfiguredEditorClient,
             session,
             recipe_worker,
+            materializations: Arc::new(ViewMaterializations::default()),
             pending: Arc::new(PendingRecipes::default()),
             renderer: MaudViewerRenderer,
             user_settings,

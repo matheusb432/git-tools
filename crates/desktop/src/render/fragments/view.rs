@@ -5,25 +5,37 @@ use application::viewer::{ViewerDocument, ViewerTab, ViewerTabKind, ViewerTabSta
 use maud::{Markup, html};
 
 use super::{SwapFeedback, SwapMode, controls};
-use crate::render::ViewerRoute;
+use crate::{
+    materialization::ViewLoadId,
+    render::{
+        VIEW_STATE_BROKEN, VIEW_STATE_EMPTY, VIEW_STATE_ERROR, VIEW_STATE_LOADING,
+        VIEW_STATE_READY, ViewerRoute,
+    },
+    session::RENDER_PENDING_REASON,
+};
 
 pub(in crate::render) fn view(
     document: &ViewerDocument,
     swap: SwapMode,
     feedback: SwapFeedback<'_>,
+    load_id: Option<ViewLoadId>,
+    defer_ready: bool,
 ) -> Markup {
     let state = match document.active_tab().map(ViewerTab::state) {
-        None => "empty",
-        Some(ViewerTabState::Ready) => "ready",
-        Some(ViewerTabState::Broken { .. }) => "broken",
-        Some(ViewerTabState::Error { reason }) if reason == "render pending" => "loading",
-        Some(ViewerTabState::Error { .. }) => "error",
+        None => VIEW_STATE_EMPTY,
+        Some(ViewerTabState::Ready) if defer_ready => VIEW_STATE_LOADING,
+        Some(ViewerTabState::Ready) => VIEW_STATE_READY,
+        Some(ViewerTabState::Broken { .. }) => VIEW_STATE_BROKEN,
+        Some(ViewerTabState::Error { reason }) if reason == RENDER_PENDING_REASON => {
+            VIEW_STATE_LOADING
+        }
+        Some(ViewerTabState::Error { .. }) => VIEW_STATE_ERROR,
     };
 
     html! {
         section id="viewer-view"
             hx-swap-oob=[swap.out_of_band()]
-            class=(if state == "ready" {
+            class=(if state == VIEW_STATE_READY {
                 "viewer-view grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft [&>.layout]:h-full [&>.layout]:min-h-0"
             } else {
                 "viewer-view min-h-0 min-w-0 overflow-hidden [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft"
@@ -34,12 +46,18 @@ pub(in crate::render) fn view(
                 None => (empty_view(feedback == SwapFeedback::LiveViewDeleted)),
                 Some(tab) => @match tab.state() {
                     ViewerTabState::Ready => {
-                        @let view = document.active_view().expect("ViewerDocument guarantees a view for the ready active tab");
-                        (controls::view_controls(view, document.settings().theme()))
-                        (preview::view_fragment(view.view(), view.options(), view.tab_id()))
+                        @if !defer_ready {
+                            @let view = document.active_view().expect("ViewerDocument guarantees a view for the ready active tab");
+                            (controls::view_controls(view, document.settings().theme()))
+                            @if let Some(load_id) = load_id {
+                                (preview::view_shell(view.view(), view.options(), view.tab_id(), load_id.get()))
+                            } @else {
+                                (preview::view_fragment(view.view(), view.options(), view.tab_id()))
+                            }
+                        }
                     },
                     ViewerTabState::Broken { code, reason } => (broken_view(tab, code, reason)),
-                    ViewerTabState::Error { reason } if reason == "render pending" => {},
+                    ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON => {},
                     ViewerTabState::Error { reason } => (error_view(tab, reason)),
                 }
             }
@@ -59,6 +77,7 @@ fn broken_view(tab: &ViewerTab, code: &str, reason: &str) -> Markup {
                     class="viewer-recovery-button mt-4 cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-[11px] py-[7px] text-xs text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-line-2 [&.htmx-request]:bg-surface-2 [&.htmx-request]:text-ink"
                     hx-get=(ViewerRoute::Refresh { tab: tab.id() })
                     hx-target="#viewer-view"
+                    hx-sync="#viewer-view:replace"
                     hx-swap="outerHTML" { "Try again" }
                 @if tab.kind() == ViewerTabKind::Live {
                     (controls::delete_live_view_button(tab.id()))
@@ -80,6 +99,7 @@ fn error_view(tab: &ViewerTab, reason: &str) -> Markup {
                     class="viewer-recovery-button mt-4 cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-[11px] py-[7px] text-xs text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-line-2 [&.htmx-request]:bg-surface-2 [&.htmx-request]:text-ink"
                     hx-get=(ViewerRoute::Refresh { tab: tab.id() })
                     hx-target="#viewer-view"
+                    hx-sync="#viewer-view:replace"
                     hx-swap="outerHTML" { "Render again" }
                 @if tab.kind() == ViewerTabKind::Live {
                     (controls::delete_live_view_button(tab.id()))

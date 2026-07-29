@@ -48,6 +48,7 @@ pub(in crate::render) fn history(entries: &[ViewerHistoryEntry]) -> Markup {
                             tabindex="0"
                             hx-get=(ViewerRoute::OpenHistory { render: entry.id() })
                             hx-target="#viewer-tabs"
+                            hx-sync="#viewer-view:replace"
                             hx-swap="outerHTML" {
                             span class="viewer-history-id min-w-0 truncate text-[11px] tabular-nums text-ink-3 [@media(max-width:760px)]:hidden" { "#" (i64::from(entry.id())) }
                             span class="viewer-history-title min-w-0 truncate font-semibold text-ink" { (entry.title()) }

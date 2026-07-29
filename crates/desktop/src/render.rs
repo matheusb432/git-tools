@@ -9,6 +9,13 @@ pub(crate) use document::MaudViewerRenderer;
 pub(crate) use fragments::SwapFeedback;
 use routes::{ViewerRoute, ViewerSettingChange};
 
+// These values form the Rust side of the `data-viewer-state` DOM contract.
+pub(crate) const VIEW_STATE_EMPTY: &str = "empty";
+pub(crate) const VIEW_STATE_LOADING: &str = "loading";
+pub(crate) const VIEW_STATE_READY: &str = "ready";
+pub(crate) const VIEW_STATE_BROKEN: &str = "broken";
+pub(crate) const VIEW_STATE_ERROR: &str = "error";
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -23,7 +30,11 @@ mod tests {
     };
     use strum::VariantArray as _;
 
-    use super::{MaudViewerRenderer, SwapFeedback, ViewerRoute, ViewerSettingChange};
+    use super::{
+        MaudViewerRenderer, SwapFeedback, VIEW_STATE_BROKEN, VIEW_STATE_EMPTY, VIEW_STATE_ERROR,
+        VIEW_STATE_LOADING, VIEW_STATE_READY, ViewerRoute, ViewerSettingChange,
+    };
+    use crate::materialization::ViewLoadId;
 
     const HTMX_SHA256: &str = "71ea67185bfa8c98c39d31717c6fce5d852370fcdfd129db4543774d3145c0de";
 
@@ -269,8 +280,8 @@ mod tests {
             .expect("empty viewer is valid");
         let empty = MaudViewerRenderer.build_view(&empty);
 
-        assert!(ready.contains("data-viewer-state=\"ready\""));
-        assert!(empty.contains("data-viewer-state=\"empty\""));
+        assert!(ready.contains(&format!("data-viewer-state=\"{VIEW_STATE_READY}\"")));
+        assert!(empty.contains(&format!("data-viewer-state=\"{VIEW_STATE_EMPTY}\"")));
 
         for (state, expected) in [
             (
@@ -278,13 +289,13 @@ mod tests {
                     code: "missing".into(),
                     reason: "artifact gone".into(),
                 },
-                "broken",
+                VIEW_STATE_BROKEN,
             ),
             (
                 ViewerTabState::Error {
                     reason: "render failed".into(),
                 },
-                "error",
+                VIEW_STATE_ERROR,
             ),
         ] {
             let id = tab_id(3);
@@ -308,6 +319,27 @@ mod tests {
                 "{html}"
             );
         }
+    }
+
+    #[test]
+    fn deferred_document_paints_loading_chrome_before_rendering_ready_rows() {
+        let html = MaudViewerRenderer.build_deferred_document(&sample_document());
+
+        assert!(html.contains("id=\"viewer-loading-template\""));
+        assert!(html.contains(&format!("data-viewer-state=\"{VIEW_STATE_LOADING}\"")));
+        assert!(!html.contains("class=\"dl "));
+    }
+
+    #[test]
+    fn materialized_view_contains_a_shell_and_one_bounded_loader_chain() {
+        let load_id = ViewLoadId::try_new(17).expect("positive load id");
+        let html =
+            MaudViewerRenderer.build_materialized_view_with_tabs(&sample_document(), load_id);
+
+        assert!(html.contains("id=\"viewer-diff-0\""));
+        assert!(html.contains("id=\"viewer-chunk-loader\""));
+        assert!(html.contains("hx-get=\"/loads/17/next\""));
+        assert!(!html.contains("class=\"dl "));
     }
 
     #[test]
@@ -585,6 +617,9 @@ mod tests {
         assert_eq!(settings_inputs.len(), 8 + Theme::VARIANTS.len());
         for input in settings_inputs {
             assert!(input.contains("hx-params=\"none\""), "{input}");
+            if input.contains("layout=") || input.contains("density=") {
+                assert!(input.contains("hx-sync=\"this:drop\""), "{input}");
+            }
         }
     }
 
@@ -719,9 +754,28 @@ mod tests {
         let open_history = opening_tag_with(&html, "/history/7/open");
 
         assert!(activate.contains("hx-target=\"#viewer-view\""));
-        for tag in [close, open_history] {
-            assert!(tag.contains("hx-target=\"#viewer-tabs\""), "{tag}");
-        }
+        assert!(close.contains("hx-target=\"#viewer-view\""), "{close}");
+        assert!(
+            open_history.contains("hx-target=\"#viewer-tabs\""),
+            "{open_history}"
+        );
+
+        let inactive = ViewerTab::new(
+            tab_id(2),
+            "inactive".into(),
+            ViewerTabKind::Snapshot,
+            ViewerTabState::Ready,
+        );
+        let tabs = MaudViewerRenderer.build_tabs(
+            &[document.tabs()[0].clone(), inactive],
+            Some(tab_id(1)),
+            settings().theme(),
+        );
+        let inactive_close = opening_tag_with(&tabs, "/tabs/2/close");
+        assert!(
+            inactive_close.contains("hx-target=\"#viewer-tabs\""),
+            "{inactive_close}"
+        );
     }
 
     #[test]

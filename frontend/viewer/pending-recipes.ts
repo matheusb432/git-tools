@@ -1,3 +1,5 @@
+import { showViewerLoading } from "./view-loading";
+
 const PENDING_RECIPES_EVENT = "recipes-pending";
 const PENDING_RECIPES_ROUTE = "/pending";
 const PENDING_TABS_TARGET = "#viewer-tabs";
@@ -35,7 +37,9 @@ function readViewerRuntime(host: unknown): ViewerRuntime | null {
   if (typeof host !== "object" || host === null) return null;
   if (!("__TAURI__" in host) || !("htmx" in host)) return null;
   const tauri = host.__TAURI__;
-  if (typeof tauri !== "object" || tauri === null || !("event" in tauri)) return null;
+  if (typeof tauri !== "object" || tauri === null || !("event" in tauri)) {
+    return null;
+  }
   const events = tauri.event;
   const htmx = host.htmx;
   return listensToEvents(events) && sendsAjax(htmx) ? { events, htmx } : null;
@@ -76,20 +80,24 @@ export async function installPendingRecipes(host: unknown): Promise<void> {
   const runtime = readViewerRuntime(host);
   if (!runtime) return;
   const drain = createCoalescedDrain(
-    () => {
-      if (typeof host === "object" && host !== null && "document" in host && host.document instanceof Document) {
-        showViewerLoading(host.document);
-      }
-      return runtime.htmx.ajax("GET", PENDING_RECIPES_ROUTE, { target: PENDING_TABS_TARGET, swap: PENDING_TABS_SWAP });
-    },
+    () =>
+      runtime.htmx.ajax("GET", PENDING_RECIPES_ROUTE, {
+        target: PENDING_TABS_TARGET,
+        swap: PENDING_TABS_SWAP,
+      }),
     (error) => console.error("failed to drain pending recipes", error),
   );
+  const drainAfterEvent = (): void => {
+    if (typeof host === "object" && host !== null && "document" in host && host.document instanceof Document) {
+      showViewerLoading(host.document);
+    }
+    void drain();
+  };
   try {
-    await runtime.events.listen(PENDING_RECIPES_EVENT, () => void drain());
+    await runtime.events.listen(PENDING_RECIPES_EVENT, drainAfterEvent);
   } catch (error) {
     console.error("failed to subscribe to pending recipes", error);
     return;
   }
   await drain();
 }
-import { showViewerLoading } from "./view-loading";

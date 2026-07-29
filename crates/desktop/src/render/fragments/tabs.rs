@@ -6,7 +6,7 @@ use application::viewer::{Theme, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTa
 use maud::{Markup, PreEscaped, html};
 
 use super::{SwapFeedback, SwapMode, theme};
-use crate::render::ViewerRoute;
+use crate::{render::ViewerRoute, session::RENDER_PENDING_REASON};
 
 const FILES_ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>"#;
 const HISTORY_ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>"#;
@@ -45,7 +45,7 @@ pub(in crate::render) fn tabs(
                     } else {
                         "viewer-tab flex min-w-[112px] max-w-60 items-center rounded-t-panel border border-b-0 border-transparent bg-surface-2 text-ink-2 hover:border-line-2 hover:text-ink [@media(max-width:760px)]:min-w-24 [@media(max-width:760px)]:rounded-none [@media(max-width:760px)]:border-0 [@media(max-width:760px)]:bg-transparent"
                     })
-                        aria-busy=[matches!(tab.state(), ViewerTabState::Error { reason } if reason == "render pending").then_some("true")] {
+                        aria-busy=[matches!(tab.state(), ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON).then_some("true")] {
                         button type="button"
                             class="viewer-tab-activate flex min-w-0 flex-1 cursor-pointer items-center gap-[7px] border-0 bg-transparent py-2 pr-1 pl-2.5 text-left text-inherit [font:inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc"
                             aria-current=[active.then_some("page")]
@@ -53,6 +53,7 @@ pub(in crate::render) fn tabs(
                             title=(tab.label())
                             hx-get=(ViewerRoute::Activate { tab: tab.id() })
                             hx-target="#viewer-view"
+                            hx-sync="#viewer-view:replace"
                             hx-swap="outerHTML" {
                             span class="viewer-tab-kind inline-flex size-[17px] flex-none items-center justify-center rounded-sm border border-line-2 text-[9px] font-bold text-ink-3" aria-hidden="true" { (tab_kind_label(tab.kind())) }
                             span class="viewer-tab-label min-w-0 truncate text-[12.5px]" { (tab.label()) }
@@ -63,7 +64,8 @@ pub(in crate::render) fn tabs(
                             aria-label={ "Close " (tab.label()) }
                             title="Close tab"
                             hx-get=(ViewerRoute::Close { tab: tab.id() })
-                            hx-target="#viewer-tabs"
+                            hx-target=(if active { "#viewer-view" } else { "#viewer-tabs" })
+                            hx-sync=[active.then_some("#viewer-view:replace")]
                             hx-swap="outerHTML" { "×" }
                     }
                 }

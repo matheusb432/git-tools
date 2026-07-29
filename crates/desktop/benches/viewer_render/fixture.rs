@@ -23,6 +23,12 @@ impl ViewerRenderBenchmark {
         }
     }
 
+    pub(super) fn fixture_115_files() -> Self {
+        Self {
+            view: Arc::new(view_fixture::many_file_view()),
+        }
+    }
+
     pub(super) fn render(&self, options: RenderOptions) -> String {
         let tab_id = ViewerTabId::try_new(1).expect("fixture tab id is positive");
         let document = ViewerDocument::new(
@@ -48,5 +54,19 @@ impl ViewerRenderBenchmark {
 
     pub(super) fn render_raw(&self) -> String {
         preview::build_html(&self.view, RenderOptions::DEFAULT, Some("dark"))
+    }
+
+    pub(super) fn render_shell(&self, options: RenderOptions) -> String {
+        preview::view_shell(
+            &self.view,
+            options,
+            ViewerTabId::try_new(1).expect("fixture tab id is positive"),
+            1,
+        )
+        .into_string()
+    }
+
+    pub(super) fn render_chunks(&self, options: RenderOptions) -> Vec<preview::ViewChunk> {
+        preview::view_chunks(&self.view, options).into()
     }
 }

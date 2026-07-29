@@ -14,6 +14,8 @@ use crate::{
 };
 
 const GIANT_FILE_CHARS: usize = 250_000;
+const MAX_CHUNK_ROWS: usize = 256;
+const MAX_CHUNK_BYTES: usize = 256 * 1024;
 const ROW_PX: usize = 22;
 const COPY_BUTTON_CLASSES: &str = concat!(
     "copy-button cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-1.5 py-px text-[10px] tracking-[.04em] text-acc [font:inherit] ",
@@ -105,12 +107,31 @@ fn filebody_presentation(surface: Surface, file: &FileDiff) -> (&'static str, Op
 }
 
 pub(super) fn file_blocks(view: &View, options: RenderOptions, surface: Surface) -> Markup {
+    file_blocks_with_mode(view, options, surface, FileBodyMode::Complete)
+}
+
+pub(super) fn file_block_shells(view: &View, options: RenderOptions, surface: Surface) -> Markup {
+    file_blocks_with_mode(view, options, surface, FileBodyMode::Shell)
+}
+
+#[derive(Clone, Copy)]
+enum FileBodyMode {
+    Complete,
+    Shell,
+}
+
+fn file_blocks_with_mode(
+    view: &View,
+    options: RenderOptions,
+    surface: Surface,
+    mode: FileBodyMode,
+) -> Markup {
     if view.files.is_empty() {
         return html! { div class="empty rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic" { "no file changes" } };
     }
 
     html! {
-        @for file in &view.files {
+        @for (file_index, file) in view.files.iter().enumerate() {
             @let absolute = format!("{}/{}", view.repo_root, file.path);
             @let status = file_status_presentation(file.status());
             @let giant = file.lines.iter().map(String::len).sum::<usize>() > GIANT_FILE_CHARS;
@@ -162,10 +183,20 @@ pub(super) fn file_blocks(view: &View, options: RenderOptions, surface: Surface)
                 }
                 // ! Keep containment below the sticky summary so it can pin to `.main`.
                 div class=(filebody_classes) style=[intrinsic] {
-                    (file_diff(file, options))
+                    @match mode {
+                        FileBodyMode::Complete => (file_diff(file, options)),
+                        FileBodyMode::Shell => (file_diff_shell(file, options, file_index)),
+                    }
                 }
             }
         }
+    }
+}
+
+fn file_diff_shell(file: &FileDiff, options: RenderOptions, file_index: usize) -> Markup {
+    let (_, density) = selected_lines(file, options);
+    html! {
+        div id=(diff_target_id(file_index)) class=(diff_classes(options.layout(), density)) {}
     }
 }
 
@@ -178,24 +209,92 @@ fn open_diff_file_route(tab_id: application::viewer::ViewerTabId, path: &str) ->
 
 fn file_diff(file: &FileDiff, options: RenderOptions) -> Markup {
     let syntax = crate::syntax::syntax_for_path(&file.path);
-    let (lines, density) = match (options.density(), file.full_lines.as_ref()) {
+    let (lines, density) = selected_lines(file, options);
+    html! {
+        div class=(diff_classes(options.layout(), density)) {
+            (PreEscaped(render_rows(file, options.layout(), lines, syntax)))
+        }
+    }
+}
+
+fn selected_lines(file: &FileDiff, options: RenderOptions) -> (&[String], DiffDensity) {
+    match (options.density(), file.full_lines.as_ref()) {
         (DiffDensity::Full, Some(full_lines)) => (full_lines, DiffDensity::Full),
         (DiffDensity::Full | DiffDensity::Compact, _) => (&file.lines, DiffDensity::Compact),
-    };
-    match (options.layout(), density) {
-        (DiffLayout::Unified, DiffDensity::Compact) => html! {
-            div class={ "diff diff-unified diff-compact " (DIFF_CLASSES) } { (PreEscaped(render_diff_lines(lines, &file.owners, syntax))) }
-        },
-        (DiffLayout::Split, DiffDensity::Compact) => html! {
-            div class={ "diff diff-split diff-compact " (DIFF_CLASSES) } { (PreEscaped(render_diff_split(lines, &file.owners, syntax))) }
-        },
-        (DiffLayout::Unified, DiffDensity::Full) => html! {
-            div class={ "diff diff-unified diff-full " (DIFF_CLASSES) } { (PreEscaped(render_diff_lines(lines, &file.owners, syntax))) }
-        },
-        (DiffLayout::Split, DiffDensity::Full) => html! {
-            div class={ "diff diff-split diff-full " (DIFF_CLASSES) } { (PreEscaped(render_diff_split(lines, &file.owners, syntax))) }
-        },
     }
+}
+
+fn diff_classes(layout: DiffLayout, density: DiffDensity) -> String {
+    format!(
+        "diff diff-{layout} diff-{density} {DIFF_CLASSES}",
+        layout = match layout {
+            DiffLayout::Unified => "unified",
+            DiffLayout::Split => "split",
+        },
+        density = match density {
+            DiffDensity::Compact => "compact",
+            DiffDensity::Full => "full",
+        },
+    )
+}
+
+fn render_rows(
+    file: &FileDiff,
+    layout: DiffLayout,
+    lines: &[String],
+    syntax: Option<&syntect::parsing::SyntaxReference>,
+) -> String {
+    match layout {
+        DiffLayout::Unified => render_diff_lines(lines, &file.owners, syntax),
+        DiffLayout::Split => render_diff_split(lines, &file.owners, syntax),
+    }
+}
+
+fn diff_target_id(file_index: usize) -> String {
+    format!("viewer-diff-{file_index}")
+}
+
+pub(super) fn view_chunks(
+    view: &View,
+    options: RenderOptions,
+) -> std::collections::VecDeque<crate::ViewChunk> {
+    let mut chunks = std::collections::VecDeque::new();
+    for (file_index, file) in view.files.iter().enumerate() {
+        let syntax = crate::syntax::syntax_for_path(&file.path);
+        let (lines, _) = selected_lines(file, options);
+        let rendered = render_rows(file, options.layout(), lines, syntax);
+        chunks.extend(
+            split_rows(&rendered)
+                .into_iter()
+                .map(|(html, rows)| crate::ViewChunk {
+                    target_id: diff_target_id(file_index),
+                    html,
+                    rows,
+                }),
+        );
+    }
+    chunks
+}
+
+fn split_rows(rendered: &str) -> Vec<(String, usize)> {
+    let mut chunks = Vec::new();
+    let mut chunk = String::new();
+    let mut row_count = 0;
+    for row in rendered.split_inclusive("</div>") {
+        let crosses_bound = row_count > 0
+            && (row_count == MAX_CHUNK_ROWS
+                || chunk.len().saturating_add(row.len()) > MAX_CHUNK_BYTES);
+        if crosses_bound {
+            chunks.push((std::mem::take(&mut chunk), row_count));
+            row_count = 0;
+        }
+        chunk.push_str(row);
+        row_count += 1;
+    }
+    if row_count > 0 {
+        chunks.push((chunk, row_count));
+    }
+    chunks
 }
 
 #[cfg(test)]
@@ -205,7 +304,7 @@ mod tests {
         viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabId},
     };
 
-    use super::{GIANT_FILE_CHARS, ROW_PX};
+    use super::{GIANT_FILE_CHARS, MAX_CHUNK_BYTES, MAX_CHUNK_ROWS, ROW_PX};
     use crate::{build_html, fixtures::sample_view, view_fragment};
 
     fn tab_id(raw: u64) -> ViewerTabId {
@@ -238,6 +337,51 @@ mod tests {
 
     fn deleted_file(path: &str) -> FileDiff {
         file(path, "deleted file mode 100644")
+    }
+
+    #[test]
+    fn desktop_chunks_recompose_the_complete_server_rendered_rows() {
+        let view = sample_view();
+        let file = &view.files[0];
+        let syntax = crate::syntax::syntax_for_path(&file.path);
+        let (lines, _) = super::selected_lines(file, RenderOptions::DEFAULT);
+        let complete = super::render_rows(file, DiffLayout::Unified, lines, syntax);
+
+        let chunks = super::view_chunks(&view, RenderOptions::DEFAULT);
+        let recomposed = chunks
+            .iter()
+            .map(|chunk| chunk.html.as_str())
+            .collect::<String>();
+
+        assert_eq!(recomposed, complete);
+        assert!(chunks.iter().all(|chunk| chunk.rows <= MAX_CHUNK_ROWS));
+        assert!(
+            chunks
+                .iter()
+                .all(|chunk| chunk.html.len() <= MAX_CHUNK_BYTES)
+        );
+    }
+
+    #[test]
+    fn oversized_row_is_isolated_and_chunking_always_advances() {
+        let oversized = format!("+{}", "x".repeat(MAX_CHUNK_BYTES + 1));
+        let rendered = format!(
+            "<div class=\"dl\">small</div><div class=\"dl\">{oversized}</div><div class=\"dl\">tail</div>"
+        );
+
+        let chunks = super::split_rows(&rendered);
+
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks.iter().map(|(_, rows)| rows).sum::<usize>(), 3);
+        assert_eq!(
+            chunks
+                .iter()
+                .map(|(html, _)| html.as_str())
+                .collect::<String>(),
+            rendered
+        );
+        assert!(chunks[1].0.len() > MAX_CHUNK_BYTES);
+        assert_eq!(chunks[1].1, 1);
     }
 
     #[test]

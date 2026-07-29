@@ -4,14 +4,34 @@ use application::{
     diffs::View,
     viewer::{ViewerDocument, ViewerHistoryEntry, ViewerSettings, ViewerTabState, ViewerView},
 };
-use maud::{DOCTYPE, html};
+use maud::{DOCTYPE, PreEscaped, html};
 
 use crate::{
-    render::{MaudViewerRenderer, SwapFeedback},
+    materialization::{ChunkPage, ViewLoadId},
+    render::{MaudViewerRenderer, SwapFeedback, VIEW_STATE_ERROR},
     session::{ComputeTicket, ViewerSession},
 };
 
 const MAX_GENERATION_RETRIES: usize = 3;
+
+pub(super) fn chunk(load: ViewLoadId, page: ChunkPage) -> String {
+    let target = format!("beforeend:#{}", page.chunk.target_id);
+    html! {
+        div hx-swap-oob=(target) data-chunk-rows=(page.chunk.rows) {
+            (PreEscaped(page.chunk.html))
+        }
+        @if page.has_more {
+            div id="viewer-chunk-loader"
+                hx-get=(format!("/loads/{load}/next"))
+                hx-trigger="load delay:16ms"
+                hx-target="this"
+                hx-swap="outerHTML" {}
+        } @else {
+            div id="viewer-chunk-loader" data-complete hidden {}
+        }
+    }
+    .into_string()
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct VersionedView {
@@ -48,6 +68,7 @@ pub(super) fn document(
     transient: Option<VersionedView>,
     history: Vec<ViewerHistoryEntry>,
     settings: ViewerSettings,
+    defer_ready: bool,
 ) -> Result<String, RenderError> {
     let mut transient = transient;
     for _ in 0..MAX_GENERATION_RETRIES {
@@ -57,7 +78,11 @@ pub(super) fn document(
             Err(RenderError::Retry) => continue,
             Err(error) => return Err(error),
         };
-        let html = renderer.build_document(&snapshot.document);
+        let html = if defer_ready {
+            renderer.build_deferred_document(&snapshot.document)
+        } else {
+            renderer.build_document(&snapshot.document)
+        };
         if snapshot_is_current(session, snapshot.ticket, snapshot.revision)? {
             return Ok(html);
         }
@@ -74,6 +99,7 @@ pub(super) fn view_with_tabs(
     session: &Mutex<ViewerSession>,
     mut transient: Option<VersionedView>,
     settings: ViewerSettings,
+    load_id: Option<ViewLoadId>,
 ) -> Result<String, RenderError> {
     for _ in 0..MAX_GENERATION_RETRIES {
         let snapshot = match snapshot(session, transient.take(), Vec::new(), settings.clone()) {
@@ -81,28 +107,21 @@ pub(super) fn view_with_tabs(
             Err(RenderError::Retry) => continue,
             Err(error) => return Err(error),
         };
-        let Some(ticket) = snapshot.ticket else {
-            let html = renderer.build_view_with_tabs(&snapshot.document);
-            if snapshot_is_current(session, None, snapshot.revision)? {
-                return Ok(html);
+        let can_materialize = snapshot.ticket.is_some()
+            && matches!(
+                snapshot
+                    .document
+                    .active_tab()
+                    .map(application::viewer::ViewerTab::state),
+                Some(ViewerTabState::Ready)
+            );
+        let html = match (can_materialize, load_id) {
+            (true, Some(load_id)) => {
+                renderer.build_materialized_view_with_tabs(&snapshot.document, load_id)
             }
-            continue;
+            _ => renderer.build_view_with_tabs(&snapshot.document),
         };
-        if !matches!(
-            snapshot
-                .document
-                .active_tab()
-                .map(application::viewer::ViewerTab::state),
-            Some(ViewerTabState::Ready)
-        ) {
-            let html = renderer.build_view_with_tabs(&snapshot.document);
-            if snapshot_is_current(session, Some(ticket), snapshot.revision)? {
-                return Ok(html);
-            }
-            continue;
-        }
-        let html = renderer.build_view_with_tabs(&snapshot.document);
-        if snapshot_is_current(session, Some(ticket), snapshot.revision)? {
+        if snapshot_is_current(session, snapshot.ticket, snapshot.revision)? {
             return Ok(html);
         }
     }
@@ -119,6 +138,7 @@ pub(super) fn tabs_with_view(
     mut transient: Option<VersionedView>,
     settings: ViewerSettings,
     feedback: SwapFeedback<'_>,
+    load_id: Option<ViewLoadId>,
 ) -> Result<String, RenderError> {
     for _ in 0..MAX_GENERATION_RETRIES {
         let snapshot = match snapshot(session, transient.take(), Vec::new(), settings.clone()) {
@@ -126,7 +146,12 @@ pub(super) fn tabs_with_view(
             Err(RenderError::Retry) => continue,
             Err(error) => return Err(error),
         };
-        let html = renderer.build_tabs_with_view(&snapshot.document, feedback);
+        let html = match load_id {
+            Some(load_id) => {
+                renderer.build_materialized_tabs_with_view(&snapshot.document, feedback, load_id)
+            }
+            None => renderer.build_tabs_with_view(&snapshot.document, feedback),
+        };
         if snapshot_is_current(session, snapshot.ticket, snapshot.revision)? {
             return Ok(html);
         }
@@ -185,7 +210,7 @@ pub(super) fn error_document() -> String {
 
 pub(super) fn error_view() -> String {
     html! {
-        section id="viewer-view" class="viewer-view min-h-0 min-w-0 overflow-hidden [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft" data-viewer-state="error" {
+        section id="viewer-view" class="viewer-view min-h-0 min-w-0 overflow-hidden [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft" data-viewer-state=(VIEW_STATE_ERROR) {
             div class="viewer-status grid min-h-full grid-cols-[minmax(0,520px)] place-content-center p-8 text-ink-2" role="alert" {
                 strong class="text-ink" { "The view could not be updated" }
                 p class="mt-1 mb-0" { "Please retry the operation." }
@@ -270,6 +295,7 @@ mod tests {
         viewer::{RenderOptions, Theme, ViewerSettings, ViewerTabKind},
     };
     use contracts::recipes::{Recipe, RecipeOp, RecipeSource};
+    use preview::ViewChunk;
 
     use super::*;
     use crate::session::{CachedView, ViewerSession};
@@ -329,11 +355,32 @@ mod tests {
                 view: old_view,
             }),
             settings(),
+            None,
         )
         .expect_err("ready oversize view retries to conflict");
         assert!(matches!(error, RenderError::Conflict));
         let mut state = session.lock().expect("session");
         assert_eq!(state.current_ticket(id), Some(current));
         assert!(state.cached_view_snapshot(id).is_none());
+    }
+
+    #[test]
+    fn chunk_response_inserts_rows_and_bounds_the_next_loader() {
+        let html = chunk(
+            ViewLoadId::try_new(7).expect("positive load id"),
+            ChunkPage {
+                chunk: ViewChunk {
+                    target_id: "viewer-diff-2".into(),
+                    html: "<div class=\"dl\">row</div>".into(),
+                    rows: 1,
+                },
+                has_more: true,
+            },
+        );
+
+        assert!(html.contains("hx-swap-oob=\"beforeend:#viewer-diff-2\""));
+        assert!(html.contains("data-chunk-rows=\"1\""));
+        assert!(html.contains("hx-get=\"/loads/7/next\""));
+        assert_eq!(html.matches("id=\"viewer-chunk-loader\"").count(), 1);
     }
 }

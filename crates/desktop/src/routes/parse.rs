@@ -5,7 +5,7 @@ use application::viewer::{
 };
 use tauri::http::{Method, Request, StatusCode};
 
-use crate::protocol_config;
+use crate::{materialization::ViewLoadId, protocol_config};
 
 const OPEN_DIFF_FILE_QUERY_BYTES_MAX: usize = 16 * 1024;
 
@@ -57,6 +57,9 @@ pub(crate) enum Route {
     Settings(SettingChange),
     Pending,
     Ready,
+    LoadNext {
+        load: ViewLoadId,
+    },
     OpenDiffFile {
         tab: ViewerTabId,
         diff_file_path: PathBuf,
@@ -91,6 +94,7 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
         ["settings"] => RouteShape::Settings,
         ["pending"] => RouteShape::Pending,
         ["ready"] => RouteShape::Ready,
+        ["loads", _, "next"] => RouteShape::LoadNext,
         _ => return Err(StatusCode::NOT_FOUND),
     };
     let expected_method = match shape {
@@ -147,6 +151,14 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
             reject_query(uri.query())?;
             Ok(Route::Ready)
         }
+        RouteShape::LoadNext => {
+            reject_query(uri.query())?;
+            let value = segments[1]
+                .parse::<u64>()
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+            let load = ViewLoadId::try_new(value).ok_or(StatusCode::BAD_REQUEST)?;
+            Ok(Route::LoadNext { load })
+        }
     }
 }
 
@@ -179,6 +191,7 @@ enum RouteShape {
     Settings,
     Pending,
     Ready,
+    LoadNext,
 }
 
 fn tab_route(
@@ -264,7 +277,7 @@ mod tests {
     use tauri::http::{Method, Request, StatusCode};
 
     use super::{OPEN_DIFF_FILE_QUERY_BYTES_MAX, ResumeNonce, Route, parse};
-    use crate::protocol_config;
+    use crate::{materialization::ViewLoadId, protocol_config};
 
     fn app_uri(path_and_query: &str) -> String {
         format!(
@@ -316,6 +329,13 @@ mod tests {
             ),
             (app_uri("/history"), Method::GET, Route::History),
             (app_uri("/ready"), Method::GET, Route::Ready),
+            (
+                app_uri("/loads/9/next"),
+                Method::GET,
+                Route::LoadNext {
+                    load: ViewLoadId::try_new(9).expect("positive load id"),
+                },
+            ),
             (
                 app_uri("/history/42/open"),
                 Method::GET,
@@ -410,6 +430,7 @@ mod tests {
             "/settings?theme=dark",
             "/pending",
             "/ready",
+            "/loads/9/next",
         ] {
             assert_eq!(
                 parse(&request(Method::POST, &app_uri(route))),
@@ -430,6 +451,8 @@ mod tests {
             "/tabs/7/view?layout=split",
             "/tabs/7/view?layout=split&density=full&layout=unified",
             "/settings?theme=dark&theme=light",
+            "/loads/0/next",
+            "/loads/not-a-number/next",
             "/settings?unknown=value",
         ] {
             assert_eq!(

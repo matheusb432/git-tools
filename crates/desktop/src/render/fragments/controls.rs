@@ -79,12 +79,14 @@ fn layout_choice(view: &ViewerView, layout: DiffLayout, label: &str, input_name:
             hx-trigger="change from:find input"
             hx-params="none"
             hx-target="#viewer-view"
+            hx-sync="#viewer-view:replace"
             hx-swap="outerHTML" {
             input type="radio" class="peer pointer-events-none absolute size-px opacity-0" name=(input_name) value=(layout)
                 checked[view.options().layout() == layout]
                 hx-get=(ViewerRoute::Settings(ViewerSettingChange::Layout(layout)))
                 hx-trigger="change"
                 hx-params="none"
+                hx-sync="this:drop"
                 hx-swap="none";
             span class="inline-flex min-h-[27px] items-center whitespace-nowrap rounded-sm border border-transparent px-2 py-1 text-[11.5px] group-hover:border-line-2 group-hover:bg-surface-2 group-hover:text-ink peer-checked:border-acc-line peer-checked:bg-acc-soft peer-checked:text-acc peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-acc" { (label) }
         }
@@ -104,12 +106,14 @@ fn density_choice(
             hx-trigger="change from:find input"
             hx-params="none"
             hx-target="#viewer-view"
+            hx-sync="#viewer-view:replace"
             hx-swap="outerHTML" {
             input type="radio" class="peer pointer-events-none absolute size-px opacity-0" name=(input_name) value=(density)
                 checked[view.options().density() == density]
                 hx-get=(ViewerRoute::Settings(ViewerSettingChange::Density(density)))
                 hx-trigger="change"
                 hx-params="none"
+                hx-sync="this:drop"
                 hx-swap="none";
             span class="inline-flex min-h-[27px] items-center whitespace-nowrap rounded-sm border border-transparent px-2 py-1 text-[11.5px] group-hover:border-line-2 group-hover:bg-surface-2 group-hover:text-ink peer-checked:border-acc-line peer-checked:bg-acc-soft peer-checked:text-acc peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-acc" { (label) }
         }
@@ -128,6 +132,7 @@ fn refresh_button(tab: ViewerTabId) -> Markup {
             class="viewer-control-button inline-flex min-h-[27px] cursor-pointer items-center whitespace-nowrap rounded-sm border border-transparent bg-transparent px-2 py-1 text-[11.5px] text-inherit [font:inherit] hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-acc-line [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc"
             hx-get=(ViewerRoute::Refresh { tab })
             hx-target="#viewer-view"
+            hx-sync="#viewer-view:replace"
             hx-swap="outerHTML" { "Refresh" }
     }
 }
@@ -141,6 +146,7 @@ pub(super) fn delete_live_view_button(tab: ViewerTabId) -> Markup {
             hx-delete=(ViewerRoute::DeleteLiveView { tab })
             hx-confirm="Delete this saved live view? This removes its tab and automatic restoration. You can add it again with gtl diff live."
             hx-target="#viewer-tabs"
+            hx-sync="#viewer-view:replace"
             hx-swap="outerHTML" { "Delete live view" }
     }
 }

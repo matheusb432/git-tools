@@ -392,6 +392,7 @@ if (typeof globalThis.document === "undefined") {
 
   Object.defineProperties(globalThis, {
     Node: { value: StubNode },
+    Document: { value: StubDocument },
     Element: { value: StubElement },
     HTMLElement: { value: StubElement },
     HTMLTemplateElement: { value: StubElement },

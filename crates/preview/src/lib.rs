@@ -42,6 +42,29 @@ pub fn view_fragment(view: &View, options: RenderOptions, tab_id: ViewerTabId) -
     layout::view_body(view, options, layout::Surface::App { tab_id })
 }
 
+/// Builds the desktop layout without diff rows and starts its bounded chunk chain.
+pub fn view_shell(
+    view: &View,
+    options: RenderOptions,
+    tab_id: ViewerTabId,
+    load_id: u64,
+) -> Markup {
+    layout::view_body_shell(view, options, layout::Surface::App { tab_id }, load_id)
+}
+
+/// One bounded server-rendered insertion into a file's existing diff container.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewChunk {
+    pub target_id: String,
+    pub html: String,
+    pub rows: usize,
+}
+
+/// Renders the desktop diff rows into bounded, semantically ordered chunks.
+pub fn view_chunks(view: &View, options: RenderOptions) -> std::collections::VecDeque<ViewChunk> {
+    layout::view_chunks(view, options)
+}
+
 /// The Maud-backed [`HtmlRenderer`](application::ports::HtmlRenderer) adapter.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MaudRenderer;

@@ -13,6 +13,9 @@ use domain::{
 };
 pub(crate) use pending::{PendingRecipes, PendingRecipesError};
 
+/// Marks a tab whose view is still being computed.
+pub(crate) const RENDER_PENDING_REASON: &str = "render pending";
+
 /// A generation token authorizing publication for one still-current compute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ComputeTicket {
@@ -115,7 +118,7 @@ impl ViewerSession {
                 label,
                 kind,
                 ViewerTabState::Error {
-                    reason: "render pending".into(),
+                    reason: RENDER_PENDING_REASON.into(),
                 },
             ),
             recipe,
@@ -146,7 +149,7 @@ impl ViewerSession {
             tab.tab.label().into(),
             tab.tab.kind(),
             ViewerTabState::Error {
-                reason: "render pending".into(),
+                reason: RENDER_PENDING_REASON.into(),
             },
         );
         let generation = tab.generation;
@@ -460,7 +463,7 @@ mod tests {
         assert_eq!(
             session.tab(id).expect("tab").tab.state(),
             &ViewerTabState::Error {
-                reason: "render pending".into()
+                reason: RENDER_PENDING_REASON.into(),
             }
         );
         session.set_state_if_current(

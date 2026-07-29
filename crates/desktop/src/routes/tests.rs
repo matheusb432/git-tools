@@ -8,6 +8,7 @@ use super::{
     ErrorTarget, PendingRecipeOutcome, RouteError, error_response, history::to_viewer_entry,
     process_pending,
 };
+use crate::render::VIEW_STATE_ERROR;
 
 fn named(path: &str) -> Recipe {
     Recipe {
@@ -157,7 +158,7 @@ fn recovery_fragments_own_their_error_presentation() {
     let tabs = super::render::error_tabs();
     let history = super::render::error_history();
 
-    assert!(view.contains("data-viewer-state=\"error\""));
+    assert!(view.contains(&format!("data-viewer-state=\"{VIEW_STATE_ERROR}\"")));
     assert!(view.contains("class=\"viewer-status "));
     assert!(tabs.contains("class=\"viewer-tabs "));
     assert!(tabs.contains("border-del-line"));

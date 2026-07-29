@@ -21,7 +21,9 @@ type ViewerHost = {
 };
 
 function viewerHost(value: unknown): ViewerHost | null {
-  if (typeof value !== "object" || value === null || !("document" in value)) return null;
+  if (typeof value !== "object" || value === null || !("document" in value)) {
+    return null;
+  }
   return value as ViewerHost;
 }
 
@@ -31,7 +33,10 @@ export function showViewerLoading(targetDocument: Document): boolean {
   if (!(template instanceof HTMLTemplateElement) || !(current instanceof HTMLElement)) return false;
   const replacement = template.content.firstElementChild?.cloneNode(true);
   if (!(replacement instanceof HTMLElement)) return false;
-  current.replaceWith(replacement);
+  current.className = replacement.className;
+  current.setAttribute("data-viewer-state", "loading");
+  current.setAttribute("aria-busy", "true");
+  current.replaceChildren(...replacement.childNodes);
   targetDocument.querySelector(".viewer-tab.active")?.setAttribute("aria-busy", "true");
   return true;
 }
@@ -45,11 +50,30 @@ function opensHistoryView(element: Element): boolean {
   return route !== null && route.startsWith("/history/") && route.endsWith("/open");
 }
 
-function activeTabClose(element: Element): boolean {
-  return (
-    element.classList.contains("viewer-tab-close") &&
-    element.closest(".viewer-tab")?.classList.contains("active") === true
-  );
+export function createCoalescedReadyRefresh(
+  refresh: () => Promise<void>,
+  reportFailure: (error: unknown) => void,
+): () => Promise<void> {
+  let running: Promise<void> | null = null;
+  let rerunRequested = false;
+  return function requestRefresh(): Promise<void> {
+    if (running) {
+      rerunRequested = true;
+      return running;
+    }
+    running = (async () => {
+      do {
+        rerunRequested = false;
+        try {
+          await refresh();
+        } catch (error) {
+          reportFailure(error);
+        }
+      } while (rerunRequested);
+      running = null;
+    })();
+    return running;
+  };
 }
 
 export async function installViewerLoading(hostValue: unknown): Promise<void> {
@@ -62,10 +86,15 @@ export async function installViewerLoading(hostValue: unknown): Promise<void> {
   targetDocument.addEventListener(
     "click",
     (event) => {
-      const trigger = event.target instanceof Element ? event.target.closest("[hx-get]") : null;
+      const trigger = event.target instanceof Element ? event.target.closest("[hx-get],[hx-delete]") : null;
       if (!trigger) return;
-      if (targetsViewerView(trigger) || opensHistoryView(trigger) || activeTabClose(trigger)) {
-        showViewerLoading(targetDocument);
+      if (targetsViewerView(trigger) || opensHistoryView(trigger)) {
+        const requestedView = targetDocument.getElementById("viewer-view");
+        setTimeout(() => {
+          if (targetDocument.getElementById("viewer-view") === requestedView) {
+            showViewerLoading(targetDocument);
+          }
+        }, 0);
       }
     },
     { capture: true },
@@ -74,12 +103,23 @@ export async function installViewerLoading(hostValue: unknown): Promise<void> {
   const events = host.__TAURI__?.event;
   const htmx = host.htmx;
   if (!events || typeof events.listen !== "function" || !htmx || typeof htmx.ajax !== "function") return;
-  const refresh = (): Promise<void> => htmx.ajax("GET", READY_ROUTE, { target: "#viewer-view", swap: "outerHTML" });
-  try {
-    await events.listen(RECIPE_COMPLETED_EVENT, () => void refresh());
-  } catch (error) {
-    console.error("failed to subscribe to recipe completion", error);
-    return;
-  }
+  const refresh = createCoalescedReadyRefresh(
+    () =>
+      htmx.ajax("GET", READY_ROUTE, {
+        target: "#viewer-view",
+        swap: "outerHTML",
+      }),
+    (error) => console.error("failed to load completed recipe", error),
+  );
+  const subscription = events
+    .listen(RECIPE_COMPLETED_EVENT, () => void refresh())
+    .then(
+      () => true,
+      (error: unknown) => {
+        console.error("failed to subscribe to recipe completion", error);
+        return false;
+      },
+    );
   await refresh();
+  await subscription;
 }

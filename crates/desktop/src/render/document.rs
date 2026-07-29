@@ -2,10 +2,10 @@ use application::viewer::{DiffDensity, ViewerDocument};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use super::{
-    fragments,
+    VIEW_STATE_LOADING, fragments,
     fragments::{SwapFeedback, SwapMode, theme},
 };
-use crate::protocol_config;
+use crate::{materialization::ViewLoadId, protocol_config};
 
 // ! Built by `deno task build` from frontend/viewer/ (Vite lib IIFE); the drift gate
 // ! pins the output to its sources.
@@ -21,6 +21,19 @@ pub struct MaudViewerRenderer;
 )]
 impl MaudViewerRenderer {
     pub(crate) fn build_document(self, document: &ViewerDocument) -> String {
+        self.build_document_with_load(document, None, false)
+    }
+
+    pub(crate) fn build_deferred_document(self, document: &ViewerDocument) -> String {
+        self.build_document_with_load(document, None, true)
+    }
+
+    fn build_document_with_load(
+        self,
+        document: &ViewerDocument,
+        load_id: Option<ViewLoadId>,
+        defer_ready: bool,
+    ) -> String {
         let settings = document.settings();
         let options = settings.options();
         let htmx = format!(
@@ -47,12 +60,12 @@ impl MaudViewerRenderer {
                 body class="viewer-shell overflow-hidden" {
                     main class="grid h-screen min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-bg" {
                         (tabs(document, SwapMode::Primary, SwapFeedback::None))
-                        (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
+                        (fragments::view(document, SwapMode::Primary, SwapFeedback::None, load_id, defer_ready))
                     }
                     template id="viewer-loading-template" {
                         section id="viewer-view"
                             class="viewer-view min-h-0 min-w-0 overflow-hidden"
-                            data-viewer-state="loading"
+                            data-viewer-state=(VIEW_STATE_LOADING)
                             aria-busy="true" {
                             div class="grid h-full min-h-0 grid-rows-[44px_minmax(0,1fr)] bg-bg" role="status" aria-label="Loading diff" {
                                 div class="animate-pulse border-b border-line bg-surface-2 px-4 py-3" {
@@ -101,7 +114,7 @@ impl MaudViewerRenderer {
 
     #[cfg(any(test, feature = "benchmark-support"))]
     pub fn build_view(self, document: &ViewerDocument) -> String {
-        fragments::view(document, SwapMode::Primary, SwapFeedback::None).into_string()
+        fragments::view(document, SwapMode::Primary, SwapFeedback::None, None, false).into_string()
     }
 
     #[cfg(test)]
@@ -139,7 +152,19 @@ impl MaudViewerRenderer {
 
     pub(crate) fn build_view_with_tabs(self, document: &ViewerDocument) -> String {
         html! {
-            (fragments::view(document, SwapMode::Primary, SwapFeedback::None))
+            (fragments::view(document, SwapMode::Primary, SwapFeedback::None, None, false))
+            (tabs(document, SwapMode::OutOfBand, SwapFeedback::None))
+        }
+        .into_string()
+    }
+
+    pub(crate) fn build_materialized_view_with_tabs(
+        self,
+        document: &ViewerDocument,
+        load_id: ViewLoadId,
+    ) -> String {
+        html! {
+            (fragments::view(document, SwapMode::Primary, SwapFeedback::None, Some(load_id), false))
             (tabs(document, SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
@@ -162,7 +187,20 @@ impl MaudViewerRenderer {
         };
         html! {
             (tabs(document, SwapMode::Primary, tabs_feedback))
-            (fragments::view(document, SwapMode::OutOfBand, view_feedback))
+            (fragments::view(document, SwapMode::OutOfBand, view_feedback, None, false))
+        }
+        .into_string()
+    }
+
+    pub(crate) fn build_materialized_tabs_with_view(
+        self,
+        document: &ViewerDocument,
+        feedback: SwapFeedback<'_>,
+        load_id: ViewLoadId,
+    ) -> String {
+        html! {
+            (tabs(document, SwapMode::Primary, feedback))
+            (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::None, Some(load_id), false))
         }
         .into_string()
     }

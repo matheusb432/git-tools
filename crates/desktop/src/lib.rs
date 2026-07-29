@@ -4,6 +4,7 @@ pub use render::MaudViewerRenderer;
 #[cfg(feature = "benchmark-support")]
 pub use session::{CacheDisposition, CachedView, WeightedViewCache};
 mod commands;
+mod materialization;
 mod presentation;
 mod protocol_config;
 mod recipe_worker;

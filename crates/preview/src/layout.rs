@@ -41,6 +41,30 @@ const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
 // [popover] elements live inside .layout so the per-layout JS scoping in preview.js
 // finds them.
 pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -> Markup {
+    view_body_with_mode(view, options, surface, BodyMode::Complete)
+}
+
+pub(crate) fn view_body_shell(
+    view: &View,
+    options: RenderOptions,
+    surface: Surface,
+    load_id: u64,
+) -> Markup {
+    view_body_with_mode(view, options, surface, BodyMode::Shell { load_id })
+}
+
+#[derive(Clone, Copy)]
+enum BodyMode {
+    Complete,
+    Shell { load_id: u64 },
+}
+
+fn view_body_with_mode(
+    view: &View,
+    options: RenderOptions,
+    surface: Surface,
+    mode: BodyMode,
+) -> Markup {
     html! {
         div class={
             (LAYOUT_PRESENTATION_CLASSES) " "
@@ -51,7 +75,17 @@ pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -
             (titlebar::titlebar(view))
             (tree::tree(view))
             main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-0 pb-[60px] [@media(min-width:1600px)_and_(min-height:900px)]:px-7 [@media(min-width:1025px)_and_(max-width:1280px)]:px-4 [@media(max-width:1024px)]:px-3 [@media(max-width:760px)]:px-1 [@media(max-width:1024px)]:pb-12 print:overflow-visible print:p-0" {
-                (files::file_blocks(view, options, surface))
+                @match mode {
+                    BodyMode::Complete => (files::file_blocks(view, options, surface)),
+                    BodyMode::Shell { load_id } => {
+                        (files::file_block_shells(view, options, surface))
+                        div id="viewer-chunk-loader"
+                            hx-get=(format!("/loads/{load_id}/next"))
+                            hx-trigger="load delay:16ms"
+                            hx-target="this"
+                            hx-swap="outerHTML" {}
+                    }
+                }
             }
             (shelf::shelf(view))
             (keybar::keybar(view))
@@ -62,6 +96,13 @@ pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -
             }
         }
     }
+}
+
+pub(crate) fn view_chunks(
+    view: &View,
+    options: RenderOptions,
+) -> std::collections::VecDeque<crate::ViewChunk> {
+    files::view_chunks(view, options)
 }
 
 #[cfg(test)]

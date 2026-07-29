@@ -1,5 +1,26 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { createCoalescedDrain, installPendingRecipes } from "./pending-recipes";
+
+afterEach(() => {
+  document.body.innerHTML = "";
+});
+
+function mountReadyView(): HTMLElement {
+  const view = document.createElement("section");
+  view.id = "viewer-view";
+  view.dataset["viewerState"] = "ready";
+  const template = document.createElement("template");
+  template.id = "viewer-loading-template";
+  const skeleton = document.createElement("section");
+  skeleton.id = "viewer-view";
+  skeleton.setAttribute("data-viewer-state", "loading");
+  Object.defineProperty(template, "content", {
+    value: { firstElementChild: skeleton },
+  });
+  document.body.appendChild(view);
+  document.body.appendChild(template);
+  return view;
+}
 
 describe("createCoalescedDrain", () => {
   test("a burst during one refresh coalesces into a single rerun", async () => {
@@ -70,5 +91,36 @@ describe("installPendingRecipes", () => {
     });
 
     expect(refreshes).toBe(1);
+  });
+
+  test("preserves the ready view during the closing drain and loads after an event", async () => {
+    const readyView = mountReadyView();
+    let eventHandler = (): void => {};
+    let refreshes = 0;
+    await installPendingRecipes({
+      document,
+      __TAURI__: {
+        event: {
+          listen: (_event: string, handler: () => void) => {
+            eventHandler = handler;
+            return Promise.resolve(() => {});
+          },
+        },
+      },
+      htmx: {
+        ajax: () => {
+          refreshes += 1;
+          return Promise.resolve();
+        },
+      },
+    });
+
+    expect(document.getElementById("viewer-view")).toBe(readyView);
+
+    eventHandler();
+
+    expect(document.getElementById("viewer-view")).toBe(readyView);
+    expect(document.getElementById("viewer-view")?.dataset["viewerState"]).toBe("loading");
+    expect(refreshes).toBe(2);
   });
 });
