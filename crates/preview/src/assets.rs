@@ -206,11 +206,6 @@ mod tests {
         );
         assert_selector_declaration(
             css,
-            ".layout .diff-unified :is(.dl-add,.dl-del,.dl-ctx) code",
-            "text-indent:-8px",
-        );
-        assert_selector_declaration(
-            css,
             ".layout .diff-unified .dl-add",
             "background:color-mix(in srgb, var(--add-bg) 50%, transparent)",
         );
@@ -228,11 +223,6 @@ mod tests {
             css,
             ".layout .diff-unified .dl-del .ln",
             "background:var(--del-gut)",
-        );
-        assert_selector_declaration(
-            css,
-            ".layout .diff-unified :is(.dl-add,.dl-del) code:first-letter",
-            "color:#0000",
         );
         assert!(css.contains(".layout .diff-unified :is(.dl-meta,.dl-hunk) .ln{display:none}"));
         assert!(

@@ -509,7 +509,7 @@ mod tests {
         .into_string();
 
         assert!(html.contains(r#"class="diff diff-unified diff-compact "#));
-        assert!(html.contains("+extra"));
+        assert!(html.contains("extra"));
         assert!(!html.contains("diff-full"));
     }
 

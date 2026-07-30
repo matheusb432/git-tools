@@ -11,10 +11,9 @@ import { toggleLongLine } from "./long-lines";
 import { computeWheelScroll } from "../shared/wheel";
 
 /**
- * Rebuilds a native copy of a selection inside a diff as clean source (whole lines, markers
- * stripped) under the same commented "path, lines" header the copy button emits. Falls back
- * to the native copy for selections that are empty, span no single diff file, or touch no
- * code rows, and when the view's context toggle is off.
+ * Rebuilds a native copy of a selection inside a diff as clean source under the same commented
+ * "path, lines" header the copy button emits. Falls back to the native copy for selections that
+ * are empty, span no single diff file, or touch no code rows, and when the context toggle is off.
  */
 export function handleDocumentCopy(e: ClipboardEvent): void {
   const sel = window.getSelection();

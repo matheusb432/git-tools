@@ -36,7 +36,7 @@ describe("handleDocumentCopy", () => {
     const row = document.createElement("div");
     row.className = "dl-add";
     const code = document.createElement("code");
-    code.textContent = "+const value = 1;";
+    code.textContent = "const value = 1;";
     row.appendChild(code);
     diff.appendChild(row);
     file.appendChild(diff);

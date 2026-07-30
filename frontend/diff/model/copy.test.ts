@@ -2,8 +2,6 @@ import { expect, test } from "vitest";
 import { extractCopyText } from "./copy";
 
 type RowDesc = {
-  /** Rendered marker column: "+" for additions, " " for context. */
-  readonly marker: string;
   readonly text: string;
   readonly newLine: number;
   /** Long-line rows nest the raw text in .code-text while <code> also carries the expander. */
@@ -12,7 +10,7 @@ type RowDesc = {
 
 function makeRowEl(desc: RowDesc): object {
   const lnEls = [{ textContent: "0" }, { textContent: String(desc.newLine) }];
-  const raw = desc.marker + desc.text;
+  const raw = desc.text;
   const codeTextEl = { textContent: raw };
   const codeEl =
     desc.expander === undefined
@@ -68,8 +66,8 @@ function makeSplitFileStub(attrs: Record<string, string>): object {
 test("extractCopyText headers the copy with the span the rows cover", () => {
   const multi = makeFileStub(
     [
-      { marker: "+", text: "const x = 1", newLine: 12 },
-      { marker: "+", text: "const y = 2", newLine: 13 },
+      { text: "const x = 1", newLine: 12 },
+      { text: "const y = 2", newLine: 13 },
     ],
     { "data-comment": "//", "data-path": "src/a.ts" },
     true,
@@ -80,7 +78,7 @@ test("extractCopyText headers the copy with the span the rows cover", () => {
 
 test("extractCopyText prefers .code-text over code when a long line is split-clipped", () => {
   const file = makeFileStub(
-    [{ marker: "+", text: "data:font/woff;base64,AAAA", newLine: 1, expander: "[expand]" }],
+    [{ text: "data:font/woff;base64,AAAA", newLine: 1, expander: "[expand]" }],
     { "data-path": "f.css" },
     false,
   );

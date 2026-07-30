@@ -14,7 +14,7 @@ use syntect::parsing::SyntaxReference;
 
 use self::{
     intraline::Span,
-    model::{Row, RowKind, derive_rows, long_line_len},
+    model::{Row, RowKind, derive_rows, line_body, long_line_len},
     split::{SplitRow, split_rows},
 };
 use crate::{
@@ -214,7 +214,7 @@ fn code_inner(raw: &str, long: Option<usize>, tokens: &[Token]) -> String {
         None if tokens.is_empty() => html_or_nbsp(raw),
         None => {
             let mut body = String::with_capacity(raw.len() * 2);
-            push_marked_body(&mut body, raw, tokens, &[]);
+            push_body(&mut body, raw, tokens, &[]);
             body
         }
         Some(len) => format!(
@@ -228,7 +228,7 @@ fn code_inner(raw: &str, long: Option<usize>, tokens: &[Token]) -> String {
 // ! page. Tame them: full text stays in `.code-text` (copy-safe) but renders clipped/no-wrap,
 // ! with an expander that reveals horizontal scroll. `long` is the precomputed Some(len).
 fn code_cell(raw: &str, long: Option<usize>, tokens: &[Token]) -> String {
-    let inner = code_inner(raw, long, tokens);
+    let inner = code_inner(line_body(raw), long, tokens);
     if long.is_some() {
         format!(r#"<code class="long">{inner}</code>"#)
     } else {
@@ -270,25 +270,21 @@ fn push_split_code(
             }
         }
     } else {
-        push_marked_body(out, raw, tokens, spans);
+        if let Some(marker) = raw.chars().next() {
+            push_escaped(out, marker);
+        }
+        push_body(out, line_body(raw), tokens, spans);
     }
     out.push_str("</code>");
 }
 
-// ! Escape a line body char by char, wrapping syntax token runs and intra-line
-// ! changed runs in flat spans. A span closes and reopens wherever either
-// ! range set changes, so tags never nest or overlap; both spans and tokens
-// ! are char-indexed into the body (after the leading +/- /space marker),
-// ! which is emitted bare first.
-fn push_marked_body(out: &mut String, raw: &str, tokens: &[Token], spans: &[Span]) {
-    let mut chars = raw.chars();
-    if let Some(marker) = chars.next() {
-        out.push(marker);
-    }
-
+// ! Escape a marker-free line body char by char, wrapping syntax token runs and intra-line
+// ! changed runs in flat spans. A span closes and reopens wherever either range set changes,
+// ! so tags never nest or overlap.
+fn push_body(out: &mut String, body: &str, tokens: &[Token], spans: &[Span]) {
     let mut open = false;
     let mut current: (Option<&'static str>, bool) = (None, false);
-    for (i, ch) in chars.enumerate() {
+    for (i, ch) in body.chars().enumerate() {
         let class = tokens
             .iter()
             .find(|token| i >= token.start && i < token.end)
@@ -385,9 +381,9 @@ mod tests {
 
         assert!(html.contains(r#"<div class="dl dl-meta"><span class="ln"></span><span class="ln"></span><code>index 111..222 100644</code></div>"#));
         assert!(html.contains(r#"<div class="dl dl-hunk"><span class="ln"></span><span class="ln"></span><code>@@ -3,2 +7,2 @@</code></div>"#));
-        assert!(html.contains(r#"<div class="dl dl-ctx"><span class="ln">3</span><span class="ln">7</span><code> keep</code></div>"#));
-        assert!(html.contains(r#"<div class="dl dl-del"><span class="ln">4</span><span class="ln"></span><code>-old</code></div>"#));
-        assert!(html.contains(r#"<div class="dl dl-add"><span class="ln"></span><span class="ln">8</span><code>+new</code></div>"#));
+        assert!(html.contains(r#"<div class="dl dl-ctx"><span class="ln">3</span><span class="ln">7</span><code>keep</code></div>"#));
+        assert!(html.contains(r#"<div class="dl dl-del"><span class="ln">4</span><span class="ln"></span><code>old</code></div>"#));
+        assert!(html.contains(r#"<div class="dl dl-add"><span class="ln"></span><span class="ln">8</span><code>new</code></div>"#));
     }
 
     #[test]
@@ -721,6 +717,20 @@ mod tests {
     }
 
     #[test]
+    fn unified_rows_omit_diff_marker_without_dropping_source_punctuation() {
+        let html = render_diff_lines(
+            &diff_lines(&["@@ -1 +1 @@", "+#[cfg(test)]"]),
+            &LineOwners::default(),
+            syntax_for_path("a.rs"),
+        );
+
+        assert_eq!(
+            select_texts(&html, ".dl-add code"),
+            ["#[cfg(test)]".to_string()]
+        );
+    }
+
+    #[test]
     fn token_spans_escape_their_content() {
         let html = render_diff_lines(
             &diff_lines(&["@@ -1 +1 @@", r#"+let s = "<&>";"#]),
@@ -762,6 +772,6 @@ mod tests {
             select_texts(&html, r#"span[class*="sy-"]"#).is_empty(),
             "{html}"
         );
-        assert!(html.contains(r"<code>+let x = 1;</code>"), "{html}");
+        assert!(html.contains(r"<code>let x = 1;</code>"), "{html}");
     }
 }

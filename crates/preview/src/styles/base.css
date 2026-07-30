@@ -154,7 +154,6 @@
 .layout .diff-unified :is(.dl-add, .dl-del, .dl-ctx) code {
   padding-right: 4px;
   padding-left: 12px;
-  text-indent: -8px;
 }
 
 .layout .diff-unified .dl-ctx .ln:first-child,
@@ -178,11 +177,6 @@
 
 .layout .diff-unified .dl-del .ln {
   background: var(--del-gut);
-}
-
-.layout .diff-unified :is(.dl-add, .dl-del) code::first-letter,
-.layout .diff-unified :is(.dl-add, .dl-del) .code-text::first-letter {
-  color: transparent;
 }
 
 .layout .diff-unified :is(.dl-meta, .dl-hunk) code {

@@ -260,7 +260,7 @@ mod tests {
             fragment.select(&code).any(|cell| cell
                 .text()
                 .collect::<String>()
-                .contains("+<script>x</script>")),
+                .contains("<script>x</script>")),
             "escaped diff content lost: {html}"
         );
     }

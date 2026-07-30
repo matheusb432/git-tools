@@ -1,6 +1,6 @@
 /** Clean source rebuilt from rendered diff rows, plus the new-side span those rows cover. */
 export type CopiedRows = {
-  /** One entry per copied row, diff marker stripped. */
+  /** One entry per copied source row. */
   readonly lines: readonly string[];
   /** `null` when no copied row carried a new-side line number. */
   readonly lineRange: string | null;
@@ -15,9 +15,9 @@ function parseLineNumber(text: string | null | undefined): number | null {
 }
 
 /**
- * Reads rendered rows back as source: whole lines, markers stripped, long-line expander
- * chrome left behind. A non-null `keep` narrows the unified rows down to a selection and
- * runs once per row, so callers hand in a closure they built once for the whole copy.
+ * Reads rendered rows back as source, excluding long-line expander chrome. Unified rows are
+ * marker-free; split rows retain their marker and remove it here. A non-null `keep` narrows
+ * unified rows down to a selection and runs once per row.
  */
 export function readCopiedRows(
   unifiedRows: Iterable<Element>,
@@ -28,9 +28,12 @@ export function readCopiedRows(
   let firstLine: number | null = null;
   let lastLine = 0;
 
-  function append(code: Element, lineNumber: number | null): void {
-    const text = (code.querySelector(".code-text") ?? code).textContent ?? "";
-    lines.push(text.length && (text[0] === "+" || text[0] === " ") ? text.slice(1) : text);
+  function codeText(code: Element): string {
+    return (code.querySelector(".code-text") ?? code).textContent ?? "";
+  }
+
+  function append(text: string, lineNumber: number | null): void {
+    lines.push(text);
     if (lineNumber === null) return;
     if (firstLine === null) firstLine = lineNumber;
     lastLine = lineNumber;
@@ -41,11 +44,11 @@ export function readCopiedRows(
     const code = row.querySelector("code");
     if (!code) continue;
     const lns = row.querySelectorAll(".ln");
-    append(code, lns.length > 1 ? parseLineNumber(lns[1]?.textContent) : null);
+    append(codeText(code), lns.length > 1 ? parseLineNumber(lns[1]?.textContent) : null);
   }
   for (const code of splitCodes) {
     const lineNumber = code.previousElementSibling;
-    append(code, lineNumber?.matches(".ln") ? parseLineNumber(lineNumber.textContent) : null);
+    append(codeText(code).slice(1), lineNumber?.matches(".ln") ? parseLineNumber(lineNumber.textContent) : null);
   }
 
   return {
