@@ -1,4 +1,4 @@
-use application::diffs::{Cmd, FileDiff, Foot, LineOwners, View};
+use application::diffs::{Cmd, FileDiff, Foot, View};
 
 const FIXTURE_LINE_COUNT: usize = 45_000;
 
@@ -43,7 +43,6 @@ pub(super) fn view_with_lines(line_count: usize) -> View {
             full_lines: Some(lines.clone()),
             lines,
             commits: vec![],
-            owners: LineOwners::default(),
         }],
         title: "Large diff".into(),
         cmd: Cmd {

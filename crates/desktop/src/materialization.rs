@@ -3,7 +3,7 @@ use std::{collections::VecDeque, num::NonZeroU64, sync::Mutex};
 use application::viewer::{RenderOptions, ViewerTabState};
 use preview::ViewChunk;
 
-use crate::session::{ComputeTicket, ViewerSession};
+use crate::session::{CommitSelectionSnapshot, ComputeTicket, ViewerSession};
 
 /// Identifies one active, non-zero view materialization.
 ///
@@ -33,6 +33,7 @@ impl std::fmt::Display for ViewLoadId {
 struct ActiveMaterialization {
     id: ViewLoadId,
     ticket: ComputeTicket,
+    revision: u64,
     chunks: VecDeque<ViewChunk>,
 }
 
@@ -103,20 +104,28 @@ impl ViewMaterializations {
             let ticket = session
                 .current_ticket(tab_id)
                 .ok_or(MaterializationError::Conflict)?;
-            let view = session
+            let cached = session
                 .cached_view_snapshot(tab_id)
-                .ok_or(MaterializationError::Conflict)?
-                .view;
-            (ticket, view)
+                .ok_or(MaterializationError::Conflict)?;
+            let view = match session.commit_selection_snapshot(tab_id) {
+                CommitSelectionSnapshot::Ready { view, .. } => view,
+                CommitSelectionSnapshot::None => cached.view,
+                CommitSelectionSnapshot::Pending { .. } | CommitSelectionSnapshot::Error { .. } => {
+                    self.clear()?;
+                    return Ok(None);
+                }
+            };
+            (ticket, session.revision(), view)
         };
 
-        let chunks = preview::view_chunks(&snapshot.1, options);
+        let chunks = preview::view_chunks(&snapshot.2, options);
         {
             let session = session
                 .lock()
                 .map_err(|_| MaterializationError::StatePoisoned)?;
             if session.active() != Some(snapshot.0.tab_id)
                 || session.current_ticket(snapshot.0.tab_id) != Some(snapshot.0)
+                || session.revision() != snapshot.1
             {
                 return Err(MaterializationError::Conflict);
             }
@@ -130,6 +139,7 @@ impl ViewMaterializations {
         state.active = Some(ActiveMaterialization {
             id,
             ticket: snapshot.0,
+            revision: snapshot.1,
             chunks,
         });
         Ok(Some(id))
@@ -154,6 +164,7 @@ impl ViewMaterializations {
             .ok_or(MaterializationError::Conflict)?;
         if session.active() != Some(materialization.ticket.tab_id)
             || session.current_ticket(materialization.ticket.tab_id) != Some(materialization.ticket)
+            || session.revision() != materialization.revision
         {
             state.active = None;
             return Err(MaterializationError::Conflict);
@@ -183,7 +194,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use application::{
-        diffs::{Cmd, FileDiff, Foot, LineOwners, View},
+        diffs::{Cmd, FileDiff, Foot, View},
         viewer::{RenderOptions, ViewerTabKind},
     };
     use contracts::recipes::{Recipe, RecipeOp, RecipeSource};
@@ -213,8 +224,6 @@ mod tests {
                 removed: 0,
                 lines: vec!["@@ -0,0 +1 @@".into(), "+new".into()],
                 full_lines: None,
-                commits: Vec::new(),
-                owners: LineOwners::default(),
             }],
             title: title.into(),
             cmd: Cmd {

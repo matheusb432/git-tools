@@ -1,4 +1,4 @@
-use application::diffs::{FileDiff, FileStatus, LineOwners, sort_files_tree_order};
+use application::diffs::{FileDiff, FileStatus, sort_files_tree_order};
 
 fn file(path: &str) -> FileDiff {
     FileDiff {
@@ -7,8 +7,6 @@ fn file(path: &str) -> FileDiff {
         removed: 0,
         lines: Vec::new(),
         full_lines: None,
-        commits: Vec::new(),
-        owners: LineOwners::default(),
     }
 }
 

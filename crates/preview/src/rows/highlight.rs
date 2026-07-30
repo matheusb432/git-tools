@@ -38,8 +38,6 @@ pub(super) fn row_tokens(rows: &[Row], syntax: Option<&SyntaxReference>) -> Vec<
 
 #[cfg(test)]
 mod tests {
-    use application::diffs::LineOwners;
-
     use super::{
         super::model::{MAX_LINE_COLS, derive_rows},
         *,
@@ -48,7 +46,7 @@ mod tests {
 
     fn rows_for(raw: &[&str]) -> Vec<super::super::model::Row> {
         let lines: Vec<String> = raw.iter().map(ToString::to_string).collect();
-        derive_rows(&lines, &LineOwners::default())
+        derive_rows(&lines)
     }
 
     #[test]

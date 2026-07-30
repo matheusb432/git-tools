@@ -83,10 +83,6 @@ pub(super) fn file_status_presentation(status: FileStatus) -> FileStatusPresenta
     }
 }
 
-fn file_commits(file: &FileDiff) -> String {
-    file.commits.join(" ")
-}
-
 // ! The app webview (wry/WebKitGTK) never marks swapped-in content-visibility:auto
 // ! subtrees relevant, so their rows would stay unpainted; only browser artifacts
 // ! opt into the offscreen-skip optimization (and its print escape hatches).
@@ -148,10 +144,7 @@ fn file_blocks_with_mode(
                 }
                 data-path=(file.path)
                 data-comment=(crate::comment_syntax::comment_leader(&file.path))
-                data-commits=(file_commits(file))
-                data-status=(status.key)
-                data-status-code=(status.code)
-                data-status-label=(status.label) {
+                {
                 summary class="sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line bg-surface-2 px-2.5 py-2 text-[12.5px] hover:bg-line [&::-webkit-details-marker]:hidden [@media(max-width:760px)]:flex-wrap [@media(max-width:760px)]:gap-x-1.5 [@media(max-width:760px)]:px-2 [@media(max-width:760px)]:py-1.5 print:static print:bg-[#f2f2f2]" {
                     span class="file-caret size-0 flex-none border-y-4 border-y-transparent border-l-5 border-l-ink-3 group-open/file:rotate-90" aria-hidden="true" {}
                     span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink" { (file.path) }
@@ -212,7 +205,7 @@ fn file_diff(file: &FileDiff, options: RenderOptions) -> Markup {
     let (lines, density) = selected_lines(file, options);
     html! {
         div class=(diff_classes(options.layout(), density)) {
-            (PreEscaped(render_rows(file, options.layout(), lines, syntax)))
+            (PreEscaped(render_rows(options.layout(), lines, syntax)))
         }
     }
 }
@@ -239,14 +232,13 @@ fn diff_classes(layout: DiffLayout, density: DiffDensity) -> String {
 }
 
 fn render_rows(
-    file: &FileDiff,
     layout: DiffLayout,
     lines: &[String],
     syntax: Option<&syntect::parsing::SyntaxReference>,
 ) -> String {
     match layout {
-        DiffLayout::Unified => render_diff_lines(lines, &file.owners, syntax),
-        DiffLayout::Split => render_diff_split(lines, &file.owners, syntax),
+        DiffLayout::Unified => render_diff_lines(lines, syntax),
+        DiffLayout::Split => render_diff_split(lines, syntax),
     }
 }
 
@@ -262,7 +254,7 @@ pub(super) fn view_chunks(
     for (file_index, file) in view.files.iter().enumerate() {
         let syntax = crate::syntax::syntax_for_path(&file.path);
         let (lines, _) = selected_lines(file, options);
-        let rendered = render_rows(file, options.layout(), lines, syntax);
+        let rendered = render_rows(options.layout(), lines, syntax);
         chunks.extend(
             split_rows(&rendered)
                 .into_iter()
@@ -300,7 +292,7 @@ fn split_rows(rendered: &str) -> Vec<(String, usize)> {
 #[cfg(test)]
 mod tests {
     use application::{
-        diffs::{FileDiff, LineOwners},
+        diffs::FileDiff,
         viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabId},
     };
 
@@ -318,8 +310,6 @@ mod tests {
             removed: 1,
             lines: vec![status_line.to_string(), "@@ -1 +1 @@".to_string()],
             full_lines: None,
-            commits: vec!["abc123def".to_string()],
-            owners: LineOwners::default(),
         }
     }
 
@@ -345,7 +335,7 @@ mod tests {
         let file = &view.files[0];
         let syntax = crate::syntax::syntax_for_path(&file.path);
         let (lines, _) = super::selected_lines(file, RenderOptions::DEFAULT);
-        let complete = super::render_rows(file, DiffLayout::Unified, lines, syntax);
+        let complete = super::render_rows(DiffLayout::Unified, lines, syntax);
 
         let chunks = super::view_chunks(&view, RenderOptions::DEFAULT);
         let recomposed = chunks
@@ -412,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn build_html_marks_file_status_for_sidebar_tree() {
+    fn build_html_marks_file_status_in_files_and_server_tree() {
         let mut view = sample_view();
         view.files = vec![
             FileDiff {
@@ -427,8 +417,6 @@ mod tests {
                     "+hello".to_string(),
                 ],
                 full_lines: None,
-                commits: vec!["abc123def".to_string()],
-                owners: LineOwners::default(),
             },
             FileDiff {
                 path: "src/gone.rs".to_string(),
@@ -442,8 +430,6 @@ mod tests {
                     "-bye".to_string(),
                 ],
                 full_lines: None,
-                commits: vec!["abc123def".to_string()],
-                owners: LineOwners::default(),
             },
             FileDiff {
                 path: "src/new-name.rs".to_string(),
@@ -455,21 +441,19 @@ mod tests {
                     "rename to src/new-name.rs".to_string(),
                 ],
                 full_lines: None,
-                commits: vec!["abc123def".to_string()],
-                owners: LineOwners::default(),
             },
         ];
 
         let html = build_html(&view, RenderOptions::DEFAULT, None);
 
-        assert!(html.contains(r#"data-status="added""#));
-        assert!(html.contains(r#"data-status-label="Added file""#));
+        assert!(html.contains(r#"class="tnode tfile status-added""#));
+        assert!(html.contains(r#"class="tstatus status-added" title="Added file""#));
         assert!(html.contains(r#"class="file status-added "#));
-        assert!(html.contains(r#"data-status="deleted""#));
-        assert!(html.contains(r#"data-status-label="Deleted file""#));
+        assert!(html.contains(r#"class="tnode tfile status-deleted""#));
+        assert!(html.contains(r#"class="tstatus status-deleted" title="Deleted file""#));
         assert!(html.contains(r#"class="file status-deleted "#));
-        assert!(html.contains(r#"data-status="renamed""#));
-        assert!(html.contains(r#"data-status-label="Renamed file""#));
+        assert!(html.contains(r#"class="tnode tfile status-renamed""#));
+        assert!(html.contains(r#"class="tstatus status-renamed" title="Renamed file""#));
         assert!(html.contains(r#"class="file status-renamed "#));
         assert!(html.contains("tstatus"));
         assert!(html.contains(r#"class="status-badge status-added inline-flex size-[15px]"#));

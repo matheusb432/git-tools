@@ -92,38 +92,49 @@ describe("enhanceLayout", () => {
     cleanup();
   });
 
-  test("a path segment named after an Object.prototype member nests like any other directory", () => {
-    const root = layout("proto");
+  test("server-rendered tree labels navigate without rebuilding the tree", () => {
+    const root = layout("tree");
     const file = must(root.querySelector<HTMLDetailsElement>("details.file"), "the layout file");
-    file.id = "file-proto";
-    file.setAttribute("data-path", "constructor/toString/main.rs");
+    file.id = "file-tree";
+    file.open = false;
     const treeBody = document.createElement("div");
     treeBody.className = "tree-body";
+    const directory = document.createElement("li");
+    directory.className = "tdir open";
+    const directoryLabel = document.createElement("div");
+    directoryLabel.className = "tlabel";
+    const leaf = document.createElement("li");
+    leaf.className = "tfile";
+    leaf.setAttribute("data-target", file.id);
+    leaf.setAttribute("data-path", "src/tree.rs");
+    const leafLabel = document.createElement("div");
+    leafLabel.className = "tlabel";
+    leaf.appendChild(leafLabel);
+    directory.appendChild(directoryLabel);
+    directory.appendChild(leaf);
+    treeBody.appendChild(directory);
     root.appendChild(treeBody);
 
     const cleanup = enhanceLayout(root);
 
-    const dirNames = [...treeBody.querySelectorAll<HTMLElement>(".tdir")].map(
-      (dir) => must(dir.querySelector<HTMLElement>(".tname"), "the directory name").textContent,
-    );
-    expect(dirNames).toEqual(["constructor", "toString"]);
-    const leaf = must(treeBody.querySelector<HTMLElement>(".tfile"), "the file leaf");
-    expect(leaf.getAttribute("data-target")).toBe("file-proto");
-    expect(must(leaf.querySelector<HTMLElement>(".tname"), "the leaf name").textContent).toBe("main.rs");
+    directoryLabel.click();
+    leafLabel.click();
+
+    expect(directory.classList.contains("open")).toBe(false);
+    expect(file.open).toBe(true);
+    expect(treeBody.querySelector(".tfile")).toBe(leaf);
     cleanup();
   });
 
-  test("rebuilding the file tree detaches old labels while the current tree still navigates", () => {
+  test("file search hides paired server-rendered file and tree elements", () => {
     const root = layout("alpha");
     const alpha = must(root.querySelector<HTMLDetailsElement>("details.file"), "the layout file");
     alpha.id = "file-alpha";
     alpha.setAttribute("data-path", "src/alpha.rs");
-    alpha.setAttribute("data-commits", "aaa111aaa");
     const beta = document.createElement("details");
     beta.className = "file";
     beta.id = "file-beta";
     beta.setAttribute("data-path", "src/beta.rs");
-    beta.setAttribute("data-commits", "bbb222bbb");
     must(root.querySelector<HTMLElement>(".main"), "the layout scroller").appendChild(beta);
     const search = document.createElement("div");
     search.className = "search";
@@ -131,31 +142,31 @@ describe("enhanceLayout", () => {
     search.appendChild(filter);
     const treeBody = document.createElement("div");
     treeBody.className = "tree-body";
-    const commit = document.createElement("div");
-    commit.className = "cline";
-    commit.setAttribute("data-sha", "aaa111aaa");
+    const directory = document.createElement("li");
+    directory.className = "tdir open";
+    for (const [path, target] of [
+      ["src/alpha.rs", alpha.id],
+      ["src/beta.rs", beta.id],
+    ] as const) {
+      const leaf = document.createElement("li");
+      leaf.className = "tfile";
+      leaf.setAttribute("data-path", path);
+      leaf.setAttribute("data-target", target);
+      directory.appendChild(leaf);
+    }
+    treeBody.appendChild(directory);
     root.appendChild(search);
     root.appendChild(treeBody);
-    root.appendChild(commit);
 
     const cleanup = enhanceLayout(root);
-    const staleLabel = must(treeBody.querySelector<HTMLElement>(".tfile .tlabel"), "the initial tree label");
-    for (const query of ["alpha", "", "beta", "", "alpha", ""]) {
-      filter.value = query;
-      filter.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-    commit.click();
-    commit.click();
+    filter.value = "beta";
+    filter.dispatchEvent(new Event("input", { bubbles: true }));
 
-    staleLabel.click();
-    expect(alpha.open).toBe(false);
-    expect(beta.open).toBe(false);
-    const currentBeta = must(
-      treeBody.querySelector<HTMLElement>('.tfile[data-target="file-beta"] .tlabel'),
-      "the rebuilt beta leaf",
-    );
-    currentBeta.click();
-    expect(beta.open).toBe(true);
+    expect(alpha.hidden).toBe(true);
+    expect(beta.hidden).toBe(false);
+    expect(treeBody.querySelector<HTMLElement>('[data-target="file-alpha"]')?.hidden).toBe(true);
+    expect(treeBody.querySelector<HTMLElement>('[data-target="file-beta"]')?.hidden).toBe(false);
+    expect(directory.hidden).toBe(false);
     cleanup();
   });
 

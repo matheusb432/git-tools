@@ -96,7 +96,6 @@ pub struct FakeGitClient {
     pub branch: String,
     pub upstream: Option<String>,
     pub commits: Vec<Commit>,
-    pub file_commits: HashMap<String, Vec<String>>,
     pub diff_output: String,
     pub full_diff_output: String,
     pub known_revs: Vec<String>,
@@ -351,21 +350,6 @@ impl GitClient for FakeGitClient {
             .get(&repo.to_string_lossy().into_owned())
             .map_or_else(|| self.commits.clone(), |o| o.commits.clone()))
     }
-    fn file_commit_map(
-        &self,
-        _repo: &Path,
-        _range: &str,
-    ) -> anyhow::Result<HashMap<String, Vec<String>>> {
-        Ok(self.file_commits.clone())
-    }
-    fn merge_members(
-        &self,
-        _repo: &Path,
-        _merge: &str,
-        _base: &str,
-    ) -> anyhow::Result<Vec<String>> {
-        Ok(vec![])
-    }
     fn diff(&self, repo: &Path, request: &GitDiffRequest) -> anyhow::Result<String> {
         // The exclusion pass asks for paths only; mirror git by listing the
         // scripted diff's file paths, one per line.
@@ -380,27 +364,6 @@ impl GitClient for FakeGitClient {
             return Ok(self.full_diff_output.clone());
         }
         Ok(self.scripted_diff(repo))
-    }
-    fn blame_forward(
-        &self,
-        _r: &Path,
-        _b: &str,
-        _t: &str,
-        _p: &str,
-    ) -> anyhow::Result<HashMap<u32, String>> {
-        Ok(HashMap::new())
-    }
-    fn blame_forward_worktree(&self, _r: &Path, _p: &str) -> anyhow::Result<HashMap<u32, String>> {
-        Ok(HashMap::new())
-    }
-    fn blame_reverse(
-        &self,
-        _r: &Path,
-        _b: &str,
-        _t: &str,
-        _p: &str,
-    ) -> anyhow::Result<HashMap<u32, String>> {
-        Ok(HashMap::new())
     }
     fn root_commit(&self, _repo: &Path) -> Option<String> {
         Some("rootsha".into())
@@ -1095,52 +1058,11 @@ impl GitClient for ScriptedGitClient {
                         .split_whitespace()
                         .map(|parent| parent.chars().take(9).collect())
                         .collect(),
-                    members: Vec::new(),
                 })
             })
             .collect())
     }
-    fn file_commit_map(
-        &self,
-        _repo: &Path,
-        _range: &str,
-    ) -> anyhow::Result<HashMap<String, Vec<String>>> {
-        unreachable!("diff tests use FakeGitClient")
-    }
-    fn merge_members(
-        &self,
-        _repo: &Path,
-        _merge: &str,
-        _base: &str,
-    ) -> anyhow::Result<Vec<String>> {
-        unreachable!("diff tests use FakeGitClient")
-    }
     fn diff(&self, _repo: &Path, _request: &GitDiffRequest) -> anyhow::Result<String> {
-        unreachable!("diff tests use FakeGitClient")
-    }
-    fn blame_forward(
-        &self,
-        _repo: &Path,
-        _base: &str,
-        _tip: &str,
-        _path: &str,
-    ) -> anyhow::Result<HashMap<u32, String>> {
-        unreachable!("diff tests use FakeGitClient")
-    }
-    fn blame_forward_worktree(
-        &self,
-        _repo: &Path,
-        _path: &str,
-    ) -> anyhow::Result<HashMap<u32, String>> {
-        unreachable!("diff tests use FakeGitClient")
-    }
-    fn blame_reverse(
-        &self,
-        _repo: &Path,
-        _base: &str,
-        _tip: &str,
-        _path: &str,
-    ) -> anyhow::Result<HashMap<u32, String>> {
         unreachable!("diff tests use FakeGitClient")
     }
     fn root_commit(&self, _repo: &Path) -> Option<String> {

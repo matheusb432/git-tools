@@ -11,10 +11,15 @@ pub(super) enum ViewerSettingChange {
     Theme(Theme),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ViewerRoute {
     View {
         tab: ViewerTabId,
+        options: RenderOptions,
+    },
+    CommitPatch {
+        tab: ViewerTabId,
+        sha: String,
         options: RenderOptions,
     },
     Activate {
@@ -42,6 +47,12 @@ impl fmt::Display for ViewerRoute {
             Self::View { tab, options } => write!(
                 formatter,
                 "/tabs/{tab}/view?layout={}&density={}",
+                options.layout(),
+                options.density()
+            ),
+            Self::CommitPatch { tab, sha, options } => write!(
+                formatter,
+                "/tabs/{tab}/commits/{sha}/view?layout={}&density={}",
                 options.layout(),
                 options.density()
             ),

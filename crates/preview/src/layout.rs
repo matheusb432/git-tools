@@ -53,6 +53,8 @@ const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
 pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -> Markup {
     view_body_with_mode(
         view,
+        view,
+        None,
         options,
         surface,
         BodyMode::Complete,
@@ -62,11 +64,21 @@ pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -
 
 pub(crate) fn view_body_with_mobile_controls(
     view: &View,
+    range_view: &View,
+    selected_commit_sha: Option<&str>,
     options: RenderOptions,
     surface: Surface,
     controls: mobile_controls::MobileViewControls,
 ) -> Markup {
-    view_body_with_mode(view, options, surface, BodyMode::Complete, controls)
+    view_body_with_mode(
+        view,
+        range_view,
+        selected_commit_sha,
+        options,
+        surface,
+        BodyMode::Complete,
+        controls,
+    )
 }
 
 pub(crate) fn view_body_shell(
@@ -77,6 +89,8 @@ pub(crate) fn view_body_shell(
 ) -> Markup {
     view_body_with_mode(
         view,
+        view,
+        None,
         options,
         surface,
         BodyMode::Shell { load_id },
@@ -86,6 +100,8 @@ pub(crate) fn view_body_shell(
 
 pub(crate) fn view_body_shell_with_mobile_controls(
     view: &View,
+    range_view: &View,
+    selected_commit_sha: Option<&str>,
     options: RenderOptions,
     surface: Surface,
     load_id: u64,
@@ -93,6 +109,8 @@ pub(crate) fn view_body_shell_with_mobile_controls(
 ) -> Markup {
     view_body_with_mode(
         view,
+        range_view,
+        selected_commit_sha,
         options,
         surface,
         BodyMode::Shell { load_id },
@@ -108,6 +126,8 @@ enum BodyMode {
 
 fn view_body_with_mode(
     view: &View,
+    range_view: &View,
+    selected_commit_sha: Option<&str>,
     options: RenderOptions,
     surface: Surface,
     mode: BodyMode,
@@ -139,12 +159,12 @@ fn view_body_with_mode(
                     }
                 }
             }
-            (shelf::shelf(view))
+            (shelf::shelf(range_view, surface, options, selected_commit_sha))
             (keybar::keybar(view))
-            (shelf::commit_popovers(view))
+            (shelf::commit_popovers(range_view))
             @if let Surface::App { .. } = surface {
                 (tree::mobile_popover(view))
-                (shelf::mobile_popover(view))
+                (shelf::mobile_popover(range_view, surface, options, selected_commit_sha))
             }
             (mobile_controls::popover(&mobile_controls_target, mobile_controls))
         }

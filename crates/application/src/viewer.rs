@@ -31,6 +31,10 @@ use crate::diffs::View;
 pub struct ViewerView {
     tab_id: ViewerTabId,
     view: Arc<View>,
+    range_view: Arc<View>,
+    selected_commit_sha: Option<String>,
+    selection_pending: bool,
+    selection_error: Option<String>,
     options: RenderOptions,
     kind: ViewerTabKind,
 }
@@ -56,7 +60,70 @@ impl ViewerView {
     ) -> Self {
         Self {
             tab_id,
+            range_view: Arc::clone(&view),
             view,
+            selected_commit_sha: None,
+            selection_pending: false,
+            selection_error: None,
+            options,
+            kind,
+        }
+    }
+
+    pub fn selected(
+        tab_id: ViewerTabId,
+        range_view: Arc<View>,
+        patch_view: Arc<View>,
+        selected_commit_sha: String,
+        options: RenderOptions,
+        kind: ViewerTabKind,
+    ) -> Self {
+        Self {
+            tab_id,
+            view: patch_view,
+            range_view,
+            selected_commit_sha: Some(selected_commit_sha),
+            selection_pending: false,
+            selection_error: None,
+            options,
+            kind,
+        }
+    }
+
+    pub fn selection_error(
+        tab_id: ViewerTabId,
+        range_view: Arc<View>,
+        selected_commit_sha: String,
+        reason: String,
+        options: RenderOptions,
+        kind: ViewerTabKind,
+    ) -> Self {
+        Self {
+            tab_id,
+            view: Arc::clone(&range_view),
+            range_view,
+            selected_commit_sha: Some(selected_commit_sha),
+            selection_pending: false,
+            selection_error: Some(reason),
+            options,
+            kind,
+        }
+    }
+
+    pub fn selection_pending(
+        tab_id: ViewerTabId,
+        range_view: Arc<View>,
+        selected_commit_sha: String,
+        options: RenderOptions,
+        kind: ViewerTabKind,
+    ) -> Self {
+        Self {
+            tab_id,
+            view: Arc::clone(&range_view),
+            range_view,
+            selected_commit_sha: Some(selected_commit_sha),
+            selection_pending: true,
+            selection_error: None,
             options,
             kind,
         }
@@ -89,6 +156,22 @@ impl ViewerView {
     /// ```
     pub fn view(&self) -> &View {
         &self.view
+    }
+
+    pub fn range_view(&self) -> &View {
+        &self.range_view
+    }
+
+    pub fn selected_commit_sha(&self) -> Option<&str> {
+        self.selected_commit_sha.as_deref()
+    }
+
+    pub fn selection_error_reason(&self) -> Option<&str> {
+        self.selection_error.as_deref()
+    }
+
+    pub const fn selection_is_pending(&self) -> bool {
+        self.selection_pending
     }
 
     /// Returns the layout and density used to render the diff.

@@ -17,7 +17,12 @@ type ResponseHeaderReader = { readonly getResponseHeader: (name: string) => stri
 
 type LandOnAnchor = (target: HTMLDetailsElement, scroller: HTMLElement, offset: number) => void;
 
-const pendingAnchors = new WeakMap<HTMLElement, SwapAnchor>();
+type PendingSwap = {
+  readonly anchor: SwapAnchor;
+  readonly viewIdentity: string | null;
+};
+
+const pendingSwaps = new WeakMap<HTMLElement, PendingSwap>();
 const RECOVERY_HEADER = "X-GTL-Recovery";
 
 function layoutsWithin(scope: ParentNode): readonly HTMLElement[] {
@@ -150,7 +155,12 @@ export const installSwapLifecycle = installOnce(
       optIntoMarkedRecoverySwap(event);
       const target = eventTarget(event);
       if (!target || !isViewerView(target) || !swapWillRun(event)) return;
-      if (!pendingAnchors.has(target)) pendingAnchors.set(target, captureSwapAnchor(target));
+      if (!pendingSwaps.has(target)) {
+        pendingSwaps.set(target, {
+          anchor: captureSwapAnchor(target),
+          viewIdentity: target.getAttribute("data-view-identity"),
+        });
+      }
       lifecycle.destroyWithin(target);
     };
     const afterSwap = (event: Event): void => {
@@ -158,10 +168,12 @@ export const installSwapLifecycle = installOnce(
       const replacement = replacementTarget(event);
       if (!oldTarget || !isViewerView(oldTarget) || !replacement || !isViewerView(replacement)) return;
       lifecycle.enhanceWithin(replacement);
-      const anchor = pendingAnchors.get(oldTarget);
-      if (anchor) {
-        restoreSwapAnchor(replacement, anchor);
-        pendingAnchors.delete(oldTarget);
+      const pending = pendingSwaps.get(oldTarget);
+      if (pending) {
+        if (pending.viewIdentity === replacement.getAttribute("data-view-identity")) {
+          restoreSwapAnchor(replacement, pending.anchor);
+        }
+        pendingSwaps.delete(oldTarget);
       }
     };
     targetDocument.addEventListener("htmx:beforeSwap", beforeSwap);

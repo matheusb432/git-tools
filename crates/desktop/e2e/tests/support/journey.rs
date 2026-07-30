@@ -342,6 +342,80 @@ pub async fn refresh_and_assert_alpha_v2(session: &TestSession) -> Result<()> {
     .await
 }
 
+pub async fn select_commit_patch_and_restore_range(session: &TestSession) -> Result<()> {
+    let driver = session.driver();
+    driver
+        .execute(
+            r##"
+const card = Array.from(document.querySelectorAll("#viewer-view .commit-select"))
+  .find((button) => button.textContent.includes("live view v2"));
+if (!(card instanceof HTMLButtonElement)) {
+  throw new Error("live view v2 commit action is missing");
+}
+card.click();
+"##,
+            Vec::new(),
+        )
+        .await
+        .context("select live view v2 commit patch")?;
+    wait::until(
+        "standalone live view v2 commit patch",
+        ASSERTION_TIMEOUT,
+        || async {
+            Ok(script_bool(
+                driver,
+                r##"
+const view = document.querySelector("#viewer-view");
+const text = view?.textContent ?? "";
+const file = view?.querySelector("details.file");
+return view?.dataset.viewerState === "ready"
+  && view.querySelector(".cline.active .commit-select")?.textContent.includes("live view v2")
+  && Array.from(view.querySelectorAll("button")).some((button) => button.textContent.trim() === "Show all changes")
+  && text.includes("alpha-v1")
+  && text.includes("alpha-v2")
+  && text.includes("1 commit")
+  && file?.querySelector(".a")?.textContent.trim() === "+1"
+  && file?.querySelector(".d")?.textContent.trim() === "−1";
+"##,
+            )
+            .await?
+            .then_some(()))
+        },
+    )
+    .await?;
+
+    by_accessible_name(driver, "Show all changes")
+        .await?
+        .click()
+        .await
+        .context("restore the complete live view range")?;
+    wait_for_htmx_idle(driver, "restoring the complete range").await?;
+    wait::until(
+        "restored complete range after commit patch",
+        ASSERTION_TIMEOUT,
+        || async {
+            Ok(script_bool(
+                driver,
+                r##"
+const view = document.querySelector("#viewer-view");
+const text = view?.textContent ?? "";
+const file = view?.querySelector("details.file");
+return view?.dataset.viewerState === "ready"
+  && view.querySelector(".cline.active") === null
+  && !Array.from(view.querySelectorAll("button")).some((button) => button.textContent.trim() === "Show all changes")
+  && !text.includes("alpha-v1")
+  && text.includes("alpha-v2")
+  && file?.querySelector(".a")?.textContent.trim() === "+1"
+  && file?.querySelector(".d")?.textContent.trim() === "−0";
+"##,
+            )
+            .await?
+            .then_some(()))
+        },
+    )
+    .await
+}
+
 async fn refresh_and_assert_alpha_v2_within(
     session: &TestSession,
     deadline: Instant,

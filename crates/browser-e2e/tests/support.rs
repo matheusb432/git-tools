@@ -65,7 +65,7 @@ fn verify_runtime_environment() -> Result<()> {
     Ok(())
 }
 
-pub async fn repository_with_worktree_change() -> Result<tempfile::TempDir> {
+pub async fn repository_with_commit() -> Result<tempfile::TempDir> {
     let repository = tempfile::Builder::new()
         .prefix("gtl-offline-artifact-")
         .tempdir()
@@ -81,8 +81,15 @@ pub async fn repository_with_worktree_change() -> Result<tempfile::TempDir> {
         .context("write Git fixture")?;
     git(repository.path(), &["add", "artifact.txt"]).await?;
     git(repository.path(), &["commit", "-q", "-m", "base"]).await?;
+    git(repository.path(), &["switch", "-q", "-c", "feature"]).await?;
     std::fs::write(repository.path().join("artifact.txt"), "base\nchanged\n")
         .context("write changed Git fixture")?;
+    git(repository.path(), &["add", "artifact.txt"]).await?;
+    git(
+        repository.path(),
+        &["commit", "-q", "-m", "artifact change"],
+    )
+    .await?;
     Ok(repository)
 }
 

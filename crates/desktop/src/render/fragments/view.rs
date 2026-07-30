@@ -21,9 +21,12 @@ pub(in crate::render) fn view(
     load_id: Option<ViewLoadId>,
     defer_ready: bool,
 ) -> Markup {
+    let selection_pending = document
+        .active_view()
+        .is_some_and(application::viewer::ViewerView::selection_is_pending);
     let state = match document.active_tab().map(ViewerTab::state) {
         None => VIEW_STATE_EMPTY,
-        Some(ViewerTabState::Ready) if defer_ready => VIEW_STATE_LOADING,
+        Some(ViewerTabState::Ready) if defer_ready || selection_pending => VIEW_STATE_LOADING,
         Some(ViewerTabState::Ready) => VIEW_STATE_READY,
         Some(ViewerTabState::Broken { .. }) => VIEW_STATE_BROKEN,
         Some(ViewerTabState::Error { reason }) if reason == RENDER_PENDING_REASON => {
@@ -31,6 +34,17 @@ pub(in crate::render) fn view(
         }
         Some(ViewerTabState::Error { .. }) => VIEW_STATE_ERROR,
     };
+    let view_identity = document.active_tab_id().map(|tab_id| {
+        document.active_view().map_or_else(
+            || format!("{tab_id}:range"),
+            |view| {
+                view.selected_commit_sha().map_or_else(
+                    || format!("{tab_id}:range"),
+                    |sha| format!("{tab_id}:commit:{sha}"),
+                )
+            },
+        )
+    });
 
     html! {
         section id="viewer-view"
@@ -41,30 +55,39 @@ pub(in crate::render) fn view(
                 "viewer-view min-h-0 min-w-0 overflow-hidden [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft"
             })
             data-viewer-state=(state)
+            data-view-identity=[view_identity]
             data-tab-id=[document.active_tab_id().map(|id| id.to_string())] {
             @match document.active_tab() {
                 None => (empty_view(feedback == SwapFeedback::LiveViewDeleted)),
                 Some(tab) => @match tab.state() {
                     ViewerTabState::Ready => {
-                        @if !defer_ready {
+                        @if !defer_ready && !selection_pending {
                             @let view = document.active_view().expect("ViewerDocument guarantees a view for the ready active tab");
-                            (controls::view_controls(view))
-                            @let mobile_controls = controls::mobile_view_controls(view, document.settings().theme());
-                            @if let Some(load_id) = load_id {
-                                (preview::view_shell_with_mobile_controls(
-                                    view.view(),
-                                    view.options(),
-                                    view.tab_id(),
-                                    load_id.get(),
-                                    mobile_controls,
-                                ))
+                            @if let Some(reason) = view.selection_error_reason() {
+                                (selected_commit_error(view, reason))
                             } @else {
-                                (preview::view_fragment_with_mobile_controls(
-                                    view.view(),
-                                    view.options(),
-                                    view.tab_id(),
-                                    mobile_controls,
-                                ))
+                                (controls::view_controls(view))
+                                @let mobile_controls = controls::mobile_view_controls(view, document.settings().theme());
+                                @if let Some(load_id) = load_id {
+                                    (preview::view_shell_with_mobile_controls(
+                                        view.view(),
+                                        view.range_view(),
+                                        view.selected_commit_sha(),
+                                        view.options(),
+                                        view.tab_id(),
+                                        load_id.get(),
+                                        mobile_controls,
+                                    ))
+                                } @else {
+                                    (preview::view_fragment_with_mobile_controls(
+                                        view.view(),
+                                        view.range_view(),
+                                        view.selected_commit_sha(),
+                                        view.options(),
+                                        view.tab_id(),
+                                        mobile_controls,
+                                    ))
+                                }
                             }
                         }
                     },
@@ -72,6 +95,25 @@ pub(in crate::render) fn view(
                     ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON => {},
                     ViewerTabState::Error { reason } => (error_view(tab, reason)),
                 }
+            }
+        }
+    }
+}
+
+fn selected_commit_error(view: &application::viewer::ViewerView, reason: &str) -> Markup {
+    html! {
+        div class="viewer-status viewer-status-error grid min-h-full grid-cols-[auto_minmax(0,520px)] place-content-center gap-[18px] p-8 text-ink-2" role="alert" {
+            span class="viewer-status-mark flex size-[42px] items-center justify-center rounded-full border border-del-line bg-del-bg text-xl font-bold text-del" aria-hidden="true" { "×" }
+            div {
+                p class="viewer-status-eyebrow m-0 text-[10px] font-bold tracking-[.08em] text-ink-3 uppercase" { "Commit patch unavailable" }
+                h1 class="mt-[3px] mb-[7px] text-xl leading-tight tracking-[-.02em] text-ink" { "The selected commit could not be rendered" }
+                p class="m-0 [overflow-wrap:anywhere]" { (reason) }
+                button type="button"
+                    class="viewer-recovery-button mt-4 cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-[11px] py-[7px] text-xs text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
+                    hx-get=(ViewerRoute::View { tab: view.tab_id(), options: view.options() })
+                    hx-target="#viewer-view"
+                    hx-sync="#viewer-view:replace"
+                    hx-swap="outerHTML" { "Show all changes" }
             }
         }
     }

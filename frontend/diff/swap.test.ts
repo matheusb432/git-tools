@@ -25,9 +25,10 @@ function layout(name: string): HTMLElement {
   return root;
 }
 
-function viewWithFile(path: string): HTMLElement {
+function viewWithFile(path: string, identity?: string): HTMLElement {
   const view = document.createElement("section");
   view.id = "viewer-view";
+  if (identity) view.setAttribute("data-view-identity", identity);
   const root = layout("view");
   must(root.querySelector<HTMLDetailsElement>("details.file"), "the layout file").setAttribute("data-path", path);
   view.appendChild(root);
@@ -170,6 +171,24 @@ test("the htmx lifecycle destroys the old view before mounting the replacement",
   dispatchSwap("htmx:afterSwap", next, before);
   expect(next.querySelector<HTMLElement>(".layout")?.dataset["gtlEnhanced"]).toBe("true");
   expect(oldLayout.dataset["gtlEnhanced"]).toBeUndefined();
+});
+
+test("a semantic view change resets the viewport instead of carrying a range anchor into a commit patch", () => {
+  installSwapLifecycle(document, testLifecycle);
+  const before = viewWithFile("src/lib.rs", "1:range");
+  const beforeScroller = must(before.querySelector<HTMLElement>(".main"), "the range scroller");
+  beforeScroller.scrollTop = 83;
+  document.body.appendChild(before);
+
+  dispatchSwap("htmx:beforeSwap", before, before);
+  const next = viewWithFile("src/lib.rs", "1:commit:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  const nextScroller = must(next.querySelector<HTMLElement>(".main"), "the commit scroller");
+  before.remove();
+  document.body.appendChild(next);
+  dispatchSwap("htmx:afterSwap", next, before);
+
+  expect(nextScroller.scrollTop).toBe(0);
+  expect(next.querySelector<HTMLDetailsElement>("details.file")?.open).toBe(false);
 });
 
 test("a canceled normal swap leaves the existing view mounted and interactive", () => {

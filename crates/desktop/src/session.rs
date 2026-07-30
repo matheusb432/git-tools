@@ -1,13 +1,19 @@
 mod cache;
 mod pending;
 
-use application::viewer::initial_recipe_label::{self, InitialRecipeLabel};
+use std::{path::PathBuf, sync::Arc};
+
+use application::{
+    diffs::View,
+    viewer::initial_recipe_label::{self, InitialRecipeLabel},
+};
 #[cfg(feature = "benchmark-support")]
 pub use cache::{CacheDisposition, CachedView, WeightedViewCache};
 #[cfg(not(feature = "benchmark-support"))]
 pub(crate) use cache::{CachedView, WeightedViewCache};
 use contracts::recipes::{Recipe, RecipeSource};
 use domain::{
+    diffs::Commit,
     live_views::LiveSource,
     viewer::{ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState},
 };
@@ -21,6 +27,44 @@ pub(crate) const RENDER_PENDING_REASON: &str = "render pending";
 pub(crate) struct ComputeTicket {
     pub(crate) tab_id: ViewerTabId,
     pub(crate) generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CommitPatchTicket {
+    pub(crate) tab_id: ViewerTabId,
+    pub(crate) range_generation: u64,
+    pub(crate) selection_generation: u64,
+}
+
+#[derive(Debug, Clone)]
+enum CommitSelection {
+    None,
+    Pending {
+        commit: Commit,
+    },
+    Ready {
+        commit: Commit,
+        transient: Option<Arc<View>>,
+    },
+    Error {
+        commit: Commit,
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum CommitSelectionSnapshot {
+    None,
+    Pending { sha: String },
+    Ready { sha: String, view: Arc<View> },
+    Error { sha: String, reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BeginCommitSelectionError {
+    UnknownTab,
+    StaleRange,
+    UnknownCommit,
 }
 
 /// Whether a compute result was current enough to mutate the session.
@@ -43,6 +87,8 @@ pub(crate) struct SessionTab {
     pub(crate) recipe: Recipe,
     pub(crate) batch_id: String,
     generation: u64,
+    selection_generation: u64,
+    selection: CommitSelection,
 }
 
 /// Authoritative recipe tabs plus their separately bounded computed views.
@@ -85,6 +131,7 @@ impl ViewerSession {
         kind: ViewerTabKind,
         label: String,
     ) -> ViewerTabId {
+        self.clear_every_commit_selection();
         let unpinned = recipe.unpinned();
         if let Some(existing) = self
             .tabs
@@ -124,6 +171,8 @@ impl ViewerSession {
             recipe,
             batch_id,
             generation: 0,
+            selection_generation: 0,
+            selection: CommitSelection::None,
         });
         self.active = Some(id);
         self.bump_revision();
@@ -144,6 +193,11 @@ impl ViewerSession {
             .generation
             .checked_add(1)
             .expect("tab compute generation exhausted");
+        tab.selection_generation = tab
+            .selection_generation
+            .checked_add(1)
+            .expect("tab selection generation exhausted");
+        tab.selection = CommitSelection::None;
         tab.tab = ViewerTab::new(
             id,
             tab.tab.label().into(),
@@ -208,6 +262,191 @@ impl ViewerSession {
         self.begin_compute(id)
     }
 
+    pub(crate) fn begin_commit_selection(
+        &mut self,
+        id: ViewerTabId,
+        sha: &str,
+    ) -> Result<(CommitPatchTicket, PathBuf, Commit), BeginCommitSelectionError> {
+        if self.active != Some(id) {
+            return Err(BeginCommitSelectionError::StaleRange);
+        }
+        let cached = self
+            .cache
+            .get(id)
+            .cloned()
+            .ok_or(BeginCommitSelectionError::StaleRange)?;
+        let commit = cached
+            .view
+            .commits
+            .iter()
+            .find(|commit| commit.sha == sha)
+            .cloned()
+            .ok_or(BeginCommitSelectionError::UnknownCommit)?;
+        let tab = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.tab.id() == id)
+            .ok_or(BeginCommitSelectionError::UnknownTab)?;
+        if !matches!(tab.tab.state(), ViewerTabState::Ready) {
+            return Err(BeginCommitSelectionError::StaleRange);
+        }
+        tab.selection_generation = tab
+            .selection_generation
+            .checked_add(1)
+            .expect("tab selection generation exhausted");
+        tab.selection = CommitSelection::Pending {
+            commit: commit.clone(),
+        };
+        let ticket = CommitPatchTicket {
+            tab_id: id,
+            range_generation: tab.generation,
+            selection_generation: tab.selection_generation,
+        };
+        let repo_root = PathBuf::from(&cached.view.repo_root);
+        self.bump_revision();
+        Ok((ticket, repo_root, commit))
+    }
+
+    pub(crate) fn has_ready_commit_selection(&mut self, id: ViewerTabId, sha: &str) -> bool {
+        if self.active != Some(id) {
+            return false;
+        }
+        let Some(tab) = self.tabs.iter().find(|tab| tab.tab.id() == id) else {
+            return false;
+        };
+        match &tab.selection {
+            CommitSelection::Ready { commit, transient } if commit.sha == sha => {
+                transient.is_some()
+                    || self
+                        .cache
+                        .get(id)
+                        .is_some_and(|cached| cached.selected.is_some())
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn publish_commit_patch_if_current(
+        &mut self,
+        ticket: CommitPatchTicket,
+        patch: Arc<View>,
+    ) -> PublishOutcome {
+        if !self.commit_patch_is_current(ticket) {
+            return PublishOutcome::Stale;
+        }
+        let Some(base) = self.cache.get(ticket.tab_id).cloned() else {
+            return PublishOutcome::Stale;
+        };
+        let sha = match self.tab(ticket.tab_id).map(|tab| &tab.selection) {
+            Some(CommitSelection::Pending { commit }) => commit.sha.clone(),
+            _ => return PublishOutcome::Stale,
+        };
+        let selected = base.with_selected(Arc::clone(&patch));
+        let transient =
+            if self.cache.insert(ticket.tab_id, selected) == cache::CacheDisposition::Oversize {
+                self.cache.insert(ticket.tab_id, base);
+                Some(patch)
+            } else {
+                None
+            };
+        let tab = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.tab.id() == ticket.tab_id)
+            .expect("current selection ticket owns a tab");
+        let CommitSelection::Pending { commit } =
+            std::mem::replace(&mut tab.selection, CommitSelection::None)
+        else {
+            unreachable!("current selection ticket is pending");
+        };
+        debug_assert_eq!(commit.sha, sha);
+        tab.selection = CommitSelection::Ready { commit, transient };
+        self.bump_revision();
+        PublishOutcome::Published
+    }
+
+    pub(crate) fn set_commit_patch_error_if_current(
+        &mut self,
+        ticket: CommitPatchTicket,
+        reason: String,
+    ) -> PublishOutcome {
+        if !self.commit_patch_is_current(ticket) {
+            return PublishOutcome::Stale;
+        }
+        let tab = self
+            .tabs
+            .iter_mut()
+            .find(|tab| tab.tab.id() == ticket.tab_id)
+            .expect("current selection ticket owns a tab");
+        let CommitSelection::Pending { commit } =
+            std::mem::replace(&mut tab.selection, CommitSelection::None)
+        else {
+            return PublishOutcome::Stale;
+        };
+        tab.selection = CommitSelection::Error { commit, reason };
+        self.bump_revision();
+        PublishOutcome::Published
+    }
+
+    pub(crate) fn clear_commit_selection(&mut self, id: ViewerTabId) -> bool {
+        let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
+            return false;
+        };
+        tab.selection_generation = tab
+            .selection_generation
+            .checked_add(1)
+            .expect("tab selection generation exhausted");
+        tab.selection = CommitSelection::None;
+        if let Some(cached) = self.cache.get(id).cloned()
+            && cached.selected.is_some()
+        {
+            self.cache.insert(id, cached.without_selected());
+        }
+        self.bump_revision();
+        true
+    }
+
+    pub(crate) fn commit_selection_snapshot(&mut self, id: ViewerTabId) -> CommitSelectionSnapshot {
+        let Some(tab) = self.tabs.iter().find(|tab| tab.tab.id() == id) else {
+            return CommitSelectionSnapshot::None;
+        };
+        match &tab.selection {
+            CommitSelection::None => CommitSelectionSnapshot::None,
+            CommitSelection::Pending { commit } => CommitSelectionSnapshot::Pending {
+                sha: commit.sha.clone(),
+            },
+            CommitSelection::Error { commit, reason } => CommitSelectionSnapshot::Error {
+                sha: commit.sha.clone(),
+                reason: reason.clone(),
+            },
+            CommitSelection::Ready { commit, transient } => {
+                let view = transient.clone().or_else(|| {
+                    self.cache
+                        .get(id)
+                        .and_then(|cached| cached.selected.clone())
+                });
+                view.map_or_else(
+                    || CommitSelectionSnapshot::Pending {
+                        sha: commit.sha.clone(),
+                    },
+                    |view| CommitSelectionSnapshot::Ready {
+                        sha: commit.sha.clone(),
+                        view,
+                    },
+                )
+            }
+        }
+    }
+
+    fn commit_patch_is_current(&self, ticket: CommitPatchTicket) -> bool {
+        self.tabs.iter().any(|tab| {
+            tab.tab.id() == ticket.tab_id
+                && tab.generation == ticket.range_generation
+                && tab.selection_generation == ticket.selection_generation
+                && matches!(tab.selection, CommitSelection::Pending { .. })
+        })
+    }
+
     pub(crate) fn close_if_current(&mut self, ticket: ComputeTicket) -> PublishOutcome {
         if self.current_ticket(ticket.tab_id) != Some(ticket) {
             return PublishOutcome::Stale;
@@ -255,6 +494,9 @@ impl ViewerSession {
 
     pub(crate) fn activate(&mut self, id: ViewerTabId) -> bool {
         if self.tabs.iter().any(|tab| tab.tab.id() == id) {
+            if self.active != Some(id) {
+                self.clear_every_commit_selection();
+            }
             self.active = Some(id);
             self.bump_revision();
             true
@@ -276,6 +518,18 @@ impl ViewerSession {
             .revision
             .checked_add(1)
             .expect("viewer session revision exhausted");
+    }
+
+    fn clear_every_commit_selection(&mut self) {
+        let selected = self
+            .tabs
+            .iter()
+            .filter(|tab| !matches!(tab.selection, CommitSelection::None))
+            .map(|tab| tab.tab.id())
+            .collect::<Vec<_>>();
+        for id in selected {
+            self.clear_commit_selection(id);
+        }
     }
 
     pub(crate) fn tabs(&self) -> impl ExactSizeIterator<Item = &SessionTab> {
@@ -362,6 +616,111 @@ mod tests {
             PublishOutcome::Published
         );
         (session, id)
+    }
+
+    fn ready_session_with_commits() -> (ViewerSession, ViewerTabId, Vec<String>) {
+        let mut session = ViewerSession::new(1024 * 1024);
+        let id = session.open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot);
+        let ticket = session.begin_compute(id).expect("tab exists");
+        let shas = vec![
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
+        ];
+        let mut range = (*view("range")).clone();
+        range.commits = shas
+            .iter()
+            .map(|sha| domain::diffs::Commit {
+                sha: sha.clone(),
+                subject: format!("commit {}", &sha[..1]),
+                ..Default::default()
+            })
+            .collect();
+        session.publish_labeled_if_current(
+            ticket,
+            CachedView::new(Arc::new(range)),
+            "ready".into(),
+        );
+        (session, id, shas)
+    }
+
+    #[test]
+    fn selected_patch_replaces_only_the_displayed_view_until_cleared() {
+        let (mut session, id, shas) = ready_session_with_commits();
+        let (ticket, repo_root, commit) = session
+            .begin_commit_selection(id, &shas[0])
+            .expect("cached commit can be selected");
+
+        assert_eq!(repo_root, PathBuf::from("/repo"));
+        assert_eq!(commit.sha, shas[0]);
+        assert!(matches!(
+            session.commit_selection_snapshot(id),
+            CommitSelectionSnapshot::Pending { .. }
+        ));
+        assert_eq!(
+            session.publish_commit_patch_if_current(ticket, view("patch")),
+            PublishOutcome::Published
+        );
+        assert!(matches!(
+            session.commit_selection_snapshot(id),
+            CommitSelectionSnapshot::Ready { sha, view } if sha == shas[0] && view.title == "patch"
+        ));
+        assert_eq!(
+            session
+                .cached_view(id)
+                .expect("range remains cached")
+                .view
+                .title,
+            "range"
+        );
+
+        assert!(session.clear_commit_selection(id));
+        assert!(matches!(
+            session.commit_selection_snapshot(id),
+            CommitSelectionSnapshot::None
+        ));
+        assert!(
+            session
+                .cached_view(id)
+                .expect("range remains cached")
+                .selected
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn clear_invalidates_every_in_flight_commit_patch_for_the_tab() {
+        let (mut session, id, shas) = ready_session_with_commits();
+        let (first, _, _) = session
+            .begin_commit_selection(id, &shas[0])
+            .expect("first selection");
+        let (second, _, _) = session
+            .begin_commit_selection(id, &shas[1])
+            .expect("second selection");
+
+        assert!(session.clear_commit_selection(id));
+
+        assert_eq!(
+            session.publish_commit_patch_if_current(first, view("first")),
+            PublishOutcome::Stale
+        );
+        assert_eq!(
+            session.publish_commit_patch_if_current(second, view("second")),
+            PublishOutcome::Stale
+        );
+        assert!(matches!(
+            session.commit_selection_snapshot(id),
+            CommitSelectionSnapshot::None
+        ));
+    }
+
+    #[test]
+    fn commit_selection_requires_an_exact_cached_identity() {
+        let (mut session, id, shas) = ready_session_with_commits();
+
+        assert_eq!(
+            session.begin_commit_selection(id, &shas[0][..10]),
+            Err(BeginCommitSelectionError::UnknownCommit)
+        );
     }
 
     #[test]

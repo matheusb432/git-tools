@@ -21,13 +21,14 @@ mod tests {
     use std::sync::Arc;
 
     use application::{
-        diffs::{Cmd, FileDiff, Foot, LineOwners, View},
+        diffs::{Cmd, FileDiff, Foot, View},
         viewer::{
             DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerDocument,
             ViewerHistoryEntry, ViewerSettings, ViewerTab, ViewerTabId, ViewerTabKind,
             ViewerTabState, ViewerView,
         },
     };
+    use domain::diffs::Commit;
     use strum::VariantArray as _;
 
     use super::{
@@ -70,8 +71,6 @@ mod tests {
                 removed: 0,
                 lines: vec!["@@ -0,0 +1 @@".into(), "+new".into()],
                 full_lines: None,
-                commits: vec![],
-                owners: LineOwners::default(),
             }],
             title: "Working tree".into(),
             cmd: Cmd {
@@ -124,6 +123,53 @@ mod tests {
     }
 
     #[test]
+    fn selected_commit_renders_its_patch_with_the_range_shelf_and_clear_action() {
+        let id = tab_id(1);
+        let sha = "abcdef0123456789abcdef0123456789abcdef01";
+        let mut range = (*view()).clone();
+        range.commits = vec![Commit {
+            sha: sha.into(),
+            subject: "selected change".into(),
+            ..Commit::default()
+        }];
+        range.files[0].added = 7;
+        let mut patch = range.clone();
+        patch.title = "commit abcdef0123".into();
+        patch.files[0].added = 1;
+        let document = ViewerDocument::new(
+            vec![ViewerTab::new(
+                id,
+                "git-tools changes".into(),
+                ViewerTabKind::Snapshot,
+                ViewerTabState::Ready,
+            )],
+            Some(id),
+            Some(ViewerView::selected(
+                id,
+                Arc::new(range),
+                Arc::new(patch),
+                sha.into(),
+                settings().options(),
+                ViewerTabKind::Snapshot,
+            )),
+            vec![],
+            settings(),
+        )
+        .expect("selected document is consistent");
+
+        let html = MaudViewerRenderer.build_document(&document);
+
+        assert!(html.contains("selected change"));
+        assert!(html.contains("commit abcdef0123"));
+        assert!(html.contains("aria-pressed=\"true\""));
+        assert!(html.contains(">Show all changes</button>"));
+        assert!(html.contains(&format!(r#"data-view-identity="1:commit:{sha}""#)));
+        assert!(html.contains(&format!("/tabs/1/commits/{sha}/view?")));
+        assert!(!html.contains("data-commits="));
+        assert!(!html.contains("data-commit="));
+    }
+
+    #[test]
     fn route_formatter_is_closed_over_validated_values() {
         let tab = tab_id(7);
         let options = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
@@ -132,6 +178,15 @@ mod tests {
         assert_eq!(
             ViewerRoute::View { tab, options }.to_string(),
             "/tabs/7/view?layout=split&density=full"
+        );
+        assert_eq!(
+            ViewerRoute::CommitPatch {
+                tab,
+                sha: "abcdef0123456789abcdef0123456789abcdef01".into(),
+                options,
+            }
+            .to_string(),
+            "/tabs/7/commits/abcdef0123456789abcdef0123456789abcdef01/view?layout=split&density=full"
         );
         assert_eq!(
             ViewerRoute::Activate { tab }.to_string(),

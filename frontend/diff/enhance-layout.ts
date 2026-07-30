@@ -4,9 +4,6 @@ import { keyboardCommand } from "./model/keyboard";
 import { scrollLandOn } from "./scroll";
 import { createTeardown } from "./teardown";
 import { showToast } from "../shared/toast";
-import { type CommitFocus, isShaTarget, resolveActiveSet } from "./model/commit-focus";
-import { planFileVisibility } from "./model/file-filter";
-import { buildFileLeaf } from "./file-tree";
 import { toggleLongLine } from "./long-lines";
 import { computeWheelScroll } from "../shared/wheel";
 
@@ -48,38 +45,17 @@ export function enhanceLayout(root: HTMLElement): () => void {
   // single document, and document-level queries would only ever wire the first panel.
   const fileEls = Array.from(root.querySelectorAll<HTMLDetailsElement>("details.file"));
   const clineEls = Array.from(root.querySelectorAll<HTMLElement>(".cline[data-sha]"));
-  const dlEls = Array.from(
-    root.querySelectorAll<HTMLElement>(".dl-add[data-commit],.dl-del[data-commit],.sp[data-commit]"),
-  );
-  // The server-rendered attributes never change, so read them once per enhance
-  // instead of on every filter pass.
-  const dlCommits = dlEls.map((row) => row.getAttribute("data-commit") ?? "");
-  const clineShas = clineEls.map((card) => card.getAttribute("data-sha") ?? "");
-  const fileTreeMeta = fileEls.map((el) => {
-    const path = el.getAttribute("data-path") || "";
-    const parts = path.split("/");
-    return {
-      dirs: parts.slice(0, -1).filter(Boolean),
-      name: parts[parts.length - 1] ?? "",
-      pathLower: path.toLowerCase(),
-      commitShas: (el.getAttribute("data-commits") || "").split(" ").filter(Boolean),
-      status: el.getAttribute("data-status") || "modified",
-      statusCode: el.getAttribute("data-status-code") || "M",
-      statusLabel: el.getAttribute("data-status-label") || "Modified file",
-    };
-  });
-  let ownedRows: HTMLElement[] = [];
-  let treeFileLeaves: Array<{ readonly leaf: HTMLElement; readonly targetId: string | null }> = [];
+  const filePaths = fileEls.map((el) => (el.getAttribute("data-path") || "").toLowerCase());
   const treeBody = root.querySelector<HTMLElement>(".tree-body");
+  const treeFileLeaves = Array.from(root.querySelectorAll<HTMLElement>(".tree-body .tfile"));
   const mobileFileMenu = root.querySelector<HTMLElement>("#viewer-files-popover");
   const filterInput = root.querySelector<HTMLInputElement>(".search input");
   const foldAll = root.querySelector<HTMLElement>(".foldall");
-  let focus: CommitFocus | null = null;
   let filterText = "";
 
   const mainScroller = root.querySelector<HTMLElement>(".main") ?? root;
 
-  if (treeBody)
+  if (treeBody) {
     listen(treeBody, "click", (event) => {
       if (!(event.target instanceof Element)) return;
       const label = event.target.closest<HTMLElement>(".tlabel");
@@ -93,8 +69,9 @@ export function enhanceLayout(root: HTMLElement): () => void {
       }
       label.closest<HTMLElement>(".tdir")?.classList.toggle("open");
     });
+  }
 
-  if (mobileFileMenu)
+  if (mobileFileMenu) {
     listen(mobileFileMenu, "click", (event) => {
       if (!(event.target instanceof Element)) return;
       const button = event.target.closest<HTMLElement>("[data-file-target]");
@@ -105,6 +82,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
       openAndScrollTo(file);
       mobileFileMenu.hidePopover?.();
     });
+  }
 
   function openAndScrollTo(t: HTMLDetailsElement): void {
     const summaryEl = t.querySelector<HTMLElement>("summary");
@@ -118,39 +96,47 @@ export function enhanceLayout(root: HTMLElement): () => void {
   }
 
   function applyFilter(): void {
-    const selected = focus === null ? null : focus.shas;
-    planFileVisibility(fileTreeMeta, { filterText, activeShas: selected }).forEach((isHidden, index) => {
+    filePaths.forEach((path, index) => {
       const el = fileEls[index];
-      if (el) el.hidden = isHidden;
+      if (el) el.hidden = filterText.length > 0 && !path.includes(filterText);
     });
-    syncBeads(selected);
-    syncOwned(selected);
-    buildTree();
+    treeFileLeaves.forEach((leaf) => {
+      const path = leaf.getAttribute("data-path") || "";
+      leaf.hidden = filterText.length > 0 && !path.includes(filterText);
+    });
+    Array.from(root.querySelectorAll<HTMLElement>(".tree-body .tdir"))
+      .reverse()
+      .forEach((directory) => {
+        directory.hidden = !Array.from(directory.querySelectorAll<HTMLElement>(".tfile")).some((leaf) => !leaf.hidden);
+      });
   }
 
-  if (filterInput)
+  if (filterInput) {
     listen(filterInput, "input", () => {
       filterText = filterInput.value.trim().toLowerCase();
       applyFilter();
     });
+  }
 
-  if (foldAll)
+  if (foldAll) {
     listen(foldAll, "click", () => {
       const anyOpen = fileEls.some((el) => el.open);
       fileEls.forEach((el) => {
         el.open = !anyOpen;
       });
     });
+  }
 
   // The context toggle drives `.copy-ctx` on this view's root; the copy button reads that
   // class at click time to decide whether to prepend the path/lines header.
   const ctxToggle = root.querySelector<HTMLElement>(".ctx-toggle");
-  if (ctxToggle)
+  if (ctxToggle) {
     listen(ctxToggle, "click", () => {
       const on = root.classList.toggle("copy-ctx");
       ctxToggle.setAttribute("aria-pressed", on ? "true" : "false");
       ctxToggle.classList.toggle("active", on);
     });
+  }
 
   listen(root, "click", (event) => {
     if (!(event.target instanceof Element)) return;
@@ -186,126 +172,16 @@ export function enhanceLayout(root: HTMLElement): () => void {
   }
   root.querySelectorAll<HTMLElement>(".diff").forEach(bindHorizontalWheel);
 
-  interface TreeFile {
-    readonly name: string;
-    readonly el: HTMLDetailsElement;
-    readonly status: string;
-    readonly statusCode: string;
-    readonly statusLabel: string;
-  }
-
-  // The tree follows DOM order, never re-sorts: the server already tree-sorted the files,
-  // and the sidebar must match the center pane exactly. A Map keyed by path segment carries
-  // that insertion order, and keeps a directory named `constructor` or `__proto__` from
-  // resolving to an Object.prototype member.
-  interface TreeNode {
-    readonly dirs: Map<string, TreeNode>;
-    readonly files: TreeFile[];
-  }
-
-  function buildTree(): void {
-    if (!treeBody) return;
-    const treeRoot: TreeNode = { dirs: new Map(), files: [] };
-    fileEls.forEach((el, index) => {
-      const meta = fileTreeMeta[index];
-      if (el.hidden || !meta) return;
-      let node = treeRoot;
-      for (const dir of meta.dirs) {
-        let child = node.dirs.get(dir);
-        if (!child) {
-          child = { dirs: new Map(), files: [] };
-          node.dirs.set(dir, child);
-        }
-        node = child;
-      }
-      node.files.push({
-        name: meta.name,
-        el,
-        status: meta.status,
-        statusCode: meta.statusCode,
-        statusLabel: meta.statusLabel,
-      });
-    });
-    treeBody.innerHTML = "";
-    treeBody.appendChild(renderNode(treeRoot));
-    treeFileLeaves = Array.from(treeBody.querySelectorAll<HTMLElement>(".tfile")).map((leaf) => ({
-      leaf,
-      targetId: leaf.getAttribute("data-target"),
-    }));
-  }
-
-  function renderNode(node: TreeNode): HTMLUListElement {
-    const ul = document.createElement("ul");
-    node.dirs.forEach((child, name) => {
-      const li = document.createElement("li");
-      li.className = "tnode tdir open";
-      const label = document.createElement("div");
-      label.className = "tlabel";
-      const caret = document.createElement("span");
-      caret.className = "tcaret";
-      const dirName = document.createElement("span");
-      dirName.className = "tname";
-      dirName.textContent = name;
-      label.appendChild(caret);
-      label.appendChild(dirName);
-      li.appendChild(label);
-      li.appendChild(renderNode(child));
-      ul.appendChild(li);
-    });
-    node.files.forEach((f) => {
-      const li = buildFileLeaf(document, f);
-      ul.appendChild(li);
-    });
-    return ul;
-  }
-
   function markCurrent(el: HTMLElement): void {
-    treeFileLeaves.forEach(({ leaf, targetId }) => {
-      leaf.classList.toggle("cur", targetId === el.id);
+    treeFileLeaves.forEach((leaf) => {
+      leaf.classList.toggle("cur", leaf.getAttribute("data-target") === el.id);
     });
-  }
-
-  function syncBeads(selected: ReadonlySet<string> | null): void {
-    clineEls.forEach((c, index) => {
-      c.classList.toggle("active", selected !== null && selected.has(clineShas[index] ?? ""));
-    });
-  }
-
-  // Dim the diff (.commit-focus) and lift only the rows whose data-commit is selected.
-  function syncOwned(selected: ReadonlySet<string> | null): void {
-    ownedRows.forEach((r) => {
-      r.classList.remove("owned");
-    });
-    ownedRows = [];
-    if (selected) {
-      dlCommits.forEach((commit, index) => {
-        if (!selected.has(commit)) return;
-        const row = dlEls[index];
-        if (!row) return;
-        row.classList.add("owned");
-        ownedRows.push(row);
-      });
-    }
-    root.classList.toggle("commit-focus", selected !== null);
   }
 
   clineEls.forEach((c) => {
     const sha = c.getAttribute("data-sha") ?? "";
-    listen(c, "click", () => {
-      focus = resolveActiveSet(sha, c.getAttribute("data-members") || "", focus === null ? null : focus.sha);
-      applyFilter();
-    });
-    listen(c, "keydown", (event) => {
-      if (!(event instanceof KeyboardEvent)) return;
-      if (event.target instanceof Element && isShaTarget(event.target)) return;
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        c.click();
-      }
-    });
-
     const hashCopy = c.querySelector<HTMLElement>(".sha");
-    if (hashCopy)
+    if (hashCopy) {
       listen(hashCopy, "click", (event) => {
         event.stopPropagation();
         void copyText(sha);
@@ -314,6 +190,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
           c.classList.remove("copied");
         }, 900);
       });
+    }
 
     const popId = c.getAttribute("data-pop");
     if (!popId) return;
@@ -406,6 +283,5 @@ export function enhanceLayout(root: HTMLElement): () => void {
     listen(button, "click", () => toggleLongLine(button));
   });
 
-  buildTree();
   return destroy;
 }

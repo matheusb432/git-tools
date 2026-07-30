@@ -11,13 +11,30 @@ use lru::LruCache;
 #[derive(Debug, Clone)]
 pub struct CachedView {
     pub(crate) view: Arc<View>,
+    pub(crate) selected: Option<Arc<View>>,
     weight: usize,
 }
 
 impl CachedView {
     pub fn new(view: Arc<View>) -> Self {
         let weight = view_weight(&view);
-        Self { view, weight }
+        Self {
+            view,
+            selected: None,
+            weight,
+        }
+    }
+
+    pub(crate) fn with_selected(&self, selected: Arc<View>) -> Self {
+        Self {
+            weight: self.weight + view_weight(&selected),
+            view: Arc::clone(&self.view),
+            selected: Some(selected),
+        }
+    }
+
+    pub(crate) fn without_selected(&self) -> Self {
+        Self::new(Arc::clone(&self.view))
     }
 
     pub const fn weight(&self) -> usize {
@@ -117,7 +134,6 @@ fn commit_weight(commit: &Commit) -> usize {
         + string_weight(&commit.date)
         + string_weight(&commit.iso)
         + commit.parents.iter().map(string_weight).sum::<usize>()
-        + commit.members.iter().map(string_weight).sum::<usize>()
 }
 
 fn file_weight(file: &FileDiff) -> usize {
@@ -127,14 +143,6 @@ fn file_weight(file: &FileDiff) -> usize {
             .full_lines
             .as_ref()
             .map_or(0, |lines| lines.iter().map(string_weight).sum())
-        + file.commits.iter().map(string_weight).sum::<usize>()
-        + file
-            .owners
-            .added
-            .values()
-            .chain(file.owners.deleted.values())
-            .map(string_weight)
-            .sum::<usize>()
 }
 
 fn string_weight(value: &String) -> usize {
@@ -146,7 +154,7 @@ mod tests {
     use std::sync::Arc;
 
     use application::{
-        diffs::{Cmd, Foot, LineOwners, View},
+        diffs::{Cmd, Foot, View},
         viewer::ViewerTabId,
     };
 
@@ -249,8 +257,6 @@ mod tests {
                 removed: 0,
                 full_lines: Some(lines.clone()),
                 lines,
-                commits: vec![],
-                owners: LineOwners::default(),
             }],
             title: "Large diff".into(),
             cmd: Cmd {

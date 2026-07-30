@@ -1,6 +1,4 @@
-//! Left sidebar: the changed-files tree with filter input and range stats.
-//! The tree body itself is built client-side by the enhancement bundle from
-//! the rendered file blocks.
+//! Left sidebar: the server-rendered changed-files tree, filter input, and range stats.
 
 use application::diffs::View;
 use maud::{Markup, html};
@@ -31,8 +29,8 @@ const TREE_PRESENTATION_CLASSES: &str = concat!(
     "[&_.tstatus.status-modified]:bg-sunk [&_.tstatus.status-modified]:text-ink-3",
 );
 
-// ! `.search` and `.tree-body` are enhancer hooks. The tree owns presentation for the
-// ! client-rendered descendants beneath `.tree-body`.
+// ! `.search` and `.tree-body` are enhancer hooks. The tree owns presentation for its
+// ! server-rendered descendants.
 pub(super) fn tree(view: &View) -> Markup {
     let total_add: u32 = view.files.iter().map(|f| f.added).sum();
     let total_del: u32 = view.files.iter().map(|f| f.removed).sum();
@@ -57,7 +55,70 @@ pub(super) fn tree(view: &View) -> Markup {
                 span class={ (stat) " border-add-line text-add" } { "+" (total_add) }
                 span class={ (stat) " border-del-line text-del" } { "−" (total_del) }
             }
-            div class="tree-body text-[12.5px] whitespace-nowrap" {}
+            div class="tree-body text-[12.5px] whitespace-nowrap" {
+                (render_file_tree(view))
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+struct TreeDirectory<'a> {
+    directories: Vec<(&'a str, TreeDirectory<'a>)>,
+    files: Vec<(&'a str, &'a application::diffs::FileDiff)>,
+}
+
+fn render_file_tree(view: &View) -> Markup {
+    let mut root = TreeDirectory::default();
+    for file in &view.files {
+        let mut directory = &mut root;
+        let mut segments = file.path.split('/').peekable();
+        while let Some(segment) = segments.next() {
+            if segments.peek().is_none() {
+                directory.files.push((segment, file));
+                break;
+            }
+            let index = directory
+                .directories
+                .iter()
+                .position(|(name, _)| *name == segment)
+                .unwrap_or_else(|| {
+                    directory
+                        .directories
+                        .push((segment, TreeDirectory::default()));
+                    directory.directories.len() - 1
+                });
+            directory = &mut directory.directories[index].1;
+        }
+    }
+    render_directory(&root)
+}
+
+fn render_directory(directory: &TreeDirectory<'_>) -> Markup {
+    html! {
+        ul {
+            @for (name, child) in &directory.directories {
+                li class="tnode tdir open" {
+                    div class="tlabel" {
+                        span class="tcaret" {}
+                        span class="tname" { (name) }
+                    }
+                    (render_directory(child))
+                }
+            }
+            @for (name, file) in &directory.files {
+                @let status = file_status_presentation(file.status());
+                li class={ "tnode tfile status-" (status.key) }
+                    data-target=(slug(&file.path))
+                    data-path=(file.path.to_lowercase()) {
+                    div class="tlabel" {
+                        span class={ "tstatus status-" (status.key) } title=(status.label) {
+                            (status.code)
+                        }
+                        span class="tname" { (name) }
+                    }
+                }
+            }
         }
     }
 }
@@ -110,7 +171,7 @@ mod tests {
     use crate::{fixtures::sample_view, view_fragment};
 
     #[test]
-    fn tree_root_owns_client_rendered_node_presentation() {
+    fn tree_renders_server_owned_file_nodes() {
         let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
         let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id)
             .into_string()
@@ -134,5 +195,6 @@ mod tests {
         }
         assert!(html.contains(r#"class="search "#));
         assert!(html.contains(r#"class="tree-body "#));
+        assert!(html.contains(r#"data-target="f-src-a-b-rs""#));
     }
 }

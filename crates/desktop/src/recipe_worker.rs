@@ -10,10 +10,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::{
-    recipes::{RecipeError, RecipeExecutor, ReservedRecipeComputation},
-    session::ComputeTicket,
-};
+use crate::recipes::{RecipeError, RecipeExecutor, ViewerComputation};
 
 const MAX_QUEUED_COMPUTATIONS: usize = 32;
 const SHUTDOWN_WAIT: Duration = Duration::from_millis(250);
@@ -24,11 +21,11 @@ pub(crate) struct RecipeCompletion {
     generation: u64,
 }
 
-impl From<ComputeTicket> for RecipeCompletion {
-    fn from(ticket: ComputeTicket) -> Self {
+impl RecipeCompletion {
+    fn from_request(request: &ViewerComputation) -> Self {
         Self {
-            tab_id: ticket.tab_id.into(),
-            generation: ticket.generation,
+            tab_id: request.tab_id().into(),
+            generation: request.generation(),
         }
     }
 }
@@ -50,7 +47,7 @@ impl std::fmt::Display for RecipeQueueError {
 
 #[derive(Debug)]
 struct QueuedComputation {
-    request: ReservedRecipeComputation,
+    request: ViewerComputation,
     active: bool,
 }
 
@@ -68,7 +65,7 @@ impl QueueState {
         if let Some(index) = self
             .computations
             .iter()
-            .position(|queued| queued.request.ticket.tab_id == computation.request.ticket.tab_id)
+            .position(|queued| queued.request.tab_id() == computation.request.tab_id())
         {
             self.computations.remove(index);
         } else if self.computations.len() == MAX_QUEUED_COMPUTATIONS {
@@ -164,7 +161,7 @@ impl RecipeWorker {
 
     pub(crate) fn submit(
         &self,
-        request: ReservedRecipeComputation,
+        request: ViewerComputation,
         active: bool,
     ) -> Result<(), RecipeQueueError> {
         let mut state = self
@@ -213,17 +210,31 @@ fn worker_loop(
         let Some(queued) = next else {
             continue;
         };
-        let ticket = queued.request.ticket;
-        match executor.compute_and_publish(queued.request) {
+        let completion = RecipeCompletion::from_request(&queued.request);
+        let recipe_ticket = match &queued.request {
+            ViewerComputation::Recipe(request) => Some(request.ticket),
+            ViewerComputation::CommitPatch(_) => None,
+        };
+        let result = match queued.request {
+            ViewerComputation::Recipe(request) => executor.compute_and_publish(request),
+            ViewerComputation::CommitPatch(request) => {
+                executor.compute_commit_patch_and_publish(request)
+            }
+        };
+        match result {
             Ok(()) => {
-                if completions.send(ticket.into()).is_err() {
+                if completions.send(completion).is_err() {
                     break;
                 }
             }
             Err(RecipeError::Stale) => {}
             Err(RecipeError::Failed(reason)) => {
-                executor.publish_failure(ticket, &reason);
-                if completions.send(ticket.into()).is_err() {
+                if let Some(ticket) = recipe_ticket {
+                    executor.publish_failure(ticket, &reason);
+                } else {
+                    eprintln!("gtl-viewer computation failed: {reason}");
+                }
+                if completions.send(completion).is_err() {
                     break;
                 }
             }
@@ -240,10 +251,11 @@ mod tests {
     use contracts::recipes::{Recipe, RecipeOp, RecipeSource};
 
     use super::*;
+    use crate::{recipes::ReservedRecipeComputation, session::ComputeTicket};
 
     fn queued(tab_id: u64, generation: u64, active: bool) -> QueuedComputation {
         QueuedComputation {
-            request: ReservedRecipeComputation {
+            request: ViewerComputation::Recipe(ReservedRecipeComputation {
                 recipe: Recipe {
                     source: RecipeSource::LocalRepo(PathBuf::from("/repo")),
                     op: RecipeOp::SquashPreview { pinned: None },
@@ -254,7 +266,7 @@ mod tests {
                     tab_id: ViewerTabId::try_new(tab_id).expect("positive tab id"),
                     generation,
                 },
-            },
+            }),
             active,
         }
     }
@@ -267,15 +279,15 @@ mod tests {
         queue.push(queued(3, 1, true)).expect("active");
 
         assert_eq!(
-            queue.pop().map(|value| value.request.ticket.tab_id),
+            queue.pop().map(|value| value.request.tab_id()),
             Some(ViewerTabId::try_new(3).expect("positive tab id"))
         );
         assert_eq!(
-            queue.pop().map(|value| value.request.ticket.tab_id),
+            queue.pop().map(|value| value.request.tab_id()),
             Some(ViewerTabId::try_new(1).expect("positive tab id"))
         );
         assert_eq!(
-            queue.pop().map(|value| value.request.ticket.tab_id),
+            queue.pop().map(|value| value.request.tab_id()),
             Some(ViewerTabId::try_new(2).expect("positive tab id"))
         );
     }
@@ -289,10 +301,10 @@ mod tests {
 
         let replacement = queue.pop().expect("replacement");
         assert_eq!(
-            replacement.request.ticket.tab_id,
+            replacement.request.tab_id(),
             ViewerTabId::try_new(1).unwrap()
         );
-        assert_eq!(replacement.request.ticket.generation, 2);
+        assert_eq!(replacement.request.generation(), 2);
         assert_eq!(queue.computations.len(), 1);
     }
 

@@ -45,7 +45,7 @@ pub fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> S
 #[cfg(test)]
 mod tests {
     use application::{
-        diffs::{Cmd, FileDiff, Foot, LineOwners, View},
+        diffs::{Cmd, FileDiff, Foot, View},
         viewer::{RenderOptions, ViewerTabId},
     };
     use domain::diffs::Commit;
@@ -123,7 +123,6 @@ mod tests {
                 date: String::new(),
                 iso: String::new(),
                 parents: Vec::new(),
-                members: Vec::new(),
             }],
             files: vec![FileDiff {
                 path: "src/a b.rs".to_string(),
@@ -143,8 +142,6 @@ mod tests {
                     " middle".to_string(),
                     " end".to_string(),
                 ]),
-                commits: vec!["abc123def".to_string()],
-                owners: LineOwners::default(),
             }],
             title: "diff".to_string(),
             cmd: Cmd {
@@ -206,11 +203,9 @@ mod tests {
         assert!(html.contains(r#"<aside class="shelf"#));
         assert!(html.contains(r#"<footer class="keybar"#));
 
-        // commit-filter feature: files carry data-commits
-        assert!(html.contains(r#"data-commits="abc123def""#));
-
-        // commit card body filters by commit; the hash tag copies the hash.
-        assert!(html.contains(r#"title="focus this commit's changes""#));
+        // Raw commit cards are informational; the hash remains independently copyable.
+        assert!(!html.contains("data-commits="));
+        assert!(!html.contains(r#"class="commit-select"#));
         assert!(html.contains(r#"<button class="sha "#));
         assert!(html.contains(r#"type="button" title="copy hash""#));
         // the timeline bead is a visual marker, not a separate click target.

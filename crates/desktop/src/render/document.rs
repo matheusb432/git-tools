@@ -211,7 +211,7 @@ fn tabs(document: &ViewerDocument, swap: SwapMode, feedback: SwapFeedback<'_>) -
         .active_view()
         .map(|view| fragments::MobileNavigationCounts {
             files: view.view().files.len(),
-            commits: view.view().commits.len(),
+            commits: view.range_view().commits.len(),
         });
     fragments::tabs(
         document.tabs(),

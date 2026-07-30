@@ -3,13 +3,13 @@
 mod parsing;
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     path::{Path, PathBuf},
 };
 
 use application::ports::{
-    BlameLines, GitClient, GitCommitReceipt, GitDiffRequest, GitEffect, GitPushReceipt,
-    GitRepositoryState, GitWorkingTree, MergedBranch,
+    GitClient, GitCommitReceipt, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState,
+    GitWorkingTree, MergedBranch,
 };
 use domain::{diffs::Commit, tags::Tag, worktrees::Worktree};
 use gix::bstr::ByteSlice;
@@ -261,39 +261,8 @@ impl GitClient for HybridGitClient {
     fn log_commits(&self, repo: &Path, range: &str) -> anyhow::Result<Vec<Commit>> {
         crate::git_capture::log_commits(repo, range)
     }
-    fn file_commit_map(
-        &self,
-        repo: &Path,
-        range: &str,
-    ) -> anyhow::Result<HashMap<String, Vec<String>>> {
-        crate::git_capture::file_commit_map(repo, range)
-    }
-    fn merge_members(&self, repo: &Path, merge: &str, base: &str) -> anyhow::Result<Vec<String>> {
-        crate::git_capture::merge_members(repo, merge, base)
-    }
     fn diff(&self, repo: &Path, request: &GitDiffRequest) -> anyhow::Result<String> {
         crate::git_capture::diff(repo, request)
-    }
-    fn blame_forward(
-        &self,
-        repo: &Path,
-        base: &str,
-        tip: &str,
-        path: &str,
-    ) -> anyhow::Result<BlameLines> {
-        crate::git_capture::blame_forward(repo, base, tip, path)
-    }
-    fn blame_forward_worktree(&self, repo: &Path, path: &str) -> anyhow::Result<BlameLines> {
-        crate::git_capture::blame_forward_worktree(repo, path)
-    }
-    fn blame_reverse(
-        &self,
-        repo: &Path,
-        base: &str,
-        tip: &str,
-        path: &str,
-    ) -> anyhow::Result<BlameLines> {
-        crate::git_capture::blame_reverse(repo, base, tip, path)
     }
     fn root_commit(&self, repo: &Path) -> Option<String> {
         crate::git_capture::root_commit(repo)

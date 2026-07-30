@@ -1,15 +1,9 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::Path,
-};
+use std::{collections::HashMap, path::Path};
 
 use domain::diffs::{Commit, ExcludedExtensions};
 
 use crate::{
-    diffs::{
-        FileDiff, FileStatus, LineOwners, UnifiedDiffLineClassifier, UnifiedDiffLineKind, View,
-        attribution::{self, NewSide},
-    },
+    diffs::{FileDiff, FileStatus, UnifiedDiffLineClassifier, UnifiedDiffLineKind, View},
     ports::{GitClient, GitDiffFormat, GitDiffRequest},
     shared::notes::Note,
 };
@@ -37,8 +31,6 @@ pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
                 removed: 0,
                 lines: Vec::new(),
                 full_lines: None,
-                commits: Vec::new(),
-                owners: LineOwners::default(),
             });
             continue;
         }
@@ -85,33 +77,20 @@ pub fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
     }
 }
 
-/// Attach each file's touching commits from the range's file→commits map (pure).
-pub fn attach_commits<S: std::hash::BuildHasher>(
-    files: &mut [FileDiff],
-    map: &HashMap<String, Vec<String>, S>,
-) {
-    for file in files {
-        file.commits = map.get(&file.path).cloned().unwrap_or_default();
-    }
-}
-
-/// The assembled diff data for one preview: commits in range and changed files
-/// (with per-line owners attached), plus the paths hidden by the extension
-/// exclusion filter.
+/// The assembled diff data for one preview: commits, changed files, and hidden paths.
 pub struct DiffData {
     pub commits: Vec<Commit>,
     pub files: Vec<FileDiff>,
     pub hidden_paths: Vec<String>,
 }
 
-/// The shared diff generator: log + diff + exclusion filter + full-context +
-/// file-commit map + per-line attribution. Does NOT sort files — callers order
-/// as they always have.
+/// The shared diff generator: log + diff + exclusion filter + full context.
+/// Does not sort files; callers retain ownership of presentation order.
 ///
 /// Exclusions are applied *before* the content diffs run: a cheap `--name-only`
 /// pass discovers the hidden paths, and both content invocations then carry
 /// `:(exclude,literal)` pathspecs, so git never computes — and this module
-/// never parses, counts, or blames — an excluded file's line diffs.
+/// never parses or counts — an excluded file's line diffs.
 pub fn assemble(
     source: &impl GitClient,
     repo: &Path,
@@ -119,18 +98,7 @@ pub fn assemble(
     log_range: &str,
     excluded: &ExcludedExtensions,
 ) -> anyhow::Result<DiffData> {
-    let mut commits = source.log_commits(repo, log_range)?;
-    let (base, new_side) = blame_targets(diff_range, log_range);
-
-    // ! Blame never attributes a line to a merge, so a merge card is otherwise dead. Map each
-    // ! merge to the commits it brought into the range so focusing it lifts their rows.
-    for commit in &mut commits {
-        if commit.is_merge() {
-            commit.members = source
-                .merge_members(repo, &commit.sha, &base)
-                .unwrap_or_default();
-        }
-    }
+    let commits = source.log_commits(repo, log_range)?;
 
     let hidden_paths = hidden_paths(source, repo, diff_range, excluded)?;
     let content_request = GitDiffRequest {
@@ -150,12 +118,6 @@ pub fn assemble(
         &mut files,
         parse_diff(&source.diff(repo, &full_context_request)?),
     );
-    let file_commits = source.file_commit_map(repo, log_range)?;
-    attach_commits(&mut files, &file_commits);
-
-    let in_range: HashSet<String> = commits.iter().map(|commit| commit.sha.clone()).collect();
-    attribution::attribute(source, repo, &base, &new_side, &in_range, &mut files);
-
     Ok(DiffData {
         commits,
         files,
@@ -215,23 +177,6 @@ pub(crate) fn exclusion_note(label: &str, view: &View) -> Option<Note> {
             applied.extensions_label(),
         ))
     })
-}
-
-// ! log_range is always two-dot `base..tip`; diff_range lacking `..` (hash mode) means the
-// ! new side is the working tree, not a commit.
-fn blame_targets(diff_range: &str, log_range: &str) -> (String, NewSide) {
-    let base = log_range
-        .split("..")
-        .next()
-        .unwrap_or(log_range)
-        .to_string();
-    let tip = log_range.rsplit("..").next().unwrap_or("HEAD").to_string();
-    let new_side = if diff_range.contains("..") {
-        NewSide::Commit(tip)
-    } else {
-        NewSide::WorkTree
-    };
-    (base, new_side)
 }
 
 /// The repo's display name: the last path component of its git top-level, falling
@@ -346,24 +291,5 @@ index 000..333\n\
                 .is_some_and(|lines| { lines.iter().any(|line| line == "middle") })
         );
         assert!(files[1].full_lines.is_none());
-    }
-
-    #[test]
-    fn blame_targets_picks_base_tip_and_new_side() {
-        let (base, side) = blame_targets("origin/main..HEAD", "origin/main..HEAD");
-        assert_eq!(base, "origin/main");
-        assert!(matches!(side, NewSide::Commit(ref tip) if tip == "HEAD"));
-
-        let (base, side) = blame_targets("main...HEAD", "main..HEAD"); // merge mode
-        assert_eq!(base, "main");
-        assert!(matches!(side, NewSide::Commit(ref tip) if tip == "HEAD"));
-
-        let (base, side) = blame_targets("abc123", "abc123..HEAD"); // hash mode -> worktree
-        assert_eq!(base, "abc123");
-        assert!(matches!(side, NewSide::WorkTree));
-
-        let (base, side) = blame_targets("a1..b2", "a1..b2"); // exact range
-        assert_eq!(base, "a1");
-        assert!(matches!(side, NewSide::Commit(ref tip) if tip == "b2"));
     }
 }

@@ -48,11 +48,20 @@ pub fn view_fragment(view: &View, options: RenderOptions, tab_id: ViewerTabId) -
 
 pub fn view_fragment_with_mobile_controls(
     view: &View,
+    range_view: &View,
+    selected_commit_sha: Option<&str>,
     options: RenderOptions,
     tab_id: ViewerTabId,
     controls: MobileViewControls,
 ) -> Markup {
-    layout::view_body_with_mobile_controls(view, options, layout::Surface::App { tab_id }, controls)
+    layout::view_body_with_mobile_controls(
+        view,
+        range_view,
+        selected_commit_sha,
+        options,
+        layout::Surface::App { tab_id },
+        controls,
+    )
 }
 
 /// Builds the desktop layout without diff rows and starts its bounded chunk chain.
@@ -67,6 +76,8 @@ pub fn view_shell(
 
 pub fn view_shell_with_mobile_controls(
     view: &View,
+    range_view: &View,
+    selected_commit_sha: Option<&str>,
     options: RenderOptions,
     tab_id: ViewerTabId,
     load_id: u64,
@@ -74,6 +85,8 @@ pub fn view_shell_with_mobile_controls(
 ) -> Markup {
     layout::view_body_shell_with_mobile_controls(
         view,
+        range_view,
+        selected_commit_sha,
         options,
         layout::Surface::App { tab_id },
         load_id,
@@ -115,7 +128,7 @@ impl application::ports::HtmlRenderer for MaudRenderer {
 
 #[cfg(test)]
 pub(crate) mod fixtures {
-    use application::diffs::{Cmd, FileDiff, Foot, LineOwners, View};
+    use application::diffs::{Cmd, FileDiff, Foot, View};
     use domain::diffs::{AppliedExclusions, Commit};
 
     /// Returns true if `html` contains any http(s):// URL. Enforces the
@@ -147,7 +160,6 @@ pub(crate) mod fixtures {
                 date: String::new(),
                 iso: String::new(),
                 parents: Vec::new(),
-                members: Vec::new(),
             }],
             files: vec![FileDiff {
                 path: "src/a b.rs".to_string(),
@@ -167,8 +179,6 @@ pub(crate) mod fixtures {
                     " middle".to_string(),
                     " end".to_string(),
                 ]),
-                commits: vec!["abc123def".to_string()],
-                owners: LineOwners::default(),
             }],
             title: "diff".to_string(),
             cmd: Cmd {

@@ -4,8 +4,8 @@
 //! dispatches (`compute_diff`/`compute_merge_diff`/`compute_squash_preview`).
 
 mod artifacts;
-pub mod attribution;
 pub mod batch;
+pub mod compute_commit_patch;
 pub mod compute_diff;
 pub mod compute_merge_diff;
 pub mod compute_squash_preview;
@@ -25,7 +25,7 @@ pub mod util;
 mod view;
 
 pub use batch::RepoRef;
-pub use file::{FileDiff, FileStatus, LineOwners};
+pub use file::{FileDiff, FileStatus};
 pub use target::{DiffTarget, DiffTargetRequest, DiffTargetRequestError, PinnedRange};
 pub use unified_diff::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 pub use view::{Cmd, Foot, View, sort_files_tree_order};

@@ -16,7 +16,6 @@ pub(super) const PRESENTATION_CLASSES: &str = concat!(
     "[&_.diff-split_.sp-del]:bg-del-bg ",
     "[&_.diff-split_.sp-add]:bg-add-bg ",
     "[&_.diff-split_.sp-pad]:bg-sunk ",
-    "[&.commit-focus_.diff-split_.sp]:opacity-[.34] [&.commit-focus_.diff-split_.sp.owned]:opacity-100 [&.commit-focus_.diff-split_.sp.owned]:shadow-[inset_3px_0_0_var(--acc)] ",
     "[@media(max-width:1024px)]:[&_.diff-split_.dl]:grid-cols-[44px_minmax(0,1fr)] ",
     "[@media(max-width:1024px)]:[&_.diff-split_:is(.dl-meta,.dl-hunk)]:grid-cols-[minmax(0,1fr)] ",
     "[@media(max-width:1024px)]:[&_.diff-split_.dl>:is(:nth-child(3),:nth-child(4))]:border-t ",
@@ -29,7 +28,6 @@ pub(super) const PRESENTATION_CLASSES: &str = concat!(
 pub(super) struct SplitCell {
     pub(super) no: u32,
     pub(super) text: String,
-    pub(super) owner: Option<String>,
     pub(super) tokens: Vec<Token>,
     pub(super) spans: Vec<Span>,
 }
@@ -119,14 +117,12 @@ fn flush_pairs(
             old: del.map(|(d, row_tokens)| SplitCell {
                 no: d.old_no.unwrap_or(0),
                 text: d.text.clone(),
-                owner: d.owner.clone(),
                 tokens: row_tokens.to_vec(),
                 spans: spans.old.clone(),
             }),
             new: add.map(|(a, row_tokens)| SplitCell {
                 no: a.new_no.unwrap_or(0),
                 text: a.text.clone(),
-                owner: a.owner.clone(),
                 tokens: row_tokens.to_vec(),
                 spans: spans.new.clone(),
             }),
@@ -138,8 +134,6 @@ fn flush_pairs(
 
 #[cfg(test)]
 mod tests {
-    use application::diffs::LineOwners;
-
     use super::{
         super::model::{MAX_LINE_COLS, derive_rows},
         *,
@@ -147,7 +141,7 @@ mod tests {
 
     fn split(raw: &[&str]) -> Vec<SplitRow> {
         let lines: Vec<String> = raw.iter().map(ToString::to_string).collect();
-        let rows = derive_rows(&lines, &LineOwners::default());
+        let rows = derive_rows(&lines);
         let tokens = vec![Vec::new(); rows.len()];
         split_rows(&rows, &tokens)
     }
@@ -248,23 +242,6 @@ mod tests {
             panic!("unpaired del expected");
         };
         assert!(o.spans.is_empty());
-    }
-
-    #[test]
-    fn owners_ride_along_on_cells() {
-        let mut owners = LineOwners::default();
-        owners.deleted.insert(1, "abc123def".into());
-        let lines: Vec<String> = ["@@ -1 +1 @@", "-a"]
-            .iter()
-            .map(ToString::to_string)
-            .collect();
-        let derived = derive_rows(&lines, &owners);
-        let tokens = vec![Vec::new(); derived.len()];
-        let rows = split_rows(&derived, &tokens);
-        let SplitRow::Pair { old: Some(o), .. } = &rows[1] else {
-            panic!("pair expected");
-        };
-        assert_eq!(o.owner.as_deref(), Some("abc123def"));
     }
 
     #[test]

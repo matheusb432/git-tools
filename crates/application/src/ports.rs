@@ -29,8 +29,8 @@ pub use file_system_client::{
     FileSystemClient, FileSystemClientError, FileSystemClientErrorKind, FileSystemEntryKind,
 };
 pub use git_client::{
-    BlameLines, GitClient, GitCommitReceipt, GitDiffFormat, GitDiffRequest, GitEffect,
-    GitPushReceipt, GitRepositoryState, GitWorkingTree, MergedBranch,
+    GitClient, GitCommitReceipt, GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt,
+    GitRepositoryState, GitWorkingTree, MergedBranch,
 };
 pub use html_renderer::HtmlRenderer;
 pub use managed_manifest::ManagedManifest;

@@ -19,9 +19,25 @@ pub(super) fn view_controls(view: &ViewerView) -> Markup {
                 (density_choice(view, DiffDensity::Compact, "Changes", "viewer-density", CHOICE_CLASSES))
                 (density_choice(view, DiffDensity::Full, "Full file", "viewer-density", CHOICE_CLASSES))
             }
+            @if view.selected_commit_sha().is_some() {
+                button type="button"
+                    class="viewer-control-button inline-flex min-h-[27px] cursor-pointer items-center whitespace-nowrap rounded-sm border border-acc-line bg-acc-soft px-2 py-1 text-[11.5px] text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
+                    hx-get=(ViewerRoute::View { tab: view.tab_id(), options: view.options() })
+                    hx-target="#viewer-view"
+                    hx-sync="#viewer-view:replace"
+                    hx-swap="outerHTML" { "Show all changes" }
+            }
             @if view.kind() == ViewerTabKind::Live {
                 (refresh_button(view.tab_id()))
                 (delete_live_view_button(view.tab_id()))
+            }
+            @if view.selected_commit_sha().is_some() {
+                button type="button"
+                    class=(preview::mobile_menu_button_classes())
+                    hx-get=(ViewerRoute::View { tab: view.tab_id(), options: view.options() })
+                    hx-target="#viewer-view"
+                    hx-sync="#viewer-view:replace"
+                    hx-swap="outerHTML" { "Show all changes" }
             }
         }
     }
@@ -84,7 +100,7 @@ fn layout_choice(
     let options = view.options().with_layout(layout);
     html! {
         label class="viewer-choice group relative cursor-pointer"
-            hx-get=(ViewerRoute::View { tab: view.tab_id(), options })
+            hx-get=(view_route(view, options))
             hx-trigger="change from:find input"
             hx-params="none"
             hx-target="#viewer-view"
@@ -112,7 +128,7 @@ fn density_choice(
     let options = view.options().with_density(density);
     html! {
         label class="viewer-choice group relative cursor-pointer"
-            hx-get=(ViewerRoute::View { tab: view.tab_id(), options })
+            hx-get=(view_route(view, options))
             hx-trigger="change from:find input"
             hx-params="none"
             hx-target="#viewer-view"
@@ -128,6 +144,20 @@ fn density_choice(
             span class=(classes) { (label) }
         }
     }
+}
+
+fn view_route(view: &ViewerView, options: application::viewer::RenderOptions) -> ViewerRoute {
+    view.selected_commit_sha().map_or(
+        ViewerRoute::View {
+            tab: view.tab_id(),
+            options,
+        },
+        |sha| ViewerRoute::CommitPatch {
+            tab: view.tab_id(),
+            sha: sha.to_string(),
+            options,
+        },
+    )
 }
 
 fn refresh_button(tab: ViewerTabId) -> Markup {

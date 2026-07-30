@@ -182,7 +182,7 @@ mod tests {
         OpenDiffFileInConfiguredEditorError, execute,
     };
     use crate::{
-        diffs::{Cmd, FileDiff, FileStatus, Foot, LineOwners, View},
+        diffs::{Cmd, FileDiff, FileStatus, Foot, View},
         ports::{
             ConfiguredEditorClient, FileSystemClient, FileSystemClientError,
             FileSystemClientErrorKind, FileSystemEntryKind,
@@ -350,8 +350,6 @@ mod tests {
                         _ => Vec::new(),
                     },
                     full_lines: None,
-                    commits: Vec::new(),
-                    owners: LineOwners::default(),
                 })
                 .collect(),
             title: "Diff".into(),

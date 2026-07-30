@@ -22,7 +22,7 @@ use tauri::http::{Request, Response, StatusCode};
 use crate::{
     materialization::{MaterializationError, ViewLoadId},
     presentation::ViewerApp,
-    recipes::RecipeError,
+    recipes::{RecipeError, SelectCommitError},
     render::SwapFeedback,
     session::{CloseOutcome, PendingRecipesError, RENDER_PENDING_REASON},
 };
@@ -93,6 +93,21 @@ impl From<RecipeError> for RouteError {
     }
 }
 
+impl From<SelectCommitError> for RouteError {
+    fn from(value: SelectCommitError) -> Self {
+        match value {
+            SelectCommitError::Reserve(
+                crate::session::BeginCommitSelectionError::UnknownTab
+                | crate::session::BeginCommitSelectionError::UnknownCommit,
+            ) => Self::NotFound,
+            SelectCommitError::Reserve(crate::session::BeginCommitSelectionError::StaleRange) => {
+                Self::Conflict
+            }
+            SelectCommitError::Failed(reason) => Self::Internal(reason),
+        }
+    }
+}
+
 type RouteResult = Result<Response<Vec<u8>>, RouteError>;
 
 #[expect(
@@ -114,9 +129,11 @@ pub(crate) fn serve_app(app: &ViewerApp, request: Request<Vec<u8>>) -> Response<
 fn error_target(route: &Route) -> ErrorTarget {
     match route {
         Route::Document { .. } | Route::Settings(_) => ErrorTarget::Document,
-        Route::View { .. } | Route::Refresh { .. } | Route::Activate { .. } | Route::Ready => {
-            ErrorTarget::View
-        }
+        Route::View { .. }
+        | Route::CommitPatch { .. }
+        | Route::Refresh { .. }
+        | Route::Activate { .. }
+        | Route::Ready => ErrorTarget::View,
         Route::Close { .. }
         | Route::DeleteLiveView { .. }
         | Route::OpenHistory { .. }
@@ -164,6 +181,7 @@ fn serve_route(app: &ViewerApp, route: Route) -> RouteResult {
     match route {
         Route::Document { .. } => document(app),
         Route::View { tab, options } => view(app, tab, options),
+        Route::CommitPatch { tab, sha, options } => commit_patch(app, tab, &sha, options),
         Route::Refresh { tab } => refresh(app, tab),
         Route::Close { tab } => close(app, tab),
         Route::DeleteLiveView { tab } => live_views::delete(app, tab),
@@ -231,6 +249,7 @@ fn view(app: &ViewerApp, tab: ViewerTabId, options: RenderOptions) -> RouteResul
         if !session.activate(tab) {
             return Ok(status_response(StatusCode::NOT_FOUND));
         }
+        session.clear_commit_selection(tab);
     }
     persist_setting(app, LAYOUT_KEY, options.layout().to_string())?;
     persist_setting(app, DENSITY_KEY, options.density().to_string())?;
@@ -239,6 +258,29 @@ fn view(app: &ViewerApp, tab: ViewerTabId, options: RenderOptions) -> RouteResul
     let settings = ViewerSettings::new(options, theme);
     let load_id = prepare_materialization(app, settings.options())?;
     render::view_with_tabs(app.renderer, &app.session, transient, settings, load_id)
+        .map(html_response)
+        .map_err(Into::into)
+}
+
+fn commit_patch(
+    app: &ViewerApp,
+    tab: ViewerTabId,
+    sha: &str,
+    options: RenderOptions,
+) -> RouteResult {
+    persist_setting(app, LAYOUT_KEY, options.layout().to_string())?;
+    persist_setting(app, DENSITY_KEY, options.density().to_string())?;
+    let retained = app
+        .session
+        .lock()
+        .map_err(|error| error.to_string())?
+        .has_ready_commit_selection(tab, sha);
+    if !retained {
+        app.select_commit(tab, sha)?;
+    }
+    let theme = load_settings(app).theme();
+    let settings = ViewerSettings::new(options, theme);
+    render::view_with_tabs(app.renderer, &app.session, None, settings, None)
         .map(html_response)
         .map_err(Into::into)
 }
@@ -273,11 +315,14 @@ fn close(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
 }
 
 fn activate(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
-    let activated = app
-        .session
-        .lock()
-        .map_err(|error| error.to_string())?
-        .activate(tab);
+    let activated = {
+        let mut session = app.session.lock().map_err(|error| error.to_string())?;
+        let activated = session.activate(tab);
+        if activated {
+            session.clear_commit_selection(tab);
+        }
+        activated
+    };
     if !activated {
         return Ok(status_response(StatusCode::NOT_FOUND));
     }

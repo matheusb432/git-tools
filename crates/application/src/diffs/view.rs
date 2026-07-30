@@ -101,7 +101,6 @@ mod tests {
     use domain::diffs::Commit;
 
     use super::*;
-    use crate::diffs::LineOwners;
 
     fn view() -> View {
         View {
@@ -133,8 +132,6 @@ mod tests {
             removed: 0,
             lines: Vec::new(),
             full_lines: None,
-            commits: Vec::new(),
-            owners: LineOwners::default(),
         }
     }
 

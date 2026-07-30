@@ -9,7 +9,7 @@ use maud::{DOCTYPE, PreEscaped, html};
 use crate::{
     materialization::{ChunkPage, ViewLoadId},
     render::{MaudViewerRenderer, SwapFeedback, VIEW_STATE_ERROR},
-    session::{ComputeTicket, ViewerSession},
+    session::{CommitSelectionSnapshot, ComputeTicket, ViewerSession},
 };
 
 const MAX_GENERATION_RETRIES: usize = 3;
@@ -261,11 +261,24 @@ fn snapshot(
     let revision = session.revision();
     let active_view = active.and_then(|id| {
         let kind = session.tab(id)?.tab.kind();
-        let view = transient
+        let range_view = transient
             .filter(|value| Some(value.ticket) == ticket && value.ticket.tab_id == id)
             .map(|value| value.view)
             .or_else(|| session.cached_view_snapshot(id).map(|cached| cached.view))?;
-        Some(ViewerView::new(id, view, settings.options(), kind))
+        Some(match session.commit_selection_snapshot(id) {
+            CommitSelectionSnapshot::None => {
+                ViewerView::new(id, range_view, settings.options(), kind)
+            }
+            CommitSelectionSnapshot::Pending { sha } => {
+                ViewerView::selection_pending(id, range_view, sha, settings.options(), kind)
+            }
+            CommitSelectionSnapshot::Ready { sha, view } => {
+                ViewerView::selected(id, range_view, view, sha, settings.options(), kind)
+            }
+            CommitSelectionSnapshot::Error { sha, reason } => {
+                ViewerView::selection_error(id, range_view, sha, reason, settings.options(), kind)
+            }
+        })
     });
     drop(session);
     let document =

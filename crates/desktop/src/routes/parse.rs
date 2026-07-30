@@ -38,6 +38,11 @@ pub(crate) enum Route {
         tab: ViewerTabId,
         options: RenderOptions,
     },
+    CommitPatch {
+        tab: ViewerTabId,
+        sha: String,
+        options: RenderOptions,
+    },
     Refresh {
         tab: ViewerTabId,
     },
@@ -84,6 +89,7 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
     let shape = match segments.as_slice() {
         [""] => RouteShape::Document,
         ["tabs", _, "view"] => RouteShape::View,
+        ["tabs", _, "commits", _, "view"] => RouteShape::CommitPatch,
         ["tabs", _, "refresh"] => RouteShape::Refresh,
         ["tabs", _, "close"] => RouteShape::Close,
         ["tabs", _, "live-view"] => RouteShape::DeleteLiveView,
@@ -111,17 +117,20 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
             let resume = parse_resume(uri.query())?;
             Ok(Route::Document { resume })
         }
-        RouteShape::View => {
-            let tab = parse_tab_id(segments[1])?;
-            let query = parse_query(uri.query())?;
-            if query.len() != 2 {
+        RouteShape::View => Ok(Route::View {
+            tab: parse_tab_id(segments[1])?,
+            options: parse_render_options(uri.query())?,
+        }),
+        RouteShape::CommitPatch => {
+            let sha = segments[3];
+            if sha.len() != 40 || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()) {
                 return Err(StatusCode::BAD_REQUEST);
             }
-            let layout = query.get("layout").ok_or(StatusCode::BAD_REQUEST)?;
-            let density = query.get("density").ok_or(StatusCode::BAD_REQUEST)?;
-            let options = RenderOptions::try_from((*layout, *density))
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
-            Ok(Route::View { tab, options })
+            Ok(Route::CommitPatch {
+                tab: parse_tab_id(segments[1])?,
+                sha: sha.to_ascii_lowercase(),
+                options: parse_render_options(uri.query())?,
+            })
         }
         RouteShape::Refresh => tab_route(uri.query(), segments[1], |tab| Route::Refresh { tab }),
         RouteShape::Close => tab_route(uri.query(), segments[1], |tab| Route::Close { tab }),
@@ -181,6 +190,7 @@ fn parse_resume(query: Option<&str>) -> Result<Option<ResumeNonce>, StatusCode> 
 enum RouteShape {
     Document,
     View,
+    CommitPatch,
     Refresh,
     Close,
     DeleteLiveView,
@@ -192,6 +202,16 @@ enum RouteShape {
     Pending,
     Ready,
     LoadNext,
+}
+
+fn parse_render_options(query: Option<&str>) -> Result<RenderOptions, StatusCode> {
+    let query = parse_query(query)?;
+    if query.len() != 2 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let layout = query.get("layout").ok_or(StatusCode::BAD_REQUEST)?;
+    let density = query.get("density").ok_or(StatusCode::BAD_REQUEST)?;
+    RenderOptions::try_from((*layout, *density)).map_err(|_| StatusCode::BAD_REQUEST)
 }
 
 fn tab_route(
@@ -299,6 +319,7 @@ mod tests {
     fn parses_only_known_same_origin_routes() {
         let tab = ViewerTabId::try_new(7).expect("positive id");
         let render = RenderHistoryId::try_new(42).expect("positive id");
+        let sha = "ABCDEF0123456789ABCDEF0123456789ABCDEF01";
         for (uri, method, expected) in [
             (app_uri("/"), Method::GET, Route::Document { resume: None }),
             (
@@ -306,6 +327,17 @@ mod tests {
                 Method::GET,
                 Route::View {
                     tab,
+                    options: RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
+                },
+            ),
+            (
+                app_uri(&format!(
+                    "/tabs/7/commits/{sha}/view?layout=split&density=full"
+                )),
+                Method::GET,
+                Route::CommitPatch {
+                    tab,
+                    sha: sha.to_ascii_lowercase(),
                     options: RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
                 },
             ),
@@ -422,6 +454,7 @@ mod tests {
         for route in [
             "/",
             "/tabs/7/view?layout=split&density=full",
+            "/tabs/7/commits/abcdef0123456789abcdef0123456789abcdef01/view?layout=split&density=full",
             "/tabs/7/close",
             "/tabs/7/activate",
             "/tabs/7/refresh",
@@ -450,6 +483,8 @@ mod tests {
             "/tabs/7/view?layout=wide&density=full",
             "/tabs/7/view?layout=split",
             "/tabs/7/view?layout=split&density=full&layout=unified",
+            "/tabs/7/commits/abc/view?layout=split&density=full",
+            "/tabs/7/commits/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz/view?layout=split&density=full",
             "/settings?theme=dark&theme=light",
             "/loads/0/next",
             "/loads/not-a-number/next",

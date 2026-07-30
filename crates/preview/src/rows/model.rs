@@ -1,8 +1,6 @@
-//! Structured diff rows derived from classified unified-diff text. Every
-//! renderer consumes this model so gutter and ownership derivation exist in
-//! one place.
+//! Structured diff rows derived from classified unified-diff text.
 
-use application::diffs::{LineOwners, UnifiedDiffLineClassifier, UnifiedDiffLineKind};
+use application::diffs::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 
 /// Char length (marker excluded) beyond which a line is "long" and is exempt
 /// from intra-line diffing and wrap layout. Shared presentation rule for all
@@ -22,22 +20,20 @@ pub(super) enum RowKind {
 
 /// One rendered diff row. `text` is the raw diff line including its leading
 /// `+`/`-`/space marker; gutter numbers are absolute file line numbers and
-/// present only on the side(s) the row exists on; `owner` is the short sha of
-/// the commit owning a changed line (never set on context/meta/hunk rows).
+/// present only on the side(s) the row exists on.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct Row {
     pub(super) kind: RowKind,
     pub(super) old_no: Option<u32>,
     pub(super) new_no: Option<u32>,
     pub(super) text: String,
-    pub(super) owner: Option<String>,
 }
 
 /// Derive structured rows from a file's raw diff lines, tracking absolute
-/// gutter numbers from hunk headers and attaching per-line commit ownership.
+/// gutter numbers from hunk headers.
 /// Empty lines are skipped; a malformed hunk header degrades to a context row
 /// (matching the historical renderer behavior).
-pub(super) fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
+pub(super) fn derive_rows(lines: &[String]) -> Vec<Row> {
     let mut old_no = 0u32;
     let mut new_no = 0u32;
     let mut rows = Vec::with_capacity(lines.len());
@@ -54,7 +50,6 @@ pub(super) fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
                 old_no: None,
                 new_no: None,
                 text: raw.clone(),
-                owner: None,
             }),
             UnifiedDiffLineKind::Hunk {
                 line_number_old,
@@ -67,7 +62,6 @@ pub(super) fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
                     old_no: None,
                     new_no: None,
                     text: raw.clone(),
-                    owner: None,
                 });
             }
             UnifiedDiffLineKind::Added => {
@@ -76,7 +70,6 @@ pub(super) fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
                     old_no: None,
                     new_no: Some(new_no),
                     text: raw.clone(),
-                    owner: owners.added.get(&new_no).cloned(),
                 });
                 new_no += 1;
             }
@@ -86,7 +79,6 @@ pub(super) fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
                     old_no: Some(old_no),
                     new_no: None,
                     text: raw.clone(),
-                    owner: owners.deleted.get(&old_no).cloned(),
                 });
                 old_no += 1;
             }
@@ -96,7 +88,6 @@ pub(super) fn derive_rows(lines: &[String], owners: &LineOwners) -> Vec<Row> {
                     old_no: Some(old_no),
                     new_no: Some(new_no),
                     text: raw.clone(),
-                    owner: None,
                 });
                 old_no += 1;
                 new_no += 1;
@@ -133,16 +124,13 @@ mod tests {
 
     #[test]
     fn classifies_rows_and_tracks_gutter_numbers() {
-        let rows = derive_rows(
-            &lines(&[
-                "index 111..222 100644",
-                "@@ -3,2 +7,2 @@",
-                " keep",
-                "-old",
-                "+new",
-            ]),
-            &LineOwners::default(),
-        );
+        let rows = derive_rows(&lines(&[
+            "index 111..222 100644",
+            "@@ -3,2 +7,2 @@",
+            " keep",
+            "-old",
+            "+new",
+        ]));
 
         assert_eq!(rows[0].kind, RowKind::Meta);
         assert_eq!((rows[0].old_no, rows[0].new_no), (None, None));
@@ -159,18 +147,15 @@ mod tests {
 
     #[test]
     fn header_like_hunk_content_keeps_changed_rows_and_gutters() {
-        let rows = derive_rows(
-            &lines(&[
-                "--- a/a.sql",
-                "+++ b/a.sql",
-                "@@ -1,2 +1,3 @@",
-                "--- old heading",
-                "+-- new heading",
-                "+++ literal",
-                " keep",
-            ]),
-            &LineOwners::default(),
-        );
+        let rows = derive_rows(&lines(&[
+            "--- a/a.sql",
+            "+++ b/a.sql",
+            "@@ -1,2 +1,3 @@",
+            "--- old heading",
+            "+-- new heading",
+            "+++ literal",
+            " keep",
+        ]));
 
         assert_eq!(rows[0].kind, RowKind::Meta);
         assert_eq!(rows[1].kind, RowKind::Meta);
@@ -194,37 +179,21 @@ mod tests {
     }
 
     #[test]
-    fn attaches_owners_to_changed_rows_by_absolute_line_number() {
-        let mut owners = LineOwners::default();
-        owners.deleted.insert(4, "abc123def".into());
-        owners.added.insert(8, "fed321cba".into());
-
-        let rows = derive_rows(
-            &lines(&["@@ -3,2 +7,2 @@", " keep", "-old", "+new"]),
-            &owners,
-        );
-
-        assert_eq!(rows[1].owner, None, "context rows never carry an owner");
-        assert_eq!(rows[2].owner.as_deref(), Some("abc123def"));
-        assert_eq!(rows[3].owner.as_deref(), Some("fed321cba"));
-    }
-
-    #[test]
     fn skips_empty_lines_entirely() {
-        let rows = derive_rows(&lines(&["@@ -1 +1 @@", "", " x"]), &LineOwners::default());
+        let rows = derive_rows(&lines(&["@@ -1 +1 @@", "", " x"]));
         assert_eq!(rows.len(), 2);
     }
 
     #[test]
     fn hunk_without_lengths_parses_starts() {
-        let rows = derive_rows(&lines(&["@@ -3 +7 @@", " k"]), &LineOwners::default());
+        let rows = derive_rows(&lines(&["@@ -3 +7 @@", " k"]));
         assert_eq!(rows[0].kind, RowKind::Hunk);
         assert_eq!((rows[1].old_no, rows[1].new_no), (Some(3), Some(7)));
     }
 
     #[test]
     fn malformed_hunk_header_falls_through_to_context() {
-        let rows = derive_rows(&lines(&["@@ garbage @@"]), &LineOwners::default());
+        let rows = derive_rows(&lines(&["@@ garbage @@"]));
         assert_eq!(rows[0].kind, RowKind::Context);
         assert_eq!((rows[0].old_no, rows[0].new_no), (Some(0), Some(0)));
     }
@@ -244,7 +213,7 @@ mod tests {
             "similarity index 90%",
             "index 111..222",
         ] {
-            let rows = derive_rows(&lines(&[raw]), &LineOwners::default());
+            let rows = derive_rows(&lines(&[raw]));
             assert_eq!(rows[0].kind, RowKind::Meta, "{raw} must be meta");
         }
     }

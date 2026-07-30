@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     path::{Path, PathBuf},
 };
 
@@ -18,8 +18,6 @@ pub struct GitDiffRequest {
     pub format: GitDiffFormat,
     pub excluded_paths: Vec<String>,
 }
-
-pub type BlameLines = HashMap<u32, String>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitEffect<T> {
@@ -183,39 +181,8 @@ pub trait GitClient: Clone + Send + Sync + 'static {
     /// The commits in `range`, newest first.
     fn log_commits(&self, repo: &Path, range: &str) -> anyhow::Result<Vec<Commit>>;
 
-    /// Map each changed path in `range` to the short shas that touched it.
-    fn file_commit_map(
-        &self,
-        repo: &Path,
-        range: &str,
-    ) -> anyhow::Result<HashMap<String, Vec<String>>>;
-
-    /// The commits `merge` brought into `base..merge` (empty when it introduces nothing).
-    fn merge_members(&self, repo: &Path, merge: &str, base: &str) -> anyhow::Result<Vec<String>>;
-
     /// A unified diff or changed-path listing for a revision range.
     fn diff(&self, repo: &Path, request: &GitDiffRequest) -> anyhow::Result<String>;
-
-    /// Range-bounded forward blame porcelain of `path` at `base..tip`.
-    fn blame_forward(
-        &self,
-        repo: &Path,
-        base: &str,
-        tip: &str,
-        path: &str,
-    ) -> anyhow::Result<BlameLines>;
-
-    /// Working-tree forward blame porcelain of `path` (hash mode: base -> worktree).
-    fn blame_forward_worktree(&self, repo: &Path, path: &str) -> anyhow::Result<BlameLines>;
-
-    /// Reverse blame porcelain of `path` at `base..tip` (each deleted line carries its deleter).
-    fn blame_reverse(
-        &self,
-        repo: &Path,
-        base: &str,
-        tip: &str,
-        path: &str,
-    ) -> anyhow::Result<BlameLines>;
 
     /// The repo's stable oldest root-commit sha, or `None` for a repo with no commits.
     fn root_commit(&self, repo: &Path) -> Option<String>;

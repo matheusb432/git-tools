@@ -1,8 +1,10 @@
 //! Right commit shelf: one card per commit in range plus the native-popover
 //! bodies for commits carrying extended notes.
 
-use application::diffs::View;
+use application::{diffs::View, viewer::RenderOptions};
 use maud::{Markup, html};
+
+use super::Surface;
 
 const SHELF_CLASSES: &str = concat!(
     "gtl-scroll [grid-area:2/3] overflow-auto border-l border-line bg-surface p-3 ",
@@ -15,7 +17,7 @@ const SHELF_STATE_CLASSES: &str = concat!(
     "[&_.cline.active_.merge-pill]:border-acc-line [&_.cline.active_.merge-pill]:bg-acc-soft [&_.cline.active_.merge-pill]:text-acc",
 );
 const COMMIT_CARD_CLASSES: &str = concat!(
-    "relative ml-1.5 cursor-pointer rounded-r-sm border-l-2 border-line-2 py-1.5 pr-2 pl-[22px] ",
+    "relative ml-1.5 rounded-r-sm border-l-2 border-line-2 py-1.5 pr-2 pl-[22px] ",
     "hover:bg-surface-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-acc ",
     "[&.has:hover]:shadow-[inset_2px_0_0_var(--acc)] [&.active]:shadow-[inset_2px_0_0_var(--acc)]",
 );
@@ -34,22 +36,35 @@ const POPOVER_CLASSES: &str = concat!(
     "shadow-[0_14px_44px_rgba(0,0,0,.7)] [&::backdrop]:bg-transparent",
 );
 
-pub(super) fn shelf(view: &View) -> Markup {
+pub(super) fn shelf(
+    view: &View,
+    surface: Surface,
+    options: RenderOptions,
+    selected_commit_sha: Option<&str>,
+) -> Markup {
     html! {
         aside class={ "shelf " (SHELF_CLASSES) " " (SHELF_STATE_CLASSES) } aria-label="Commits in range" {
             div {
                 h3 class="mx-0.5 mt-1.5 mb-1 text-[11px] font-semibold tracking-[0.06em] text-ink-3 uppercase" { (view.commits_label) }
                 p class="mx-0.5 mt-0 mb-3 flex items-center gap-1.5 text-[11px] text-ink-3" {
                     span class="size-2 flex-none rounded-full bg-acc shadow-[0_0_0_3px_var(--acc-soft)]" {}
-                    "click card = focus commit · hash = copy · hover = notes"
+                    @match surface {
+                        Surface::App { .. } => { "view = standalone patch · hash = copy · hover = notes" }
+                        Surface::Artifact { .. } => { "hash = copy · hover = notes" }
+                    }
                 }
             }
-            (commit_rows(view))
+            (commit_rows(view, surface, options, selected_commit_sha))
         }
     }
 }
 
-pub(super) fn mobile_popover(view: &View) -> Markup {
+pub(super) fn mobile_popover(
+    view: &View,
+    surface: Surface,
+    options: RenderOptions,
+    selected_commit_sha: Option<&str>,
+) -> Markup {
     html! {
         aside id="viewer-commits-popover"
             class={ "fixed inset-3 m-0 h-[calc(100vh_-_24px)] w-[calc(100vw_-_24px)] max-w-none overflow-hidden rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)] " (SHELF_STATE_CLASSES) }
@@ -64,17 +79,18 @@ pub(super) fn mobile_popover(view: &View) -> Markup {
                     popovertarget="viewer-commits-popover" popovertargetaction="hide" aria-label="Close commits in range" { "×" }
             }
             div class="gtl-scroll h-[calc(100%_-_57px)] overflow-y-auto p-3" {
-                (commit_rows(view))
+                (commit_rows(view, surface, options, selected_commit_sha))
             }
         }
     }
 }
 
-// Right-hand commit shelf cards. The card filters files by commit; the hash tag copies its sha.
-// A card with a body also gets a distinct `notes-ico` glyph + a `data-pop` pointer to its sibling
-// [popover] (emitted by commit_popovers). The always-visible body `pre` of the old terminal layout
-// is gone.
-fn commit_rows(view: &View) -> Markup {
+fn commit_rows(
+    view: &View,
+    surface: Surface,
+    options: RenderOptions,
+    selected_commit_sha: Option<&str>,
+) -> Markup {
     if view.commits.is_empty() {
         return html! { div class="empty rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic" { "no commits in range" } };
     }
@@ -82,21 +98,24 @@ fn commit_rows(view: &View) -> Markup {
     html! {
         @for commit in &view.commits {
             @let has_notes = !commit.body.trim().is_empty();
-            div class={ (if has_notes { "cline has " } else { "cline " }) (COMMIT_CARD_CLASSES) }
+            @let selected = selected_commit_sha == Some(commit.sha.as_str());
+            div class={
+                (if has_notes { "cline has " } else { "cline " })
+                (if selected { "active " } else { "" })
+                (COMMIT_CARD_CLASSES)
+            }
                 data-sha=(commit.sha)
-                data-members=[merge_members_attr(commit)]
-                data-pop=[has_notes.then(|| format!("pop-{}", commit.sha))]
-                role="button" tabindex="0" title="focus this commit's changes" {
+                data-pop=[has_notes.then(|| format!("pop-{}", commit.sha))] {
                 span class={ "bead " (BEAD_CLASSES) } aria-hidden="true" {}
                 div class="top mb-1 flex items-center gap-1.5" {
-                    button class={ "sha " (SHA_CLASSES) } type="button" title="copy hash" { (commit.sha) }
+                    button class={ "sha " (SHA_CLASSES) } type="button" title="copy hash" {
+                        (abbreviate(&commit.sha))
+                    }
                     @if has_notes {
                         span class={ "notes-ico " (NOTES_ICON_CLASSES) } aria-hidden="true" title="has extended notes" {}
                     }
-                    @if commit.is_merge() && !commit.members.is_empty() {
-                        span class={ "merge-pill " (MERGE_PILL_CLASSES) } title="commits this merge brought in — focus to highlight them" {
-                            "merge · " (commit.members.len())
-                        }
+                    @if commit.is_merge() {
+                        span class={ "merge-pill " (MERGE_PILL_CLASSES) } { "merge" }
                     }
                     @if !commit.date.is_empty() {
                         @if commit.iso.is_empty() {
@@ -106,7 +125,35 @@ fn commit_rows(view: &View) -> Markup {
                         }
                     }
                 }
-                div class={ "sub " (SUBJECT_CLASSES) } { (commit.subject) }
+                @match surface {
+                    Surface::App { tab_id } => {
+                        button type="button"
+                            class={ "commit-select block w-full cursor-pointer border-0 bg-transparent p-0 text-left [font:inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc sub " (SUBJECT_CLASSES) }
+                            aria-pressed=(selected)
+                            hx-get=(if selected {
+                                format!(
+                                    "/tabs/{tab_id}/view?layout={}&density={}",
+                                    options.layout(),
+                                    options.density(),
+                                )
+                            } else {
+                                format!(
+                                    "/tabs/{tab_id}/commits/{}/view?layout={}&density={}",
+                                    commit.sha,
+                                    options.layout(),
+                                    options.density(),
+                                )
+                            })
+                            hx-target="#viewer-view"
+                            hx-sync="#viewer-view:replace"
+                            hx-swap="outerHTML" {
+                            (commit.subject)
+                        }
+                    }
+                    Surface::Artifact { .. } => {
+                        div class={ "sub " (SUBJECT_CLASSES) } { (commit.subject) }
+                    }
+                }
             }
         }
     }
@@ -134,9 +181,8 @@ pub(super) fn commit_popovers(view: &View) -> Markup {
     }
 }
 
-// ! Serialize a merge's brought-in commits for the focus set; non-merge / empty -> no attribute.
-fn merge_members_attr(commit: &domain::diffs::Commit) -> Option<String> {
-    (commit.is_merge() && !commit.members.is_empty()).then(|| commit.members.join(" "))
+fn abbreviate(sha: &str) -> String {
+    sha.chars().take(10).collect()
 }
 
 #[cfg(test)]
@@ -159,13 +205,13 @@ mod tests {
     }
 
     #[test]
-    fn commit_shelf_click_contract_focuses_card_and_copies_hash_tag() {
-        // ! JS behavior: the sha-guard predicate (isShaTarget) is owned by
-        // ! frontend/diff/model/commit-focus.ts. copyText + stopPropagation wiring is
-        // ! event-listener-only and not extracted.
+    fn artifact_commit_shelf_is_informational_and_copies_hashes() {
         let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
-        assert!(html.contains(r#"title="focus this commit's changes""#));
+        assert!(!html.contains(r#"class="commit-select"#));
+        assert!(!html.contains(r#"role="button""#));
+        assert!(!html.contains(r#"tabindex="0""#));
+        assert!(!html.contains("commits/abc123def/view"));
         assert!(html.contains(r#"<button class="sha "#));
         assert!(html.contains(r#"type="button" title="copy hash""#));
         assert!(html.contains(r#"<span class="bead "#));
@@ -209,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_rows_marks_a_merge_card_with_members_and_pill() {
+    fn commit_rows_marks_a_merge_card_without_derived_members() {
         let mut view = sample_view();
         view.commits = vec![
             Commit {
@@ -219,7 +265,6 @@ mod tests {
                 date: String::new(),
                 iso: String::new(),
                 parents: vec!["p1aaaaaaa".to_string(), "p2bbbbbbb".to_string()],
-                members: vec!["aaa111aaa".to_string(), "bbb222bbb".to_string()],
             },
             Commit {
                 sha: "plain5678".to_string(),
@@ -228,36 +273,13 @@ mod tests {
                 date: String::new(),
                 iso: String::new(),
                 parents: vec!["p1aaaaaaa".to_string()],
-                members: Vec::new(),
             },
         ];
 
         let html = build_html(&view, RenderOptions::DEFAULT, None);
 
-        assert!(html.contains(r#"data-members="aaa111aaa bbb222bbb""#));
-        assert!(html.contains("merge · 2"));
-        // exactly one card is a merge: no pill / no data-members leaks onto the plain card
-        assert_eq!(html.matches("merge · ").count(), 1);
-        assert_eq!(html.matches("data-members=").count(), 1);
-        assert!(html.contains("[&amp;_.cline.active_.merge-pill]:border-acc-line"));
-    }
-
-    #[test]
-    fn commit_rows_skips_pill_for_a_merge_with_no_in_range_members() {
-        let mut view = sample_view();
-        view.commits = vec![Commit {
-            sha: "merge1234".to_string(),
-            subject: "Merge branch 'main'".to_string(),
-            body: String::new(),
-            date: String::new(),
-            iso: String::new(),
-            parents: vec!["p1aaaaaaa".to_string(), "p2bbbbbbb".to_string()],
-            members: Vec::new(), // base-bounded walk found nothing in range
-        }];
-
-        let html = build_html(&view, RenderOptions::DEFAULT, None);
-
-        assert!(!html.contains("merge · "));
+        assert!(html.contains(">merge</span>"));
         assert!(!html.contains("data-members="));
+        assert!(html.contains("[&amp;_.cline.active_.merge-pill]:border-acc-line"));
     }
 }

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use application::{
-    diffs::{Cmd, FileDiff, Foot, LineOwners, View},
+    diffs::{Cmd, FileDiff, Foot, View},
     ports::{ArtifactMeta, ArtifactStore, HtmlRenderer},
 };
 use domain::{
@@ -29,8 +29,6 @@ fn view(repo_root: &Path) -> View {
                 "+new".into(),
                 " context".into(),
             ]),
-            commits: Vec::new(),
-            owners: LineOwners::default(),
         }],
         title: "diff".into(),
         cmd: Cmd {

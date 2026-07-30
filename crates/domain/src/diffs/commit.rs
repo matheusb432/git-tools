@@ -1,6 +1,5 @@
 /// One commit in range. `date`/`iso` are the human + machine timestamps.
-/// `parents` are the short shas of its parents (≥2 ⇒ a merge); `members` are the
-/// commits this merge brought into the previewed range (empty for a non-merge).
+/// `sha` and `parents` retain Git's full identities; presentation abbreviates them.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Commit {
     pub sha: String,
@@ -9,7 +8,6 @@ pub struct Commit {
     pub date: String,
     pub iso: String,
     pub parents: Vec<String>,
-    pub members: Vec<String>,
 }
 
 impl Commit {
