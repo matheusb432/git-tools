@@ -39,6 +39,10 @@ pub(crate) const ROW_PRESENTATION_CLASSES: &str = concat!(
 pub(crate) const SPLIT_PRESENTATION_CLASSES: &str = split::PRESENTATION_CLASSES;
 pub(crate) const INTRALINE_PRESENTATION_CLASSES: &str = intraline::PRESENTATION_CLASSES;
 
+pub(crate) fn unified_line_number_digits(lines: &[String]) -> u32 {
+    model::line_number_digits(lines)
+}
+
 pub(crate) fn render_diff_lines(lines: &[String], syntax: Option<&SyntaxReference>) -> String {
     let rows = derive_rows(lines);
     let tokens = highlight::row_tokens(&rows, syntax);

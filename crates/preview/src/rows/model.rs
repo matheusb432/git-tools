@@ -29,73 +29,87 @@ pub(super) struct Row {
     pub(super) text: String,
 }
 
+#[derive(Debug, Default)]
+struct LineNumberState {
+    old: u32,
+    new: u32,
+}
+
+impl LineNumberState {
+    fn advance(&mut self, line_kind: UnifiedDiffLineKind) -> (RowKind, Option<u32>, Option<u32>) {
+        match line_kind {
+            UnifiedDiffLineKind::Meta => (RowKind::Meta, None, None),
+            UnifiedDiffLineKind::Hunk {
+                line_number_old,
+                line_number_new,
+            } => {
+                self.old = line_number_old;
+                self.new = line_number_new;
+                (RowKind::Hunk, None, None)
+            }
+            UnifiedDiffLineKind::Added => {
+                let new = self.new;
+                self.new += 1;
+                (RowKind::Add, None, Some(new))
+            }
+            UnifiedDiffLineKind::Removed => {
+                let old = self.old;
+                self.old += 1;
+                (RowKind::Del, Some(old), None)
+            }
+            UnifiedDiffLineKind::Context => {
+                let old = self.old;
+                let new = self.new;
+                self.old += 1;
+                self.new += 1;
+                (RowKind::Context, Some(old), Some(new))
+            }
+        }
+    }
+}
+
 /// Derive structured rows from a file's raw diff lines, tracking absolute
 /// gutter numbers from hunk headers.
 /// Empty lines are skipped; a malformed hunk header degrades to a context row
 /// (matching the historical renderer behavior).
 pub(super) fn derive_rows(lines: &[String]) -> Vec<Row> {
-    let mut old_no = 0u32;
-    let mut new_no = 0u32;
     let mut rows = Vec::with_capacity(lines.len());
     let mut line_classifier = UnifiedDiffLineClassifier::default();
+    let mut line_numbers = LineNumberState::default();
 
     for raw in lines {
         if raw.is_empty() {
             continue;
         }
 
-        match line_classifier.classify(raw) {
-            UnifiedDiffLineKind::Meta => rows.push(Row {
-                kind: RowKind::Meta,
-                old_no: None,
-                new_no: None,
-                text: raw.clone(),
-            }),
-            UnifiedDiffLineKind::Hunk {
-                line_number_old,
-                line_number_new,
-            } => {
-                old_no = line_number_old;
-                new_no = line_number_new;
-                rows.push(Row {
-                    kind: RowKind::Hunk,
-                    old_no: None,
-                    new_no: None,
-                    text: raw.clone(),
-                });
-            }
-            UnifiedDiffLineKind::Added => {
-                rows.push(Row {
-                    kind: RowKind::Add,
-                    old_no: None,
-                    new_no: Some(new_no),
-                    text: raw.clone(),
-                });
-                new_no += 1;
-            }
-            UnifiedDiffLineKind::Removed => {
-                rows.push(Row {
-                    kind: RowKind::Del,
-                    old_no: Some(old_no),
-                    new_no: None,
-                    text: raw.clone(),
-                });
-                old_no += 1;
-            }
-            UnifiedDiffLineKind::Context => {
-                rows.push(Row {
-                    kind: RowKind::Context,
-                    old_no: Some(old_no),
-                    new_no: Some(new_no),
-                    text: raw.clone(),
-                });
-                old_no += 1;
-                new_no += 1;
-            }
-        }
+        let (kind, old_no, new_no) = line_numbers.advance(line_classifier.classify(raw));
+        rows.push(Row {
+            kind,
+            old_no,
+            new_no,
+            text: raw.clone(),
+        });
     }
 
     rows
+}
+
+pub(super) fn line_number_digits(lines: &[String]) -> u32 {
+    let mut line_classifier = UnifiedDiffLineClassifier::default();
+    let mut line_numbers = LineNumberState::default();
+    let mut line_number_max = 0;
+
+    for raw in lines.iter().filter(|line| !line.is_empty()) {
+        let (_, old_no, new_no) = line_numbers.advance(line_classifier.classify(raw));
+        if let Some(line_number) = old_no {
+            line_number_max = line_number_max.max(line_number);
+        }
+        if let Some(line_number) = new_no {
+            line_number_max = line_number_max.max(line_number);
+        }
+    }
+
+    line_number_max.checked_ilog10().unwrap_or(0) + 1
 }
 
 /// A changed line body with its leading diff marker stripped, ready for

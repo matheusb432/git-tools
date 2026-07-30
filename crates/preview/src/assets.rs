@@ -195,7 +195,7 @@ mod tests {
         assert_selector_declaration(
             css,
             ".layout .diff-unified .dl",
-            "grid-template-columns:28px minmax(0,1fr)",
+            "grid-template-columns:max(28px, var(--unified-line-number-width,28px)) minmax(0, 1fr)",
         );
         assert_selector_declaration(css, ".layout .diff-unified .dl .ln", "font-size:14px");
         assert_selector_declaration(css, ".layout .diff-unified .dl .ln", "text-align:center");

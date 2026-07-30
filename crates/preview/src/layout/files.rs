@@ -9,7 +9,7 @@ use maud::{Markup, PreEscaped, html};
 
 use crate::{
     layout::Surface,
-    rows::{render_diff_lines, render_diff_split},
+    rows::{render_diff_lines, render_diff_split, unified_line_number_digits},
     text::slug,
 };
 
@@ -187,9 +187,12 @@ fn file_blocks_with_mode(
 }
 
 fn file_diff_shell(file: &FileDiff, options: RenderOptions, file_index: usize) -> Markup {
-    let (_, density) = selected_lines(file, options);
+    let (lines, density) = selected_lines(file, options);
+    let style = unified_line_number_gutter_style(options.layout(), lines);
     html! {
-        div id=(diff_target_id(file_index)) class=(diff_classes(options.layout(), density)) {}
+        div id=(diff_target_id(file_index))
+            class=(diff_classes(options.layout(), density))
+            style=[style] {}
     }
 }
 
@@ -203,8 +206,9 @@ fn open_diff_file_route(tab_id: application::viewer::ViewerTabId, path: &str) ->
 fn file_diff(file: &FileDiff, options: RenderOptions) -> Markup {
     let syntax = crate::syntax::syntax_for_path(&file.path);
     let (lines, density) = selected_lines(file, options);
+    let style = unified_line_number_gutter_style(options.layout(), lines);
     html! {
-        div class=(diff_classes(options.layout(), density)) {
+        div class=(diff_classes(options.layout(), density)) style=[style] {
             (PreEscaped(render_rows(options.layout(), lines, syntax)))
         }
     }
@@ -229,6 +233,16 @@ fn diff_classes(layout: DiffLayout, density: DiffDensity) -> String {
             DiffDensity::Full => "full",
         },
     )
+}
+
+fn unified_line_number_gutter_style(layout: DiffLayout, lines: &[String]) -> Option<String> {
+    match layout {
+        DiffLayout::Unified => Some(format!(
+            "--unified-line-number-width:calc({}ch + 8px)",
+            unified_line_number_digits(lines)
+        )),
+        DiffLayout::Split => None,
+    }
 }
 
 fn render_rows(
