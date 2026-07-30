@@ -8,7 +8,8 @@ use application::{
 };
 use tauri::http::StatusCode;
 
-use super::{RouteError, RouteResult, ViewerApp, status_response};
+use super::response::{RouteError, RouteOutput, RouteResult};
+use crate::presentation::ViewerApp;
 
 pub(super) fn serve(app: &ViewerApp, tab: ViewerTabId, diff_file_path: PathBuf) -> RouteResult {
     let cached_view = app
@@ -25,7 +26,7 @@ pub(super) fn serve(app: &ViewerApp, tab: ViewerTabId, diff_file_path: PathBuf) 
         &app.file_system,
         &app.configured_editor,
     ) {
-        Ok(()) => Ok(status_response(StatusCode::NO_CONTENT)),
+        Ok(()) => Ok(RouteOutput::Empty(StatusCode::NO_CONTENT)),
         Err(
             OpenDiffFileInConfiguredEditorError::FileNotInCurrentDiff
             | OpenDiffFileInConfiguredEditorError::DiffFileDeleted

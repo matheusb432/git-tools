@@ -20,6 +20,7 @@ pub struct MaudViewerRenderer;
     reason = "method syntax keeps the renderer adapter replaceable at route call sites"
 )]
 impl MaudViewerRenderer {
+    #[cfg(test)]
     pub(crate) fn build_document(self, document: &ViewerDocument) -> String {
         self.build_document_with_load(document, None, false)
     }
