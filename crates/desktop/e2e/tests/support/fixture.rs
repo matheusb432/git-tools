@@ -7,6 +7,8 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 
+const CONCURRENT_LIVE_LINE_COUNT_MAX: usize = 45_000;
+
 const ENVIRONMENT_VARIABLES: [&str; 6] = [
     "GTL_E2E_CLI_BINARY",
     "GTL_E2E_FIXTURE_ROOT",
@@ -25,6 +27,7 @@ pub struct EditorRecord {
 
 pub struct ViewerFixture {
     repository: PathBuf,
+    concurrent_live_root: PathBuf,
     cli: PathBuf,
     editor_record: PathBuf,
     editor_release: PathBuf,
@@ -42,6 +45,7 @@ impl ViewerFixture {
             editor_exit,
         ] = required_environment_paths()?;
         let repository = fixture_root.join("dom-repositories/live-view");
+        let concurrent_live_root = fixture_root.join("dom-repositories/concurrent-live");
         fs::create_dir_all(&repository)
             .with_context(|| format!("create live-view repository {}", repository.display()))?;
 
@@ -69,6 +73,7 @@ impl ViewerFixture {
 
         Ok(Self {
             repository,
+            concurrent_live_root,
             cli,
             editor_record,
             editor_release,
@@ -90,6 +95,43 @@ impl ViewerFixture {
             .context("write alpha-v2 worktree")?;
         git(&self.repository, ["add", "work.txt"])?;
         git(&self.repository, ["commit", "-q", "-m", "live view v2"])
+    }
+
+    pub fn forward_sized_live_view(
+        &self,
+        repository_name: &str,
+        marker: &str,
+        added_line_count: usize,
+    ) -> Result<()> {
+        if added_line_count > CONCURRENT_LIVE_LINE_COUNT_MAX {
+            bail!(
+                "live-view fixture requested {added_line_count} lines; maximum is {CONCURRENT_LIVE_LINE_COUNT_MAX}"
+            );
+        }
+        let repository = self.concurrent_live_root.join(repository_name);
+        fs::create_dir_all(&repository)
+            .with_context(|| format!("create live-view repository {}", repository.display()))?;
+        git(&repository, ["init", "-q", "-b", "main"])?;
+        git(&repository, ["config", "user.name", "Viewer E2E"])?;
+        git(
+            &repository,
+            ["config", "user.email", "viewer-e2e@example.invalid"],
+        )?;
+        fs::write(repository.join("work.txt"), "base\n").context("write live-view base")?;
+        git(&repository, ["add", "work.txt"])?;
+        git(&repository, ["commit", "-q", "-m", "live-view base"])?;
+        git(&repository, ["switch", "-q", "-c", "feature"])?;
+        let contents = format!("{marker}\n{}", "changed\n".repeat(added_line_count));
+        fs::write(repository.join("work.txt"), contents)
+            .with_context(|| format!("write {repository_name} live view"))?;
+        git(&repository, ["add", "work.txt"])?;
+        git(&repository, ["commit", "-q", "-m", "live-view change"])?;
+        command_checked(
+            &self.cli,
+            ["diff", "live", "--path", path_as_str(&repository)?],
+            None,
+        )
+        .with_context(|| format!("forward {repository_name} live view through release CLI"))
     }
 
     pub fn canonical_repository(&self) -> Result<PathBuf> {

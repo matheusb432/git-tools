@@ -21,15 +21,8 @@ pub async fn assert_forwarded_live_view(
     expected_content: &str,
 ) -> Result<()> {
     let driver = session.driver();
-    driver
-        .execute(
-            "return window.htmx.ajax('GET', '/pending', { target: '#viewer-tabs', swap: 'outerHTML' });",
-            Vec::new(),
-        )
-        .await
-        .context("drain pending viewer recipes")?;
     wait_for_live_tab(driver, "forwarded live view").await?;
-    wait_for_htmx_idle(driver, "draining pending viewer recipes").await?;
+    wait_for_htmx_idle(driver, "forwarding live view").await?;
     let layout = by_css(driver, "#viewer-view .layout", "rendered viewer layout").await?;
     ensure!(layout.is_displayed().await?, "viewer layout is hidden");
     ensure!(
@@ -252,6 +245,61 @@ pub async fn assert_first_paint(session: &TestSession) -> Result<()> {
     Ok(())
 }
 
+pub async fn assert_overlapping_live_updates(
+    session: &TestSession,
+    fixture: &ViewerFixture,
+) -> Result<()> {
+    let driver = session.driver();
+    driver
+        .set_window_rect(0, 0, 1280, 800)
+        .await
+        .context("resize viewer for overlapping live updates")?;
+    fixture.forward_sized_live_view("live-heavy", "first-live-marker", 45_000)?;
+    fixture.forward_sized_live_view("live-latest", "second-live-marker", 1)?;
+
+    let observation = wait::until(
+        "second live view ready without duplicate viewer regions",
+        ASSERTION_TIMEOUT,
+        || async {
+            let result = driver
+                .execute(
+                    r"
+return {
+  tabs: document.querySelectorAll('#viewer-tabs').length,
+  views: document.querySelectorAll('#viewer-view').length,
+  latestReady: document.querySelector('#viewer-view')?.textContent.includes('second-live-marker') ?? false
+};
+",
+                    Vec::new(),
+                )
+                .await
+                .context("inspect overlapping live-update viewer regions")?;
+            let observation = result.json();
+            let tabs = observation["tabs"].as_u64().unwrap_or_default();
+            let views = observation["views"].as_u64().unwrap_or_default();
+            let latest_ready = observation["latestReady"].as_bool().unwrap_or(false);
+            Ok(((tabs != 1 || views != 1) || latest_ready).then_some(observation.clone()))
+        },
+    )
+    .await?;
+
+    ensure!(
+        observation["tabs"].as_u64() == Some(1),
+        "overlapping live updates rendered {} tab regions",
+        observation["tabs"]
+    );
+    ensure!(
+        observation["views"].as_u64() == Some(1),
+        "overlapping live updates rendered {} view regions",
+        observation["views"]
+    );
+    ensure!(
+        observation["latestReady"].as_bool() == Some(true),
+        "the latest live view did not become the active ready view"
+    );
+    Ok(())
+}
+
 pub async fn select_and_restore_split_layout(session: &TestSession) -> Result<()> {
     let driver = session.driver();
     driver
@@ -311,8 +359,12 @@ async fn refresh_and_assert_alpha_v2_within(
         "refreshed live view rendering alpha-v2",
         refresh_budget_remaining(deadline)?,
         || async {
-            let view = by_css(driver, "#viewer-view", "refreshed viewer view").await?;
-            Ok(view.text().await?.contains("alpha-v2").then_some(()))
+            Ok(script_bool(
+                driver,
+                "return document.querySelector('#viewer-view')?.textContent.includes('alpha-v2') ?? false;",
+            )
+            .await?
+            .then_some(()))
         },
     )
     .await?;

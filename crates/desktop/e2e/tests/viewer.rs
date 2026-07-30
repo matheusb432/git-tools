@@ -33,7 +33,10 @@ async fn viewer_live_lifecycle() -> anyhow::Result<()> {
                 .context("restore forwarded live view")?;
             support::assert_mobile_navigation(session)
                 .await
-                .context("assert mobile navigation")
+                .context("assert mobile navigation")?;
+            support::assert_overlapping_live_updates(session, &fixture)
+                .await
+                .context("assert overlapping live updates")
         })
     })
     .await

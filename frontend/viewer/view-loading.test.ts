@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
-import { createCoalescedReadyRefresh, installViewerLoading, showViewerLoading } from "./view-loading";
+import { afterEach, describe, expect, test } from "vitest";
+import { installViewerLoading, showViewerLoading } from "./view-loading";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -39,63 +39,13 @@ describe("showViewerLoading", () => {
 });
 
 describe("installViewerLoading", () => {
-  test("subscribes before the closing readiness request", async () => {
-    mountLoadingTemplate();
-    const ajax = vi.fn(() => Promise.resolve());
-    let subscribed = false;
-
-    await installViewerLoading({
-      document,
-      __TAURI__: {
-        event: {
-          listen: () => {
-            subscribed = true;
-            expect(ajax).not.toHaveBeenCalled();
-            return Promise.resolve(() => {});
-          },
-        },
-      },
-      htmx: { ajax },
-    });
-
-    expect(subscribed).toBe(true);
-    expect(ajax).toHaveBeenCalledWith("GET", "/ready", {
-      target: "#viewer-view",
-      swap: "outerHTML",
-    });
-  });
-
-  test("does not wait for event subscription before the readiness request", async () => {
-    mountLoadingTemplate();
-    const ajax = vi.fn(() => Promise.resolve());
-    let releaseSubscription = (): void => {};
-    const installed = installViewerLoading({
-      document,
-      __TAURI__: {
-        event: {
-          listen: () =>
-            new Promise<void>((resolve) => {
-              releaseSubscription = resolve;
-            }),
-        },
-      },
-      htmx: { ajax },
-    });
-
-    await Promise.resolve();
-    expect(ajax).toHaveBeenCalledOnce();
-
-    releaseSubscription();
-    await installed;
-  });
-
   test("shows loading before htmx handles a view request", async () => {
     const previous = mountLoadingTemplate();
     const trigger = document.createElement("button");
     trigger.setAttribute("hx-get", "/tabs/2/activate");
     trigger.setAttribute("hx-target", "#viewer-view");
     document.body.appendChild(trigger);
-    await installViewerLoading({ document });
+    installViewerLoading(document);
 
     trigger.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -110,7 +60,7 @@ describe("installViewerLoading", () => {
     trigger.setAttribute("hx-get", "/tabs/2/activate");
     trigger.setAttribute("hx-target", "#viewer-view");
     document.body.appendChild(trigger);
-    await installViewerLoading({ document });
+    installViewerLoading(document);
 
     trigger.click();
     const completed = document.createElement("section");
@@ -121,32 +71,5 @@ describe("installViewerLoading", () => {
 
     expect(document.getElementById("viewer-view")).toBe(completed);
     expect(completed.dataset["viewerState"]).toBe("ready");
-  });
-});
-
-describe("createCoalescedReadyRefresh", () => {
-  test("bounds a completion burst to one running request and one rerun", async () => {
-    let refreshes = 0;
-    let release = (): void => {};
-    const refresh = createCoalescedReadyRefresh(
-      () => {
-        refreshes += 1;
-        if (refreshes > 1) return Promise.resolve();
-        return new Promise<void>((resolve) => {
-          release = resolve;
-        });
-      },
-      () => {},
-    );
-
-    const settled = refresh();
-    refresh();
-    refresh();
-    expect(refreshes).toBe(1);
-
-    release();
-    await settled;
-
-    expect(refreshes).toBe(2);
   });
 });
