@@ -46,7 +46,7 @@ impl Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Diff the current repo (all managed repos with `--all`, nested subrepos with `-r`),
-    /// opens the rendered diff in the app's viewer; `--raw` opens it in the browser instead.
+    /// opening it in the app's viewer unless `--raw` prints an artifact URL instead.
     #[command(visible_alias = "d")]
     Diff(DiffArgs),
     /// Squash all unpushed local commits into a single commit.
@@ -111,7 +111,7 @@ pub enum DaemonCommand {
 pub struct DiffArgs {
     #[command(subcommand)]
     pub sub: Option<DiffSub>,
-    /// Render via the browser/Maud path instead of the app.
+    /// Render an artifact and print its URL without opening a viewer.
     #[arg(long)]
     pub raw: bool,
     #[command(flatten)]
@@ -138,7 +138,7 @@ pub struct MergeArgs {
     /// Base branch to merge into (default: main).
     #[arg(long)]
     pub base: Option<String>,
-    /// Render via the browser/Maud path instead of the app.
+    /// Render an artifact and print its URL without opening a viewer.
     #[arg(long)]
     pub raw: bool,
 }
@@ -149,13 +149,13 @@ pub struct SquashArgs {
     /// Subrepo working tree to preview.
     #[arg(long)]
     pub repo: String,
-    /// Render via the browser/Maud path instead of the app.
+    /// Render an artifact and print its URL without opening a viewer.
     #[arg(long)]
     pub raw: bool,
 }
 
 /// Arguments for `diff live`. No `--raw`: a live view only ever renders through
-/// the app (there is no store-artifact/browser path for it).
+/// the app because it has no store-artifact path.
 #[derive(Debug, Args)]
 pub struct LiveArgs {
     /// Repo to save + open a live view for (default: every managed repo with

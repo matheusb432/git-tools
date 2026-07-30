@@ -50,7 +50,7 @@ pub fn build_tabbed_html(
                 }
                 @for (index, view) in views.iter().enumerate() {
                     section class={ "panel " (PANEL_CLASSES) } id={ "panel-" (index) } role="tabpanel" aria-labelledby={ "tab-" (index) } hidden[index != 0] {
-                        (view_body(view, options, Surface::Artifact))
+                        (view_body(view, options, Surface::Artifact { view_index: index }))
                     }
                 }
                 script { (PreEscaped(PREVIEW_BUNDLE)) }

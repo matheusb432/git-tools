@@ -3,9 +3,8 @@
 use std::path::PathBuf;
 
 /// Whether a display server is available (`DISPLAY` or `WAYLAND_DISPLAY` set,
-/// non-empty presence — the *value* doesn't matter). Shared by the `--raw`/headless
-/// routing decision (`commands::diff`, `commands::diff_subrepos`) and by
-/// `open_artifact`'s degrade path.
+/// non-empty presence -- the *value* does not matter). Used by diff commands to
+/// choose between the native viewer and a rendered artifact.
 pub fn has_display() -> bool {
     std::env::var_os("DISPLAY").is_some() || std::env::var_os("WAYLAND_DISPLAY").is_some()
 }

@@ -69,7 +69,7 @@ pub fn execute(
     }
     let render_directly = command.raw || !command.has_display || !command.effects_enabled;
     if render_directly {
-        return render_artifact(&command.render, command.effects_enabled, false, viewer);
+        return render_artifact(&command.render, false, viewer);
     }
 
     let batch = build_batch(command.batch_id, command.recipes, git)?;
@@ -81,11 +81,11 @@ pub fn execute(
             degraded: false,
         }),
         Err(error) => {
-            let mut outcome = render_artifact(&command.render, true, true, viewer)?;
+            let mut outcome = render_artifact(&command.render, true, viewer)?;
             outcome.notes.insert(
                 0,
                 Note::warn(format!(
-                    "diff: viewer unavailable ({error:#}); rendering via the browser instead"
+                    "diff: viewer unavailable ({error:#}); rendering an artifact instead"
                 )),
             );
             Ok(outcome)
@@ -95,7 +95,6 @@ pub fn execute(
 
 fn render_artifact(
     request: &DiffRenderRequest,
-    open: bool,
     degraded: bool,
     viewer: &impl DiffViewerClient,
 ) -> Result<PresentDiffOk, PresentDiffError> {
@@ -104,19 +103,10 @@ fn render_artifact(
         DiffRenderOutcome::Rendered(path) => Some(path),
         DiffRenderOutcome::Empty => None,
     };
-    let mut notes = response.notes;
-    if open
-        && let Some(path) = artifact.as_deref()
-        && let Err(error) = viewer.open(path)
-    {
-        notes.push(Note::warn(format!(
-            "diff: could not open artifact ({error:#})"
-        )));
-    }
     Ok(PresentDiffOk {
         surface: DiffSurface::Artifact,
         artifact,
-        notes,
+        notes: response.notes,
         degraded,
     })
 }
@@ -232,7 +222,6 @@ mod tests {
     struct FakeViewer {
         forward_error: Option<String>,
         render: DiffRenderOutcome,
-        open_error: Option<String>,
     }
 
     impl DiffViewerClient for FakeViewer {
@@ -248,13 +237,6 @@ mod tests {
                 outcome: self.render.clone(),
                 notes: vec![Note::info("rendered")],
             })
-        }
-
-        fn open(&self, _artifact: &Path) -> anyhow::Result<()> {
-            match &self.open_error {
-                Some(error) => anyhow::bail!("{error}"),
-                None => Ok(()),
-            }
         }
     }
 
@@ -290,11 +272,10 @@ mod tests {
     }
 
     #[test]
-    fn disabled_effects_render_an_artifact_without_opening_it() {
+    fn disabled_effects_render_an_artifact() {
         let viewer = FakeViewer {
             forward_error: Some("must not forward".into()),
             render: DiffRenderOutcome::Rendered("/tmp/diff.html".into()),
-            open_error: Some("must not open".into()),
         };
 
         let outcome = execute(request(false, true, false), &viewer, &git()).unwrap();
@@ -310,7 +291,6 @@ mod tests {
         let viewer = FakeViewer {
             forward_error: None,
             render: DiffRenderOutcome::Empty,
-            open_error: None,
         };
 
         let outcome = execute(request(false, true, true), &viewer, &git()).unwrap();
@@ -325,7 +305,6 @@ mod tests {
         let viewer = FakeViewer {
             forward_error: Some("viewer unavailable".into()),
             render: DiffRenderOutcome::Rendered("/tmp/diff.html".into()),
-            open_error: None,
         };
 
         let outcome = execute(request(false, true, true), &viewer, &git()).unwrap();
@@ -337,22 +316,17 @@ mod tests {
     }
 
     #[test]
-    fn opener_failure_is_reported_without_losing_the_artifact() {
+    fn raw_renders_an_artifact() {
         let viewer = FakeViewer {
-            forward_error: None,
+            forward_error: Some("must not forward".into()),
             render: DiffRenderOutcome::Rendered("/tmp/diff.html".into()),
-            open_error: Some("handler missing".into()),
         };
 
         let outcome = execute(request(true, true, true), &viewer, &git()).unwrap();
 
+        assert_eq!(outcome.surface, DiffSurface::Artifact);
         assert_eq!(outcome.artifact, Some("/tmp/diff.html".into()));
-        assert!(
-            outcome
-                .notes
-                .iter()
-                .any(|note| note.text.contains("handler missing"))
-        );
+        assert_eq!(outcome.notes, vec![Note::info("rendered")]);
     }
 
     #[test]

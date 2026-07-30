@@ -4,6 +4,7 @@
 
 mod files;
 mod keybar;
+pub(crate) mod mobile_controls;
 mod shelf;
 mod titlebar;
 mod tree;
@@ -25,7 +26,16 @@ pub(crate) enum Surface {
     /// The desktop viewer's embedded webview.
     App { tab_id: ViewerTabId },
     /// Self-contained offline documents opened in a browser.
-    Artifact,
+    Artifact { view_index: usize },
+}
+
+impl Surface {
+    fn mobile_controls_target(self) -> String {
+        match self {
+            Self::App { .. } => "viewer-controls-popover".to_string(),
+            Self::Artifact { view_index } => format!("preview-controls-popover-{view_index}"),
+        }
+    }
 }
 
 const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
@@ -41,7 +51,22 @@ const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
 // [popover] elements live inside .layout so the per-layout JS scoping in preview.js
 // finds them.
 pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -> Markup {
-    view_body_with_mode(view, options, surface, BodyMode::Complete)
+    view_body_with_mode(
+        view,
+        options,
+        surface,
+        BodyMode::Complete,
+        mobile_controls::MobileViewControls::default(),
+    )
+}
+
+pub(crate) fn view_body_with_mobile_controls(
+    view: &View,
+    options: RenderOptions,
+    surface: Surface,
+    controls: mobile_controls::MobileViewControls,
+) -> Markup {
+    view_body_with_mode(view, options, surface, BodyMode::Complete, controls)
 }
 
 pub(crate) fn view_body_shell(
@@ -50,7 +75,29 @@ pub(crate) fn view_body_shell(
     surface: Surface,
     load_id: u64,
 ) -> Markup {
-    view_body_with_mode(view, options, surface, BodyMode::Shell { load_id })
+    view_body_with_mode(
+        view,
+        options,
+        surface,
+        BodyMode::Shell { load_id },
+        mobile_controls::MobileViewControls::default(),
+    )
+}
+
+pub(crate) fn view_body_shell_with_mobile_controls(
+    view: &View,
+    options: RenderOptions,
+    surface: Surface,
+    load_id: u64,
+    controls: mobile_controls::MobileViewControls,
+) -> Markup {
+    view_body_with_mode(
+        view,
+        options,
+        surface,
+        BodyMode::Shell { load_id },
+        controls,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -64,7 +111,9 @@ fn view_body_with_mode(
     options: RenderOptions,
     surface: Surface,
     mode: BodyMode,
+    mobile_controls: mobile_controls::MobileViewControls,
 ) -> Markup {
+    let mobile_controls_target = surface.mobile_controls_target();
     html! {
         div class={
             (LAYOUT_PRESENTATION_CLASSES) " "
@@ -72,7 +121,10 @@ fn view_body_with_mode(
             (crate::rows::SPLIT_PRESENTATION_CLASSES) " "
             (crate::rows::INTRALINE_PRESENTATION_CLASSES)
         } {
-            (titlebar::titlebar(view))
+            (titlebar::titlebar(
+                view,
+                matches!(surface, Surface::Artifact { .. }).then_some(mobile_controls_target.as_str()),
+            ))
             (tree::tree(view))
             main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-0 pb-[60px] [@media(min-width:1600px)_and_(min-height:900px)]:px-7 [@media(min-width:1025px)_and_(max-width:1280px)]:px-4 [@media(max-width:1024px)]:px-3 [@media(max-width:760px)]:px-1 [@media(max-width:1024px)]:pb-12 print:overflow-visible print:p-0" {
                 @match mode {
@@ -94,6 +146,7 @@ fn view_body_with_mode(
                 (tree::mobile_popover(view))
                 (shelf::mobile_popover(view))
             }
+            (mobile_controls::popover(&mobile_controls_target, mobile_controls))
         }
     }
 }

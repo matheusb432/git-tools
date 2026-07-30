@@ -96,7 +96,7 @@ fn filebody_presentation(surface: Surface, file: &FileDiff) -> (&'static str, Op
             "filebody single-variant overflow-hidden rounded-b-panel",
             None,
         ),
-        Surface::Artifact => {
+        Surface::Artifact { .. } => {
             let rows = file.lines.iter().filter(|l| !l.is_empty()).count();
             (
                 "filebody single-variant [content-visibility:auto] overflow-hidden rounded-b-panel print:block! print:[content-visibility:visible] print:overflow-visible",

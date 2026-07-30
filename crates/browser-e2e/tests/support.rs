@@ -12,7 +12,7 @@ use browser_e2e::{
     evidence::Recording,
 };
 use command_group::{CommandGroup, GroupChild};
-use playwright_rs::protocol::{AriaRole, ClickOptions, GetByRoleOptions, Locator, Page};
+use playwright_rs::protocol::{AriaRole, ClickOptions, GetByRoleOptions, Locator, Page, Viewport};
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
 const WAIT_INTERVAL: Duration = Duration::from_millis(100);
@@ -93,8 +93,7 @@ pub async fn render_raw_diff(repository: &tempfile::TempDir) -> Result<String> {
     let mut command = Command::new(&cli_binary);
     command
         .args(["diff", "--raw"])
-        .current_dir(repository.path())
-        .env("GIT_TOOLS_NO_OPEN", "1");
+        .current_dir(repository.path());
     let output = command_output(command, "git-tools diff --raw").await?;
     ensure_success(&output, "git-tools diff --raw")?;
     let urls = String::from_utf8(output.stdout)
@@ -108,6 +107,18 @@ pub async fn render_raw_diff(repository: &tempfile::TempDir) -> Result<String> {
         [] => bail!("git-tools diff --raw printed no file:// artifact URL"),
         _ => bail!("git-tools diff --raw printed multiple file:// artifact URLs"),
     }
+}
+
+pub async fn set_mobile_viewport(page: &Page) -> Result<()> {
+    operation("set mobile Chromium viewport", async {
+        page.set_viewport_size(Viewport {
+            width: 390,
+            height: 844,
+        })
+        .await
+        .context("set mobile Chromium viewport")
+    })
+    .await
 }
 
 #[must_use]

@@ -238,6 +238,23 @@ mod tests {
     }
 
     #[test]
+    fn ready_document_injects_viewer_actions_into_shared_mobile_controls() {
+        let html = MaudViewerRenderer.build_document(&sample_document());
+
+        assert_eq!(
+            html.matches(r#"class="preview-mobile-controls "#).count(),
+            1
+        );
+        assert!(html.contains(r#"data-preview-action="fold-all""#));
+        assert!(html.contains(r#"data-preview-action="toggle-context""#));
+        assert!(html.contains(r#"name="viewer-layout-mobile""#));
+        assert!(html.contains(r#"name="viewer-density-mobile""#));
+        assert!(html.contains(r#"hx-get="/history""#));
+        assert!(html.contains(r#"hx-get="/tabs/1/refresh""#));
+        assert!(html.contains(r#"hx-delete="/tabs/1/live-view""#));
+    }
+
+    #[test]
     fn empty_document_disables_mobile_view_navigation() {
         let document = ViewerDocument::new(vec![], None, None, vec![], settings())
             .expect("empty viewer is valid");
@@ -720,6 +737,7 @@ mod tests {
         assert!(shared.contains("@media (max-width:1024px)"));
         assert!(!shared.contains("@media not all and (min-width:1024px)"));
         assert!(shared.contains("grid-template-columns:44px minmax(0,1fr)"));
+        assert!(shared.contains("grid-template-columns:30px minmax(0,1fr)"));
         assert!(!shared.contains("data-diff-full"));
         assert!(!shared.contains("body.viewer-shell"));
     }

@@ -1,6 +1,4 @@
-mod browser;
-
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Context as _;
 use application::{
@@ -46,10 +44,6 @@ impl DiffViewerClient for CliDiffViewerClient {
             DiffRenderRequest::ManagedAll(request) => backend.render_diff_all(request)?,
         };
         from_wire_response(envelope)
-    }
-
-    fn open(&self, artifact: &Path) -> anyhow::Result<()> {
-        browser::open(artifact)
     }
 }
 

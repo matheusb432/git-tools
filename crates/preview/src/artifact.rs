@@ -34,7 +34,7 @@ pub fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> S
                 style { (PreEscaped(preview_css())) }
             }
             body {
-                (view_body(view, options, Surface::Artifact))
+                (view_body(view, options, Surface::Artifact { view_index: 0 }))
                 script { (PreEscaped(PREVIEW_BUNDLE)) }
             }
         }
@@ -78,6 +78,34 @@ mod tests {
         assert!(!html.contains(r#"class="layout-toggle""#));
         assert!(!html.contains(r#"class="view-toggle""#));
         assert!(!html.contains(r#"class="theme-select""#));
+    }
+
+    #[test]
+    fn raw_documents_render_shared_mobile_controls_with_per_view_targets() {
+        let raw = build_html(&sample_view(), RenderOptions::DEFAULT, None);
+        let tabbed = build_tabbed_html(
+            "diffs",
+            &[sample_view(), sample_view()],
+            RenderOptions::DEFAULT,
+            None,
+        );
+
+        assert!(raw.contains(r#"aria-label="View settings""#));
+        assert!(raw.contains(r#"popovertarget="preview-controls-popover-0""#));
+        assert!(raw.contains(r#"id="preview-controls-popover-0" class="preview-mobile-controls "#));
+        assert!(raw.contains(r#"data-preview-action="fold-all""#));
+        assert!(raw.contains(r#"data-preview-action="toggle-context""#));
+
+        for index in 0..2 {
+            let target = format!("preview-controls-popover-{index}");
+            assert_eq!(
+                tabbed
+                    .matches(&format!(r#"popovertarget="{target}""#))
+                    .count(),
+                2
+            );
+            assert_eq!(tabbed.matches(&format!(r#"id="{target}""#)).count(), 1);
+        }
     }
 
     #[test]

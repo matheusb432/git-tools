@@ -189,9 +189,57 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_wraps_diff_code_inside_fixed_line_number_gutters() {
+    fn preview_css_uses_single_aligned_unified_line_number_gutter() {
         let css = preview_css();
-        assert!(css.contains("grid-template-columns:44px 44px minmax(0,1fr)"));
+
+        assert_selector_declaration(
+            css,
+            ".layout .diff-unified .dl",
+            "grid-template-columns:28px minmax(0,1fr)",
+        );
+        assert_selector_declaration(css, ".layout .diff-unified .dl .ln", "font-size:14px");
+        assert_selector_declaration(css, ".layout .diff-unified .dl .ln", "text-align:center");
+        assert_selector_declaration(
+            css,
+            ".layout .diff-unified :is(.dl-add,.dl-del,.dl-ctx) code",
+            "padding-left:12px",
+        );
+        assert_selector_declaration(
+            css,
+            ".layout .diff-unified :is(.dl-add,.dl-del,.dl-ctx) code",
+            "text-indent:-8px",
+        );
+        assert_selector_declaration(
+            css,
+            ".layout .diff-unified .dl-add",
+            "background:color-mix(in srgb, var(--add-bg) 50%, transparent)",
+        );
+        assert_selector_declaration(
+            css,
+            ".layout .diff-unified .dl-del",
+            "background:color-mix(in srgb, var(--del-bg) 50%, transparent)",
+        );
+        assert_selector_declaration(
+            css,
+            ".layout .diff-unified .dl-add .ln",
+            "background:var(--add-gut)",
+        );
+        assert_selector_declaration(
+            css,
+            ".layout .diff-unified .dl-del .ln",
+            "background:var(--del-gut)",
+        );
+        assert_selector_declaration(
+            css,
+            ".layout .diff-unified :is(.dl-add,.dl-del) code:first-letter",
+            "color:#0000",
+        );
+        assert!(css.contains(".layout .diff-unified :is(.dl-meta,.dl-hunk) .ln{display:none}"));
+        assert!(
+            css.contains(".layout .diff-unified :is(.dl-meta,.dl-hunk) code{grid-column:1/-1}")
+        );
+        assert!(css.contains("@media (max-width:760px)"));
+        assert_selector_declaration(css, ".layout .diff-unified .dl .ln", "font-size:13px");
         assert!(css.contains("line-height:22px"));
         assert!(css.contains("white-space:pre-wrap"));
         assert!(css.contains("overflow-wrap:anywhere"));

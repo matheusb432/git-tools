@@ -63,6 +63,35 @@ describe("handleDocumentCopy", () => {
 });
 
 describe("enhanceLayout", () => {
+  test("shared mobile diff actions drive their own server-rendered layout", () => {
+    const root = layout("mobile-actions");
+    root.classList.add("copy-ctx");
+    const file = must(root.querySelector<HTMLDetailsElement>("details.file"), "the layout file");
+    file.open = true;
+    const context = document.createElement("button");
+    context.className = "ctx-toggle active";
+    context.setAttribute("aria-pressed", "true");
+    const menu = document.createElement("aside");
+    menu.setAttribute("popover", "");
+    const foldAction = document.createElement("button");
+    foldAction.setAttribute("data-preview-action", "fold-all");
+    const contextAction = document.createElement("button");
+    contextAction.setAttribute("data-preview-action", "toggle-context");
+    menu.appendChild(foldAction);
+    menu.appendChild(contextAction);
+    root.appendChild(context);
+    root.appendChild(menu);
+
+    const cleanup = enhanceLayout(root);
+    foldAction.click();
+    contextAction.click();
+
+    expect(file.open).toBe(false);
+    expect(root.classList.contains("copy-ctx")).toBe(false);
+    expect(context.getAttribute("aria-pressed")).toBe("false");
+    cleanup();
+  });
+
   test("a path segment named after an Object.prototype member nests like any other directory", () => {
     const root = layout("proto");
     const file = must(root.querySelector<HTMLDetailsElement>("details.file"), "the layout file");

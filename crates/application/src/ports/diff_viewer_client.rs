@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::{
     diffs::{
@@ -59,6 +59,4 @@ pub trait DiffViewerClient: Clone + Send + Sync + 'static {
     fn forward(&self, batch: &DiffViewerBatch) -> anyhow::Result<()>;
 
     fn render(&self, request: &DiffRenderRequest) -> anyhow::Result<DiffRenderResponse>;
-
-    fn open(&self, artifact: &Path) -> anyhow::Result<()>;
 }

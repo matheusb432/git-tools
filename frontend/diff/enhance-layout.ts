@@ -153,6 +153,23 @@ export function enhanceLayout(root: HTMLElement): () => void {
       ctxToggle.classList.toggle("active", on);
     });
 
+  listen(root, "click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const trigger = event.target.closest<HTMLElement>("[data-preview-action]");
+    if (!trigger || !root.contains(trigger)) return;
+    switch (trigger.getAttribute("data-preview-action")) {
+      case "fold-all":
+        foldAll?.click();
+        break;
+      case "toggle-context":
+        ctxToggle?.click();
+        break;
+      default:
+        return;
+    }
+    trigger.closest<HTMLElement>("[popover]")?.hidePopover?.();
+  });
+
   function bindHorizontalWheel(scroller: HTMLElement): void {
     listen(
       scroller,

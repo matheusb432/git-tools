@@ -276,7 +276,6 @@ impl Fixture {
         let mut cmd = Command::new(workspace_bin("git-tools"));
         cmd.args(args)
             .current_dir(&self.repo)
-            .env("GIT_TOOLS_NO_OPEN", "1")
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
             // This suite pins the daemon/render round trip directly (autostart, sidecar
             // reuse); simulate headless so `diff`'s default degrades to that path

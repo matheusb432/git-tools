@@ -48,11 +48,23 @@ pub(in crate::render) fn view(
                     ViewerTabState::Ready => {
                         @if !defer_ready {
                             @let view = document.active_view().expect("ViewerDocument guarantees a view for the ready active tab");
-                            (controls::view_controls(view, document.settings().theme()))
+                            (controls::view_controls(view))
+                            @let mobile_controls = controls::mobile_view_controls(view, document.settings().theme());
                             @if let Some(load_id) = load_id {
-                                (preview::view_shell(view.view(), view.options(), view.tab_id(), load_id.get()))
+                                (preview::view_shell_with_mobile_controls(
+                                    view.view(),
+                                    view.options(),
+                                    view.tab_id(),
+                                    load_id.get(),
+                                    mobile_controls,
+                                ))
                             } @else {
-                                (preview::view_fragment(view.view(), view.options(), view.tab_id()))
+                                (preview::view_fragment_with_mobile_controls(
+                                    view.view(),
+                                    view.options(),
+                                    view.tab_id(),
+                                    mobile_controls,
+                                ))
                             }
                         }
                     },

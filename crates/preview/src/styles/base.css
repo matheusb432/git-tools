@@ -33,6 +33,22 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  @media (max-width: 760px) {
+    .layout .dl .ln {
+      padding-inline: 4px;
+      font-size: 10px;
+    }
+
+    .layout .dl code {
+      padding-inline: 8px;
+      font-size: 13px;
+    }
+
+    .layout .diff-split .dl {
+      grid-template-columns: 30px minmax(0, 1fr);
+    }
+  }
+
   ::selection {
     background: var(--acc-soft);
   }
@@ -114,4 +130,67 @@
   .sy-op { color: var(--sy-op); }
   .sy-tag { color: var(--sy-tag); }
   .sy-var { color: var(--sy-var); }
+}
+
+.layout .diff-unified .dl {
+  position: relative;
+  grid-template-columns: 28px minmax(0, 1fr);
+}
+
+.layout .diff-unified .dl .ln {
+  grid-column: 1;
+  grid-row: 1;
+  padding-inline: 0;
+  background: transparent;
+  font-size: 14px;
+  text-align: center;
+}
+
+.layout .diff-unified .dl code {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.layout .diff-unified :is(.dl-add, .dl-del, .dl-ctx) code {
+  padding-right: 4px;
+  padding-left: 12px;
+  text-indent: -8px;
+}
+
+.layout .diff-unified .dl-ctx .ln:first-child,
+.layout .diff-unified .dl-add .ln:first-child,
+.layout .diff-unified .dl-del .ln:nth-child(2),
+.layout .diff-unified :is(.dl-meta, .dl-hunk) .ln {
+  display: none;
+}
+
+.layout .diff-unified .dl-add {
+  background: color-mix(in srgb, var(--add-bg) 50%, transparent);
+}
+
+.layout .diff-unified .dl-del {
+  background: color-mix(in srgb, var(--del-bg) 50%, transparent);
+}
+
+.layout .diff-unified .dl-add .ln {
+  background: var(--add-gut);
+}
+
+.layout .diff-unified .dl-del .ln {
+  background: var(--del-gut);
+}
+
+.layout .diff-unified :is(.dl-add, .dl-del) code::first-letter,
+.layout .diff-unified :is(.dl-add, .dl-del) .code-text::first-letter {
+  color: transparent;
+}
+
+.layout .diff-unified :is(.dl-meta, .dl-hunk) code {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 760px) {
+  .layout .diff-unified .dl .ln {
+    font-size: 13px;
+  }
 }

@@ -3,15 +3,10 @@
 //! response attaches to it.
 
 use application::viewer::{Theme, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState};
-use maud::{Markup, PreEscaped, html};
+use maud::{Markup, html};
 
 use super::{SwapFeedback, SwapMode, theme};
 use crate::{render::ViewerRoute, session::RENDER_PENDING_REASON};
-
-const FILES_ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"/></svg>"#;
-const HISTORY_ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>"#;
-const VIEW_ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true" data-slot="icon"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75"/></svg>"#;
-const MOBILE_NAV_BUTTON_CLASSES: &str = "relative hidden min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 border-0 bg-transparent px-1 py-1 text-[10px] leading-none text-ink-2 [font:inherit] hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc disabled:cursor-default disabled:opacity-35 [@media(max-width:760px)]:flex [&_svg]:size-5";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::render) struct MobileNavigationCounts {
@@ -29,13 +24,9 @@ pub(in crate::render) fn tabs(
 ) -> Markup {
     html! {
         nav id="viewer-tabs" hx-swap-oob=[swap.out_of_band()] class="viewer-tabs z-[70] flex min-w-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2 [&.htmx-swapping]:border-acc-line [&.htmx-settling]:border-acc-line [@media(max-width:760px)]:grid [@media(max-width:760px)]:h-[58px] [@media(max-width:760px)]:grid-cols-[58px_minmax(0,1fr)_58px_58px] [@media(max-width:760px)]:items-stretch [@media(max-width:760px)]:gap-0 [@media(max-width:760px)]:p-0" aria-label="Open diffs" {
-            (mobile_navigation_button(
-                "Changed files",
-                "Files",
-                "viewer-files-popover",
+            (preview::files_navigation(
                 mobile_counts.map(|counts| counts.files),
                 mobile_counts.is_some(),
-                FILES_ICON,
             ))
             ul class="viewer-tab-list gtl-scroll-rail m-0 flex min-w-0 flex-1 list-none items-end gap-1 overflow-x-auto p-0 [@media(max-width:760px)]:h-full [@media(max-width:760px)]:items-stretch" {
                 @for tab in tabs {
@@ -70,21 +61,13 @@ pub(in crate::render) fn tabs(
                     }
                 }
             }
-            (mobile_navigation_button(
-                "Commits in range",
-                "History",
-                "viewer-commits-popover",
+            (preview::commits_navigation(
                 mobile_counts.map(|counts| counts.commits),
                 mobile_counts.is_some(),
-                HISTORY_ICON,
             ))
-            (mobile_navigation_button(
-                "View settings",
-                "View",
+            (preview::view_navigation(
                 "viewer-controls-popover",
-                None,
                 mobile_counts.is_some(),
-                VIEW_ICON,
             ))
             button type="button"
                 class="viewer-history-button mb-[7px] flex flex-none cursor-pointer items-center gap-[7px] rounded-sm border border-transparent bg-transparent px-[9px] py-1.5 text-xs text-ink-2 [font:inherit] hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-acc-line [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc [@media(max-width:760px)]:hidden"
@@ -121,29 +104,6 @@ pub(in crate::render) fn tabs(
                         None => { "Live view deleted. No diffs remain open. Open History or run gtl diff live to add one." }
                     }
                 }
-            }
-        }
-    }
-}
-
-fn mobile_navigation_button(
-    aria_label: &str,
-    label: &str,
-    target: &str,
-    count: Option<usize>,
-    enabled: bool,
-    icon: &str,
-) -> Markup {
-    html! {
-        button type="button"
-            class=(MOBILE_NAV_BUTTON_CLASSES)
-            popovertarget=(target)
-            disabled[!enabled]
-            aria-label=(aria_label) {
-            (PreEscaped(icon))
-            span { (label) }
-            @if let Some(count) = count {
-                span class="absolute top-1 right-1 min-w-[16px] rounded-full bg-acc-soft px-1 py-0.5 text-center text-[9px] font-semibold leading-none text-acc" { (count) }
             }
         }
     }

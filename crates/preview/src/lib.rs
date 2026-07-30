@@ -17,6 +17,10 @@ use application::{
 };
 pub use artifact::{build_html, build_tabbed_html};
 pub use assets::{preview_bundle, preview_css, strip_stylesheet_banner};
+pub use layout::mobile_controls::{
+    MobileViewControls, commits_navigation, files_navigation, mobile_menu_button_classes,
+    mobile_menu_danger_button_classes, view_navigation,
+};
 use maud::Markup;
 
 /// Builds one app-hosted diff view using the requested layout and density variant.
@@ -42,6 +46,15 @@ pub fn view_fragment(view: &View, options: RenderOptions, tab_id: ViewerTabId) -
     layout::view_body(view, options, layout::Surface::App { tab_id })
 }
 
+pub fn view_fragment_with_mobile_controls(
+    view: &View,
+    options: RenderOptions,
+    tab_id: ViewerTabId,
+    controls: MobileViewControls,
+) -> Markup {
+    layout::view_body_with_mobile_controls(view, options, layout::Surface::App { tab_id }, controls)
+}
+
 /// Builds the desktop layout without diff rows and starts its bounded chunk chain.
 pub fn view_shell(
     view: &View,
@@ -50,6 +63,22 @@ pub fn view_shell(
     load_id: u64,
 ) -> Markup {
     layout::view_body_shell(view, options, layout::Surface::App { tab_id }, load_id)
+}
+
+pub fn view_shell_with_mobile_controls(
+    view: &View,
+    options: RenderOptions,
+    tab_id: ViewerTabId,
+    load_id: u64,
+    controls: MobileViewControls,
+) -> Markup {
+    layout::view_body_shell_with_mobile_controls(
+        view,
+        options,
+        layout::Surface::App { tab_id },
+        load_id,
+        controls,
+    )
 }
 
 /// One bounded server-rendered insertion into a file's existing diff container.

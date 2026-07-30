@@ -427,9 +427,9 @@ async fn install_refresh_delivery_observer(driver: &WebDriver, deadline: Instant
         within_refresh_webdriver_operation(deadline, "install Refresh delivery observer", async {
             driver
                 .execute(
-                    r"
-const buttons = Array.from(document.querySelectorAll('button')).filter((button) =>
-  button.textContent.trim() === 'Refresh' && button.getAttribute('hx-get')?.endsWith('/refresh')
+                    r#"
+const buttons = Array.from(
+  document.querySelectorAll(".viewer-controls button[hx-get$='/refresh']")
 );
 if (buttons.length !== 1) {
   return buttons.length;
@@ -443,8 +443,7 @@ const delivery = {
 window.__gtlRefreshDelivery = delivery;
 const semanticRefreshButton = (event) => event.composedPath().find((element) =>
   element instanceof HTMLButtonElement &&
-  element.textContent.trim() === 'Refresh' &&
-  element.getAttribute('hx-get')?.endsWith('/refresh')
+  element.matches(".viewer-controls button[hx-get$='/refresh']")
 );
 document.addEventListener('click', (event) => {
   const button = semanticRefreshButton(event);
@@ -466,7 +465,7 @@ document.addEventListener('htmx:beforeRequest', (event) => {
   }
 });
 return buttons.length;
-",
+"#,
                     Vec::new(),
                 )
                 .await
@@ -533,11 +532,15 @@ async fn click_refresh(driver: &WebDriver, deadline: Instant, attempt: usize) ->
         deadline,
         &format!("deliver Refresh click attempt {attempt}"),
         async {
-            by_accessible_name(driver, "Refresh")
-                .await?
-                .click()
-                .await
-                .with_context(|| format!("refresh live view attempt {attempt}"))
+            by_css(
+                driver,
+                ".viewer-controls button[hx-get$='/refresh']",
+                "desktop Refresh action",
+            )
+            .await?
+            .click()
+            .await
+            .with_context(|| format!("refresh live view attempt {attempt}"))
         },
     )
     .await

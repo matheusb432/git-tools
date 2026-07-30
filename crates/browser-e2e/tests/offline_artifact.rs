@@ -6,6 +6,7 @@ async fn offline_artifact_fold_all() -> anyhow::Result<()> {
     let outcome = async {
         let repository = support::repository_with_worktree_change().await?;
         let artifact_url = support::render_raw_diff(&repository).await?;
+        support::set_mobile_viewport(&spec.session.page).await?;
         support::goto(&spec.session.page, &artifact_url).await?;
 
         let files = spec.session.page.locator("details.file");
@@ -20,8 +21,13 @@ async fn offline_artifact_fold_all() -> anyhow::Result<()> {
         );
 
         support::click(
-            &support::get_button(&spec.session.page, "Collapse all"),
-            "click Collapse all",
+            &support::get_button(&spec.session.page, "View settings"),
+            "open raw mobile view settings",
+        )
+        .await?;
+        support::click(
+            &support::get_button(&spec.session.page, "Collapse or expand all files"),
+            "collapse files from raw mobile view settings",
         )
         .await?;
 
