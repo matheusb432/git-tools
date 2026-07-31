@@ -411,10 +411,7 @@ fn cargo_runner_config(executable: &Path) -> String {
 }
 
 fn workflow() -> Result<()> {
-    require_tool(
-        "tauri-driver",
-        "install tauri-driver through sample_project provisioning",
-    )?;
+    require_tool("tauri-driver", "run `mise install cargo:tauri-driver`")?;
     build::run(BuildTarget::Cli)?;
     build::run(BuildTarget::Viewer)?;
     process::run(
@@ -572,19 +569,28 @@ fn start_private_dbus(
 
 fn preflight_linux() -> Result<()> {
     for (tool, hint) in [
-        ("Xvfb", "install xvfb through sample_project provisioning"),
-        ("openbox", "install openbox through sample_project provisioning"),
+        ("Xvfb", "run `mise bootstrap packages apply apt:xvfb`"),
+        ("openbox", "run `mise bootstrap packages apply apt:openbox`"),
         (
             "stalonetray",
-            "install stalonetray through sample_project provisioning",
+            "run `mise bootstrap packages apply apt:stalonetray`",
         ),
-        ("dbus-run-session", "install dbus through sample_project provisioning"),
-        ("xdotool", "install xdotool through sample_project provisioning"),
-        ("xwininfo", "install x11-utils through sample_project provisioning"),
-        ("xdpyinfo", "install x11-utils through sample_project provisioning"),
+        (
+            "dbus-run-session",
+            "run `mise bootstrap packages apply apt:dbus-daemon`",
+        ),
+        ("xdotool", "run `mise bootstrap packages apply apt:xdotool`"),
+        (
+            "xwininfo",
+            "run `mise bootstrap packages apply apt:x11-utils`",
+        ),
+        (
+            "xdpyinfo",
+            "run `mise bootstrap packages apply apt:x11-utils`",
+        ),
         (
             "WebKitWebDriver",
-            "install webkit2gtk-driver through sample_project provisioning",
+            "run `mise bootstrap packages apply apt:webkit2gtk-driver`",
         ),
     ] {
         require_tool(tool, hint)?;

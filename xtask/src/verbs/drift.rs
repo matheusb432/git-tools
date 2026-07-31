@@ -35,9 +35,7 @@ fn git_clean(dir: &str) -> bool {
 
 /// Rebuilds the bundle, validates its presentation policy, then diffs the committed output.
 pub fn run() -> Result<()> {
-    which::which("deno").context(
-        "required tool `deno` is missing; install it through the declarative host configuration",
-    )?;
+    which::which("deno").context("required tool `deno` is missing; run `mise install deno`")?;
     frontend::build()?;
     super::presentation::run()?;
     check_drift(BUNDLES, &git_clean)

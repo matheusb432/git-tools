@@ -28,9 +28,9 @@ pub struct Cli {
 /// `conflicts_with` (see the commented `--all` example), never a runtime `if a && b`.
 #[derive(Subcommand)]
 pub enum Command {
-    /// Full post-toolchain dev-host bring-up: configure hooks, install frontend dependencies,
-    /// build and install both artifacts, and ensure `~/.local/bin` is on PATH. The toolchain
-    /// install itself stays in `bootstrap.sh`.
+    /// Repository-local bootstrap phase: configure hooks, install frontend dependencies, build
+    /// and install both artifacts, and ensure `~/.local/bin` is on PATH. Mise owns host packages,
+    /// toolchains, and shell activation.
     #[command(name = Verb::BOOTSTRAP.as_str())]
     Bootstrap,
     /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the

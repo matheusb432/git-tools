@@ -33,12 +33,12 @@ pub fn preflight(
     let mut ok = true;
     if !have("cargo-xwin") {
         ok = false;
-        lines.push("cargo-xwin not found — run: cargo install cargo-xwin --locked".to_string());
+        lines.push("cargo-xwin not found; run: mise install cargo:cargo-xwin".to_string());
     }
     if !has_target(WIN_TARGET) {
         ok = false;
         lines.push(format!(
-            "rustup target '{WIN_TARGET}' missing — run: rustup target add {WIN_TARGET}"
+            "rustup target '{WIN_TARGET}' missing; run: mise install rust"
         ));
     }
     PreflightReport { ok, lines }
@@ -147,7 +147,7 @@ mod tests {
         assert!(
             r.lines
                 .iter()
-                .any(|l| l.contains("cargo install cargo-xwin --locked")),
+                .any(|l| l.contains("mise install cargo:cargo-xwin")),
             "expected install hint, got {:?}",
             r.lines
         );
@@ -158,9 +158,7 @@ mod tests {
         let r = preflight(&|_| true, &|tr| tr != WIN_TARGET);
         assert!(!r.ok);
         assert!(
-            r.lines
-                .iter()
-                .any(|l| l.contains("rustup target add x86_64-pc-windows-msvc")),
+            r.lines.iter().any(|l| l.contains("mise install rust")),
             "expected target hint, got {:?}",
             r.lines
         );

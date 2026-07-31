@@ -8,9 +8,7 @@ use anyhow::{Context, Result};
 use crate::process;
 
 fn require_deno() -> Result<()> {
-    which::which("deno").context(
-        "required tool `deno` is missing; install it through the declarative host configuration",
-    )?;
+    which::which("deno").context("required tool `deno` is missing; run `mise install deno`")?;
     Ok(())
 }
 

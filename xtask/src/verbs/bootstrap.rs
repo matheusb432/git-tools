@@ -1,14 +1,12 @@
-//! `xtask bootstrap` — the full post-toolchain dev-host bring-up. `bootstrap.sh` installs *only*
-//! the Rust toolchain (the chicken-and-egg seam), then `exec`s this verb, which does every other
-//! automation. Migrates `install-git-tools.sh` (build + install + ensure PATH) into one Rust
-//! verb.
+//! `xtask bootstrap` is the repository-local phase of development-host bring-up. Mise installs
+//! Ubuntu packages and toolchains first, then invokes this verb as its bootstrap task.
 //!
-//! Steps (CWD is the repo root — `bootstrap.sh` cds there, and `just bootstrap` runs from root):
+//! Steps (CWD is the repository root):
 //! 1. configure the tracked `.githooks` directory for this clone;
 //! 2. install the pinned Deno dependencies;
 //! 3. build both artifacts (`just build`);
 //! 4. install both onto PATH (`install::run_install`);
-//! 5. ensure `~/.local/bin` is on PATH (append to `~/.bashrc` once, when absent).
+//! 5. ensure `~/.local/bin` is on PATH (append to `~/.zshrc` once, when absent).
 
 use std::{
     env, fs,
@@ -29,16 +27,14 @@ use crate::{
 /// absent rather than a cryptic mid-build error.
 pub fn run() -> Result<()> {
     if which::which("just").is_err() {
-        bail!("`just` not found on PATH — install it (e.g. `cargo install just`) then re-run");
+        bail!("`just` not found on PATH; run `mise install just`, then re-run bootstrap");
     }
-    which::which("deno").context(
-        "required tool `deno` is missing; install it through the declarative host configuration",
-    )?;
+    which::which("deno").context("required tool `deno` is missing; run `mise install deno`")?;
     configure_git_hooks()?;
     process::run("frontend-dependencies", "deno", &["install", "--frozen"])?;
     process::run("build", "just", &["build"])?;
     install::run_install(InstallTarget::Both)?;
-    ensure_path_on_bashrc()?;
+    ensure_path_on_zshrc()?;
     process::result(Verb::BOOTSTRAP, Status::Pass);
     Ok(())
 }
@@ -59,25 +55,25 @@ fn needs_path_entry(path_var: &str, bindir: &Path) -> bool {
         .any(|p| Path::new(p) == bindir)
 }
 
-/// Append a PATH export to `~/.bashrc` when the install bindir is not already on PATH. Idempotent
+/// Append a PATH export to `~/.zshrc` when the install bindir is not already on PATH. Idempotent
 /// in practice: once a reopened shell has the dir on PATH, this is a no-op.
-fn ensure_path_on_bashrc() -> Result<()> {
+fn ensure_path_on_zshrc() -> Result<()> {
     let bindir = install::bindir()?;
     let path_var = env::var("PATH").unwrap_or_default();
     if !needs_path_entry(&path_var, &bindir) {
         return Ok(());
     }
-    let home = env::var_os("HOME").context("HOME is not set; cannot update ~/.bashrc for PATH")?;
-    let bashrc = PathBuf::from(home).join(".bashrc");
+    let home = env::var_os("HOME").context("HOME is not set; cannot update ~/.zshrc for PATH")?;
+    let zshrc = PathBuf::from(home).join(".zshrc");
     let line = format!("export PATH=\"{}:$PATH\"\n", bindir.display());
     let mut f = fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&bashrc)
-        .with_context(|| format!("appending the PATH export to {}", bashrc.display()))?;
+        .open(&zshrc)
+        .with_context(|| format!("appending the PATH export to {}", zshrc.display()))?;
     f.write_all(line.as_bytes())?;
     println!(
-        "Added {} to PATH in ~/.bashrc (open a new shell).",
+        "Added {} to PATH in ~/.zshrc (open a new shell).",
         bindir.display()
     );
     Ok(())

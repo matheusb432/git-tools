@@ -12,7 +12,7 @@ Run `gtl --help` and `gtl <command> --help` for the authoritative command refere
 
 ## Install
 
-The supported development hosts are Ubuntu 24.04 and Windows 11 through Git Bash.
+Development runs on Ubuntu 24.04. Windows 11 is a release target, not a development host.
 
 ```sh
 git clone git@github.com:matheusb432/git-tools.git
@@ -20,7 +20,7 @@ cd git-tools
 sh xtask/bootstrap.sh
 ```
 
-Bootstrap installs Rust when needed, prepares the repository toolchain, builds the CLI and viewer, and installs them on `PATH`. Run `just doctor` to diagnose missing host dependencies.
+Bootstrap installs mise when needed. Mise then converges the declared Ubuntu packages, pinned tools, Rust toolchains, and zsh activation before it builds and installs the CLI and viewer. Run `just doctor` for a read-only report of missing declared state.
 
 Refresh an existing installation with:
 

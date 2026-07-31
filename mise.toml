@@ -1,0 +1,73 @@
+min_version = "2026.7.18"
+
+[settings]
+auto_install = false
+lockfile = true
+locked = true
+
+[env]
+_.path = ["/usr/lib/llvm-18/bin"]
+
+[tools]
+rust = [
+  { version = "1.97.1", profile = "minimal", components = [
+    "clippy",
+    "rustfmt",
+    "llvm-tools",
+  ], targets = [
+    "x86_64-pc-windows-msvc",
+  ] },
+  { version = "nightly-2026-06-23", profile = "minimal", components = [
+    "rustfmt",
+  ] },
+]
+deno = "2.9.2"
+just = "1.56.0"
+taplo = "0.10.0"
+rumdl = "0.2.41"
+ast-grep = "0.44.1"
+"cargo-binstall" = "1.21.1"
+"cargo:cargo-llvm-cov" = { version = "0.8.7", depends = [
+  "rust",
+  "cargo-binstall",
+] }
+"cargo:cargo-xwin" = { version = "0.22.0", depends = [
+  "rust",
+  "cargo-binstall",
+] }
+"cargo:tauri-driver" = { version = "2.0.6", depends = [
+  "rust",
+  "cargo-binstall",
+] }
+
+[bootstrap.packages]
+"apt:build-essential" = "latest"
+"apt:ca-certificates" = "latest"
+"apt:curl" = "latest"
+"apt:dbus-daemon" = "latest"
+"apt:file" = "latest"
+"apt:git" = "latest"
+"apt:libayatana-appindicator3-dev" = "latest"
+"apt:libdbus-1-dev" = "latest"
+"apt:libgtk-3-dev" = "latest"
+"apt:librsvg2-dev" = "latest"
+"apt:libssl-dev" = "latest"
+"apt:libwebkit2gtk-4.1-dev" = "latest"
+"apt:libxdo-dev" = "latest"
+"apt:llvm" = "latest"
+"apt:openbox" = "latest"
+"apt:pkg-config" = "latest"
+"apt:stalonetray" = "latest"
+"apt:webkit2gtk-driver" = "latest"
+"apt:wget" = "latest"
+"apt:x11-utils" = "latest"
+"apt:xdotool" = "latest"
+"apt:xvfb" = "latest"
+"apt:zsh" = "latest"
+
+[bootstrap.mise_shell_activate]
+zshrc = "activate"
+
+[tasks.bootstrap]
+description = "Configure this clone, install frontend dependencies, and build and install git-tools"
+run = "cargo run --quiet -p xtask -- bootstrap"

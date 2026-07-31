@@ -86,10 +86,12 @@ fix *args:
 drift-check:
     cargo run --quiet -p xtask -- drift-check
 
-# Read-only first-run check for required tools, Linux desktop-test dependencies, and hook wiring.
+# Report missing mise state and verify the tracked Git hook wiring.
 [group('quality')]
 doctor *args:
-    doctor-rs {{ args }}
+    mise bootstrap status --missing {{ args }}
+    test "$(git config --local --get core.hooksPath)" = ".githooks"
+    test -x .githooks/pre-commit
 
 # ============ windows cross-build (host/release split — see specs) ============
 
@@ -98,11 +100,6 @@ doctor *args:
 ship *args:
     cargo run --quiet -p xtask -- ship {{ args }}
 
-# Print the manual Win11 runtime-certification checklist (run on a real Windows box/VM).
-[group('windows')]
-win-release-checklist:
-    @cat docs/windows-release-checklist.md
-
-# Full dev-host bring-up: configure hooks, build + install both artifacts, ensure ~/.local/bin on PATH (fresh machine: `sh xtask/bootstrap.sh`).
-bootstrap:
-    cargo run --quiet -p xtask -- bootstrap
+# Converge the Ubuntu development environment and run the project bootstrap task (fresh machine: `sh xtask/bootstrap.sh`).
+bootstrap *args:
+    mise bootstrap --yes {{ args }}

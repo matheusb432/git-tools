@@ -67,9 +67,8 @@ pub(super) fn check_steps(verbose: bool) -> Result<Vec<Step>> {
 
 /// The complete formatter matrix for `mode`.
 fn format_steps(mode: FormatMode, verbose: bool) -> Result<Vec<Step>> {
-    which::which("taplo").context(
-        "required formatter `taplo` is missing; install taplo-cli through the declarative host configuration",
-    )?;
+    which::which("taplo")
+        .context("required formatter `taplo` is missing; run `mise install taplo`")?;
     let mut steps = vec![rust::format_step(mode)?, taplo_step(mode, verbose)];
     steps.extend(markdown::format_step(mode)?);
     steps.push(frontend_step(mode));
