@@ -2,7 +2,7 @@ use application::viewer::{DiffDensity, ViewerDocument};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
 use super::{
-    VIEW_STATE_LOADING, fragments,
+    fragments,
     fragments::{SwapFeedback, SwapMode, theme},
 };
 use crate::{materialization::ViewLoadId, protocol_config};
@@ -22,19 +22,14 @@ pub struct MaudViewerRenderer;
 impl MaudViewerRenderer {
     #[cfg(test)]
     pub(crate) fn build_document(self, document: &ViewerDocument) -> String {
-        self.build_document_with_load(document, None, false)
+        self.render_document(document, false)
     }
 
     pub(crate) fn build_deferred_document(self, document: &ViewerDocument) -> String {
-        self.build_document_with_load(document, None, true)
+        self.render_document(document, true)
     }
 
-    fn build_document_with_load(
-        self,
-        document: &ViewerDocument,
-        load_id: Option<ViewLoadId>,
-        defer_ready: bool,
-    ) -> String {
+    fn render_document(self, document: &ViewerDocument, defer_ready: bool) -> String {
         let settings = document.settings();
         let options = settings.options();
         let htmx = format!(
@@ -61,39 +56,9 @@ impl MaudViewerRenderer {
                 body class="viewer-shell overflow-hidden" {
                     main class="grid h-screen min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-bg" {
                         (tabs(document, SwapMode::Primary, SwapFeedback::None))
-                        (fragments::view(document, SwapMode::Primary, SwapFeedback::None, load_id, defer_ready))
+                        (fragments::view(document, SwapMode::Primary, SwapFeedback::None, None, defer_ready))
                     }
-                    template id="viewer-loading-template" {
-                        section id="viewer-view"
-                            class="viewer-view min-h-0 min-w-0 overflow-hidden"
-                            data-viewer-state=(VIEW_STATE_LOADING)
-                            aria-busy="true" {
-                            div class="grid h-full min-h-0 grid-rows-[44px_minmax(0,1fr)] bg-bg" role="status" aria-label="Loading diff" {
-                                div class="animate-pulse border-b border-line bg-surface-2 px-4 py-3" {
-                                    div class="h-4 w-2/5 rounded-sm bg-line-2" {}
-                                }
-                                div class="grid min-h-0 grid-cols-[minmax(180px,22%)_minmax(0,1fr)_minmax(180px,20%)] gap-4 p-4 [@media(max-width:760px)]:grid-cols-1" {
-                                    div class="animate-pulse rounded-panel border border-line bg-surface p-3" {
-                                        div class="mb-3 h-3 w-3/4 rounded-sm bg-line-2" {}
-                                        div class="mb-2 h-3 w-full rounded-sm bg-line" {}
-                                        div class="mb-2 h-3 w-5/6 rounded-sm bg-line" {}
-                                        div class="h-3 w-2/3 rounded-sm bg-line" {}
-                                    }
-                                    div class="animate-pulse rounded-panel border border-line bg-surface p-3" {
-                                        @for width in ["w-5/6", "w-full", "w-4/5", "w-11/12", "w-3/4", "w-full", "w-4/5"] {
-                                            div class={ "mb-2 h-3 rounded-sm bg-line " (width) } {}
-                                        }
-                                    }
-                                    div class="animate-pulse rounded-panel border border-line bg-surface p-3 [@media(max-width:760px)]:hidden" {
-                                        div class="mb-3 h-3 w-2/3 rounded-sm bg-line-2" {}
-                                        div class="mb-2 h-8 w-full rounded-sm bg-line" {}
-                                        div class="mb-2 h-8 w-full rounded-sm bg-line" {}
-                                        div class="h-8 w-full rounded-sm bg-line" {}
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    (fragments::loading_template())
                     aside id="viewer-history-popover" class="viewer-history-popover m-auto h-[min(680px,calc(100vh_-_84px))] w-[min(1040px,calc(100vw_-_48px))] max-w-none overflow-hidden border-line-2 bg-surface p-0 inset-[42px] shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)] [@media(max-width:760px)]:h-[calc(100vh_-_24px)] [@media(max-width:760px)]:w-[calc(100vw_-_24px)] [@media(max-width:760px)]:inset-3" popover {
                         header class="viewer-history-header flex items-center justify-between border-b border-line bg-surface-2 px-4 py-[13px]" {
                             div {
@@ -152,11 +117,7 @@ impl MaudViewerRenderer {
     }
 
     pub(crate) fn build_view_with_tabs(self, document: &ViewerDocument) -> String {
-        html! {
-            (fragments::view(document, SwapMode::Primary, SwapFeedback::None, None, false))
-            (tabs(document, SwapMode::OutOfBand, SwapFeedback::None))
-        }
-        .into_string()
+        self.render_view_with_tabs(document, None)
     }
 
     pub(crate) fn build_materialized_view_with_tabs(
@@ -164,8 +125,16 @@ impl MaudViewerRenderer {
         document: &ViewerDocument,
         load_id: ViewLoadId,
     ) -> String {
+        self.render_view_with_tabs(document, Some(load_id))
+    }
+
+    fn render_view_with_tabs(
+        self,
+        document: &ViewerDocument,
+        load_id: Option<ViewLoadId>,
+    ) -> String {
         html! {
-            (fragments::view(document, SwapMode::Primary, SwapFeedback::None, Some(load_id), false))
+            (fragments::view(document, SwapMode::Primary, SwapFeedback::None, load_id, false))
             (tabs(document, SwapMode::OutOfBand, SwapFeedback::None))
         }
         .into_string()
@@ -176,21 +145,7 @@ impl MaudViewerRenderer {
         document: &ViewerDocument,
         feedback: SwapFeedback<'_>,
     ) -> String {
-        let (tabs_feedback, view_feedback) = match feedback {
-            SwapFeedback::None => (SwapFeedback::None, SwapFeedback::None),
-            SwapFeedback::LiveViewDeleted => {
-                (SwapFeedback::LiveViewDeleted, SwapFeedback::LiveViewDeleted)
-            }
-            SwapFeedback::SnapshotRecipesSkipped(labels) => (
-                SwapFeedback::SnapshotRecipesSkipped(labels),
-                SwapFeedback::None,
-            ),
-        };
-        html! {
-            (tabs(document, SwapMode::Primary, tabs_feedback))
-            (fragments::view(document, SwapMode::OutOfBand, view_feedback, None, false))
-        }
-        .into_string()
+        self.render_tabs_with_view(document, feedback, None)
     }
 
     pub(crate) fn build_materialized_tabs_with_view(
@@ -199,9 +154,24 @@ impl MaudViewerRenderer {
         feedback: SwapFeedback<'_>,
         load_id: ViewLoadId,
     ) -> String {
+        self.render_tabs_with_view(document, feedback, Some(load_id))
+    }
+
+    fn render_tabs_with_view(
+        self,
+        document: &ViewerDocument,
+        feedback: SwapFeedback<'_>,
+        load_id: Option<ViewLoadId>,
+    ) -> String {
+        let view_feedback = match feedback {
+            SwapFeedback::LiveViewDeleted if load_id.is_none() => SwapFeedback::LiveViewDeleted,
+            SwapFeedback::None
+            | SwapFeedback::LiveViewDeleted
+            | SwapFeedback::SnapshotRecipesSkipped(_) => SwapFeedback::None,
+        };
         html! {
             (tabs(document, SwapMode::Primary, feedback))
-            (fragments::view(document, SwapMode::OutOfBand, SwapFeedback::None, Some(load_id), false))
+            (fragments::view(document, SwapMode::OutOfBand, view_feedback, load_id, false))
         }
         .into_string()
     }

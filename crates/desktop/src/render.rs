@@ -162,7 +162,13 @@ mod tests {
         assert!(html.contains("selected change"));
         assert!(html.contains("commit abcdef0123"));
         assert!(html.contains("aria-pressed=\"true\""));
-        assert!(html.contains(">Show all changes</button>"));
+        assert_eq!(html.matches(">Show all changes</button>").count(), 2);
+        let mobile_controls = html
+            .split_once(r#"<aside id="viewer-controls-popover""#)
+            .and_then(|(_, tail)| tail.split_once("</aside>"))
+            .map(|(popover, _)| popover)
+            .expect("selected commit renders the mobile controls popover");
+        assert!(mobile_controls.contains(">Show all changes</button>"));
         assert!(html.contains(&format!(r#"data-view-identity="1:commit:{sha}""#)));
         assert!(html.contains(&format!("/tabs/1/commits/{sha}/view?")));
         assert!(!html.contains("data-commits="));

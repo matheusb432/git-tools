@@ -11,7 +11,7 @@ mod view;
 
 pub(super) use history::history;
 pub(super) use tabs::{MobileNavigationCounts, tabs};
-pub(super) use view::view;
+pub(super) use view::{loading_template, view};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SwapMode {

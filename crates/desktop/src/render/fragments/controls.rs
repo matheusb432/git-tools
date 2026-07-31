@@ -6,6 +6,8 @@ use maud::{Markup, html};
 
 use crate::render::{ViewerRoute, ViewerSettingChange};
 
+const DESKTOP_SHOW_ALL_CLASSES: &str = "viewer-control-button inline-flex min-h-[27px] cursor-pointer items-center whitespace-nowrap rounded-sm border border-acc-line bg-acc-soft px-2 py-1 text-[11.5px] text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
+
 pub(super) fn view_controls(view: &ViewerView) -> Markup {
     html! {
         header class="viewer-controls gtl-scroll flex min-w-0 items-center gap-3 border-b border-line bg-surface px-3 py-[7px] text-ink-2 [@media(max-width:760px)]:hidden" aria-label="Diff display controls" {
@@ -20,24 +22,11 @@ pub(super) fn view_controls(view: &ViewerView) -> Markup {
                 (density_choice(view, DiffDensity::Full, "Full file", "viewer-density", CHOICE_CLASSES))
             }
             @if view.selected_commit_sha().is_some() {
-                button type="button"
-                    class="viewer-control-button inline-flex min-h-[27px] cursor-pointer items-center whitespace-nowrap rounded-sm border border-acc-line bg-acc-soft px-2 py-1 text-[11.5px] text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
-                    hx-get=(ViewerRoute::View { tab: view.tab_id(), options: view.options() })
-                    hx-target="#viewer-view"
-                    hx-sync="#viewer-view:replace"
-                    hx-swap="outerHTML" { "Show all changes" }
+                (show_all_changes_button(view, DESKTOP_SHOW_ALL_CLASSES))
             }
             @if view.kind() == ViewerTabKind::Live {
                 (refresh_button(view.tab_id()))
                 (delete_live_view_button(view.tab_id()))
-            }
-            @if view.selected_commit_sha().is_some() {
-                button type="button"
-                    class=(preview::mobile_menu_button_classes())
-                    hx-get=(ViewerRoute::View { tab: view.tab_id(), options: view.options() })
-                    hx-target="#viewer-view"
-                    hx-sync="#viewer-view:replace"
-                    hx-swap="outerHTML" { "Show all changes" }
             }
         }
     }
@@ -78,6 +67,9 @@ pub(super) fn mobile_view_controls(
                 popovertarget="viewer-theme-popover" {
                 "Theme: " (super::theme::label(active_theme))
             }
+            @if view.selected_commit_sha().is_some() {
+                (show_all_changes_button(view, preview::mobile_menu_button_classes()))
+            }
             @if view.kind() == ViewerTabKind::Live {
                 (mobile_refresh_button(view.tab_id()))
                 (mobile_delete_live_view_button(view.tab_id()))
@@ -85,6 +77,17 @@ pub(super) fn mobile_view_controls(
         }
     };
     preview::MobileViewControls::viewer(display, viewer_actions)
+}
+
+pub(super) fn show_all_changes_button(view: &ViewerView, classes: &str) -> Markup {
+    html! {
+        button type="button"
+            class=(classes)
+            hx-get=(ViewerRoute::View { tab: view.tab_id(), options: view.options() })
+            hx-target="#viewer-view"
+            hx-sync="#viewer-view:replace"
+            hx-swap="outerHTML" { "Show all changes" }
+    }
 }
 
 const CHOICE_CLASSES: &str = "inline-flex min-h-[27px] items-center whitespace-nowrap rounded-sm border border-transparent px-2 py-1 text-[11.5px] group-hover:border-line-2 group-hover:bg-surface-2 group-hover:text-ink peer-checked:border-acc-line peer-checked:bg-acc-soft peer-checked:text-acc peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-acc";

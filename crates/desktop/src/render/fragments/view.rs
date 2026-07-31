@@ -14,6 +14,10 @@ use crate::{
     session::RENDER_PENDING_REASON,
 };
 
+const STATUS_LAYOUT_CLASSES: &str = "grid min-h-full grid-cols-[auto_minmax(0,520px)] place-content-center gap-[18px] p-8 text-ink-2";
+const RETRY_BUTTON_CLASSES: &str = "viewer-recovery-button mt-4 cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-[11px] py-[7px] text-xs text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-line-2 [&.htmx-request]:bg-surface-2 [&.htmx-request]:text-ink";
+const SHOW_ALL_BUTTON_CLASSES: &str = "viewer-recovery-button mt-4 cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-[11px] py-[7px] text-xs text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
+
 pub(in crate::render) fn view(
     document: &ViewerDocument,
     swap: SwapMode,
@@ -91,9 +95,45 @@ pub(in crate::render) fn view(
                             }
                         }
                     },
-                    ViewerTabState::Broken { code, reason } => (broken_view(tab, code, reason)),
+                    ViewerTabState::Broken { code, reason } => (failure_view(tab, TabFailure::Broken { code, reason })),
                     ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON => {},
-                    ViewerTabState::Error { reason } => (error_view(tab, reason)),
+                    ViewerTabState::Error { reason } => (failure_view(tab, TabFailure::Render { reason })),
+                }
+            }
+        }
+    }
+}
+
+pub(in crate::render) fn loading_template() -> Markup {
+    html! {
+        template id="viewer-loading-template" {
+            section id="viewer-view"
+                class="viewer-view min-h-0 min-w-0 overflow-hidden"
+                data-viewer-state=(VIEW_STATE_LOADING)
+                aria-busy="true" {
+                div class="grid h-full min-h-0 grid-rows-[44px_minmax(0,1fr)] bg-bg" role="status" aria-label="Loading diff" {
+                    div class="animate-pulse border-b border-line bg-surface-2 px-4 py-3" {
+                        div class="h-4 w-2/5 rounded-sm bg-line-2" {}
+                    }
+                    div class="grid min-h-0 grid-cols-[minmax(180px,22%)_minmax(0,1fr)_minmax(180px,20%)] gap-4 p-4 [@media(max-width:760px)]:grid-cols-1" {
+                        div class="animate-pulse rounded-panel border border-line bg-surface p-3" {
+                            div class="mb-3 h-3 w-3/4 rounded-sm bg-line-2" {}
+                            div class="mb-2 h-3 w-full rounded-sm bg-line" {}
+                            div class="mb-2 h-3 w-5/6 rounded-sm bg-line" {}
+                            div class="h-3 w-2/3 rounded-sm bg-line" {}
+                        }
+                        div class="animate-pulse rounded-panel border border-line bg-surface p-3" {
+                            @for width in ["w-5/6", "w-full", "w-4/5", "w-11/12", "w-3/4", "w-full", "w-4/5"] {
+                                div class={ "mb-2 h-3 rounded-sm bg-line " (width) } {}
+                            }
+                        }
+                        div class="animate-pulse rounded-panel border border-line bg-surface p-3 [@media(max-width:760px)]:hidden" {
+                            div class="mb-3 h-3 w-2/3 rounded-sm bg-line-2" {}
+                            div class="mb-2 h-8 w-full rounded-sm bg-line" {}
+                            div class="mb-2 h-8 w-full rounded-sm bg-line" {}
+                            div class="h-8 w-full rounded-sm bg-line" {}
+                        }
+                    }
                 }
             }
         }
@@ -108,53 +148,61 @@ fn selected_commit_error(view: &application::viewer::ViewerView, reason: &str) -
                 p class="viewer-status-eyebrow m-0 text-[10px] font-bold tracking-[.08em] text-ink-3 uppercase" { "Commit patch unavailable" }
                 h1 class="mt-[3px] mb-[7px] text-xl leading-tight tracking-[-.02em] text-ink" { "The selected commit could not be rendered" }
                 p class="m-0 [overflow-wrap:anywhere]" { (reason) }
-                button type="button"
-                    class="viewer-recovery-button mt-4 cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-[11px] py-[7px] text-xs text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
-                    hx-get=(ViewerRoute::View { tab: view.tab_id(), options: view.options() })
-                    hx-target="#viewer-view"
-                    hx-sync="#viewer-view:replace"
-                    hx-swap="outerHTML" { "Show all changes" }
+                (controls::show_all_changes_button(view, SHOW_ALL_BUTTON_CLASSES))
             }
         }
     }
 }
 
-fn broken_view(tab: &ViewerTab, code: &str, reason: &str) -> Markup {
+#[derive(Debug, Clone, Copy)]
+enum TabFailure<'a> {
+    Broken { code: &'a str, reason: &'a str },
+    Render { reason: &'a str },
+}
+
+fn failure_view(tab: &ViewerTab, failure: TabFailure<'_>) -> Markup {
+    let (status_class, role, mark_classes, mark, title, action) = match failure {
+        TabFailure::Broken { .. } => (
+            "viewer-status-broken",
+            "status",
+            "border-line-2 bg-surface text-acc",
+            "!",
+            "This diff cannot be opened",
+            "Try again",
+        ),
+        TabFailure::Render { .. } => (
+            "viewer-status-error",
+            "alert",
+            "border-del-line bg-del-bg text-del",
+            "×",
+            "The diff could not be rendered",
+            "Render again",
+        ),
+    };
+    let reason = match failure {
+        TabFailure::Broken { reason, .. } | TabFailure::Render { reason } => reason,
+    };
+
     html! {
-        div class="viewer-status viewer-status-broken grid min-h-full grid-cols-[auto_minmax(0,520px)] place-content-center gap-[18px] p-8 text-ink-2" role="status" {
-            span class="viewer-status-mark flex size-[42px] items-center justify-center rounded-full border border-line-2 bg-surface text-xl font-bold text-acc" aria-hidden="true" { "!" }
+        div class={ "viewer-status " (status_class) " " (STATUS_LAYOUT_CLASSES) } role=(role) {
+            span class={ "viewer-status-mark flex size-[42px] items-center justify-center rounded-full border text-xl font-bold " (mark_classes) } aria-hidden="true" { (mark) }
             div {
-                p class="viewer-status-eyebrow m-0 text-[10px] font-bold tracking-[.08em] text-ink-3 uppercase" { "Unavailable · " code class="rounded-sm border border-line bg-sunk px-[5px] py-px text-ink [font:inherit]" { (code) } }
-                h1 class="mt-[3px] mb-[7px] text-xl leading-tight tracking-[-.02em] text-ink" { "This diff cannot be opened" }
-                p class="m-0 [overflow-wrap:anywhere]" { (reason) }
-                button type="button"
-                    class="viewer-recovery-button mt-4 cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-[11px] py-[7px] text-xs text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-line-2 [&.htmx-request]:bg-surface-2 [&.htmx-request]:text-ink"
-                    hx-get=(ViewerRoute::Refresh { tab: tab.id() })
-                    hx-target="#viewer-view"
-                    hx-sync="#viewer-view:replace"
-                    hx-swap="outerHTML" { "Try again" }
-                @if tab.kind() == ViewerTabKind::Live {
-                    (controls::delete_live_view_button(tab.id()))
+                p class="viewer-status-eyebrow m-0 text-[10px] font-bold tracking-[.08em] text-ink-3 uppercase" {
+                    @match failure {
+                        TabFailure::Broken { code, .. } => {
+                            "Unavailable · " code class="rounded-sm border border-line bg-sunk px-[5px] py-px text-ink [font:inherit]" { (code) }
+                        }
+                        TabFailure::Render { .. } => { "Render failed" }
+                    }
                 }
-            }
-        }
-    }
-}
-
-fn error_view(tab: &ViewerTab, reason: &str) -> Markup {
-    html! {
-        div class="viewer-status viewer-status-error grid min-h-full grid-cols-[auto_minmax(0,520px)] place-content-center gap-[18px] p-8 text-ink-2" role="alert" {
-            span class="viewer-status-mark flex size-[42px] items-center justify-center rounded-full border border-del-line bg-del-bg text-xl font-bold text-del" aria-hidden="true" { "×" }
-            div {
-                p class="viewer-status-eyebrow m-0 text-[10px] font-bold tracking-[.08em] text-ink-3 uppercase" { "Render failed" }
-                h1 class="mt-[3px] mb-[7px] text-xl leading-tight tracking-[-.02em] text-ink" { "The diff could not be rendered" }
+                h1 class="mt-[3px] mb-[7px] text-xl leading-tight tracking-[-.02em] text-ink" { (title) }
                 p class="m-0 [overflow-wrap:anywhere]" { (reason) }
                 button type="button"
-                    class="viewer-recovery-button mt-4 cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-[11px] py-[7px] text-xs text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-line-2 [&.htmx-request]:bg-surface-2 [&.htmx-request]:text-ink"
+                    class=(RETRY_BUTTON_CLASSES)
                     hx-get=(ViewerRoute::Refresh { tab: tab.id() })
                     hx-target="#viewer-view"
                     hx-sync="#viewer-view:replace"
-                    hx-swap="outerHTML" { "Render again" }
+                    hx-swap="outerHTML" { (action) }
                 @if tab.kind() == ViewerTabKind::Live {
                     (controls::delete_live_view_button(tab.id()))
                 }
