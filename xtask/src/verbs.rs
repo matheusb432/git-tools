@@ -6,7 +6,6 @@ pub(crate) mod bootstrap;
 pub(crate) mod build;
 pub(crate) mod check;
 pub(crate) mod check_structure;
-pub(crate) mod cov;
 pub(crate) mod desktop_e2e;
 pub(crate) mod drift;
 pub(crate) mod fix;

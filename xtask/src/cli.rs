@@ -99,10 +99,6 @@ pub enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         arguments: Vec<OsString>,
     },
-    /// Run the complete Rust workspace under LLVM coverage. Writes per-line reports to
-    /// `.artifacts/coverage/text/` and excludes dedicated test files from the report.
-    #[command(name = Verb::COV.as_str())]
-    Cov,
     /// Build the CLI engine, desktop viewer, or both release artifacts.
     #[command(name = Verb::BUILD.as_str())]
     Build {

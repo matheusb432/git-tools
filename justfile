@@ -51,15 +51,10 @@ _preflight:
 
 # ============ quality ============
 
-# Fast gate: check (formatting + linters) + default-member Rust tests (desktop excluded). --e2e runs the hermetic viewer and offline-artifact browser journeys; --all adds all Rust tests, frontend, drift, and E2E; --verbose streams logs.
+# Run tests, or use `just test coverage` for cargo-llvm-cov. Run `just test --help` for options.
 [group('quality')]
 test *args:
     @cargo run --quiet -p xtask -- test {{ args }}
-
-# Run the complete Rust workspace with LLVM line coverage. The report excludes dedicated test files and writes per-line output under .artifacts/coverage/text/.
-[group('quality')]
-cov:
-    cargo run --quiet -p xtask -- cov
 
 # Apply pinned-nightly rustfmt, Taplo, rumdl, and Oxfmt across the repository. --verbose restores taplo's file-discovery logs.
 [group('quality')]

@@ -1,17 +1,20 @@
 //! Test runner.
 
 use anyhow::{Context, Result};
-use clap::{Args, ValueEnum};
+use clap::{Args, Subcommand, ValueEnum};
 use sample_project::Run;
 
-use crate::project;
+use crate::{process, project, task::Step};
 
 #[expect(
     clippy::struct_excessive_bools,
     reason = "CLI flags map directly to Clap arguments"
 )]
 #[derive(Args)]
+#[command(args_conflicts_with_subcommands = true)]
 pub(crate) struct TestArguments {
+    #[command(subcommand)]
+    command: Option<TestCommand>,
     /// Stream full test output live; the log still captures it.
     #[arg(long)]
     pub(crate) verbose: bool,
@@ -37,6 +40,19 @@ pub(crate) struct TestArguments {
     all: bool,
 }
 
+#[derive(Subcommand)]
+enum TestCommand {
+    /// Collect workspace test coverage with cargo-llvm-cov.
+    Coverage(TestCoverageArguments),
+}
+
+#[derive(Args)]
+struct TestCoverageArguments {
+    /// Extra arguments for cargo-llvm-cov.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    arguments_extra: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Scope {
     Unit,
@@ -45,6 +61,10 @@ pub(crate) enum Scope {
 }
 
 pub(crate) fn run(arguments: &TestArguments) -> Result<()> {
+    if let Some(TestCommand::Coverage(coverage)) = &arguments.command {
+        return test_coverage(&coverage.arguments_extra);
+    }
+
     let executable = std::env::current_exe().context("resolve the xtask executable")?;
     let declarations = selected_tests(arguments.scope, executable.into_os_string());
     let tests = declarations
@@ -58,6 +78,15 @@ pub(crate) fn run(arguments: &TestArguments) -> Result<()> {
         .execute()?;
 
     Ok(())
+}
+
+fn test_coverage(arguments_extra: &[String]) -> Result<()> {
+    process::run_step(&test_coverage_step(arguments_extra))
+}
+
+fn test_coverage_step(arguments_extra: &[String]) -> Step {
+    Step::new("test coverage", "cargo", ["llvm-cov", "--workspace"])
+        .with_arguments(arguments_extra.iter().cloned())
 }
 
 fn selected_tests(scope: Scope, executable: std::ffi::OsString) -> Vec<project::TestDeclaration> {
@@ -105,6 +134,18 @@ mod tests {
         assert_eq!(
             selected_test_labels(Scope::All),
             ["check", "unit", "web", "drift", "e2e"]
+        );
+    }
+
+    #[test]
+    fn test_coverage_forwards_cargo_llvm_cov_arguments() {
+        let step = test_coverage_step(&["--show-missing-lines".to_string()]);
+
+        assert_eq!(step.label(), "test coverage");
+        assert_eq!(step.program(), "cargo");
+        assert_eq!(
+            step.arguments(),
+            ["llvm-cov", "--workspace", "--show-missing-lines"]
         );
     }
 }

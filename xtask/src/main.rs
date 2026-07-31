@@ -37,7 +37,6 @@ fn run(command: cli::Command) -> Result<()> {
             executable,
             arguments,
         } => verbs::desktop_e2e::run_runtime(&executable, &arguments),
-        cli::Command::Cov => verbs::cov::run(),
         cli::Command::Build { target } => verbs::build::run(target),
         cli::Command::FrontendTest => verbs::frontend::test(),
         cli::Command::FrontendBench => verbs::frontend::bench(),
