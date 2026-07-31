@@ -3,7 +3,7 @@
 use application::diffs::View;
 use maud::{Markup, html};
 
-use super::files::file_status_presentation;
+use super::file_status::file_status_presentation;
 use crate::text::{plural, slug};
 
 const TREE_PRESENTATION_CLASSES: &str = concat!(
@@ -108,11 +108,11 @@ fn render_directory(directory: &TreeDirectory<'_>) -> Markup {
             }
             @for (name, file) in &directory.files {
                 @let status = file_status_presentation(file.status());
-                li class={ "tnode tfile status-" (status.key) }
+                li class={ "tnode tfile " (status.css_class) }
                     data-target=(slug(&file.path))
                     data-path=(file.path.to_lowercase()) {
                     div class="tlabel" {
-                        span class={ "tstatus status-" (status.key) } title=(status.label) {
+                        span class={ "tstatus " (status.css_class) } title=(status.label) {
                             (status.code)
                         }
                         span class="tname" { (name) }

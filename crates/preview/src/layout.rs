@@ -2,6 +2,7 @@
 //! center, commit shelf right) with titlebar and keybar spanning the full
 //! width. One module per region; this module owns their composition.
 
+mod file_status;
 mod files;
 mod keybar;
 pub(crate) mod mobile_controls;
@@ -151,11 +152,7 @@ fn view_body_with_mode(
                     BodyMode::Complete => (files::file_blocks(view, options, surface)),
                     BodyMode::Shell { load_id } => {
                         (files::file_block_shells(view, options, surface))
-                        div id="viewer-chunk-loader"
-                            hx-get=(format!("/loads/{load_id}/next"))
-                            hx-trigger="load delay:16ms"
-                            hx-target="this"
-                            hx-swap="outerHTML" {}
+                        (files::chunk_loader(load_id))
                     }
                 }
             }
@@ -176,6 +173,10 @@ pub(crate) fn view_chunks(
     options: RenderOptions,
 ) -> std::collections::VecDeque<crate::ViewChunk> {
     files::view_chunks(view, options)
+}
+
+pub(crate) fn view_chunk_fragment(chunk: &crate::ViewChunk, next_load_id: Option<u64>) -> Markup {
+    files::chunk_fragment(chunk, next_load_id)
 }
 
 #[cfg(test)]

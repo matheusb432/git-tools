@@ -1,21 +1,22 @@
 //! Center column: one `<details>` block per changed file, carrying the copy
 //! buttons, status badge, and selected diff pane.
 
+mod chunks;
+
 use application::{
     diffs::{FileDiff, FileStatus, View},
     viewer::{DiffDensity, DiffLayout, RenderOptions},
 };
+pub(super) use chunks::{chunk_fragment, chunk_loader, view_chunks};
 use maud::{Markup, PreEscaped, html};
 
 use crate::{
-    layout::Surface,
+    layout::{Surface, file_status::file_status_presentation},
     rows::{render_diff_lines, render_diff_split, unified_line_number_digits},
     text::slug,
 };
 
 const GIANT_FILE_CHARS: usize = 250_000;
-const MAX_CHUNK_ROWS: usize = 256;
-const MAX_CHUNK_BYTES: usize = 256 * 1024;
 const ROW_PX: usize = 22;
 const COPY_BUTTON_CLASSES: &str = concat!(
     "copy-button cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-1.5 py-px text-[10px] tracking-[.04em] text-acc [font:inherit] ",
@@ -35,53 +36,6 @@ const DIFF_CLASSES: &str = concat!(
     "print:[&_.dl_code]:text-[#111]",
 );
 const STATUS_BADGE_CLASSES: &str = "inline-flex size-[15px] flex-none items-center justify-center rounded-sm border text-[9.5px] leading-none font-bold";
-
-#[derive(Clone, Copy)]
-pub(super) struct FileStatusPresentation {
-    pub(super) key: &'static str,
-    pub(super) code: &'static str,
-    pub(super) label: &'static str,
-    pub(super) css_class: &'static str,
-    pub(super) badge_classes: &'static str,
-}
-
-const STATUS_ADDED: FileStatusPresentation = FileStatusPresentation {
-    key: "added",
-    code: "A",
-    label: "Added file",
-    css_class: "status-added",
-    badge_classes: "border-add-line bg-add-bg text-add",
-};
-const STATUS_DELETED: FileStatusPresentation = FileStatusPresentation {
-    key: "deleted",
-    code: "D",
-    label: "Deleted file",
-    css_class: "status-deleted",
-    badge_classes: "border-del-line bg-del-bg text-del",
-};
-const STATUS_RENAMED: FileStatusPresentation = FileStatusPresentation {
-    key: "renamed",
-    code: "R",
-    label: "Renamed file",
-    css_class: "status-renamed",
-    badge_classes: "border-acc-line bg-acc-soft text-acc",
-};
-const STATUS_MODIFIED: FileStatusPresentation = FileStatusPresentation {
-    key: "modified",
-    code: "M",
-    label: "Modified file",
-    css_class: "status-modified",
-    badge_classes: "border-line-2 bg-sunk text-ink-3",
-};
-
-pub(super) fn file_status_presentation(status: FileStatus) -> FileStatusPresentation {
-    match status {
-        FileStatus::Added => STATUS_ADDED,
-        FileStatus::Deleted => STATUS_DELETED,
-        FileStatus::Renamed => STATUS_RENAMED,
-        FileStatus::Modified => STATUS_MODIFIED,
-    }
-}
 
 // ! The app webview (wry/WebKitGTK) never marks swapped-in content-visibility:auto
 // ! subtrees relevant, so their rows would stay unpainted; only browser artifacts
@@ -260,49 +214,6 @@ fn diff_target_id(file_index: usize) -> String {
     format!("viewer-diff-{file_index}")
 }
 
-pub(super) fn view_chunks(
-    view: &View,
-    options: RenderOptions,
-) -> std::collections::VecDeque<crate::ViewChunk> {
-    let mut chunks = std::collections::VecDeque::new();
-    for (file_index, file) in view.files.iter().enumerate() {
-        let syntax = crate::syntax::syntax_for_path(&file.path);
-        let (lines, _) = selected_lines(file, options);
-        let rendered = render_rows(options.layout(), lines, syntax);
-        chunks.extend(
-            split_rows(&rendered)
-                .into_iter()
-                .map(|(html, rows)| crate::ViewChunk {
-                    target_id: diff_target_id(file_index),
-                    html,
-                    rows,
-                }),
-        );
-    }
-    chunks
-}
-
-fn split_rows(rendered: &str) -> Vec<(String, usize)> {
-    let mut chunks = Vec::new();
-    let mut chunk = String::new();
-    let mut row_count = 0;
-    for row in rendered.split_inclusive("</div>") {
-        let crosses_bound = row_count > 0
-            && (row_count == MAX_CHUNK_ROWS
-                || chunk.len().saturating_add(row.len()) > MAX_CHUNK_BYTES);
-        if crosses_bound {
-            chunks.push((std::mem::take(&mut chunk), row_count));
-            row_count = 0;
-        }
-        chunk.push_str(row);
-        row_count += 1;
-    }
-    if row_count > 0 {
-        chunks.push((chunk, row_count));
-    }
-    chunks
-}
-
 #[cfg(test)]
 mod tests {
     use application::{
@@ -310,7 +221,7 @@ mod tests {
         viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabId},
     };
 
-    use super::{GIANT_FILE_CHARS, MAX_CHUNK_BYTES, MAX_CHUNK_ROWS, ROW_PX};
+    use super::{GIANT_FILE_CHARS, ROW_PX};
     use crate::{build_html, fixtures::sample_view, view_fragment};
 
     fn tab_id(raw: u64) -> ViewerTabId {
@@ -341,51 +252,6 @@ mod tests {
 
     fn deleted_file(path: &str) -> FileDiff {
         file(path, "deleted file mode 100644")
-    }
-
-    #[test]
-    fn desktop_chunks_recompose_the_complete_server_rendered_rows() {
-        let view = sample_view();
-        let file = &view.files[0];
-        let syntax = crate::syntax::syntax_for_path(&file.path);
-        let (lines, _) = super::selected_lines(file, RenderOptions::DEFAULT);
-        let complete = super::render_rows(DiffLayout::Unified, lines, syntax);
-
-        let chunks = super::view_chunks(&view, RenderOptions::DEFAULT);
-        let recomposed = chunks
-            .iter()
-            .map(|chunk| chunk.html.as_str())
-            .collect::<String>();
-
-        assert_eq!(recomposed, complete);
-        assert!(chunks.iter().all(|chunk| chunk.rows <= MAX_CHUNK_ROWS));
-        assert!(
-            chunks
-                .iter()
-                .all(|chunk| chunk.html.len() <= MAX_CHUNK_BYTES)
-        );
-    }
-
-    #[test]
-    fn oversized_row_is_isolated_and_chunking_always_advances() {
-        let oversized = format!("+{}", "x".repeat(MAX_CHUNK_BYTES + 1));
-        let rendered = format!(
-            "<div class=\"dl\">small</div><div class=\"dl\">{oversized}</div><div class=\"dl\">tail</div>"
-        );
-
-        let chunks = super::split_rows(&rendered);
-
-        assert_eq!(chunks.len(), 3);
-        assert_eq!(chunks.iter().map(|(_, rows)| rows).sum::<usize>(), 3);
-        assert_eq!(
-            chunks
-                .iter()
-                .map(|(html, _)| html.as_str())
-                .collect::<String>(),
-            rendered
-        );
-        assert!(chunks[1].0.len() > MAX_CHUNK_BYTES);
-        assert_eq!(chunks[1].1, 1);
     }
 
     #[test]

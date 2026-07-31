@@ -1,5 +1,4 @@
 use application::viewer::{RenderOptions, ViewerTabState};
-use maud::{PreEscaped, html};
 use tauri::http::StatusCode;
 
 use super::{
@@ -38,7 +37,7 @@ pub(super) fn ready(app: &ViewerApp) -> RouteResult {
 
 pub(super) fn load_next(app: &ViewerApp, load: ViewLoadId) -> RouteResult {
     let page = app.materializations.next(&app.session, load)?;
-    Ok(RouteOutput::Html(render_chunk(load, page)))
+    Ok(RouteOutput::Html(render_chunk(load, &page)))
 }
 
 pub(super) fn ensure_active_view(app: &ViewerApp) -> Result<Option<VersionedView>, RouteError> {
@@ -71,23 +70,9 @@ pub(super) fn prepare_materialization(
         .map_err(Into::into)
 }
 
-fn render_chunk(load: ViewLoadId, page: ChunkPage) -> String {
-    let target = format!("beforeend:#{}", page.chunk.target_id);
-    html! {
-        div hx-swap-oob=(target) data-chunk-rows=(page.chunk.rows) {
-            (PreEscaped(page.chunk.html))
-        }
-        @if page.has_more {
-            div id="viewer-chunk-loader"
-                hx-get=(format!("/loads/{load}/next"))
-                hx-trigger="load delay:16ms"
-                hx-target="this"
-                hx-swap="outerHTML" {}
-        } @else {
-            div id="viewer-chunk-loader" data-complete hidden {}
-        }
-    }
-    .into_string()
+fn render_chunk(load: ViewLoadId, page: &ChunkPage) -> String {
+    let next_load_id = page.has_more.then_some(load.get());
+    preview::view_chunk_fragment(&page.chunk, next_load_id).into_string()
 }
 
 #[cfg(test)]
@@ -100,7 +85,7 @@ mod tests {
     fn chunk_response_inserts_rows_and_bounds_the_next_loader() {
         let html = render_chunk(
             ViewLoadId::try_new(7).expect("positive load id"),
-            ChunkPage {
+            &ChunkPage {
                 chunk: ViewChunk {
                     target_id: "viewer-diff-2".into(),
                     html: "<div class=\"dl\">row</div>".into(),
@@ -113,6 +98,8 @@ mod tests {
         assert!(html.contains("hx-swap-oob=\"beforeend:#viewer-diff-2\""));
         assert!(html.contains("data-chunk-rows=\"1\""));
         assert!(html.contains("hx-get=\"/loads/7/next\""));
+        assert!(html.contains("hx-trigger=\"load\""));
+        assert!(!html.contains("delay:"));
         assert_eq!(html.matches("id=\"viewer-chunk-loader\"").count(), 1);
     }
 }

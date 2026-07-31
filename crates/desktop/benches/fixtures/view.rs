@@ -42,7 +42,6 @@ pub(super) fn view_with_lines(line_count: usize) -> View {
             removed: 0,
             full_lines: Some(lines.clone()),
             lines,
-            commits: vec![],
         }],
         title: "Large diff".into(),
         cmd: Cmd {
