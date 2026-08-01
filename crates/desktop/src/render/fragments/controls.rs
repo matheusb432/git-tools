@@ -6,8 +6,6 @@ use maud::{Markup, html};
 
 use crate::render::{ViewerRoute, ViewerSettingChange};
 
-const DESKTOP_SHOW_ALL_CLASSES: &str = "viewer-control-button inline-flex min-h-[27px] cursor-pointer items-center whitespace-nowrap rounded-sm border border-acc-line bg-acc-soft px-2 py-1 text-[11.5px] text-acc [font:inherit] hover:bg-acc hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
-
 pub(super) fn view_controls(view: &ViewerView) -> Markup {
     html! {
         header class="viewer-controls gtl-scroll flex min-w-0 items-center gap-3 border-b border-line bg-surface px-3 py-[7px] text-ink-2 [@media(max-width:760px)]:hidden" aria-label="Diff display controls" {
@@ -20,9 +18,6 @@ pub(super) fn view_controls(view: &ViewerView) -> Markup {
                 span class="viewer-control-label mr-[3px] text-[10px] font-bold tracking-[.06em] text-ink-3 uppercase" { "View" }
                 (density_choice(view, DiffDensity::Compact, "Changes", "viewer-density", CHOICE_CLASSES))
                 (density_choice(view, DiffDensity::Full, "Full file", "viewer-density", CHOICE_CLASSES))
-            }
-            @if view.selected_commit_sha().is_some() {
-                (show_all_changes_button(view, DESKTOP_SHOW_ALL_CLASSES))
             }
             @if view.kind() == ViewerTabKind::Live {
                 (refresh_button(view.tab_id()))
@@ -66,9 +61,6 @@ pub(super) fn mobile_view_controls(
                 class=(preview::mobile_menu_button_classes())
                 popovertarget="viewer-theme-popover" {
                 "Theme: " (super::theme::label(active_theme))
-            }
-            @if view.selected_commit_sha().is_some() {
-                (show_all_changes_button(view, preview::mobile_menu_button_classes()))
             }
             @if view.kind() == ViewerTabKind::Live {
                 (mobile_refresh_button(view.tab_id()))

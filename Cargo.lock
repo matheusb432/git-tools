@@ -7807,8 +7807,8 @@ dependencies = [
 
 [[package]]
 name = "sample_project"
-version = "0.1.1"
-source = "git+ssh://git@github.com/matheusb432/sample_project.git?tag=v0.1.1#6f6000e18033bfa24c56df54a736ab208836c8eb"
+version = "0.2.0"
+source = "git+ssh://git@github.com/matheusb432/sample_project.git?tag=v0.2.0#b1c91b608833f6e9ed51075c9a2ecb87a3f039dc"
 dependencies = [
  "command-group",
  "console",

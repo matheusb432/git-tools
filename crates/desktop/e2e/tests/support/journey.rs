@@ -370,7 +370,6 @@ const text = view?.textContent ?? "";
 const file = view?.querySelector("details.file");
 return view?.dataset.viewerState === "ready"
   && view.querySelector(".cline.active .commit-select")?.textContent.includes("live view v2")
-  && Array.from(view.querySelectorAll("button")).some((button) => button.textContent.trim() === "Show all changes")
   && text.includes("alpha-v1")
   && text.includes("alpha-v2")
   && text.includes("1 commit")
@@ -384,9 +383,17 @@ return view?.dataset.viewerState === "ready"
     )
     .await?;
 
-    by_accessible_name(driver, "Show all changes")
-        .await?
-        .click()
+    driver
+        .execute(
+            r##"
+const card = document.querySelector("#viewer-view .cline.active .commit-select");
+if (!(card instanceof HTMLButtonElement)) {
+  throw new Error("selected commit clear action is missing");
+}
+card.click();
+"##,
+            Vec::new(),
+        )
         .await
         .context("restore the complete live view range")?;
     wait_for_htmx_idle(driver, "restoring the complete range").await?;
@@ -402,7 +409,6 @@ const text = view?.textContent ?? "";
 const file = view?.querySelector("details.file");
 return view?.dataset.viewerState === "ready"
   && view.querySelector(".cline.active") === null
-  && !Array.from(view.querySelectorAll("button")).some((button) => button.textContent.trim() === "Show all changes")
   && !text.includes("alpha-v1")
   && text.includes("alpha-v2")
   && file?.querySelector(".a")?.textContent.trim() === "+1"
