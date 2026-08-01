@@ -19,7 +19,7 @@
 | `fix [clippy args...]` | Apply Clippy and Oxlint fixes before normalizing every formatter. | `just fix` |
 | `build [--target cli\|viewer\|both]` | Build mandatory release artifact sets; the root build never soft-skips the viewer. | `just build` / scoped build recipes |
 | `frontend-test` | Type-check and unit-test the framework-free frontend. | `just cli test` |
-| `desktop-bench` | Run the pure viewer-render benchmark with host display variables removed. | `just desktop bench` |
+| `desktop-bench` | Run the pure viewer-render benchmark; `--fast` selects the concise shell-only preset. | `just desktop bench` |
 | `check-structure` | Cargo dependency-direction policy for core, shared, adapter, and black-box test packages. Wired into `lint` / `check`; also runnable standalone. | (via `just check`) |
 | `drift-check` | Rebuild the committed diff-preview JS bundle and fail if it drifts from its TypeScript sources. | `just drift-check` |
 | `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |

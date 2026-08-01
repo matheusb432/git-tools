@@ -159,15 +159,16 @@ mod tests {
     #[test]
     fn preview_css_keeps_narrow_split_metadata_rows_full_width() {
         let css = preview_css();
-        let narrow = css
-            .split_once("@media (max-width:1024px)")
-            .map(|(_, tail)| tail)
-            .expect("narrow media block");
-        let stacked_rows = narrow
-            .find(".diff-split .dl{grid-template-columns:44px minmax(0,1fr)")
+        assert!(css.contains("@media (max-width:1024px)"));
+        let stacked_rows = css
+            .find(
+                r".tablet\:\[\&_\.diff-split_\.dl\]\:grid-cols-\[44px_minmax\(0\,1fr\)\] .diff-split .dl{grid-template-columns:44px minmax(0,1fr)}",
+            )
             .expect("stacked split rows");
-        let metadata_rows = narrow
-            .find(".diff-split :is(.dl-meta,.dl-hunk){grid-template-columns:minmax(0,1fr)")
+        let metadata_rows = css
+            .find(
+                r".tablet\:\[\&_\.diff-split_\:is\(\.dl-meta\,\.dl-hunk\)\]\:grid-cols-\[minmax\(0\,1fr\)\] .diff-split :is(.dl-meta,.dl-hunk){grid-template-columns:minmax(0,1fr)}",
+            )
             .expect("full-width split metadata rows");
 
         assert!(stacked_rows < metadata_rows);
