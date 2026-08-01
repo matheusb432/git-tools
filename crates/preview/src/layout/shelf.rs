@@ -8,7 +8,7 @@ use super::Surface;
 
 const SHELF_CLASSES: &str = concat!(
     "gtl-scroll [grid-area:2/3] overflow-auto border-l border-line bg-surface p-3 ",
-    "[@media(max-width:1280px)]:p-2.5 [@media(max-width:1024px)]:hidden print:hidden!",
+    "compact:p-2.5 tablet:hidden print:hidden!",
 );
 const SHELF_STATE_CLASSES: &str = concat!(
     "[&_.cline:hover_.bead::before]:border-acc [&_.cline.active_.bead::before]:border-acc [&_.cline.active_.bead::before]:bg-acc [&_.cline.active_.bead::before]:shadow-[0_0_0_3px_var(--acc-soft)] ",

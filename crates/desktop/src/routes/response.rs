@@ -170,7 +170,7 @@ fn error_view() -> String {
 
 fn error_tabs() -> String {
     html! {
-        nav id="viewer-tabs" class="viewer-tabs z-[70] flex min-w-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2 [&.htmx-swapping]:border-acc-line [&.htmx-settling]:border-acc-line [@media(max-width:760px)]:px-2" aria-label="Open diffs" {
+        nav id="viewer-tabs" class="viewer-tabs z-[70] flex min-w-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2 [&.htmx-swapping]:border-acc-line [&.htmx-settling]:border-acc-line mobile:px-2" aria-label="Open diffs" {
             div class="mb-2 rounded-sm border border-del-line bg-del-bg px-2.5 py-1.5 text-xs text-del" role="alert" {
                 strong { "The tabs could not be updated" }
                 span { " Please retry the operation." }

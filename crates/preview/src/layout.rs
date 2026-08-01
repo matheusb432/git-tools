@@ -41,9 +41,9 @@ impl Surface {
 
 const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
     "layout copy-ctx grid h-screen grid-cols-[262px_minmax(0,1fr)_252px] grid-rows-[auto_1fr_auto] ",
-    "[@media(min-width:1600px)_and_(min-height:900px)]:grid-cols-[320px_minmax(0,1fr)_304px] ",
-    "[@media(min-width:1025px)_and_(max-width:1280px)]:grid-cols-[220px_minmax(0,1fr)_210px] ",
-    "[@media(max-width:1024px)]:grid-cols-[0_minmax(0,1fr)_0] ",
+    "wide-screen:grid-cols-[320px_minmax(0,1fr)_304px] ",
+    "compact-desktop:grid-cols-[220px_minmax(0,1fr)_210px] ",
+    "tablet:grid-cols-[0_minmax(0,1fr)_0] ",
     "print:block print:h-auto print:bg-white print:text-[#111]",
 );
 
@@ -147,7 +147,7 @@ fn view_body_with_mode(
                 matches!(surface, Surface::Artifact { .. }).then_some(mobile_controls_target.as_str()),
             ))
             (tree::tree(view))
-            main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-0 pb-[60px] [@media(min-width:1600px)_and_(min-height:900px)]:px-7 [@media(min-width:1025px)_and_(max-width:1280px)]:px-4 [@media(max-width:1024px)]:px-3 [@media(max-width:760px)]:px-1 [@media(max-width:1024px)]:pb-12 print:overflow-visible print:p-0" {
+            main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-0 pb-[60px] wide-screen:px-7 compact-desktop:px-4 tablet:px-3 mobile:px-1 tablet:pb-12 print:overflow-visible print:p-0" {
                 @match mode {
                     BodyMode::Complete => (files::file_blocks(view, options, surface)),
                     BodyMode::Shell { load_id } => {
@@ -235,7 +235,7 @@ mod tests {
 
         assert!(html.contains(r#"class="layout copy-ctx grid"#));
         assert!(html.contains("grid-cols-[262px_minmax(0,1fr)_252px]"));
-        assert!(html.contains("[@media(max-width:1024px)]:grid-cols-[0_minmax(0,1fr)_0]"));
+        assert!(html.contains("tablet:grid-cols-[0_minmax(0,1fr)_0]"));
         assert!(html.contains("grid-rows-[auto_1fr_auto]"));
         assert!(html.contains("[&_.dl]:grid-cols-[44px_44px_minmax(0,1fr)]"));
         assert!(
@@ -281,7 +281,7 @@ mod tests {
         assert!(main.split_ascii_whitespace().any(|class| class == "pt-0"));
         assert!(
             main.split_ascii_whitespace()
-                .any(|class| class == "[@media(max-width:760px)]:px-1")
+                .any(|class| class == "mobile:px-1")
         );
         assert!(!main.split_ascii_whitespace().any(|class| class == "pt-4"));
         assert!(!main.contains(concat!("scroll-", "smooth")));

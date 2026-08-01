@@ -27,7 +27,7 @@ pub(super) fn label(theme: Theme) -> &'static str {
 pub(in crate::render) fn trigger(active: Theme) -> Markup {
     html! {
         button type="button"
-            class="viewer-theme-button mb-[7px] flex flex-none cursor-pointer items-center gap-[7px] rounded-sm border border-transparent bg-transparent px-[9px] py-1.5 text-xs text-ink-2 [font:inherit] hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [@media(max-width:760px)]:hidden"
+            class="viewer-theme-button mb-[7px] flex flex-none cursor-pointer items-center gap-[7px] rounded-sm border border-transparent bg-transparent px-[9px] py-1.5 text-xs text-ink-2 [font:inherit] hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc mobile:hidden"
             popovertarget=(POPOVER_ID) {
             span class="sr-only" { "Theme: " }
             // The dot needs no update path: `--acc` re-resolves from the root
@@ -47,7 +47,7 @@ pub(in crate::render) fn popover(active: Theme) -> Markup {
         // override the `top` and `right` beside them. The palette list grows,
         // so the panel scrolls inside the viewport rather than past its bottom.
         div id=(POPOVER_ID)
-            class="viewer-theme-popover fixed top-[42px] right-3 bottom-auto left-auto m-0 max-h-[calc(100vh_-_56px)] w-[188px] overflow-y-auto rounded-panel border border-line-2 bg-surface p-1.5 shadow-[0_18px_48px_rgba(0,0,0,.58)] [@media(max-width:760px)]:right-2"
+            class="viewer-theme-popover fixed top-[42px] right-3 bottom-auto left-auto m-0 max-h-[calc(100vh_-_56px)] w-[188px] overflow-y-auto rounded-panel border border-line-2 bg-surface p-1.5 shadow-[0_18px_48px_rgba(0,0,0,.58)] mobile:right-2"
             role="group"
             aria-label="Theme"
             popover {

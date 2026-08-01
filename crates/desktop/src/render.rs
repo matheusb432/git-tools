@@ -818,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn dependent_actions_target_their_primary_compound_root() {
+    fn tab_actions_target_their_primary_compound_root() {
         fn opening_tag_with<'html>(html: &'html str, needle: &str) -> &'html str {
             let position = html.find(needle).expect("route appears in rendered markup");
             let start = html[..position].rfind('<').expect("route belongs to a tag");
@@ -828,11 +828,13 @@ mod tests {
 
         let document = sample_document();
         let html = MaudViewerRenderer.build_document(&document);
-        let activate = opening_tag_with(&html, "/tabs/1/activate");
+        let active = opening_tag_with(&html, "aria-current=\"page\"");
         let close = opening_tag_with(&html, "/tabs/1/close");
         let open_history = opening_tag_with(&html, "/history/7/open");
 
-        assert!(activate.contains("hx-target=\"#viewer-view\""));
+        assert!(active.contains("aria-disabled=\"true\""), "{active}");
+        assert!(!active.contains("hx-get="), "{active}");
+        assert!(!active.contains("hx-target="), "{active}");
         assert!(close.contains("hx-target=\"#viewer-view\""), "{close}");
         assert!(
             open_history.contains("hx-target=\"#viewer-tabs\""),
@@ -849,6 +851,11 @@ mod tests {
             &[document.tabs()[0].clone(), inactive],
             Some(tab_id(1)),
             settings().theme(),
+        );
+        let inactive_activate = opening_tag_with(&tabs, "/tabs/2/activate");
+        assert!(
+            inactive_activate.contains("hx-target=\"#viewer-view\""),
+            "{inactive_activate}"
         );
         let inactive_close = opening_tag_with(&tabs, "/tabs/2/close");
         assert!(

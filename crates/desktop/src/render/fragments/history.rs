@@ -32,7 +32,7 @@ pub(in crate::render) fn history(entries: &[ViewerHistoryEntry]) -> Markup {
                     p class="mt-1 mb-0" { "Rendered diffs will appear here after you open them." }
                 }
             } @else {
-                div class="viewer-history-columns grid grid-cols-[52px_minmax(160px,1.5fr)_minmax(120px,1fr)_88px_minmax(120px,1fr)_168px_34px] items-center gap-3 border-b border-line px-2.5 pt-1.5 pb-2 text-[10px] font-bold tracking-[.06em] text-ink-3 uppercase [@media(max-width:760px)]:hidden" aria-hidden="true" {
+                div class="viewer-history-columns grid grid-cols-[52px_minmax(160px,1.5fr)_minmax(120px,1fr)_88px_minmax(120px,1fr)_168px_34px] items-center gap-3 border-b border-line px-2.5 pt-1.5 pb-2 text-[10px] font-bold tracking-[.06em] text-ink-3 uppercase mobile:hidden" aria-hidden="true" {
                     span { "ID" }
                     span { "Diff" }
                     span { "Repository" }
@@ -43,19 +43,19 @@ pub(in crate::render) fn history(entries: &[ViewerHistoryEntry]) -> Markup {
                 }
                 div class="viewer-history-list pt-1" {
                     @for entry in entries {
-                        div class="viewer-history-row grid w-full cursor-pointer select-text grid-cols-[52px_minmax(160px,1.5fr)_minmax(120px,1fr)_88px_minmax(120px,1fr)_168px_34px] items-center gap-3 rounded-sm border border-transparent px-2.5 py-[9px] text-ink-2 hover:border-line hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-acc-line [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc [@media(max-width:760px)]:grid-cols-[minmax(0,1fr)_auto_34px]"
+                div class="viewer-history-row grid w-full cursor-pointer select-text grid-cols-[52px_minmax(160px,1.5fr)_minmax(120px,1fr)_88px_minmax(120px,1fr)_168px_34px] items-center gap-3 rounded-sm border border-transparent px-2.5 py-[9px] text-ink-2 hover:border-line hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-acc-line [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc mobile:grid-cols-[minmax(0,1fr)_auto_34px]"
                             role="button"
                             tabindex="0"
                             hx-get=(ViewerRoute::OpenHistory { render: entry.id() })
                             hx-target="#viewer-tabs"
                             hx-sync="#viewer-view:replace"
                             hx-swap="outerHTML" {
-                            span class="viewer-history-id min-w-0 truncate text-[11px] tabular-nums text-ink-3 [@media(max-width:760px)]:hidden" { "#" (i64::from(entry.id())) }
+                            span class="viewer-history-id min-w-0 truncate text-[11px] tabular-nums text-ink-3 mobile:hidden" { "#" (i64::from(entry.id())) }
                             span class="viewer-history-title min-w-0 truncate font-semibold text-ink" { (entry.title()) }
-                            span class="viewer-history-repo min-w-0 truncate [@media(max-width:760px)]:hidden" { (entry.repo_name()) }
+                            span class="viewer-history-repo min-w-0 truncate mobile:hidden" { (entry.repo_name()) }
                             span class="viewer-history-kind w-max min-w-0 truncate rounded-sm border border-line-2 px-1.5 py-px text-[10px] text-acc" { (entry.kind()) }
-                            span class="viewer-history-range min-w-0 truncate text-[11px] tabular-nums [@media(max-width:760px)]:hidden" { (entry.range_label()) }
-                            time class="min-w-0 truncate text-[11px] tabular-nums [@media(max-width:760px)]:hidden" datetime=(entry.rendered_at()) { (entry.rendered_at()) }
+                            span class="viewer-history-range min-w-0 truncate text-[11px] tabular-nums mobile:hidden" { (entry.range_label()) }
+                            time class="min-w-0 truncate text-[11px] tabular-nums mobile:hidden" datetime=(entry.rendered_at()) { (entry.rendered_at()) }
                             button type="button"
                                 class="viewer-history-copy grid size-[26px] cursor-pointer place-content-center justify-self-center rounded-sm border-0 bg-transparent text-ink-3 select-none hover:bg-line hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&[data-copied]]:text-add"
                                 data-history-copy=(history_copy_json(entry))

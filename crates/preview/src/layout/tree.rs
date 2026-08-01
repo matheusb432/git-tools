@@ -8,7 +8,7 @@ use crate::text::{plural, slug};
 
 const TREE_PRESENTATION_CLASSES: &str = concat!(
     "tree gtl-scroll [grid-area:2/1] overflow-auto border-r border-line bg-surface p-3 ",
-    "[@media(max-width:1280px)]:p-2.5 [@media(max-width:1024px)]:hidden print:hidden! ",
+    "compact:p-2.5 tablet:hidden print:hidden! ",
     "[&_.tree-body_ul]:m-0 [&_.tree-body_ul]:list-none [&_.tree-body_ul]:pl-2.5 [&_.tree-body>ul]:pl-0 ",
     "[&_.tnode]:min-w-0 ",
     "[&_.tlabel]:flex [&_.tlabel]:cursor-pointer [&_.tlabel]:items-center [&_.tlabel]:gap-1.5 [&_.tlabel]:rounded-sm [&_.tlabel]:px-1.5 [&_.tlabel]:py-0.5 [&_.tlabel]:leading-[1.35] [&_.tlabel]:text-ink-2 ",

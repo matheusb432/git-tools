@@ -115,7 +115,7 @@ pub(in crate::render) fn loading_template() -> Markup {
                     div class="animate-pulse border-b border-line bg-surface-2 px-4 py-3" {
                         div class="h-4 w-2/5 rounded-sm bg-line-2" {}
                     }
-                    div class="grid min-h-0 grid-cols-[minmax(180px,22%)_minmax(0,1fr)_minmax(180px,20%)] gap-4 p-4 [@media(max-width:760px)]:grid-cols-1" {
+                    div class="grid min-h-0 grid-cols-[minmax(180px,22%)_minmax(0,1fr)_minmax(180px,20%)] gap-4 p-4 mobile:grid-cols-1" {
                         div class="animate-pulse rounded-panel border border-line bg-surface p-3" {
                             div class="mb-3 h-3 w-3/4 rounded-sm bg-line-2" {}
                             div class="mb-2 h-3 w-full rounded-sm bg-line" {}
@@ -127,7 +127,7 @@ pub(in crate::render) fn loading_template() -> Markup {
                                 div class={ "mb-2 h-3 rounded-sm bg-line " (width) } {}
                             }
                         }
-                        div class="animate-pulse rounded-panel border border-line bg-surface p-3 [@media(max-width:760px)]:hidden" {
+                        div class="animate-pulse rounded-panel border border-line bg-surface p-3 mobile:hidden" {
                             div class="mb-3 h-3 w-2/3 rounded-sm bg-line-2" {}
                             div class="mb-2 h-8 w-full rounded-sm bg-line" {}
                             div class="mb-2 h-8 w-full rounded-sm bg-line" {}

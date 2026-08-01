@@ -99,11 +99,11 @@ fn file_blocks_with_mode(
                 data-path=(file.path)
                 data-comment=(crate::comment_syntax::comment_leader(&file.path))
                 {
-                summary class="sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line bg-surface-2 px-2.5 py-2 text-[12.5px] hover:bg-line [&::-webkit-details-marker]:hidden [@media(max-width:760px)]:flex-wrap [@media(max-width:760px)]:gap-x-1.5 [@media(max-width:760px)]:px-2 [@media(max-width:760px)]:py-1.5 print:static print:bg-[#f2f2f2]" {
+                summary class="sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line bg-surface-2 px-2.5 py-2 text-[12.5px] hover:bg-line [&::-webkit-details-marker]:hidden mobile:flex-wrap mobile:gap-x-1.5 mobile:px-2 mobile:py-1.5 print:static print:bg-[#f2f2f2]" {
                     span class="file-caret size-0 flex-none border-y-4 border-y-transparent border-l-5 border-l-ink-3 group-open/file:rotate-90" aria-hidden="true" {}
                     span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink" { (file.path) }
                     span class={ "status-badge " (status.css_class) " " (STATUS_BADGE_CLASSES) " " (status.badge_classes) } title=(status.label) aria-label=(status.label) { (status.code) }
-                    span class="file-actions flex flex-none items-center gap-2 [@media(max-width:760px)]:basis-full [@media(max-width:760px)]:justify-end" {
+                    span class="file-actions flex flex-none items-center gap-2 mobile:basis-full mobile:justify-end" {
                         span class="copies flex flex-none gap-[5px] print:hidden!" {
                             button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(file.path) data-copy-label="path" { "path" }
                             button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(absolute) data-copy-label="abs" { "abs" }

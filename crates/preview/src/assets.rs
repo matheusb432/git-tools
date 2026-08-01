@@ -161,8 +161,7 @@ mod tests {
         let css = preview_css();
         let narrow = css
             .split_once("@media (max-width:1024px)")
-            .and_then(|(_, tail)| tail.split_once("}@media"))
-            .map(|(block, _)| block)
+            .map(|(_, tail)| tail)
             .expect("narrow media block");
         let stacked_rows = narrow
             .find(".diff-split .dl{grid-template-columns:44px minmax(0,1fr)")

@@ -8,7 +8,7 @@ use crate::render::{ViewerRoute, ViewerSettingChange};
 
 pub(super) fn view_controls(view: &ViewerView) -> Markup {
     html! {
-        header class="viewer-controls gtl-scroll flex min-w-0 items-center gap-3 border-b border-line bg-surface px-3 py-[7px] text-ink-2 [@media(max-width:760px)]:hidden" aria-label="Diff display controls" {
+        header class="viewer-controls gtl-scroll flex min-w-0 items-center gap-3 border-b border-line bg-surface px-3 py-[7px] text-ink-2 mobile:hidden" aria-label="Diff display controls" {
             div class="flex items-center gap-[3px]" role="group" aria-label="Layout" {
                 span class="viewer-control-label mr-[3px] text-[10px] font-bold tracking-[.06em] text-ink-3 uppercase" { "Layout" }
                 (layout_choice(view, DiffLayout::Unified, "Unified", "viewer-layout", CHOICE_CLASSES))

@@ -12,12 +12,12 @@ const CONTROL_CLASSES: &str = "cursor-pointer rounded-sm border border-line-2 bg
 // ! `.foldall` and `.ctx-toggle` remain enhancer hooks for their toggled states.
 pub(super) fn titlebar(view: &View, mobile_controls_target: Option<&str>) -> Markup {
     html! {
-        header class="titlebar [grid-column:1/4] flex items-center gap-4 border-b border-line bg-surface px-5 py-3 [@media(max-width:1024px)]:flex-wrap [@media(max-width:1024px)]:gap-2.5 [@media(max-width:1024px)]:px-3 [@media(max-width:1024px)]:py-2.5 [@media(max-width:760px)]:gap-1.5 [@media(max-width:760px)]:px-2 [@media(max-width:760px)]:py-2 print:border-[#bbb] print:bg-[#f2f2f2]" {
-            div class="flex items-baseline gap-2 text-[18px] font-semibold tracking-[-0.01em] [@media(max-width:760px)]:text-[15px]" {
+        header class="titlebar [grid-column:1/4] flex items-center gap-4 border-b border-line bg-surface px-5 py-3 tablet:flex-wrap tablet:gap-2.5 tablet:px-3 tablet:py-2.5 mobile:gap-1.5 mobile:px-2 mobile:py-2 print:border-[#bbb] print:bg-[#f2f2f2]" {
+            div class="flex items-baseline gap-2 text-[18px] font-semibold tracking-[-0.01em] mobile:text-[15px]" {
                 span { "~/" b class="font-bold text-acc" { (view.repo_name) } }
                 span class="self-center rounded-sm border border-acc-line bg-acc-soft px-2 py-0.5 text-[12px] font-medium text-acc" { (view.title) }
             }
-            div class="branchline flex items-center gap-1.5 text-[12.5px] text-ink-2 [@media(max-width:1024px)]:order-3 [@media(max-width:1024px)]:w-full" {
+            div class="branchline flex items-center gap-1.5 text-[12.5px] text-ink-2 tablet:order-3 tablet:w-full" {
                 span class="text-acc" { (view.branch) }
                 span class="text-ink-3" { "→" }
                 span class="text-ink-3" { (view.upstream) }
@@ -35,8 +35,8 @@ pub(super) fn titlebar(view: &View, mobile_controls_target: Option<&str>) -> Mar
             @if let Some(target) = mobile_controls_target {
                 (super::mobile_controls::view_navigation(target, true))
             }
-            button type="button" class={ "foldall " (CONTROL_CLASSES) " [@media(max-width:760px)]:hidden" } title="Collapse/expand all files" { "Collapse all" }
-            button type="button" class={ "ctx-toggle active " (CONTROL_CLASSES) " [&.active]:border-acc-line [&.active]:bg-acc-soft [&.active]:text-ink [@media(max-width:760px)]:hidden" } aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
+            button type="button" class={ "foldall " (CONTROL_CLASSES) " mobile:hidden" } title="Collapse/expand all files" { "Collapse all" }
+            button type="button" class={ "ctx-toggle active " (CONTROL_CLASSES) " [&.active]:border-acc-line [&.active]:bg-acc-soft [&.active]:text-ink mobile:hidden" } aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
         }
     }
 }

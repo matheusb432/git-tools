@@ -16,11 +16,11 @@ pub(super) const PRESENTATION_CLASSES: &str = concat!(
     "[&_.diff-split_.sp-del]:bg-del-bg ",
     "[&_.diff-split_.sp-add]:bg-add-bg ",
     "[&_.diff-split_.sp-pad]:bg-sunk ",
-    "[@media(max-width:1024px)]:[&_.diff-split_.dl]:grid-cols-[44px_minmax(0,1fr)] ",
-    "[@media(max-width:1024px)]:[&_.diff-split_:is(.dl-meta,.dl-hunk)]:grid-cols-[minmax(0,1fr)] ",
-    "[@media(max-width:1024px)]:[&_.diff-split_.dl>:is(:nth-child(3),:nth-child(4))]:border-t ",
-    "[@media(max-width:1024px)]:[&_.diff-split_.dl>:is(:nth-child(3),:nth-child(4))]:border-line ",
-    "[@media(max-width:1024px)]:[&_.diff-split_.dl>:nth-child(3)]:border-l-0",
+    "tablet:[&_.diff-split_.dl]:grid-cols-[44px_minmax(0,1fr)] ",
+    "tablet:[&_.diff-split_:is(.dl-meta,.dl-hunk)]:grid-cols-[minmax(0,1fr)] ",
+    "tablet:[&_.diff-split_.dl>:is(:nth-child(3),:nth-child(4))]:border-t ",
+    "tablet:[&_.diff-split_.dl>:is(:nth-child(3),:nth-child(4))]:border-line ",
+    "tablet:[&_.diff-split_.dl>:nth-child(3)]:border-l-0",
 );
 
 /// One side of a paired side-by-side row.
