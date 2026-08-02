@@ -55,7 +55,7 @@ cargo test -p xtask                # arg-surface + unit tests
 
 ## Browser E2E
 
-Thirtyfour owns the release Tauri/WebKit DOM lifecycle journey. Playwright-Rust owns one Chromium interaction with a production-generated `file://` diff artifact. The typed xtask installs browser assets, isolates each suite, runs them in order, reaps their process trees, and writes logs and `report.json`.
+Thirtyfour owns the release Tauri/WebKit one-shot and saved-live-view lifecycles. Playwright-Rust owns the raw-artifact lifecycle for a production-generated `file://` diff in Chromium. The typed xtask installs browser assets, isolates each spec's mutable state, runs the suites serially, reaps their process trees, and writes logs and `report.json`.
 
 ```bash
 just test --e2e
@@ -64,4 +64,4 @@ just test --all
 just test --all --evidences
 ```
 
-`--evidences` writes the browser PNG evidence under `.artifacts/e2e`.
+`--evidences` writes one success PNG for each of the three browser workflows under `.artifacts/e2e/success`. Failing workflows always write their PNG under `.artifacts/e2e/fail`.

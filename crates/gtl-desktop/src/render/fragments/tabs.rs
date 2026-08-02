@@ -44,7 +44,7 @@ pub(in crate::render) fn tabs(
                             }
                             aria-current=[active.then_some("page")]
                             aria-disabled=[active.then_some("true")]
-                            autofocus[active && feedback == SwapFeedback::LiveViewDeleted]
+                            autofocus[active && matches!(feedback, SwapFeedback::TabClosed | SwapFeedback::LiveViewDeleted)]
                             title=(tab.label())
                             hx-get=[(!active).then(|| ViewerRoute::Activate { tab: tab.id() })]
                             hx-target=[(!active).then_some("#viewer-view")]

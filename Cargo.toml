@@ -114,7 +114,7 @@ walkdir = "2.5.0"
 which = "8.0.4"
 x11-dl = "2.21.0"
 zbus = "5.16.0"
-sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.2.0" }
+sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.2.1" }
 
 [profile.release]
 strip = "symbols"

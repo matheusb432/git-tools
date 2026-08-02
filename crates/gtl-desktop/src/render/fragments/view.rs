@@ -62,7 +62,10 @@ pub(in crate::render) fn view(
             data-view-identity=[view_identity]
             data-tab-id=[document.active_tab_id().map(|id| id.to_string())] {
             @match document.active_tab() {
-                None => (empty_view(feedback == SwapFeedback::LiveViewDeleted)),
+                None => (empty_view(matches!(
+                    feedback,
+                    SwapFeedback::TabClosed | SwapFeedback::LiveViewDeleted
+                ))),
                 Some(tab) => @match tab.state() {
                     ViewerTabState::Ready => {
                         @if !defer_ready && !selection_pending {

@@ -28,9 +28,16 @@ pub(super) fn view(app: &ViewerApp, tab: ViewerTabId, options: RenderOptions) ->
     let theme = settings::load(app).theme();
     let settings = ViewerSettings::new(options, theme);
     let load_id = view_loading::prepare_materialization(app, settings.options())?;
-    render_view_with_tabs(app.renderer, &app.session, transient, settings, load_id)
-        .map(RouteOutput::Html)
-        .map_err(Into::into)
+    render_view_with_tabs(
+        app.renderer,
+        &app.session,
+        transient,
+        settings,
+        SwapFeedback::None,
+        load_id,
+    )
+    .map(RouteOutput::Html)
+    .map_err(Into::into)
 }
 
 pub(super) fn commit_patch(
@@ -50,9 +57,16 @@ pub(super) fn commit_patch(
     }
     let theme = settings::load(app).theme();
     let settings = ViewerSettings::new(options, theme);
-    render_view_with_tabs(app.renderer, &app.session, None, settings, None)
-        .map(RouteOutput::Html)
-        .map_err(Into::into)
+    render_view_with_tabs(
+        app.renderer,
+        &app.session,
+        None,
+        settings,
+        SwapFeedback::None,
+        None,
+    )
+    .map(RouteOutput::Html)
+    .map_err(Into::into)
 }
 
 pub(super) fn refresh(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
@@ -79,9 +93,16 @@ pub(super) fn close(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     }
     let transient = view_loading::ensure_active_view(app)?;
     let load_id = view_loading::prepare_materialization(app, settings.options())?;
-    render_view_with_tabs(app.renderer, &app.session, transient, settings, load_id)
-        .map(RouteOutput::Html)
-        .map_err(Into::into)
+    render_view_with_tabs(
+        app.renderer,
+        &app.session,
+        transient,
+        settings,
+        SwapFeedback::TabClosed,
+        load_id,
+    )
+    .map(RouteOutput::Html)
+    .map_err(Into::into)
 }
 
 fn tab_exists(app: &ViewerApp, id: ViewerTabId) -> Result<bool, String> {
@@ -108,9 +129,16 @@ pub(super) fn activate(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     let transient = view_loading::ensure_active_view(app)?;
     let settings = settings::load(app);
     let load_id = view_loading::prepare_materialization(app, settings.options())?;
-    render_view_with_tabs(app.renderer, &app.session, transient, settings, load_id)
-        .map(RouteOutput::Html)
-        .map_err(Into::into)
+    render_view_with_tabs(
+        app.renderer,
+        &app.session,
+        transient,
+        settings,
+        SwapFeedback::None,
+        load_id,
+    )
+    .map(RouteOutput::Html)
+    .map_err(Into::into)
 }
 
 #[expect(
@@ -122,6 +150,7 @@ pub(super) fn render_view_with_tabs(
     session: &Mutex<ViewerSession>,
     mut transient: Option<VersionedView>,
     settings: ViewerSettings,
+    feedback: SwapFeedback<'_>,
     load_id: Option<ViewLoadId>,
 ) -> Result<String, RenderError> {
     for _ in 0..GENERATION_ATTEMPTS_MAX {
@@ -140,10 +169,12 @@ pub(super) fn render_view_with_tabs(
                 Some(ViewerTabState::Ready)
             );
         let html = match (can_materialize, load_id) {
-            (true, Some(load_id)) => {
-                renderer.build_materialized_view_with_tabs(&snapshot.document, load_id)
-            }
-            _ => renderer.build_view_with_tabs(&snapshot.document),
+            (true, Some(load_id)) => renderer.build_materialized_view_with_tabs_feedback(
+                &snapshot.document,
+                feedback,
+                load_id,
+            ),
+            _ => renderer.build_view_with_tabs_feedback(&snapshot.document, feedback),
         };
         if view_snapshot::is_current(session, snapshot.ticket, snapshot.revision)? {
             return Ok(html);
@@ -276,6 +307,7 @@ mod tests {
                 view: old_view,
             }),
             settings(),
+            SwapFeedback::None,
             None,
         )
         .expect_err("ready oversize view retries to conflict");

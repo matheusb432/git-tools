@@ -30,9 +30,16 @@ pub(super) fn ready(app: &ViewerApp) -> RouteResult {
     }
     let settings = settings::load(app);
     let load_id = prepare_materialization(app, settings.options())?;
-    tabs::render_view_with_tabs(app.renderer, &app.session, None, settings, load_id)
-        .map(RouteOutput::Html)
-        .map_err(Into::into)
+    tabs::render_view_with_tabs(
+        app.renderer,
+        &app.session,
+        None,
+        settings,
+        crate::render::SwapFeedback::None,
+        load_id,
+    )
+    .map(RouteOutput::Html)
+    .map_err(Into::into)
 }
 
 pub(super) fn load_next(app: &ViewerApp, load: ViewLoadId) -> RouteResult {

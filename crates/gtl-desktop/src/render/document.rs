@@ -116,26 +116,32 @@ impl MaudViewerRenderer {
         fragments::history(history).into_string()
     }
 
-    pub(crate) fn build_view_with_tabs(self, document: &ViewerDocument) -> String {
-        self.render_view_with_tabs(document, None)
-    }
-
-    pub(crate) fn build_materialized_view_with_tabs(
+    pub(crate) fn build_view_with_tabs_feedback(
         self,
         document: &ViewerDocument,
+        feedback: SwapFeedback<'_>,
+    ) -> String {
+        self.render_view_with_tabs(document, feedback, None)
+    }
+
+    pub(crate) fn build_materialized_view_with_tabs_feedback(
+        self,
+        document: &ViewerDocument,
+        feedback: SwapFeedback<'_>,
         load_id: ViewLoadId,
     ) -> String {
-        self.render_view_with_tabs(document, Some(load_id))
+        self.render_view_with_tabs(document, feedback, Some(load_id))
     }
 
     fn render_view_with_tabs(
         self,
         document: &ViewerDocument,
+        feedback: SwapFeedback<'_>,
         load_id: Option<ViewLoadId>,
     ) -> String {
         html! {
-            (fragments::view(document, SwapMode::Primary, SwapFeedback::None, load_id, false))
-            (tabs(document, SwapMode::OutOfBand, SwapFeedback::None))
+            (fragments::view(document, SwapMode::Primary, feedback, load_id, false))
+            (tabs(document, SwapMode::OutOfBand, feedback))
         }
         .into_string()
     }
@@ -166,6 +172,7 @@ impl MaudViewerRenderer {
         let view_feedback = match feedback {
             SwapFeedback::LiveViewDeleted if load_id.is_none() => SwapFeedback::LiveViewDeleted,
             SwapFeedback::None
+            | SwapFeedback::TabClosed
             | SwapFeedback::LiveViewDeleted
             | SwapFeedback::SnapshotRecipesSkipped(_) => SwapFeedback::None,
         };

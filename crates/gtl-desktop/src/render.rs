@@ -411,8 +411,11 @@ mod tests {
     #[test]
     fn materialized_view_contains_a_shell_and_one_bounded_loader_chain() {
         let load_id = ViewLoadId::try_new(17).expect("positive load id");
-        let html =
-            MaudViewerRenderer.build_materialized_view_with_tabs(&sample_document(), load_id);
+        let html = MaudViewerRenderer.build_materialized_view_with_tabs_feedback(
+            &sample_document(),
+            SwapFeedback::None,
+            load_id,
+        );
 
         assert!(html.contains("id=\"viewer-diff-0\""));
         assert!(html.contains("id=\"viewer-chunk-loader\""));
@@ -703,7 +706,8 @@ mod tests {
 
     #[test]
     fn view_primary_response_updates_tabs_out_of_band() {
-        let html = MaudViewerRenderer.build_view_with_tabs(&sample_document());
+        let html = MaudViewerRenderer
+            .build_view_with_tabs_feedback(&sample_document(), SwapFeedback::None);
 
         assert_eq!(html.matches("id=\"viewer-view\"").count(), 1);
         assert_eq!(html.matches("id=\"viewer-tabs\"").count(), 1);
@@ -788,6 +792,23 @@ mod tests {
         assert!(history.contains("autofocus"), "{history}");
         assert!(html.contains("Live view deleted. No diffs remain open."));
         assert!(html.contains("Open History or run gtl diff live to add one."));
+        assert_eq!(html.matches("autofocus").count(), 1);
+    }
+
+    #[test]
+    fn tab_close_feedback_focuses_history_without_live_delete_announcement() {
+        let empty = ViewerDocument::new(vec![], None, None, vec![], settings())
+            .expect("empty viewer is valid");
+        let html =
+            MaudViewerRenderer.build_view_with_tabs_feedback(&empty, SwapFeedback::TabClosed);
+        let history = html
+            .split_once("class=\"viewer-recovery-button ")
+            .and_then(|(_, tail)| tail.split_once('>'))
+            .map(|(tag, _)| tag)
+            .expect("empty-state History action renders");
+
+        assert!(history.contains("autofocus"), "{history}");
+        assert!(!html.contains("Live view deleted."));
         assert_eq!(html.matches("autofocus").count(), 1);
     }
 

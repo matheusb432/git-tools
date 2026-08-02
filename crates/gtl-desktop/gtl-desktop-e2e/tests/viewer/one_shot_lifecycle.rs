@@ -102,7 +102,6 @@ async fn viewer_one_shot_lifecycle() -> Result<()> {
 
             let recovery =
                 support::selectors::by_accessible_name(session.driver(), "Open history").await?;
-            recovery.focus().await.context("focus history recovery")?;
             recovery
                 .send_keys(Key::Enter)
                 .await
@@ -299,7 +298,7 @@ async fn wait_for_empty_viewer(driver: &WebDriver) -> Result<()> {
                     r#"
 return document.querySelectorAll('.viewer-tab').length === 0
   && document.querySelector('.viewer-status-empty') !== null
-  && document.querySelector('.viewer-recovery-button') !== null;
+  && document.activeElement?.classList.contains('viewer-recovery-button');
 "#,
                     Vec::new(),
                 )
