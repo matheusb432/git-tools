@@ -121,9 +121,50 @@ async fn viewer_one_shot_lifecycle() -> Result<()> {
                 .context("reload one-shot viewer")?;
             wait_for_ready_snapshot(session.driver(), "one-shot-beta", "beta-one-shot-marker", 1)
                 .await?;
+            fixture.seed_render_history(33)?;
             open_history(session.driver()).await?;
+            wait_for_history_page_state(
+                session.driver(),
+                HistoryPageExpectation {
+                    current_page: 1,
+                    total_pages: 2,
+                    visible_rows: 30,
+                    position: HistoryPagePosition::First,
+                },
+            )
+            .await?;
+            support::selectors::by_accessible_name(session.driver(), "Last page")
+                .await?
+                .click()
+                .await
+                .context("open last render-history page")?;
+            wait_for_history_page_state(
+                session.driver(),
+                HistoryPageExpectation {
+                    current_page: 2,
+                    total_pages: 2,
+                    visible_rows: 5,
+                    position: HistoryPagePosition::Last,
+                },
+            )
+            .await?;
             wait_for_history_count(session.driver(), "one-shot-alpha", 1).await?;
-            wait_for_history_count(session.driver(), "one-shot-beta", 1).await
+            wait_for_history_count(session.driver(), "one-shot-beta", 1).await?;
+            support::selectors::by_accessible_name(session.driver(), "First page")
+                .await?
+                .click()
+                .await
+                .context("return to first render-history page")?;
+            wait_for_history_page_state(
+                session.driver(),
+                HistoryPageExpectation {
+                    current_page: 1,
+                    total_pages: 2,
+                    visible_rows: 30,
+                    position: HistoryPagePosition::First,
+                },
+            )
+            .await
         })
     })
     .await
@@ -255,6 +296,62 @@ return Array.from(document.querySelectorAll('#viewer-history .viewer-history-rep
                 .await
                 .context("count repository render history rows")?;
             Ok((result.json().as_u64() == Some(expected)).then_some(()))
+        },
+    )
+    .await
+}
+
+struct HistoryPageExpectation {
+    current_page: u64,
+    total_pages: u64,
+    visible_rows: u64,
+    position: HistoryPagePosition,
+}
+
+enum HistoryPagePosition {
+    First,
+    Last,
+}
+
+impl HistoryPagePosition {
+    fn disabled_controls(&self) -> [bool; 4] {
+        match self {
+            Self::First => [true, true, false, false],
+            Self::Last => [false, false, true, true],
+        }
+    }
+}
+
+async fn wait_for_history_page_state(
+    driver: &WebDriver,
+    expected: HistoryPageExpectation,
+) -> Result<()> {
+    let expected_disabled = expected.position.disabled_controls();
+    wait::until(
+        "bounded render history page with accessible navigation",
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            let result = driver
+                .execute(
+                    r#"
+const navigation = document.querySelector('[aria-label="Render history pages"]');
+const page = navigation?.querySelector('output');
+const buttons = Array.from(navigation?.querySelectorAll('button') ?? []);
+return document.querySelectorAll('#viewer-history .viewer-history-row').length === arguments[2]
+  && page?.getAttribute('aria-label') === `Page ${arguments[0]} of ${arguments[1]}`
+  && buttons.length === 4
+  && buttons.every((button, index) => button.disabled === arguments[3][index]);
+"#,
+                    vec![
+                        serde_json::json!(expected.current_page),
+                        serde_json::json!(expected.total_pages),
+                        serde_json::json!(expected.visible_rows),
+                        serde_json::json!(expected_disabled),
+                    ],
+                )
+                .await
+                .context("inspect render history page state")?;
+            Ok(result.json().as_bool().unwrap_or(false).then_some(()))
         },
     )
     .await

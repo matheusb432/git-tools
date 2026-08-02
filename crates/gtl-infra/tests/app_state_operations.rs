@@ -8,7 +8,7 @@ use std::{
 use gtl_application::{
     history::{
         get_recent_render::{self, GetRecentRender},
-        list_recent_renders::{self, ListRecentRenders},
+        list_recent_render_page::{self, ListRecentRenderPage},
         record_render::{self, RecordRender, RecordRenderError},
     },
     live_views::{
@@ -128,7 +128,8 @@ fn public_operations_use_the_migrated_schema() {
     }
     let history = {
         let connection = state.connection_lock().expect("lock state connection");
-        list_recent_renders::execute(ListRecentRenders, &connection).expect("list recent renders")
+        list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
+            .expect("list recent renders")
     };
     assert_eq!(history.entries.len(), 1);
     let id = history.entries[0].id;

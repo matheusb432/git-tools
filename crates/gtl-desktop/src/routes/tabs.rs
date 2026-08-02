@@ -1,6 +1,8 @@
 use std::sync::Mutex;
 
-use gtl_application::viewer::{RenderOptions, ViewerSettings, ViewerTabId, ViewerTabState};
+use gtl_application::viewer::{
+    RenderOptions, ViewerHistoryPage, ViewerSettings, ViewerTabId, ViewerTabState,
+};
 use tauri::http::StatusCode;
 
 use super::{
@@ -154,12 +156,16 @@ pub(super) fn render_view_with_tabs(
     load_id: Option<ViewLoadId>,
 ) -> Result<String, RenderError> {
     for _ in 0..GENERATION_ATTEMPTS_MAX {
-        let snapshot =
-            match view_snapshot::gather(session, transient.take(), Vec::new(), settings.clone()) {
-                Ok(snapshot) => snapshot,
-                Err(RenderError::Retry) => continue,
-                Err(error) => return Err(error),
-            };
+        let snapshot = match view_snapshot::gather(
+            session,
+            transient.take(),
+            ViewerHistoryPage::default(),
+            settings.clone(),
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(RenderError::Retry) => continue,
+            Err(error) => return Err(error),
+        };
         let can_materialize = snapshot.ticket.is_some()
             && matches!(
                 snapshot
@@ -196,12 +202,16 @@ pub(super) fn render_tabs_with_view(
     load_id: Option<ViewLoadId>,
 ) -> Result<String, RenderError> {
     for _ in 0..GENERATION_ATTEMPTS_MAX {
-        let snapshot =
-            match view_snapshot::gather(session, transient.take(), Vec::new(), settings.clone()) {
-                Ok(snapshot) => snapshot,
-                Err(RenderError::Retry) => continue,
-                Err(error) => return Err(error),
-            };
+        let snapshot = match view_snapshot::gather(
+            session,
+            transient.take(),
+            ViewerHistoryPage::default(),
+            settings.clone(),
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(RenderError::Retry) => continue,
+            Err(error) => return Err(error),
+        };
         let html = match load_id {
             Some(load_id) => {
                 renderer.build_materialized_tabs_with_view(&snapshot.document, feedback, load_id)
@@ -226,7 +236,12 @@ pub(super) fn render_tabs_only(
     feedback: SwapFeedback<'_>,
 ) -> Result<String, RenderError> {
     for _ in 0..GENERATION_ATTEMPTS_MAX {
-        let snapshot = match view_snapshot::gather(session, None, Vec::new(), settings.clone()) {
+        let snapshot = match view_snapshot::gather(
+            session,
+            None,
+            ViewerHistoryPage::default(),
+            settings.clone(),
+        ) {
             Ok(snapshot) => snapshot,
             Err(RenderError::Retry) => continue,
             Err(error) => return Err(error),

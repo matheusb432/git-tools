@@ -115,7 +115,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        history::{RecentRenderRecord, list_recent_renders, persistence::store_test},
+        history::{RecentRenderRecord, list_recent_render_page, persistence::store_test},
         testing::FixedClock,
     };
 
@@ -166,9 +166,12 @@ mod tests {
     }
 
     fn list_recent(connection: &Connection) -> Vec<RecentRenderRecord> {
-        list_recent_renders::execute(list_recent_renders::ListRecentRenders, connection)
-            .expect("list succeeds")
-            .entries
+        list_recent_render_page::execute(
+            list_recent_render_page::ListRecentRenderPage::default(),
+            connection,
+        )
+        .expect("list succeeds")
+        .entries
     }
 
     fn project_sources(connection: &Connection) -> Vec<(String, Option<String>)> {
@@ -321,10 +324,22 @@ mod tests {
             .expect("record succeeds");
         }
 
-        let renders = list_recent(&connection);
-        assert_eq!(renders.len(), RECENT_RENDERS_CAP);
-        assert_eq!(renders[0].title, "render 504");
-        assert_eq!(renders[RECENT_RENDERS_CAP - 1].title, "render 5");
+        let (render_count, newest_title, oldest_title): (i64, String, String) = connection
+            .query_row(
+                "SELECT COUNT(*),
+                        (SELECT title FROM recent_renders ORDER BY id DESC LIMIT 1),
+                        (SELECT title FROM recent_renders ORDER BY id ASC LIMIT 1)
+                 FROM recent_renders",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("read retained render bounds");
+        assert_eq!(
+            render_count,
+            i64::try_from(RECENT_RENDERS_CAP).expect("cap fits SQLite integer")
+        );
+        assert_eq!(newest_title, "render 504");
+        assert_eq!(oldest_title, "render 5");
         assert_eq!(
             project_sources(&connection)
                 .into_iter()

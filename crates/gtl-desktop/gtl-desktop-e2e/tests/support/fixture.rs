@@ -5,9 +5,13 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
+use gtl_application::history::record_render::{self, RecordRender};
+use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+use gtl_infra::{app_state::SqliteAppState, clock::SystemClock};
 use serde::Deserialize;
 
 const CONCURRENT_LIVE_LINE_COUNT_MAX: usize = 45_000;
+const RENDER_HISTORY_SEED_COUNT_MAX: usize = 60;
 const ONE_SHOT_ALPHA_REPOSITORY: &str = "one-shot-alpha";
 const ONE_SHOT_BETA_REPOSITORY: &str = "one-shot-beta";
 
@@ -76,6 +80,43 @@ impl OneShotFixture {
     pub fn forward_beta(&self) -> Result<()> {
         self.forward(&self.beta_repository)
             .context("forward beta one-shot diff")
+    }
+
+    pub fn seed_render_history(&self, count: usize) -> Result<()> {
+        if count > RENDER_HISTORY_SEED_COUNT_MAX {
+            bail!(
+                "render-history fixture requested {count} rows; maximum is {RENDER_HISTORY_SEED_COUNT_MAX}"
+            );
+        }
+
+        let app_state = SqliteAppState::open(&self.data_root).context("open fixture app state")?;
+        let mut connection = app_state
+            .connection_lock()
+            .context("lock fixture app state")?;
+        for index in 1..=count {
+            let repo_name = format!("history-seed-{index:02}");
+            let recipe = Recipe {
+                source: RecipeSource::LocalRepo(
+                    PathBuf::from("/e2e/render-history").join(&repo_name),
+                ),
+                op: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
+                name: None,
+            };
+            record_render::execute(
+                RecordRender {
+                    recipe,
+                    title: format!("{repo_name}: 1 commit"),
+                    repo_name,
+                    range_label: "main".into(),
+                },
+                &mut connection,
+                &SystemClock,
+            )
+            .with_context(|| format!("seed render-history row {index}"))?;
+        }
+        Ok(())
     }
 
     fn forward(&self, repository: &Path) -> Result<()> {

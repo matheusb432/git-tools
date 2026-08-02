@@ -2,7 +2,10 @@
 //! accessible feedback (skip toast, deletion announcement) a compound
 //! response attaches to it.
 
-use gtl_application::viewer::{Theme, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState};
+use gtl_application::{
+    history::list_recent_render_page::RecentRenderPageCursor,
+    viewer::{Theme, ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState},
+};
 use maud::{Markup, html};
 
 use super::{SwapFeedback, SwapMode, theme};
@@ -75,7 +78,7 @@ pub(in crate::render) fn tabs(
             ))
             button type="button"
                 class="viewer-history-button mb-[7px] flex flex-none cursor-pointer items-center gap-[7px] rounded-sm border border-transparent bg-transparent px-[9px] py-1.5 text-xs text-ink-2 [font:inherit] hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-acc-line [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc mobile:hidden"
-                hx-get=(ViewerRoute::History)
+                hx-get=(ViewerRoute::History { cursor: RecentRenderPageCursor::Newest })
                 hx-target="#viewer-history"
                 hx-swap="outerHTML"
                 popovertarget="viewer-history-popover" {

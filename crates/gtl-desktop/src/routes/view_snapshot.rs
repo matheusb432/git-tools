@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use gtl_application::{
     diffs::View,
-    viewer::{ViewerDocument, ViewerHistoryEntry, ViewerSettings, ViewerView},
+    viewer::{ViewerDocument, ViewerHistoryPage, ViewerSettings, ViewerView},
 };
 
 use crate::session::{CommitSelectionSnapshot, ComputeTicket, ViewerSession};
@@ -37,7 +37,7 @@ pub(super) struct ViewSnapshot {
 pub(super) fn gather(
     session: &Mutex<ViewerSession>,
     transient: Option<VersionedView>,
-    history: Vec<ViewerHistoryEntry>,
+    history: ViewerHistoryPage,
     settings: ViewerSettings,
 ) -> Result<ViewSnapshot, RenderError> {
     let mut session = session

@@ -18,14 +18,15 @@ pub(crate) const VIEW_STATE_ERROR: &str = "error";
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{num::NonZeroUsize, sync::Arc};
 
     use gtl_application::{
         diffs::{Cmd, FileDiff, Foot, View},
+        history::list_recent_render_page::RecentRenderPageCursor,
         viewer::{
             DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerDocument,
-            ViewerHistoryEntry, ViewerSettings, ViewerTab, ViewerTabId, ViewerTabKind,
-            ViewerTabState, ViewerView,
+            ViewerHistoryEntry, ViewerHistoryPage, ViewerSettings, ViewerTab, ViewerTabId,
+            ViewerTabKind, ViewerTabState, ViewerView,
         },
     };
     use gtl_models::diffs::Commit;
@@ -204,7 +205,40 @@ mod tests {
             ViewerRoute::DeleteLiveView { tab }.to_string(),
             "/tabs/7/live-view"
         );
-        assert_eq!(ViewerRoute::History.to_string(), "/history");
+        assert_eq!(
+            ViewerRoute::History {
+                cursor: RecentRenderPageCursor::Newest,
+            }
+            .to_string(),
+            "/history"
+        );
+        assert_eq!(
+            ViewerRoute::History {
+                cursor: RecentRenderPageCursor::OlderThan {
+                    render,
+                    page: NonZeroUsize::new(2).expect("positive page"),
+                },
+            }
+            .to_string(),
+            "/history?before=42&page=2"
+        );
+        assert_eq!(
+            ViewerRoute::History {
+                cursor: RecentRenderPageCursor::NewerThan {
+                    render,
+                    page: NonZeroUsize::new(1).expect("positive page"),
+                },
+            }
+            .to_string(),
+            "/history?after=42&page=1"
+        );
+        assert_eq!(
+            ViewerRoute::History {
+                cursor: RecentRenderPageCursor::Oldest,
+            }
+            .to_string(),
+            "/history?edge=last"
+        );
         assert_eq!(
             ViewerRoute::OpenHistory { render }.to_string(),
             "/history/42/open"
@@ -580,7 +614,8 @@ mod tests {
 
     #[test]
     fn history_row_shows_stable_id_and_escapes_metadata() {
-        let html = MaudViewerRenderer.build_history(&[sample_history_entry()]);
+        let page = ViewerHistoryPage::from(vec![sample_history_entry()]);
+        let html = MaudViewerRenderer.build_history(&page);
         let row = html
             .split_once("viewer-history-row")
             .and_then(|(_, tail)| tail.split_once('>'))
@@ -597,10 +632,41 @@ mod tests {
 
     #[test]
     fn history_row_offers_a_json_copy_action() {
-        let html = MaudViewerRenderer.build_history(&[sample_history_entry()]);
+        let page = ViewerHistoryPage::from(vec![sample_history_entry()]);
+        let html = MaudViewerRenderer.build_history(&page);
 
         assert!(html.contains("data-history-copy="));
         assert!(html.contains("aria-label=\"Copy render JSON\""));
+    }
+
+    #[test]
+    fn history_page_renders_keyset_navigation_without_offset_links() {
+        let entries = (31..=60)
+            .rev()
+            .map(|id| {
+                ViewerHistoryEntry::new(
+                    history_id(id),
+                    format!("render-{id}"),
+                    "git-tools".into(),
+                    "main..HEAD".into(),
+                    "2026-08-02T12:00:00Z".into(),
+                    sample_recipe(),
+                )
+            })
+            .collect();
+        let page = ViewerHistoryPage::new(entries, 65, 2, 3, true, true);
+
+        let html = MaudViewerRenderer.build_history(&page);
+
+        assert_eq!(html.matches("viewer-history-row").count(), 30);
+        assert!(html.contains("65 renders"));
+        assert!(html.contains("30 per page"));
+        assert!(html.contains(">02 / 03</output>"));
+        assert!(html.contains("hx-get=\"/history\""));
+        assert!(html.contains("hx-get=\"/history?after=60&amp;page=1\""));
+        assert!(html.contains("hx-get=\"/history?before=31&amp;page=3\""));
+        assert!(html.contains("hx-get=\"/history?edge=last\""));
+        assert!(!html.contains("?offset="));
     }
 
     #[test]

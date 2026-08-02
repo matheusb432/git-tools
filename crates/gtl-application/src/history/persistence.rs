@@ -295,7 +295,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        history::{list_recent_renders, record_render},
+        history::{list_recent_render_page, record_render},
         testing::FixedClock,
     };
 
@@ -313,10 +313,12 @@ mod tests {
         )
         .expect("record succeeds");
 
-        let entries =
-            list_recent_renders::execute(list_recent_renders::ListRecentRenders, &connection)
-                .expect("list succeeds")
-                .entries;
+        let entries = list_recent_render_page::execute(
+            list_recent_render_page::ListRecentRenderPage::default(),
+            &connection,
+        )
+        .expect("list succeeds")
+        .entries;
 
         assert_eq!(entries.len(), 1, "recipe {recipe:?} persists one row");
         assert_eq!(&entries[0].recipe, recipe, "recipe survives the row codec");

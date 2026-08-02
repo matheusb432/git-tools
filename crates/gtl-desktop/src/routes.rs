@@ -44,7 +44,7 @@ fn error_target(route: &Route) -> ErrorTarget {
         | Route::DeleteLiveView { .. }
         | Route::OpenHistory { .. }
         | Route::Pending => ErrorTarget::Tabs,
-        Route::History => ErrorTarget::History,
+        Route::History { .. } => ErrorTarget::History,
         Route::OpenDiffFile { .. } | Route::LoadNext { .. } => ErrorTarget::Action,
     }
 }
@@ -58,7 +58,7 @@ fn serve_route(app: &ViewerApp, route: Route) -> RouteResult {
         Route::Close { tab } => tabs::close(app, tab),
         Route::DeleteLiveView { tab } => live_views::delete(app, tab),
         Route::Activate { tab } => tabs::activate(app, tab),
-        Route::History => history::list(app),
+        Route::History { cursor } => history::list(app, cursor),
         Route::OpenHistory { render } => history::open(app, render),
         Route::Settings(change) => settings::serve(app, change),
         Route::Pending => pending::serve(app),

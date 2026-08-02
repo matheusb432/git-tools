@@ -1,6 +1,11 @@
 use gtl_application::{
-    history::{RecentRenderRecord, get_recent_render, list_recent_renders},
-    viewer::{RenderHistoryId, ViewerHistoryEntry, ViewerTabKind},
+    history::{
+        RecentRenderRecord, get_recent_render,
+        list_recent_render_page::{
+            self, ListRecentRenderPage, ListRecentRenderPageOk, RecentRenderPageCursor,
+        },
+    },
+    viewer::{RenderHistoryId, ViewerHistoryEntry, ViewerHistoryPage, ViewerTabKind},
 };
 use tauri::http::StatusCode;
 
@@ -10,9 +15,9 @@ use super::{
 };
 use crate::{presentation::ViewerApp, render::SwapFeedback};
 
-pub(super) fn list(app: &ViewerApp) -> RouteResult {
-    let entries = load(app)?;
-    Ok(RouteOutput::Html(app.renderer.build_history(&entries)))
+pub(super) fn list(app: &ViewerApp, cursor: RecentRenderPageCursor) -> RouteResult {
+    let page = load(app, cursor)?;
+    Ok(RouteOutput::Html(app.renderer.build_history(&page)))
 }
 
 pub(super) fn open(app: &ViewerApp, id: RenderHistoryId) -> RouteResult {
@@ -38,14 +43,28 @@ pub(super) fn open(app: &ViewerApp, id: RenderHistoryId) -> RouteResult {
         .map_err(Into::into)
 }
 
-pub(super) fn load(app: &ViewerApp) -> Result<Vec<ViewerHistoryEntry>, String> {
+pub(super) fn load(
+    app: &ViewerApp,
+    cursor: RecentRenderPageCursor,
+) -> Result<ViewerHistoryPage, String> {
     let connection = app
         .app_state
         .connection_lock()
         .map_err(|error| format!("{error:#}"))?;
-    list_recent_renders::execute(list_recent_renders::ListRecentRenders, &connection)
-        .map(|response| response.entries.into_iter().map(to_viewer_entry).collect())
+    list_recent_render_page::execute(ListRecentRenderPage { cursor }, &connection)
+        .map(to_viewer_page)
         .map_err(|error| format!("{error:#}"))
+}
+
+fn to_viewer_page(response: ListRecentRenderPageOk) -> ViewerHistoryPage {
+    ViewerHistoryPage::new(
+        response.entries.into_iter().map(to_viewer_entry).collect(),
+        response.total_count,
+        response.page_number,
+        response.page_count,
+        response.has_newer,
+        response.has_older,
+    )
 }
 
 fn to_viewer_entry(record: RecentRenderRecord) -> ViewerHistoryEntry {

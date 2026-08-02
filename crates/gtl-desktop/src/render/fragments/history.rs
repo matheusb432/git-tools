@@ -1,6 +1,11 @@
-//! The render-history list shown inside the history popover.
+//! The keyset-paginated render history shown inside the history popover.
 
-use gtl_application::viewer::ViewerHistoryEntry;
+use std::num::NonZeroUsize;
+
+use gtl_application::{
+    history::list_recent_render_page::{RECENT_RENDER_PAGE_SIZE, RecentRenderPageCursor},
+    viewer::{ViewerHistoryEntry, ViewerHistoryPage},
+};
 use maud::{Markup, PreEscaped, html};
 
 use crate::render::ViewerRoute;
@@ -23,16 +28,17 @@ fn history_copy_json(entry: &ViewerHistoryEntry) -> String {
     serde_json::to_string_pretty(&payload).unwrap_or_default()
 }
 
-pub(in crate::render) fn history(entries: &[ViewerHistoryEntry]) -> Markup {
+pub(in crate::render) fn history(page: &ViewerHistoryPage) -> Markup {
+    let entries = page.entries();
     html! {
-        section id="viewer-history" class="viewer-history gtl-scroll h-[calc(100%-58px)] overflow-auto px-4 py-3.5 [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft" aria-label="Recent diff previews" {
+        section id="viewer-history" class="viewer-history grid h-[calc(100%-58px)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden px-4 [&.htmx-swapping]:bg-acc-soft [&.htmx-settling]:bg-acc-soft" aria-label="Recent diff previews" {
             @if entries.is_empty() {
-                div class="viewer-history-empty grid h-full place-content-center text-center text-ink-2" {
+                div class="viewer-history-empty col-span-full row-span-full grid h-full place-content-center text-center text-ink-2" {
                     strong class="text-ink" { "No history yet" }
                     p class="mt-1 mb-0" { "Rendered diffs will appear here after you open them." }
                 }
             } @else {
-                div class="viewer-history-columns grid grid-cols-[52px_minmax(160px,1.5fr)_minmax(120px,1fr)_88px_minmax(120px,1fr)_168px_34px] items-center gap-3 border-b border-line px-2.5 pt-1.5 pb-2 text-[10px] font-bold tracking-[.06em] text-ink-3 uppercase mobile:hidden" aria-hidden="true" {
+                div class="viewer-history-columns grid grid-cols-[52px_minmax(160px,1.5fr)_minmax(120px,1fr)_88px_minmax(120px,1fr)_168px_34px] items-center gap-3 border-b border-line px-2.5 pt-5 pb-2 text-[10px] font-bold tracking-[.06em] text-ink-3 uppercase mobile:hidden" aria-hidden="true" {
                     span { "ID" }
                     span { "Diff" }
                     span { "Repository" }
@@ -41,9 +47,9 @@ pub(in crate::render) fn history(entries: &[ViewerHistoryEntry]) -> Markup {
                     span { "Rendered" }
                     span {}
                 }
-                div class="viewer-history-list pt-1" {
+                div class="viewer-history-list gtl-scroll min-h-0 overflow-auto pt-1" {
                     @for entry in entries {
-                div class="viewer-history-row grid w-full cursor-pointer select-text grid-cols-[52px_minmax(160px,1.5fr)_minmax(120px,1fr)_88px_minmax(120px,1fr)_168px_34px] items-center gap-3 rounded-sm border border-transparent px-2.5 py-[9px] text-ink-2 hover:border-line hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-acc-line [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc mobile:grid-cols-[minmax(0,1fr)_auto_34px]"
+                        div class="viewer-history-row grid w-full cursor-pointer select-text grid-cols-[52px_minmax(160px,1.5fr)_minmax(120px,1fr)_88px_minmax(120px,1fr)_168px_34px] items-center gap-3 rounded-sm border border-transparent px-2.5 py-2 text-ink-2 hover:border-line hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc [&.htmx-request]:cursor-progress [&.htmx-request]:border-acc-line [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc mobile:grid-cols-[minmax(0,1fr)_auto_34px]"
                             role="button"
                             tabindex="0"
                             hx-get=(ViewerRoute::OpenHistory { render: entry.id() })
@@ -66,7 +72,80 @@ pub(in crate::render) fn history(entries: &[ViewerHistoryEntry]) -> Markup {
                         }
                     }
                 }
+                (history_footer(page))
             }
+        }
+    }
+}
+
+fn history_footer(page: &ViewerHistoryPage) -> Markup {
+    let first_render = page.entries().first().map(ViewerHistoryEntry::id);
+    let last_render = page.entries().last().map(ViewerHistoryEntry::id);
+    let previous_page = page
+        .page_number()
+        .checked_sub(1)
+        .and_then(NonZeroUsize::new);
+    let next_page = page
+        .page_number()
+        .checked_add(1)
+        .and_then(NonZeroUsize::new);
+    let first_route = page.has_newer().then_some(ViewerRoute::History {
+        cursor: RecentRenderPageCursor::Newest,
+    });
+    let previous_route = page.has_newer().then(|| ViewerRoute::History {
+        cursor: RecentRenderPageCursor::NewerThan {
+            render: first_render.expect("a populated page has a first render"),
+            page: previous_page.expect("a page with newer rows is not the first page"),
+        },
+    });
+    let next_route = page.has_older().then(|| ViewerRoute::History {
+        cursor: RecentRenderPageCursor::OlderThan {
+            render: last_render.expect("a populated page has a last render"),
+            page: next_page.expect("the page number can advance while older rows exist"),
+        },
+    });
+    let last_route = page.has_older().then_some(ViewerRoute::History {
+        cursor: RecentRenderPageCursor::Oldest,
+    });
+    let progress_percent = page
+        .page_number()
+        .checked_mul(100)
+        .and_then(|value| value.checked_div(page.page_count()))
+        .unwrap_or(0);
+    html! {
+        footer class="viewer-history-footer relative -mx-4 grid min-h-14 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center border-t border-line bg-surface px-4 mobile:grid-cols-[1fr_auto] mobile:px-2" {
+            div class="absolute inset-x-4 top-0 h-px bg-line mobile:inset-x-2" role="progressbar" aria-label="History page position" aria-valuemin="1" aria-valuemax=(page.page_count()) aria-valuenow=(page.page_number()) {
+                span class="block h-full bg-acc" style=(format!("width:{progress_percent}%")) {}
+            }
+            p class="m-0 text-[11px] tabular-nums text-ink-3 mobile:hidden" {
+                (page.total_count()) " renders " (PreEscaped("&middot;")) " " (RECENT_RENDER_PAGE_SIZE) " per page"
+            }
+            nav class="col-start-2 flex items-center justify-center gap-1" aria-label="Render history pages" {
+                (history_page_button("First page", "<<", first_route))
+                (history_page_button("Previous page", "<", previous_route))
+                output class="min-w-16 px-2 text-center text-xs tabular-nums text-ink" aria-label=(format!("Page {} of {}", page.page_number(), page.page_count())) {
+                    (format!("{:02}", page.page_number())) " / " (format!("{:02}", page.page_count()))
+                }
+                (history_page_button("Next page", ">", next_route))
+                (history_page_button("Last page", ">>", last_route))
+            }
+        }
+    }
+}
+
+fn history_page_button(label: &str, icon: &str, route: Option<ViewerRoute>) -> Markup {
+    let disabled = route.is_none();
+    html! {
+        button type="button"
+            class="viewer-history-page-button grid min-h-11 min-w-11 cursor-pointer place-content-center rounded-sm border border-transparent bg-transparent px-2 text-xs font-semibold text-ink-2 [font:inherit] hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc disabled:cursor-default disabled:text-ink-3 disabled:opacity-50 disabled:hover:border-transparent disabled:hover:bg-transparent [&.htmx-request]:cursor-progress [&.htmx-request]:border-acc-line [&.htmx-request]:bg-acc-soft [&.htmx-request]:text-acc"
+            aria-label=(label)
+            title=(label)
+            disabled[disabled]
+            hx-get=[route.map(|route| route.to_string())]
+            hx-target="#viewer-history"
+            hx-swap="outerHTML"
+            hx-sync="#viewer-history:replace" {
+            span aria-hidden="true" { (icon) }
         }
     }
 }

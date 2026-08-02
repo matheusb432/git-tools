@@ -1,6 +1,9 @@
 use std::sync::Mutex;
 
-use gtl_application::viewer::{ViewerHistoryEntry, ViewerSettings};
+use gtl_application::{
+    history::list_recent_render_page::RecentRenderPageCursor,
+    viewer::{ViewerHistoryPage, ViewerSettings},
+};
 
 use super::{
     history, live_views,
@@ -13,7 +16,7 @@ use crate::{presentation::ViewerApp, render::MaudViewerRenderer, session::Viewer
 pub(super) fn serve(app: &ViewerApp) -> RouteResult {
     let transient = live_views::restore(app)?;
     let settings = settings::load(app);
-    let history = history::load(app)?;
+    let history = history::load(app, RecentRenderPageCursor::Newest)?;
     render_document(app.renderer, &app.session, transient, history, settings)
         .map(RouteOutput::Html)
         .map_err(Into::into)
@@ -27,7 +30,7 @@ fn render_document(
     renderer: MaudViewerRenderer,
     session: &Mutex<ViewerSession>,
     transient: Option<VersionedView>,
-    history: Vec<ViewerHistoryEntry>,
+    history: ViewerHistoryPage,
     settings: ViewerSettings,
 ) -> Result<String, RenderError> {
     let mut transient = transient;

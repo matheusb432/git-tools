@@ -1,7 +1,8 @@
 use std::fmt;
 
-use gtl_application::viewer::{
-    DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerTabId,
+use gtl_application::{
+    history::list_recent_render_page::RecentRenderPageCursor,
+    viewer::{DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerTabId},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,7 +35,9 @@ pub(super) enum ViewerRoute {
     DeleteLiveView {
         tab: ViewerTabId,
     },
-    History,
+    History {
+        cursor: RecentRenderPageCursor,
+    },
     OpenHistory {
         render: RenderHistoryId,
     },
@@ -60,7 +63,18 @@ impl fmt::Display for ViewerRoute {
             Self::Refresh { tab } => write!(formatter, "/tabs/{tab}/refresh"),
             Self::Close { tab } => write!(formatter, "/tabs/{tab}/close"),
             Self::DeleteLiveView { tab } => write!(formatter, "/tabs/{tab}/live-view"),
-            Self::History => formatter.write_str("/history"),
+            Self::History {
+                cursor: RecentRenderPageCursor::Newest,
+            } => formatter.write_str("/history"),
+            Self::History {
+                cursor: RecentRenderPageCursor::OlderThan { render, page },
+            } => write!(formatter, "/history?before={render}&page={page}"),
+            Self::History {
+                cursor: RecentRenderPageCursor::NewerThan { render, page },
+            } => write!(formatter, "/history?after={render}&page={page}"),
+            Self::History {
+                cursor: RecentRenderPageCursor::Oldest,
+            } => formatter.write_str("/history?edge=last"),
             Self::OpenHistory { render } => write!(formatter, "/history/{render}/open"),
             Self::Settings(ViewerSettingChange::Layout(value)) => {
                 write!(formatter, "/settings?layout={value}")

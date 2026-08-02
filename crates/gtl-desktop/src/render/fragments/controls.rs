@@ -1,8 +1,9 @@
 //! The display controls header: the layout and density radios scoped to the
 //! active view, plus the live-view actions.
 
-use gtl_application::viewer::{
-    DiffDensity, DiffLayout, Theme, ViewerTabId, ViewerTabKind, ViewerView,
+use gtl_application::{
+    history::list_recent_render_page::RecentRenderPageCursor,
+    viewer::{DiffDensity, DiffLayout, Theme, ViewerTabId, ViewerTabKind, ViewerView},
 };
 use maud::{Markup, html};
 
@@ -55,7 +56,7 @@ pub(super) fn mobile_view_controls(
         div class="grid gap-2" {
             button type="button"
                 class=(gtl_preview::mobile_menu_button_classes())
-                hx-get=(ViewerRoute::History)
+                hx-get=(ViewerRoute::History { cursor: RecentRenderPageCursor::Newest })
                 hx-target="#viewer-history"
                 hx-swap="outerHTML"
                 popovertarget="viewer-history-popover" { "Render history" }

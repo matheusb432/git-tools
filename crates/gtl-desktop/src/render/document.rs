@@ -111,7 +111,7 @@ impl MaudViewerRenderer {
 
     pub(crate) fn build_history(
         self,
-        history: &[gtl_application::viewer::ViewerHistoryEntry],
+        history: &gtl_application::viewer::ViewerHistoryPage,
     ) -> String {
         fragments::history(history).into_string()
     }

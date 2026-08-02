@@ -2,7 +2,7 @@
 
 pub mod get_recent_render;
 pub mod list;
-pub mod list_recent_renders;
+pub mod list_recent_render_page;
 mod persistence;
 pub mod record_render;
 

@@ -1,13 +1,19 @@
-use std::{collections::HashMap, num::NonZeroU64, path::PathBuf};
+use std::{
+    collections::HashMap,
+    num::{NonZeroU64, NonZeroUsize},
+    path::PathBuf,
+};
 
-use gtl_application::viewer::{
-    DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerTabId,
+use gtl_application::{
+    history::list_recent_render_page::RecentRenderPageCursor,
+    viewer::{DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, Theme, ViewerTabId},
 };
 use tauri::http::{Method, Request, StatusCode};
 
 use crate::{materialization::ViewLoadId, protocol_config};
 
 const OPEN_DIFF_FILE_QUERY_BYTES_MAX: usize = 16 * 1024;
+const HISTORY_QUERY_BYTES_MAX: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SettingChange {
@@ -55,7 +61,9 @@ pub(crate) enum Route {
     Activate {
         tab: ViewerTabId,
     },
-    History,
+    History {
+        cursor: RecentRenderPageCursor,
+    },
     OpenHistory {
         render: RenderHistoryId,
     },
@@ -140,8 +148,8 @@ pub(crate) fn parse(request: &Request<Vec<u8>>) -> Result<Route, StatusCode> {
         RouteShape::Activate => tab_route(uri.query(), segments[1], |tab| Route::Activate { tab }),
         RouteShape::OpenDiffFile => parse_open_diff_file(uri.query(), segments[1]),
         RouteShape::History => {
-            reject_query(uri.query())?;
-            Ok(Route::History)
+            let cursor = parse_history_cursor(uri.query())?;
+            Ok(Route::History { cursor })
         }
         RouteShape::OpenHistory => {
             reject_query(uri.query())?;
@@ -184,6 +192,44 @@ fn parse_resume(query: Option<&str>) -> Result<Option<ResumeNonce>, StatusCode> 
     ResumeNonce::try_new(value)
         .map(Some)
         .ok_or(StatusCode::BAD_REQUEST)
+}
+
+fn parse_history_cursor(query: Option<&str>) -> Result<RecentRenderPageCursor, StatusCode> {
+    let Some(raw_query) = query else {
+        return Ok(RecentRenderPageCursor::Newest);
+    };
+    if raw_query.len() > HISTORY_QUERY_BYTES_MAX {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let query = parse_query(Some(raw_query))?;
+    if query.len() == 1 && query.get("edge") == Some(&"last") {
+        return Ok(RecentRenderPageCursor::Oldest);
+    }
+    if query.len() != 2 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let page = query
+        .get("page")
+        .ok_or(StatusCode::BAD_REQUEST)?
+        .parse::<usize>()
+        .map_err(|_| StatusCode::BAD_REQUEST)
+        .and_then(|page| NonZeroUsize::new(page).ok_or(StatusCode::BAD_REQUEST))?;
+    let (key, older) = if let Some(value) = query.get("before") {
+        (value, true)
+    } else if let Some(value) = query.get("after") {
+        (value, false)
+    } else {
+        return Err(StatusCode::BAD_REQUEST);
+    };
+    let render = key
+        .parse::<i64>()
+        .map_err(|_| StatusCode::BAD_REQUEST)
+        .and_then(|id| RenderHistoryId::try_new(id).map_err(|_| StatusCode::BAD_REQUEST))?;
+    Ok(if older {
+        RecentRenderPageCursor::OlderThan { render, page }
+    } else {
+        RecentRenderPageCursor::NewerThan { render, page }
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -289,10 +335,11 @@ fn parse_query(query: Option<&str>) -> Result<HashMap<&str, &str>, StatusCode> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{num::NonZeroUsize, path::PathBuf};
 
-    use gtl_application::viewer::{
-        DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, ViewerTabId,
+    use gtl_application::{
+        history::list_recent_render_page::RecentRenderPageCursor,
+        viewer::{DiffDensity, DiffLayout, RenderHistoryId, RenderOptions, ViewerTabId},
     };
     use tauri::http::{Method, Request, StatusCode};
 
@@ -359,7 +406,40 @@ mod tests {
                     diff_file_path: PathBuf::from("src/a b.rs"),
                 },
             ),
-            (app_uri("/history"), Method::GET, Route::History),
+            (
+                app_uri("/history"),
+                Method::GET,
+                Route::History {
+                    cursor: RecentRenderPageCursor::Newest,
+                },
+            ),
+            (
+                app_uri("/history?before=42&page=2"),
+                Method::GET,
+                Route::History {
+                    cursor: RecentRenderPageCursor::OlderThan {
+                        render,
+                        page: NonZeroUsize::new(2).expect("positive page"),
+                    },
+                },
+            ),
+            (
+                app_uri("/history?after=42&page=1"),
+                Method::GET,
+                Route::History {
+                    cursor: RecentRenderPageCursor::NewerThan {
+                        render,
+                        page: NonZeroUsize::new(1).expect("positive page"),
+                    },
+                },
+            ),
+            (
+                app_uri("/history?edge=last"),
+                Method::GET,
+                Route::History {
+                    cursor: RecentRenderPageCursor::Oldest,
+                },
+            ),
             (app_uri("/ready"), Method::GET, Route::Ready),
             (
                 app_uri("/loads/9/next"),
@@ -399,6 +479,27 @@ mod tests {
                 parse(&request(Method::GET, &app_uri(&format!("/{query}")))),
                 Err(StatusCode::BAD_REQUEST),
                 "{query}"
+            );
+        }
+    }
+
+    #[test]
+    fn history_cursor_rejects_offsets_and_malformed_keysets() {
+        for route in [
+            "/history?offset=30",
+            "/history?before=42",
+            "/history?before=42&page=0",
+            "/history?before=0&page=2",
+            "/history?after=42&page=abc",
+            "/history?before=42&after=41&page=2",
+            "/history?edge=first",
+            "/history?edge=middle",
+            "/history?edge=last&page=2",
+        ] {
+            assert_eq!(
+                parse(&request(Method::GET, &app_uri(route))),
+                Err(StatusCode::BAD_REQUEST),
+                "{route}"
             );
         }
     }

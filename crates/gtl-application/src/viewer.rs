@@ -220,6 +220,75 @@ impl ViewerHistoryEntry {
     }
 }
 
+/// Holds one bounded recent-render page and its navigation state.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ViewerHistoryPage {
+    entries: Vec<ViewerHistoryEntry>,
+    total_count: usize,
+    page_number: usize,
+    page_count: usize,
+    has_newer: bool,
+    has_older: bool,
+}
+
+impl ViewerHistoryPage {
+    pub fn new(
+        entries: Vec<ViewerHistoryEntry>,
+        total_count: usize,
+        page_number: usize,
+        page_count: usize,
+        has_newer: bool,
+        has_older: bool,
+    ) -> Self {
+        Self {
+            entries,
+            total_count,
+            page_number,
+            page_count,
+            has_newer,
+            has_older,
+        }
+    }
+
+    pub fn entries(&self) -> &[ViewerHistoryEntry] {
+        &self.entries
+    }
+
+    pub const fn total_count(&self) -> usize {
+        self.total_count
+    }
+
+    pub const fn page_number(&self) -> usize {
+        self.page_number
+    }
+
+    pub const fn page_count(&self) -> usize {
+        self.page_count
+    }
+
+    pub const fn has_newer(&self) -> bool {
+        self.has_newer
+    }
+
+    pub const fn has_older(&self) -> bool {
+        self.has_older
+    }
+}
+
+impl From<Vec<ViewerHistoryEntry>> for ViewerHistoryPage {
+    fn from(entries: Vec<ViewerHistoryEntry>) -> Self {
+        let total_count = entries.len();
+        Self {
+            entries,
+            total_count,
+            page_number: usize::from(total_count > 0),
+            page_count: usize::from(total_count > 0),
+            has_newer: false,
+            has_older: false,
+        }
+    }
+}
+
 /// Holds the validated rendering and color choices applied to the viewer document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewerSettings {
@@ -320,7 +389,7 @@ pub struct ViewerDocument {
     tabs: Vec<ViewerTab>,
     active_tab_id: Option<ViewerTabId>,
     active_view: Option<ViewerView>,
-    history: Vec<ViewerHistoryEntry>,
+    history: ViewerHistoryPage,
     settings: ViewerSettings,
 }
 
@@ -352,7 +421,7 @@ impl ViewerDocument {
         tabs: Vec<ViewerTab>,
         active_tab_id: Option<ViewerTabId>,
         active_view: Option<ViewerView>,
-        history: Vec<ViewerHistoryEntry>,
+        history: impl Into<ViewerHistoryPage>,
         settings: ViewerSettings,
     ) -> Result<Self, ViewerDocumentError> {
         let mut tab_ids = HashSet::with_capacity(tabs.len());
@@ -410,7 +479,7 @@ impl ViewerDocument {
             tabs,
             active_tab_id,
             active_view,
-            history,
+            history: history.into(),
             settings,
         })
     }
@@ -445,7 +514,7 @@ impl ViewerDocument {
     }
 
     /// Returns recent renders in the order supplied by the application query.
-    pub fn history(&self) -> &[ViewerHistoryEntry] {
+    pub const fn history(&self) -> &ViewerHistoryPage {
         &self.history
     }
 
