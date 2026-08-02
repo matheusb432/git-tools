@@ -66,10 +66,9 @@ pub enum Status {
     Fail,
 }
 
-/// Applied result: a status, a human-readable detail block, and the per-repo reports.
+/// Applied result: an overall status and the structured per-repo reports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PushAllResult {
     pub status: Status,
-    pub detail: String,
     pub reports: Vec<RepoReport>,
 }

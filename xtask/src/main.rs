@@ -40,7 +40,7 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::Build { target } => verbs::build::run(target),
         cli::Command::FrontendTest => verbs::frontend::test(),
         cli::Command::FrontendBench => verbs::frontend::bench(),
-        cli::Command::DesktopBench(arguments) => verbs::bench::run(&arguments),
+        cli::Command::Bench(arguments) => verbs::bench::run(&arguments),
         cli::Command::Fmt(arguments) => verbs::format::run(arguments.verbose),
         cli::Command::FmtCheck(arguments) => verbs::format::check(arguments.verbose),
         cli::Command::Lint => verbs::lint::run(),

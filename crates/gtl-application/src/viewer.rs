@@ -1,9 +1,10 @@
 use std::{collections::HashSet, sync::Arc};
 
-pub mod complete_recipe_computation;
-pub mod compute_recipe;
+mod complete_recipe_computation;
+mod compute_recipe;
 pub mod initial_recipe_label;
-pub mod probe_recipe;
+pub mod prepare_recipe;
+mod probe_recipe;
 mod recipe_label;
 
 pub use gtl_models::viewer::{

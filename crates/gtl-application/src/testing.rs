@@ -21,8 +21,6 @@ use gtl_models::{
     viewer::RenderOptions,
 };
 
-#[cfg(test)]
-use crate::ports::AppStateStore;
 use crate::ports::{
     AppSettings, ArtifactMeta, ArtifactStore, Clock, GitClient, GitCommitReceipt, GitDiffFormat,
     GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState, GitWorkingTree, HistoryRecord,
@@ -645,35 +643,6 @@ impl PushLedger for FakePushLedger {
         self.known.get(repo_name).cloned()
     }
     async fn refresh(&self) {}
-}
-
-/// Provides one clone-shared in-memory `SQLite` connection for application tests.
-#[derive(Debug, Clone)]
-#[cfg(test)]
-pub(crate) struct AppStateStoreTest {
-    connection: Arc<Mutex<rusqlite::Connection>>,
-}
-
-#[cfg(test)]
-impl AppStateStoreTest {
-    pub(crate) fn new(schema: &str) -> anyhow::Result<Self> {
-        let connection = rusqlite::Connection::open_in_memory()?;
-        connection.execute_batch(schema)?;
-        Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
-        })
-    }
-}
-
-#[cfg(test)]
-impl AppStateStore for AppStateStoreTest {
-    fn connection_lock(
-        &self,
-    ) -> anyhow::Result<impl std::ops::DerefMut<Target = rusqlite::Connection> + '_> {
-        self.connection
-            .try_lock()
-            .map_err(|error| anyhow::anyhow!("locking app-state test connection failed: {error}"))
-    }
 }
 
 /// Scripted Git client that returns queued adapter responses or failures.

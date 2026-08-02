@@ -11,7 +11,6 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use gtl_application::ports::AppStateStore;
 use gtl_daemon::{lifecycle::ExeIdentity, state::DaemonState};
 use http_body_util::BodyExt as _;
 use serde_json::{Value, json};

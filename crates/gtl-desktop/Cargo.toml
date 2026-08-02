@@ -12,16 +12,6 @@ path = "src/main.rs"
 name = "gtl_desktop"
 path = "src/lib.rs"
 
-[[bench]]
-name = "viewer_render"
-harness = false
-required-features = ["benchmark-support"]
-
-[[bench]]
-name = "view_cache"
-harness = false
-required-features = ["benchmark-support"]
-
 [build-dependencies]
 serde.workspace = true
 tauri-build.workspace = true
@@ -57,7 +47,6 @@ benchmark-support = []
 custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
-criterion.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 toml.workspace = true

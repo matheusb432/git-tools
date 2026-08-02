@@ -15,7 +15,7 @@ use crate::{
         DiffTargetArgs, LiveArgs, ManagedArgs, ManagedReadArgs, MergeArgs, PruneArgs, PushArgs,
         SquashArgs, StatusArgs, SwArgs, TagCommand, Theme, WorktreeCommand,
     },
-    commands::managed::{ManagedExit, ManagedOptions, ManagedRun},
+    commands::managed::{ManagedExit, ManagedOptions, ManagedRun, PushOutcome, PushSummary},
     confirm::{Confirmation, DefaultAnswer, RealConfirm},
 };
 
@@ -681,17 +681,48 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
     }
 
     let result = push_subrepos::apply::execute(push_subrepos::apply::ApplyPush { targets }, &git);
+    let detail = format_push_subrepos_result(&result);
     match result.status {
         gtl_models::managed::push_subrepos::Status::Ok => {
-            println!("{}", result.detail);
+            println!("{detail}");
             ExitCode::Ok
         }
         gtl_models::managed::push_subrepos::Status::Partial
         | gtl_models::managed::push_subrepos::Status::Fail => {
-            eprintln!("{}", result.detail);
+            eprintln!("{detail}");
             ExitCode::Internal
         }
     }
+}
+
+fn format_push_subrepos_result(
+    result: &gtl_models::managed::push_subrepos::PushAllResult,
+) -> String {
+    use gtl_models::managed::push_subrepos::{RepoOutcome, Status};
+
+    let summary = PushSummary::from_outcomes(
+        result.reports.iter().map(|report| match &report.outcome {
+            RepoOutcome::Pushed => PushOutcome::Pushed,
+            RepoOutcome::UpToDate | RepoOutcome::Skipped(_) => PushOutcome::Skipped,
+            RepoOutcome::Failed(_) => PushOutcome::Failed,
+        }),
+        false,
+    );
+    let exit_code = match result.status {
+        Status::Ok => 0,
+        Status::Partial | Status::Fail => 1,
+    };
+    let mut detail = summary.render(exit_code);
+    for report in &result.reports {
+        let line = match &report.outcome {
+            RepoOutcome::Pushed => format!("\n  {}: pushed", report.label),
+            RepoOutcome::UpToDate => format!("\n  {}: already up to date", report.label),
+            RepoOutcome::Skipped(reason) => format!("\n  {}: skipped — {reason}", report.label),
+            RepoOutcome::Failed(reason) => format!("\n  {}: failed — {reason}", report.label),
+        };
+        detail.push_str(&line);
+    }
+    detail
 }
 
 /// Orchestrates `sw`: pick the flow from flags, run the plan read-only, then apply.

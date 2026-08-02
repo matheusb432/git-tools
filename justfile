@@ -49,6 +49,13 @@ purge:
 _preflight:
     test -x "{{ _bin }}" || cargo build --release -p gtl-cli -p gtl-daemon
 
+# ============ performance ============
+
+# Run a shared Rust benchmark; --fast selects the concise viewer-render preset.
+[group('performance')]
+bench *args:
+    cargo run --quiet -p xtask -- bench {{ args }}
+
 # ============ quality ============
 
 # Run tests, or use `just test coverage` for cargo-llvm-cov. Run `just test --help` for options.

@@ -27,10 +27,14 @@ pub async fn handle(
     let Json(request) = request.map_err(|error| EndpointError::bad_request(error.body_text()))?;
     let request = super::to_request(request);
     let response = tokio::task::spawn_blocking(move || {
+        let mut connection = state
+            .app_state
+            .connection_lock()
+            .map_err(gtl_application::live_views::save::SaveLiveViewError::from)?;
         gtl_application::live_views::save::execute(
             request,
             &state.git,
-            &state.app_state,
+            &mut connection,
             &state.clock,
         )
     })

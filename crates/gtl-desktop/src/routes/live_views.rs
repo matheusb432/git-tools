@@ -21,14 +21,20 @@ pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
         return Ok(RouteOutput::Empty(StatusCode::NOT_FOUND));
     };
 
-    live_views::remove::execute(
-        live_views::remove::RemoveLiveView {
-            source_kind: source.kind().into(),
-            source_value: source.value(),
-        },
-        &app.app_state,
-    )
-    .map_err(|error| format!("{error:#}"))?;
+    {
+        let connection = app
+            .app_state
+            .connection_lock()
+            .map_err(|error| format!("{error:#}"))?;
+        live_views::remove::execute(
+            live_views::remove::RemoveLiveView {
+                source_kind: source.kind().into(),
+                source_value: source.value(),
+            },
+            &connection,
+        )
+        .map_err(|error| format!("{error:#}"))?;
+    }
 
     let closed = app
         .session
@@ -56,9 +62,15 @@ pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
 
 pub(super) fn restore(app: &ViewerApp) -> Result<Option<VersionedView>, RouteError> {
     let owner = app.restoration.run_once(|| {
-        let records = live_views::list::execute(live_views::list::ListLiveViews, &app.app_state)
-            .map_err(|error| format!("{error:#}"))?
-            .views;
+        let records = {
+            let connection = app
+                .app_state
+                .connection_lock()
+                .map_err(|error| format!("{error:#}"))?;
+            live_views::list::execute(live_views::list::ListLiveViews, &connection)
+                .map_err(|error| format!("{error:#}"))?
+                .views
+        };
         let mut newest = None;
         {
             let mut session = app.session.lock().map_err(|error| error.to_string())?;

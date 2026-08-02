@@ -10,6 +10,7 @@ mod commit;
 mod manifest;
 mod prune_all;
 mod push_pull;
+mod push_summary;
 mod status;
 
 pub use commit::{CommitFile, CommitResult, run_commit_all};
@@ -18,6 +19,7 @@ pub use gtl_models::managed::ManagedRepo;
 pub use manifest::{sample_project_manifest_path, load_repos};
 pub use prune_all::{PruneRepoResult, PrunedBranch, run_prune_all};
 pub use push_pull::{PushPullResult, run_pull_all, run_push_all};
+pub(crate) use push_summary::{PushOutcome, PushSummary};
 pub use status::{StatusResult, run_status, run_status_current, run_status_recursive};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

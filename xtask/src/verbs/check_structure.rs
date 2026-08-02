@@ -17,6 +17,7 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
         label: "gtl-models stays pure",
         forbidden: &[
             "gtl-application",
+            "gtl-benchmarks",
             "gtl-contracts",
             "gtl-infra",
             "gtl-preview",
@@ -38,6 +39,7 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
         from: "gtl-application",
         label: "gtl-application points inward",
         forbidden: &[
+            "gtl-benchmarks",
             "gtl-infra",
             "gtl-preview",
             "gtl-cli",
@@ -60,6 +62,7 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
         forbidden: &[
             "gtl-models",
             "gtl-application",
+            "gtl-benchmarks",
             "gtl-infra",
             "gtl-preview",
             "gtl-cli",
@@ -87,6 +90,7 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
         label: "gtl-e2e stays black-box",
         forbidden: &[
             "gtl-application",
+            "gtl-benchmarks",
             "gtl-cli",
             "gtl-daemon",
             "gtl-desktop",

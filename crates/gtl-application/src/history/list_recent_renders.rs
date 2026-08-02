@@ -3,12 +3,9 @@
 
 use rusqlite::Connection;
 
-use crate::{
-    history::{
-        RecentRenderRecord, RecentRenderRowError,
-        persistence::{RECENT_RENDER_SELECT, RecentRenderRow},
-    },
-    ports::AppStateStore,
+use crate::history::{
+    RecentRenderRecord, RecentRenderRowError,
+    persistence::{RECENT_RENDER_SELECT, RecentRenderRow},
 };
 
 /// Requests every recent render in the store's newest-first order.
@@ -30,15 +27,13 @@ pub enum ListRecentRendersError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Lists recent renders through the app-state persistence port.
-#[cqrsy::query]
+/// Lists recent renders from the application database connection.
 pub fn execute(
     _query: ListRecentRenders,
-    store: &impl AppStateStore,
+    connection: &Connection,
 ) -> Result<ListRecentRendersOk, ListRecentRendersError> {
-    let connection = store.connection_lock()?;
     Ok(ListRecentRendersOk {
-        entries: list_recent_renders(&connection)?,
+        entries: list_recent_renders(connection)?,
     })
 }
 
@@ -68,11 +63,11 @@ mod tests {
 
     #[test]
     fn recent_history_exposes_stable_database_ids_newest_first() {
-        let store = store_test();
-        seed_recent_render(&store, 10, "older");
-        seed_recent_render(&store, 11, "newer");
+        let connection = store_test();
+        seed_recent_render(&connection, 10, "older");
+        seed_recent_render(&connection, 11, "newer");
 
-        let response = execute(ListRecentRenders, &store).expect("list succeeds");
+        let response = execute(ListRecentRenders, &connection).expect("list succeeds");
 
         assert_eq!(
             response
@@ -86,10 +81,11 @@ mod tests {
 
     #[test]
     fn recent_history_maps_invalid_persisted_id_to_the_list_operation_error() {
-        let store = store_test();
-        seed_recent_render(&store, 0, "invalid");
+        let connection = store_test();
+        seed_recent_render(&connection, 0, "invalid");
 
-        let error = execute(ListRecentRenders, &store).expect_err("corrupt row identity rejects");
+        let error =
+            execute(ListRecentRenders, &connection).expect_err("corrupt row identity rejects");
 
         assert!(matches!(
             error,
@@ -99,10 +95,8 @@ mod tests {
 
     #[test]
     fn recent_history_maps_an_unknown_operation_to_the_recipe_decode_error() {
-        let store = store_test();
-        store
-            .connection_lock()
-            .expect("connection lock")
+        let connection = store_test();
+        connection
             .execute_batch(
                 "INSERT INTO project_sources (id, kind, value, created_at) \
                  VALUES (7, 'directory', '/repos/gt', '2026-07-11T00:00:00Z');
@@ -113,7 +107,7 @@ mod tests {
             )
             .expect("seed undecodable render");
 
-        let error = execute(ListRecentRenders, &store).expect_err("unknown operation rejects");
+        let error = execute(ListRecentRenders, &connection).expect_err("unknown operation rejects");
 
         assert!(matches!(
             error,

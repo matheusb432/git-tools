@@ -2,7 +2,6 @@
 
 use std::{fmt::Write as _, path::PathBuf};
 
-use gtl_application::shared::push_summary::{PushOutcome, PushSummary};
 use gtl_contracts::{
     envelope::{Envelope, NoteLevel, Outcome},
     managed::{
@@ -11,7 +10,11 @@ use gtl_contracts::{
 };
 use serde::Serialize;
 
-use super::{ManagedExit, ManagedOptions, ManagedRun, manifest::resolve_manifest_location};
+use super::{
+    ManagedExit, ManagedOptions, ManagedRun,
+    manifest::resolve_manifest_location,
+    push_summary::{PushOutcome, PushSummary},
+};
 use crate::client::{Backend, HttpBackend};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -2641,6 +2641,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtl-benchmarks"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "criterion",
+ "gtl-application",
+ "gtl-contracts",
+ "gtl-desktop",
+ "gtl-infra",
+ "gtl-preview",
+ "tempfile",
+]
+
+[[package]]
 name = "gtl-browser-e2e"
 version = "0.1.0"
 dependencies = [
@@ -2712,7 +2726,6 @@ name = "gtl-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "criterion",
  "gtl-application",
  "gtl-contracts",
  "gtl-infra",
@@ -2765,7 +2778,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "command-group",
- "criterion",
  "directories",
  "gix",
  "gtl-application",
@@ -7796,6 +7808,7 @@ dependencies = [
  "clap",
  "clap-cargo",
  "command-group",
+ "gtl-benchmarks",
  "ico",
  "image",
  "tempfile",

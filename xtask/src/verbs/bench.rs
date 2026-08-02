@@ -1,96 +1,55 @@
-//! Headless viewer-render benchmark entrypoint.
+//! Shared Rust benchmark entrypoint.
 
-use anyhow::Result;
-use clap::{Args, ValueEnum};
+use anyhow::{Result, bail};
+use clap::Args;
+use gtl_benchmarks::{Benchmark, BenchmarkCase, PACKAGE_NAME};
 
 use crate::{process, task::Step};
 
-const DEFAULT_SAMPLE_SIZE: usize = 10;
 const FAST_SAMPLE_SIZE: usize = 100;
 const FAST_WARM_UP_SECONDS: u64 = 5;
 const FAST_MEASUREMENT_SECONDS: u64 = 5;
-const FAST_CASE_FILTER: &str = "^materialized-shell-(45k|115-files)$";
 const MINIMUM_SAMPLE_SIZE: usize = 10;
 
 #[derive(Args, Debug)]
-pub(crate) struct DesktopBenchArguments {
+pub(crate) struct BenchArguments {
     /// Benchmark target to run.
     #[arg(long, value_enum, default_value_t = Benchmark::ViewerRender)]
     benchmark: Benchmark,
-    /// Run the two shell-only cases with a stable, concise Criterion preset.
-    #[arg(long, conflicts_with_all = ["case", "sample_size"])]
+    /// Run the selected target's stable, concise Criterion preset.
+    #[arg(
+        long,
+        conflicts_with_all = ["case", "sample_size", "criterion_arguments"]
+    )]
     fast: bool,
-    /// Run exactly one viewer-render case.
+    /// Run exactly one case owned by the selected benchmark.
     #[arg(long, value_enum, conflicts_with = "fast")]
-    case: Option<ViewerRenderCase>,
-    /// Criterion samples for full or selected runs; defaults to 10.
+    case: Option<BenchmarkCase>,
+    /// Override the benchmark target's Criterion sample count.
     #[arg(long, value_parser = parse_sample_size, conflicts_with = "fast")]
     sample_size: Option<usize>,
-}
-
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum Benchmark {
-    #[value(name = "viewer-render")]
-    ViewerRender,
-}
-
-impl Benchmark {
-    const fn cargo_target(self) -> &'static str {
-        match self {
-            Self::ViewerRender => "viewer_render",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
-enum ViewerRenderCase {
-    #[value(name = "unified-compact")]
-    UnifiedCompact,
-    #[value(name = "split-full")]
-    SplitFull,
-    #[value(name = "raw-artifact")]
-    RawArtifact,
-    #[value(name = "materialized-shell-45k")]
-    MaterializedShell45k,
-    #[value(name = "materialized-chunks-45k")]
-    MaterializedChunks45k,
-    #[value(name = "materialized-shell-115-files")]
-    MaterializedShell115Files,
-    #[value(name = "materialized-chunks-115-files")]
-    MaterializedChunks115Files,
-}
-
-impl ViewerRenderCase {
-    const fn criterion_filter(self) -> &'static str {
-        match self {
-            Self::UnifiedCompact => "unified-compact",
-            Self::SplitFull => "split-full",
-            Self::RawArtifact => "raw-artifact",
-            Self::MaterializedShell45k => "materialized-shell-45k",
-            Self::MaterializedChunks45k => "materialized-chunks-45k",
-            Self::MaterializedShell115Files => "materialized-shell-115-files",
-            Self::MaterializedChunks115Files => "materialized-chunks-115-files",
-        }
-    }
+    /// Additional arguments forwarded to Criterion after `--`.
+    #[arg(last = true, allow_hyphen_values = true, conflicts_with = "fast")]
+    criterion_arguments: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BenchmarkSelection {
     Standard {
-        case: Option<ViewerRenderCase>,
-        sample_size: usize,
+        case: Option<BenchmarkCase>,
+        sample_size: Option<usize>,
     },
     Fast,
 }
 
-impl DesktopBenchArguments {
+impl BenchArguments {
     fn selection(&self) -> BenchmarkSelection {
         if self.fast {
             BenchmarkSelection::Fast
         } else {
             BenchmarkSelection::Standard {
                 case: self.case,
-                sample_size: self.sample_size.unwrap_or(DEFAULT_SAMPLE_SIZE),
+                sample_size: self.sample_size,
             }
         }
     }
@@ -108,12 +67,20 @@ fn parse_sample_size(value: &str) -> Result<usize, String> {
     Ok(sample_size)
 }
 
-/// Run the pure renderer benchmark with host display variables removed.
-pub(crate) fn run(arguments: &DesktopBenchArguments) -> Result<()> {
-    process::run_step(&benchmark_step(arguments.benchmark, arguments.selection()))
+pub(crate) fn run(arguments: &BenchArguments) -> Result<()> {
+    let step = benchmark_step(
+        arguments.benchmark,
+        arguments.selection(),
+        &arguments.criterion_arguments,
+    )?;
+    process::run_step(&step)
 }
 
-fn benchmark_step(benchmark: Benchmark, selection: BenchmarkSelection) -> Step {
+fn benchmark_step(
+    benchmark: Benchmark,
+    selection: BenchmarkSelection,
+    criterion_arguments: &[String],
+) -> Result<Step> {
     let mut arguments = vec!["bench".to_owned()];
     if matches!(selection, BenchmarkSelection::Fast) {
         arguments.push("--quiet".to_owned());
@@ -121,11 +88,9 @@ fn benchmark_step(benchmark: Benchmark, selection: BenchmarkSelection) -> Step {
     arguments.extend(
         [
             "-p",
-            "gtl-desktop",
+            PACKAGE_NAME,
             "--bench",
             benchmark.cargo_target(),
-            "--features",
-            "benchmark-support",
             "--",
         ]
         .into_iter()
@@ -135,13 +100,23 @@ fn benchmark_step(benchmark: Benchmark, selection: BenchmarkSelection) -> Step {
     match selection {
         BenchmarkSelection::Standard { case, sample_size } => {
             if let Some(case) = case {
-                arguments.extend([case.criterion_filter().to_owned(), "--exact".to_owned()]);
+                if case.benchmark() != benchmark {
+                    bail!("benchmark case {case} belongs to {}", case.benchmark());
+                }
+                arguments.extend([case.to_string(), "--exact".to_owned()]);
             }
-            arguments.extend(["--sample-size".to_owned(), sample_size.to_string()]);
+            if let Some(sample_size) = sample_size {
+                arguments.extend(["--sample-size".to_owned(), sample_size.to_string()]);
+            }
+            arguments.extend(criterion_arguments.iter().cloned());
         }
         BenchmarkSelection::Fast => {
+            let fast_cases = benchmark.fast_cases();
+            if fast_cases.is_empty() {
+                bail!("benchmark {benchmark} has no fast preset");
+            }
             arguments.extend([
-                FAST_CASE_FILTER.to_owned(),
+                exact_case_filter(fast_cases),
                 "--sample-size".to_owned(),
                 FAST_SAMPLE_SIZE.to_string(),
                 "--warm-up-time".to_owned(),
@@ -158,8 +133,17 @@ fn benchmark_step(benchmark: Benchmark, selection: BenchmarkSelection) -> Step {
         }
     }
 
-    Step::new("desktop-render-benchmark", "cargo", arguments)
-        .without_environment(["DISPLAY", "WAYLAND_DISPLAY"])
+    Ok(Step::new("benchmark", "cargo", arguments)
+        .without_environment(["DISPLAY", "WAYLAND_DISPLAY"]))
+}
+
+fn exact_case_filter(cases: &[BenchmarkCase]) -> String {
+    let case_names = cases
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("|");
+    format!("^({case_names})$")
 }
 
 #[cfg(test)]
@@ -171,30 +155,32 @@ mod tests {
     }
 
     #[test]
-    fn benchmark_step_forwards_selected_case_and_sample_size() {
+    fn benchmark_step_forwards_selected_case_sample_size_and_criterion_arguments() {
         let step = benchmark_step(
             Benchmark::ViewerRender,
             BenchmarkSelection::Standard {
-                case: Some(ViewerRenderCase::MaterializedShell45k),
-                sample_size: 20,
+                case: Some(BenchmarkCase::ViewerRenderMaterializedShell45k),
+                sample_size: Some(20),
             },
-        );
+            &["--save-baseline".to_owned(), "candidate".to_owned()],
+        )
+        .expect("viewer case belongs to viewer benchmark");
 
         assert_eq!(
             argument_strings(&step),
             [
                 "bench",
                 "-p",
-                "gtl-desktop",
+                "gtl-benchmarks",
                 "--bench",
                 "viewer_render",
-                "--features",
-                "benchmark-support",
                 "--",
                 "materialized-shell-45k",
                 "--exact",
                 "--sample-size",
-                "20"
+                "20",
+                "--save-baseline",
+                "candidate"
             ]
         );
         assert_eq!(
@@ -204,8 +190,9 @@ mod tests {
     }
 
     #[test]
-    fn benchmark_step_uses_the_criterion_fast_preset() {
-        let step = benchmark_step(Benchmark::ViewerRender, BenchmarkSelection::Fast);
+    fn benchmark_step_uses_the_catalogue_fast_cases() {
+        let step = benchmark_step(Benchmark::ViewerRender, BenchmarkSelection::Fast, &[])
+            .expect("viewer benchmark has a fast preset");
 
         assert_eq!(
             argument_strings(&step),
@@ -213,13 +200,11 @@ mod tests {
                 "bench",
                 "--quiet",
                 "-p",
-                "gtl-desktop",
+                "gtl-benchmarks",
                 "--bench",
                 "viewer_render",
-                "--features",
-                "benchmark-support",
                 "--",
-                "^materialized-shell-(45k|115-files)$",
+                "^(materialized-shell-45k|materialized-shell-115-files)$",
                 "--sample-size",
                 "100",
                 "--warm-up-time",
@@ -233,6 +218,26 @@ mod tests {
                 "--color",
                 "never"
             ]
+        );
+    }
+
+    #[test]
+    fn benchmark_step_rejects_a_case_from_another_target() {
+        let result = benchmark_step(
+            Benchmark::ViewCache,
+            BenchmarkSelection::Standard {
+                case: Some(BenchmarkCase::ViewerRenderRawArtifact),
+                sample_size: None,
+            },
+            &[],
+        );
+        let Err(error) = result else {
+            panic!("viewer case does not belong to view-cache benchmark");
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "benchmark case raw-artifact belongs to viewer-render"
         );
     }
 }

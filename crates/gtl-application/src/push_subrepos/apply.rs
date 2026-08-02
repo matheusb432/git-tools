@@ -5,10 +5,7 @@ use gtl_models::managed::push_subrepos::{
     Dest, PushAllResult, RepoOutcome, RepoReport, RepoTarget, Status,
 };
 
-use crate::{
-    ports::{GitClient, GitEffect},
-    shared::push_summary::{PushOutcome, PushSummary},
-};
+use crate::ports::{GitClient, GitEffect};
 
 /// Push every pushable target of a confirmed recursive-push plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,48 +29,23 @@ pub fn execute(command: ApplyPush, git: &impl GitClient) -> ApplyPushOk {
         })
         .collect();
 
-    let summary = PushSummary::from_outcomes(
-        reports.iter().map(|report| match &report.outcome {
-            RepoOutcome::Pushed => PushOutcome::Pushed,
-            RepoOutcome::UpToDate | RepoOutcome::Skipped(_) => PushOutcome::Skipped,
-            RepoOutcome::Failed(_) => PushOutcome::Failed,
-        }),
-        false,
-    );
-
-    let status = if summary.failed() == 0 {
+    let failed = reports
+        .iter()
+        .filter(|report| matches!(report.outcome, RepoOutcome::Failed(_)))
+        .count();
+    let pushed = reports
+        .iter()
+        .filter(|report| report.outcome == RepoOutcome::Pushed)
+        .count();
+    let status = if failed == 0 {
         Status::Ok
-    } else if summary.pushed() == 0 {
+    } else if pushed == 0 {
         Status::Fail
     } else {
         Status::Partial
     };
 
-    let mut detail = summary.render(exit_code(status));
-    for report in &reports {
-        let line = match &report.outcome {
-            RepoOutcome::Pushed => format!("\n  {}: pushed", report.label),
-            RepoOutcome::UpToDate => format!("\n  {}: already up to date", report.label),
-            RepoOutcome::Skipped(reason) => format!("\n  {}: skipped — {reason}", report.label),
-            RepoOutcome::Failed(reason) => format!("\n  {}: failed — {reason}", report.label),
-        };
-        detail.push_str(&line);
-    }
-
-    ApplyPushOk {
-        status,
-        detail,
-        reports,
-    }
-}
-
-/// The exit code the CLI maps a status to; baked into the detail header so the
-/// rendered summary matches the process exit.
-const fn exit_code(status: Status) -> i32 {
-    match status {
-        Status::Ok => 0,
-        Status::Partial | Status::Fail => 1,
-    }
+    ApplyPushOk { status, reports }
 }
 
 /// Pushes one repo, mapping git's exit and output to a [`RepoOutcome`].
@@ -142,11 +114,6 @@ mod tests {
         let result = apply(&runner, vec![push_target("api")]);
         assert_eq!(result.status, Status::Ok);
         assert_eq!(result.reports[0].outcome, RepoOutcome::UpToDate);
-        assert!(
-            result.detail.contains("api: already up to date"),
-            "{}",
-            result.detail
-        );
     }
 
     #[test]
@@ -207,11 +174,7 @@ mod tests {
 
         let result = apply(&runner, targets);
 
-        assert!(
-            result
-                .detail
-                .starts_with("exit 0  -  3 repos: 1 pushed, 2 skipped\n  pushed: pushed")
-        );
+        assert_eq!(result.reports.len(), 3);
     }
 
     #[test]
@@ -224,13 +187,7 @@ mod tests {
         assert_eq!(result.status, Status::Partial);
         assert_eq!(result.reports[0].outcome, RepoOutcome::Pushed);
         assert!(matches!(result.reports[1].outcome, RepoOutcome::Failed(_)));
-        assert!(
-            result
-                .detail
-                .starts_with("exit 1  -  2 repos: 1 pushed, 0 skipped, 1 fail")
-        );
-        assert!(!result.detail.contains("0 warn"));
-        assert!(result.detail.contains("web: failed —"), "{}", result.detail);
+        assert_eq!(result.reports.len(), 2);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::{
     verb::Verb,
-    verbs::{bench::DesktopBenchArguments, format::FormatArguments, test::TestArguments},
+    verbs::{bench::BenchArguments, format::FormatArguments, test::TestArguments},
 };
 
 /// xtask — this repo's embedded dev/release automation (xtask).
@@ -112,9 +112,9 @@ pub enum Command {
     /// Run the frontend compute benchmarks (tinybench through vitest bench).
     #[command(name = Verb::FRONTEND_BENCH.as_str())]
     FrontendBench,
-    /// Run the pure viewer-render benchmark without a host display.
-    #[command(name = Verb::DESKTOP_BENCH.as_str())]
-    DesktopBench(DesktopBenchArguments),
+    /// Run a shared Rust benchmark without host display variables.
+    #[command(name = Verb::BENCH.as_str())]
+    Bench(BenchArguments),
     /// Rebuild the committed diff-preview bundle and fail if it drifts from its TypeScript
     /// sources. Requires Deno.
     #[command(name = Verb::DRIFT_CHECK.as_str())]

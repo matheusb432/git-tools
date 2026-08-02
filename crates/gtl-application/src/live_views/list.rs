@@ -2,7 +2,7 @@
 
 use rusqlite::Connection;
 
-use crate::{live_views::LiveViewRecord, ports::AppStateStore};
+use crate::live_views::LiveViewRecord;
 
 /// Lists every saved live view.
 #[derive(Debug, Clone, PartialEq)]
@@ -19,14 +19,12 @@ pub enum ListLiveViewsError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Lists saved live views through the app-state port.
-#[cqrsy::query]
+/// Lists saved live views from the application database connection.
 pub fn execute(
     _query: ListLiveViews,
-    store: &impl AppStateStore,
+    connection: &Connection,
 ) -> Result<ListLiveViewsOk, ListLiveViewsError> {
-    let connection = store.connection_lock()?;
-    let views = list_live_views(&connection)?;
+    let views = list_live_views(connection)?;
     Ok(ListLiveViewsOk { views })
 }
 
@@ -50,12 +48,11 @@ fn list_live_views(connection: &Connection) -> anyhow::Result<Vec<LiveViewRecord
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{live_views::persistence::store_test, ports::AppStateStore};
+    use crate::live_views::persistence::store_test;
 
     #[test]
     fn lists_saved_views_in_creation_order() {
-        let store = store_test();
-        let connection = store.connection_lock().expect("connection lock");
+        let connection = store_test();
         connection
             .execute(
                 "INSERT INTO live_views \
@@ -65,8 +62,7 @@ mod tests {
                 [],
             )
             .expect("seed live views");
-        drop(connection);
-        let response = execute(ListLiveViews, &store).expect("list succeeds");
+        let response = execute(ListLiveViews, &connection).expect("list succeeds");
 
         assert_eq!(
             response

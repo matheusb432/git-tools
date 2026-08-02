@@ -16,8 +16,12 @@ pub(super) fn list(app: &ViewerApp) -> RouteResult {
 }
 
 pub(super) fn open(app: &ViewerApp, id: RenderHistoryId) -> RouteResult {
+    let connection = app
+        .app_state
+        .connection_lock()
+        .map_err(|error| format!("{error:#}"))?;
     let Some(entry) =
-        get_recent_render::execute(get_recent_render::GetRecentRender { id }, &app.app_state)
+        get_recent_render::execute(get_recent_render::GetRecentRender { id }, &connection)
             .map_err(|error| format!("{error:#}"))?
             .entry
     else {
@@ -35,7 +39,11 @@ pub(super) fn open(app: &ViewerApp, id: RenderHistoryId) -> RouteResult {
 }
 
 pub(super) fn load(app: &ViewerApp) -> Result<Vec<ViewerHistoryEntry>, String> {
-    list_recent_renders::execute(list_recent_renders::ListRecentRenders, &app.app_state)
+    let connection = app
+        .app_state
+        .connection_lock()
+        .map_err(|error| format!("{error:#}"))?;
+    list_recent_renders::execute(list_recent_renders::ListRecentRenders, &connection)
         .map(|response| response.entries.into_iter().map(to_viewer_entry).collect())
         .map_err(|error| format!("{error:#}"))
 }

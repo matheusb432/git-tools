@@ -16,7 +16,7 @@ use gtl_application::{
         remove::{self, RemoveLiveView},
         save::{self, SaveLiveView, SaveLiveViewOutcome},
     },
-    ports::{AppStateStore, Clock, GitRepositoryState},
+    ports::{Clock, GitRepositoryState},
     testing::FakeGitClient,
 };
 use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
@@ -75,12 +75,13 @@ fn unpushed_diff_recipe() -> Recipe {
 }
 
 fn save_live_view(state: &SqliteAppState, top_level: &Path) {
+    let mut connection = state.connection_lock().expect("lock state connection");
     let response = save::execute(
         SaveLiveView {
             path: top_level.to_path_buf(),
         },
         &git(top_level),
-        state,
+        &mut connection,
         &ClockTest,
     )
     .expect("save live view");
@@ -94,7 +95,8 @@ fn save_live_view(state: &SqliteAppState, top_level: &Path) {
 }
 
 fn list_live_views(state: &SqliteAppState) -> Vec<gtl_application::live_views::LiveViewRecord> {
-    list::execute(ListLiveViews, state)
+    let connection = state.connection_lock().expect("lock state connection");
+    list::execute(ListLiveViews, &connection)
         .expect("list live views")
         .views
 }
@@ -110,36 +112,46 @@ fn public_operations_use_the_migrated_schema() {
     assert_eq!(live_views.len(), 1);
     assert_eq!(live_views[0].display_name, "alpha");
 
-    record_render::execute(
-        RecordRender {
-            recipe: unpushed_diff_recipe(),
-            title: "alpha · unpushed".into(),
-            repo_name: "alpha".into(),
-            range_label: "origin/main..HEAD".into(),
-        },
-        &state,
-        &ClockTest,
-    )
-    .expect("record render");
-    let history =
-        list_recent_renders::execute(ListRecentRenders, &state).expect("list recent renders");
+    {
+        let mut connection = state.connection_lock().expect("lock state connection");
+        record_render::execute(
+            RecordRender {
+                recipe: unpushed_diff_recipe(),
+                title: "alpha · unpushed".into(),
+                repo_name: "alpha".into(),
+                range_label: "origin/main..HEAD".into(),
+            },
+            &mut connection,
+            &ClockTest,
+        )
+        .expect("record render");
+    }
+    let history = {
+        let connection = state.connection_lock().expect("lock state connection");
+        list_recent_renders::execute(ListRecentRenders, &connection).expect("list recent renders")
+    };
     assert_eq!(history.entries.len(), 1);
     let id = history.entries[0].id;
-    let found =
-        get_recent_render::execute(GetRecentRender { id }, &state).expect("get recent render");
+    let found = {
+        let connection = state.connection_lock().expect("lock state connection");
+        get_recent_render::execute(GetRecentRender { id }, &connection).expect("get recent render")
+    };
     assert_eq!(
         found.entry.expect("recent render").title,
         "alpha · unpushed"
     );
 
-    let removed = remove::execute(
-        RemoveLiveView {
-            source_kind: "LocalRepo".into(),
-            source_value: top_level.display().to_string(),
-        },
-        &state,
-    )
-    .expect("remove live view");
+    let removed = {
+        let connection = state.connection_lock().expect("lock state connection");
+        remove::execute(
+            RemoveLiveView {
+                source_kind: "LocalRepo".into(),
+                source_value: top_level.display().to_string(),
+            },
+            &connection,
+        )
+        .expect("remove live view")
+    };
     assert!(removed.removed);
     assert!(list_live_views(&state).is_empty());
 }
@@ -186,12 +198,13 @@ fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
             let completion_sender = completion_sender.clone();
             thread::spawn(move || {
                 barrier.wait();
+                let mut connection = state.connection_lock().expect("lock state connection");
                 let result = save::execute(
                     SaveLiveView {
                         path: "/repos/concurrent".into(),
                     },
                     &git("/repos/concurrent"),
-                    &state,
+                    &mut connection,
                     &ClockTest,
                 )
                 .map_err(|error| error.to_string())
@@ -289,16 +302,19 @@ fn prune_failure_rolls_back_the_render_insertion() {
         )
         .expect("seed capped history and install prune trigger");
 
-    let result = record_render::execute(
-        RecordRender {
-            recipe: unpushed_diff_recipe(),
-            title: "failed insertion".into(),
-            repo_name: "alpha".into(),
-            range_label: "origin/main..HEAD".into(),
-        },
-        &state,
-        &ClockTest,
-    );
+    let result = {
+        let mut connection = state.connection_lock().expect("lock record connection");
+        record_render::execute(
+            RecordRender {
+                recipe: unpushed_diff_recipe(),
+                title: "failed insertion".into(),
+                repo_name: "alpha".into(),
+                range_label: "origin/main..HEAD".into(),
+            },
+            &mut connection,
+            &ClockTest,
+        )
+    };
 
     assert!(matches!(result, Err(RecordRenderError::Unexpected(_))));
     let connection = state.connection_lock().expect("lock assertion connection");

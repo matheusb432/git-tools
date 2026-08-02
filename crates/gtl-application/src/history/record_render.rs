@@ -3,10 +3,7 @@
 use gtl_contracts::recipes::Recipe;
 use rusqlite::{Connection, params};
 
-use crate::{
-    history::persistence::RecipeColumns,
-    ports::{AppStateStore, Clock},
-};
+use crate::{history::persistence::RecipeColumns, ports::Clock};
 
 const RECENT_RENDERS_CAP: usize = 500;
 
@@ -30,20 +27,18 @@ pub enum RecordRenderError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Records a render through the app-state port.
+/// Records a render through the application database connection.
 #[expect(
     clippy::needless_pass_by_value,
-    reason = "cqrsy requires request-first operations to take requests by value"
+    reason = "application operations keep request-first values consistent"
 )]
-#[cqrsy::command]
 pub fn execute(
     req: RecordRender,
-    store: &impl AppStateStore,
+    connection: &mut Connection,
     clock: &impl Clock,
 ) -> Result<RecordRenderOk, RecordRenderError> {
     let rendered_at = clock.now_iso();
-    let mut connection = store.connection_lock()?;
-    record_render(&mut connection, &req, &rendered_at)?;
+    record_render(connection, &req, &rendered_at)?;
     Ok(RecordRenderOk {})
 }
 
@@ -170,16 +165,14 @@ mod tests {
         }
     }
 
-    fn list_recent(store: &impl AppStateStore) -> Vec<RecentRenderRecord> {
-        list_recent_renders::execute(list_recent_renders::ListRecentRenders, store)
+    fn list_recent(connection: &Connection) -> Vec<RecentRenderRecord> {
+        list_recent_renders::execute(list_recent_renders::ListRecentRenders, connection)
             .expect("list succeeds")
             .entries
     }
 
-    fn project_sources(store: &impl AppStateStore) -> Vec<(String, Option<String>)> {
-        store
-            .connection_lock()
-            .expect("connection lock")
+    fn project_sources(connection: &Connection) -> Vec<(String, Option<String>)> {
+        connection
             .prepare("SELECT value, updated_at FROM project_sources ORDER BY value")
             .expect("prepare sources")
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
@@ -190,11 +183,11 @@ mod tests {
 
     #[test]
     fn records_a_render_stamped_by_the_clock() {
-        let store = store_test();
+        let mut connection = store_test();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
-        execute(command("gt · unpushed"), &store, &clock).expect("record succeeds");
+        execute(command("gt · unpushed"), &mut connection, &clock).expect("record succeeds");
 
-        let renders = list_recent(&store);
+        let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
         assert_eq!(
             renders[0],
@@ -211,39 +204,47 @@ mod tests {
 
     #[test]
     fn repeated_renders_share_one_touched_project_source() {
-        let store = store_test();
+        let mut connection = store_test();
         execute(
             command("first"),
-            &store,
+            &mut connection,
             &FixedClock("2026-07-07T00:00:00Z".into()),
         )
         .expect("record succeeds");
         execute(
             command("second"),
-            &store,
+            &mut connection,
             &FixedClock("2026-07-08T00:00:00Z".into()),
         )
         .expect("record succeeds");
 
         assert_eq!(
-            project_sources(&store),
+            project_sources(&connection),
             vec![("/repos/gt".into(), Some("2026-07-08T00:00:00Z".into()))]
         );
     }
 
     #[test]
     fn repeated_fingerprint_preserves_the_original_render() {
-        let store = store_test();
+        let mut connection = store_test();
         let first = command_for_recipe("first", "gt", pinned_recipe("/repos/gt", "base", "head"));
         let mut repeated = first.clone();
         repeated.title = "repeated".into();
 
-        execute(first, &store, &FixedClock("2026-07-07T00:00:00Z".into()))
-            .expect("first record succeeds");
-        execute(repeated, &store, &FixedClock("2026-07-08T00:00:00Z".into()))
-            .expect("repeated fingerprint is a successful no-op");
+        execute(
+            first,
+            &mut connection,
+            &FixedClock("2026-07-07T00:00:00Z".into()),
+        )
+        .expect("first record succeeds");
+        execute(
+            repeated,
+            &mut connection,
+            &FixedClock("2026-07-08T00:00:00Z".into()),
+        )
+        .expect("repeated fingerprint is a successful no-op");
 
-        let renders = list_recent(&store);
+        let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
         assert_eq!(renders[0].title, "first");
         assert_eq!(renders[0].rendered_at, "2026-07-07T00:00:00Z");
@@ -251,7 +252,7 @@ mod tests {
 
     #[test]
     fn every_fingerprint_field_distinguishes_a_render() {
-        let store = store_test();
+        let mut connection = store_test();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
         let commands = [
             command_for_recipe("original", "gt", pinned_recipe("/repos/gt", "base", "head")),
@@ -274,15 +275,15 @@ mod tests {
         ];
 
         for command in commands {
-            execute(command, &store, &clock).expect("distinct record succeeds");
+            execute(command, &mut connection, &clock).expect("distinct record succeeds");
         }
 
-        assert_eq!(list_recent(&store).len(), 5);
+        assert_eq!(list_recent(&connection).len(), 5);
     }
 
     #[test]
     fn recording_past_the_cap_prunes_oldest_rows_and_orphaned_sources() {
-        let store = store_test();
+        let mut connection = store_test();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
 
         // The first five renders come from a repo no later render references,
@@ -298,7 +299,7 @@ mod tests {
                         &format!("head-{index}"),
                     ),
                 ),
-                &store,
+                &mut connection,
                 &clock,
             )
             .expect("record succeeds");
@@ -314,18 +315,18 @@ mod tests {
                         &format!("head-{index}"),
                     ),
                 ),
-                &store,
+                &mut connection,
                 &clock,
             )
             .expect("record succeeds");
         }
 
-        let renders = list_recent(&store);
+        let renders = list_recent(&connection);
         assert_eq!(renders.len(), RECENT_RENDERS_CAP);
         assert_eq!(renders[0].title, "render 504");
         assert_eq!(renders[RECENT_RENDERS_CAP - 1].title, "render 5");
         assert_eq!(
-            project_sources(&store)
+            project_sources(&connection)
                 .into_iter()
                 .map(|(value, _)| value)
                 .collect::<Vec<_>>(),

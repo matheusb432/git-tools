@@ -7,9 +7,8 @@ use std::{num::NonZeroU32, path::PathBuf};
 
 use gtl_contracts::recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
 use gtl_models::viewer::RenderHistoryId;
-
 #[cfg(test)]
-use crate::{ports::AppStateStore, testing::AppStateStoreTest};
+use rusqlite::Connection;
 
 /// The `project_sources.kind` value for a repository addressed by directory.
 pub(super) const SOURCE_KIND_DIRECTORY: &str = "directory";
@@ -217,9 +216,11 @@ pub enum RecentRenderRowError {
 }
 
 #[cfg(test)]
-pub(crate) fn store_test() -> AppStateStoreTest {
-    AppStateStoreTest::new(
-        "CREATE TABLE project_sources (
+pub(crate) fn store_test() -> Connection {
+    let connection = Connection::open_in_memory().expect("history test connection");
+    connection
+        .execute_batch(
+            "CREATE TABLE project_sources (
           id         INTEGER PRIMARY KEY AUTOINCREMENT,
           kind       TEXT NOT NULL CHECK (kind IN ('directory', 'remote')),
           value      TEXT NOT NULL,
@@ -266,17 +267,16 @@ pub(crate) fn store_test() -> AppStateStoreTest {
         ON recent_renders (repo_name);
         CREATE INDEX project_sources_value_idx
         ON project_sources (value);",
-    )
-    .expect("history test store")
+        )
+        .expect("history test schema");
+    connection
 }
 
 /// Inserts one minimal unpushed-diff render row under `id`, sharing a single
 /// seeded project source across calls.
 #[cfg(test)]
-pub(crate) fn seed_recent_render(store: &impl AppStateStore, id: i64, title: &str) {
-    store
-        .connection_lock()
-        .expect("connection lock")
+pub(crate) fn seed_recent_render(connection: &Connection, id: i64, title: &str) {
+    connection
         .execute_batch(&format!(
             "INSERT OR IGNORE INTO project_sources (id, kind, value, created_at) \
              VALUES (7, 'directory', '/repos/gt', '2026-07-11T00:00:00Z');
@@ -300,7 +300,7 @@ mod tests {
     };
 
     fn assert_round_trips(recipe: &Recipe) {
-        let store = store_test();
+        let mut connection = store_test();
         record_render::execute(
             record_render::RecordRender {
                 recipe: recipe.clone(),
@@ -308,14 +308,15 @@ mod tests {
                 repo_name: "gt".into(),
                 range_label: "main..HEAD".into(),
             },
-            &store,
+            &mut connection,
             &FixedClock("2026-07-11T00:00:00Z".into()),
         )
         .expect("record succeeds");
 
-        let entries = list_recent_renders::execute(list_recent_renders::ListRecentRenders, &store)
-            .expect("list succeeds")
-            .entries;
+        let entries =
+            list_recent_renders::execute(list_recent_renders::ListRecentRenders, &connection)
+                .expect("list succeeds")
+                .entries;
 
         assert_eq!(entries.len(), 1, "recipe {recipe:?} persists one row");
         assert_eq!(&entries[0].recipe, recipe, "recipe survives the row codec");

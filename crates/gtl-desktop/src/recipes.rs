@@ -3,18 +3,11 @@
 use std::sync::{Arc, Mutex};
 
 use gtl_application::{
-    diffs::{
-        View,
-        compute_commit_patch::{self, ComputeCommitPatch},
-    },
+    diffs::compute_commit_patch::{self, ComputeCommitPatch},
     history::record_render::{self, RecordRender},
     viewer::{
         ViewerTabId, ViewerTabKind, ViewerTabState,
-        complete_recipe_computation::{
-            self, CompleteRecipeComputation, CompleteRecipeComputationOk,
-        },
-        compute_recipe::{self, ComputeRecipe},
-        probe_recipe::{self, ProbeRecipe, ProbeRecipeOutcome},
+        prepare_recipe::{self, PrepareRecipe, PrepareRecipeError, PrepareRecipeOk},
     },
 };
 use gtl_contracts::recipes::Recipe;
@@ -169,45 +162,35 @@ impl RecipeExecutor {
             kind,
             ticket,
         } = reserved;
-        let probe = probe_recipe::execute(
-            ProbeRecipe {
+        let prepared = match prepare_recipe::execute(
+            PrepareRecipe {
                 recipe: recipe.clone(),
                 kind,
-            },
-            &self.git,
-        )
-        .map_err(|error| RecipeError::Failed(format!("{error:#}")))?;
-        if let ProbeRecipeOutcome::Broken { state } = probe.outcome {
-            let mut session = self
-                .session
-                .lock()
-                .map_err(|error| RecipeError::Failed(error.to_string()))?;
-            if session.set_state_if_current(ticket, state) == PublishOutcome::Stale {
-                return Err(RecipeError::Stale);
-            }
-            return Ok(());
-        }
-
-        let view = match compute_recipe::execute(
-            ComputeRecipe {
-                recipe: recipe.clone(),
             },
             &self.user_settings,
             &self.git,
         ) {
-            Ok(response) => response.view,
-            Err(reason) => {
+            Ok(response) => response,
+            Err(PrepareRecipeError::Probe(reason)) => {
+                return Err(RecipeError::Failed(format!("{reason:#}")));
+            }
+            Err(PrepareRecipeError::Compute(reason)) => {
                 publish_compute_error(&self.session, ticket, &format!("{reason:#}"))?;
                 return Ok(());
             }
         };
 
-        match complete_recipe_computation::execute(CompleteRecipeComputation {
-            recipe: recipe.clone(),
-            kind,
-            view,
-        }) {
-            CompleteRecipeComputationOk::Skipped { .. } => {
+        match prepared {
+            PrepareRecipeOk::Broken { state } => {
+                let mut session = self
+                    .session
+                    .lock()
+                    .map_err(|error| RecipeError::Failed(error.to_string()))?;
+                if session.set_state_if_current(ticket, state) == PublishOutcome::Stale {
+                    return Err(RecipeError::Stale);
+                }
+            }
+            PrepareRecipeOk::Skipped { .. } => {
                 let mut session = self
                     .session
                     .lock()
@@ -216,7 +199,11 @@ impl RecipeExecutor {
                     return Err(RecipeError::Stale);
                 }
             }
-            CompleteRecipeComputationOk::Publish { label, view } => {
+            PrepareRecipeOk::Publish {
+                label,
+                view,
+                history,
+            } => {
                 let published = {
                     let mut session = self
                         .session
@@ -231,7 +218,7 @@ impl RecipeExecutor {
                 if published == PublishOutcome::Stale {
                     return Err(RecipeError::Stale);
                 }
-                record_render(&self.app_state, &self.clock, recipe, &view, label);
+                record_render(&self.app_state, &self.clock, history);
             }
         }
         Ok(())
@@ -388,22 +375,18 @@ pub(crate) enum SelectCommitError {
 }
 
 fn record_render(
-    app_state: &impl gtl_application::ports::AppStateStore,
+    app_state: &gtl_infra::app_state::SqliteAppState,
     clock: &impl gtl_application::ports::Clock,
-    recipe: Recipe,
-    view: &View,
-    label: String,
+    request: RecordRender,
 ) {
-    if let Err(error) = record_render::execute(
-        RecordRender {
-            recipe,
-            title: label,
-            repo_name: view.repo_name.clone(),
-            range_label: view.cmd.range.clone(),
-        },
-        app_state,
-        clock,
-    ) {
+    let mut connection = match app_state.connection_lock() {
+        Ok(connection) => connection,
+        Err(error) => {
+            eprintln!("gtl-viewer: failed to lock render history: {error:#}");
+            return;
+        }
+    };
+    if let Err(error) = record_render::execute(request, &mut connection, clock) {
         eprintln!("gtl-viewer: failed to record render history: {error:#}");
     }
 }

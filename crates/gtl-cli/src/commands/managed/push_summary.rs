@@ -1,9 +1,9 @@
-//! Pure aggregate formatting shared by managed and recursive push commands.
+//! CLI-owned summary formatting for managed and recursive push commands.
 
 use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PushOutcome {
+pub(crate) enum PushOutcome {
     Pushed,
     Skipped,
     Failed,
@@ -11,7 +11,7 @@ pub enum PushOutcome {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PushSummary {
+pub(crate) struct PushSummary {
     total: usize,
     pushed: usize,
     skipped: usize,
@@ -21,7 +21,10 @@ pub struct PushSummary {
 }
 
 impl PushSummary {
-    pub fn from_outcomes(outcomes: impl IntoIterator<Item = PushOutcome>, dry: bool) -> Self {
+    pub(crate) fn from_outcomes(
+        outcomes: impl IntoIterator<Item = PushOutcome>,
+        dry: bool,
+    ) -> Self {
         let mut summary = Self {
             total: 0,
             pushed: 0,
@@ -42,15 +45,7 @@ impl PushSummary {
         summary
     }
 
-    pub const fn pushed(self) -> usize {
-        self.pushed
-    }
-
-    pub const fn failed(self) -> usize {
-        self.failed
-    }
-
-    pub fn render(self, exit_code: i32) -> String {
+    pub(crate) fn render(self, exit_code: i32) -> String {
         let pushed_label = if self.dry { "would push" } else { "pushed" };
         let mut output = format!(
             "exit {exit_code}  -  {} repos: {} {pushed_label}, {} skipped",
@@ -80,8 +75,8 @@ mod tests {
             ],
             false,
         );
-        assert_eq!(summary.pushed(), 2);
-        assert_eq!(summary.failed(), 0);
+        assert_eq!(summary.pushed, 2);
+        assert_eq!(summary.failed, 0);
         assert_eq!(summary.render(0), "exit 0  -  3 repos: 2 pushed, 1 skipped");
     }
 
@@ -105,7 +100,7 @@ mod tests {
     #[test]
     fn failed_only_summary_omits_zero_warn_count() {
         let summary = PushSummary::from_outcomes([PushOutcome::Failed], false);
-        assert_eq!(summary.failed(), 1);
+        assert_eq!(summary.failed, 1);
         assert_eq!(
             summary.render(1),
             "exit 1  -  1 repos: 0 pushed, 0 skipped, 1 fail"

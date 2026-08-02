@@ -1,5 +1,5 @@
 #[cfg(test)]
-use crate::testing::AppStateStoreTest;
+use rusqlite::Connection;
 
 /// One saved live view, keyed by its source identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,9 +12,11 @@ pub struct LiveViewRecord {
 }
 
 #[cfg(test)]
-pub(crate) fn store_test() -> AppStateStoreTest {
-    AppStateStoreTest::new(
-        "CREATE TABLE live_views (
+pub(crate) fn store_test() -> Connection {
+    let connection = Connection::open_in_memory().expect("live-view test connection");
+    connection
+        .execute_batch(
+            "CREATE TABLE live_views (
           id             INTEGER PRIMARY KEY,
           source_kind    TEXT NOT NULL,
           source_value   TEXT NOT NULL,
@@ -23,6 +25,7 @@ pub(crate) fn store_test() -> AppStateStoreTest {
           last_opened_at TEXT,
           UNIQUE (source_kind, source_value)
         ) STRICT;",
-    )
-    .expect("live-view test store")
+        )
+        .expect("live-view test schema");
+    connection
 }

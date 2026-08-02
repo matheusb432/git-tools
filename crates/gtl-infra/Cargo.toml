@@ -4,10 +4,6 @@ version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
 
-[[bench]]
-name = "app_state"
-harness = false
-
 [dependencies]
 anyhow.workspace = true
 gtl-application.workspace = true
@@ -34,7 +30,6 @@ libc.workspace = true
 [dev-dependencies]
 gtl-application = { workspace = true, features = ["testing"] }
 gtl-contracts.workspace = true
-criterion.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt"] }
 
 [lints]

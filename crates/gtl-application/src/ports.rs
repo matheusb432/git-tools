@@ -3,7 +3,6 @@
 //! thread-safe, and `'static` so process roots can move adapters across worker
 //! boundaries.
 
-mod app_state_store;
 mod artifact_store;
 mod clock;
 mod configured_editor_client;
@@ -17,7 +16,6 @@ mod repo_discovery;
 mod user_settings_editor;
 mod user_settings_store;
 
-pub use app_state_store::AppStateStore;
 pub use artifact_store::{ArtifactMeta, ArtifactStore, HistoryRecord, PlacedArtifact};
 pub use clock::Clock;
 pub use configured_editor_client::ConfiguredEditorClient;

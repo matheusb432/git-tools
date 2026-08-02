@@ -6,22 +6,6 @@ pub(super) fn large_view() -> View {
     view_with_lines(FIXTURE_LINE_COUNT)
 }
 
-pub(super) fn many_file_view() -> View {
-    const FILE_COUNT: usize = 115;
-    const LINES_PER_FILE: usize = 79;
-    let mut view = view_with_lines(LINES_PER_FILE);
-    let template = view.files.remove(0);
-    view.files = (0..FILE_COUNT)
-        .map(|index| {
-            let mut file = template.clone();
-            file.path = format!("src/generated/file-{index:03}.rs");
-            file
-        })
-        .collect();
-    view.title = "115-file diff".into();
-    view
-}
-
 pub(super) fn view_with_lines(line_count: usize) -> View {
     let mut lines = Vec::with_capacity(line_count);
     lines.push(format!("@@ -1,{line_count} +1,{line_count} @@"));

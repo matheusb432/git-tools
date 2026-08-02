@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "benchmarks",
   "crates/gtl-application",
   "crates/gtl-browser-e2e",
   "crates/gtl-cli",
@@ -14,8 +15,8 @@ members = [
   "crates/gtl-preview",
   "xtask",
 ]
-# Everything except `gtl-desktop`, which needs webkit2gtk headers and stays opt-in
-# via `-p gtl-desktop` (matching the pre-virtualization behavior of bare cargo).
+# Desktop and Criterion targets need webkit2gtk headers, so their packages are not default members.
+# xtask still uses the lightweight benchmark catalogue.
 default-members = [
   "crates/gtl-application",
   "crates/gtl-cli",
@@ -36,6 +37,7 @@ publish = false
 [workspace.dependencies]
 anyhow = "1"
 gtl-application = { path = "crates/gtl-application" }
+gtl-benchmarks = { path = "benchmarks" }
 assert_cmd = "2"
 axum = "0.8"
 base64 = "0.22.1"
@@ -46,6 +48,7 @@ clap-cargo = "0.18.3"
 command-group = "5.0.1"
 console = { version = "0.16.4", default-features = false, features = ["std"] }
 gtl-contracts = { path = "crates/gtl-contracts" }
+gtl-desktop = { path = "crates/gtl-desktop" }
 cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.10.0" }
 criterion = "0.8.2"
 directories = "6.0.0"

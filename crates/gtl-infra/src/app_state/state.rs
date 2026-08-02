@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::Context;
-use gtl_application::ports::AppStateStore;
 use parking_lot::{Mutex, MutexGuard};
 use rusqlite::Connection;
 
@@ -74,8 +73,10 @@ impl SqliteAppState {
     }
 }
 
-impl AppStateStore for SqliteAppState {
-    fn connection_lock(&self) -> anyhow::Result<impl std::ops::DerefMut<Target = Connection> + '_> {
+impl SqliteAppState {
+    pub fn connection_lock(
+        &self,
+    ) -> anyhow::Result<impl std::ops::DerefMut<Target = Connection> + '_> {
         self.connection_lock_timeout(CONNECTION_LOCK_TIMEOUT)
     }
 }
@@ -83,8 +84,6 @@ impl AppStateStore for SqliteAppState {
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
-
-    use gtl_application::ports::AppStateStore;
 
     use super::SqliteAppState;
 

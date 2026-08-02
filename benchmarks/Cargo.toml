@@ -1,0 +1,32 @@
+[package]
+name = "gtl-benchmarks"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[[bench]]
+name = "app_state_record_render"
+harness = false
+
+[[bench]]
+name = "view_cache"
+harness = false
+
+[[bench]]
+name = "viewer_render"
+harness = false
+
+[dependencies]
+clap.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+gtl-application.workspace = true
+gtl-contracts.workspace = true
+gtl-desktop = { workspace = true, features = ["benchmark-support"] }
+gtl-infra.workspace = true
+gtl-preview.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

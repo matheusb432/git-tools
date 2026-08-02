@@ -4,12 +4,9 @@
 use gtl_models::viewer::RenderHistoryId;
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::{
-    history::{
-        RecentRenderRecord, RecentRenderRowError,
-        persistence::{RECENT_RENDER_SELECT, RecentRenderRow},
-    },
-    ports::AppStateStore,
+use crate::history::{
+    RecentRenderRecord, RecentRenderRowError,
+    persistence::{RECENT_RENDER_SELECT, RecentRenderRow},
 };
 
 /// Requests one recent render by its stable persisted-row identity.
@@ -33,20 +30,18 @@ pub enum GetRecentRenderError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Gets a recent render through the app-state persistence port.
+/// Gets a recent render from the application database connection.
 #[expect(
     clippy::needless_pass_by_value,
     reason = "cqrsy requires request-first operations to take requests by value"
 )]
-#[cqrsy::query]
 pub fn execute(
     query: GetRecentRender,
-    store: &impl AppStateStore,
+    connection: &Connection,
 ) -> Result<GetRecentRenderOk, GetRecentRenderError> {
     let GetRecentRender { id } = query;
-    let connection = store.connection_lock()?;
     Ok(GetRecentRenderOk {
-        entry: get_recent_render(&connection, id)?,
+        entry: get_recent_render(connection, id)?,
     })
 }
 
@@ -72,10 +67,10 @@ mod tests {
     #[test]
     fn recent_render_is_looked_up_by_stable_id() {
         let id = RenderHistoryId::try_new(11).expect("positive id");
-        let store = store_test();
-        seed_recent_render(&store, i64::from(id), "render");
+        let connection = store_test();
+        seed_recent_render(&connection, i64::from(id), "render");
 
-        let response = execute(GetRecentRender { id }, &store).expect("lookup succeeds");
+        let response = execute(GetRecentRender { id }, &connection).expect("lookup succeeds");
 
         assert_eq!(response.entry.expect("record exists").id, id);
     }
@@ -84,8 +79,8 @@ mod tests {
     fn absent_recent_render_is_a_successful_miss() {
         let id = RenderHistoryId::try_new(99).expect("positive id");
 
-        let store = store_test();
-        let response = execute(GetRecentRender { id }, &store).expect("lookup succeeds");
+        let connection = store_test();
+        let response = execute(GetRecentRender { id }, &connection).expect("lookup succeeds");
 
         assert!(response.entry.is_none());
     }

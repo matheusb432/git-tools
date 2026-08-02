@@ -7,10 +7,10 @@ pub(crate) struct Verb(&'static str);
 
 impl Verb {
     pub(crate) const BOOTSTRAP: Self = Self("bootstrap");
+    pub(crate) const BENCH: Self = Self("bench");
     pub(crate) const BUILD: Self = Self("build");
     pub(crate) const CHECK: Self = Self("check");
     pub(crate) const CHECK_STRUCTURE: Self = Self("check-structure");
-    pub(crate) const DESKTOP_BENCH: Self = Self("desktop-bench");
     pub(crate) const DESKTOP_E2E: Self = Self("desktop-e2e");
     pub(crate) const DRIFT_CHECK: Self = Self("drift-check");
     pub(crate) const FIX: Self = Self("fix");

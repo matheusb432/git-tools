@@ -2,8 +2,6 @@
 
 use rusqlite::{Connection, params};
 
-use crate::ports::AppStateStore;
-
 /// Delete the saved live view identified by `(source_kind, source_value)`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RemoveLiveView {
@@ -22,18 +20,16 @@ pub enum RemoveLiveViewError {
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Removes a saved live view through the app-state port.
-#[cqrsy::command]
+/// Removes a saved live view from the application database connection.
 pub fn execute(
     req: RemoveLiveView,
-    store: &impl AppStateStore,
+    connection: &Connection,
 ) -> Result<RemoveLiveViewOk, RemoveLiveViewError> {
     let RemoveLiveView {
         source_kind,
         source_value,
     } = req;
-    let connection = store.connection_lock()?;
-    let removed = remove_live_view(&connection, &source_kind, &source_value)?;
+    let removed = remove_live_view(connection, &source_kind, &source_value)?;
     Ok(RemoveLiveViewOk { removed })
 }
 
@@ -50,12 +46,10 @@ fn remove_live_view(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{live_views::persistence::store_test, ports::AppStateStore};
+    use crate::live_views::persistence::store_test;
 
-    fn seed_live_view(store: &impl AppStateStore) {
-        store
-            .connection_lock()
-            .expect("connection lock")
+    fn seed_live_view(connection: &Connection) {
+        connection
             .execute(
                 "INSERT INTO live_views \
                  (source_kind, source_value, display_name, created_at) \
@@ -67,14 +61,14 @@ mod tests {
 
     #[test]
     fn remove_reports_true_when_a_row_was_removed() {
-        let store = store_test();
-        seed_live_view(&store);
+        let connection = store_test();
+        seed_live_view(&connection);
         let response = execute(
             RemoveLiveView {
                 source_kind: "LocalRepo".into(),
                 source_value: "/repos/gt".into(),
             },
-            &store,
+            &connection,
         )
         .expect("remove succeeds");
 
@@ -83,13 +77,13 @@ mod tests {
 
     #[test]
     fn remove_reports_false_for_unknown_identity() {
-        let store = store_test();
+        let connection = store_test();
         let response = execute(
             RemoveLiveView {
                 source_kind: "LocalRepo".into(),
                 source_value: "/repos/unknown".into(),
             },
-            &store,
+            &connection,
         )
         .expect("remove succeeds");
 
@@ -98,10 +92,8 @@ mod tests {
 
     #[test]
     fn delete_failure_is_an_unexpected_operation_error() {
-        let store = store_test();
-        store
-            .connection_lock()
-            .expect("connection lock")
+        let connection = store_test();
+        connection
             .execute("DROP TABLE live_views", [])
             .expect("drop live views table");
 
@@ -110,7 +102,7 @@ mod tests {
                 source_kind: "LocalRepo".into(),
                 source_value: "/repos/gt".into(),
             },
-            &store,
+            &connection,
         )
         .expect_err("delete failure rejects");
 

@@ -5,6 +5,7 @@ use gtl_application::{
     history::record_render::{self, RecordRender},
     ports::Clock,
 };
+use gtl_benchmarks::{Benchmark, BenchmarkCase};
 use gtl_infra::app_state::SqliteAppState;
 
 #[derive(Clone, Copy)]
@@ -34,11 +35,12 @@ fn request() -> RecordRender {
 fn record_render(criterion: &mut Criterion) {
     let directory = tempfile::tempdir().expect("temporary app-state directory");
     let app_state = SqliteAppState::open(directory.path()).expect("open app state");
-    criterion.bench_function("app-state-record-render", |bencher| {
+    criterion.bench_function(BenchmarkCase::AppStateRecordRender.as_str(), |bencher| {
         bencher.iter_batched(
             request,
             |request| {
-                record_render::execute(black_box(request), &app_state, &BenchmarkClock)
+                let mut connection = app_state.connection_lock().expect("lock app state");
+                record_render::execute(black_box(request), &mut connection, &BenchmarkClock)
                     .expect("record render");
             },
             BatchSize::SmallInput,
@@ -46,5 +48,9 @@ fn record_render(criterion: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, record_render);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().sample_size(Benchmark::AppStateRecordRender.sample_size());
+    targets = record_render
+}
 criterion_main!(benches);

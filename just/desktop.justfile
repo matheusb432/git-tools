@@ -23,8 +23,3 @@ update: build install
 [group('desktop')]
 gen-icon:
     cargo run --quiet -p xtask -- gen-icon
-
-# Run the pure viewer-render benchmark; --fast selects the concise shell-only preset.
-[group('desktop')]
-bench *args:
-    cargo run --quiet -p xtask -- desktop-bench {{ args }}
