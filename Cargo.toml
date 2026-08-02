@@ -1,30 +1,30 @@
 [workspace]
 resolver = "3"
 members = [
-  "crates/application",
-  "crates/browser-e2e",
-  "crates/cli",
-  "crates/contracts",
-  "crates/daemon",
-  "crates/desktop",
-  "crates/desktop/e2e",
-  "crates/domain",
-  "crates/e2e",
-  "crates/infra",
-  "crates/preview",
+  "crates/gtl-application",
+  "crates/gtl-browser-e2e",
+  "crates/gtl-cli",
+  "crates/gtl-contracts",
+  "crates/gtl-daemon",
+  "crates/gtl-desktop",
+  "crates/gtl-desktop/gtl-desktop-e2e",
+  "crates/gtl-models",
+  "crates/gtl-e2e",
+  "crates/gtl-infra",
+  "crates/gtl-preview",
   "xtask",
 ]
-# Everything except `desktop`, which needs webkit2gtk headers and stays opt-in
-# via `-p desktop` (matching the pre-virtualization behavior of bare cargo).
+# Everything except `gtl-desktop`, which needs webkit2gtk headers and stays opt-in
+# via `-p gtl-desktop` (matching the pre-virtualization behavior of bare cargo).
 default-members = [
-  "crates/application",
-  "crates/cli",
-  "crates/contracts",
-  "crates/daemon",
-  "crates/domain",
-  "crates/e2e",
-  "crates/infra",
-  "crates/preview",
+  "crates/gtl-application",
+  "crates/gtl-cli",
+  "crates/gtl-contracts",
+  "crates/gtl-daemon",
+  "crates/gtl-models",
+  "crates/gtl-e2e",
+  "crates/gtl-infra",
+  "crates/gtl-preview",
   "xtask",
 ]
 
@@ -35,7 +35,7 @@ publish = false
 
 [workspace.dependencies]
 anyhow = "1"
-application = { path = "crates/application" }
+gtl-application = { path = "crates/gtl-application" }
 assert_cmd = "2"
 axum = "0.8"
 base64 = "0.22.1"
@@ -45,18 +45,18 @@ clap = { version = "4", features = ["derive"] }
 clap-cargo = "0.18.3"
 command-group = "5.0.1"
 console = { version = "0.16.4", default-features = false, features = ["std"] }
-contracts = { path = "crates/contracts" }
+gtl-contracts = { path = "crates/gtl-contracts" }
 cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.10.0" }
 criterion = "0.8.2"
 directories = "6.0.0"
-domain = { path = "crates/domain" }
+gtl-models = { path = "crates/gtl-models" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gix = { version = "0.56", default-features = false, features = ["revision"] }
 http-body-util = "0.1"
 ico = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
 indicatif = { version = "0.18.6", default-features = false }
-infra = { path = "crates/infra" }
+gtl-infra = { path = "crates/gtl-infra" }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 lru = "0.18.1"
 libc = "0.2.186"
@@ -66,7 +66,7 @@ nutype = "0.7.0"
 parking_lot = "0.12.5"
 playwright-rs = "=0.15.0"
 predicates = "3"
-preview = { path = "crates/preview" }
+gtl-preview = { path = "crates/gtl-preview" }
 raw-window-handle = "0.6"
 reqwest = { version = "0.13", default-features = false, features = [
   "blocking",

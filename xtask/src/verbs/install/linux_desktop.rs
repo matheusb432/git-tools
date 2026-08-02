@@ -14,11 +14,7 @@ pub(super) fn install(repo: &Path, viewer: &Path) -> Result<Option<PathBuf>> {
     let Some(data_home) = xdg_data_home()? else {
         return Ok(None);
     };
-    let icon = repo
-        .join("crates")
-        .join("desktop")
-        .join("icons")
-        .join("icon.png");
+    let icon = icon_source_path(repo);
     install_files(&data_home, viewer, &icon)
         .with_context(|| format!("installing Linux desktop files for {}", viewer.display()))?;
     Ok(Some(desktop_entry_path(&data_home)))
@@ -62,6 +58,13 @@ fn xdg_data_home() -> Result<Option<PathBuf>> {
     let home =
         env::var_os("HOME").context("HOME is not set; cannot install Linux desktop entry")?;
     Ok(Some(PathBuf::from(home).join(".local").join("share")))
+}
+
+fn icon_source_path(repo: &Path) -> PathBuf {
+    repo.join("crates")
+        .join("gtl-desktop")
+        .join("icons")
+        .join("icon.png")
 }
 
 fn install_files(data_home: &Path, viewer: &Path, icon_src: &Path) -> Result<()> {
@@ -158,6 +161,16 @@ fn desktop_exec_arg(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use std::{fs, path::Path};
+
+    #[test]
+    fn icon_source_path_points_to_the_gtl_desktop_crate() {
+        let repo = Path::new("/home/dev/git-tools");
+
+        assert_eq!(
+            super::icon_source_path(repo),
+            repo.join("crates/gtl-desktop/icons/icon.png")
+        );
+    }
 
     #[test]
     fn desktop_entry_matches_gtl_viewer_identity() {

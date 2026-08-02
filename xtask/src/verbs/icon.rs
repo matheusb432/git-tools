@@ -42,7 +42,7 @@ const WHITE: Rgb = (255, 255, 255);
 /// Resolutions packed into the multi-resolution `.ico` (taskbar/tray/explorer needs).
 const ICO_SIZES: &[u32] = &[16, 24, 32, 48, 64, 128, 256];
 
-/// Render the icon and write `icon.png` + `icon.ico` into `crates/desktop/icons/`.
+/// Render the icon and write `icon.png` + `icon.ico` into `crates/gtl-desktop/icons/`.
 pub fn run() -> Result<()> {
     let pixmap = render()?;
     let img = to_rgba_image(&pixmap);
@@ -62,9 +62,9 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-/// `crates/desktop/icons/`, resolved from this crate's source so the verb works from any CWD.
+/// `crates/gtl-desktop/icons/`, resolved from this crate's source so the verb works from any CWD.
 fn icons_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/desktop/icons")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/gtl-desktop/icons")
 }
 
 /// Draw the full icon into a `RENDER`-square premultiplied canvas.

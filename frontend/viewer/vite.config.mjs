@@ -10,7 +10,7 @@ export default defineConfig({
     target: "es2021",
     minify: true,
     emptyOutDir: false,
-    outDir: resolve(root, "crates/desktop/src/embedded/generated"),
+    outDir: resolve(root, "crates/gtl-desktop/src/embedded/generated"),
     lib: {
       entry: resolve(root, "frontend/viewer/main.ts"),
       name: "GtlViewer",

@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn groups_repository_formatter_and_linter_ownership() {
         let classified = CheckPaths::classify(&paths(&[
-            "crates/domain/src/lib.rs",
+            "crates/gtl-models/src/lib.rs",
             "Cargo.toml",
             "docs/Guide Name.md",
             "frontend/shared/wheel.ts",
@@ -91,11 +91,11 @@ mod tests {
             "tsconfig.json",
             "vitest.config.mjs",
             "frontend/test/dom-stub.ts",
-            "crates/preview/src/styles/base.css",
+            "crates/gtl-preview/src/styles/base.css",
             ".github/workflows/check.yaml",
         ]));
 
-        assert_eq!(classified.rust, paths(&["crates/domain/src/lib.rs"]));
+        assert_eq!(classified.rust, paths(&["crates/gtl-models/src/lib.rs"]));
         assert_eq!(classified.toml, paths(&["Cargo.toml"]));
         assert_eq!(classified.markdown, paths(&["docs/Guide Name.md"]));
         assert_eq!(

@@ -84,10 +84,10 @@ mod tests {
     #[test]
     fn paths_preserve_spaces_and_nul_boundaries() {
         assert_eq!(
-            parse_paths(b"docs/Guide Name.md\0crates/domain/src/lib.rs\0").unwrap(),
+            parse_paths(b"docs/Guide Name.md\0crates/gtl-models/src/lib.rs\0").unwrap(),
             [
                 PathBuf::from("docs/Guide Name.md"),
-                PathBuf::from("crates/domain/src/lib.rs"),
+                PathBuf::from("crates/gtl-models/src/lib.rs"),
             ]
         );
     }

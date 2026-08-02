@@ -80,7 +80,7 @@ pub enum Command {
         extra: Vec<String>,
     },
     /// Run the selected test scope, terse by default. The default excludes desktop tests;
-    /// `--e2e` is hermetic viewer E2E only; `--all` is the complete repository gate.
+    /// `--e2e` is hermetic viewer E2E only; `--all` is the complete repository test suite.
     #[command(name = Verb::TEST.as_str())]
     Test(TestArguments),
     /// Run the ordered native desktop E2E workflow for the test supervisor.
@@ -122,7 +122,7 @@ pub enum Command {
     /// Reject forbidden outward Cargo dependency edges.
     #[command(name = Verb::CHECK_STRUCTURE.as_str())]
     CheckStructure,
-    /// Render the gtl-viewer icon assets (`crates/desktop/icons/icon.{png,ico}`) from code.
+    /// Render the gtl-viewer icon assets (`crates/gtl-desktop/icons/icon.{png,ico}`) from code.
     /// Ports the retired Python generator; the multi-res `.ico` is required by tauri-build on
     /// Windows.
     #[command(name = Verb::GEN_ICON.as_str())]

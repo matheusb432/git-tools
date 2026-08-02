@@ -421,7 +421,7 @@ fn workflow() -> Result<()> {
             "build",
             "--release",
             "-p",
-            "e2e",
+            "gtl-e2e",
             "--bin",
             "editor-recorder",
         ],
@@ -670,7 +670,7 @@ fn run_dom_phase(
     let arguments = [
         "test",
         "-p",
-        "desktop-e2e",
+        "gtl-desktop-e2e",
         "--features",
         "e2e",
         "--test",

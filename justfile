@@ -47,7 +47,7 @@ purge:
 
 # Build only if the binary is missing (preflight for run recipes).
 _preflight:
-    test -x "{{ _bin }}" || cargo build --release -p cli -p daemon
+    test -x "{{ _bin }}" || cargo build --release -p gtl-cli -p gtl-daemon
 
 # ============ quality ============
 

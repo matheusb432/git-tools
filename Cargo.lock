@@ -119,25 +119,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
-name = "application"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "contracts",
- "cqrsy",
- "domain",
- "futures-util",
- "natord",
- "rusqlite",
- "serde",
- "shlex",
- "strum",
- "thiserror 2.0.19",
- "tokio",
- "toml 1.1.3+spec-1.1.0",
-]
-
-[[package]]
 name = "arc-swap"
 version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -527,17 +508,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "browser-e2e"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "command-group",
- "playwright-rs",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -848,30 +818,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
-name = "cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "application",
- "assert_cmd",
- "clap",
- "clap-cargo",
- "contracts",
- "domain",
- "infra",
- "jiff",
- "predicates",
- "reqwest",
- "serde",
- "serde_json",
- "strum",
- "tempfile",
- "thiserror 2.0.19",
- "toml 1.1.3+spec-1.1.0",
- "uuid",
-]
-
-[[package]]
 name = "clru"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -960,16 +906,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-xid",
-]
-
-[[package]]
-name = "contracts"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "serde",
- "serde_json",
- "serde_with",
 ]
 
 [[package]]
@@ -1225,28 +1161,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
 
 [[package]]
-name = "daemon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "application",
- "axum",
- "contracts",
- "http-body-util",
- "infra",
- "preview",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1357,47 +1271,6 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.118",
-]
-
-[[package]]
-name = "desktop"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "application",
- "contracts",
- "criterion",
- "domain",
- "infra",
- "lru",
- "maud",
- "preview",
- "raw-window-handle",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "strum",
- "tauri",
- "tauri-build",
- "tauri-plugin-single-instance",
- "tempfile",
- "toml 1.1.3+spec-1.1.0",
- "url",
- "x11-dl",
-]
-
-[[package]]
-name = "desktop-e2e"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "command-group",
- "futures-util",
- "serde",
- "serde_json",
- "tempfile",
- "thirtyfour",
- "tokio",
 ]
 
 [[package]]
@@ -1519,16 +1392,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "domain"
-version = "0.1.0"
-dependencies = [
- "nutype",
- "serde",
- "strum",
- "thiserror 2.0.19",
-]
-
-[[package]]
 name = "dpi"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1578,17 +1441,6 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
-
-[[package]]
-name = "e2e"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "predicates",
- "serde_json",
- "tempfile",
-]
 
 [[package]]
 name = "ego-tree"
@@ -2770,6 +2622,195 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtl-application"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cqrsy",
+ "futures-util",
+ "gtl-contracts",
+ "gtl-models",
+ "natord",
+ "rusqlite",
+ "serde",
+ "shlex",
+ "strum",
+ "thiserror 2.0.19",
+ "tokio",
+ "toml 1.1.3+spec-1.1.0",
+]
+
+[[package]]
+name = "gtl-browser-e2e"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "command-group",
+ "playwright-rs",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "gtl-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "clap-cargo",
+ "gtl-application",
+ "gtl-contracts",
+ "gtl-infra",
+ "gtl-models",
+ "jiff",
+ "predicates",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "strum",
+ "tempfile",
+ "thiserror 2.0.19",
+ "toml 1.1.3+spec-1.1.0",
+ "uuid",
+]
+
+[[package]]
+name = "gtl-contracts"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+ "serde_with",
+]
+
+[[package]]
+name = "gtl-daemon"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "gtl-application",
+ "gtl-contracts",
+ "gtl-infra",
+ "gtl-preview",
+ "http-body-util",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "gtl-desktop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "criterion",
+ "gtl-application",
+ "gtl-contracts",
+ "gtl-infra",
+ "gtl-models",
+ "gtl-preview",
+ "lru",
+ "maud",
+ "raw-window-handle",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "strum",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-single-instance",
+ "tempfile",
+ "toml 1.1.3+spec-1.1.0",
+ "url",
+ "x11-dl",
+]
+
+[[package]]
+name = "gtl-desktop-e2e"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "command-group",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thirtyfour",
+ "tokio",
+]
+
+[[package]]
+name = "gtl-e2e"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "predicates",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "gtl-infra"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "command-group",
+ "criterion",
+ "directories",
+ "gix",
+ "gtl-application",
+ "gtl-contracts",
+ "gtl-models",
+ "jiff",
+ "libc",
+ "parking_lot",
+ "rusqlite",
+ "rusqlite_migration",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "tokio",
+ "toml 1.1.3+spec-1.1.0",
+ "toml_edit 0.25.12+spec-1.1.0",
+ "walkdir",
+]
+
+[[package]]
+name = "gtl-models"
+version = "0.1.0"
+dependencies = [
+ "nutype",
+ "serde",
+ "strum",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "gtl-preview"
+version = "0.1.0"
+dependencies = [
+ "gtl-application",
+ "gtl-models",
+ "maud",
+ "scraper",
+ "similar",
+ "strum",
+ "syntect",
+ "url",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3201,33 +3242,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a588916bfdfd92e71cacef98a63d9b1f0d74d6599980d11894290e7ddefffcf7"
 dependencies = [
  "cfb",
-]
-
-[[package]]
-name = "infra"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "application",
- "command-group",
- "contracts",
- "criterion",
- "directories",
- "domain",
- "gix",
- "jiff",
- "libc",
- "parking_lot",
- "rusqlite",
- "rusqlite_migration",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tempfile",
- "tokio",
- "toml 1.1.3+spec-1.1.0",
- "toml_edit 0.25.12+spec-1.1.0",
- "walkdir",
 ]
 
 [[package]]
@@ -4508,20 +4522,6 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.118",
-]
-
-[[package]]
-name = "preview"
-version = "0.1.0"
-dependencies = [
- "application",
- "domain",
- "maud",
- "scraper",
- "similar",
- "strum",
- "syntect",
- "url",
 ]
 
 [[package]]

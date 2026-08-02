@@ -8,12 +8,12 @@ use std::{
 use anyhow::{Context, Result, bail};
 
 const AUTHORED_CSS_ALLOWED: &[&str] = &[
-    "crates/preview/src/styles/base.css",
-    "crates/preview/src/styles/theme-map.css",
-    "crates/preview/src/styles/tokens.css",
+    "crates/gtl-preview/src/styles/base.css",
+    "crates/gtl-preview/src/styles/theme-map.css",
+    "crates/gtl-preview/src/styles/tokens.css",
 ];
-const AUTHORED_CSS_ROOTS: &[&str] = &["crates/preview/src", "crates/desktop/src"];
-const GENERATED_CSS_PATH: &str = "crates/preview/src/embedded/generated/preview.css";
+const AUTHORED_CSS_ROOTS: &[&str] = &["crates/gtl-preview/src", "crates/gtl-desktop/src"];
+const GENERATED_CSS_PATH: &str = "crates/gtl-preview/src/embedded/generated/preview.css";
 const TRAVERSAL_LIMITS: TraversalLimits = TraversalLimits {
     directory_depth_max: 32,
     directory_entry_count_max: 10_000,
@@ -261,21 +261,21 @@ mod tests {
         TraversalLimits, check_authored_css, check_compiled_css, inventory_authored_css_with_limits,
     };
 
-    const GENERATED_CSS_PATH: &str = "crates/preview/src/embedded/generated/preview.css";
+    const GENERATED_CSS_PATH: &str = "crates/gtl-preview/src/embedded/generated/preview.css";
 
     fn repository_with_allowed_css() -> TempDir {
         let repository = TempDir::new().expect("temporary repository");
         for path in [
-            "crates/preview/src/styles/base.css",
-            "crates/preview/src/styles/theme-map.css",
-            "crates/preview/src/styles/tokens.css",
+            "crates/gtl-preview/src/styles/base.css",
+            "crates/gtl-preview/src/styles/theme-map.css",
+            "crates/gtl-preview/src/styles/tokens.css",
         ] {
             let path = repository.path().join(path);
             fs::create_dir_all(path.parent().expect("CSS parent directory"))
                 .expect("create CSS parent directory");
             fs::write(path, "").expect("write CSS fixture");
         }
-        fs::create_dir_all(repository.path().join("crates/desktop/src"))
+        fs::create_dir_all(repository.path().join("crates/gtl-desktop/src"))
             .expect("create desktop source directory");
         repository
     }
@@ -299,11 +299,11 @@ mod tests {
         let repository = repository_with_allowed_css();
         write_css(
             &repository,
-            "crates/preview/src/embedded/generated/extra.css",
+            "crates/gtl-preview/src/embedded/generated/extra.css",
         );
         write_css(
             &repository,
-            "crates/desktop/src/embedded/generated/extra.css",
+            "crates/gtl-desktop/src/embedded/generated/extra.css",
         );
 
         assert!(check_authored_css(repository.path()).is_ok());
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn authored_css_rejects_an_extra_preview_file() {
         let repository = repository_with_allowed_css();
-        let path = "crates/preview/src/styles/viewer.css";
+        let path = "crates/gtl-preview/src/styles/viewer.css";
         write_css(&repository, path);
 
         let error = check_authored_css(repository.path())
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn authored_css_rejects_an_extra_desktop_file() {
         let repository = repository_with_allowed_css();
-        let path = "crates/desktop/src/render/viewer.css";
+        let path = "crates/gtl-desktop/src/render/viewer.css";
         write_css(&repository, path);
 
         let error = check_authored_css(repository.path())
@@ -338,7 +338,7 @@ mod tests {
     #[test]
     fn authored_css_rejects_directory_depth_over_limit() {
         let repository = repository_with_allowed_css();
-        let path = "crates/preview/src/nested/deeper";
+        let path = "crates/gtl-preview/src/nested/deeper";
         fs::create_dir_all(repository.path().join(path)).expect("create nested source directory");
         let limits = TraversalLimits {
             directory_depth_max: 1,
@@ -368,7 +368,7 @@ mod tests {
             .expect_err("source entry count should be bounded")
             .to_string();
 
-        assert!(error.contains("crates/preview/src"), "{error}");
+        assert!(error.contains("crates/gtl-preview/src"), "{error}");
         assert!(
             error.contains("directory entry count exceeds limit 0"),
             "{error}"

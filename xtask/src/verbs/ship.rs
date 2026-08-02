@@ -92,17 +92,17 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
     let profile: &[&str] = if smoke { &[] } else { &["--release"] };
     let mut cli_args = vec!["xwin", "build"];
     cli_args.extend_from_slice(profile);
-    cli_args.extend_from_slice(&["-p", "cli", "--target", WIN_TARGET]);
+    cli_args.extend_from_slice(&["-p", "gtl-cli", "--target", WIN_TARGET]);
 
     let mut daemon_args = vec!["xwin", "build"];
     daemon_args.extend_from_slice(profile);
-    daemon_args.extend_from_slice(&["-p", "daemon", "--target", WIN_TARGET]);
+    daemon_args.extend_from_slice(&["-p", "gtl-daemon", "--target", WIN_TARGET]);
 
     let mut viewer_args = vec!["xwin", "build"];
     viewer_args.extend_from_slice(profile);
     viewer_args.extend_from_slice(&[
         "-p",
-        "desktop",
+        "gtl-desktop",
         "--features",
         "custom-protocol",
         "--target",

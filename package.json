@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "bench": "vitest bench --run frontend",
-    "build": "vite build --config frontend/diff/vite.config.mjs && vite build --config frontend/viewer/vite.config.mjs && vite build --config frontend/boot/vite.config.mjs && tailwindcss -i crates/preview/src/styles/base.css -o crates/preview/src/embedded/generated/preview.css --minify",
+    "build": "vite build --config frontend/diff/vite.config.mjs && vite build --config frontend/viewer/vite.config.mjs && vite build --config frontend/boot/vite.config.mjs && tailwindcss -i crates/gtl-preview/src/styles/base.css -o crates/gtl-preview/src/embedded/generated/preview.css --minify",
     "fix": "oxlint frontend/boot frontend/diff frontend/shared frontend/viewer --fix && oxfmt frontend/boot frontend/diff frontend/shared frontend/viewer .oxfmtrc.json .oxlintrc.json package.json tsconfig.json vitest.config.mjs",
     "format": "oxfmt frontend/boot frontend/diff frontend/shared frontend/viewer .oxfmtrc.json .oxlintrc.json package.json tsconfig.json vitest.config.mjs",
     "format:check": "oxfmt --check frontend/boot frontend/diff frontend/shared frontend/viewer .oxfmtrc.json .oxlintrc.json package.json tsconfig.json vitest.config.mjs",

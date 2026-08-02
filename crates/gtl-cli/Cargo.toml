@@ -1,0 +1,38 @@
+[package]
+name = "gtl-cli"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "git-tools"
+path = "src/main.rs"
+
+[lib]
+name = "gtl_cli"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow.workspace = true
+gtl-application.workspace = true
+clap.workspace = true
+clap-cargo.workspace = true
+gtl-contracts.workspace = true
+gtl-models.workspace = true
+gtl-infra.workspace = true
+jiff.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+strum.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

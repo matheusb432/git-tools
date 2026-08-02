@@ -121,7 +121,7 @@ fn benchmark_step(benchmark: Benchmark, selection: BenchmarkSelection) -> Step {
     arguments.extend(
         [
             "-p",
-            "desktop",
+            "gtl-desktop",
             "--bench",
             benchmark.cargo_target(),
             "--features",
@@ -185,7 +185,7 @@ mod tests {
             [
                 "bench",
                 "-p",
-                "desktop",
+                "gtl-desktop",
                 "--bench",
                 "viewer_render",
                 "--features",
@@ -213,7 +213,7 @@ mod tests {
                 "bench",
                 "--quiet",
                 "-p",
-                "desktop",
+                "gtl-desktop",
                 "--bench",
                 "viewer_render",
                 "--features",

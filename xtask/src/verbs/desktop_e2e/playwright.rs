@@ -57,7 +57,7 @@ pub(super) fn run(
         &[
             "test",
             "-p",
-            "browser-e2e",
+            "gtl-browser-e2e",
             "--features",
             "e2e",
             "--test",
@@ -87,7 +87,7 @@ fn install_browsers(
                 "run",
                 "--quiet",
                 "-p",
-                "browser-e2e",
+                "gtl-browser-e2e",
                 "--features",
                 "e2e",
                 "--bin",

@@ -11,7 +11,7 @@ const VIEWER_BUILD_ARGS: &[&str] = &[
     "build",
     "--release",
     "-p",
-    "desktop",
+    "gtl-desktop",
     "--features",
     "custom-protocol",
 ];
@@ -33,7 +33,7 @@ fn build_cli() -> Result<()> {
     process::run(
         "cli-release-build",
         "cargo",
-        &["build", "--release", "-p", "cli", "-p", "daemon"],
+        &["build", "--release", "-p", "gtl-cli", "-p", "gtl-daemon"],
     )
 }
 
@@ -67,7 +67,7 @@ mod tests {
                 "build",
                 "--release",
                 "-p",
-                "desktop",
+                "gtl-desktop",
                 "--features",
                 "custom-protocol"
             ]

@@ -1,0 +1,41 @@
+[package]
+name = "gtl-infra"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[[bench]]
+name = "app_state"
+harness = false
+
+[dependencies]
+anyhow.workspace = true
+gtl-application.workspace = true
+command-group.workspace = true
+directories.workspace = true
+gtl-models.workspace = true
+gix.workspace = true
+jiff.workspace = true
+parking_lot.workspace = true
+rusqlite.workspace = true
+rusqlite_migration.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["fs", "process"] }
+toml.workspace = true
+toml_edit.workspace = true
+walkdir.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+gtl-application = { workspace = true, features = ["testing"] }
+gtl-contracts.workspace = true
+criterion.workspace = true
+tokio = { workspace = true, features = ["fs", "macros", "rt"] }
+
+[lints]
+workspace = true

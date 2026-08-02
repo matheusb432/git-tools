@@ -1,0 +1,28 @@
+[package]
+name = "gtl-browser-e2e"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+autotests = false
+
+[features]
+e2e = []
+
+[dependencies]
+anyhow.workspace = true
+command-group.workspace = true
+playwright-rs.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[[bin]]
+name = "install-browsers"
+path = "src/bin/install-browsers.rs"
+
+[[test]]
+name = "offline_artifact"
+path = "tests/offline_artifact.rs"
+required-features = ["e2e"]
+
+[lints]
+workspace = true

@@ -31,17 +31,14 @@ impl TestDeclaration {
     }
 }
 
-pub(crate) fn tests_unit(executable: &OsString) -> Vec<TestDeclaration> {
-    vec![
-        worker("check", executable, "check"),
-        TestDeclaration::new(
-            "unit",
-            Test::new("unit", "cargo")
-                .args(["test", "--quiet"])
-                .verbose_arguments(["--", "--nocapture"])
-                .summary_parser(summary::cargo),
-        ),
-    ]
+pub(crate) fn tests_unit() -> Vec<TestDeclaration> {
+    vec![TestDeclaration::new(
+        "unit",
+        Test::new("unit", "cargo")
+            .args(["test", "--quiet"])
+            .verbose_arguments(["--", "--nocapture"])
+            .summary_parser(summary::cargo),
+    )]
 }
 
 pub(crate) fn tests_e2e(executable: OsString) -> Vec<TestDeclaration> {
@@ -50,7 +47,6 @@ pub(crate) fn tests_e2e(executable: OsString) -> Vec<TestDeclaration> {
 
 pub(crate) fn tests_all(executable: OsString) -> Vec<TestDeclaration> {
     vec![
-        worker("check", &executable, "check"),
         TestDeclaration::new(
             "unit",
             Test::new("unit", "cargo")

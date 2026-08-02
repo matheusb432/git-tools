@@ -91,7 +91,7 @@ fn test_coverage_step(arguments_extra: &[String]) -> Step {
 
 fn selected_tests(scope: Scope, executable: std::ffi::OsString) -> Vec<project::TestDeclaration> {
     match scope {
-        Scope::Unit => project::tests_unit(&executable),
+        Scope::Unit => project::tests_unit(),
         Scope::E2e => project::tests_e2e(executable),
         Scope::All => project::tests_all(executable),
     }
@@ -120,8 +120,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unit_selects_check_and_default_member_tests() {
-        assert_eq!(selected_test_labels(Scope::Unit), ["check", "unit"]);
+    fn unit_selects_default_member_tests() {
+        assert_eq!(selected_test_labels(Scope::Unit), ["unit"]);
     }
 
     #[test]
@@ -130,10 +130,10 @@ mod tests {
     }
 
     #[test]
-    fn all_selects_the_complete_gate_in_declaration_order() {
+    fn all_selects_the_complete_test_suite_in_declaration_order() {
         assert_eq!(
             selected_test_labels(Scope::All),
-            ["check", "unit", "web", "drift", "e2e"]
+            ["unit", "web", "drift", "e2e"]
         );
     }
 

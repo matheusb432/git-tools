@@ -7,11 +7,11 @@ fn check_structure_rejects_application_dependency_on_infrastructure() {
         workspace.path(),
         &[
             (
-                "application",
-                "application",
-                "[dependencies]\ninfra = { path = \"../infra\" }\n",
+                "gtl-application",
+                "gtl-application",
+                "[dependencies]\ngtl-infra = { path = \"../gtl-infra\" }\n",
             ),
-            ("infra", "infra", ""),
+            ("gtl-infra", "gtl-infra", ""),
         ],
     );
 
@@ -20,8 +20,8 @@ fn check_structure_rejects_application_dependency_on_infrastructure() {
     assert_eq!(output.status.code(), Some(3));
     assert!(
         String::from_utf8_lossy(&output.stderr).contains(
-            "[application points inward] application -> infra: \
-             use cases may depend on domain and wire contracts, not adapters or process roots"
+            "[gtl-application points inward] gtl-application -> gtl-infra: \
+             use cases may depend on models and wire contracts, not adapters or process roots"
         ),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
@@ -35,17 +35,17 @@ fn check_structure_allows_build_and_inward_test_edges() {
         workspace.path(),
         &[
             (
-                "application",
-                "application",
-                "[build-dependencies]\ninfra = { path = \"../infra\" }\n",
+                "gtl-application",
+                "gtl-application",
+                "[build-dependencies]\ngtl-infra = { path = \"../gtl-infra\" }\n",
             ),
-            ("infra", "infra", ""),
+            ("gtl-infra", "gtl-infra", ""),
             (
-                "e2e",
-                "e2e",
-                "[dev-dependencies]\ncontracts = { path = \"../contracts\" }\n",
+                "gtl-e2e",
+                "gtl-e2e",
+                "[dev-dependencies]\ngtl-contracts = { path = \"../gtl-contracts\" }\n",
             ),
-            ("contracts", "contracts", ""),
+            ("gtl-contracts", "gtl-contracts", ""),
         ],
     );
 

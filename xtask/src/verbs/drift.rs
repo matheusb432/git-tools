@@ -9,8 +9,14 @@ use super::frontend;
 
 /// The committed bundle dirs and the recipe that regenerates each, paired for the stale hint.
 const BUNDLES: &[(&str, &str)] = &[
-    ("crates/preview/src/embedded/generated/", "just cli build"),
-    ("crates/desktop/src/embedded/generated/", "just cli build"),
+    (
+        "crates/gtl-preview/src/embedded/generated/",
+        "just cli build",
+    ),
+    (
+        "crates/gtl-desktop/src/embedded/generated/",
+        "just cli build",
+    ),
 ];
 
 /// Fail if any bundle dir has uncommitted changes after a rebuild — i.e. it drifted from its TS
@@ -54,7 +60,7 @@ mod tests {
     fn check_drift_fails_with_rebuild_hint_when_a_bundle_is_dirty() {
         let err = check_drift(BUNDLES, &|_| false).unwrap_err().to_string();
         assert!(
-            err.contains("crates/preview/src/embedded/generated/ is stale"),
+            err.contains("crates/gtl-preview/src/embedded/generated/ is stale"),
             "{err}"
         );
         assert!(err.contains("just cli build"), "{err}");

@@ -1,0 +1,20 @@
+[package]
+name = "gtl-preview"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+gtl-application.workspace = true
+gtl-models.workspace = true
+maud.workspace = true
+similar.workspace = true
+syntect.workspace = true
+url.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+scraper.workspace = true
+strum.workspace = true
