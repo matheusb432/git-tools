@@ -8,6 +8,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 
 const CONCURRENT_LIVE_LINE_COUNT_MAX: usize = 45_000;
+const ONE_SHOT_ALPHA_REPOSITORY: &str = "one-shot-alpha";
+const ONE_SHOT_BETA_REPOSITORY: &str = "one-shot-beta";
 
 const ENVIRONMENT_VARIABLES: [&str; 6] = [
     "GTL_E2E_CLI_BINARY",
@@ -28,14 +30,61 @@ pub struct EditorRecord {
 pub struct ViewerFixture {
     repository: PathBuf,
     concurrent_live_root: PathBuf,
+    unavailable_repository: PathBuf,
     cli: PathBuf,
+    data_root: PathBuf,
     editor_record: PathBuf,
     editor_release: PathBuf,
     editor_exit: PathBuf,
 }
 
+pub struct OneShotFixture {
+    alpha_repository: PathBuf,
+    beta_repository: PathBuf,
+    cli: PathBuf,
+    data_root: PathBuf,
+}
+
+impl OneShotFixture {
+    pub fn create(data_root: &Path) -> Result<Self> {
+        let cli = required_environment_path("GTL_E2E_CLI_BINARY")?;
+        let fixture_root = required_environment_path("GTL_E2E_FIXTURE_ROOT")?;
+        let repositories = fixture_root.join("dom-repositories");
+        let alpha_repository = create_snapshot_repository(
+            &repositories,
+            ONE_SHOT_ALPHA_REPOSITORY,
+            "alpha-one-shot-marker",
+        )?;
+        let beta_repository = create_snapshot_repository(
+            &repositories,
+            ONE_SHOT_BETA_REPOSITORY,
+            "beta-one-shot-marker",
+        )?;
+        Ok(Self {
+            alpha_repository,
+            beta_repository,
+            cli,
+            data_root: data_root.to_path_buf(),
+        })
+    }
+
+    pub fn forward_alpha(&self) -> Result<()> {
+        self.forward(&self.alpha_repository)
+            .context("forward alpha one-shot diff")
+    }
+
+    pub fn forward_beta(&self) -> Result<()> {
+        self.forward(&self.beta_repository)
+            .context("forward beta one-shot diff")
+    }
+
+    fn forward(&self, repository: &Path) -> Result<()> {
+        command_checked_with_data_root(&self.cli, ["diff"], Some(repository), &self.data_root)
+    }
+}
+
 impl ViewerFixture {
-    pub fn create() -> Result<Self> {
+    pub fn create(data_root: &Path) -> Result<Self> {
         let [
             cli,
             fixture_root,
@@ -46,6 +95,7 @@ impl ViewerFixture {
         ] = required_environment_paths()?;
         let repository = fixture_root.join("dom-repositories/live-view");
         let concurrent_live_root = fixture_root.join("dom-repositories/concurrent-live");
+        let unavailable_repository = fixture_root.join("dom-repositories/live-view-unavailable");
         fs::create_dir_all(&repository)
             .with_context(|| format!("create live-view repository {}", repository.display()))?;
 
@@ -74,7 +124,9 @@ impl ViewerFixture {
         Ok(Self {
             repository,
             concurrent_live_root,
+            unavailable_repository,
             cli,
+            data_root: data_root.to_path_buf(),
             editor_record,
             editor_release,
             editor_exit,
@@ -82,10 +134,11 @@ impl ViewerFixture {
     }
 
     pub fn forward_live_view(&self) -> Result<()> {
-        command_checked(
+        command_checked_with_data_root(
             &self.cli,
             ["diff", "live", "--path", path_as_str(&self.repository)?],
             None,
+            &self.data_root,
         )
         .context("forward live view through release CLI")
     }
@@ -126,12 +179,33 @@ impl ViewerFixture {
             .with_context(|| format!("write {repository_name} live view"))?;
         git(&repository, ["add", "work.txt"])?;
         git(&repository, ["commit", "-q", "-m", "live-view change"])?;
-        command_checked(
+        command_checked_with_data_root(
             &self.cli,
             ["diff", "live", "--path", path_as_str(&repository)?],
             None,
+            &self.data_root,
         )
         .with_context(|| format!("forward {repository_name} live view through release CLI"))
+    }
+
+    pub fn make_repository_unavailable(&self) -> Result<()> {
+        fs::rename(&self.repository, &self.unavailable_repository).with_context(|| {
+            format!(
+                "move live-view repository from {} to {}",
+                self.repository.display(),
+                self.unavailable_repository.display()
+            )
+        })
+    }
+
+    pub fn restore_repository(&self) -> Result<()> {
+        fs::rename(&self.unavailable_repository, &self.repository).with_context(|| {
+            format!(
+                "restore live-view repository from {} to {}",
+                self.unavailable_repository.display(),
+                self.repository.display()
+            )
+        })
     }
 
     pub fn canonical_repository(&self) -> Result<PathBuf> {
@@ -165,11 +239,7 @@ impl ViewerFixture {
 }
 
 fn required_environment_paths() -> Result<[PathBuf; 6]> {
-    let paths = ENVIRONMENT_VARIABLES.map(|name| {
-        env::var_os(name)
-            .map(PathBuf::from)
-            .ok_or_else(|| anyhow!("{name} is required"))
-    });
+    let paths = ENVIRONMENT_VARIABLES.map(|name| required_environment_path(name));
     let [
         cli,
         fixture_root,
@@ -186,6 +256,33 @@ fn required_environment_paths() -> Result<[PathBuf; 6]> {
         editor_release?,
         editor_exit?,
     ])
+}
+
+fn required_environment_path(name: &str) -> Result<PathBuf> {
+    env::var_os(name)
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow!("{name} is required"))
+}
+
+fn create_snapshot_repository(root: &Path, name: &str, marker: &str) -> Result<PathBuf> {
+    let repository = root.join(name);
+    fs::create_dir_all(&repository)
+        .with_context(|| format!("create one-shot repository {}", repository.display()))?;
+    git(&repository, ["init", "-q", "-b", "main"])?;
+    git(&repository, ["config", "user.name", "Viewer E2E"])?;
+    git(
+        &repository,
+        ["config", "user.email", "viewer-e2e@example.invalid"],
+    )?;
+    fs::write(repository.join("work.txt"), "base\n").context("write one-shot base")?;
+    git(&repository, ["add", "work.txt"])?;
+    git(&repository, ["commit", "-q", "-m", "base"])?;
+    git(&repository, ["switch", "-q", "-c", "feature"])?;
+    fs::write(repository.join("work.txt"), format!("base\n{marker}\n"))
+        .with_context(|| format!("write {name} one-shot change"))?;
+    git(&repository, ["add", "work.txt"])?;
+    git(&repository, ["commit", "-q", "-m", "one-shot change"])?;
+    Ok(repository)
 }
 
 fn configured_editor(recorder: &Path, record: &Path, release: &Path, exit: &Path) -> String {
@@ -207,10 +304,31 @@ fn command_checked<const N: usize>(
     arguments: [&str; N],
     working_directory: Option<&Path>,
 ) -> Result<()> {
+    command_checked_with_optional_data_root(program, arguments, working_directory, None)
+}
+
+fn command_checked_with_data_root<const N: usize>(
+    program: impl AsRef<Path>,
+    arguments: [&str; N],
+    working_directory: Option<&Path>,
+    data_root: &Path,
+) -> Result<()> {
+    command_checked_with_optional_data_root(program, arguments, working_directory, Some(data_root))
+}
+
+fn command_checked_with_optional_data_root<const N: usize>(
+    program: impl AsRef<Path>,
+    arguments: [&str; N],
+    working_directory: Option<&Path>,
+    data_root: Option<&Path>,
+) -> Result<()> {
     let mut command = Command::new(program.as_ref());
     command.args(arguments);
     if let Some(working_directory) = working_directory {
         command.current_dir(working_directory);
+    }
+    if let Some(data_root) = data_root {
+        command.env("GIT_TOOLS_DATA_DIR", data_root);
     }
     let output = command
         .output()

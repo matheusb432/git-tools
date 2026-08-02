@@ -28,6 +28,7 @@ const TREE_PRESENTATION_CLASSES: &str = concat!(
     "[&_.tstatus.status-renamed]:border-acc-line [&_.tstatus.status-renamed]:bg-acc-soft [&_.tstatus.status-renamed]:text-acc ",
     "[&_.tstatus.status-modified]:bg-sunk [&_.tstatus.status-modified]:text-ink-3",
 );
+const STAT_CLASSES: &str = "rounded-sm border px-2 py-0.5 text-[11px]";
 
 // ! `.search` and `.tree-body` are enhancer hooks. The tree owns presentation for its
 // ! server-rendered descendants.
@@ -36,10 +37,6 @@ pub(super) fn tree(view: &View) -> Markup {
     let total_del: u32 = view.files.iter().map(|f| f.removed).sum();
     let commit_count = view.commits.len();
     let file_count = view.files.len();
-    // ! One border-color and one text-color utility per chip: stacking a neutral and an
-    // ! accent utility of the same property leaves the winner to stylesheet order.
-    let stat = "rounded-sm border px-2 py-0.5 text-[11px]";
-
     html! {
         aside class=(TREE_PRESENTATION_CLASSES) aria-label="Changed files tree" {
             div class="search relative mb-3 print:hidden!" {
@@ -51,9 +48,9 @@ pub(super) fn tree(view: &View) -> Markup {
                 span { (view.commits_label) " · " (file_count) " file" (plural(file_count)) }
             }
             div class="mx-0.5 mb-3 flex flex-wrap gap-2" {
-                span class={ (stat) " border-line-2 text-ink-2" } { b class="font-bold text-ink" { (commit_count) } " commit" (plural(commit_count)) }
-                span class={ (stat) " border-add-line text-add" } { "+" (total_add) }
-                span class={ (stat) " border-del-line text-del" } { "−" (total_del) }
+                span class={ (STAT_CLASSES) " border-line-2 text-ink-2" } { b class="font-bold text-ink" { (commit_count) } " commit" (plural(commit_count)) }
+                span class={ (STAT_CLASSES) " border-add-line text-add" } { "+" (total_add) }
+                span class={ (STAT_CLASSES) " border-del-line text-del" } { "−" (total_del) }
             }
             div class="tree-body text-[12.5px] whitespace-nowrap" {
                 (render_file_tree(view))
@@ -123,26 +120,33 @@ fn render_directory(directory: &TreeDirectory<'_>) -> Markup {
     }
 }
 
-pub(super) fn mobile_popover(view: &View) -> Markup {
+pub(super) fn mobile_popover(view: &View, target: &str) -> Markup {
     let total_add: u32 = view.files.iter().map(|file| file.added).sum();
     let total_del: u32 = view.files.iter().map(|file| file.removed).sum();
 
     html! {
-        aside id="viewer-files-popover"
+        aside id=(target)
+            data-preview-files-popover
             class="fixed inset-3 m-0 h-[calc(100vh_-_24px)] w-[calc(100vw_-_24px)] max-w-none overflow-hidden rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)]"
             aria-label="Changed files"
             popover {
             header class="flex items-center justify-between border-b border-line bg-surface-2 px-4 py-3" {
                 div {
                     strong class="block text-[13px]" { "Changed files" }
-                    span class="text-[11px] text-ink-3" {
-                        (view.files.len()) " file" (plural(view.files.len())) " · "
-                        span class="text-add" { "+" (total_add) } " "
-                        span class="text-del" { "−" (total_del) }
+                    div class="flex flex-wrap items-center gap-1.5 pt-1" {
+                        span class="text-[11px] text-ink-3" {
+                            (view.files.len()) " file" (plural(view.files.len()))
+                        }
+                        span class={ (STAT_CLASSES) " border-add-line text-add" } title="Lines added" {
+                            "+" (total_add)
+                        }
+                        span class={ (STAT_CLASSES) " border-del-line text-del" } title="Lines removed" {
+                            "−" (total_del)
+                        }
                     }
                 }
                 button type="button" class="size-[30px] cursor-pointer rounded-sm border-0 bg-transparent text-xl text-ink-2 [font:inherit] hover:bg-line hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
-                    popovertarget="viewer-files-popover" popovertargetaction="hide" aria-label="Close changed files" { "×" }
+                    popovertarget=(target) popovertargetaction="hide" aria-label="Close changed files" { "×" }
             }
             div class="gtl-scroll h-[calc(100%_-_57px)] overflow-y-auto p-2" {
                 @for file in &view.files {
@@ -196,5 +200,24 @@ mod tests {
         assert!(html.contains(r#"class="search "#));
         assert!(html.contains(r#"class="tree-body "#));
         assert!(html.contains(r#"data-target="f-src-a-b-rs""#));
+    }
+
+    #[test]
+    fn mobile_changed_files_popover_renders_total_line_chips() {
+        let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
+        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id).into_string();
+
+        let mobile_popover = html
+            .split_once(r#"id="viewer-files-popover""#)
+            .and_then(|(_, tail)| tail.split_once(r#"<div class="gtl-scroll"#))
+            .map(|(header, _)| header)
+            .expect("mobile changed-files popover header");
+
+        assert!(mobile_popover.contains("title=\"Lines added\""));
+        assert!(mobile_popover.contains("title=\"Lines removed\""));
+        assert!(mobile_popover.contains("border-add-line text-add"));
+        assert!(mobile_popover.contains("border-del-line text-del"));
+        assert!(mobile_popover.contains(">+2</span>"));
+        assert!(mobile_popover.contains(">−1</span>"));
     }
 }

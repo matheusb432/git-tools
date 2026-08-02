@@ -1,4 +1,10 @@
-use std::{env, net::TcpListener, path::PathBuf, process::Command, time::Duration};
+use std::{
+    env, fs,
+    net::TcpListener,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 
 use anyhow::{Context, Result, anyhow, ensure};
 use command_group::{CommandGroup, GroupChild};
@@ -21,10 +27,16 @@ const CLEANUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 pub struct TestSession {
     driver: Option<WebDriver>,
     driver_child: Option<GroupChild>,
+    data_root: PathBuf,
 }
 
 impl TestSession {
-    pub async fn start() -> Result<Self> {
+    pub async fn start(name: &str) -> Result<Self> {
+        let data_root = suite_data_root(name)?;
+        Self::start_with_data_root(data_root).await
+    }
+
+    async fn start_with_data_root(data_root: PathBuf) -> Result<Self> {
         verify_runtime_environment()?;
         let viewer_binary = viewer_binary()?;
         let mut failure = None;
@@ -37,7 +49,8 @@ impl TestSession {
                 .arg("--port")
                 .arg(webdriver_port.to_string())
                 .arg("--native-port")
-                .arg(native_driver_port.to_string());
+                .arg(native_driver_port.to_string())
+                .env("GIT_TOOLS_DATA_DIR", &data_root);
             deny_external_proxies(&mut command);
             drop(ports);
             let mut driver_child = match command.group_spawn() {
@@ -61,6 +74,7 @@ impl TestSession {
                     return Ok(Self {
                         driver: Some(driver),
                         driver_child: Some(driver_child),
+                        data_root,
                     });
                 }
                 Ok(Err(error)) => {
@@ -89,7 +103,31 @@ impl TestSession {
             .expect("driver remains available until session cleanup")
     }
 
+    pub fn driver_if_active(&self) -> Option<&WebDriver> {
+        self.driver.as_ref()
+    }
+
+    pub fn data_root(&self) -> &Path {
+        &self.data_root
+    }
+
+    pub async fn restart(&mut self) -> Result<()> {
+        let data_root = self.data_root.clone();
+        self.shutdown()
+            .await
+            .context("stop viewer before restart")?;
+        let replacement = Self::start_with_data_root(data_root)
+            .await
+            .context("start viewer after restart")?;
+        *self = replacement;
+        Ok(())
+    }
+
     pub async fn finish(mut self) -> Result<()> {
+        self.shutdown().await
+    }
+
+    async fn shutdown(&mut self) -> Result<()> {
         let driver_result = match self.driver.take() {
             Some(driver) => {
                 wait::within(
@@ -117,6 +155,23 @@ impl TestSession {
                 .context(format!("tauri-driver cleanup also failed: {child_error:#}")),
         }
     }
+}
+
+fn suite_data_root(name: &str) -> Result<PathBuf> {
+    ensure!(
+        !name.is_empty()
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'),
+        "desktop E2E suite name must contain only lowercase ASCII letters, digits, and hyphens"
+    );
+    let base = env::var_os("GTL_E2E_DATA_ROOT")
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow!("GTL_E2E_DATA_ROOT is required"))?;
+    let data_root = base.join(name);
+    fs::create_dir_all(&data_root)
+        .with_context(|| format!("create suite data root {}", data_root.display()))?;
+    Ok(data_root)
 }
 
 impl Drop for TestSession {

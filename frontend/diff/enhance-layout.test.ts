@@ -176,7 +176,8 @@ describe("enhanceLayout", () => {
     file.id = "file-mobile";
     file.open = false;
     const popover = document.createElement("aside");
-    popover.id = "viewer-files-popover";
+    popover.id = "preview-files-popover-3";
+    popover.setAttribute("data-preview-files-popover", "");
     const hidePopover = vi.fn();
     Object.defineProperty(popover, "hidePopover", { value: hidePopover });
     const button = document.createElement("button");

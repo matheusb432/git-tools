@@ -146,12 +146,21 @@ pub async fn open() -> Result<Session> {
 }
 
 impl Session {
-    pub async fn finish(self) -> Result<()> {
+    pub fn verify_network_guard(&self) -> Result<()> {
         let blocked_urls = self
             .blocked_urls
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
+        ensure!(
+            blocked_urls.is_empty(),
+            "Chromium requested external URLs: {}",
+            blocked_urls.join(", ")
+        );
+        Ok(())
+    }
+
+    pub async fn finish(self) -> Result<()> {
         close_resources(
             Some(&self.page),
             Some(&self.context),
@@ -159,12 +168,7 @@ impl Session {
             &self.playwright,
         )
         .await?;
-        ensure!(
-            blocked_urls.is_empty(),
-            "Chromium requested external URLs: {}",
-            blocked_urls.join(", ")
-        );
-        Ok(())
+        self.verify_network_guard()
     }
 }
 

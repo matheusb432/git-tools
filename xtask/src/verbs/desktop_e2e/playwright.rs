@@ -61,7 +61,7 @@ pub(super) fn run(
             "--features",
             "e2e",
             "--test",
-            "offline_artifact",
+            "browser",
             "--",
             "--test-threads",
             "1",

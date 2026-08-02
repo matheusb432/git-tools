@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{future::Future, panic::AssertUnwindSafe, pin::Pin};
+use std::{future::Future, panic::AssertUnwindSafe, path::PathBuf, pin::Pin};
 
 use anyhow::{Context, Result};
 use futures_util::FutureExt;
@@ -15,43 +15,60 @@ mod journey;
 mod refresh_delivery;
 
 pub use journey::{
-    assert_configured_editor_launch, assert_first_paint, assert_forwarded_live_view,
-    assert_mobile_navigation, assert_overlapping_live_updates, delete_and_restore_empty_state,
-    refresh_and_assert_alpha_v2, select_and_restore_split_layout,
+    assert_configured_editor_launch, assert_durable_empty_state, assert_first_paint,
+    assert_forwarded_live_view, assert_mobile_navigation, assert_overlapping_live_updates,
+    assert_restarted_live_view, delete_and_restore_empty_state, delete_temporary_live_views,
+    refresh_and_assert_alpha_v2, refresh_and_assert_unavailable, select_and_restore_split_layout,
     select_commit_patch_and_restore_range,
 };
 
 pub async fn run_test<F>(name: &'static str, body: F) -> Result<()>
 where
     F: for<'session> FnOnce(
-        &'session session::TestSession,
+        &'session mut session::TestSession,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'session>>,
 {
-    let session = session::TestSession::start().await?;
-    let body_result = AssertUnwindSafe(body(&session)).catch_unwind().await;
-    let outcome = if matches!(&body_result, Ok(Ok(()))) {
-        "success"
-    } else {
-        "fail"
+    let mut session = session::TestSession::start(name).await?;
+    let body_result = AssertUnwindSafe(body(&mut session)).catch_unwind().await;
+    let passed = matches!(&body_result, Ok(Ok(())));
+    let evidence_result = match session.driver_if_active() {
+        Some(driver) => evidence::capture(driver, name, passed).await,
+        None => Ok(None),
     };
-    let evidence_result = evidence::capture(session.driver(), name, outcome).await;
     let cleanup_result = session.finish().await;
 
     match body_result {
-        Ok(Ok(())) => attach_secondary_error(evidence_result, cleanup_result, "test cleanup"),
+        Ok(Ok(())) => {
+            attach_secondary_error(evidence_result.map(|_| ()), cleanup_result, "test cleanup")
+        }
         Ok(Err(body_error)) => {
-            let result =
-                attach_secondary_error(Err(body_error), evidence_result, "evidence capture");
+            let result = attach_evidence(Err(body_error), evidence_result);
             attach_secondary_error(result, cleanup_result, "test cleanup")
         }
         Err(panic) => {
-            if let Err(error) = evidence_result {
-                eprintln!("evidence capture failed after panic: {error:#}");
+            match evidence_result {
+                Ok(Some(path)) => eprintln!("evidence saved after panic: {}", path.display()),
+                Ok(None) => {}
+                Err(error) => eprintln!("evidence capture failed after panic: {error:#}"),
             }
             if let Err(error) = cleanup_result {
                 eprintln!("test cleanup failed after panic: {error:#}");
             }
             std::panic::resume_unwind(panic);
+        }
+    }
+}
+
+fn attach_evidence(primary: Result<()>, evidence: Result<Option<PathBuf>>) -> Result<()> {
+    match (primary, evidence) {
+        (Ok(()), Ok(_)) => Ok(()),
+        (Ok(()), Err(error)) => Err(error),
+        (Err(primary_error), Ok(Some(path))) => {
+            Err(primary_error).context(format!("evidence saved to {}", path.display()))
+        }
+        (Err(primary_error), Ok(None)) => Err(primary_error),
+        (Err(primary_error), Err(error)) => {
+            Err(primary_error).context(format!("evidence capture also failed: {error:#}"))
         }
     }
 }
@@ -70,14 +87,13 @@ fn attach_secondary_error(primary: Result<()>, secondary: Result<()>, label: &st
 mod tests {
     use anyhow::anyhow;
 
-    use super::attach_secondary_error;
+    use super::{attach_evidence, attach_secondary_error};
 
     #[test]
     fn primary_assertion_error_survives_screenshot_and_cleanup_failures() {
-        let result = attach_secondary_error(
+        let result = attach_evidence(
             Err(anyhow!("expected live view")),
             Err(anyhow!("screenshot unavailable")),
-            "evidence capture",
         );
         let error =
             attach_secondary_error(result, Err(anyhow!("cleanup unavailable")), "test cleanup")
@@ -87,5 +103,18 @@ mod tests {
         assert!(message.contains("expected live view"));
         assert!(message.contains("screenshot unavailable"));
         assert!(message.contains("cleanup unavailable"));
+    }
+
+    #[test]
+    fn primary_assertion_error_names_the_saved_evidence() {
+        let error = attach_evidence(
+            Err(anyhow!("expected live view")),
+            Ok(Some("/evidence/fail.png".into())),
+        )
+        .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("expected live view"));
+        assert!(message.contains("/evidence/fail.png"));
     }
 }

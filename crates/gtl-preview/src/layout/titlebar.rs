@@ -5,12 +5,16 @@ use gtl_application::diffs::View;
 use gtl_models::diffs::AppliedExclusions;
 use maud::{Markup, html};
 
+use super::ArtifactMobileNavigationTargets;
 use crate::text::plural;
 
 const CONTROL_CLASSES: &str = "cursor-pointer rounded-sm border border-line-2 bg-surface-2 px-2.5 py-1.5 text-[12px] text-ink-2 [font:inherit] hover:border-acc-line hover:text-ink print:hidden!";
 
 // ! `.foldall` and `.ctx-toggle` remain enhancer hooks for their toggled states.
-pub(super) fn titlebar(view: &View, mobile_controls_target: Option<&str>) -> Markup {
+pub(super) fn titlebar(
+    view: &View,
+    mobile_navigation: Option<&ArtifactMobileNavigationTargets>,
+) -> Markup {
     html! {
         header class="titlebar [grid-column:1/4] flex items-center gap-4 border-b border-line bg-surface px-5 py-3 tablet:flex-wrap tablet:gap-2.5 tablet:px-3 tablet:py-2.5 mobile:gap-1.5 mobile:px-2 mobile:py-2 print:border-[#bbb] print:bg-[#f2f2f2]" {
             div class="flex items-baseline gap-2 text-[18px] font-semibold tracking-[-0.01em] mobile:text-[15px]" {
@@ -32,8 +36,10 @@ pub(super) fn titlebar(view: &View, mobile_controls_target: Option<&str>) -> Mar
                 // TODO: add button to enable file exclusion modification here. should open a dialog.
             }
             div class="flex-1" {}
-            @if let Some(target) = mobile_controls_target {
-                (super::mobile_controls::view_navigation(target, true))
+            @if let Some(targets) = mobile_navigation {
+                (super::mobile_controls::files_navigation_target(&targets.files, Some(view.files.len()), !view.files.is_empty()))
+                (super::mobile_controls::commits_navigation_target(&targets.commits, Some(view.commits.len()), !view.commits.is_empty()))
+                (super::mobile_controls::view_navigation(&targets.controls, true))
             }
             button type="button" class={ "foldall " (CONTROL_CLASSES) " mobile:hidden" } title="Collapse/expand all files" { "Collapse all" }
             button type="button" class={ "ctx-toggle active " (CONTROL_CLASSES) " [&.active]:border-acc-line [&.active]:bg-acc-soft [&.active]:text-ink mobile:hidden" } aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }

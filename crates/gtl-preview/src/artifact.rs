@@ -90,13 +90,21 @@ mod tests {
             None,
         );
 
+        assert!(raw.contains(r#"aria-label="Changed files""#));
+        assert!(raw.contains(r#"aria-label="Commits in range""#));
         assert!(raw.contains(r#"aria-label="View settings""#));
+        assert!(raw.contains(r#"id="preview-files-popover-0" data-preview-files-popover"#));
+        assert!(raw.contains(r#"id="preview-commits-popover-0" data-preview-commits-popover"#));
         assert!(raw.contains(r#"popovertarget="preview-controls-popover-0""#));
         assert!(raw.contains(r#"id="preview-controls-popover-0" class="preview-mobile-controls "#));
         assert!(raw.contains(r#"data-preview-action="fold-all""#));
         assert!(raw.contains(r#"data-preview-action="toggle-context""#));
 
         for index in 0..2 {
+            for prefix in ["preview-files-popover", "preview-commits-popover"] {
+                let target = format!("{prefix}-{index}");
+                assert_eq!(tabbed.matches(&format!(r#"id="{target}""#)).count(), 1);
+            }
             let target = format!("preview-controls-popover-{index}");
             assert_eq!(
                 tabbed

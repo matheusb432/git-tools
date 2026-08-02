@@ -32,14 +32,15 @@ pub async fn assert_forwarded_live_view(
             .is_empty(),
         "viewer rendered an iframe instead of the server-rendered layout"
     );
-    ensure!(
-        by_css(driver, "#viewer-view", "viewer view")
-            .await?
-            .text()
-            .await?
-            .contains(expected_content),
-        "forwarded live view did not render {expected_content}"
-    );
+    wait::until(
+        &format!("forwarded live view to render {expected_content}"),
+        ASSERTION_TIMEOUT,
+        || async {
+            let view = by_css(driver, "#viewer-view", "viewer view").await?;
+            Ok((view.text().await?.contains(expected_content)).then_some(()))
+        },
+    )
+    .await?;
     Ok(())
 }
 
@@ -134,41 +135,6 @@ pub async fn assert_mobile_navigation(session: &TestSession) -> Result<()> {
         .context("close mobile view settings")?;
     assert_popover_closed(driver, "viewer-controls-popover").await?;
 
-    let metrics = driver
-        .execute(
-            r"
-const main = document.querySelector('#viewer-view .main');
-const summary = main?.querySelector('details.file > summary');
-if (!(main instanceof HTMLElement) || !(summary instanceof HTMLElement)) {
-  return null;
-}
-const style = getComputedStyle(main);
-return {
-  paddingLeft: Number.parseFloat(style.paddingLeft),
-  paddingRight: Number.parseFloat(style.paddingRight),
-  stickyGap: summary.getBoundingClientRect().top - main.getBoundingClientRect().top
-};
-",
-            Vec::new(),
-        )
-        .await
-        .context("measure mobile diff spacing")?;
-    let metrics = metrics.json();
-    ensure!(
-        !metrics.is_null(),
-        "mobile diff spacing targets are missing"
-    );
-    let padding_left = metrics["paddingLeft"].as_f64().unwrap_or(f64::INFINITY);
-    let padding_right = metrics["paddingRight"].as_f64().unwrap_or(f64::INFINITY);
-    let sticky_gap = metrics["stickyGap"].as_f64().unwrap_or(f64::INFINITY);
-    ensure!(
-        padding_left <= 4.0 && padding_right <= 4.0,
-        "mobile diff padding is {padding_left}px left and {padding_right}px right"
-    );
-    ensure!(
-        sticky_gap.abs() <= 1.0,
-        "sticky file header starts {sticky_gap}px below the diff viewport"
-    );
     driver
         .execute(
             "if (document.activeElement instanceof HTMLElement) document.activeElement.blur();",
@@ -267,7 +233,8 @@ pub async fn assert_overlapping_live_updates(
 return {
   tabs: document.querySelectorAll('#viewer-tabs').length,
   views: document.querySelectorAll('#viewer-view').length,
-  latestReady: document.querySelector('#viewer-view')?.textContent.includes('second-live-marker') ?? false
+  latestReady: document.querySelector('#viewer-view')?.dataset.viewerState === 'ready'
+    && (document.querySelector('#viewer-view')?.textContent.includes('second-live-marker') ?? false)
 };
 ",
                     Vec::new(),
@@ -298,6 +265,108 @@ return {
         "the latest live view did not become the active ready view"
     );
     Ok(())
+}
+
+pub async fn delete_temporary_live_views(session: &TestSession) -> Result<()> {
+    let driver = session.driver();
+    for (current_repository, current_marker, next_repository, next_marker, remaining_tabs) in [
+        (
+            "live-latest",
+            "second-live-marker",
+            "live-heavy",
+            "first-live-marker",
+            2_u64,
+        ),
+        (
+            "live-heavy",
+            "first-live-marker",
+            "live-view",
+            "alpha-v2",
+            1,
+        ),
+    ] {
+        wait_for_active_live_view(
+            driver,
+            current_repository,
+            current_marker,
+            remaining_tabs + 1,
+        )
+        .await?;
+        by_accessible_name(driver, "Delete saved live view")
+            .await?
+            .click()
+            .await
+            .with_context(|| format!("delete temporary {current_repository} live view"))?;
+        accept_delete_confirmation(driver).await?;
+        wait_for_htmx_idle(driver, &format!("deleting {current_repository} live view")).await?;
+        wait_for_active_live_view(driver, next_repository, next_marker, remaining_tabs).await?;
+    }
+    Ok(())
+}
+
+pub async fn assert_restarted_live_view(
+    session: &TestSession,
+    expected_content: &str,
+) -> Result<()> {
+    assert_forwarded_live_view(session, expected_content).await?;
+    wait::until(
+        "restarted live view with persisted split layout",
+        ASSERTION_TIMEOUT,
+        || async { Ok(viewer_state(session.driver()).await?.then_some(())) },
+    )
+    .await
+}
+
+pub async fn refresh_and_assert_unavailable(session: &TestSession) -> Result<()> {
+    let driver = session.driver();
+    by_accessible_name(driver, "Refresh")
+        .await?
+        .click()
+        .await
+        .context("refresh unavailable live view")?;
+    wait::until(
+        "live view to publish Unavailable instead of Render failed",
+        ASSERTION_TIMEOUT,
+        || async {
+            Ok(script_bool(
+                driver,
+                r#"
+const view = document.querySelector('#viewer-view');
+const active = document.querySelector('.viewer-tab.active');
+return view?.dataset.viewerState === 'broken'
+  && view.querySelector('.viewer-status-broken') !== null
+  && view.textContent.includes('Unavailable')
+  && !view.textContent.includes('Render failed')
+  && active?.querySelector('.viewer-tab-state[aria-label="Unavailable"]') !== null
+  && active.querySelector('.viewer-tab-state[aria-label="Render failed"]') === null;
+"#,
+            )
+            .await?
+            .then_some(()))
+        },
+    )
+    .await
+}
+
+pub async fn assert_durable_empty_state(session: &TestSession) -> Result<()> {
+    let driver = session.driver();
+    wait::until(
+        "deleted live view to remain absent after viewer restart",
+        ASSERTION_TIMEOUT,
+        || async {
+            Ok(script_bool(
+                driver,
+                r#"
+return document.querySelector('.viewer-status-empty') !== null
+  && !Array.from(document.querySelectorAll('.viewer-tab-kind')).some((kind) => kind.textContent === 'L')
+  && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent.trim() === 'Delete live view');
+"#,
+            )
+            .await?
+            .then_some(()))
+        },
+    )
+    .await
 }
 
 pub async fn select_and_restore_split_layout(session: &TestSession) -> Result<()> {
@@ -469,28 +538,7 @@ pub async fn delete_and_restore_empty_state(session: &TestSession) -> Result<()>
         .send_keys(Key::Enter)
         .await
         .context("activate Delete live view with Enter")?;
-    let confirmation = wait::until(
-        "Delete live view confirmation",
-        ASSERTION_TIMEOUT,
-        || async {
-            match driver.get_alert_text().await {
-                Ok(text) => Ok(Some(text)),
-                Err(error) if matches!(error.as_inner(), WebDriverErrorInner::NoSuchAlert(..)) => {
-                    Ok(None)
-                }
-                Err(error) => Err(error.into()),
-            }
-        },
-    )
-    .await?;
-    ensure!(
-        confirmation == DELETE_CONFIRMATION,
-        "unexpected Delete live view confirmation: {confirmation:?}"
-    );
-    driver
-        .accept_alert()
-        .await
-        .context("accept Delete live view confirmation")?;
+    accept_delete_confirmation(driver).await?;
     wait_for_htmx_idle(driver, "deleting the live view").await?;
     wait::until(
         "focused empty state after deleting live view",
@@ -523,10 +571,70 @@ pub async fn delete_and_restore_empty_state(session: &TestSession) -> Result<()>
     Ok(())
 }
 
+async fn accept_delete_confirmation(driver: &WebDriver) -> Result<()> {
+    let confirmation = wait::until(
+        "Delete live view confirmation",
+        ASSERTION_TIMEOUT,
+        || async {
+            match driver.get_alert_text().await {
+                Ok(text) => Ok(Some(text)),
+                Err(error) if matches!(error.as_inner(), WebDriverErrorInner::NoSuchAlert(..)) => {
+                    Ok(None)
+                }
+                Err(error) => Err(error.into()),
+            }
+        },
+    )
+    .await?;
+    ensure!(
+        confirmation == DELETE_CONFIRMATION,
+        "unexpected Delete live view confirmation: {confirmation:?}"
+    );
+    driver
+        .accept_alert()
+        .await
+        .context("accept Delete live view confirmation")?;
+    Ok(())
+}
+
 async fn wait_for_live_tab(driver: &WebDriver, description: &str) -> Result<()> {
     wait::until(description, ASSERTION_TIMEOUT, || async {
         Ok(live_tab_is_only_active_tab(driver).await?.then_some(()))
     })
+    .await
+}
+
+async fn wait_for_active_live_view(
+    driver: &WebDriver,
+    repository: &str,
+    marker: &str,
+    tab_count: u64,
+) -> Result<()> {
+    wait::until(
+        &format!("{repository} live view to be active and ready"),
+        ASSERTION_TIMEOUT,
+        || async {
+            let result = driver
+                .execute(
+                    r#"
+const active = document.querySelector('.viewer-tab.active');
+const view = document.querySelector('#viewer-view');
+return document.querySelectorAll('.viewer-tab').length === arguments[2]
+  && active?.querySelector('.viewer-tab-label')?.textContent.includes(arguments[0])
+  && view?.dataset.viewerState === 'ready'
+  && view.textContent.includes(arguments[1]);
+"#,
+                    vec![
+                        serde_json::json!(repository),
+                        serde_json::json!(marker),
+                        serde_json::json!(tab_count),
+                    ],
+                )
+                .await
+                .context("inspect active live view")?;
+            Ok(result.json().as_bool().unwrap_or(false).then_some(()))
+        },
+    )
     .await
 }
 

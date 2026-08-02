@@ -27,7 +27,11 @@ mod stable_runner;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+const DOM_DAEMON_STORE_MAX: usize = 64;
 const WINDOW_TITLE_PATTERN: &str = "^git-tools diff viewer$";
+const EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "GTL_E2E_EVIDENCE_OUTPUT_PATH";
+const EVIDENCES_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "TEST_EVIDENCES_OUTPUT_PATH";
+const EVIDENCE_OUTPUT_PATH_DEFAULT: &str = ".artifacts/e2e";
 const HOST_ENVIRONMENT_VARIABLE_NAMES: &[&str] =
     &["PATH", "SystemRoot", "WINDIR", "PATHEXT", "COMSPEC"];
 #[cfg(not(windows))]
@@ -57,7 +61,8 @@ struct Sandbox {
     cli_binary: PathBuf,
     viewer_binary: PathBuf,
     cargo_runner_config: PathBuf,
-    evidence_root: Option<PathBuf>,
+    evidence_root: PathBuf,
+    success_evidence_requested: bool,
 }
 
 impl Sandbox {
@@ -67,6 +72,18 @@ impl Sandbox {
             .tempdir()
             .context("create viewer E2E sandbox")?;
         let root = guard.path().to_path_buf();
+        let repository_root = env::current_dir().context("resolve repository root")?;
+        let requested_evidence_root = env::var_os(EVIDENCES_OUTPUT_PATH_ENVIRONMENT_VARIABLE);
+        let success_evidence_requested = requested_evidence_root.is_some();
+        let evidence_root = requested_evidence_root.map_or_else(
+            || PathBuf::from(EVIDENCE_OUTPUT_PATH_DEFAULT),
+            PathBuf::from,
+        );
+        let evidence_root = if evidence_root.is_absolute() {
+            evidence_root
+        } else {
+            repository_root.join(evidence_root)
+        };
         let sandbox = Self {
             _root: guard,
             home: root.join("home"),
@@ -89,7 +106,8 @@ impl Sandbox {
             cli_binary: release_binary("git-tools")?,
             viewer_binary: release_binary("gtl-viewer")?,
             cargo_runner_config: root.join("cargo-runner.toml"),
-            evidence_root: env::var_os("TEST_EVIDENCES_OUTPUT_PATH").map(PathBuf::from),
+            evidence_root,
+            success_evidence_requested,
             root,
         };
         for path in [
@@ -152,6 +170,10 @@ impl Sandbox {
             ("GTL_E2E_EDITOR_EXIT", self.editor_exit.as_os_str()),
             ("GTL_E2E_CLI_BINARY", self.cli_binary.as_os_str()),
             ("GTL_E2E_VIEWER_BINARY", self.viewer_binary.as_os_str()),
+            (
+                EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE,
+                self.evidence_root.as_os_str(),
+            ),
         ]
         .into_iter()
         .map(|(name, value)| (OsString::from(name), value.to_os_string()))
@@ -161,10 +183,10 @@ impl Sandbox {
                 pairs.push((OsString::from(name), value));
             }
         }
-        if let Some(evidence_root) = &self.evidence_root {
+        if self.success_evidence_requested {
             pairs.push((
-                OsString::from("TEST_EVIDENCES_OUTPUT_PATH"),
-                evidence_root.as_os_str().to_os_string(),
+                OsString::from(EVIDENCES_OUTPUT_PATH_ENVIRONMENT_VARIABLE),
+                self.evidence_root.as_os_str().to_os_string(),
             ));
         }
         IsolatedEnv { pairs }
@@ -314,27 +336,47 @@ impl Drop for ManagedChild {
 struct DaemonCleanupGuard {
     cli: PathBuf,
     cwd: PathBuf,
-    environments: Vec<(&'static str, IsolatedEnv)>,
+    environments: Vec<(String, IsolatedEnv)>,
+    dom_data: PathBuf,
+    dom_environment: IsolatedEnv,
     stopped: bool,
 }
 
 impl DaemonCleanupGuard {
     fn new(sandbox: &Sandbox) -> Result<Self> {
+        let dom_environment = sandbox.environment(&sandbox.dom_data);
         Ok(Self {
             cli: release_binary("git-tools")?,
             cwd: sandbox.root.clone(),
             environments: vec![
-                ("native", sandbox.environment(&sandbox.native_data)),
-                ("dom", sandbox.environment(&sandbox.dom_data)),
-                ("browser", sandbox.environment(&sandbox.browser_data)),
+                ("native".into(), sandbox.environment(&sandbox.native_data)),
+                ("dom".into(), dom_environment.clone()),
+                ("browser".into(), sandbox.environment(&sandbox.browser_data)),
             ],
+            dom_data: sandbox.dom_data.clone(),
+            dom_environment,
             stopped: false,
         })
     }
 
     fn stop(&mut self) -> Result<()> {
         let mut failures = Vec::new();
-        for (name, environment) in &self.environments {
+        let mut environments = self.environments.clone();
+        match daemon_data_roots(&self.dom_data) {
+            Ok(data_roots) => {
+                for data_root in data_roots {
+                    let mut environment = self.dom_environment.clone();
+                    environment.set("GIT_TOOLS_DATA_DIR", &data_root);
+                    environment.set("GTL_E2E_DATA_ROOT", &data_root);
+                    let name: String = data_root
+                        .file_name()
+                        .map_or_else(|| "dom/spec".into(), |name| name.to_string_lossy().into());
+                    environments.push((format!("dom/{name}"), environment));
+                }
+            }
+            Err(error) => failures.push(format!("DOM store discovery: {error:#}")),
+        }
+        for (name, environment) in &environments {
             if let Err(error) = command_checked(
                 environment,
                 self.cli.to_string_lossy().as_ref(),
@@ -354,6 +396,28 @@ impl DaemonCleanupGuard {
         self.stopped = true;
         Ok(())
     }
+}
+
+fn daemon_data_roots(dom_data: &Path) -> Result<Vec<PathBuf>> {
+    let mut roots = fs::read_dir(dom_data)
+        .with_context(|| format!("read DOM data root {}", dom_data.display()))?
+        .filter_map(|entry| match entry {
+            Ok(entry) => match entry.file_type() {
+                Ok(file_type) if file_type.is_dir() => Some(Ok(entry.path())),
+                Ok(_) => None,
+                Err(error) => Some(Err(error)),
+            },
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<std::io::Result<Vec<_>>>()?;
+    roots.sort();
+    if roots.len() > DOM_DAEMON_STORE_MAX {
+        bail!(
+            "DOM daemon stores exceed maximum {DOM_DAEMON_STORE_MAX}: found {}",
+            roots.len()
+        );
+    }
+    Ok(roots)
 }
 
 impl Drop for DaemonCleanupGuard {
@@ -428,7 +492,7 @@ fn workflow() -> Result<()> {
     )?;
 
     let sandbox = Sandbox::create()?;
-    clear_evidence_outcomes(sandbox.evidence_root.as_deref())?;
+    clear_evidence_outcomes(&sandbox.evidence_root, sandbox.success_evidence_requested)?;
     fs::copy(release_binary("editor-recorder")?, &sandbox.editor_recorder)
         .context("copy editor recorder fixture")?;
     let mut daemon_cleanup = DaemonCleanupGuard::new(&sandbox)?;
@@ -708,11 +772,13 @@ fn run_browser_phases(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
     )
 }
 
-fn clear_evidence_outcomes(evidence_root: Option<&Path>) -> Result<()> {
-    let Some(evidence_root) = evidence_root else {
-        return Ok(());
+fn clear_evidence_outcomes(evidence_root: &Path, success_evidence_requested: bool) -> Result<()> {
+    let outcomes: &[&str] = if success_evidence_requested {
+        &["success", "fail"]
+    } else {
+        &["fail"]
     };
-    for outcome in ["success", "fail"] {
+    for outcome in outcomes {
         let outcome_path = evidence_root.join(outcome);
         if outcome_path.exists() {
             fs::remove_dir_all(&outcome_path)
@@ -927,21 +993,52 @@ mod tests {
     };
 
     use super::{
-        HostCargoEnvironment, IsolatedEnv, cargo_runner_config, clear_evidence_outcomes,
-        runtime_command,
+        DOM_DAEMON_STORE_MAX, HostCargoEnvironment, IsolatedEnv, cargo_runner_config,
+        clear_evidence_outcomes, daemon_data_roots, runtime_command,
     };
 
     #[test]
-    fn absent_evidence_root_preserves_existing_outcomes() {
+    fn daemon_cleanup_discovers_bounded_direct_dom_stores() {
+        let dom_root = tempfile::tempdir().expect("temporary DOM data root");
+        let one_shot = dom_root.path().join("viewer-one-shot-lifecycle");
+        let live = dom_root.path().join("viewer-live-lifecycle");
+        fs::create_dir_all(one_shot.join("nested")).expect("create one-shot data root");
+        fs::create_dir(&live).expect("create live data root");
+        fs::write(dom_root.path().join("state.db"), b"ignored").expect("write root file");
+
+        let roots = daemon_data_roots(dom_root.path()).expect("discover daemon data roots");
+
+        assert_eq!(roots, vec![live, one_shot]);
+    }
+
+    #[test]
+    fn daemon_cleanup_rejects_unbounded_dom_stores() {
+        let dom_root = tempfile::tempdir().expect("temporary DOM data root");
+        for index in 0..=DOM_DAEMON_STORE_MAX {
+            fs::create_dir(dom_root.path().join(format!("suite-{index:02}")))
+                .expect("create DOM data root");
+        }
+
+        let error = daemon_data_roots(dom_root.path()).unwrap_err();
+
+        assert!(error.to_string().contains("maximum"));
+    }
+
+    #[test]
+    fn plain_run_clears_failures_and_preserves_success_evidence() {
         let evidence_root = tempfile::tempdir().expect("temporary evidence root");
-        let screenshot = evidence_root.path().join("success/thirtyfour/viewer.png");
-        fs::create_dir_all(screenshot.parent().expect("screenshot parent"))
-            .expect("create stale success evidence");
-        fs::write(&screenshot, b"stale").expect("write stale success evidence");
+        let success = evidence_root.path().join("success/thirtyfour/viewer.png");
+        let failure = evidence_root.path().join("fail/thirtyfour/viewer.png");
+        for screenshot in [&success, &failure] {
+            fs::create_dir_all(screenshot.parent().expect("screenshot parent"))
+                .expect("create stale evidence parent");
+            fs::write(screenshot, b"stale").expect("write stale evidence");
+        }
 
-        clear_evidence_outcomes(None).expect("skip evidence cleanup");
+        clear_evidence_outcomes(evidence_root.path(), false).expect("clear failure evidence");
 
-        assert!(screenshot.is_file());
+        assert!(success.is_file());
+        assert!(!failure.exists());
     }
 
     #[test]
@@ -954,7 +1051,7 @@ mod tests {
             fs::write(screenshot, b"stale").expect("write stale evidence");
         }
 
-        clear_evidence_outcomes(Some(evidence_root.path())).expect("clear stale evidence");
+        clear_evidence_outcomes(evidence_root.path(), true).expect("clear stale evidence");
 
         assert!(!evidence_root.path().join("success").exists());
         assert!(!evidence_root.path().join("fail").exists());

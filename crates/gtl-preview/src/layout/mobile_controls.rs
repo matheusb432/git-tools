@@ -34,21 +34,26 @@ pub fn mobile_menu_danger_button_classes() -> &'static str {
 }
 
 pub fn files_navigation(count: Option<usize>, enabled: bool) -> Markup {
-    navigation_button(
-        "Changed files",
-        "Files",
-        "viewer-files-popover",
-        count,
-        enabled,
-        FILES_ICON,
-    )
+    files_navigation_target("viewer-files-popover", count, enabled)
+}
+
+pub(super) fn files_navigation_target(target: &str, count: Option<usize>, enabled: bool) -> Markup {
+    navigation_button("Changed files", "Files", target, count, enabled, FILES_ICON)
 }
 
 pub fn commits_navigation(count: Option<usize>, enabled: bool) -> Markup {
+    commits_navigation_target("viewer-commits-popover", count, enabled)
+}
+
+pub(super) fn commits_navigation_target(
+    target: &str,
+    count: Option<usize>,
+    enabled: bool,
+) -> Markup {
     navigation_button(
         "Commits in range",
         "History",
-        "viewer-commits-popover",
+        target,
         count,
         enabled,
         HISTORY_ICON,

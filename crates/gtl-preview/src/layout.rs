@@ -39,6 +39,25 @@ impl Surface {
     }
 }
 
+struct ArtifactMobileNavigationTargets {
+    files: String,
+    commits: String,
+    controls: String,
+}
+
+impl ArtifactMobileNavigationTargets {
+    fn from_surface(surface: Surface) -> Option<Self> {
+        let Surface::Artifact { view_index } = surface else {
+            return None;
+        };
+        Some(Self {
+            files: format!("preview-files-popover-{view_index}"),
+            commits: format!("preview-commits-popover-{view_index}"),
+            controls: surface.mobile_controls_target(),
+        })
+    }
+}
+
 const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
     "layout copy-ctx grid h-screen grid-cols-[262px_minmax(0,1fr)_252px] grid-rows-[auto_1fr_auto] ",
     "wide-screen:grid-cols-[320px_minmax(0,1fr)_304px] ",
@@ -135,6 +154,7 @@ fn view_body_with_mode(
     mobile_controls: mobile_controls::MobileViewControls,
 ) -> Markup {
     let mobile_controls_target = surface.mobile_controls_target();
+    let artifact_mobile_navigation = ArtifactMobileNavigationTargets::from_surface(surface);
     html! {
         div class={
             (LAYOUT_PRESENTATION_CLASSES) " "
@@ -142,10 +162,7 @@ fn view_body_with_mode(
             (crate::rows::SPLIT_PRESENTATION_CLASSES) " "
             (crate::rows::INTRALINE_PRESENTATION_CLASSES)
         } {
-            (titlebar::titlebar(
-                view,
-                matches!(surface, Surface::Artifact { .. }).then_some(mobile_controls_target.as_str()),
-            ))
+            (titlebar::titlebar(view, artifact_mobile_navigation.as_ref()))
             (tree::tree(view))
             main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-0 pb-[60px] wide-screen:px-7 compact-desktop:px-4 tablet:px-3 mobile:px-1 tablet:pb-12 print:overflow-visible print:p-0" {
                 @match mode {
@@ -159,9 +176,15 @@ fn view_body_with_mode(
             (shelf::shelf(range_view, surface, options, selected_commit_sha))
             (keybar::keybar(view))
             (shelf::commit_popovers(range_view))
-            @if let Surface::App { .. } = surface {
-                (tree::mobile_popover(view))
-                (shelf::mobile_popover(range_view, surface, options, selected_commit_sha))
+            @match &artifact_mobile_navigation {
+                Some(targets) => {
+                    (tree::mobile_popover(view, &targets.files))
+                    (shelf::mobile_popover(range_view, surface, options, selected_commit_sha, &targets.commits))
+                }
+                None => {
+                    (tree::mobile_popover(view, "viewer-files-popover"))
+                    (shelf::mobile_popover(range_view, surface, options, selected_commit_sha, "viewer-commits-popover"))
+                }
             }
             (mobile_controls::popover(&mobile_controls_target, mobile_controls))
         }

@@ -48,7 +48,7 @@ export function enhanceLayout(root: HTMLElement): () => void {
   const filePaths = fileEls.map((el) => (el.getAttribute("data-path") || "").toLowerCase());
   const treeBody = root.querySelector<HTMLElement>(".tree-body");
   const treeFileLeaves = Array.from(root.querySelectorAll<HTMLElement>(".tree-body .tfile"));
-  const mobileFileMenu = root.querySelector<HTMLElement>("#viewer-files-popover");
+  const mobileFileMenu = root.querySelector<HTMLElement>("[data-preview-files-popover]");
   const filterInput = root.querySelector<HTMLInputElement>(".search input");
   const foldAll = root.querySelector<HTMLElement>(".foldall");
   let filterText = "";

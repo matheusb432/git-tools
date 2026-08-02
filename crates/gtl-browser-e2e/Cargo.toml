@@ -20,8 +20,8 @@ name = "install-browsers"
 path = "src/bin/install-browsers.rs"
 
 [[test]]
-name = "offline_artifact"
-path = "tests/offline_artifact.rs"
+name = "browser"
+path = "tests/browser.rs"
 required-features = ["e2e"]
 
 [lints]

@@ -10,12 +10,13 @@ use anyhow::{Context as _, Result, bail, ensure};
 use command_group::{CommandGroup, GroupChild};
 use gtl_browser_e2e::{
     browser::{self, OPERATION_TIMEOUT, Session, operation},
-    evidence::Recording,
+    evidence::{EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE, Recording},
 };
-use playwright_rs::protocol::{AriaRole, ClickOptions, GetByRoleOptions, Locator, Page, Viewport};
+use playwright_rs::{
+    expect,
+    protocol::{AriaRole, ClickOptions, GetByRoleOptions, Locator, Page, Viewport},
+};
 
-const WAIT_TIMEOUT: Duration = Duration::from_secs(30);
-const WAIT_INTERVAL: Duration = Duration::from_millis(100);
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(30);
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const PROCESS_REAP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -25,8 +26,13 @@ pub struct Spec {
     recording: Recording,
 }
 
+pub struct RawArtifactFixture {
+    repository: tempfile::TempDir,
+    config: tempfile::NamedTempFile,
+}
+
 impl Spec {
-    pub async fn start(name: &'static str) -> Result<Self> {
+    pub async fn start(name: &str) -> Result<Self> {
         verify_runtime_environment()?;
         let session = browser::open().await?;
         let recording = Recording::new(&session, name);
@@ -34,20 +40,15 @@ impl Spec {
     }
 
     pub async fn finish(self, outcome: Result<()>) -> Result<()> {
+        let outcome = attach_secondary_error(
+            outcome,
+            self.session.verify_network_guard(),
+            "browser network guard",
+        );
         let evidence_result = self.recording.finish(outcome.is_ok()).await;
         let cleanup_result = self.session.finish().await;
-        if let Err(failure) = outcome {
-            if let Err(error) = evidence_result {
-                eprintln!("browser evidence failed: {error:#}");
-            }
-            if let Err(error) = cleanup_result {
-                eprintln!("browser cleanup failed: {error:#}");
-            }
-            Err(failure)
-        } else {
-            evidence_result?;
-            cleanup_result
-        }
+        let outcome = attach_evidence(outcome, evidence_result);
+        attach_secondary_error(outcome, cleanup_result, "browser cleanup")
     }
 }
 
@@ -55,6 +56,10 @@ fn verify_runtime_environment() -> Result<()> {
     ensure!(
         env::var("GTL_E2E_RUNTIME_ISOLATED").as_deref() == Ok("1"),
         "browser E2E must run through the typed xtask runtime boundary"
+    );
+    ensure!(
+        env::var_os(EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE).is_some(),
+        "browser E2E evidence output path is missing"
     );
     for name in ["CARGO_HOME", "RUSTUP_HOME", "SSH_AUTH_SOCK"] {
         ensure!(
@@ -65,7 +70,7 @@ fn verify_runtime_environment() -> Result<()> {
     Ok(())
 }
 
-pub async fn repository_with_commit() -> Result<tempfile::TempDir> {
+pub async fn repository_with_raw_changes() -> Result<RawArtifactFixture> {
     let repository = tempfile::Builder::new()
         .prefix("gtl-offline-artifact-")
         .tempdir()
@@ -77,30 +82,66 @@ pub async fn repository_with_commit() -> Result<tempfile::TempDir> {
         &["config", "user.email", "browser-e2e@example.invalid"],
     )
     .await?;
-    std::fs::write(repository.path().join("artifact.txt"), "base\n")
-        .context("write Git fixture")?;
-    git(repository.path(), &["add", "artifact.txt"]).await?;
+    std::fs::create_dir_all(repository.path().join("src"))
+        .context("create raw artifact source directory")?;
+    std::fs::write(
+        repository.path().join("src/alpha.rs"),
+        "fn alpha_1() {}\nfn alpha_2() {}\nfn alpha_3() {}\nfn alpha_4() {}\nfn alpha_5() {}\nfn alpha_6() {}\nfn alpha_7() {}\nfn alpha_8() {}\nfn alpha_9() {}\n",
+    )
+    .context("write alpha base fixture")?;
+    std::fs::write(
+        repository.path().join("src/beta.rs"),
+        "fn beta_1() {}\nfn beta_2() {}\nfn beta_3() {}\nfn beta_4() {}\nfn beta_5() {}\nfn beta_6() {}\nfn beta_7() {}\nfn beta_8() {}\nfn beta_9() {}\n",
+    )
+    .context("write beta base fixture")?;
+    std::fs::write(repository.path().join("large.txt"), "base\n")
+        .context("write large-file base fixture")?;
+    git(repository.path(), &["add", "."]).await?;
     git(repository.path(), &["commit", "-q", "-m", "base"]).await?;
     git(repository.path(), &["switch", "-q", "-c", "feature"]).await?;
-    std::fs::write(repository.path().join("artifact.txt"), "base\nchanged\n")
-        .context("write changed Git fixture")?;
-    git(repository.path(), &["add", "artifact.txt"]).await?;
+    std::fs::write(
+        repository.path().join("src/alpha.rs"),
+        "fn alpha_1() {}\nfn alpha_2() {}\nfn alpha_3() {}\nfn alpha_4() {}\nfn alpha_5() { println!(\"alpha-marker\"); }\nfn alpha_6() {}\nfn alpha_7() {}\nfn alpha_8() {}\nfn alpha_9() {}\n",
+    )
+    .context("write alpha change fixture")?;
+    std::fs::write(
+        repository.path().join("src/beta.rs"),
+        "fn beta_1() {}\nfn beta_2() {}\nfn beta_3() {}\nfn beta_4() {}\nfn beta_5() { println!(\"beta-marker\"); }\nfn beta_6() {}\nfn beta_7() {}\nfn beta_8() {}\nfn beta_9() {}\n",
+    )
+    .context("write beta change fixture")?;
+    std::fs::write(
+        repository.path().join("large.txt"),
+        format!("large-marker-{}\n", "x".repeat(250_000)),
+    )
+    .context("write giant raw artifact fixture")?;
+    git(repository.path(), &["add", "."]).await?;
     git(
         repository.path(),
         &["commit", "-q", "-m", "artifact change"],
     )
     .await?;
-    Ok(repository)
+    let config = tempfile::NamedTempFile::new().context("create raw artifact config")?;
+    Ok(RawArtifactFixture { repository, config })
 }
 
-pub async fn render_raw_diff(repository: &tempfile::TempDir) -> Result<String> {
+pub async fn render_raw_diff(
+    fixture: &RawArtifactFixture,
+    layout: &str,
+    density: &str,
+) -> Result<String> {
     let cli_binary = env::var_os("GTL_E2E_CLI_BINARY")
         .map(PathBuf::from)
         .context("GTL_E2E_CLI_BINARY is required for browser E2E")?;
     let mut command = Command::new(&cli_binary);
+    std::fs::write(
+        fixture.config.path(),
+        format!("layout = {layout:?}\ndensity = {density:?}\n"),
+    )
+    .context("write raw artifact presentation config")?;
     command
         .args(["diff", "--raw"])
-        .current_dir(repository.path());
+        .env("GIT_TOOLS_CONFIG", fixture.config.path())
+        .current_dir(fixture.repository.path());
     let output = command_output(command, "git-tools diff --raw").await?;
     ensure_success(&output, "git-tools diff --raw")?;
     let urls = String::from_utf8(output.stdout)
@@ -136,26 +177,11 @@ pub fn get_button(page: &Page, name: &str) -> Locator {
     )
 }
 
-pub async fn wait_until_every_file_is_collapsed(page: &Page) -> Result<()> {
-    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
-    loop {
-        let expanded_files = operation("count expanded file sections", async {
-            page.locator("details.file[open]")
-                .count()
-                .await
-                .context("count expanded file sections")
-        })
-        .await?;
-        if expanded_files == 0 {
-            return Ok(());
-        }
-        if tokio::time::Instant::now() >= deadline {
-            bail!(
-                "timed out waiting for all file sections to collapse; {expanded_files} remain open"
-            );
-        }
-        tokio::time::sleep(WAIT_INTERVAL).await;
-    }
+pub async fn expect_every_file_is_collapsed(page: &Page) -> Result<()> {
+    expect(page.locator("details.file[open]"))
+        .to_have_count(0)
+        .await
+        .context("wait for every file section to collapse")
 }
 
 pub async fn count(locator: &Locator, label: &str) -> Result<usize> {
@@ -188,6 +214,16 @@ pub async fn goto(page: &Page, url: &str) -> Result<()> {
         .await
         .context("navigate to offline artifact")
         .map(|_| ())
+    })
+    .await
+}
+
+pub async fn reload(page: &Page) -> Result<()> {
+    operation("reload offline artifact", async {
+        page.reload(None)
+            .await
+            .context("reload offline artifact")
+            .map(|_| ())
     })
     .await
 }
@@ -291,4 +327,63 @@ fn ensure_success(output: &Output, description: &str) -> Result<()> {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     )
+}
+
+fn attach_evidence(outcome: Result<()>, evidence: Result<Vec<PathBuf>>) -> Result<()> {
+    match (outcome, evidence) {
+        (Ok(()), Ok(_)) => Ok(()),
+        (Ok(()), Err(error)) => Err(error),
+        (Err(failure), Ok(written)) if written.is_empty() => Err(failure),
+        (Err(failure), Ok(written)) => Err(failure.context(format!(
+            "browser evidence saved to {}",
+            join_paths(&written)
+        ))),
+        (Err(failure), Err(error)) => {
+            Err(failure.context(format!("browser evidence also failed: {error:#}")))
+        }
+    }
+}
+
+fn attach_secondary_error(primary: Result<()>, secondary: Result<()>, label: &str) -> Result<()> {
+    match (primary, secondary) {
+        (Ok(()), result) => result,
+        (Err(primary_error), Ok(())) => Err(primary_error),
+        (Err(primary_error), Err(secondary_error)) => {
+            Err(primary_error).context(format!("{label} also failed: {secondary_error:#}"))
+        }
+    }
+}
+
+fn join_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::anyhow;
+
+    use super::{attach_evidence, attach_secondary_error};
+
+    #[test]
+    fn assertion_failure_keeps_evidence_path_and_cleanup_failure() {
+        let outcome = attach_evidence(
+            Err(anyhow!("expected collapsed files")),
+            Ok(vec!["/evidence/fail.png".into()]),
+        );
+        let error = attach_secondary_error(
+            outcome,
+            Err(anyhow!("driver did not stop")),
+            "browser cleanup",
+        )
+        .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("expected collapsed files"));
+        assert!(message.contains("/evidence/fail.png"));
+        assert!(message.contains("driver did not stop"));
+    }
 }
