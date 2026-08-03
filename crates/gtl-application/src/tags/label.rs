@@ -12,7 +12,7 @@ use crate::ports::GitClient;
 /// Requests a lightweight label that resolves through an existing tag to its commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LabelTag {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     pub tag: String,
     pub label: String,
 }
@@ -55,21 +55,25 @@ fn label(command: LabelTag, git: &impl GitClient) -> Result<TagActionOutcome, Gi
     if let Some(failure) = validate(&command) {
         return Ok(failure);
     }
-    let LabelTag { repo, tag, label } = command;
-    create(git, &repo, &tag, &label)?;
+    let LabelTag {
+        repo_path,
+        tag,
+        label,
+    } = command;
+    create(git, &repo_path, &tag, &label)?;
 
     let created = TagActionOutcome::new(TagActionStatus::Created, format!("created tag {label}"))
         .with_progress(TagOperationProgress::created(label.clone()));
-    push::push_named(git, &repo, std::slice::from_ref(&label), created)
+    push::push_named(git, &repo_path, std::slice::from_ref(&label), created)
 }
 
 pub(super) fn create(
     git: &impl GitClient,
-    repo: &Path,
+    repo_path: &Path,
     target: &str,
     label: &str,
 ) -> Result<(), GitCommandError> {
-    match git.create_lightweight_tag(repo, label, target)? {
+    match git.create_lightweight_tag(repo_path, label, target)? {
         crate::ports::GitEffect::Applied(()) => Ok(()),
         crate::ports::GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
             "git tag label failed for {label}: {detail}"
@@ -101,7 +105,7 @@ mod tests {
     fn validation_preserves_required_tag_detail() {
         assert_eq!(
             validate(&LabelTag {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 tag: String::new(),
                 label: "stable".into(),
             }),
@@ -117,7 +121,7 @@ mod tests {
     fn validation_preserves_required_label_detail() {
         assert_eq!(
             validate(&LabelTag {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 tag: "v1.0.0".into(),
                 label: "  ".into(),
             }),
@@ -137,7 +141,7 @@ mod tests {
 
         let error = execute(
             LabelTag {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 tag: "v1.0.0".into(),
                 label: "stable".into(),
             },
@@ -160,7 +164,7 @@ mod tests {
         assert_eq!(
             execute(
                 LabelTag {
-                    repo: ".".into(),
+                    repo_path: ".".into(),
                     tag: "v1.0.0".into(),
                     label: "stable".into(),
                 },

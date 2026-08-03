@@ -16,6 +16,7 @@ futures-util.workspace = true
 natord.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
+semver.workspace = true
 shlex.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt"] }

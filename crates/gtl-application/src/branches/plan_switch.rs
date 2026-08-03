@@ -7,7 +7,7 @@ use crate::ports::GitClient;
 /// Requests a read-only switch plan for one repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanSwitch {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     pub onto: String,
 }
 
@@ -47,9 +47,9 @@ pub enum PlanSwitchError {
 /// Returns [`PlanSwitchError`] when Git transport fails.
 #[cqrsy::query]
 pub fn execute(query: PlanSwitch, git: &impl GitClient) -> Result<PlanSwitchOk, PlanSwitchError> {
-    let PlanSwitch { repo, onto } = query;
+    let PlanSwitch { repo_path, onto } = query;
     let Some(top) = git
-        .discover_top(&repo)
+        .discover_top(&repo_path)
         .map_err(|source| transport("discover repository", source))?
     else {
         return Ok(PlanSwitchOk::Refused("not a git repo".into()));
@@ -97,7 +97,7 @@ mod tests {
 
         let plan = execute(
             PlanSwitch {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,
@@ -123,7 +123,7 @@ mod tests {
 
         let plan = execute(
             PlanSwitch {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,
@@ -143,7 +143,7 @@ mod tests {
 
         let plan = execute(
             PlanSwitch {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,
@@ -164,7 +164,7 @@ mod tests {
 
         let error = execute(
             PlanSwitch {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,

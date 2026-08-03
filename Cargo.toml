@@ -84,6 +84,7 @@ scraper = "0.27.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 serde_with = { version = "3", default-features = false, features = ["macros"] }
+semver = "1.0.28"
 shlex = "2.0.1"
 sha2 = "0.11.0"
 similar = "3.1.1"
@@ -114,7 +115,7 @@ walkdir = "2.5.0"
 which = "8.0.4"
 x11-dl = "2.21.0"
 zbus = "5.16.0"
-sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.2.1" }
+sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.3.0" }
 
 [profile.release]
 strip = "symbols"

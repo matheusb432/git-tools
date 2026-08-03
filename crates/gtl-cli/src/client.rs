@@ -19,6 +19,7 @@ use gtl_contracts::{
     envelope::Envelope,
     live_views::{SaveLiveViewData, SaveLiveViewRequest},
     managed::{PullAllRequest, PushAllRequest, SyncData},
+    tags::{BumpTagData, BumpTagRequest, DryRunTagBumpRequest, TagBumpPreview},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -52,6 +53,19 @@ pub trait Backend {
         _req: &SaveLiveViewRequest,
     ) -> anyhow::Result<Envelope<SaveLiveViewData>> {
         unimplemented!("save_live_view")
+    }
+
+    /// Gather an exact tag-bump proposal without mutating Git state.
+    fn dry_run_tag_bump(
+        &self,
+        _req: &DryRunTagBumpRequest,
+    ) -> anyhow::Result<Envelope<TagBumpPreview>> {
+        unimplemented!("dry_run_tag_bump")
+    }
+
+    /// Apply one exact displayed tag-bump proposal.
+    fn bump_tag(&self, _req: &BumpTagRequest) -> anyhow::Result<Envelope<BumpTagData>> {
+        unimplemented!("bump_tag")
     }
 }
 
@@ -201,8 +215,8 @@ impl HttpBackend {
         })
     }
 
-    /// POST `req` as JSON to `path` and parse the response body as `Res`. A 400/500
-    /// carries an error envelope, so the body is deserialized regardless of status.
+    /// POST `req` as JSON to `path` and parse the response body as `Res`. HTTP errors carry an
+    /// error envelope, so the body is deserialized regardless of status.
     fn post_json<Req: Serialize, Res: DeserializeOwned>(
         &self,
         path: &str,
@@ -267,6 +281,17 @@ impl Backend for HttpBackend {
         req: &SaveLiveViewRequest,
     ) -> anyhow::Result<Envelope<SaveLiveViewData>> {
         self.post_json("/live-views/save", req)
+    }
+
+    fn dry_run_tag_bump(
+        &self,
+        req: &DryRunTagBumpRequest,
+    ) -> anyhow::Result<Envelope<TagBumpPreview>> {
+        self.post_json("/tags/bump/dry-run", req)
+    }
+
+    fn bump_tag(&self, req: &BumpTagRequest) -> anyhow::Result<Envelope<BumpTagData>> {
+        self.post_json("/tags/bump", req)
     }
 }
 

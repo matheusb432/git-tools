@@ -1,7 +1,10 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use gtl_application::diffs::present_diff::{PresentDiff, PresentDiffOk};
+use gtl_application::{
+    diffs::present_diff::{PresentDiff, PresentDiffOk},
+    ports::FileSystemClient,
+};
 use gtl_contracts::envelope::{Note, NoteLevel};
 
 pub mod daemon_ctl;
@@ -15,6 +18,12 @@ pub mod squash_preview;
 pub mod sync;
 pub mod tag;
 pub mod worktree;
+
+pub(crate) fn canonical_working_directory() -> anyhow::Result<PathBuf> {
+    gtl_infra::file_system::LocalFileSystemClient
+        .canonical_working_directory()
+        .map_err(|error| anyhow::anyhow!(error.to_string()))
+}
 
 /// Forward one recipe batch to the single-instance viewer as one argv token.
 pub(crate) fn forward_recipes(batch: &gtl_contracts::recipes::OpenRecipes) -> anyhow::Result<()> {

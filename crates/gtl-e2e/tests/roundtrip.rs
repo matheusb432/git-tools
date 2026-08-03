@@ -105,7 +105,19 @@ struct DirectDaemonGuard {
 
 impl DirectDaemonGuard {
     fn spawn(store_root: &Path) -> Self {
-        let child = process::Command::new(workspace_bin("gtl-daemon"))
+        Self::spawn_command(store_root, None)
+    }
+
+    fn spawn_in(store_root: &Path, working_directory: &Path) -> Self {
+        Self::spawn_command(store_root, Some(working_directory))
+    }
+
+    fn spawn_command(store_root: &Path, working_directory: Option<&Path>) -> Self {
+        let mut command = process::Command::new(workspace_bin("gtl-daemon"));
+        if let Some(working_directory) = working_directory {
+            command.current_dir(working_directory);
+        }
+        let child = command
             .env("GIT_TOOLS_DATA_DIR", store_root)
             .env_remove("GIT_TOOLS_DAEMON_PORT")
             .stdout(Stdio::null())
@@ -189,7 +201,7 @@ struct Fixture {
     _tmp: TempDir,
     _daemon: DaemonProcessGuard,
     _store: TempDir,
-    repo: PathBuf,
+    repo_path: PathBuf,
     store_dir: PathBuf,
 }
 
@@ -199,8 +211,8 @@ impl Fixture {
     fn new() -> Self {
         let tmp = tempfile::tempdir().unwrap();
         let store = tempfile::tempdir().unwrap();
-        let repo = tmp.path().join("repo");
-        std::fs::create_dir_all(&repo).unwrap();
+        let repo_path = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo_path).unwrap();
         let store_dir = store.path().to_path_buf();
         let daemon = DaemonProcessGuard::new(&store_dir);
 
@@ -208,7 +220,7 @@ impl Fixture {
             _tmp: tmp,
             _daemon: daemon,
             _store: store,
-            repo,
+            repo_path,
             store_dir,
         };
         this.git(&["init", "-b", "main"]);
@@ -226,7 +238,7 @@ impl Fixture {
     fn git(&self, args: &[&str]) -> String {
         let out = process::Command::new("git")
             .arg("-C")
-            .arg(&self.repo)
+            .arg(&self.repo_path)
             .args(args)
             .output()
             .unwrap();
@@ -240,12 +252,12 @@ impl Fixture {
 
     /// Writes `file` then commits it with a fixed date; returns the new full SHA.
     fn commit(&self, file: &str, contents: &str, message: &str) -> String {
-        let path = self.repo.join(file);
+        let path = self.repo_path.join(file);
         std::fs::write(&path, contents).unwrap();
         self.git(&["add", "-A"]);
         let out = process::Command::new("git")
             .arg("-C")
-            .arg(&self.repo)
+            .arg(&self.repo_path)
             .args(["commit", "-m", message])
             .env("GIT_AUTHOR_DATE", "2026-01-01T12:00:00")
             .env("GIT_COMMITTER_DATE", "2026-01-01T12:00:00")
@@ -261,7 +273,7 @@ impl Fixture {
 
     /// Adds a bare `origin` and pushes `main`, establishing an upstream (`@{u}`).
     fn add_upstream(&self) {
-        let remote = self.repo.parent().unwrap().join("origin.git");
+        let remote = self.repo_path.parent().unwrap().join("origin.git");
         let out = process::Command::new("git")
             .args(["init", "--bare"])
             .arg(&remote)
@@ -277,7 +289,7 @@ impl Fixture {
     fn run(&self, args: &[&str]) -> Command {
         let mut cmd = Command::new(workspace_bin("git-tools"));
         cmd.args(args)
-            .current_dir(&self.repo)
+            .current_dir(&self.repo_path)
             .env("GIT_TOOLS_DATA_DIR", &self.store_dir)
             // This suite pins the daemon/render round trip directly (autostart, sidecar
             // reuse); simulate headless so `diff`'s default degrades to that path
@@ -360,7 +372,7 @@ fn cli_autostarts_the_daemon_renders_and_stops() {
     // 4. Exactly one artifact + sidecar landed in the repository-local store.
     let artifact = artifact_from_stdout(&stdout);
     assert!(artifact.exists(), "artifact must exist at {artifact:?}");
-    let artifact_root = fixture.repo.join(".artifacts/gtl");
+    let artifact_root = fixture.repo_path.join(".artifacts/gtl");
     assert!(
         artifact
             .parent()
@@ -427,6 +439,112 @@ fn cli_autostarts_the_daemon_renders_and_stops() {
         .assert()
         .success()
         .stdout(contains("gtl-daemon not running"));
+}
+
+fn init_tag_bump_repo(repository: &Path, base_tag: &str) {
+    std::fs::create_dir_all(repository).unwrap();
+    git_at(repository, &["init", "-q", "-b", "main"]);
+    git_at(repository, &["config", "user.name", "E2E Bot"]);
+    git_at(repository, &["config", "user.email", "e2e@example.invalid"]);
+    std::fs::write(repository.join("release.txt"), "release\n").unwrap();
+    git_at(repository, &["add", "release.txt"]);
+    git_at(repository, &["commit", "-qm", "initial"]);
+    git_at(
+        repository,
+        &["tag", "-a", base_tag, "-m", "initial release"],
+    );
+}
+
+fn git_at(repository: &Path, arguments: &[&str]) -> String {
+    let output = process::Command::new("git")
+        .args(arguments)
+        .current_dir(repository)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {arguments:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_string()
+}
+
+#[test]
+fn tag_bump_uses_the_cli_repository_when_daemon_started_elsewhere() {
+    let temporary = tempfile::tempdir().unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let repository_a = temporary.path().join("repository-a");
+    let repository_b = temporary.path().join("repository-b");
+    init_tag_bump_repo(&repository_a, "v9.0.0");
+    init_tag_bump_repo(&repository_b, "v1.2.3");
+
+    let mut daemon = DirectDaemonGuard::spawn_in(store.path(), &repository_a);
+    assert!(
+        wait_for(Duration::from_secs(5), || {
+            std::fs::read_to_string(store.path().join("daemon.json"))
+                .ok()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .and_then(|json| json["pid"].as_u64())
+                == Some(u64::from(daemon.id()))
+        }),
+        "daemon started from repository A must publish its discovery record"
+    );
+
+    let run_cli = |arguments: &[&str]| {
+        let mut command = Command::new(workspace_bin("git-tools"));
+        command
+            .args(arguments)
+            .current_dir(&repository_b)
+            .env("GIT_TOOLS_DATA_DIR", store.path());
+        command
+    };
+
+    let dry_run = run_cli(&["tag", "bump", "patch", "release B", "--dry"])
+        .output()
+        .unwrap();
+    let dry_stdout = String::from_utf8(dry_run.stdout).unwrap();
+    let dry_stderr = String::from_utf8(dry_run.stderr).unwrap();
+    assert!(
+        dry_run.status.success(),
+        "dry-run failed\nstdout: {dry_stdout}\nstderr: {dry_stderr}"
+    );
+    assert!(
+        dry_stdout.contains(&format!(
+            "repository: repository-b ({})",
+            repository_b.display()
+        )),
+        "stdout: {dry_stdout}"
+    );
+    assert!(
+        dry_stdout.contains("base tag: v1.2.3"),
+        "stdout: {dry_stdout}"
+    );
+    assert!(
+        dry_stdout.contains("create: annotated tag v1.2.4"),
+        "stdout: {dry_stdout}"
+    );
+    assert!(!dry_stdout.contains(&repository_a.display().to_string()));
+    assert!(!dry_stdout.contains("v9.0.1"));
+
+    let applied = run_cli(&["tag", "bump", "patch", "release B", "--yes"])
+        .output()
+        .unwrap();
+    let applied_stdout = String::from_utf8(applied.stdout).unwrap();
+    let applied_stderr = String::from_utf8(applied.stderr).unwrap();
+    assert!(
+        applied.status.success(),
+        "bump failed\nstdout: {applied_stdout}\nstderr: {applied_stderr}"
+    );
+    assert!(
+        applied_stdout.contains("created tag v1.2.4"),
+        "stdout: {applied_stdout}"
+    );
+    assert_eq!(
+        git_at(&repository_b, &["tag", "--list", "v1.2.4"]),
+        "v1.2.4"
+    );
+    assert!(git_at(&repository_a, &["tag", "--list", "v1.2.4"]).is_empty());
+    daemon.kill_and_wait();
 }
 
 #[test]

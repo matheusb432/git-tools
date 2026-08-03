@@ -83,5 +83,7 @@ pub fn router(state: DaemonState) -> Router {
             "/live-views/save",
             post(endpoints::live_views::save::handle),
         )
+        .route("/tags/bump/dry-run", post(endpoints::tags::dry_run::handle))
+        .route("/tags/bump", post(endpoints::tags::bump::handle))
         .with_state(state)
 }

@@ -56,8 +56,8 @@ pub(super) fn build(
     exclusions: &gtl_models::diffs::DiffExclusions,
     notes: &mut Vec<Note>,
 ) -> anyhow::Result<(View, String)> {
-    let repo = Path::new(top);
-    let branch = source.current_branch(repo)?;
+    let repo_path = Path::new(top);
+    let branch = source.current_branch(repo_path)?;
     let repo_name = repo_name(top);
     let excluded = exclusions.for_project_or_default(&repo_name);
 
@@ -74,7 +74,7 @@ pub(super) fn build(
         commits,
         mut files,
         hidden_paths,
-    } = assemble(source, repo, &io_ranges.diff, &io_ranges.log, excluded)?;
+    } = assemble(source, repo_path, &io_ranges.diff, &io_ranges.log, excluded)?;
     sort_files_tree_order(&mut files);
 
     let view = View {
@@ -109,7 +109,7 @@ fn resolve_target_ranges(
     target: &DiffTarget,
     notes: &mut Vec<Note>,
 ) -> anyhow::Result<ResolvedTarget> {
-    let repo = Path::new(top);
+    let repo_path = Path::new(top);
     let resolved = match target {
         DiffTarget::Range {
             pinned: Some(pin), ..
@@ -130,8 +130,8 @@ fn resolve_target_ranges(
             )
         }
         DiffTarget::Base(base) => {
-            source.verify_commit(repo, base)?;
-            let short = source.short_ref(repo, base)?;
+            source.verify_commit(repo_path, base)?;
+            let short = source.short_ref(repo_path, base)?;
             ResolvedTarget {
                 base_ref: short.clone(),
                 io_ranges: DiffRanges::working_tree(base),
@@ -145,7 +145,7 @@ fn resolve_target_ranges(
             pinned: Some(pin),
         } => ResolvedTarget::pinned(pin, base.clone(), RangePresentation::Merge),
         DiffTarget::Merge { base, pinned: None } => {
-            source.verify_commit(repo, base)?;
+            source.verify_commit(repo_path, base)?;
             ResolvedTarget::same_ranges(
                 base.clone(),
                 DiffRanges::merge(base),
@@ -198,15 +198,15 @@ fn unpushed_or_main_base(
     top: &str,
     notes: &mut Vec<Note>,
 ) -> anyhow::Result<DiffBase> {
-    let repo = Path::new(top);
-    match source.upstream(repo) {
+    let repo_path = Path::new(top);
+    match source.upstream(repo_path) {
         Ok(crate::ports::GitEffect::Applied(upstream)) => Ok(DiffBase {
             ref_name: upstream,
             is_upstream: true,
         }),
         Ok(crate::ports::GitEffect::Rejected(upstream_error)) => {
             source
-                .verify_commit(repo, "main")
+                .verify_commit(repo_path, "main")
                 .map_err(|_| anyhow::anyhow!(upstream_error))?;
             notes.push(Note::warn(
                 "diff-preview: no upstream; falling back to main",
@@ -227,8 +227,8 @@ fn verify_exact_range(source: &impl GitClient, top: &str, range: &str) -> anyhow
     if start.trim().is_empty() || end.trim().is_empty() {
         anyhow::bail!("range must use <start>..<end>");
     }
-    let repo = Path::new(top);
-    source.verify_commit(repo, start)?;
-    source.verify_commit(repo, end)?;
+    let repo_path = Path::new(top);
+    source.verify_commit(repo_path, start)?;
+    source.verify_commit(repo_path, end)?;
     Ok(())
 }

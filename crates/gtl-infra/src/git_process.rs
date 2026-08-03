@@ -36,13 +36,13 @@ impl GitProcessOutput {
     }
 }
 
-pub(crate) fn run(repo: &Path, args: &[&str]) -> anyhow::Result<GitProcessOutput> {
+pub(crate) fn run(repo_path: &Path, args: &[&str]) -> anyhow::Result<GitProcessOutput> {
     let output = Command::new("git")
         .arg("-C")
-        .arg(repo)
+        .arg(repo_path)
         .args(args)
         .output()
-        .with_context(|| format!("failed to run git in {}", repo.display()))?;
+        .with_context(|| format!("failed to run git in {}", repo_path.display()))?;
 
     Ok(GitProcessOutput {
         stdout: String::from_utf8(output.stdout).context("git stdout was not valid UTF-8")?,

@@ -4,10 +4,10 @@ use std::path::PathBuf;
 
 use crate::ports::GitClient;
 
-/// Requests the repository top level containing `repo`.
+/// Requests the repository top level containing `repo_path`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolveRepoTop {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
 }
 
 pub type ResolveRepoTopOk = PathBuf;
@@ -17,15 +17,15 @@ pub type ResolveRepoTopOk = PathBuf;
 #[non_exhaustive]
 pub enum ResolveRepoTopError {
     /// Git transport failed before returning a command result.
-    #[error("{source}\nnot a git repo: {}", repo.display())]
+    #[error("{source}\nnot a git repo: {}", repo_path.display())]
     Transport {
-        repo: PathBuf,
+        repo_path: PathBuf,
         #[source]
         source: anyhow::Error,
     },
     /// Git rejected the path or returned no top-level path.
     #[error("{detail}")]
-    Rejected { repo: PathBuf, detail: String },
+    Rejected { repo_path: PathBuf, detail: String },
 }
 
 /// Resolves a path to the top level of its containing Git repository.
@@ -39,19 +39,19 @@ pub fn execute(
     query: ResolveRepoTop,
     git: &impl GitClient,
 ) -> Result<ResolveRepoTopOk, ResolveRepoTopError> {
-    let top = git
-        .discover_top(&query.repo)
-        .map_err(|source| ResolveRepoTopError::Transport {
-            repo: query.repo.clone(),
-            source,
-        })?;
+    let top =
+        git.discover_top(&query.repo_path)
+            .map_err(|source| ResolveRepoTopError::Transport {
+                repo_path: query.repo_path.clone(),
+                source,
+            })?;
     if let Some(top) = top {
         return Ok(top);
     }
 
     Err(ResolveRepoTopError::Rejected {
-        detail: format!("not a git repo: {}", query.repo.display()),
-        repo: query.repo,
+        detail: format!("not a git repo: {}", query.repo_path.display()),
+        repo_path: query.repo_path,
     })
 }
 
@@ -68,7 +68,7 @@ mod tests {
 
         let top = execute(
             ResolveRepoTop {
-                repo: "/repos/api/src".into(),
+                repo_path: "/repos/api/src".into(),
             },
             &git,
         )
@@ -83,7 +83,7 @@ mod tests {
 
         let error = execute(
             ResolveRepoTop {
-                repo: "/repos/api".into(),
+                repo_path: "/repos/api".into(),
             },
             &git,
         )
@@ -103,7 +103,7 @@ mod tests {
 
         let error = execute(
             ResolveRepoTop {
-                repo: "/repos/api".into(),
+                repo_path: "/repos/api".into(),
             },
             &git,
         )

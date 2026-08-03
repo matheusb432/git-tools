@@ -1,4 +1,4 @@
-//! End-to-end tests for `gtl prune`: build a real temp repo with merged and unmerged
+//! End-to-end tests for `gtl prune`: build a real temp repository with merged and unmerged
 //! branches, run the built binary against it, and assert exit code, stdout/stderr, and the
 //! surviving branch set. Local-only — no network.
 
@@ -8,11 +8,11 @@ use assert_cmd::Command;
 use predicates::str::contains;
 use tempfile::TempDir;
 
-/// Run a git command in `repo`, asserting success.
-fn git(repo: &Path, args: &[&str]) {
+/// Run a git command in `repo_path`, asserting success.
+fn git(repo_path: &Path, args: &[&str]) {
     let out = process::Command::new("git")
         .arg("-C")
-        .arg(repo)
+        .arg(repo_path)
         .args(args)
         .output()
         .unwrap();
@@ -23,11 +23,11 @@ fn git(repo: &Path, args: &[&str]) {
     );
 }
 
-/// True when `branch` still exists locally in `repo`.
-fn branch_exists(repo: &Path, branch: &str) -> bool {
+/// True when `branch` still exists locally in `repo_path`.
+fn branch_exists(repo_path: &Path, branch: &str) -> bool {
     process::Command::new("git")
         .arg("-C")
-        .arg(repo)
+        .arg(repo_path)
         .args(["rev-parse", "--verify", &format!("refs/heads/{branch}")])
         .output()
         .unwrap()
@@ -35,48 +35,48 @@ fn branch_exists(repo: &Path, branch: &str) -> bool {
         .success()
 }
 
-/// A temp repo on `main` with: `feat/merged` (fast-forward-merged into main) and
+/// A temp repository on `main` with: `feat/merged` (fast-forward-merged into main) and
 /// `feat/wip` (one commit ahead, never merged). Left checked out on `main`, clean tree.
 fn setup() -> (TempDir, std::path::PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path().to_path_buf();
-    git(&repo, &["init", "-q", "-b", "main"]);
-    git(&repo, &["config", "user.name", "E2E Bot"]);
-    git(&repo, &["config", "user.email", "e2e@example.invalid"]);
-    git(&repo, &["config", "commit.gpgsign", "false"]);
+    let repo_path = tmp.path().to_path_buf();
+    git(&repo_path, &["init", "-q", "-b", "main"]);
+    git(&repo_path, &["config", "user.name", "E2E Bot"]);
+    git(&repo_path, &["config", "user.email", "e2e@example.invalid"]);
+    git(&repo_path, &["config", "commit.gpgsign", "false"]);
     git(
-        &repo,
+        &repo_path,
         &["commit", "-q", "--allow-empty", "-m", "chore: base"],
     );
 
-    git(&repo, &["switch", "-qc", "feat/merged"]);
+    git(&repo_path, &["switch", "-qc", "feat/merged"]);
     git(
-        &repo,
+        &repo_path,
         &["commit", "-q", "--allow-empty", "-m", "feat: done"],
     );
-    git(&repo, &["switch", "-q", "main"]);
-    git(&repo, &["merge", "-q", "--ff-only", "feat/merged"]);
+    git(&repo_path, &["switch", "-q", "main"]);
+    git(&repo_path, &["merge", "-q", "--ff-only", "feat/merged"]);
 
-    git(&repo, &["switch", "-qc", "feat/wip"]);
-    git(&repo, &["commit", "-q", "--allow-empty", "-m", "wip"]);
-    git(&repo, &["switch", "-q", "main"]);
-    (tmp, repo)
+    git(&repo_path, &["switch", "-qc", "feat/wip"]);
+    git(&repo_path, &["commit", "-q", "--allow-empty", "-m", "wip"]);
+    git(&repo_path, &["switch", "-q", "main"]);
+    (tmp, repo_path)
 }
 
-/// The built `git-tools` binary, run with cwd inside `repo`.
-fn gtl(repo: &Path) -> Command {
+/// The built `git-tools` binary, run with cwd inside `repo_path`.
+fn gtl(repo_path: &Path) -> Command {
     let mut cmd = Command::cargo_bin("git-tools").unwrap();
-    cmd.current_dir(repo);
+    cmd.current_dir(repo_path);
     cmd
 }
 
 #[test]
 fn prune_partial_failure_reports_recovery_and_preserves_blocked_branch() {
-    let (_tmp, repo) = setup();
-    git(&repo, &["branch", "feat/blocked"]);
-    let linked_worktree = repo.join("linked-worktree");
+    let (_tmp, repo_path) = setup();
+    git(&repo_path, &["branch", "feat/blocked"]);
+    let linked_worktree = repo_path.join("linked-worktree");
     git(
-        &repo,
+        &repo_path,
         &[
             "worktree",
             "add",
@@ -86,7 +86,7 @@ fn prune_partial_failure_reports_recovery_and_preserves_blocked_branch() {
         ],
     );
 
-    gtl(&repo)
+    gtl(&repo_path)
         .args(["prune", "-y"])
         .assert()
         .failure()
@@ -97,12 +97,15 @@ fn prune_partial_failure_reports_recovery_and_preserves_blocked_branch() {
         .stderr(contains("failed: feat/blocked"));
 
     assert!(
-        !branch_exists(&repo, "feat/merged"),
+        !branch_exists(&repo_path, "feat/merged"),
         "deletable merged branch removed"
     );
     assert!(
-        branch_exists(&repo, "feat/blocked"),
+        branch_exists(&repo_path, "feat/blocked"),
         "checked-out merged branch preserved"
     );
-    assert!(branch_exists(&repo, "feat/wip"), "unmerged branch kept");
+    assert!(
+        branch_exists(&repo_path, "feat/wip"),
+        "unmerged branch kept"
+    );
 }

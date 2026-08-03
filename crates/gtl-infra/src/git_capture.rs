@@ -4,8 +4,8 @@ use anyhow::anyhow;
 use gtl_application::ports::{GitDiffFormat, GitDiffRequest};
 use gtl_models::diffs::Commit;
 
-pub(crate) fn run_git(repo: impl AsRef<Path>, args: &[&str]) -> anyhow::Result<String> {
-    let output = crate::git_process::run(repo.as_ref(), args)?;
+pub(crate) fn run_git(repo_path: impl AsRef<Path>, args: &[&str]) -> anyhow::Result<String> {
+    let output = crate::git_process::run(repo_path.as_ref(), args)?;
     if !output.success() {
         let stderr = output.stderr.trim().to_string();
         if stderr.is_empty() {
@@ -17,9 +17,9 @@ pub(crate) fn run_git(repo: impl AsRef<Path>, args: &[&str]) -> anyhow::Result<S
     Ok(output.stdout)
 }
 
-pub(crate) fn log_commits(repo: impl AsRef<Path>, range: &str) -> anyhow::Result<Vec<Commit>> {
+pub(crate) fn log_commits(repo_path: impl AsRef<Path>, range: &str) -> anyhow::Result<Vec<Commit>> {
     let raw = run_git(
-        repo,
+        repo_path,
         &[
             "log",
             "--date=format:%Y-%m-%d %H:%M",
@@ -30,7 +30,10 @@ pub(crate) fn log_commits(repo: impl AsRef<Path>, range: &str) -> anyhow::Result
     Ok(parse_commit_log(&raw))
 }
 
-pub(crate) fn diff(repo: impl AsRef<Path>, request: &GitDiffRequest) -> anyhow::Result<String> {
+pub(crate) fn diff(
+    repo_path: impl AsRef<Path>,
+    request: &GitDiffRequest,
+) -> anyhow::Result<String> {
     let mut args = vec!["diff".to_string()];
     match request.format {
         GitDiffFormat::NamesOnly => args.push("--name-only".to_string()),
@@ -48,13 +51,13 @@ pub(crate) fn diff(repo: impl AsRef<Path>, request: &GitDiffRequest) -> anyhow::
         );
     }
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-    run_git(repo, &args)
+    run_git(repo_path, &args)
 }
 
 /// The repo's oldest root-commit sha (lexicographically smallest when several
 /// roots exist), or `None` for a repo with no commits. Stable repo identity.
-pub(crate) fn root_commit(repo: impl AsRef<Path>) -> Option<String> {
-    let out = run_git(repo, &["rev-list", "--max-parents=0", "HEAD"]).ok()?;
+pub(crate) fn root_commit(repo_path: impl AsRef<Path>) -> Option<String> {
+    let out = run_git(repo_path, &["rev-list", "--max-parents=0", "HEAD"]).ok()?;
     out.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
@@ -63,13 +66,15 @@ pub(crate) fn root_commit(repo: impl AsRef<Path>) -> Option<String> {
 }
 
 /// The merge base of `a` and `b` as a full sha.
-pub(crate) fn merge_base(repo: impl AsRef<Path>, a: &str, b: &str) -> anyhow::Result<String> {
-    Ok(run_git(repo, &["merge-base", a, b])?.trim().to_string())
+pub(crate) fn merge_base(repo_path: impl AsRef<Path>, a: &str, b: &str) -> anyhow::Result<String> {
+    Ok(run_git(repo_path, &["merge-base", a, b])?
+        .trim()
+        .to_string())
 }
 
 /// The committer date of `rev` as a strict ISO-8601 string (empty on failure).
-pub(crate) fn committed_at(repo: impl AsRef<Path>, rev: &str) -> String {
-    run_git(repo, &["show", "-s", "--format=%cI", rev])
+pub(crate) fn committed_at(repo_path: impl AsRef<Path>, rev: &str) -> String {
+    run_git(repo_path, &["show", "-s", "--format=%cI", rev])
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
 }

@@ -10,6 +10,8 @@ use super::error_envelope;
 pub(crate) enum EndpointError {
     #[error("{0}")]
     BadRequest(String),
+    #[error("{0}")]
+    Conflict(String),
     #[error("{0:#}")]
     Unexpected(#[source] anyhow::Error),
     #[error("daemon task panicked: {0}")]
@@ -25,6 +27,10 @@ impl EndpointError {
         Self::Unexpected(error.into())
     }
 
+    pub(crate) fn conflict(error: impl std::fmt::Display) -> Self {
+        Self::Conflict(error.to_string())
+    }
+
     pub(crate) fn task_join(error: tokio::task::JoinError) -> Self {
         Self::TaskJoin(error)
     }
@@ -32,10 +38,10 @@ impl EndpointError {
 
 impl IntoResponse for EndpointError {
     fn into_response(self) -> Response {
-        let status = if matches!(&self, Self::BadRequest(_)) {
-            StatusCode::BAD_REQUEST
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
+        let status = match &self {
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::Unexpected(_) | Self::TaskJoin(_) => StatusCode::INTERNAL_SERVER_ERROR,
         };
         (status, Json(error_envelope::<()>(self.to_string()))).into_response()
     }
@@ -54,5 +60,14 @@ mod tests {
         let endpoint = EndpointError::unexpected(error);
 
         assert!(endpoint.source().is_some());
+    }
+
+    #[test]
+    fn conflict_maps_to_http_409() {
+        use axum::{http::StatusCode, response::IntoResponse as _};
+
+        let response = EndpointError::conflict("stale preview").into_response();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
     }
 }

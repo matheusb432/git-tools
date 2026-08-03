@@ -6,6 +6,7 @@ pub mod health;
 pub mod live_views;
 pub mod managed;
 pub mod shutdown;
+pub mod tags;
 
 pub(crate) use error::EndpointError;
 use gtl_contracts::envelope::{Envelope, Note, NoteLevel, Outcome};

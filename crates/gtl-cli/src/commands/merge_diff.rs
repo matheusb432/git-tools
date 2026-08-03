@@ -11,8 +11,12 @@ use gtl_application::{
 
 use crate::{commands::diff::DiffOutcome, viewer};
 
-pub fn run(repo: impl AsRef<Path>, base: Option<&str>, raw: bool) -> anyhow::Result<DiffOutcome> {
-    let cwd = std::path::absolute(repo.as_ref())?;
+pub fn run(
+    repo_path: impl AsRef<Path>,
+    base: Option<&str>,
+    raw: bool,
+) -> anyhow::Result<DiffOutcome> {
+    let cwd = std::path::absolute(repo_path.as_ref())?;
     super::present(PresentDiff {
         render: DiffRenderRequest::MergeDiff(RenderMergeDiff {
             cwd: cwd.clone(),
@@ -20,7 +24,7 @@ pub fn run(repo: impl AsRef<Path>, base: Option<&str>, raw: bool) -> anyhow::Res
         }),
         batch_id: crate::recipe::new_batch_id(),
         recipes: vec![DiffRecipeIntent {
-            repo: cwd,
+            repo_path: cwd,
             operation: RecipeRequest::MergeDiff {
                 base: base.map(str::to_string),
             },

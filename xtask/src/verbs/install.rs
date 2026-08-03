@@ -215,20 +215,23 @@ pub(crate) fn bindir() -> Result<PathBuf> {
 /// Place the requested artifact(s). Repo root is the current dir (the install recipes set
 /// `working-directory := '..'`, so CWD is the repo root).
 pub fn run_install(target: InstallTarget) -> Result<()> {
-    let repo = env::current_dir()?;
+    let repo_path = env::current_dir()?;
     let bindir = bindir()?;
     match target {
-        InstallTarget::Cli => install_cli(&repo, &bindir),
-        InstallTarget::Viewer => install_viewer(&repo, &bindir),
+        InstallTarget::Cli => install_cli(&repo_path, &bindir),
+        InstallTarget::Viewer => install_viewer(&repo_path, &bindir),
         InstallTarget::Both => {
-            install_cli(&repo, &bindir)?;
-            install_viewer(&repo, &bindir)
+            install_cli(&repo_path, &bindir)?;
+            install_viewer(&repo_path, &bindir)
         }
     }
 }
 
-fn install_cli(repo: &Path, bindir: &Path) -> Result<()> {
-    let src = repo.join("target").join("release").join(cli_bin_name());
+fn install_cli(repo_path: &Path, bindir: &Path) -> Result<()> {
+    let src = repo_path
+        .join("target")
+        .join("release")
+        .join(cli_bin_name());
     if !src.is_file() {
         bail!(
             "git-tools not built at {} — run `just cli build` first",
@@ -242,7 +245,10 @@ fn install_cli(repo: &Path, bindir: &Path) -> Result<()> {
     );
     println!("gtl {act} -> {}", bindir.join(cli_alias_name()).display());
 
-    let daemon_src = repo.join("target").join("release").join(daemon_bin_name());
+    let daemon_src = repo_path
+        .join("target")
+        .join("release")
+        .join(daemon_bin_name());
     if !daemon_src.is_file() {
         bail!(
             "gtl-daemon not built at {} — run `just cli build` first",
@@ -257,13 +263,16 @@ fn install_cli(repo: &Path, bindir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn install_viewer(repo: &Path, bindir: &Path) -> Result<()> {
-    let src = repo.join("target").join("release").join(viewer_bin_name());
+fn install_viewer(repo_path: &Path, bindir: &Path) -> Result<()> {
+    let src = repo_path
+        .join("target")
+        .join("release")
+        .join(viewer_bin_name());
     if src.is_file() {
         let dst = bindir.join(viewer_bin_name());
         let act = install_viewer_binary(&src, bindir)?;
         println!("gtl-viewer {act} -> {}", dst.display());
-        if let Some(path) = linux_desktop::install(repo, &dst)? {
+        if let Some(path) = linux_desktop::install(repo_path, &dst)? {
             println!("gtl-viewer desktop entry -> {}", path.display());
         }
     } else {

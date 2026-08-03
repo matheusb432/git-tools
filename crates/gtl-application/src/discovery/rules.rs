@@ -45,15 +45,15 @@ pub fn should_skip(
 
 /// Label a discovered repo by its path relative to `root`, falling back to the
 /// repo's own directory name when it *is* the root.
-pub fn repo_label(root: &Path, repo: &Path) -> String {
-    let relative = repo.strip_prefix(root).unwrap_or(repo);
+pub fn repo_label(root: &Path, repo_path: &Path) -> String {
+    let relative = repo_path.strip_prefix(root).unwrap_or(repo_path);
     let label = relative
         .components()
         .map(|component| component.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/");
     if label.is_empty() {
-        repo_name(repo)
+        repo_name(repo_path)
     } else {
         label
     }

@@ -11,7 +11,7 @@ use crate::ports::GitClient;
 /// Requests creation of one annotated tag in a repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddTag {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     pub tag: String,
     pub message: String,
 }
@@ -54,12 +54,24 @@ pub(super) fn create(
     command: AddTag,
     git: &impl GitClient,
 ) -> Result<TagActionOutcome, GitCommandError> {
+    create_at(command, "HEAD", git)
+}
+
+pub(super) fn create_at(
+    command: AddTag,
+    revision: &str,
+    git: &impl GitClient,
+) -> Result<TagActionOutcome, GitCommandError> {
     if let Some(failure) = validate(&command) {
         return Ok(failure);
     }
 
-    let AddTag { repo, tag, message } = command;
-    match git.create_annotated_tag(&repo, &tag, &message)? {
+    let AddTag {
+        repo_path,
+        tag,
+        message,
+    } = command;
+    match git.create_annotated_tag_at(&repo_path, &tag, revision, &message)? {
         crate::ports::GitEffect::Applied(()) => Ok(TagActionOutcome::new(
             TagActionStatus::Created,
             format!("created tag {tag}"),
@@ -97,7 +109,7 @@ mod tests {
     fn validation_preserves_required_tag_detail() {
         assert_eq!(
             validate(&AddTag {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 tag: "  ".into(),
                 message: "release".into(),
             }),
@@ -113,7 +125,7 @@ mod tests {
     fn validation_preserves_required_message_detail() {
         assert_eq!(
             validate(&AddTag {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 tag: "v1.0.0".into(),
                 message: "\n".into(),
             }),
@@ -133,7 +145,7 @@ mod tests {
 
         let error = execute(
             AddTag {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 tag: "v1.0.0".into(),
                 message: "release".into(),
             },
@@ -157,7 +169,7 @@ mod tests {
         assert_eq!(
             execute(
                 AddTag {
-                    repo: ".".into(),
+                    repo_path: ".".into(),
                     tag: "v1.0.0".into(),
                     message: "release".into(),
                 },
@@ -178,7 +190,7 @@ mod tests {
 
         let outcome = execute(
             AddTag {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 tag: "v1.0.0".into(),
                 message: "release".into(),
             },

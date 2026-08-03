@@ -32,8 +32,8 @@ pub fn execute(
     settings: &impl UserSettingsStore,
     source: &impl GitClient,
 ) -> Result<View, ComputeCommitPatchError> {
-    let repo = request.repo_root;
-    let top = repo.to_string_lossy();
+    let repo_path = request.repo_root;
+    let top = repo_path.to_string_lossy();
     let repo_name = repo_name(&top);
     let settings = settings.load();
     let excluded = settings
@@ -50,14 +50,20 @@ pub fn execute(
         commits,
         mut files,
         hidden_paths,
-    } = assemble(source, Path::new(&repo), &diff_range, &log_range, excluded)?;
+    } = assemble(
+        source,
+        Path::new(&repo_path),
+        &diff_range,
+        &log_range,
+        excluded,
+    )?;
     sort_files_tree_order(&mut files);
 
     let short_sha = abbreviate(&commit.sha);
     Ok(View {
         repo_name,
         repo_root: top.into_owned(),
-        branch: source.current_branch(Path::new(&repo))?,
+        branch: source.current_branch(Path::new(&repo_path))?,
         upstream: abbreviate(base),
         title: format!("commit {short_sha}"),
         cmd: Cmd {

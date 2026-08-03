@@ -8,7 +8,7 @@ use crate::ports::GitClient;
 /// Requests the local tags for one repository, optionally with their origin state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListTags {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     /// Queries origin over the network to resolve each tag's [`gtl_models::tags::TagState`].
     pub include_state: bool,
 }
@@ -30,13 +30,13 @@ pub enum ListTagsError {
 #[cqrsy::query]
 pub fn execute(query: ListTags, git: &impl GitClient) -> Result<ListTagsOk, ListTagsError> {
     let ListTags {
-        repo,
+        repo_path,
         include_state,
     } = query;
     let refs = if include_state {
-        parse::load(git, &repo)
+        parse::load(git, &repo_path)
     } else {
-        parse::load_local(git, &repo)
+        parse::load_local(git, &repo_path)
     };
     match refs {
         Ok(refs) => Ok(ListTagsOk::Listed {
@@ -89,7 +89,7 @@ mod tests {
 
         execute(
             ListTags {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 include_state: false,
             },
             &git,
@@ -116,7 +116,7 @@ mod tests {
 
     fn list_with_state() -> ListTags {
         ListTags {
-            repo: ".".into(),
+            repo_path: ".".into(),
             include_state: true,
         }
     }

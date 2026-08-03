@@ -7,7 +7,7 @@ use crate::ports::{GitClient, GitEffect};
 /// Requests collapsing every unpushed commit into one commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SquashLocal {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     pub message: String,
     pub dry: bool,
 }
@@ -132,9 +132,13 @@ pub fn execute(
     command: SquashLocal,
     git: &impl GitClient,
 ) -> Result<SquashLocalOk, SquashLocalError> {
-    let SquashLocal { repo, message, dry } = command;
+    let SquashLocal {
+        repo_path,
+        message,
+        dry,
+    } = command;
     let Some(top) = git
-        .discover_top(&repo)
+        .discover_top(&repo_path)
         .map_err(SquashLocalError::Unexpected)?
     else {
         return Ok(SquashLocalOk::new(SquashStatus::Refused, "not a git repo"));
@@ -366,7 +370,7 @@ mod tests {
 
     fn command(dry: bool) -> SquashLocal {
         SquashLocal {
-            repo: ".".into(),
+            repo_path: ".".into(),
             message: "collapse".into(),
             dry,
         }

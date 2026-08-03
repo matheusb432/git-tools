@@ -11,13 +11,13 @@ use gtl_application::{
 
 use crate::{commands::diff::DiffOutcome, viewer};
 
-pub fn run(repo: impl AsRef<Path>, raw: bool) -> anyhow::Result<DiffOutcome> {
-    let cwd = std::path::absolute(repo.as_ref())?;
+pub fn run(repo_path: impl AsRef<Path>, raw: bool) -> anyhow::Result<DiffOutcome> {
+    let cwd = std::path::absolute(repo_path.as_ref())?;
     super::present(PresentDiff {
         render: DiffRenderRequest::SquashPreview(RenderSquashPreview { cwd: cwd.clone() }),
         batch_id: crate::recipe::new_batch_id(),
         recipes: vec![DiffRecipeIntent {
-            repo: cwd,
+            repo_path: cwd,
             operation: RecipeRequest::SquashPreview,
             name: None,
         }],

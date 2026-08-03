@@ -63,19 +63,25 @@ impl TagRefs {
     }
 }
 
-pub(super) fn load(git: &impl GitClient, repo: &Path) -> Result<TagRefs, GitCommandError> {
+pub(super) fn load(git: &impl GitClient, repo_path: &Path) -> Result<TagRefs, GitCommandError> {
     Ok(TagRefs::new(
-        local_refs(git, repo)?,
-        Some(remote_refs(git, repo)?),
+        local_refs(git, repo_path)?,
+        Some(remote_refs(git, repo_path)?),
     ))
 }
 
-pub(super) fn load_local(git: &impl GitClient, repo: &Path) -> Result<TagRefs, GitCommandError> {
-    Ok(TagRefs::new(local_refs(git, repo)?, None))
+pub(super) fn load_local(
+    git: &impl GitClient,
+    repo_path: &Path,
+) -> Result<TagRefs, GitCommandError> {
+    Ok(TagRefs::new(local_refs(git, repo_path)?, None))
 }
 
-fn local_refs(git: &impl GitClient, repo: &Path) -> Result<BTreeMap<String, Tag>, GitCommandError> {
-    match git.local_tags(repo)? {
+fn local_refs(
+    git: &impl GitClient,
+    repo_path: &Path,
+) -> Result<BTreeMap<String, Tag>, GitCommandError> {
+    match git.local_tags(repo_path)? {
         GitEffect::Applied(tags) => Ok(tags),
         GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
             "git for-each-ref failed: {detail}"
@@ -85,9 +91,9 @@ fn local_refs(git: &impl GitClient, repo: &Path) -> Result<BTreeMap<String, Tag>
 
 fn remote_refs(
     git: &impl GitClient,
-    repo: &Path,
+    repo_path: &Path,
 ) -> Result<BTreeMap<String, String>, GitCommandError> {
-    match git.remote_tags(repo, "origin")? {
+    match git.remote_tags(repo_path, "origin")? {
         GitEffect::Applied(tags) => Ok(tags),
         GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
             "git ls-remote failed: {detail}"

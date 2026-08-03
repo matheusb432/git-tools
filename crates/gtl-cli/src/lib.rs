@@ -1,6 +1,6 @@
 //! git-tools - CLI entry point: clap parsing + a machine-readable exit-code contract.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use gtl_application::{
     managed::plan_push::{self, PlanPush, PlanPushOk},
@@ -11,9 +11,9 @@ use gtl_infra::git_client::HybridGitClient;
 
 use crate::{
     cli::{
-        Cli, ColorChoice, Command, CommitArgs, DaemonArgs, DaemonCommand, DiffSub, DiffTarget,
-        DiffTargetArgs, LiveArgs, ManagedArgs, ManagedReadArgs, MergeArgs, PruneArgs, PushArgs,
-        SquashArgs, StatusArgs, SwArgs, TagCommand, Theme, WorktreeCommand,
+        Cli, ColorChoice, Command, CommitArgs, DaemonArgs, DaemonCommand, DiffArgs, DiffSub,
+        DiffTarget, DiffTargetArgs, ManagedArgs, ManagedReadArgs, MergeArgs, PruneArgs, PushArgs,
+        SquashArgs, StatusArgs, SwArgs, Theme, WorktreeCommand,
     },
     commands::managed::{ManagedExit, ManagedOptions, ManagedRun, PushOutcome, PushSummary},
     confirm::{Confirmation, DefaultAnswer, RealConfirm},
@@ -87,48 +87,16 @@ fn render_clap_error(error: &clap::Error) -> ExitCode {
 
 fn dispatch(command: Command) -> ExitCode {
     match command {
-        Command::Diff(args) => match args.sub {
-            Some(DiffSub::Merge(MergeArgs { repo, base, raw })) => {
-                diff_exit(commands::merge_diff::run(repo, base.as_deref(), raw))
-            }
-            Some(DiffSub::Squash(SquashArgs { repo, raw })) => {
-                diff_exit(commands::squash_preview::run(repo, raw))
-            }
-            Some(DiffSub::Live(LiveArgs { path })) => {
-                diff_live_exit(commands::diff_live::run(path))
-            }
-            None => {
-                let raw = args.raw;
-                if let Some(theme) = args.target.set_theme {
-                    return run_set_theme(theme);
-                }
-                if args.target.recursive {
-                    return diff_exit(commands::diff_subrepos::run_scan(
-                        ".",
-                        args.target.last,
-                        args.target.worktrees,
-                        raw,
-                    ));
-                }
-                match diff_invocation(args.target) {
-                    DiffInvocation::Single { target, name } => {
-                        diff_exit(commands::diff::run(&target, name.as_deref(), raw))
-                    }
-                    DiffInvocation::ManagedAll {
-                        repos_file,
-                        home_dir,
-                    } => {
-                        let options = managed_diff_options(repos_file, home_dir);
-                        diff_exit(commands::diff_subrepos::run_managed_all(".", &options, raw))
-                    }
-                }
-            }
-        },
-        Command::SquashLocal { repo, message, dry } => {
+        Command::Diff(args) => run_diff(args),
+        Command::SquashLocal {
+            repo_path,
+            message,
+            dry,
+        } => {
             let git = HybridGitClient;
             match squash_local::execute(
                 SquashLocal {
-                    repo: repo.into(),
+                    repo_path: repo_path.into(),
                     message: message.clone(),
                     dry,
                 },
@@ -175,11 +143,55 @@ fn dispatch(command: Command) -> ExitCode {
         Command::Commit(args) => run_commit(args),
         Command::Sw(args) => run_sw(&args),
         Command::Prune(args) => run_prune(args),
-        Command::Tag(args) => run_tag(args.command, args.commits, args.state),
+        Command::Tag(args) => commands::tag::run(args.command, args.commits, args.state),
         Command::Wk(args) => run_worktree(&args.command),
         Command::Status(args) => managed_exit(&run_status(args)),
         Command::Ls(args) => managed_exit(&run_status(args.into())),
         Command::Daemon(DaemonArgs { command }) => run_daemon_ctl(&command),
+    }
+}
+
+fn run_diff(args: DiffArgs) -> ExitCode {
+    match args.sub {
+        Some(DiffSub::Merge(MergeArgs {
+            repo_path,
+            base,
+            raw,
+        })) => diff_exit(commands::merge_diff::run(repo_path, base.as_deref(), raw)),
+        Some(DiffSub::Squash(SquashArgs { repo_path, raw })) => {
+            diff_exit(commands::squash_preview::run(repo_path, raw))
+        }
+        Some(DiffSub::Live(args)) => diff_live_exit(commands::diff_live::run(args.path)),
+        None => {
+            let raw = args.raw;
+            if let Some(theme) = args.target.set_theme {
+                return run_set_theme(theme);
+            }
+            if args.target.recursive {
+                return diff_exit(commands::canonical_working_directory().and_then(|root| {
+                    commands::diff_subrepos::run_scan(
+                        root,
+                        args.target.last,
+                        args.target.worktrees,
+                        raw,
+                    )
+                }));
+            }
+            match diff_invocation(args.target) {
+                DiffInvocation::Single { target, name } => {
+                    diff_exit(commands::diff::run(&target, name.as_deref(), raw))
+                }
+                DiffInvocation::ManagedAll {
+                    repos_file,
+                    home_dir,
+                } => {
+                    let options = managed_diff_options(repos_file, home_dir);
+                    diff_exit(commands::canonical_working_directory().and_then(|root| {
+                        commands::diff_subrepos::run_managed_all(root, &options, raw)
+                    }))
+                }
+            }
+        }
     }
 }
 
@@ -278,9 +290,15 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
     use crate::commands::worktree;
 
     let git = HybridGitClient;
-    let repo = std::path::PathBuf::from(".");
+    let repo_path = match commands::canonical_working_directory() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("wk: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
     match command {
-        WorktreeCommand::Base => match get_base::execute(GetWorktreeBase { repo }, &git) {
+        WorktreeCommand::Base => match get_base::execute(GetWorktreeBase { repo_path }, &git) {
             Ok(GetWorktreeBaseOk::Found { path }) => {
                 if !path.is_empty() {
                     println!("{path}");
@@ -296,7 +314,7 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
                 ExitCode::Internal
             }
         },
-        WorktreeCommand::Ls => match list::execute(ListWorktrees { repo }, &git) {
+        WorktreeCommand::Ls => match list::execute(ListWorktrees { repo_path }, &git) {
             Ok(ListWorktreesOk::Listed { worktrees }) => {
                 let detail = worktree::render_list(&worktrees);
                 if !detail.is_empty() {
@@ -436,7 +454,14 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
     }
 
     let git = HybridGitClient;
-    let target = match plan_push::execute(plan_push::PlanPush { repo: ".".into() }, &git) {
+    let repo_path = match commands::canonical_working_directory() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("push: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+    let target = match plan_push::execute(plan_push::PlanPush { repo_path }, &git) {
         Ok(plan_push::PlanPushOk::Refused(detail)) => {
             eprintln!("push: {detail}");
             return ExitCode::Internal;
@@ -500,7 +525,14 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
     use crate::commands::sync;
 
     let git = HybridGitClient;
-    let target = match plan_push::execute(plan_push::PlanPush { repo: ".".into() }, &git) {
+    let repo_path = match commands::canonical_working_directory() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("push: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+    let target = match plan_push::execute(plan_push::PlanPush { repo_path }, &git) {
         Ok(plan_push::PlanPushOk::Refused(detail)) => {
             eprintln!("push: {detail}");
             return ExitCode::Internal;
@@ -576,7 +608,14 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
     }
 
     let git = HybridGitClient;
-    let target = match plan_commit::execute(plan_commit::PlanCommit { repo: ".".into() }, &git) {
+    let repo_path = match commands::canonical_working_directory() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("commit: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+    let target = match plan_commit::execute(plan_commit::PlanCommit { repo_path }, &git) {
         Ok(plan_commit::PlanCommitOk::Refused(detail)) => {
             eprintln!("commit: {detail}");
             return ExitCode::Internal;
@@ -642,9 +681,13 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
     use gtl_models::managed::push_subrepos::SubreposPlan;
 
     let git = HybridGitClient;
-    // Canonicalize first (like `diff -r`) so repo labels read off real path segments
-    // — the root repo is named for its directory, not the bare ".".
-    let root = std::fs::canonicalize(".").unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let root = match commands::canonical_working_directory() {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("push -r: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
 
     let targets = match push_subrepos::plan::execute(
         push_subrepos::plan::PlanPush { root: root.clone() },
@@ -728,6 +771,14 @@ fn format_push_subrepos_result(
 /// Orchestrates `sw`: pick the flow from flags, run the plan read-only, then apply.
 /// All git work is local; refusals go to stderr (exit 1), logs to stdout (exit 0).
 fn run_sw(args: &SwArgs) -> ExitCode {
+    let repo_path = match canonical_working_directory_or_exit("sw") {
+        Ok(path) => path,
+        Err(code) => return code,
+    };
+    run_sw_with_path(args, repo_path)
+}
+
+fn run_sw_with_path(args: &SwArgs, repo_path: PathBuf) -> ExitCode {
     use gtl_application::branches::{
         apply_rebase::{self, ApplyRebase, RebaseStatus},
         apply_revert::{self, ApplyRevert, RevertStatus},
@@ -743,7 +794,7 @@ fn run_sw(args: &SwArgs) -> ExitCode {
     if args.revert {
         return match plan_revert::execute(
             PlanRevert {
-                repo: ".".into(),
+                repo_path: repo_path.clone(),
                 onto: onto.into(),
             },
             &git,
@@ -769,7 +820,7 @@ fn run_sw(args: &SwArgs) -> ExitCode {
     if args.rebase {
         let target = match plan_rebase::execute(
             PlanRebase {
-                repo: ".".into(),
+                repo_path: repo_path.clone(),
                 onto: onto.into(),
             },
             &git,
@@ -805,7 +856,7 @@ fn run_sw(args: &SwArgs) -> ExitCode {
 
     match plan_switch::execute(
         PlanSwitch {
-            repo: ".".into(),
+            repo_path,
             onto: onto.into(),
         },
         &git,
@@ -878,10 +929,17 @@ fn run_prune(args: PruneArgs) -> ExitCode {
     }
 
     let git = HybridGitClient;
+    let repo_path = match commands::canonical_working_directory() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("prune: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
 
     let (top, branches) = match plan_prune::execute(
         PlanPrune {
-            repo: ".".into(),
+            repo_path,
             onto: onto.into(),
         },
         &git,
@@ -947,125 +1005,6 @@ fn run_prune(args: PruneArgs) -> ExitCode {
     }
 }
 
-fn run_tag(command: Option<TagCommand>, commits: bool, state: bool) -> ExitCode {
-    use gtl_application::tags::{
-        add::{self, AddTag},
-        add_and_push::{self, AddAndPushTag},
-        label::{self, LabelTag},
-        list::{self, ListTags},
-        push::{self, PushTags},
-    };
-
-    let git = HybridGitClient;
-    let repo = std::path::PathBuf::from(".");
-    match command {
-        Some(TagCommand::Add { tag, message }) => {
-            finish_tag_action(add::execute(AddTag { repo, tag, message }, &git))
-        }
-        Some(TagCommand::Push {
-            tag: Some(tag),
-            message: Some(message),
-            label,
-        }) => finish_tag_action(add_and_push::execute(
-            AddAndPushTag {
-                repo,
-                tag,
-                message,
-                label,
-            },
-            &git,
-        )),
-        Some(TagCommand::Push {
-            tag: Some(tag),
-            message: None,
-            label: Some(label),
-        }) => finish_tag_action(label::execute(LabelTag { repo, tag, label }, &git)),
-        Some(TagCommand::Push {
-            tag: None,
-            message: None,
-            label: None,
-        }) => finish_tag_action(push::execute(PushTags { repo }, &git)),
-        Some(TagCommand::Push { tag: None, .. }) => {
-            eprintln!("tag: tag push --label requires a <tag> to label");
-            ExitCode::Usage
-        }
-        Some(TagCommand::Push { .. }) => {
-            eprintln!("tag: tag push requires both <tag> and <message> when creating a tag");
-            ExitCode::Usage
-        }
-        Some(TagCommand::Ls) | None => finish_tag_list(
-            list::execute(
-                ListTags {
-                    repo,
-                    include_state: state,
-                },
-                &git,
-            ),
-            commits,
-        ),
-    }
-}
-
-fn finish_tag_list<E>(
-    result: Result<gtl_application::tags::ListTagsOk, E>,
-    commits: bool,
-) -> ExitCode
-where
-    E: std::fmt::Display,
-{
-    use gtl_application::tags::ListTagsOk;
-
-    use crate::commands::tag;
-
-    match result {
-        Ok(list @ ListTagsOk::Listed { .. }) => {
-            let detail = tag::render_list(&list, commits);
-            if !detail.is_empty() {
-                println!("{detail}");
-            }
-            ExitCode::Ok
-        }
-        Ok(ListTagsOk::Failed { detail }) => {
-            eprintln!("tag: {detail}");
-            ExitCode::Internal
-        }
-        Err(error) => {
-            eprintln!("tag: {error}");
-            ExitCode::Internal
-        }
-    }
-}
-
-fn finish_tag_action<E>(result: Result<gtl_application::tags::TagActionOutcome, E>) -> ExitCode
-where
-    E: std::fmt::Display,
-{
-    match result {
-        Ok(outcome) => render_tag_action(&outcome),
-        Err(error) => {
-            eprintln!("tag: {error}");
-            ExitCode::Internal
-        }
-    }
-}
-
-fn render_tag_action(outcome: &gtl_application::tags::TagActionOutcome) -> ExitCode {
-    use gtl_application::tags::TagActionStatus;
-
-    match outcome.status {
-        TagActionStatus::Created | TagActionStatus::Noop | TagActionStatus::Pushed => {
-            if !outcome.detail.is_empty() {
-                println!("{}", outcome.detail);
-            }
-            ExitCode::Ok
-        }
-        TagActionStatus::Failed => {
-            eprintln!("tag: {}", outcome.detail);
-            ExitCode::Internal
-        }
-    }
-}
-
 /// Dispatches `status` by scope: `--all` ⇒ managed manifest, `-r` ⇒ recursive scan of
 /// the current directory, default ⇒ the current repo alone.
 fn run_status(args: StatusArgs) -> ManagedRun<commands::managed::StatusResult> {
@@ -1078,10 +1017,34 @@ fn run_status(args: StatusArgs) -> ManagedRun<commands::managed::StatusResult> {
     if all {
         commands::managed::run_status(&options)
     } else if recursive {
-        commands::managed::run_status_recursive(std::path::Path::new("."), &options)
+        let root = match commands::canonical_working_directory() {
+            Ok(root) => root,
+            Err(error) => return status_path_error(&error),
+        };
+        commands::managed::run_status_recursive(&root, &options)
     } else {
-        commands::managed::run_status_current(std::path::Path::new("."), &options)
+        let root = match commands::canonical_working_directory() {
+            Ok(root) => root,
+            Err(error) => return status_path_error(&error),
+        };
+        commands::managed::run_status_current(&root, &options)
     }
+}
+
+fn status_path_error(error: &anyhow::Error) -> ManagedRun<commands::managed::StatusResult> {
+    ManagedRun {
+        exit: ManagedExit::Fail,
+        results: Vec::new(),
+        stdout: String::new(),
+        stderr: format!("status: {error:#}"),
+    }
+}
+
+fn canonical_working_directory_or_exit(command: &str) -> Result<PathBuf, ExitCode> {
+    commands::canonical_working_directory().map_err(|error| {
+        eprintln!("{command}: {error:#}");
+        ExitCode::Internal
+    })
 }
 
 /// Builds the [`ManagedOptions`] for a read-only managed command from its parsed flags.

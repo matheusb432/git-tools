@@ -10,11 +10,11 @@ const APP_NAME: &str = "git-tools diff viewer";
 const WM_CLASS: &str = "Gtl-viewer";
 const ICON_SIZE: u32 = 512;
 
-pub(super) fn install(repo: &Path, viewer: &Path) -> Result<Option<PathBuf>> {
+pub(super) fn install(repo_path: &Path, viewer: &Path) -> Result<Option<PathBuf>> {
     let Some(data_home) = xdg_data_home()? else {
         return Ok(None);
     };
-    let icon = icon_source_path(repo);
+    let icon = icon_source_path(repo_path);
     install_files(&data_home, viewer, &icon)
         .with_context(|| format!("installing Linux desktop files for {}", viewer.display()))?;
     Ok(Some(desktop_entry_path(&data_home)))
@@ -60,8 +60,9 @@ fn xdg_data_home() -> Result<Option<PathBuf>> {
     Ok(Some(PathBuf::from(home).join(".local").join("share")))
 }
 
-fn icon_source_path(repo: &Path) -> PathBuf {
-    repo.join("crates")
+fn icon_source_path(repo_path: &Path) -> PathBuf {
+    repo_path
+        .join("crates")
         .join("gtl-desktop")
         .join("icons")
         .join("icon.png")
@@ -164,11 +165,11 @@ mod tests {
 
     #[test]
     fn icon_source_path_points_to_the_gtl_desktop_crate() {
-        let repo = Path::new("/home/dev/git-tools");
+        let repo_path = Path::new("/home/dev/git-tools");
 
         assert_eq!(
-            super::icon_source_path(repo),
-            repo.join("crates/gtl-desktop/icons/icon.png")
+            super::icon_source_path(repo_path),
+            repo_path.join("crates/gtl-desktop/icons/icon.png")
         );
     }
 

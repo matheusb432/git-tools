@@ -122,18 +122,18 @@ pub fn execute(command: PruneAll, git: &impl GitClient) -> Result<PruneAllOk, Pr
 }
 
 fn prune_one(
-    repo: &std::path::Path,
+    repo_path: &std::path::Path,
     onto: &str,
     dry: bool,
     git: &impl GitClient,
 ) -> Result<PruneAction, PruneAttemptError> {
-    if !git.repo_present(repo) {
+    if !git.repo_present(repo_path) {
         return Ok(PruneAction::Absent);
     }
 
     let plan = plan_prune::execute(
         PlanPrune {
-            repo: repo.to_path_buf(),
+            repo_path: repo_path.to_path_buf(),
             onto: onto.into(),
         },
         git,

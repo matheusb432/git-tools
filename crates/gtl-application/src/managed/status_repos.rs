@@ -106,12 +106,12 @@ fn status_one(git: &impl GitClient, repo: &ManagedRepo) -> StatusResult {
 /// (`@{u}..HEAD`) — the two sync facts `gtl status --all` reports. `None` when the branch has
 /// no upstream. Purely local (no fetch); the same semantics `push --all` uses to skip repos
 /// already synced with their remote instead of pushing every one.
-fn upstream_ahead(git: &impl GitClient, repo: &Path) -> Option<(String, usize)> {
-    let crate::ports::GitEffect::Applied(upstream) = git.upstream(repo).ok()? else {
+fn upstream_ahead(git: &impl GitClient, repo_path: &Path) -> Option<(String, usize)> {
+    let crate::ports::GitEffect::Applied(upstream) = git.upstream(repo_path).ok()? else {
         return None;
     };
     let ahead = git
-        .commit_count(repo, "@{u}..HEAD")
+        .commit_count(repo_path, "@{u}..HEAD")
         .ok()
         .flatten()
         .unwrap_or(0);

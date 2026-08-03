@@ -1,6 +1,101 @@
 use gtl_application::tags::{ListTagsOk, TagGroup};
 use gtl_models::tags::{Tag, TagState};
 
+use crate::cli::TagCommand;
+
+pub mod bump;
+
+pub fn run(command: Option<TagCommand>, commits: bool, state: bool) -> crate::ExitCode {
+    match command {
+        Some(TagCommand::Bump {
+            level,
+            message,
+            push,
+            dry,
+            yes,
+        }) => bump::run(level, message, push, dry, yes),
+        other => run_non_bump(other, commits, state),
+    }
+}
+
+fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crate::ExitCode {
+    use gtl_application::tags::{
+        add::{self, AddTag},
+        add_and_push::{self, AddAndPushTag},
+        label::{self, LabelTag},
+        list::{self, ListTags},
+        push::{self, PushTags},
+    };
+
+    let repo_path = match super::canonical_working_directory() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("tag: {error:#}");
+            return crate::ExitCode::Internal;
+        }
+    };
+    let git = gtl_infra::git_client::HybridGitClient;
+    match command {
+        Some(TagCommand::Add { tag, message }) => finish_tag_action(add::execute(
+            AddTag {
+                repo_path,
+                tag,
+                message,
+            },
+            &git,
+        )),
+        Some(TagCommand::Push {
+            tag: Some(tag),
+            message: Some(message),
+            label,
+        }) => finish_tag_action(add_and_push::execute(
+            AddAndPushTag {
+                repo_path,
+                tag,
+                message,
+                label,
+            },
+            &git,
+        )),
+        Some(TagCommand::Push {
+            tag: Some(tag),
+            message: None,
+            label: Some(label),
+        }) => finish_tag_action(label::execute(
+            LabelTag {
+                repo_path,
+                tag,
+                label,
+            },
+            &git,
+        )),
+        Some(TagCommand::Push {
+            tag: None,
+            message: None,
+            label: None,
+        }) => finish_tag_action(push::execute(PushTags { repo_path }, &git)),
+        Some(TagCommand::Push { tag: None, .. }) => {
+            eprintln!("tag: tag push --label requires a <tag> to label");
+            crate::ExitCode::Usage
+        }
+        Some(TagCommand::Push { .. }) => {
+            eprintln!("tag: tag push requires both <tag> and <message> when creating a tag");
+            crate::ExitCode::Usage
+        }
+        Some(TagCommand::Ls) | None => finish_tag_list(
+            list::execute(
+                ListTags {
+                    repo_path,
+                    include_state: state,
+                },
+                &git,
+            ),
+            commits,
+        ),
+        Some(TagCommand::Bump { .. }) => unreachable!("tag bump is dispatched before local tags"),
+    }
+}
+
 pub fn render_list(list: &ListTagsOk, commits: bool) -> String {
     let groups = match list {
         ListTagsOk::Listed { groups } => groups,
@@ -63,6 +158,61 @@ fn render_state(state: Option<TagState>) -> &'static str {
 fn render_message(tag: &Tag) -> String {
     tag.message()
         .map_or_else(String::new, |message| format!("  {message}"))
+}
+
+fn finish_tag_list<E>(result: Result<ListTagsOk, E>, commits: bool) -> crate::ExitCode
+where
+    E: std::fmt::Display,
+{
+    match result {
+        Ok(list @ ListTagsOk::Listed { .. }) => {
+            let detail = render_list(&list, commits);
+            if !detail.is_empty() {
+                println!("{detail}");
+            }
+            crate::ExitCode::Ok
+        }
+        Ok(ListTagsOk::Failed { detail }) => {
+            eprintln!("tag: {detail}");
+            crate::ExitCode::Internal
+        }
+        Err(error) => {
+            eprintln!("tag: {error}");
+            crate::ExitCode::Internal
+        }
+    }
+}
+
+fn finish_tag_action<E>(
+    result: Result<gtl_application::tags::TagActionOutcome, E>,
+) -> crate::ExitCode
+where
+    E: std::fmt::Display,
+{
+    match result {
+        Ok(outcome) => render_tag_action(&outcome),
+        Err(error) => {
+            eprintln!("tag: {error}");
+            crate::ExitCode::Internal
+        }
+    }
+}
+
+fn render_tag_action(outcome: &gtl_application::tags::TagActionOutcome) -> crate::ExitCode {
+    use gtl_application::tags::TagActionStatus;
+
+    match outcome.status {
+        TagActionStatus::Created | TagActionStatus::Noop | TagActionStatus::Pushed => {
+            if !outcome.detail.is_empty() {
+                println!("{}", outcome.detail);
+            }
+            crate::ExitCode::Ok
+        }
+        TagActionStatus::Failed => {
+            eprintln!("tag: {}", outcome.detail);
+            crate::ExitCode::Internal
+        }
+    }
 }
 
 #[cfg(test)]

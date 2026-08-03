@@ -9,16 +9,19 @@ use crate::ports::GitClient;
 
 /// The repo's working-tree state: absent when its `.git` entry is missing, else
 /// the parsed `git status --porcelain` file list (empty on a git failure).
-pub fn dirty_state(git: &impl GitClient, repo: &Path) -> DirtyState {
-    dirty_state_checked(git, repo).unwrap_or(DirtyState {
+pub fn dirty_state(git: &impl GitClient, repo_path: &Path) -> DirtyState {
+    dirty_state_checked(git, repo_path).unwrap_or(DirtyState {
         present: true,
         dirty: false,
         files: Vec::new(),
     })
 }
 
-pub(super) fn dirty_state_checked(git: &impl GitClient, repo: &Path) -> anyhow::Result<DirtyState> {
-    if !git.repo_present(repo) {
+pub(super) fn dirty_state_checked(
+    git: &impl GitClient,
+    repo_path: &Path,
+) -> anyhow::Result<DirtyState> {
+    if !git.repo_present(repo_path) {
         return Ok(DirtyState {
             present: false,
             dirty: false,
@@ -26,7 +29,7 @@ pub(super) fn dirty_state_checked(git: &impl GitClient, repo: &Path) -> anyhow::
         });
     }
 
-    let files = match git.working_tree(repo)? {
+    let files = match git.working_tree(repo_path)? {
         crate::ports::GitEffect::Applied(tree) => tree.files,
         crate::ports::GitEffect::Rejected(_) => Vec::new(),
     };

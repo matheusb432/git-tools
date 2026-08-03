@@ -40,7 +40,7 @@ pub fn run_scan(
     let recipe_intents = repos
         .iter()
         .map(|repo| DiffRecipeIntent {
-            repo: repo.path.clone(),
+            repo_path: repo.path.clone(),
             operation: RecipeRequest::Diff(target.clone()),
             name: Some(repo.label.clone()),
         })
@@ -72,7 +72,7 @@ pub fn run_managed_all(
     let recipe_intents = repos
         .iter()
         .map(|repo| DiffRecipeIntent {
-            repo: repo.path.clone(),
+            repo_path: repo.path.clone(),
             operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
             name: Some(repo.label.clone()),
         })

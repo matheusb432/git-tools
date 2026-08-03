@@ -1,4 +1,4 @@
-//! End-to-end tests for `gtl sw`: build a real temp repo with a feature branch ahead of
+//! End-to-end tests for `gtl sw`: build a real temp repository with a feature branch ahead of
 //! `main`, run the built binary against it, and assert exit code, stdout/stderr, and the
 //! resulting ref topology. Local-only — no network.
 
@@ -8,11 +8,11 @@ use assert_cmd::Command;
 use predicates::str::contains;
 use tempfile::TempDir;
 
-/// Run a git command in `repo`, asserting success.
-fn git(repo: &Path, args: &[&str]) {
+/// Run a git command in `repo_path`, asserting success.
+fn git(repo_path: &Path, args: &[&str]) {
     let out = process::Command::new("git")
         .arg("-C")
-        .arg(repo)
+        .arg(repo_path)
         .args(args)
         .output()
         .unwrap();
@@ -23,11 +23,11 @@ fn git(repo: &Path, args: &[&str]) {
     );
 }
 
-/// `git rev-parse <rev>` (trimmed) in `repo`.
-fn rev(repo: &Path, r: &str) -> String {
+/// `git rev-parse <rev>` (trimmed) in `repo_path`.
+fn rev(repo_path: &Path, r: &str) -> String {
     let out = process::Command::new("git")
         .arg("-C")
-        .arg(repo)
+        .arg(repo_path)
         .args(["rev-parse", r])
         .output()
         .unwrap();
@@ -35,63 +35,67 @@ fn rev(repo: &Path, r: &str) -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
-/// The currently checked-out branch name in `repo`.
-fn current_branch(repo: &Path) -> String {
+/// The currently checked-out branch name in `repo_path`.
+fn current_branch(repo_path: &Path) -> String {
     let out = process::Command::new("git")
         .arg("-C")
-        .arg(repo)
+        .arg(repo_path)
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .output()
         .unwrap();
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
-/// Commit `content` to `file` in `repo` with message `msg`.
-fn commit(repo: &Path, file: &str, content: &str, msg: &str) {
-    std::fs::write(repo.join(file), content).unwrap();
-    git(repo, &["add", "."]);
-    git(repo, &["commit", "-qm", msg]);
+/// Commit `content` to `file` in `repo_path` with message `msg`.
+fn commit(repo_path: &Path, file: &str, content: &str, msg: &str) {
+    std::fs::write(repo_path.join(file), content).unwrap();
+    git(repo_path, &["add", "."]);
+    git(repo_path, &["commit", "-qm", msg]);
 }
 
-/// A temp repo: `main` with one commit, then a `feature` branch +2 commits, left checked out
-/// on `feature` with a clean tree. Returns (tempdir, repo path).
+/// A temp repository: `main` with one commit, then a `feature` branch +2 commits, left checked out
+/// on `feature` with a clean tree. Returns (tempdir, repository path).
 fn setup() -> (TempDir, std::path::PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = tmp.path().to_path_buf();
-    git(&repo, &["init", "-q", "-b", "main"]);
-    git(&repo, &["config", "user.name", "E2E Bot"]);
-    git(&repo, &["config", "user.email", "e2e@example.invalid"]);
-    git(&repo, &["config", "commit.gpgsign", "false"]);
-    git(&repo, &["config", "core.autocrlf", "false"]);
-    commit(&repo, "README.md", "base\n", "chore: base");
-    git(&repo, &["switch", "-qc", "feature"]);
-    commit(&repo, "a.txt", "a\n", "feat: add a");
-    commit(&repo, "b.txt", "b\n", "feat: add b");
-    (tmp, repo)
+    let repo_path = tmp.path().to_path_buf();
+    git(&repo_path, &["init", "-q", "-b", "main"]);
+    git(&repo_path, &["config", "user.name", "E2E Bot"]);
+    git(&repo_path, &["config", "user.email", "e2e@example.invalid"]);
+    git(&repo_path, &["config", "commit.gpgsign", "false"]);
+    git(&repo_path, &["config", "core.autocrlf", "false"]);
+    commit(&repo_path, "README.md", "base\n", "chore: base");
+    git(&repo_path, &["switch", "-qc", "feature"]);
+    commit(&repo_path, "a.txt", "a\n", "feat: add a");
+    commit(&repo_path, "b.txt", "b\n", "feat: add b");
+    (tmp, repo_path)
 }
 
-/// The built `git-tools` binary, run with cwd inside `repo`.
-fn gtl(repo: &Path) -> Command {
+/// The built `git-tools` binary, run with cwd inside `repo_path`.
+fn gtl(repo_path: &Path) -> Command {
     let mut cmd = Command::cargo_bin("git-tools").unwrap();
-    cmd.current_dir(repo);
+    cmd.current_dir(repo_path);
     cmd
 }
 
 #[test]
 fn revert_undoes_a_rebase_and_returns_to_feature() {
-    let (_tmp, repo) = setup();
-    let main_before = rev(&repo, "main");
-    gtl(&repo).args(["sw", "--rebase"]).assert().success();
+    let (_tmp, repo_path) = setup();
+    let main_before = rev(&repo_path, "main");
+    gtl(&repo_path).args(["sw", "--rebase"]).assert().success();
     // Now on main at the feature tip; revert it.
-    gtl(&repo)
+    gtl(&repo_path)
         .args(["sw", "--revert"])
         .assert()
         .success()
         .stdout(contains("reverted 'main'"));
     assert_eq!(
-        rev(&repo, "main"),
+        rev(&repo_path, "main"),
         main_before,
         "main reset to its pre-rebase tip"
     );
-    assert_eq!(current_branch(&repo), "feature", "switched back to feature");
+    assert_eq!(
+        current_branch(&repo_path),
+        "feature",
+        "switched back to feature"
+    );
 }

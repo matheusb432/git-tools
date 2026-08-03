@@ -698,12 +698,12 @@ fn run_native_phase(
         bail!("close-to-hide terminated the original viewer process");
     }
 
-    let repo = create_native_fixture(sandbox, env)?;
+    let repo_path = create_native_fixture(sandbox, env)?;
     command_checked(
         env,
         cli.to_string_lossy().as_ref(),
         &["diff", "--name", "warm forwarding"],
-        &repo,
+        &repo_path,
     )?;
     let forwarded_window = retry_value("warm forwarding remap", READY_TIMEOUT, || {
         find_window(env, WINDOW_TITLE_PATTERN).ok()
@@ -830,21 +830,26 @@ fn release_editor_recorder(sandbox: &Sandbox) -> Result<()> {
 }
 
 fn create_native_fixture(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<PathBuf> {
-    let repo = sandbox.fixtures.join("native-repo");
-    fs::create_dir_all(&repo)?;
-    command_checked(env, "git", &["init", "-q", "-b", "main"], &repo)?;
-    command_checked(env, "git", &["config", "user.name", "Viewer E2E"], &repo)?;
+    let repo_path = sandbox.fixtures.join("native-repo");
+    fs::create_dir_all(&repo_path)?;
+    command_checked(env, "git", &["init", "-q", "-b", "main"], &repo_path)?;
+    command_checked(
+        env,
+        "git",
+        &["config", "user.name", "Viewer E2E"],
+        &repo_path,
+    )?;
     command_checked(
         env,
         "git",
         &["config", "user.email", "viewer-e2e@example.invalid"],
-        &repo,
+        &repo_path,
     )?;
-    fs::write(repo.join("work.txt"), "base\n")?;
-    command_checked(env, "git", &["add", "work.txt"], &repo)?;
-    command_checked(env, "git", &["commit", "-q", "-m", "base"], &repo)?;
-    fs::write(repo.join("work.txt"), "base\nwarm forwarding\n")?;
-    Ok(repo)
+    fs::write(repo_path.join("work.txt"), "base\n")?;
+    command_checked(env, "git", &["add", "work.txt"], &repo_path)?;
+    command_checked(env, "git", &["commit", "-q", "-m", "base"], &repo_path)?;
+    fs::write(repo_path.join("work.txt"), "base\nwarm forwarding\n")?;
+    Ok(repo_path)
 }
 
 fn release_binary(name: &str) -> Result<PathBuf> {

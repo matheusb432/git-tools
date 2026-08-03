@@ -14,6 +14,14 @@ fn non_empty_name(value: &str) -> Result<String, String> {
     }
 }
 
+fn non_empty_message(value: &str) -> Result<String, String> {
+    if value.trim().is_empty() {
+        Err("message must not be blank".to_string())
+    } else {
+        Ok(value.to_string())
+    }
+}
+
 /// git-tools — render git workflow HTML previews and squash local commits.
 #[derive(Debug, Parser)]
 #[command(
@@ -55,8 +63,8 @@ pub enum Command {
         #[arg(allow_hyphen_values = true)]
         message: String,
         /// Repo whose unpushed commits are squashed.
-        #[arg(long)]
-        repo: String,
+        #[arg(long = "repo")]
+        repo_path: String,
         /// Preview the squash without rewriting history.
         #[arg(long)]
         dry: bool,
@@ -133,8 +141,8 @@ pub enum DiffSub {
 #[derive(Debug, Args)]
 pub struct MergeArgs {
     /// Subrepo working tree to preview.
-    #[arg(long)]
-    pub repo: String,
+    #[arg(long = "repo")]
+    pub repo_path: String,
     /// Base branch to merge into (default: main).
     #[arg(long)]
     pub base: Option<String>,
@@ -147,8 +155,8 @@ pub struct MergeArgs {
 #[derive(Debug, Args)]
 pub struct SquashArgs {
     /// Subrepo working tree to preview.
-    #[arg(long)]
-    pub repo: String,
+    #[arg(long = "repo")]
+    pub repo_path: String,
     /// Render an artifact and print its URL without opening a viewer.
     #[arg(long)]
     pub raw: bool,
@@ -274,6 +282,32 @@ pub enum TagCommand {
         #[arg(short = 'l', long = "label")]
         label: Option<String>,
     },
+    /// Preview and create the next canonical `SemVer` tag.
+    Bump {
+        /// `SemVer` component to advance.
+        level: TagBumpLevel,
+        /// Annotated tag message.
+        #[arg(allow_hyphen_values = true, value_parser = non_empty_message)]
+        message: String,
+        /// Push only the newly created tag to origin.
+        #[arg(long)]
+        push: bool,
+        /// Show the exact proposed mutation without creating or pushing a tag.
+        #[arg(long, conflicts_with = "yes")]
+        dry: bool,
+        /// Commit the displayed preview without prompting.
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+    },
+}
+
+/// `SemVer` component accepted by `tag bump`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[value(rename_all = "lower")]
+pub enum TagBumpLevel {
+    Major,
+    Minor,
+    Patch,
 }
 
 /// Arguments for `wk`.
@@ -569,8 +603,11 @@ mod tests {
         .unwrap();
         assert!(matches!(
             cli.command,
-            Command::SquashLocal { message, repo, dry }
-                if message == "- fix commit" && repo == "r" && !dry
+            Command::SquashLocal {
+                message,
+                repo_path,
+                dry,
+            } if message == "- fix commit" && repo_path == "r" && !dry
         ));
     }
 

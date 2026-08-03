@@ -14,7 +14,7 @@ use crate::ports::GitClient;
 /// Requests publication of every local tag missing from origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PushTags {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
 }
 
 pub type PushTagsOk = TagActionOutcome;
@@ -52,8 +52,8 @@ pub fn execute(command: PushTags, git: &impl GitClient) -> Result<PushTagsOk, Pu
 }
 
 fn push(command: PushTags, git: &impl GitClient) -> Result<TagActionOutcome, GitCommandError> {
-    let PushTags { repo } = command;
-    let refs = parse::load(git, &repo)?;
+    let PushTags { repo_path } = command;
+    let refs = parse::load(git, &repo_path)?;
     let pending = refs.pending().into_iter().cloned().collect::<Vec<_>>();
     if pending.is_empty() {
         return Ok(TagActionOutcome::new(
@@ -62,16 +62,16 @@ fn push(command: PushTags, git: &impl GitClient) -> Result<TagActionOutcome, Git
         ));
     }
 
-    push_tags(git, &repo, &pending, TagOperationProgress::default())
+    push_tags(git, &repo_path, &pending, TagOperationProgress::default())
 }
 
 pub(super) fn push_named(
     git: &impl GitClient,
-    repo: &Path,
+    repo_path: &Path,
     names: &[String],
     created: TagActionOutcome,
 ) -> Result<TagActionOutcome, GitCommandError> {
-    let refs = parse::load(git, repo)
+    let refs = parse::load(git, repo_path)
         .map_err(|error| error.with_prior_progress(created.progress.clone()))?;
 
     let mut pending = Vec::new();
@@ -93,12 +93,12 @@ pub(super) fn push_named(
     }
 
     let created_detail = created.detail;
-    Ok(push_tags(git, repo, &pending, created.progress)?.with_created_detail(created_detail))
+    Ok(push_tags(git, repo_path, &pending, created.progress)?.with_created_detail(created_detail))
 }
 
 fn push_tags(
     git: &impl GitClient,
-    repo: &Path,
+    repo_path: &Path,
     pending: &[Tag],
     mut progress: TagOperationProgress,
 ) -> Result<TagActionOutcome, GitCommandError> {
@@ -108,7 +108,7 @@ fn push_tags(
         .collect::<Vec<_>>();
     progress.record_push_attempt(&names);
     let output = git
-        .push_tag_refs(repo, "origin", &names)
+        .push_tag_refs(repo_path, "origin", &names)
         .map_err(GitCommandError::from)
         .map_err(|error| error.with_prior_progress(progress.clone()))?;
     if let crate::ports::GitEffect::Rejected(detail) = output {
@@ -172,8 +172,13 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = execute(PushTags { repo: ".".into() }, &git)
-            .expect_err("transport failure must remain an error");
+        let error = execute(
+            PushTags {
+                repo_path: ".".into(),
+            },
+            &git,
+        )
+        .expect_err("transport failure must remain an error");
 
         assert_transport_error(&error);
     }
@@ -184,8 +189,13 @@ mod tests {
             ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: refs unavailable")]);
 
         assert_eq!(
-            execute(PushTags { repo: ".".into() }, &git)
-                .expect("a Git rejection is a closed action failure"),
+            execute(
+                PushTags {
+                    repo_path: ".".into(),
+                },
+                &git,
+            )
+            .expect("a Git rejection is a closed action failure"),
             failed("git for-each-ref failed: fatal: refs unavailable")
         );
     }
@@ -198,8 +208,13 @@ mod tests {
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
-        let error = execute(PushTags { repo: ".".into() }, &git)
-            .expect_err("transport failure must remain an error");
+        let error = execute(
+            PushTags {
+                repo_path: ".".into(),
+            },
+            &git,
+        )
+        .expect_err("transport failure must remain an error");
 
         let PushTagsError::Unexpected { progress, source } = error;
         assert_eq!(
@@ -219,8 +234,13 @@ mod tests {
             ScriptedGitClient::rejected("fatal: remote rejected"),
         ]);
 
-        let outcome = execute(PushTags { repo: ".".into() }, &git)
-            .expect("a Git rejection is a closed action failure");
+        let outcome = execute(
+            PushTags {
+                repo_path: ".".into(),
+            },
+            &git,
+        )
+        .expect("a Git rejection is a closed action failure");
 
         assert_eq!(
             outcome.detail,
@@ -242,7 +262,13 @@ mod tests {
             ScriptedGitClient::applied(""),
         ]);
 
-        let outcome = execute(PushTags { repo: ".".into() }, &git).expect("scripted git succeeds");
+        let outcome = execute(
+            PushTags {
+                repo_path: ".".into(),
+            },
+            &git,
+        )
+        .expect("scripted git succeeds");
 
         assert_eq!(outcome.status, TagActionStatus::Pushed);
         assert_eq!(outcome.detail, "pushed 1 tag: v1.0.0");
@@ -255,7 +281,13 @@ mod tests {
             ScriptedGitClient::applied("object-v1\trefs/tags/v1.0.0\n"),
         ]);
 
-        let outcome = execute(PushTags { repo: ".".into() }, &git).expect("scripted git succeeds");
+        let outcome = execute(
+            PushTags {
+                repo_path: ".".into(),
+            },
+            &git,
+        )
+        .expect("scripted git succeeds");
 
         assert_eq!(outcome.status, TagActionStatus::Noop);
         assert_eq!(outcome.detail, "tags already up to date");

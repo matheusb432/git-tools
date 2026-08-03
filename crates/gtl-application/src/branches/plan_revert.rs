@@ -7,7 +7,7 @@ use crate::ports::{GitClient, GitEffect};
 /// Requests a read-only branch recovery plan for one repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanRevert {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     pub onto: String,
 }
 
@@ -46,9 +46,9 @@ pub enum PlanRevertError {
 /// Returns [`PlanRevertError`] when Git transport fails.
 #[cqrsy::query]
 pub fn execute(query: PlanRevert, git: &impl GitClient) -> Result<PlanRevertOk, PlanRevertError> {
-    let PlanRevert { repo, onto } = query;
+    let PlanRevert { repo_path, onto } = query;
     let Some(top) = git
-        .discover_top(&repo)
+        .discover_top(&repo_path)
         .map_err(|source| transport("discover repository", source))?
     else {
         return Ok(PlanRevertOk::Refused("not a git repo".into()));
@@ -106,11 +106,11 @@ pub fn execute(query: PlanRevert, git: &impl GitClient) -> Result<PlanRevertOk, 
 
 fn is_ancestor(
     git: &impl GitClient,
-    repo: &Path,
+    repo_path: &Path,
     ancestor: &str,
     descendant: &str,
 ) -> Result<bool, PlanRevertError> {
-    git.is_ancestor(repo, ancestor, descendant)
+    git.is_ancestor(repo_path, ancestor, descendant)
         .map_err(|source| transport("check ancestry", source))
 }
 
@@ -131,7 +131,7 @@ mod tests {
     fn plan(git: &ScriptedGitClient) -> PlanRevertOk {
         execute(
             PlanRevert {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             git,
@@ -243,7 +243,7 @@ mod tests {
 
         let error = execute(
             PlanRevert {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,

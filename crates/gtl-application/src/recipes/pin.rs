@@ -14,7 +14,7 @@ use crate::{
 /// Requests one complete snapshot recipe for a repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinRecipe {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     pub operation: RecipeRequest,
     pub name: Option<String>,
 }
@@ -28,7 +28,7 @@ pub enum PinRecipeError {
     /// Git could not resolve the requested path to its repository top level.
     #[error("{source}")]
     TopLevel {
-        repo: PathBuf,
+        repo_path: PathBuf,
         #[source]
         source: resolve_repo_top::ResolveRepoTopError,
     },
@@ -40,18 +40,18 @@ pub enum PinRecipeError {
 ///
 /// # Errors
 ///
-/// Returns [`PinRecipeError::TopLevel`] when Git cannot resolve `query.repo` to
+/// Returns [`PinRecipeError::TopLevel`] when Git cannot resolve `query.repo_path` to
 /// a repository top level.
 #[cqrsy::query]
 pub fn execute(query: PinRecipe, git: &impl GitClient) -> Result<PinRecipeOk, PinRecipeError> {
     let top = resolve_repo_top::execute(
         resolve_repo_top::ResolveRepoTop {
-            repo: query.repo.clone(),
+            repo_path: query.repo_path.clone(),
         },
         git,
     )
     .map_err(|source| PinRecipeError::TopLevel {
-        repo: query.repo.clone(),
+        repo_path: query.repo_path.clone(),
         source,
     })?;
 
@@ -202,7 +202,7 @@ mod tests {
     ) -> gtl_contracts::recipes::Recipe {
         execute(
             PinRecipe {
-                repo: "/work/repo/nested".into(),
+                repo_path: "/work/repo/nested".into(),
                 operation,
                 name: Some("repo".into()),
             },
@@ -412,7 +412,7 @@ mod tests {
 
         let recipe = execute(
             PinRecipe {
-                repo: "/work/repo".into(),
+                repo_path: "/work/repo".into(),
                 operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
                 name: Some("repo".into()),
             },

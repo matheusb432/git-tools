@@ -8,6 +8,16 @@ use gtl_application::ports::{
 pub struct LocalFileSystemClient;
 
 impl FileSystemClient for LocalFileSystemClient {
+    fn canonical_working_directory(&self) -> Result<PathBuf, FileSystemClientError> {
+        let working_directory = std::env::current_dir().map_err(|error| {
+            FileSystemClientError::new(
+                FileSystemClientErrorKind::Other,
+                format!("resolve current working directory: {error}"),
+            )
+        })?;
+        self.canonicalize(&working_directory)
+    }
+
     fn canonicalize(&self, path: &Path) -> Result<PathBuf, FileSystemClientError> {
         std::fs::canonicalize(path).map_err(|error| map_error(path, &error))
     }
@@ -57,6 +67,19 @@ mod tests {
                 .canonicalize(&file)
                 .expect("path canonicalizes"),
             std::fs::canonicalize(file).expect("expected canonical path"),
+        );
+    }
+
+    #[test]
+    fn canonical_working_directory_returns_the_client_directory() {
+        let expected = std::fs::canonicalize(std::env::current_dir().expect("working directory"))
+            .expect("canonical working directory");
+
+        assert_eq!(
+            LocalFileSystemClient
+                .canonical_working_directory()
+                .expect("working directory resolves"),
+            expected,
         );
     }
 

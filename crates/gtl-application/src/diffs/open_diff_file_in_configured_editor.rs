@@ -231,6 +231,10 @@ mod tests {
     }
 
     impl FileSystemClient for ScriptedFileSystem {
+        fn canonical_working_directory(&self) -> Result<PathBuf, FileSystemClientError> {
+            self.canonicalize(Path::new("working-directory"))
+        }
+
         fn canonicalize(&self, _: &Path) -> Result<PathBuf, FileSystemClientError> {
             self.canonicalize_results
                 .lock()

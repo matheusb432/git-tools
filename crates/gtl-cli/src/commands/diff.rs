@@ -25,7 +25,7 @@ pub fn run(target: &DiffTarget, name: Option<&str>, raw: bool) -> anyhow::Result
         }),
         batch_id: crate::recipe::new_batch_id(),
         recipes: vec![DiffRecipeIntent {
-            repo: cwd,
+            repo_path: cwd,
             operation: RecipeRequest::Diff(target.clone()),
             name: name.map(str::to_string),
         }],

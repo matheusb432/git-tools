@@ -93,14 +93,14 @@ pub struct DiffData {
 /// never parses or counts — an excluded file's line diffs.
 pub fn assemble(
     source: &impl GitClient,
-    repo: &Path,
+    repo_path: &Path,
     diff_range: &str,
     log_range: &str,
     excluded: &ExcludedExtensions,
 ) -> anyhow::Result<DiffData> {
-    let commits = source.log_commits(repo, log_range)?;
+    let commits = source.log_commits(repo_path, log_range)?;
 
-    let hidden_paths = hidden_paths(source, repo, diff_range, excluded)?;
+    let hidden_paths = hidden_paths(source, repo_path, diff_range, excluded)?;
     let content_request = GitDiffRequest {
         range: diff_range.to_string(),
         format: GitDiffFormat::Unified,
@@ -108,15 +108,17 @@ pub fn assemble(
     };
     // ? partition again after parsing: a source that ignores the exclude
     // ? pathspecs (the scripted test fake) must still never leak hidden files.
-    let (mut files, _) =
-        partition_excluded(parse_diff(&source.diff(repo, &content_request)?), excluded);
+    let (mut files, _) = partition_excluded(
+        parse_diff(&source.diff(repo_path, &content_request)?),
+        excluded,
+    );
     let full_context_request = GitDiffRequest {
         format: GitDiffFormat::FullContext,
         ..content_request
     };
     attach_full_context(
         &mut files,
-        parse_diff(&source.diff(repo, &full_context_request)?),
+        parse_diff(&source.diff(repo_path, &full_context_request)?),
     );
     Ok(DiffData {
         commits,
@@ -130,7 +132,7 @@ pub fn assemble(
 /// nothing is excluded.
 fn hidden_paths(
     source: &impl GitClient,
-    repo: &Path,
+    repo_path: &Path,
     range: &str,
     excluded: &ExcludedExtensions,
 ) -> anyhow::Result<Vec<String>> {
@@ -139,7 +141,7 @@ fn hidden_paths(
     }
     Ok(source
         .diff(
-            repo,
+            repo_path,
             &GitDiffRequest {
                 range: range.to_string(),
                 format: GitDiffFormat::NamesOnly,

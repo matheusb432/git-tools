@@ -275,8 +275,49 @@ fn tag_help_documents_modes() {
         .success()
         .stdout(contains("--commits"))
         .stdout(contains("add"))
+        .stdout(contains("bump"))
         .stdout(contains("ls"))
         .stdout(contains("push"));
+}
+
+#[test]
+fn tag_bump_help_documents_preview_confirmation_and_push() {
+    git_tools()
+        .args(["tag", "bump", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("<LEVEL>"))
+        .stdout(contains("<MESSAGE>"))
+        .stdout(contains("--push"))
+        .stdout(contains("--dry"))
+        .stdout(contains("--yes"));
+}
+
+#[test]
+fn tag_bump_rejects_an_unknown_level_before_contacting_the_daemon() {
+    git_tools()
+        .args(["tag", "bump", "micro", "release"])
+        .assert()
+        .code(2)
+        .stderr(contains("invalid value 'micro'"));
+}
+
+#[test]
+fn tag_bump_rejects_a_blank_message_before_contacting_the_daemon() {
+    git_tools()
+        .args(["tag", "bump", "patch", "  "])
+        .assert()
+        .code(2)
+        .stderr(contains("message must not be blank"));
+}
+
+#[test]
+fn tag_bump_dry_conflicts_with_yes() {
+    git_tools()
+        .args(["tag", "bump", "patch", "release", "--dry", "--yes"])
+        .assert()
+        .code(2)
+        .stderr(contains("cannot be used with"));
 }
 
 #[test]

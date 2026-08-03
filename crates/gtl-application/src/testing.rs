@@ -117,10 +117,10 @@ pub struct RepoOverride {
 }
 
 impl FakeGitClient {
-    /// The scripted primary diff for `repo`: its per-repo override, else the shared one.
-    fn scripted_diff(&self, repo: &Path) -> String {
+    /// The scripted primary diff for `repo_path`: its per-repo override, else the shared one.
+    fn scripted_diff(&self, repo_path: &Path) -> String {
         self.per_repo
-            .get(&repo.to_string_lossy().into_owned())
+            .get(&repo_path.to_string_lossy().into_owned())
             .map_or_else(|| self.diff_output.clone(), |o| o.diff_output.clone())
     }
 }
@@ -316,6 +316,15 @@ impl GitClient for FakeGitClient {
     ) -> anyhow::Result<GitEffect<()>> {
         Ok(GitEffect::Applied(()))
     }
+    fn create_annotated_tag_at(
+        &self,
+        _repo: &Path,
+        _tag: &str,
+        _revision: &str,
+        _message: &str,
+    ) -> anyhow::Result<GitEffect<()>> {
+        Ok(GitEffect::Applied(()))
+    }
     fn create_lightweight_tag(
         &self,
         _repo: &Path,
@@ -342,17 +351,17 @@ impl GitClient for FakeGitClient {
     fn short_ref(&self, _repo: &Path, rev: &str) -> anyhow::Result<String> {
         Ok(rev.to_string())
     }
-    fn log_commits(&self, repo: &Path, _range: &str) -> anyhow::Result<Vec<Commit>> {
+    fn log_commits(&self, repo_path: &Path, _range: &str) -> anyhow::Result<Vec<Commit>> {
         Ok(self
             .per_repo
-            .get(&repo.to_string_lossy().into_owned())
+            .get(&repo_path.to_string_lossy().into_owned())
             .map_or_else(|| self.commits.clone(), |o| o.commits.clone()))
     }
-    fn diff(&self, repo: &Path, request: &GitDiffRequest) -> anyhow::Result<String> {
+    fn diff(&self, repo_path: &Path, request: &GitDiffRequest) -> anyhow::Result<String> {
         // The exclusion pass asks for paths only; mirror git by listing the
         // scripted diff's file paths, one per line.
         if request.format == GitDiffFormat::NamesOnly {
-            let paths: Vec<String> = crate::diffs::util::parse_diff(&self.scripted_diff(repo))
+            let paths: Vec<String> = crate::diffs::util::parse_diff(&self.scripted_diff(repo_path))
                 .into_iter()
                 .map(|file| file.path)
                 .collect();
@@ -361,7 +370,7 @@ impl GitClient for FakeGitClient {
         if request.format == GitDiffFormat::FullContext {
             return Ok(self.full_diff_output.clone());
         }
-        Ok(self.scripted_diff(repo))
+        Ok(self.scripted_diff(repo_path))
     }
     fn root_commit(&self, _repo: &Path) -> Option<String> {
         Some("rootsha".into())
@@ -705,14 +714,19 @@ impl ScriptedGitClient {
         Ok(self.results.lock().unwrap().remove(0))
     }
 
-    fn repo_present(&self, repo: &Path) -> bool {
-        !self.absent_repos.lock().unwrap().iter().any(|p| p == repo)
+    fn repo_present(&self, repo_path: &Path) -> bool {
+        !self
+            .absent_repos
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|p| p == repo_path)
     }
 }
 
 impl GitClient for ScriptedGitClient {
-    fn repo_present(&self, repo: &Path) -> bool {
-        self.repo_present(repo)
+    fn repo_present(&self, repo_path: &Path) -> bool {
+        self.repo_present(repo_path)
     }
     fn probe_repository(&self, dir: &Path) -> anyhow::Result<GitRepositoryState> {
         if !self.repo_present(dir) {
@@ -733,51 +747,66 @@ impl GitClient for ScriptedGitClient {
         scripted_capture(self, dir, &["rev-parse", "--show-toplevel"])?
             .ok_or_else(|| anyhow::anyhow!("not a git repository"))
     }
-    fn current_branch(&self, repo: &Path) -> anyhow::Result<String> {
-        scripted_capture(self, repo, &["rev-parse", "--abbrev-ref", "HEAD"])?
+    fn current_branch(&self, repo_path: &Path) -> anyhow::Result<String> {
+        scripted_capture(self, repo_path, &["rev-parse", "--abbrev-ref", "HEAD"])?
             .ok_or_else(|| anyhow::anyhow!("not a git repository"))
     }
-    fn upstream(&self, repo: &Path) -> anyhow::Result<GitEffect<String>> {
+    fn upstream(&self, repo_path: &Path) -> anyhow::Result<GitEffect<String>> {
         scripted_effect(
             self,
-            repo,
+            repo_path,
             &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
             |output| output.trim().to_string(),
         )
     }
-    fn branch_remote(&self, repo: &Path, branch: &str) -> anyhow::Result<Option<String>> {
-        scripted_capture(self, repo, &["config", &format!("branch.{branch}.remote")])
+    fn branch_remote(&self, repo_path: &Path, branch: &str) -> anyhow::Result<Option<String>> {
+        scripted_capture(
+            self,
+            repo_path,
+            &["config", &format!("branch.{branch}.remote")],
+        )
     }
-    fn remote_url(&self, repo: &Path, remote: &str) -> anyhow::Result<Option<String>> {
-        scripted_capture(self, repo, &["remote", "get-url", remote])
+    fn remote_url(&self, repo_path: &Path, remote: &str) -> anyhow::Result<Option<String>> {
+        scripted_capture(self, repo_path, &["remote", "get-url", remote])
     }
-    fn revision_exists(&self, repo: &Path, revision: &str) -> anyhow::Result<bool> {
-        scripted_success(self, repo, &["rev-parse", "--verify", revision])
+    fn revision_exists(&self, repo_path: &Path, revision: &str) -> anyhow::Result<bool> {
+        scripted_success(self, repo_path, &["rev-parse", "--verify", revision])
     }
-    fn commit_count(&self, repo: &Path, range: &str) -> anyhow::Result<Option<usize>> {
+    fn commit_count(&self, repo_path: &Path, range: &str) -> anyhow::Result<Option<usize>> {
         Ok(
-            scripted_capture(self, repo, &["rev-list", "--count", range])?
+            scripted_capture(self, repo_path, &["rev-list", "--count", range])?
                 .and_then(|count| count.parse().ok()),
         )
     }
-    fn ahead_behind(&self, repo: &Path, range: &str) -> anyhow::Result<Option<(usize, usize)>> {
-        Ok(
-            scripted_capture(self, repo, &["rev-list", "--count", "--left-right", range])?
-                .and_then(|counts| {
-                    let (left, right) = counts.split_once(char::is_whitespace)?;
-                    Some((left.parse().ok()?, right.trim().parse().ok()?))
-                }),
-        )
+    fn ahead_behind(
+        &self,
+        repo_path: &Path,
+        range: &str,
+    ) -> anyhow::Result<Option<(usize, usize)>> {
+        Ok(scripted_capture(
+            self,
+            repo_path,
+            &["rev-list", "--count", "--left-right", range],
+        )?
+        .and_then(|counts| {
+            let (left, right) = counts.split_once(char::is_whitespace)?;
+            Some((left.parse().ok()?, right.trim().parse().ok()?))
+        }))
     }
-    fn is_ancestor(&self, repo: &Path, ancestor: &str, descendant: &str) -> anyhow::Result<bool> {
+    fn is_ancestor(
+        &self,
+        repo_path: &Path,
+        ancestor: &str,
+        descendant: &str,
+    ) -> anyhow::Result<bool> {
         scripted_success(
             self,
-            repo,
+            repo_path,
             &["merge-base", "--is-ancestor", ancestor, descendant],
         )
     }
-    fn working_tree(&self, repo: &Path) -> anyhow::Result<GitEffect<GitWorkingTree>> {
-        scripted_effect(self, repo, &["status", "--porcelain"], |output| {
+    fn working_tree(&self, repo_path: &Path) -> anyhow::Result<GitEffect<GitWorkingTree>> {
+        scripted_effect(self, repo_path, &["status", "--porcelain"], |output| {
             let mut tree = GitWorkingTree::default();
             for line in output.lines().filter(|line| !line.is_empty()) {
                 let bytes = line.as_bytes();
@@ -802,12 +831,12 @@ impl GitClient for ScriptedGitClient {
     }
     fn merged_branches(
         &self,
-        repo: &Path,
+        repo_path: &Path,
         into: &str,
     ) -> anyhow::Result<GitEffect<Vec<MergedBranch>>> {
         scripted_effect(
             self,
-            repo,
+            repo_path,
             &[
                 "for-each-ref",
                 "--merged",
@@ -831,19 +860,22 @@ impl GitClient for ScriptedGitClient {
     }
     fn worktrees(
         &self,
-        repo: &Path,
+        repo_path: &Path,
     ) -> anyhow::Result<GitEffect<Vec<gtl_models::worktrees::Worktree>>> {
-        scripted_effect(self, repo, &["worktree", "list", "--porcelain"], |output| {
-            crate::worktrees::porcelain::parse(output)
-        })
+        scripted_effect(
+            self,
+            repo_path,
+            &["worktree", "list", "--porcelain"],
+            crate::worktrees::porcelain::parse,
+        )
     }
     fn local_tags(
         &self,
-        repo: &Path,
+        repo_path: &Path,
     ) -> anyhow::Result<GitEffect<BTreeMap<String, gtl_models::tags::Tag>>> {
         scripted_effect(
             self,
-            repo,
+            repo_path,
             &[
                 "for-each-ref",
                 crate::tags::parse::LOCAL_TAG_FORMAT_ARG,
@@ -854,44 +886,56 @@ impl GitClient for ScriptedGitClient {
     }
     fn remote_tags(
         &self,
-        repo: &Path,
+        repo_path: &Path,
         remote: &str,
     ) -> anyhow::Result<GitEffect<BTreeMap<String, String>>> {
-        scripted_effect(self, repo, &["ls-remote", "--tags", remote], |output| {
-            crate::tags::parse::parse_remote_refs(output)
-        })
+        scripted_effect(
+            self,
+            repo_path,
+            &["ls-remote", "--tags", remote],
+            crate::tags::parse::parse_remote_refs,
+        )
     }
-    fn previous_checkout(&self, repo: &Path) -> anyhow::Result<Option<String>> {
-        scripted_capture(self, repo, &["rev-parse", "@{-1}"])
+    fn previous_checkout(&self, repo_path: &Path) -> anyhow::Result<Option<String>> {
+        scripted_capture(self, repo_path, &["rev-parse", "@{-1}"])
     }
-    fn brief_log(&self, repo: &Path, range: &str) -> anyhow::Result<GitEffect<Vec<String>>> {
-        scripted_effect(self, repo, &["log", "--format=%h %s", range], |output| {
-            output
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
+    fn brief_log(&self, repo_path: &Path, range: &str) -> anyhow::Result<GitEffect<Vec<String>>> {
+        scripted_effect(
+            self,
+            repo_path,
+            &["log", "--format=%h %s", range],
+            |output| {
+                output
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            },
+        )
     }
     fn diff_stat(
         &self,
-        repo: &Path,
+        repo_path: &Path,
         before: &str,
         after: &str,
     ) -> anyhow::Result<GitEffect<String>> {
         scripted_effect(
             self,
-            repo,
+            repo_path,
             &["diff", "--stat", before, after],
             str::to_string,
         )
     }
-    fn stage_all(&self, repo: &Path) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(self, repo, &["add", "-A"], |_| ())
+    fn stage_all(&self, repo_path: &Path) -> anyhow::Result<GitEffect<()>> {
+        scripted_effect(self, repo_path, &["add", "-A"], |_| ())
     }
-    fn commit(&self, repo: &Path, message: &str) -> anyhow::Result<GitEffect<GitCommitReceipt>> {
-        scripted_effect(self, repo, &["commit", "-m", message], |output| {
+    fn commit(
+        &self,
+        repo_path: &Path,
+        message: &str,
+    ) -> anyhow::Result<GitEffect<GitCommitReceipt>> {
+        scripted_effect(self, repo_path, &["commit", "-m", message], |output| {
             GitCommitReceipt {
                 detail: crate::shared::git::last_non_empty_line(output)
                     .unwrap_or("committed")
@@ -900,37 +944,37 @@ impl GitClient for ScriptedGitClient {
             }
         })
     }
-    fn switch(&self, repo: &Path, branch: &str) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(self, repo, &["switch", branch], |_| ())
+    fn switch(&self, repo_path: &Path, branch: &str) -> anyhow::Result<GitEffect<()>> {
+        scripted_effect(self, repo_path, &["switch", branch], |_| ())
     }
-    fn switch_previous(&self, repo: &Path) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(self, repo, &["switch", "-"], |_| ())
+    fn switch_previous(&self, repo_path: &Path) -> anyhow::Result<GitEffect<()>> {
+        scripted_effect(self, repo_path, &["switch", "-"], |_| ())
     }
-    fn fast_forward(&self, repo: &Path, revision: &str) -> anyhow::Result<GitEffect<String>> {
+    fn fast_forward(&self, repo_path: &Path, revision: &str) -> anyhow::Result<GitEffect<String>> {
         scripted_effect(
             self,
-            repo,
+            repo_path,
             &["merge", "--ff-only", revision],
             str::to_string,
         )
     }
     fn move_branch(
         &self,
-        repo: &Path,
+        repo_path: &Path,
         branch: &str,
         revision: &str,
     ) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(self, repo, &["branch", "-f", branch, revision], |_| ())
+        scripted_effect(self, repo_path, &["branch", "-f", branch, revision], |_| ())
     }
-    fn delete_branch(&self, repo: &Path, branch: &str) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(self, repo, &["branch", "-D", branch], |_| ())
+    fn delete_branch(&self, repo_path: &Path, branch: &str) -> anyhow::Result<GitEffect<()>> {
+        scripted_effect(self, repo_path, &["branch", "-D", branch], |_| ())
     }
-    fn soft_reset(&self, repo: &Path, revision: &str) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(self, repo, &["reset", "--soft", revision], |_| ())
+    fn soft_reset(&self, repo_path: &Path, revision: &str) -> anyhow::Result<GitEffect<()>> {
+        scripted_effect(self, repo_path, &["reset", "--soft", revision], |_| ())
     }
     fn push_branch(
         &self,
-        repo: &Path,
+        repo_path: &Path,
         remote: &str,
         branch: &str,
         dry_run: bool,
@@ -939,40 +983,54 @@ impl GitClient for ScriptedGitClient {
         if dry_run {
             args.push("--dry-run");
         }
-        scripted_effect(self, repo, &args, |output| GitPushReceipt {
+        scripted_effect(self, repo_path, &args, |output| GitPushReceipt {
             detail: crate::shared::git::last_non_empty_line(output)
                 .unwrap_or("pushed")
                 .to_string(),
             up_to_date: output.contains("Everything up-to-date"),
         })
     }
-    fn fetch(&self, repo: &Path, remote: &str) -> anyhow::Result<GitEffect<String>> {
-        scripted_effect(self, repo, &["fetch", remote], str::to_string)
+    fn fetch(&self, repo_path: &Path, remote: &str) -> anyhow::Result<GitEffect<String>> {
+        scripted_effect(self, repo_path, &["fetch", remote], str::to_string)
     }
     fn create_annotated_tag(
         &self,
-        repo: &Path,
+        repo_path: &Path,
         tag: &str,
         message: &str,
     ) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(self, repo, &["tag", "-a", tag, "-m", message], |_| ())
+        scripted_effect(self, repo_path, &["tag", "-a", tag, "-m", message], |_| ())
+    }
+    fn create_annotated_tag_at(
+        &self,
+        repo_path: &Path,
+        tag: &str,
+        revision: &str,
+        message: &str,
+    ) -> anyhow::Result<GitEffect<()>> {
+        scripted_effect(
+            self,
+            repo_path,
+            &["tag", "-a", tag, revision, "-m", message],
+            |_| (),
+        )
     }
     fn create_lightweight_tag(
         &self,
-        repo: &Path,
+        repo_path: &Path,
         tag: &str,
         revision: &str,
     ) -> anyhow::Result<GitEffect<()>> {
         scripted_effect(
             self,
-            repo,
+            repo_path,
             &["tag", tag, &format!("{revision}^{{}}")],
             |_| (),
         )
     }
     fn push_tag_refs(
         &self,
-        repo: &Path,
+        repo_path: &Path,
         remote: &str,
         tags: &[String],
     ) -> anyhow::Result<GitEffect<String>> {
@@ -982,25 +1040,25 @@ impl GitClient for ScriptedGitClient {
                 .map(|tag| format!("refs/tags/{tag}:refs/tags/{tag}")),
         );
         let args = owned.iter().map(String::as_str).collect::<Vec<_>>();
-        scripted_effect(self, repo, &args, str::to_string)
+        scripted_effect(self, repo_path, &args, str::to_string)
     }
-    fn verify_commit(&self, repo: &Path, revision: &str) -> anyhow::Result<()> {
+    fn verify_commit(&self, repo_path: &Path, revision: &str) -> anyhow::Result<()> {
         scripted_success(
             self,
-            repo,
+            repo_path,
             &["rev-parse", "--verify", &format!("{revision}^{{commit}}")],
         )?
         .then_some(())
         .ok_or_else(|| anyhow::anyhow!("not a commit"))
     }
-    fn short_ref(&self, repo: &Path, revision: &str) -> anyhow::Result<String> {
-        scripted_capture(self, repo, &["rev-parse", "--short", revision])?
+    fn short_ref(&self, repo_path: &Path, revision: &str) -> anyhow::Result<String> {
+        scripted_capture(self, repo_path, &["rev-parse", "--short", revision])?
             .ok_or_else(|| anyhow::anyhow!("unknown revision"))
     }
-    fn log_commits(&self, repo: &Path, range: &str) -> anyhow::Result<Vec<Commit>> {
+    fn log_commits(&self, repo_path: &Path, range: &str) -> anyhow::Result<Vec<Commit>> {
         let Some(raw) = scripted_capture(
             self,
-            repo,
+            repo_path,
             &[
                 "log",
                 "--date=format:%Y-%m-%d %H:%M",
@@ -1038,12 +1096,12 @@ impl GitClient for ScriptedGitClient {
     fn root_commit(&self, _repo: &Path) -> Option<String> {
         None
     }
-    fn resolve_sha(&self, repo: &Path, revision: &str) -> anyhow::Result<String> {
-        scripted_capture(self, repo, &["rev-parse", revision])?
+    fn resolve_sha(&self, repo_path: &Path, revision: &str) -> anyhow::Result<String> {
+        scripted_capture(self, repo_path, &["rev-parse", revision])?
             .ok_or_else(|| anyhow::anyhow!("unknown revision"))
     }
-    fn merge_base(&self, repo: &Path, left: &str, right: &str) -> anyhow::Result<String> {
-        scripted_capture(self, repo, &["merge-base", left, right])?
+    fn merge_base(&self, repo_path: &Path, left: &str, right: &str) -> anyhow::Result<String> {
+        scripted_capture(self, repo_path, &["merge-base", left, right])?
             .ok_or_else(|| anyhow::anyhow!("no merge base"))
     }
     fn committed_at(&self, _repo: &Path, _revision: &str) -> String {

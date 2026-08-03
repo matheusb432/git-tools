@@ -12,7 +12,7 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffRecipeIntent {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     pub operation: RecipeRequest,
     pub name: Option<String>,
 }
@@ -43,9 +43,9 @@ pub struct PresentDiffOk {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PresentDiffError {
-    #[error("failed to resolve recipe repository {repo}: {source}")]
+    #[error("failed to resolve recipe repository {repo_path}: {source}")]
     RecipeRepository {
-        repo: PathBuf,
+        repo_path: PathBuf,
         #[source]
         source: anyhow::Error,
     },
@@ -128,10 +128,10 @@ fn build_recipe(
     git: &impl GitClient,
 ) -> Result<DiffViewerRecipe, PresentDiffError> {
     let source = git
-        .top_level(&intent.repo)
+        .top_level(&intent.repo_path)
         .map(PathBuf::from)
         .map_err(|source| PresentDiffError::RecipeRepository {
-            repo: intent.repo,
+            repo_path: intent.repo_path,
             source,
         })?;
     let operation = match intent.operation {
@@ -153,34 +153,34 @@ fn build_recipe(
     })
 }
 
-fn pin_target(repo: &Path, target: DiffTarget, git: &impl GitClient) -> DiffTarget {
+fn pin_target(repo_path: &Path, target: DiffTarget, git: &impl GitClient) -> DiffTarget {
     match target {
         DiffTarget::Unpushed { pinned: None } => DiffTarget::Unpushed {
-            pinned: pin_range(repo, "@{u}", "HEAD", git),
+            pinned: pin_range(repo_path, "@{u}", "HEAD", git),
         },
         DiffTarget::Range {
             range,
             pinned: None,
         } => DiffTarget::Range {
-            pinned: pin_exact_range(repo, &range, git),
+            pinned: pin_exact_range(repo_path, &range, git),
             range,
         },
         DiffTarget::Merge { base, pinned: None } => DiffTarget::Merge {
-            pinned: pin_merge(repo, Some(&base), git),
+            pinned: pin_merge(repo_path, Some(&base), git),
             base,
         },
         DiffTarget::Last {
             count,
             pinned: None,
         } => DiffTarget::Last {
-            pinned: pin_range(repo, &format!("HEAD~{count}"), "HEAD", git),
+            pinned: pin_range(repo_path, &format!("HEAD~{count}"), "HEAD", git),
             count,
         },
         target => target,
     }
 }
 
-fn pin_exact_range(repo: &Path, range: &str, git: &impl GitClient) -> Option<PinnedRange> {
+fn pin_exact_range(repo_path: &Path, range: &str, git: &impl GitClient) -> Option<PinnedRange> {
     if range.contains("...") {
         return None;
     }
@@ -188,24 +188,29 @@ fn pin_exact_range(repo: &Path, range: &str, git: &impl GitClient) -> Option<Pin
     if base.is_empty() || head.is_empty() {
         return None;
     }
-    pin_range(repo, base, head, git)
+    pin_range(repo_path, base, head, git)
 }
 
-fn pin_merge(repo: &Path, base: Option<&str>, git: &impl GitClient) -> Option<PinnedRange> {
+fn pin_merge(repo_path: &Path, base: Option<&str>, git: &impl GitClient) -> Option<PinnedRange> {
     let base = base
         .map(str::trim)
         .filter(|base| !base.is_empty())
         .unwrap_or(super::render_merge_diff::DEFAULT_BASE);
     Some(PinnedRange {
-        base: git.merge_base(repo, base, "HEAD").ok()?,
-        head: git.resolve_sha(repo, "HEAD").ok()?,
+        base: git.merge_base(repo_path, base, "HEAD").ok()?,
+        head: git.resolve_sha(repo_path, "HEAD").ok()?,
     })
 }
 
-fn pin_range(repo: &Path, base: &str, head: &str, git: &impl GitClient) -> Option<PinnedRange> {
+fn pin_range(
+    repo_path: &Path,
+    base: &str,
+    head: &str,
+    git: &impl GitClient,
+) -> Option<PinnedRange> {
     Some(PinnedRange {
-        base: git.resolve_sha(repo, base).ok()?,
-        head: git.resolve_sha(repo, head).ok()?,
+        base: git.resolve_sha(repo_path, base).ok()?,
+        head: git.resolve_sha(repo_path, head).ok()?,
     })
 }
 
@@ -249,7 +254,7 @@ mod tests {
             }),
             batch_id: "batch".into(),
             recipes: vec![DiffRecipeIntent {
-                repo: "/repo".into(),
+                repo_path: "/repo".into(),
                 operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
                 name: None,
             }],

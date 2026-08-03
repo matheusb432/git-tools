@@ -7,7 +7,7 @@ use crate::ports::{GitClient, GitEffect};
 /// Requests a read-only fast-forward plan for one repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanRebase {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     pub onto: String,
 }
 
@@ -54,9 +54,9 @@ pub enum PlanRebaseError {
 /// Returns [`PlanRebaseError`] when Git transport fails.
 #[cqrsy::query]
 pub fn execute(query: PlanRebase, git: &impl GitClient) -> Result<PlanRebaseOk, PlanRebaseError> {
-    let PlanRebase { repo, onto } = query;
+    let PlanRebase { repo_path, onto } = query;
     let Some(top) = git
-        .discover_top(&repo)
+        .discover_top(&repo_path)
         .map_err(|source| transport("discover repository", source))?
     else {
         return Ok(PlanRebaseOk::Refused("not a git repo".into()));
@@ -121,20 +121,20 @@ pub fn execute(query: PlanRebase, git: &impl GitClient) -> Result<PlanRebaseOk, 
 
 fn is_ancestor(
     git: &impl GitClient,
-    repo: &Path,
+    repo_path: &Path,
     ancestor: &str,
     descendant: &str,
 ) -> Result<bool, PlanRebaseError> {
-    git.is_ancestor(repo, ancestor, descendant)
+    git.is_ancestor(repo_path, ancestor, descendant)
         .map_err(|source| transport("check ancestry", source))
 }
 
 fn count_range(
     git: &impl GitClient,
-    repo: &Path,
+    repo_path: &Path,
     range: &str,
 ) -> Result<Option<usize>, PlanRebaseError> {
-    git.commit_count(repo, range)
+    git.commit_count(repo_path, range)
         .map_err(|source| transport("count commits", source))
 }
 
@@ -155,7 +155,7 @@ mod tests {
     fn plan(git: &ScriptedGitClient) -> PlanRebaseOk {
         execute(
             PlanRebase {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             git,
@@ -250,7 +250,7 @@ mod tests {
 
         let plan = execute(
             PlanRebase {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,
@@ -321,7 +321,7 @@ mod tests {
 
         let error = execute(
             PlanRebase {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,

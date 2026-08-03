@@ -14,7 +14,7 @@ use crate::ports::GitClient;
 /// Requests creation and publication of an annotated tag and optional lightweight label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddAndPushTag {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     pub tag: String,
     pub message: String,
     pub label: Option<String>,
@@ -64,7 +64,7 @@ fn add_and_push(
     git: &impl GitClient,
 ) -> Result<TagActionOutcome, GitCommandError> {
     let add = AddTag {
-        repo: command.repo.clone(),
+        repo_path: command.repo_path.clone(),
         tag: command.tag.clone(),
         message: command.message,
     };
@@ -76,14 +76,14 @@ fn add_and_push(
     let mut names = vec![command.tag.clone()];
     let mut created = created;
     if let Some(label_name) = command.label {
-        label::create(git, &command.repo, &command.tag, &label_name)
+        label::create(git, &command.repo_path, &command.tag, &label_name)
             .map_err(|error| error.with_prior_progress(created.progress.clone()))?;
         created.detail = format!("{}\ncreated tag {label_name}", created.detail);
         created.progress.record_created(label_name.clone());
         names.push(label_name);
     }
 
-    push::push_named(git, &command.repo, &names, created)
+    push::push_named(git, &command.repo_path, &names, created)
 }
 
 #[cfg(test)]
@@ -102,7 +102,7 @@ mod tests {
 
         let error: AddAndPushTagError = execute(
             AddAndPushTag {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 tag: "v1.0.0".into(),
                 message: "release".into(),
                 label: Some("stable".into()),

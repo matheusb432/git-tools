@@ -226,6 +226,70 @@ async fn malformed_render_json_is_a_400_error_envelope() {
 }
 
 #[tokio::test]
+async fn tag_bump_rejects_a_stale_preview_before_mutation() {
+    let fixture = Fixture::new();
+    git(
+        &fixture.repository,
+        &["tag", "-a", "0.29.1", "-m", "mistyped release"],
+    );
+    git(
+        &fixture.repository,
+        &["tag", "-a", "v0.30.0", "-m", "release"],
+    );
+    let dry_run = fixture
+        .post(
+            "/tags/bump/dry-run",
+            json!({
+                "repo_path": fixture.repository,
+                "level": "patch",
+                "message": "next release",
+                "push": false
+            }),
+        )
+        .await;
+
+    assert_eq!(dry_run.status(), StatusCode::OK);
+    let dry_run = body_json(dry_run).await;
+    assert_eq!(dry_run["outcome"], "ok");
+    assert_eq!(dry_run["data"]["base_tag"], "v0.30.0");
+    assert_eq!(dry_run["data"]["next_tag"], "v0.30.1");
+    let preview = dry_run["data"].clone();
+
+    git(
+        &fixture.repository,
+        &["tag", "-a", "v0.30.1", "-m", "concurrent release"],
+    );
+    let committed = fixture
+        .post("/tags/bump", json!({"preview": preview}))
+        .await;
+
+    assert_eq!(committed.status(), StatusCode::CONFLICT);
+    let committed = body_json(committed).await;
+    assert_eq!(committed["outcome"], "error");
+    assert!(
+        committed["notes"][0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("stale"))
+    );
+    let unexpected = Command::new("git")
+        .args(["tag", "--list", "v0.30.2"])
+        .current_dir(&fixture.repository)
+        .output()
+        .expect("list unexpected tag");
+    assert!(unexpected.status.success());
+    assert!(unexpected.stdout.is_empty());
+    assert_eq!(
+        Command::new("git")
+            .args(["tag", "--list", "v0.30.1"])
+            .current_dir(&fixture.repository)
+            .output()
+            .expect("list concurrent tag")
+            .stdout,
+        b"v0.30.1\n"
+    );
+}
+
+#[tokio::test]
 async fn live_view_save_ignores_legacy_data_root_and_uses_daemon_store() {
     let fixture = Fixture::new();
     let redirected_root = fixture.data_root.with_file_name("redirected");

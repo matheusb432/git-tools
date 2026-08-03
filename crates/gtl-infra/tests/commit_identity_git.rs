@@ -8,10 +8,10 @@ use gtl_application::repository_sync::{
 use gtl_infra::git_client::HybridGitClient;
 use gtl_models::repository::PendingChanges;
 
-fn git(repo: &Path, args: &[&str]) -> String {
+fn git(repo_path: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
         .arg("-C")
-        .arg(repo)
+        .arg(repo_path)
         .args(args)
         .output()
         .expect("git starts");
@@ -26,19 +26,19 @@ fn git(repo: &Path, args: &[&str]) -> String {
         .to_string()
 }
 
-fn init_dirty_repo(repo: &Path) {
-    git(repo, &["init", "-q", "-b", "main"]);
-    git(repo, &["config", "user.email", "test@example.invalid"]);
-    git(repo, &["config", "user.name", "Test"]);
-    std::fs::write(repo.join("tracked.txt"), "initial\n").unwrap();
-    git(repo, &["add", "."]);
-    git(repo, &["commit", "-qm", "initial"]);
-    install_stderr_post_commit_hook(repo);
-    std::fs::write(repo.join("tracked.txt"), "changed\n").unwrap();
+fn init_dirty_repo(repo_path: &Path) {
+    git(repo_path, &["init", "-q", "-b", "main"]);
+    git(repo_path, &["config", "user.email", "test@example.invalid"]);
+    git(repo_path, &["config", "user.name", "Test"]);
+    std::fs::write(repo_path.join("tracked.txt"), "initial\n").unwrap();
+    git(repo_path, &["add", "."]);
+    git(repo_path, &["commit", "-qm", "initial"]);
+    install_stderr_post_commit_hook(repo_path);
+    std::fs::write(repo_path.join("tracked.txt"), "changed\n").unwrap();
 }
 
-fn install_stderr_post_commit_hook(repo: &Path) {
-    let hook = repo.join(".git/hooks/post-commit");
+fn install_stderr_post_commit_hook(repo_path: &Path) {
+    let hook = repo_path.join(".git/hooks/post-commit");
     std::fs::write(&hook, "#!/bin/sh\nprintf '%s\\n' '[hook deadbeef]' >&2\n").unwrap();
 
     #[cfg(unix)]

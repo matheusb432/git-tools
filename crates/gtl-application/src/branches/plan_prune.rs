@@ -7,7 +7,7 @@ use crate::ports::{GitClient, GitEffect};
 /// Requests a read-only branch-prune plan for one repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlanPrune {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
     pub onto: String,
 }
 
@@ -50,9 +50,9 @@ pub enum PlanPruneError {
 /// Returns [`PlanPruneError`] when Git cannot be executed.
 #[cqrsy::query]
 pub fn execute(query: PlanPrune, git: &impl GitClient) -> Result<PlanPruneOk, PlanPruneError> {
-    let PlanPrune { repo, onto } = query;
+    let PlanPrune { repo_path, onto } = query;
     let top = git
-        .discover_top(&repo)
+        .discover_top(&repo_path)
         .map_err(|source| PlanPruneError::Transport { source })?;
     let Some(top) = top else {
         return Ok(PlanPruneOk::Refused("not a git repo".into()));
@@ -131,7 +131,7 @@ mod tests {
         ]);
         let plan = execute(
             PlanPrune {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,
@@ -155,7 +155,7 @@ mod tests {
 
         let plan = execute(
             PlanPrune {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,
@@ -177,7 +177,7 @@ mod tests {
 
         let plan = execute(
             PlanPrune {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,
@@ -200,7 +200,7 @@ mod tests {
 
         let plan = execute(
             PlanPrune {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,
@@ -219,7 +219,7 @@ mod tests {
 
         let plan = execute(
             PlanPrune {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,
@@ -237,7 +237,7 @@ mod tests {
 
         let error = execute(
             PlanPrune {
-                repo: ".".into(),
+                repo_path: ".".into(),
                 onto: "main".into(),
             },
             &git,

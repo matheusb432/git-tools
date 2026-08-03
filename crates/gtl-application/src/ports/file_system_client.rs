@@ -33,6 +33,7 @@ impl FileSystemClientError {
 }
 
 pub trait FileSystemClient: Clone + Send + Sync + 'static {
+    fn canonical_working_directory(&self) -> Result<PathBuf, FileSystemClientError>;
     fn canonicalize(&self, path: &Path) -> Result<PathBuf, FileSystemClientError>;
     fn entry_kind(&self, path: &Path) -> Result<FileSystemEntryKind, FileSystemClientError>;
 }

@@ -29,7 +29,7 @@ pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
 pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<StatusResult> {
     let top = match gtl_application::discovery::resolve_repo_top::execute(
         gtl_application::discovery::resolve_repo_top::ResolveRepoTop {
-            repo: dir.to_path_buf(),
+            repo_path: dir.to_path_buf(),
         },
         &HybridGitClient,
     ) {

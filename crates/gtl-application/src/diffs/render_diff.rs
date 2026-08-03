@@ -86,7 +86,7 @@ fn resolved_range(
     top: &str,
     target: &DiffTarget,
 ) -> Option<(DiffKind, String, String)> {
-    let repo = Path::new(top);
+    let repo_path = Path::new(top);
     let diff_range = match target {
         DiffTarget::Range {
             range,
@@ -100,7 +100,8 @@ fn resolved_range(
         DiffTarget::Unpushed { pinned: None } => {
             // No upstream means the compute core falls back to Hash (worktree) mode; not fast-path
             // eligible, and the fallback warning is emitted there (once), not here.
-            let crate::ports::GitEffect::Applied(upstream) = source.upstream(repo).ok()? else {
+            let crate::ports::GitEffect::Applied(upstream) = source.upstream(repo_path).ok()?
+            else {
                 return None;
             };
             DiffRanges::unpushed(&upstream).diff
@@ -126,9 +127,11 @@ fn resolved_range(
     if kind == DiffKind::WorkTree {
         return None;
     }
-    let base = source.resolve_sha(repo, range_base(&diff_range)).ok()?;
+    let base = source
+        .resolve_sha(repo_path, range_base(&diff_range))
+        .ok()?;
     let head = source
-        .resolve_sha(repo, diff_range.rsplit("..").next()?)
+        .resolve_sha(repo_path, diff_range.rsplit("..").next()?)
         .ok()?;
     Some((kind, base, head))
 }
@@ -212,17 +215,17 @@ pub fn execute(
     let file_count = view.files.len();
     let html = renderer.build_html(&view, render_options, theme.as_deref());
 
-    let repo = Path::new(&top);
+    let repo_path = Path::new(&top);
     let meta = ArtifactMeta {
         repo_root: PathBuf::from(&top),
         repo_name: view.repo_name.clone(),
         kind: DiffKind::from_diff_range(&view.cmd.range),
         base_sha: source
-            .resolve_sha(repo, range_base(&view.cmd.range))
+            .resolve_sha(repo_path, range_base(&view.cmd.range))
             .unwrap_or_default(),
         head_sha: head_sha_for(source, &top, &view.cmd.range),
         range_label: view.cmd.range.clone(),
-        head_committed_at: source.committed_at(repo, "HEAD"),
+        head_committed_at: source.committed_at(repo_path, "HEAD"),
         generated_at: clock.now_iso(),
         title: view.title.clone(),
         render_options,

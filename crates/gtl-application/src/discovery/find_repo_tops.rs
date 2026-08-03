@@ -64,7 +64,9 @@ pub fn execute(
         .map(|repo| {
             Ok(DiscoveredRepo {
                 path: resolve_repo_top::execute(
-                    resolve_repo_top::ResolveRepoTop { repo: repo.path },
+                    resolve_repo_top::ResolveRepoTop {
+                        repo_path: repo.path,
+                    },
                     git,
                 )?,
                 label: repo.label,

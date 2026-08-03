@@ -369,9 +369,9 @@ mod tests {
     }
 
     fn init_unpushed_managed_repo(home: &Path, name: &str, remote_root: &Path) {
-        let repo = home.join(name);
-        std::fs::create_dir_all(&repo).unwrap();
-        init_repo(&repo);
+        let repo_path = home.join(name);
+        std::fs::create_dir_all(&repo_path).unwrap();
+        init_repo(&repo_path);
         let remote = remote_root.join(format!("{name}.git"));
         assert!(
             std::process::Command::new("git")
@@ -385,7 +385,7 @@ mod tests {
             assert!(
                 std::process::Command::new("git")
                     .arg("-C")
-                    .arg(&repo)
+                    .arg(&repo_path)
                     .args(args)
                     .status()
                     .unwrap()
@@ -394,7 +394,7 @@ mod tests {
         };
         git(&["remote", "add", "origin", remote.to_str().unwrap()]);
         git(&["push", "-q", "-u", "origin", "HEAD"]);
-        std::fs::write(repo.join("a.txt"), "a\nmore\n").unwrap();
+        std::fs::write(repo_path.join("a.txt"), "a\nmore\n").unwrap();
         git(&["commit", "-aqm", "second"]);
     }
 

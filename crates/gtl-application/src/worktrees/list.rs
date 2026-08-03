@@ -9,7 +9,7 @@ use crate::ports::{GitClient, GitEffect};
 /// Requests every worktree registered for one repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListWorktrees {
-    pub repo: PathBuf,
+    pub repo_path: PathBuf,
 }
 
 /// Reports either structured worktrees or the Git failure that prevented listing.
@@ -40,9 +40,9 @@ pub fn execute(
     query: ListWorktrees,
     git: &impl GitClient,
 ) -> Result<ListWorktreesOk, ListWorktreesError> {
-    let ListWorktrees { repo } = query;
+    let ListWorktrees { repo_path } = query;
     let worktrees = git
-        .worktrees(&repo)
+        .worktrees(&repo_path)
         .map_err(ListWorktreesError::Unexpected)?;
     let worktrees = match worktrees {
         GitEffect::Applied(worktrees) => worktrees,
@@ -71,8 +71,13 @@ mod tests {
             "worktree /linked\nHEAD abcdef123456789\ndetached\nlocked maintenance\nprunable gone\n\n",
         ))]);
 
-        let result = execute(ListWorktrees { repo: ".".into() }, &git)
-            .expect("porcelain output should produce a structured list");
+        let result = execute(
+            ListWorktrees {
+                repo_path: ".".into(),
+            },
+            &git,
+        )
+        .expect("porcelain output should produce a structured list");
 
         let ListWorktreesOk::Listed { worktrees } = result else {
             panic!("Git output should produce listed worktrees");
@@ -89,8 +94,13 @@ mod tests {
         let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: not a repo")]);
 
         assert_eq!(
-            execute(ListWorktrees { repo: ".".into() }, &git)
-                .expect("a Git rejection is a closed list failure"),
+            execute(
+                ListWorktrees {
+                    repo_path: ".".into(),
+                },
+                &git,
+            )
+            .expect("a Git rejection is a closed list failure"),
             ListWorktreesOk::Failed {
                 detail: "fatal: not a repo".into(),
             }
@@ -102,8 +112,13 @@ mod tests {
         let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
 
         assert_eq!(
-            execute(ListWorktrees { repo: ".".into() }, &git)
-                .expect("empty Git output is a closed list failure"),
+            execute(
+                ListWorktrees {
+                    repo_path: ".".into(),
+                },
+                &git,
+            )
+            .expect("empty Git output is a closed list failure"),
             ListWorktreesOk::Failed {
                 detail: "git returned no worktrees".into(),
             }
@@ -116,8 +131,13 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = execute(ListWorktrees { repo: ".".into() }, &git)
-            .expect_err("transport failure must remain an error");
+        let error = execute(
+            ListWorktrees {
+                repo_path: ".".into(),
+            },
+            &git,
+        )
+        .expect_err("transport failure must remain an error");
 
         assert_eq!(error.to_string(), "git transport unavailable");
         assert_eq!(
