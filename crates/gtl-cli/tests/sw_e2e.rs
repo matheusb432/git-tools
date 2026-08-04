@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! End-to-end tests for `gtl sw`: build a real temp repository with a feature branch ahead of
 //! `main`, run the built binary against it, and assert exit code, stdout/stderr, and the
 //! resulting ref topology. Local-only — no network.

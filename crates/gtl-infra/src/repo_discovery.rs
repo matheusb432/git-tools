@@ -1,12 +1,12 @@
 //! `WalkdirRepoDiscovery`: the [`RepoDiscovery`] adapter — a `walkdir` tree walk
-//! that prunes/skips via the pure `gtl_application::discovery::rules`, reading each
+//! that prunes/skips via the pure `gtl_application::discovery::logic::rules`, reading each
 //! candidate's `.git` file to classify linked worktrees. The imperative shell over
 //! the pure decision core.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use gtl_application::{discovery::rules, ports::RepoDiscovery};
+use gtl_application::{discovery::logic::rules, ports::RepoDiscovery};
 use walkdir::{DirEntry, WalkDir};
 
 /// Discovers git repos under a root with `walkdir`.
@@ -32,7 +32,7 @@ impl RepoDiscovery for WalkdirRepoDiscovery {
 }
 
 /// Whether `walkdir` should skip an entry (and, for a directory, its subtree),
-/// delegating the decision to the pure `gtl_application::discovery::rules`.
+/// delegating the decision to the pure `gtl_application::discovery::logic::rules`.
 fn is_skipped(entry: &DirEntry, include_worktrees: bool) -> bool {
     if !entry.file_type().is_dir() {
         return false;

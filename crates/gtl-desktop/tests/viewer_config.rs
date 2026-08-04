@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use std::{fs, path::Path};
 
 use tempfile::TempDir;

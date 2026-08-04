@@ -5,16 +5,19 @@ use gtl_models::diffs::AppliedExclusions;
 use crate::{
     diffs::{
         Cmd, Foot, PinnedRange, View,
-        range::DiffRanges,
-        util::{DiffData, assemble, repo_name},
+        logic::{
+            assemble::{DiffData, assemble},
+            range::DiffRanges,
+        },
     },
     ports::GitClient,
+    shared::repository_name::from_path,
 };
 
-pub(crate) struct SquashViewBuild {
-    pub view: View,
-    pub top: String,
-    pub log_range: String,
+pub(super) struct SquashViewBuild {
+    pub(super) view: View,
+    pub(super) top: String,
+    pub(super) log_range: String,
 }
 
 pub(super) fn build(
@@ -25,7 +28,7 @@ pub(super) fn build(
 ) -> anyhow::Result<SquashViewBuild> {
     let top = source.top_level(cwd)?;
     let branch = source.current_branch(Path::new(&top))?;
-    let repo_name = repo_name(&top);
+    let repo_name = from_path(&top);
     let excluded = exclusions.for_project_or_default(&repo_name);
 
     #[expect(

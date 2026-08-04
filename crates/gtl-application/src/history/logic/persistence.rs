@@ -11,7 +11,7 @@ use gtl_models::viewer::RenderHistoryId;
 use rusqlite::Connection;
 
 /// The `project_sources.kind` value for a repository addressed by directory.
-pub(super) const SOURCE_KIND_DIRECTORY: &str = "directory";
+pub(crate) const SOURCE_KIND_DIRECTORY: &str = "directory";
 
 /// One persisted render recipe with its stable row identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,18 +27,18 @@ pub struct RecentRenderRecord {
 /// The relational projection of one [`Recipe`], ready to bind as SQL
 /// parameters. Operation and target names match the seeded
 /// `render_operations` / `render_targets` rows.
-pub(super) struct RecipeColumns {
-    pub(super) source_kind: &'static str,
-    pub(super) source_value: String,
-    pub(super) operation: &'static str,
-    pub(super) target: Option<&'static str>,
-    pub(super) argument: Option<String>,
-    pub(super) pinned: Option<PinnedRange>,
-    pub(super) recipe_name: Option<String>,
+pub(crate) struct RecipeColumns {
+    pub(crate) source_kind: &'static str,
+    pub(crate) source_value: String,
+    pub(crate) operation: &'static str,
+    pub(crate) target: Option<&'static str>,
+    pub(crate) argument: Option<String>,
+    pub(crate) pinned: Option<PinnedRange>,
+    pub(crate) recipe_name: Option<String>,
 }
 
 impl RecipeColumns {
-    pub(super) fn from_recipe(recipe: &Recipe) -> Self {
+    pub(crate) fn from_recipe(recipe: &Recipe) -> Self {
         let RecipeSource::LocalRepo(path) = &recipe.source;
         let (operation, target, argument, pinned) = match &recipe.op {
             RecipeOp::Diff { target } => {
@@ -75,7 +75,7 @@ impl RecipeColumns {
 }
 
 /// One raw joined `recent_renders` row, before identity and recipe validation.
-pub(super) struct RecentRenderRow {
+pub(crate) struct RecentRenderRow {
     id: i64,
     source_kind: String,
     source_value: String,
@@ -93,7 +93,7 @@ pub(super) struct RecentRenderRow {
 
 /// The column list every recent-render query selects, in
 /// [`RecentRenderRow::from_row`] order.
-pub(super) const RECENT_RENDER_SELECT: &str = "
+pub(crate) const RECENT_RENDER_SELECT: &str = "
 SELECT r.id, s.kind, s.value, o.name, t.name, r.argument,
        r.pinned_base, r.pinned_head, r.recipe_name,
        r.title, r.repo_name, r.range_label, r.rendered_at
@@ -103,7 +103,7 @@ JOIN render_operations o ON o.id = r.operation_id
 LEFT JOIN render_targets t ON t.id = r.target_id";
 
 impl RecentRenderRow {
-    pub(super) fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+    pub(crate) fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get(0)?,
             source_kind: row.get(1)?,
@@ -121,7 +121,7 @@ impl RecentRenderRow {
         })
     }
 
-    pub(super) fn try_into_record(self) -> Result<RecentRenderRecord, RecentRenderRowError> {
+    pub(crate) fn try_into_record(self) -> Result<RecentRenderRecord, RecentRenderRowError> {
         let id = RenderHistoryId::try_new(self.id)
             .map_err(|_| RecentRenderRowError::InvalidId { id: self.id })?;
         let recipe =

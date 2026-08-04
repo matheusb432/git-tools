@@ -8,7 +8,7 @@ use futures_util::{StreamExt as _, stream};
 use gtl_models::managed::ManagedRepo;
 
 use crate::{
-    managed::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
+    managed::logic::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
     ports::{GitClient, GitEffect, ManagedManifest},
 };
 
@@ -168,7 +168,7 @@ mod tests {
 
     fn req() -> PullAll {
         PullAll {
-            repos_file: "/repos.toml".into(),
+            repos_file: "/projects.toml".into(),
             home_dir: "/home".into(),
             dry: false,
         }

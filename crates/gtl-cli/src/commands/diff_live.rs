@@ -402,10 +402,10 @@ mod tests {
         let home = tmp.join("home");
         init_unpushed_managed_repo(&home, "one", tmp);
         init_unpushed_managed_repo(&home, "two", tmp);
-        let manifest = tmp.join("repos.toml");
+        let manifest = tmp.join("projects.toml");
         std::fs::write(
             &manifest,
-            "[[repo]]\npath = \"one\"\nremote = \"origin\"\n[[repo]]\npath = \"two\"\nremote = \"origin\"\n",
+            "[[project]]\npath = \"one\"\nremote = \"origin\"\n[[project]]\npath = \"two\"\nremote = \"origin\"\n",
         )
         .unwrap();
         ManagedOptions {
@@ -504,10 +504,10 @@ mod tests {
                 .success()
         );
 
-        let manifest = tmp.path().join("repos.toml");
+        let manifest = tmp.path().join("projects.toml");
         std::fs::write(
             &manifest,
-            "[[repo]]\npath = \"repo1\"\nremote = \"origin\"\n",
+            "[[project]]\npath = \"repo1\"\nremote = \"origin\"\n",
         )
         .unwrap();
         let options = ManagedOptions {
@@ -547,7 +547,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         std::fs::create_dir_all(&home).unwrap();
-        let manifest = tmp.path().join("repos.toml");
+        let manifest = tmp.path().join("projects.toml");
         std::fs::write(&manifest, "").unwrap();
         let options = ManagedOptions {
             repos_file: Some(manifest),

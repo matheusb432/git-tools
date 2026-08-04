@@ -1,20 +1,23 @@
-//! Real-git integration tests for the diff engine (`gtl_application::diffs`) driven
-//! through the `HybridGitClient` adapter. The pure parsing paths are unit-tested in
-//! `application`; here we prove the engine against actual `git log`/`git blame`
-//! output on fixture repos.
+#![cfg(test)]
+
+//! Real-git integration tests for application diff slices driven through public
+//! interactor boundaries and the `HybridGitClient` adapter. The pure parsing paths
+//! are unit-tested in `application`; here we prove the slices against actual Git
+//! output on fixture repositories.
 
 use std::{path::Path, process::Command};
 
 use gtl_application::{
     diffs::{
+        DiffTarget,
         compute_commit_patch::{self, ComputeCommitPatch},
-        util::assemble,
+        compute_diff::{self, ComputeDiff},
     },
     ports::GitClient,
     testing::FixedUserSettingsStore,
 };
 use gtl_infra::git_client::HybridGitClient;
-use gtl_models::diffs::ExcludedExtensions;
+use gtl_models::{diffs::DiffExclusions, settings::UserSettings, viewer::RenderOptions};
 
 fn git(dir: &Path, args: &[&str]) {
     let ok = Command::new("git")
@@ -44,23 +47,53 @@ fn assemble_excludes_extensions_at_the_git_level() {
     git(d, &["add", "."]);
     git(d, &["commit", "-qm", "feat: work"]);
 
-    let data = assemble(
+    let project = d
+        .file_name()
+        .and_then(|name| name.to_str())
+        .expect("temporary repository has a UTF-8 project name")
+        .to_owned();
+    let settings = UserSettings::new(
+        None,
+        RenderOptions::DEFAULT,
+        true,
+        DiffExclusions::new(
+            [
+                (project, vec!["md"]),
+                (DiffExclusions::DEFAULT_KEY.to_owned(), vec!["txt"]),
+            ],
+            None,
+        ),
+    );
+    let response = compute_diff::execute(
+        ComputeDiff {
+            cwd: d.to_path_buf(),
+            target: DiffTarget::Merge {
+                base: "main".into(),
+                pinned: None,
+            },
+        },
+        &FixedUserSettingsStore::new(settings),
         &HybridGitClient,
-        d,
-        "main...HEAD",
-        "main..HEAD",
-        &ExcludedExtensions::new(["md"]),
     )
-    .unwrap();
+    .expect("compute diff succeeds");
 
-    let paths: Vec<&str> = data.files.iter().map(|f| f.path.as_str()).collect();
+    let paths: Vec<&str> = response
+        .view
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect();
     assert_eq!(paths, ["code.rs"], "git must not emit the excluded file");
     assert_eq!(
-        data.hidden_paths,
+        response
+            .view
+            .exclusions
+            .expect("excluded path metadata")
+            .hidden_paths,
         ["docs plan.MD"],
         "hidden paths come from the name-only pass, case-insensitively"
     );
-    let total_added: u32 = data.files.iter().map(|f| f.added).sum();
+    let total_added: u32 = response.view.files.iter().map(|file| file.added).sum();
     assert_eq!(
         total_added, 1,
         "excluded lines contribute nothing to the totals"

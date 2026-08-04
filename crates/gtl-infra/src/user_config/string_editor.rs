@@ -10,7 +10,7 @@ use anyhow::Context as _;
 use gtl_application::ports::UserSettingsEditError;
 use toml_edit::{DocumentMut, Item, Value};
 
-const USER_SETTINGS_LOCK_WAIT_MAX: Duration = Duration::from_millis(500);
+const USER_SETTINGS_LOCK_WAIT_MAX: Duration = Duration::from_secs(5);
 const USER_SETTINGS_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const USER_SETTINGS_SYMBOLIC_LINK_DEPTH_MAX: usize = 40;
 
@@ -32,53 +32,103 @@ fn lock_path(settings_path: &Path) -> PathBuf {
     PathBuf::from(value)
 }
 
-fn acquire_lock(settings_path: &Path) -> anyhow::Result<File> {
-    let path = lock_path(settings_path);
-    let lock = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .with_context(|| format!("open user-settings lock {}", path.display()))?;
-    let deadline = Instant::now() + USER_SETTINGS_LOCK_WAIT_MAX;
-    let mut acquisition_attempt_initial = true;
+#[derive(Debug)]
+#[must_use = "dropping the lease releases exclusive access to the user-settings file"]
+struct SettingsEditLease {
+    _lock_file: File,
+}
 
-    loop {
-        if !acquisition_attempt_initial && Instant::now() >= deadline {
-            anyhow::bail!(
-                "user-settings lock {} was not acquired within 500 ms",
-                path.display()
-            );
-        }
-        acquisition_attempt_initial = false;
+impl SettingsEditLease {
+    fn acquire(settings_path: &Path) -> Result<Self, UserSettingsEditError> {
+        let path = lock_path(settings_path);
+        let lock = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .truncate(false)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("open user-settings lock {}", path.display()))?;
+        let deadline = Instant::now() + USER_SETTINGS_LOCK_WAIT_MAX;
 
-        match lock.try_lock() {
-            Ok(()) => return Ok(lock),
-            Err(TryLockError::WouldBlock) => {}
-            Err(TryLockError::Error(error)) => {
-                return Err(error)
-                    .with_context(|| format!("lock user settings {}", path.display()));
+        loop {
+            if Instant::now() >= deadline {
+                return Err(UserSettingsEditError::LockTimeout {
+                    path,
+                    wait_seconds: USER_SETTINGS_LOCK_WAIT_MAX.as_secs(),
+                });
             }
-        }
 
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if !remaining.is_zero() {
-            std::thread::sleep(remaining.min(USER_SETTINGS_LOCK_POLL_INTERVAL));
+            match lock.try_lock() {
+                Ok(()) => return Ok(Self { _lock_file: lock }),
+                Err(TryLockError::WouldBlock) => {}
+                Err(TryLockError::Error(error)) => {
+                    return Err(UserSettingsEditError::Unexpected(
+                        anyhow::Error::new(error)
+                            .context(format!("lock user settings {}", path.display())),
+                    ));
+                }
+            }
+
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if !remaining.is_zero() {
+                std::thread::sleep(remaining.min(USER_SETTINGS_LOCK_POLL_INTERVAL));
+            }
         }
     }
 }
 
-fn read_document(path: &Path) -> anyhow::Result<DocumentMut> {
-    let raw = match std::fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+fn lock_identity_path(settings_path: &Path) -> anyhow::Result<PathBuf> {
+    match std::fs::canonicalize(settings_path) {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = settings_path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            let file_name = settings_path
+                .file_name()
+                .context("user-settings path has no file name")?;
+            let parent = std::fs::canonicalize(parent).with_context(|| {
+                format!("resolve user-settings lock parent {}", parent.display())
+            })?;
+            Ok(parent.join(file_name))
+        }
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "resolve user-settings lock identity {}",
+                settings_path.display()
+            )
+        }),
+    }
+}
+
+fn acquire_lock(settings_path: &Path) -> Result<SettingsEditLease, UserSettingsEditError> {
+    SettingsEditLease::acquire(&lock_identity_path(settings_path)?)
+}
+
+fn read_document(path: &Path) -> Result<(Vec<u8>, String, DocumentMut), UserSettingsEditError> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(error) => {
-            return Err(error).with_context(|| format!("read user settings {}", path.display()));
+            return Err(UserSettingsEditError::Unexpected(
+                anyhow::Error::new(error).context(format!("read user settings {}", path.display())),
+            ));
         }
     };
-    raw.parse::<DocumentMut>()
-        .with_context(|| format!("parse user settings {}", path.display()))
+    let raw = String::from_utf8(bytes.clone()).map_err(|error| {
+        UserSettingsEditError::InvalidConfiguration {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        }
+    })?;
+    let document = raw.parse::<DocumentMut>().map_err(|error| {
+        UserSettingsEditError::InvalidConfiguration {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        }
+    })?;
+    Ok((bytes, raw, document))
 }
 
 fn replacement_path(path: &Path) -> anyhow::Result<PathBuf> {
@@ -155,7 +205,6 @@ pub(super) fn edit(
     std::fs::create_dir_all(lock_parent)
         .with_context(|| format!("create user-settings directory {}", lock_parent.display()))?;
 
-    let _lock = acquire_lock(path)?;
     let replacement_path = replacement_path(path)?;
     let replacement_parent = replacement_path
         .parent()
@@ -167,8 +216,10 @@ pub(super) fn edit(
             replacement_parent.display()
         )
     })?;
-    let mut document = read_document(&replacement_path)?;
+    let _lease = acquire_lock(&replacement_path)?;
+    let (baseline_bytes, raw, mut document) = read_document(&replacement_path)?;
     let value_old = value_old(&document, key)?;
+    super::validate_raw_for_edit(&replacement_path, &raw)?;
 
     let document_changed = match edit {
         StringEdit::Set(value_new) if value_old.as_deref() == Some(value_new) => false,
@@ -190,20 +241,30 @@ pub(super) fn edit(
         });
     }
 
+    #[cfg(test)]
+    wait_before_persist_for_test(&replacement_path);
+
+    let current_bytes = read_document_bytes(&replacement_path)?;
+    if current_bytes != baseline_bytes {
+        return Err(UserSettingsEditError::ConcurrentModification {
+            path: replacement_path,
+        });
+    }
+
+    let raw_new = document.to_string();
+    super::validate_raw_for_edit(&replacement_path, &raw_new)?;
     let mut temporary = tempfile::NamedTempFile::new_in(replacement_parent).with_context(|| {
         format!(
             "create temporary settings file in {}",
             replacement_parent.display()
         )
     })?;
-    temporary
-        .write_all(document.to_string().as_bytes())
-        .with_context(|| {
-            format!(
-                "write temporary user settings {}",
-                temporary.path().display()
-            )
-        })?;
+    temporary.write_all(raw_new.as_bytes()).with_context(|| {
+        format!(
+            "write temporary user settings {}",
+            temporary.path().display()
+        )
+    })?;
     temporary.flush().with_context(|| {
         format!(
             "flush temporary user settings {}",
@@ -227,6 +288,50 @@ pub(super) fn edit(
     })
 }
 
+fn read_document_bytes(path: &Path) -> anyhow::Result<Vec<u8>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) => {
+            Err(error).with_context(|| format!("reread user settings {}", path.display()))
+        }
+    }
+}
+
+#[cfg(test)]
+fn wait_before_persist_for_test(path: &Path) {
+    let hook = {
+        let mut slot = BEFORE_PERSIST_HOOK
+            .get_or_init(|| std::sync::Mutex::new(None))
+            .lock()
+            .expect("lock pre-persist test hook");
+        if slot.as_ref().is_some_and(|hook| hook.path == path) {
+            slot.take()
+        } else {
+            None
+        }
+    };
+    if let Some(hook) = hook {
+        hook.ready_sender
+            .send(())
+            .expect("signal pre-persist test hook");
+        hook.continue_receiver
+            .recv()
+            .expect("release pre-persist test hook");
+    }
+}
+
+#[cfg(test)]
+struct BeforePersistHook {
+    path: PathBuf,
+    ready_sender: std::sync::mpsc::SyncSender<()>,
+    continue_receiver: std::sync::mpsc::Receiver<()>,
+}
+
+#[cfg(test)]
+static BEFORE_PERSIST_HOOK: std::sync::OnceLock<std::sync::Mutex<Option<BeforePersistHook>>> =
+    std::sync::OnceLock::new();
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -236,11 +341,16 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use super::{StringEdit, USER_SETTINGS_LOCK_WAIT_MAX, edit, lock_path};
+    use gtl_application::ports::UserSettingsEditError;
+
+    use super::{
+        BEFORE_PERSIST_HOOK, BeforePersistHook, StringEdit, USER_SETTINGS_LOCK_WAIT_MAX, edit,
+        lock_identity_path, lock_path, replacement_path,
+    };
 
     const LOCK_ATTEMPT_WAIT_TEST_MAX: Duration = Duration::from_millis(100);
     const LOCK_HELD_OBSERVATION_WAIT: Duration = Duration::from_millis(50);
-    const RESULT_WAIT_TEST_MAX: Duration = Duration::from_secs(2);
+    const RESULT_WAIT_TEST_MAX: Duration = Duration::from_secs(8);
 
     #[cfg(unix)]
     fn create_file_symbolic_link(original: &Path, link: &Path) -> std::io::Result<()> {
@@ -253,12 +363,14 @@ mod tests {
     }
 
     fn hold_settings_lock(path: &Path) -> File {
+        let replacement_path = replacement_path(path).expect("resolve replacement path");
+        let identity_path = lock_identity_path(&replacement_path).expect("resolve lock identity");
         let lock = OpenOptions::new()
             .create(true)
             .read(true)
             .truncate(false)
             .write(true)
-            .open(lock_path(path))
+            .open(lock_path(&identity_path))
             .expect("open lock");
         lock.lock().expect("hold lock");
         lock
@@ -398,12 +510,15 @@ mod tests {
     }
 
     #[test]
-    fn edit_stops_when_the_lock_budget_expires() {
+    fn symlink_aliases_share_the_lock_and_timeout_without_writing() {
         let directory = tempfile::tempdir().expect("temp directory");
+        let target = directory.path().join("managed").join("config.toml");
         let path = directory.path().join("config.toml");
+        std::fs::create_dir_all(target.parent().expect("target parent")).expect("create target");
         let raw = "theme = \"dark\"\n";
-        std::fs::write(&path, raw).expect("seed config");
-        let _lock = hold_settings_lock(&path);
+        std::fs::write(&target, raw).expect("seed config");
+        create_file_symbolic_link(Path::new("managed/config.toml"), &path).expect("link config");
+        let _lock = hold_settings_lock(&target);
         let (result_sender, result_receiver) = mpsc::sync_channel(1);
         let path_worker = path.clone();
 
@@ -419,18 +534,63 @@ mod tests {
         drop(worker);
         let error = result.expect_err("held lock times out");
 
-        assert!(format!("{error:#}").contains("within 500 ms"));
+        assert!(matches!(
+            error,
+            UserSettingsEditError::LockTimeout {
+                wait_seconds: 5,
+                ..
+            }
+        ));
         assert!(
             elapsed >= USER_SETTINGS_LOCK_WAIT_MAX,
             "elapsed: {elapsed:?}"
         );
         assert!(elapsed < RESULT_WAIT_TEST_MAX, "elapsed: {elapsed:?}");
-        assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
+        assert_eq!(std::fs::read_to_string(target).unwrap(), raw);
+    }
+
+    #[test]
+    fn concurrent_external_change_aborts_and_preserves_the_change() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("config.toml");
+        let raw = "theme = \"dark\"\nlayout = \"split\"\n";
+        let changed_raw = "theme = \"hearth\"\nlayout = \"split\"\n";
+        std::fs::write(&path, raw).expect("seed config");
+        let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+        let (continue_sender, continue_receiver) = mpsc::sync_channel(1);
+        BEFORE_PERSIST_HOOK
+            .get_or_init(|| std::sync::Mutex::new(None))
+            .lock()
+            .expect("lock pre-persist test hook")
+            .replace(BeforePersistHook {
+                path: path.clone(),
+                ready_sender,
+                continue_receiver,
+            });
+        let path_worker = path.clone();
+        let worker =
+            std::thread::spawn(move || edit(&path_worker, "theme", StringEdit::Set("light")));
+
+        ready_receiver
+            .recv_timeout(RESULT_WAIT_TEST_MAX)
+            .expect("edit reaches pre-persist check");
+        std::fs::write(&path, changed_raw).expect("external edit");
+        continue_sender.send(()).expect("release edit");
+        let error = worker
+            .join()
+            .expect("join edit")
+            .expect_err("external edit must abort the replacement");
+        assert!(matches!(
+            error,
+            UserSettingsEditError::ConcurrentModification { path: error_path }
+                if error_path == path
+        ));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), changed_raw);
     }
 
     #[test]
     fn concurrent_changes_to_different_keys_both_survive() {
-        use gtl_application::ports::UserSettingsEditor as _;
+        use gtl_application::ports::UserSettingsStore as _;
 
         use crate::user_config::TomlSettingsStore;
 
@@ -441,7 +601,7 @@ mod tests {
         let (attempt_sender, attempt_receiver) = mpsc::sync_channel(2);
         let (result_sender, result_receiver) = mpsc::sync_channel(2);
 
-        let store_theme = store.clone();
+        let mut store_theme = store.clone();
         let attempt_sender_theme = attempt_sender.clone();
         let result_sender_theme = result_sender.clone();
         let theme_worker = std::thread::spawn(move || {
@@ -454,7 +614,7 @@ mod tests {
                 .expect("send theme result");
         });
 
-        let store_layout = store.clone();
+        let mut store_layout = store.clone();
         let attempt_sender_layout = attempt_sender.clone();
         let result_sender_layout = result_sender.clone();
         let layout_worker = std::thread::spawn(move || {

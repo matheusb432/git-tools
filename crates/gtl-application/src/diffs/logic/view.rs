@@ -1,6 +1,6 @@
 use gtl_models::diffs::{AppliedExclusions, Commit};
 
-use super::FileDiff;
+use super::file::FileDiff;
 
 /// The `$ <lead><range><trail>` command line shown at the top of the screen.
 #[derive(Debug, Clone, PartialEq)]
@@ -71,7 +71,7 @@ impl View {
 /// Reorders changed files into directory-tree order: at each directory level,
 /// subdirectories come before files, both sorted alphabetically (depth-first).
 /// This is the single source of truth for file order; the sidebar follows it.
-pub fn sort_files_tree_order(files: &mut [FileDiff]) {
+pub(in crate::diffs) fn sort_files_tree_order(files: &mut [FileDiff]) {
     use std::cmp::Ordering;
 
     files.sort_by(|a, b| {
@@ -146,5 +146,62 @@ mod tests {
         view.commits.clear();
         view.files.push(file());
         assert!(view.has_diff_content());
+    }
+
+    #[test]
+    fn file_tree_order_places_directories_before_files_at_each_level() {
+        let mut files = vec![
+            FileDiff {
+                path: "src/render.rs".into(),
+                added: 0,
+                removed: 0,
+                lines: Vec::new(),
+                full_lines: None,
+            },
+            FileDiff {
+                path: "docs/adr/0001-render-stack.md".into(),
+                added: 0,
+                removed: 0,
+                lines: Vec::new(),
+                full_lines: None,
+            },
+            FileDiff {
+                path: "src/assets/preview.css".into(),
+                added: 0,
+                removed: 0,
+                lines: Vec::new(),
+                full_lines: None,
+            },
+            FileDiff {
+                path: "src/model.rs".into(),
+                added: 0,
+                removed: 0,
+                lines: Vec::new(),
+                full_lines: None,
+            },
+            FileDiff {
+                path: "src/assets/components.js".into(),
+                added: 0,
+                removed: 0,
+                lines: Vec::new(),
+                full_lines: None,
+            },
+        ];
+
+        sort_files_tree_order(&mut files);
+
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "docs/adr/0001-render-stack.md",
+                "src/assets/components.js",
+                "src/assets/preview.css",
+                "src/model.rs",
+                "src/render.rs",
+            ]
+        );
     }
 }

@@ -2,7 +2,7 @@ use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeTarget};
 
 use crate::diffs::{View, render_merge_diff::DEFAULT_BASE};
 
-pub(super) fn initial(recipe: &Recipe) -> String {
+pub(crate) fn initial(recipe: &Recipe) -> String {
     if let Some(name) = &recipe.name {
         return name.clone();
     }
@@ -22,7 +22,7 @@ pub(super) fn initial(recipe: &Recipe) -> String {
     }
 }
 
-pub(super) fn computed(recipe: &Recipe, view: &View) -> String {
+pub(crate) fn computed(recipe: &Recipe, view: &View) -> String {
     if let Some(name) = &recipe.name {
         return name.clone();
     }

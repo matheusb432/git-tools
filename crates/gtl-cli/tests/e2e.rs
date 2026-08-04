@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use std::{path::PathBuf, process};
 
 use assert_cmd::Command;

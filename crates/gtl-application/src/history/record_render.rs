@@ -3,7 +3,7 @@
 use gtl_contracts::recipes::Recipe;
 use rusqlite::{Connection, params};
 
-use crate::{history::persistence::RecipeColumns, ports::Clock};
+use crate::{history::logic::persistence::RecipeColumns, ports::Clock};
 
 const RECENT_RENDERS_CAP: usize = 500;
 
@@ -15,10 +15,6 @@ pub struct RecordRender {
     pub repo_name: String,
     pub range_label: String,
 }
-
-/// Successful result when a render is recorded.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RecordRenderOk {}
 
 /// Error when recording a render fails.
 #[derive(Debug, thiserror::Error)]
@@ -36,10 +32,10 @@ pub fn execute(
     req: RecordRender,
     connection: &mut Connection,
     clock: &impl Clock,
-) -> Result<RecordRenderOk, RecordRenderError> {
+) -> Result<(), RecordRenderError> {
     let rendered_at = clock.now_iso();
     record_render(connection, &req, &rendered_at)?;
-    Ok(RecordRenderOk {})
+    Ok(())
 }
 
 fn record_render(
@@ -115,7 +111,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        history::{RecentRenderRecord, list_recent_render_page, persistence::store_test},
+        history::{RecentRenderRecord, list_recent_render_page, logic::persistence::store_test},
         testing::FixedClock,
     };
 

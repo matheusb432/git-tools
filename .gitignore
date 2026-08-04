@@ -17,39 +17,14 @@ node_modules/
 # Repo-local editing link to the global git-tools config.
 /config/local/config.toml
 
-# >>> CFG: shared ignored artifacts
-# superpowers audit artifacts
 .superpowers/
 
-# Per-machine agent config (skill scoping settings.local.json, CLAUDE.local.md) — never committed
 *.local.*
 
-*.swp
-
-*:Zone.Identifier
-
-.playwright-mcp
 /.cache/playwright-driver/
 .artifacts/
-testResults.xml
 
 /secrets/
 
-# Canonical secret-bearing files — defense-in-depth; never commit (any depth).
 *.env
 !*.env.example
-auth.json
-credentials.json
-.credentials.json
-*.pem
-*.key
-id_rsa
-id_rsa.*
-id_ed25519
-id_ed25519.*
-*.pfx
-*.p12
-
-/.worktrees/**
-!/.worktrees/.gitkeep
-# <<< CFG: shared ignored artifacts

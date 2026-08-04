@@ -7,7 +7,7 @@ use rusqlite::{Connection, params_from_iter};
 
 use crate::history::{
     RecentRenderRecord, RecentRenderRowError,
-    persistence::{RECENT_RENDER_SELECT, RecentRenderRow},
+    logic::persistence::{RECENT_RENDER_SELECT, RecentRenderRow},
 };
 
 pub const RECENT_RENDER_PAGE_SIZE: usize = 30;
@@ -148,7 +148,7 @@ fn list_page(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::history::persistence::{seed_recent_render, store_test};
+    use crate::history::logic::persistence::{seed_recent_render, store_test};
 
     fn seed_history(connection: &Connection, count: i64) {
         for id in 1..=count {

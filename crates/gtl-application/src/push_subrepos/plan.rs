@@ -17,8 +17,6 @@ pub struct PlanPush {
     pub root: PathBuf,
 }
 
-pub type PlanPushOk = SubreposPlan;
-
 /// Everything that can go wrong planning a recursive push.
 #[derive(Debug, thiserror::Error)]
 pub enum PlanPushError {
@@ -33,7 +31,7 @@ pub fn execute(
     req: PlanPush,
     discovery: &impl RepoDiscovery,
     git: &impl GitClient,
-) -> Result<PlanPushOk, PlanPushError> {
+) -> Result<SubreposPlan, PlanPushError> {
     let PlanPush { root } = req;
     let discovered = find_repos::execute(
         find_repos::DiscoverRepos {
@@ -44,7 +42,7 @@ pub fn execute(
     )
     .map_err(anyhow::Error::from)?;
     if discovered.is_empty() {
-        return Ok(PlanPushOk::Refused(format!(
+        return Ok(SubreposPlan::Refused(format!(
             "no git repos found under {}",
             root.display()
         )));
@@ -53,7 +51,7 @@ pub fn execute(
         .into_iter()
         .map(|repo| inspect(git, &repo.path, repo.label))
         .collect();
-    Ok(PlanPushOk::Ready(targets))
+    Ok(SubreposPlan::Ready(targets))
 }
 
 /// Resolves one repo's push destination from local refs only — never fetches. A detached
@@ -186,7 +184,7 @@ mod tests {
 
         assert_eq!(
             plan,
-            PlanPushOk::Refused("no git repos found under /work".into())
+            SubreposPlan::Refused("no git repos found under /work".into())
         );
     }
 
@@ -210,7 +208,7 @@ mod tests {
         )
         .expect("planning succeeds");
 
-        let PlanPushOk::Ready(targets) = plan else {
+        let SubreposPlan::Ready(targets) = plan else {
             panic!("expected a ready plan, got {plan:?}");
         };
         let labels: Vec<&str> = targets.iter().map(|target| target.label.as_str()).collect();

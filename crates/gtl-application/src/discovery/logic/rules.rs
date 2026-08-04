@@ -53,19 +53,10 @@ pub fn repo_label(root: &Path, repo_path: &Path) -> String {
         .collect::<Vec<_>>()
         .join("/");
     if label.is_empty() {
-        repo_name(repo_path)
+        crate::shared::repository_name::from_path(repo_path)
     } else {
         label
     }
-}
-
-/// The repo's directory name, or `"repo"` for a nameless path.
-pub fn repo_name(top: &Path) -> String {
-    top.file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("repo")
-        .to_string()
 }
 
 #[cfg(test)]
@@ -120,11 +111,5 @@ mod tests {
         );
         // repo == root: use the root's own directory name.
         assert_eq!(repo_label(root, root), "work");
-    }
-
-    #[test]
-    fn repo_name_uses_the_final_component_or_a_fallback() {
-        assert_eq!(repo_name(Path::new("/work/api")), "api");
-        assert_eq!(repo_name(Path::new("/")), "repo");
     }
 }

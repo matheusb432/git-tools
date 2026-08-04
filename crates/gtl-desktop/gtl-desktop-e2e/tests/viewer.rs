@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Native Tauri/WebKit browser journeys.
 
 mod support;

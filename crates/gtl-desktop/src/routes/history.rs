@@ -37,7 +37,7 @@ pub(super) fn open(app: &ViewerApp, id: RenderHistoryId) -> RouteResult {
         format!("history-{id}"),
         ViewerTabKind::Snapshot,
     )?;
-    let settings = settings::load(app);
+    let settings = settings::load(app)?;
     tabs::render_tabs_only(app.renderer, &app.session, settings, SwapFeedback::None)
         .map(RouteOutput::Html)
         .map_err(Into::into)

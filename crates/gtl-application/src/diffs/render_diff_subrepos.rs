@@ -13,9 +13,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
     diffs::{
         DiffTarget, DiffTargetRequest, DiffTargetRequestError,
-        batch::{RepoRef, dated_title, render_batch},
+        logic::batch::{RepoRef, dated_title, render_batch},
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsStore},
+    ports::{
+        ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsLoadError,
+        UserSettingsStore,
+    },
     shared::notes::Note,
 };
 
@@ -50,6 +53,8 @@ pub enum RenderDiffSubreposError {
     #[error(transparent)]
     InvalidTarget(#[from] DiffTargetRequestError),
     #[error(transparent)]
+    Settings(#[from] UserSettingsLoadError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
@@ -68,9 +73,9 @@ pub fn execute(
         repos,
         target,
     } = req;
-    let store_root = super::artifacts::root(&root);
+    let store_root = super::logic::artifacts::root(&root);
     let target = DiffTarget::try_from(target)?;
-    let settings = app_settings.load();
+    let settings = app_settings.load()?;
     let mut notes = Vec::new();
     let batch = render_batch(source, &target, &settings, &repos, true, &mut notes)?;
 
@@ -87,7 +92,7 @@ pub fn execute(
 
     let title = dated_title(clock, "diff-preview subrepos");
     let render_options = settings.viewer_render_options();
-    let theme = settings.theme().map(str::to_owned);
+    let theme = settings.theme().map(|theme| theme.to_string());
     let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme.as_deref());
     let meta = ArtifactMeta {
         repo_root: root,
@@ -129,12 +134,15 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use gtl_models::diffs::DiffExclusions;
+    use gtl_models::{
+        diffs::DiffExclusions,
+        settings::UserSettings,
+        viewer::{RenderOptions, Theme},
+    };
 
     use super::{RenderDiffSubrepos, RenderDiffSubreposOutcome, RepoRef, execute};
     use crate::{
         diffs::DiffTargetRequest,
-        ports::AppSettings,
         shared::notes::Note,
         testing::{
             FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
@@ -248,8 +256,9 @@ diff --git a/notes.md b/notes.md\n\
             diff_output: TWO_FILE_DIFF.into(),
             ..Default::default()
         };
-        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
-            Some("night".into()),
+        let app_settings = FixedUserSettingsStore::new(UserSettings::new(
+            Some(Theme::Noir),
+            RenderOptions::DEFAULT,
             true,
             DiffExclusions::new([("repo-a".to_string(), vec!["md"])], None),
         ));
@@ -275,6 +284,6 @@ diff --git a/notes.md b/notes.md\n\
         let artifact = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
-        assert!(artifact.html.contains("repo-a:night:unified:compact:1"));
+        assert!(artifact.html.contains("repo-a:noir:unified:compact:1"));
     }
 }

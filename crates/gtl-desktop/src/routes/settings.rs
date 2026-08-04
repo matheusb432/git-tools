@@ -24,13 +24,13 @@ pub(super) fn serve(app: &ViewerApp, change: SettingChange) -> RouteResult {
     Ok(RouteOutput::Empty(StatusCode::NO_CONTENT))
 }
 
-pub(super) fn load(app: &ViewerApp) -> ViewerSettings {
-    let settings = app.user_settings.load();
-    let theme = settings
-        .theme()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(Theme::Dark);
-    ViewerSettings::new(settings.viewer_render_options(), theme)
+pub(super) fn load(app: &ViewerApp) -> Result<ViewerSettings, String> {
+    let settings = app
+        .user_settings
+        .load()
+        .map_err(|error| format!("{error:#}"))?;
+    let theme = settings.theme().unwrap_or(Theme::Dark);
+    Ok(ViewerSettings::new(settings.viewer_render_options(), theme))
 }
 
 pub(super) fn persist_render_options(
@@ -42,12 +42,13 @@ pub(super) fn persist_render_options(
 }
 
 fn persist(app: &ViewerApp, key: &str, value_new: String) -> Result<(), String> {
+    let mut settings_store = app.user_settings.clone();
     gtl_application::settings::set_key::execute(
         gtl_application::settings::set_key::SetSettingKey {
             key: key.into(),
             value_new,
         },
-        &app.user_settings,
+        &mut settings_store,
     )
     .map(|_| ())
     .map_err(|error| format!("{error:#}"))

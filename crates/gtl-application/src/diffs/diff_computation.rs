@@ -1,18 +1,27 @@
 use std::path::Path;
 
-use gtl_models::diffs::AppliedExclusions;
+use gtl_models::diffs::{AppliedExclusions, DiffExclusions};
 
 use crate::{
     diffs::{
         DiffTarget, PinnedRange, View,
-        range::DiffRanges,
-        range_view::{RangePresentation, RangeView},
-        sort_files_tree_order,
-        util::{DiffData, assemble, exclusion_note, repo_name},
+        logic::{
+            assemble::{DiffData, assemble},
+            exclusions,
+            range::DiffRanges,
+            range_view::{RangePresentation, RangeView},
+            view::sort_files_tree_order,
+        },
     },
     ports::GitClient,
-    shared::notes::Note,
+    shared::{notes::Note, repository_name::from_path},
 };
+
+pub(super) struct DiffComputation {
+    pub(super) view: View,
+    pub(super) summary: String,
+    pub(super) notes: Vec<Note>,
+}
 
 struct ResolvedTarget {
     base_ref: String,
@@ -53,12 +62,12 @@ pub(super) fn build(
     source: &impl GitClient,
     top: &str,
     target: &DiffTarget,
-    exclusions: &gtl_models::diffs::DiffExclusions,
-    notes: &mut Vec<Note>,
-) -> anyhow::Result<(View, String)> {
+    exclusions: &DiffExclusions,
+) -> anyhow::Result<DiffComputation> {
+    let mut notes = Vec::new();
     let repo_path = Path::new(top);
     let branch = source.current_branch(repo_path)?;
-    let repo_name = repo_name(top);
+    let repo_name = from_path(top);
     let excluded = exclusions.for_project_or_default(&repo_name);
 
     let ResolvedTarget {
@@ -67,7 +76,7 @@ pub(super) fn build(
         view_ranges,
         presentation,
         fallback_to_main,
-    } = resolve_target_ranges(source, top, target, notes)?;
+    } = resolve_target_ranges(source, top, target, &mut notes)?;
     let range_view = RangeView::new(&view_ranges.diff, presentation);
 
     let DiffData {
@@ -90,7 +99,7 @@ pub(super) fn build(
         files,
         exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
     };
-    notes.extend(exclusion_note("diff-preview", &view));
+    notes.extend(exclusions::note("diff-preview", &view));
 
     let summary = match target {
         DiffTarget::Range { .. } => base_ref.clone(),
@@ -100,7 +109,11 @@ pub(super) fn build(
         DiffTarget::Unpushed { .. } => format!("{} unpushed commit(s)", view.commits.len()),
         DiffTarget::Last { count, .. } => format!("last {count} commit(s)"),
     };
-    Ok((view, summary))
+    Ok(DiffComputation {
+        view,
+        summary,
+        notes,
+    })
 }
 
 fn resolve_target_ranges(

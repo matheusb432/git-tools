@@ -16,13 +16,11 @@ pub struct StatusRepos {
     pub repos: Vec<ManagedRepo>,
 }
 
-pub type StatusReposOk = Vec<StatusResult>;
-
 /// Classifies each repo purely from local refs (no fetch). Infallible by design:
 /// an unreadable fact degrades to its neutral value (`branch-unavailable`,
 /// `no-upstream`, ahead `0`) and is reported in the result, never as an error.
 #[cqrsy::query]
-pub fn execute(query: StatusRepos, git: &impl GitClient) -> StatusReposOk {
+pub fn execute(query: StatusRepos, git: &impl GitClient) -> Vec<StatusResult> {
     let StatusRepos { repos } = query;
     repos.iter().map(|repo| status_one(git, repo)).collect()
 }
@@ -48,7 +46,7 @@ fn status_one(git: &impl GitClient, repo: &ManagedRepo) -> StatusResult {
     result.present = true;
     result.branch = git.current_branch(&repo.path).unwrap_or_default();
 
-    let dirty = super::working_tree::dirty_state(git, &repo.path);
+    let dirty = super::logic::working_tree::dirty_state(git, &repo.path);
     result.untracked_count = dirty
         .files
         .iter()

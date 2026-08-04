@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Barrier, Mutex, mpsc},

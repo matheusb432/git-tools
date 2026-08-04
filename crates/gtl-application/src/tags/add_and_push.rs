@@ -4,9 +4,11 @@ use std::path::PathBuf;
 
 use super::{
     add::{self, AddTag},
-    git_command_error::GitCommandError,
     label,
-    outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
+    logic::{
+        git_command_error::GitCommandError,
+        outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
+    },
     push,
 };
 use crate::ports::GitClient;
@@ -19,8 +21,6 @@ pub struct AddAndPushTag {
     pub message: String,
     pub label: Option<String>,
 }
-
-pub type AddAndPushTagOk = TagActionOutcome;
 
 /// Reports an unexpected Git transport failure while adding and publishing a tag.
 #[derive(Debug, thiserror::Error)]
@@ -44,7 +44,7 @@ pub enum AddAndPushTagError {
 pub fn execute(
     command: AddAndPushTag,
     git: &impl GitClient,
-) -> Result<AddAndPushTagOk, AddAndPushTagError> {
+) -> Result<TagActionOutcome, AddAndPushTagError> {
     match add_and_push(command, git) {
         Ok(outcome) => Ok(outcome),
         Err(GitCommandError::Rejected { detail, progress }) => {

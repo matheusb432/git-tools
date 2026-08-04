@@ -17,7 +17,7 @@ pub fn dirty_state(git: &impl GitClient, repo_path: &Path) -> DirtyState {
     })
 }
 
-pub(super) fn dirty_state_checked(
+pub(crate) fn dirty_state_checked(
     git: &impl GitClient,
     repo_path: &Path,
 ) -> anyhow::Result<DirtyState> {

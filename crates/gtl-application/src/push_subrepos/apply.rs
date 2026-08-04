@@ -13,13 +13,11 @@ pub struct ApplyPush {
     pub targets: Vec<RepoTarget>,
 }
 
-pub type ApplyPushOk = PushAllResult;
-
 /// Pushes each repo's current branch to its upstream, skipping the un-pushable ones, and
 /// aggregates per-repo outcomes into an overall [`Status`]. Infallible by design: a
 /// failed push becomes a [`RepoOutcome::Failed`] report, never an error.
 #[cqrsy::command]
-pub fn execute(command: ApplyPush, git: &impl GitClient) -> ApplyPushOk {
+pub fn execute(command: ApplyPush, git: &impl GitClient) -> PushAllResult {
     let ApplyPush { targets } = command;
     let reports: Vec<RepoReport> = targets
         .iter()
@@ -45,7 +43,7 @@ pub fn execute(command: ApplyPush, git: &impl GitClient) -> ApplyPushOk {
         Status::Partial
     };
 
-    ApplyPushOk { status, reports }
+    PushAllResult { status, reports }
 }
 
 /// Pushes one repo, mapping git's exit and output to a [`RepoOutcome`].
@@ -87,7 +85,7 @@ mod tests {
         }
     }
 
-    fn apply(runner: &ScriptedGitClient, targets: Vec<RepoTarget>) -> ApplyPushOk {
+    fn apply(runner: &ScriptedGitClient, targets: Vec<RepoTarget>) -> PushAllResult {
         execute(ApplyPush { targets }, runner)
     }
 

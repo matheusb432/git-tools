@@ -1,6 +1,6 @@
 //! Applies a confirmed local-only commit plan.
 
-use super::{commit_progress::CommitProgress, plan_commit::CommitTarget};
+use super::{logic::commit_progress::CommitProgress, plan_commit::CommitTarget};
 use crate::ports::{GitClient, GitEffect};
 
 /// Requests staging and committing the confirmed target without pushing it.

@@ -1,6 +1,6 @@
 use gtl_contracts::recipes::Recipe;
 
-use super::recipe_label;
+use super::logic::recipe_label;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InitialRecipeLabel {

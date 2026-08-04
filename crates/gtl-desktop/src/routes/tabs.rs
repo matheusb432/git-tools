@@ -27,7 +27,7 @@ pub(super) fn view(app: &ViewerApp, tab: ViewerTabId, options: RenderOptions) ->
     }
     settings::persist_render_options(app, options)?;
     let transient = view_loading::ensure_active_view(app)?;
-    let theme = settings::load(app).theme();
+    let theme = settings::load(app)?.theme();
     let settings = ViewerSettings::new(options, theme);
     let load_id = view_loading::prepare_materialization(app, settings.options())?;
     render_view_with_tabs(
@@ -57,7 +57,7 @@ pub(super) fn commit_patch(
     if !retained {
         app.select_commit(tab, sha)?;
     }
-    let theme = settings::load(app).theme();
+    let theme = settings::load(app)?.theme();
     let settings = ViewerSettings::new(options, theme);
     render_view_with_tabs(
         app.renderer,
@@ -87,7 +87,7 @@ pub(super) fn close(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     let Some(outcome) = outcome else {
         return Ok(RouteOutput::Empty(StatusCode::NOT_FOUND));
     };
-    let settings = settings::load(app);
+    let settings = settings::load(app)?;
     if outcome == CloseOutcome::ActiveUnchanged {
         return render_tabs_only(app.renderer, &app.session, settings, SwapFeedback::None)
             .map(RouteOutput::Html)
@@ -129,7 +129,7 @@ pub(super) fn activate(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
         return Ok(RouteOutput::Empty(StatusCode::NOT_FOUND));
     }
     let transient = view_loading::ensure_active_view(app)?;
-    let settings = settings::load(app);
+    let settings = settings::load(app)?;
     let load_id = view_loading::prepare_materialization(app, settings.options())?;
     render_view_with_tabs(
         app.renderer,

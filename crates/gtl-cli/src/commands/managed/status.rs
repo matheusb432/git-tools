@@ -37,7 +37,7 @@ pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<St
         Err(error) => return status_fail(format!("status: {error:#}")),
     };
     let repo = ManagedRepo {
-        name: gtl_application::discovery::rules::repo_name(&top),
+        name: gtl_application::shared::repository_name::from_path(&top),
         path: top,
         remote: String::new(),
     };

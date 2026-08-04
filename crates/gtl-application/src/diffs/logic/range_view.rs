@@ -1,33 +1,33 @@
-use super::{Cmd, Foot};
+use super::view::{Cmd, Foot};
 
 const TITLE_DIFF: &str = "diff";
-pub(super) const TITLE_MERGE_DIFF: &str = "merge-diff";
+pub(crate) const TITLE_MERGE_DIFF: &str = "merge-diff";
 const GIT_DIFF_LEAD: &str = "git diff ";
-pub(super) const LABEL_UNPUSHED_COMMITS: &str = "# unpushed commits";
-pub(super) const LABEL_COMMITS_IN_RANGE: &str = "# commits in range";
+pub(crate) const LABEL_UNPUSHED_COMMITS: &str = "# unpushed commits";
+pub(crate) const LABEL_COMMITS_IN_RANGE: &str = "# commits in range";
 const LABEL_COMMITS_TO_MERGE: &str = "# commits to merge";
 const NOTE_UNPUSHED_WORK: &str = "# unpushed work";
-pub(super) const NOTE_WORKING_TREE: &str = "# base → working tree";
+pub(crate) const NOTE_WORKING_TREE: &str = "# base → working tree";
 const NOTE_COMMIT_RANGE: &str = "# commit range";
 const NOTE_MERGE_PREVIEW: &str = "# merge preview";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum RangePresentation {
+pub(crate) enum RangePresentation {
     Unpushed,
     WorkingTree,
     Exact,
     Merge,
 }
 
-pub(super) struct RangeView {
-    pub(super) title: String,
-    pub(super) cmd: Cmd,
-    pub(super) commits_label: String,
-    pub(super) foot: Foot,
+pub(crate) struct RangeView {
+    pub(crate) title: String,
+    pub(crate) cmd: Cmd,
+    pub(crate) commits_label: String,
+    pub(crate) foot: Foot,
 }
 
 impl RangeView {
-    pub(super) fn new(range: &str, presentation: RangePresentation) -> Self {
+    pub(crate) fn new(range: &str, presentation: RangePresentation) -> Self {
         let (title, commits_label, note) = match presentation {
             RangePresentation::Unpushed => (
                 TITLE_DIFF,

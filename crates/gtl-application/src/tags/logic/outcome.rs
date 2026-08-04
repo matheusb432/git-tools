@@ -18,7 +18,7 @@ pub struct TagOperationProgress {
 }
 
 impl TagOperationProgress {
-    pub(super) fn created(name: impl Into<String>) -> Self {
+    pub(crate) fn created(name: impl Into<String>) -> Self {
         let name = name.into();
         Self {
             created_refs: vec![local_ref(&name)],
@@ -26,23 +26,23 @@ impl TagOperationProgress {
         }
     }
 
-    pub(super) fn record_created(&mut self, name: impl Into<String>) {
+    pub(crate) fn record_created(&mut self, name: impl Into<String>) {
         push_unique(&mut self.created_refs, local_ref(&name.into()));
     }
 
-    pub(super) fn record_push_attempt(&mut self, names: &[String]) {
+    pub(crate) fn record_push_attempt(&mut self, names: &[String]) {
         self.remote_push = TagRemotePushProgress::Indeterminate {
             attempted_refs: names.iter().map(|name| local_ref(name)).collect(),
         };
     }
 
-    pub(super) fn record_push_completed(&mut self, names: &[String]) {
+    pub(crate) fn record_push_completed(&mut self, names: &[String]) {
         self.remote_push = TagRemotePushProgress::Completed {
             pushed_refs: names.iter().map(|name| local_ref(name)).collect(),
         };
     }
 
-    pub(super) fn merge(&mut self, prior: Self) {
+    pub(crate) fn merge(&mut self, prior: Self) {
         for name in prior.created_refs {
             push_unique(&mut self.created_refs, name);
         }
@@ -87,7 +87,7 @@ pub struct TagActionOutcome {
 }
 
 impl TagActionOutcome {
-    pub(super) fn new(status: TagActionStatus, detail: impl Into<String>) -> Self {
+    pub(crate) fn new(status: TagActionStatus, detail: impl Into<String>) -> Self {
         Self {
             status,
             detail: detail.into(),
@@ -95,16 +95,16 @@ impl TagActionOutcome {
         }
     }
 
-    pub(super) fn with_progress(mut self, progress: TagOperationProgress) -> Self {
+    pub(crate) fn with_progress(mut self, progress: TagOperationProgress) -> Self {
         self.progress = progress;
         self
     }
 
-    pub(super) fn failed(detail: impl Into<String>) -> Self {
+    pub(crate) fn failed(detail: impl Into<String>) -> Self {
         Self::new(TagActionStatus::Failed, detail)
     }
 
-    pub(super) fn with_created_detail(self, created_detail: String) -> Self {
+    pub(crate) fn with_created_detail(self, created_detail: String) -> Self {
         let progress = self.progress;
         match self.status {
             TagActionStatus::Pushed => Self::new(

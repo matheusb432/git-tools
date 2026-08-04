@@ -3,7 +3,7 @@
 use gtl_contracts::recipes::Recipe;
 use gtl_models::managed::ManagedRepo;
 
-use super::{RecipeRequest, pin};
+use super::RecipeRequest;
 use crate::{managed::select_unpushed, ports::GitClient};
 
 /// Requests recipes for ahead repositories from an already-resolved manifest.
@@ -12,8 +12,6 @@ pub struct BuildManagedRecipes {
     pub repos: Vec<ManagedRepo>,
     pub operation: RecipeRequest,
 }
-
-pub type BuildManagedRecipesOk = Vec<Recipe>;
 
 /// Reports a failure while selecting managed repositories.
 #[derive(Debug, thiserror::Error)]
@@ -33,12 +31,14 @@ pub enum BuildManagedRecipesError {
 pub fn execute(
     query: BuildManagedRecipes,
     git: &impl GitClient,
-) -> Result<BuildManagedRecipesOk, BuildManagedRecipesError> {
+) -> Result<Vec<Recipe>, BuildManagedRecipesError> {
     let selected =
         select_unpushed::execute(select_unpushed::SelectUnpushed { repos: query.repos }, git)?;
     Ok(selected
         .into_iter()
-        .map(|repo| pin::build_resolved(repo.path, query.operation.clone(), Some(repo.label), git))
+        .map(|repo| {
+            super::logic::build_resolved(repo.path, query.operation.clone(), Some(repo.label), git)
+        })
         .collect())
 }
 

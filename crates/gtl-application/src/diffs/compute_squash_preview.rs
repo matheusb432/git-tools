@@ -5,11 +5,9 @@ mod view;
 
 use std::path::PathBuf;
 
-pub(crate) use view::SquashViewBuild;
-
 use crate::{
     diffs::{PinnedRange, View},
-    ports::{AppSettings, GitClient, UserSettingsStore},
+    ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
 };
 
 /// Compute the squash-preview view of the current branch's unpushed commits
@@ -24,49 +22,57 @@ pub struct ComputeSquashPreview {
 #[derive(Debug, Clone)]
 pub struct ComputeSquashPreviewOk {
     pub view: View,
+    pub top: String,
+    pub log_range: String,
+    pub render_options: gtl_models::viewer::RenderOptions,
+    pub theme: Option<String>,
+    pub excluded_extensions: Vec<String>,
 }
 
 /// Everything that can go wrong computing a squash-preview view.
 #[derive(Debug, thiserror::Error)]
 pub enum ComputeSquashPreviewError {
     #[error(transparent)]
+    Settings(#[from] UserSettingsLoadError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Computes a squash preview via the shared squash view builder.
 #[cqrsy::query]
 pub fn execute(
     req: ComputeSquashPreview,
     app_settings: &impl UserSettingsStore,
     source: &impl GitClient,
 ) -> Result<ComputeSquashPreviewOk, ComputeSquashPreviewError> {
-    let settings = app_settings.load();
-    let built = compute(req, &settings, source)?;
-    Ok(ComputeSquashPreviewOk { view: built.view })
-}
-
-pub(crate) fn compute(
-    req: ComputeSquashPreview,
-    settings: &AppSettings,
-    source: &impl GitClient,
-) -> anyhow::Result<SquashViewBuild> {
+    let settings = app_settings.load()?;
     let ComputeSquashPreview { cwd, pinned } = req;
-    view::build(source, &cwd, pinned.as_ref(), settings.diff_exclusions())
+    let built = view::build(source, &cwd, pinned.as_ref(), settings.diff_exclusions())?;
+    let excluded_extensions = settings
+        .diff_exclusions()
+        .for_project_or_default(&built.view.repo_name)
+        .extensions()
+        .to_vec();
+
+    Ok(ComputeSquashPreviewOk {
+        view: built.view,
+        top: built.top,
+        log_range: built.log_range,
+        render_options: settings.viewer_render_options(),
+        theme: settings.theme().map(|theme| theme.to_string()),
+        excluded_extensions,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use gtl_models::diffs::DiffExclusions;
+    use gtl_models::{diffs::DiffExclusions, settings::UserSettings, viewer::RenderOptions};
 
     use super::*;
-    use crate::{
-        ports::AppSettings,
-        testing::{
-            FakeGitClient, FixedUserSettingsStore,
-            diffs::{DIFF_SINGLE_FILE, commit},
-        },
+    use crate::testing::{
+        FakeGitClient, FixedUserSettingsStore,
+        diffs::{DIFF_SINGLE_FILE, commit},
     };
 
     const CODE_AND_NOTES_DIFF: &str = "diff --git a/f.txt b/f.txt\n\
@@ -92,7 +98,7 @@ index 333..444 100644\n\
     }
 
     #[test]
-    fn viewer_and_raw_computation_share_the_same_view() {
+    fn compute_result_retains_the_render_inputs() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -101,21 +107,20 @@ index 333..444 100644\n\
             diff_output: DIFF_SINGLE_FILE.into(),
             ..Default::default()
         };
-        let settings = AppSettings::default();
         let request = ComputeSquashPreview {
             cwd: PathBuf::from("/repo"),
             pinned: None,
         };
 
-        let viewer = execute(
-            request.clone(),
-            &FixedUserSettingsStore::new(settings.clone()),
-            &source,
-        )
-        .expect("viewer compute succeeds");
-        let raw = compute(request, &settings, &source).expect("raw compute succeeds");
+        let response = execute(request, &FixedUserSettingsStore::default(), &source)
+            .expect("compute succeeds");
 
-        assert_eq!(viewer.view, raw.view);
+        assert_eq!(response.view.repo_root, "/repo");
+        assert_eq!(response.top, "/repo");
+        assert_eq!(response.log_range, "origin/main..HEAD");
+        assert_eq!(response.render_options, RenderOptions::DEFAULT);
+        assert_eq!(response.theme, None);
+        assert!(response.excluded_extensions.is_empty());
     }
 
     #[test]
@@ -128,8 +133,9 @@ index 333..444 100644\n\
             diff_output: CODE_AND_NOTES_DIFF.into(),
             ..Default::default()
         };
-        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(UserSettings::new(
             None,
+            RenderOptions::DEFAULT,
             true,
             DiffExclusions::new([("repo".into(), vec!["md"])], None),
         ));
@@ -145,6 +151,7 @@ index 333..444 100644\n\
         .expect("compute succeeds");
 
         assert_eq!(response.view.files.len(), 1);
+        assert_eq!(response.excluded_extensions, ["md"]);
         assert_eq!(response.view.files[0].path, "f.txt");
         assert_eq!(
             response
@@ -226,7 +233,9 @@ index 333..444 100644\n\
         )
         .expect_err("no upstream errors");
 
-        let ComputeSquashPreviewError::Unexpected(err) = error;
+        let ComputeSquashPreviewError::Unexpected(err) = error else {
+            panic!("expected Git computation error");
+        };
         assert_eq!(format!("{err:#}"), "no upstream");
     }
 }

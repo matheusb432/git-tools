@@ -1,4 +1,4 @@
-//! Fanning git operations out across every repo listed in the `repos.toml` manifest
+//! Fanning git operations out across every repo listed in the `projects.toml` manifest
 //! (sample_project's managed-repos list): `push --all`, `pull --all`, `commit --all`, `status --all`,
 //! and `prune --all`. Each concern lives in its own submodule; this facade owns the shared
 //! request/response seam (`ManagedRepo`, `ManagedOptions`, `ManagedRun`, `ManagedExit`) and

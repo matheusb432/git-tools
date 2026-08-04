@@ -8,7 +8,7 @@ pub struct BranchRecovery {
 }
 
 impl BranchRecovery {
-    pub(super) fn switch_to(branch: &str) -> Self {
+    pub(crate) fn switch_to(branch: &str) -> Self {
         Self {
             original_branch: branch.to_string(),
             command: format!("git switch {branch}"),

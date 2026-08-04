@@ -48,7 +48,7 @@ fn list_live_views(connection: &Connection) -> anyhow::Result<Vec<LiveViewRecord
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::live_views::persistence::store_test;
+    use crate::live_views::logic::persistence::store_test;
 
     #[test]
     fn lists_saved_views_in_creation_order() {

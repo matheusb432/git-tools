@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Tripwire for the Windows MSVC linker flags required by shipped executables.
 use std::{fs, path::Path};
 

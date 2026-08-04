@@ -7,7 +7,7 @@ use futures_util::{StreamExt as _, stream};
 use gtl_models::managed::ManagedRepo;
 
 use crate::{
-    managed::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
+    managed::logic::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
     ports::{Clock, GitClient, GitEffect, ManagedManifest, PushLedger},
 };
 
@@ -159,9 +159,17 @@ fn push_failure_detail(output: &str) -> String {
                 || trimmed.starts_with("fatal:")
         })
         .map(str::trim)
-        .or_else(|| crate::shared::git::last_non_empty_line(output))
+        .or_else(|| last_non_empty_line(output))
         .unwrap_or("push failed")
         .to_string()
+}
+
+fn last_non_empty_line(output: &str) -> Option<&str> {
+    output
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
 }
 
 #[cfg(test)]
@@ -200,7 +208,7 @@ mod tests {
 
     fn req() -> PushAll {
         PushAll {
-            repos_file: "/repos.toml".into(),
+            repos_file: "/projects.toml".into(),
             home_dir: "/home".into(),
             dry: false,
         }

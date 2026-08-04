@@ -34,7 +34,8 @@ impl TestDeclaration {
 pub(crate) fn tests_unit() -> Vec<TestDeclaration> {
     vec![TestDeclaration::new(
         "unit",
-        Test::new("unit", "cargo")
+        Test::try_new("unit", "cargo")
+            .expect("unit test definition is valid")
             .args(["test", "--quiet"])
             .verbose_arguments(["--", "--nocapture"])
             .summary_parser(summary::cargo),
@@ -49,14 +50,16 @@ pub(crate) fn tests_all(executable: OsString) -> Vec<TestDeclaration> {
     vec![
         TestDeclaration::new(
             "unit",
-            Test::new("unit", "cargo")
+            Test::try_new("unit", "cargo")
+                .expect("unit test definition is valid")
                 .args(["test", "--workspace", "--quiet"])
                 .verbose_arguments(["--", "--nocapture"])
                 .summary_parser(summary::cargo),
         ),
         TestDeclaration::new(
             "web",
-            Test::new("web", executable.clone())
+            Test::try_new("web", executable.clone())
+                .expect("web test definition is valid")
                 .arg("frontend-test")
                 .summary_parser(summary::vitest),
         ),
@@ -66,13 +69,19 @@ pub(crate) fn tests_all(executable: OsString) -> Vec<TestDeclaration> {
 }
 
 fn worker(label: &'static str, executable: &OsString, verb: &'static str) -> TestDeclaration {
-    TestDeclaration::new(label, Test::new(label, executable.clone()).arg(verb))
+    TestDeclaration::new(
+        label,
+        Test::try_new(label, executable.clone())
+            .expect("worker test definition is valid")
+            .arg(verb),
+    )
 }
 
 fn desktop_e2e(executable: OsString) -> TestDeclaration {
     TestDeclaration::new(
         "e2e",
-        Test::new("e2e", executable)
+        Test::try_new("e2e", executable)
+            .expect("desktop E2E test definition is valid")
             .arg("desktop-e2e-worker")
             .verbose_arguments(["--verbose"])
             .accepts_evidences()

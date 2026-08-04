@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use super::{branch_recovery::BranchRecovery, plan_rebase::RebaseTarget};
+use super::{BranchRecovery, plan_rebase::RebaseTarget};
 use crate::ports::{GitClient, GitEffect};
 
 /// Requests applying one confirmed fast-forward.

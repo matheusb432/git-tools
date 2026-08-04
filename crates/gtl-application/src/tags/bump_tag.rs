@@ -4,8 +4,10 @@ use super::{
     DryRunTagBump, DryRunTagBumpOk, TagBumpPreview,
     add::{self, AddTag},
     dry_run_tag_bump,
-    git_command_error::GitCommandError,
-    outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
+    logic::{
+        git_command_error::GitCommandError,
+        outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
+    },
     push,
 };
 use crate::ports::GitClient;

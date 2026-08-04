@@ -1,15 +1,11 @@
 //! Builds one snapshot recipe and pins its symbolic Git range when possible.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use gtl_contracts::recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
+use gtl_contracts::recipes::Recipe;
 
 use super::RecipeRequest;
-use crate::{
-    diffs::{self, DiffTarget},
-    discovery::resolve_repo_top,
-    ports::GitClient,
-};
+use crate::{discovery::resolve_repo_top, ports::GitClient, recipes::logic::build_resolved};
 
 /// Requests one complete snapshot recipe for a repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,8 +14,6 @@ pub struct PinRecipe {
     pub operation: RecipeRequest,
     pub name: Option<String>,
 }
-
-pub type PinRecipeOk = Recipe;
 
 /// Reports a failure to resolve the recipe source repository.
 #[derive(Debug, thiserror::Error)]
@@ -43,7 +37,7 @@ pub enum PinRecipeError {
 /// Returns [`PinRecipeError::TopLevel`] when Git cannot resolve `query.repo_path` to
 /// a repository top level.
 #[cqrsy::query]
-pub fn execute(query: PinRecipe, git: &impl GitClient) -> Result<PinRecipeOk, PinRecipeError> {
+pub fn execute(query: PinRecipe, git: &impl GitClient) -> Result<Recipe, PinRecipeError> {
     let top = resolve_repo_top::execute(
         resolve_repo_top::ResolveRepoTop {
             repo_path: query.repo_path.clone(),
@@ -56,131 +50,6 @@ pub fn execute(query: PinRecipe, git: &impl GitClient) -> Result<PinRecipeOk, Pi
     })?;
 
     Ok(build_resolved(top, query.operation, query.name, git))
-}
-
-pub(super) fn build_resolved(
-    repo_top: PathBuf,
-    operation: RecipeRequest,
-    name: Option<String>,
-    git: &impl GitClient,
-) -> Recipe {
-    Recipe {
-        op: pin_operation(&repo_top, operation_to_op(operation), git),
-        source: RecipeSource::LocalRepo(repo_top),
-        name,
-    }
-}
-
-fn operation_to_op(operation: RecipeRequest) -> RecipeOp {
-    match operation {
-        RecipeRequest::Diff(target) => RecipeOp::Diff {
-            target: target_to_recipe(target),
-        },
-        RecipeRequest::MergeDiff { base } => RecipeOp::MergeDiff { base, pinned: None },
-        RecipeRequest::SquashPreview => RecipeOp::SquashPreview { pinned: None },
-    }
-}
-
-fn target_to_recipe(target: DiffTarget) -> RecipeTarget {
-    match target {
-        DiffTarget::Unpushed { pinned } => RecipeTarget::Unpushed {
-            pinned: pinned.map(pin_to_recipe),
-        },
-        DiffTarget::Base(rev) => RecipeTarget::Base { rev },
-        DiffTarget::Range { range, pinned } => RecipeTarget::Range {
-            range,
-            pinned: pinned.map(pin_to_recipe),
-        },
-        DiffTarget::Merge { base, pinned } => RecipeTarget::Merge {
-            base,
-            pinned: pinned.map(pin_to_recipe),
-        },
-        DiffTarget::Last { count, pinned } => RecipeTarget::Last {
-            count,
-            pinned: pinned.map(pin_to_recipe),
-        },
-    }
-}
-
-fn pin_to_recipe(pin: diffs::PinnedRange) -> PinnedRange {
-    PinnedRange {
-        base: pin.base,
-        head: pin.head,
-    }
-}
-
-fn pin_operation(repo_top: &Path, operation: RecipeOp, git: &impl GitClient) -> RecipeOp {
-    match operation {
-        RecipeOp::Diff { target } => RecipeOp::Diff {
-            target: pin_target(repo_top, target, git),
-        },
-        RecipeOp::MergeDiff { base, pinned: None } => RecipeOp::MergeDiff {
-            pinned: pin_merge(repo_top, base.as_deref(), git),
-            base,
-        },
-        RecipeOp::SquashPreview { pinned: None } => RecipeOp::SquashPreview {
-            pinned: pin_range(repo_top, "@{u}", "HEAD", git),
-        },
-        operation => operation,
-    }
-}
-
-fn pin_target(repo_top: &Path, target: RecipeTarget, git: &impl GitClient) -> RecipeTarget {
-    match target {
-        RecipeTarget::Unpushed { pinned: None } => RecipeTarget::Unpushed {
-            pinned: pin_range(repo_top, "@{u}", "HEAD", git),
-        },
-        RecipeTarget::Last {
-            count,
-            pinned: None,
-        } => RecipeTarget::Last {
-            count,
-            pinned: pin_range(repo_top, &format!("HEAD~{count}"), "HEAD", git),
-        },
-        RecipeTarget::Range {
-            range,
-            pinned: None,
-        } => RecipeTarget::Range {
-            pinned: pin_exact_range(repo_top, &range, git),
-            range,
-        },
-        RecipeTarget::Merge { base, pinned: None } => RecipeTarget::Merge {
-            pinned: pin_merge(repo_top, Some(&base), git),
-            base,
-        },
-        target => target,
-    }
-}
-
-fn pin_range(repo_top: &Path, base: &str, head: &str, git: &impl GitClient) -> Option<PinnedRange> {
-    let base = capture_pin(git.resolve_sha(repo_top, base))?;
-    let head = capture_pin(git.resolve_sha(repo_top, head))?;
-    Some(PinnedRange { base, head })
-}
-
-fn pin_exact_range(repo_top: &Path, range: &str, git: &impl GitClient) -> Option<PinnedRange> {
-    if range.contains("...") {
-        return None;
-    }
-    let (base, head) = range.split_once("..")?;
-    if base.is_empty() || head.is_empty() {
-        return None;
-    }
-    pin_range(repo_top, base, head, git)
-}
-
-fn pin_merge(repo_top: &Path, base: Option<&str>, git: &impl GitClient) -> Option<PinnedRange> {
-    let base = base
-        .map(str::trim)
-        .filter(|base| !base.is_empty())
-        .unwrap_or(crate::diffs::render_merge_diff::DEFAULT_BASE);
-    let base = capture_pin(git.merge_base(repo_top, base, "HEAD"))?;
-    let head = capture_pin(git.resolve_sha(repo_top, "HEAD"))?;
-    Some(PinnedRange { base, head })
-}
-
-fn capture_pin(result: anyhow::Result<String>) -> Option<String> {
-    result.ok()
 }
 
 #[cfg(test)]

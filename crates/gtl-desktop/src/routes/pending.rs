@@ -24,7 +24,7 @@ fn process_transaction(app: &ViewerApp) -> RouteResult {
                 latest_opened: _,
                 skipped_labels,
             } = processed;
-            let settings = settings::load(app);
+            let settings = settings::load(app)?;
             let feedback = if skipped_labels.is_empty() {
                 SwapFeedback::None
             } else {

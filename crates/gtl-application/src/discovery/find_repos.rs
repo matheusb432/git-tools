@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use gtl_models::discovery::DiscoveredRepo;
 
-use crate::{discovery::rules::repo_label, ports::RepoDiscovery};
+use crate::{discovery::logic::rules::repo_label, ports::RepoDiscovery};
 
 /// Discover every git repo under `root`, labeled relative to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,11 +15,9 @@ pub struct DiscoverRepos {
     pub include_worktrees: bool,
 }
 
-pub type DiscoverReposOk = Vec<DiscoveredRepo>;
-
 /// Everything that can go wrong discovering repos.
 #[derive(Debug, thiserror::Error)]
-pub enum DiscoverError {
+pub enum DiscoverReposError {
     #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
@@ -29,7 +27,7 @@ pub enum DiscoverError {
 pub fn execute(
     req: DiscoverRepos,
     discovery: &impl RepoDiscovery,
-) -> Result<DiscoverReposOk, DiscoverError> {
+) -> Result<Vec<DiscoveredRepo>, DiscoverReposError> {
     let DiscoverRepos {
         root,
         include_worktrees,

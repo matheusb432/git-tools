@@ -34,6 +34,7 @@ pub async fn handle(
     .map_err(EndpointError::task_join)?
     .map_err(|error| match error {
         RenderDiffError::InvalidTarget(error) => EndpointError::bad_request(error),
+        RenderDiffError::Settings(error) => EndpointError::unexpected(error),
         RenderDiffError::Unexpected(error) => EndpointError::unexpected(error),
     })?;
     Ok(Json(super::to_envelope(response)))

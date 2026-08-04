@@ -33,6 +33,7 @@ pub async fn handle(
     .map_err(EndpointError::task_join)?
     .map_err(|error| match error {
         RenderDiffSubreposError::InvalidTarget(error) => EndpointError::bad_request(error),
+        RenderDiffSubreposError::Settings(error) => EndpointError::unexpected(error),
         RenderDiffSubreposError::Unexpected(error) => EndpointError::unexpected(error),
     })?;
     Ok(Json(super::to_subrepos_envelope(response)))

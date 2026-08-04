@@ -1,7 +1,7 @@
 use super::outcome::TagOperationProgress;
 
 #[derive(Debug)]
-pub(super) enum GitCommandError {
+pub(crate) enum GitCommandError {
     Rejected {
         detail: String,
         progress: Box<TagOperationProgress>,
@@ -13,14 +13,14 @@ pub(super) enum GitCommandError {
 }
 
 impl GitCommandError {
-    pub(super) fn rejected(detail: impl Into<String>) -> Self {
+    pub(crate) fn rejected(detail: impl Into<String>) -> Self {
         Self::Rejected {
             detail: detail.into(),
             progress: Box::default(),
         }
     }
 
-    pub(super) fn with_prior_progress(mut self, prior: TagOperationProgress) -> Self {
+    pub(crate) fn with_prior_progress(mut self, prior: TagOperationProgress) -> Self {
         match &mut self {
             Self::Rejected { progress, .. } | Self::Transport { progress, .. } => {
                 progress.merge(prior);

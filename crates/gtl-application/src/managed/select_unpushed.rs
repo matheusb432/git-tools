@@ -10,8 +10,6 @@ pub struct SelectUnpushed {
     pub repos: Vec<ManagedRepo>,
 }
 
-pub type SelectUnpushedOk = Vec<DiscoveredRepo>;
-
 /// Reports an unexpected Git failure while selecting unpushed repositories.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -52,7 +50,7 @@ pub enum SelectUnpushedError {
 pub fn execute(
     query: SelectUnpushed,
     git: &impl GitClient,
-) -> Result<SelectUnpushedOk, SelectUnpushedError> {
+) -> Result<Vec<DiscoveredRepo>, SelectUnpushedError> {
     let mut selected = Vec::new();
     for repo in query.repos {
         if !git.repo_present(&repo.path) {

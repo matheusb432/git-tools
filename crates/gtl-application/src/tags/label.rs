@@ -3,8 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    git_command_error::GitCommandError,
-    outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
+    logic::{
+        git_command_error::GitCommandError,
+        outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
+    },
     push,
 };
 use crate::ports::GitClient;
@@ -16,8 +18,6 @@ pub struct LabelTag {
     pub tag: String,
     pub label: String,
 }
-
-pub type LabelTagOk = TagActionOutcome;
 
 /// Reports an unexpected Git transport failure while labeling a tag.
 #[derive(Debug, thiserror::Error)]
@@ -38,7 +38,7 @@ pub enum LabelTagError {
 ///
 /// Returns [`LabelTagError`] when Git cannot be executed.
 #[cqrsy::command]
-pub fn execute(command: LabelTag, git: &impl GitClient) -> Result<LabelTagOk, LabelTagError> {
+pub fn execute(command: LabelTag, git: &impl GitClient) -> Result<TagActionOutcome, LabelTagError> {
     match label(command, git) {
         Ok(outcome) => Ok(outcome),
         Err(GitCommandError::Rejected { detail, progress }) => {
@@ -97,7 +97,7 @@ mod tests {
 
     use super::{LabelTag, execute, validate};
     use crate::{
-        tags::outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
+        tags::logic::outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
         testing::ScriptedGitClient,
     };
 

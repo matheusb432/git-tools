@@ -58,7 +58,7 @@ bench *args:
 
 # ============ quality ============
 
-# Run tests, or use `just test coverage` for cargo-llvm-cov. Run `just test --help` for options.
+# Run tests, or use `just test coverage`; coverage defaults to quiet and forwards cargo-llvm-cov arguments.
 [group('quality')]
 test *args:
     @cargo run --quiet -p xtask -- test {{ args }}

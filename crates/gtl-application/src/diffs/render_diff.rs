@@ -9,11 +9,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{
-        DiffTarget, DiffTargetRequest, DiffTargetRequestError, compute_diff, range::DiffRanges,
-        util::repo_name,
+        DiffTarget, DiffTargetRequest, DiffTargetRequestError, diff_computation,
+        logic::range::DiffRanges,
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsStore},
-    shared::notes::Note,
+    ports::{
+        ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsLoadError,
+        UserSettingsStore,
+    },
+    shared::{notes::Note, repository_name::from_path},
 };
 
 /// Render a diff preview for `target`, resolving the repository from `cwd`.
@@ -46,6 +49,8 @@ pub enum RenderDiffOutcome {
 pub enum RenderDiffError {
     #[error(transparent)]
     InvalidTarget(#[from] DiffTargetRequestError),
+    #[error(transparent)]
+    Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
@@ -159,14 +164,14 @@ pub fn execute(
     let RenderDiff { cwd, target, name } = req;
     let target = DiffTarget::try_from(target)?;
     let mut notes = Vec::new();
-    let settings = app_settings.load();
+    let settings = app_settings.load()?;
     let render_options = settings.viewer_render_options();
-    let theme = settings.theme().map(str::to_owned);
+    let theme = settings.theme().map(|theme| theme.to_string());
     let top = source.top_level(&cwd)?;
-    let store_root = super::artifacts::root(Path::new(&top));
+    let store_root = super::logic::artifacts::root(Path::new(&top));
     let excluded = settings
         .diff_exclusions()
-        .for_project_or_default(&repo_name(&top));
+        .for_project_or_default(&from_path(&top));
 
     // ! Fast-path: pure commit ranges are fully determined by resolved shas plus
     // ! the active rendering settings, so a prior identical artifact can be
@@ -196,7 +201,7 @@ pub fn execute(
         });
     }
 
-    let computed = compute_diff::compute(&top, &target, &settings, source)?;
+    let computed = diff_computation::build(source, &top, &target, settings.diff_exclusions())?;
     let mut view = computed.view;
     let summary = computed.summary;
     notes.extend(computed.notes);
@@ -267,13 +272,13 @@ mod tests {
 
     use gtl_models::{
         diffs::{DiffExclusions, DiffKind},
-        viewer::RenderOptions,
+        settings::UserSettings,
+        viewer::{RenderOptions, Theme},
     };
 
     use super::{RenderDiff, RenderDiffError, RenderDiffOutcome, execute};
     use crate::{
         diffs::{DiffTarget, DiffTargetRequest},
-        ports::AppSettings,
         shared::notes::Note,
         testing::{
             FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
@@ -287,6 +292,10 @@ mod tests {
             target: DiffTargetRequest::from(target),
             name: None,
         }
+    }
+
+    fn settings(theme: Option<Theme>, exclusions: DiffExclusions) -> UserSettings {
+        UserSettings::new(theme, RenderOptions::DEFAULT, true, exclusions)
     }
 
     #[test]
@@ -344,9 +353,8 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
-            Some("night".into()),
-            true,
+        let app_settings = FixedUserSettingsStore::new(settings(
+            Some(Theme::Noir),
             DiffExclusions::new(
                 [
                     ("repo".to_string(), vec!["md".to_string()]),
@@ -374,7 +382,7 @@ mod tests {
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.excluded_extensions, vec!["md"]);
-        assert!(artifact.html.contains("night"));
+        assert!(artifact.html.contains("noir"));
     }
 
     #[test]
@@ -499,9 +507,8 @@ mod tests {
                 pinned: None,
             },
         );
-        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(settings(
             None,
-            true,
             DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None),
         ));
         let response = execute(
@@ -563,11 +570,7 @@ mod tests {
                     pinned: None,
                 },
             ),
-            &FixedUserSettingsStore::new(AppSettings::new(
-                Some("light".to_string()),
-                true,
-                DiffExclusions::default(),
-            )),
+            &FixedUserSettingsStore::new(settings(Some(Theme::Light), DiffExclusions::default())),
             &source,
             &store,
             &StubRenderer,
@@ -613,9 +616,8 @@ mod tests {
                 pinned: None,
             },
         );
-        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
+        let app_settings = FixedUserSettingsStore::new(settings(
             None,
-            true,
             DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None),
         ));
         let response = execute(

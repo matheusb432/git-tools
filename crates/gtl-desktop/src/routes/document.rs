@@ -15,7 +15,7 @@ use crate::{presentation::ViewerApp, render::MaudViewerRenderer, session::Viewer
 
 pub(super) fn serve(app: &ViewerApp) -> RouteResult {
     let transient = live_views::restore(app)?;
-    let settings = settings::load(app);
+    let settings = settings::load(app)?;
     let history = history::load(app, RecentRenderPageCursor::Newest)?;
     render_document(app.renderer, &app.session, transient, history, settings)
         .map(RouteOutput::Html)

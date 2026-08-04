@@ -20,15 +20,13 @@ pub struct FindRepoTops {
     pub include_worktrees: bool,
 }
 
-pub type FindRepoTopsOk = Vec<DiscoveredRepo>;
-
 /// Everything that can go wrong discovering and resolving repo tops.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum FindRepoTopsError {
     /// Reports that repositories could not be discovered under the requested root.
     #[error(transparent)]
-    Discover(#[from] find_repos::DiscoverError),
+    Discover(#[from] find_repos::DiscoverReposError),
     /// Reports that a discovered repository's canonical top level could not be resolved.
     #[error(transparent)]
     Resolve(#[from] resolve_repo_top::ResolveRepoTopError),
@@ -47,7 +45,7 @@ pub fn execute(
     req: FindRepoTops,
     discovery: &impl RepoDiscovery,
     git: &impl GitClient,
-) -> Result<FindRepoTopsOk, FindRepoTopsError> {
+) -> Result<Vec<DiscoveredRepo>, FindRepoTopsError> {
     let FindRepoTops {
         root,
         include_worktrees,

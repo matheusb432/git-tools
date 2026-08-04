@@ -1,10 +1,13 @@
 //! Plans a local-only commit without changing Git state.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use gtl_models::repository::PendingChanges;
 
-use crate::ports::{GitClient, GitEffect};
+use crate::{
+    ports::{GitClient, GitEffect},
+    shared::repository_name::from_path,
+};
 
 /// Requests a read-only local commit plan for one repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,7 +80,7 @@ pub fn execute(query: PlanCommit, git: &impl GitClient) -> Result<PlanCommitOk, 
     };
 
     Ok(PlanCommitOk::Ready(CommitTarget {
-        name: repo_name(&top),
+        name: from_path(&top),
         top,
         branch,
         pending: PendingChanges {
@@ -94,14 +97,6 @@ fn transport(command: &str, source: anyhow::Error) -> PlanCommitError {
         command: command.into(),
         source,
     }
-}
-
-fn repo_name(top: &Path) -> String {
-    top.file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("repo")
-        .to_string()
 }
 
 #[cfg(test)]

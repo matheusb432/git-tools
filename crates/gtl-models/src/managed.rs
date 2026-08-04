@@ -7,7 +7,7 @@ pub mod push_subrepos;
 pub mod status;
 pub mod working_tree;
 
-/// One repo listed in the managed-repos manifest (`repos.toml`), resolved to an
+/// One Git repository derived from an sample_project project in `projects.toml`, resolved to an
 /// absolute local path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedRepo {

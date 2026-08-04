@@ -12,8 +12,7 @@ pub use crate::diffs::compute_merge_diff::DEFAULT_BASE;
 use crate::{
     diffs::{
         compute_merge_diff::{self, ComputeMergeDiff},
-        range_view::TITLE_MERGE_DIFF,
-        util::exclusion_note,
+        logic::{exclusions, range_view::TITLE_MERGE_DIFF},
     },
     ports::{ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
@@ -40,6 +39,8 @@ pub struct RenderMergeDiffOk {
 #[derive(Debug, thiserror::Error)]
 pub enum RenderMergeDiffError {
     #[error(transparent)]
+    Compute(#[from] compute_merge_diff::ComputeMergeDiffError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
@@ -54,54 +55,47 @@ pub fn execute(
     clock: &impl Clock,
 ) -> Result<RenderMergeDiffOk, RenderMergeDiffError> {
     let RenderMergeDiff { cwd, base } = req;
-    let settings = app_settings.load();
-    let built = compute_merge_diff::compute(
+    let computed = compute_merge_diff::execute(
         ComputeMergeDiff {
             cwd,
             base,
             pinned: None,
         },
-        &settings,
+        app_settings,
         source,
     )?;
-    let store_root = super::artifacts::root(Path::new(&built.top));
-    let view = built.view;
+    let store_root = super::logic::artifacts::root(Path::new(&computed.top));
+    let view = computed.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
-    let render_options = settings.viewer_render_options();
-    let theme = settings.theme().map(str::to_owned);
-    let html = renderer.build_html(&view, render_options, theme.as_deref());
+    let html = renderer.build_html(&view, computed.render_options, computed.theme.as_deref());
 
     let meta = ArtifactMeta {
-        repo_root: PathBuf::from(&built.top),
+        repo_root: PathBuf::from(&computed.top),
         repo_name: view.repo_name.clone(),
-        kind: DiffKind::from_diff_range(&built.diff_range),
+        kind: DiffKind::from_diff_range(&computed.diff_range),
         base_sha: source
-            .resolve_sha(Path::new(&built.top), &built.base)
+            .resolve_sha(Path::new(&computed.top), &computed.base)
             .unwrap_or_default(),
         head_sha: source
-            .resolve_sha(Path::new(&built.top), "HEAD")
+            .resolve_sha(Path::new(&computed.top), "HEAD")
             .unwrap_or_default(),
-        range_label: built.diff_range.clone(),
-        head_committed_at: source.committed_at(Path::new(&built.top), "HEAD"),
+        range_label: computed.diff_range.clone(),
+        head_committed_at: source.committed_at(Path::new(&computed.top), "HEAD"),
         generated_at: clock.now_iso(),
         title: TITLE_MERGE_DIFF.to_string(),
-        render_options,
-        theme,
-        excluded_extensions: settings
-            .diff_exclusions()
-            .for_project_or_default(&view.repo_name)
-            .extensions()
-            .to_vec(),
+        render_options: computed.render_options,
+        theme: computed.theme,
+        excluded_extensions: computed.excluded_extensions,
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
     let mut notes = Vec::new();
-    notes.extend(exclusion_note(TITLE_MERGE_DIFF, &view));
+    notes.extend(exclusions::note(TITLE_MERGE_DIFF, &view));
     notes.push(Note::info(format!(
         "{TITLE_MERGE_DIFF}: {commit_count} commit{} to merge into {}, {file_count} file{}",
         plural(commit_count),
-        built.base,
+        computed.base,
         plural(file_count),
     )));
     notes.push(Note::info(format!("wrote {}", placed.path.display())));
@@ -120,11 +114,15 @@ fn plural(n: usize) -> &'static str {
 mod tests {
     use std::path::PathBuf;
 
-    use gtl_models::diffs::DiffExclusions;
+    use gtl_models::{
+        diffs::DiffExclusions,
+        settings::UserSettings,
+        viewer::{RenderOptions, Theme},
+    };
 
     use super::{RenderMergeDiff, RenderMergeDiffError, execute};
     use crate::{
-        ports::AppSettings,
+        diffs::compute_merge_diff::{self, ComputeMergeDiff},
         shared::notes::Note,
         testing::{
             FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
@@ -150,6 +148,16 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
+        let computed = compute_merge_diff::execute(
+            ComputeMergeDiff {
+                cwd: PathBuf::from("/repo"),
+                base: None,
+                pinned: None,
+            },
+            &FixedUserSettingsStore::default(),
+            &source,
+        )
+        .expect("compute succeeds");
 
         let response = execute(
             req("/repo", None),
@@ -178,6 +186,14 @@ mod tests {
             .expect("artifact persisted");
         assert_eq!(artifact.meta.title, "merge-diff");
         assert_eq!(artifact.meta.repo_name, "repo");
+        assert_eq!(artifact.meta.repo_root, PathBuf::from(computed.top));
+        assert_eq!(artifact.meta.range_label, computed.diff_range);
+        assert_eq!(artifact.meta.render_options, computed.render_options);
+        assert_eq!(artifact.meta.theme, computed.theme);
+        assert_eq!(
+            artifact.meta.excluded_extensions,
+            computed.excluded_extensions
+        );
     }
 
     #[test]
@@ -191,8 +207,9 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
-            Some("night".into()),
+        let app_settings = FixedUserSettingsStore::new(UserSettings::new(
+            Some(Theme::Noir),
+            RenderOptions::DEFAULT,
             true,
             DiffExclusions::new([("repo".to_string(), vec!["md"])], None),
         ));
@@ -214,7 +231,7 @@ mod tests {
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.excluded_extensions, vec!["md"]);
-        assert!(artifact.html.contains("night"));
+        assert!(artifact.html.contains("noir"));
     }
 
     #[test]
@@ -265,7 +282,12 @@ mod tests {
         )
         .expect_err("unknown base errors");
 
-        let RenderMergeDiffError::Unexpected(err) = error;
+        let RenderMergeDiffError::Compute(compute_merge_diff::ComputeMergeDiffError::Unexpected(
+            err,
+        )) = error
+        else {
+            panic!("expected merge computation error");
+        };
         assert_eq!(format!("{err:#}"), "unknown revision nope");
     }
 }

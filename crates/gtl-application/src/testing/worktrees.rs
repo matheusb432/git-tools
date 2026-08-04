@@ -1,8 +1,6 @@
-//! Pure parsing for `git worktree list --porcelain` output.
-
 use gtl_models::worktrees::Worktree;
 
-pub(crate) fn parse(raw: &str) -> Vec<Worktree> {
+pub(super) fn parse(raw: &str) -> Vec<Worktree> {
     let mut worktrees = Vec::new();
     let mut current: Option<Worktree> = None;
 
@@ -58,42 +56,4 @@ pub(crate) fn parse(raw: &str) -> Vec<Worktree> {
     }
 
     worktrees
-}
-
-#[cfg(test)]
-mod tests {
-    use gtl_models::worktrees::Worktree;
-
-    use super::parse;
-
-    #[test]
-    fn preserves_every_worktree_value() {
-        assert_eq!(
-            parse(concat!(
-                "worktree /repo\nHEAD 123456789abcdef\nbranch refs/heads/main\n\n",
-                "worktree /linked\nHEAD abcdef123456789\ndetached\nbare\n",
-                "locked maintenance\nprunable gone\n\n",
-            )),
-            vec![
-                Worktree {
-                    path: "/repo".into(),
-                    head: "123456789abcdef".into(),
-                    branch: Some("main".into()),
-                    detached: false,
-                    bare: false,
-                    locked: None,
-                    prunable: None,
-                },
-                Worktree {
-                    path: "/linked".into(),
-                    head: "abcdef123456789".into(),
-                    branch: None,
-                    detached: true,
-                    bare: true,
-                    locked: Some("maintenance".into()),
-                    prunable: Some("gone".into()),
-                },
-            ]
-        );
-    }
 }

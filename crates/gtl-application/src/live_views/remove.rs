@@ -46,7 +46,7 @@ fn remove_live_view(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::live_views::persistence::store_test;
+    use crate::live_views::logic::persistence::store_test;
 
     fn seed_live_view(connection: &Connection) {
         connection

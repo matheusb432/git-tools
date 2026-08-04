@@ -331,7 +331,7 @@ mod tests {
 
     fn options(directory: &TempDir, dry: bool, json: bool) -> ManagedOptions {
         ManagedOptions {
-            repos_file: Some(directory.path().join("repos.toml")),
+            repos_file: Some(directory.path().join("projects.toml")),
             home_dir: Some(directory.path().join("home")),
             dry,
             json,

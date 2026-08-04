@@ -1,6 +1,6 @@
 //! Applies a confirmed current-repository push plan.
 
-use super::{commit_progress::CommitProgress, plan_push::PushTarget};
+use super::{logic::commit_progress::CommitProgress, plan_push::PushTarget};
 use crate::ports::{GitClient, GitEffect};
 
 /// Selects whether a push may create a commit or may push existing commits only.

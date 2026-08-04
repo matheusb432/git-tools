@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::ports::{UserSettingsEditError, UserSettingsEditor};
+use crate::ports::{UserSettingsEditError, UserSettingsStore};
 
 /// Requests removal of one supported root-string setting.
 #[derive(Debug, Eq, PartialEq)]
@@ -14,12 +14,12 @@ pub struct RemoveSettingKey {
 ///
 /// ```no_run
 /// use gtl_application::{
-///     ports::UserSettingsEditor,
+///     ports::UserSettingsStore,
 ///     settings::remove_key::{self, RemoveSettingKey, RemoveSettingKeyError},
 /// };
 ///
 /// fn previous_layout(
-///     store: &impl UserSettingsEditor,
+///     store: &mut impl UserSettingsStore,
 /// ) -> Result<Option<String>, RemoveSettingKeyError> {
 ///     Ok(remove_key::execute(
 ///         RemoveSettingKey {
@@ -57,7 +57,7 @@ pub enum RemoveSettingKeyError {
     #[error("user setting `{key}` must be a string")]
     InvalidValueShape { key: String },
     #[error(transparent)]
-    Unexpected(#[from] anyhow::Error),
+    Settings(#[from] UserSettingsEditError),
 }
 
 fn validate(key: &str) -> Result<(), RemoveSettingKeyError> {
@@ -81,11 +81,11 @@ fn validate(key: &str) -> Result<(), RemoveSettingKeyError> {
 ///
 /// ```no_run
 /// use gtl_application::{
-///     ports::UserSettingsEditor,
+///     ports::UserSettingsStore,
 ///     settings::remove_key::{self, RemoveSettingKey, RemoveSettingKeyError},
 /// };
 ///
-/// fn remove_density(store: &impl UserSettingsEditor) -> Result<(), RemoveSettingKeyError> {
+/// fn remove_density(store: &mut impl UserSettingsStore) -> Result<(), RemoveSettingKeyError> {
 ///     remove_key::execute(
 ///         RemoveSettingKey {
 ///             key: "density".into(),
@@ -98,7 +98,7 @@ fn validate(key: &str) -> Result<(), RemoveSettingKeyError> {
 #[cqrsy::command]
 pub fn execute(
     command: RemoveSettingKey,
-    settings_store: &impl UserSettingsEditor,
+    settings_store: &mut impl UserSettingsStore,
 ) -> Result<RemoveSettingKeyOk, RemoveSettingKeyError> {
     let RemoveSettingKey { key } = command;
     validate(&key)?;
@@ -108,9 +108,7 @@ pub fn execute(
             UserSettingsEditError::InvalidValueShape => {
                 RemoveSettingKeyError::InvalidValueShape { key: key.clone() }
             }
-            UserSettingsEditError::Unexpected(error) => RemoveSettingKeyError::Unexpected(
-                error.context(format!("remove user setting `{key}`")),
-            ),
+            error => RemoveSettingKeyError::Settings(error),
         })?;
 
     Ok(RemoveSettingKeyOk { key, value_old })

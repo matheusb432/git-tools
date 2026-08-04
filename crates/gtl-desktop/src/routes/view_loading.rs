@@ -28,7 +28,7 @@ pub(super) fn ready(app: &ViewerApp) -> RouteResult {
     if render_pending {
         return Ok(RouteOutput::Empty(StatusCode::NO_CONTENT));
     }
-    let settings = settings::load(app);
+    let settings = settings::load(app)?;
     let load_id = prepare_materialization(app, settings.options())?;
     tabs::render_view_with_tabs(
         app.renderer,

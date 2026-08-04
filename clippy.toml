@@ -2,6 +2,9 @@
 
 # Internal binaries, never published libraries: let Clippy suggest better signatures freely.
 avoid-breaking-exported-api = false
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
 
 # Pairs with the fleet `cognitive_complexity` opt-in; matches the fleet threshold (clippy default is 25).
 cognitive-complexity-threshold = 30

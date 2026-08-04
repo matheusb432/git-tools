@@ -9,6 +9,7 @@ anyhow.workspace = true
 gtl-application.workspace = true
 command-group.workspace = true
 directories.workspace = true
+gtl-contracts.workspace = true
 gtl-models.workspace = true
 gix.workspace = true
 jiff.workspace = true
@@ -29,7 +30,6 @@ libc.workspace = true
 
 [dev-dependencies]
 gtl-application = { workspace = true, features = ["testing"] }
-gtl-contracts.workspace = true
 tokio = { workspace = true, features = ["fs", "macros", "rt"] }
 
 [lints]

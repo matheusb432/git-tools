@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use gtl_contracts::recipes::Recipe;
 
-use super::{ViewerTabKind, recipe_label};
+use super::{ViewerTabKind, logic::recipe_label};
 use crate::diffs::View;
 
 #[derive(Debug, Clone, PartialEq)]

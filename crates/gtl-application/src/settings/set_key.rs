@@ -3,7 +3,7 @@ use std::str::FromStr as _;
 use gtl_models::viewer::{DiffDensity, DiffLayout, Theme};
 use thiserror::Error;
 
-use crate::ports::{UserSettingsEditError, UserSettingsEditor};
+use crate::ports::{UserSettingsEditError, UserSettingsStore};
 
 /// Requests one validated root-string setting replacement.
 #[derive(Debug, Eq, PartialEq)]
@@ -18,12 +18,12 @@ pub struct SetSettingKey {
 ///
 /// ```no_run
 /// use gtl_application::{
-///     ports::UserSettingsEditor,
+///     ports::UserSettingsStore,
 ///     settings::set_key::{self, SetSettingKey, SetSettingKeyError},
 /// };
 ///
 /// fn previous_theme(
-///     store: &impl UserSettingsEditor,
+///     store: &mut impl UserSettingsStore,
 /// ) -> Result<Option<String>, SetSettingKeyError> {
 ///     Ok(set_key::execute(
 ///         SetSettingKey {
@@ -65,7 +65,7 @@ pub enum SetSettingKeyError {
     #[error("user setting `{key}` must be a string")]
     InvalidValueShape { key: String },
     #[error(transparent)]
-    Unexpected(#[from] anyhow::Error),
+    Settings(#[from] UserSettingsEditError),
 }
 
 fn validate(key: &str, value_new: &str) -> Result<(), SetSettingKeyError> {
@@ -99,11 +99,11 @@ fn validate(key: &str, value_new: &str) -> Result<(), SetSettingKeyError> {
 ///
 /// ```no_run
 /// use gtl_application::{
-///     ports::UserSettingsEditor,
+///     ports::UserSettingsStore,
 ///     settings::set_key::{self, SetSettingKey, SetSettingKeyError},
 /// };
 ///
-/// fn set_layout(store: &impl UserSettingsEditor) -> Result<(), SetSettingKeyError> {
+/// fn set_layout(store: &mut impl UserSettingsStore) -> Result<(), SetSettingKeyError> {
 ///     set_key::execute(
 ///         SetSettingKey {
 ///             key: "layout".into(),
@@ -117,7 +117,7 @@ fn validate(key: &str, value_new: &str) -> Result<(), SetSettingKeyError> {
 #[cqrsy::command]
 pub fn execute(
     command: SetSettingKey,
-    settings_store: &impl UserSettingsEditor,
+    settings_store: &mut impl UserSettingsStore,
 ) -> Result<SetSettingKeyOk, SetSettingKeyError> {
     let SetSettingKey { key, value_new } = command;
     validate(&key, &value_new)?;
@@ -127,9 +127,7 @@ pub fn execute(
             UserSettingsEditError::InvalidValueShape => {
                 SetSettingKeyError::InvalidValueShape { key: key.clone() }
             }
-            UserSettingsEditError::Unexpected(error) => {
-                SetSettingKeyError::Unexpected(error.context(format!("set user setting `{key}`")))
-            }
+            error => SetSettingKeyError::Settings(error),
         })?;
 
     Ok(SetSettingKeyOk {

@@ -10,8 +10,6 @@ pub struct ResolveRepoTop {
     pub repo_path: PathBuf,
 }
 
-pub type ResolveRepoTopOk = PathBuf;
-
 /// Reports a failure to resolve a repository top level.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -38,7 +36,7 @@ pub enum ResolveRepoTopError {
 pub fn execute(
     query: ResolveRepoTop,
     git: &impl GitClient,
-) -> Result<ResolveRepoTopOk, ResolveRepoTopError> {
+) -> Result<PathBuf, ResolveRepoTopError> {
     let top =
         git.discover_top(&query.repo_path)
             .map_err(|source| ResolveRepoTopError::Transport {

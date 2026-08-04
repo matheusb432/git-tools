@@ -115,7 +115,7 @@ walkdir = "2.5.0"
 which = "8.0.4"
 x11-dl = "2.21.0"
 zbus = "5.16.0"
-sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.3.0" }
+sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.4.0" }
 
 [profile.release]
 strip = "symbols"
@@ -124,12 +124,17 @@ strip = "symbols"
 inherits = "release"
 debug = "line-tables-only"
 strip = "none"
-
-# Avoid tweaking, prefer fixing the lints.
 [workspace.lints.clippy]
 all = { level = "warn", priority = -2 }
 pedantic = { level = "warn", priority = -2 }
 correctness = { level = "deny", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+dbg_macro = "warn"
 disallowed_methods = "deny"
 cognitive_complexity = "warn"
 branches_sharing_code = "warn"

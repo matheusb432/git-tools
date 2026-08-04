@@ -28,31 +28,31 @@ pub trait Backend {
     /// Push every managed repo, returning the service-composed wire envelope.
     ///
     /// # Errors
-    /// Returns an error only on transport/parse failure — an error *outcome* is
-    /// carried inside the returned [`Envelope`], not as `Err`.
+    /// Returns an error on transport/parse failure or when a focused backend does not support
+    /// this operation. A service error *outcome* is carried inside the returned [`Envelope`].
     fn push_all(&self, _req: &PushAllRequest) -> anyhow::Result<Envelope<SyncData>> {
-        unimplemented!("push_all")
+        anyhow::bail!("backend does not support push_all")
     }
 
     /// Pull every managed repo, returning the service-composed wire envelope.
     ///
     /// # Errors
-    /// Returns an error only on transport/parse failure — an error *outcome* is
-    /// carried inside the returned [`Envelope`], not as `Err`.
+    /// Returns an error on transport/parse failure or when a focused backend does not support
+    /// this operation. A service error *outcome* is carried inside the returned [`Envelope`].
     fn pull_all(&self, _req: &PullAllRequest) -> anyhow::Result<Envelope<SyncData>> {
-        unimplemented!("pull_all")
+        anyhow::bail!("backend does not support pull_all")
     }
 
     /// Validate + persist a live-view source, returning the service-composed wire envelope.
     ///
     /// # Errors
-    /// Returns an error only on transport/parse failure — a rejection is carried inside the
-    /// returned [`Envelope`], not as `Err`.
+    /// Returns an error on transport/parse failure or when a focused backend does not support
+    /// this operation. A rejection is carried inside the returned [`Envelope`].
     fn save_live_view(
         &self,
         _req: &SaveLiveViewRequest,
     ) -> anyhow::Result<Envelope<SaveLiveViewData>> {
-        unimplemented!("save_live_view")
+        anyhow::bail!("backend does not support save_live_view")
     }
 
     /// Gather an exact tag-bump proposal without mutating Git state.
@@ -60,12 +60,12 @@ pub trait Backend {
         &self,
         _req: &DryRunTagBumpRequest,
     ) -> anyhow::Result<Envelope<TagBumpPreview>> {
-        unimplemented!("dry_run_tag_bump")
+        anyhow::bail!("backend does not support dry_run_tag_bump")
     }
 
     /// Apply one exact displayed tag-bump proposal.
     fn bump_tag(&self, _req: &BumpTagRequest) -> anyhow::Result<Envelope<BumpTagData>> {
-        unimplemented!("bump_tag")
+        anyhow::bail!("backend does not support bump_tag")
     }
 }
 

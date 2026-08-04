@@ -2,8 +2,21 @@
 
 use std::path::PathBuf;
 
-use super::{ListTagsOk, git_command_error::GitCommandError, group::group, parse};
+use super::logic::{
+    git_command_error::GitCommandError,
+    group::{self, group},
+    parse,
+};
 use crate::ports::GitClient;
+
+/// Reports either structured local tag groups or the Git failure that prevented listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListTagsOk {
+    /// Git refs loaded and grouped successfully.
+    Listed { groups: Vec<group::TagGroup> },
+    /// Git refs could not be loaded.
+    Failed { detail: String },
+}
 
 /// Requests the local tags for one repository, optionally with their origin state.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -9,5 +9,5 @@
 
 pub mod find_repo_tops;
 pub mod find_repos;
+pub mod logic;
 pub mod resolve_repo_top;
-pub mod rules;

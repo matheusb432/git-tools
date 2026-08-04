@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use gtl_contracts::recipes::Recipe;
 
-use super::{RecipeRequest, pin};
+use super::RecipeRequest;
 use crate::{
     discovery::find_repo_tops,
     ports::{GitClient, RepoDiscovery},
@@ -17,8 +17,6 @@ pub struct BuildSubrepoRecipes {
     pub operation: RecipeRequest,
     pub include_worktrees: bool,
 }
-
-pub type BuildSubrepoRecipesOk = Vec<Recipe>;
 
 /// Reports a failure while discovering recursive repositories.
 #[derive(Debug, thiserror::Error)]
@@ -39,7 +37,7 @@ pub fn execute(
     query: BuildSubrepoRecipes,
     discovery: &impl RepoDiscovery,
     git: &impl GitClient,
-) -> Result<BuildSubrepoRecipesOk, BuildSubrepoRecipesError> {
+) -> Result<Vec<Recipe>, BuildSubrepoRecipesError> {
     let repos = find_repo_tops::execute(
         find_repo_tops::FindRepoTops {
             root: query.root,
@@ -50,7 +48,9 @@ pub fn execute(
     )?;
     Ok(repos
         .into_iter()
-        .map(|repo| pin::build_resolved(repo.path, query.operation.clone(), Some(repo.label), git))
+        .map(|repo| {
+            super::logic::build_resolved(repo.path, query.operation.clone(), Some(repo.label), git)
+        })
         .collect())
 }
 

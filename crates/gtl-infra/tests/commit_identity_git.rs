@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use std::{path::Path, process::Command};
 
 use gtl_application::repository_sync::{

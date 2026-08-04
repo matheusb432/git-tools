@@ -12,8 +12,6 @@ pub struct OpenDiffFileInConfiguredEditor {
     pub diff_file_path: PathBuf,
 }
 
-pub type OpenDiffFileInConfiguredEditorOk = ();
-
 #[derive(Debug, thiserror::Error)]
 pub enum OpenDiffFileInConfiguredEditorError {
     #[error("the file is not present in the current diff")]
@@ -98,7 +96,7 @@ pub fn execute(
     current_view: &View,
     file_system: &impl FileSystemClient,
     configured_editor: &impl ConfiguredEditorClient,
-) -> Result<OpenDiffFileInConfiguredEditorOk, OpenDiffFileInConfiguredEditorError> {
+) -> Result<(), OpenDiffFileInConfiguredEditorError> {
     let OpenDiffFileInConfiguredEditor { diff_file_path } = command;
     let relative_path = diff_file_path.as_path();
     let file = current_view

@@ -1,29 +1,29 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct DiffRanges {
-    pub(super) diff: String,
-    pub(super) log: String,
+pub(crate) struct DiffRanges {
+    pub(crate) diff: String,
+    pub(crate) log: String,
 }
 
 impl DiffRanges {
-    pub(super) fn unpushed(base: &str) -> Self {
+    pub(crate) fn unpushed(base: &str) -> Self {
         Self::exact(format!("{base}..HEAD"))
     }
 
-    pub(super) fn working_tree(base: &str) -> Self {
+    pub(crate) fn working_tree(base: &str) -> Self {
         Self {
             diff: base.to_string(),
             log: format!("{base}..HEAD"),
         }
     }
 
-    pub(super) fn merge(base: &str) -> Self {
+    pub(crate) fn merge(base: &str) -> Self {
         Self {
             diff: format!("{base}...HEAD"),
             log: format!("{base}..HEAD"),
         }
     }
 
-    pub(super) fn exact(range: impl Into<String>) -> Self {
+    pub(crate) fn exact(range: impl Into<String>) -> Self {
         let range = range.into();
         Self {
             diff: range.clone(),

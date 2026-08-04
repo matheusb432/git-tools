@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Integration coverage for `sample_project_manifest_path` with Unix stub scripts.
 
 use std::path::PathBuf;
@@ -28,7 +30,7 @@ fn sample_project_manifest_path_returns_stub_stdout_when_target_exists() {
     use std::os::unix::fs::PermissionsExt;
 
     let root = unique_temp_dir("sample_project-manifest-path-stub-ok");
-    let target = root.join("resolved/repos.toml");
+    let target = root.join("resolved/projects.toml");
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "").unwrap();
     let stub = root.join("fake-sample_project.sh");
@@ -47,7 +49,7 @@ fn sample_project_manifest_path_returns_none_when_stub_path_does_not_exist() {
     let stub = root.join("fake-sample_project.sh");
     std::fs::write(
         &stub,
-        "#!/bin/sh\necho '/definitely/not/a/real/path/repos.toml'\n",
+        "#!/bin/sh\necho '/definitely/not/a/real/path/projects.toml'\n",
     )
     .unwrap();
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();

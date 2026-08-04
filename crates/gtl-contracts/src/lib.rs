@@ -6,4 +6,5 @@ pub mod envelope;
 pub mod live_views;
 pub mod managed;
 pub mod recipes;
+pub mod settings;
 pub mod tags;

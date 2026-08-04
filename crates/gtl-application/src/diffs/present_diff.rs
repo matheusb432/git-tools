@@ -7,7 +7,7 @@ use crate::{
         DiffViewerRecipeOperation, GitClient,
     },
     recipes::RecipeRequest,
-    shared::notes::Note,
+    shared::{git_range_pinning, notes::Note},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,11 +139,13 @@ fn build_recipe(
             DiffViewerRecipeOperation::Diff(pin_target(&source, target, git))
         }
         RecipeRequest::MergeDiff { base } => DiffViewerRecipeOperation::MergeDiff {
-            pinned: pin_merge(&source, base.as_deref(), git),
+            pinned: git_range_pinning::resolve_merge_range(&source, base.as_deref(), git)
+                .map(to_pinned_range),
             base,
         },
         RecipeRequest::SquashPreview => DiffViewerRecipeOperation::SquashPreview {
-            pinned: pin_range(&source, "@{u}", "HEAD", git),
+            pinned: git_range_pinning::resolve_range(&source, "@{u}", "HEAD", git)
+                .map(to_pinned_range),
         },
     };
     Ok(DiffViewerRecipe {
@@ -156,69 +158,51 @@ fn build_recipe(
 fn pin_target(repo_path: &Path, target: DiffTarget, git: &impl GitClient) -> DiffTarget {
     match target {
         DiffTarget::Unpushed { pinned: None } => DiffTarget::Unpushed {
-            pinned: pin_range(repo_path, "@{u}", "HEAD", git),
+            pinned: git_range_pinning::resolve_range(repo_path, "@{u}", "HEAD", git)
+                .map(to_pinned_range),
         },
         DiffTarget::Range {
             range,
             pinned: None,
         } => DiffTarget::Range {
-            pinned: pin_exact_range(repo_path, &range, git),
+            pinned: git_range_pinning::resolve_exact_range(repo_path, &range, git)
+                .map(to_pinned_range),
             range,
         },
         DiffTarget::Merge { base, pinned: None } => DiffTarget::Merge {
-            pinned: pin_merge(repo_path, Some(&base), git),
+            pinned: git_range_pinning::resolve_merge_range(repo_path, Some(&base), git)
+                .map(to_pinned_range),
             base,
         },
         DiffTarget::Last {
             count,
             pinned: None,
         } => DiffTarget::Last {
-            pinned: pin_range(repo_path, &format!("HEAD~{count}"), "HEAD", git),
+            pinned: git_range_pinning::resolve_range(
+                repo_path,
+                &format!("HEAD~{count}"),
+                "HEAD",
+                git,
+            )
+            .map(to_pinned_range),
             count,
         },
         target => target,
     }
 }
 
-fn pin_exact_range(repo_path: &Path, range: &str, git: &impl GitClient) -> Option<PinnedRange> {
-    if range.contains("...") {
-        return None;
+fn to_pinned_range(range: git_range_pinning::ResolvedGitRange) -> PinnedRange {
+    PinnedRange {
+        base: range.base,
+        head: range.head,
     }
-    let (base, head) = range.split_once("..")?;
-    if base.is_empty() || head.is_empty() {
-        return None;
-    }
-    pin_range(repo_path, base, head, git)
-}
-
-fn pin_merge(repo_path: &Path, base: Option<&str>, git: &impl GitClient) -> Option<PinnedRange> {
-    let base = base
-        .map(str::trim)
-        .filter(|base| !base.is_empty())
-        .unwrap_or(super::render_merge_diff::DEFAULT_BASE);
-    Some(PinnedRange {
-        base: git.merge_base(repo_path, base, "HEAD").ok()?,
-        head: git.resolve_sha(repo_path, "HEAD").ok()?,
-    })
-}
-
-fn pin_range(
-    repo_path: &Path,
-    base: &str,
-    head: &str,
-    git: &impl GitClient,
-) -> Option<PinnedRange> {
-    Some(PinnedRange {
-        base: git.resolve_sha(repo_path, base).ok()?,
-        head: git.resolve_sha(repo_path, head).ok()?,
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        diffs::{DiffTargetRequest, render_diff::RenderDiff},
+        diffs::{DiffTargetRequest, PinnedRange, render_diff::RenderDiff},
         ports::{DiffRenderResponse, DiffViewerBatch, DiffViewerClient, DiffViewerRecipeOperation},
         testing::FakeGitClient,
     };

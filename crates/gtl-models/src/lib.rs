@@ -5,6 +5,7 @@ pub mod discovery;
 pub mod live_views;
 pub mod managed;
 pub mod repository;
+pub mod settings;
 pub mod tags;
 pub mod viewer;
 pub mod worktrees;

@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Router-level tests exercising the concrete daemon state through real temporary boundaries.
 
 use std::{

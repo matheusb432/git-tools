@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use gtl_models::tags::Tag;
 
-use super::{
+use super::logic::{
     git_command_error::GitCommandError,
     outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
     parse,
@@ -16,8 +16,6 @@ use crate::ports::GitClient;
 pub struct PushTags {
     pub repo_path: PathBuf,
 }
-
-pub type PushTagsOk = TagActionOutcome;
 
 /// Reports an unexpected Git transport failure while publishing tags.
 #[derive(Debug, thiserror::Error)]
@@ -38,7 +36,7 @@ pub enum PushTagsError {
 ///
 /// Returns [`PushTagsError`] when Git cannot be executed.
 #[cqrsy::command]
-pub fn execute(command: PushTags, git: &impl GitClient) -> Result<PushTagsOk, PushTagsError> {
+pub fn execute(command: PushTags, git: &impl GitClient) -> Result<TagActionOutcome, PushTagsError> {
     match push(command, git) {
         Ok(outcome) => Ok(outcome),
         Err(GitCommandError::Rejected { detail, progress }) => {
@@ -142,7 +140,7 @@ mod tests {
 
     use super::{PushTags, PushTagsError, execute, push_refspecs};
     use crate::{
-        tags::outcome::{
+        tags::logic::outcome::{
             TagActionOutcome, TagActionStatus, TagOperationProgress, TagRemotePushProgress,
         },
         testing::ScriptedGitClient,

@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! The walking-skeleton round trip: cli -> autostarted daemon -> store.
 //!
 //! Fixture helpers are copied from `crates/gtl-cli/tests/e2e.rs` rather than shared

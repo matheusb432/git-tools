@@ -4,9 +4,9 @@ pub mod pull_all;
 pub mod push_all;
 
 use gtl_application::managed::{
+    RepoSyncResult, SyncExit, SyncStatus,
     pull_all::{PullAll, PullAllOk},
     push_all::{PushAll, PushAllOk},
-    service::{RepoSyncResult, SyncExit, SyncStatus},
 };
 use gtl_contracts::{
     envelope::{Envelope, Outcome},

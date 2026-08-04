@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Security posture tripwire for the custom-origin htmx viewer.
 use std::{fs, path::Path};
 

@@ -46,7 +46,7 @@ pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     }
 
     let transient = view_loading::ensure_active_view(app)?;
-    let settings = settings::load(app);
+    let settings = settings::load(app)?;
     let load_id = view_loading::prepare_materialization(app, settings.options())?;
     tabs::render_tabs_with_view(
         app.renderer,

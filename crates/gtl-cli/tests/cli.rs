@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Behavior tests: run the built binary and assert on help/usage text and exit codes.
 //! Command behavior over real git repos lives in `tests/e2e.rs`; these pin the clap-owned
 //! surface (subcommand list, flags, and the 0/1/2 exit-code contract).

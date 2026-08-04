@@ -13,7 +13,6 @@ mod html_renderer;
 mod managed_manifest;
 mod push_ledger;
 mod repo_discovery;
-mod user_settings_editor;
 mod user_settings_store;
 
 pub use artifact_store::{ArtifactMeta, ArtifactStore, HistoryRecord, PlacedArtifact};
@@ -34,5 +33,4 @@ pub use html_renderer::HtmlRenderer;
 pub use managed_manifest::ManagedManifest;
 pub use push_ledger::{LedgerEntry, PushLedger};
 pub use repo_discovery::RepoDiscovery;
-pub use user_settings_editor::{UserSettingsEditError, UserSettingsEditor};
-pub use user_settings_store::{AppSettings, UserSettingsStore};
+pub use user_settings_store::{UserSettingsEditError, UserSettingsLoadError, UserSettingsStore};

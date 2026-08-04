@@ -2,7 +2,7 @@
 
 use gtl_models::managed::{ManagedRepo, working_tree::CommitFile};
 
-use super::working_tree;
+use super::logic::working_tree;
 use crate::ports::{GitClient, GitEffect};
 
 /// Requests one local commit attempt for every resolved managed repository.

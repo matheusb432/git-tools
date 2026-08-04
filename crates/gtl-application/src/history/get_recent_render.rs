@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::history::{
     RecentRenderRecord, RecentRenderRowError,
-    persistence::{RECENT_RENDER_SELECT, RecentRenderRow},
+    logic::persistence::{RECENT_RENDER_SELECT, RecentRenderRow},
 };
 
 /// Requests one recent render by its stable persisted-row identity.
@@ -62,7 +62,7 @@ fn get_recent_render(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::history::persistence::{seed_recent_render, store_test};
+    use crate::history::logic::persistence::{seed_recent_render, store_test};
 
     #[test]
     fn recent_render_is_looked_up_by_stable_id() {

@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use super::{
+use super::logic::{
     git_command_error::GitCommandError,
     outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
 };
@@ -15,8 +15,6 @@ pub struct AddTag {
     pub tag: String,
     pub message: String,
 }
-
-pub type AddTagOk = TagActionOutcome;
 
 /// Reports an unexpected Git transport failure while adding a tag.
 #[derive(Debug, thiserror::Error)]
@@ -37,7 +35,7 @@ pub enum AddTagError {
 ///
 /// Returns [`AddTagError`] when Git cannot be executed.
 #[cqrsy::command]
-pub fn execute(command: AddTag, git: &impl GitClient) -> Result<AddTagOk, AddTagError> {
+pub fn execute(command: AddTag, git: &impl GitClient) -> Result<TagActionOutcome, AddTagError> {
     match create(command, git) {
         Ok(outcome) => Ok(outcome),
         Err(GitCommandError::Rejected { detail, progress }) => {
@@ -99,7 +97,7 @@ mod tests {
 
     use super::{AddTag, execute, validate};
     use crate::{
-        tags::outcome::{
+        tags::logic::outcome::{
             TagActionOutcome, TagActionStatus, TagOperationProgress, TagRemotePushProgress,
         },
         testing::ScriptedGitClient,

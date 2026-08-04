@@ -156,7 +156,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        live_views::{list, persistence::store_test},
+        live_views::{list, logic::persistence::store_test},
         ports::GitRepositoryState,
         shared::notes::NoteLevel,
         testing::{FakeGitClient, FixedClock},

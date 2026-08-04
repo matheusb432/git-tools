@@ -3,11 +3,12 @@
 //! whether an empty or errored view is skipped-and-counted (diff-subrepos) or kept
 //! and propagated (diff-all).
 
+use gtl_models::settings::UserSettings;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    diffs::{DiffTarget, View, compute_diff},
-    ports::{AppSettings, Clock, GitClient},
+    diffs::{DiffTarget, View, diff_computation},
+    ports::{Clock, GitClient},
     shared::notes::Note,
 };
 
@@ -33,7 +34,7 @@ pub(crate) struct BatchBuild {
 pub(crate) fn render_batch(
     source: &impl GitClient,
     target: &DiffTarget,
-    settings: &AppSettings,
+    settings: &UserSettings,
     repos: &[RepoRef],
     skip_empty: bool,
     notes: &mut Vec<Note>,
@@ -41,7 +42,7 @@ pub(crate) fn render_batch(
     let mut views = Vec::with_capacity(repos.len());
     let mut skipped = 0usize;
     for repo in repos {
-        let built = compute_diff::compute(&repo.top, target, settings, source);
+        let built = diff_computation::build(source, &repo.top, target, settings.diff_exclusions());
         if skip_empty {
             match built {
                 Ok(mut response) if response.view.has_diff_content() => {
@@ -76,14 +77,13 @@ pub(crate) fn dated_title(clock: &impl Clock, label: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::diffs::DiffExclusions;
+    use gtl_models::{diffs::DiffExclusions, settings::UserSettings, viewer::RenderOptions};
 
     use super::{RepoRef, dated_title, render_batch};
     use crate::{
         diffs::DiffTarget,
-        ports::AppSettings,
         testing::{
-            FakeGitClient, FixedClock, RepoOverride,
+            FakeGitClient, FixedClock, RepoOverride, default_user_settings,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
@@ -99,6 +99,10 @@ mod tests {
                 label: "repo-b".into(),
             },
         ]
+    }
+
+    fn settings(exclusions: DiffExclusions) -> UserSettings {
+        UserSettings::new(None, RenderOptions::DEFAULT, true, exclusions)
     }
 
     #[test]
@@ -131,7 +135,7 @@ mod tests {
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            &AppSettings::default(),
+            &default_user_settings(),
             &repos,
             true,
             &mut notes,
@@ -159,7 +163,7 @@ mod tests {
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            &AppSettings::default(),
+            &default_user_settings(),
             &repos,
             true,
             &mut notes,
@@ -182,7 +186,7 @@ mod tests {
         let batch = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            &AppSettings::default(),
+            &default_user_settings(),
             &repos,
             false,
             &mut notes,
@@ -225,7 +229,7 @@ diff --git a/notes.md b/notes.md\n\
             [("repo-a".to_string(), vec!["md".to_string()])],
             None,
         );
-        let settings = AppSettings::new(None, true, exclusions);
+        let settings = settings(exclusions);
         let repos = two_repos();
         let mut notes = Vec::new();
 
@@ -273,11 +277,10 @@ diff --git a/notes.md b/notes.md\n\
                 },
             );
         }
-        let settings = AppSettings::new(
+        let settings = settings(DiffExclusions::new(
+            [("repo-a".to_string(), vec!["md"])],
             None,
-            true,
-            DiffExclusions::new([("repo-a".to_string(), vec!["md"])], None),
-        );
+        ));
         let mut notes = Vec::new();
 
         let batch = render_batch(
@@ -307,7 +310,7 @@ diff --git a/notes.md b/notes.md\n\
         let result = render_batch(
             &source,
             &DiffTarget::Unpushed { pinned: None },
-            &AppSettings::default(),
+            &default_user_settings(),
             &repos,
             false,
             &mut notes,

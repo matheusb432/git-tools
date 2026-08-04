@@ -3,13 +3,11 @@
 //! The desktop's in-process mediator dispatches this for recipe tabs; the
 //! daemon's `--raw` path keeps using `render_diff`.
 
-mod view;
-
 use std::path::PathBuf;
 
 use crate::{
-    diffs::{DiffTarget, View},
-    ports::{AppSettings, GitClient, UserSettingsStore},
+    diffs::{DiffTarget, View, diff_computation},
+    ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
     shared::notes::Note,
 };
 
@@ -33,6 +31,8 @@ pub struct ComputeDiffOk {
 #[derive(Debug, thiserror::Error)]
 pub enum ComputeDiffError {
     #[error(transparent)]
+    Settings(#[from] UserSettingsLoadError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
@@ -44,23 +44,13 @@ pub fn execute(
     source: &impl GitClient,
 ) -> Result<ComputeDiffOk, ComputeDiffError> {
     let ComputeDiff { cwd, target } = req;
-    let settings = app_settings.load();
+    let settings = app_settings.load()?;
     let top = source.top_level(&cwd)?;
-    Ok(compute(&top, &target, &settings, source)?)
-}
-
-pub(crate) fn compute(
-    top: &str,
-    target: &DiffTarget,
-    settings: &AppSettings,
-    source: &impl GitClient,
-) -> anyhow::Result<ComputeDiffOk> {
-    let mut notes = Vec::new();
-    let (view, summary) = view::build(source, top, target, settings.diff_exclusions(), &mut notes)?;
+    let built = diff_computation::build(source, &top, &target, settings.diff_exclusions())?;
     Ok(ComputeDiffOk {
-        view,
-        summary,
-        notes,
+        view: built.view,
+        summary: built.summary,
+        notes: built.notes,
     })
 }
 
@@ -68,15 +58,16 @@ pub(crate) fn compute(
 mod tests {
     use std::path::PathBuf;
 
-    use gtl_models::diffs::DiffExclusions;
+    use gtl_models::{diffs::DiffExclusions, settings::UserSettings, viewer::RenderOptions};
 
     use super::*;
     use crate::{
         diffs::{
             DiffTarget, PinnedRange,
-            range_view::{LABEL_COMMITS_IN_RANGE, LABEL_UNPUSHED_COMMITS, NOTE_WORKING_TREE},
+            logic::range_view::{
+                LABEL_COMMITS_IN_RANGE, LABEL_UNPUSHED_COMMITS, NOTE_WORKING_TREE,
+            },
         },
-        ports::AppSettings,
         testing::{
             FakeGitClient, FixedUserSettingsStore,
             diffs::{DIFF_SINGLE_FILE, commit},
@@ -95,33 +86,6 @@ mod tests {
         source: &FakeGitClient,
     ) -> Result<ComputeDiffOk, ComputeDiffError> {
         execute(request, &FixedUserSettingsStore::default(), source)
-    }
-
-    #[test]
-    fn viewer_and_raw_computation_share_the_same_result() {
-        let source = FakeGitClient {
-            top_level: Some("/repo".into()),
-            branch: "feature".into(),
-            upstream: Some("origin/main".into()),
-            commits: vec![commit("abc1234")],
-            diff_output: DIFF_SINGLE_FILE.into(),
-            ..Default::default()
-        };
-        let settings = AppSettings::default();
-        let request = req(DiffTarget::Unpushed { pinned: None });
-
-        let viewer = execute(
-            request.clone(),
-            &FixedUserSettingsStore::new(settings.clone()),
-            &source,
-        )
-        .expect("viewer compute succeeds");
-        let raw =
-            compute("/repo", &request.target, &settings, &source).expect("raw compute succeeds");
-
-        assert_eq!(viewer.view, raw.view);
-        assert_eq!(viewer.summary, raw.summary);
-        assert_eq!(viewer.notes, raw.notes);
     }
 
     fn pin() -> PinnedRange {
@@ -288,7 +252,9 @@ mod tests {
         let error = execute_default_settings(req(DiffTarget::Base("nope".into())), &source)
             .expect_err("unknown base errors");
 
-        let ComputeDiffError::Unexpected(err) = error;
+        let ComputeDiffError::Unexpected(err) = error else {
+            panic!("expected Git computation error");
+        };
         assert_eq!(format!("{err:#}"), "unknown revision nope");
     }
 
@@ -317,6 +283,10 @@ index 333..444 100644\n\
         )
     }
 
+    fn settings(exclusions: DiffExclusions) -> UserSettings {
+        UserSettings::new(None, RenderOptions::DEFAULT, true, exclusions)
+    }
+
     #[test]
     fn configured_extensions_are_hidden_and_reported() {
         let source = FakeGitClient {
@@ -328,8 +298,7 @@ index 333..444 100644\n\
             ..Default::default()
         };
         let request = req(DiffTarget::Unpushed { pinned: None });
-        let app_settings =
-            FixedUserSettingsStore::new(AppSettings::new(None, true, excluding("repo", &["md"])));
+        let app_settings = FixedUserSettingsStore::new(settings(excluding("repo", &["md"])));
 
         let response = execute(request, &app_settings, &source).expect("compute succeeds");
 
@@ -366,11 +335,7 @@ index 333..444 100644\n\
             ..Default::default()
         };
         let request = req(DiffTarget::Unpushed { pinned: None });
-        let app_settings = FixedUserSettingsStore::new(AppSettings::new(
-            None,
-            true,
-            excluding("other-repo", &["md"]),
-        ));
+        let app_settings = FixedUserSettingsStore::new(settings(excluding("other-repo", &["md"])));
 
         let response = execute(request, &app_settings, &source).expect("compute succeeds");
 
@@ -390,8 +355,7 @@ index 333..444 100644\n\
             ..Default::default()
         };
         let request = req(DiffTarget::Unpushed { pinned: None });
-        let app_settings =
-            FixedUserSettingsStore::new(AppSettings::new(None, true, excluding("repo", &["md"])));
+        let app_settings = FixedUserSettingsStore::new(settings(excluding("repo", &["md"])));
 
         let response = execute(request, &app_settings, &source).expect("compute succeeds");
 

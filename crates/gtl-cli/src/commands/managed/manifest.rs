@@ -1,4 +1,4 @@
-//! Loading and resolving the `repos.toml` managed-repos manifest.
+//! Loads managed Git repositories from sample_project's `projects.toml` manifest.
 
 use std::{
     path::{Path, PathBuf},
@@ -10,16 +10,16 @@ use serde::Deserialize;
 
 use super::{ManagedOptions, ManagedRepo};
 
-/// The `repos.toml` document: an array of `[[repo]]` tables. Only `path` + `remote` are
-/// read here; sample_project owns the other fields (`code`/`slug`/`color`).
+/// The `projects.toml` document. Only `path`, `remote`, and `managed` are read here; sample_project owns
+/// the remaining project fields.
 #[derive(Deserialize)]
 struct Manifest {
     #[serde(default)]
-    repo: Vec<RepoEntry>,
+    project: Vec<ProjectEntry>,
 }
 
 #[derive(Deserialize)]
-struct RepoEntry {
+struct ProjectEntry {
     path: String,
     #[serde(default)]
     remote: String,
@@ -27,17 +27,17 @@ struct RepoEntry {
     managed: bool,
 }
 
-/// serde default for `RepoEntry::managed` — repos are in-scope unless they opt out (CFG-0185).
+/// Serde default for [`ProjectEntry::managed`]; sample_project projects are active unless they opt out.
 fn default_true() -> bool {
     true
 }
 
 fn parse_manifest(raw: &str, home_dir: &Path) -> anyhow::Result<Vec<ManagedRepo>> {
     let manifest: Manifest =
-        toml::from_str(raw).context("parsing managed-repos manifest (repos.toml)")?;
+        toml::from_str(raw).context("parsing managed-repos manifest (projects.toml)")?;
     let mut repos = Vec::new();
 
-    for entry in manifest.repo {
+    for entry in manifest.project {
         let local = entry.path.trim();
         if local.is_empty() {
             continue;
@@ -110,7 +110,7 @@ fn resolve_repos_file_from_sources(
     }
 
     let home_hint = home_dir.map(home_default_repos_file).map_or_else(
-        || "$HOME/tools/sample_project/repos.toml".into(),
+        || "$HOME/tools/sample_project/projects.toml".into(),
         |path| path.display().to_string(),
     );
     Err(anyhow!(
@@ -120,7 +120,7 @@ fn resolve_repos_file_from_sources(
 
 fn find_upward_config(start: &Path) -> Option<PathBuf> {
     for dir in start.ancestors() {
-        let candidate = dir.join("repos.toml");
+        let candidate = dir.join("projects.toml");
         if candidate.exists() {
             return Some(candidate);
         }
@@ -129,10 +129,10 @@ fn find_upward_config(start: &Path) -> Option<PathBuf> {
 }
 
 fn home_default_repos_file(home_dir: &Path) -> PathBuf {
-    home_dir.join("tools").join("sample_project").join("repos.toml")
+    home_dir.join("tools").join("sample_project").join("projects.toml")
 }
 
-/// Best-effort: asks `sample_project repos manifest-path` for the fleet's resolved manifest
+/// Best-effort: asks `sample_project projects manifest-path` for the fleet's resolved manifest
 /// location, so a sample_project relocation doesn't also require updating the literal in
 /// `home_default_repos_file` below. Returns `None` on any failure (binary missing,
 /// non-zero exit, unreadable output, or a printed path that doesn't exist) — this is
@@ -140,7 +140,7 @@ fn home_default_repos_file(home_dir: &Path) -> PathBuf {
 /// the true offline last resort for a fresh clone where `sample_project` isn't installed yet.
 pub fn sample_project_manifest_path(binary: &str) -> Option<PathBuf> {
     let output = Command::new(binary)
-        .args(["repos", "manifest-path"])
+        .args(["projects", "manifest-path"])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -188,8 +188,8 @@ mod tests {
     fn parses_toml_manifest_with_comments_and_missing_remote() {
         let repos = parse_manifest(
             "# comment\n\
-             [[repo]]\npath = \"self/repo-b\"\nremote = \"https://example.invalid/cfg.git\"\ncode = \"CFG\"\n\n\
-             [[repo]]\npath = \"tools/git-tools\"\n",
+             [[project]]\npath = \"self/repo-b\"\nremote = \"https://example.invalid/cfg.git\"\ncode = \"CFG\"\n\n\
+             [[project]]\npath = \"tools/git-tools\"\n",
             Path::new("/home/me"),
         )
         .unwrap();
@@ -210,8 +210,8 @@ mod tests {
         let explicit = root.join("explicit.txt");
         let env_file = root.join("env.txt");
         let cwd = root.join("workspace").join("repo");
-        let upward = root.join("workspace/repos.toml");
-        let home_default = home.join("tools/sample_project/repos.toml");
+        let upward = root.join("workspace/projects.toml");
+        let home_default = home.join("tools/sample_project/projects.toml");
         touch(&explicit);
         touch(&env_file);
         touch(&upward);
@@ -244,7 +244,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let home = directory.path().join("home");
         let cwd = directory.path().join("elsewhere").join("repo");
-        let home_default = home.join("tools/sample_project/repos.toml");
+        let home_default = home.join("tools/sample_project/projects.toml");
         touch(&home_default);
 
         assert_eq!(
@@ -275,8 +275,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let home = directory.path().join("home");
         let cwd = directory.path().join("elsewhere").join("repo");
-        let home_default = home.join("tools/sample_project/repos.toml");
-        let sample_project_answer = directory.path().join("live/repos.toml");
+        let home_default = home.join("tools/sample_project/projects.toml");
+        let sample_project_answer = directory.path().join("live/projects.toml");
         touch(&home_default);
         touch(&sample_project_answer);
 
@@ -292,8 +292,8 @@ mod tests {
     #[test]
     fn parse_manifest_skips_paused_repos() {
         let home = Path::new("/home/u");
-        let raw = "[[repo]]\npath='self/cfg'\nremote='git@x:c.git'\n\
-                   [[repo]]\npath='work/sample_project'\nremote='git@x:i.git'\nmanaged=false\n";
+        let raw = "[[project]]\npath='self/cfg'\nremote='git@x:c.git'\n\
+                   [[project]]\npath='work/sample_project'\nremote='git@x:i.git'\nmanaged=false\n";
         let repos = parse_manifest(raw, home).unwrap();
         assert_eq!(repos.len(), 1);
         assert_eq!(repos[0].name, "self/cfg");

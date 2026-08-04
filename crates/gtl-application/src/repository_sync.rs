@@ -1,7 +1,7 @@
 pub mod apply_commit;
 pub mod apply_push;
-mod commit_progress;
+mod logic;
 pub mod plan_commit;
 pub mod plan_push;
 
-pub use commit_progress::CommitProgress;
+pub use logic::commit_progress::CommitProgress;

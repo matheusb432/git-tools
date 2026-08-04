@@ -1,13 +1,16 @@
 //! In-memory fakes for the application ports (template pattern: cheap-clone
 //! shared state so tests keep a handle after passing a fake in).
 
+mod tags;
+
 #[cfg(test)]
 pub(crate) mod diffs;
 #[cfg(test)]
 pub(crate) mod viewer;
+mod worktrees;
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
@@ -16,16 +19,17 @@ use std::{
 };
 
 use gtl_models::{
-    diffs::{Commit, DiffKind},
+    diffs::{Commit, DiffExclusions, DiffKind},
     managed::ManagedRepo,
+    settings::UserSettings,
     viewer::RenderOptions,
 };
 
 use crate::ports::{
-    AppSettings, ArtifactMeta, ArtifactStore, Clock, GitClient, GitCommitReceipt, GitDiffFormat,
-    GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState, GitWorkingTree, HistoryRecord,
-    HtmlRenderer, LedgerEntry, ManagedManifest, MergedBranch, PlacedArtifact, PushLedger,
-    RepoDiscovery, UserSettingsStore,
+    ArtifactMeta, ArtifactStore, Clock, GitClient, GitCommitReceipt, GitDiffFormat, GitDiffRequest,
+    GitEffect, GitPushReceipt, GitRepositoryState, GitWorkingTree, HistoryRecord, HtmlRenderer,
+    LedgerEntry, ManagedManifest, MergedBranch, PlacedArtifact, PushLedger, RepoDiscovery,
+    UserSettingsEditError, UserSettingsLoadError, UserSettingsStore,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,21 +73,86 @@ impl GitResponse {
 }
 
 /// Fixed effective settings for application operation tests.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FixedUserSettingsStore {
-    settings: AppSettings,
+    settings: UserSettings,
 }
 
 impl FixedUserSettingsStore {
     /// Creates a store that returns `settings` from every load.
-    pub const fn new(settings: AppSettings) -> Self {
+    pub const fn new(settings: UserSettings) -> Self {
         Self { settings }
     }
 }
 
+pub fn default_user_settings() -> UserSettings {
+    UserSettings::new(
+        None,
+        RenderOptions::DEFAULT,
+        true,
+        DiffExclusions::default(),
+    )
+}
+
+impl Default for FixedUserSettingsStore {
+    fn default() -> Self {
+        Self::new(default_user_settings())
+    }
+}
+
 impl UserSettingsStore for FixedUserSettingsStore {
-    fn load(&self) -> AppSettings {
-        self.settings.clone()
+    fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
+        Ok(self.settings.clone())
+    }
+
+    fn set_string(
+        &mut self,
+        _key: &str,
+        _value_new: &str,
+    ) -> Result<Option<String>, UserSettingsEditError> {
+        Err(anyhow::anyhow!("fixed user settings cannot be edited").into())
+    }
+
+    fn remove_string(&mut self, _key: &str) -> Result<Option<String>, UserSettingsEditError> {
+        Err(anyhow::anyhow!("fixed user settings cannot be edited").into())
+    }
+}
+
+/// User settings snapshots returned in insertion order.
+#[derive(Debug, Clone)]
+pub struct SequenceUserSettingsStore {
+    snapshots: Arc<Mutex<VecDeque<UserSettings>>>,
+}
+
+impl SequenceUserSettingsStore {
+    /// Creates a store that returns each snapshot in insertion order.
+    pub fn new(snapshots: impl IntoIterator<Item = UserSettings>) -> Self {
+        Self {
+            snapshots: Arc::new(Mutex::new(snapshots.into_iter().collect())),
+        }
+    }
+}
+
+impl UserSettingsStore for SequenceUserSettingsStore {
+    fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
+        Ok(self
+            .snapshots
+            .lock()
+            .expect("settings sequence lock")
+            .pop_front()
+            .expect("configured settings snapshot"))
+    }
+
+    fn set_string(
+        &mut self,
+        _key: &str,
+        _value_new: &str,
+    ) -> Result<Option<String>, UserSettingsEditError> {
+        Err(anyhow::anyhow!("sequence user settings cannot be edited").into())
+    }
+
+    fn remove_string(&mut self, _key: &str) -> Result<Option<String>, UserSettingsEditError> {
+        Err(anyhow::anyhow!("sequence user settings cannot be edited").into())
     }
 }
 
@@ -361,9 +430,14 @@ impl GitClient for FakeGitClient {
         // The exclusion pass asks for paths only; mirror git by listing the
         // scripted diff's file paths, one per line.
         if request.format == GitDiffFormat::NamesOnly {
-            let paths: Vec<String> = crate::diffs::util::parse_diff(&self.scripted_diff(repo_path))
-                .into_iter()
-                .map(|file| file.path)
+            let paths: Vec<String> = self
+                .scripted_diff(repo_path)
+                .lines()
+                .filter_map(|line| {
+                    line.strip_prefix("diff --git a/")
+                        .and_then(|rest| rest.split_once(" b/"))
+                        .map(|(_, path)| path.to_string())
+                })
                 .collect();
             return Ok(paths.join("\n"));
         }
@@ -574,6 +648,14 @@ pub struct SyncOutput {
     pub combined: String,
 }
 
+fn last_non_empty_line(output: &str) -> Option<&str> {
+    output
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+}
+
 impl SyncOutput {
     fn effect(&self) -> GitEffect<String> {
         if self.success {
@@ -586,7 +668,7 @@ impl SyncOutput {
     fn push_effect(&self) -> GitEffect<GitPushReceipt> {
         if self.success {
             GitEffect::Applied(GitPushReceipt {
-                detail: crate::shared::git::last_non_empty_line(&self.combined)
+                detail: last_non_empty_line(&self.combined)
                     .unwrap_or("up to date")
                     .to_string(),
                 up_to_date: self.combined.contains("Everything up-to-date"),
@@ -866,7 +948,7 @@ impl GitClient for ScriptedGitClient {
             self,
             repo_path,
             &["worktree", "list", "--porcelain"],
-            crate::worktrees::porcelain::parse,
+            worktrees::parse,
         )
     }
     fn local_tags(
@@ -876,12 +958,8 @@ impl GitClient for ScriptedGitClient {
         scripted_effect(
             self,
             repo_path,
-            &[
-                "for-each-ref",
-                crate::tags::parse::LOCAL_TAG_FORMAT_ARG,
-                "refs/tags",
-            ],
-            crate::tags::parse::parse_refs,
+            &["for-each-ref", tags::LOCAL_TAG_FORMAT_ARG, "refs/tags"],
+            tags::parse_refs,
         )
     }
     fn remote_tags(
@@ -893,7 +971,7 @@ impl GitClient for ScriptedGitClient {
             self,
             repo_path,
             &["ls-remote", "--tags", remote],
-            crate::tags::parse::parse_remote_refs,
+            tags::parse_remote_refs,
         )
     }
     fn previous_checkout(&self, repo_path: &Path) -> anyhow::Result<Option<String>> {
@@ -937,7 +1015,7 @@ impl GitClient for ScriptedGitClient {
     ) -> anyhow::Result<GitEffect<GitCommitReceipt>> {
         scripted_effect(self, repo_path, &["commit", "-m", message], |output| {
             GitCommitReceipt {
-                detail: crate::shared::git::last_non_empty_line(output)
+                detail: last_non_empty_line(output)
                     .unwrap_or("committed")
                     .to_string(),
                 identity: commit_identity(output),
@@ -984,9 +1062,7 @@ impl GitClient for ScriptedGitClient {
             args.push("--dry-run");
         }
         scripted_effect(self, repo_path, &args, |output| GitPushReceipt {
-            detail: crate::shared::git::last_non_empty_line(output)
-                .unwrap_or("pushed")
-                .to_string(),
+            detail: last_non_empty_line(output).unwrap_or("pushed").to_string(),
             up_to_date: output.contains("Everything up-to-date"),
         })
     }

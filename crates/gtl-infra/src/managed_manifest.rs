@@ -1,5 +1,4 @@
-//! The real `ManagedManifest` adapter: parses an already-resolved `repos.toml`.
-//! Ported verbatim from the CLI's retired `commands/managed/manifest.rs::parse_manifest`.
+//! Parses an already-resolved sample_project project manifest into GTL's managed Git repositories.
 
 use std::path::Path;
 
@@ -13,11 +12,11 @@ pub struct TokioManagedManifest;
 #[derive(Deserialize)]
 struct Manifest {
     #[serde(default)]
-    repo: Vec<RepoEntry>,
+    project: Vec<ProjectEntry>,
 }
 
 #[derive(Deserialize)]
-struct RepoEntry {
+struct ProjectEntry {
     path: String,
     #[serde(default)]
     remote: String,
@@ -31,9 +30,9 @@ fn default_true() -> bool {
 
 fn parse(raw: &str, home_dir: &Path) -> anyhow::Result<Vec<ManagedRepo>> {
     let manifest: Manifest = toml::from_str(raw)
-        .map_err(|e| anyhow::anyhow!("parsing managed-repos manifest (repos.toml): {e}"))?;
+        .map_err(|e| anyhow::anyhow!("parsing managed-repos manifest (projects.toml): {e}"))?;
     let mut repos = Vec::new();
-    for entry in manifest.repo {
+    for entry in manifest.project {
         let local = entry.path.trim();
         if local.is_empty() || !entry.managed {
             continue;
@@ -69,8 +68,8 @@ mod tests {
     fn parses_toml_manifest_with_comments_and_missing_remote() {
         let repos = parse(
             "# comment\n\
-             [[repo]]\npath = \"self/repo-b\"\nremote = \"https://example.invalid/cfg.git\"\n\n\
-             [[repo]]\npath = \"tools/git-tools\"\n",
+             [[project]]\npath = \"self/repo-b\"\nremote = \"https://example.invalid/cfg.git\"\n\n\
+             [[project]]\npath = \"tools/git-tools\"\n",
             Path::new("/home/me"),
         )
         .unwrap();
@@ -84,8 +83,8 @@ mod tests {
 
     #[test]
     fn skips_paused_repos() {
-        let raw = "[[repo]]\npath='self/cfg'\nremote='git@x:c.git'\n\
-                   [[repo]]\npath='work/sample_project'\nremote='git@x:i.git'\nmanaged=false\n";
+        let raw = "[[project]]\npath='self/cfg'\nremote='git@x:c.git'\n\
+                   [[project]]\npath='work/sample_project'\nremote='git@x:i.git'\nmanaged=false\n";
         let repos = parse(raw, Path::new("/home/u")).unwrap();
         assert_eq!(repos.len(), 1);
         assert_eq!(repos[0].name, "self/cfg");
@@ -94,8 +93,8 @@ mod tests {
     #[tokio::test]
     async fn load_reads_and_parses_a_real_file() {
         let dir = tempfile::tempdir().unwrap();
-        let manifest_path = dir.path().join("repos.toml");
-        std::fs::write(&manifest_path, "[[repo]]\npath = \"a/b\"\n").unwrap();
+        let manifest_path = dir.path().join("projects.toml");
+        std::fs::write(&manifest_path, "[[project]]\npath = \"a/b\"\n").unwrap();
 
         let repos = TokioManagedManifest
             .load(&manifest_path, dir.path())

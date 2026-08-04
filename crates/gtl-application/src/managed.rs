@@ -2,11 +2,12 @@
 //! selection operations over already-resolved manifest entries.
 
 pub mod commit_all;
+mod logic;
 pub mod plan_push;
 pub mod prune_all;
 pub mod pull_all;
 pub mod push_all;
 pub mod select_unpushed;
-pub mod service;
 pub mod status_repos;
-pub mod working_tree;
+
+pub use logic::service::{RepoSyncResult, SyncExit, SyncStatus};

@@ -1,6 +1,6 @@
 //! Applies a planned recovery of a branch's prior position.
 
-use super::{branch_recovery::BranchRecovery, plan_revert::RevertTarget};
+use super::{BranchRecovery, plan_revert::RevertTarget};
 use crate::ports::{GitClient, GitEffect};
 
 /// Requests applying one confirmed branch recovery.

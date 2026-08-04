@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Surface tests for the grouped `diff` verb (Task 1.5): `merge-diff`/`squash-preview`
 //! became `diff merge`/`diff squash`, and the legacy top-level spellings still work
 //! through the `preprocess::normalize` argv shim. Real git behavior for these paths is

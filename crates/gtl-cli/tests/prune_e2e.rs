@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! End-to-end tests for `gtl prune`: build a real temp repository with merged and unmerged
 //! branches, run the built binary against it, and assert exit code, stdout/stderr, and the
 //! surviving branch set. Local-only — no network.

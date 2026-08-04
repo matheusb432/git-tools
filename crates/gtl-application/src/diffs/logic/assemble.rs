@@ -1,14 +1,13 @@
-use std::{collections::HashMap, path::Path};
+use std::path::Path;
 
 use gtl_models::diffs::{Commit, ExcludedExtensions};
 
 use crate::{
-    diffs::{FileDiff, FileStatus, UnifiedDiffLineClassifier, UnifiedDiffLineKind, View},
+    diffs::{FileDiff, FileStatus, UnifiedDiffLineClassifier, UnifiedDiffLineKind},
     ports::{GitClient, GitDiffFormat, GitDiffRequest},
-    shared::notes::Note,
 };
 
-pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
+fn parse_diff(raw: &str) -> Vec<FileDiff> {
     if raw.trim().is_empty() {
         return Vec::new();
     }
@@ -56,8 +55,8 @@ pub fn parse_diff(raw: &str) -> Vec<FileDiff> {
     files
 }
 
-pub fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
-    let mut full_by_path: HashMap<String, Vec<String>> = full_files
+fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
+    let mut full_by_path: std::collections::HashMap<String, Vec<String>> = full_files
         .into_iter()
         .map(|file| (file.path, file.lines))
         .collect();
@@ -78,20 +77,20 @@ pub fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
 }
 
 /// The assembled diff data for one preview: commits, changed files, and hidden paths.
-pub struct DiffData {
+pub(in crate::diffs) struct DiffData {
     pub commits: Vec<Commit>,
     pub files: Vec<FileDiff>,
     pub hidden_paths: Vec<String>,
 }
 
-/// The shared diff generator: log + diff + exclusion filter + full context.
+/// The shared diff generator: log + diff + exclusion filtering + full context.
 /// Does not sort files; callers retain ownership of presentation order.
 ///
 /// Exclusions are applied *before* the content diffs run: a cheap `--name-only`
 /// pass discovers the hidden paths, and both content invocations then carry
 /// `:(exclude,literal)` pathspecs, so git never computes — and this module
 /// never parses or counts — an excluded file's line diffs.
-pub fn assemble(
+pub(in crate::diffs) fn assemble(
     source: &impl GitClient,
     repo_path: &Path,
     diff_range: &str,
@@ -108,7 +107,7 @@ pub fn assemble(
     };
     // ? partition again after parsing: a source that ignores the exclude
     // ? pathspecs (the scripted test fake) must still never leak hidden files.
-    let (mut files, _) = partition_excluded(
+    let (mut files, _) = super::exclusions::filter_excluded_files(
         parse_diff(&source.diff(repo_path, &content_request)?),
         excluded,
     );
@@ -153,43 +152,6 @@ fn hidden_paths(
         .filter(|path| !path.is_empty() && excluded.matches(path))
         .map(String::from)
         .collect())
-}
-
-/// Split parsed files into (kept, hidden paths) under the exclusion set (pure).
-fn partition_excluded(
-    files: Vec<FileDiff>,
-    excluded: &ExcludedExtensions,
-) -> (Vec<FileDiff>, Vec<String>) {
-    if excluded.is_empty() {
-        return (files, Vec::new());
-    }
-    let (hidden, kept): (Vec<FileDiff>, Vec<FileDiff>) = files
-        .into_iter()
-        .partition(|file| excluded.matches(&file.path));
-    (kept, hidden.into_iter().map(|file| file.path).collect())
-}
-
-/// The user-facing note for a view whose exclusion filter hid files, prefixed
-/// with the slice's label (`diff-preview`, `squash-preview`).
-pub(crate) fn exclusion_note(label: &str, view: &View) -> Option<Note> {
-    view.exclusions.as_ref().map(|applied| {
-        Note::info(format!(
-            "{label}: {} file(s) hidden by config [diff.exclude] ({})",
-            applied.hidden_paths.len(),
-            applied.extensions_label(),
-        ))
-    })
-}
-
-/// The repo's display name: the last path component of its git top-level, falling
-/// back to `"repo"` when the path has no usable final component.
-pub(crate) fn repo_name(top: &str) -> String {
-    Path::new(top)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("repo")
-        .to_string()
 }
 
 #[cfg(test)]

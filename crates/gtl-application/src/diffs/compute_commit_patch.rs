@@ -6,10 +6,14 @@ use gtl_models::diffs::{AppliedExclusions, Commit};
 
 use crate::{
     diffs::{
-        Cmd, Foot, View, sort_files_tree_order,
-        util::{DiffData, assemble, repo_name},
+        Cmd, Foot, View,
+        logic::{
+            assemble::{DiffData, assemble},
+            view::sort_files_tree_order,
+        },
     },
-    ports::{GitClient, UserSettingsStore},
+    ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
+    shared::repository_name::from_path,
 };
 
 const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -23,6 +27,8 @@ pub struct ComputeCommitPatch {
 #[derive(Debug, thiserror::Error)]
 pub enum ComputeCommitPatchError {
     #[error(transparent)]
+    Settings(#[from] UserSettingsLoadError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
@@ -34,8 +40,8 @@ pub fn execute(
 ) -> Result<View, ComputeCommitPatchError> {
     let repo_path = request.repo_root;
     let top = repo_path.to_string_lossy();
-    let repo_name = repo_name(&top);
-    let settings = settings.load();
+    let repo_name = from_path(top.as_ref());
+    let settings = settings.load()?;
     let excluded = settings
         .diff_exclusions()
         .for_project_or_default(&repo_name);

@@ -39,16 +39,7 @@ impl TagGroup {
     }
 }
 
-/// Reports either structured local tag groups or the Git failure that prevented listing.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ListTagsOk {
-    /// Git refs loaded and grouped successfully.
-    Listed { groups: Vec<TagGroup> },
-    /// Git refs could not be loaded.
-    Failed { detail: String },
-}
-
-pub(super) fn group(tags: Vec<Tag>) -> Vec<TagGroup> {
+pub(crate) fn group(tags: Vec<Tag>) -> Vec<TagGroup> {
     let mut by_commit = BTreeMap::<String, Vec<Tag>>::new();
     let mut commit_order = Vec::new();
     for tag in tags {
@@ -93,7 +84,7 @@ fn classify(mut tags: Vec<Tag>) -> TagGroup {
     }
 }
 
-pub(super) fn compare_tags(left: &Tag, right: &Tag) -> Ordering {
+pub(crate) fn compare_tags(left: &Tag, right: &Tag) -> Ordering {
     left.created_at()
         .cmp(&right.created_at())
         .then_with(|| natord::compare(left.name(), right.name()))

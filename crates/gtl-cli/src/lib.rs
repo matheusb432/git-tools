@@ -126,8 +126,14 @@ fn dispatch(command: Command) -> ExitCode {
             yes,
             ..
         }) => {
-            let settings = gtl_infra::user_config::TomlSettingsStore::from_environment().load();
-            run_push_current(yes, settings.push_confirmation_required())
+            let settings = gtl_infra::user_config::TomlSettingsStore::from_environment();
+            match settings.load() {
+                Ok(settings) => run_push_current(yes, settings.push_confirmation_required()),
+                Err(error) => {
+                    eprintln!("error: {error:#}");
+                    ExitCode::Internal
+                }
+            }
         }
         Command::Push(PushArgs {
             all: false,
@@ -251,7 +257,7 @@ fn run_daemon_ctl(command: &DaemonCommand) -> ExitCode {
 
 /// Persist the diff-preview theme to the user config and exit (no rendering).
 fn run_set_theme(theme: Theme) -> ExitCode {
-    let store = gtl_infra::user_config::TomlSettingsStore::from_environment();
+    let mut store = gtl_infra::user_config::TomlSettingsStore::from_environment();
     let Some(path) = store.path().map(Path::to_path_buf) else {
         eprintln!(
             "error: could not resolve a config path (no GIT_TOOLS_CONFIG, XDG_CONFIG_HOME, or HOME)"
@@ -265,7 +271,7 @@ fn run_set_theme(theme: Theme) -> ExitCode {
             key: "theme".into(),
             value_new: value_new.clone(),
         },
-        &store,
+        &mut store,
     ) {
         Ok(_) => {
             println!(
@@ -680,6 +686,8 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
     use gtl_application::push_subrepos;
     use gtl_models::managed::push_subrepos::SubreposPlan;
 
+    use crate::commands::push_subrepos::confirmation;
+
     let git = HybridGitClient;
     let root = match commands::canonical_working_directory() {
         Ok(root) => root,
@@ -705,7 +713,7 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
         }
     };
 
-    println!("{}", push_subrepos::confirmation(&root, &targets));
+    println!("{}", confirmation(&root, &targets));
 
     match confirm::request(&RealConfirm, yes, "Proceed?", DefaultAnswer::Yes) {
         Confirmation::RefuseNonInteractive => {
@@ -1243,9 +1251,9 @@ mod tests {
     fn ls_exits_ok() {
         // Hermetic: point at an empty manifest via `--repos-file` so this never reads the
         // real `$HOME` manifest or touches the developer's actual repos (an empty
-        // `[[repo]]` array parses to zero managed repos, which is a Clean status run).
+        // `[[project]]` array parses to zero managed repos, which is a Clean status run).
         let dir = tempfile::tempdir().expect("tempdir");
-        let repos_file = dir.path().join("repos.toml");
+        let repos_file = dir.path().join("projects.toml");
         std::fs::write(&repos_file, "").expect("write empty manifest");
 
         let exit = run(&[

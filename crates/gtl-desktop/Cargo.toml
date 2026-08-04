@@ -51,5 +51,20 @@ sha2.workspace = true
 tempfile.workspace = true
 toml.workspace = true
 
-[lints]
-workspace = true
+[lints.clippy]
+all = { level = "warn", priority = -2 }
+pedantic = { level = "warn", priority = -2 }
+correctness = { level = "deny", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "allow"
+dbg_macro = "warn"
+disallowed_methods = "deny"
+cognitive_complexity = "warn"
+branches_sharing_code = "warn"
+collection_is_never_read = "warn"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"

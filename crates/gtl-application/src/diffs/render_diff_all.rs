@@ -12,9 +12,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
     diffs::{
         DiffTarget,
-        batch::{RepoRef, dated_title, render_batch},
+        logic::batch::{RepoRef, dated_title, render_batch},
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsStore},
+    ports::{
+        ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsLoadError,
+        UserSettingsStore,
+    },
     shared::notes::Note,
 };
 
@@ -39,6 +42,8 @@ pub struct RenderDiffAllOk {
 #[derive(Debug, thiserror::Error)]
 pub enum RenderDiffAllError {
     #[error(transparent)]
+    Settings(#[from] UserSettingsLoadError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
@@ -53,8 +58,8 @@ pub fn execute(
     clock: &impl Clock,
 ) -> Result<RenderDiffAllOk, RenderDiffAllError> {
     let RenderDiffAll { root, repos } = req;
-    let store_root = super::artifacts::root(&root);
-    let settings = app_settings.load();
+    let store_root = super::logic::artifacts::root(&root);
+    let settings = app_settings.load()?;
     let mut notes = Vec::new();
     let batch = render_batch(
         source,
@@ -67,7 +72,7 @@ pub fn execute(
 
     let title = dated_title(clock, "diff-preview all");
     let render_options = settings.viewer_render_options();
-    let theme = settings.theme().map(str::to_owned);
+    let theme = settings.theme().map(|theme| theme.to_string());
     let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme.as_deref());
     let meta = ArtifactMeta {
         repo_root: root,
@@ -99,46 +104,26 @@ pub fn execute(
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        collections::VecDeque,
-        path::PathBuf,
-        sync::{Arc, Mutex},
-    };
+    use std::path::PathBuf;
 
-    use gtl_models::diffs::{DiffExclusions, DiffKind};
+    use gtl_models::{
+        diffs::{DiffExclusions, DiffKind},
+        settings::UserSettings,
+        viewer::{RenderOptions, Theme},
+    };
 
     use super::{RenderDiffAll, RepoRef, execute};
     use crate::{
-        ports::{AppSettings, UserSettingsStore},
         shared::notes::Note,
         testing::{
             FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, RepoOverride,
-            StubRenderer,
+            SequenceUserSettingsStore, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
     };
 
-    #[derive(Clone)]
-    struct SequenceUserSettingsStore {
-        snapshots: Arc<Mutex<VecDeque<AppSettings>>>,
-    }
-
-    impl SequenceUserSettingsStore {
-        fn new(snapshots: impl IntoIterator<Item = AppSettings>) -> Self {
-            Self {
-                snapshots: Arc::new(Mutex::new(snapshots.into_iter().collect())),
-            }
-        }
-    }
-
-    impl UserSettingsStore for SequenceUserSettingsStore {
-        fn load(&self) -> AppSettings {
-            self.snapshots
-                .lock()
-                .expect("settings sequence lock")
-                .pop_front()
-                .expect("one settings snapshot per operation")
-        }
+    fn settings(theme: Theme, exclusions: DiffExclusions) -> UserSettings {
+        UserSettings::new(Some(theme), RenderOptions::DEFAULT, true, exclusions)
     }
 
     fn req(repos: Vec<RepoRef>) -> RenderDiffAll {
@@ -250,14 +235,12 @@ diff --git a/notes.md b/notes.md\n\
             );
         }
         let app_settings = SequenceUserSettingsStore::new([
-            AppSettings::new(
-                Some("first".into()),
-                true,
+            settings(
+                Theme::Hearth,
                 DiffExclusions::new([("repo-a".to_string(), vec!["md"])], None),
             ),
-            AppSettings::new(
-                Some("second".into()),
-                true,
+            settings(
+                Theme::Light,
                 DiffExclusions::new([("repo-b".to_string(), vec!["txt"])], None),
             ),
         ]);
@@ -308,10 +291,10 @@ diff --git a/notes.md b/notes.md\n\
             .html;
 
         assert!(
-            first_html.contains("repo-a:first:unified:compact:1|repo-b:first:unified:compact:2")
+            first_html.contains("repo-a:hearth:unified:compact:1|repo-b:hearth:unified:compact:2")
         );
         assert!(
-            second_html.contains("repo-a:second:unified:compact:2|repo-b:second:unified:compact:1")
+            second_html.contains("repo-a:light:unified:compact:2|repo-b:light:unified:compact:1")
         );
     }
 }
