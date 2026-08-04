@@ -14,7 +14,7 @@ use gtl_contracts::{
     recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget},
 };
 
-use crate::client::HttpBackend;
+use crate::client::HttpClient;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct CliDiffViewerClient;
@@ -36,13 +36,13 @@ impl DiffViewerClient for CliDiffViewerClient {
     }
 
     fn render(&self, request: &DiffRenderRequest) -> anyhow::Result<DiffRenderResponse> {
-        let backend = HttpBackend::ensure_daemon()?;
+        let client = HttpClient::ensure_daemon()?;
         let envelope = match request {
-            DiffRenderRequest::Diff(request) => backend.render_diff(request)?,
-            DiffRenderRequest::MergeDiff(request) => backend.render_merge_diff(request)?,
-            DiffRenderRequest::SquashPreview(request) => backend.render_squash_preview(request)?,
-            DiffRenderRequest::Subrepos(request) => backend.render_diff_subrepos(request)?,
-            DiffRenderRequest::ManagedAll(request) => backend.render_diff_all(request)?,
+            DiffRenderRequest::Diff(request) => client.render_diff(request)?,
+            DiffRenderRequest::MergeDiff(request) => client.render_merge_diff(request)?,
+            DiffRenderRequest::SquashPreview(request) => client.render_squash_preview(request)?,
+            DiffRenderRequest::Subrepos(request) => client.render_diff_subrepos(request)?,
+            DiffRenderRequest::ManagedAll(request) => client.render_diff_all(request)?,
         };
         from_wire_response(envelope)
     }

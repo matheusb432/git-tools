@@ -8,7 +8,7 @@ use gtl_contracts::{
 use crate::{
     ExitCode,
     cli::TagBumpLevel,
-    client::{Backend as _, HttpBackend},
+    client::HttpClient,
     commands,
     confirm::{Confirmation, DefaultAnswer, RealConfirm},
 };
@@ -21,15 +21,15 @@ pub fn run(level: TagBumpLevel, message: String, push: bool, dry: bool, yes: boo
             return ExitCode::Internal;
         }
     };
-    let backend = match HttpBackend::ensure_daemon() {
-        Ok(backend) => backend,
+    let client = match HttpClient::ensure_daemon() {
+        Ok(client) => client,
         Err(error) => {
             eprintln!("tag bump: {error:#}");
             return ExitCode::Internal;
         }
     };
     let level = to_level_dto(level);
-    let prepared = match backend.dry_run_tag_bump(&DryRunTagBumpRequest {
+    let prepared = match client.dry_run_tag_bump(&DryRunTagBumpRequest {
         repo_path: repo_path.to_string_lossy().into_owned(),
         level,
         message,
@@ -76,7 +76,7 @@ pub fn run(level: TagBumpLevel, message: String, push: bool, dry: bool, yes: boo
         Confirmation::Proceed => {}
     }
 
-    let bumped = match backend.bump_tag(&BumpTagRequest { preview }) {
+    let bumped = match client.bump_tag(&BumpTagRequest { preview }) {
         Ok(response) => response,
         Err(error) => {
             eprintln!("tag bump: {error:#}");

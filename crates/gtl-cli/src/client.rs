@@ -1,6 +1,5 @@
-//! The daemon client: the swap-later `Backend` trait and its localhost-HTTP
-//! implementation (discovery via the port file, exe-identity handshake with
-//! restart-on-mismatch, and detached autostart).
+//! The daemon HTTP client: discovery via the port file, executable identity
+//! handshake with restart-on-mismatch, and detached autostart.
 
 use std::{
     fs::{File, OpenOptions, TryLockError},
@@ -22,52 +21,6 @@ use gtl_contracts::{
     tags::{BumpTagData, BumpTagRequest, DryRunTagBumpRequest, TagBumpPreview},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-
-/// Transport for managed synchronization and live-view persistence.
-pub trait Backend {
-    /// Push every managed repo, returning the service-composed wire envelope.
-    ///
-    /// # Errors
-    /// Returns an error on transport/parse failure or when a focused backend does not support
-    /// this operation. A service error *outcome* is carried inside the returned [`Envelope`].
-    fn push_all(&self, _req: &PushAllRequest) -> anyhow::Result<Envelope<SyncData>> {
-        anyhow::bail!("backend does not support push_all")
-    }
-
-    /// Pull every managed repo, returning the service-composed wire envelope.
-    ///
-    /// # Errors
-    /// Returns an error on transport/parse failure or when a focused backend does not support
-    /// this operation. A service error *outcome* is carried inside the returned [`Envelope`].
-    fn pull_all(&self, _req: &PullAllRequest) -> anyhow::Result<Envelope<SyncData>> {
-        anyhow::bail!("backend does not support pull_all")
-    }
-
-    /// Validate + persist a live-view source, returning the service-composed wire envelope.
-    ///
-    /// # Errors
-    /// Returns an error on transport/parse failure or when a focused backend does not support
-    /// this operation. A rejection is carried inside the returned [`Envelope`].
-    fn save_live_view(
-        &self,
-        _req: &SaveLiveViewRequest,
-    ) -> anyhow::Result<Envelope<SaveLiveViewData>> {
-        anyhow::bail!("backend does not support save_live_view")
-    }
-
-    /// Gather an exact tag-bump proposal without mutating Git state.
-    fn dry_run_tag_bump(
-        &self,
-        _req: &DryRunTagBumpRequest,
-    ) -> anyhow::Result<Envelope<TagBumpPreview>> {
-        anyhow::bail!("backend does not support dry_run_tag_bump")
-    }
-
-    /// Apply one exact displayed tag-bump proposal.
-    fn bump_tag(&self, _req: &BumpTagRequest) -> anyhow::Result<Envelope<BumpTagData>> {
-        anyhow::bail!("backend does not support bump_tag")
-    }
-}
 
 /// The `/health` identity payload, deserialized from a running daemon.
 #[derive(Debug, Deserialize)]
@@ -142,15 +95,13 @@ pub enum DaemonStopOutcome {
     NotRunning,
 }
 
-/// The localhost-HTTP backend: a base URL resolved by [`HttpBackend::ensure_daemon`]
-/// plus a blocking reqwest client (connect-timeout only — a large diff may take a
-/// while to render).
-pub struct HttpBackend {
+/// A localhost HTTP connection resolved by [`HttpClient::ensure_daemon`].
+pub struct HttpClient {
     base_url: String,
     http: reqwest::blocking::Client,
 }
 
-impl HttpBackend {
+impl HttpClient {
     /// Discover-or-start the daemon and connect to it.
     ///
     /// Discovery order: a pinned `GIT_TOOLS_DAEMON_PORT` → the port file →
@@ -176,7 +127,7 @@ impl HttpBackend {
             }
         }
 
-        Self::spawn_and_connect(&bin, stale_pid).map(|(backend, _)| backend)
+        Self::spawn_and_connect(&bin, stale_pid).map(|(client, _)| client)
     }
 
     /// Spawn `gtl-daemon` detached and poll for it to publish a fresh, matching
@@ -194,13 +145,13 @@ impl HttpBackend {
                 bin.display()
             );
         };
-        let backend = Self::connect(port)?;
+        let client = Self::connect(port)?;
         let status = DaemonStatus {
             port,
             pid: health.pid,
             version: health.version,
         };
-        Ok((backend, status))
+        Ok((client, status))
     }
 
     /// Build the blocking client for a resolved port (connect-timeout only).
@@ -265,33 +216,34 @@ impl HttpBackend {
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
         self.post_json("/diffs/all", request)
     }
-}
 
-impl Backend for HttpBackend {
-    fn push_all(&self, req: &PushAllRequest) -> anyhow::Result<Envelope<SyncData>> {
-        self.post_json("/managed/push-all", req)
+    pub(crate) fn push_all(&self, request: &PushAllRequest) -> anyhow::Result<Envelope<SyncData>> {
+        self.post_json("/managed/push-all", request)
     }
 
-    fn pull_all(&self, req: &PullAllRequest) -> anyhow::Result<Envelope<SyncData>> {
-        self.post_json("/managed/pull-all", req)
+    pub(crate) fn pull_all(&self, request: &PullAllRequest) -> anyhow::Result<Envelope<SyncData>> {
+        self.post_json("/managed/pull-all", request)
     }
 
-    fn save_live_view(
+    pub(crate) fn save_live_view(
         &self,
-        req: &SaveLiveViewRequest,
+        request: &SaveLiveViewRequest,
     ) -> anyhow::Result<Envelope<SaveLiveViewData>> {
-        self.post_json("/live-views/save", req)
+        self.post_json("/live-views/save", request)
     }
 
-    fn dry_run_tag_bump(
+    pub(crate) fn dry_run_tag_bump(
         &self,
-        req: &DryRunTagBumpRequest,
+        request: &DryRunTagBumpRequest,
     ) -> anyhow::Result<Envelope<TagBumpPreview>> {
-        self.post_json("/tags/bump/dry-run", req)
+        self.post_json("/tags/bump/dry-run", request)
     }
 
-    fn bump_tag(&self, req: &BumpTagRequest) -> anyhow::Result<Envelope<BumpTagData>> {
-        self.post_json("/tags/bump", req)
+    pub(crate) fn bump_tag(
+        &self,
+        request: &BumpTagRequest,
+    ) -> anyhow::Result<Envelope<BumpTagData>> {
+        self.post_json("/tags/bump", request)
     }
 }
 
@@ -347,7 +299,7 @@ pub fn daemon_restart() -> anyhow::Result<DaemonStatus> {
             DaemonReplacementOutcome::Released => {}
         }
     }
-    HttpBackend::spawn_and_connect(&bin, stale_pid).map(|(_, status)| status)
+    HttpClient::spawn_and_connect(&bin, stale_pid).map(|(_, status)| status)
 }
 
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
@@ -789,8 +741,8 @@ mod tests {
             }
         });
 
-        let backend = HttpBackend::connect(port).unwrap();
-        let result = backend.post_json::<_, serde_json::Value>(
+        let client = HttpClient::connect(port).unwrap();
+        let result = client.post_json::<_, serde_json::Value>(
             "/diffs/render",
             &serde_json::json!({"request": "once"}),
         );
