@@ -10,10 +10,7 @@ fn emit_viewer_config(config: &viewer_config::ResolvedViewerConfig) {
         "cargo:rustc-env=GTL_VIEWER_PROTOCOL_SCHEME={}",
         config.app_url.scheme()
     );
-    println!(
-        "cargo:rustc-env=GTL_VIEWER_APP_HOST={}",
-        config.app_url.host_str().expect("validated URL has a host")
-    );
+    println!("cargo:rustc-env=GTL_VIEWER_APP_HOST={}", config.app_host);
     println!("cargo:rustc-env=GTL_VIEWER_APP_URL={}", config.app_url);
     println!(
         "cargo:rustc-env=GTL_VIEWER_HTMX_PATH={}",
@@ -21,10 +18,13 @@ fn emit_viewer_config(config: &viewer_config::ResolvedViewerConfig) {
     );
 }
 
-fn main() {
-    let manifest_dir =
-        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo sets CARGO_MANIFEST_DIR"));
-    let config = viewer_config::load(&manifest_dir);
+fn main() -> anyhow::Result<()> {
+    let manifest_dir = PathBuf::from(
+        env::var_os("CARGO_MANIFEST_DIR")
+            .ok_or_else(|| anyhow::anyhow!("Cargo did not set CARGO_MANIFEST_DIR"))?,
+    );
+    let config = viewer_config::load(&manifest_dir)?;
     emit_viewer_config(&config);
     tauri_build::build();
+    Ok(())
 }

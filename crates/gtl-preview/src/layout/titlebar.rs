@@ -64,9 +64,8 @@ mod tests {
     use gtl_models::diffs::AppliedExclusions;
 
     use crate::{
-        build_html,
         fixtures::{applied_exclusions, sample_view},
-        view_fragment,
+        test_render::{build_html, view_fragment},
     };
 
     #[test]

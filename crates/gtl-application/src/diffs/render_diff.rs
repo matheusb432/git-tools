@@ -218,7 +218,7 @@ pub fn execute(
         });
     }
     let file_count = view.files.len();
-    let html = renderer.build_html(&view, render_options, theme.as_deref());
+    let html = renderer.build_html(&view, render_options, theme.as_deref())?;
 
     let repo_path = Path::new(&top);
     let meta = ArtifactMeta {

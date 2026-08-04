@@ -5,11 +5,13 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 gtl-application.workspace = true
 gtl-models.workspace = true
 maud.workspace = true
 similar.workspace = true
 syntect.workspace = true
+thiserror.workspace = true
 url.workspace = true
 
 [lints]

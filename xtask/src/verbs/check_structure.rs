@@ -11,7 +11,7 @@ struct EdgePolicy {
     reason: &'static str,
 }
 
-const EDGE_POLICIES: [EdgePolicy; 5] = [
+const EDGE_POLICIES: [EdgePolicy; 4] = [
     EdgePolicy {
         from: "gtl-models",
         label: "gtl-models stays pure",
@@ -26,7 +26,6 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
             "gtl-desktop",
             "gtl-browser-e2e",
             "gtl-desktop-e2e",
-            "gtl-e2e",
             "xtask",
             "axum",
             "reqwest",
@@ -47,7 +46,6 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
             "gtl-desktop",
             "gtl-browser-e2e",
             "gtl-desktop-e2e",
-            "gtl-e2e",
             "xtask",
             "axum",
             "reqwest",
@@ -70,7 +68,6 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
             "gtl-desktop",
             "gtl-browser-e2e",
             "gtl-desktop-e2e",
-            "gtl-e2e",
             "xtask",
             "axum",
             "reqwest",
@@ -84,21 +81,6 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
         label: "gtl-infra owns no templates",
         forbidden: &["maud"],
         reason: "presentation belongs to crates/gtl-preview, not the adapter layer",
-    },
-    EdgePolicy {
-        from: "gtl-e2e",
-        label: "gtl-e2e stays black-box",
-        forbidden: &[
-            "gtl-application",
-            "gtl-benchmarks",
-            "gtl-cli",
-            "gtl-daemon",
-            "gtl-desktop",
-            "gtl-models",
-            "gtl-infra",
-            "gtl-preview",
-        ],
-        reason: "black-box tests may use contracts and app-agnostic shared crates, not product internals",
     },
 ];
 

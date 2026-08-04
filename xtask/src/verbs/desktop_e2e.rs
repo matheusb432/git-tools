@@ -485,7 +485,7 @@ fn workflow() -> Result<()> {
             "build",
             "--release",
             "-p",
-            "gtl-e2e",
+            "gtl-desktop-e2e",
             "--bin",
             "editor-recorder",
         ],

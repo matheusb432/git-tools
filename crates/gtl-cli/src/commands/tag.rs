@@ -92,7 +92,13 @@ fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crat
             ),
             commits,
         ),
-        Some(TagCommand::Bump { .. }) => unreachable!("tag bump is dispatched before local tags"),
+        Some(TagCommand::Bump {
+            level,
+            message,
+            push,
+            dry,
+            yes,
+        }) => bump::run(level, message, push, dry, yes),
     }
 }
 

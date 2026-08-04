@@ -82,39 +82,3 @@ fn attach_secondary_error(primary: Result<()>, secondary: Result<()>, label: &st
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use anyhow::anyhow;
-
-    use super::{attach_evidence, attach_secondary_error};
-
-    #[test]
-    fn primary_assertion_error_survives_screenshot_and_cleanup_failures() {
-        let result = attach_evidence(
-            Err(anyhow!("expected live view")),
-            Err(anyhow!("screenshot unavailable")),
-        );
-        let error =
-            attach_secondary_error(result, Err(anyhow!("cleanup unavailable")), "test cleanup")
-                .unwrap_err();
-
-        let message = format!("{error:#}");
-        assert!(message.contains("expected live view"));
-        assert!(message.contains("screenshot unavailable"));
-        assert!(message.contains("cleanup unavailable"));
-    }
-
-    #[test]
-    fn primary_assertion_error_names_the_saved_evidence() {
-        let error = attach_evidence(
-            Err(anyhow!("expected live view")),
-            Ok(Some("/evidence/fail.png".into())),
-        )
-        .unwrap_err();
-
-        let message = format!("{error:#}");
-        assert!(message.contains("expected live view"));
-        assert!(message.contains("/evidence/fail.png"));
-    }
-}

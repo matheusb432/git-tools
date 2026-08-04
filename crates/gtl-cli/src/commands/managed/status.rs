@@ -95,12 +95,14 @@ pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun
 }
 
 fn status_run(results: Vec<StatusResult>, options: &ManagedOptions) -> ManagedRun<StatusResult> {
-    let stdout = format_status(options.json, options.color, &results);
-    ManagedRun {
-        exit: ManagedExit::Clean,
-        results,
-        stdout,
-        stderr: String::new(),
+    match format_status(options.json, options.color, &results) {
+        Ok(stdout) => ManagedRun {
+            exit: ManagedExit::Clean,
+            results,
+            stdout,
+            stderr: String::new(),
+        },
+        Err(error) => status_fail(format!("status: {error:#}")),
     }
 }
 
@@ -113,17 +115,19 @@ fn status_fail(message: String) -> ManagedRun<StatusResult> {
     }
 }
 
-fn format_status(json: bool, color: bool, results: &[StatusResult]) -> String {
+fn format_status(json: bool, color: bool, results: &[StatusResult]) -> anyhow::Result<String> {
     if json {
-        return serde_json::to_string_pretty(results).unwrap_or_else(|_| "[]".to_string());
+        return serde_json::to_string_pretty(results).map_err(Into::into);
     }
 
-    let palette = color.then(StatusColorPalette::from_embedded_toml);
-    results
+    let palette = color
+        .then(StatusColorPalette::from_embedded_toml)
+        .transpose()?;
+    Ok(results
         .iter()
         .map(|result| format_status_line(result, palette.as_ref()))
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n"))
 }
 
 fn format_status_line(result: &StatusResult, palette: Option<&StatusColorPalette>) -> String {
@@ -208,7 +212,7 @@ mod tests {
         ];
 
         assert_eq!(
-            format_status(false, false, &results),
+            format_status(false, false, &results).expect("status should format"),
             "repo main [⇡1 !?]\nmissing (absent) [not present]"
         );
     }
@@ -219,7 +223,7 @@ mod tests {
             status_result("dirty", true, "main", "⇡1 !?"),
             status_result("clean", true, "main", "✓"),
         ];
-        let rendered = format_status(false, true, &results);
+        let rendered = format_status(false, true, &results).expect("status should format");
 
         assert!(rendered.contains("\x1b[1m\x1b[38;2;242;133;0m[\x1b[39m"));
         assert!(rendered.contains("\x1b[38;2;242;133;0m⇡\x1b[39m1"));

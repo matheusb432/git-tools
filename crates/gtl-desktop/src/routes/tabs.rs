@@ -181,7 +181,7 @@ pub(super) fn render_view_with_tabs(
                 load_id,
             ),
             _ => renderer.build_view_with_tabs_feedback(&snapshot.document, feedback),
-        };
+        }?;
         if view_snapshot::is_current(session, snapshot.ticket, snapshot.revision)? {
             return Ok(html);
         }
@@ -217,7 +217,7 @@ pub(super) fn render_tabs_with_view(
                 renderer.build_materialized_tabs_with_view(&snapshot.document, feedback, load_id)
             }
             None => renderer.build_tabs_with_view(&snapshot.document, feedback),
-        };
+        }?;
         if view_snapshot::is_current(session, snapshot.ticket, snapshot.revision)? {
             return Ok(html);
         }
@@ -302,7 +302,9 @@ mod tests {
             name: None,
         };
         let mut state = ViewerSession::new(1);
-        let id = state.open(recipe, "batch".into(), ViewerTabKind::Snapshot);
+        let id = state
+            .open(recipe, "batch".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
         let old = state.begin_compute(id).expect("old ticket");
         let old_view = view("old transient");
         state.publish_labeled_if_current(old, CachedView::new(Arc::clone(&old_view)), "old".into());

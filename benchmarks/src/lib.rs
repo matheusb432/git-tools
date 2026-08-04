@@ -4,6 +4,20 @@ use clap::{ValueEnum, builder::PossibleValue};
 
 pub const PACKAGE_NAME: &str = "gtl-benchmarks";
 
+/// Returns a benchmark fixture value or terminates the benchmark process with context.
+pub fn require<T, Error>(result: Result<T, Error>, context: &str) -> T
+where
+    Error: std::fmt::Display,
+{
+    match result {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("benchmark setup failed while {context}: {error}");
+            std::process::exit(1);
+        }
+    }
+}
+
 const VIEWER_RENDER_FAST_CASES: &[BenchmarkCase] = &[
     BenchmarkCase::ViewerRenderMaterializedShell45k,
     BenchmarkCase::ViewerRenderMaterializedShell115Files,

@@ -13,7 +13,7 @@ use std::{
     collections::{BTreeMap, HashMap, VecDeque},
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -31,6 +31,10 @@ use crate::ports::{
     LedgerEntry, ManagedManifest, MergedBranch, PlacedArtifact, PushLedger, RepoDiscovery,
     UserSettingsEditError, UserSettingsLoadError, UserSettingsStore,
 };
+
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitResponse {
@@ -135,12 +139,12 @@ impl SequenceUserSettingsStore {
 
 impl UserSettingsStore for SequenceUserSettingsStore {
     fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
-        Ok(self
-            .snapshots
-            .lock()
-            .expect("settings sequence lock")
-            .pop_front()
-            .expect("configured settings snapshot"))
+        lock_or_recover(&self.snapshots).pop_front().ok_or_else(|| {
+            UserSettingsLoadError::InvalidConfiguration {
+                path: PathBuf::from("<test settings sequence>"),
+                reason: "no configured snapshot remains".into(),
+            }
+        })
     }
 
     fn set_string(
@@ -520,7 +524,7 @@ impl InMemoryArtifactStore {
         excluded_extensions: &[&str],
         artifact_path: &str,
     ) {
-        self.range_hits.lock().unwrap().insert(
+        lock_or_recover(&self.range_hits).insert(
             (
                 kind,
                 base_sha.to_owned(),
@@ -545,7 +549,7 @@ impl ArtifactStore for InMemoryArtifactStore {
         html: &str,
     ) -> anyhow::Result<PlacedArtifact> {
         let path = store_root.join("artifact.html");
-        self.artifacts.lock().unwrap().insert(
+        lock_or_recover(&self.artifacts).insert(
             path.clone(),
             StoredArtifact {
                 meta: meta.clone(),
@@ -568,10 +572,7 @@ impl ArtifactStore for InMemoryArtifactStore {
         theme: Option<&str>,
         excluded_extensions: &[String],
     ) -> anyhow::Result<Option<PathBuf>> {
-        Ok(self
-            .range_hits
-            .lock()
-            .unwrap()
+        Ok(lock_or_recover(&self.range_hits)
             .get(&(
                 kind,
                 base_sha.to_string(),
@@ -597,14 +598,14 @@ impl HtmlRenderer for StubRenderer {
         view: &crate::diffs::View,
         options: RenderOptions,
         theme: Option<&str>,
-    ) -> String {
-        format!(
+    ) -> anyhow::Result<String> {
+        Ok(format!(
             "<html data-theme=\"{}\" data-layout=\"{}\" data-density=\"{}\"><title>{}</title></html>",
             theme.unwrap_or_default(),
             options.layout(),
             options.density(),
             view.title
-        )
+        ))
     }
     fn build_tabbed_html(
         &self,
@@ -612,7 +613,7 @@ impl HtmlRenderer for StubRenderer {
         views: &[crate::diffs::View],
         options: RenderOptions,
         theme: Option<&str>,
-    ) -> String {
+    ) -> anyhow::Result<String> {
         let view_summaries = views
             .iter()
             .map(|view| {
@@ -627,7 +628,9 @@ impl HtmlRenderer for StubRenderer {
             })
             .collect::<Vec<_>>()
             .join("|");
-        format!("<html><title>{title}</title>{view_summaries}</html>")
+        Ok(format!(
+            "<html><title>{title}</title>{view_summaries}</html>"
+        ))
     }
 }
 
@@ -739,7 +742,7 @@ impl PushLedger for FakePushLedger {
 /// Scripted Git client that returns queued adapter responses or failures.
 #[derive(Debug, Clone, Default)]
 pub struct ScriptedGitClient {
-    pub results: Arc<Mutex<Vec<GitResponse>>>,
+    pub results: Arc<Mutex<VecDeque<GitResponse>>>,
     transport_errors: Arc<Mutex<BTreeMap<usize, anyhow::Error>>>,
     invocations: Arc<AtomicUsize>,
     /// Repos `repo_present` answers `false` for; everything else is present.
@@ -749,7 +752,7 @@ pub struct ScriptedGitClient {
 impl ScriptedGitClient {
     pub fn new(results: Vec<GitResponse>) -> Self {
         Self {
-            results: Arc::new(Mutex::new(results)),
+            results: Arc::new(Mutex::new(results.into())),
             transport_errors: Arc::new(Mutex::new(BTreeMap::new())),
             invocations: Arc::new(AtomicUsize::new(0)),
             absent_repos: Arc::new(Mutex::new(Vec::new())),
@@ -769,7 +772,7 @@ impl ScriptedGitClient {
             }
         }
         Self {
-            results: Arc::new(Mutex::new(outputs)),
+            results: Arc::new(Mutex::new(outputs.into())),
             transport_errors: Arc::new(Mutex::new(transport_errors)),
             invocations: Arc::new(AtomicUsize::new(0)),
             absent_repos: Arc::new(Mutex::new(Vec::new())),
@@ -790,17 +793,16 @@ impl ScriptedGitClient {
 impl ScriptedGitClient {
     fn respond(&self) -> anyhow::Result<GitResponse> {
         let index = self.invocations.fetch_add(1, Ordering::Relaxed);
-        if let Some(error) = self.transport_errors.lock().unwrap().remove(&index) {
+        if let Some(error) = lock_or_recover(&self.transport_errors).remove(&index) {
             return Err(error);
         }
-        Ok(self.results.lock().unwrap().remove(0))
+        lock_or_recover(&self.results)
+            .pop_front()
+            .ok_or_else(|| anyhow::anyhow!("scripted Git response {index} was not configured"))
     }
 
     fn repo_present(&self, repo_path: &Path) -> bool {
-        !self
-            .absent_repos
-            .lock()
-            .unwrap()
+        !lock_or_recover(&self.absent_repos)
             .iter()
             .any(|p| p == repo_path)
     }
@@ -1167,7 +1169,7 @@ impl GitClient for ScriptedGitClient {
             .collect())
     }
     fn diff(&self, _repo: &Path, _request: &GitDiffRequest) -> anyhow::Result<String> {
-        unreachable!("diff tests use FakeGitClient")
+        anyhow::bail!("ScriptedGitClient does not implement diff output")
     }
     fn root_commit(&self, _repo: &Path) -> Option<String> {
         None

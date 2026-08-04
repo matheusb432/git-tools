@@ -71,8 +71,12 @@ fn presentation_options_have_distinct_artifact_identities() {
     let view = view(repo.path());
     let options_default = RenderOptions::DEFAULT;
     let options_split_full = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
-    let html_default = MaudRenderer.build_html(&view, options_default, None);
-    let html_split_full = MaudRenderer.build_html(&view, options_split_full, None);
+    let html_default = MaudRenderer
+        .build_html(&view, options_default, None)
+        .expect("embedded syntax assets should load");
+    let html_split_full = MaudRenderer
+        .build_html(&view, options_split_full, None)
+        .expect("embedded syntax assets should load");
 
     assert_ne!(html_default, html_split_full);
 

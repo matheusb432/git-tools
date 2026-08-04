@@ -67,7 +67,7 @@ pub(crate) fn run(arguments: &TestArguments) -> Result<()> {
     }
 
     let executable = std::env::current_exe().context("resolve the xtask executable")?;
-    let declarations = selected_tests(arguments.scope, executable.into_os_string());
+    let declarations = selected_tests(arguments.scope, executable.into_os_string())?;
     let tests = declarations
         .into_iter()
         .map(project::TestDeclaration::into_test);
@@ -105,7 +105,10 @@ fn coverage_output_is_explicit(arguments: &[String]) -> bool {
         })
 }
 
-fn selected_tests(scope: Scope, executable: std::ffi::OsString) -> Vec<project::TestDeclaration> {
+fn selected_tests(
+    scope: Scope,
+    executable: std::ffi::OsString,
+) -> Result<Vec<project::TestDeclaration>> {
     match scope {
         Scope::Unit => project::tests_unit(),
         Scope::E2e => project::tests_e2e(executable),
@@ -126,6 +129,7 @@ impl std::fmt::Display for Scope {
 #[cfg(test)]
 fn selected_test_labels(scope: Scope) -> Vec<&'static str> {
     selected_tests(scope, "xtask".into())
+        .expect("static test declarations are valid")
         .iter()
         .map(project::TestDeclaration::label)
         .collect()

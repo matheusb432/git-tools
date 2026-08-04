@@ -18,45 +18,35 @@ pub enum TagGroup {
 }
 
 impl TagGroup {
-    fn order_tag(&self) -> &Tag {
-        self.tags()
-            .min_by(|left, right| compare_tags(left, right))
-            .expect("every tag group contains at least one tag")
-    }
-
-    fn tags(&self) -> impl Iterator<Item = &Tag> {
-        let (first, rest) = match self {
-            Self::Single(tag) => (tag, [].as_slice()),
-            Self::Canonical { canonical, labels } => (canonical, labels.as_slice()),
+    fn order_tag(&self) -> Option<&Tag> {
+        match self {
+            Self::Single(tag) => Some(tag),
+            Self::Canonical { canonical, labels } => std::iter::once(canonical)
+                .chain(labels)
+                .min_by(|left, right| compare_tags(left, right)),
             Self::MoreThanOneTagHasMessage(tags) | Self::AllLabels(tags) => {
-                let (first, rest) = tags
-                    .split_first()
-                    .expect("group creates only non-empty tag groups");
-                (first, rest)
+                tags.iter().min_by(|left, right| compare_tags(left, right))
             }
-        };
-        std::iter::once(first).chain(rest)
+        }
     }
 }
 
 pub(crate) fn group(tags: Vec<Tag>) -> Vec<TagGroup> {
     let mut by_commit = BTreeMap::<String, Vec<Tag>>::new();
-    let mut commit_order = Vec::new();
     for tag in tags {
-        if !by_commit.contains_key(tag.commit()) {
-            commit_order.push(tag.commit().to_string());
-        }
         by_commit
             .entry(tag.commit().to_string())
             .or_default()
             .push(tag);
     }
 
-    let mut groups = commit_order
-        .into_iter()
-        .map(|commit| classify(by_commit.remove(&commit).expect("commit key was inserted")))
-        .collect::<Vec<_>>();
-    groups.sort_by(|left, right| compare_tags(left.order_tag(), right.order_tag()));
+    let mut groups = by_commit.into_values().map(classify).collect::<Vec<_>>();
+    groups.sort_by(|left, right| match (left.order_tag(), right.order_tag()) {
+        (Some(left), Some(right)) => compare_tags(left, right),
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (None, None) => Ordering::Equal,
+    });
     groups
 }
 

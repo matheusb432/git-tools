@@ -23,7 +23,7 @@ pub(super) fn keybar(view: &View) -> Markup {
 mod tests {
     use gtl_application::viewer::{RenderOptions, ViewerTabId};
 
-    use crate::{fixtures::sample_view, view_fragment};
+    use crate::{fixtures::sample_view, test_render::view_fragment};
 
     #[test]
     fn keybar_keeps_the_keyboard_command_contract() {

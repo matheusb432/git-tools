@@ -172,7 +172,7 @@ pub(super) fn mobile_popover(view: &View, target: &str) -> Markup {
 mod tests {
     use gtl_application::viewer::{RenderOptions, ViewerTabId};
 
-    use crate::{fixtures::sample_view, view_fragment};
+    use crate::{fixtures::sample_view, test_render::view_fragment};
 
     #[test]
     fn tree_renders_server_owned_file_nodes() {

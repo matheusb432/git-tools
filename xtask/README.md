@@ -39,7 +39,7 @@ This is the embedded kind, not an installable tool. It deliberately ships **no i
 - `src/gate.rs` — captures a bash command's combined output into `.artifacts/logs/<scope>.log`, printing a terse PASS/FAIL line plus the `RESULT` contract line and tailing the log on failure.
 - `src/task.rs` — labeled command steps (`Step`) plus `run_all` / `check_all` plan orchestration.
 - `src/verbs/` — one module per verb, each owning its flags and workflow with pure helpers where command planning needs unit coverage; `format/` is the formatter matrix and linter gate, `install/` adds the Linux desktop-entry/icon submodule, and `check_structure.rs` is the Cargo architecture policy.
-- `tests/cli.rs` — `assert_cmd` arg-surface tests.
+- `tests/architecture_policy.rs` — dependency-direction policy tests.
 - `bootstrap.sh` — the one POSIX-shell seam: installs the pinned mise release, trusts the project configuration, then hands off to `mise bootstrap`.
 
 ## Adding a verb

@@ -68,7 +68,7 @@ pub fn execute(
     let view = computed.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
-    let html = renderer.build_html(&view, computed.render_options, computed.theme.as_deref());
+    let html = renderer.build_html(&view, computed.render_options, computed.theme.as_deref())?;
 
     let meta = ArtifactMeta {
         repo_root: PathBuf::from(&computed.top),

@@ -93,7 +93,8 @@ pub fn execute(
     let title = dated_title(clock, "diff-preview subrepos");
     let render_options = settings.viewer_render_options();
     let theme = settings.theme().map(|theme| theme.to_string());
-    let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme.as_deref());
+    let html =
+        renderer.build_tabbed_html(&title, &batch.views, render_options, theme.as_deref())?;
     let meta = ArtifactMeta {
         repo_root: root,
         repo_name: "subrepos".to_string(),

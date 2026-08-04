@@ -8,6 +8,7 @@ use super::THEME_BOOT_JS;
 use crate::{
     assets::{PREVIEW_BUNDLE, preview_css},
     layout::{Surface, view_body},
+    syntax::PreviewResult,
 };
 
 const TABS_CLASSES: &str = "gtl-scroll-rail sticky top-0 z-60 flex items-center gap-1.5 overflow-x-auto border-b border-line bg-surface-2 px-3 py-2.5";
@@ -17,13 +18,18 @@ const TAB_CLASSES: &str = concat!(
 );
 const PANEL_CLASSES: &str = "[&[hidden]]:hidden";
 
+/// Builds a self-contained tabbed HTML document for multiple diff views.
+///
+/// # Errors
+///
+/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
 pub fn build_tabbed_html(
     title: &str,
     views: &[View],
     options: RenderOptions,
     theme: Option<&str>,
-) -> String {
-    html! {
+) -> PreviewResult<String> {
+    Ok(html! {
         (DOCTYPE)
         html lang="en" data-theme=[theme] {
             head {
@@ -50,21 +56,21 @@ pub fn build_tabbed_html(
                 }
                 @for (index, view) in views.iter().enumerate() {
                     section class={ "panel " (PANEL_CLASSES) } id={ "panel-" (index) } role="tabpanel" aria-labelledby={ "tab-" (index) } hidden[index != 0] {
-                        (view_body(view, options, Surface::Artifact { view_index: index }))
+                        (view_body(view, options, Surface::Artifact { view_index: index })?)
                     }
                 }
                 script { (PreEscaped(PREVIEW_BUNDLE)) }
             }
         }
     }
-    .into_string()
+    .into_string())
 }
 
 #[cfg(test)]
 mod tests {
     use gtl_application::viewer::RenderOptions;
 
-    use crate::{build_tabbed_html, fixtures::sample_view};
+    use crate::{fixtures::sample_view, test_render::build_tabbed_html};
 
     #[test]
     fn tabbed_document_keeps_semantic_tab_hooks_in_one_shared_stylesheet() {

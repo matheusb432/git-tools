@@ -9,15 +9,13 @@ mod intraline;
 mod model;
 mod split;
 
-use syntect::parsing::SyntaxReference;
-
 use self::{
     intraline::Span,
     model::{Row, RowKind, derive_rows, line_body, long_line_len},
     split::{SplitRow, split_rows},
 };
 use crate::{
-    syntax::Token,
+    syntax::{SyntaxDefinition, Token},
     text::{escape_html, html_or_nbsp, push_escaped},
 };
 
@@ -43,7 +41,7 @@ pub(crate) fn unified_line_number_digits(lines: &[String]) -> u32 {
     model::line_number_digits(lines)
 }
 
-pub(crate) fn render_diff_lines(lines: &[String], syntax: Option<&SyntaxReference>) -> String {
+pub(crate) fn render_diff_lines(lines: &[String], syntax: Option<SyntaxDefinition>) -> String {
     let rows = derive_rows(lines);
     let tokens = highlight::row_tokens(&rows, syntax);
     render_unified_rows(&rows, &tokens)
@@ -112,7 +110,7 @@ fn render_unified_rows(parsed: &[Row], tokens: &[Vec<Token>]) -> String {
 // out as old | new panes. Within a hunk, a run of deletions is paired index-wise with the
 // following run of additions (the shorter side padded), context lines mirror on both panes,
 // and meta/hunk headers span the full width.
-pub(crate) fn render_diff_split(lines: &[String], syntax: Option<&SyntaxReference>) -> String {
+pub(crate) fn render_diff_split(lines: &[String], syntax: Option<SyntaxDefinition>) -> String {
     let rows = derive_rows(lines);
     let tokens = highlight::row_tokens(&rows, syntax);
     render_split_rows(&split_rows(&rows, &tokens))
@@ -311,7 +309,7 @@ mod tests {
         split::{SplitCell, SplitRow},
         *,
     };
-    use crate::syntax::{TokenClass, syntax_for_path};
+    use crate::{syntax::TokenClass, test_render::syntax_for_path};
 
     #[test]
     fn render_unified_rows_maps_each_row_kind_and_gutter() {

@@ -77,13 +77,13 @@ fn render() -> Result<Pixmap> {
     fill(
         &mut pixmap,
         &tile,
-        &gradient(t, b, SLATE_TOP, 255, SLATE_BOT, 255),
+        &gradient(t, b, SLATE_TOP, 255, SLATE_BOT, 255)?,
     );
     // Sheen: white ~10% at the top, fading to nothing by mid-tile.
     fill(
         &mut pixmap,
         &tile,
-        &gradient(t, t + (b - t) * 0.5, WHITE, 26, WHITE, 0),
+        &gradient(t, t + (b - t) * 0.5, WHITE, 26, WHITE, 0)?,
     );
     stroke(&mut pixmap, &tile, BORDER, 140, sx(2.0));
 
@@ -167,7 +167,7 @@ fn rrect(rect: Rect, radius: f32) -> Option<tiny_skia::Path> {
 }
 
 /// A vertical linear-gradient paint between two RGBA colors (canvas y-coords).
-fn gradient(y0: f32, y1: f32, c0: Rgb, a0: u8, c1: Rgb, a1: u8) -> Paint<'static> {
+fn gradient(y0: f32, y1: f32, c0: Rgb, a0: u8, c1: Rgb, a1: u8) -> Result<Paint<'static>> {
     let shader = LinearGradient::new(
         Point::from_xy(0.0, y0),
         Point::from_xy(0.0, y1),
@@ -178,12 +178,12 @@ fn gradient(y0: f32, y1: f32, c0: Rgb, a0: u8, c1: Rgb, a1: u8) -> Paint<'static
         SpreadMode::Pad,
         Transform::identity(),
     )
-    .expect("non-degenerate vertical gradient");
-    Paint {
+    .context("gradient endpoints must differ")?;
+    Ok(Paint {
         shader,
         anti_alias: true,
         ..Paint::default()
-    }
+    })
 }
 
 fn solid_paint(color: Rgb, a: u8) -> Paint<'static> {
@@ -223,14 +223,9 @@ fn stroke(pixmap: &mut Pixmap, path: &tiny_skia::Path, color: Rgb, a: u8, width:
 fn to_rgba_image(pixmap: &Pixmap) -> image::RgbaImage {
     let (w, h) = (pixmap.width(), pixmap.height());
     let mut img = image::RgbaImage::new(w, h);
-    for (i, px) in pixmap.pixels().iter().enumerate() {
-        let c = px.demultiply();
-        let i = u32::try_from(i).expect("canvas pixel count fits u32");
-        img.put_pixel(
-            i % w,
-            i / w,
-            image::Rgba([c.red(), c.green(), c.blue(), c.alpha()]),
-        );
+    for (output, input) in img.pixels_mut().zip(pixmap.pixels()) {
+        let color = input.demultiply();
+        *output = image::Rgba([color.red(), color.green(), color.blue(), color.alpha()]);
     }
     img
 }

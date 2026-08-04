@@ -96,7 +96,7 @@ pub(crate) struct ViewerSession {
     tabs: Vec<SessionTab>,
     cache: WeightedViewCache,
     active: Option<ViewerTabId>,
-    next_id: u64,
+    next_id: Option<u64>,
     revision: u64,
 }
 
@@ -106,7 +106,7 @@ impl ViewerSession {
             tabs: Vec::new(),
             cache: WeightedViewCache::new(max_cache_weight),
             active: None,
-            next_id: 1,
+            next_id: Some(1),
             revision: 0,
         }
     }
@@ -116,7 +116,7 @@ impl ViewerSession {
         recipe: Recipe,
         batch_id: String,
         kind: ViewerTabKind,
-    ) -> ViewerTabId {
+    ) -> Option<ViewerTabId> {
         let label = initial_recipe_label::execute(InitialRecipeLabel {
             recipe: recipe.clone(),
         })
@@ -130,7 +130,7 @@ impl ViewerSession {
         batch_id: String,
         kind: ViewerTabKind,
         label: String,
-    ) -> ViewerTabId {
+    ) -> Option<ViewerTabId> {
         self.clear_every_commit_selection();
         let unpinned = recipe.unpinned();
         if let Some(existing) = self
@@ -151,14 +151,13 @@ impl ViewerSession {
             self.active = Some(existing.tab.id());
             let id = existing.tab.id();
             self.bump_revision();
-            return id;
+            return Some(id);
         }
 
-        let id = ViewerTabId::try_new(self.next_id).expect("session tab IDs start at one");
-        self.next_id = self
+        let id = self
             .next_id
-            .checked_add(1)
-            .expect("viewer tab ID exhausted");
+            .and_then(|value| ViewerTabId::try_new(value).ok())?;
+        self.next_id = self.next_id.and_then(|value| value.checked_add(1));
         self.tabs.push(SessionTab {
             tab: ViewerTab::new(
                 id,
@@ -176,27 +175,16 @@ impl ViewerSession {
         });
         self.active = Some(id);
         self.bump_revision();
-        id
+        Some(id)
     }
 
     pub(crate) fn begin_compute(&mut self, id: ViewerTabId) -> Option<ComputeTicket> {
-        if !self.tabs.iter().any(|tab| tab.tab.id() == id) {
-            return None;
-        }
+        let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == id)?;
         self.cache.remove(id);
-        let tab = self
-            .tabs
-            .iter_mut()
-            .find(|tab| tab.tab.id() == id)
-            .expect("tab existence checked before cache invalidation");
-        tab.generation = tab
-            .generation
-            .checked_add(1)
-            .expect("tab compute generation exhausted");
-        tab.selection_generation = tab
-            .selection_generation
-            .checked_add(1)
-            .expect("tab selection generation exhausted");
+        // Tickets are process-local and short-lived; wrapping would require 2^64 mutations while
+        // one ticket remains in flight before an old ticket could compare equal again.
+        tab.generation = tab.generation.wrapping_add(1);
+        tab.selection_generation = tab.selection_generation.wrapping_add(1);
         tab.selection = CommitSelection::None;
         tab.tab = ViewerTab::new(
             id,
@@ -290,10 +278,7 @@ impl ViewerSession {
         if !matches!(tab.tab.state(), ViewerTabState::Ready) {
             return Err(BeginCommitSelectionError::StaleRange);
         }
-        tab.selection_generation = tab
-            .selection_generation
-            .checked_add(1)
-            .expect("tab selection generation exhausted");
+        tab.selection_generation = tab.selection_generation.wrapping_add(1);
         tab.selection = CommitSelection::Pending {
             commit: commit.clone(),
         };
@@ -349,15 +334,17 @@ impl ViewerSession {
             } else {
                 None
             };
-        let tab = self
+        let Some(tab) = self
             .tabs
             .iter_mut()
             .find(|tab| tab.tab.id() == ticket.tab_id)
-            .expect("current selection ticket owns a tab");
+        else {
+            return PublishOutcome::Stale;
+        };
         let CommitSelection::Pending { commit } =
             std::mem::replace(&mut tab.selection, CommitSelection::None)
         else {
-            unreachable!("current selection ticket is pending");
+            return PublishOutcome::Stale;
         };
         debug_assert_eq!(commit.sha, sha);
         tab.selection = CommitSelection::Ready { commit, transient };
@@ -373,11 +360,13 @@ impl ViewerSession {
         if !self.commit_patch_is_current(ticket) {
             return PublishOutcome::Stale;
         }
-        let tab = self
+        let Some(tab) = self
             .tabs
             .iter_mut()
             .find(|tab| tab.tab.id() == ticket.tab_id)
-            .expect("current selection ticket owns a tab");
+        else {
+            return PublishOutcome::Stale;
+        };
         let CommitSelection::Pending { commit } =
             std::mem::replace(&mut tab.selection, CommitSelection::None)
         else {
@@ -392,10 +381,7 @@ impl ViewerSession {
         let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
             return false;
         };
-        tab.selection_generation = tab
-            .selection_generation
-            .checked_add(1)
-            .expect("tab selection generation exhausted");
+        tab.selection_generation = tab.selection_generation.wrapping_add(1);
         tab.selection = CommitSelection::None;
         if let Some(cached) = self.cache.get(id).cloned()
             && cached.selected.is_some()
@@ -514,10 +500,7 @@ impl ViewerSession {
     }
 
     fn bump_revision(&mut self) {
-        self.revision = self
-            .revision
-            .checked_add(1)
-            .expect("viewer session revision exhausted");
+        self.revision = self.revision.wrapping_add(1);
     }
 
     fn clear_every_commit_selection(&mut self) {
@@ -605,7 +588,9 @@ mod tests {
 
     fn ready_session() -> (ViewerSession, ViewerTabId) {
         let mut session = ViewerSession::new(1024);
-        let id = session.open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot);
+        let id = session
+            .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
         let ticket = session.begin_compute(id).expect("tab exists");
         assert_eq!(
             session.publish_labeled_if_current(
@@ -620,7 +605,9 @@ mod tests {
 
     fn ready_session_with_commits() -> (ViewerSession, ViewerTabId, Vec<String>) {
         let mut session = ViewerSession::new(1024 * 1024);
-        let id = session.open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot);
+        let id = session
+            .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
         let ticket = session.begin_compute(id).expect("tab exists");
         let shas = vec![
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
@@ -726,8 +713,12 @@ mod tests {
     #[test]
     fn reopening_a_recipe_reuses_its_tab_and_updates_the_batch() {
         let mut session = ViewerSession::new(128 * 1024 * 1024);
-        let first = session.open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot);
-        let second = session.open(recipe(), "batch-2".into(), ViewerTabKind::Snapshot);
+        let first = session
+            .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
+        let second = session
+            .open(recipe(), "batch-2".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
 
         assert_eq!(first, second);
         assert_eq!(session.tab(first).expect("tab").batch_id, "batch-2");
@@ -736,9 +727,13 @@ mod tests {
     #[test]
     fn reopening_a_recipe_updates_its_authoritative_kind() {
         let mut session = ViewerSession::new(1024);
-        let id = session.open(recipe(), "snapshot".into(), ViewerTabKind::Snapshot);
+        let id = session
+            .open(recipe(), "snapshot".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
 
-        let reopened = session.open(recipe(), "live".into(), ViewerTabKind::Live);
+        let reopened = session
+            .open(recipe(), "live".into(), ViewerTabKind::Live)
+            .expect("tab id should be available");
 
         assert_eq!(reopened, id);
         let tab = session.tab(id).expect("tab");
@@ -845,7 +840,9 @@ mod tests {
     fn shell_visible_mutations_advance_the_session_revision() {
         let mut session = ViewerSession::new(1024);
         let start = session.revision();
-        let id = session.open(recipe(), "batch".into(), ViewerTabKind::Snapshot);
+        let id = session
+            .open(recipe(), "batch".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
         assert!(session.revision() > start);
         let opened = session.revision();
         assert!(session.activate(id));
@@ -884,10 +881,14 @@ mod tests {
     #[test]
     fn activating_a_tab_updates_the_active_identity() {
         let mut session = ViewerSession::new(1024);
-        let first = session.open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot);
+        let first = session
+            .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
         let mut other = recipe();
         other.source = RecipeSource::LocalRepo(PathBuf::from("/other"));
-        let second = session.open(other, "batch-1".into(), ViewerTabKind::Live);
+        let second = session
+            .open(other, "batch-1".into(), ViewerTabKind::Live)
+            .expect("tab id should be available");
 
         assert!(session.activate(first));
         assert_eq!(session.active(), Some(first));
@@ -919,16 +920,20 @@ mod tests {
     #[test]
     fn open_dedupes_snapshot_tabs_by_unpinned_identity_and_adopts_the_new_pin() {
         let mut session = ViewerSession::new(1024 * 1024);
-        let first = session.open(
-            pinned_unpushed_recipe("b"),
-            "batch-1".into(),
-            ViewerTabKind::Snapshot,
-        );
-        let second = session.open(
-            pinned_unpushed_recipe("c"),
-            "batch-2".into(),
-            ViewerTabKind::Snapshot,
-        );
+        let first = session
+            .open(
+                pinned_unpushed_recipe("b"),
+                "batch-1".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("tab id should be available");
+        let second = session
+            .open(
+                pinned_unpushed_recipe("c"),
+                "batch-2".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("tab id should be available");
 
         assert_eq!(first, second, "same repo+op must reuse the tab across pins");
         let tab = session.tab(second).expect("tab exists");
@@ -952,16 +957,20 @@ mod tests {
             },
             name: None,
         };
-        let a = session.open(
-            range_recipe("a..b"),
-            "batch-1".into(),
-            ViewerTabKind::Snapshot,
-        );
-        let b = session.open(
-            range_recipe("c..d"),
-            "batch-2".into(),
-            ViewerTabKind::Snapshot,
-        );
+        let a = session
+            .open(
+                range_recipe("a..b"),
+                "batch-1".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("tab id should be available");
+        let b = session
+            .open(
+                range_recipe("c..d"),
+                "batch-2".into(),
+                ViewerTabKind::Snapshot,
+            )
+            .expect("tab id should be available");
         assert_ne!(a, b);
     }
 }

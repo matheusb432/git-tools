@@ -29,7 +29,8 @@ impl DiffViewerClient for CliDiffViewerClient {
         };
         let bin = crate::viewer::resolve_viewer_bin()
             .context("gtl-viewer is not installed; cannot forward the recipe batch")?;
-        let token = gtl_contracts::recipes::encode_token(&wire);
+        let token = gtl_contracts::recipes::encode_token(&wire)
+            .context("failed to encode the viewer recipe batch")?;
         gtl_infra::detached_process::spawn(&bin, &[token.as_str()])
             .context("failed to spawn gtl-viewer to forward the recipe batch")
     }

@@ -94,10 +94,10 @@ impl WeightedViewCache {
 
     fn evict_to_bound(&mut self) {
         while self.weight > self.max_weight {
-            let (_, evicted) = self
-                .entries
-                .pop_lru()
-                .expect("positive cache weight has an entry");
+            let Some((_, evicted)) = self.entries.pop_lru() else {
+                self.weight = 0;
+                break;
+            };
             self.weight -= evicted.weight();
         }
     }

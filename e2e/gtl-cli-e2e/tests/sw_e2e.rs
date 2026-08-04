@@ -10,6 +10,9 @@ use assert_cmd::Command;
 use predicates::str::contains;
 use tempfile::TempDir;
 
+mod support;
+use support::workspace_bin;
+
 /// Run a git command in `repo_path`, asserting success.
 fn git(repo_path: &Path, args: &[&str]) {
     let out = process::Command::new("git")
@@ -74,7 +77,7 @@ fn setup() -> (TempDir, std::path::PathBuf) {
 
 /// The built `git-tools` binary, run with cwd inside `repo_path`.
 fn gtl(repo_path: &Path) -> Command {
-    let mut cmd = Command::cargo_bin("git-tools").unwrap();
+    let mut cmd = Command::new(workspace_bin("git-tools"));
     cmd.current_dir(repo_path);
     cmd
 }

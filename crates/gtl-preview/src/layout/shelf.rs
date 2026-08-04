@@ -192,7 +192,7 @@ mod tests {
     use gtl_application::viewer::RenderOptions;
     use gtl_models::diffs::Commit;
 
-    use crate::{build_html, fixtures::sample_view};
+    use crate::{fixtures::sample_view, test_render::build_html};
 
     #[test]
     fn no_commit_state_owns_its_presentation_utilities() {

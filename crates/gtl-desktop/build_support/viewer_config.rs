@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::{Context as _, ensure};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -26,49 +27,52 @@ pub(crate) struct ResolvedViewerConfig {
     pub(crate) config_path: PathBuf,
     pub(crate) htmx_path: PathBuf,
     pub(crate) app_url: url::Url,
+    pub(crate) app_host: String,
 }
 
-pub(crate) fn load(manifest_dir: &Path) -> ResolvedViewerConfig {
+pub(crate) fn load(manifest_dir: &Path) -> anyhow::Result<ResolvedViewerConfig> {
     let config_path = manifest_dir.join("viewer.toml");
-    let raw = fs::read_to_string(&config_path).expect("viewer.toml must be readable");
-    let config: ViewerConfig = toml::from_str(&raw).expect("viewer.toml must match its schema");
+    let raw = fs::read_to_string(&config_path)
+        .with_context(|| format!("read {}", config_path.display()))?;
+    let config: ViewerConfig =
+        toml::from_str(&raw).with_context(|| format!("parse {}", config_path.display()))?;
     let app_url = url::Url::parse(&format!(
         "{}://{}/",
         config.protocol.scheme, config.protocol.host
     ))
-    .expect("viewer protocol scheme and host must form a valid URL");
-    assert_eq!(
-        app_url.path(),
-        "/",
+    .context("viewer protocol scheme and host must form a valid URL")?;
+    ensure!(
+        app_url.path() == "/",
         "viewer protocol URL must not contain a path"
     );
-    assert!(
+    ensure!(
         app_url.query().is_none(),
         "viewer protocol URL must not contain a query"
     );
-    assert!(
+    ensure!(
         config.assets.htmx_path.is_relative(),
         "htmx asset path must be relative to the desktop crate"
     );
     let htmx_path = manifest_dir
         .join(config.assets.htmx_path)
         .canonicalize()
-        .expect("configured htmx asset must exist");
+        .context("configured htmx asset must exist")?;
     let manifest_dir = manifest_dir
         .canonicalize()
-        .expect("desktop manifest directory must exist");
-    assert!(
+        .context("desktop manifest directory must exist")?;
+    ensure!(
         htmx_path.starts_with(&manifest_dir),
         "htmx asset must remain inside the desktop crate"
     );
-    assert!(
+    ensure!(
         htmx_path.is_file(),
         "configured htmx asset must be a regular file"
     );
 
-    ResolvedViewerConfig {
+    Ok(ResolvedViewerConfig {
         config_path,
         htmx_path,
         app_url,
-    }
+        app_host: config.protocol.host,
+    })
 }

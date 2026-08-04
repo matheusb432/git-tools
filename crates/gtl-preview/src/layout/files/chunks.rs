@@ -4,7 +4,7 @@ use gtl_application::{diffs::View, viewer::RenderOptions};
 use maud::{Markup, PreEscaped, html};
 
 use super::{diff_target_id, render_rows, selected_lines};
-use crate::ViewChunk;
+use crate::{ViewChunk, syntax::PreviewResult};
 
 const MAX_CHUNK_ROWS: usize = 256;
 const MAX_CHUNK_BYTES: usize = 256 * 1024;
@@ -33,10 +33,13 @@ pub(in crate::layout) fn chunk_fragment(chunk: &ViewChunk, next_load_id: Option<
     }
 }
 
-pub(in crate::layout) fn view_chunks(view: &View, options: RenderOptions) -> VecDeque<ViewChunk> {
+pub(in crate::layout) fn view_chunks(
+    view: &View,
+    options: RenderOptions,
+) -> PreviewResult<VecDeque<ViewChunk>> {
     let mut chunks = VecDeque::new();
     for (file_index, file) in view.files.iter().enumerate() {
-        let syntax = crate::syntax::syntax_for_path(&file.path);
+        let syntax = crate::syntax::syntax_for_path(&file.path)?;
         let (lines, _) = selected_lines(file, options);
         let rendered = render_rows(options.layout(), lines, syntax);
         chunks.extend(
@@ -49,7 +52,7 @@ pub(in crate::layout) fn view_chunks(view: &View, options: RenderOptions) -> Vec
                 }),
         );
     }
-    chunks
+    Ok(chunks)
 }
 
 fn split_rows(rendered: &str) -> Vec<(String, usize)> {
@@ -84,11 +87,12 @@ mod tests {
     fn desktop_chunks_recompose_the_complete_server_rendered_rows() {
         let view = sample_view();
         let file = &view.files[0];
-        let syntax = crate::syntax::syntax_for_path(&file.path);
+        let syntax = crate::test_render::syntax_for_path(&file.path);
         let (lines, _) = selected_lines(file, RenderOptions::DEFAULT);
         let complete = render_rows(DiffLayout::Unified, lines, syntax);
 
-        let chunks = view_chunks(&view, RenderOptions::DEFAULT);
+        let chunks =
+            view_chunks(&view, RenderOptions::DEFAULT).expect("embedded syntax assets should load");
         let recomposed = chunks
             .iter()
             .map(|chunk| chunk.html.as_str())

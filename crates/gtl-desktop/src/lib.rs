@@ -254,18 +254,19 @@ fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
     }
 }
 
-/// Build and run the Tauri application. Called by `main.rs`.
+/// Builds and runs the Tauri application.
 ///
-/// # Panics
-/// Panics when viewer storage cannot initialize or the Tauri runtime cannot start.
-pub fn run() {
-    let data_root = commands::data_root().expect("viewer data root resolves");
+/// # Errors
+///
+/// Returns an error when viewer storage cannot initialize, window setup fails, or the Tauri
+/// runtime cannot start.
+pub fn run() -> anyhow::Result<()> {
+    let data_root = commands::data_root().map_err(anyhow::Error::msg)?;
     let viewer_app = presentation::ViewerApp::open(
         &data_root,
         gtl_infra::user_config::TomlSettingsStore::from_environment(),
         DEFAULT_VIEW_CACHE_WEIGHT,
-    )
-    .expect("viewer app state opens");
+    )?;
     let cold_start_batches = recipes_from_argv(&std::env::args().collect::<Vec<_>>());
     tauri::Builder::default()
         .manage(viewer_app)
@@ -320,9 +321,7 @@ pub fn run() {
             ) {
                 eprintln!("gtl-viewer: failed to enqueue cold-start recipes: {error}");
             }
-            let app_url = protocol_config::APP_URL
-                .parse()
-                .expect("build-validated app URL");
+            let app_url: url::Url = protocol_config::APP_URL.parse()?;
             WebviewWindowBuilder::new(app, "main", WebviewUrl::CustomProtocol(app_url))
                 .title(MAIN_WINDOW_TITLE)
                 .inner_size(MAIN_WINDOW_SIZE.0, MAIN_WINDOW_SIZE.1)
@@ -351,8 +350,8 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(handle_window_event)
-        .run(tauri::generate_context!())
-        .expect("error while running gtl-viewer");
+        .run(tauri::generate_context!())?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -381,10 +380,10 @@ mod tests {
         let second = recipe_batch("second");
         let argv = vec![
             "gtl-viewer".into(),
-            gtl_contracts::recipes::encode_token(&first),
+            gtl_contracts::recipes::encode_token(&first).expect("first batch encodes"),
             "gtl-recipe://malformed".into(),
             "--flag".into(),
-            gtl_contracts::recipes::encode_token(&second),
+            gtl_contracts::recipes::encode_token(&second).expect("second batch encodes"),
         ];
 
         assert_eq!(recipes_from_argv(&argv), vec![first, second]);
@@ -395,7 +394,9 @@ mod tests {
         let batch = recipe_batch("warm");
 
         assert_eq!(
-            recipes_from_argv(&[gtl_contracts::recipes::encode_token(&batch)]),
+            recipes_from_argv(&[
+                gtl_contracts::recipes::encode_token(&batch).expect("batch encodes")
+            ]),
             vec![batch]
         );
     }

@@ -1,5 +1,5 @@
 use maud::{DOCTYPE, html};
-use tauri::http::{Response, StatusCode};
+use tauri::http::{HeaderValue, Response, StatusCode, header};
 
 use super::view_snapshot;
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
 const HTML_CONTENT_TYPE: &str = "text/html; charset=utf-8";
 const TEXT_CONTENT_TYPE: &str = "text/plain; charset=utf-8";
 const DYNAMIC_CACHE_CONTROL: &str = "no-store";
-const RECOVERY_HEADER: &str = "X-GTL-Recovery";
+const RECOVERY_HEADER: &str = "x-gtl-recovery";
 const RECOVERY_RESWAP: &str = "outerHTML";
 
 #[derive(Debug, Clone, Copy)]
@@ -58,9 +58,9 @@ impl From<MaterializationError> for RouteError {
     fn from(value: MaterializationError) -> Self {
         match value {
             MaterializationError::Conflict => Self::Conflict,
-            MaterializationError::ExhaustedIds | MaterializationError::StatePoisoned => {
-                Self::Internal(value.to_string())
-            }
+            MaterializationError::ExhaustedIds
+            | MaterializationError::Render(_)
+            | MaterializationError::StatePoisoned => Self::Internal(value.to_string()),
         }
     }
 }
@@ -98,18 +98,10 @@ pub(super) type RouteResult = Result<RouteOutput, RouteError>;
 
 pub(super) fn into_response(output: RouteOutput) -> Response<Vec<u8>> {
     match output {
-        RouteOutput::Html(body) => Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", HTML_CONTENT_TYPE)
-            .header("Cache-Control", DYNAMIC_CACHE_CONTROL)
-            .body(body.into_bytes())
-            .expect("static HTML response builds"),
-        RouteOutput::Empty(status) => Response::builder()
-            .status(status)
-            .header("Content-Type", TEXT_CONTENT_TYPE)
-            .header("Cache-Control", DYNAMIC_CACHE_CONTROL)
-            .body(Vec::new())
-            .expect("static status response builds"),
+        RouteOutput::Html(body) => {
+            response(StatusCode::OK, HTML_CONTENT_TYPE, body.into_bytes(), false)
+        }
+        RouteOutput::Empty(status) => response(status, TEXT_CONTENT_TYPE, Vec::new(), false),
     }
 }
 
@@ -131,20 +123,40 @@ pub(super) fn error_response(target: ErrorTarget, error: &RouteError) -> Respons
         ErrorTarget::History => error_history(),
         ErrorTarget::Action => String::new(),
     };
-    let builder = Response::builder()
-        .status(status)
-        .header("Content-Type", HTML_CONTENT_TYPE)
-        .header("Cache-Control", DYNAMIC_CACHE_CONTROL);
-    let builder = if matches!(target, ErrorTarget::Document | ErrorTarget::Action) {
-        builder
-    } else {
-        builder
-            .header(RECOVERY_HEADER, "true")
-            .header("HX-Reswap", RECOVERY_RESWAP)
-    };
-    builder
-        .body(body.into_bytes())
-        .expect("static error response builds")
+    response(
+        status,
+        HTML_CONTENT_TYPE,
+        body.into_bytes(),
+        !matches!(target, ErrorTarget::Document | ErrorTarget::Action),
+    )
+}
+
+fn response(
+    status: StatusCode,
+    content_type: &'static str,
+    body: Vec<u8>,
+    recovery: bool,
+) -> Response<Vec<u8>> {
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(DYNAMIC_CACHE_CONTROL),
+    );
+    if recovery {
+        response.headers_mut().insert(
+            header::HeaderName::from_static(RECOVERY_HEADER),
+            HeaderValue::from_static("true"),
+        );
+        response.headers_mut().insert(
+            header::HeaderName::from_static("hx-reswap"),
+            HeaderValue::from_static(RECOVERY_RESWAP),
+        );
+    }
+    response
 }
 
 fn error_document() -> String {

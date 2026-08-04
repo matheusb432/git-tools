@@ -311,7 +311,7 @@ mod tests {
         let backend = FakeBackend(rejected_envelope("not a git repo"));
 
         let Err(err) = run_with_forward(&backend, Some("/nope".to_string()), |_batch| {
-            unreachable!("a rejected save must not forward anything")
+            anyhow::bail!("a rejected save forwarded a batch")
         }) else {
             panic!("a rejected save must map to Err")
         };
@@ -449,7 +449,7 @@ mod tests {
         };
 
         let error = run_managed_with_options(&backend, &options, |_batch| {
-            unreachable!("no batch exists when every save is rejected")
+            anyhow::bail!("a fully rejected run forwarded a batch")
         })
         .unwrap_err();
 
@@ -559,11 +559,14 @@ mod tests {
             interactive: false,
         };
 
+        let forwarded = Cell::new(false);
         let result = run_managed_with_options(&EchoingBackend, &options, |_batch| {
-            unreachable!("nothing to forward when no repo has unpushed commits")
+            forwarded.set(true);
+            Ok(())
         });
 
         assert!(result.is_ok());
+        assert!(!forwarded.get());
     }
 
     #[test]

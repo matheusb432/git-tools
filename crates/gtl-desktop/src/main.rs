@@ -2,5 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    gtl_desktop::run();
+    if let Err(error) = gtl_desktop::run() {
+        eprintln!("gtl-viewer: {error:#}");
+        std::process::exit(1);
+    }
 }

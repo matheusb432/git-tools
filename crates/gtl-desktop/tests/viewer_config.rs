@@ -26,9 +26,10 @@ fn resolves_valid_origin_and_asset_path() {
     fs::write(&asset_path, "// htmx").expect("test htmx asset is writable");
     write_config(manifest_dir.path(), "gtl", "src/embedded/htmx.js");
 
-    let resolved = viewer_config::load(manifest_dir.path());
+    let resolved = viewer_config::load(manifest_dir.path()).expect("valid config should resolve");
 
     assert_eq!(resolved.app_url.as_str(), "gtl://app/");
+    assert_eq!(resolved.app_host, "app");
     assert_eq!(
         resolved.config_path,
         manifest_dir.path().join("viewer.toml")
@@ -42,7 +43,6 @@ fn resolves_valid_origin_and_asset_path() {
 }
 
 #[test]
-#[should_panic(expected = "viewer protocol scheme and host must form a valid URL")]
 fn rejects_an_invalid_origin() {
     let manifest_dir = TempDir::new().expect("temporary desktop crate is available");
     let asset_dir = manifest_dir.path().join("src/embedded");
@@ -50,16 +50,31 @@ fn rejects_an_invalid_origin() {
     fs::write(asset_dir.join("htmx.js"), "// htmx").expect("test htmx asset is writable");
     write_config(manifest_dir.path(), "1invalid", "src/embedded/htmx.js");
 
-    viewer_config::load(manifest_dir.path());
+    let Err(error) = viewer_config::load(manifest_dir.path()) else {
+        panic!("invalid origin should fail");
+    };
+
+    assert!(
+        error
+            .to_string()
+            .contains("viewer protocol scheme and host must form a valid URL")
+    );
 }
 
 #[test]
-#[should_panic(expected = "configured htmx asset must be a regular file")]
 fn rejects_a_directory_as_the_htmx_asset() {
     let manifest_dir = TempDir::new().expect("temporary desktop crate is available");
     fs::create_dir_all(manifest_dir.path().join("src/embedded"))
         .expect("test asset directory is creatable");
     write_config(manifest_dir.path(), "gtl", "src/embedded");
 
-    viewer_config::load(manifest_dir.path());
+    let Err(error) = viewer_config::load(manifest_dir.path()) else {
+        panic!("directory asset should fail");
+    };
+
+    assert!(
+        error
+            .to_string()
+            .contains("configured htmx asset must be a regular file")
+    );
 }

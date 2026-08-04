@@ -8,7 +8,7 @@ use std::{
 };
 
 #[test]
-fn recorder_remains_alive_until_released_and_then_exits() {
+fn editor_recorder_remains_alive_until_released_and_then_exits() {
     let temporary = tempfile::tempdir().expect("temporary directory");
     let record_path = temporary.path().join("editor-record.json");
     let release_path = temporary.path().join("editor-release");

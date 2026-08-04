@@ -16,6 +16,8 @@ use gtl_application::{
 };
 use maud::{Markup, html};
 
+use crate::syntax::PreviewResult;
+
 /// The host that consumes one rendered `.layout` body.
 ///
 /// The two hosts share every region, but file bodies diverge: the desktop app's
@@ -70,7 +72,11 @@ const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
 // document chrome — one <style>/<script> — lives only at the top level. Per-commit
 // [popover] elements live inside .layout so the per-layout JS scoping in preview.js
 // finds them.
-pub(crate) fn view_body(view: &View, options: RenderOptions, surface: Surface) -> Markup {
+pub(crate) fn view_body(
+    view: &View,
+    options: RenderOptions,
+    surface: Surface,
+) -> PreviewResult<Markup> {
     view_body_with_mode(
         view,
         view,
@@ -89,7 +95,7 @@ pub(crate) fn view_body_with_mobile_controls(
     options: RenderOptions,
     surface: Surface,
     controls: mobile_controls::MobileViewControls,
-) -> Markup {
+) -> PreviewResult<Markup> {
     view_body_with_mode(
         view,
         range_view,
@@ -106,7 +112,7 @@ pub(crate) fn view_body_shell(
     options: RenderOptions,
     surface: Surface,
     load_id: u64,
-) -> Markup {
+) -> PreviewResult<Markup> {
     view_body_with_mode(
         view,
         view,
@@ -126,7 +132,7 @@ pub(crate) fn view_body_shell_with_mobile_controls(
     surface: Surface,
     load_id: u64,
     controls: mobile_controls::MobileViewControls,
-) -> Markup {
+) -> PreviewResult<Markup> {
     view_body_with_mode(
         view,
         range_view,
@@ -152,10 +158,10 @@ fn view_body_with_mode(
     surface: Surface,
     mode: BodyMode,
     mobile_controls: mobile_controls::MobileViewControls,
-) -> Markup {
+) -> PreviewResult<Markup> {
     let mobile_controls_target = surface.mobile_controls_target();
     let artifact_mobile_navigation = ArtifactMobileNavigationTargets::from_surface(surface);
-    html! {
+    Ok(html! {
         div class={
             (LAYOUT_PRESENTATION_CLASSES) " "
             (crate::rows::ROW_PRESENTATION_CLASSES) " "
@@ -166,9 +172,9 @@ fn view_body_with_mode(
             (tree::tree(view))
             main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-0 pb-[60px] wide-screen:px-7 compact-desktop:px-4 tablet:px-3 mobile:px-1 tablet:pb-12 print:overflow-visible print:p-0" {
                 @match mode {
-                    BodyMode::Complete => (files::file_blocks(view, options, surface)),
+                    BodyMode::Complete => (files::file_blocks(view, options, surface)?)
                     BodyMode::Shell { load_id } => {
-                        (files::file_block_shells(view, options, surface))
+                        (files::file_block_shells(view, options, surface)?)
                         (files::chunk_loader(load_id))
                     }
                 }
@@ -188,13 +194,13 @@ fn view_body_with_mode(
             }
             (mobile_controls::popover(&mobile_controls_target, mobile_controls))
         }
-    }
+    })
 }
 
 pub(crate) fn view_chunks(
     view: &View,
     options: RenderOptions,
-) -> std::collections::VecDeque<crate::ViewChunk> {
+) -> PreviewResult<std::collections::VecDeque<crate::ViewChunk>> {
     files::view_chunks(view, options)
 }
 
@@ -206,7 +212,10 @@ pub(crate) fn view_chunk_fragment(chunk: &crate::ViewChunk, next_load_id: Option
 mod tests {
     use gtl_application::viewer::{RenderOptions, ViewerTabId};
 
-    use crate::{fixtures::sample_view, view_fragment};
+    use crate::{
+        fixtures::sample_view,
+        test_render::{build_html, view_fragment},
+    };
 
     fn tab_id(raw: u64) -> ViewerTabId {
         ViewerTabId::try_new(raw).expect("positive tab id")
@@ -237,7 +246,7 @@ mod tests {
 
     #[test]
     fn build_html_wires_copy_context_toggle_and_per_file_comment_leader() {
-        let html = crate::build_html(&sample_view(), RenderOptions::DEFAULT, None);
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         // context-on by default: the root carries the class the copy-button reads at click time
         assert!(html.contains(r#"class="layout copy-ctx "#));

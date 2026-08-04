@@ -2,6 +2,7 @@
 
 use std::{ffi::OsString, time::Duration};
 
+use anyhow::Result;
 use sample_project::{Test, summary};
 
 pub(crate) struct TestDeclaration {
@@ -31,60 +32,58 @@ impl TestDeclaration {
     }
 }
 
-pub(crate) fn tests_unit() -> Vec<TestDeclaration> {
-    vec![TestDeclaration::new(
+pub(crate) fn tests_unit() -> Result<Vec<TestDeclaration>> {
+    Ok(vec![TestDeclaration::new(
         "unit",
-        Test::try_new("unit", "cargo")
-            .expect("unit test definition is valid")
+        Test::try_new("unit", "cargo")?
             .args(["test", "--quiet"])
             .verbose_arguments(["--", "--nocapture"])
             .summary_parser(summary::cargo),
-    )]
+    )])
 }
 
-pub(crate) fn tests_e2e(executable: OsString) -> Vec<TestDeclaration> {
-    vec![desktop_e2e(executable)]
+pub(crate) fn tests_e2e(executable: OsString) -> Result<Vec<TestDeclaration>> {
+    Ok(vec![desktop_e2e(executable)?])
 }
 
-pub(crate) fn tests_all(executable: OsString) -> Vec<TestDeclaration> {
-    vec![
+pub(crate) fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
+    Ok(vec![
         TestDeclaration::new(
             "unit",
-            Test::try_new("unit", "cargo")
-                .expect("unit test definition is valid")
+            Test::try_new("unit", "cargo")?
                 .args(["test", "--workspace", "--quiet"])
                 .verbose_arguments(["--", "--nocapture"])
                 .summary_parser(summary::cargo),
         ),
         TestDeclaration::new(
             "web",
-            Test::try_new("web", executable.clone())
-                .expect("web test definition is valid")
+            Test::try_new("web", executable.clone())?
                 .arg("frontend-test")
                 .summary_parser(summary::vitest),
         ),
-        worker("drift", &executable, "drift-check"),
-        desktop_e2e(executable),
-    ]
+        worker("drift", &executable, "drift-check")?,
+        desktop_e2e(executable)?,
+    ])
 }
 
-fn worker(label: &'static str, executable: &OsString, verb: &'static str) -> TestDeclaration {
-    TestDeclaration::new(
+fn worker(
+    label: &'static str,
+    executable: &OsString,
+    verb: &'static str,
+) -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
         label,
-        Test::try_new(label, executable.clone())
-            .expect("worker test definition is valid")
-            .arg(verb),
-    )
+        Test::try_new(label, executable.clone())?.arg(verb),
+    ))
 }
 
-fn desktop_e2e(executable: OsString) -> TestDeclaration {
-    TestDeclaration::new(
+fn desktop_e2e(executable: OsString) -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
         "e2e",
-        Test::try_new("e2e", executable)
-            .expect("desktop E2E test definition is valid")
+        Test::try_new("e2e", executable)?
             .arg("desktop-e2e-worker")
             .verbose_arguments(["--verbose"])
             .accepts_evidences()
             .timeout(Duration::from_hours(2)),
-    )
+    ))
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gtl_application::viewer::{DiffDensity, ViewerDocument};
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 
@@ -10,6 +12,7 @@ use crate::{materialization::ViewLoadId, protocol_config};
 // ! Built by `deno task build` from frontend/viewer/ (Vite lib IIFE); the drift gate
 // ! pins the output to its sources.
 const VIEWER_JS: &str = include_str!("../embedded/generated/viewer.js");
+type RenderResult<T> = Result<T, Arc<gtl_preview::PreviewError>>;
 
 /// Renders the server-authored viewer document and its independently swappable fragments.
 #[derive(Debug, Clone, Copy, Default)]
@@ -21,15 +24,15 @@ pub struct MaudViewerRenderer;
 )]
 impl MaudViewerRenderer {
     #[cfg(test)]
-    pub(crate) fn build_document(self, document: &ViewerDocument) -> String {
+    pub(crate) fn build_document(self, document: &ViewerDocument) -> RenderResult<String> {
         self.render_document(document, false)
     }
 
-    pub(crate) fn build_deferred_document(self, document: &ViewerDocument) -> String {
+    pub(crate) fn build_deferred_document(self, document: &ViewerDocument) -> RenderResult<String> {
         self.render_document(document, true)
     }
 
-    fn render_document(self, document: &ViewerDocument, defer_ready: bool) -> String {
+    fn render_document(self, document: &ViewerDocument, defer_ready: bool) -> RenderResult<String> {
         let settings = document.settings();
         let options = settings.options();
         let htmx = format!(
@@ -37,7 +40,7 @@ impl MaudViewerRenderer {
             protocol_config::HTMX
         );
 
-        html! {
+        Ok(html! {
             (DOCTYPE)
             html lang="en"
                 data-theme=(settings.theme())
@@ -56,7 +59,7 @@ impl MaudViewerRenderer {
                 body class="viewer-shell overflow-hidden" {
                     main class="grid h-screen min-w-0 grid-rows-[auto_minmax(0,1fr)] bg-bg" {
                         (tabs(document, SwapMode::Primary, SwapFeedback::None))
-                        (fragments::view(document, SwapMode::Primary, SwapFeedback::None, None, defer_ready))
+                        (fragments::view(document, SwapMode::Primary, SwapFeedback::None, None, defer_ready)?)
                     }
                     (fragments::loading_template())
                     aside id="viewer-history-popover" class="viewer-history-popover m-auto h-[min(680px,calc(100vh_-_84px))] w-[min(1040px,calc(100vw_-_48px))] max-w-none overflow-hidden border-line-2 bg-surface p-0 inset-[42px] shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)] mobile:h-[calc(100vh_-_24px)] mobile:w-[calc(100vw_-_24px)] mobile:inset-3" popover {
@@ -75,12 +78,15 @@ impl MaudViewerRenderer {
                 }
             }
         }
-        .into_string()
+        .into_string())
     }
 
     #[cfg(any(test, feature = "benchmark-support"))]
-    pub fn build_view(self, document: &ViewerDocument) -> String {
-        fragments::view(document, SwapMode::Primary, SwapFeedback::None, None, false).into_string()
+    pub fn build_view(self, document: &ViewerDocument) -> RenderResult<String> {
+        Ok(
+            fragments::view(document, SwapMode::Primary, SwapFeedback::None, None, false)?
+                .into_string(),
+        )
     }
 
     #[cfg(test)]
@@ -120,7 +126,7 @@ impl MaudViewerRenderer {
         self,
         document: &ViewerDocument,
         feedback: SwapFeedback<'_>,
-    ) -> String {
+    ) -> RenderResult<String> {
         self.render_view_with_tabs(document, feedback, None)
     }
 
@@ -129,7 +135,7 @@ impl MaudViewerRenderer {
         document: &ViewerDocument,
         feedback: SwapFeedback<'_>,
         load_id: ViewLoadId,
-    ) -> String {
+    ) -> RenderResult<String> {
         self.render_view_with_tabs(document, feedback, Some(load_id))
     }
 
@@ -138,19 +144,19 @@ impl MaudViewerRenderer {
         document: &ViewerDocument,
         feedback: SwapFeedback<'_>,
         load_id: Option<ViewLoadId>,
-    ) -> String {
-        html! {
-            (fragments::view(document, SwapMode::Primary, feedback, load_id, false))
+    ) -> RenderResult<String> {
+        Ok(html! {
+            (fragments::view(document, SwapMode::Primary, feedback, load_id, false)?)
             (tabs(document, SwapMode::OutOfBand, feedback))
         }
-        .into_string()
+        .into_string())
     }
 
     pub(crate) fn build_tabs_with_view(
         self,
         document: &ViewerDocument,
         feedback: SwapFeedback<'_>,
-    ) -> String {
+    ) -> RenderResult<String> {
         self.render_tabs_with_view(document, feedback, None)
     }
 
@@ -159,7 +165,7 @@ impl MaudViewerRenderer {
         document: &ViewerDocument,
         feedback: SwapFeedback<'_>,
         load_id: ViewLoadId,
-    ) -> String {
+    ) -> RenderResult<String> {
         self.render_tabs_with_view(document, feedback, Some(load_id))
     }
 
@@ -168,7 +174,7 @@ impl MaudViewerRenderer {
         document: &ViewerDocument,
         feedback: SwapFeedback<'_>,
         load_id: Option<ViewLoadId>,
-    ) -> String {
+    ) -> RenderResult<String> {
         let view_feedback = match feedback {
             SwapFeedback::LiveViewDeleted if load_id.is_none() => SwapFeedback::LiveViewDeleted,
             SwapFeedback::None
@@ -176,11 +182,11 @@ impl MaudViewerRenderer {
             | SwapFeedback::LiveViewDeleted
             | SwapFeedback::SnapshotRecipesSkipped(_) => SwapFeedback::None,
         };
-        html! {
+        Ok(html! {
             (tabs(document, SwapMode::Primary, feedback))
-            (fragments::view(document, SwapMode::OutOfBand, view_feedback, load_id, false))
+            (fragments::view(document, SwapMode::OutOfBand, view_feedback, load_id, false)?)
         }
-        .into_string()
+        .into_string())
     }
 }
 

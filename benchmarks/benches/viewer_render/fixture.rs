@@ -7,6 +7,7 @@ use gtl_application::{
         ViewerTabKind, ViewerTabState, ViewerView,
     },
 };
+use gtl_benchmarks::require;
 use gtl_desktop::MaudViewerRenderer;
 
 use super::view_fixture;
@@ -30,44 +31,59 @@ impl ViewerRenderBenchmark {
     }
 
     pub(super) fn render(&self, options: RenderOptions) -> String {
-        let tab_id = ViewerTabId::try_new(1).expect("fixture tab id is positive");
-        let document = ViewerDocument::new(
-            vec![ViewerTab::new(
-                tab_id,
-                "45k-line benchmark".into(),
-                ViewerTabKind::Snapshot,
-                ViewerTabState::Ready,
-            )],
-            Some(tab_id),
-            Some(ViewerView::new(
-                tab_id,
-                Arc::clone(&self.view),
-                options,
-                ViewerTabKind::Snapshot,
-            )),
-            vec![],
-            ViewerSettings::new(options, Theme::Dark),
+        let tab_id = require(ViewerTabId::try_new(1), "creating a benchmark tab id");
+        let document = require(
+            ViewerDocument::new(
+                vec![ViewerTab::new(
+                    tab_id,
+                    "45k-line benchmark".into(),
+                    ViewerTabKind::Snapshot,
+                    ViewerTabState::Ready,
+                )],
+                Some(tab_id),
+                Some(ViewerView::new(
+                    tab_id,
+                    Arc::clone(&self.view),
+                    options,
+                    ViewerTabKind::Snapshot,
+                )),
+                vec![],
+                ViewerSettings::new(options, Theme::Dark),
+            ),
+            "building a benchmark viewer document",
+        );
+        require(
+            MaudViewerRenderer.build_view(&document),
+            "rendering the benchmark viewer",
         )
-        .expect("benchmark render options preserve document invariants");
-        MaudViewerRenderer.build_view(&document)
     }
 
     pub(super) fn render_raw(&self) -> String {
-        gtl_preview::build_html(&self.view, RenderOptions::DEFAULT, Some("dark"))
+        require(
+            gtl_preview::build_html(&self.view, RenderOptions::DEFAULT, Some("dark")),
+            "rendering the raw benchmark artifact",
+        )
     }
 
     pub(super) fn render_shell(&self, options: RenderOptions) -> String {
-        gtl_preview::view_shell(
-            &self.view,
-            options,
-            ViewerTabId::try_new(1).expect("fixture tab id is positive"),
-            1,
+        require(
+            gtl_preview::view_shell(
+                &self.view,
+                options,
+                require(ViewerTabId::try_new(1), "creating a benchmark tab id"),
+                1,
+            ),
+            "rendering the benchmark view shell",
         )
         .into_string()
     }
 
     pub(super) fn render_chunks(&self, options: RenderOptions) -> Vec<gtl_preview::ViewChunk> {
-        gtl_preview::view_chunks(&self.view, options).into()
+        require(
+            gtl_preview::view_chunks(&self.view, options),
+            "rendering the benchmark view chunks",
+        )
+        .into()
     }
 }
 

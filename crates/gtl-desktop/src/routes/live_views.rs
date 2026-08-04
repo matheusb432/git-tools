@@ -85,7 +85,11 @@ pub(super) fn restore(app: &ViewerApp) -> Result<Option<VersionedView>, RouteErr
                     },
                     name: Some(record.display_name),
                 };
-                newest = Some(session.open(recipe, "restored-live".into(), ViewerTabKind::Live));
+                newest = Some(
+                    session
+                        .open(recipe, "restored-live".into(), ViewerTabKind::Live)
+                        .ok_or_else(|| "viewer tab ids exhausted".to_string())?,
+                );
             }
         }
         if let Some(tab) = newest {

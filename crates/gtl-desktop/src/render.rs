@@ -33,10 +33,84 @@ mod tests {
     use strum::VariantArray as _;
 
     use super::{
-        MaudViewerRenderer, SwapFeedback, VIEW_STATE_BROKEN, VIEW_STATE_EMPTY, VIEW_STATE_ERROR,
-        VIEW_STATE_LOADING, VIEW_STATE_READY, ViewerRoute, ViewerSettingChange,
+        SwapFeedback, VIEW_STATE_BROKEN, VIEW_STATE_EMPTY, VIEW_STATE_ERROR, VIEW_STATE_LOADING,
+        VIEW_STATE_READY, ViewerRoute, ViewerSettingChange,
     };
     use crate::materialization::ViewLoadId;
+
+    #[derive(Debug, Clone, Copy)]
+    struct MaudViewerRenderer;
+
+    impl MaudViewerRenderer {
+        fn renderer(self) -> super::document::MaudViewerRenderer {
+            match self {
+                Self => super::document::MaudViewerRenderer,
+            }
+        }
+
+        fn build_document(self, document: &ViewerDocument) -> String {
+            self.renderer()
+                .build_document(document)
+                .expect("embedded syntax assets should load")
+        }
+
+        fn build_deferred_document(self, document: &ViewerDocument) -> String {
+            self.renderer()
+                .build_deferred_document(document)
+                .expect("embedded syntax assets should load")
+        }
+
+        fn build_view(self, document: &ViewerDocument) -> String {
+            self.renderer()
+                .build_view(document)
+                .expect("embedded syntax assets should load")
+        }
+
+        fn build_materialized_view_with_tabs_feedback(
+            self,
+            document: &ViewerDocument,
+            feedback: SwapFeedback<'_>,
+            load_id: ViewLoadId,
+        ) -> String {
+            self.renderer()
+                .build_materialized_view_with_tabs_feedback(document, feedback, load_id)
+                .expect("embedded syntax assets should load")
+        }
+
+        fn build_tabs(
+            self,
+            tabs: &[ViewerTab],
+            active_tab_id: Option<ViewerTabId>,
+            active_theme: Theme,
+        ) -> String {
+            self.renderer()
+                .build_tabs(tabs, active_tab_id, active_theme)
+        }
+
+        fn build_history(self, history: &ViewerHistoryPage) -> String {
+            self.renderer().build_history(history)
+        }
+
+        fn build_tabs_with_view(
+            self,
+            document: &ViewerDocument,
+            feedback: SwapFeedback<'_>,
+        ) -> String {
+            self.renderer()
+                .build_tabs_with_view(document, feedback)
+                .expect("embedded syntax assets should load")
+        }
+
+        fn build_view_with_tabs_feedback(
+            self,
+            document: &ViewerDocument,
+            feedback: SwapFeedback<'_>,
+        ) -> String {
+            self.renderer()
+                .build_view_with_tabs_feedback(document, feedback)
+                .expect("embedded syntax assets should load")
+        }
+    }
 
     const HTMX_SHA256: &str = "71ea67185bfa8c98c39d31717c6fce5d852370fcdfd129db4543774d3145c0de";
 
@@ -584,7 +658,8 @@ mod tests {
         assert!(!snapshot.contains("Delete live view"));
         assert!(!snapshot.contains("/live-view"));
 
-        let raw = gtl_preview::build_html(&view(), RenderOptions::DEFAULT, None);
+        let raw = gtl_preview::build_html(&view(), RenderOptions::DEFAULT, None)
+            .expect("embedded syntax assets should load");
         assert!(!raw.contains("Delete live view"));
         assert!(!raw.contains("/live-view"));
     }

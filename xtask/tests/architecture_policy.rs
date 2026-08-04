@@ -31,7 +31,7 @@ fn check_structure_rejects_application_dependency_on_infrastructure() {
 }
 
 #[test]
-fn check_structure_allows_build_and_inward_test_edges() {
+fn check_structure_allows_build_dependencies() {
     let workspace = tempfile::tempdir().expect("create temporary workspace");
     write_workspace(
         workspace.path(),
@@ -42,11 +42,6 @@ fn check_structure_allows_build_and_inward_test_edges() {
                 "[build-dependencies]\ngtl-infra = { path = \"../gtl-infra\" }\n",
             ),
             ("gtl-infra", "gtl-infra", ""),
-            (
-                "gtl-e2e",
-                "gtl-e2e",
-                "[dev-dependencies]\ngtl-contracts = { path = \"../gtl-contracts\" }\n",
-            ),
             ("gtl-contracts", "gtl-contracts", ""),
         ],
     );

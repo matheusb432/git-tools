@@ -89,7 +89,9 @@ impl ReservedRecipeComputation {
         let mut session = session
             .lock()
             .map_err(|error| RecipeError::Failed(error.to_string()))?;
-        let tab_id = session.open(recipe.clone(), batch_id, kind);
+        let tab_id = session
+            .open(recipe.clone(), batch_id, kind)
+            .ok_or_else(|| RecipeError::Failed("viewer tab ids exhausted".into()))?;
         let ticket = session
             .begin_compute(tab_id)
             .ok_or_else(|| format!("tab {tab_id} closed before compute"))?;

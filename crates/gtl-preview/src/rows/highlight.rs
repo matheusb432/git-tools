@@ -1,16 +1,14 @@
 //! Per-row syntax tokens: one side-stateful walk over a file's structured rows.
 
-use syntect::parsing::SyntaxReference;
-
 use super::model::{Row, RowKind, line_body, long_line_len};
-use crate::syntax::{SideHighlighter, Token};
+use crate::syntax::{SideHighlighter, SyntaxDefinition, Token};
 
 /// Tokens per row, parallel to `rows`. The old side consumes context and
 /// deleted lines, the new side context and added lines; context rows render
 /// the new side's tokens. Meta and hunk rows stay untokenized. Long lines skip
 /// the parser entirely: their parse cost is unbounded and their effect on
 /// multiline state is assumed nil.
-pub(super) fn row_tokens(rows: &[Row], syntax: Option<&SyntaxReference>) -> Vec<Vec<Token>> {
+pub(super) fn row_tokens(rows: &[Row], syntax: Option<SyntaxDefinition>) -> Vec<Vec<Token>> {
     let Some(syntax) = syntax else {
         return vec![Vec::new(); rows.len()];
     };
@@ -42,7 +40,7 @@ mod tests {
         super::model::{MAX_LINE_COLS, derive_rows},
         *,
     };
-    use crate::syntax::{TokenClass, syntax_for_path};
+    use crate::{syntax::TokenClass, test_render::syntax_for_path};
 
     fn rows_for(raw: &[&str]) -> Vec<super::super::model::Row> {
         let lines: Vec<String> = raw.iter().map(ToString::to_string).collect();

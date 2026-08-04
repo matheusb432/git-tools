@@ -11,6 +11,7 @@ pub use tabbed::build_tabbed_html;
 use crate::{
     assets::{PREVIEW_BUNDLE, preview_css},
     layout::{Surface, view_body},
+    syntax::PreviewResult,
     text::plural,
 };
 
@@ -19,9 +20,18 @@ use crate::{
 // ! minified bundle's global scope.
 const THEME_BOOT_JS: &str = include_str!("embedded/generated/boot.js");
 
-pub fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> String {
+/// Builds a self-contained HTML document for one diff view.
+///
+/// # Errors
+///
+/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
+pub fn build_html(
+    view: &View,
+    options: RenderOptions,
+    theme: Option<&str>,
+) -> PreviewResult<String> {
     let count = view.commits.len();
-    html! {
+    Ok(html! {
         (DOCTYPE)
         html lang="en" data-theme=[theme] {
             head {
@@ -34,12 +44,12 @@ pub fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> S
                 style { (PreEscaped(preview_css())) }
             }
             body {
-                (view_body(view, options, Surface::Artifact { view_index: 0 }))
+                (view_body(view, options, Surface::Artifact { view_index: 0 })?)
                 script { (PreEscaped(PREVIEW_BUNDLE)) }
             }
         }
     }
-    .into_string()
+    .into_string())
 }
 
 #[cfg(test)]
@@ -52,9 +62,8 @@ mod tests {
 
     use super::THEME_BOOT_JS;
     use crate::{
-        build_html, build_tabbed_html,
         fixtures::{has_disallowed_external_url, sample_view},
-        view_fragment,
+        test_render::{build_html, build_tabbed_html, view_fragment},
     };
 
     #[test]

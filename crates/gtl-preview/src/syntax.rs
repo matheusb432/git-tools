@@ -5,20 +5,89 @@
 //! Output spans are char-indexed over the line body so the row renderer can
 //! weave them into its per-char escape walk.
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use syntect::parsing::{ParseState, Scope, ScopeStack, SyntaxReference, SyntaxSet};
 
-static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(|| {
-    syntect::dumps::from_uncompressed_data(include_bytes!("embedded/generated/syntaxes.packdump"))
-        .expect("embedded syntax pack must deserialize")
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum PreviewError {
+    #[error("embedded syntax pack is invalid")]
+    SyntaxPack(#[source] anyhow::Error),
+    #[error("embedded syntax scope prefix is invalid: {prefix}")]
+    ScopePrefix {
+        prefix: &'static str,
+        #[source]
+        source: syntect::parsing::ParseScopeError,
+    },
+}
+
+/// The result of rendering preview content that depends on embedded syntax assets.
+pub type PreviewResult<T> = Result<T, Arc<PreviewError>>;
+
+struct SyntaxAssets {
+    syntax_set: SyntaxSet,
+    scope_map: Vec<(Scope, TokenClass)>,
+}
+
+static SYNTAX_ASSETS: LazyLock<PreviewResult<SyntaxAssets>> = LazyLock::new(|| {
+    load_syntax_assets(
+        include_bytes!("embedded/generated/syntaxes.packdump"),
+        &SCOPE_PREFIXES,
+    )
+    .map_err(Arc::new)
 });
+
+fn load_syntax_assets(
+    syntax_pack: &[u8],
+    scope_prefixes: &[(&'static str, TokenClass)],
+) -> Result<SyntaxAssets, PreviewError> {
+    let syntax_set = syntect::dumps::from_uncompressed_data(syntax_pack)
+        .map_err(|source| PreviewError::SyntaxPack(anyhow::Error::new(source)))?;
+    let scope_map = scope_prefixes
+        .iter()
+        .copied()
+        .map(|(prefix, class)| {
+            Scope::new(prefix)
+                .map(|scope| (scope, class))
+                .map_err(|source| PreviewError::ScopePrefix { prefix, source })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(SyntaxAssets {
+        syntax_set,
+        scope_map,
+    })
+}
+
+fn syntax_assets() -> PreviewResult<&'static SyntaxAssets> {
+    SYNTAX_ASSETS.as_ref().map_err(Arc::clone)
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct SyntaxDefinition {
+    syntax: &'static SyntaxReference,
+    syntax_set: &'static SyntaxSet,
+    scope_map: &'static [(Scope, TokenClass)],
+}
 
 /// The grammar for `path`, resolved by extension, or `None` when the set has
 /// no match (the file renders unhighlighted).
-pub(crate) fn syntax_for_path(path: &str) -> Option<&'static SyntaxReference> {
-    let ext = std::path::Path::new(path).extension()?.to_str()?;
-    SYNTAX_SET.find_syntax_by_extension(ext)
+pub(crate) fn syntax_for_path(path: &str) -> PreviewResult<Option<SyntaxDefinition>> {
+    let Some(ext) = std::path::Path::new(path)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+    else {
+        return Ok(None);
+    };
+    let assets = syntax_assets()?;
+    Ok(assets
+        .syntax_set
+        .find_syntax_by_extension(ext)
+        .map(|syntax| SyntaxDefinition {
+            syntax,
+            syntax_set: &assets.syntax_set,
+            scope_map: &assets.scope_map,
+        }))
 }
 
 /// Semantic token classes the themes color; one CSS custom property each.
@@ -59,40 +128,35 @@ impl TokenClass {
 // ! Priority-ordered prefix map from TextMate scopes to token classes; first
 // ! match on a stack scope wins, and the stack is walked innermost-first so
 // ! the most specific scope decides.
-static SCOPE_MAP: LazyLock<Vec<(Scope, TokenClass)>> = LazyLock::new(|| {
-    [
-        ("comment", TokenClass::Comment),
-        ("string", TokenClass::String),
-        ("constant.numeric", TokenClass::Number),
-        ("constant", TokenClass::Constant),
-        ("keyword.operator", TokenClass::Operator),
-        ("keyword", TokenClass::Keyword),
-        ("storage", TokenClass::Keyword),
-        ("entity.name.function", TokenClass::Function),
-        ("support.function", TokenClass::Function),
-        ("entity.name.type", TokenClass::Type),
-        ("entity.name.class", TokenClass::Type),
-        ("entity.name.struct", TokenClass::Type),
-        ("entity.name.enum", TokenClass::Type),
-        ("entity.name.trait", TokenClass::Type),
-        ("support.type", TokenClass::Type),
-        ("support.class", TokenClass::Type),
-        ("entity.name.tag", TokenClass::Tag),
-        ("markup.heading", TokenClass::Tag),
-        ("markup.raw", TokenClass::String),
-        ("markup.bold", TokenClass::Keyword),
-        ("markup.italic", TokenClass::Keyword),
-        ("entity.other.attribute-name", TokenClass::Variable),
-        ("variable.parameter", TokenClass::Variable),
-    ]
-    .into_iter()
-    .map(|(prefix, class)| (Scope::new(prefix).expect("static scope prefix"), class))
-    .collect()
-});
+const SCOPE_PREFIXES: [(&str, TokenClass); 23] = [
+    ("comment", TokenClass::Comment),
+    ("string", TokenClass::String),
+    ("constant.numeric", TokenClass::Number),
+    ("constant", TokenClass::Constant),
+    ("keyword.operator", TokenClass::Operator),
+    ("keyword", TokenClass::Keyword),
+    ("storage", TokenClass::Keyword),
+    ("entity.name.function", TokenClass::Function),
+    ("support.function", TokenClass::Function),
+    ("entity.name.type", TokenClass::Type),
+    ("entity.name.class", TokenClass::Type),
+    ("entity.name.struct", TokenClass::Type),
+    ("entity.name.enum", TokenClass::Type),
+    ("entity.name.trait", TokenClass::Type),
+    ("support.type", TokenClass::Type),
+    ("support.class", TokenClass::Type),
+    ("entity.name.tag", TokenClass::Tag),
+    ("markup.heading", TokenClass::Tag),
+    ("markup.raw", TokenClass::String),
+    ("markup.bold", TokenClass::Keyword),
+    ("markup.italic", TokenClass::Keyword),
+    ("entity.other.attribute-name", TokenClass::Variable),
+    ("variable.parameter", TokenClass::Variable),
+];
 
-fn class_for(stack: &ScopeStack) -> Option<TokenClass> {
+fn class_for(stack: &ScopeStack, scope_map: &[(Scope, TokenClass)]) -> Option<TokenClass> {
     for scope in stack.as_slice().iter().rev() {
-        if let Some((_, class)) = SCOPE_MAP
+        if let Some((_, class)) = scope_map
             .iter()
             .find(|(prefix, _)| prefix.is_prefix_of(*scope))
         {
@@ -111,34 +175,38 @@ pub(crate) struct Token {
 }
 
 /// Line-by-line tokenizer for one side of a file's diff, carrying parser
-/// state across lines. Any parse error poisons the side: remaining lines
-/// yield no tokens instead of corrupt ones.
+/// state across lines. A parser failure disables highlighting for the side so
+/// remaining lines render as plain text.
 pub(crate) struct SideHighlighter {
     parse: ParseState,
     stack: ScopeStack,
-    poisoned: bool,
+    syntax_set: &'static SyntaxSet,
+    scope_map: &'static [(Scope, TokenClass)],
+    disabled: bool,
 }
 
 impl SideHighlighter {
-    pub(crate) fn new(syntax: &SyntaxReference) -> Self {
+    pub(crate) fn new(definition: SyntaxDefinition) -> Self {
         Self {
-            parse: ParseState::new(syntax),
+            parse: ParseState::new(definition.syntax),
             stack: ScopeStack::new(),
-            poisoned: false,
+            syntax_set: definition.syntax_set,
+            scope_map: definition.scope_map,
+            disabled: false,
         }
     }
 
     /// Tokens for one line body (diff marker stripped, no trailing newline).
     pub(crate) fn tokens(&mut self, body: &str) -> Vec<Token> {
-        if self.poisoned {
+        if self.disabled {
             return Vec::new();
         }
         // ! The newline-variant grammars require the terminator to match
         // ! line-end rules; ops past body.len() refer to it and are clamped.
         let line = format!("{body}\n");
-        let Ok(ops) = self.parse.parse_line(&line, &SYNTAX_SET) else {
-            self.poisoned = true;
-            return Vec::new();
+        let ops = match self.parse.parse_line(&line, self.syntax_set) {
+            Ok(ops) => ops,
+            Err(error) => return self.disable(error),
         };
 
         let mut tokens: Vec<Token> = Vec::new();
@@ -148,20 +216,35 @@ impl SideHighlighter {
             let clamped = op_byte.min(body.len());
             if clamped > byte_pos {
                 let end = char_pos + body[byte_pos..clamped].chars().count();
-                push_token(&mut tokens, char_pos, end, class_for(&self.stack));
+                push_token(
+                    &mut tokens,
+                    char_pos,
+                    end,
+                    class_for(&self.stack, self.scope_map),
+                );
                 char_pos = end;
                 byte_pos = clamped;
             }
-            if self.stack.apply(&op).is_err() {
-                self.poisoned = true;
-                return Vec::new();
+            if let Err(error) = self.stack.apply(&op) {
+                return self.disable(error);
             }
         }
         if body.len() > byte_pos {
             let end = char_pos + body[byte_pos..].chars().count();
-            push_token(&mut tokens, char_pos, end, class_for(&self.stack));
+            push_token(
+                &mut tokens,
+                char_pos,
+                end,
+                class_for(&self.stack, self.scope_map),
+            );
         }
         tokens
+    }
+
+    fn disable(&mut self, error: impl std::fmt::Display) -> Vec<Token> {
+        self.disabled = true;
+        eprintln!("gtl-preview: syntax highlighting disabled: {error}");
+        Vec::new()
     }
 }
 
@@ -182,6 +265,12 @@ fn push_token(tokens: &mut Vec<Token>, start: usize, end: usize, class: Option<T
 mod tests {
     use super::*;
 
+    fn required_syntax(path: &str) -> SyntaxDefinition {
+        syntax_for_path(path)
+            .expect("embedded syntax assets should load")
+            .expect("fixture syntax should be present")
+    }
+
     fn keyword_token_overlaps(tokens: &[Token], start: usize, end: usize) -> bool {
         tokens.iter().any(|token| {
             token.class == TokenClass::Keyword && token.start < end && start < token.end
@@ -189,15 +278,28 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_embedded_syntax_pack_is_a_render_error() {
+        let Err(error) = load_syntax_assets(&[], &SCOPE_PREFIXES) else {
+            panic!("corrupt syntax pack should fail");
+        };
+
+        assert!(matches!(error, PreviewError::SyntaxPack(_)));
+    }
+
+    #[test]
     fn unknown_or_missing_extensions_resolve_none() {
-        assert!(syntax_for_path("file.zzzunknown").is_none());
-        assert!(syntax_for_path("no-extension").is_none());
-        assert!(syntax_for_path("").is_none());
+        for path in ["file.zzzunknown", "no-extension", ""] {
+            assert!(
+                syntax_for_path(path)
+                    .expect("embedded syntax assets should load")
+                    .is_none()
+            );
+        }
     }
 
     #[test]
     fn rust_string_and_comment_token_spans_are_char_indexed() {
-        let mut side = SideHighlighter::new(syntax_for_path("a.rs").unwrap());
+        let mut side = SideHighlighter::new(required_syntax("a.rs"));
         let tokens = side.tokens(r#"let s = "hi"; // note"#);
         assert!(
             tokens.contains(&Token {
@@ -217,7 +319,7 @@ mod tests {
 
     #[test]
     fn token_indices_count_chars_not_bytes() {
-        let mut side = SideHighlighter::new(syntax_for_path("a.rs").unwrap());
+        let mut side = SideHighlighter::new(required_syntax("a.rs"));
         // 'e' with accent is 2 bytes, alpha is 2 bytes: byte indexing would shift the span.
         let tokens = side.tokens("let caf\u{e9} = \"\u{3b1}\";");
         let string = tokens
@@ -240,7 +342,7 @@ mod tests {
         ] {
             let start = source.find("async").unwrap();
             let end = start + "async".len();
-            let mut side = SideHighlighter::new(syntax_for_path("a.rs").unwrap());
+            let mut side = SideHighlighter::new(required_syntax("a.rs"));
             let tokens = side.tokens(source);
             if expected_keyword {
                 assert!(
@@ -262,7 +364,7 @@ mod tests {
 
     #[test]
     fn block_comment_state_carries_across_lines() {
-        let mut side = SideHighlighter::new(syntax_for_path("a.rs").unwrap());
+        let mut side = SideHighlighter::new(required_syntax("a.rs"));
         side.tokens("/* open");
         let tokens = side.tokens("still inside");
         assert_eq!(
@@ -277,7 +379,7 @@ mod tests {
 
     #[test]
     fn typescript_tokenizes_keywords_and_comments() {
-        let mut side = SideHighlighter::new(syntax_for_path("a.ts").unwrap());
+        let mut side = SideHighlighter::new(required_syntax("a.ts"));
         let tokens = side.tokens("const n: number = 1; // c");
         assert!(tokens.iter().any(|t| t.class == TokenClass::Keyword));
         assert!(tokens.iter().any(|t| t.class == TokenClass::Number));
@@ -297,7 +399,7 @@ mod tests {
             ("a.yaml", "key: value"),
         ];
         for (path, line) in representative {
-            let syntax = syntax_for_path(path).unwrap();
+            let syntax = required_syntax(path);
             let tokens = SideHighlighter::new(syntax).tokens(line);
             assert!(!tokens.is_empty(), "no tokens for {path}: {line:?}");
         }

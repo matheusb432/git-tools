@@ -1,6 +1,8 @@
 //! The active diff view: the ready view (controls + shared diff body) and the
 //! empty, broken, and render-failed states with their recovery actions.
 
+use std::sync::Arc;
+
 use gtl_application::viewer::{ViewerDocument, ViewerTab, ViewerTabKind, ViewerTabState};
 use maud::{Markup, html};
 
@@ -24,7 +26,7 @@ pub(in crate::render) fn view(
     feedback: SwapFeedback<'_>,
     load_id: Option<ViewLoadId>,
     defer_ready: bool,
-) -> Markup {
+) -> Result<Markup, Arc<gtl_preview::PreviewError>> {
     let selection_pending = document
         .active_view()
         .is_some_and(gtl_application::viewer::ViewerView::selection_is_pending);
@@ -50,7 +52,7 @@ pub(in crate::render) fn view(
         )
     });
 
-    html! {
+    Ok(html! {
         section id="viewer-view"
             hx-swap-oob=[swap.out_of_band()]
             class=(if state == VIEW_STATE_READY {
@@ -69,31 +71,32 @@ pub(in crate::render) fn view(
                 Some(tab) => @match tab.state() {
                     ViewerTabState::Ready => {
                         @if !defer_ready && !selection_pending {
-                            @let view = document.active_view().expect("ViewerDocument guarantees a view for the ready active tab");
-                            @if let Some(reason) = view.selection_error_reason() {
-                                (selected_commit_error(view, reason))
-                            } @else {
-                                (controls::view_controls(view))
-                                @let mobile_controls = controls::mobile_view_controls(view, document.settings().theme());
-                                @if let Some(load_id) = load_id {
-                                    (gtl_preview::view_shell_with_mobile_controls(
-                                        view.view(),
-                                        view.range_view(),
-                                        view.selected_commit_sha(),
-                                        view.options(),
-                                        view.tab_id(),
-                                        load_id.get(),
-                                        mobile_controls,
-                                    ))
+                            @if let Some(view) = document.active_view() {
+                                @if let Some(reason) = view.selection_error_reason() {
+                                    (selected_commit_error(view, reason))
                                 } @else {
-                                    (gtl_preview::view_fragment_with_mobile_controls(
-                                        view.view(),
-                                        view.range_view(),
-                                        view.selected_commit_sha(),
-                                        view.options(),
-                                        view.tab_id(),
-                                        mobile_controls,
-                                    ))
+                                    (controls::view_controls(view))
+                                    @let mobile_controls = controls::mobile_view_controls(view, document.settings().theme());
+                                    @if let Some(load_id) = load_id {
+                                        (gtl_preview::view_shell_with_mobile_controls(
+                                            view.view(),
+                                            view.range_view(),
+                                            view.selected_commit_sha(),
+                                            view.options(),
+                                            view.tab_id(),
+                                            load_id.get(),
+                                            mobile_controls,
+                                        )?)
+                                    } @else {
+                                        (gtl_preview::view_fragment_with_mobile_controls(
+                                            view.view(),
+                                            view.range_view(),
+                                            view.selected_commit_sha(),
+                                            view.options(),
+                                            view.tab_id(),
+                                            mobile_controls,
+                                        )?)
+                                    }
                                 }
                             }
                         }
@@ -104,7 +107,7 @@ pub(in crate::render) fn view(
                 }
             }
         }
-    }
+    })
 }
 
 pub(in crate::render) fn loading_template() -> Markup {

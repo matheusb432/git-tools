@@ -177,18 +177,17 @@ pub struct OpenRecipes {
 /// encoded [`OpenRecipes`] batch rather than a plain file path.
 pub const RECIPE_TOKEN_PREFIX: &str = "gtl-recipe://";
 
-/// Encode a recipe batch into a single self-contained argv token: JSON
-/// serialized, then base64url (no padding) encoded, prefixed with
-/// [`RECIPE_TOKEN_PREFIX`].
+/// Encodes a recipe batch into one JSON and base64url argv token.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics only if serializing [`OpenRecipes`] to JSON fails — which cannot
-/// happen for this data shape (plain strings, paths, and enums; no map with
-/// non-string keys and no fallible custom `Serialize`).
-pub fn encode_token(batch: &OpenRecipes) -> String {
-    let json = serde_json::to_vec(batch).expect("OpenRecipes serializes to JSON infallibly");
-    format!("{RECIPE_TOKEN_PREFIX}{}", URL_SAFE_NO_PAD.encode(json))
+/// Returns the JSON serialization error when the batch cannot be encoded.
+pub fn encode_token(batch: &OpenRecipes) -> Result<String, serde_json::Error> {
+    let json = serde_json::to_vec(batch)?;
+    Ok(format!(
+        "{RECIPE_TOKEN_PREFIX}{}",
+        URL_SAFE_NO_PAD.encode(json)
+    ))
 }
 
 /// Decode an argv token produced by [`encode_token`] back into an
@@ -419,7 +418,7 @@ mod tests {
     #[test]
     fn token_round_trips_through_encode_and_decode() {
         let batch = sample_batch();
-        let token = encode_token(&batch);
+        let token = encode_token(&batch).expect("sample batch encodes");
         assert!(token.starts_with(RECIPE_TOKEN_PREFIX));
         assert_eq!(decode_token(&token), Some(batch));
     }
@@ -443,7 +442,8 @@ mod tests {
         let mut batch = sample_batch();
         batch.kind = RecipeBatchKind::Live;
 
-        let decoded = decode_token(&encode_token(&batch)).expect("live token decodes");
+        let token = encode_token(&batch).expect("live batch encodes");
+        let decoded = decode_token(&token).expect("live token decodes");
 
         assert_eq!(decoded, batch);
         assert_eq!(decoded.kind, RecipeBatchKind::Live);

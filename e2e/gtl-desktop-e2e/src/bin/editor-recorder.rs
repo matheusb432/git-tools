@@ -21,6 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "arguments": arguments,
     });
     let record_temporary_path = record_path.with_extension("tmp");
+    // Publish the record only after serialization has completed.
     fs::write(&record_temporary_path, serde_json::to_vec(&record)?)?;
     fs::rename(record_temporary_path, record_path)?;
 

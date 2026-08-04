@@ -92,18 +92,20 @@ fn history_footer(page: &ViewerHistoryPage) -> Markup {
     let first_route = page.has_newer().then_some(ViewerRoute::History {
         cursor: RecentRenderPageCursor::Newest,
     });
-    let previous_route = page.has_newer().then(|| ViewerRoute::History {
-        cursor: RecentRenderPageCursor::NewerThan {
-            render: first_render.expect("a populated page has a first render"),
-            page: previous_page.expect("a page with newer rows is not the first page"),
-        },
-    });
-    let next_route = page.has_older().then(|| ViewerRoute::History {
-        cursor: RecentRenderPageCursor::OlderThan {
-            render: last_render.expect("a populated page has a last render"),
-            page: next_page.expect("the page number can advance while older rows exist"),
-        },
-    });
+    let previous_route = page
+        .has_newer()
+        .then_some(())
+        .and_then(|()| first_render.zip(previous_page))
+        .map(|(render, page)| ViewerRoute::History {
+            cursor: RecentRenderPageCursor::NewerThan { render, page },
+        });
+    let next_route = page
+        .has_older()
+        .then_some(())
+        .and_then(|()| last_render.zip(next_page))
+        .map(|(render, page)| ViewerRoute::History {
+            cursor: RecentRenderPageCursor::OlderThan { render, page },
+        });
     let last_route = page.has_older().then_some(ViewerRoute::History {
         cursor: RecentRenderPageCursor::Oldest,
     });

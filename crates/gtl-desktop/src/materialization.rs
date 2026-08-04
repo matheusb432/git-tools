@@ -58,10 +58,11 @@ pub(crate) struct ChunkPage {
     pub(crate) has_more: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum MaterializationError {
     Conflict,
     ExhaustedIds,
+    Render(String),
     StatePoisoned,
 }
 
@@ -70,6 +71,7 @@ impl std::fmt::Display for MaterializationError {
         match self {
             Self::Conflict => formatter.write_str("stale view materialization"),
             Self::ExhaustedIds => formatter.write_str("view materialization ids exhausted"),
+            Self::Render(reason) => write!(formatter, "view materialization failed: {reason}"),
             Self::StatePoisoned => formatter.write_str("view materialization state poisoned"),
         }
     }
@@ -118,7 +120,8 @@ impl ViewMaterializations {
             (ticket, session.revision(), view)
         };
 
-        let chunks = gtl_preview::view_chunks(&snapshot.2, options);
+        let chunks = gtl_preview::view_chunks(&snapshot.2, options)
+            .map_err(|error| MaterializationError::Render(error.to_string()))?;
         {
             let session = session
                 .lock()
@@ -242,14 +245,18 @@ mod tests {
     #[test]
     fn activating_another_tab_invalidates_the_previous_chunk_chain() {
         let mut session = ViewerSession::new(1024 * 1024);
-        let first = session.open(recipe("/first"), "first".into(), ViewerTabKind::Snapshot);
+        let first = session
+            .open(recipe("/first"), "first".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
         let first_ticket = session.begin_compute(first).expect("first ticket");
         session.publish_labeled_if_current(
             first_ticket,
             CachedView::new(view("first")),
             "first".into(),
         );
-        let second = session.open(recipe("/second"), "second".into(), ViewerTabKind::Snapshot);
+        let second = session
+            .open(recipe("/second"), "second".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
         let second_ticket = session.begin_compute(second).expect("second ticket");
         session.publish_labeled_if_current(
             second_ticket,

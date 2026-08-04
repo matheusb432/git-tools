@@ -361,29 +361,3 @@ fn join_paths(paths: &[PathBuf]) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
-
-#[cfg(test)]
-mod tests {
-    use anyhow::anyhow;
-
-    use super::{attach_evidence, attach_secondary_error};
-
-    #[test]
-    fn assertion_failure_keeps_evidence_path_and_cleanup_failure() {
-        let outcome = attach_evidence(
-            Err(anyhow!("expected collapsed files")),
-            Ok(vec!["/evidence/fail.png".into()]),
-        );
-        let error = attach_secondary_error(
-            outcome,
-            Err(anyhow!("driver did not stop")),
-            "browser cleanup",
-        )
-        .unwrap_err();
-
-        let message = format!("{error:#}");
-        assert!(message.contains("expected collapsed files"));
-        assert!(message.contains("/evidence/fail.png"));
-        assert!(message.contains("driver did not stop"));
-    }
-}

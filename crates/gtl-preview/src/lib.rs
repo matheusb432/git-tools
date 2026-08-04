@@ -22,6 +22,7 @@ pub use layout::mobile_controls::{
     mobile_menu_danger_button_classes, view_navigation,
 };
 use maud::Markup;
+pub use syntax::{PreviewError, PreviewResult};
 
 /// Builds one app-hosted diff view using the requested layout and density variant.
 ///
@@ -39,13 +40,27 @@ use maud::Markup;
 ///
 /// # fn load_view() -> View { todo!() }
 /// # let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
-/// let fragment = view_fragment(&load_view(), RenderOptions::DEFAULT, tab_id);
+/// let fragment = view_fragment(&load_view(), RenderOptions::DEFAULT, tab_id)
+///     .expect("embedded syntax assets should load");
 /// assert!(fragment.into_string().contains("diff-unified diff-compact"));
 /// ```
-pub fn view_fragment(view: &View, options: RenderOptions, tab_id: ViewerTabId) -> Markup {
+///
+/// # Errors
+///
+/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
+pub fn view_fragment(
+    view: &View,
+    options: RenderOptions,
+    tab_id: ViewerTabId,
+) -> PreviewResult<Markup> {
     layout::view_body(view, options, layout::Surface::App { tab_id })
 }
 
+/// Builds an app-hosted diff view with server-rendered mobile controls.
+///
+/// # Errors
+///
+/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
 pub fn view_fragment_with_mobile_controls(
     view: &View,
     range_view: &View,
@@ -53,7 +68,7 @@ pub fn view_fragment_with_mobile_controls(
     options: RenderOptions,
     tab_id: ViewerTabId,
     controls: MobileViewControls,
-) -> Markup {
+) -> PreviewResult<Markup> {
     layout::view_body_with_mobile_controls(
         view,
         range_view,
@@ -65,15 +80,24 @@ pub fn view_fragment_with_mobile_controls(
 }
 
 /// Builds the desktop layout without diff rows and starts its bounded chunk chain.
+///
+/// # Errors
+///
+/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
 pub fn view_shell(
     view: &View,
     options: RenderOptions,
     tab_id: ViewerTabId,
     load_id: u64,
-) -> Markup {
+) -> PreviewResult<Markup> {
     layout::view_body_shell(view, options, layout::Surface::App { tab_id }, load_id)
 }
 
+/// Builds the desktop layout shell with server-rendered mobile controls.
+///
+/// # Errors
+///
+/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
 pub fn view_shell_with_mobile_controls(
     view: &View,
     range_view: &View,
@@ -82,7 +106,7 @@ pub fn view_shell_with_mobile_controls(
     tab_id: ViewerTabId,
     load_id: u64,
     controls: MobileViewControls,
-) -> Markup {
+) -> PreviewResult<Markup> {
     layout::view_body_shell_with_mobile_controls(
         view,
         range_view,
@@ -108,7 +132,14 @@ pub fn view_chunk_fragment(chunk: &ViewChunk, next_load_id: Option<u64>) -> Mark
 }
 
 /// Renders the desktop diff rows into bounded, semantically ordered chunks.
-pub fn view_chunks(view: &View, options: RenderOptions) -> std::collections::VecDeque<ViewChunk> {
+///
+/// # Errors
+///
+/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
+pub fn view_chunks(
+    view: &View,
+    options: RenderOptions,
+) -> PreviewResult<std::collections::VecDeque<ViewChunk>> {
     layout::view_chunks(view, options)
 }
 
@@ -117,8 +148,13 @@ pub fn view_chunks(view: &View, options: RenderOptions) -> std::collections::Vec
 pub struct MaudRenderer;
 
 impl gtl_application::ports::HtmlRenderer for MaudRenderer {
-    fn build_html(&self, view: &View, options: RenderOptions, theme: Option<&str>) -> String {
-        build_html(view, options, theme)
+    fn build_html(
+        &self,
+        view: &View,
+        options: RenderOptions,
+        theme: Option<&str>,
+    ) -> anyhow::Result<String> {
+        build_html(view, options, theme).map_err(Into::into)
     }
     fn build_tabbed_html(
         &self,
@@ -126,8 +162,45 @@ impl gtl_application::ports::HtmlRenderer for MaudRenderer {
         views: &[View],
         options: RenderOptions,
         theme: Option<&str>,
+    ) -> anyhow::Result<String> {
+        build_tabbed_html(title, views, options, theme).map_err(Into::into)
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_render {
+    use gtl_application::{
+        diffs::View,
+        viewer::{RenderOptions, ViewerTabId},
+    };
+    use maud::Markup;
+
+    use crate::syntax::SyntaxDefinition;
+
+    pub(crate) fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> String {
+        crate::build_html(view, options, theme).expect("embedded syntax assets should load")
+    }
+
+    pub(crate) fn build_tabbed_html(
+        title: &str,
+        views: &[View],
+        options: RenderOptions,
+        theme: Option<&str>,
     ) -> String {
-        build_tabbed_html(title, views, options, theme)
+        crate::build_tabbed_html(title, views, options, theme)
+            .expect("embedded syntax assets should load")
+    }
+
+    pub(crate) fn view_fragment(
+        view: &View,
+        options: RenderOptions,
+        tab_id: ViewerTabId,
+    ) -> Markup {
+        crate::view_fragment(view, options, tab_id).expect("embedded syntax assets should load")
+    }
+
+    pub(crate) fn syntax_for_path(path: &str) -> Option<SyntaxDefinition> {
+        crate::syntax::syntax_for_path(path).expect("embedded syntax assets should load")
     }
 }
 

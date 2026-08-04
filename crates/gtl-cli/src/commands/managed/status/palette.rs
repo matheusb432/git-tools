@@ -14,8 +14,8 @@ pub(super) struct StatusColorPalette {
 }
 
 impl StatusColorPalette {
-    pub(super) fn from_embedded_toml() -> Self {
-        Self::from_toml(STATUS_COLORS_TOML).expect("embedded status color palette should be valid")
+    pub(super) fn from_embedded_toml() -> anyhow::Result<Self> {
+        Self::from_toml(STATUS_COLORS_TOML)
     }
 
     fn from_toml(raw: &str) -> anyhow::Result<Self> {

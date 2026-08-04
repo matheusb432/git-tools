@@ -45,7 +45,7 @@ fn render_document(
             Err(RenderError::Retry) => continue,
             Err(error) => return Err(error),
         };
-        let html = renderer.build_deferred_document(&snapshot.document);
+        let html = renderer.build_deferred_document(&snapshot.document)?;
         if view_snapshot::is_current(session, snapshot.ticket, snapshot.revision)? {
             return Ok(html);
         }

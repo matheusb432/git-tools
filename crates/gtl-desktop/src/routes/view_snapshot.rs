@@ -28,6 +28,12 @@ impl From<String> for RenderError {
     }
 }
 
+impl From<Arc<gtl_preview::PreviewError>> for RenderError {
+    fn from(value: Arc<gtl_preview::PreviewError>) -> Self {
+        Self::State(value.to_string())
+    }
+}
+
 pub(super) struct ViewSnapshot {
     pub(super) document: ViewerDocument,
     pub(super) ticket: Option<ComputeTicket>,

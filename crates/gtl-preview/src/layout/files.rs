@@ -13,6 +13,7 @@ use maud::{Markup, PreEscaped, html};
 use crate::{
     layout::{Surface, file_status::file_status_presentation},
     rows::{render_diff_lines, render_diff_split, unified_line_number_digits},
+    syntax::PreviewResult,
     text::slug,
 };
 
@@ -56,11 +57,19 @@ fn filebody_presentation(surface: Surface, file: &FileDiff) -> (&'static str, Op
     }
 }
 
-pub(super) fn file_blocks(view: &View, options: RenderOptions, surface: Surface) -> Markup {
+pub(super) fn file_blocks(
+    view: &View,
+    options: RenderOptions,
+    surface: Surface,
+) -> PreviewResult<Markup> {
     file_blocks_with_mode(view, options, surface, FileBodyMode::Complete)
 }
 
-pub(super) fn file_block_shells(view: &View, options: RenderOptions, surface: Surface) -> Markup {
+pub(super) fn file_block_shells(
+    view: &View,
+    options: RenderOptions,
+    surface: Surface,
+) -> PreviewResult<Markup> {
     file_blocks_with_mode(view, options, surface, FileBodyMode::Shell)
 }
 
@@ -75,12 +84,14 @@ fn file_blocks_with_mode(
     options: RenderOptions,
     surface: Surface,
     mode: FileBodyMode,
-) -> Markup {
+) -> PreviewResult<Markup> {
     if view.files.is_empty() {
-        return html! { div class="empty rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic" { "no file changes" } };
+        return Ok(
+            html! { div class="empty rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic" { "no file changes" } },
+        );
     }
 
-    html! {
+    Ok(html! {
         @for (file_index, file) in view.files.iter().enumerate() {
             @let absolute = format!("{}/{}", view.repo_root, file.path);
             @let status = file_status_presentation(file.status());
@@ -131,13 +142,13 @@ fn file_blocks_with_mode(
                 // ! Keep containment below the sticky summary so it can pin to `.main`.
                 div class=(filebody_classes) style=[intrinsic] {
                     @match mode {
-                        FileBodyMode::Complete => (file_diff(file, options)),
+                        FileBodyMode::Complete => (file_diff(file, options)?),
                         FileBodyMode::Shell => (file_diff_shell(file, options, file_index)),
                     }
                 }
             }
         }
-    }
+    })
 }
 
 fn file_diff_shell(file: &FileDiff, options: RenderOptions, file_index: usize) -> Markup {
@@ -157,15 +168,15 @@ fn open_diff_file_route(tab_id: gtl_application::viewer::ViewerTabId, path: &str
     format!("/tabs/{tab_id}/files/open?{query}")
 }
 
-fn file_diff(file: &FileDiff, options: RenderOptions) -> Markup {
-    let syntax = crate::syntax::syntax_for_path(&file.path);
+fn file_diff(file: &FileDiff, options: RenderOptions) -> PreviewResult<Markup> {
+    let syntax = crate::syntax::syntax_for_path(&file.path)?;
     let (lines, density) = selected_lines(file, options);
     let style = unified_line_number_gutter_style(options.layout(), lines);
-    html! {
+    Ok(html! {
         div class=(diff_classes(options.layout(), density)) style=[style] {
             (PreEscaped(render_rows(options.layout(), lines, syntax)))
         }
-    }
+    })
 }
 
 fn selected_lines(file: &FileDiff, options: RenderOptions) -> (&[String], DiffDensity) {
@@ -202,7 +213,7 @@ fn unified_line_number_gutter_style(layout: DiffLayout, lines: &[String]) -> Opt
 fn render_rows(
     layout: DiffLayout,
     lines: &[String],
-    syntax: Option<&syntect::parsing::SyntaxReference>,
+    syntax: Option<crate::syntax::SyntaxDefinition>,
 ) -> String {
     match layout {
         DiffLayout::Unified => render_diff_lines(lines, syntax),
@@ -222,7 +233,10 @@ mod tests {
     };
 
     use super::{GIANT_FILE_CHARS, ROW_PX};
-    use crate::{build_html, fixtures::sample_view, view_fragment};
+    use crate::{
+        fixtures::sample_view,
+        test_render::{build_html, view_fragment},
+    };
 
     fn tab_id(raw: u64) -> ViewerTabId {
         ViewerTabId::try_new(raw).expect("positive tab id")

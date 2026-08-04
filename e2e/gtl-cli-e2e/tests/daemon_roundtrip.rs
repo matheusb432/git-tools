@@ -2,8 +2,8 @@
 
 //! The walking-skeleton round trip: cli -> autostarted daemon -> store.
 //!
-//! Fixture helpers are copied from `crates/gtl-cli/tests/e2e.rs` rather than shared
-//! across crates (this crate stays test-only, with no production `[lib]`).
+//! This dedicated target owns the daemon process helpers because the ordinary CLI
+//! tests only need the `git-tools` binary.
 
 use std::{
     fs::{OpenOptions, TryLockError},
@@ -19,7 +19,7 @@ use tempfile::TempDir;
 
 /// Build both `git-tools` and `gtl-daemon` once per test binary — the daemon
 /// lives in a sibling crate `assert_cmd` never builds on its own, so this
-/// crate must build it explicitly for `cargo test -p gtl-e2e` to work standalone.
+/// crate must build it explicitly for `cargo test -p gtl-cli-e2e` to work standalone.
 fn ensure_binaries_built() {
     static BUILT: OnceLock<()> = OnceLock::new();
     BUILT.get_or_init(|| {

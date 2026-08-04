@@ -2737,6 +2737,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtl-cli-e2e"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "predicates",
+ "serde_json",
+ "tempfile",
+ "toml 1.1.3+spec-1.1.0",
+]
+
+[[package]]
 name = "gtl-contracts"
 version = "0.1.0"
 dependencies = [
@@ -2799,6 +2810,7 @@ name = "gtl-desktop-e2e"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_cmd",
  "command-group",
  "futures-util",
  "gtl-application",
@@ -2809,17 +2821,6 @@ dependencies = [
  "tempfile",
  "thirtyfour",
  "tokio",
-]
-
-[[package]]
-name = "gtl-e2e"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "predicates",
- "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -2862,6 +2863,7 @@ dependencies = [
 name = "gtl-preview"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "gtl-application",
  "gtl-models",
  "maud",
@@ -2869,6 +2871,7 @@ dependencies = [
  "similar",
  "strum",
  "syntect",
+ "thiserror 2.0.19",
  "url",
 ]
 
