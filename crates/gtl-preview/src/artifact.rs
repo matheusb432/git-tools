@@ -56,7 +56,7 @@ pub fn build_html(
 mod tests {
     use gtl_application::{
         diffs::{Cmd, FileDiff, Foot, View},
-        viewer::{RenderOptions, ViewerTabId},
+        viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabId},
     };
     use gtl_models::diffs::Commit;
 
@@ -324,28 +324,43 @@ mod tests {
     }
 
     #[test]
-    fn raw_documents_emit_only_the_requested_variant_without_presentation_controls() {
+    fn raw_documents_emit_only_each_requested_presentation_variant() {
         let view = sample_view();
-        let options = RenderOptions::new(
-            gtl_application::viewer::DiffLayout::Split,
-            gtl_application::viewer::DiffDensity::Full,
-        );
-        let documents = [
-            build_html(&view, options, None),
-            build_tabbed_html("diffs", &[view], options, None),
+        let presentations = [
+            (
+                DiffLayout::Unified,
+                DiffDensity::Compact,
+                "unified",
+                "compact",
+            ),
+            (DiffLayout::Unified, DiffDensity::Full, "unified", "full"),
+            (DiffLayout::Split, DiffDensity::Compact, "split", "compact"),
+            (DiffLayout::Split, DiffDensity::Full, "split", "full"),
         ];
 
-        for html in documents {
-            assert_eq!(
-                html.matches(r#"class="diff diff-split diff-full "#).count(),
-                1
-            );
-            assert!(!html.contains(r#"class="diff diff-unified"#));
-            assert!(!html.contains(r#"class="diff diff-split diff-compact"#));
-            assert!(!html.contains(r#"class="layout-toggle""#));
-            assert!(!html.contains(r#"class="view-toggle""#));
-            assert!(!html.contains(r#"class="theme-select""#));
-            assert!(html.contains(THEME_BOOT_JS));
+        for (layout, density, layout_token, density_token) in presentations {
+            let options = RenderOptions::new(layout, density);
+            let documents = [
+                build_html(&view, options, None),
+                build_tabbed_html("diffs", std::slice::from_ref(&view), options, None),
+            ];
+            let requested = format!(r#"class="diff diff-{layout_token} diff-{density_token} "#);
+
+            for html in documents {
+                assert_eq!(html.matches(&requested).count(), 1);
+                for (_, _, candidate_layout, candidate_density) in presentations {
+                    if (candidate_layout, candidate_density) == (layout_token, density_token) {
+                        continue;
+                    }
+                    assert!(!html.contains(&format!(
+                        r#"class="diff diff-{candidate_layout} diff-{candidate_density} "#
+                    )));
+                }
+                assert!(!html.contains(r#"class="layout-toggle""#));
+                assert!(!html.contains(r#"class="view-toggle""#));
+                assert!(!html.contains(r#"class="theme-select""#));
+                assert!(html.contains(THEME_BOOT_JS));
+            }
         }
     }
 

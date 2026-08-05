@@ -184,13 +184,6 @@ pub async fn expect_every_file_is_collapsed(page: &Page) -> Result<()> {
         .context("wait for every file section to collapse")
 }
 
-pub async fn count(locator: &Locator, label: &str) -> Result<usize> {
-    operation(label, async {
-        locator.count().await.with_context(|| label.to_owned())
-    })
-    .await
-}
-
 pub async fn click(locator: &Locator, label: &str) -> Result<()> {
     operation(label, async {
         locator

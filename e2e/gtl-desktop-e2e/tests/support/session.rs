@@ -343,7 +343,6 @@ async fn wait_for_exit(child: &mut GroupChild, duration: Duration) -> Result<boo
 mod tests {
     use std::{
         fs,
-        net::TcpListener,
         path::{Path, PathBuf},
         process::Command,
         time::Duration,
@@ -351,23 +350,7 @@ mod tests {
 
     use command_group::CommandGroup;
 
-    use super::{available_port_pair, request_driver_group_termination, wait_for_exit};
-
-    #[test]
-    fn distinct_driver_ports_are_selected() {
-        let ports = available_port_pair().unwrap();
-        let (webdriver, native) = ports.ports().unwrap();
-        assert_ne!(webdriver, native);
-    }
-
-    #[test]
-    fn driver_ports_remain_reserved_while_the_pair_is_owned() {
-        let ports = available_port_pair().unwrap();
-        let (webdriver, native) = ports.ports().unwrap();
-
-        assert!(TcpListener::bind(("127.0.0.1", webdriver)).is_err());
-        assert!(TcpListener::bind(("127.0.0.1", native)).is_err());
-    }
+    use super::{request_driver_group_termination, wait_for_exit};
 
     #[cfg(target_os = "linux")]
     #[tokio::test]

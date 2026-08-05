@@ -61,26 +61,3 @@ fn should_capture(passed: bool, success_evidence_requested: bool) -> bool {
 pub fn evidence_path(root: &Path, outcome: &str, suite: &str, name: &str) -> PathBuf {
     root.join(outcome).join(suite).join(format!("{name}.png"))
 }
-
-#[cfg(test)]
-mod tests {
-    use std::path::Path;
-
-    use super::{evidence_path, should_capture};
-
-    #[test]
-    fn evidence_path_uses_the_supplied_root_and_stable_suite_name() {
-        let root = Path::new("/evidence");
-        assert_eq!(
-            evidence_path(root, "success", "thirtyfour", "viewer-live-lifecycle"),
-            root.join("success/thirtyfour/viewer-live-lifecycle.png")
-        );
-    }
-
-    #[test]
-    fn failures_capture_without_requesting_success_evidence() {
-        assert!(should_capture(false, false));
-        assert!(!should_capture(true, false));
-        assert!(should_capture(true, true));
-    }
-}

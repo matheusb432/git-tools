@@ -16,7 +16,6 @@ path = "src/bin/editor-recorder.rs"
 serde_json.workspace = true
 
 [dev-dependencies]
-assert_cmd.workspace = true
 anyhow.workspace = true
 command-group.workspace = true
 futures-util.workspace = true
@@ -37,10 +36,6 @@ tokio = { workspace = true, features = [
 name = "viewer"
 path = "tests/viewer.rs"
 required-features = ["e2e"]
-
-[[test]]
-name = "editor_recorder"
-path = "tests/editor_recorder.rs"
 
 [lints]
 workspace = true

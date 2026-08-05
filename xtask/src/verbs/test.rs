@@ -145,15 +145,15 @@ mod tests {
     }
 
     #[test]
-    fn e2e_selects_only_the_desktop_worker() {
-        assert_eq!(selected_test_labels(Scope::E2e), ["e2e"]);
+    fn e2e_selects_both_process_boundary_suites() {
+        assert_eq!(selected_test_labels(Scope::E2e), ["cli-e2e", "desktop-e2e"]);
     }
 
     #[test]
     fn all_selects_the_complete_test_suite_in_declaration_order() {
         assert_eq!(
             selected_test_labels(Scope::All),
-            ["unit", "web", "drift", "e2e"]
+            ["unit", "web", "drift", "cli-e2e", "desktop-e2e"]
         );
     }
 

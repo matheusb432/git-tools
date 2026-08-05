@@ -139,7 +139,34 @@ pub fn execute(
 
 #[cfg(test)]
 mod tests {
-    use super::{SetSettingKeyError, validate};
+    use gtl_models::settings::UserSettings;
+
+    use super::{SetSettingKey, SetSettingKeyError, execute, validate};
+    use crate::ports::{UserSettingsEditError, UserSettingsLoadError, UserSettingsStore};
+
+    #[derive(Clone)]
+    struct InvalidShapeSettingsStore;
+
+    impl UserSettingsStore for InvalidShapeSettingsStore {
+        fn load(&self) -> Result<UserSettings, UserSettingsLoadError> {
+            Err(UserSettingsLoadError::InvalidConfiguration {
+                path: "<unused>".into(),
+                reason: "set_key does not load settings".into(),
+            })
+        }
+
+        fn set_string(
+            &mut self,
+            _key: &str,
+            _value_new: &str,
+        ) -> Result<Option<String>, UserSettingsEditError> {
+            Err(UserSettingsEditError::InvalidValueShape)
+        }
+
+        fn remove_string(&mut self, _key: &str) -> Result<Option<String>, UserSettingsEditError> {
+            Err(UserSettingsEditError::InvalidValueShape)
+        }
+    }
 
     #[test]
     fn validation_rejects_unknown_keys_and_values() {
@@ -173,5 +200,22 @@ mod tests {
                 validate(key, value).expect("supported value");
             }
         }
+    }
+
+    #[test]
+    fn execute_adds_the_setting_key_to_an_invalid_shape_error() {
+        let error = execute(
+            SetSettingKey {
+                key: "theme".into(),
+                value_new: "light".into(),
+            },
+            &mut InvalidShapeSettingsStore,
+        )
+        .expect_err("invalid existing shape must fail");
+
+        assert!(matches!(
+            error,
+            SetSettingKeyError::InvalidValueShape { key } if key == "theme"
+        ));
     }
 }

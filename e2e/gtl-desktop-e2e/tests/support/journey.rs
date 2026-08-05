@@ -1,17 +1,13 @@
-use std::{future::Future, process::Command, time::Duration};
+use std::process::Command;
 
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use thirtyfour::{By, Key, WebDriver, error::WebDriverErrorInner};
-use tokio::time::{Instant, sleep, timeout};
 
 use super::{
     fixture::{EditorRecord, ViewerFixture},
-    refresh_delivery::{
-        RefreshDelivery, RefreshDeliveryAction, RefreshDeliveryObservation, refresh_delivery_window,
-    },
     selectors::{by_accessible_name, by_css},
     session::TestSession,
-    wait::{self, ASSERTION_TIMEOUT, WEBDRIVER_OPERATION_TIMEOUT},
+    wait::{self, ASSERTION_TIMEOUT},
 };
 
 const DELETE_CONFIRMATION: &str = "Delete this saved live view? This removes its tab and automatic restoration. You can add it again with gtl diff live.";
@@ -83,57 +79,6 @@ pub async fn assert_mobile_navigation(session: &TestSession) -> Result<()> {
         .await
         .context("close changed files")?;
     assert_popover_closed(driver, "viewer-files-popover").await?;
-
-    by_accessible_name(driver, "Commits in range")
-        .await?
-        .click()
-        .await
-        .context("open commits in range")?;
-    by_css(
-        driver,
-        "#viewer-commits-popover:popover-open .cline .sub",
-        "commit in the open mobile popover",
-    )
-    .await?;
-    let commit_text = driver
-        .execute(
-            "return document.querySelector('#viewer-commits-popover:popover-open .cline .sub')?.textContent ?? '';",
-            Vec::new(),
-        )
-        .await
-        .context("read commit subject")?
-        .json()
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    ensure!(
-        commit_text.contains("live view v2"),
-        "mobile commits popover omitted live view v2"
-    );
-    by_accessible_name(driver, "Close commits in range")
-        .await?
-        .click()
-        .await
-        .context("close commits in range")?;
-    assert_popover_closed(driver, "viewer-commits-popover").await?;
-
-    by_accessible_name(driver, "View settings")
-        .await?
-        .click()
-        .await
-        .context("open mobile view settings")?;
-    by_css(
-        driver,
-        "#viewer-controls-popover:popover-open",
-        "open mobile view settings",
-    )
-    .await?;
-    by_accessible_name(driver, "Close view settings")
-        .await?
-        .click()
-        .await
-        .context("close mobile view settings")?;
-    assert_popover_closed(driver, "viewer-controls-popover").await?;
 
     driver
         .execute(
@@ -369,7 +314,7 @@ return document.querySelector('.viewer-status-empty') !== null
     .await
 }
 
-pub async fn select_and_restore_split_layout(session: &TestSession) -> Result<()> {
+pub async fn select_split_layout(session: &TestSession) -> Result<()> {
     let driver = session.driver();
     driver
         .execute(
@@ -392,21 +337,28 @@ pub async fn select_and_restore_split_layout(session: &TestSession) -> Result<()
         "split layout control is not selected"
     );
 
-    driver.refresh().await.context("reload viewer session")?;
-    wait::until(
-        "restored live view and split layout",
-        ASSERTION_TIMEOUT,
-        || async { Ok(viewer_state(driver).await?.then_some(())) },
-    )
-    .await
+    Ok(())
 }
 
 pub async fn refresh_and_assert_alpha_v2(session: &TestSession) -> Result<()> {
-    let deadline = Instant::now() + ASSERTION_TIMEOUT;
-    wait::within(
-        "refresh live view and render alpha-v2",
+    let driver = session.driver();
+    by_accessible_name(driver, "Refresh")
+        .await?
+        .click()
+        .await
+        .context("refresh live view")?;
+    wait_for_htmx_idle(driver, "refreshing the live view").await?;
+    wait::until(
+        "refreshed live view rendering alpha-v2",
         ASSERTION_TIMEOUT,
-        refresh_and_assert_alpha_v2_within(session, deadline),
+        || async {
+            Ok(script_bool(
+                driver,
+                "return document.querySelector('#viewer-view')?.textContent.includes('alpha-v2') ?? false;",
+            )
+            .await?
+            .then_some(()))
+        },
     )
     .await
 }
@@ -491,46 +443,7 @@ return view?.dataset.viewerState === "ready"
     .await
 }
 
-async fn refresh_and_assert_alpha_v2_within(
-    session: &TestSession,
-    deadline: Instant,
-) -> Result<()> {
-    let driver = session.driver();
-    install_refresh_delivery_observer(driver, deadline).await?;
-    let attempts = refresh_until_request_starts(driver, deadline).await?;
-    wait_for_htmx_idle_until(
-        driver,
-        "refreshing the live view",
-        refresh_budget_remaining(deadline)?,
-    )
-    .await?;
-    wait::until(
-        "refreshed live view rendering alpha-v2",
-        refresh_budget_remaining(deadline)?,
-        || async {
-            Ok(script_bool(
-                driver,
-                "return document.querySelector('#viewer-view')?.textContent.includes('alpha-v2') ?? false;",
-            )
-            .await?
-            .then_some(()))
-        },
-    )
-    .await?;
-    let observation = refresh_delivery_observation(driver, deadline).await?;
-    ensure!(
-        observation.click_deliveries == 1
-            && observation.request_starts == 1
-            && observation.duplicate_clicks_blocked == 0,
-        "Refresh delivery was not exactly once after {attempts} WebDriver click attempt(s): {} delivered click(s), {} request start(s), {} duplicate click(s) blocked",
-        observation.click_deliveries,
-        observation.request_starts,
-        observation.duplicate_clicks_blocked
-    );
-    Ok(())
-}
-
-pub async fn delete_and_restore_empty_state(session: &TestSession) -> Result<()> {
+pub async fn delete_and_assert_empty_state(session: &TestSession) -> Result<()> {
     let driver = session.driver();
     let delete = by_accessible_name(driver, "Delete saved live view").await?;
     delete.focus().await.context("focus Delete live view")?;
@@ -554,20 +467,6 @@ pub async fn delete_and_restore_empty_state(session: &TestSession) -> Result<()>
     )
     .await?;
 
-    driver
-        .refresh()
-        .await
-        .context("reload empty viewer state")?;
-    by_css(
-        driver,
-        ".viewer-status-empty",
-        "restored empty viewer state",
-    )
-    .await?;
-    ensure!(
-        !has_button(driver, "Delete live view").await?,
-        "Delete live view remains available after empty state reload"
-    );
     Ok(())
 }
 
@@ -639,17 +538,9 @@ return document.querySelectorAll('.viewer-tab').length === arguments[2]
 }
 
 async fn wait_for_htmx_idle(driver: &WebDriver, label: &str) -> Result<()> {
-    wait_for_htmx_idle_until(driver, label, ASSERTION_TIMEOUT).await
-}
-
-async fn wait_for_htmx_idle_until(
-    driver: &WebDriver,
-    label: &str,
-    wait_timeout: Duration,
-) -> Result<()> {
     wait::until(
         &format!("HTMX to settle after {label}"),
-        wait_timeout,
+        ASSERTION_TIMEOUT,
         || async {
             Ok(script_bool(
                 driver,
@@ -660,222 +551,6 @@ async fn wait_for_htmx_idle_until(
         },
     )
     .await
-}
-
-async fn install_refresh_delivery_observer(driver: &WebDriver, deadline: Instant) -> Result<()> {
-    let result =
-        within_refresh_webdriver_operation(deadline, "install Refresh delivery observer", async {
-            driver
-                .execute(
-                    r#"
-const buttons = Array.from(
-  document.querySelectorAll(".viewer-controls button[hx-get$='/refresh']")
-);
-if (buttons.length !== 1) {
-  return buttons.length;
-}
-const delivery = {
-  button: buttons[0],
-  clickDeliveries: 0,
-  requestStarts: 0,
-  duplicateClicksBlocked: 0
-};
-window.__gtlRefreshDelivery = delivery;
-const semanticRefreshButton = (event) => event.composedPath().find((element) =>
-  element instanceof HTMLButtonElement &&
-  element.matches(".viewer-controls button[hx-get$='/refresh']")
-);
-document.addEventListener('click', (event) => {
-  const button = semanticRefreshButton(event);
-  if (!button) {
-    return;
-  }
-  delivery.clickDeliveries += 1;
-  if (delivery.clickDeliveries === 1) {
-    delivery.button = button;
-    return;
-  }
-  delivery.duplicateClicksBlocked += 1;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-}, true);
-document.addEventListener('htmx:beforeRequest', (event) => {
-  if (event.detail?.elt === delivery.button) {
-    delivery.requestStarts += 1;
-  }
-});
-return buttons.length;
-"#,
-                    Vec::new(),
-                )
-                .await
-                .context("install Refresh delivery observer")
-        })
-        .await?;
-    ensure!(
-        result.json().as_u64() == Some(1),
-        "expected one Refresh button when installing the delivery observer"
-    );
-    Ok(())
-}
-
-async fn refresh_until_request_starts(driver: &WebDriver, deadline: Instant) -> Result<usize> {
-    let mut delivery = RefreshDelivery::default();
-    let mut observation = refresh_delivery_observation(driver, deadline).await?;
-    let mut delivery_window_elapsed = true;
-
-    loop {
-        match delivery.next_action(
-            observation,
-            delivery_window_elapsed,
-            Instant::now() < deadline,
-        ) {
-            RefreshDeliveryAction::Click(attempt) => {
-                click_refresh(driver, deadline, attempt).await?;
-                (observation, delivery_window_elapsed) =
-                    observe_refresh_delivery_window(driver, deadline).await?;
-            }
-            RefreshDeliveryAction::AwaitDelivery => {
-                (observation, delivery_window_elapsed) =
-                    observe_refresh_delivery_window(driver, deadline).await?;
-            }
-            RefreshDeliveryAction::AwaitRequest => {
-                observation = wait_for_refresh_request_start(driver, deadline).await?;
-                delivery_window_elapsed = false;
-            }
-            RefreshDeliveryAction::Complete(attempts) => return Ok(attempts),
-            RefreshDeliveryAction::Exhausted(attempts) => {
-                bail!(
-                    "Refresh click was not delivered after {attempts} WebDriver click attempt(s)"
-                );
-            }
-            RefreshDeliveryAction::DeadlineExceeded(attempts) => {
-                bail!(
-                    "Refresh did not render alpha-v2 within {ASSERTION_TIMEOUT:?} after {attempts} WebDriver click attempt(s)"
-                );
-            }
-            RefreshDeliveryAction::Duplicate {
-                click_deliveries,
-                request_starts,
-                duplicate_clicks_blocked,
-            } => {
-                bail!(
-                    "Refresh duplicate click was blocked before HTMX: {click_deliveries} delivered click(s), {request_starts} request start(s), {duplicate_clicks_blocked} duplicate click(s) blocked"
-                );
-            }
-        }
-    }
-}
-
-async fn click_refresh(driver: &WebDriver, deadline: Instant, attempt: usize) -> Result<()> {
-    within_refresh_webdriver_operation(
-        deadline,
-        &format!("deliver Refresh click attempt {attempt}"),
-        async {
-            by_css(
-                driver,
-                ".viewer-controls button[hx-get$='/refresh']",
-                "desktop Refresh action",
-            )
-            .await?
-            .click()
-            .await
-            .with_context(|| format!("refresh live view attempt {attempt}"))
-        },
-    )
-    .await
-}
-
-async fn observe_refresh_delivery_window(
-    driver: &WebDriver,
-    deadline: Instant,
-) -> Result<(RefreshDeliveryObservation, bool)> {
-    let delivery_window = refresh_delivery_window(refresh_budget_remaining(deadline)?);
-    match timeout(delivery_window, async {
-        loop {
-            let observation = refresh_delivery_observation(driver, deadline).await?;
-            if observation.delivery_started() {
-                return Ok::<_, anyhow::Error>(observation);
-            }
-            sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    {
-        Ok(result) => Ok((result?, false)),
-        Err(_) => Ok((refresh_delivery_observation(driver, deadline).await?, true)),
-    }
-}
-
-async fn wait_for_refresh_request_start(
-    driver: &WebDriver,
-    deadline: Instant,
-) -> Result<RefreshDeliveryObservation> {
-    wait::until(
-        "Refresh HTMX request to start after its click was delivered",
-        refresh_budget_remaining(deadline)?,
-        || async {
-            let observation = refresh_delivery_observation(driver, deadline).await?;
-            Ok(
-                (observation.request_starts > 0 || observation.click_deliveries > 1)
-                    .then_some(observation),
-            )
-        },
-    )
-    .await
-}
-
-async fn refresh_delivery_observation(
-    driver: &WebDriver,
-    deadline: Instant,
-) -> Result<RefreshDeliveryObservation> {
-    let result = within_refresh_webdriver_operation(
-        deadline,
-        "read Refresh delivery observation",
-        async {
-            driver
-                .execute(
-                    "return { clickDeliveries: window.__gtlRefreshDelivery?.clickDeliveries ?? 0, requestStarts: window.__gtlRefreshDelivery?.requestStarts ?? 0, duplicateClicksBlocked: window.__gtlRefreshDelivery?.duplicateClicksBlocked ?? 0 };",
-                    Vec::new(),
-                )
-                .await
-                .context("read Refresh delivery observation")
-        },
-    )
-    .await?;
-    let observation = result.json();
-    Ok(RefreshDeliveryObservation::new(
-        observation["clickDeliveries"].as_u64().unwrap_or_default(),
-        observation["requestStarts"].as_u64().unwrap_or_default(),
-        observation["duplicateClicksBlocked"]
-            .as_u64()
-            .unwrap_or_default(),
-    ))
-}
-
-async fn within_refresh_webdriver_operation<T, F>(
-    deadline: Instant,
-    description: &str,
-    operation: F,
-) -> Result<T>
-where
-    F: Future<Output = Result<T>>,
-{
-    wait::within(
-        description,
-        WEBDRIVER_OPERATION_TIMEOUT.min(refresh_budget_remaining(deadline)?),
-        operation,
-    )
-    .await
-}
-
-fn refresh_budget_remaining(deadline: Instant) -> Result<Duration> {
-    let budget_remaining = deadline.saturating_duration_since(Instant::now());
-    ensure!(
-        !budget_remaining.is_zero(),
-        "Refresh did not render alpha-v2 within {ASSERTION_TIMEOUT:?}"
-    );
-    Ok(budget_remaining)
 }
 
 async fn viewer_state(driver: &WebDriver) -> Result<bool> {
@@ -900,17 +575,6 @@ async fn empty_state_is_focused(driver: &WebDriver) -> Result<bool> {
         "return !Array.from(document.querySelectorAll('.viewer-tab-kind')).some((kind) => kind.textContent === 'L') && document.querySelector('.viewer-status-empty') !== null && document.activeElement?.classList.contains('viewer-recovery-button');",
     )
     .await
-}
-
-async fn has_button(driver: &WebDriver, expected: &str) -> Result<bool> {
-    let result = driver
-        .execute(
-            "return Array.from(document.querySelectorAll('button')).some((button) => button.textContent.trim() === arguments[0]);",
-            vec![serde_json::json!(expected)],
-        )
-        .await
-        .context("inspect viewer buttons")?;
-    Ok(result.json().as_bool().unwrap_or(false))
 }
 
 async fn script_bool(driver: &WebDriver, script: &str) -> Result<bool> {

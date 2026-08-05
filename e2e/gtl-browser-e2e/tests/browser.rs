@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 //! Playwright browser journeys.
 //!
 //! Every workflow is a module of this explicit Cargo test target. The modules

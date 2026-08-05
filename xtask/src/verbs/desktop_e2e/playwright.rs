@@ -122,5 +122,4 @@ fn decide_install(install: &impl Fn() -> bool, attempts_max: u32) -> InstallOutc
 }
 
 #[cfg(test)]
-#[path = "../../../../e2e/gtl-desktop-e2e/xtask/playwright.rs"]
 mod tests;

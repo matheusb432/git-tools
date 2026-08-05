@@ -25,7 +25,6 @@ default-members = [
   "crates/gtl-models",
   "crates/gtl-infra",
   "crates/gtl-preview",
-  "e2e/gtl-cli-e2e",
   "xtask",
 ]
 

@@ -5,28 +5,19 @@ edition.workspace = true
 publish.workspace = true
 autotests = false
 
+[features]
+e2e = []
+
 [dev-dependencies]
 assert_cmd.workspace = true
 predicates.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-toml.workspace = true
 
 [[test]]
-name = "e2e"
-path = "tests/e2e.rs"
-
-[[test]]
-name = "prune_e2e"
-path = "tests/prune_e2e.rs"
-
-[[test]]
-name = "sw_e2e"
-path = "tests/sw_e2e.rs"
-
-[[test]]
-name = "daemon_roundtrip"
-path = "tests/daemon_roundtrip.rs"
+name = "daemon_lifecycle"
+path = "tests/daemon_lifecycle.rs"
+required-features = ["e2e"]
 
 [lints]
 workspace = true

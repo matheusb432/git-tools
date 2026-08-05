@@ -17,9 +17,9 @@ async fn viewer_live_lifecycle() -> anyhow::Result<()> {
             support::assert_first_paint(session)
                 .await
                 .context("assert first diff-row paint")?;
-            support::select_and_restore_split_layout(session)
+            support::select_split_layout(session)
                 .await
-                .context("select and restore split layout")?;
+                .context("select split layout")?;
             fixture.commit_alpha_v2()?;
             support::refresh_and_assert_alpha_v2(session)
                 .await
@@ -55,7 +55,7 @@ async fn viewer_live_lifecycle() -> anyhow::Result<()> {
                 .await
                 .context("recover saved live view without duplicate tabs")?;
 
-            support::delete_and_restore_empty_state(session)
+            support::delete_and_assert_empty_state(session)
                 .await
                 .context("delete saved live view through keyboard confirmation")?;
             session

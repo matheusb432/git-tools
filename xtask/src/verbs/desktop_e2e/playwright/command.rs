@@ -124,5 +124,4 @@ fn terminate_and_reap(child: &mut GroupChild, description: &str) -> Result<()> {
 }
 
 #[cfg(all(test, target_os = "linux"))]
-#[path = "../../../../../e2e/gtl-desktop-e2e/xtask/command.rs"]
 mod tests;

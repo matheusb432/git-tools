@@ -498,15 +498,35 @@ mod tests {
     }
 
     #[test]
-    fn non_string_and_malformed_documents_remain_unchanged() {
+    fn non_string_document_returns_the_typed_shape_error_without_writing() {
         let directory = tempfile::tempdir().expect("temp directory");
         let path = directory.path().join("config.toml");
+        let raw = "theme = 7\n";
+        std::fs::write(&path, raw).expect("seed config");
 
-        for raw in ["theme = 7\n", "theme = {{{\n"] {
-            std::fs::write(&path, raw).expect("seed config");
-            assert!(edit(&path, "theme", StringEdit::Set("light")).is_err());
-            assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
-        }
+        let error = edit(&path, "theme", StringEdit::Set("light"))
+            .expect_err("non-string setting must fail");
+
+        assert!(matches!(error, UserSettingsEditError::InvalidValueShape));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
+    }
+
+    #[test]
+    fn malformed_document_returns_a_typed_configuration_error_without_writing() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("config.toml");
+        let raw = "theme = {{{\n";
+        std::fs::write(&path, raw).expect("seed config");
+
+        let error = edit(&path, "theme", StringEdit::Set("light"))
+            .expect_err("malformed settings must fail");
+
+        assert!(matches!(
+            error,
+            UserSettingsEditError::InvalidConfiguration { path: error_path, .. }
+                if error_path == path
+        ));
+        assert_eq!(std::fs::read_to_string(path).unwrap(), raw);
     }
 
     #[test]

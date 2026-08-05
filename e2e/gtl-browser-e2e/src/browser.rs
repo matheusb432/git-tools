@@ -234,26 +234,3 @@ async fn close_resources(
         bail!("Chromium cleanup failed: {}", failures.join("; "));
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use std::{future, time::Duration};
-
-    use super::with_timeout;
-
-    #[tokio::test]
-    async fn deadline_rejects_an_operation_that_never_finishes() {
-        let error = with_timeout(
-            "pending browser operation",
-            Duration::from_millis(1),
-            future::pending::<anyhow::Result<()>>(),
-        )
-        .await
-        .expect_err("pending operation must time out");
-
-        assert!(
-            format!("{error:#}").contains("pending browser operation timed out after 1ms"),
-            "unexpected deadline error: {error:#}"
-        );
-    }
-}

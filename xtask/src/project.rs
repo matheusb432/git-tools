@@ -43,7 +43,7 @@ pub(crate) fn tests_unit() -> Result<Vec<TestDeclaration>> {
 }
 
 pub(crate) fn tests_e2e(executable: OsString) -> Result<Vec<TestDeclaration>> {
-    Ok(vec![desktop_e2e(executable)?])
+    Ok(vec![cli_e2e()?, desktop_e2e(executable)?])
 }
 
 pub(crate) fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
@@ -62,6 +62,7 @@ pub(crate) fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
                 .summary_parser(summary::vitest),
         ),
         worker("drift", &executable, "drift-check")?,
+        cli_e2e()?,
         desktop_e2e(executable)?,
     ])
 }
@@ -79,11 +80,33 @@ fn worker(
 
 fn desktop_e2e(executable: OsString) -> Result<TestDeclaration> {
     Ok(TestDeclaration::new(
-        "e2e",
-        Test::try_new("e2e", executable)?
+        "desktop-e2e",
+        Test::try_new("desktop-e2e", executable)?
             .arg("desktop-e2e-worker")
             .verbose_arguments(["--verbose"])
             .accepts_evidences()
             .timeout(Duration::from_hours(2)),
+    ))
+}
+
+fn cli_e2e() -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
+        "cli-e2e",
+        Test::try_new("cli-e2e", "cargo")?
+            .args([
+                "test",
+                "-p",
+                "gtl-cli-e2e",
+                "--features",
+                "e2e",
+                "--test",
+                "daemon_lifecycle",
+                "--",
+                "--test-threads",
+                "1",
+            ])
+            .verbose_arguments(["--nocapture"])
+            .summary_parser(summary::cargo)
+            .timeout(Duration::from_mins(5)),
     ))
 }
