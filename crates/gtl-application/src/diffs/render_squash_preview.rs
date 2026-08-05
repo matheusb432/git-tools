@@ -1,6 +1,6 @@
-//! The `render_squash_preview` vertical slice: render the read-only preview of
-//! what `squash-local` would collapse the current branch's unpushed commits
-//! into, carrying every user-facing message out as [`Note`]s. Mirrors
+//! The `render_squash_preview` vertical slice: render a read-only preview of
+//! collapsing the current branch's unpushed commits into one, carrying every
+//! user-facing message out as [`Note`]s. Mirrors
 //! `render_merge_diff`'s shape; the cli's `gtl squash-preview` calls this
 //! in-process.
 

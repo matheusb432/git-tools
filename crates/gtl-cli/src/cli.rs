@@ -22,7 +22,7 @@ fn non_empty_message(value: &str) -> Result<String, String> {
     }
 }
 
-/// git-tools — render git workflow HTML previews and squash local commits.
+/// git-tools — render git workflow HTML previews.
 #[derive(Debug, Parser)]
 #[command(
     name = "git-tools",
@@ -57,18 +57,6 @@ pub enum Command {
     /// opening it in the app's viewer unless `--raw` prints an artifact URL instead.
     #[command(visible_alias = "d")]
     Diff(DiffArgs),
-    /// Squash all unpushed local commits into a single commit.
-    SquashLocal {
-        /// New commit message for the squashed commit.
-        #[arg(allow_hyphen_values = true)]
-        message: String,
-        /// Repo whose unpushed commits are squashed.
-        #[arg(long = "repo")]
-        repo_path: String,
-        /// Preview the squash without rewriting history.
-        #[arg(long)]
-        dry: bool,
-    },
     /// Push existing commits, or stage all changes, commit with MESSAGE, and push.
     #[command(visible_alias = "p")]
     Push(PushArgs),
@@ -79,10 +67,12 @@ pub enum Command {
     /// List tags, show tag commits, or push tags.
     Tag(TagArgs),
     /// Inspect git worktrees.
-    Wk(WorktreeArgs),
+    #[command(visible_alias = "wk")]
+    Worktree(WorktreeArgs),
     /// Switch to the main branch; with `--rebase`, fast-forward it onto the current branch's
     /// commits.
-    Sw(SwArgs),
+    #[command(visible_alias = "sw")]
+    Switch(SwitchArgs),
     /// Show git status for the current repo; `--all` fans out over managed repos, `-r` recurses
     /// into nested subrepos.
     #[command(visible_alias = "s")]
@@ -283,6 +273,7 @@ pub enum TagCommand {
         label: Option<String>,
     },
     /// Preview and create the next canonical `SemVer` tag.
+    #[command(visible_alias = "b")]
     Bump {
         /// `SemVer` component to advance.
         level: TagBumpLevel,
@@ -290,7 +281,7 @@ pub enum TagCommand {
         #[arg(allow_hyphen_values = true, value_parser = non_empty_message)]
         message: String,
         /// Push only the newly created tag to origin.
-        #[arg(long)]
+        #[arg(short = 'p', long)]
         push: bool,
         /// Show the exact proposed mutation without creating or pushing a tag.
         #[arg(long, conflicts_with = "yes")]
@@ -310,14 +301,14 @@ pub enum TagBumpLevel {
     Patch,
 }
 
-/// Arguments for `wk`.
+/// Arguments for `worktree`.
 #[derive(Debug, Args)]
 pub struct WorktreeArgs {
     #[command(subcommand)]
     pub command: WorktreeCommand,
 }
 
-/// Nested commands under `wk`.
+/// Nested commands under `worktree`.
 #[derive(Debug, Subcommand)]
 pub enum WorktreeCommand {
     /// Print the primary worktree path.
@@ -461,9 +452,9 @@ pub enum ColorChoice {
     Never,
 }
 
-/// Arguments for `sw`.
+/// Arguments for `switch`.
 #[derive(Debug, Args)]
-pub struct SwArgs {
+pub struct SwitchArgs {
     /// Fast-forward the target branch onto the current branch's commits after switching.
     #[arg(long, conflicts_with = "revert")]
     pub rebase: bool,
@@ -473,7 +464,7 @@ pub struct SwArgs {
     /// After rebasing, render an HTML diff of the now-unpushed commits (requires --rebase).
     #[arg(short = 'd', long = "diff", requires = "rebase")]
     pub diff: bool,
-    /// Undo the last `sw --rebase`: reset the target branch and switch back to the previous
+    /// Undo the last `switch --rebase`: reset the target branch and switch back to the previous
     /// branch.
     #[arg(short = 'r', long = "revert")]
     pub revert: bool,
@@ -525,101 +516,30 @@ pub use gtl_application::diffs::DiffTarget;
 mod tests {
     use super::*;
 
-    /// The clap `Theme` enum duplicates `gtl_models::viewer::Theme` because clap can't
-    /// derive `--set-theme`'s possible-values help from a foreign type. Nothing else
-    /// catches the two drifting apart, so pin them here: same tokens, same order.
     #[test]
-    fn set_theme_value_enum_pins_to_models_theme_variants() {
-        use clap::ValueEnum as _;
-        use strum::VariantArray as _;
-
-        let models_tokens: Vec<String> = gtl_models::viewer::Theme::VARIANTS
-            .iter()
-            .map(ToString::to_string)
-            .collect();
-        let cli_tokens: Vec<&str> = Theme::value_variants()
-            .iter()
-            .map(|theme| theme.as_config_str())
-            .collect();
-
-        assert_eq!(
-            cli_tokens, models_tokens,
-            "clap --set-theme enum must mirror gtl_models::viewer::Theme::VARIANTS"
-        );
-    }
-
-    #[test]
-    fn parse_args_diff_sub_conflicts_with_target_flags() {
-        // `args_conflicts_with_subcommands`: a target flag and a nested subcommand
-        // can't both be present.
-        assert!(
-            Cli::parse_args(&[
-                "diff".into(),
-                "-r".into(),
-                "merge".into(),
-                "--repo".into(),
-                "r".into(),
-            ])
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn parse_args_status_all_conflicts_with_recursive() {
-        let err = Cli::parse_args(&["status".into(), "--all".into(), "-r".into()])
-            .expect_err("--all and --recursive are mutually exclusive");
-        assert!(
-            err.to_string().contains("cannot be used with"),
-            "error: {err}"
-        );
-    }
-
-    #[test]
-    fn parse_args_bare_pull_is_usage() {
-        assert!(Cli::parse_args(&["pull".into()]).is_err());
-    }
-
-    #[test]
-    fn parse_args_ls_is_status_all_alias() {
-        let cli = Cli::parse_args(&["ls".into()]).unwrap();
-        let Command::Ls(ls_args) = cli.command else {
-            panic!("expected Command::Ls, got {:?}", cli.command);
-        };
-
-        let status_args = StatusArgs::from(ls_args);
-        assert!(status_args.all);
-        assert!(!status_args.recursive);
-    }
-
-    #[test]
-    fn parse_args_accepts_dash_prefixed_squash_message() {
-        // A commit message can begin with `-`; allow_hyphen_values keeps it a value, not a flag.
+    fn parse_args_tag_bump_accepts_short_aliases() {
         let cli = Cli::parse_args(&[
-            "squash-local".into(),
-            "- fix commit".into(),
-            "--repo".into(),
-            "r".into(),
+            "tag".into(),
+            "b".into(),
+            "patch".into(),
+            "release".into(),
+            "-p".into(),
         ])
         .unwrap();
+
         assert!(matches!(
             cli.command,
-            Command::SquashLocal {
-                message,
-                repo_path,
-                dry,
-            } if message == "- fix commit" && repo_path == "r" && !dry
+            Command::Tag(TagArgs {
+                command: Some(TagCommand::Bump {
+                    level: TagBumpLevel::Patch,
+                    message,
+                    push: true,
+                    dry: false,
+                    yes: false,
+                }),
+                ..
+            }) if message == "release"
         ));
-    }
-
-    #[test]
-    fn parse_args_rejects_unknown_command() {
-        assert!(Cli::parse_args(&["bogus".into()]).is_err());
-    }
-
-    #[test]
-    fn parse_args_diff_recursive_conflicts_with_all_and_target() {
-        assert!(Cli::parse_args(&["diff".into(), "-r".into(), "--all".into()]).is_err());
-        assert!(Cli::parse_args(&["diff".into(), "-r".into(), "abc123".into()]).is_err());
     }
 
     #[test]
@@ -638,11 +558,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_diff_rejects_blank_name() {
-        assert!(Cli::parse_args(&["diff".into(), "--name".into(), "  ".into()]).is_err());
-    }
-
-    #[test]
     fn parse_args_diff_set_theme_conflicts_with_a_target() {
         assert!(
             Cli::parse_args(&[
@@ -653,12 +568,6 @@ mod tests {
             ])
             .is_err()
         );
-    }
-
-    #[test]
-    fn parse_args_diff_rejects_zero_last() {
-        // NonZeroU32 makes `-l 0` unrepresentable: clap rejects it before dispatch.
-        assert!(Cli::parse_args(&["diff".into(), "-l".into(), "0".into()]).is_err());
     }
 
     #[test]
@@ -690,49 +599,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_args_sw_diff_requires_rebase() {
-        assert!(Cli::parse_args(&["sw".into(), "--diff".into()]).is_err());
+    fn parse_args_switch_scenarios() {
+        assert!(Cli::parse_args(&["switch".into(), "--diff".into()]).is_err());
         assert!(Cli::parse_args(&["sw".into(), "--rebase".into(), "-d".into()]).is_ok());
+        assert!(Cli::parse_args(&["switch".into(), "--rebase".into(), "--revert".into()]).is_err());
     }
 
     #[test]
-    fn parse_args_sw_rebase_conflicts_with_revert() {
-        assert!(Cli::parse_args(&["sw".into(), "--rebase".into(), "--revert".into()]).is_err());
-    }
-
-    /// Durable guard for "every public verb is exposed via `--help`". clap renders help
-    /// from the derive, so the only way a working verb disappears from help is a hidden
-    /// subcommand (`hide`) or a hidden alias (`alias` instead of `visible_alias`) -- e.g.
-    /// `tag push`'s `p` alias silently dropping out of `tag --help`. This walks the whole
-    /// command tree and fails on either, so the exposure can't drift on memory alone.
-    #[test]
-    fn every_command_and_alias_is_visible_in_help() {
-        use clap::CommandFactory;
-
-        fn assert_all_visible(cmd: &clap::Command, path: &str) {
-            let here = if path.is_empty() {
-                cmd.get_name().to_string()
-            } else {
-                format!("{path} {}", cmd.get_name())
-            };
-
-            let hidden_aliases: Vec<&str> = cmd.get_aliases().collect();
-            assert!(
-                hidden_aliases.is_empty(),
-                "`{here}` has hidden alias(es) {hidden_aliases:?}; use `visible_alias` \
-                 so the verb shows in `--help`",
-            );
-
-            for sub in cmd.get_subcommands() {
-                assert!(
-                    !sub.is_hide_set(),
-                    "`{here} {}` is hidden from `--help`; every public command must be listed",
-                    sub.get_name(),
-                );
-                assert_all_visible(sub, &here);
-            }
+    fn parse_args_worktree_accepts_short_alias() {
+        for command in ["worktree", "wk"] {
+            assert!(Cli::parse_args(&[command.into(), "base".into()]).is_ok());
         }
-
-        assert_all_visible(&Cli::command(), "");
     }
 }

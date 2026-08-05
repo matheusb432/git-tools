@@ -1,4 +1,4 @@
-//! End-to-end tests for `gtl sw`: build a real temp repository with a feature branch ahead of
+//! End-to-end tests for `gtl switch`: build a real temp repository with a feature branch ahead of
 //! `main`, run the built binary against it, and assert exit code, stdout/stderr, and the
 //! resulting ref topology. Local-only — no network.
 
@@ -89,7 +89,10 @@ fn gtl(repo_path: &Path) -> Command {
 fn revert_undoes_a_rebase_and_returns_to_feature() -> Result<()> {
     let (_tmp, repo_path) = setup()?;
     let main_before = rev(&repo_path, "main")?;
-    gtl(&repo_path).args(["sw", "--rebase"]).assert().success();
+    gtl(&repo_path)
+        .args(["switch", "--rebase"])
+        .assert()
+        .success();
     // Now on main at the feature tip; revert it.
     gtl(&repo_path)
         .args(["sw", "--revert"])

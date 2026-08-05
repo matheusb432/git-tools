@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use gtl_application::{
     managed::plan_push::{self, PlanPush, PlanPushOk},
     ports::UserSettingsStore,
-    squash_local::{self, SquashLocal, SquashLocalOk, SquashStatus},
 };
 use gtl_infra::git_client::HybridGitClient;
 
@@ -13,7 +12,7 @@ use crate::{
     cli::{
         Cli, ColorChoice, Command, CommitArgs, DaemonArgs, DaemonCommand, DiffArgs, DiffSub,
         DiffTarget, DiffTargetArgs, ManagedArgs, ManagedReadArgs, MergeArgs, PruneArgs, PushArgs,
-        SquashArgs, StatusArgs, SwArgs, Theme, WorktreeCommand,
+        SquashArgs, StatusArgs, SwitchArgs, Theme, WorktreeCommand,
     },
     commands::managed::{ManagedExit, ManagedOptions, ManagedRun, PushOutcome, PushSummary},
     confirm::{Confirmation, DefaultAnswer, RealConfirm},
@@ -37,28 +36,6 @@ pub enum ExitCode {
     Ok = 0,
     Internal = 1,
     Usage = 2,
-}
-
-fn squash_local_exit_code(status: SquashStatus) -> ExitCode {
-    match status {
-        SquashStatus::Refused | SquashStatus::Failed => ExitCode::Internal,
-        SquashStatus::Noop | SquashStatus::WouldSquash | SquashStatus::Squashed => ExitCode::Ok,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OutputStream {
-    Stdout,
-    Stderr,
-}
-
-fn squash_local_output_stream(status: SquashStatus) -> OutputStream {
-    match status {
-        SquashStatus::Refused | SquashStatus::Failed => OutputStream::Stderr,
-        SquashStatus::Noop | SquashStatus::WouldSquash | SquashStatus::Squashed => {
-            OutputStream::Stdout
-        }
-    }
 }
 
 /// Route argv (already stripped of argv[0]) to an [`ExitCode`].
@@ -88,30 +65,6 @@ fn render_clap_error(error: &clap::Error) -> ExitCode {
 fn dispatch(command: Command) -> ExitCode {
     match command {
         Command::Diff(args) => run_diff(args),
-        Command::SquashLocal {
-            repo_path,
-            message,
-            dry,
-        } => {
-            let git = HybridGitClient;
-            match squash_local::execute(
-                SquashLocal {
-                    repo_path: repo_path.into(),
-                    message: message.clone(),
-                    dry,
-                },
-                &git,
-            ) {
-                Ok(result) => {
-                    print_squash_local_result(&result, &message);
-                    squash_local_exit_code(result.status)
-                }
-                Err(error) => {
-                    eprintln!("{error}");
-                    ExitCode::Internal
-                }
-            }
-        }
         Command::Push(PushArgs {
             all: false,
             recursive: false,
@@ -147,10 +100,10 @@ fn dispatch(command: Command) -> ExitCode {
             None,
         ))),
         Command::Commit(args) => run_commit(args),
-        Command::Sw(args) => run_sw(&args),
+        Command::Switch(args) => run_switch(&args),
         Command::Prune(args) => run_prune(args),
         Command::Tag(args) => commands::tag::run(args.command, args.commits, args.state),
-        Command::Wk(args) => run_worktree(&args.command),
+        Command::Worktree(args) => run_worktree(&args.command),
         Command::Status(args) => managed_exit(&run_status(args)),
         Command::Ls(args) => managed_exit(&run_status(args.into())),
         Command::Daemon(DaemonArgs { command }) => run_daemon_ctl(&command),
@@ -299,7 +252,7 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
     let repo_path = match commands::canonical_working_directory() {
         Ok(path) => path,
         Err(error) => {
-            eprintln!("wk: {error:#}");
+            eprintln!("worktree: {error:#}");
             return ExitCode::Internal;
         }
     };
@@ -312,11 +265,11 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
                 ExitCode::Ok
             }
             Ok(GetWorktreeBaseOk::Failed { detail }) => {
-                eprintln!("wk: {detail}");
+                eprintln!("worktree: {detail}");
                 ExitCode::Internal
             }
             Err(error) => {
-                eprintln!("wk: {error}");
+                eprintln!("worktree: {error}");
                 ExitCode::Internal
             }
         },
@@ -329,11 +282,11 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
                 ExitCode::Ok
             }
             Ok(ListWorktreesOk::Failed { detail }) => {
-                eprintln!("wk: {detail}");
+                eprintln!("worktree: {detail}");
                 ExitCode::Internal
             }
             Err(error) => {
-                eprintln!("wk: {error}");
+                eprintln!("worktree: {error}");
                 ExitCode::Internal
             }
         },
@@ -776,17 +729,17 @@ fn format_push_subrepos_result(
     detail
 }
 
-/// Orchestrates `sw`: pick the flow from flags, run the plan read-only, then apply.
+/// Orchestrates `switch`: pick the flow from flags, run the plan read-only, then apply.
 /// All git work is local; refusals go to stderr (exit 1), logs to stdout (exit 0).
-fn run_sw(args: &SwArgs) -> ExitCode {
-    let repo_path = match canonical_working_directory_or_exit("sw") {
+fn run_switch(args: &SwitchArgs) -> ExitCode {
+    let repo_path = match canonical_working_directory_or_exit("switch") {
         Ok(path) => path,
         Err(code) => return code,
     };
-    run_sw_with_path(args, repo_path)
+    run_switch_with_path(args, repo_path)
 }
 
-fn run_sw_with_path(args: &SwArgs, repo_path: PathBuf) -> ExitCode {
+fn run_switch_with_path(args: &SwitchArgs, repo_path: PathBuf) -> ExitCode {
     use gtl_application::branches::{
         apply_rebase::{self, ApplyRebase, RebaseStatus},
         apply_revert::{self, ApplyRevert, RevertStatus},
@@ -808,20 +761,20 @@ fn run_sw_with_path(args: &SwArgs, repo_path: PathBuf) -> ExitCode {
             &git,
         ) {
             Ok(PlanRevertOk::Refused(detail)) => {
-                eprintln!("sw: {detail}");
+                eprintln!("switch: {detail}");
                 ExitCode::Internal
             }
             Ok(PlanRevertOk::Ready(target)) => {
                 let result = match apply_revert::execute(ApplyRevert { target }, &git) {
                     Ok(result) => result,
-                    Err(error) => return finish_sw_error(&error),
+                    Err(error) => return finish_switch_error(&error),
                 };
-                finish_sw(match result.status {
+                finish_switch(match result.status {
                     RevertStatus::Reverted => Ok(&result.detail),
                     RevertStatus::Failed => Err(&result.detail),
                 })
             }
-            Err(error) => finish_sw_error(&error),
+            Err(error) => finish_switch_error(&error),
         };
     }
 
@@ -834,7 +787,7 @@ fn run_sw_with_path(args: &SwArgs, repo_path: PathBuf) -> ExitCode {
             &git,
         ) {
             Ok(PlanRebaseOk::Refused(detail)) => {
-                eprintln!("sw: {detail}");
+                eprintln!("switch: {detail}");
                 return ExitCode::Internal;
             }
             Ok(PlanRebaseOk::Noop(detail)) => {
@@ -842,13 +795,13 @@ fn run_sw_with_path(args: &SwArgs, repo_path: PathBuf) -> ExitCode {
                 return ExitCode::Ok;
             }
             Ok(PlanRebaseOk::Ready(target)) => target,
-            Err(error) => return finish_sw_error(&error),
+            Err(error) => return finish_switch_error(&error),
         };
         let result = match apply_rebase::execute(ApplyRebase { target }, &git) {
             Ok(result) => result,
-            Err(error) => return finish_sw_error(&error),
+            Err(error) => return finish_switch_error(&error),
         };
-        let code = finish_sw(match result.status {
+        let code = finish_switch(match result.status {
             RebaseStatus::FastForwarded => Ok(&result.detail),
             RebaseStatus::Failed => Err(&result.detail),
         });
@@ -870,7 +823,7 @@ fn run_sw_with_path(args: &SwArgs, repo_path: PathBuf) -> ExitCode {
         &git,
     ) {
         Ok(PlanSwitchOk::Refused(detail)) => {
-            eprintln!("sw: {detail}");
+            eprintln!("switch: {detail}");
             ExitCode::Internal
         }
         Ok(PlanSwitchOk::AlreadyThere(onto)) => {
@@ -880,31 +833,31 @@ fn run_sw_with_path(args: &SwArgs, repo_path: PathBuf) -> ExitCode {
         Ok(PlanSwitchOk::Ready(target)) => {
             let result = match apply_switch::execute(ApplySwitch { target }, &git) {
                 Ok(result) => result,
-                Err(error) => return finish_sw_error(&error),
+                Err(error) => return finish_switch_error(&error),
             };
-            finish_sw(match result.status {
+            finish_switch(match result.status {
                 SwitchStatus::Switched => Ok(&result.detail),
                 SwitchStatus::Failed => Err(&result.detail),
             })
         }
-        Err(error) => finish_sw_error(&error),
+        Err(error) => finish_switch_error(&error),
     }
 }
 
-fn finish_sw_error(error: &impl std::fmt::Display) -> ExitCode {
-    eprintln!("sw: {error}");
+fn finish_switch_error(error: &impl std::fmt::Display) -> ExitCode {
+    eprintln!("switch: {error}");
     ExitCode::Internal
 }
 
-/// Print an applied `sw` result and map its status to an exit code.
-fn finish_sw(result: Result<&str, &str>) -> ExitCode {
+/// Print an applied `switch` result and map its status to an exit code.
+fn finish_switch(result: Result<&str, &str>) -> ExitCode {
     match result {
         Ok(detail) => {
             println!("{detail}");
             ExitCode::Ok
         }
         Err(detail) => {
-            eprintln!("sw: {detail}");
+            eprintln!("switch: {detail}");
             ExitCode::Internal
         }
     }
@@ -1136,46 +1089,6 @@ fn diff_live_exit(result: anyhow::Result<()>) -> ExitCode {
     }
 }
 
-fn print_squash_local_result(result: &SquashLocalOk, message: &str) {
-    let stream = squash_local_output_stream(result.status);
-    match result.status {
-        SquashStatus::Refused => {
-            print_squash_local_line(stream, &format!("refused: {}", result.detail));
-        }
-        SquashStatus::Failed | SquashStatus::Noop => {
-            print_squash_local_line(stream, &result.detail);
-        }
-        SquashStatus::WouldSquash => {
-            print_squash_local_line(
-                stream,
-                &format!(
-                    "[dry] would collapse {} unpushed commits into one:",
-                    result.count
-                ),
-            );
-            for commit in &result.commits {
-                print_squash_local_line(stream, &format!("  {commit}"));
-            }
-            print_squash_local_line(stream, &format!("[dry] new message would be: {message}"));
-            print_squash_local_line(stream, "[dry] re-run without --dry to apply.");
-        }
-        SquashStatus::Squashed => {
-            print_squash_local_line(
-                stream,
-                &format!("squashed {} commits into one.", result.count),
-            );
-            print_squash_local_line(stream, &format!("recover: git reset --soft {}", result.pre));
-        }
-    }
-}
-
-fn print_squash_local_line(stream: OutputStream, line: &str) {
-    match stream {
-        OutputStream::Stdout => println!("{line}"),
-        OutputStream::Stderr => eprintln!("{line}"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1282,48 +1195,6 @@ mod tests {
         assert_eq!(
             html_error_text(&error),
             "fatal: bad ref\nnot a commit: nope"
-        );
-    }
-
-    #[test]
-    fn squash_local_statuses_map_to_ps1_exit_codes() {
-        assert_eq!(
-            squash_local_exit_code(SquashStatus::Refused),
-            ExitCode::Internal
-        );
-        assert_eq!(
-            squash_local_exit_code(SquashStatus::Failed),
-            ExitCode::Internal
-        );
-        assert_eq!(squash_local_exit_code(SquashStatus::Noop), ExitCode::Ok);
-        assert_eq!(
-            squash_local_exit_code(SquashStatus::WouldSquash),
-            ExitCode::Ok
-        );
-        assert_eq!(squash_local_exit_code(SquashStatus::Squashed), ExitCode::Ok);
-    }
-
-    #[test]
-    fn squash_local_output_streams_route_failures_to_stderr() {
-        assert_eq!(
-            squash_local_output_stream(SquashStatus::Refused),
-            OutputStream::Stderr
-        );
-        assert_eq!(
-            squash_local_output_stream(SquashStatus::Failed),
-            OutputStream::Stderr
-        );
-        assert_eq!(
-            squash_local_output_stream(SquashStatus::Noop),
-            OutputStream::Stdout
-        );
-        assert_eq!(
-            squash_local_output_stream(SquashStatus::WouldSquash),
-            OutputStream::Stdout
-        );
-        assert_eq!(
-            squash_local_output_stream(SquashStatus::Squashed),
-            OutputStream::Stdout
         );
     }
 }

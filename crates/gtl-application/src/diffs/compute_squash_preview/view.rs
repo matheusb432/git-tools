@@ -76,7 +76,7 @@ pub(super) fn build(
         },
         commits_label: "# commits \u{2014} collapse into 1".to_string(),
         foot: Foot {
-            cmd: "squash-local".to_string(),
+            cmd: "diff squash".to_string(),
             note: collapse_note(commits.len()),
         },
         commits,

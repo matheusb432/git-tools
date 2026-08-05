@@ -5,7 +5,7 @@
 ## Core workflows
 
 - Render unpushed, range, merge, squash, recursive, or managed-repository diffs in the offline desktop viewer. Use `--raw` for a self-contained browser artifact.
-- Inspect, commit, push, pull, prune, switch, tag, and squash local history without replacing Git's underlying repository model.
+- Inspect, commit, push, pull, prune, switch, and tag without replacing Git's underlying repository model.
 - Run status, commit, push, pull, and diff operations across repositories declared in `projects.toml`.
 
 Run `gtl --help` and `gtl <command> --help` for the authoritative command reference. Architecture decisions are indexed in [docs/adr/adr.toml](docs/adr/adr.toml).

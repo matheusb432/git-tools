@@ -101,16 +101,7 @@ fn read_preview(
         )));
     };
     let local_tags = local_tags(git, &repo_path)?;
-    let remote_tags = query
-        .push
-        .then(|| remote_tags(git, &repo_path))
-        .transpose()?;
-    let tag_names = local_tags.keys().map(String::as_str).chain(
-        remote_tags
-            .iter()
-            .flat_map(|tags| tags.keys().map(String::as_str)),
-    );
-    let decision = match decide_tag_version(tag_names, query.level) {
+    let decision = match decide_tag_version(local_tags.keys().map(String::as_str), query.level) {
         Ok(decision) => decision,
         Err(rejection) => return Ok(Err(rejection.to_string())),
     };
@@ -141,14 +132,34 @@ fn local_tags(
     }
 }
 
-fn remote_tags(
-    git: &impl GitClient,
-    repo_path: &Path,
-) -> Result<std::collections::BTreeMap<String, String>, GitCommandError> {
-    match git.remote_tags(repo_path, "origin")? {
-        GitEffect::Applied(tags) => Ok(tags),
-        GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
-            "git ls-remote failed: {detail}"
-        ))),
+#[cfg(test)]
+mod tests {
+    use super::{DryRunTagBump, DryRunTagBumpOk, execute};
+    use crate::{tags::BumpLevel, testing::ScriptedGitClient};
+
+    #[test]
+    fn pushed_preview_uses_local_tags_without_querying_origin() {
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repo"),
+            ScriptedGitClient::applied("commit-a\t\t\tv1.2.3\t"),
+            ScriptedGitClient::applied("main"),
+            ScriptedGitClient::applied("target-sha"),
+        ]);
+
+        let result = execute(
+            DryRunTagBump {
+                repo_path: "/repo".into(),
+                level: BumpLevel::Patch,
+                message: "release".into(),
+                push: true,
+            },
+            &git,
+        )
+        .expect("local tag preview should succeed without origin access");
+
+        let DryRunTagBumpOk::Ready(preview) = result else {
+            panic!("expected a ready tag bump preview");
+        };
+        assert_eq!(preview.next_tag, "v1.2.4");
     }
 }

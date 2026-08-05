@@ -109,7 +109,7 @@ mod tests {
             Worktree {
                 path: "/linked".to_string(),
                 head: "abcdef123456789".to_string(),
-                branch: Some("feature/wk".to_string()),
+                branch: Some("feature/worktree".to_string()),
                 detached: false,
                 bare: true,
                 locked: Some("maintenance".to_string()),
@@ -120,9 +120,9 @@ mod tests {
         assert_eq!(
             render_list(&worktrees),
             concat!(
-                "PATH     BRANCH      HEAD     STATE    DETAILS\n",
-                "/repo    main        1234567  primary  \n",
-                "/linked  feature/wk  abcdef1  linked   bare, locked: maintenance",
+                "PATH     BRANCH            HEAD     STATE    DETAILS\n",
+                "/repo    main              1234567  primary  \n",
+                "/linked  feature/worktree  abcdef1  linked   bare, locked: maintenance",
             )
         );
     }

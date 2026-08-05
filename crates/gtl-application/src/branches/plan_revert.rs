@@ -66,7 +66,7 @@ pub fn execute(query: PlanRevert, git: &impl GitClient) -> Result<PlanRevertOk, 
         }
         _ => {
             return Ok(PlanRevertOk::Refused(format!(
-                "revert expects to be on '{onto}' (the branch the last sw rebased)"
+                "revert expects to be on '{onto}' (the branch the last switch rebased)"
             )));
         }
     }
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(
             plan(&git),
             PlanRevertOk::Refused(
-                "revert expects to be on 'main' (the branch the last sw rebased)".into()
+                "revert expects to be on 'main' (the branch the last switch rebased)".into()
             )
         );
     }

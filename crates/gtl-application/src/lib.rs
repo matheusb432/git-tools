@@ -19,7 +19,6 @@ pub mod recipes;
 pub mod repository_sync;
 pub mod settings;
 pub mod shared;
-pub mod squash_local;
 pub mod tags;
 pub mod viewer;
 pub mod worktrees;
