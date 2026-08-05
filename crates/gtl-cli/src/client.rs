@@ -11,7 +11,6 @@ use anyhow::Context as _;
 use gtl_application::diffs::{
     render_diff::RenderDiff, render_diff_all::RenderDiffAll,
     render_diff_subrepos::RenderDiffSubrepos, render_merge_diff::RenderMergeDiff,
-    render_squash_preview::RenderSquashPreview,
 };
 use gtl_contracts::{
     diffs::RenderDiffData,
@@ -194,13 +193,6 @@ impl HttpClient {
         request: &RenderMergeDiff,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
         self.post_json("/diffs/merge", request)
-    }
-
-    pub(crate) fn render_squash_preview(
-        &self,
-        request: &RenderSquashPreview,
-    ) -> anyhow::Result<Envelope<RenderDiffData>> {
-        self.post_json("/diffs/squash-preview", request)
     }
 
     pub(crate) fn render_diff_subrepos(

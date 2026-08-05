@@ -208,7 +208,10 @@ mod tests {
     fn recipe(path: &str) -> Recipe {
         Recipe {
             source: RecipeSource::LocalRepo(path.into()),
-            op: RecipeOp::SquashPreview { pinned: None },
+            op: RecipeOp::MergeDiff {
+                base: None,
+                pinned: None,
+            },
             name: None,
         }
     }

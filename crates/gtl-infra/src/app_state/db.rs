@@ -64,8 +64,7 @@ CREATE TABLE render_operations (
 
 INSERT INTO render_operations (id, name) VALUES
   (1, 'diff'),
-  (2, 'merge_diff'),
-  (3, 'squash_preview');
+  (2, 'merge_diff');
 
 CREATE TABLE render_targets (
   id   INTEGER PRIMARY KEY,
@@ -189,11 +188,18 @@ CREATE INDEX project_sources_value_idx
 ON project_sources (value);
 ";
 
+const SCHEMA_V5: &str = "
+DELETE FROM recent_renders WHERE operation_id = 3;
+DELETE FROM render_operations WHERE id = 3;
+DELETE FROM project_sources WHERE id NOT IN (SELECT source_id FROM recent_renders);
+";
+
 const MIGRATIONS_SLICE: &[M<'_>] = &[
     M::up(SCHEMA_V1),
     M::up(SCHEMA_V2),
     M::up(SCHEMA_V3),
     M::up(SCHEMA_V4),
+    M::up(SCHEMA_V5),
 ];
 const MIGRATIONS: Migrations<'_> = Migrations::from_slice(MIGRATIONS_SLICE);
 
@@ -326,7 +332,7 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM recent_renders", [], |row| row.get(0))
             .expect("recent render count");
 
-        assert_eq!(user_version, 4);
+        assert_eq!(user_version, 5);
         assert_eq!(settings_table_count, 0);
         assert_eq!(live_view_count, 1);
         assert_eq!(recent_render_count, 1);
@@ -561,7 +567,7 @@ mod tests {
                 "recent_renders_repo_name_idx".to_owned(),
             ]
         );
-        assert_eq!(user_version, 4);
+        assert_eq!(user_version, 5);
     }
 
     /// Two processes (daemon + viewer) can open a fresh db concurrently; both

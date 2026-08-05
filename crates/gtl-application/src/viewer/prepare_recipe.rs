@@ -139,26 +139,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_snapshot_is_skipped_after_computation() {
-        let response = execute(
-            PrepareRecipe {
-                recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
-                kind: ViewerTabKind::Snapshot,
-            },
-            &FixedUserSettingsStore::default(),
-            &source(),
-        )
-        .expect("empty snapshot is a successful decision");
-
-        assert_eq!(
-            response,
-            PrepareRecipeOk::Skipped {
-                label: "project: squash".into()
-            }
-        );
-    }
-
-    #[test]
     fn ready_live_recipe_returns_a_publish_decision() {
         let response = execute(
             PrepareRecipe {

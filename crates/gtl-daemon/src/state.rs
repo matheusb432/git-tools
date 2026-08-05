@@ -65,10 +65,6 @@ pub fn router(state: DaemonState) -> Router {
         .route("/shutdown", post(endpoints::shutdown::handle))
         .route("/diffs/render", post(endpoints::diffs::render::handle))
         .route("/diffs/merge", post(endpoints::diffs::merge::handle))
-        .route(
-            "/diffs/squash-preview",
-            post(endpoints::diffs::squash_preview::handle),
-        )
         .route("/diffs/subrepos", post(endpoints::diffs::subrepos::handle))
         .route("/diffs/all", post(endpoints::diffs::all::handle))
         .route(

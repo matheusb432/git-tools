@@ -15,7 +15,6 @@ pub mod managed;
 pub mod merge_diff;
 pub mod prune;
 pub mod push_subrepos;
-pub mod squash_preview;
 pub mod sync;
 pub mod tag;
 pub mod worktree;

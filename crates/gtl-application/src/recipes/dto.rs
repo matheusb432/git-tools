@@ -7,6 +7,4 @@ pub enum RecipeRequest {
     Diff(DiffTarget),
     /// Renders a merge diff against the optional base.
     MergeDiff { base: Option<String> },
-    /// Renders the current branch as a squash preview.
-    SquashPreview,
 }

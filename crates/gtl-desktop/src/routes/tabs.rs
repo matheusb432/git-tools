@@ -298,7 +298,10 @@ mod tests {
     fn stale_transient_followed_by_current_oversize_view_is_bounded_conflict() {
         let recipe = Recipe {
             source: RecipeSource::LocalRepo("/repo".into()),
-            op: RecipeOp::SquashPreview { pinned: None },
+            op: RecipeOp::MergeDiff {
+                base: None,
+                pinned: None,
+            },
             name: None,
         };
         let mut state = ViewerSession::new(1);

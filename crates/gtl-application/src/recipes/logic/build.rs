@@ -29,7 +29,6 @@ fn operation_to_op(operation: RecipeRequest) -> RecipeOp {
             target: target_to_recipe(target),
         },
         RecipeRequest::MergeDiff { base } => RecipeOp::MergeDiff { base, pinned: None },
-        RecipeRequest::SquashPreview => RecipeOp::SquashPreview { pinned: None },
     }
 }
 
@@ -78,11 +77,9 @@ fn pin_operation(repo_top: &Path, operation: RecipeOp, git: &impl GitClient) -> 
                 .map(resolved_pin_to_recipe),
             base,
         },
-        RecipeOp::SquashPreview { pinned: None } => RecipeOp::SquashPreview {
-            pinned: git_range_pinning::resolve_range(repo_top, "@{u}", "HEAD", git)
-                .map(resolved_pin_to_recipe),
-        },
-        operation => operation,
+        operation @ RecipeOp::MergeDiff {
+            pinned: Some(_), ..
+        } => operation,
     }
 }
 

@@ -82,7 +82,10 @@ mod tests {
     fn snapshot_does_not_probe_its_source() {
         let response = execute(
             ProbeRecipe {
-                recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
+                recipe: recipe(RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                }),
                 kind: ViewerTabKind::Snapshot,
             },
             &git(GitRepositoryState::NotFound),
@@ -96,7 +99,10 @@ mod tests {
     fn missing_live_source_is_broken() {
         let response = execute(
             ProbeRecipe {
-                recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
+                recipe: recipe(RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                }),
                 kind: ViewerTabKind::Live,
             },
             &git(GitRepositoryState::NotFound),
@@ -118,7 +124,10 @@ mod tests {
     fn non_repository_live_source_is_broken() {
         let response = execute(
             ProbeRecipe {
-                recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
+                recipe: recipe(RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                }),
                 kind: ViewerTabKind::Live,
             },
             &git(GitRepositoryState::NotARepository),
@@ -140,7 +149,10 @@ mod tests {
     fn valid_live_source_is_ready() {
         let response = execute(
             ProbeRecipe {
-                recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
+                recipe: recipe(RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                }),
                 kind: ViewerTabKind::Live,
             },
             &git(GitRepositoryState::Repository {
@@ -156,7 +168,10 @@ mod tests {
     fn unexpected_live_probe_failure_is_returned() {
         let error = execute(
             ProbeRecipe {
-                recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
+                recipe: recipe(RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                }),
                 kind: ViewerTabKind::Live,
             },
             &FakeGitClient {

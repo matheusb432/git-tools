@@ -86,10 +86,6 @@ pub enum RecipeOp {
         base: Option<String>,
         pinned: Option<PinnedRange>,
     },
-    #[serde(alias = "squash-preview")]
-    SquashPreview {
-        pinned: Option<PinnedRange>,
-    },
 }
 
 /// One renderable recipe: the repo source plus the operation.
@@ -115,7 +111,6 @@ impl Recipe {
         match self.op {
             RecipeOp::Diff { .. } => "diff",
             RecipeOp::MergeDiff { .. } => "merge-diff",
-            RecipeOp::SquashPreview { .. } => "squash-preview",
         }
     }
 
@@ -133,7 +128,7 @@ impl Recipe {
                 | RecipeTarget::Last { pinned, .. } => *pinned = None,
                 RecipeTarget::Base { .. } => {}
             },
-            RecipeOp::MergeDiff { pinned, .. } | RecipeOp::SquashPreview { pinned } => {
+            RecipeOp::MergeDiff { pinned, .. } => {
                 *pinned = None;
             }
         }
@@ -218,14 +213,7 @@ mod tests {
         OpenRecipes {
             batch_id: "batch-1".into(),
             kind: RecipeBatchKind::Snapshot,
-            recipes: vec![
-                diff_recipe(),
-                Recipe {
-                    source: RecipeSource::LocalRepo(PathBuf::from("/repos/other")),
-                    op: RecipeOp::SquashPreview { pinned: None },
-                    name: None,
-                },
-            ],
+            recipes: vec![diff_recipe()],
         }
     }
 
@@ -239,27 +227,19 @@ mod tests {
     }
 
     #[test]
-    fn canonical_multiword_operation_tags_are_snake_case() {
-        for (op, expected_tag) in [
-            (
-                RecipeOp::MergeDiff {
-                    base: None,
-                    pinned: None,
-                },
-                "merge_diff",
-            ),
-            (RecipeOp::SquashPreview { pinned: None }, "squash_preview"),
-        ] {
-            let recipe = Recipe {
-                source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
-                op,
-                name: None,
-            };
+    fn canonical_merge_operation_tag_is_snake_case() {
+        let recipe = Recipe {
+            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            op: RecipeOp::MergeDiff {
+                base: None,
+                pinned: None,
+            },
+            name: None,
+        };
 
-            let json = serde_json::to_value(recipe).expect("recipe serializes");
+        let json = serde_json::to_value(recipe).expect("recipe serializes");
 
-            assert_eq!(json["op"]["op"], expected_tag);
-        }
+        assert_eq!(json["op"]["op"], "merge_diff");
     }
 
     #[test]
@@ -319,10 +299,6 @@ mod tests {
                     pinned: None,
                 },
             ),
-            (
-                r#"{"op":"squash-preview"}"#,
-                RecipeOp::SquashPreview { pinned: None },
-            ),
         ] {
             let op: RecipeOp =
                 serde_json::from_str(json).expect("legacy operation tag remains readable");
@@ -340,24 +316,6 @@ mod tests {
     }
 
     #[test]
-    fn legacy_recipe_token_tags_still_decode() {
-        let legacy_json = r#"{"batch_id":"old","kind":"live","recipes":[{"source":{"kind":"LocalRepo","value":"/repos/gt"},"op":{"op":"squash-preview"}}]}"#;
-        let token = format!(
-            "{RECIPE_TOKEN_PREFIX}{}",
-            URL_SAFE_NO_PAD.encode(legacy_json.as_bytes())
-        );
-
-        let batch = decode_token(&token).expect("legacy argv token remains readable");
-
-        assert_eq!(batch.kind, RecipeBatchKind::Live);
-        assert_eq!(batch.recipes.len(), 1);
-        assert_eq!(
-            batch.recipes[0].op,
-            RecipeOp::SquashPreview { pinned: None }
-        );
-    }
-
-    #[test]
     fn recipe_round_trips_through_json() {
         for recipe in [
             diff_recipe(),
@@ -367,11 +325,6 @@ mod tests {
                     base: None,
                     pinned: None,
                 },
-                name: None,
-            },
-            Recipe {
-                source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
-                op: RecipeOp::SquashPreview { pinned: None },
                 name: None,
             },
         ] {
@@ -397,7 +350,6 @@ mod tests {
                 },
                 "merge-diff",
             ),
-            (RecipeOp::SquashPreview { pinned: None }, "squash-preview"),
         ] {
             let recipe = Recipe {
                 source: RecipeSource::LocalRepo("/repos/gt".into()),
@@ -411,7 +363,7 @@ mod tests {
 
     #[test]
     fn unknown_source_kind_is_rejected_at_deserialization() {
-        let json = r#"{"source":{"kind":"GithubRepo","value":"o/r"},"op":{"op":"squash-preview"}}"#;
+        let json = r#"{"source":{"kind":"GithubRepo","value":"o/r"},"op":{"op":"merge-diff","base":null}}"#;
         assert!(serde_json::from_str::<Recipe>(json).is_err());
     }
 
@@ -525,7 +477,6 @@ mod tests {
                 base: Some("main".into()),
                 pinned: pin.clone(),
             },
-            RecipeOp::SquashPreview { pinned: pin },
         ];
         for op in cases {
             let recipe = Recipe {

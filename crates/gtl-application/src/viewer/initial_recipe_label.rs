@@ -94,7 +94,6 @@ mod tests {
                 },
                 "project: merge ->release",
             ),
-            (RecipeOp::SquashPreview { pinned: None }, "project: squash"),
         ];
 
         for (op, expected) in cases {
@@ -106,7 +105,10 @@ mod tests {
 
     #[test]
     fn explicit_name_overrides_the_recipe_label() {
-        let mut named = recipe(RecipeOp::SquashPreview { pinned: None });
+        let mut named = recipe(RecipeOp::MergeDiff {
+            base: None,
+            pinned: None,
+        });
         named.name = Some("Release review".into());
 
         let response = execute(InitialRecipeLabel { recipe: named });
@@ -116,11 +118,14 @@ mod tests {
 
     #[test]
     fn root_repository_uses_its_full_path_as_the_label() {
-        let mut root = recipe(RecipeOp::SquashPreview { pinned: None });
+        let mut root = recipe(RecipeOp::MergeDiff {
+            base: None,
+            pinned: None,
+        });
         root.source = RecipeSource::LocalRepo("/".into());
 
         let response = execute(InitialRecipeLabel { recipe: root });
 
-        assert_eq!(response.label, "/: squash");
+        assert_eq!(response.label, "/: merge ->main");
     }
 }

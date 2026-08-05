@@ -18,7 +18,6 @@ pub(crate) fn initial(recipe: &Recipe) -> String {
                 .unwrap_or(DEFAULT_BASE);
             format!("{repo}: merge ->{base}")
         }
-        RecipeOp::SquashPreview { .. } => format!("{repo}: squash"),
     }
 }
 
@@ -31,9 +30,6 @@ pub(crate) fn computed(recipe: &Recipe, view: &View) -> String {
     match &recipe.op {
         RecipeOp::Diff { target } => computed_diff_label(repo, target, view),
         RecipeOp::MergeDiff { .. } => merge_label(repo, view),
-        RecipeOp::SquashPreview { .. } => {
-            format!("{repo}: squash {}", commit_count(view.commits.len()))
-        }
     }
 }
 

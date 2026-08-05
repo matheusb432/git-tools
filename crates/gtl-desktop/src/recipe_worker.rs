@@ -258,7 +258,10 @@ mod tests {
             request: ViewerComputation::Recipe(ReservedRecipeComputation {
                 recipe: Recipe {
                     source: RecipeSource::LocalRepo(PathBuf::from("/repo")),
-                    op: RecipeOp::SquashPreview { pinned: None },
+                    op: RecipeOp::MergeDiff {
+                        base: None,
+                        pinned: None,
+                    },
                     name: None,
                 },
                 kind: ViewerTabKind::Snapshot,

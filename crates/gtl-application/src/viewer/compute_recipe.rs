@@ -5,7 +5,6 @@ use crate::{
         DiffTarget, PinnedRange, View,
         compute_diff::{self, ComputeDiff},
         compute_merge_diff::{self, ComputeMergeDiff},
-        compute_squash_preview::{self, ComputeSquashPreview},
     },
     ports::{GitClient, UserSettingsStore},
 };
@@ -26,8 +25,6 @@ pub enum ComputeRecipeError {
     Diff(#[from] compute_diff::ComputeDiffError),
     #[error(transparent)]
     MergeDiff(#[from] compute_merge_diff::ComputeMergeDiffError),
-    #[error(transparent)]
-    SquashPreview(#[from] compute_squash_preview::ComputeSquashPreviewError),
 }
 
 #[cqrsy::query]
@@ -55,17 +52,6 @@ pub fn execute(
                 ComputeMergeDiff {
                     cwd,
                     base,
-                    pinned: pinned.map(application_pin),
-                },
-                user_settings,
-                source,
-            )?
-            .view
-        }
-        RecipeOp::SquashPreview { pinned } => {
-            compute_squash_preview::execute(
-                ComputeSquashPreview {
-                    cwd,
                     pinned: pinned.map(application_pin),
                 },
                 user_settings,
@@ -238,32 +224,19 @@ mod tests {
             branch: "feature".into(),
             ..Default::default()
         };
-        let cases = [
-            (
-                RecipeOp::MergeDiff {
+        let response = execute(
+            ComputeRecipe {
+                recipe: recipe(RecipeOp::MergeDiff {
                     base: Some("release".into()),
                     pinned: Some(pin()),
-                },
-                "merge-diff",
-            ),
-            (
-                RecipeOp::SquashPreview {
-                    pinned: Some(pin()),
-                },
-                "squash-preview",
-            ),
-        ];
+                }),
+            },
+            &FixedUserSettingsStore::default(),
+            &source,
+        )
+        .expect("recipe computes");
 
-        for (op, expected_title) in cases {
-            let response = execute(
-                ComputeRecipe { recipe: recipe(op) },
-                &FixedUserSettingsStore::default(),
-                &source,
-            )
-            .expect("recipe computes");
-
-            assert_eq!(response.view.title, expected_title);
-        }
+        assert_eq!(response.view.title, "merge-diff");
     }
 
     #[test]
@@ -297,17 +270,7 @@ mod tests {
             &source,
         )
         .expect_err("unknown merge base fails");
-        let squash = execute(
-            ComputeRecipe {
-                recipe: recipe(RecipeOp::SquashPreview { pinned: None }),
-            },
-            &FixedUserSettingsStore::default(),
-            &source,
-        )
-        .expect_err("missing squash upstream fails");
-
         assert!(matches!(diff, ComputeRecipeError::Diff(_)));
         assert!(matches!(merge, ComputeRecipeError::MergeDiff(_)));
-        assert!(matches!(squash, ComputeRecipeError::SquashPreview(_)));
     }
 }

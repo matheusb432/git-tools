@@ -143,10 +143,6 @@ fn build_recipe(
                 .map(to_pinned_range),
             base,
         },
-        RecipeRequest::SquashPreview => DiffViewerRecipeOperation::SquashPreview {
-            pinned: git_range_pinning::resolve_range(&source, "@{u}", "HEAD", git)
-                .map(to_pinned_range),
-        },
     };
     Ok(DiffViewerRecipe {
         source,

@@ -60,7 +60,6 @@ impl RecipeColumns {
             RecipeOp::MergeDiff { base, pinned } => {
                 ("merge_diff", None, base.clone(), pinned.clone())
             }
-            RecipeOp::SquashPreview { pinned } => ("squash_preview", None, None, pinned.clone()),
         };
         Self {
             source_kind: SOURCE_KIND_DIRECTORY,
@@ -161,7 +160,6 @@ impl RecentRenderRow {
                 base: self.argument.clone(),
                 pinned,
             },
-            "squash_preview" => RecipeOp::SquashPreview { pinned },
             other => return Err(format!("unknown render operation '{other}'")),
         };
         Ok(Recipe {
@@ -233,7 +231,7 @@ pub(crate) fn store_test() -> Connection {
           name TEXT NOT NULL UNIQUE
         ) STRICT;
         INSERT INTO render_operations (id, name) VALUES
-          (1, 'diff'), (2, 'merge_diff'), (3, 'squash_preview');
+          (1, 'diff'), (2, 'merge_diff');
         CREATE TABLE render_targets (
           id   INTEGER PRIMARY KEY,
           name TEXT NOT NULL UNIQUE
@@ -364,7 +362,6 @@ mod tests {
                     base: None,
                     pinned: pin.clone(),
                 },
-                RecipeOp::SquashPreview { pinned: pin },
             ]);
         for (index, op) in ops.enumerate() {
             assert_round_trips(&Recipe {

@@ -121,8 +121,6 @@ pub struct DiffArgs {
 pub enum DiffSub {
     /// Render a merge preview (three-dot diff) of a repo against a base branch.
     Merge(MergeArgs),
-    /// Render a squash preview of a repo's unpushed work as a single commit.
-    Squash(SquashArgs),
     /// Save + open a persisted live view of unpushed work in a managed repo.
     Live(LiveArgs),
 }
@@ -136,17 +134,6 @@ pub struct MergeArgs {
     /// Base branch to merge into (default: main).
     #[arg(long)]
     pub base: Option<String>,
-    /// Render an artifact and print its URL without opening a viewer.
-    #[arg(long)]
-    pub raw: bool,
-}
-
-/// Arguments for `diff squash`.
-#[derive(Debug, Args)]
-pub struct SquashArgs {
-    /// Subrepo working tree to preview.
-    #[arg(long = "repo")]
-    pub repo_path: String,
     /// Render an artifact and print its URL without opening a viewer.
     #[arg(long)]
     pub raw: bool,

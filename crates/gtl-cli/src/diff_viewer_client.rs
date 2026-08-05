@@ -40,7 +40,6 @@ impl DiffViewerClient for CliDiffViewerClient {
         let envelope = match request {
             DiffRenderRequest::Diff(request) => client.render_diff(request)?,
             DiffRenderRequest::MergeDiff(request) => client.render_merge_diff(request)?,
-            DiffRenderRequest::SquashPreview(request) => client.render_squash_preview(request)?,
             DiffRenderRequest::Subrepos(request) => client.render_diff_subrepos(request)?,
             DiffRenderRequest::ManagedAll(request) => client.render_diff_all(request)?,
         };
@@ -80,9 +79,6 @@ fn to_wire_recipe(recipe: &DiffViewerRecipe) -> Recipe {
             },
             DiffViewerRecipeOperation::MergeDiff { base, pinned } => RecipeOp::MergeDiff {
                 base: base.clone(),
-                pinned: pinned.as_ref().map(to_wire_pin),
-            },
-            DiffViewerRecipeOperation::SquashPreview { pinned } => RecipeOp::SquashPreview {
                 pinned: pinned.as_ref().map(to_wire_pin),
             },
         },

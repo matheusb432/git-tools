@@ -178,15 +178,6 @@ mod tests {
                     }),
                 },
             ),
-            (
-                RecipeRequest::SquashPreview,
-                RecipeOp::SquashPreview {
-                    pinned: Some(PinnedRange {
-                        base: "base-sha".into(),
-                        head: "head-sha".into(),
-                    }),
-                },
-            ),
         ];
 
         for (operation, expected) in cases {

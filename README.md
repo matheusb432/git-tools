@@ -4,7 +4,7 @@
 
 ## Core workflows
 
-- Render unpushed, range, merge, squash, recursive, or managed-repository diffs in the offline desktop viewer. Use `--raw` for a self-contained browser artifact.
+- Render unpushed, range, merge, recursive, or managed-repository diffs in the offline desktop viewer. Use `--raw` for a self-contained browser artifact.
 - Inspect, commit, push, pull, prune, switch, and tag without replacing Git's underlying repository model.
 - Run status, commit, push, pull, and diff operations across repositories declared in `projects.toml`.
 

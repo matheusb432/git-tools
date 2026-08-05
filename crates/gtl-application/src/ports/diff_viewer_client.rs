@@ -4,7 +4,6 @@ use crate::{
     diffs::{
         DiffTarget, PinnedRange, render_diff::RenderDiff, render_diff_all::RenderDiffAll,
         render_diff_subrepos::RenderDiffSubrepos, render_merge_diff::RenderMergeDiff,
-        render_squash_preview::RenderSquashPreview,
     },
     shared::notes::Note,
 };
@@ -23,9 +22,6 @@ pub enum DiffViewerRecipeOperation {
         base: Option<String>,
         pinned: Option<PinnedRange>,
     },
-    SquashPreview {
-        pinned: Option<PinnedRange>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +34,6 @@ pub struct DiffViewerBatch {
 pub enum DiffRenderRequest {
     Diff(RenderDiff),
     MergeDiff(RenderMergeDiff),
-    SquashPreview(RenderSquashPreview),
     Subrepos(RenderDiffSubrepos),
     ManagedAll(RenderDiffAll),
 }

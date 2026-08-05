@@ -43,44 +43,6 @@ mod tests {
     use super::*;
     use crate::testing::viewer::{empty_view, recipe};
 
-    fn squash_recipe() -> Recipe {
-        recipe(RecipeOp::SquashPreview { pinned: None })
-    }
-
-    #[test]
-    fn empty_snapshot_is_skipped() {
-        let response = execute(CompleteRecipeComputation {
-            recipe: squash_recipe(),
-            kind: ViewerTabKind::Snapshot,
-            view: empty_view(),
-        });
-
-        assert_eq!(
-            response,
-            CompleteRecipeComputationOk::Skipped {
-                label: "project: squash".into(),
-            }
-        );
-    }
-
-    #[test]
-    fn empty_live_view_is_published() {
-        let view = empty_view();
-        let response = execute(CompleteRecipeComputation {
-            recipe: squash_recipe(),
-            kind: ViewerTabKind::Live,
-            view: view.clone(),
-        });
-
-        assert_eq!(
-            response,
-            CompleteRecipeComputationOk::Publish {
-                label: "project: squash 0 commits".into(),
-                view: Arc::new(view),
-            }
-        );
-    }
-
     #[test]
     fn computed_labels_preserve_recipe_intent() {
         let cases = [
@@ -136,11 +98,6 @@ mod tests {
                 0,
                 "project: merge feature->main",
             ),
-            (
-                RecipeOp::SquashPreview { pinned: None },
-                2,
-                "project: squash 2 commits",
-            ),
         ];
 
         for (op, commit_count, expected) in cases {
@@ -161,7 +118,10 @@ mod tests {
 
     #[test]
     fn explicit_name_overrides_the_computed_label() {
-        let mut named = squash_recipe();
+        let mut named = recipe(RecipeOp::MergeDiff {
+            base: None,
+            pinned: None,
+        });
         named.name = Some("Release review".into());
 
         let response = execute(CompleteRecipeComputation {

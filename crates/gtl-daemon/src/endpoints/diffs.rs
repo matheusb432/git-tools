@@ -3,7 +3,6 @@
 pub mod all;
 pub mod merge;
 pub mod render;
-pub mod squash_preview;
 pub mod subrepos;
 
 use gtl_application::{
@@ -12,7 +11,6 @@ use gtl_application::{
         render_diff_all::RenderDiffAllOk,
         render_diff_subrepos::{RenderDiffSubreposOk, RenderDiffSubreposOutcome},
         render_merge_diff::RenderMergeDiffOk,
-        render_squash_preview::RenderSquashPreviewOk,
     },
     shared::notes,
 };
@@ -59,11 +57,6 @@ fn ok_envelope(
 
 /// Project a successful application response onto the wire envelope.
 pub(crate) fn to_merge_envelope(resp: &RenderMergeDiffOk) -> Envelope<RenderDiffData> {
-    ok_envelope(&resp.artifact, resp.reused, &resp.notes)
-}
-
-/// Project a successful application response onto the wire envelope.
-pub(crate) fn to_squash_envelope(resp: &RenderSquashPreviewOk) -> Envelope<RenderDiffData> {
     ok_envelope(&resp.artifact, resp.reused, &resp.notes)
 }
 

@@ -12,7 +12,7 @@ use crate::{
     cli::{
         Cli, ColorChoice, Command, CommitArgs, DaemonArgs, DaemonCommand, DiffArgs, DiffSub,
         DiffTarget, DiffTargetArgs, ManagedArgs, ManagedReadArgs, MergeArgs, PruneArgs, PushArgs,
-        SquashArgs, StatusArgs, SwitchArgs, Theme, WorktreeCommand,
+        StatusArgs, SwitchArgs, Theme, WorktreeCommand,
     },
     commands::managed::{ManagedExit, ManagedOptions, ManagedRun, PushOutcome, PushSummary},
     confirm::{Confirmation, DefaultAnswer, RealConfirm},
@@ -117,9 +117,6 @@ fn run_diff(args: DiffArgs) -> ExitCode {
             base,
             raw,
         })) => diff_exit(commands::merge_diff::run(repo_path, base.as_deref(), raw)),
-        Some(DiffSub::Squash(SquashArgs { repo_path, raw })) => {
-            diff_exit(commands::squash_preview::run(repo_path, raw))
-        }
         Some(DiffSub::Live(args)) => diff_live_exit(commands::diff_live::run(args.path)),
         None => {
             let raw = args.raw;
@@ -1061,7 +1058,7 @@ fn stdout_is_terminal() -> bool {
 /// Map a [`commands::diff::DiffOutcome`] result to an [`ExitCode`]: either `Ok` variant
 /// (an artifact was rendered, or a clean empty-range no-op) is a success. Shared by every
 /// render path that produces a `DiffOutcome` — `diff`, `diff -r`, `diff --all`,
-/// `diff merge`, and `diff squash`.
+/// and `diff merge`.
 fn diff_exit(result: anyhow::Result<commands::diff::DiffOutcome>) -> ExitCode {
     match result {
         Ok(_) => ExitCode::Ok,
