@@ -10,7 +10,7 @@ _.path = ["/usr/lib/llvm-18/bin"]
 
 [tools]
 rust = [
-  { version = "1.97.1", profile = "minimal", components = [
+  { version = "stable", profile = "minimal", components = [
     "clippy",
     "rustfmt",
     "llvm-tools",
@@ -39,6 +39,7 @@ ast-grep = "0.44.1"
   "rust",
   "cargo-binstall",
 ] }
+"cargo:tauri-cli" = { version = "2.11.4", depends = ["rust", "cargo-binstall"] }
 
 [bootstrap.packages]
 "apt:build-essential" = "latest"

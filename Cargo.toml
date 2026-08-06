@@ -116,6 +116,12 @@ x11-dl = "2.21.0"
 zbus = "5.16.0"
 sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.4.0" }
 
+[profile.dev.package."*"]
+debug = false
+
+[profile.test.package."*"]
+debug = false
+
 [profile.release]
 strip = "symbols"
 

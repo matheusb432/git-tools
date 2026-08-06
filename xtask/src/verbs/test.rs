@@ -82,7 +82,15 @@ pub(crate) fn run(arguments: &TestArguments) -> Result<()> {
 }
 
 fn test_coverage(arguments_extra: &[String]) -> Result<()> {
-    process::run_step(&test_coverage_step(arguments_extra))
+    process::run_step(&test_coverage_step(arguments_extra))?;
+    if coverage_cleanup_is_required(arguments_extra) {
+        process::run_step(&Step::new(
+            "clean coverage artifacts",
+            "cargo",
+            ["clean", "--target-dir", "target/llvm-cov-target"],
+        ))?;
+    }
+    Ok(())
 }
 
 fn test_coverage_step(arguments_extra: &[String]) -> Step {
@@ -91,6 +99,13 @@ fn test_coverage_step(arguments_extra: &[String]) -> Step {
         step = step.with_arguments(["--quiet"]);
     }
     step.with_arguments(arguments_extra.iter().cloned())
+}
+
+fn coverage_cleanup_is_required(arguments: &[String]) -> bool {
+    !arguments
+        .iter()
+        .take_while(|argument| argument.as_str() != "--")
+        .any(|argument| matches!(argument.as_str(), "-h" | "--help" | "--no-report"))
 }
 
 fn coverage_output_is_explicit(arguments: &[String]) -> bool {
@@ -177,6 +192,16 @@ mod tests {
         assert!(!coverage_output_is_explicit(&[
             "--".to_string(),
             "--verbose".to_string(),
+        ]));
+    }
+
+    #[test]
+    fn test_coverage_cleanup_requires_a_generated_report() {
+        assert!(!coverage_cleanup_is_required(&["--help".to_string()]));
+        assert!(!coverage_cleanup_is_required(&["--no-report".to_string()]));
+        assert!(coverage_cleanup_is_required(&[
+            "--".to_string(),
+            "--help".to_string(),
         ]));
     }
 }

@@ -5,6 +5,12 @@ set working-directory := '..'
 _default:
     @just --list desktop
 
+# Start the debug viewer with the isolated development identity and production-shaped embedded assets.
+[group('desktop')]
+up:
+    deno task --frozen build
+    cd crates/gtl-desktop && cargo tauri dev --config tauri.dev.conf.json --features custom-protocol --no-dev-server
+
 # Build the gtl-viewer Tauri binary; missing webkit2gtk-4.1 headers fail with an actionable error.
 [group('desktop')]
 build:

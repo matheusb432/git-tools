@@ -41,3 +41,19 @@ fn csp_is_null_for_offline_own_content() {
         "csp must be null (justified offline own-content)"
     );
 }
+
+#[test]
+fn development_flavor_has_an_independent_single_instance_identity() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let release_conf = fs::read_to_string(manifest_dir.join("tauri.conf.json"))
+        .expect("tauri.conf.json must exist");
+    let development_conf = fs::read_to_string(manifest_dir.join("tauri.dev.conf.json"))
+        .expect("tauri.dev.conf.json must exist");
+    let release: serde_json::Value = serde_json::from_str(&release_conf).expect("valid JSON");
+    let development: serde_json::Value =
+        serde_json::from_str(&development_conf).expect("valid JSON");
+
+    assert_eq!(release["identifier"], "dev.gittools.viewer");
+    assert_eq!(development["identifier"], "dev.gittools.viewer.dev");
+    assert_ne!(development["identifier"], release["identifier"]);
+}

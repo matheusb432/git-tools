@@ -27,6 +27,10 @@ backend = "cargo:cargo-llvm-cov"
 version = "0.22.0"
 backend = "cargo:cargo-xwin"
 
+[[tools."cargo:tauri-cli"]]
+version = "2.11.4"
+backend = "cargo:tauri-cli"
+
 [[tools."cargo:tauri-driver"]]
 version = "2.0.6"
 backend = "cargo:tauri-driver"
@@ -59,21 +63,21 @@ url_api = "https://api.github.com/repos/rvben/rumdl/releases/assets/487015981"
 provenance = "github-attestations"
 
 [[tools.rust]]
-version = "1.97.1"
-backend = "core:rust"
-
-[tools.rust.options]
-components = "clippy,llvm-tools,rustfmt"
-profile = "minimal"
-targets = "x86_64-pc-windows-msvc"
-
-[[tools.rust]]
 version = "nightly-2026-06-23"
 backend = "core:rust"
 
 [tools.rust.options]
 components = "rustfmt"
 profile = "minimal"
+
+[[tools.rust]]
+version = "stable"
+backend = "core:rust"
+
+[tools.rust.options]
+components = "clippy,llvm-tools,rustfmt"
+profile = "minimal"
+targets = "x86_64-pc-windows-msvc"
 
 [[tools.taplo]]
 version = "0.10.0"

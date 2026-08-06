@@ -16,7 +16,10 @@ _default:
 help: _preflight
     @"{{ _bin }}" --help
 
-# ============ build / install (aggregate over cli + desktop) ============
+# Start the debug desktop viewer with watched Rust, TypeScript, and CSS sources.
+[group('build')]
+up:
+    just desktop up
 
 # Build both the CLI engine (+ diff bundle) and the desktop viewer.
 [group('build')]
@@ -49,14 +52,10 @@ purge:
 _preflight:
     test -x "{{ _bin }}" || cargo build --release -p gtl-cli -p gtl-daemon
 
-# ============ performance ============
-
 # Run a shared Rust benchmark; --fast selects the concise viewer-render preset.
 [group('performance')]
 bench *args:
     cargo run --quiet -p xtask -- bench {{ args }}
-
-# ============ quality ============
 
 # Run tests, or use `just test coverage`; coverage defaults to quiet and forwards cargo-llvm-cov arguments.
 [group('quality')]
@@ -99,8 +98,6 @@ doctor *args:
     mise bootstrap status --missing {{ args }}
     test "$(git config --local --get core.hooksPath)" = ".githooks"
     test -x .githooks/pre-commit
-
-# ============ windows cross-build (host/release split — see specs) ============
 
 # Cross-build all three Win11 exes; runs `just test --all` first unless -f/--force. --smoke selects a debug linkage build; use `--smoke --force` for the fast smoke path.
 [group('windows')]
