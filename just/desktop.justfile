@@ -11,6 +11,11 @@ up:
     deno task --frozen build
     cd crates/gtl-desktop && cargo tauri dev --config tauri.dev.conf.json --features custom-protocol --no-dev-server
 
+# Run the removable Dioxus Web shell proof inside its isolated Tauri development identity.
+[group('desktop')]
+dioxus-poc:
+    cd crates/gtl-desktop && cargo tauri dev --config tauri.dioxus.conf.json --features dioxus-poc
+
 # Build the gtl-viewer Tauri binary; missing webkit2gtk-4.1 headers fail with an actionable error.
 [group('desktop')]
 build:

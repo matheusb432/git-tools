@@ -32,6 +32,14 @@ pub(crate) fn serve_app(app: &ViewerApp, request: Request<Vec<u8>>) -> Response<
     }
 }
 
+#[cfg(feature = "dioxus-poc")]
+pub(crate) fn serve_unmaterialized_view(app: &ViewerApp) -> Response<Vec<u8>> {
+    match view_loading::ready_unmaterialized(app) {
+        Ok(output) => response::into_response(output),
+        Err(error) => response::error_response(ErrorTarget::View, &error),
+    }
+}
+
 fn error_target(route: &Route) -> ErrorTarget {
     match route {
         Route::Document { .. } | Route::Settings(_) => ErrorTarget::Document,

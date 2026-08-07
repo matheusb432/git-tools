@@ -7,6 +7,7 @@
   "ignorePatterns": [
     "crates/gtl-preview/src/embedded/generated",
     "crates/gtl-desktop/src/embedded/generated",
+    "crates/gtl-web/assets/generated",
     "node_modules",
     "target"
   ],

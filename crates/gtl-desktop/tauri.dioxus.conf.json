@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "gtl-viewer-dioxus-poc",
+  "identifier": "dev.gittools.viewer.dioxus-poc",
+  "build": {
+    "devUrl": "http://127.0.0.1:8080",
+    "beforeDevCommand": {
+      "script": "deno task --frozen \"dev:dioxus-poc:*\"",
+      "cwd": "../..",
+      "wait": false
+    }
+  }
+}

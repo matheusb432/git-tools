@@ -4,6 +4,8 @@ pub use render::MaudViewerRenderer;
 #[cfg(feature = "benchmark-support")]
 pub use session::{CacheDisposition, CachedView, WeightedViewCache};
 mod commands;
+#[cfg(feature = "dioxus-poc")]
+mod dioxus_poc;
 mod materialization;
 mod presentation;
 mod protocol_config;
@@ -227,6 +229,17 @@ fn resume_url(nonce: routes::ResumeNonce) -> Result<tauri::Url, String> {
     Ok(url)
 }
 
+#[cfg(feature = "dioxus-poc")]
+fn main_window_url() -> anyhow::Result<WebviewUrl> {
+    Ok(WebviewUrl::App("index.html".into()))
+}
+
+#[cfg(not(feature = "dioxus-poc"))]
+fn main_window_url() -> anyhow::Result<WebviewUrl> {
+    let app_url = protocol_config::APP_URL.parse::<url::Url>()?;
+    Ok(WebviewUrl::CustomProtocol(app_url))
+}
+
 /// Returns the native X11 window id of `window` when this is an X11 session, or
 /// `None` on Wayland, Windows, and macOS.
 fn window_xid(window: &tauri::WebviewWindow) -> Option<u64> {
@@ -268,9 +281,15 @@ pub fn run() -> anyhow::Result<()> {
         DEFAULT_VIEW_CACHE_WEIGHT,
     )?;
     let cold_start_batches = recipes_from_argv(&std::env::args().collect::<Vec<_>>());
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(viewer_app)
-        .manage(MainWindowLifecycle::default())
+        .manage(MainWindowLifecycle::default());
+    #[cfg(feature = "dioxus-poc")]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        dioxus_poc::dioxus_poc_process_pending,
+        dioxus_poc::dioxus_poc_diff_fragment,
+    ]);
+    builder
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let batches = recipes_from_argv(&argv);
             let viewer = app.state::<presentation::ViewerApp>();
@@ -321,8 +340,7 @@ pub fn run() -> anyhow::Result<()> {
             ) {
                 eprintln!("gtl-viewer: failed to enqueue cold-start recipes: {error}");
             }
-            let app_url: url::Url = protocol_config::APP_URL.parse()?;
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::CustomProtocol(app_url))
+            WebviewWindowBuilder::new(app, "main", main_window_url()?)
                 .title(MAIN_WINDOW_TITLE)
                 .inner_size(MAIN_WINDOW_SIZE.0, MAIN_WINDOW_SIZE.1)
                 .min_inner_size(MAIN_WINDOW_MIN_SIZE.0, MAIN_WINDOW_MIN_SIZE.1)
@@ -483,6 +501,15 @@ mod tests {
         assert_eq!(MAIN_WINDOW_TITLE, "git-tools diff viewer");
         assert_eq!(MAIN_WINDOW_SIZE, (1200.0, 800.0));
         assert_eq!(MAIN_WINDOW_MIN_SIZE, (390.0, 480.0));
+    }
+
+    #[cfg(feature = "dioxus-poc")]
+    #[test]
+    fn dioxus_proof_uses_the_tauri_app_url_boundary() {
+        assert!(matches!(
+            main_window_url().expect("Dioxus proof URL"),
+            WebviewUrl::App(path) if path == std::path::PathBuf::from("index.html")
+        ));
     }
 
     #[test]

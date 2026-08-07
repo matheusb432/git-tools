@@ -13,19 +13,7 @@ use crate::{
 };
 
 pub(super) fn ready(app: &ViewerApp) -> RouteResult {
-    let render_pending = {
-        let session = app.session.lock().map_err(|error| error.to_string())?;
-        session
-            .active()
-            .and_then(|id| session.tab(id))
-            .is_some_and(|tab| {
-                matches!(
-                    tab.tab.state(),
-                    ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON
-                )
-            })
-    };
-    if render_pending {
+    if render_is_pending(app)? {
         return Ok(RouteOutput::Empty(StatusCode::NO_CONTENT));
     }
     let settings = settings::load(app)?;
@@ -40,6 +28,37 @@ pub(super) fn ready(app: &ViewerApp) -> RouteResult {
     )
     .map(RouteOutput::Html)
     .map_err(Into::into)
+}
+
+#[cfg(feature = "dioxus-poc")]
+pub(super) fn ready_unmaterialized(app: &ViewerApp) -> RouteResult {
+    if render_is_pending(app)? {
+        return Ok(RouteOutput::Empty(StatusCode::NO_CONTENT));
+    }
+    let settings = settings::load(app)?;
+    tabs::render_view_with_tabs(
+        app.renderer,
+        &app.session,
+        None,
+        settings,
+        crate::render::SwapFeedback::None,
+        None,
+    )
+    .map(RouteOutput::Html)
+    .map_err(Into::into)
+}
+
+fn render_is_pending(app: &ViewerApp) -> Result<bool, RouteError> {
+    let session = app.session.lock().map_err(|error| error.to_string())?;
+    Ok(session
+        .active()
+        .and_then(|id| session.tab(id))
+        .is_some_and(|tab| {
+            matches!(
+                tab.tab.state(),
+                ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON
+            )
+        }))
 }
 
 pub(super) fn load_next(app: &ViewerApp, load: ViewLoadId) -> RouteResult {

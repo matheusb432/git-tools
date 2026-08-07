@@ -14,6 +14,7 @@ members = [
   "e2e/gtl-cli-e2e",
   "e2e/gtl-desktop-e2e",
   "xtask",
+  "crates/gtl-web",
 ]
 # Desktop and Criterion targets need webkit2gtk headers, so their packages are not default members.
 # xtask still uses the lightweight benchmark catalogue.

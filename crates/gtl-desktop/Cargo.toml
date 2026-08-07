@@ -41,6 +41,7 @@ x11-dl.workspace = true
 
 [features]
 benchmark-support = []
+dioxus-poc = []
 # Production/standalone builds must enable this so tauri's build.rs sets
 # cfg(dev)=false and the exe serves the embedded frontend via the tauri custom
 # protocol instead of devUrl. `just build`/install pass it explicitly (we do not
