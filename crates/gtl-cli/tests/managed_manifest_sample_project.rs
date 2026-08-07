@@ -34,7 +34,14 @@ fn sample_project_manifest_path_returns_stub_stdout_when_target_exists() {
     std::fs::create_dir_all(target.parent().unwrap()).unwrap();
     std::fs::write(&target, "").unwrap();
     let stub = root.join("fake-sample_project.sh");
-    std::fs::write(&stub, format!("#!/bin/sh\necho '{}'\n", target.display())).unwrap();
+    std::fs::write(
+        &stub,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in\n  'project manifest-path') echo '{}' ;;\n  *) exit 64 ;;\nesac\n",
+            target.display()
+        ),
+    )
+    .unwrap();
     std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     assert_eq!(sample_project_manifest_path(stub.to_str().unwrap()), Some(target));

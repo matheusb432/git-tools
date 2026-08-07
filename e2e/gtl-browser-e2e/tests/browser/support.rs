@@ -8,13 +8,14 @@ use std::{
 
 use anyhow::{Context as _, Result, bail, ensure};
 use command_group::{CommandGroup, GroupChild};
-use gtl_browser_e2e::{
-    browser::{self, OPERATION_TIMEOUT, Session, operation},
-    evidence::{EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE, Recording},
-};
 use playwright_rs::{
     expect,
     protocol::{AriaRole, ClickOptions, GetByRoleOptions, Locator, Page, Viewport},
+};
+
+use crate::harness::{
+    browser::{self, OPERATION_TIMEOUT, Session, operation},
+    evidence::{EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE, Recording},
 };
 
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(30);

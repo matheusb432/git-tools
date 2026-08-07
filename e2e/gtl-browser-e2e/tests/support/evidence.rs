@@ -6,7 +6,7 @@ use std::{
 use anyhow::{Context as _, Result};
 use playwright_rs::protocol::{Animations, Caret, Page, ScreenshotOptions};
 
-use crate::browser::{Session, operation};
+use super::browser::{Session, operation};
 
 pub const EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "GTL_E2E_EVIDENCE_OUTPUT_PATH";
 const EVIDENCES_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "TEST_EVIDENCES_OUTPUT_PATH";

@@ -3,7 +3,7 @@
 use std::{ffi::OsString, time::Duration};
 
 use anyhow::Result;
-use sample_project::{Test, summary};
+use sample_project::{Test, surface};
 
 pub(crate) struct TestDeclaration {
     #[cfg(test)]
@@ -35,10 +35,9 @@ impl TestDeclaration {
 pub(crate) fn tests_unit() -> Result<Vec<TestDeclaration>> {
     Ok(vec![TestDeclaration::new(
         "unit",
-        Test::try_new("unit", "cargo")?
+        Test::try_new("unit", surface::CARGO, "cargo")?
             .args(["test", "--quiet"])
-            .verbose_arguments(["--", "--nocapture"])
-            .summary_parser(summary::cargo),
+            .verbose_arguments(["--", "--nocapture"]),
     )])
 }
 
@@ -50,16 +49,13 @@ pub(crate) fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
     Ok(vec![
         TestDeclaration::new(
             "unit",
-            Test::try_new("unit", "cargo")?
+            Test::try_new("unit", surface::CARGO, "cargo")?
                 .args(["test", "--workspace", "--quiet"])
-                .verbose_arguments(["--", "--nocapture"])
-                .summary_parser(summary::cargo),
+                .verbose_arguments(["--", "--nocapture"]),
         ),
         TestDeclaration::new(
             "web",
-            Test::try_new("web", executable.clone())?
-                .arg("frontend-test")
-                .summary_parser(summary::vitest),
+            Test::try_new("web", surface::VITEST, executable.clone())?.arg("frontend-test"),
         ),
         worker("drift", &executable, "drift-check")?,
         cli_e2e()?,
@@ -74,14 +70,14 @@ fn worker(
 ) -> Result<TestDeclaration> {
     Ok(TestDeclaration::new(
         label,
-        Test::try_new(label, executable.clone())?.arg(verb),
+        Test::try_new(label, surface::OPAQUE, executable.clone())?.arg(verb),
     ))
 }
 
 fn desktop_e2e(executable: OsString) -> Result<TestDeclaration> {
     Ok(TestDeclaration::new(
         "desktop-e2e",
-        Test::try_new("desktop-e2e", executable)?
+        Test::try_new("desktop-e2e", surface::OPAQUE, executable)?
             .arg("desktop-e2e-worker")
             .verbose_arguments(["--verbose"])
             .accepts_evidences()
@@ -92,7 +88,7 @@ fn desktop_e2e(executable: OsString) -> Result<TestDeclaration> {
 fn cli_e2e() -> Result<TestDeclaration> {
     Ok(TestDeclaration::new(
         "cli-e2e",
-        Test::try_new("cli-e2e", "cargo")?
+        Test::try_new("cli-e2e", surface::CARGO, "cargo")?
             .args([
                 "test",
                 "-p",
@@ -106,7 +102,6 @@ fn cli_e2e() -> Result<TestDeclaration> {
                 "1",
             ])
             .verbose_arguments(["--nocapture"])
-            .summary_parser(summary::cargo)
             .timeout(Duration::from_mins(5)),
     ))
 }

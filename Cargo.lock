@@ -9145,8 +9145,8 @@ dependencies = [
 
 [[package]]
 name = "sample_project"
-version = "0.4.0"
-source = "git+ssh://git@github.com/matheusb432/sample_project.git?tag=v0.4.0#f71248b7e0efd5f564974b573b7212e4ffb68046"
+version = "0.6.0"
+source = "git+ssh://git@github.com/matheusb432/sample_project.git?tag=v0.6.0#0d7e978f2d39596dfe622b640e5057a2f237054f"
 dependencies = [
  "askama",
  "command-group",

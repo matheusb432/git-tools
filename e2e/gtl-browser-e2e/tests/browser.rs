@@ -4,6 +4,9 @@
 //! share test-only mechanics while each spec owns its browser session and
 //! disposable production fixture.
 
+#[path = "support.rs"]
+mod harness;
+
 #[path = "browser/support.rs"]
 mod support;
 

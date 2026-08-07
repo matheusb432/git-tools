@@ -132,7 +132,7 @@ fn home_default_repos_file(home_dir: &Path) -> PathBuf {
     home_dir.join("tools").join("sample_project").join("projects.toml")
 }
 
-/// Best-effort: asks `sample_project projects manifest-path` for the fleet's resolved manifest
+/// Best-effort: asks `sample_project project manifest-path` for the fleet's resolved manifest
 /// location, so a sample_project relocation doesn't also require updating the literal in
 /// `home_default_repos_file` below. Returns `None` on any failure (binary missing,
 /// non-zero exit, unreadable output, or a printed path that doesn't exist) — this is
@@ -140,7 +140,7 @@ fn home_default_repos_file(home_dir: &Path) -> PathBuf {
 /// the true offline last resort for a fresh clone where `sample_project` isn't installed yet.
 pub fn sample_project_manifest_path(binary: &str) -> Option<PathBuf> {
     let output = Command::new(binary)
-        .args(["projects", "manifest-path"])
+        .args(["project", "manifest-path"])
         .output()
         .ok()?;
     if !output.status.success() {
