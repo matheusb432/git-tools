@@ -25,7 +25,7 @@ fn main() {
 /// Dispatch one parsed verb to its focused workflow module.
 fn run(command: cli::Command) -> Result<()> {
     match command {
-        cli::Command::Bootstrap => verbs::bootstrap::run(),
+        cli::Command::Setup => verbs::setup::run(),
         cli::Command::Install { target } => verbs::install::run_install(target),
         cli::Command::Uninstall {
             remove_config,
@@ -53,6 +53,5 @@ fn run(command: cli::Command) -> Result<()> {
             Ok(())
         }
         cli::Command::GenIcon => verbs::icon::run(),
-        cli::Command::Ship { smoke, force } => verbs::ship::run(smoke, force),
     }
 }

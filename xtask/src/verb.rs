@@ -6,7 +6,6 @@
 pub(crate) struct Verb(&'static str);
 
 impl Verb {
-    pub(crate) const BOOTSTRAP: Self = Self("bootstrap");
     pub(crate) const BENCH: Self = Self("bench");
     pub(crate) const BUILD: Self = Self("build");
     pub(crate) const CHECK: Self = Self("check");
@@ -22,7 +21,7 @@ impl Verb {
     pub(crate) const PRE_COMMIT: Self = Self("pre-commit");
     pub(crate) const GEN_ICON: Self = Self("gen-icon");
     pub(crate) const INSTALL: Self = Self("install");
-    pub(crate) const SHIP: Self = Self("ship");
+    pub(crate) const SETUP: Self = Self("setup");
     pub(crate) const TEST: Self = Self("test");
     pub(crate) const UNINSTALL: Self = Self("uninstall");
 

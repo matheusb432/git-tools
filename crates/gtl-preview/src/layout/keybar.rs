@@ -3,6 +3,8 @@
 use gtl_application::diffs::View;
 use maud::{Markup, html};
 
+// TODO: [gtl-web]: make the desktop command keybar into a component and retain artifact markup
+// here.
 pub(super) fn keybar(view: &View) -> Markup {
     let kbd = "rounded-sm border border-line-2 border-b-2 bg-sunk px-1.5 py-px font-mono text-[11px] text-ink-2";
 

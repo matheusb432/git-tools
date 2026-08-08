@@ -1,12 +1,11 @@
-# Statically link the MSVC C runtime (VCRUNTIME140*, UCRT) INTO the Windows
-# shippables so each release exe is a true single file: copy it to a clean Win11
+# Statically link the MSVC C runtime (VCRUNTIME140*, UCRT) into Windows
+# release executables so each binary is a true single file: copy it to a clean Win11
 # machine and it runs, with no Visual C++ Redistributable to install first. Without
 # this the exe imports VCRUNTIME140.dll / VCRUNTIME140_1.dll, which are NOT part of
 # base Windows and fail to load on a fresh box.
 #
-# Scope: applies only to the x86_64-pc-windows-msvc target (both `just ship`
-# and `just ship --smoke`), so the compile smoke links exactly like the
-# shippable. Native Linux builds (the host target) are unaffected.
+# Scope: applies only to the x86_64-pc-windows-msvc target. Native Linux builds
+# (the host target) are unaffected.
 # cargo-xwin's CRT archives reference unavailable Microsoft-internal PDBs;
 # LNK4099 reports only those missing debug references.
 [target.x86_64-pc-windows-msvc]

@@ -9,6 +9,7 @@ use crate::{ViewChunk, syntax::PreviewResult};
 const MAX_CHUNK_ROWS: usize = 256;
 const MAX_CHUNK_BYTES: usize = 256 * 1024;
 
+// TODO: [gtl-web]: replace this HTMX load trigger with Dioxus-owned chunk requests.
 pub(in crate::layout) fn chunk_loader(load_id: u64) -> Markup {
     html! {
         div id="viewer-chunk-loader"

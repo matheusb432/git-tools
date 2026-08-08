@@ -94,16 +94,15 @@ drift-check:
 
 # Report missing mise state and verify the tracked Git hook wiring.
 [group('quality')]
-doctor *args:
-    mise bootstrap status --missing {{ args }}
+doctor:
+    @mise ls --local --missing --locked --no-header
     test "$(git config --local --get core.hooksPath)" = ".githooks"
     test -x .githooks/pre-commit
 
-# Cross-build all three Win11 exes; runs `just test --all` first unless -f/--force. --smoke selects a debug linkage build; use `--smoke --force` for the fast smoke path.
-[group('windows')]
-ship *args:
-    cargo run --quiet -p xtask -- ship {{ args }}
+# Configure this clone, install frontend dependencies, build, and install git-tools.
+setup:
+    cargo run --quiet -p xtask -- setup
 
-# Converge the Ubuntu development environment and run the project bootstrap task (fresh machine: `sh xtask/bootstrap.sh`).
+# Converge the Ubuntu development environment and run repository setup (fresh machine: `sh xtask/bootstrap.sh`).
 bootstrap *args:
     mise bootstrap --yes {{ args }}

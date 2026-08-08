@@ -10,6 +10,7 @@ const MOBILE_NAVIGATION_BUTTON_CLASSES: &str = "relative hidden min-w-0 cursor-p
 const MOBILE_MENU_BUTTON_CLASSES: &str = "inline-flex min-h-11 w-full cursor-pointer items-center rounded-sm border border-line-2 bg-surface-2 px-3 py-2.5 text-left text-[12.5px] text-ink-2 [font:inherit] hover:border-acc-line hover:bg-acc-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
 const MOBILE_MENU_DANGER_BUTTON_CLASSES: &str = "inline-flex min-h-11 w-full cursor-pointer items-center rounded-sm border border-del-line bg-del-bg px-3 py-2.5 text-left text-[12.5px] text-del [font:inherit] hover:border-del hover:bg-del hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
 
+// TODO: [gtl-web]: replace the desktop Maud slots with Dioxus-owned mobile controls.
 #[derive(Default)]
 pub struct MobileViewControls {
     display: Option<Markup>,
@@ -33,6 +34,8 @@ pub fn mobile_menu_danger_button_classes() -> &'static str {
     MOBILE_MENU_DANGER_BUTTON_CLASSES
 }
 
+// TODO: [gtl-web]: make the desktop mobile navigation buttons into components and retain artifact
+// buttons here.
 pub fn files_navigation(count: Option<usize>, enabled: bool) -> Markup {
     files_navigation_target("viewer-files-popover", count, enabled)
 }
@@ -64,6 +67,8 @@ pub fn view_navigation(target_id: &str, enabled: bool) -> Markup {
     navigation_button("View settings", "View", target_id, None, enabled, VIEW_ICON)
 }
 
+// TODO: [gtl-web]: make the desktop view-settings popover into a component and retain artifact
+// markup here.
 pub(super) fn popover(target_id: &str, controls: MobileViewControls) -> Markup {
     let preview_actions = preview_actions();
     html! {

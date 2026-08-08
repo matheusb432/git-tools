@@ -2,6 +2,7 @@
 //! bodies for commits carrying extended notes.
 
 use gtl_application::{diffs::View, viewer::RenderOptions};
+use gtl_models::diffs::Commit;
 use maud::{Markup, html};
 
 use super::Surface;
@@ -36,36 +37,128 @@ const POPOVER_CLASSES: &str = concat!(
     "shadow-[0_14px_44px_rgba(0,0,0,.7)] [&::backdrop]:bg-transparent",
 );
 
-pub(super) fn shelf(
-    view: &View,
-    surface: Surface,
-    options: RenderOptions,
-    selected_commit_sha: Option<&str>,
-) -> Markup {
-    html! {
-        aside class={ "shelf " (SHELF_CLASSES) " " (SHELF_STATE_CLASSES) } aria-label="Commits in range" {
-            div {
-                h3 class="mx-0.5 mt-1.5 mb-1 text-[11px] font-semibold tracking-[0.06em] text-ink-3 uppercase" { (view.commits_label) }
-                p class="mx-0.5 mt-0 mb-3 flex items-center gap-1.5 text-[11px] text-ink-3" {
-                    span class="size-2 flex-none rounded-full bg-acc shadow-[0_0_0_3px_var(--acc-soft)]" {}
-                    @match surface {
-                        Surface::App { .. } => { "view = standalone patch · hash = copy · hover = notes" }
-                        Surface::Artifact { .. } => { "hash = copy · hover = notes" }
-                    }
-                }
-            }
-            (commit_rows(view, surface, options, selected_commit_sha))
+pub(super) struct CommitShelfPresentation<'view> {
+    commits_label: &'view str,
+    hint: &'static str,
+    commits: Vec<CommitPresentation<'view>>,
+}
+
+impl<'view> CommitShelfPresentation<'view> {
+    pub(super) fn new(
+        view: &'view View,
+        surface: Surface,
+        options: RenderOptions,
+        selected_commit_sha: Option<&str>,
+    ) -> Self {
+        Self {
+            commits_label: &view.commits_label,
+            hint: match surface {
+                Surface::App { .. } => "view = standalone patch · hash = copy · hover = notes",
+                Surface::Artifact { .. } => "hash = copy · hover = notes",
+            },
+            commits: view
+                .commits
+                .iter()
+                .map(|commit| {
+                    CommitPresentation::new(commit, surface, options, selected_commit_sha)
+                })
+                .collect(),
         }
     }
 }
 
-pub(super) fn mobile_popover(
-    view: &View,
+struct CommitPresentation<'view> {
+    commit: &'view Commit,
+    abbreviated_sha: String,
+    popover_id: Option<String>,
+    subject_action: CommitSubjectAction,
+}
+
+enum CommitSubjectAction {
+    Informational,
+    Select { route: String, is_selected: bool },
+}
+
+impl<'view> CommitPresentation<'view> {
+    fn new(
+        commit: &'view Commit,
+        surface: Surface,
+        options: RenderOptions,
+        selected_commit_sha: Option<&str>,
+    ) -> Self {
+        let has_notes = !commit.body.trim().is_empty();
+        Self {
+            commit,
+            abbreviated_sha: commit.sha.chars().take(10).collect(),
+            popover_id: has_notes.then(|| format!("pop-{}", commit.sha)),
+            subject_action: commit_subject_action(
+                surface,
+                options,
+                commit,
+                selected_commit_sha == Some(commit.sha.as_str()),
+            ),
+        }
+    }
+
+    fn has_notes(&self) -> bool {
+        self.popover_id.is_some()
+    }
+
+    fn is_selected(&self) -> bool {
+        matches!(
+            &self.subject_action,
+            CommitSubjectAction::Select {
+                is_selected: true,
+                ..
+            }
+        )
+    }
+}
+
+fn commit_subject_action(
     surface: Surface,
     options: RenderOptions,
-    selected_commit_sha: Option<&str>,
-    target: &str,
-) -> Markup {
+    commit: &Commit,
+    is_selected: bool,
+) -> CommitSubjectAction {
+    let Surface::App { tab_id } = surface else {
+        return CommitSubjectAction::Informational;
+    };
+    let route = if is_selected {
+        format!(
+            "/tabs/{tab_id}/view?layout={}&density={}",
+            options.layout(),
+            options.density(),
+        )
+    } else {
+        format!(
+            "/tabs/{tab_id}/commits/{}/view?layout={}&density={}",
+            commit.sha,
+            options.layout(),
+            options.density(),
+        )
+    };
+    CommitSubjectAction::Select { route, is_selected }
+}
+
+// TODO: [gtl-web]: make the desktop commit shelf into a component.
+pub(super) fn shelf(presentation: &CommitShelfPresentation<'_>) -> Markup {
+    html! {
+        aside class={ "shelf " (SHELF_CLASSES) " " (SHELF_STATE_CLASSES) } aria-label="Commits in range" {
+            div {
+                h3 class="mx-0.5 mt-1.5 mb-1 text-[11px] font-semibold tracking-[0.06em] text-ink-3 uppercase" { (presentation.commits_label) }
+                p class="mx-0.5 mt-0 mb-3 flex items-center gap-1.5 text-[11px] text-ink-3" {
+                    span class="size-2 flex-none rounded-full bg-acc shadow-[0_0_0_3px_var(--acc-soft)]" {}
+                    (presentation.hint)
+                }
+            }
+            (commit_rows(presentation))
+        }
+    }
+}
+
+// TODO: [gtl-web]: make the desktop commit-history popover into a component.
+pub(super) fn mobile_popover(presentation: &CommitShelfPresentation<'_>, target: &str) -> Markup {
     html! {
         aside id=(target)
             data-preview-commits-popover
@@ -75,45 +168,39 @@ pub(super) fn mobile_popover(
             header class="flex items-center justify-between border-b border-line bg-surface-2 px-4 py-3" {
                 div {
                     strong class="block text-[13px]" { "Commit history" }
-                    span class="text-[11px] text-ink-3" { (view.commits_label) }
+                    span class="text-[11px] text-ink-3" { (presentation.commits_label) }
                 }
                 button type="button" class="size-[30px] cursor-pointer rounded-sm border-0 bg-transparent text-xl text-ink-2 [font:inherit] hover:bg-line hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
                     popovertarget=(target) popovertargetaction="hide" aria-label="Close commits in range" { "×" }
             }
             div class="gtl-scroll h-[calc(100%_-_57px)] overflow-y-auto p-3" {
-                (commit_rows(view, surface, options, selected_commit_sha))
+                (commit_rows(presentation))
             }
         }
     }
 }
 
-fn commit_rows(
-    view: &View,
-    surface: Surface,
-    options: RenderOptions,
-    selected_commit_sha: Option<&str>,
-) -> Markup {
-    if view.commits.is_empty() {
+fn commit_rows(presentation: &CommitShelfPresentation<'_>) -> Markup {
+    if presentation.commits.is_empty() {
         return html! { div class="empty rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic" { "no commits in range" } };
     }
 
     html! {
-        @for commit in &view.commits {
-            @let has_notes = !commit.body.trim().is_empty();
-            @let selected = selected_commit_sha == Some(commit.sha.as_str());
+        @for commit_presentation in &presentation.commits {
+            @let commit = commit_presentation.commit;
             div class={
-                (if has_notes { "cline has " } else { "cline " })
-                (if selected { "active " } else { "" })
+                (if commit_presentation.has_notes() { "cline has " } else { "cline " })
+                (if commit_presentation.is_selected() { "active " } else { "" })
                 (COMMIT_CARD_CLASSES)
             }
                 data-sha=(commit.sha)
-                data-pop=[has_notes.then(|| format!("pop-{}", commit.sha))] {
+                data-pop=[commit_presentation.popover_id.as_deref()] {
                 span class={ "bead " (BEAD_CLASSES) } aria-hidden="true" {}
                 div class="top mb-1 flex items-center gap-1.5" {
                     button class={ "sha " (SHA_CLASSES) } type="button" title="copy hash" {
-                        (abbreviate(&commit.sha))
+                        (commit_presentation.abbreviated_sha)
                     }
-                    @if has_notes {
+                    @if commit_presentation.has_notes() {
                         span class={ "notes-ico " (NOTES_ICON_CLASSES) } aria-hidden="true" title="has extended notes" {}
                     }
                     @if commit.is_merge() {
@@ -127,32 +214,19 @@ fn commit_rows(
                         }
                     }
                 }
-                @match surface {
-                    Surface::App { tab_id } => {
+                @match &commit_presentation.subject_action {
+                    CommitSubjectAction::Select { route, is_selected } => {
                         button type="button"
                             class={ "commit-select block w-full cursor-pointer border-0 bg-transparent p-0 text-left [font:inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc sub " (SUBJECT_CLASSES) }
-                            aria-pressed=(selected)
-                            hx-get=(if selected {
-                                format!(
-                                    "/tabs/{tab_id}/view?layout={}&density={}",
-                                    options.layout(),
-                                    options.density(),
-                                )
-                            } else {
-                                format!(
-                                    "/tabs/{tab_id}/commits/{}/view?layout={}&density={}",
-                                    commit.sha,
-                                    options.layout(),
-                                    options.density(),
-                                )
-                            })
+                            aria-pressed=(is_selected)
+                            hx-get=(route)
                             hx-target="#viewer-view"
                             hx-sync="#viewer-view:replace"
                             hx-swap="outerHTML" {
                             (commit.subject)
                         }
                     }
-                    Surface::Artifact { .. } => {
+                    CommitSubjectAction::Informational => {
                         div class={ "sub " (SUBJECT_CLASSES) } { (commit.subject) }
                     }
                 }
@@ -164,10 +238,12 @@ fn commit_rows(
 // Native-popover bodies for commits that carry a body, emitted once per .layout (top-level
 // [popover] elements escape the sidebar's scroll clip). The id is keyed to the sha so the
 // shelf card's data-pop can resolve its popover within `root`.
-pub(super) fn commit_popovers(view: &View) -> Markup {
+// TODO: [gtl-web]: make the desktop commit-notes popover into a component.
+pub(super) fn commit_popovers(presentation: &CommitShelfPresentation<'_>) -> Markup {
     html! {
-        @for commit in &view.commits {
-            @if !commit.body.trim().is_empty() {
+        @for commit_presentation in &presentation.commits {
+            @let commit = commit_presentation.commit;
+            @if commit_presentation.has_notes() {
                 div id={ "pop-" (commit.sha) } class={ "print:hidden! " (POPOVER_CLASSES) } popover {
                     div class="flex items-center gap-2 border-b border-line bg-surface-2 px-3 py-2.5" {
                         span class="text-[12px] text-acc" { (commit.sha) }
@@ -181,10 +257,6 @@ pub(super) fn commit_popovers(view: &View) -> Markup {
             }
         }
     }
-}
-
-fn abbreviate(sha: &str) -> String {
-    sha.chars().take(10).collect()
 }
 
 #[cfg(test)]

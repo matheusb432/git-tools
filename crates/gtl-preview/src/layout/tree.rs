@@ -1,6 +1,6 @@
 //! Left sidebar: the server-rendered changed-files tree, filter input, and range stats.
 
-use gtl_application::diffs::View;
+use gtl_application::diffs::{FileDiff, View};
 use maud::{Markup, html};
 
 use super::file_status::file_status_presentation;
@@ -30,13 +30,32 @@ const TREE_PRESENTATION_CLASSES: &str = concat!(
 );
 const STAT_CLASSES: &str = "rounded-sm border px-2 py-0.5 text-[11px]";
 
+pub(super) struct ChangedFilesPresentation<'view> {
+    commits_label: &'view str,
+    commit_count: usize,
+    files: &'view [FileDiff],
+    total_added: u32,
+    total_removed: u32,
+    root: TreeDirectory<'view>,
+}
+
+impl<'view> ChangedFilesPresentation<'view> {
+    pub(super) fn new(view: &'view View) -> Self {
+        Self {
+            commits_label: &view.commits_label,
+            commit_count: view.commits.len(),
+            files: &view.files,
+            total_added: view.files.iter().map(|file| file.added).sum(),
+            total_removed: view.files.iter().map(|file| file.removed).sum(),
+            root: TreeDirectory::from_files(&view.files),
+        }
+    }
+}
+
 // ! `.search` and `.tree-body` are enhancer hooks. The tree owns presentation for its
 // ! server-rendered descendants.
-pub(super) fn tree(view: &View) -> Markup {
-    let total_add: u32 = view.files.iter().map(|f| f.added).sum();
-    let total_del: u32 = view.files.iter().map(|f| f.removed).sum();
-    let commit_count = view.commits.len();
-    let file_count = view.files.len();
+// TODO: [gtl-web]: make the desktop changed-files tree into a component.
+pub(super) fn tree(presentation: &ChangedFilesPresentation<'_>) -> Markup {
     html! {
         aside class=(TREE_PRESENTATION_CLASSES) aria-label="Changed files tree" {
             div class="search relative mb-3 print:hidden!" {
@@ -45,15 +64,15 @@ pub(super) fn tree(view: &View) -> Markup {
                     placeholder="Filter files…  /" aria-label="Filter files";
             }
             div class="mx-1 mt-1.5 mb-2 flex justify-between text-[11px] tracking-[0.06em] text-ink-3 uppercase" {
-                span { (view.commits_label) " · " (file_count) " file" (plural(file_count)) }
+                span { (presentation.commits_label) " · " (presentation.files.len()) " file" (plural(presentation.files.len())) }
             }
             div class="mx-0.5 mb-3 flex flex-wrap gap-2" {
-                span class={ (STAT_CLASSES) " border-line-2 text-ink-2" } { b class="font-bold text-ink" { (commit_count) } " commit" (plural(commit_count)) }
-                span class={ (STAT_CLASSES) " border-add-line text-add" } { "+" (total_add) }
-                span class={ (STAT_CLASSES) " border-del-line text-del" } { "−" (total_del) }
+                span class={ (STAT_CLASSES) " border-line-2 text-ink-2" } { b class="font-bold text-ink" { (presentation.commit_count) } " commit" (plural(presentation.commit_count)) }
+                span class={ (STAT_CLASSES) " border-add-line text-add" } { "+" (presentation.total_added) }
+                span class={ (STAT_CLASSES) " border-del-line text-del" } { "−" (presentation.total_removed) }
             }
             div class="tree-body text-[12.5px] whitespace-nowrap" {
-                (render_file_tree(view))
+                (render_directory(&presentation.root))
             }
         }
     }
@@ -62,33 +81,33 @@ pub(super) fn tree(view: &View) -> Markup {
 #[derive(Default)]
 struct TreeDirectory<'a> {
     directories: Vec<(&'a str, TreeDirectory<'a>)>,
-    files: Vec<(&'a str, &'a gtl_application::diffs::FileDiff)>,
+    files: Vec<(&'a str, &'a FileDiff)>,
 }
 
-fn render_file_tree(view: &View) -> Markup {
-    let mut root = TreeDirectory::default();
-    for file in &view.files {
-        let mut directory = &mut root;
-        let mut segments = file.path.split('/').peekable();
-        while let Some(segment) = segments.next() {
-            if segments.peek().is_none() {
-                directory.files.push((segment, file));
-                break;
+impl<'view> TreeDirectory<'view> {
+    fn from_files(files: &'view [FileDiff]) -> Self {
+        let mut root = Self::default();
+        for file in files {
+            let mut directory = &mut root;
+            let mut segments = file.path.split('/').peekable();
+            while let Some(segment) = segments.next() {
+                if segments.peek().is_none() {
+                    directory.files.push((segment, file));
+                    break;
+                }
+                let index = directory
+                    .directories
+                    .iter()
+                    .position(|(name, _)| *name == segment)
+                    .unwrap_or_else(|| {
+                        directory.directories.push((segment, Self::default()));
+                        directory.directories.len() - 1
+                    });
+                directory = &mut directory.directories[index].1;
             }
-            let index = directory
-                .directories
-                .iter()
-                .position(|(name, _)| *name == segment)
-                .unwrap_or_else(|| {
-                    directory
-                        .directories
-                        .push((segment, TreeDirectory::default()));
-                    directory.directories.len() - 1
-                });
-            directory = &mut directory.directories[index].1;
         }
+        root
     }
-    render_directory(&root)
 }
 
 fn render_directory(directory: &TreeDirectory<'_>) -> Markup {
@@ -120,10 +139,8 @@ fn render_directory(directory: &TreeDirectory<'_>) -> Markup {
     }
 }
 
-pub(super) fn mobile_popover(view: &View, target: &str) -> Markup {
-    let total_add: u32 = view.files.iter().map(|file| file.added).sum();
-    let total_del: u32 = view.files.iter().map(|file| file.removed).sum();
-
+// TODO: [gtl-web]: make the desktop changed-files popover into a component.
+pub(super) fn mobile_popover(presentation: &ChangedFilesPresentation<'_>, target: &str) -> Markup {
     html! {
         aside id=(target)
             data-preview-files-popover
@@ -135,13 +152,13 @@ pub(super) fn mobile_popover(view: &View, target: &str) -> Markup {
                     strong class="block text-[13px]" { "Changed files" }
                     div class="flex flex-wrap items-center gap-1.5 pt-1" {
                         span class="text-[11px] text-ink-3" {
-                            (view.files.len()) " file" (plural(view.files.len()))
+                            (presentation.files.len()) " file" (plural(presentation.files.len()))
                         }
                         span class={ (STAT_CLASSES) " border-add-line text-add" } title="Lines added" {
-                            "+" (total_add)
+                            "+" (presentation.total_added)
                         }
                         span class={ (STAT_CLASSES) " border-del-line text-del" } title="Lines removed" {
-                            "−" (total_del)
+                            "−" (presentation.total_removed)
                         }
                     }
                 }
@@ -149,7 +166,7 @@ pub(super) fn mobile_popover(view: &View, target: &str) -> Markup {
                     popovertarget=(target) popovertargetaction="hide" aria-label="Close changed files" { "×" }
             }
             div class="gtl-scroll h-[calc(100%_-_57px)] overflow-y-auto p-2" {
-                @for file in &view.files {
+                @for file in presentation.files {
                     @let status = file_status_presentation(file.status());
                     button type="button"
                         class="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-2 text-left text-[12.5px] text-ink-2 [font:inherit] hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc"

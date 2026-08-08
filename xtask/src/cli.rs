@@ -28,11 +28,10 @@ pub struct Cli {
 /// `conflicts_with` (see the commented `--all` example), never a runtime `if a && b`.
 #[derive(Subcommand)]
 pub enum Command {
-    /// Repository-local bootstrap phase: configure hooks, install frontend dependencies, build
-    /// and install both artifacts, and ensure `~/.local/bin` is on PATH. Mise owns host packages,
-    /// toolchains, and shell activation.
-    #[command(name = Verb::BOOTSTRAP.as_str())]
-    Bootstrap,
+    /// Configure hooks, install frontend dependencies, build and install both artifacts, and
+    /// ensure `~/.local/bin` is on PATH.
+    #[command(name = Verb::SETUP.as_str())]
+    Setup,
     /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the
     /// desktop viewer on PATH. Builds are owned by the justfile; this only copies the
     /// already-built artifacts. Migrates `scripts/install.sh`.
@@ -127,19 +126,6 @@ pub enum Command {
     /// Windows.
     #[command(name = Verb::GEN_ICON.as_str())]
     GenIcon,
-    /// Cross-build the Win11 shippables (CLI + viewer + gtl-daemon) from this Linux host via
-    /// cargo-xwin. `--smoke` is a fast debug-profile linkage check; the default is the release
-    /// ship + verify.
-    #[command(name = Verb::SHIP.as_str())]
-    Ship {
-        /// Debug-profile compile-smoke of all three binaries — a non-authoritative linkage drift
-        /// check (no artifact verify), not a shippable.
-        #[arg(long)]
-        smoke: bool,
-        /// Skip only the `just test --all` preflight.
-        #[arg(short = 'f', long)]
-        force: bool,
-    },
 }
 
 /// Which release artifact set `build` produces.

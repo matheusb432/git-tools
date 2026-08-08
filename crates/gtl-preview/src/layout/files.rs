@@ -38,23 +38,96 @@ const DIFF_CLASSES: &str = concat!(
 );
 const STATUS_BADGE_CLASSES: &str = "inline-flex size-[15px] flex-none items-center justify-center rounded-sm border text-[9.5px] leading-none font-bold";
 
+struct FileBlockPresentation<'file> {
+    file: &'file FileDiff,
+    absolute_path: String,
+    anchor_id: String,
+    comment_leader: &'static str,
+    diff: DiffPresentation<'file>,
+    file_body: FileBodyPresentation,
+    is_expanded: bool,
+    open_in_editor_route: Option<String>,
+    status: super::file_status::FileStatusPresentation,
+}
+
+impl<'file> FileBlockPresentation<'file> {
+    fn new(
+        repo_root: &str,
+        file: &'file FileDiff,
+        file_index: usize,
+        options: RenderOptions,
+        surface: Surface,
+    ) -> Self {
+        Self {
+            file,
+            absolute_path: format!("{repo_root}/{}", file.path),
+            anchor_id: slug(&file.path),
+            comment_leader: crate::comment_syntax::comment_leader(&file.path),
+            diff: DiffPresentation::new(file, file_index, options),
+            file_body: file_body_presentation(surface, file),
+            is_expanded: file.lines.iter().map(String::len).sum::<usize>() <= GIANT_FILE_CHARS,
+            open_in_editor_route: open_diff_file_route(surface, file),
+            status: file_status_presentation(file.status()),
+        }
+    }
+}
+
+struct DiffPresentation<'file> {
+    classes: String,
+    file_index: usize,
+    layout: DiffLayout,
+    lines: &'file [String],
+    style: Option<String>,
+}
+
+impl<'file> DiffPresentation<'file> {
+    fn new(file: &'file FileDiff, file_index: usize, options: RenderOptions) -> Self {
+        let (lines, density) = selected_lines(file, options);
+        Self {
+            classes: diff_classes(options.layout(), density),
+            file_index,
+            layout: options.layout(),
+            lines,
+            style: unified_line_number_gutter_style(options.layout(), lines),
+        }
+    }
+}
+
+struct FileBodyPresentation {
+    classes: &'static str,
+    intrinsic_size: Option<String>,
+}
+
 // ! The app webview (wry/WebKitGTK) never marks swapped-in content-visibility:auto
 // ! subtrees relevant, so their rows would stay unpainted; only browser artifacts
 // ! opt into the offscreen-skip optimization (and its print escape hatches).
-fn filebody_presentation(surface: Surface, file: &FileDiff) -> (&'static str, Option<String>) {
+fn file_body_presentation(surface: Surface, file: &FileDiff) -> FileBodyPresentation {
     match surface {
-        Surface::App { .. } => (
-            "filebody single-variant overflow-hidden rounded-b-panel",
-            None,
-        ),
+        Surface::App { .. } => FileBodyPresentation {
+            classes: "filebody single-variant overflow-hidden rounded-b-panel",
+            intrinsic_size: None,
+        },
         Surface::Artifact { .. } => {
             let rows = file.lines.iter().filter(|l| !l.is_empty()).count();
-            (
-                "filebody single-variant [content-visibility:auto] overflow-hidden rounded-b-panel print:block! print:[content-visibility:visible] print:overflow-visible",
-                Some(format!("contain-intrinsic-size:auto {}px", rows * ROW_PX)),
-            )
+            FileBodyPresentation {
+                classes: "filebody single-variant [content-visibility:auto] overflow-hidden rounded-b-panel print:block! print:[content-visibility:visible] print:overflow-visible",
+                intrinsic_size: Some(format!("contain-intrinsic-size:auto {}px", rows * ROW_PX)),
+            }
         }
     }
+}
+
+fn open_diff_file_route(surface: Surface, file: &FileDiff) -> Option<String> {
+    let Surface::App { tab_id } = surface else {
+        return None;
+    };
+    if file.status() == FileStatus::Deleted {
+        return None;
+    }
+    let query = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("path", &file.path)
+        .finish();
+    Some(format!("/tabs/{tab_id}/files/open?{query}"))
 }
 
 pub(super) fn file_blocks(
@@ -91,16 +164,21 @@ fn file_blocks_with_mode(
         );
     }
 
+    let files = view
+        .files
+        .iter()
+        .enumerate()
+        .map(|(file_index, file)| {
+            FileBlockPresentation::new(&view.repo_root, file, file_index, options, surface)
+        })
+        .collect::<Vec<_>>();
     Ok(html! {
-        @for (file_index, file) in view.files.iter().enumerate() {
-            @let absolute = format!("{}/{}", view.repo_root, file.path);
-            @let status = file_status_presentation(file.status());
-            @let giant = file.lines.iter().map(String::len).sum::<usize>() > GIANT_FILE_CHARS;
-            @let (filebody_classes, intrinsic) = filebody_presentation(surface, file);
-            details open[!giant]
-                id=(slug(&file.path))
+        @for presentation in &files {
+            @let file = presentation.file;
+            details open[presentation.is_expanded]
+                id=(presentation.anchor_id)
                 class={
-                    "file " (status.css_class) " group/file mb-2.5 rounded-panel border border-line bg-surface "
+                    "file " (presentation.status.css_class) " group/file mb-2.5 rounded-panel border border-line bg-surface "
                     "[&:not([open])>summary]:rounded-panel [&:not([open])>summary]:border-b-0 "
                     "[&.status-added>summary]:bg-[color-mix(in_srgb,var(--add-bg)_34%,var(--surface-2))] "
                     "[&.status-deleted>summary]:bg-[color-mix(in_srgb,var(--del-bg)_34%,var(--surface-2))] "
@@ -108,42 +186,40 @@ fn file_blocks_with_mode(
                     "print:break-inside-avoid print:[&[hidden]]:block!"
                 }
                 data-path=(file.path)
-                data-comment=(crate::comment_syntax::comment_leader(&file.path))
+                data-comment=(presentation.comment_leader)
                 {
                 summary class="sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line bg-surface-2 px-2.5 py-2 text-[12.5px] hover:bg-line [&::-webkit-details-marker]:hidden mobile:flex-wrap mobile:gap-x-1.5 mobile:px-2 mobile:py-1.5 print:static print:bg-[#f2f2f2]" {
                     span class="file-caret size-0 flex-none border-y-4 border-y-transparent border-l-5 border-l-ink-3 group-open/file:rotate-90" aria-hidden="true" {}
                     span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink" { (file.path) }
-                    span class={ "status-badge " (status.css_class) " " (STATUS_BADGE_CLASSES) " " (status.badge_classes) } title=(status.label) aria-label=(status.label) { (status.code) }
+                    span class={ "status-badge " (presentation.status.css_class) " " (STATUS_BADGE_CLASSES) " " (presentation.status.badge_classes) } title=(presentation.status.label) aria-label=(presentation.status.label) { (presentation.status.code) }
                     span class="file-actions flex flex-none items-center gap-2 mobile:basis-full mobile:justify-end" {
                         span class="copies flex flex-none gap-[5px] print:hidden!" {
                             button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(file.path) data-copy-label="path" { "path" }
-                            button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(absolute) data-copy-label="abs" { "abs" }
+                            button type="button" class=(COPY_BUTTON_CLASSES) data-copy-value=(presentation.absolute_path) data-copy-label="abs" { "abs" }
                             // ! mode="code" carries no payload: the button reads its own file's
                             // ! already-rendered diff rows at click time (no per-file content dupe).
                             button type="button" class=(COPY_BUTTON_CLASSES) data-copy-mode="code" data-copy-label="code" { "code" }
                         }
                         span class="flex-none text-[12.5px]" { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
-                        @if let Surface::App { tab_id } = surface {
-                            @if file.status() != FileStatus::Deleted {
-                                button type="button"
-                                    class=(OPEN_IN_EDITOR_BUTTON_CLASSES)
-                                    aria-label="Open in IDE"
-                                    title="Open in IDE"
-                                    hx-post=(open_diff_file_route(tab_id, &file.path))
-                                    hx-disabled-elt="this"
-                                    hx-sync="this:drop"
-                                    hx-swap="none" {
-                                    (PreEscaped(OPEN_IN_EDITOR_ICON))
-                                }
+                        @if let Some(open_in_editor_route) = &presentation.open_in_editor_route {
+                            button type="button"
+                                class=(OPEN_IN_EDITOR_BUTTON_CLASSES)
+                                aria-label="Open in IDE"
+                                title="Open in IDE"
+                                hx-post=(open_in_editor_route)
+                                hx-disabled-elt="this"
+                                hx-sync="this:drop"
+                                hx-swap="none" {
+                                (PreEscaped(OPEN_IN_EDITOR_ICON))
                             }
                         }
                     }
                 }
                 // ! Keep containment below the sticky summary so it can pin to `.main`.
-                div class=(filebody_classes) style=[intrinsic] {
+                div class=(presentation.file_body.classes) style=[presentation.file_body.intrinsic_size.as_deref()] {
                     @match mode {
-                        FileBodyMode::Complete => (file_diff(file, options)?),
-                        FileBodyMode::Shell => (file_diff_shell(file, options, file_index)),
+                        FileBodyMode::Complete => (file_diff(presentation)?),
+                        FileBodyMode::Shell => (file_diff_shell(&presentation.diff)),
                     }
                 }
             }
@@ -151,30 +227,19 @@ fn file_blocks_with_mode(
     })
 }
 
-fn file_diff_shell(file: &FileDiff, options: RenderOptions, file_index: usize) -> Markup {
-    let (lines, density) = selected_lines(file, options);
-    let style = unified_line_number_gutter_style(options.layout(), lines);
+fn file_diff_shell(presentation: &DiffPresentation<'_>) -> Markup {
     html! {
-        div id=(diff_target_id(file_index))
-            class=(diff_classes(options.layout(), density))
-            style=[style] {}
+        div id=(diff_target_id(presentation.file_index))
+            class=(presentation.classes)
+            style=[presentation.style.as_deref()] {}
     }
 }
 
-fn open_diff_file_route(tab_id: gtl_application::viewer::ViewerTabId, path: &str) -> String {
-    let query = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("path", path)
-        .finish();
-    format!("/tabs/{tab_id}/files/open?{query}")
-}
-
-fn file_diff(file: &FileDiff, options: RenderOptions) -> PreviewResult<Markup> {
-    let syntax = crate::syntax::syntax_for_path(&file.path)?;
-    let (lines, density) = selected_lines(file, options);
-    let style = unified_line_number_gutter_style(options.layout(), lines);
+fn file_diff(presentation: &FileBlockPresentation<'_>) -> PreviewResult<Markup> {
+    let syntax = crate::syntax::syntax_for_path(&presentation.file.path)?;
     Ok(html! {
-        div class=(diff_classes(options.layout(), density)) style=[style] {
-            (PreEscaped(render_rows(options.layout(), lines, syntax)))
+        div class=(presentation.diff.classes) style=[presentation.diff.style.as_deref()] {
+            (PreEscaped(render_rows(presentation.diff.layout, presentation.diff.lines, syntax)))
         }
     })
 }

@@ -2,11 +2,10 @@
 //! panel per repo view behind a sticky tab strip.
 
 use gtl_application::{diffs::View, viewer::RenderOptions};
-use maud::{DOCTYPE, PreEscaped, html};
+use maud::html;
 
-use super::THEME_BOOT_JS;
+use super::document;
 use crate::{
-    assets::{PREVIEW_BUNDLE, preview_css},
     layout::{Surface, view_body},
     syntax::PreviewResult,
 };
@@ -29,41 +28,26 @@ pub fn build_tabbed_html(
     options: RenderOptions,
     theme: Option<&str>,
 ) -> PreviewResult<String> {
-    Ok(html! {
-        (DOCTYPE)
-        html lang="en" data-theme=[theme] {
-            head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                // ! The page ships its own palette, so Dark Reader must leave it alone.
-                meta name="darkreader-lock";
-                title { (title) }
-                script { (PreEscaped(THEME_BOOT_JS)) }
-                style { (PreEscaped(preview_css())) }
-            }
-            body {
-                nav class={ "tabs " (TABS_CLASSES) } role="tablist" aria-label="Subrepo diffs" {
-                    @for (index, view) in views.iter().enumerate() {
-                        button class={ (if index == 0 { "tab active " } else { "tab " }) (TAB_CLASSES) }
-                            id={ "tab-" (index) }
-                            role="tab"
-                            aria-selected=(if index == 0 { "true" } else { "false" })
-                            aria-controls={ "panel-" (index) }
-                            data-tab=(index) {
-                            (view.repo_name)
-                        }
-                    }
+    let body = html! {
+        nav class={ "tabs " (TABS_CLASSES) } role="tablist" aria-label="Subrepo diffs" {
+            @for (index, view) in views.iter().enumerate() {
+                button class={ (if index == 0 { "tab active " } else { "tab " }) (TAB_CLASSES) }
+                    id={ "tab-" (index) }
+                    role="tab"
+                    aria-selected=(if index == 0 { "true" } else { "false" })
+                    aria-controls={ "panel-" (index) }
+                    data-tab=(index) {
+                    (view.repo_name)
                 }
-                @for (index, view) in views.iter().enumerate() {
-                    section class={ "panel " (PANEL_CLASSES) } id={ "panel-" (index) } role="tabpanel" aria-labelledby={ "tab-" (index) } hidden[index != 0] {
-                        (view_body(view, options, Surface::Artifact { view_index: index })?)
-                    }
-                }
-                script { (PreEscaped(PREVIEW_BUNDLE)) }
             }
         }
-    }
-    .into_string())
+        @for (index, view) in views.iter().enumerate() {
+            section class={ "panel " (PANEL_CLASSES) } id={ "panel-" (index) } role="tabpanel" aria-labelledby={ "tab-" (index) } hidden[index != 0] {
+                (view_body(view, options, Surface::Artifact { view_index: index })?)
+            }
+        }
+    };
+    Ok(document(title, theme, &body))
 }
 
 #[cfg(test)]

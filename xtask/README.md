@@ -6,7 +6,7 @@
 
 | Verb | What it does | Justfile entry |
 | -- | -- | -- |
-| `bootstrap` | Repository-local bootstrap phase: configure the tracked `.githooks` directory, install frontend dependencies, build and install both artifacts, and ensure `~/.local/bin` is on PATH. Mise runs it after converging the host environment. | `just bootstrap` |
+| `setup` | Configure the tracked `.githooks` directory, install frontend dependencies, build and install both artifacts, and ensure `~/.local/bin` is on PATH. | `just setup` |
 | `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the viewer on PATH (idempotent byte-compare → installed/updated/unchanged; atomic replace is warm-tray-safe). Migrates `scripts/install.sh`. | `just install` / `just cli install` / `just desktop install` |
 | `uninstall [--remove-config] [--force]` | Remove the CLI, alias, daemon, viewer, desktop entry, and icon; optionally delete repo-local config. | `just uninstall` / `just purge` |
 | `test [--verbose] [--scope unit\|e2e\|all]` | Default (`unit`): default-member Rust tests. `--e2e`: hermetic native and browser E2E. `--all`: all Rust, frontend, drift, and E2E. Run `just check` separately for the read-only quality gate. `--e2e`/`--all` are shorthands for `--scope`. | `just test` |
@@ -23,7 +23,6 @@
 | `check-structure` | Cargo dependency-direction policy for core, shared, adapter, and black-box test packages. Wired into `lint` / `check`; also runnable standalone. | (via `just check`) |
 | `drift-check` | Rebuild the committed diff-preview JS bundle and fail if it drifts from its TypeScript sources. | `just drift-check` |
 | `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |
-| `ship [--smoke] [--force]` | Run `just test --all` unless forced, then cross-build the three Win11 exes. `--smoke --force` is the fast linkage-only path. | `just ship` |
 
 ## Why this is not a `new-rust-cli`
 
@@ -49,7 +48,7 @@ Add an arm to `cli::Command` (its doc comment is the `--help` text) named via a 
 ## Build & test
 
 ```bash
-cargo run -p xtask -- gen-icon     # run a verb (or: ship --smoke)
+cargo run -p xtask -- gen-icon     # run a verb
 cargo test -p xtask                # arg-surface + unit tests
 ```
 

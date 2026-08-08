@@ -71,4 +71,4 @@ zshrc = "activate"
 
 [tasks.bootstrap]
 description = "Configure this clone, install frontend dependencies, and build and install git-tools"
-run = "cargo run --quiet -p xtask -- bootstrap"
+run = "just setup"

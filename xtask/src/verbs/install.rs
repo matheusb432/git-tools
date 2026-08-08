@@ -202,7 +202,7 @@ pub fn remove_cli_config(
 
 // --- thin glue (resolve paths, print the report) ---------------------------
 
-/// Target bindir: `GIT_TOOLS_BINDIR` override, else `$HOME/.local/bin`. Shared with `bootstrap`
+/// Target bindir: `GIT_TOOLS_BINDIR` override, else `$HOME/.local/bin`. Shared with `setup`
 /// (which ensures this dir is on PATH).
 pub(crate) fn bindir() -> Result<PathBuf> {
     if let Some(dir) = env::var_os("GIT_TOOLS_BINDIR") {

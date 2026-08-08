@@ -72,6 +72,7 @@ const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
 // document chrome — one <style>/<script> — lives only at the top level. Per-commit
 // [popover] elements live inside .layout so the per-layout JS scoping in preview.js
 // finds them.
+// TODO: [gtl-web]: make the desktop layout shell into a component around the Maud diff document.
 pub(crate) fn view_body(
     view: &View,
     options: RenderOptions,
@@ -161,6 +162,9 @@ fn view_body_with_mode(
 ) -> PreviewResult<Markup> {
     let mobile_controls_target = surface.mobile_controls_target();
     let artifact_mobile_navigation = ArtifactMobileNavigationTargets::from_surface(surface);
+    let changed_files = tree::ChangedFilesPresentation::new(view);
+    let commit_shelf =
+        shelf::CommitShelfPresentation::new(range_view, surface, options, selected_commit_sha);
     Ok(html! {
         div class={
             (LAYOUT_PRESENTATION_CLASSES) " "
@@ -169,7 +173,7 @@ fn view_body_with_mode(
             (crate::rows::INTRALINE_PRESENTATION_CLASSES)
         } {
             (titlebar::titlebar(view, artifact_mobile_navigation.as_ref()))
-            (tree::tree(view))
+            (tree::tree(&changed_files))
             main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-0 pb-[60px] wide-screen:px-7 compact-desktop:px-4 tablet:px-3 mobile:px-1 tablet:pb-12 print:overflow-visible print:p-0" {
                 @match mode {
                     BodyMode::Complete => (files::file_blocks(view, options, surface)?)
@@ -179,17 +183,17 @@ fn view_body_with_mode(
                     }
                 }
             }
-            (shelf::shelf(range_view, surface, options, selected_commit_sha))
+            (shelf::shelf(&commit_shelf))
             (keybar::keybar(view))
-            (shelf::commit_popovers(range_view))
+            (shelf::commit_popovers(&commit_shelf))
             @match &artifact_mobile_navigation {
                 Some(targets) => {
-                    (tree::mobile_popover(view, &targets.files))
-                    (shelf::mobile_popover(range_view, surface, options, selected_commit_sha, &targets.commits))
+                    (tree::mobile_popover(&changed_files, &targets.files))
+                    (shelf::mobile_popover(&commit_shelf, &targets.commits))
                 }
                 None => {
-                    (tree::mobile_popover(view, "viewer-files-popover"))
-                    (shelf::mobile_popover(range_view, surface, options, selected_commit_sha, "viewer-commits-popover"))
+                    (tree::mobile_popover(&changed_files, "viewer-files-popover"))
+                    (shelf::mobile_popover(&commit_shelf, "viewer-commits-popover"))
                 }
             }
             (mobile_controls::popover(&mobile_controls_target, mobile_controls))

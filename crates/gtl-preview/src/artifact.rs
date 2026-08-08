@@ -5,7 +5,7 @@
 mod tabbed;
 
 use gtl_application::{diffs::View, viewer::RenderOptions};
-use maud::{DOCTYPE, PreEscaped, html};
+use maud::{DOCTYPE, Markup, PreEscaped, html};
 pub use tabbed::build_tabbed_html;
 
 use crate::{
@@ -31,7 +31,18 @@ pub fn build_html(
     theme: Option<&str>,
 ) -> PreviewResult<String> {
     let count = view.commits.len();
-    Ok(html! {
+    let title = format!(
+        "{} — {} · {count} commit{}",
+        view.repo_name,
+        view.title,
+        plural(count)
+    );
+    let body = view_body(view, options, Surface::Artifact { view_index: 0 })?;
+    Ok(document(&title, theme, &body))
+}
+
+fn document(title: &str, theme: Option<&str>, body: &Markup) -> String {
+    html! {
         (DOCTYPE)
         html lang="en" data-theme=[theme] {
             head {
@@ -39,17 +50,17 @@ pub fn build_html(
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 // ! The page ships its own palette, so Dark Reader must leave it alone.
                 meta name="darkreader-lock";
-                title { (view.repo_name) " — " (view.title) " · " (count) " commit" (plural(count)) }
+                title { (title) }
                 script { (PreEscaped(THEME_BOOT_JS)) }
                 style { (PreEscaped(preview_css())) }
             }
             body {
-                (view_body(view, options, Surface::Artifact { view_index: 0 })?)
+                (body)
                 script { (PreEscaped(PREVIEW_BUNDLE)) }
             }
         }
     }
-    .into_string())
+    .into_string()
 }
 
 #[cfg(test)]

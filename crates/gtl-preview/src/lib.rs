@@ -24,6 +24,7 @@ pub use layout::mobile_controls::{
 use maud::Markup;
 pub use syntax::{PreviewError, PreviewResult};
 
+// TODO: [gtl-web]: replace the desktop fragment APIs with a narrow Maud diff-document renderer.
 /// Builds one app-hosted diff view using the requested layout and density variant.
 ///
 /// The fragment retains the server-rendered file tree, commit shelf, popovers, and diff rows,
@@ -79,6 +80,7 @@ pub fn view_fragment_with_mobile_controls(
     )
 }
 
+// TODO: [gtl-web]: replace the HTMX shell API with a Dioxus-owned diff-island lifecycle.
 /// Builds the desktop layout without diff rows and starts its bounded chunk chain.
 ///
 /// # Errors

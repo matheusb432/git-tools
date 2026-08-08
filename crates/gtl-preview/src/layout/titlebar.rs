@@ -11,6 +11,7 @@ use crate::text::plural;
 const CONTROL_CLASSES: &str = "cursor-pointer rounded-sm border border-line-2 bg-surface-2 px-2.5 py-1.5 text-[12px] text-ink-2 [font:inherit] hover:border-acc-line hover:text-ink print:hidden!";
 
 // ! `.foldall` and `.ctx-toggle` remain enhancer hooks for their toggled states.
+// TODO: [gtl-web]: make the desktop titlebar into a component and retain artifact markup here.
 pub(super) fn titlebar(
     view: &View,
     mobile_navigation: Option<&ArtifactMobileNavigationTargets>,
