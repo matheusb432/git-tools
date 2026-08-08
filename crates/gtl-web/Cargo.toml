@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 dioxus = { version = "0.7.1", features = ["router"] }
+dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
 
 [lints]
 workspace = true

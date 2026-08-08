@@ -1,5 +1,5 @@
 [application]
-tailwind_input = "tailwind.css"
+tailwind_input = "src/app/assets/styles/tailwind.css"
 tailwind_output = "assets/tailwind.css"
 
 [web.app]

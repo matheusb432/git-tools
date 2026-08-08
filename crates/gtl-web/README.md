@@ -20,6 +20,6 @@ mise exec -- cargo run --quiet -p gtl-cli -- diff --last 1
 
 Use the debug CLI command for this proof. The installed `gtl` command resolves the installed production viewer instead.
 
-RSX and Rust logic reload through the Dioxus dev server. `tailwind.css` drives the generated shell stylesheet, and `frontend/dioxus-poc/` owns the watched bridge bundle.
+RSX and Rust logic reload through the Dioxus dev server. `src/app/assets/styles/tailwind.css` drives the generated shell stylesheet, and `frontend/dioxus-poc/` owns the watched bridge bundle.
 
 See [the Dioxus Web proof agent guide](../../docs/agents/dioxus-web-poc.md) for the runtime boundary, ownership map, and current limitations.

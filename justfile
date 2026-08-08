@@ -3,6 +3,7 @@ set windows-shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
 mod cli 'just/cli.justfile'
 mod desktop 'just/desktop.justfile'
+mod web 'just/web.justfile'
 
 [private]
 _binname := if os() == "windows" { "git-tools.exe" } else { "git-tools" }

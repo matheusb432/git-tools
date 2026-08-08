@@ -1,0 +1,55 @@
+@import "tailwindcss";
+@source "../../../**/*.rs";
+
+@theme {
+  --color-bg: #0a0d13;
+  --color-surface: #0d1117;
+  --color-surface-2: #161b22;
+  --color-sunk: #080a10;
+  --color-ink: #c9d1d9;
+  --color-ink-2: #768390;
+  --color-ink-3: #545d68;
+  --color-line: #21262d;
+  --color-line-2: #2d333b;
+  --color-acc: #b69bff;
+  --color-acc-2: #cbb4ff;
+  --color-acc-soft: rgb(182 155 255 / 14%);
+  --color-acc-line: rgb(182 155 255 / 42%);
+  --color-add: #3fb950;
+  --color-add-bg: rgb(46 160 67 / 20%);
+  --color-add-line: rgb(63 185 80 / 42%);
+  --color-del: #f85149;
+  --color-del-bg: rgb(248 81 73 / 20%);
+  --color-del-line: rgb(248 81 73 / 42%);
+  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Maple Mono", "JetBrains Mono", ui-monospace, monospace;
+  --radius-sm: 4px;
+  --radius-panel: 6px;
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    background: var(--color-bg);
+    font-family: var(--font-sans);
+  }
+
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #main {
+    min-height: 100%;
+    margin: 0;
+  }
+
+  button,
+  input,
+  a {
+    font: inherit;
+  }
+}
