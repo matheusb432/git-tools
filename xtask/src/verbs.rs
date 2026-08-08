@@ -16,5 +16,6 @@ pub(crate) mod lint;
 pub(crate) mod pre_commit;
 pub(crate) mod presentation;
 pub(crate) mod setup;
+pub(crate) mod ship;
 pub(crate) mod status_notifier;
 pub(crate) mod test;

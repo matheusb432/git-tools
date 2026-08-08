@@ -6,7 +6,7 @@ mod routes;
 pub use document::MaudViewerRenderer;
 #[cfg(not(feature = "benchmark-support"))]
 pub(crate) use document::MaudViewerRenderer;
-pub(crate) use fragments::SwapFeedback;
+pub(crate) use fragments::{SwapFeedback, view_chunk};
 use routes::{ViewerRoute, ViewerSettingChange};
 
 // These values form the Rust side of the `data-viewer-state` DOM contract.

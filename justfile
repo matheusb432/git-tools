@@ -99,6 +99,11 @@ doctor:
     test "$(git config --local --get core.hooksPath)" = ".githooks"
     test -x .githooks/pre-commit
 
+# Cross-build all three Win11 exes; runs `just test --all` first unless -f/--force. --smoke selects a debug linkage build; use `--smoke --force` for the fast smoke path.
+[group('windows')]
+ship *args:
+    cargo run --quiet -p xtask -- ship {{ args }}
+
 # Configure this clone, install frontend dependencies, build, and install git-tools.
 setup:
     cargo run --quiet -p xtask -- setup

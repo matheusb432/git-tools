@@ -128,11 +128,6 @@ pub struct ViewChunk {
     pub rows: usize,
 }
 
-/// Renders one chunk insertion and the continuation marker for its load chain.
-pub fn view_chunk_fragment(chunk: &ViewChunk, next_load_id: Option<u64>) -> Markup {
-    layout::view_chunk_fragment(chunk, next_load_id)
-}
-
 /// Renders the desktop diff rows into bounded, semantically ordered chunks.
 ///
 /// # Errors

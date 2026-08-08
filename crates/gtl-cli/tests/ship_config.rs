@@ -1,13 +1,13 @@
 #![cfg(test)]
 
-//! Tripwire for the Windows MSVC linker flags required by release executables.
+//! Tripwire for the Windows MSVC linker flags required by shipped executables.
 use std::{fs, path::Path};
 
 #[test]
 fn cargo_config_pins_windows_msvc_linker_flags() {
     let source =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.cargo/config.toml"))
-            .expect(".cargo/config.toml must exist (crt-static for win-msvc releases)");
+            .expect(".cargo/config.toml must exist (crt-static for the win-msvc ship)");
     let config: toml::Value =
         toml::from_str(&source).expect(".cargo/config.toml must contain valid TOML");
     let rustflags = config

@@ -5,10 +5,10 @@
 ## Core workflows
 
 - Render unpushed, range, merge, recursive, or managed-repository diffs in the offline desktop viewer. Use `--raw` for a self-contained browser artifact.
-- Inspect, commit, push, pull, prune, switch, and tag without replacing Git's underlying repository model.
-- Run status, commit, push, pull, and diff operations across repositories declared in `projects.toml`.
+- Inspect status and worktrees; commit, push, pull, prune, switch branches, and manage tags without replacing Git's underlying repository model.
+- Run status, commit, push, pull, diff, and prune operations across active repositories declared in the `projects.toml` manifest.
 
-Run `gtl --help` and `gtl <command> --help` for the authoritative command reference. Architecture decisions are indexed in [docs/adr/adr.toml](docs/adr/adr.toml).
+Run `gtl --help` and `gtl <command> --help` for the authoritative command reference. ADR statuses are tracked in [docs/adr/adr.toml](docs/adr/adr.toml), and repository automation is documented in [xtask/README.md](xtask/README.md).
 
 ## Install
 

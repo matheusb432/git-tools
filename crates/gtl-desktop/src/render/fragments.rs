@@ -8,10 +8,12 @@ mod history;
 mod tabs;
 pub(super) mod theme;
 mod view;
+mod view_chunk;
 
 pub(super) use history::history;
 pub(super) use tabs::{MobileNavigationCounts, tabs};
 pub(super) use view::{loading_template, view};
+pub(crate) use view_chunk::view_chunk;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SwapMode {

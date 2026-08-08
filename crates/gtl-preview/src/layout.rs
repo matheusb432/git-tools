@@ -208,10 +208,6 @@ pub(crate) fn view_chunks(
     files::view_chunks(view, options)
 }
 
-pub(crate) fn view_chunk_fragment(chunk: &crate::ViewChunk, next_load_id: Option<u64>) -> Markup {
-    files::chunk_fragment(chunk, next_load_id)
-}
-
 #[cfg(test)]
 mod tests {
     use gtl_application::viewer::{RenderOptions, ViewerTabId};

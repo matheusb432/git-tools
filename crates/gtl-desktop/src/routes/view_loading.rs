@@ -98,7 +98,7 @@ pub(super) fn prepare_materialization(
 
 fn render_chunk(load: ViewLoadId, page: &ChunkPage) -> String {
     let next_load_id = page.has_more.then_some(load.get());
-    gtl_preview::view_chunk_fragment(&page.chunk, next_load_id).into_string()
+    crate::render::view_chunk(&page.chunk, next_load_id).into_string()
 }
 
 #[cfg(test)]

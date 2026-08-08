@@ -22,6 +22,7 @@ impl Verb {
     pub(crate) const GEN_ICON: Self = Self("gen-icon");
     pub(crate) const INSTALL: Self = Self("install");
     pub(crate) const SETUP: Self = Self("setup");
+    pub(crate) const SHIP: Self = Self("ship");
     pub(crate) const TEST: Self = Self("test");
     pub(crate) const UNINSTALL: Self = Self("uninstall");
 

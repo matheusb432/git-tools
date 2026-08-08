@@ -126,6 +126,19 @@ pub enum Command {
     /// Windows.
     #[command(name = Verb::GEN_ICON.as_str())]
     GenIcon,
+    /// Cross-build the Win11 shippables (CLI + viewer + gtl-daemon) from this Linux host via
+    /// cargo-xwin. `--smoke` is a fast debug-profile linkage check; the default is the release
+    /// ship + verify.
+    #[command(name = Verb::SHIP.as_str())]
+    Ship {
+        /// Debug-profile compile-smoke of all three binaries — a non-authoritative linkage drift
+        /// check (no artifact verify), not a shippable.
+        #[arg(long)]
+        smoke: bool,
+        /// Skip only the `just test --all` preflight.
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
 }
 
 /// Which release artifact set `build` produces.

@@ -3,7 +3,7 @@
 
 mod chunks;
 
-pub(super) use chunks::{chunk_fragment, chunk_loader, view_chunks};
+pub(super) use chunks::{chunk_loader, view_chunks};
 use gtl_application::{
     diffs::{FileDiff, FileStatus, View},
     viewer::{DiffDensity, DiffLayout, RenderOptions},

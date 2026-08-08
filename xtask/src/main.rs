@@ -53,5 +53,6 @@ fn run(command: cli::Command) -> Result<()> {
             Ok(())
         }
         cli::Command::GenIcon => verbs::icon::run(),
+        cli::Command::Ship { smoke, force } => verbs::ship::run(smoke, force),
     }
 }

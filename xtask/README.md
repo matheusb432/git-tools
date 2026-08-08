@@ -1,13 +1,13 @@
 # xtask
 
-`xtask` is this repo's **embedded dev/release automation harness** (the cargo-xtask pattern). It is a workspace member built on demand and **never installed** — invoked only through this repo's own justfile as `cargo run -p xtask -- <verb>`.
+`xtask` is this repo's **embedded dev/release automation harness** (the cargo-xtask pattern). It is a workspace member built on demand and **never installed**. Repository recipes normally invoke it as `cargo run -p xtask -- <verb>`.
 
 ## Verbs
 
 | Verb | What it does | Justfile entry |
 | -- | -- | -- |
 | `setup` | Configure the tracked `.githooks` directory, install frontend dependencies, build and install both artifacts, and ensure `~/.local/bin` is on PATH. | `just setup` |
-| `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the viewer on PATH (idempotent byte-compare → installed/updated/unchanged; atomic replace is warm-tray-safe). Migrates `scripts/install.sh`. | `just install` / `just cli install` / `just desktop install` |
+| `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the viewer on PATH (idempotent byte comparison: installed, updated, or unchanged; atomic replace is warm-tray-safe). | `just install` / `just cli install` / `just desktop install` |
 | `uninstall [--remove-config] [--force]` | Remove the CLI, alias, daemon, viewer, desktop entry, and icon; optionally delete repo-local config. | `just uninstall` / `just purge` |
 | `test [--verbose] [--scope unit\|e2e\|all]` | Default (`unit`): default-member Rust tests. `--e2e`: hermetic native and browser E2E. `--all`: all Rust, frontend, drift, and E2E. Run `just check` separately for the read-only quality gate. `--e2e`/`--all` are shorthands for `--scope`. | `just test` |
 | `test coverage [cargo-llvm-cov args...]` | Collect workspace coverage with `cargo llvm-cov`; extra arguments are forwarded. | `just test coverage` |
@@ -23,10 +23,11 @@
 | `check-structure` | Cargo dependency-direction policy for core, shared, adapter, and black-box test packages. Wired into `lint` / `check`; also runnable standalone. | (via `just check`) |
 | `drift-check` | Rebuild the committed diff-preview JS bundle and fail if it drifts from its TypeScript sources. | `just drift-check` |
 | `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |
+| `ship [--smoke] [--force]` | Run `just test --all` unless forced, then cross-build the three Win11 exes. `--smoke --force` is the fast linkage-only path. | `just ship` |
 
 ## Why this is not a `new-rust-cli`
 
-This is the embedded kind, not an installable tool. It deliberately ships **no install shim, no scoop manifest, no `install` recipe, and no global-shim runbook** — those are forbidden for embedded automation crates. If you need a tool on PATH / shared across repos, scaffold with `just repos new-rust-cli` instead.
+This is embedded automation, not an installable tool. It ships no global xtask shim or Scoop manifest. Its `install` verb installs git-tools artifacts, not xtask itself. If you need a tool on PATH or shared across repos, scaffold with `just repos new-rust-cli` instead.
 
 ## Layout
 
@@ -48,7 +49,7 @@ Add an arm to `cli::Command` (its doc comment is the `--help` text) named via a 
 ## Build & test
 
 ```bash
-cargo run -p xtask -- gen-icon     # run a verb
+cargo run -p xtask -- gen-icon     # run a verb (or: ship --smoke)
 cargo test -p xtask                # arg-surface + unit tests
 ```
 

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use gtl_application::{diffs::View, viewer::RenderOptions};
-use maud::{Markup, PreEscaped, html};
+use maud::{Markup, html};
 
 use super::{diff_target_id, render_rows, selected_lines};
 use crate::{ViewChunk, syntax::PreviewResult};
@@ -17,20 +17,6 @@ pub(in crate::layout) fn chunk_loader(load_id: u64) -> Markup {
             hx-trigger="load"
             hx-target="this"
             hx-swap="outerHTML" {}
-    }
-}
-
-pub(in crate::layout) fn chunk_fragment(chunk: &ViewChunk, next_load_id: Option<u64>) -> Markup {
-    let target = format!("beforeend:#{}", chunk.target_id);
-    html! {
-        div hx-swap-oob=(target) data-chunk-rows=(chunk.rows) {
-            (PreEscaped(&chunk.html))
-        }
-        @if let Some(load_id) = next_load_id {
-            (chunk_loader(load_id))
-        } @else {
-            div id="viewer-chunk-loader" data-complete hidden {}
-        }
     }
 }
 
