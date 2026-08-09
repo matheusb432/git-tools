@@ -3621,18 +3621,13 @@ dependencies = [
  "gtl-models",
  "gtl-preview",
  "lru",
- "maud",
  "raw-window-handle",
- "serde",
  "serde_json",
- "sha2 0.11.0",
- "strum",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
  "tempfile",
  "toml 1.1.3+spec-1.1.0",
- "url",
  "x11-dl",
 ]
 
@@ -3702,7 +3697,6 @@ dependencies = [
  "strum",
  "syntect",
  "thiserror 2.0.19",
- "url",
 ]
 
 [[package]]

@@ -10,7 +10,7 @@ pub use tabbed::build_tabbed_html;
 
 use crate::{
     assets::{PREVIEW_BUNDLE, preview_css},
-    layout::{Surface, view_body},
+    layout::view_body,
     syntax::PreviewResult,
     text::plural,
 };
@@ -37,7 +37,7 @@ pub fn build_html(
         view.title,
         plural(count)
     );
-    let body = view_body(view, options, Surface::Artifact { view_index: 0 })?;
+    let body = view_body(view, options, 0)?;
     Ok(document(&title, theme, &body))
 }
 
@@ -67,28 +67,26 @@ fn document(title: &str, theme: Option<&str>, body: &Markup) -> String {
 mod tests {
     use gtl_application::{
         diffs::{Cmd, FileDiff, Foot, View},
-        viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabId},
+        viewer::{DiffDensity, DiffLayout, RenderOptions},
     };
     use gtl_models::diffs::Commit;
 
     use super::THEME_BOOT_JS;
     use crate::{
         fixtures::{has_disallowed_external_url, sample_view},
-        test_render::{build_html, build_tabbed_html, view_fragment},
+        test_render::{build_html, build_tabbed_html},
     };
 
     #[test]
-    fn artifact_and_app_fragment_keep_their_surface_presentation_distinct() {
-        let view = sample_view();
-        let options = RenderOptions::DEFAULT;
-        let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
-        let fragment = view_fragment(&view, options, tab_id).into_string();
-        let html = build_html(&view, options, None);
+    fn raw_artifact_keeps_browser_only_file_body_presentation() {
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
+        let document = scraper::Html::parse_document(&html);
+        let host_action =
+            scraper::Selector::parse("[data-open-diff-file]").expect("valid host-action selector");
 
-        assert!(fragment.contains("files/open"));
-        assert!(!html.contains("files/open"));
-        assert!(!fragment.contains("content-visibility"));
         assert!(html.contains("content-visibility"));
+        assert!(document.select(&host_action).next().is_none());
+        assert!(!html.contains("hx-"));
     }
 
     #[test]

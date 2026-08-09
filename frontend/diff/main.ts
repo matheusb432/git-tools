@@ -1,8 +1,8 @@
-import { installHistoryActions } from "./history";
-import { enhanceWithin, installSwapLifecycle } from "./swap";
+import { enhanceLayout } from "./enhance-layout";
+import { createEnhancementLifecycle } from "./enhancement-lifecycle";
 import { initTabs } from "./tabbed";
 
-enhanceWithin(document);
-installSwapLifecycle(document);
-installHistoryActions(document);
+const layoutLifecycle = createEnhancementLifecycle(".layout", enhanceLayout);
+
+layoutLifecycle.enhanceWithin(document);
 initTabs();

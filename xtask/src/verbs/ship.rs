@@ -12,8 +12,8 @@ use crate::{
     verb::Verb,
 };
 
-/// The Windows cross-target. Production builds enable Tauri's custom protocol and the embedded
-/// Dioxus shell explicitly.
+/// The Windows cross-target. Production builds enable Tauri's custom protocol for embedded App
+/// assets.
 const WIN_TARGET: &str = "x86_64-pc-windows-msvc";
 
 /// Whether the Linux-to-Windows cross toolchain is ready, plus fix-hint lines when not.
@@ -190,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn viewer_cross_build_uses_the_production_shell_features() {
+    fn viewer_cross_build_uses_the_production_app_feature() {
         assert_eq!(
             viewer_build_arguments(false),
             [
@@ -200,7 +200,7 @@ mod tests {
                 "-p",
                 "gtl-desktop",
                 "--features",
-                "custom-protocol,dioxus-shell",
+                "custom-protocol",
                 "--target",
                 WIN_TARGET,
             ]

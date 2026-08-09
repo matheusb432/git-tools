@@ -1,4 +1,4 @@
-//! Mobile navigation and the shared view-options popover.
+//! Mobile navigation and view actions for self-contained raw artifacts.
 
 use maud::{Markup, PreEscaped, html};
 
@@ -8,51 +8,12 @@ const VIEW_ICON: &str = r#"<svg fill="none" viewBox="0 0 24 24" stroke-width="1.
 
 const MOBILE_NAVIGATION_BUTTON_CLASSES: &str = "relative hidden min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 border-0 bg-transparent px-1 py-1 text-[10px] leading-none text-ink-2 [font:inherit] hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc disabled:cursor-default disabled:opacity-35 mobile:flex [&_svg]:size-5";
 const MOBILE_MENU_BUTTON_CLASSES: &str = "inline-flex min-h-11 w-full cursor-pointer items-center rounded-sm border border-line-2 bg-surface-2 px-3 py-2.5 text-left text-[12.5px] text-ink-2 [font:inherit] hover:border-acc-line hover:bg-acc-soft hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
-const MOBILE_MENU_DANGER_BUTTON_CLASSES: &str = "inline-flex min-h-11 w-full cursor-pointer items-center rounded-sm border border-del-line bg-del-bg px-3 py-2.5 text-left text-[12.5px] text-del [font:inherit] hover:border-del hover:bg-del hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
 
-// TODO: [gtl-web]: replace the desktop Maud slots with Dioxus-owned mobile controls.
-#[derive(Default)]
-pub struct MobileViewControls {
-    display: Option<Markup>,
-    viewer_actions: Option<Markup>,
-}
-
-impl MobileViewControls {
-    pub fn viewer(display: Markup, viewer_actions: Markup) -> Self {
-        Self {
-            display: Some(display),
-            viewer_actions: Some(viewer_actions),
-        }
-    }
-}
-
-pub fn mobile_menu_button_classes() -> &'static str {
-    MOBILE_MENU_BUTTON_CLASSES
-}
-
-pub fn mobile_menu_danger_button_classes() -> &'static str {
-    MOBILE_MENU_DANGER_BUTTON_CLASSES
-}
-
-// TODO: [gtl-web]: make the desktop mobile navigation buttons into components and retain artifact
-// buttons here.
-pub fn files_navigation(count: Option<usize>, enabled: bool) -> Markup {
-    files_navigation_target("viewer-files-popover", count, enabled)
-}
-
-pub(super) fn files_navigation_target(target: &str, count: Option<usize>, enabled: bool) -> Markup {
+pub(super) fn files_navigation(target: &str, count: Option<usize>, enabled: bool) -> Markup {
     navigation_button("Changed files", "Files", target, count, enabled, FILES_ICON)
 }
 
-pub fn commits_navigation(count: Option<usize>, enabled: bool) -> Markup {
-    commits_navigation_target("viewer-commits-popover", count, enabled)
-}
-
-pub(super) fn commits_navigation_target(
-    target: &str,
-    count: Option<usize>,
-    enabled: bool,
-) -> Markup {
+pub(super) fn commits_navigation(target: &str, count: Option<usize>, enabled: bool) -> Markup {
     navigation_button(
         "Commits in range",
         "History",
@@ -63,16 +24,14 @@ pub(super) fn commits_navigation_target(
     )
 }
 
-pub fn view_navigation(target_id: &str, enabled: bool) -> Markup {
-    navigation_button("View settings", "View", target_id, None, enabled, VIEW_ICON)
+pub(super) fn view_navigation(target: &str) -> Markup {
+    navigation_button("View settings", "View", target, None, true, VIEW_ICON)
 }
 
-// TODO: [gtl-web]: make the desktop view-settings popover into a component and retain artifact
-// markup here.
-pub(super) fn popover(target_id: &str, controls: MobileViewControls) -> Markup {
+pub(super) fn popover(target: &str) -> Markup {
     let preview_actions = preview_actions();
     html! {
-        aside id=(target_id)
+        aside id=(target)
             class="preview-mobile-controls fixed top-2 right-2 bottom-auto left-auto m-0 max-h-[calc(100vh_-_16px)] w-[min(320px,calc(100vw_-_16px))] max-w-none overflow-y-auto rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)]"
             popover {
             header class="sticky top-0 z-1 flex items-center justify-between border-b border-line bg-surface-2 px-3 py-2.5" {
@@ -82,18 +41,12 @@ pub(super) fn popover(target_id: &str, controls: MobileViewControls) -> Markup {
                 }
                 button type="button"
                     class="size-9 cursor-pointer rounded-sm border-0 bg-transparent text-lg text-ink-2 [font:inherit] hover:bg-line hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
-                    popovertarget=(target_id)
+                    popovertarget=(target)
                     popovertargetaction="hide"
                     aria-label="Close view settings" { "x" }
             }
             div class="grid gap-3 p-3" {
-                @if let Some(display) = controls.display {
-                    (section("Display", &display))
-                }
                 (section("Diff", &preview_actions))
-                @if let Some(viewer_actions) = controls.viewer_actions {
-                    (section("Viewer", &viewer_actions))
-                }
             }
         }
     }

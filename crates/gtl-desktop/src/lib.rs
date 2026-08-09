@@ -1,21 +1,13 @@
 //! gtl-viewer: the Tauri desktop diff viewer.
 #[cfg(feature = "benchmark-support")]
-pub use render::MaudViewerRenderer;
-#[cfg(feature = "benchmark-support")]
 pub use session::{CacheDisposition, CachedView, WeightedViewCache};
 mod bridge;
-mod commands;
-#[cfg(feature = "dioxus-poc")]
-mod dioxus_poc;
 mod live_view_restoration;
 mod materialization;
 mod pending_recipes;
 mod presentation;
-mod protocol_config;
 mod recipe_worker;
 mod recipes;
-mod render;
-mod routes;
 mod session;
 mod window_activation;
 
@@ -150,40 +142,10 @@ fn focus_main(window: &tauri::WebviewWindow) {
     }
 }
 
-#[cfg(any(feature = "dioxus-poc", feature = "dioxus-shell"))]
 fn main_window_url() -> WebviewUrl {
     WebviewUrl::App("index.html".into())
 }
 
-#[cfg(not(any(feature = "dioxus-poc", feature = "dioxus-shell")))]
-fn main_window_url() -> anyhow::Result<WebviewUrl> {
-    let app_url = protocol_config::APP_URL.parse::<url::Url>()?;
-    Ok(WebviewUrl::CustomProtocol(app_url))
-}
-
-#[cfg(feature = "dioxus-poc")]
-fn with_viewer_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
-    builder.invoke_handler(tauri::generate_handler![
-        bridge::viewer_get_shell,
-        bridge::viewer_prepare_diff_document,
-        bridge::viewer_load_diff_chunk,
-        bridge::viewer_activate_tab,
-        bridge::viewer_close_tab,
-        bridge::viewer_refresh_tab,
-        bridge::viewer_delete_live_tab,
-        bridge::viewer_select_commit,
-        bridge::viewer_clear_commit_selection,
-        bridge::viewer_set_preference,
-        bridge::viewer_list_history,
-        bridge::viewer_open_history,
-        bridge::viewer_get_settings,
-        bridge::viewer_open_diff_file,
-        dioxus_poc::dioxus_poc_process_pending,
-        dioxus_poc::dioxus_poc_diff_fragment,
-    ])
-}
-
-#[cfg(not(feature = "dioxus-poc"))]
 fn with_viewer_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.invoke_handler(tauri::generate_handler![
         bridge::viewer_get_shell,
@@ -294,17 +256,14 @@ fn setup_viewer(
 /// Returns an error when viewer storage cannot initialize, window setup fails, or the Tauri
 /// runtime cannot start.
 pub fn run() -> anyhow::Result<()> {
-    let data_root = commands::data_root().map_err(anyhow::Error::msg)?;
+    let data_root = gtl_infra::data_root::resolve()?;
     let viewer_app = presentation::ViewerApp::open(
         &data_root,
         gtl_infra::user_config::TomlSettingsStore::from_environment(),
         DEFAULT_VIEW_CACHE_WEIGHT,
     )?;
     let cold_start_batches = recipes_from_argv(&std::env::args().collect::<Vec<_>>());
-    #[cfg(any(feature = "dioxus-poc", feature = "dioxus-shell"))]
     let main_window_url = main_window_url();
-    #[cfg(not(any(feature = "dioxus-poc", feature = "dioxus-shell")))]
-    let main_window_url = main_window_url()?;
     let builder = with_viewer_commands(
         tauri::Builder::default()
             .manage(viewer_app)
@@ -326,19 +285,6 @@ pub fn run() -> anyhow::Result<()> {
                 focus_main(window);
             }
         }))
-        .register_asynchronous_uri_scheme_protocol(
-            protocol_config::PROTOCOL_SCHEME,
-            |ctx, request, responder| {
-                let app = ctx
-                    .app_handle()
-                    .state::<presentation::ViewerApp>()
-                    .inner()
-                    .clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    responder.respond(routes::serve_app(&app, request));
-                });
-            },
-        )
         .setup(move |app| setup_viewer(app, cold_start_batches, main_window_url))
         .on_window_event(handle_window_event)
         .run(tauri::generate_context!())?;
@@ -399,9 +345,8 @@ mod tests {
         assert_eq!(MAIN_WINDOW_MIN_SIZE, (390.0, 480.0));
     }
 
-    #[cfg(any(feature = "dioxus-poc", feature = "dioxus-shell"))]
     #[test]
-    fn dioxus_shell_uses_the_tauri_app_url_boundary() {
+    fn main_window_uses_the_tauri_app_url_boundary() {
         assert!(matches!(
             main_window_url(),
             WebviewUrl::App(path) if path == std::path::Path::new("index.html")

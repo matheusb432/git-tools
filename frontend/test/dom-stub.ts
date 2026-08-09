@@ -427,8 +427,7 @@ if (typeof globalThis.requestAnimationFrame === "undefined") {
 }
 
 // The stub document is a singleton, so every case inherits whatever the last one left in the
-// body. Clearing it here is the only teardown a case needs; document-level listeners installed
-// through the install-once guards deliberately survive, one install per test file.
+// body. Clearing it here is the shared DOM teardown between cases.
 beforeEach(() => {
   document.body.replaceChildren();
 });

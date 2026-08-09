@@ -49,10 +49,7 @@ const SOURCE_DIRECTORIES: &[&str] = &[
     "frontend/diff-island",
     "frontend/shared",
 ];
-const SOURCE_DIRECTORY_EXCLUSIONS: &[&str] = &[
-    "crates/gtl-desktop/src/embedded",
-    "crates/gtl-preview/src/embedded",
-];
+const SOURCE_DIRECTORY_EXCLUSIONS: &[&str] = &["crates/gtl-preview/src/embedded"];
 const GENERATED_SOURCE_OUTPUTS: &[&str] = &[
     "crates/gtl-web/assets/diff-island.css",
     "crates/gtl-web/assets/generated",

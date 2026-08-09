@@ -3,8 +3,9 @@
   "productName": "gtl-viewer-dev",
   "identifier": "dev.gittools.viewer.dev",
   "build": {
+    "devUrl": "http://127.0.0.1:8080",
     "beforeDevCommand": {
-      "script": "deno task --frozen \"dev:desktop:*\"",
+      "script": "cargo run --quiet -p xtask -- web-serve -- --addr 127.0.0.1 --port 8080 --open false",
       "cwd": "../..",
       "wait": false
     }

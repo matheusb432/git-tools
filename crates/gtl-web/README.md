@@ -1,25 +1,20 @@
 # gtl-web
 
-`gtl-web` is the development-only Dioxus Web shell for the desktop viewer proof. Dioxus owns two demonstration routes and transient shell state. The desktop backend still renders the diff island.
+`gtl-web` is the production Dioxus Web application embedded in the Tauri viewer. It owns the
+workspace, diff history, read-only user settings, application navigation, and transient shell
+state.
 
-The proof runs behind the `dioxus-poc` feature with a separate Tauri identity. The production viewer continues to load its Maud and HTMX document from the `gtl://app` custom protocol.
+The desktop backend remains authoritative for durable tabs, history, settings, Git decisions, and
+rendering. Shared Rust DTOs define focused Tauri commands and queries. The active diff is installed
+in one open shadow root: Rust renders its Maud file document and bounded row chunks, while the web
+application owns the surrounding shell.
 
-## Run the proof
+## Runtime and development
 
-Start the Dioxus dev server, TypeScript bridge watcher, and Tauri host:
+Release builds contain only local application assets and require no runtime network. The typed
+xtask owns stylesheet generation, the Dioxus Web bundle, Tauri embedding, drift checks, and the
+development server. Use the repository's `just --list` output for current entry points.
 
-```sh
-just desktop dioxus-poc
-```
-
-From another terminal in this repository, send the last committed diff to the sibling debug viewer:
-
-```sh
-mise exec -- cargo run --quiet -p gtl-cli -- diff --last 1
-```
-
-Use the debug CLI command for this proof. The installed `gtl` command resolves the installed production viewer instead.
-
-RSX and Rust logic reload through the Dioxus dev server. `src/app/assets/styles/tailwind.css` drives the generated shell stylesheet, and `frontend/dioxus-poc/` owns the watched bridge bundle.
-
-See [the Dioxus Web proof agent guide](../../docs/agents/dioxus-web-poc.md) for the runtime boundary, ownership map, and current limitations.
+`src/app/assets/styles/tailwind.css` is the shell stylesheet source. The framework-free adapter in
+`frontend/diff-island/` mounts the opaque server-rendered diff document and appends typed chunk
+responses; it does not own application state or render rows.

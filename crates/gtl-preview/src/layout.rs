@@ -1,47 +1,20 @@
-//! The shared `.layout` body: the Shelf 3-column grid (file tree left, diff
-//! center, commit shelf right) with titlebar and keybar spanning the full
-//! width. One module per region; this module owns their composition.
+//! The raw artifact's `.layout` body: the Shelf 3-column grid with titlebar
+//! and keybar spanning the full width.
 
+mod artifact_controls;
 mod diff_document;
 mod file_status;
 mod files;
 mod keybar;
-pub(crate) mod mobile_controls;
 mod shelf;
 mod titlebar;
 mod tree;
 
 pub(crate) use diff_document::shell as diff_document_shell;
-use gtl_application::{
-    diffs::View,
-    viewer::{RenderOptions, ViewerTabId},
-};
+use gtl_application::{diffs::View, viewer::RenderOptions};
 use maud::{Markup, html};
 
 use crate::syntax::PreviewResult;
-
-/// The host that consumes one rendered `.layout` body.
-///
-/// The two hosts share every region, but file bodies diverge: the desktop app's
-/// wry/WebKitGTK webview never marks swapped-in `content-visibility:auto`
-/// subtrees relevant, leaving them permanently unpainted, so only browser
-/// artifacts opt into that offscreen-skip optimization.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Surface {
-    /// The desktop viewer's embedded webview.
-    App { tab_id: ViewerTabId },
-    /// Self-contained offline documents opened in a browser.
-    Artifact { view_index: usize },
-}
-
-impl Surface {
-    fn mobile_controls_target(self) -> String {
-        match self {
-            Self::App { .. } => "viewer-controls-popover".to_string(),
-            Self::Artifact { view_index } => format!("preview-controls-popover-{view_index}"),
-        }
-    }
-}
 
 struct ArtifactMobileNavigationTargets {
     files: String,
@@ -50,15 +23,12 @@ struct ArtifactMobileNavigationTargets {
 }
 
 impl ArtifactMobileNavigationTargets {
-    fn from_surface(surface: Surface) -> Option<Self> {
-        let Surface::Artifact { view_index } = surface else {
-            return None;
-        };
-        Some(Self {
+    fn new(view_index: usize) -> Self {
+        Self {
             files: format!("preview-files-popover-{view_index}"),
             commits: format!("preview-commits-popover-{view_index}"),
-            controls: surface.mobile_controls_target(),
-        })
+            controls: format!("preview-controls-popover-{view_index}"),
+        }
     }
 }
 
@@ -70,103 +40,17 @@ const LAYOUT_PRESENTATION_CLASSES: &str = concat!(
     "print:block print:h-auto print:bg-white print:text-[#111]",
 );
 
-// Body-only markup (the .layout block) shared by the single and tabbed views so the
-// document chrome — one <style>/<script> — lives only at the top level. Per-commit
-// [popover] elements live inside .layout so the per-layout JS scoping in preview.js
-// finds them.
-// TODO: [gtl-web]: make the desktop layout shell into a component around the Maud diff document.
+// Body-only markup shared by the single and tabbed artifact documents so the
+// document chrome lives once at the top level. Per-commit popovers stay inside
+// `.layout` for the raw enhancer's per-layout scoping.
 pub(crate) fn view_body(
     view: &View,
     options: RenderOptions,
-    surface: Surface,
+    view_index: usize,
 ) -> PreviewResult<Markup> {
-    view_body_with_mode(
-        view,
-        view,
-        None,
-        options,
-        surface,
-        BodyMode::Complete,
-        mobile_controls::MobileViewControls::default(),
-    )
-}
-
-pub(crate) fn view_body_with_mobile_controls(
-    view: &View,
-    range_view: &View,
-    selected_commit_sha: Option<&str>,
-    options: RenderOptions,
-    surface: Surface,
-    controls: mobile_controls::MobileViewControls,
-) -> PreviewResult<Markup> {
-    view_body_with_mode(
-        view,
-        range_view,
-        selected_commit_sha,
-        options,
-        surface,
-        BodyMode::Complete,
-        controls,
-    )
-}
-
-pub(crate) fn view_body_shell(
-    view: &View,
-    options: RenderOptions,
-    surface: Surface,
-    load_id: u64,
-) -> PreviewResult<Markup> {
-    view_body_with_mode(
-        view,
-        view,
-        None,
-        options,
-        surface,
-        BodyMode::Shell { load_id },
-        mobile_controls::MobileViewControls::default(),
-    )
-}
-
-pub(crate) fn view_body_shell_with_mobile_controls(
-    view: &View,
-    range_view: &View,
-    selected_commit_sha: Option<&str>,
-    options: RenderOptions,
-    surface: Surface,
-    load_id: u64,
-    controls: mobile_controls::MobileViewControls,
-) -> PreviewResult<Markup> {
-    view_body_with_mode(
-        view,
-        range_view,
-        selected_commit_sha,
-        options,
-        surface,
-        BodyMode::Shell { load_id },
-        controls,
-    )
-}
-
-#[derive(Clone, Copy)]
-enum BodyMode {
-    Complete,
-    Shell { load_id: u64 },
-}
-
-fn view_body_with_mode(
-    view: &View,
-    range_view: &View,
-    selected_commit_sha: Option<&str>,
-    options: RenderOptions,
-    surface: Surface,
-    mode: BodyMode,
-    mobile_controls: mobile_controls::MobileViewControls,
-) -> PreviewResult<Markup> {
-    let mobile_controls_target = surface.mobile_controls_target();
-    let artifact_mobile_navigation = ArtifactMobileNavigationTargets::from_surface(surface);
+    let mobile_navigation = ArtifactMobileNavigationTargets::new(view_index);
     let changed_files = tree::ChangedFilesPresentation::new(view);
-    let commit_shelf =
-        shelf::CommitShelfPresentation::new(range_view, surface, options, selected_commit_sha);
+    let commit_shelf = shelf::CommitShelfPresentation::new(view);
     Ok(html! {
         div class={
             (LAYOUT_PRESENTATION_CLASSES) " "
@@ -174,31 +58,17 @@ fn view_body_with_mode(
             (crate::rows::SPLIT_PRESENTATION_CLASSES) " "
             (crate::rows::INTRALINE_PRESENTATION_CLASSES)
         } {
-            (titlebar::titlebar(view, artifact_mobile_navigation.as_ref()))
+            (titlebar::titlebar(view, &mobile_navigation))
             (tree::tree(&changed_files))
             main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-0 pb-[60px] wide-screen:px-7 compact-desktop:px-4 tablet:px-3 mobile:px-1 tablet:pb-12 print:overflow-visible print:p-0" {
-                @match mode {
-                    BodyMode::Complete => (files::file_blocks(view, options, surface)?)
-                    BodyMode::Shell { load_id } => {
-                        (files::file_block_shells(view, options, surface)?)
-                        (files::chunk_loader(load_id))
-                    }
-                }
+                (files::file_blocks(view, options)?)
             }
             (shelf::shelf(&commit_shelf))
             (keybar::keybar(view))
             (shelf::commit_popovers(&commit_shelf))
-            @match &artifact_mobile_navigation {
-                Some(targets) => {
-                    (tree::mobile_popover(&changed_files, &targets.files))
-                    (shelf::mobile_popover(&commit_shelf, &targets.commits))
-                }
-                None => {
-                    (tree::mobile_popover(&changed_files, "viewer-files-popover"))
-                    (shelf::mobile_popover(&commit_shelf, "viewer-commits-popover"))
-                }
-            }
-            (mobile_controls::popover(&mobile_controls_target, mobile_controls))
+            (tree::mobile_popover(&changed_files, &mobile_navigation.files))
+            (shelf::mobile_popover(&commit_shelf, &mobile_navigation.commits))
+            (artifact_controls::popover(&mobile_navigation.controls))
         }
     })
 }
@@ -212,16 +82,9 @@ pub(crate) fn view_chunks(
 
 #[cfg(test)]
 mod tests {
-    use gtl_application::viewer::{RenderOptions, ViewerTabId};
+    use gtl_application::viewer::RenderOptions;
 
-    use crate::{
-        fixtures::sample_view,
-        test_render::{build_html, view_fragment},
-    };
-
-    fn tab_id(raw: u64) -> ViewerTabId {
-        ViewerTabId::try_new(raw).expect("positive tab id")
-    }
+    use crate::{fixtures::sample_view, test_render::build_html};
 
     fn layout_classes(html: &str) -> &str {
         html.split_once(r#"<div class="layout "#)
@@ -231,13 +94,12 @@ mod tests {
     }
 
     #[test]
-    fn view_fragment_omits_document_chrome_and_presentation_controls() {
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id(1)).into_string();
+    fn raw_layout_omits_presentation_controls() {
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         assert!(!html.contains(r#"class="layout-toggle""#));
         assert!(!html.contains(r#"class="view-toggle""#));
         assert!(!html.contains(r#"class="theme-select""#));
-        assert!(!html.contains("localStorage"));
         assert!(html.contains(r#"<aside class="tree "#));
         assert!(html.contains(r#"<aside class="shelf"#));
         assert!(html.contains(r#"<div id="pop-abc123def" class="print:hidden! "#));
@@ -261,9 +123,7 @@ mod tests {
 
     #[test]
     fn view_body_carries_grid_scroll_and_print_contracts() {
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id(1))
-            .into_string()
-            .replace("&amp;", "&");
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None).replace("&amp;", "&");
         let layout = layout_classes(&html);
         eprintln!("layout_root_class_bytes={}", layout.len());
 

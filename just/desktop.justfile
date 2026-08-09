@@ -5,16 +5,10 @@ set working-directory := '..'
 _default:
     @just --list desktop
 
-# Start the debug viewer with the isolated development identity and production-shaped embedded assets.
+# Start the Dioxus viewer with the isolated development identity and typed web dev server.
 [group('desktop')]
 up:
-    deno task --frozen build
-    cd crates/gtl-desktop && cargo tauri dev --config tauri.dev.conf.json --features custom-protocol --no-dev-server
-
-# Run the removable Dioxus Web shell proof inside its isolated Tauri development identity.
-[group('desktop')]
-dioxus-poc:
-    cd crates/gtl-desktop && cargo tauri dev --config tauri.dioxus.conf.json --features dioxus-poc
+    cd crates/gtl-desktop && cargo tauri dev --config tauri.dev.conf.json
 
 # Build the gtl-viewer Tauri binary; missing webkit2gtk-4.1 headers fail with an actionable error.
 [group('desktop')]

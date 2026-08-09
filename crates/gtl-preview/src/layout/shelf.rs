@@ -1,11 +1,9 @@
 //! Right commit shelf: one card per commit in range plus the native-popover
 //! bodies for commits carrying extended notes.
 
-use gtl_application::{diffs::View, viewer::RenderOptions};
+use gtl_application::diffs::View;
 use gtl_models::diffs::Commit;
 use maud::{Markup, html};
-
-use super::Surface;
 
 const SHELF_CLASSES: &str = concat!(
     "gtl-scroll [grid-area:2/3] overflow-auto border-l border-line bg-surface p-3 ",
@@ -44,25 +42,11 @@ pub(super) struct CommitShelfPresentation<'view> {
 }
 
 impl<'view> CommitShelfPresentation<'view> {
-    pub(super) fn new(
-        view: &'view View,
-        surface: Surface,
-        options: RenderOptions,
-        selected_commit_sha: Option<&str>,
-    ) -> Self {
+    pub(super) fn new(view: &'view View) -> Self {
         Self {
             commits_label: &view.commits_label,
-            hint: match surface {
-                Surface::App { .. } => "view = standalone patch · hash = copy · hover = notes",
-                Surface::Artifact { .. } => "hash = copy · hover = notes",
-            },
-            commits: view
-                .commits
-                .iter()
-                .map(|commit| {
-                    CommitPresentation::new(commit, surface, options, selected_commit_sha)
-                })
-                .collect(),
+            hint: "hash = copy · hover = notes",
+            commits: view.commits.iter().map(CommitPresentation::new).collect(),
         }
     }
 }
@@ -71,77 +55,23 @@ struct CommitPresentation<'view> {
     commit: &'view Commit,
     abbreviated_sha: String,
     popover_id: Option<String>,
-    subject_action: CommitSubjectAction,
-}
-
-enum CommitSubjectAction {
-    Informational,
-    Select { route: String, is_selected: bool },
 }
 
 impl<'view> CommitPresentation<'view> {
-    fn new(
-        commit: &'view Commit,
-        surface: Surface,
-        options: RenderOptions,
-        selected_commit_sha: Option<&str>,
-    ) -> Self {
+    fn new(commit: &'view Commit) -> Self {
         let has_notes = !commit.body.trim().is_empty();
         Self {
             commit,
             abbreviated_sha: commit.sha.chars().take(10).collect(),
             popover_id: has_notes.then(|| format!("pop-{}", commit.sha)),
-            subject_action: commit_subject_action(
-                surface,
-                options,
-                commit,
-                selected_commit_sha == Some(commit.sha.as_str()),
-            ),
         }
     }
 
     fn has_notes(&self) -> bool {
         self.popover_id.is_some()
     }
-
-    fn is_selected(&self) -> bool {
-        matches!(
-            &self.subject_action,
-            CommitSubjectAction::Select {
-                is_selected: true,
-                ..
-            }
-        )
-    }
 }
 
-fn commit_subject_action(
-    surface: Surface,
-    options: RenderOptions,
-    commit: &Commit,
-    is_selected: bool,
-) -> CommitSubjectAction {
-    let Surface::App { tab_id } = surface else {
-        return CommitSubjectAction::Informational;
-    };
-    let route = if is_selected {
-        format!(
-            "/tabs/{tab_id}/view?layout={}&density={}",
-            options.layout(),
-            options.density(),
-        )
-    } else {
-        format!(
-            "/tabs/{tab_id}/commits/{}/view?layout={}&density={}",
-            commit.sha,
-            options.layout(),
-            options.density(),
-        )
-    };
-    CommitSubjectAction::Select { route, is_selected }
-}
-
-// TODO: [gtl-web]: make the desktop commit shelf into a component.
 pub(super) fn shelf(presentation: &CommitShelfPresentation<'_>) -> Markup {
     html! {
         aside class={ "shelf " (SHELF_CLASSES) " " (SHELF_STATE_CLASSES) } aria-label="Commits in range" {
@@ -157,7 +87,6 @@ pub(super) fn shelf(presentation: &CommitShelfPresentation<'_>) -> Markup {
     }
 }
 
-// TODO: [gtl-web]: make the desktop commit-history popover into a component.
 pub(super) fn mobile_popover(presentation: &CommitShelfPresentation<'_>, target: &str) -> Markup {
     html! {
         aside id=(target)
@@ -190,7 +119,6 @@ fn commit_rows(presentation: &CommitShelfPresentation<'_>) -> Markup {
             @let commit = commit_presentation.commit;
             div class={
                 (if commit_presentation.has_notes() { "cline has " } else { "cline " })
-                (if commit_presentation.is_selected() { "active " } else { "" })
                 (COMMIT_CARD_CLASSES)
             }
                 data-sha=(commit.sha)
@@ -214,22 +142,7 @@ fn commit_rows(presentation: &CommitShelfPresentation<'_>) -> Markup {
                         }
                     }
                 }
-                @match &commit_presentation.subject_action {
-                    CommitSubjectAction::Select { route, is_selected } => {
-                        button type="button"
-                            class={ "commit-select block w-full cursor-pointer border-0 bg-transparent p-0 text-left [font:inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc sub " (SUBJECT_CLASSES) }
-                            aria-pressed=(is_selected)
-                            hx-get=(route)
-                            hx-target="#viewer-view"
-                            hx-sync="#viewer-view:replace"
-                            hx-swap="outerHTML" {
-                            (commit.subject)
-                        }
-                    }
-                    CommitSubjectAction::Informational => {
-                        div class={ "sub " (SUBJECT_CLASSES) } { (commit.subject) }
-                    }
-                }
+                div class={ "sub " (SUBJECT_CLASSES) } { (commit.subject) }
             }
         }
     }
@@ -238,7 +151,6 @@ fn commit_rows(presentation: &CommitShelfPresentation<'_>) -> Markup {
 // Native-popover bodies for commits that carry a body, emitted once per .layout (top-level
 // [popover] elements escape the sidebar's scroll clip). The id is keyed to the sha so the
 // shelf card's data-pop can resolve its popover within `root`.
-// TODO: [gtl-web]: make the desktop commit-notes popover into a component.
 pub(super) fn commit_popovers(presentation: &CommitShelfPresentation<'_>) -> Markup {
     html! {
         @for commit_presentation in &presentation.commits {

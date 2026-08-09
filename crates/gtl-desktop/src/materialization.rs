@@ -7,7 +7,7 @@ use crate::session::{ActiveContentIdentity, ViewerSession};
 
 /// Identifies one active, non-zero view materialization.
 ///
-/// Keeping the raw integer private prevents unvalidated route values from
+/// Keeping the raw integer private prevents unvalidated bridge values from
 /// entering the materialization and rendering pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ViewLoadId(NonZeroU64);
@@ -20,12 +20,6 @@ impl ViewLoadId {
     /// Returns the raw identifier required by the preview renderer boundary.
     pub(crate) const fn get(self) -> u64 {
         self.0.get()
-    }
-}
-
-impl std::fmt::Display for ViewLoadId {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
     }
 }
 
@@ -88,18 +82,6 @@ pub(crate) struct ViewMaterializations {
 }
 
 impl ViewMaterializations {
-    pub(crate) fn prepare(
-        &self,
-        session: &Mutex<ViewerSession>,
-        options: RenderOptions,
-    ) -> Result<Option<ViewLoadId>, MaterializationError> {
-        let prepared = self.prepare_content(session, options)?;
-        Ok(match prepared {
-            None | Some(PreparedMaterialization::Complete) => None,
-            Some(PreparedMaterialization::Loading(load)) => Some(load),
-        })
-    }
-
     pub(crate) fn prepare_content(
         &self,
         session: &Mutex<ViewerSession>,
@@ -391,10 +373,14 @@ mod tests {
         session.activate(first);
         let session = Mutex::new(session);
         let materializations = ViewMaterializations::default();
-        let first_load = materializations
-            .prepare(&session, RenderOptions::DEFAULT)
+        let first_load = match materializations
+            .prepare_content(&session, RenderOptions::DEFAULT)
             .expect("prepare first")
-            .expect("ready first");
+            .expect("ready first")
+        {
+            PreparedMaterialization::Loading(load) => load,
+            PreparedMaterialization::Complete => panic!("first view contains diff rows"),
+        };
 
         session.lock().expect("session").activate(second);
 
@@ -428,10 +414,14 @@ mod tests {
         session.activate(first);
         let session = Mutex::new(session);
         let materializations = ViewMaterializations::default();
-        let first_load = materializations
-            .prepare(&session, RenderOptions::DEFAULT)
+        let first_load = match materializations
+            .prepare_content(&session, RenderOptions::DEFAULT)
             .expect("prepare first")
-            .expect("ready first");
+            .expect("ready first")
+        {
+            PreparedMaterialization::Loading(load) => load,
+            PreparedMaterialization::Complete => panic!("first view contains diff rows"),
+        };
 
         session
             .lock()

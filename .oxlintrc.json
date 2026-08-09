@@ -20,7 +20,7 @@
           {
             "patterns": [
               {
-                "group": ["**/boot", "**/boot/**", "**/diff", "**/diff/**", "**/viewer", "**/viewer/**"],
+                "group": ["**/boot", "**/boot/**", "**/diff", "**/diff/**", "**/diff-island", "**/diff-island/**"],
                 "message": "shared is the bottom layer: a bundle imports shared, never the other way round."
               }
             ]
@@ -36,24 +36,8 @@
           {
             "patterns": [
               {
-                "group": ["**/boot", "**/boot/**", "**/viewer", "**/viewer/**"],
-                "message": "diff and viewer are sibling bundles; share through frontend/shared."
-              }
-            ]
-          }
-        ]
-      }
-    },
-    {
-      "files": ["frontend/viewer/**"],
-      "rules": {
-        "no-restricted-imports": [
-          "error",
-          {
-            "patterns": [
-              {
-                "group": ["**/boot", "**/boot/**", "**/diff", "**/diff/**"],
-                "message": "diff and viewer are sibling bundles; share through frontend/shared."
+                "group": ["**/boot", "**/boot/**", "**/diff-island", "**/diff-island/**"],
+                "message": "diff is the reusable layer; boot and diff-island depend inward."
               }
             ]
           }
@@ -79,17 +63,16 @@
     },
     {
       "files": ["frontend/**"],
-      "excludeFiles": ["frontend/viewer/**"],
       "rules": {
         "no-restricted-globals": [
           "error",
           {
             "name": "__TAURI__",
-            "message": "the Tauri host exists only in the viewer document."
+            "message": "frontend bundles use typed Rust-owned adapters instead of the untyped Tauri global."
           },
           {
             "name": "htmx",
-            "message": "the htmx bootstrap runs only in the viewer document."
+            "message": "the production and raw artifact frontends do not load HTMX."
           }
         ]
       }

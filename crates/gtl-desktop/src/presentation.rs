@@ -17,7 +17,6 @@ use crate::{
     materialization::ViewMaterializations,
     recipe_worker::RecipeWorker,
     recipes::RecipeExecutor,
-    render::MaudViewerRenderer,
     session::{PendingRecipes, ViewerSession},
 };
 
@@ -30,7 +29,6 @@ pub(crate) struct ViewerApp {
     pub(crate) recipe_worker: RecipeWorker,
     pub(crate) materializations: Arc<ViewMaterializations>,
     pending: Arc<PendingRecipes>,
-    pub(crate) renderer: MaudViewerRenderer,
     pub(crate) user_settings: TomlSettingsStore,
     pub(crate) restoration: Arc<RestorationGate>,
 }
@@ -61,7 +59,6 @@ impl ViewerApp {
             recipe_worker,
             materializations: Arc::new(ViewMaterializations::default()),
             pending: Arc::new(PendingRecipes::default()),
-            renderer: MaudViewerRenderer,
             user_settings,
             restoration: Arc::new(RestorationGate::default()),
         })

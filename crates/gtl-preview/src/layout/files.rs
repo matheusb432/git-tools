@@ -3,7 +3,7 @@
 
 mod chunks;
 
-pub(super) use chunks::{chunk_loader, view_chunks};
+pub(super) use chunks::view_chunks;
 use gtl_application::{
     diffs::{FileDiff, FileStatus, View},
     viewer::{DiffDensity, DiffLayout, RenderOptions},
@@ -12,7 +12,7 @@ use maud::{Markup, PreEscaped, html};
 
 use crate::{
     diff_file_anchor_id,
-    layout::{Surface, file_status::file_status_presentation},
+    layout::file_status::file_status_presentation,
     rows::{render_diff_lines, render_diff_split, unified_line_number_digits},
     syntax::PreviewResult,
 };
@@ -100,40 +100,20 @@ struct FileBodyPresentation {
 
 #[derive(Clone, Copy)]
 enum FileBlockSurface {
-    HtmxApp {
-        tab_id: gtl_application::viewer::ViewerTabId,
-    },
     DiffDocument,
     Artifact,
 }
 
-impl From<Surface> for FileBlockSurface {
-    fn from(surface: Surface) -> Self {
-        match surface {
-            Surface::App { tab_id } => Self::HtmxApp { tab_id },
-            Surface::Artifact { .. } => Self::Artifact,
-        }
-    }
-}
-
 enum OpenDiffFileAction<'file> {
     Omitted,
-    Htmx { route: String },
     Host { path: &'file str },
 }
 
 impl OpenDiffFileAction<'_> {
-    fn htmx_route(&self) -> Option<&str> {
-        match self {
-            Self::Htmx { route } => Some(route),
-            Self::Omitted | Self::Host { .. } => None,
-        }
-    }
-
     fn host_path(&self) -> Option<&str> {
         match self {
             Self::Host { path } => Some(path),
-            Self::Omitted | Self::Htmx { .. } => None,
+            Self::Omitted => None,
         }
     }
 
@@ -142,12 +122,12 @@ impl OpenDiffFileAction<'_> {
     }
 }
 
-// ! The app webview (wry/WebKitGTK) never marks swapped-in content-visibility:auto
-// ! subtrees relevant, so their rows would stay unpainted; only browser artifacts
-// ! opt into the offscreen-skip optimization (and its print escape hatches).
+// ! Browser artifacts opt into offscreen skipping and its print escape
+// ! hatches. Diff documents are installed dynamically in the desktop shadow
+// ! root, where WebKitGTK does not reliably mark such subtrees relevant.
 fn file_body_presentation(surface: FileBlockSurface, file: &FileDiff) -> FileBodyPresentation {
     match surface {
-        FileBlockSurface::HtmxApp { .. } | FileBlockSurface::DiffDocument => FileBodyPresentation {
+        FileBlockSurface::DiffDocument => FileBodyPresentation {
             classes: "filebody single-variant overflow-hidden rounded-b-panel",
             intrinsic_size: None,
         },
@@ -166,42 +146,17 @@ fn open_diff_file_action(surface: FileBlockSurface, file: &FileDiff) -> OpenDiff
         return OpenDiffFileAction::Omitted;
     }
     match surface {
-        FileBlockSurface::HtmxApp { tab_id } => {
-            let query = url::form_urlencoded::Serializer::new(String::new())
-                .append_pair("path", &file.path)
-                .finish();
-            OpenDiffFileAction::Htmx {
-                route: format!("/tabs/{tab_id}/files/open?{query}"),
-            }
-        }
         FileBlockSurface::DiffDocument => OpenDiffFileAction::Host { path: &file.path },
         FileBlockSurface::Artifact => OpenDiffFileAction::Omitted,
     }
 }
 
-pub(super) fn file_blocks(
-    view: &View,
-    options: RenderOptions,
-    surface: Surface,
-) -> PreviewResult<Markup> {
+pub(super) fn file_blocks(view: &View, options: RenderOptions) -> PreviewResult<Markup> {
     file_blocks_with_mode(
         view,
         options,
-        FileBlockSurface::from(surface),
+        FileBlockSurface::Artifact,
         FileBodyMode::Complete,
-    )
-}
-
-pub(super) fn file_block_shells(
-    view: &View,
-    options: RenderOptions,
-    surface: Surface,
-) -> PreviewResult<Markup> {
-    file_blocks_with_mode(
-        view,
-        options,
-        FileBlockSurface::from(surface),
-        FileBodyMode::Shell,
     )
 }
 
@@ -274,10 +229,6 @@ fn file_blocks_with_mode(
                                 class=(OPEN_IN_EDITOR_BUTTON_CLASSES)
                                 aria-label="Open in IDE"
                                 title="Open in IDE"
-                                hx-post=[presentation.open_diff_file_action.htmx_route()]
-                                hx-disabled-elt=[presentation.open_diff_file_action.htmx_route().map(|_| "this")]
-                                hx-sync=[presentation.open_diff_file_action.htmx_route().map(|_| "this:drop")]
-                                hx-swap=[presentation.open_diff_file_action.htmx_route().map(|_| "none")]
                                 data-open-diff-file=[presentation.open_diff_file_action.host_path()] {
                                 (PreEscaped(OPEN_IN_EDITOR_ICON))
                             }
@@ -363,18 +314,11 @@ fn diff_target_id(file_index: usize) -> String {
 mod tests {
     use gtl_application::{
         diffs::FileDiff,
-        viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabId},
+        viewer::{DiffDensity, DiffLayout, RenderOptions},
     };
 
     use super::{GIANT_FILE_CHARS, ROW_PX};
-    use crate::{
-        fixtures::sample_view,
-        test_render::{build_html, view_fragment},
-    };
-
-    fn tab_id(raw: u64) -> ViewerTabId {
-        ViewerTabId::try_new(raw).expect("positive tab id")
-    }
+    use crate::{fixtures::sample_view, test_render::build_html};
 
     fn file(path: &str, status_line: &str) -> FileDiff {
         FileDiff {
@@ -403,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn app_fragment_renders_one_accessible_open_action_for_each_non_deleted_file() {
+    fn diff_document_renders_one_host_action_for_each_non_deleted_file() {
         let mut view = sample_view();
         view.files = vec![
             added_file("src/added.rs"),
@@ -412,21 +356,16 @@ mod tests {
             deleted_file("src/deleted.rs"),
         ];
 
-        let html = view_fragment(&view, RenderOptions::DEFAULT, tab_id(7)).into_string();
+        let html = crate::diff_document_shell(&view, RenderOptions::DEFAULT)
+            .expect("embedded syntax assets should load")
+            .into_string();
 
         assert_eq!(html.matches(r#"aria-label="Open in IDE""#).count(), 3);
         assert_eq!(html.matches(r#"title="Open in IDE""#).count(), 3);
-        assert_eq!(html.matches(r#"hx-disabled-elt="this""#).count(), 3);
-        assert_eq!(html.matches(r#"hx-sync="this:drop""#).count(), 3);
+        assert_eq!(html.matches("data-open-diff-file=").count(), 3);
+        assert!(!html.contains("hx-"));
         assert!(html.contains("disabled:pointer-events-none"));
-        assert!(!html.contains("path=src%2Fdeleted.rs"));
-    }
-
-    #[test]
-    fn app_fragment_encodes_the_tab_and_repository_relative_path() {
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id(7)).into_string();
-
-        assert!(html.contains(r#"hx-post="/tabs/7/files/open?path=src%2Fa+b.rs""#));
+        assert!(!html.contains(r#"data-open-diff-file="src/deleted.rs""#));
     }
 
     #[test]
@@ -495,13 +434,12 @@ mod tests {
     }
 
     #[test]
-    fn app_fragment_emits_only_the_requested_variant() {
-        let html = view_fragment(
+    fn raw_artifact_emits_only_the_requested_variant() {
+        let html = build_html(
             &sample_view(),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
-            tab_id(1),
-        )
-        .into_string();
+            None,
+        );
 
         assert!(html.contains(r#"class="diff diff-split diff-full "#));
         assert!(!html.contains(r#"class="diff diff-unified"#));
@@ -509,16 +447,15 @@ mod tests {
     }
 
     #[test]
-    fn app_fragment_full_density_falls_back_to_compact_source_lines() {
+    fn raw_artifact_full_density_falls_back_to_compact_source_lines() {
         let mut view = sample_view();
         view.files[0].full_lines = None;
 
-        let html = view_fragment(
+        let html = build_html(
             &view,
             RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
-            tab_id(1),
-        )
-        .into_string();
+            None,
+        );
 
         assert!(html.contains(r#"class="diff diff-unified diff-compact "#));
         assert!(html.contains("extra"));
@@ -609,8 +546,10 @@ mod tests {
     }
 
     #[test]
-    fn app_fragment_omits_content_visibility_for_the_webview() {
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id(1)).into_string();
+    fn diff_document_omits_artifact_content_visibility() {
+        let html = crate::diff_document_shell(&sample_view(), RenderOptions::DEFAULT)
+            .expect("embedded syntax assets should load")
+            .into_string();
 
         assert!(!html.contains("content-visibility"));
         assert!(!html.contains("contain-intrinsic-size"));

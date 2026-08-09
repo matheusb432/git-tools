@@ -90,7 +90,7 @@ mod tests {
                 "-p",
                 "gtl-desktop",
                 "--features",
-                "custom-protocol,dioxus-shell"
+                "custom-protocol"
             ]
         );
     }

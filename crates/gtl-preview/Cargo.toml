@@ -12,7 +12,6 @@ maud.workspace = true
 similar.workspace = true
 syntect.workspace = true
 thiserror.workspace = true
-url.workspace = true
 
 [lints]
 workspace = true

@@ -41,7 +41,7 @@ fn is_frontend_format_path(path: &Path) -> bool {
     ROOT_PATHS
         .iter()
         .any(|candidate| path == Path::new(candidate))
-        || (is_frontend_source_path(path, &["boot", "diff", "shared", "viewer"])
+        || (is_frontend_source_path(path, &["boot", "diff", "diff-island", "shared"])
             && extension_matches(
                 path,
                 &["js", "jsx", "ts", "tsx", "mjs", "cjs", "json", "jsonc"],
@@ -49,7 +49,7 @@ fn is_frontend_format_path(path: &Path) -> bool {
 }
 
 fn is_frontend_lint_path(path: &Path) -> bool {
-    is_frontend_source_path(path, &["boot", "diff", "shared", "viewer"])
+    is_frontend_source_path(path, &["boot", "diff", "diff-island", "shared"])
         && extension_matches(path, &["js", "jsx", "ts", "tsx", "mjs", "cjs"])
 }
 
@@ -84,7 +84,7 @@ mod tests {
             "frontend/shared/wheel.ts",
             "frontend/diff/vite.config.mjs",
             "frontend/boot/theme-boot.ts",
-            "frontend/viewer/toast.ts",
+            "frontend/diff-island/adapter.ts",
             ".oxfmtrc.json",
             ".oxlintrc.json",
             "package.json",
@@ -104,7 +104,7 @@ mod tests {
                 "frontend/shared/wheel.ts",
                 "frontend/diff/vite.config.mjs",
                 "frontend/boot/theme-boot.ts",
-                "frontend/viewer/toast.ts",
+                "frontend/diff-island/adapter.ts",
                 ".oxfmtrc.json",
                 ".oxlintrc.json",
                 "package.json",
@@ -118,7 +118,7 @@ mod tests {
                 "frontend/shared/wheel.ts",
                 "frontend/diff/vite.config.mjs",
                 "frontend/boot/theme-boot.ts",
-                "frontend/viewer/toast.ts",
+                "frontend/diff-island/adapter.ts",
             ])
         );
     }

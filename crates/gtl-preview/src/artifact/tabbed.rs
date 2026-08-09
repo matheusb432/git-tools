@@ -5,10 +5,7 @@ use gtl_application::{diffs::View, viewer::RenderOptions};
 use maud::html;
 
 use super::document;
-use crate::{
-    layout::{Surface, view_body},
-    syntax::PreviewResult,
-};
+use crate::{layout::view_body, syntax::PreviewResult};
 
 const TABS_CLASSES: &str = "gtl-scroll-rail sticky top-0 z-60 flex items-center gap-1.5 overflow-x-auto border-b border-line bg-surface-2 px-3 py-2.5";
 const TAB_CLASSES: &str = concat!(
@@ -43,7 +40,7 @@ pub fn build_tabbed_html(
         }
         @for (index, view) in views.iter().enumerate() {
             section class={ "panel " (PANEL_CLASSES) } id={ "panel-" (index) } role="tabpanel" aria-labelledby={ "tab-" (index) } hidden[index != 0] {
-                (view_body(view, options, Surface::Artifact { view_index: index })?)
+                (view_body(view, options, index)?)
             }
         }
     };

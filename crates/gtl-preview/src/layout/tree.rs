@@ -54,7 +54,6 @@ impl<'view> ChangedFilesPresentation<'view> {
 
 // ! `.search` and `.tree-body` are enhancer hooks. The tree owns presentation for its
 // ! server-rendered descendants.
-// TODO: [gtl-web]: make the desktop changed-files tree into a component.
 pub(super) fn tree(presentation: &ChangedFilesPresentation<'_>) -> Markup {
     html! {
         aside class=(TREE_PRESENTATION_CLASSES) aria-label="Changed files tree" {
@@ -139,7 +138,6 @@ fn render_directory(directory: &TreeDirectory<'_>) -> Markup {
     }
 }
 
-// TODO: [gtl-web]: make the desktop changed-files popover into a component.
 pub(super) fn mobile_popover(presentation: &ChangedFilesPresentation<'_>, target: &str) -> Markup {
     html! {
         aside id=(target)
@@ -187,16 +185,13 @@ pub(super) fn mobile_popover(presentation: &ChangedFilesPresentation<'_>, target
 
 #[cfg(test)]
 mod tests {
-    use gtl_application::viewer::{RenderOptions, ViewerTabId};
+    use gtl_application::viewer::RenderOptions;
 
-    use crate::{fixtures::sample_view, test_render::view_fragment};
+    use crate::{fixtures::sample_view, test_render::build_html};
 
     #[test]
     fn tree_renders_server_owned_file_nodes() {
-        let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id)
-            .into_string()
-            .replace("&amp;", "&");
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None).replace("&amp;", "&");
         let tree_classes = html
             .split_once(r#"<aside class="tree "#)
             .and_then(|(_, tail)| tail.split_once('"'))
@@ -221,11 +216,10 @@ mod tests {
 
     #[test]
     fn mobile_changed_files_popover_renders_total_line_chips() {
-        let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id).into_string();
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         let mobile_popover = html
-            .split_once(r#"id="viewer-files-popover""#)
+            .split_once(r#"id="preview-files-popover-0""#)
             .and_then(|(_, tail)| tail.split_once(r#"<div class="gtl-scroll"#))
             .map(|(header, _)| header)
             .expect("mobile changed-files popover header");

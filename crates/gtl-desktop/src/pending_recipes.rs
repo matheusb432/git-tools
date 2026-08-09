@@ -53,12 +53,6 @@ impl ViewerApp {
             .map_err(ProcessPendingRecipesError::Queue)??;
         Ok(())
     }
-
-    pub(crate) fn process_pending_recipes(&self) -> Result<(), ProcessPendingRecipesError> {
-        self.pending()
-            .with_consumer(|| process_transaction(self))
-            .map_err(ProcessPendingRecipesError::Queue)?
-    }
 }
 
 fn process_transaction(app: &ViewerApp) -> Result<(), ProcessPendingRecipesError> {

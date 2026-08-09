@@ -11,11 +11,7 @@ use crate::text::plural;
 const CONTROL_CLASSES: &str = "cursor-pointer rounded-sm border border-line-2 bg-surface-2 px-2.5 py-1.5 text-[12px] text-ink-2 [font:inherit] hover:border-acc-line hover:text-ink print:hidden!";
 
 // ! `.foldall` and `.ctx-toggle` remain enhancer hooks for their toggled states.
-// TODO: [gtl-web]: make the desktop titlebar into a component and retain artifact markup here.
-pub(super) fn titlebar(
-    view: &View,
-    mobile_navigation: Option<&ArtifactMobileNavigationTargets>,
-) -> Markup {
+pub(super) fn titlebar(view: &View, mobile_navigation: &ArtifactMobileNavigationTargets) -> Markup {
     html! {
         header class="titlebar [grid-column:1/4] flex items-center gap-4 border-b border-line bg-surface px-5 py-3 tablet:flex-wrap tablet:gap-2.5 tablet:px-3 tablet:py-2.5 mobile:gap-1.5 mobile:px-2 mobile:py-2 print:border-[#bbb] print:bg-[#f2f2f2]" {
             div class="flex items-baseline gap-2 text-[18px] font-semibold tracking-[-0.01em] mobile:text-[15px]" {
@@ -37,11 +33,9 @@ pub(super) fn titlebar(
                 // TODO: add button to enable file exclusion modification here. should open a dialog.
             }
             div class="flex-1" {}
-            @if let Some(targets) = mobile_navigation {
-                (super::mobile_controls::files_navigation_target(&targets.files, Some(view.files.len()), !view.files.is_empty()))
-                (super::mobile_controls::commits_navigation_target(&targets.commits, Some(view.commits.len()), !view.commits.is_empty()))
-                (super::mobile_controls::view_navigation(&targets.controls, true))
-            }
+            (super::artifact_controls::files_navigation(&mobile_navigation.files, Some(view.files.len()), !view.files.is_empty()))
+            (super::artifact_controls::commits_navigation(&mobile_navigation.commits, Some(view.commits.len()), !view.commits.is_empty()))
+            (super::artifact_controls::view_navigation(&mobile_navigation.controls))
             button type="button" class={ "foldall " (CONTROL_CLASSES) " mobile:hidden" } title="Collapse/expand all files" { "Collapse all" }
             button type="button" class={ "ctx-toggle active " (CONTROL_CLASSES) " [&.active]:border-acc-line [&.active]:bg-acc-soft [&.active]:text-ink mobile:hidden" } aria-pressed="true" title="Prepend a commented “path, lines” header when copying code" { "+ context" }
         }
@@ -61,12 +55,12 @@ fn exclusion_tooltip(excluded: &AppliedExclusions) -> String {
 
 #[cfg(test)]
 mod tests {
-    use gtl_application::viewer::{RenderOptions, ViewerTabId};
+    use gtl_application::viewer::RenderOptions;
     use gtl_models::diffs::AppliedExclusions;
 
     use crate::{
         fixtures::{applied_exclusions, sample_view},
-        test_render::{build_html, view_fragment},
+        test_render::build_html,
     };
 
     #[test]
@@ -94,17 +88,6 @@ mod tests {
             !build_html(&sample_view(), RenderOptions::DEFAULT, None)
                 .contains(r#"<span class="excl-chip"#)
         );
-    }
-
-    #[test]
-    fn view_fragment_carries_the_exclusion_chip_into_the_app_shell() {
-        let mut view = sample_view();
-        view.exclusions = Some(applied_exclusions());
-
-        let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
-        let fragment = view_fragment(&view, RenderOptions::DEFAULT, tab_id).into_string();
-
-        assert!(fragment.contains(r#"<span class="excl-chip"#));
     }
 
     #[test]

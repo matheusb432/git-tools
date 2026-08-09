@@ -3,8 +3,6 @@
 use gtl_application::diffs::View;
 use maud::{Markup, html};
 
-// TODO: [gtl-web]: make the desktop command keybar into a component and retain artifact markup
-// here.
 pub(super) fn keybar(view: &View) -> Markup {
     let kbd = "rounded-sm border border-line-2 border-b-2 bg-sunk px-1.5 py-px font-mono text-[11px] text-ink-2";
 
@@ -23,14 +21,13 @@ pub(super) fn keybar(view: &View) -> Markup {
 
 #[cfg(test)]
 mod tests {
-    use gtl_application::viewer::{RenderOptions, ViewerTabId};
+    use gtl_application::viewer::RenderOptions;
 
-    use crate::{fixtures::sample_view, test_render::view_fragment};
+    use crate::{fixtures::sample_view, test_render::build_html};
 
     #[test]
     fn keybar_keeps_the_keyboard_command_contract() {
-        let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
-        let html = view_fragment(&sample_view(), RenderOptions::DEFAULT, tab_id).into_string();
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         assert!(html.contains(r#"<footer class="keybar "#));
         assert!(html.contains(">j</kbd> <kbd"));

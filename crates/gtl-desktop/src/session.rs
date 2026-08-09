@@ -340,25 +340,6 @@ impl ViewerSession {
         Ok((ticket, repo_root, commit))
     }
 
-    pub(crate) fn has_ready_commit_selection(&mut self, id: ViewerTabId, sha: &str) -> bool {
-        if self.active != Some(id) {
-            return false;
-        }
-        let Some(tab) = self.tabs.iter().find(|tab| tab.tab.id() == id) else {
-            return false;
-        };
-        match &tab.selection {
-            CommitSelection::Ready { commit, transient } if commit.sha == sha => {
-                transient.is_some()
-                    || self
-                        .cache
-                        .get(id)
-                        .is_some_and(|cached| cached.selected.is_some())
-            }
-            _ => false,
-        }
-    }
-
     pub(crate) fn publish_commit_patch_if_current(
         &mut self,
         ticket: CommitPatchTicket,

@@ -1,48 +1,20 @@
-//! Embedded stylesheet and progressive-enhancement bundle shared by the
-//! artifact documents and the app shell. Both are build outputs committed
-//! under `embedded/generated/`: the stylesheet compiles from `styles/` through
-//! Tailwind, the bundle from `frontend/` through vite (`deno task build`), and
-//! the xtask drift gate keeps the committed bytes in sync with their sources.
+//! Embedded stylesheet and progressive-enhancement bundle for raw artifacts.
+//! Both are generated, committed payloads whose readable sources live in this
+//! crate and under `frontend/diff`.
 
 const RAW_PREVIEW_CSS: &str = include_str!("embedded/generated/preview.css");
 pub(crate) const PREVIEW_BUNDLE: &str = include_str!("embedded/generated/preview.js");
 
 // ! The compiler banner comment carries an https:// URL; artifacts ban `http(s)://`
 // ! outright so the offline contract stays a plain substring scan.
-/// Strips the leading Tailwind banner comment from a compiled stylesheet.
-///
-/// # Examples
-///
-/// ```
-/// let css = "/*! tailwindcss */:root{--x:1}";
-/// assert_eq!(gtl_preview::strip_stylesheet_banner(css), ":root{--x:1}");
-/// ```
-pub fn strip_stylesheet_banner(css: &str) -> &str {
+fn strip_stylesheet_banner(css: &str) -> &str {
     css.strip_prefix("/*!")
         .and_then(|rest| rest.split_once("*/"))
         .map_or(css, |(_, tail)| tail.trim_start())
 }
 
-/// Returns the embedded stylesheet shared by artifact and app renderers.
-///
-/// # Examples
-///
-/// ```
-/// assert!(gtl_preview::preview_css().contains("content-visibility:auto"));
-/// ```
-pub fn preview_css() -> &'static str {
+pub(crate) fn preview_css() -> &'static str {
     strip_stylesheet_banner(RAW_PREVIEW_CSS)
-}
-
-/// Returns the embedded progressive-enhancement bundle shared by artifact and app renderers.
-///
-/// # Examples
-///
-/// ```
-/// assert!(!gtl_preview::preview_bundle().is_empty());
-/// ```
-pub fn preview_bundle() -> &'static str {
-    PREVIEW_BUNDLE
 }
 
 #[cfg(test)]
@@ -59,14 +31,14 @@ mod tests {
     }
 
     #[test]
-    fn public_preview_assets_are_the_embedded_offline_payloads() {
+    fn preview_assets_are_offline_payloads() {
         let css = preview_css();
         assert!(!css.starts_with("/*!"), "compiler banner must be stripped");
         assert!(!css.contains("/*!"));
         assert!(css.contains(":host,:root,[data-theme=dark]{"));
-        assert_eq!(preview_bundle(), PREVIEW_BUNDLE);
+        assert!(!PREVIEW_BUNDLE.is_empty());
         assert!(!has_disallowed_external_url(css));
-        assert!(!has_disallowed_external_url(preview_bundle()));
+        assert!(!has_disallowed_external_url(PREVIEW_BUNDLE));
     }
 
     #[test]
@@ -265,17 +237,6 @@ mod tests {
         assert!(css.contains("grid-area:2/2"));
         assert!(css.contains("grid-area:2/3"));
         assert!(!css.contains(".keybar{display:none}"));
-    }
-
-    #[test]
-    fn preview_css_styles_the_route_recovery_grid() {
-        let css = preview_css();
-
-        assert_selector_declaration(
-            css,
-            ".grid-cols-\\[minmax\\(0\\,520px\\)\\]",
-            "grid-template-columns:minmax(0,520px)",
-        );
     }
 
     #[test]

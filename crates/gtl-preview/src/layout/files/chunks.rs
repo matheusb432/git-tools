@@ -1,24 +1,12 @@
 use std::collections::VecDeque;
 
 use gtl_application::{diffs::View, viewer::RenderOptions};
-use maud::{Markup, html};
 
 use super::{diff_target_id, render_rows, selected_lines};
 use crate::{ViewChunk, syntax::PreviewResult};
 
 const MAX_CHUNK_ROWS: usize = 256;
 const MAX_CHUNK_BYTES: usize = 256 * 1024;
-
-// TODO: [gtl-web]: replace this HTMX load trigger with Dioxus-owned chunk requests.
-pub(in crate::layout) fn chunk_loader(load_id: u64) -> Markup {
-    html! {
-        div id="viewer-chunk-loader"
-            hx-get=(format!("/loads/{load_id}/next"))
-            hx-trigger="load"
-            hx-target="this"
-            hx-swap="outerHTML" {}
-    }
-}
 
 pub(in crate::layout) fn view_chunks(
     view: &View,
@@ -71,7 +59,7 @@ mod tests {
     use crate::fixtures::sample_view;
 
     #[test]
-    fn desktop_chunks_recompose_the_complete_server_rendered_rows() {
+    fn chunks_recompose_the_complete_server_rendered_rows() {
         let view = sample_view();
         let file = &view.files[0];
         let syntax = crate::test_render::syntax_for_path(&file.path);

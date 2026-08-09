@@ -1,14 +1,7 @@
 use std::sync::Arc;
 
-use gtl_application::{
-    diffs::View,
-    viewer::{
-        RenderOptions, Theme, ViewerDocument, ViewerSettings, ViewerTab, ViewerTabId,
-        ViewerTabKind, ViewerTabState, ViewerView,
-    },
-};
+use gtl_application::{diffs::View, viewer::RenderOptions};
 use gtl_benchmarks::require;
-use gtl_desktop::MaudViewerRenderer;
 
 use super::view_fixture;
 
@@ -30,50 +23,17 @@ impl ViewerRenderBenchmark {
         }
     }
 
-    pub(super) fn render(&self, options: RenderOptions) -> String {
-        let tab_id = require(ViewerTabId::try_new(1), "creating a benchmark tab id");
-        let document = require(
-            ViewerDocument::new(
-                vec![ViewerTab::new(
-                    tab_id,
-                    "45k-line benchmark".into(),
-                    ViewerTabKind::Snapshot,
-                    ViewerTabState::Ready,
-                )],
-                Some(tab_id),
-                Some(ViewerView::new(
-                    tab_id,
-                    Arc::clone(&self.view),
-                    options,
-                    ViewerTabKind::Snapshot,
-                )),
-                vec![],
-                ViewerSettings::new(options, Theme::Dark),
-            ),
-            "building a benchmark viewer document",
-        );
+    pub(super) fn render_raw_artifact(&self, options: RenderOptions) -> String {
         require(
-            MaudViewerRenderer.build_view(&document),
-            "rendering the benchmark viewer",
-        )
-    }
-
-    pub(super) fn render_raw(&self) -> String {
-        require(
-            gtl_preview::build_html(&self.view, RenderOptions::DEFAULT, Some("dark")),
+            gtl_preview::build_html(&self.view, options, Some("dark")),
             "rendering the raw benchmark artifact",
         )
     }
 
-    pub(super) fn render_shell(&self, options: RenderOptions) -> String {
+    pub(super) fn render_diff_document_shell(&self, options: RenderOptions) -> String {
         require(
-            gtl_preview::view_shell(
-                &self.view,
-                options,
-                require(ViewerTabId::try_new(1), "creating a benchmark tab id"),
-                1,
-            ),
-            "rendering the benchmark view shell",
+            gtl_preview::diff_document_shell(&self.view, options),
+            "rendering the benchmark diff document shell",
         )
         .into_string()
     }

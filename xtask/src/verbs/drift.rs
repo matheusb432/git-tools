@@ -13,10 +13,6 @@ const BUNDLES: &[(&str, &str)] = &[
         "crates/gtl-preview/src/embedded/generated/",
         "just cli build",
     ),
-    (
-        "crates/gtl-desktop/src/embedded/generated/",
-        "just cli build",
-    ),
     ("crates/gtl-web/assets/generated/", "just web build"),
     ("crates/gtl-web/assets/tailwind.css", "just web styles"),
     ("crates/gtl-web/assets/diff-island.css", "just web styles"),

@@ -89,9 +89,8 @@ pub enum BenchmarkCase {
     AppStateRecordRender,
     ViewCacheViewWeight45k,
     ViewCacheViewReplace45k,
-    ViewerRenderUnifiedCompact,
-    ViewerRenderSplitFull,
     ViewerRenderRawArtifact,
+    ViewerRenderRawArtifactSplitFull,
     ViewerRenderMaterializedShell45k,
     ViewerRenderMaterializedChunks45k,
     ViewerRenderMaterializedShell115Files,
@@ -99,13 +98,12 @@ pub enum BenchmarkCase {
 }
 
 impl BenchmarkCase {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 9] = [
         Self::AppStateRecordRender,
         Self::ViewCacheViewWeight45k,
         Self::ViewCacheViewReplace45k,
-        Self::ViewerRenderUnifiedCompact,
-        Self::ViewerRenderSplitFull,
         Self::ViewerRenderRawArtifact,
+        Self::ViewerRenderRawArtifactSplitFull,
         Self::ViewerRenderMaterializedShell45k,
         Self::ViewerRenderMaterializedChunks45k,
         Self::ViewerRenderMaterializedShell115Files,
@@ -117,9 +115,8 @@ impl BenchmarkCase {
             Self::AppStateRecordRender => "app-state-record-render",
             Self::ViewCacheViewWeight45k => "view-cache/view-weight/45k",
             Self::ViewCacheViewReplace45k => "view-cache/view-replace/45k",
-            Self::ViewerRenderUnifiedCompact => "unified-compact",
-            Self::ViewerRenderSplitFull => "split-full",
             Self::ViewerRenderRawArtifact => "raw-artifact",
+            Self::ViewerRenderRawArtifactSplitFull => "raw-artifact-split-full",
             Self::ViewerRenderMaterializedShell45k => "materialized-shell-45k",
             Self::ViewerRenderMaterializedChunks45k => "materialized-chunks-45k",
             Self::ViewerRenderMaterializedShell115Files => "materialized-shell-115-files",
@@ -131,9 +128,8 @@ impl BenchmarkCase {
         match self {
             Self::AppStateRecordRender => Benchmark::AppStateRecordRender,
             Self::ViewCacheViewWeight45k | Self::ViewCacheViewReplace45k => Benchmark::ViewCache,
-            Self::ViewerRenderUnifiedCompact
-            | Self::ViewerRenderSplitFull
-            | Self::ViewerRenderRawArtifact
+            Self::ViewerRenderRawArtifact
+            | Self::ViewerRenderRawArtifactSplitFull
             | Self::ViewerRenderMaterializedShell45k
             | Self::ViewerRenderMaterializedChunks45k
             | Self::ViewerRenderMaterializedShell115Files

@@ -6,8 +6,6 @@
 @source not "../styles";
 @source "../../../../frontend/shared";
 @source "../../../../frontend/diff";
-@source "../../../gtl-desktop/src";
-@source not "../../../gtl-desktop/src/embedded";
 @custom-variant compact (@media (max-width: 1280px));
 @custom-variant compact-desktop (@media (min-width: 1025px) and (max-width: 1280px));
 @custom-variant tablet (@media (max-width: 1024px));

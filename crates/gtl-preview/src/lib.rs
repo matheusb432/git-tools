@@ -1,7 +1,9 @@
-//! Presentation for the diff preview: the shared `.layout` body, the offline
-//! artifact documents, and the embedded stylesheet/JS assets. Consumed by the
-//! daemon (artifact rendering through the `HtmlRenderer` port) and the desktop
-//! viewer (`view_fragment` inside its htmx shell).
+//! Presentation for complete offline diff artifacts and the server-rendered
+//! diff document embedded by the desktop viewer.
+//!
+//! Offline artifacts retain their complete Maud-owned layout and inlined
+//! enhancement assets. The desktop API renders only file shells and bounded
+//! row chunks; its application shell belongs to the desktop frontend.
 
 mod artifact;
 mod assets;
@@ -12,15 +14,7 @@ mod syntax;
 mod text;
 
 pub use artifact::{build_html, build_tabbed_html};
-pub use assets::{preview_bundle, preview_css, strip_stylesheet_banner};
-use gtl_application::{
-    diffs::View,
-    viewer::{RenderOptions, ViewerTabId},
-};
-pub use layout::mobile_controls::{
-    MobileViewControls, commits_navigation, files_navigation, mobile_menu_button_classes,
-    mobile_menu_danger_button_classes, view_navigation,
-};
+use gtl_application::{diffs::View, viewer::RenderOptions};
 use maud::Markup;
 pub use syntax::{PreviewError, PreviewResult};
 
@@ -45,102 +39,6 @@ pub fn diff_document_shell(view: &View, options: RenderOptions) -> PreviewResult
     layout::diff_document_shell(view, options)
 }
 
-// TODO: [gtl-web]: replace the desktop fragment APIs with a narrow Maud diff-document renderer.
-/// Builds one app-hosted diff view using the requested layout and density variant.
-///
-/// The fragment retains the server-rendered file tree, commit shelf, popovers, and diff rows,
-/// while leaving layout, density, and theme controls to the surrounding app shell.
-///
-/// # Examples
-///
-/// ```no_run
-/// use gtl_application::{
-///     diffs::View,
-///     viewer::{RenderOptions, ViewerTabId},
-/// };
-/// use gtl_preview::view_fragment;
-///
-/// # fn load_view() -> View { todo!() }
-/// # let tab_id = ViewerTabId::try_new(1).expect("positive tab id");
-/// let fragment = view_fragment(&load_view(), RenderOptions::DEFAULT, tab_id)
-///     .expect("embedded syntax assets should load");
-/// assert!(fragment.into_string().contains("diff-unified diff-compact"));
-/// ```
-///
-/// # Errors
-///
-/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
-pub fn view_fragment(
-    view: &View,
-    options: RenderOptions,
-    tab_id: ViewerTabId,
-) -> PreviewResult<Markup> {
-    layout::view_body(view, options, layout::Surface::App { tab_id })
-}
-
-/// Builds an app-hosted diff view with server-rendered mobile controls.
-///
-/// # Errors
-///
-/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
-pub fn view_fragment_with_mobile_controls(
-    view: &View,
-    range_view: &View,
-    selected_commit_sha: Option<&str>,
-    options: RenderOptions,
-    tab_id: ViewerTabId,
-    controls: MobileViewControls,
-) -> PreviewResult<Markup> {
-    layout::view_body_with_mobile_controls(
-        view,
-        range_view,
-        selected_commit_sha,
-        options,
-        layout::Surface::App { tab_id },
-        controls,
-    )
-}
-
-// TODO: [gtl-web]: replace the HTMX shell API with a Dioxus-owned diff-island lifecycle.
-/// Builds the desktop layout without diff rows and starts its bounded chunk chain.
-///
-/// # Errors
-///
-/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
-pub fn view_shell(
-    view: &View,
-    options: RenderOptions,
-    tab_id: ViewerTabId,
-    load_id: u64,
-) -> PreviewResult<Markup> {
-    layout::view_body_shell(view, options, layout::Surface::App { tab_id }, load_id)
-}
-
-/// Builds the desktop layout shell with server-rendered mobile controls.
-///
-/// # Errors
-///
-/// Returns an error when the embedded syntax-highlighting assets cannot be loaded.
-pub fn view_shell_with_mobile_controls(
-    view: &View,
-    range_view: &View,
-    selected_commit_sha: Option<&str>,
-    options: RenderOptions,
-    tab_id: ViewerTabId,
-    load_id: u64,
-    controls: MobileViewControls,
-) -> PreviewResult<Markup> {
-    layout::view_body_shell_with_mobile_controls(
-        view,
-        range_view,
-        selected_commit_sha,
-        options,
-        layout::Surface::App { tab_id },
-        load_id,
-        controls,
-    )
-}
-
 /// One bounded server-rendered insertion into a file's existing diff container.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewChunk {
@@ -149,7 +47,7 @@ pub struct ViewChunk {
     pub rows: usize,
 }
 
-/// Renders the desktop diff rows into bounded, semantically ordered chunks.
+/// Renders diff rows into bounded, semantically ordered chunks.
 ///
 /// # Errors
 ///
@@ -187,11 +85,7 @@ impl gtl_application::ports::HtmlRenderer for MaudRenderer {
 
 #[cfg(test)]
 pub(crate) mod test_render {
-    use gtl_application::{
-        diffs::View,
-        viewer::{RenderOptions, ViewerTabId},
-    };
-    use maud::Markup;
+    use gtl_application::{diffs::View, viewer::RenderOptions};
 
     use crate::syntax::SyntaxDefinition;
 
@@ -207,14 +101,6 @@ pub(crate) mod test_render {
     ) -> String {
         crate::build_tabbed_html(title, views, options, theme)
             .expect("embedded syntax assets should load")
-    }
-
-    pub(crate) fn view_fragment(
-        view: &View,
-        options: RenderOptions,
-        tab_id: ViewerTabId,
-    ) -> Markup {
-        crate::view_fragment(view, options, tab_id).expect("embedded syntax assets should load")
     }
 
     pub(crate) fn syntax_for_path(path: &str) -> Option<SyntaxDefinition> {

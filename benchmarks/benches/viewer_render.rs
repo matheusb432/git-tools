@@ -11,18 +11,17 @@ mod view_fixture;
 
 use fixture::ViewerRenderBenchmark;
 
-fn render_large_viewer(c: &mut Criterion) {
-    benchmark_view(
+fn render_viewer_boundaries(c: &mut Criterion) {
+    benchmark_raw_artifact(
         c,
-        BenchmarkCase::ViewerRenderUnifiedCompact,
-        RenderOptions::new(DiffLayout::Unified, DiffDensity::Compact),
+        BenchmarkCase::ViewerRenderRawArtifact,
+        RenderOptions::DEFAULT,
     );
-    benchmark_view(
+    benchmark_raw_artifact(
         c,
-        BenchmarkCase::ViewerRenderSplitFull,
+        BenchmarkCase::ViewerRenderRawArtifactSplitFull,
         RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
     );
-    benchmark_raw_artifact(c);
     benchmark_materialized(
         c,
         BenchmarkCase::ViewerRenderMaterializedShell45k,
@@ -37,29 +36,19 @@ fn render_large_viewer(c: &mut Criterion) {
     );
 }
 
-fn benchmark_view(c: &mut Criterion, case: BenchmarkCase, options: RenderOptions) {
+fn benchmark_raw_artifact(c: &mut Criterion, case: BenchmarkCase, options: RenderOptions) {
     let fixture = OnceCell::new();
     let label = case.as_str();
     c.bench_function(label, move |b| {
         let fixture = fixture.get_or_init(|| {
             let fixture = ViewerRenderBenchmark::fixture_45k();
-            eprintln!("{label} output_bytes={}", fixture.render(options).len());
+            eprintln!(
+                "{label} output_bytes={}",
+                fixture.render_raw_artifact(options).len()
+            );
             fixture
         });
-        b.iter(|| black_box(fixture.render(black_box(options))));
-    });
-}
-
-fn benchmark_raw_artifact(c: &mut Criterion) {
-    let fixture = OnceCell::new();
-    let label = BenchmarkCase::ViewerRenderRawArtifact.as_str();
-    c.bench_function(label, move |b| {
-        let fixture = fixture.get_or_init(|| {
-            let fixture = ViewerRenderBenchmark::fixture_45k();
-            eprintln!("{label} output_bytes={}", fixture.render_raw().len());
-            fixture
-        });
-        b.iter(|| black_box(fixture.render_raw()));
+        b.iter(|| black_box(fixture.render_raw_artifact(black_box(options))));
     });
 }
 
@@ -74,11 +63,11 @@ fn benchmark_materialized(
     c.bench_function(shell_label, move |b| {
         let fixture = shell_fixture.get_or_init(|| {
             let fixture = fixture_factory();
-            let shell = fixture.render_shell(RenderOptions::DEFAULT);
+            let shell = fixture.render_diff_document_shell(RenderOptions::DEFAULT);
             eprintln!("{shell_label} output_bytes={}", shell.len());
             fixture
         });
-        b.iter(|| black_box(fixture.render_shell(black_box(RenderOptions::DEFAULT))));
+        b.iter(|| black_box(fixture.render_diff_document_shell(black_box(RenderOptions::DEFAULT))));
     });
 
     let chunks_fixture = OnceCell::new();
@@ -106,6 +95,6 @@ fn benchmark_materialized(
 criterion_group! {
     name = benches;
     config = Criterion::default().sample_size(Benchmark::ViewerRender.sample_size());
-    targets = render_large_viewer
+    targets = render_viewer_boundaries
 }
 criterion_main!(benches);

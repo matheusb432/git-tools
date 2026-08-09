@@ -1,6 +1,0 @@
-[protocol]
-scheme = "gtl"
-host = "app"
-
-[assets]
-htmx_path = "src/embedded/htmx-2.0.10.min.js"
