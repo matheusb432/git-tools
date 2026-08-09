@@ -152,7 +152,7 @@ pub(super) fn render_view_with_tabs(
     session: &Mutex<ViewerSession>,
     mut transient: Option<VersionedView>,
     settings: ViewerSettings,
-    feedback: SwapFeedback<'_>,
+    feedback: SwapFeedback,
     load_id: Option<ViewLoadId>,
 ) -> Result<String, RenderError> {
     for _ in 0..GENERATION_ATTEMPTS_MAX {
@@ -198,7 +198,7 @@ pub(super) fn render_tabs_with_view(
     session: &Mutex<ViewerSession>,
     mut transient: Option<VersionedView>,
     settings: ViewerSettings,
-    feedback: SwapFeedback<'_>,
+    feedback: SwapFeedback,
     load_id: Option<ViewLoadId>,
 ) -> Result<String, RenderError> {
     for _ in 0..GENERATION_ATTEMPTS_MAX {
@@ -233,7 +233,7 @@ pub(super) fn render_tabs_only(
     renderer: MaudViewerRenderer,
     session: &Mutex<ViewerSession>,
     settings: ViewerSettings,
-    feedback: SwapFeedback<'_>,
+    feedback: SwapFeedback,
 ) -> Result<String, RenderError> {
     for _ in 0..GENERATION_ATTEMPTS_MAX {
         let snapshot = match view_snapshot::gather(

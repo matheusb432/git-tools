@@ -6,6 +6,8 @@ pub(crate) mod build;
 pub(crate) mod check;
 pub(crate) mod check_structure;
 pub(crate) mod desktop_e2e;
+pub(crate) mod desktop_release;
+pub(crate) mod dioxus_web;
 pub(crate) mod drift;
 pub(crate) mod fix;
 pub(crate) mod format;

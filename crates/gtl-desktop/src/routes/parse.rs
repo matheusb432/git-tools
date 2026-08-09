@@ -29,10 +29,6 @@ impl ResumeNonce {
     pub(crate) fn try_new(value: u64) -> Option<Self> {
         NonZeroU64::new(value).map(Self)
     }
-
-    pub(crate) const fn get(self) -> u64 {
-        self.0.get()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

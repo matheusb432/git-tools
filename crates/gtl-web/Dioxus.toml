@@ -1,11 +1,9 @@
 [application]
-tailwind_input = "src/app/assets/styles/tailwind.css"
-tailwind_output = "assets/tailwind.css"
+out_dir = "dist"
 
 [web.app]
 
-# HTML title tag content
-title = "git-tools Dioxus proof"
+title = "git-tools"
 
 # include `assets` in web platform
 [web.resource]

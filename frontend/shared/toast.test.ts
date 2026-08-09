@@ -3,6 +3,15 @@ import { useFakeToastTimers } from "../test/dom-stub";
 import { showToast, TOAST_HOLD_MS, TOAST_LEAVE_MS, TOAST_LEAVING_ATTRIBUTE } from "./toast";
 
 describe("showToast", () => {
+  test("can render inside a caller-owned local container", () => {
+    const container = document.createElement("div");
+
+    showToast("Copied", container);
+
+    expect(container.querySelector(".gtl-toast")?.textContent).toBe("Copied");
+    expect(document.body.querySelector(".gtl-toast")).toBeNull();
+  });
+
   useFakeToastTimers();
 
   test("inserts one announced pill carrying the message", () => {

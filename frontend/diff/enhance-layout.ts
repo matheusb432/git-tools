@@ -1,34 +1,7 @@
-import { copyText } from "./clipboard";
-import { copyContextEnabled, copyHeader, readCopiedRows } from "./model/copy";
 import { keyboardCommand } from "./model/keyboard";
 import { scrollLandOn } from "./scroll";
 import { createTeardown } from "./teardown";
-import { showToast } from "../shared/toast";
-import { toggleLongLine } from "./long-lines";
-import { computeWheelScroll } from "../shared/wheel";
-
-/**
- * Rebuilds a native copy of a selection inside a diff as clean source under the same commented
- * "path, lines" header the copy button emits. Falls back to the native copy for selections that
- * are empty, span no single diff file, or touch no code rows, and when the context toggle is off.
- */
-export function handleDocumentCopy(e: ClipboardEvent): void {
-  const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || !sel.rangeCount || !sel.containsNode) return;
-  const node = sel.getRangeAt(0).commonAncestorContainer;
-  const el = node instanceof Element ? node : node.parentElement;
-  const file = el?.closest ? el.closest("details.file") : null;
-  if (!file || !copyContextEnabled(file)) return;
-  // Pane visibility is CSS-driven, so read rows from the pane the selection sits in. Split
-  // panes carry no .dl-add rows; their selections fall through to the native copy.
-  const diffBlock = el?.closest ? el.closest(".diff") : null;
-  if (!diffBlock) return;
-  const copied = readCopiedRows(diffBlock.querySelectorAll(".dl-add, .dl-ctx"), (row) => sel.containsNode(row, true));
-  if (!copied.lines.length || !e.clipboardData) return;
-  e.clipboardData.setData("text/plain", `${copyHeader(file, copied.lineRange)}\n${copied.lines.join("\n")}`);
-  e.preventDefault();
-  showToast(copied.lineRange === null ? "Copied with context" : `Copied with context · lines ${copied.lineRange}`);
-}
+import { enhanceDiffDocument } from "./enhance-document";
 
 /**
  * Opens `target`, then lands on it in the next animation frame so a collapsed
@@ -40,11 +13,11 @@ function navigateToFile(target: HTMLDetailsElement, scroller: HTMLElement, stick
 }
 
 export function enhanceLayout(root: HTMLElement): () => void {
-  const { listen, later, cancel, destroy } = createTeardown();
+  const cleanupDiffDocument = enhanceDiffDocument(root);
+  const { listen, later, destroy } = createTeardown();
   // Query within `root`, never document: the tabbed view inlines one .layout per panel in a
   // single document, and document-level queries would only ever wire the first panel.
   const fileEls = Array.from(root.querySelectorAll<HTMLDetailsElement>("details.file"));
-  const clineEls = Array.from(root.querySelectorAll<HTMLElement>(".cline[data-sha]"));
   const filePaths = fileEls.map((el) => (el.getAttribute("data-path") || "").toLowerCase());
   const treeBody = root.querySelector<HTMLElement>(".tree-body");
   const treeFileLeaves = Array.from(root.querySelectorAll<HTMLElement>(".tree-body .tfile"));
@@ -155,74 +128,11 @@ export function enhanceLayout(root: HTMLElement): () => void {
     trigger.closest<HTMLElement>("[popover]")?.hidePopover?.();
   });
 
-  function bindHorizontalWheel(scroller: HTMLElement): void {
-    listen(
-      scroller,
-      "wheel",
-      (ev) => {
-        if (!(ev instanceof WheelEvent)) return;
-        const next = computeWheelScroll(scroller, ev);
-        if (next === null) return;
-        ev.stopPropagation();
-        ev.preventDefault();
-        scroller.scrollLeft = next;
-      },
-      { passive: false },
-    );
-  }
-  root.querySelectorAll<HTMLElement>(".diff").forEach(bindHorizontalWheel);
-
   function markCurrent(el: HTMLElement): void {
     treeFileLeaves.forEach((leaf) => {
       leaf.classList.toggle("cur", leaf.getAttribute("data-target") === el.id);
     });
   }
-
-  clineEls.forEach((c) => {
-    const sha = c.getAttribute("data-sha") ?? "";
-    const hashCopy = c.querySelector<HTMLElement>(".sha");
-    if (hashCopy) {
-      listen(hashCopy, "click", (event) => {
-        event.stopPropagation();
-        void copyText(sha);
-        c.classList.add("copied");
-        later(() => {
-          c.classList.remove("copied");
-        }, 900);
-      });
-    }
-
-    const popId = c.getAttribute("data-pop");
-    if (!popId) return;
-    const cssEscaped = window.CSS && CSS.escape ? CSS.escape(popId) : popId;
-    const pop = root.querySelector<HTMLElement>(`#${cssEscaped}`);
-    if (!pop) return;
-    const popover = pop;
-    let hideTimer: ReturnType<typeof setTimeout> | undefined;
-    function show(): void {
-      if (hideTimer !== undefined) cancel(hideTimer);
-      const r = c.getBoundingClientRect();
-      let left = r.left - 338;
-      if (left < 8) left = r.right + 6;
-      popover.style.left = `${left}px`;
-      popover.style.top = `${Math.min(r.top, innerHeight - 210)}px`;
-      popover.showPopover?.();
-    }
-    function hide(): void {
-      hideTimer = later(() => {
-        hideTimer = undefined;
-        popover.hidePopover?.();
-      }, 140);
-    }
-    listen(c, "mouseenter", show);
-    listen(c, "mouseleave", hide);
-    listen(popover, "mouseenter", () => {
-      if (hideTimer === undefined) return;
-      cancel(hideTimer);
-      hideTimer = undefined;
-    });
-    listen(popover, "mouseleave", hide);
-  });
 
   let curFile = -1;
 
@@ -279,9 +189,8 @@ export function enhanceLayout(root: HTMLElement): () => void {
     }
   });
 
-  root.querySelectorAll<HTMLElement>(".ln-more").forEach((button) => {
-    listen(button, "click", () => toggleLongLine(button));
-  });
-
-  return destroy;
+  return () => {
+    destroy();
+    cleanupDiffDocument();
+  };
 }

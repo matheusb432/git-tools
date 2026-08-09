@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
+use lucide_dioxus::LoaderCircle;
 
 const BUTTON_CLASSES: &str = "inline-flex shrink-0 cursor-pointer items-center justify-center whitespace-nowrap rounded-sm border font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc active:translate-y-px motion-safe:transition-transform disabled:cursor-not-allowed disabled:opacity-50 disabled:active:translate-y-0";
 
@@ -38,10 +39,8 @@ pub(crate) enum ButtonSize {
     Small,
     #[default]
     Medium,
-    Large,
     IconSmall,
     IconMedium,
-    IconLarge,
 }
 
 impl ButtonSize {
@@ -49,10 +48,8 @@ impl ButtonSize {
         match self {
             Self::Small => "h-7 gap-1 px-2 text-xs",
             Self::Medium => "h-9 gap-2 px-4 text-sm",
-            Self::Large => "h-11 gap-2 px-5 text-sm",
             Self::IconSmall => "size-7 p-0 text-xs",
             Self::IconMedium => "size-9 p-0 text-sm",
-            Self::IconLarge => "size-11 p-0 text-base",
         }
     }
 }
@@ -103,9 +100,8 @@ pub(crate) fn Button(
             },
             ..attributes,
             if state.is_loading() {
-                span {
-                    class: "size-3.5 shrink-0 animate-spin rounded-full border-2 border-current border-r-transparent motion-reduce:animate-none",
-                    aria_hidden: "true",
+                span { class: "shrink-0 animate-spin motion-reduce:animate-none", aria_hidden: "true",
+                    LoaderCircle { size: 14 }
                 }
             }
             {children}

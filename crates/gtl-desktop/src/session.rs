@@ -71,6 +71,10 @@ impl ActiveContentSnapshot {
     pub(crate) fn view(&self) -> &View {
         &self.view
     }
+
+    pub(crate) fn shared_view(&self) -> Arc<View> {
+        Arc::clone(&self.view)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +106,7 @@ pub(crate) enum BeginCommitSelectionError {
     UnknownTab,
     StaleRange,
     UnknownCommit,
+    SelectionPending,
 }
 
 /// Whether a compute result was current enough to mutate the session.
@@ -294,6 +299,12 @@ impl ViewerSession {
     ) -> Result<(CommitPatchTicket, PathBuf, Commit), BeginCommitSelectionError> {
         if self.active != Some(id) {
             return Err(BeginCommitSelectionError::StaleRange);
+        }
+        if self
+            .tab(id)
+            .is_some_and(|tab| matches!(tab.selection, CommitSelection::Pending { .. }))
+        {
+            return Err(BeginCommitSelectionError::SelectionPending);
         }
         let cached = self
             .cache
@@ -719,6 +730,28 @@ mod tests {
     }
 
     #[test]
+    fn active_content_snapshot_shares_the_cached_view_allocation() {
+        let mut session = ViewerSession::new(1024);
+        let id = session
+            .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
+        let ticket = session.begin_compute(id).expect("tab exists");
+        let view = view("shared");
+        assert_eq!(
+            session.publish_labeled_if_current(
+                ticket,
+                CachedView::new(Arc::clone(&view)),
+                "ready".into(),
+            ),
+            PublishOutcome::Published
+        );
+
+        let snapshot = session.active_content_snapshot().expect("active snapshot");
+
+        assert!(Arc::ptr_eq(&view, &snapshot.shared_view()));
+    }
+
+    #[test]
     fn selected_patch_replaces_only_the_displayed_view_until_cleared() {
         let (mut session, id, shas) = ready_session_with_commits();
         let (ticket, repo_root, commit) = session
@@ -763,23 +796,21 @@ mod tests {
     }
 
     #[test]
-    fn clear_invalidates_every_in_flight_commit_patch_for_the_tab() {
+    fn a_pending_commit_selection_rejects_another_reservation_until_cleared() {
         let (mut session, id, shas) = ready_session_with_commits();
         let (first, _, _) = session
             .begin_commit_selection(id, &shas[0])
             .expect("first selection");
-        let (second, _, _) = session
-            .begin_commit_selection(id, &shas[1])
-            .expect("second selection");
+
+        assert_eq!(
+            session.begin_commit_selection(id, &shas[1]),
+            Err(BeginCommitSelectionError::SelectionPending)
+        );
 
         assert!(session.clear_commit_selection(id));
 
         assert_eq!(
             session.publish_commit_patch_if_current(first, view("first")),
-            PublishOutcome::Stale
-        );
-        assert_eq!(
-            session.publish_commit_patch_if_current(second, view("second")),
             PublishOutcome::Stale
         );
         assert!(matches!(

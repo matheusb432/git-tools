@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use gtl_contracts::viewer::ViewerStateChanged;
 use gtl_infra::{
     app_state::SqliteAppState, clock::SystemClock, configured_editor::GitConfiguredEditorClient,
     file_system::LocalFileSystemClient, git_client::HybridGitClient,
@@ -14,7 +15,7 @@ pub(crate) use restoration::RestorationGate;
 
 use crate::{
     materialization::ViewMaterializations,
-    recipe_worker::{RecipeCompletion, RecipeWorker},
+    recipe_worker::RecipeWorker,
     recipes::RecipeExecutor,
     render::MaudViewerRenderer,
     session::{PendingRecipes, ViewerSession},
@@ -70,9 +71,16 @@ impl ViewerApp {
         &self.pending
     }
 
-    pub(crate) fn take_recipe_completions(
-        &self,
-    ) -> Option<std::sync::mpsc::Receiver<RecipeCompletion>> {
+    pub(crate) fn take_recipe_completions(&self) -> Option<std::sync::mpsc::Receiver<()>> {
         self.recipe_worker.take_completions()
+    }
+
+    pub(crate) fn state_changed(&self) -> Result<ViewerStateChanged, String> {
+        let revision = self
+            .session
+            .lock()
+            .map_err(|error| format!("failed to lock viewer session: {error}"))?
+            .revision();
+        Ok(ViewerStateChanged { revision })
     }
 }

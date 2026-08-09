@@ -29,7 +29,7 @@ export function beginToastLeave(toast: Element, onRemoved: () => void = () => {}
  * Shows a self-dismissing toast pill. A fresh element is inserted on each call so
  * the enter animation replays, replacing any toast still on screen at once.
  */
-export function showToast(message: string): void {
+export function showToast(message: string, container: ParentNode = document.body): void {
   if (dismissTimer !== null) clearTimeout(dismissTimer);
   activeToast?.remove();
 
@@ -39,7 +39,7 @@ export function showToast(message: string): void {
   el.setAttribute("aria-live", "polite");
   el.setAttribute("aria-atomic", "true");
   el.textContent = message;
-  document.body.appendChild(el);
+  container.appendChild(el);
   activeToast = el;
   dismissTimer = setTimeout(() => {
     dismissTimer = beginToastLeave(el, () => {

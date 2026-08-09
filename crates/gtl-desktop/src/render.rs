@@ -69,7 +69,7 @@ mod tests {
         fn build_materialized_view_with_tabs_feedback(
             self,
             document: &ViewerDocument,
-            feedback: SwapFeedback<'_>,
+            feedback: SwapFeedback,
             load_id: ViewLoadId,
         ) -> String {
             self.renderer()
@@ -91,11 +91,7 @@ mod tests {
             self.renderer().build_history(history)
         }
 
-        fn build_tabs_with_view(
-            self,
-            document: &ViewerDocument,
-            feedback: SwapFeedback<'_>,
-        ) -> String {
+        fn build_tabs_with_view(self, document: &ViewerDocument, feedback: SwapFeedback) -> String {
             self.renderer()
                 .build_tabs_with_view(document, feedback)
                 .expect("embedded syntax assets should load")
@@ -104,7 +100,7 @@ mod tests {
         fn build_view_with_tabs_feedback(
             self,
             document: &ViewerDocument,
-            feedback: SwapFeedback<'_>,
+            feedback: SwapFeedback,
         ) -> String {
             self.renderer()
                 .build_view_with_tabs_feedback(document, feedback)
@@ -444,10 +440,6 @@ mod tests {
     fn viewer_fragments_keep_stable_htmx_and_inline_script_hooks() {
         let document = sample_document();
         let html = MaudViewerRenderer.build_document(&document);
-        let feedback = MaudViewerRenderer.build_tabs_with_view(
-            &document,
-            SwapFeedback::SnapshotRecipesSkipped(&["api".into()]),
-        );
 
         assert!(html.contains("id=\"viewer-tabs\""));
         assert!(html.contains("id=\"viewer-view\""));
@@ -456,7 +448,6 @@ mod tests {
         assert!(html.contains("hx-target=\"#viewer-tabs\""));
         assert!(html.contains("hx-target=\"#viewer-history\""));
         assert!(html.contains("data-viewer-theme="));
-        assert!(feedback.contains("data-viewer-toast"));
     }
 
     #[test]
@@ -866,24 +857,6 @@ mod tests {
         assert!(html.starts_with("<nav id=\"viewer-tabs\""));
         assert!(html.contains("<section id=\"viewer-view\" hx-swap-oob=\"outerHTML\""));
         assert!(!html.starts_with("<nav id=\"viewer-tabs\" hx-swap-oob"));
-    }
-
-    #[test]
-    fn snapshot_skips_render_one_accessible_escaped_toast() {
-        let labels = vec!["api".into(), "<script>web</script>".into()];
-
-        let html = MaudViewerRenderer.build_tabs_with_view(
-            &sample_document(),
-            SwapFeedback::SnapshotRecipesSkipped(&labels),
-        );
-
-        assert!(html.contains("class=\"gtl-toast viewer-toast-skip pointer-events-none "));
-        assert!(html.contains("data-viewer-toast"));
-        assert!(html.contains("role=\"status\" aria-live=\"polite\" aria-atomic=\"true\""));
-        assert!(html.contains(
-            "Skipped 2 diffs with no commits or changed files: api, &lt;script&gt;web&lt;/script&gt;."
-        ));
-        assert!(!html.contains("<script>web</script>"));
     }
 
     #[test]

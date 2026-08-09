@@ -23,7 +23,7 @@ const SHOW_ALL_BUTTON_CLASSES: &str = "viewer-recovery-button mt-4 cursor-pointe
 pub(in crate::render) fn view(
     document: &ViewerDocument,
     swap: SwapMode,
-    feedback: SwapFeedback<'_>,
+    feedback: SwapFeedback,
     load_id: Option<ViewLoadId>,
     defer_ready: bool,
 ) -> Result<Markup, Arc<gtl_preview::PreviewError>> {

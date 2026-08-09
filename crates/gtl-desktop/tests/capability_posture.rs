@@ -57,3 +57,55 @@ fn development_flavor_has_an_independent_single_instance_identity() {
     assert_eq!(development["identifier"], "dev.gittools.viewer.dev");
     assert_ne!(development["identifier"], release["identifier"]);
 }
+
+#[test]
+fn production_flavor_embeds_the_local_dioxus_bundle() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let production_conf = fs::read_to_string(manifest_dir.join("tauri.production.conf.json"))
+        .expect("tauri.production.conf.json must exist");
+    let production: serde_json::Value = serde_json::from_str(&production_conf).expect("valid JSON");
+
+    assert_eq!(
+        production["build"]["frontendDist"],
+        "../gtl-web/dist/public"
+    );
+    assert!(production["build"]["devUrl"].is_null());
+
+    let dioxus_conf = fs::read_to_string(manifest_dir.join("../gtl-web/Dioxus.toml"))
+        .expect("gtl-web/Dioxus.toml must exist");
+    let dioxus: toml::Value = toml::from_str(&dioxus_conf).expect("valid Dioxus TOML");
+    assert_eq!(dioxus["application"]["out_dir"].as_str(), Some("dist"));
+    assert!(
+        dioxus["application"].get("tailwind_input").is_none(),
+        "the locked xtask owns release stylesheet generation"
+    );
+}
+
+#[test]
+fn production_flavor_has_a_local_only_wasm_and_ipc_csp() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let production_conf = fs::read_to_string(manifest_dir.join("tauri.production.conf.json"))
+        .expect("tauri.production.conf.json must exist");
+    let production: serde_json::Value = serde_json::from_str(&production_conf).expect("valid JSON");
+    let csp = production["app"]["security"]["csp"]
+        .as_str()
+        .expect("production CSP must be a policy string");
+
+    let directives = csp.split(';').map(str::trim).collect::<Vec<_>>();
+    assert_eq!(
+        directives,
+        [
+            "default-src 'self'",
+            "base-uri 'self'",
+            "connect-src 'self' ipc: http://ipc.localhost",
+            "font-src 'self' data:",
+            "form-action 'none'",
+            "frame-src 'none'",
+            "img-src 'self' data:",
+            "object-src 'none'",
+            "script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'",
+            "style-src 'self' 'unsafe-inline'",
+        ],
+        "production CSP must remain the exact reviewed local policy"
+    );
+}

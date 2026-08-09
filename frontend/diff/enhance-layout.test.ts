@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
-import { enhanceLayout, handleDocumentCopy } from "./enhance-layout";
+import { enhanceLayout } from "./enhance-layout";
+import { handleDiffDocumentCopy, OPEN_DIFF_FILE_EVENT } from "./enhance-document";
 
 function must<T>(value: T | null, what: string): T {
   if (value === null) throw new Error(`${what} is missing`);
@@ -23,7 +24,7 @@ function layout(name: string): HTMLElement {
   return root;
 }
 
-describe("handleDocumentCopy", () => {
+describe("handleDiffDocumentCopy", () => {
   test("a diff selection copies as headed source and announces itself", () => {
     const root = document.createElement("div");
     root.className = "layout copy-ctx";
@@ -55,7 +56,7 @@ describe("handleDocumentCopy", () => {
     const event = new Event("copy", { cancelable: true });
     Object.defineProperty(event, "clipboardData", { value: clipboardData });
 
-    handleDocumentCopy(event as ClipboardEvent);
+    handleDiffDocumentCopy(event, root);
 
     expect(document.querySelector(".gtl-toast")).not.toBeNull();
     expect(clipboardData.setData).toHaveBeenCalledWith("text/plain", "// * src/main.ts\nconst value = 1;");
@@ -63,6 +64,30 @@ describe("handleDocumentCopy", () => {
 });
 
 describe("enhanceLayout", () => {
+  test("a retained file action emits its path through the composed host boundary", () => {
+    const root = layout("open-file");
+    const file = must(root.querySelector<HTMLDetailsElement>("details.file"), "the layout file");
+    file.setAttribute("data-path", "src/open-file.rs");
+    const button = document.createElement("button");
+    button.setAttribute("data-open-diff-file", "src/open-file.rs");
+    file.appendChild(button);
+    let openedPath: string | null = null;
+    let composed = false;
+    root.addEventListener(OPEN_DIFF_FILE_EVENT, (event) => {
+      composed = event.composed;
+      if ("detail" in event && typeof event.detail === "object" && event.detail !== null && "path" in event.detail) {
+        openedPath = typeof event.detail.path === "string" ? event.detail.path : null;
+      }
+    });
+
+    const cleanup = enhanceLayout(root);
+    button.click();
+
+    expect(openedPath).toBe("src/open-file.rs");
+    expect(composed).toBe(true);
+    cleanup();
+  });
+
   test("shared mobile diff actions drive their own server-rendered layout", () => {
     const root = layout("mobile-actions");
     root.classList.add("copy-ctx");

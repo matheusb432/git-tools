@@ -280,7 +280,7 @@ impl ViewerFixture {
 }
 
 fn required_environment_paths() -> Result<[PathBuf; 6]> {
-    let paths = ENVIRONMENT_VARIABLES.map(|name| required_environment_path(name));
+    let paths = ENVIRONMENT_VARIABLES.map(required_environment_path);
     let [
         cli,
         fixture_root,

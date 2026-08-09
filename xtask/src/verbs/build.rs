@@ -1,11 +1,11 @@
 //! Release build orchestration for the independent CLI and desktop artifacts.
 
-use std::ffi::OsStr;
+use std::{ffi::OsStr, path::Path};
 
 use anyhow::{Result, anyhow};
 
-use super::frontend;
-use crate::{cli::BuildTarget, process};
+use super::{desktop_release, dioxus_web, frontend};
+use crate::{cli::BuildTarget, process, project, task::Step};
 
 const VIEWER_BUILD_ARGS: &[&str] = &[
     "build",
@@ -13,31 +13,36 @@ const VIEWER_BUILD_ARGS: &[&str] = &[
     "-p",
     "gtl-desktop",
     "--features",
-    "custom-protocol",
+    desktop_release::PRODUCTION_FEATURES,
 ];
 
 /// Build the selected release artifact set. Every selected artifact is mandatory.
 pub fn run(target: BuildTarget) -> Result<()> {
-    match target {
-        BuildTarget::Cli => build_cli(),
-        BuildTarget::Viewer => build_viewer(),
-        BuildTarget::Both => {
-            build_cli()?;
-            build_viewer()
+    let root = project::repository_root();
+    let _lock = project::lock_frontend_assets(&root)?;
+    for stage in build_stages(target) {
+        match stage {
+            BuildStage::Frontend => frontend::build_unlocked(&root)?,
+            BuildStage::DioxusWeb => dioxus_web::build_release_unlocked(&root)?,
+            BuildStage::Cli => build_cli(&root)?,
+            BuildStage::Viewer => build_viewer(&root)?,
         }
     }
+    Ok(())
 }
 
-fn build_cli() -> Result<()> {
-    frontend::build()?;
-    process::run(
-        "cli-release-build",
-        "cargo",
-        &["build", "--release", "-p", "gtl-cli", "-p", "gtl-daemon"],
+fn build_cli(root: &Path) -> Result<()> {
+    process::run_step(
+        &Step::new(
+            "cli-release-build",
+            "cargo",
+            ["build", "--release", "-p", "gtl-cli", "-p", "gtl-daemon"],
+        )
+        .with_current_directory(root),
     )
 }
 
-fn build_viewer() -> Result<()> {
+fn build_viewer(root: &Path) -> Result<()> {
     if std::env::consts::OS == "linux" {
         process::run_captured_with_env(
             "viewer-webkit-headers",
@@ -52,7 +57,23 @@ fn build_viewer() -> Result<()> {
             )
         })?;
     }
-    process::run("viewer-release-build", "cargo", VIEWER_BUILD_ARGS)
+    desktop_release::run_cargo_unlocked("viewer-release-build", VIEWER_BUILD_ARGS, root)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BuildStage {
+    Frontend,
+    DioxusWeb,
+    Cli,
+    Viewer,
+}
+
+fn build_stages(target: BuildTarget) -> &'static [BuildStage] {
+    match target {
+        BuildTarget::Cli => &[BuildStage::Frontend, BuildStage::Cli],
+        BuildTarget::Viewer => &[BuildStage::DioxusWeb, BuildStage::Viewer],
+        BuildTarget::Both => &[BuildStage::DioxusWeb, BuildStage::Cli, BuildStage::Viewer],
+    }
 }
 
 #[cfg(test)]
@@ -69,8 +90,20 @@ mod tests {
                 "-p",
                 "gtl-desktop",
                 "--features",
-                "custom-protocol"
+                "custom-protocol,dioxus-shell"
             ]
+        );
+    }
+
+    #[test]
+    fn viewer_build_stages_dioxus_transaction_before_cargo() {
+        assert_eq!(
+            build_stages(BuildTarget::Viewer),
+            [BuildStage::DioxusWeb, BuildStage::Viewer]
+        );
+        assert_eq!(
+            build_stages(BuildTarget::Both),
+            [BuildStage::DioxusWeb, BuildStage::Cli, BuildStage::Viewer]
         );
     }
 }

@@ -81,9 +81,10 @@ impl From<SelectCommitError> for RouteError {
                 crate::session::BeginCommitSelectionError::UnknownTab
                 | crate::session::BeginCommitSelectionError::UnknownCommit,
             ) => Self::NotFound,
-            SelectCommitError::Reserve(crate::session::BeginCommitSelectionError::StaleRange) => {
-                Self::Conflict
-            }
+            SelectCommitError::Reserve(
+                crate::session::BeginCommitSelectionError::StaleRange
+                | crate::session::BeginCommitSelectionError::SelectionPending,
+            ) => Self::Conflict,
             SelectCommitError::Failed(reason) => Self::Internal(reason),
         }
     }

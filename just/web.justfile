@@ -5,7 +5,17 @@ set working-directory := '../crates/gtl-web'
 _default:
     @just --list web
 
-# Serve the Dioxus Web app in isolation with file watching and full hot reload.
+# Build the tracked shell styles and stage the offline Dioxus release bundle.
+[group('web')]
+build:
+    cargo run --quiet -p xtask -- web-build
+
+# Regenerate the tracked shell and diff-island stylesheets.
+[group('web')]
+styles:
+    cargo run --quiet -p xtask -- web-styles
+
+# Serve the Dioxus Web app with typed Rust, TypeScript, and stylesheet watchers.
 [group('web')]
 serve *args:
-    dx serve --web --package gtl-web --locked --hot-reload true --watch true {{ args }}
+    cargo run --quiet -p xtask -- web-serve {{ args }}

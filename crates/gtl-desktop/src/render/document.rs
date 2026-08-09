@@ -110,7 +110,7 @@ impl MaudViewerRenderer {
     pub(crate) fn build_tabs_only(
         self,
         document: &ViewerDocument,
-        feedback: SwapFeedback<'_>,
+        feedback: SwapFeedback,
     ) -> String {
         tabs(document, SwapMode::Primary, feedback).into_string()
     }
@@ -125,7 +125,7 @@ impl MaudViewerRenderer {
     pub(crate) fn build_view_with_tabs_feedback(
         self,
         document: &ViewerDocument,
-        feedback: SwapFeedback<'_>,
+        feedback: SwapFeedback,
     ) -> RenderResult<String> {
         self.render_view_with_tabs(document, feedback, None)
     }
@@ -133,7 +133,7 @@ impl MaudViewerRenderer {
     pub(crate) fn build_materialized_view_with_tabs_feedback(
         self,
         document: &ViewerDocument,
-        feedback: SwapFeedback<'_>,
+        feedback: SwapFeedback,
         load_id: ViewLoadId,
     ) -> RenderResult<String> {
         self.render_view_with_tabs(document, feedback, Some(load_id))
@@ -142,7 +142,7 @@ impl MaudViewerRenderer {
     fn render_view_with_tabs(
         self,
         document: &ViewerDocument,
-        feedback: SwapFeedback<'_>,
+        feedback: SwapFeedback,
         load_id: Option<ViewLoadId>,
     ) -> RenderResult<String> {
         Ok(html! {
@@ -155,7 +155,7 @@ impl MaudViewerRenderer {
     pub(crate) fn build_tabs_with_view(
         self,
         document: &ViewerDocument,
-        feedback: SwapFeedback<'_>,
+        feedback: SwapFeedback,
     ) -> RenderResult<String> {
         self.render_tabs_with_view(document, feedback, None)
     }
@@ -163,7 +163,7 @@ impl MaudViewerRenderer {
     pub(crate) fn build_materialized_tabs_with_view(
         self,
         document: &ViewerDocument,
-        feedback: SwapFeedback<'_>,
+        feedback: SwapFeedback,
         load_id: ViewLoadId,
     ) -> RenderResult<String> {
         self.render_tabs_with_view(document, feedback, Some(load_id))
@@ -172,15 +172,14 @@ impl MaudViewerRenderer {
     fn render_tabs_with_view(
         self,
         document: &ViewerDocument,
-        feedback: SwapFeedback<'_>,
+        feedback: SwapFeedback,
         load_id: Option<ViewLoadId>,
     ) -> RenderResult<String> {
         let view_feedback = match feedback {
             SwapFeedback::LiveViewDeleted if load_id.is_none() => SwapFeedback::LiveViewDeleted,
-            SwapFeedback::None
-            | SwapFeedback::TabClosed
-            | SwapFeedback::LiveViewDeleted
-            | SwapFeedback::SnapshotRecipesSkipped(_) => SwapFeedback::None,
+            SwapFeedback::None | SwapFeedback::TabClosed | SwapFeedback::LiveViewDeleted => {
+                SwapFeedback::None
+            }
         };
         Ok(html! {
             (tabs(document, SwapMode::Primary, feedback))
@@ -190,7 +189,7 @@ impl MaudViewerRenderer {
     }
 }
 
-fn tabs(document: &ViewerDocument, swap: SwapMode, feedback: SwapFeedback<'_>) -> Markup {
+fn tabs(document: &ViewerDocument, swap: SwapMode, feedback: SwapFeedback) -> Markup {
     let mobile_counts = document
         .active_view()
         .map(|view| fragments::MobileNavigationCounts {

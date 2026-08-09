@@ -1,9 +1,62 @@
 //! Repository-owned test declarations.
 
-use std::{ffi::OsString, time::Duration};
+use std::{
+    ffi::OsString,
+    fs::{self, File, OpenOptions},
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use cargo_metadata::MetadataCommand;
 use sample_project::{Test, surface};
+
+pub(crate) fn repository_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
+}
+
+pub(crate) fn cargo_target_directory(root: &Path) -> Result<PathBuf> {
+    let metadata = MetadataCommand::new()
+        .manifest_path(root.join("Cargo.toml"))
+        .current_dir(root)
+        .no_deps()
+        .other_options(vec!["--locked".to_string()])
+        .exec()
+        .context("resolve the Cargo target directory")?;
+    Ok(metadata.target_directory.into_std_path_buf())
+}
+
+pub(crate) struct FrontendAssetLock(File);
+
+impl FrontendAssetLock {
+    fn acquire_at(target: &Path) -> Result<Self> {
+        let path = target.join("xtask/frontend-assets.lock");
+        fs::create_dir_all(path.parent().context("frontend asset lock parent")?)
+            .with_context(|| format!("create lock parent for {}", path.display()))?;
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("open frontend asset lock {}", path.display()))?;
+        file.lock()
+            .with_context(|| format!("acquire frontend asset lock {}", path.display()))?;
+        Ok(Self(file))
+    }
+}
+
+impl Drop for FrontendAssetLock {
+    fn drop(&mut self) {
+        if let Err(error) = self.0.unlock() {
+            eprintln!("failed to release frontend asset lock: {error}");
+        }
+    }
+}
+
+pub(crate) fn lock_frontend_assets(root: &Path) -> Result<FrontendAssetLock> {
+    FrontendAssetLock::acquire_at(&cargo_target_directory(root)?)
+}
 
 pub(crate) struct TestDeclaration {
     #[cfg(test)]
@@ -104,4 +157,25 @@ fn cli_e2e() -> Result<TestDeclaration> {
             .verbose_arguments(["--nocapture"])
             .timeout(Duration::from_mins(5)),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frontend_asset_lock_serializes_release_transactions() {
+        let target = tempfile::tempdir().expect("temporary target directory");
+        let guard = FrontendAssetLock::acquire_at(target.path()).expect("first lock is acquired");
+        let contender = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(target.path().join("xtask/frontend-assets.lock"))
+            .expect("lock contender opens");
+
+        assert!(contender.try_lock().is_err());
+        drop(guard);
+        contender.lock().expect("contender acquires after release");
+        contender.unlock().expect("contender releases");
+    }
 }

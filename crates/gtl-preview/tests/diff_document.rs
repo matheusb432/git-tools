@@ -59,7 +59,9 @@ fn diff_document_shell_contains_only_file_blocks_and_empty_row_targets() -> Resu
 
     assert_eq!(
         fragment
-            .select(&selector("[data-gtl-diff-document]")?)
+            .select(&selector(
+                "[data-gtl-diff-document][data-gtl-diff-scroller]",
+            )?)
             .count(),
         1
     );
@@ -145,8 +147,18 @@ fn raw_artifact_retains_its_complete_layout_and_rows() -> Result<()> {
             "the raw artifact must retain `{retained}`"
         );
     }
-    assert!(!artifact.contains("data-gtl-diff-document"));
-    assert!(!artifact.contains("data-open-diff-file"));
+    assert!(
+        document
+            .select(&selector("[data-gtl-diff-document]")?)
+            .next()
+            .is_none()
+    );
+    assert!(
+        document
+            .select(&selector("[data-open-diff-file]")?)
+            .next()
+            .is_none()
+    );
     assert!(text.contains("old"));
     assert!(text.contains("new"));
     Ok(())

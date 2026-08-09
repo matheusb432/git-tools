@@ -1,13 +1,13 @@
-//! `xtask drift-check` rebuilds the committed frontend bundle, validates its presentation policy,
-//! and fails if the generated output drifts from its sources.
+//! Rebuild tracked frontend assets, validate their presentation policy, and reject source drift.
 
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-use super::frontend;
+use super::{dioxus_web, frontend};
+use crate::project;
 
-/// The committed bundle dirs and the recipe that regenerates each, paired for the stale hint.
+/// Tracked generated paths paired with the command that regenerates them.
 const BUNDLES: &[(&str, &str)] = &[
     (
         "crates/gtl-preview/src/embedded/generated/",
@@ -17,32 +17,40 @@ const BUNDLES: &[(&str, &str)] = &[
         "crates/gtl-desktop/src/embedded/generated/",
         "just cli build",
     ),
+    ("crates/gtl-web/assets/generated/", "just web build"),
+    ("crates/gtl-web/assets/tailwind.css", "just web styles"),
+    ("crates/gtl-web/assets/diff-island.css", "just web styles"),
 ];
 
-/// Fail if any bundle dir has uncommitted changes after a rebuild — i.e. it drifted from its TS
-/// source. `is_clean(dir)` reports whether the dir matches its committed state; injected so the
+/// Fail if any generated path has checkout changes after a rebuild. `is_clean(path)` reports
+/// whether the path matches its committed state; injected so the
 /// decision is host-testable without a real git tree.
 fn check_drift(bundles: &[(&str, &str)], is_clean: &dyn Fn(&str) -> bool) -> Result<()> {
     for (dir, rebuild) in bundles {
         if !is_clean(dir) {
-            bail!("{dir} is stale — run '{rebuild}' and commit");
+            bail!("{dir} is stale -- run '{rebuild}' and commit");
         }
     }
     Ok(())
 }
 
-/// Whether `dir` has no uncommitted changes (`git diff --quiet` exits 0).
-fn git_clean(dir: &str) -> bool {
+/// Whether `path` has no tracked or untracked checkout changes.
+fn git_clean(path: &str) -> bool {
     Command::new("git")
-        .args(["diff", "--quiet", "--", dir])
-        .status()
-        .is_ok_and(|s| s.success())
+        .args(["status", "--short", "--untracked-files=all", "--", path])
+        .current_dir(project::repository_root())
+        .output()
+        .is_ok_and(|output| output.status.success() && output.stdout.is_empty())
 }
 
 /// Rebuilds the bundle, validates its presentation policy, then diffs the committed output.
 pub fn run() -> Result<()> {
     which::which("deno").context("required tool `deno` is missing; run `mise install deno`")?;
-    frontend::build()?;
+    let root = project::repository_root();
+    let _lock = project::lock_frontend_assets(&root)?;
+    frontend::build_unlocked(&root)?;
+    dioxus_web::build_styles_unlocked(&root)?;
+    dioxus_web::verify_staged_bundle_if_present()?;
     super::presentation::run()?;
     check_drift(BUNDLES, &git_clean)
 }
@@ -64,5 +72,27 @@ mod tests {
             "{err}"
         );
         assert!(err.contains("just cli build"), "{err}");
+    }
+
+    #[test]
+    fn check_drift_covers_the_tracked_dioxus_styles() {
+        let err = check_drift(BUNDLES, &|path| {
+            path != "crates/gtl-web/assets/diff-island.css"
+        })
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("assets/diff-island.css is stale"), "{err}");
+        assert!(err.contains("just web styles"), "{err}");
+    }
+
+    #[test]
+    fn check_drift_covers_the_tracked_diff_island_script() {
+        let error = check_drift(BUNDLES, &|path| path != "crates/gtl-web/assets/generated/")
+            .expect_err("generated diff-island script drift must fail")
+            .to_string();
+
+        assert!(error.contains("assets/generated/ is stale"), "{error}");
+        assert!(error.contains("just web build"), "{error}");
     }
 }

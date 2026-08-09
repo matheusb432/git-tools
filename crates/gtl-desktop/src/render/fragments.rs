@@ -22,11 +22,10 @@ pub(super) enum SwapMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SwapFeedback<'a> {
+pub(crate) enum SwapFeedback {
     None,
     TabClosed,
     LiveViewDeleted,
-    SnapshotRecipesSkipped(&'a [String]),
 }
 
 impl SwapMode {

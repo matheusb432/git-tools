@@ -9,7 +9,7 @@ use crate::{
 
 pub(crate) fn shell(view: &View, options: RenderOptions) -> PreviewResult<Markup> {
     Ok(html! {
-        div data-gtl-diff-document class={
+        div data-gtl-diff-document data-gtl-diff-scroller class={
             "diff-document copy-ctx "
             (ROW_PRESENTATION_CLASSES) " "
             (SPLIT_PRESENTATION_CLASSES) " "

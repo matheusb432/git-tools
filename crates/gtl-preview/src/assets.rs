@@ -63,7 +63,7 @@ mod tests {
         let css = preview_css();
         assert!(!css.starts_with("/*!"), "compiler banner must be stripped");
         assert!(!css.contains("/*!"));
-        assert!(css.contains(":root,[data-theme=dark]{"));
+        assert!(css.contains(":host,:root,[data-theme=dark]{"));
         assert_eq!(preview_bundle(), PREVIEW_BUNDLE);
         assert!(!has_disallowed_external_url(css));
         assert!(!has_disallowed_external_url(preview_bundle()));
@@ -191,45 +191,60 @@ mod tests {
     #[test]
     fn preview_css_uses_single_aligned_unified_line_number_gutter() {
         let css = preview_css();
+        let document = ":is(.layout,[data-gtl-diff-document])";
 
         assert_selector_declaration(
             css,
-            ".layout .diff-unified .dl",
+            &format!("{document} .diff-unified .dl"),
             "grid-template-columns:max(28px, var(--unified-line-number-width,28px)) minmax(0, 1fr)",
         );
-        assert_selector_declaration(css, ".layout .diff-unified .dl .ln", "font-size:14px");
-        assert_selector_declaration(css, ".layout .diff-unified .dl .ln", "text-align:center");
         assert_selector_declaration(
             css,
-            ".layout .diff-unified :is(.dl-add,.dl-del,.dl-ctx) code",
+            &format!("{document} .diff-unified .dl .ln"),
+            "font-size:14px",
+        );
+        assert_selector_declaration(
+            css,
+            &format!("{document} .diff-unified .dl .ln"),
+            "text-align:center",
+        );
+        assert_selector_declaration(
+            css,
+            &format!("{document} .diff-unified :is(.dl-add,.dl-del,.dl-ctx) code"),
             "padding-left:12px",
         );
         assert_selector_declaration(
             css,
-            ".layout .diff-unified .dl-add",
+            &format!("{document} .diff-unified .dl-add"),
             "background:color-mix(in srgb, var(--add-bg) 50%, transparent)",
         );
         assert_selector_declaration(
             css,
-            ".layout .diff-unified .dl-del",
+            &format!("{document} .diff-unified .dl-del"),
             "background:color-mix(in srgb, var(--del-bg) 50%, transparent)",
         );
         assert_selector_declaration(
             css,
-            ".layout .diff-unified .dl-add .ln",
+            &format!("{document} .diff-unified .dl-add .ln"),
             "background:var(--add-gut)",
         );
         assert_selector_declaration(
             css,
-            ".layout .diff-unified .dl-del .ln",
+            &format!("{document} .diff-unified .dl-del .ln"),
             "background:var(--del-gut)",
         );
-        assert!(css.contains(".layout .diff-unified :is(.dl-meta,.dl-hunk) .ln{display:none}"));
-        assert!(
-            css.contains(".layout .diff-unified :is(.dl-meta,.dl-hunk) code{grid-column:1/-1}")
-        );
+        assert!(css.contains(&format!(
+            "{document} .diff-unified :is(.dl-meta,.dl-hunk) .ln{{display:none}}"
+        )));
+        assert!(css.contains(&format!(
+            "{document} .diff-unified :is(.dl-meta,.dl-hunk) code{{grid-column:1/-1}}"
+        )));
         assert!(css.contains("@media (max-width:760px)"));
-        assert_selector_declaration(css, ".layout .diff-unified .dl .ln", "font-size:13px");
+        assert_selector_declaration(
+            css,
+            &format!("{document} .diff-unified .dl .ln"),
+            "font-size:13px",
+        );
         assert!(css.contains("line-height:22px"));
         assert!(css.contains("white-space:pre-wrap"));
         assert!(css.contains("overflow-wrap:anywhere"));
@@ -296,14 +311,13 @@ mod tests {
         let css = preview_css();
         assert!(css.contains("[data-theme=hearth]{"));
         assert!(css.contains("[data-theme=light]{"));
+        assert!(css.contains(":host([data-theme=hearth]),[data-theme=hearth]{"));
+        assert!(css.contains(":host([data-theme=light]),[data-theme=light]{"));
         assert!(!css.contains(":root[data-theme="));
 
-        let base = css
-            .find(":root,[data-theme=dark]{")
-            .or_else(|| css.find("[data-theme=dark],:root{"))
-            .expect(
-                "base block must also match `[data-theme=dark]` so a nested dark swatch resolves",
-            );
+        let base = css.find(":host,:root,[data-theme=dark]{").expect(
+            "base block must also match `[data-theme=dark]` so a nested dark swatch resolves",
+        );
         let hearth = css
             .find("[data-theme=hearth]{")
             .expect("hearth block present");

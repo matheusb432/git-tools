@@ -1,8 +1,4 @@
-use gtl_application::{
-    live_views,
-    viewer::{ViewerTabId, ViewerTabKind},
-};
-use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+use gtl_application::{live_views, viewer::ViewerTabId};
 use tauri::http::StatusCode;
 
 use super::{
@@ -10,7 +6,7 @@ use super::{
     settings, tabs, view_loading,
     view_snapshot::VersionedView,
 };
-use crate::{presentation::ViewerApp, render::SwapFeedback};
+use crate::{live_view_restoration, presentation::ViewerApp, render::SwapFeedback};
 
 pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
     let source = {
@@ -61,42 +57,7 @@ pub(super) fn delete(app: &ViewerApp, tab: ViewerTabId) -> RouteResult {
 }
 
 pub(super) fn restore(app: &ViewerApp) -> Result<Option<VersionedView>, RouteError> {
-    let owner = app.restoration.run_once(|| {
-        let records = {
-            let connection = app
-                .app_state
-                .connection_lock()
-                .map_err(|error| format!("{error:#}"))?;
-            live_views::list::execute(live_views::list::ListLiveViews, &connection)
-                .map_err(|error| format!("{error:#}"))?
-                .views
-        };
-        let mut newest = None;
-        {
-            let mut session = app.session.lock().map_err(|error| error.to_string())?;
-            for record in records {
-                if record.source_kind != "LocalRepo" {
-                    continue;
-                }
-                let recipe = Recipe {
-                    source: RecipeSource::LocalRepo(record.source_value.into()),
-                    op: RecipeOp::Diff {
-                        target: RecipeTarget::Unpushed { pinned: None },
-                    },
-                    name: Some(record.display_name),
-                };
-                newest = Some(
-                    session
-                        .open(recipe, "restored-live".into(), ViewerTabKind::Live)
-                        .ok_or_else(|| "viewer tab ids exhausted".to_string())?,
-                );
-            }
-        }
-        if let Some(tab) = newest {
-            app.refresh_recipe(tab).map_err(|error| error.to_string())?;
-        }
-        Ok(())
-    })?;
+    let owner = live_view_restoration::restore(app)?;
     if owner {
         Ok(None)
     } else {

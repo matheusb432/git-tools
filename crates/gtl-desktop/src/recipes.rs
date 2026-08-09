@@ -70,13 +70,6 @@ impl ViewerComputation {
             Self::CommitPatch(request) => request.ticket.tab_id,
         }
     }
-
-    pub(crate) const fn generation(&self) -> u64 {
-        match self {
-            Self::Recipe(request) => request.ticket.generation,
-            Self::CommitPatch(request) => request.ticket.selection_generation,
-        }
-    }
 }
 
 impl ReservedRecipeComputation {

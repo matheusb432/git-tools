@@ -1,42 +1,29 @@
 use std::process::Command;
 
 use anyhow::{Context, Result, ensure};
-use thirtyfour::{By, Key, WebDriver, error::WebDriverErrorInner};
+use thirtyfour::{By, Key, WebDriver, WebElement};
 
 use super::{
     fixture::{EditorRecord, ViewerFixture},
-    selectors::{by_accessible_name, by_css},
+    selectors::{by_accessible_name, by_accessible_name_within, by_css},
     session::TestSession,
     wait::{self, ASSERTION_TIMEOUT},
 };
 
-const DELETE_CONFIRMATION: &str = "Delete this saved live view? This removes its tab and automatic restoration. You can add it again with gtl diff live.";
+const COMPLETE_DIFF_SELECTOR: &str = "#viewer-diff-island[data-view-state='complete'][data-chunks-complete='true'][aria-busy='false']";
+const DELETE_DESCRIPTION: &str =
+    "This removes the saved live view and closes its tab. Render history remains available.";
 
 pub async fn assert_forwarded_live_view(
     session: &TestSession,
     expected_content: &str,
 ) -> Result<()> {
     let driver = session.driver();
-    wait_for_live_tab(driver, "forwarded live view").await?;
-    wait_for_htmx_idle(driver, "forwarding live view").await?;
-    let layout = by_css(driver, "#viewer-view .layout", "rendered viewer layout").await?;
-    ensure!(layout.is_displayed().await?, "viewer layout is hidden");
+    wait_for_active_live_view(driver, "live-view", expected_content, 1).await?;
     ensure!(
-        driver
-            .find_all(By::Css("#viewer-view iframe"))
-            .await?
-            .is_empty(),
-        "viewer rendered an iframe instead of the server-rendered layout"
+        driver.find_all(By::Css("iframe")).await?.is_empty(),
+        "viewer rendered an iframe instead of the server-rendered diff island"
     );
-    wait::until(
-        &format!("forwarded live view to render {expected_content}"),
-        ASSERTION_TIMEOUT,
-        || async {
-            let view = by_css(driver, "#viewer-view", "viewer view").await?;
-            Ok((view.text().await?.contains(expected_content)).then_some(()))
-        },
-    )
-    .await?;
     Ok(())
 }
 
@@ -47,38 +34,39 @@ pub async fn assert_mobile_navigation(session: &TestSession) -> Result<()> {
         .await
         .context("resize viewer to the mobile viewport")?;
 
-    by_accessible_name(driver, "Changed files")
+    by_accessible_name(driver, "Files")
         .await?
         .click()
         .await
         .context("open changed files")?;
     by_css(
         driver,
-        "#viewer-files-popover:popover-open [data-file-target]",
-        "changed file in the open mobile popover",
+        "#mobile-files-panel[open]",
+        "open changed-files dialog",
     )
     .await?;
-    let changed_file_text = driver
-        .execute(
-            "return document.querySelector('#viewer-files-popover:popover-open [data-file-target]')?.textContent ?? '';",
-            Vec::new(),
-        )
-        .await
-        .context("read changed file text")?
-        .json()
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    ensure!(
-        changed_file_text.contains("work.txt"),
-        "mobile changed-files popover omitted work.txt"
-    );
-    by_accessible_name(driver, "Close changed files")
+    wait::until(
+        "work.txt in the mobile changed-files dialog",
+        ASSERTION_TIMEOUT,
+        || async {
+            Ok(script_bool(
+                driver,
+                r"
+const dialog = document.querySelector('#mobile-files-panel[open]');
+return dialog?.textContent.includes('Changed files') && dialog.textContent.includes('work.txt');
+",
+            )
+            .await?
+            .then_some(()))
+        },
+    )
+    .await?;
+    by_accessible_name_within(driver, "#mobile-files-panel[open]", "Close Changed files")
         .await?
         .click()
         .await
         .context("close changed files")?;
-    assert_popover_closed(driver, "viewer-files-popover").await?;
+    wait_for_dialog_closed(driver, "mobile-files-panel").await?;
 
     driver
         .execute(
@@ -88,18 +76,6 @@ pub async fn assert_mobile_navigation(session: &TestSession) -> Result<()> {
         .await
         .context("normalize focus before mobile evidence capture")?;
     Ok(())
-}
-
-async fn assert_popover_closed(driver: &WebDriver, id: &str) -> Result<()> {
-    let selector = format!("#{id}:popover-open");
-    wait::until(&format!("{id} to close"), ASSERTION_TIMEOUT, || async {
-        Ok(driver
-            .find_all(By::Css(&selector))
-            .await?
-            .is_empty()
-            .then_some(()))
-    })
-    .await
 }
 
 pub async fn assert_configured_editor_launch(
@@ -112,7 +88,6 @@ pub async fn assert_configured_editor_launch(
         .click()
         .await
         .context("open changed file in configured editor")?;
-    wait_for_htmx_idle(driver, "opening the diff file").await?;
     let editor = wait::until(
         "configured editor launch record",
         ASSERTION_TIMEOUT,
@@ -140,11 +115,15 @@ pub async fn assert_first_paint(session: &TestSession) -> Result<()> {
     let script_result = session
         .driver()
         .execute(
-            "const rows = document.querySelectorAll('#viewer-view .filebody .dl'); return { count: rows.length, firstHeight: rows[0]?.offsetHeight ?? 0 };",
+            r"
+const host = document.querySelector('#viewer-diff-island');
+const rows = host?.shadowRoot?.querySelectorAll('[data-gtl-diff-document] .filebody .dl') ?? [];
+return { count: rows.length, firstHeight: rows[0]?.offsetHeight ?? 0 };
+",
             Vec::new(),
         )
         .await
-        .context("measure first rendered diff row")?;
+        .context("measure first server-rendered diff row")?;
     let rows = script_result.json();
     let count = rows["count"].as_u64().unwrap_or_default();
     let first_height = rows["firstHeight"].as_u64().unwrap_or_default();
@@ -154,6 +133,68 @@ pub async fn assert_first_paint(session: &TestSession) -> Result<()> {
         "viewer first diff row has zero height on first paint"
     );
     Ok(())
+}
+
+pub async fn assert_default_navigation_reachable(session: &TestSession) -> Result<()> {
+    wait::until(
+        "display, changed-files, and commit navigation at the default window width",
+        ASSERTION_TIMEOUT,
+        || async {
+            Ok(script_bool(
+                session.driver(),
+                r"
+const displayed = (element) => element !== null
+  && getComputedStyle(element).display !== 'none'
+  && getComputedStyle(element).visibility !== 'hidden'
+  && element.getClientRects().length > 0;
+return window.innerWidth === 1200
+  && ['mobile-display-trigger', 'mobile-files-trigger', 'mobile-commits-trigger']
+    .every((id) => displayed(document.getElementById(id)));
+",
+            )
+            .await?
+            .then_some(()))
+        },
+    )
+    .await
+}
+
+pub async fn assert_chunked_live_view(
+    session: &TestSession,
+    fixture: &ViewerFixture,
+) -> Result<u64> {
+    fixture.forward_sized_live_view("live-chunked", "chunked-live-marker", 600)?;
+    let driver = session.driver();
+    wait_for_active_live_view(driver, "live-chunked", "chunked-live-marker", 2).await?;
+    wait::until(
+        "multiple diff chunks to materialize in the open shadow root",
+        ASSERTION_TIMEOUT,
+        || async {
+            let result = driver
+                .execute(
+                    r"
+const host = document.querySelector(arguments[0]);
+const root = host?.shadowRoot;
+const documentElement = root?.querySelector('[data-gtl-diff-document]');
+return {
+  hasDocument: documentElement !== null,
+  hasTarget: root?.querySelector('#viewer-diff-0') !== null,
+  rows: documentElement?.querySelectorAll('.filebody .dl').length ?? 0
+};
+",
+                    vec![serde_json::json!(COMPLETE_DIFF_SELECTOR)],
+                )
+                .await
+                .context("inspect chunked diff island")?;
+            let observation = result.json();
+            let row_count = observation["rows"].as_u64().unwrap_or_default();
+            let ready = observation["hasDocument"].as_bool() == Some(true)
+                && observation["hasTarget"].as_bool() == Some(true)
+                && row_count > 256;
+            Ok(ready.then_some(row_count))
+        },
+    )
+    .await
 }
 
 pub async fn assert_overlapping_live_updates(
@@ -169,83 +210,81 @@ pub async fn assert_overlapping_live_updates(
     fixture.forward_sized_live_view("live-latest", "second-live-marker", 1)?;
 
     let observation = wait::until(
-        "second live view ready without duplicate viewer regions",
+        "second live view ready without duplicate Dioxus regions",
         ASSERTION_TIMEOUT,
         || async {
             let result = driver
                 .execute(
-                    r"
+                    r#"
+const active = document.querySelector('[role="tab"][aria-selected="true"]');
+const host = document.querySelector(
+  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+);
+const diff = host?.shadowRoot?.querySelector('[data-gtl-diff-document]');
 return {
-  tabs: document.querySelectorAll('#viewer-tabs').length,
-  views: document.querySelectorAll('#viewer-view').length,
-  latestReady: document.querySelector('#viewer-view')?.dataset.viewerState === 'ready'
-    && (document.querySelector('#viewer-view')?.textContent.includes('second-live-marker') ?? false)
+  tablists: document.querySelectorAll('[role="tablist"][aria-label="Open diffs"]').length,
+  activeViews: document.querySelectorAll('#viewer-active-view').length,
+  tabs: document.querySelectorAll('[role="tab"]').length,
+  latestReady: active?.textContent.includes('live-latest')
+    && active.textContent.includes('Live')
+    && diff?.textContent.includes('second-live-marker')
 };
-",
+"#,
                     Vec::new(),
                 )
                 .await
-                .context("inspect overlapping live-update viewer regions")?;
+                .context("inspect overlapping live-update Dioxus regions")?;
             let observation = result.json();
-            let tabs = observation["tabs"].as_u64().unwrap_or_default();
-            let views = observation["views"].as_u64().unwrap_or_default();
             let latest_ready = observation["latestReady"].as_bool().unwrap_or(false);
-            Ok(((tabs != 1 || views != 1) || latest_ready).then_some(observation.clone()))
+            let duplicate = observation["tablists"]
+                .as_u64()
+                .is_some_and(|count| count > 1)
+                || observation["activeViews"]
+                    .as_u64()
+                    .is_some_and(|count| count > 1);
+            Ok((duplicate || latest_ready).then_some(observation.clone()))
         },
     )
     .await?;
 
     ensure!(
-        observation["tabs"].as_u64() == Some(1),
-        "overlapping live updates rendered {} tab regions",
+        observation["tablists"].as_u64() == Some(1),
+        "overlapping live updates rendered {} tablists",
+        observation["tablists"]
+    );
+    ensure!(
+        observation["activeViews"].as_u64() == Some(1),
+        "overlapping live updates rendered {} active-view regions",
+        observation["activeViews"]
+    );
+    ensure!(
+        observation["tabs"].as_u64() == Some(4),
+        "overlapping live updates rendered {} tabs instead of four",
         observation["tabs"]
     );
     ensure!(
-        observation["views"].as_u64() == Some(1),
-        "overlapping live updates rendered {} view regions",
-        observation["views"]
-    );
-    ensure!(
         observation["latestReady"].as_bool() == Some(true),
-        "the latest live view did not become the active ready view"
+        "the latest live view did not become the active completed diff"
     );
     Ok(())
 }
 
-pub async fn delete_temporary_live_views(session: &TestSession) -> Result<()> {
+pub async fn delete_temporary_live_views(
+    session: &TestSession,
+    chunked_row_count: u64,
+) -> Result<()> {
     let driver = session.driver();
-    for (current_repository, current_marker, next_repository, next_marker, remaining_tabs) in [
-        (
-            "live-latest",
-            "second-live-marker",
-            "live-heavy",
-            "first-live-marker",
-            2_u64,
-        ),
-        (
-            "live-heavy",
-            "first-live-marker",
-            "live-view",
-            "alpha-v2",
-            1,
-        ),
-    ] {
-        wait_for_active_live_view(
-            driver,
-            current_repository,
-            current_marker,
-            remaining_tabs + 1,
-        )
-        .await?;
-        by_accessible_name(driver, "Delete saved live view")
-            .await?
-            .click()
-            .await
-            .with_context(|| format!("delete temporary {current_repository} live view"))?;
-        accept_delete_confirmation(driver).await?;
-        wait_for_htmx_idle(driver, &format!("deleting {current_repository} live view")).await?;
-        wait_for_active_live_view(driver, next_repository, next_marker, remaining_tabs).await?;
-    }
+    wait_for_active_live_view(driver, "live-latest", "second-live-marker", 4).await?;
+    delete_active_live_view(driver, "live-latest").await?;
+
+    wait_for_active_live_materialization(driver, "live-heavy", 3).await?;
+    delete_active_live_view(driver, "live-heavy").await?;
+
+    wait_for_active_live_view(driver, "live-chunked", "chunked-live-marker", 2).await?;
+    assert_diff_excludes_with_row_count(driver, "first-live-marker", chunked_row_count).await?;
+    delete_active_live_view(driver, "live-chunked").await?;
+
+    wait_for_active_live_view(driver, "live-view", "alpha-v2", 1).await?;
     Ok(())
 }
 
@@ -257,33 +296,37 @@ pub async fn assert_restarted_live_view(
     wait::until(
         "restarted live view with persisted split layout",
         ASSERTION_TIMEOUT,
-        || async { Ok(viewer_state(session.driver()).await?.then_some(())) },
+        || async {
+            Ok(viewer_uses_split_layout(session.driver())
+                .await?
+                .then_some(()))
+        },
     )
     .await
 }
 
 pub async fn refresh_and_assert_unavailable(session: &TestSession) -> Result<()> {
     let driver = session.driver();
-    by_accessible_name(driver, "Refresh")
+    by_accessible_name(driver, "Refresh diff")
         .await?
         .click()
         .await
         .context("refresh unavailable live view")?;
     wait::until(
-        "live view to publish Unavailable instead of Render failed",
+        "missing live repository to render its typed unavailable state",
         ASSERTION_TIMEOUT,
         || async {
             Ok(script_bool(
                 driver,
                 r#"
-const view = document.querySelector('#viewer-view');
-const active = document.querySelector('.viewer-tab.active');
-return view?.dataset.viewerState === 'broken'
-  && view.querySelector('.viewer-status-broken') !== null
-  && view.textContent.includes('Unavailable')
-  && !view.textContent.includes('Render failed')
-  && active?.querySelector('.viewer-tab-state[aria-label="Unavailable"]') !== null
-  && active.querySelector('.viewer-tab-state[aria-label="Render failed"]') === null;
+const alert = document.querySelector('main [role="alert"]');
+const active = document.querySelector('[role="tab"][aria-selected="true"]');
+const text = alert?.textContent ?? '';
+return active?.textContent.includes('Live')
+  && text.includes('Render stopped (DirNotFound)')
+  && text.includes('was not found')
+  && !text.includes('Render failed')
+  && document.querySelector('#viewer-diff-island') === null;
 "#,
             )
             .await?
@@ -302,9 +345,12 @@ pub async fn assert_durable_empty_state(session: &TestSession) -> Result<()> {
             Ok(script_bool(
                 driver,
                 r#"
-return document.querySelector('.viewer-status-empty') !== null
-  && !Array.from(document.querySelectorAll('.viewer-tab-kind')).some((kind) => kind.textContent === 'L')
-  && !Array.from(document.querySelectorAll('button')).some((button) => button.textContent.trim() === 'Delete live view');
+return document.querySelectorAll('[role="tab"]').length === 0
+  && document.querySelector('[role="tablist"][aria-label="Open diffs"]')?.textContent.includes('No open diffs')
+  && document.querySelector('main')?.textContent.includes('No diff is open')
+  && !Array.from(document.querySelectorAll('button')).some((button) =>
+    button.getAttribute('aria-label') === 'Delete live view'
+  );
 "#,
             )
             .await?
@@ -316,48 +362,83 @@ return document.querySelector('.viewer-status-empty') !== null
 
 pub async fn select_split_layout(session: &TestSession) -> Result<()> {
     let driver = session.driver();
-    driver
-        .execute(
-            "const input = document.querySelector(\"input[name='viewer-layout'][value='split']\"); if (!(input instanceof HTMLInputElement)) { throw new Error('split layout input is missing'); } input.click();",
-            Vec::new(),
-        )
+    by_accessible_name(driver, "Display")
+        .await?
+        .click()
         .await
-        .context("select split layout")?;
-    wait_for_htmx_idle(driver, "selecting the split layout").await?;
-    by_css(driver, "#viewer-view .diff-split", "split diff layout").await?;
-    ensure!(
-        by_css(
+        .context("open default-width display controls")?;
+    by_css(
+        driver,
+        "#mobile-display-panel[open]",
+        "open default-width display-controls dialog",
+    )
+    .await?;
+    by_accessible_name_within(driver, "#mobile-display-panel[open]", "Split")
+        .await?
+        .click()
+        .await
+        .context("select split layout from default-width display controls")?;
+    wait::until("completed split diff layout", ASSERTION_TIMEOUT, || async {
+        Ok(script_bool(
             driver,
-            "input[name='viewer-layout'][value='split']",
-            "selected split layout control",
+            r#"
+const split = Array.from(document.querySelectorAll('button'))
+  .find((button) => button.textContent.trim() === 'Split' && button.offsetParent !== null);
+const host = document.querySelector(
+  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+);
+return split?.getAttribute('aria-pressed') === 'true'
+  && host?.dataset.viewIdentity.includes(':split:')
+  && host.shadowRoot?.querySelector('[data-gtl-diff-document] .diff-split') !== null;
+"#,
         )
         .await?
-        .is_selected()
-        .await?,
-        "split layout control is not selected"
-    );
-
-    Ok(())
+        .then_some(()))
+    })
+    .await?;
+    by_accessible_name_within(
+        driver,
+        "#mobile-display-panel[open]",
+        "Close Display controls",
+    )
+    .await?
+    .click()
+    .await
+    .context("close default-width display controls")?;
+    wait_for_dialog_closed(driver, "mobile-display-panel").await
 }
 
 pub async fn refresh_and_assert_alpha_v2(session: &TestSession) -> Result<()> {
     let driver = session.driver();
-    by_accessible_name(driver, "Refresh")
+    let previous_identity = by_css(driver, COMPLETE_DIFF_SELECTOR, "completed diff island")
+        .await?
+        .attr("data-view-identity")
+        .await
+        .context("read pre-refresh diff identity")?
+        .context("completed diff island is missing its view identity")?;
+    by_accessible_name(driver, "Refresh diff")
         .await?
         .click()
         .await
         .context("refresh live view")?;
-    wait_for_htmx_idle(driver, "refreshing the live view").await?;
     wait::until(
-        "refreshed live view rendering alpha-v2",
+        "refreshed live view rendering alpha-v2 with a new range generation",
         ASSERTION_TIMEOUT,
         || async {
-            Ok(script_bool(
-                driver,
-                "return document.querySelector('#viewer-view')?.textContent.includes('alpha-v2') ?? false;",
-            )
-            .await?
-            .then_some(()))
+            let result = driver
+                .execute(
+                    r#"
+const host = document.querySelector(
+  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+);
+const text = host?.shadowRoot?.querySelector('[data-gtl-diff-document]')?.textContent ?? '';
+return host?.dataset.viewIdentity !== arguments[0] && text.includes('alpha-v2');
+"#,
+                    vec![serde_json::json!(previous_identity)],
+                )
+                .await
+                .context("inspect refreshed diff identity and content")?;
+            Ok(result.json().as_bool().unwrap_or(false).then_some(()))
         },
     )
     .await
@@ -366,75 +447,93 @@ pub async fn refresh_and_assert_alpha_v2(session: &TestSession) -> Result<()> {
 pub async fn select_commit_patch_and_restore_range(session: &TestSession) -> Result<()> {
     let driver = session.driver();
     driver
-        .execute(
-            r##"
-const card = Array.from(document.querySelectorAll("#viewer-view .commit-select"))
-  .find((button) => button.textContent.includes("live view v2"));
-if (!(card instanceof HTMLButtonElement)) {
-  throw new Error("live view v2 commit action is missing");
-}
-card.click();
-"##,
-            Vec::new(),
-        )
+        .set_window_rect(0, 0, 1440, 900)
+        .await
+        .context("resize viewer to expose the desktop commit shelf")?;
+    let range_identity = by_css(
+        driver,
+        COMPLETE_DIFF_SELECTOR,
+        "completed range diff island",
+    )
+    .await?
+    .attr("data-view-identity")
+    .await
+    .context("read range diff identity")?
+    .context("completed range diff island is missing its view identity")?;
+    let commit = commit_button(driver, "live view v2").await?;
+    commit
+        .click()
         .await
         .context("select live view v2 commit patch")?;
+
     wait::until(
         "standalone live view v2 commit patch",
         ASSERTION_TIMEOUT,
         || async {
-            Ok(script_bool(
+            Ok(script_bool_with_string(
                 driver,
-                r##"
-const view = document.querySelector("#viewer-view");
-const text = view?.textContent ?? "";
-const file = view?.querySelector("details.file");
-return view?.dataset.viewerState === "ready"
-  && view.querySelector(".cline.active .commit-select")?.textContent.includes("live view v2")
-  && text.includes("alpha-v1")
-  && text.includes("alpha-v2")
-  && text.includes("1 commit")
-  && file?.querySelector(".a")?.textContent.trim() === "+1"
-  && file?.querySelector(".d")?.textContent.trim() === "−1";
-"##,
+                r#"
+const shelf = document.querySelector('aside[aria-label="Commits"]');
+const selected = shelf?.querySelector('button[aria-pressed="true"]');
+const host = document.querySelector(
+  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+);
+const root = host?.shadowRoot;
+const text = root?.querySelector('[data-gtl-diff-document]')?.textContent ?? '';
+const file = root?.querySelector('details.file');
+return selected?.textContent.includes('live view v2')
+  && selected.disabled === false
+  && host?.dataset.viewIdentity !== arguments[0]
+  && text.includes('alpha-v1')
+  && text.includes('alpha-v2')
+  && file?.querySelector('.a')?.textContent.trim() === '+1'
+  && file?.querySelector('.d')?.textContent.trim() === '−1';
+"#,
+                &range_identity,
             )
             .await?
             .then_some(()))
         },
     )
     .await?;
+    let selected_identity = by_css(
+        driver,
+        COMPLETE_DIFF_SELECTOR,
+        "completed selected-commit diff island",
+    )
+    .await?
+    .attr("data-view-identity")
+    .await
+    .context("read selected-commit diff identity")?
+    .context("selected-commit diff island is missing its view identity")?;
 
-    driver
-        .execute(
-            r##"
-const card = document.querySelector("#viewer-view .cline.active .commit-select");
-if (!(card instanceof HTMLButtonElement)) {
-  throw new Error("selected commit clear action is missing");
-}
-card.click();
-"##,
-            Vec::new(),
-        )
+    by_accessible_name(driver, "Range")
+        .await?
+        .click()
         .await
         .context("restore the complete live view range")?;
-    wait_for_htmx_idle(driver, "restoring the complete range").await?;
     wait::until(
         "restored complete range after commit patch",
         ASSERTION_TIMEOUT,
         || async {
-            Ok(script_bool(
+            Ok(script_bool_with_string(
                 driver,
-                r##"
-const view = document.querySelector("#viewer-view");
-const text = view?.textContent ?? "";
-const file = view?.querySelector("details.file");
-return view?.dataset.viewerState === "ready"
-  && view.querySelector(".cline.active") === null
-  && !text.includes("alpha-v1")
-  && text.includes("alpha-v2")
-  && file?.querySelector(".a")?.textContent.trim() === "+1"
-  && file?.querySelector(".d")?.textContent.trim() === "−0";
-"##,
+                r#"
+const shelf = document.querySelector('aside[aria-label="Commits"]');
+const host = document.querySelector(
+  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+);
+const root = host?.shadowRoot;
+const text = root?.querySelector('[data-gtl-diff-document]')?.textContent ?? '';
+const file = root?.querySelector('details.file');
+return shelf?.querySelector('button[aria-pressed="true"]') === null
+  && host?.dataset.viewIdentity !== arguments[0]
+  && text.includes('alpha-v2')
+  && !text.includes('alpha-v1')
+  && file?.querySelector('.a')?.textContent.trim() === '+1'
+  && file?.querySelector('.d')?.textContent.trim() === '−0';
+"#,
+                &selected_identity,
             )
             .await?
             .then_some(()))
@@ -445,61 +544,106 @@ return view?.dataset.viewerState === "ready"
 
 pub async fn delete_and_assert_empty_state(session: &TestSession) -> Result<()> {
     let driver = session.driver();
-    let delete = by_accessible_name(driver, "Delete saved live view").await?;
-    delete.focus().await.context("focus Delete live view")?;
+    open_compact_delete_dialog(driver).await?;
+    wait_for_focused_element(driver, "#delete-live-view-dialog button", "Cancel").await?;
+    driver
+        .active_element()
+        .await
+        .context("read initially focused deletion control")?
+        .send_keys(Key::Escape)
+        .await
+        .context("cancel live-view deletion with Escape")?;
+    wait_for_dialog_closed(driver, "delete-live-view-dialog").await?;
+    wait_for_focused_element(driver, "#mobile-display-trigger", "Display").await?;
+
+    open_compact_delete_dialog(driver).await?;
+    wait_for_focused_element(driver, "#delete-live-view-dialog button", "Cancel").await?;
+    let confirm = wait_for_delete_confirmation(driver).await?;
+    confirm
+        .focus()
+        .await
+        .context("focus deletion confirmation")?;
+    confirm
+        .send_keys(Key::Enter)
+        .await
+        .context("confirm live-view deletion with Enter")?;
+    wait_for_empty_viewer(driver).await
+}
+
+async fn open_compact_delete_dialog(driver: &WebDriver) -> Result<()> {
+    by_accessible_name(driver, "Display")
+        .await?
+        .click()
+        .await
+        .context("open compact display controls")?;
+    by_css(
+        driver,
+        "#mobile-display-panel[open]",
+        "open compact display-controls dialog",
+    )
+    .await?;
+    let delete =
+        by_accessible_name_within(driver, "#mobile-display-panel[open]", "Delete live view")
+            .await?;
+    delete
+        .focus()
+        .await
+        .context("focus compact Delete live view")?;
     delete
         .send_keys(Key::Enter)
         .await
-        .context("activate Delete live view with Enter")?;
-    accept_delete_confirmation(driver).await?;
-    wait_for_htmx_idle(driver, "deleting the live view").await?;
-    wait::until(
-        "focused empty state after deleting live view",
-        ASSERTION_TIMEOUT,
-        || async { Ok(empty_state_is_focused(driver).await?.then_some(())) },
-    )
-    .await?;
-    by_css(driver, ".viewer-status-empty", "empty viewer state").await?;
-    by_css(
-        driver,
-        ".viewer-recovery-button",
-        "focused viewer recovery control",
-    )
-    .await?;
-
-    Ok(())
+        .context("activate compact Delete live view with Enter")?;
+    wait_for_delete_dialog(driver).await.map(|_| ())
 }
 
-async fn accept_delete_confirmation(driver: &WebDriver) -> Result<()> {
-    let confirmation = wait::until(
-        "Delete live view confirmation",
+async fn confirm_live_view_deletion(driver: &WebDriver) -> Result<()> {
+    wait_for_delete_confirmation(driver)
+        .await?
+        .click()
+        .await
+        .context("confirm live-view deletion")
+}
+
+async fn delete_active_live_view(driver: &WebDriver, repository: &str) -> Result<()> {
+    by_accessible_name(driver, "Delete live view")
+        .await?
+        .click()
+        .await
+        .with_context(|| format!("open {repository} deletion confirmation"))?;
+    confirm_live_view_deletion(driver)
+        .await
+        .with_context(|| format!("delete temporary {repository} live view"))
+}
+
+async fn wait_for_delete_confirmation(driver: &WebDriver) -> Result<WebElement> {
+    wait_for_delete_dialog(driver).await?;
+    by_accessible_name_within(driver, "#delete-live-view-dialog[open]", "Delete live view").await
+}
+
+async fn wait_for_delete_dialog(driver: &WebDriver) -> Result<WebElement> {
+    wait::until(
+        "live-view deletion alert dialog",
         ASSERTION_TIMEOUT,
         || async {
-            match driver.get_alert_text().await {
-                Ok(text) => Ok(Some(text)),
-                Err(error) if matches!(error.as_inner(), WebDriverErrorInner::NoSuchAlert(..)) => {
-                    Ok(None)
-                }
-                Err(error) => Err(error.into()),
+            let result = driver
+                .execute(
+                    r#"
+const dialog = document.querySelector('#delete-live-view-dialog[open][role="alertdialog"]');
+return dialog?.textContent.includes(arguments[0]) ? dialog : null;
+"#,
+                    vec![serde_json::json!(DELETE_DESCRIPTION)],
+                )
+                .await
+                .context("inspect live-view deletion dialog")?;
+            if result.json().is_null() {
+                return Ok(None);
             }
+            result
+                .element()
+                .map(Some)
+                .context("convert live-view deletion dialog")
         },
     )
-    .await?;
-    ensure!(
-        confirmation == DELETE_CONFIRMATION,
-        "unexpected Delete live view confirmation: {confirmation:?}"
-    );
-    driver
-        .accept_alert()
-        .await
-        .context("accept Delete live view confirmation")?;
-    Ok(())
-}
-
-async fn wait_for_live_tab(driver: &WebDriver, description: &str) -> Result<()> {
-    wait::until(description, ASSERTION_TIMEOUT, || async {
-        Ok(live_tab_is_only_active_tab(driver).await?.then_some(()))
-    })
     .await
 }
 
@@ -510,18 +654,22 @@ async fn wait_for_active_live_view(
     tab_count: u64,
 ) -> Result<()> {
     wait::until(
-        &format!("{repository} live view to be active and ready"),
+        &format!("{repository} live view to be active with a completed diff"),
         ASSERTION_TIMEOUT,
         || async {
             let result = driver
                 .execute(
                     r#"
-const active = document.querySelector('.viewer-tab.active');
-const view = document.querySelector('#viewer-view');
-return document.querySelectorAll('.viewer-tab').length === arguments[2]
-  && active?.querySelector('.viewer-tab-label')?.textContent.includes(arguments[0])
-  && view?.dataset.viewerState === 'ready'
-  && view.textContent.includes(arguments[1]);
+const active = document.querySelector('[role="tab"][aria-selected="true"]');
+const host = document.querySelector(
+  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+);
+const documentElement = host?.shadowRoot?.querySelector('[data-gtl-diff-document]');
+return document.querySelectorAll('[role="tablist"][aria-label="Open diffs"]').length === 1
+  && document.querySelectorAll('[role="tab"]').length === arguments[2]
+  && active?.textContent.includes(arguments[0])
+  && active.textContent.includes('Live')
+  && documentElement?.textContent.includes(arguments[1]);
 "#,
                     vec![
                         serde_json::json!(repository),
@@ -530,21 +678,91 @@ return document.querySelectorAll('.viewer-tab').length === arguments[2]
                     ],
                 )
                 .await
-                .context("inspect active live view")?;
+                .context("inspect active Dioxus live view")?;
             Ok(result.json().as_bool().unwrap_or(false).then_some(()))
         },
     )
     .await
 }
 
-async fn wait_for_htmx_idle(driver: &WebDriver, label: &str) -> Result<()> {
+async fn wait_for_active_live_materialization(
+    driver: &WebDriver,
+    repository: &str,
+    tab_count: u64,
+) -> Result<()> {
     wait::until(
-        &format!("HTMX to settle after {label}"),
+        &format!("{repository} live diff materialization to be active"),
+        ASSERTION_TIMEOUT,
+        || async {
+            let result = driver
+                .execute(
+                    r#"
+const active = document.querySelector('[role="tab"][aria-selected="true"]');
+const host = document.querySelector('#viewer-diff-island');
+return document.querySelectorAll('[role="tab"]').length === arguments[1]
+  && active?.textContent.includes(arguments[0])
+  && active.textContent.includes('Live')
+  && document.querySelectorAll('#viewer-active-view').length === 1
+  && ['loading', 'streaming', 'complete'].includes(host?.dataset.viewState);
+"#,
+                    vec![serde_json::json!(repository), serde_json::json!(tab_count)],
+                )
+                .await
+                .context("inspect active Dioxus live materialization")?;
+            Ok(result.json().as_bool().unwrap_or(false).then_some(()))
+        },
+    )
+    .await
+}
+
+async fn assert_diff_excludes_with_row_count(
+    driver: &WebDriver,
+    unexpected: &str,
+    expected_rows: u64,
+) -> Result<()> {
+    let result = driver
+        .execute(
+            r#"
+const host = document.querySelector(
+  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+);
+const documentElement = host?.shadowRoot?.querySelector('[data-gtl-diff-document]');
+return {
+  containsUnexpected: documentElement?.textContent.includes(arguments[0]) ?? false,
+  rows: documentElement?.querySelectorAll('.filebody .dl').length ?? 0
+};
+"#,
+            vec![serde_json::json!(unexpected)],
+        )
+        .await
+        .context("inspect replacement diff for stale chunks")?;
+    let observation = result.json();
+    ensure!(
+        observation["containsUnexpected"].as_bool() == Some(false),
+        "replacement diff contains stale content {unexpected:?}"
+    );
+    let rows = observation["rows"].as_u64().unwrap_or_default();
+    ensure!(
+        rows == expected_rows,
+        "replacement diff has {rows} rows instead of the original {expected_rows} chunked-fixture rows"
+    );
+    Ok(())
+}
+
+async fn wait_for_empty_viewer(driver: &WebDriver) -> Result<()> {
+    wait::until(
+        "empty viewer after deleting live view",
         ASSERTION_TIMEOUT,
         || async {
             Ok(script_bool(
                 driver,
-                "return !document.querySelector('.hx-request, .htmx-request');",
+                r#"
+return document.querySelectorAll('[role="tab"]').length === 0
+  && document.querySelector('[role="tablist"][aria-label="Open diffs"]')?.textContent.includes('No open diffs')
+  && document.querySelector('main')?.textContent.includes('No diff is open')
+  && document.querySelector('#viewer-diff-island') === null
+  && !document.querySelector('#delete-live-view-dialog[open]');
+"#,
             )
             .await?
             .then_some(()))
@@ -553,32 +771,91 @@ async fn wait_for_htmx_idle(driver: &WebDriver, label: &str) -> Result<()> {
     .await
 }
 
-async fn viewer_state(driver: &WebDriver) -> Result<bool> {
-    script_bool(
-        driver,
-        "return document.querySelectorAll('.viewer-tab').length === 1 && document.querySelector('.viewer-tab.active .viewer-tab-kind')?.textContent === 'L' && document.querySelector('#viewer-view .diff-split') !== null && document.querySelector(\"input[name='viewer-layout'][value='split']\")?.checked === true;",
+async fn wait_for_dialog_closed(driver: &WebDriver, id: &str) -> Result<()> {
+    let selector = format!("#{id}[open]");
+    wait::until(&format!("{id} to close"), ASSERTION_TIMEOUT, || async {
+        Ok(driver
+            .find_all(By::Css(&selector))
+            .await?
+            .is_empty()
+            .then_some(()))
+    })
+    .await
+}
+
+async fn wait_for_focused_element(driver: &WebDriver, selector: &str, text: &str) -> Result<()> {
+    wait::until(
+        &format!("{text:?} to receive focus"),
+        ASSERTION_TIMEOUT,
+        || async {
+            let result = driver
+                .execute(
+                    r"
+const active = document.activeElement;
+return active?.matches(arguments[0]) && active.textContent.trim() === arguments[1];
+",
+                    vec![serde_json::json!(selector), serde_json::json!(text)],
+                )
+                .await
+                .with_context(|| format!("inspect focus for {text:?}"))?;
+            Ok(result.json().as_bool().unwrap_or(false).then_some(()))
+        },
     )
     .await
 }
 
-async fn live_tab_is_only_active_tab(driver: &WebDriver) -> Result<bool> {
-    script_bool(
-        driver,
-        "return document.querySelectorAll('.viewer-tab').length === 1 && document.querySelector('.viewer-tab.active .viewer-tab-kind')?.textContent === 'L';",
+async fn commit_button(driver: &WebDriver, subject: &str) -> Result<WebElement> {
+    wait::until(
+        &format!("commit action for {subject:?}"),
+        ASSERTION_TIMEOUT,
+        || async {
+            let result = driver
+                .execute(
+                    r#"
+return Array.from(document.querySelectorAll('aside[aria-label="Commits"] button'))
+  .find((button) => button.offsetParent !== null && button.textContent.includes(arguments[0])) ?? null;
+"#,
+                    vec![serde_json::json!(subject)],
+                )
+                .await
+                .with_context(|| format!("find commit action for {subject:?}"))?;
+            if result.json().is_null() {
+                return Ok(None);
+            }
+            result
+                .element()
+                .map(Some)
+                .with_context(|| format!("convert commit action for {subject:?}"))
+        },
     )
     .await
 }
 
-async fn empty_state_is_focused(driver: &WebDriver) -> Result<bool> {
+async fn viewer_uses_split_layout(driver: &WebDriver) -> Result<bool> {
     script_bool(
         driver,
-        "return !Array.from(document.querySelectorAll('.viewer-tab-kind')).some((kind) => kind.textContent === 'L') && document.querySelector('.viewer-status-empty') !== null && document.activeElement?.classList.contains('viewer-recovery-button');",
+        r#"
+const host = document.querySelector(
+  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+);
+return document.querySelectorAll('[role="tab"]').length === 1
+  && document.querySelector('[role="tab"][aria-selected="true"]')?.textContent.includes('Live')
+  && host?.dataset.viewIdentity.includes(':split:')
+  && host.shadowRoot?.querySelector('[data-gtl-diff-document] .diff-split') !== null;
+"#,
     )
     .await
 }
 
 async fn script_bool(driver: &WebDriver, script: &str) -> Result<bool> {
     let result = driver.execute(script, Vec::new()).await?;
+    Ok(result.json().as_bool().unwrap_or(false))
+}
+
+async fn script_bool_with_string(driver: &WebDriver, script: &str, value: &str) -> Result<bool> {
+    let result = driver
+        .execute(script, vec![serde_json::json!(value)])
+        .await?;
     Ok(result.json().as_bool().unwrap_or(false))
 }
 

@@ -105,6 +105,19 @@ pub enum Command {
         #[arg(long, value_enum, default_value_t = BuildTarget::Both)]
         target: BuildTarget,
     },
+    /// Build the framework-free assets and stage the release Dioxus Web bundle.
+    #[command(name = Verb::WEB_BUILD.as_str())]
+    WebBuild,
+    /// Serve the Dioxus shell with repository-owned asset watchers.
+    #[command(name = Verb::WEB_SERVE.as_str())]
+    WebServe {
+        /// Arguments forwarded to `dx serve`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        arguments: Vec<String>,
+    },
+    /// Generate the tracked Dioxus shell and diff-island stylesheets.
+    #[command(name = Verb::WEB_STYLES.as_str())]
+    WebStyles,
     /// Type-check and test the framework-free frontend sources.
     #[command(name = Verb::FRONTEND_TEST.as_str())]
     FrontendTest,

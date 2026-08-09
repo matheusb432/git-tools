@@ -37,6 +37,13 @@ if (!document.getElementById(id)) {
   style.textContent = "*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }";
   document.head.appendChild(style);
 }
+const diffRoot = document.getElementById("viewer-diff-island")?.shadowRoot;
+if (diffRoot && !diffRoot.getElementById(id)) {
+  const style = document.createElement("style");
+  style.id = id;
+  style.textContent = "*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }";
+  diffRoot.appendChild(style);
+}
 "#,
                     Vec::new(),
                 )

@@ -12,11 +12,11 @@ pub mod wait;
 mod journey;
 
 pub use journey::{
-    assert_configured_editor_launch, assert_durable_empty_state, assert_first_paint,
-    assert_forwarded_live_view, assert_mobile_navigation, assert_overlapping_live_updates,
-    assert_restarted_live_view, delete_and_assert_empty_state, delete_temporary_live_views,
-    refresh_and_assert_alpha_v2, refresh_and_assert_unavailable,
-    select_commit_patch_and_restore_range, select_split_layout,
+    assert_chunked_live_view, assert_configured_editor_launch, assert_default_navigation_reachable,
+    assert_durable_empty_state, assert_first_paint, assert_forwarded_live_view,
+    assert_mobile_navigation, assert_overlapping_live_updates, assert_restarted_live_view,
+    delete_and_assert_empty_state, delete_temporary_live_views, refresh_and_assert_alpha_v2,
+    refresh_and_assert_unavailable, select_commit_patch_and_restore_range, select_split_layout,
 };
 
 pub async fn run_test<F>(name: &'static str, body: F) -> Result<()>

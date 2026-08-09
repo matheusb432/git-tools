@@ -25,6 +25,9 @@ impl Verb {
     pub(crate) const SHIP: Self = Self("ship");
     pub(crate) const TEST: Self = Self("test");
     pub(crate) const UNINSTALL: Self = Self("uninstall");
+    pub(crate) const WEB_BUILD: Self = Self("web-build");
+    pub(crate) const WEB_SERVE: Self = Self("web-serve");
+    pub(crate) const WEB_STYLES: Self = Self("web-styles");
 
     pub(crate) const fn as_str(self) -> &'static str {
         self.0

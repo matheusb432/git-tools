@@ -16,13 +16,13 @@ export function enhanceControls(root: HTMLElement): () => void {
     }, 1200);
   };
 
-  root.querySelectorAll<HTMLButtonElement>(".copy-button").forEach((button) => {
-    // The payload is read synchronously so copyText's execCommand fallback still runs
-    // inside the click's transient user activation window.
-    listen(button, "click", () => {
-      void copyText(copyButtonPayload(button)).then((ok) => {
-        if (active) scheduleReset(button, ok ? "ok" : "err");
-      });
+  listen(root, "click", (event) => {
+    if (!(event.target instanceof Element)) return;
+    const button = event.target.closest<HTMLButtonElement>(".copy-button");
+    if (!button || !root.contains(button)) return;
+    // Start the fallback inside the click's transient user activation window.
+    void copyText(copyButtonPayload(button)).then((ok) => {
+      if (active) scheduleReset(button, ok ? "ok" : "err");
     });
   });
   return () => {

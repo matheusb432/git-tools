@@ -10,7 +10,7 @@ mod tabs;
 mod view_loading;
 mod view_snapshot;
 
-pub(crate) use parse::{ResumeNonce, Route, SettingChange, parse};
+pub(crate) use parse::{Route, SettingChange, parse};
 use response::{ErrorTarget, RouteOutput, RouteResult};
 use tauri::http::{Request, Response};
 

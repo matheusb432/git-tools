@@ -23,7 +23,7 @@ pub(in crate::render) fn tabs(
     active_theme: Theme,
     mobile_counts: Option<MobileNavigationCounts>,
     swap: SwapMode,
-    feedback: SwapFeedback<'_>,
+    feedback: SwapFeedback,
 ) -> Markup {
     html! {
         nav id="viewer-tabs" hx-swap-oob=[swap.out_of_band()] class="viewer-tabs z-[70] flex min-w-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2 [&.htmx-swapping]:border-acc-line [&.htmx-settling]:border-acc-line mobile:grid mobile:h-[58px] mobile:grid-cols-[58px_minmax(0,1fr)_58px_58px] mobile:items-stretch mobile:gap-0 mobile:p-0" aria-label="Open diffs" {
@@ -88,22 +88,6 @@ pub(in crate::render) fn tabs(
                 }
             }
             (theme::trigger(active_theme))
-            @if let SwapFeedback::SnapshotRecipesSkipped(labels) = feedback {
-                div class="gtl-toast viewer-toast-skip pointer-events-none fixed bottom-6 left-1/2 z-50 flex max-w-[min(760px,calc(100vw-32px))] -translate-x-1/2 items-center gap-2 rounded-panel border border-acc-line bg-surface px-3.5 py-2 text-[12.5px] text-ink opacity-100 shadow-[0_6px_18px_rgba(0,0,0,.22)] transition-[opacity,scale] duration-200 ease-out starting:scale-95 starting:opacity-0 motion-reduce:transition-none [overflow-wrap:anywhere] before:font-bold before:text-acc before:content-['!'] [&[data-leaving]]:scale-95 [&[data-leaving]]:opacity-0"
-                    data-viewer-toast
-                    role="status"
-                    aria-live="polite"
-                    aria-atomic="true" {
-                    "Skipped " (labels.len()) " "
-                    (if labels.len() == 1 { "diff" } else { "diffs" })
-                    " with no commits or changed files: "
-                    @for (index, label) in labels.iter().enumerate() {
-                        @if index > 0 { ", " }
-                        (label)
-                    }
-                    "."
-                }
-            }
             @if feedback == SwapFeedback::LiveViewDeleted {
                 div class="viewer-sr-only sr-only" role="status" aria-live="polite" aria-atomic="true" {
                     @match tabs.iter().find(|tab| Some(tab.id()) == active_tab_id) {

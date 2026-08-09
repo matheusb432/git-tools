@@ -17,6 +17,9 @@ async fn viewer_live_lifecycle() -> anyhow::Result<()> {
             support::assert_first_paint(session)
                 .await
                 .context("assert first diff-row paint")?;
+            support::assert_default_navigation_reachable(session)
+                .await
+                .context("assert default-width files and commit navigation")?;
             support::select_split_layout(session)
                 .await
                 .context("select split layout")?;
@@ -30,10 +33,13 @@ async fn viewer_live_lifecycle() -> anyhow::Result<()> {
             support::assert_mobile_navigation(session)
                 .await
                 .context("assert mobile navigation")?;
+            let chunked_row_count = support::assert_chunked_live_view(session, &fixture)
+                .await
+                .context("assert chunked diff materialization")?;
             support::assert_overlapping_live_updates(session, &fixture)
                 .await
                 .context("assert overlapping live updates")?;
-            support::delete_temporary_live_views(session)
+            support::delete_temporary_live_views(session, chunked_row_count)
                 .await
                 .context("remove temporary overlapping live views")?;
 

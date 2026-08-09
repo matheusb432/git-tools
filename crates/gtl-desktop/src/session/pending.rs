@@ -15,7 +15,7 @@ impl std::fmt::Display for PendingRecipesError {
 
 impl std::error::Error for PendingRecipesError {}
 
-/// Complete recipe batches waiting for the viewer's route layer to consume them.
+/// Complete recipe batches waiting for the viewer backend to consume them.
 #[derive(Debug, Default)]
 pub(crate) struct PendingRecipes {
     batches: Mutex<VecDeque<OpenRecipes>>,
@@ -74,7 +74,6 @@ mod tests {
     use gtl_contracts::recipes::{OpenRecipes, RecipeBatchKind};
 
     use super::*;
-    use crate::{ForwardRecipesError, enqueue_and_wake};
 
     fn batch(id: &str) -> OpenRecipes {
         OpenRecipes {
@@ -128,27 +127,6 @@ mod tests {
             pending.prepend(vec![batch("prepend")]),
             Err(PendingRecipesError::Poisoned)
         );
-    }
-
-    #[test]
-    fn poisoned_queue_prevents_wake_and_returns_a_typed_forwarding_error() {
-        let pending = PendingRecipes::default();
-        let _ = std::panic::catch_unwind(|| {
-            let _guard = pending.batches.lock().expect("initial lock");
-            panic!("poison queue");
-        });
-        let mut woke = false;
-
-        let result = enqueue_and_wake(&pending, vec![batch("unavailable")], || {
-            woke = true;
-            Ok::<(), &'static str>(())
-        });
-
-        assert!(matches!(
-            result,
-            Err(ForwardRecipesError::Queue(PendingRecipesError::Poisoned))
-        ));
-        assert!(!woke);
     }
 
     #[test]

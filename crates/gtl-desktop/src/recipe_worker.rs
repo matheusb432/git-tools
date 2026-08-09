@@ -8,27 +8,10 @@ use std::{
     time::Duration,
 };
 
-use serde::Serialize;
-
 use crate::recipes::{RecipeError, RecipeExecutor, ViewerComputation};
 
 const MAX_QUEUED_COMPUTATIONS: usize = 32;
 const SHUTDOWN_WAIT: Duration = Duration::from_millis(250);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub(crate) struct RecipeCompletion {
-    tab_id: u64,
-    generation: u64,
-}
-
-impl RecipeCompletion {
-    fn from_request(request: &ViewerComputation) -> Self {
-        Self {
-            tab_id: request.tab_id().into(),
-            generation: request.generation(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RecipeQueueError {
@@ -97,7 +80,7 @@ struct SharedQueue {
 
 struct RecipeWorkerInner {
     shared: Arc<SharedQueue>,
-    completions: Mutex<Option<Receiver<RecipeCompletion>>>,
+    completions: Mutex<Option<Receiver<()>>>,
     stopped: Mutex<Receiver<()>>,
     handle: Mutex<Option<JoinHandle<()>>>,
 }
@@ -175,7 +158,7 @@ impl RecipeWorker {
         Ok(())
     }
 
-    pub(crate) fn take_completions(&self) -> Option<Receiver<RecipeCompletion>> {
+    pub(crate) fn take_completions(&self) -> Option<Receiver<()>> {
         self.inner
             .completions
             .lock()
@@ -187,7 +170,7 @@ impl RecipeWorker {
 fn worker_loop(
     queue: &SharedQueue,
     executor: &RecipeExecutor,
-    completions: &Sender<RecipeCompletion>,
+    completions: &Sender<()>,
     stopped: &Sender<()>,
 ) {
     loop {
@@ -210,7 +193,6 @@ fn worker_loop(
         let Some(queued) = next else {
             continue;
         };
-        let completion = RecipeCompletion::from_request(&queued.request);
         let recipe_ticket = match &queued.request {
             ViewerComputation::Recipe(request) => Some(request.ticket),
             ViewerComputation::CommitPatch(_) => None,
@@ -223,7 +205,7 @@ fn worker_loop(
         };
         match result {
             Ok(()) => {
-                if completions.send(completion).is_err() {
+                if completions.send(()).is_err() {
                     break;
                 }
             }
@@ -234,7 +216,7 @@ fn worker_loop(
                 } else {
                     eprintln!("gtl-viewer computation failed: {reason}");
                 }
-                if completions.send(completion).is_err() {
+                if completions.send(()).is_err() {
                     break;
                 }
             }
@@ -307,7 +289,10 @@ mod tests {
             replacement.request.tab_id(),
             ViewerTabId::try_new(1).unwrap()
         );
-        assert_eq!(replacement.request.generation(), 2);
+        assert!(matches!(
+            replacement.request,
+            ViewerComputation::Recipe(request) if request.ticket.generation == 2
+        ));
         assert_eq!(queue.computations.len(), 1);
     }
 

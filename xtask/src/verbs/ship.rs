@@ -1,23 +1,22 @@
-//! `xtask ship` — cross-build the Win11 shippables (CLI + viewer + gtl-daemon) from this Linux
-//! host via cargo-xwin. Migrates `scripts/win-preflight.sh` + the `win-build`/`win-compile-smoke`
-//! recipes. Stages run side-effect-free-first and emit the `RESULT scope=ship …` contract; a
-//! cross-build proves linkage, NOT runtime (host/release split — certify on real Win11).
+//! Cross-build the Windows CLI, daemon, and offline desktop viewer from Linux with cargo-xwin.
 
 use std::{path::Path, process::Command};
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
-use super::frontend;
+use super::{desktop_release, dioxus_web};
 use crate::{
     process::{self, Status},
+    project,
+    task::Step,
     verb::Verb,
 };
 
-/// The Windows cross-target. `--features custom-protocol` is required for the viewer (else the
-/// exe serves devUrl and fails with `ERR_CONNECTION_REFUSED`).
+/// The Windows cross-target. Production builds enable Tauri's custom protocol and the embedded
+/// Dioxus shell explicitly.
 const WIN_TARGET: &str = "x86_64-pc-windows-msvc";
 
-/// Whether the Linux→Windows cross toolchain is ready, plus fix-hint lines when not.
+/// Whether the Linux-to-Windows cross toolchain is ready, plus fix-hint lines when not.
 pub struct PreflightReport {
     pub ok: bool,
     pub lines: Vec<String>,
@@ -44,7 +43,7 @@ pub fn preflight(
     PreflightReport { ok, lines }
 }
 
-/// Whether `tool` resolves to an executable on PATH. Uses the `which` crate — no shell, no
+/// Whether `tool` resolves to an executable on PATH. Uses the `which` crate -- no shell, no
 /// string interpolation, so there is no `sh -c` injection surface and it is cross-platform.
 fn on_path(tool: &str) -> bool {
     which::which(tool).is_ok()
@@ -62,19 +61,37 @@ fn target_installed(triple: &str) -> bool {
         })
 }
 
-/// Cross-build the Win11 shippables. `smoke` = fast debug linkage check (committed bundles, no
-/// artifact verify); otherwise a release ship (fresh bundles + verify). Migrates the
-/// `win-build`/`win-compile-smoke` recipes + `scripts/win-preflight.sh`.
-pub fn run(smoke: bool, force: bool) -> Result<()> {
-    // 1. repository gate; force skips only this test preflight.
-    if !force {
-        process::run("ship-tests", "just", &["test", "--all"])?;
+fn viewer_build_arguments(smoke: bool) -> Vec<&'static str> {
+    let mut arguments = vec!["xwin", "build"];
+    if !smoke {
+        arguments.push("--release");
     }
+    arguments.extend_from_slice(&[
+        "-p",
+        "gtl-desktop",
+        "--features",
+        desktop_release::PRODUCTION_FEATURES,
+        "--target",
+        WIN_TARGET,
+    ]);
+    arguments
+}
 
-    // 2. cross-toolchain preflight (side-effect-free decision)
+fn release_artifact_path(target: &Path, executable: &str) -> std::path::PathBuf {
+    target.join(WIN_TARGET).join("release").join(executable)
+}
+
+fn cross_build_step(label: &str, arguments: &[&str], root: &Path) -> Step {
+    Step::new(label, "cargo", arguments.iter().copied()).with_current_directory(root)
+}
+
+/// Cross-build the Windows shippables. Smoke mode uses the debug Rust profile and skips artifact
+/// verification; both modes stage the complete offline frontend first.
+pub fn run(smoke: bool, force: bool) -> Result<()> {
+    // 1. Cross-toolchain preflight (side-effect-free decision).
     let report = preflight(&on_path, &target_installed);
     if !report.ok {
-        // ! Hints → stderr (human); the RESULT line → stdout (machine-parsed). Keep the split.
+        // Keep human hints on stderr and the machine-readable result on stdout.
         for line in &report.lines {
             eprintln!("{line}");
         }
@@ -82,13 +99,18 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
         bail!("ship preflight failed");
     }
 
-    // 3. frontend bundle (release only — smoke uses the committed bundle for speed)
-    if !smoke && frontend::build().is_err() {
-        process::result_fail_step(Verb::SHIP, "frontend");
-        bail!("ship frontend bundle build failed");
+    // 2. Stage frontend bundles before drift-sensitive repository tests.
+    if let Err(error) = dioxus_web::build_release() {
+        process::result_fail_step(Verb::SHIP, "dioxus-web");
+        return Err(error).context("ship Dioxus Web release bundle failed");
     }
 
-    // 4. cross-build all three packages
+    // 3. Repository gate; force skips only this test preflight.
+    if !force {
+        process::run("ship-tests", "just", &["test", "--all"])?;
+    }
+
+    // 4. Cross-build all three packages.
     let profile: &[&str] = if smoke { &[] } else { &["--release"] };
     let mut cli_args = vec!["xwin", "build"];
     cli_args.extend_from_slice(profile);
@@ -98,32 +120,30 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
     daemon_args.extend_from_slice(profile);
     daemon_args.extend_from_slice(&["-p", "gtl-daemon", "--target", WIN_TARGET]);
 
-    let mut viewer_args = vec!["xwin", "build"];
-    viewer_args.extend_from_slice(profile);
-    viewer_args.extend_from_slice(&[
-        "-p",
-        "gtl-desktop",
-        "--features",
-        "custom-protocol",
-        "--target",
-        WIN_TARGET,
-    ]);
+    let viewer_args = viewer_build_arguments(smoke);
+    let root = project::repository_root();
 
-    if process::run("cross-build-cli", "cargo", &cli_args).is_err()
-        || process::run("cross-build-daemon", "cargo", &daemon_args).is_err()
-        || process::run("cross-build-viewer", "cargo", &viewer_args).is_err()
-    {
+    let cross_build = process::run_step(&cross_build_step("cross-build-cli", &cli_args, &root))
+        .context("cross-build the Windows CLI")
+        .and_then(|()| {
+            process::run_step(&cross_build_step("cross-build-daemon", &daemon_args, &root))
+                .context("cross-build the Windows daemon")
+        })
+        .and_then(|()| {
+            desktop_release::run_cargo("cross-build-viewer", &viewer_args)
+                .context("cross-build the Windows Dioxus viewer")
+        });
+    if let Err(error) = cross_build {
         process::result_fail_step(Verb::SHIP, "cross-build");
-        bail!("ship cross-build failed");
+        return Err(error);
     }
 
-    // 5. verify artifacts (release only)
+    // 5. Verify artifacts (release only).
     if !smoke {
+        let target = project::cargo_target_directory(&root)
+            .context("resolve Windows release artifact directory")?;
         for exe in ["git-tools.exe", "gtl-daemon.exe", "gtl-viewer.exe"] {
-            let path = Path::new("target")
-                .join(WIN_TARGET)
-                .join("release")
-                .join(exe);
+            let path = release_artifact_path(&target, exe);
             let bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
             if bytes == 0 {
                 process::result_fail_step(Verb::SHIP, "verify");
@@ -167,5 +187,43 @@ mod tests {
     #[test]
     fn preflight_ok_when_both_present() {
         assert!(preflight(&|_| true, &|_| true).ok);
+    }
+
+    #[test]
+    fn viewer_cross_build_uses_the_production_shell_features() {
+        assert_eq!(
+            viewer_build_arguments(false),
+            [
+                "xwin",
+                "build",
+                "--release",
+                "-p",
+                "gtl-desktop",
+                "--features",
+                "custom-protocol,dioxus-shell",
+                "--target",
+                WIN_TARGET,
+            ]
+        );
+    }
+
+    #[test]
+    fn release_artifacts_resolve_from_a_non_default_cargo_target() {
+        assert_eq!(
+            release_artifact_path(Path::new("non-default-target"), "gtl-viewer.exe"),
+            Path::new("non-default-target")
+                .join(WIN_TARGET)
+                .join("release/gtl-viewer.exe")
+        );
+    }
+
+    #[test]
+    fn cross_build_steps_run_from_the_repository_root() {
+        let root = Path::new("repository-root");
+        let step = cross_build_step("cross-build-cli", &["xwin", "build", "-p", "gtl-cli"], root);
+
+        assert_eq!(step.program(), "cargo");
+        assert_eq!(step.current_directory(), Some(root));
+        assert_eq!(step.arguments(), ["xwin", "build", "-p", "gtl-cli"]);
     }
 }

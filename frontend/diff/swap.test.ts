@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
-import { enhanceControls } from "./controls";
 import { enhanceLayout } from "./enhance-layout";
-import { captureSwapAnchor, createEnhancementLifecycle, installSwapLifecycle, restoreSwapAnchor } from "./swap";
+import { createEnhancementLifecycle } from "./enhancement-lifecycle";
+import { captureSwapAnchor, installSwapLifecycle, restoreSwapAnchor } from "./swap";
 
 function must<T>(value: T | null, what: string): T {
   if (value === null) throw new Error(`${what} is missing`);
@@ -64,12 +64,7 @@ function dispatchSwap(
 }
 
 // Mirrors swap.ts's production mount so the lifecycle covers everything a real swap wires.
-const testLifecycle = createEnhancementLifecycle((root) => {
-  const cleanups = [enhanceControls(root), enhanceLayout(root)];
-  return () => {
-    cleanups.reverse().forEach((cleanup) => cleanup());
-  };
-});
+const testLifecycle = createEnhancementLifecycle(".layout", enhanceLayout);
 
 test("enhances and tears down each layout independently", () => {
   const first = layout("first");
