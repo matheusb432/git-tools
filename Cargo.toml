@@ -109,7 +109,6 @@ toml_edit = "0.25.12"
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-url = "2.5.8"
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2.5.0"
 which = "8.0.4"

@@ -1,8 +1,9 @@
 use gtl_contracts::viewer::{
-    ListViewerHistory, LoadViewerDiffChunk, OpenViewerDiffFile, OpenViewerHistory,
-    PrepareDiffDocument, SelectViewerCommit, SetViewerPreference, VIEWER_STATE_CHANGED_EVENT,
-    ViewerDiffChunk, ViewerDiffDocument, ViewerHistoryCursor, ViewerHistoryPage, ViewerShell,
-    ViewerStateChanged, ViewerTabRequest, ViewerUserSettings, ViewerViewIdentity,
+    GetViewerHistoryCopy, ListViewerHistory, LoadViewerDiffChunk, OpenViewerDiffFile,
+    OpenViewerHistory, PrepareDiffDocument, SelectViewerCommit, SetViewerPreference,
+    VIEWER_STATE_CHANGED_EVENT, ViewerDiffChunk, ViewerDiffDocument, ViewerHistoryCopyPayload,
+    ViewerHistoryCursor, ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest,
+    ViewerUserSettings, ViewerViewIdentity,
 };
 
 use crate::shared::bridge::{ClientApiError, TauriBridge};
@@ -19,6 +20,7 @@ const CLEAR_COMMIT_SELECTION_COMMAND: &str = "viewer_clear_commit_selection";
 const SET_PREFERENCE_COMMAND: &str = "viewer_set_preference";
 const LIST_HISTORY_COMMAND: &str = "viewer_list_history";
 const OPEN_HISTORY_COMMAND: &str = "viewer_open_history";
+const GET_HISTORY_COPY_COMMAND: &str = "viewer_get_history_copy";
 const GET_SETTINGS_COMMAND: &str = "viewer_get_settings";
 const OPEN_DIFF_FILE_COMMAND: &str = "viewer_open_diff_file";
 
@@ -93,6 +95,16 @@ impl ViewerApi {
 
     pub(crate) async fn open_history(render_id: i64) -> Result<ViewerShell, ClientApiError> {
         TauriBridge::invoke_request(OPEN_HISTORY_COMMAND, &OpenViewerHistory { render_id }).await
+    }
+
+    pub(crate) async fn get_history_copy(
+        render_id: i64,
+    ) -> Result<ViewerHistoryCopyPayload, ClientApiError> {
+        TauriBridge::invoke_request(
+            GET_HISTORY_COPY_COMMAND,
+            &GetViewerHistoryCopy { render_id },
+        )
+        .await
     }
 
     pub(crate) async fn get_settings() -> Result<ViewerUserSettings, ClientApiError> {

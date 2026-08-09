@@ -26,20 +26,68 @@ if (typeof listen !== "function") {
     dioxus.send({ status: "unavailable" });
     return;
 }
+const subscriptions = window.__GTL_TAURI_EVENT_SUBSCRIPTIONS__ ?? new Map();
+window.__GTL_TAURI_EVENT_SUBSCRIPTIONS__ = subscriptions;
+const stopSubscription = (subscription) => {
+    const unlisten = subscription?.unlisten;
+    if (typeof unlisten === "function") {
+        subscription.unlisten = null;
+        unlisten();
+    }
+};
+let subscription;
 try {
+    const previousSubscription = subscriptions.get(eventName);
+    stopSubscription(previousSubscription);
+    subscription = { unlisten: null };
+    subscriptions.set(eventName, subscription);
     const unlisten = await listen(eventName, (event) => {
-        dioxus.send({ status: "event", payload: event.payload });
+        if (subscriptions.get(eventName) === subscription) {
+            dioxus.send({ status: "event", payload: event.payload });
+        }
     });
+    subscription.unlisten = unlisten;
+    if (subscriptions.get(eventName) !== subscription) {
+        stopSubscription(subscription);
+        return;
+    }
     dioxus.send({ status: "ready" });
     try {
         await dioxus.recv();
     } finally {
-        unlisten();
+        if (subscriptions.get(eventName) === subscription) {
+            subscriptions.delete(eventName);
+        }
+        stopSubscription(subscription);
     }
 } catch (_error) {
+    if (subscription && subscriptions.get(eventName) === subscription) {
+        subscriptions.delete(eventName);
+    }
+    stopSubscription(subscription);
     dioxus.send({ status: "unavailable" });
 }
 "#;
+
+struct EventSubscriptionTeardown<SendTeardown: FnOnce()> {
+    send_teardown: Option<SendTeardown>,
+}
+
+impl<SendTeardown: FnOnce()> EventSubscriptionTeardown<SendTeardown> {
+    fn new(send_teardown: SendTeardown) -> Self {
+        Self {
+            send_teardown: Some(send_teardown),
+        }
+    }
+}
+
+impl<SendTeardown: FnOnce()> Drop for EventSubscriptionTeardown<SendTeardown> {
+    fn drop(&mut self) {
+        if let Some(send_teardown) = self.send_teardown.take() {
+            send_teardown();
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientApiError {
@@ -147,6 +195,10 @@ impl TauriBridge {
         evaluator
             .send(event_name)
             .map_err(|_| ClientApiError::Unavailable)?;
+        let event_evaluator = evaluator;
+        let _subscription_teardown = EventSubscriptionTeardown::new(move || {
+            let _ = event_evaluator.send(());
+        });
 
         loop {
             match evaluator
@@ -166,7 +218,33 @@ impl TauriBridge {
 mod tests {
     use gtl_contracts::viewer::{ViewerApiError, ViewerResource};
 
-    use super::ClientApiError;
+    use super::{ClientApiError, EventSubscriptionTeardown};
+
+    #[test]
+    fn restarting_event_subscription_keeps_exactly_one_listener_active() {
+        let active = std::cell::Cell::new(0);
+        let teardowns = std::cell::Cell::new(0);
+
+        let subscribe = || {
+            active.set(active.get() + 1);
+            EventSubscriptionTeardown::new(|| {
+                active.set(active.get() - 1);
+                teardowns.set(teardowns.get() + 1);
+            })
+        };
+
+        let mut subscription = Some(subscribe());
+        assert_eq!(active.get(), 1);
+
+        drop(subscription.take());
+        subscription = Some(subscribe());
+        assert_eq!(active.get(), 1);
+        assert_eq!(teardowns.get(), 1);
+
+        drop(subscription);
+        assert_eq!(active.get(), 0);
+        assert_eq!(teardowns.get(), 2);
+    }
 
     #[test]
     fn backend_details_are_not_exposed_in_user_messages() {

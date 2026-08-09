@@ -1,7 +1,7 @@
 //! `gtl diff live`: validate + persist a live view of unpushed work through the
-//! daemon's `POST /live-views/save`, then forward it to the viewer app for HTMX
-//! rendering. `--path <p>` saves one repo; with no path, every managed repo with
-//! unpushed commits is saved and forwarded as one batch.
+//! daemon's `POST /live-views/save`, then forward it to the Dioxus viewer shell.
+//! `--path <p>` saves one repo; with no path, every managed repo with unpushed
+//! commits is saved and forwarded as one batch.
 
 use anyhow::Context as _;
 use gtl_contracts::{

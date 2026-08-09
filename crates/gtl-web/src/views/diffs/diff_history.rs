@@ -1,12 +1,8 @@
 use dioxus::prelude::*;
-use gtl_contracts::{
-    recipes::Recipe,
-    viewer::{ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage, ViewerRecipeKind},
-};
+use gtl_contracts::viewer::{ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage};
 use lucide_dioxus::{
     Check, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Copy, ExternalLink, History,
 };
-use serde::Serialize;
 
 use crate::{
     app::{application_layout::ViewerContext, application_router::Route},
@@ -70,31 +66,6 @@ impl HistoryOpenState {
 
     const fn is_opening(self, render_id: i64) -> bool {
         matches!(self.request, Some(request) if request.render_id == render_id)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct HistoryCopyPayload {
-    id: i64,
-    title: String,
-    repo_name: String,
-    kind: ViewerRecipeKind,
-    range_label: String,
-    rendered_at: String,
-    recipe: Recipe,
-}
-
-impl From<ViewerHistoryEntry> for HistoryCopyPayload {
-    fn from(entry: ViewerHistoryEntry) -> Self {
-        Self {
-            id: entry.id,
-            title: entry.title,
-            repo_name: entry.repository_name,
-            kind: entry.kind,
-            range_label: entry.range_label,
-            rendered_at: entry.rendered_at,
-            recipe: entry.recipe,
-        }
     }
 }
 
@@ -207,13 +178,14 @@ pub(crate) fn DiffHistoryView() -> Element {
                                                 }
                                             });
                                         },
-                                        oncopy: move |entry: ViewerHistoryEntry| {
-                                            let render_id = entry.id;
-                                            let payload = HistoryCopyPayload::from(entry);
+                                        oncopy: move |render_id: i64| {
                                             action_error.set(None);
                                             spawn(async move {
-                                                match browser::copy_json(&payload).await {
-                                                    Ok(()) => copied_id.set(Some(render_id)),
+                                                match ViewerApi::get_history_copy(render_id).await {
+                                                    Ok(payload) => match browser::copy_json(&payload).await {
+                                                        Ok(()) => copied_id.set(Some(render_id)),
+                                                        Err(error) => action_error.set(Some(error)),
+                                                    },
                                                     Err(error) => action_error.set(Some(error)),
                                                 }
                                             });
@@ -255,10 +227,8 @@ fn HistoryRow(
     open_disabled: bool,
     copied: bool,
     onopen: EventHandler<i64>,
-    oncopy: EventHandler<ViewerHistoryEntry>,
+    oncopy: EventHandler<i64>,
 ) -> Element {
-    let copy_entry = entry.clone();
-
     rsx! {
         article { class: "grid min-w-0 gap-3 rounded-sm border border-line bg-surface px-3 py-3 hover:border-line-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(8rem,0.8fr)_auto] sm:items-center",
             div { class: "min-w-0",
@@ -287,7 +257,7 @@ fn HistoryRow(
                     variant: ButtonVariant::Ghost,
                     aria_label: "Copy {entry.title} JSON",
                     title: if copied { "Copied" } else { "Copy render JSON" },
-                    onclick: move |_| oncopy.call(copy_entry.clone()),
+                    onclick: move |_| oncopy.call(entry.id),
                     span { aria_hidden: "true",
                         if copied { Check { size: 14 } } else { Copy { size: 14 } }
                     }
@@ -367,12 +337,7 @@ fn HistoryPageButton(
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::{
-        recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
-        viewer::{ViewerHistoryEntry, ViewerRecipeKind},
-    };
-
-    use super::{HistoryCopyPayload, HistoryOpenState};
+    use super::HistoryOpenState;
 
     #[test]
     fn history_open_is_page_wide_and_rejects_stale_completion() {
@@ -395,34 +360,5 @@ mod tests {
         assert_eq!(state.begin(10), Some(second));
         assert!(!state.accepts(first));
         assert!(state.accepts(second));
-    }
-
-    #[test]
-    fn history_copy_payload_keeps_the_desktop_json_contract() {
-        let entry = ViewerHistoryEntry {
-            id: 9,
-            title: "Recent changes".to_owned(),
-            repository_name: "git-tools".to_owned(),
-            kind: ViewerRecipeKind::Diff,
-            range_label: "main..HEAD".to_owned(),
-            rendered_at: "2026-07-11T00:00:00Z".to_owned(),
-            recipe: Recipe {
-                source: RecipeSource::LocalRepo("/repos/gt".into()),
-                op: RecipeOp::Diff {
-                    target: RecipeTarget::Unpushed { pinned: None },
-                },
-                name: None,
-            },
-        };
-
-        let payload = serde_json::to_value(HistoryCopyPayload::from(entry));
-        assert!(payload.is_ok());
-        let Ok(payload) = payload else {
-            return;
-        };
-
-        assert_eq!(payload["repo_name"], "git-tools");
-        assert!(payload.get("repository_name").is_none());
-        assert_eq!(payload["recipe"]["source"]["kind"], "local_repo");
     }
 }

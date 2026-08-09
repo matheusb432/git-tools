@@ -10,7 +10,7 @@ mod shelf;
 mod titlebar;
 mod tree;
 
-pub(crate) use diff_document::shell as diff_document_shell;
+pub(crate) use diff_document::diff_document_shell;
 use gtl_application::{diffs::View, viewer::RenderOptions};
 use maud::{Markup, html};
 

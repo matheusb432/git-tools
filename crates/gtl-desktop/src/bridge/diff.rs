@@ -6,7 +6,10 @@ use gtl_contracts::viewer::{
 
 use super::{internal, settings, shell, unavailable};
 use crate::{
-    materialization::{MaterializationError, PreparedMaterialization, ViewLoadId},
+    materialization::{
+        MaterializationError, PreparedMaterialization, RenderedMaterialization, ViewLoadId,
+        ViewMaterializations,
+    },
     presentation::ViewerApp,
 };
 
@@ -15,7 +18,7 @@ pub(super) fn prepare(
     request: PrepareDiffDocument,
 ) -> Result<ViewerDiffDocument, ViewerApiError> {
     let options = validated_current_options(app, request.identity)?;
-    let view = {
+    let snapshot = {
         let mut session = app
             .session
             .lock()
@@ -26,16 +29,14 @@ pub(super) fn prepare(
         if !shell::identity_matches(request.identity, snapshot.identity(), options) {
             return Err(ViewerApiError::Conflict);
         }
-        snapshot.shared_view()
+        snapshot
     };
-    let html = gtl_preview::diff_document_shell(&view, options)
+    let html = gtl_preview::diff_document_shell(snapshot.view(), options)
         .map_err(|error| internal("failed to render diff document", error))?
         .into_string();
-    let materialization = app
-        .materializations
-        .prepare_content(&app.session, options)
-        .map_err(map_materialization_error)?
-        .ok_or(ViewerApiError::Conflict)?;
+    let rendered = ViewMaterializations::render_content(&snapshot, options)
+        .map_err(map_materialization_error)?;
+    let materialization = publish_rendered(app, rendered)?;
     validate_current_request(app, request.identity, options)?;
     Ok(ViewerDiffDocument {
         identity: request.identity,
@@ -58,7 +59,7 @@ pub(super) fn load(
     validate_content_identity(app, request.identity, options)?;
     let page = app
         .materializations
-        .next(&app.session, load_id)
+        .next(&app.session, load_id, options)
         .map_err(map_materialization_error)?;
     validate_current_request(app, request.identity, options)?;
     Ok(ViewerDiffChunk {
@@ -71,6 +72,17 @@ pub(super) fn load(
         } else {
             ViewerDiffChunkContinuation::Complete
         },
+    })
+}
+
+fn publish_rendered(
+    app: &ViewerApp,
+    rendered: RenderedMaterialization,
+) -> Result<PreparedMaterialization, ViewerApiError> {
+    settings::with_current(app, |_store, settings| {
+        app.materializations
+            .publish_content(&app.session, rendered, settings.viewer_render_options())
+            .map_err(map_materialization_error)
     })
 }
 
@@ -136,7 +148,10 @@ mod tests {
         diffs::{Cmd, FileDiff, Foot, View},
         viewer::{RenderOptions, ViewerTabKind},
     };
-    use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource};
+    use gtl_contracts::{
+        recipes::{Recipe, RecipeOp, RecipeSource},
+        viewer::{SetViewerPreference, ViewerDiffLayout},
+    };
     use gtl_infra::user_config::TomlSettingsStore;
 
     use super::*;
@@ -144,8 +159,13 @@ mod tests {
 
     fn ready_app() -> (tempfile::TempDir, ViewerApp, ViewerViewIdentity) {
         let directory = tempfile::tempdir().expect("temporary viewer data");
-        let app = ViewerApp::open(directory.path(), TomlSettingsStore::new(None), 1024 * 1024)
-            .expect("open viewer app");
+        let settings_path = directory.path().join("config.toml");
+        let app = ViewerApp::open(
+            directory.path(),
+            TomlSettingsStore::new(Some(settings_path)),
+            1024 * 1024,
+        )
+        .expect("open viewer app");
         let mut session = app.session.lock().expect("viewer session");
         let tab_id = session
             .open(
@@ -229,5 +249,50 @@ mod tests {
             map_materialization_error(MaterializationError::Conflict),
             ViewerApiError::Conflict
         );
+    }
+
+    #[test]
+    fn old_options_prepare_cannot_strand_the_current_options_chain() {
+        let (_directory, app, identity_old) = ready_app();
+        let options_old = validated_current_options(&app, identity_old).expect("old options");
+        let snapshot = app
+            .session
+            .lock()
+            .expect("viewer session")
+            .active_content_snapshot()
+            .expect("active content");
+        let rendered_old = ViewMaterializations::render_content(&snapshot, options_old)
+            .expect("render old options");
+
+        super::super::actions::set_preference(
+            &app,
+            SetViewerPreference::Layout(ViewerDiffLayout::Split),
+        )
+        .expect("set current options");
+        let options_current = settings::load(&app)
+            .expect("current settings")
+            .viewer_render_options();
+        let identity_current = shell::to_identity(snapshot.identity(), options_current);
+        let rendered_current = ViewMaterializations::render_content(&snapshot, options_current)
+            .expect("render current options");
+        let PreparedMaterialization::Loading(current_load) =
+            publish_rendered(&app, rendered_current).expect("publish current options")
+        else {
+            panic!("a nonempty diff must create a chunk chain");
+        };
+
+        assert_eq!(
+            publish_rendered(&app, rendered_old),
+            Err(ViewerApiError::Conflict)
+        );
+        let chunk = load(
+            &app,
+            LoadViewerDiffChunk {
+                identity: identity_current,
+                load_id: current_load.get(),
+            },
+        )
+        .expect("current chain remains available");
+        assert!(chunk.html.contains("server rendered"));
     }
 }

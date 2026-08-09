@@ -295,15 +295,11 @@ mod tests {
     }
 
     #[test]
-    fn authored_css_ignores_embedded_generated_files() {
+    fn authored_css_ignores_preview_generated_files() {
         let repository = repository_with_allowed_css();
         write_css(
             &repository,
             "crates/gtl-preview/src/embedded/generated/extra.css",
-        );
-        write_css(
-            &repository,
-            "crates/gtl-desktop/src/embedded/generated/extra.css",
         );
 
         assert!(check_authored_css(repository.path()).is_ok());

@@ -5,7 +5,6 @@ use gtl_application::{
         self, OpenDiffFileInConfiguredEditor, OpenDiffFileInConfiguredEditorError,
     },
     live_views,
-    settings::set_key::{self, SetSettingKey},
 };
 use gtl_contracts::viewer::{
     OpenViewerDiffFile, SelectViewerCommit, SetViewerPreference, ViewerApiError, ViewerFeedback,
@@ -13,7 +12,7 @@ use gtl_contracts::viewer::{
 };
 use gtl_models::viewer::{ViewerTabId, ViewerTabState};
 
-use super::{diff, internal, shell, unavailable};
+use super::{diff, internal, settings, shell, unavailable};
 use crate::{
     presentation::ViewerApp,
     recipes::{RecipeError, SelectCommitError},
@@ -157,15 +156,7 @@ pub(super) fn set_preference(
     request: SetViewerPreference,
 ) -> Result<ViewerShell, ViewerApiError> {
     let (key, value_new) = preference_pair(request);
-    let mut store = app.user_settings.clone();
-    set_key::execute(
-        SetSettingKey {
-            key: key.into(),
-            value_new,
-        },
-        &mut store,
-    )
-    .map_err(|error| internal("failed to persist viewer preference", error))?;
+    settings::set_root_key(app, key.into(), value_new)?;
     shell::load(app, None)
 }
 

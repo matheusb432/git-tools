@@ -1,9 +1,9 @@
 //! Deterministic Dioxus Web release staging for the Tauri viewer.
 
 use std::{
-    fmt::Write as FmtWrite,
+    fmt::Write as _,
     fs::{self, File},
-    io::{Read, Write as IoWrite},
+    io::{Read as _, Write as _},
     path::{Path, PathBuf},
     process::{Child, Command},
 };

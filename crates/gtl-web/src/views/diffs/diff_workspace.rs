@@ -132,8 +132,8 @@ fn WorkspaceShell(shell: ViewerShell) -> Element {
                 match shell.active {
                     ViewerActiveState::Empty => rsx! { EmptyWorkspace {} },
                     ViewerActiveState::Pending { .. } => rsx! { PendingWorkspace {} },
-                    ViewerActiveState::Broken { code, reason, .. } => rsx! {
-                        WorkspaceFailure { title: format!("Render stopped ({code})"), message: reason }
+                    ViewerActiveState::Broken { code, message, .. } => rsx! {
+                        WorkspaceFailure { title: format!("Render stopped ({code})"), message }
                     },
                     ViewerActiveState::Error { message, .. } => rsx! {
                         WorkspaceFailure { title: "Render failed".to_owned(), message }
@@ -281,8 +281,8 @@ const fn tab_state_label(state: &ViewerTabState) -> &'static str {
     match state {
         ViewerTabState::Ready => "Ready",
         ViewerTabState::Pending => "Rendering",
-        ViewerTabState::Broken { .. } => "Render stopped",
-        ViewerTabState::Error { .. } => "Render failed",
+        ViewerTabState::Broken => "Render stopped",
+        ViewerTabState::Error => "Render failed",
     }
 }
 
@@ -299,7 +299,7 @@ fn TabStateIndicator(state: ViewerTabState) -> Element {
                 ViewerTabState::Pending => rsx! {
                     span { class: "block animate-spin text-acc motion-reduce:animate-none", LoaderCircle { size: 13 } }
                 },
-                ViewerTabState::Broken { .. } | ViewerTabState::Error { .. } => rsx! {
+                ViewerTabState::Broken | ViewerTabState::Error => rsx! {
                     span { class: "block text-del", TriangleAlert { size: 13 } }
                 },
             }
@@ -342,7 +342,6 @@ fn ReadyWorkspace(
 ) -> Element {
     let viewer = use_context::<ViewerContext>();
     let mut action_error = use_signal(|| None::<ClientApiError>);
-    let mut action_pending = use_signal(|| false);
     let mut delete_open = use_signal(|| false);
     let mut delete_pending = use_signal(|| false);
     let mut delete_trigger_id = use_signal(|| "delete-live-view-desktop".to_owned());
@@ -353,25 +352,11 @@ fn ReadyWorkspace(
 
     let onpreference = move |preference: SetViewerPreference| {
         action_error.set(None);
-        action_pending.set(true);
-        spawn(async move {
-            match ViewerApi::set_preference(preference).await {
-                Ok(shell) => viewer.replace_shell(shell),
-                Err(error) => action_error.set(Some(error)),
-            }
-            action_pending.set(false);
-        });
+        viewer.set_preference(preference);
     };
     let onrefresh = move |_| {
         action_error.set(None);
-        action_pending.set(true);
-        spawn(async move {
-            match ViewerApi::refresh_tab(tab_id).await {
-                Ok(shell) => viewer.replace_shell(shell),
-                Err(error) => action_error.set(Some(error)),
-            }
-            action_pending.set(false);
-        });
+        viewer.refresh_tab(tab_id);
     };
     let onselect_commit = move |sha: String| {
         action_error.set(None);
@@ -399,7 +384,7 @@ fn ReadyWorkspace(
                 div { class: "hidden items-center justify-between gap-3 xl:flex",
                     DisplayControls {
                         preferences,
-                        pending: action_pending(),
+                        pending: viewer.render_command_pending(),
                         is_live,
                         delete_trigger_id: "delete-live-view-desktop",
                         onpreference,
@@ -414,12 +399,19 @@ fn ReadyWorkspace(
                     MobilePanelButton { id: "mobile-display-trigger", label: "Display", icon: MobilePanel::Display, onclick: move |_| mobile_panel.set(Some(MobilePanel::Display)) }
                     MobilePanelButton { id: "mobile-files-trigger", label: "Files", icon: MobilePanel::Files, onclick: move |_| mobile_panel.set(Some(MobilePanel::Files)) }
                     MobilePanelButton { id: "mobile-commits-trigger", label: "Commits", icon: MobilePanel::Commits, onclick: move |_| mobile_panel.set(Some(MobilePanel::Commits)) }
-                    Button { class: "ml-auto", size: ButtonSize::IconSmall, variant: ButtonVariant::Ghost, state: if action_pending() { ButtonState::Loading } else { ButtonState::Enabled }, aria_label: "Refresh diff", title: "Refresh diff", onclick: onrefresh,
-                        span { aria_hidden: "true", RefreshCw { size: 14 } }
+                    Button { class: "ml-auto", size: ButtonSize::IconSmall, variant: ButtonVariant::Ghost, aria_label: "Refresh diff", title: "Refresh diff", onclick: onrefresh,
+                        if viewer.render_command_pending() {
+                            span { class: "animate-spin motion-reduce:animate-none", aria_hidden: "true", LoaderCircle { size: 14 } }
+                        } else {
+                            span { aria_hidden: "true", RefreshCw { size: 14 } }
+                        }
                     }
                 }
-                if let Some(error) = action_error() {
+                if let Some(error) = action_error().or_else(|| viewer.render_command_error()) {
                     p { class: "mt-2 text-xs text-del", role: "alert", "{error.message()}" }
+                }
+                if viewer.render_command_pending() {
+                    p { class: "sr-only", role: "status", "Applying the latest viewer update" }
                 }
             }
 
@@ -449,7 +441,7 @@ fn ReadyWorkspace(
             onclose: move |()| mobile_panel.set(None),
             DisplayControls {
                 preferences,
-                pending: action_pending(),
+                pending: viewer.render_command_pending(),
                 is_live,
                 delete_trigger_id: "delete-live-view-mobile",
                 onpreference,
@@ -554,12 +546,6 @@ fn DisplayControls(
     onrefresh: EventHandler<MouseEvent>,
     ondelete: EventHandler<MouseEvent>,
 ) -> Element {
-    let state = if pending {
-        ButtonState::Loading
-    } else {
-        ButtonState::Enabled
-    };
-
     rsx! {
         div { class: "flex flex-wrap items-center gap-2",
             div { class: "flex items-center rounded-sm border border-line-2 bg-sunk p-0.5", aria_label: "Diff layout",
@@ -603,7 +589,6 @@ fn DisplayControls(
                 select {
                     class: "cursor-pointer bg-transparent font-mono text-[10px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc",
                     value: theme_value(preferences.theme),
-                    disabled: pending,
                     onchange: move |event| {
                         if let Some(theme) = theme_from_value(&event.value()) {
                             onpreference.call(SetViewerPreference::Theme(theme));
@@ -616,8 +601,12 @@ fn DisplayControls(
             }
         }
         div { class: "flex items-center gap-1",
-            Button { size: ButtonSize::IconSmall, variant: ButtonVariant::Ghost, state, aria_label: "Refresh diff", title: "Refresh diff", onclick: onrefresh,
-                span { aria_hidden: "true", RefreshCw { size: 14 } }
+            Button { size: ButtonSize::IconSmall, variant: ButtonVariant::Ghost, aria_label: "Refresh diff", title: "Refresh diff", onclick: onrefresh,
+                if pending {
+                    span { class: "animate-spin motion-reduce:animate-none", aria_hidden: "true", LoaderCircle { size: 14 } }
+                } else {
+                    span { aria_hidden: "true", RefreshCw { size: 14 } }
+                }
             }
             if is_live {
                 Button { id: delete_trigger_id, size: ButtonSize::IconSmall, variant: ButtonVariant::Ghost, aria_label: "Delete live view", title: "Delete live view", onclick: ondelete,
@@ -1041,18 +1030,7 @@ mod tests {
     fn every_tab_state_has_a_non_color_label() {
         assert_eq!(tab_state_label(&ViewerTabState::Ready), "Ready");
         assert_eq!(tab_state_label(&ViewerTabState::Pending), "Rendering");
-        assert_eq!(
-            tab_state_label(&ViewerTabState::Broken {
-                code: "render".to_owned(),
-                reason: "stopped".to_owned(),
-            }),
-            "Render stopped"
-        );
-        assert_eq!(
-            tab_state_label(&ViewerTabState::Error {
-                message: "failed".to_owned(),
-            }),
-            "Render failed"
-        );
+        assert_eq!(tab_state_label(&ViewerTabState::Broken), "Render stopped");
+        assert_eq!(tab_state_label(&ViewerTabState::Error), "Render failed");
     }
 }

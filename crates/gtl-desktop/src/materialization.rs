@@ -3,7 +3,7 @@ use std::{collections::VecDeque, num::NonZeroU64, sync::Mutex};
 use gtl_application::viewer::RenderOptions;
 use gtl_preview::ViewChunk;
 
-use crate::session::{ActiveContentIdentity, ViewerSession};
+use crate::session::{ActiveContentIdentity, ActiveContentSnapshot, ViewerSession};
 
 /// Identifies one active, non-zero view materialization.
 ///
@@ -26,7 +26,19 @@ impl ViewLoadId {
 #[derive(Debug)]
 struct ActiveMaterialization {
     id: ViewLoadId,
+    identity: MaterializationIdentity,
+    chunks: VecDeque<ViewChunk>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MaterializationIdentity {
     content: ActiveContentIdentity,
+    options: RenderOptions,
+}
+
+#[derive(Debug)]
+pub(crate) struct RenderedMaterialization {
+    identity: MaterializationIdentity,
     chunks: VecDeque<ViewChunk>,
 }
 
@@ -82,58 +94,60 @@ pub(crate) struct ViewMaterializations {
 }
 
 impl ViewMaterializations {
-    pub(crate) fn prepare_content(
-        &self,
-        session: &Mutex<ViewerSession>,
+    pub(crate) fn render_content(
+        snapshot: &ActiveContentSnapshot,
         options: RenderOptions,
-    ) -> Result<Option<PreparedMaterialization>, MaterializationError> {
-        let snapshot = {
-            let mut session = session
-                .lock()
-                .map_err(|_| MaterializationError::StatePoisoned)?;
-            if session.active().is_none() {
-                self.clear()?;
-                return Ok(None);
-            }
-            let Some(snapshot) = session.active_content_snapshot() else {
-                self.clear()?;
-                return Ok(None);
-            };
-            snapshot
-        };
-
+    ) -> Result<RenderedMaterialization, MaterializationError> {
         let chunks = gtl_preview::view_chunks(snapshot.view(), options)
             .map_err(|error| MaterializationError::Render(error.to_string()))?;
+        Ok(RenderedMaterialization {
+            identity: MaterializationIdentity {
+                content: snapshot.identity(),
+                options,
+            },
+            chunks,
+        })
+    }
+
+    pub(crate) fn publish_content(
+        &self,
+        session: &Mutex<ViewerSession>,
+        rendered: RenderedMaterialization,
+        options_current: RenderOptions,
+    ) -> Result<PreparedMaterialization, MaterializationError> {
+        let RenderedMaterialization { identity, chunks } = rendered;
+        let session = session
+            .lock()
+            .map_err(|_| MaterializationError::StatePoisoned)?;
+        if identity.options != options_current
+            || !session.active_content_is_current(identity.content)
         {
-            let session = session
-                .lock()
-                .map_err(|_| MaterializationError::StatePoisoned)?;
-            if !session.active_content_is_current(snapshot.identity()) {
-                return Err(MaterializationError::Conflict);
-            }
+            return Err(MaterializationError::Conflict);
         }
+        // Hold the session guard through replacement so the checked content cannot change.
         let mut state = self
             .state
             .lock()
             .map_err(|_| MaterializationError::StatePoisoned)?;
         if chunks.is_empty() {
             state.active = None;
-            return Ok(Some(PreparedMaterialization::Complete));
+            return Ok(PreparedMaterialization::Complete);
         }
         let id = state.next_id.ok_or(MaterializationError::ExhaustedIds)?;
         state.next_id = id.get().checked_add(1).and_then(ViewLoadId::try_new);
         state.active = Some(ActiveMaterialization {
             id,
-            content: snapshot.identity(),
+            identity,
             chunks,
         });
-        Ok(Some(PreparedMaterialization::Loading(id)))
+        Ok(PreparedMaterialization::Loading(id))
     }
 
     pub(crate) fn next(
         &self,
         session: &Mutex<ViewerSession>,
         id: ViewLoadId,
+        options: RenderOptions,
     ) -> Result<ChunkPage, MaterializationError> {
         let session = session
             .lock()
@@ -147,7 +161,10 @@ impl ViewMaterializations {
             .as_mut()
             .filter(|materialization| materialization.id == id)
             .ok_or(MaterializationError::Conflict)?;
-        if !session.active_content_is_current(materialization.content) {
+        if materialization.identity.options != options {
+            return Err(MaterializationError::Conflict);
+        }
+        if !session.active_content_is_current(materialization.identity.content) {
             state.active = None;
             return Err(MaterializationError::Conflict);
         }
@@ -161,14 +178,6 @@ impl ViewMaterializations {
         }
         Ok(ChunkPage { chunk, has_more })
     }
-
-    fn clear(&self) -> Result<(), MaterializationError> {
-        self.state
-            .lock()
-            .map_err(|_| MaterializationError::StatePoisoned)?
-            .active = None;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -177,7 +186,7 @@ mod tests {
 
     use gtl_application::{
         diffs::{Cmd, FileDiff, Foot, View},
-        viewer::{RenderOptions, ViewerTabKind},
+        viewer::{DiffDensity, DiffLayout, RenderOptions, ViewerTabKind},
     };
     use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource};
     use gtl_models::diffs::Commit;
@@ -241,6 +250,45 @@ mod tests {
         );
     }
 
+    fn two_ready_tabs() -> (Mutex<ViewerSession>, gtl_models::viewer::ViewerTabId) {
+        let mut session = ViewerSession::new(1024 * 1024);
+        let first = session
+            .open(recipe("/first"), "first".into(), ViewerTabKind::Snapshot)
+            .expect("first tab id should be available");
+        publish_ready(&mut session, first, view_with_line("first", "+first"));
+        let second = session
+            .open(recipe("/second"), "second".into(), ViewerTabKind::Snapshot)
+            .expect("second tab id should be available");
+        publish_ready(&mut session, second, view_with_line("second", "+second"));
+        assert!(session.activate(first));
+        (Mutex::new(session), second)
+    }
+
+    fn active_snapshot(session: &Mutex<ViewerSession>) -> ActiveContentSnapshot {
+        session
+            .lock()
+            .expect("session")
+            .active_content_snapshot()
+            .expect("active content")
+    }
+
+    fn loading_id(prepared: PreparedMaterialization) -> ViewLoadId {
+        match prepared {
+            PreparedMaterialization::Loading(load) => load,
+            PreparedMaterialization::Complete => panic!("view contains diff rows"),
+        }
+    }
+
+    fn prepare_content(
+        materializations: &ViewMaterializations,
+        session: &Mutex<ViewerSession>,
+        snapshot: &ActiveContentSnapshot,
+        options: RenderOptions,
+    ) -> Result<PreparedMaterialization, MaterializationError> {
+        let rendered = ViewMaterializations::render_content(snapshot, options)?;
+        materializations.publish_content(session, rendered, options)
+    }
+
     #[test]
     fn an_empty_chunk_stream_completes_without_consuming_a_load_id() {
         let mut session = ViewerSession::new(1024 * 1024);
@@ -252,22 +300,30 @@ mod tests {
         publish_ready(&mut session, tab, Arc::new(empty));
         let session = Mutex::new(session);
         let materializations = ViewMaterializations::default();
+        let empty_snapshot = active_snapshot(&session);
 
         assert_eq!(
-            materializations
-                .prepare_content(&session, RenderOptions::DEFAULT)
-                .expect("prepare empty"),
-            Some(PreparedMaterialization::Complete)
+            prepare_content(
+                &materializations,
+                &session,
+                &empty_snapshot,
+                RenderOptions::DEFAULT,
+            )
+            .expect("prepare empty"),
+            PreparedMaterialization::Complete
         );
 
         publish_ready(&mut session.lock().expect("session"), tab, view("nonempty"));
+        let nonempty_snapshot = active_snapshot(&session);
         assert_eq!(
-            materializations
-                .prepare_content(&session, RenderOptions::DEFAULT)
-                .expect("prepare nonempty"),
-            Some(PreparedMaterialization::Loading(
-                ViewLoadId::try_new(1).expect("first load id")
-            ))
+            prepare_content(
+                &materializations,
+                &session,
+                &nonempty_snapshot,
+                RenderOptions::DEFAULT,
+            )
+            .expect("prepare nonempty"),
+            PreparedMaterialization::Loading(ViewLoadId::try_new(1).expect("first load id"))
         );
     }
 
@@ -295,17 +351,21 @@ mod tests {
         );
         let session = Mutex::new(session);
         let materializations = ViewMaterializations::default();
+        let snapshot = active_snapshot(&session);
 
-        let load = match materializations
-            .prepare_content(&session, RenderOptions::DEFAULT)
-            .expect("prepare selection")
-            .expect("ready selection")
+        let load = match prepare_content(
+            &materializations,
+            &session,
+            &snapshot,
+            RenderOptions::DEFAULT,
+        )
+        .expect("prepare selection")
         {
             PreparedMaterialization::Loading(load) => load,
             PreparedMaterialization::Complete => panic!("selected view contains diff rows"),
         };
         let page = materializations
-            .next(&session, load)
+            .next(&session, load, RenderOptions::DEFAULT)
             .expect("selected chunk");
 
         assert!(page.chunk.html.contains("selected"));
@@ -335,16 +395,22 @@ mod tests {
         );
         let session = Mutex::new(session);
         let materializations = ViewMaterializations::default();
+        let snapshot = active_snapshot(&session);
 
-        let load = match materializations
-            .prepare_content(&session, RenderOptions::DEFAULT)
-            .expect("prepare range fallback")
-            .expect("range fallback is ready")
+        let load = match prepare_content(
+            &materializations,
+            &session,
+            &snapshot,
+            RenderOptions::DEFAULT,
+        )
+        .expect("prepare range fallback")
         {
             PreparedMaterialization::Loading(load) => load,
             PreparedMaterialization::Complete => panic!("range view contains diff rows"),
         };
-        let page = materializations.next(&session, load).expect("range chunk");
+        let page = materializations
+            .next(&session, load, RenderOptions::DEFAULT)
+            .expect("range chunk");
 
         assert!(page.chunk.html.contains("range"));
     }
@@ -373,10 +439,14 @@ mod tests {
         session.activate(first);
         let session = Mutex::new(session);
         let materializations = ViewMaterializations::default();
-        let first_load = match materializations
-            .prepare_content(&session, RenderOptions::DEFAULT)
-            .expect("prepare first")
-            .expect("ready first")
+        let first_snapshot = active_snapshot(&session);
+        let first_load = match prepare_content(
+            &materializations,
+            &session,
+            &first_snapshot,
+            RenderOptions::DEFAULT,
+        )
+        .expect("prepare first")
         {
             PreparedMaterialization::Loading(load) => load,
             PreparedMaterialization::Complete => panic!("first view contains diff rows"),
@@ -385,7 +455,7 @@ mod tests {
         session.lock().expect("session").activate(second);
 
         assert!(matches!(
-            materializations.next(&session, first_load),
+            materializations.next(&session, first_load, RenderOptions::DEFAULT),
             Err(MaterializationError::Conflict)
         ));
     }
@@ -414,10 +484,14 @@ mod tests {
         session.activate(first);
         let session = Mutex::new(session);
         let materializations = ViewMaterializations::default();
-        let first_load = match materializations
-            .prepare_content(&session, RenderOptions::DEFAULT)
-            .expect("prepare first")
-            .expect("ready first")
+        let first_snapshot = active_snapshot(&session);
+        let first_load = match prepare_content(
+            &materializations,
+            &session,
+            &first_snapshot,
+            RenderOptions::DEFAULT,
+        )
+        .expect("prepare first")
         {
             PreparedMaterialization::Loading(load) => load,
             PreparedMaterialization::Complete => panic!("first view contains diff rows"),
@@ -429,6 +503,104 @@ mod tests {
             .begin_compute(second)
             .expect("second tab still exists");
 
-        assert!(materializations.next(&session, first_load).is_ok());
+        assert!(
+            materializations
+                .next(&session, first_load, RenderOptions::DEFAULT)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn stale_snapshot_cannot_replace_the_current_chunk_chain() {
+        let (session, second) = two_ready_tabs();
+        let stale_snapshot = active_snapshot(&session);
+        assert!(session.lock().expect("session").activate(second));
+        let current_snapshot = active_snapshot(&session);
+        let materializations = ViewMaterializations::default();
+        let current_load = loading_id(
+            prepare_content(
+                &materializations,
+                &session,
+                &current_snapshot,
+                RenderOptions::DEFAULT,
+            )
+            .expect("prepare current content"),
+        );
+
+        assert_eq!(
+            prepare_content(
+                &materializations,
+                &session,
+                &stale_snapshot,
+                RenderOptions::DEFAULT,
+            ),
+            Err(MaterializationError::Conflict)
+        );
+
+        let current_page = materializations
+            .next(&session, current_load, RenderOptions::DEFAULT)
+            .expect("current chain remains available");
+        assert!(current_page.chunk.html.contains("second"));
+        assert!(!current_page.chunk.html.contains("first"));
+    }
+
+    #[test]
+    fn identity_change_after_render_cannot_replace_the_current_chunk_chain() {
+        let (session, second) = two_ready_tabs();
+        let stale_snapshot = active_snapshot(&session);
+        let materializations = ViewMaterializations::default();
+        let stale_rendered =
+            ViewMaterializations::render_content(&stale_snapshot, RenderOptions::DEFAULT)
+                .expect("render stale content");
+        assert!(session.lock().expect("session").activate(second));
+        let current_snapshot = active_snapshot(&session);
+        let current_load = loading_id(
+            prepare_content(
+                &materializations,
+                &session,
+                &current_snapshot,
+                RenderOptions::DEFAULT,
+            )
+            .expect("prepare current content"),
+        );
+
+        assert_eq!(
+            materializations.publish_content(&session, stale_rendered, RenderOptions::DEFAULT,),
+            Err(MaterializationError::Conflict)
+        );
+
+        let current_page = materializations
+            .next(&session, current_load, RenderOptions::DEFAULT)
+            .expect("current chain remains available");
+        assert!(current_page.chunk.html.contains("second"));
+        assert!(!current_page.chunk.html.contains("first"));
+    }
+
+    #[test]
+    fn old_render_options_cannot_replace_the_current_options_chain() {
+        let (session, _second) = two_ready_tabs();
+        let snapshot = active_snapshot(&session);
+        let materializations = ViewMaterializations::default();
+        let options_old = RenderOptions::DEFAULT;
+        let options_current = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
+        let rendered_old = ViewMaterializations::render_content(&snapshot, options_old)
+            .expect("render old options");
+        let rendered_current = ViewMaterializations::render_content(&snapshot, options_current)
+            .expect("render current options");
+        let current_load = loading_id(
+            materializations
+                .publish_content(&session, rendered_current, options_current)
+                .expect("publish current options"),
+        );
+
+        assert_eq!(
+            materializations.publish_content(&session, rendered_old, options_current),
+            Err(MaterializationError::Conflict)
+        );
+        assert!(
+            materializations
+                .next(&session, current_load, options_current)
+                .is_ok()
+        );
     }
 }

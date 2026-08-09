@@ -7,10 +7,10 @@ mod shell;
 use std::fmt::Display;
 
 use gtl_contracts::viewer::{
-    ListViewerHistory, LoadViewerDiffChunk, OpenViewerDiffFile, OpenViewerHistory,
-    PrepareDiffDocument, SelectViewerCommit, SetViewerPreference, ViewerApiError, ViewerDiffChunk,
-    ViewerDiffDocument, ViewerHistoryPage, ViewerResource, ViewerShell, ViewerTabRequest,
-    ViewerUserSettings,
+    GetViewerHistoryCopy, ListViewerHistory, LoadViewerDiffChunk, OpenViewerDiffFile,
+    OpenViewerHistory, PrepareDiffDocument, SelectViewerCommit, SetViewerPreference,
+    ViewerApiError, ViewerDiffChunk, ViewerDiffDocument, ViewerHistoryCopyPayload,
+    ViewerHistoryPage, ViewerResource, ViewerShell, ViewerTabRequest, ViewerUserSettings,
 };
 use tauri::State;
 
@@ -181,6 +181,18 @@ pub(crate) async fn viewer_open_history(
     let app = app.inner().clone();
     run_blocking("open history worker failed", move || {
         history::open(&app, request)
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn viewer_get_history_copy(
+    app: State<'_, ViewerApp>,
+    request: GetViewerHistoryCopy,
+) -> Result<ViewerHistoryCopyPayload, ViewerApiError> {
+    let app = app.inner().clone();
+    run_blocking("history copy worker failed", move || {
+        history::copy(&app, request)
     })
     .await
 }

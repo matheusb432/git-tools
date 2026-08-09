@@ -1,8 +1,8 @@
 // Framework-free transient toast: a bottom-center pill that fades in on insert
-// (via @starting-style) and out via the data-leaving attribute. Shared by the
-// client-created copy toast and the server-rendered swap toast's dismissal.
+// (via @starting-style) and out via the data-leaving attribute. Shared by raw
+// artifact and shadow-root diff-document copy feedback.
 
-// One literal so Tailwind scans it; mirrors the swap toast in fragments/tabs.rs.
+// One literal keeps the complete dynamically assigned class set visible to Tailwind.
 const TOAST_CLASSES =
   "gtl-toast pointer-events-none fixed bottom-6 left-1/2 z-50 flex max-w-[min(760px,calc(100vw-32px))] -translate-x-1/2 items-center gap-2 rounded-panel border border-acc-line bg-surface px-3.5 py-2 text-[12.5px] text-ink opacity-100 shadow-[0_6px_18px_rgba(0,0,0,.22)] transition-[opacity,scale] duration-200 ease-out [overflow-wrap:anywhere] starting:scale-95 starting:opacity-0 motion-reduce:transition-none before:font-bold before:text-add before:content-['\\2713'] [&[data-leaving]]:scale-95 [&[data-leaving]]:opacity-0 print:hidden!";
 

@@ -120,8 +120,8 @@ pub(super) fn line_body(raw: &str) -> &str {
 
 /// The char count of `raw` (leading `+`/`-`/space marker excluded) when the
 /// line is "long" (beyond [`MAX_LINE_COLS`]), else `None`. The single long-line
-/// rule shared by every renderer: Maud's long-line taming, the split pane's
-/// intra-line exemption, and the native viewer's row DTOs.
+/// rule shared by every server-rendered row path: unified long-line taming, the
+/// split pane's intra-line exemption, and the syntax-highlighting bypass.
 pub(super) fn long_line_len(raw: &str) -> Option<usize> {
     let marker = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
     let len = raw.chars().count().saturating_sub(marker);

@@ -7,7 +7,7 @@ use crate::{
     syntax::PreviewResult,
 };
 
-pub(crate) fn shell(view: &View, options: RenderOptions) -> PreviewResult<Markup> {
+pub(crate) fn diff_document_shell(view: &View, options: RenderOptions) -> PreviewResult<Markup> {
     Ok(html! {
         div data-gtl-diff-document data-gtl-diff-scroller class={
             "diff-document copy-ctx "

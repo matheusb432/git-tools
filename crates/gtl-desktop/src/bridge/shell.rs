@@ -3,14 +3,11 @@ use std::sync::Arc;
 use gtl_application::diffs::{FileStatus, View};
 use gtl_contracts::viewer::{
     ViewerActiveState, ViewerActiveView, ViewerAppliedExclusions, ViewerCommandLine,
-    ViewerCommitSelection, ViewerCommitSummary, ViewerFeedback, ViewerFileStatus,
-    ViewerFileSummary, ViewerFooter, ViewerPreferences, ViewerRenderOptions, ViewerShell,
-    ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme, ViewerViewIdentity,
+    ViewerCommitSelection, ViewerCommitSummary, ViewerFailureCode, ViewerFeedback,
+    ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerPreferences, ViewerRenderOptions,
+    ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme, ViewerViewIdentity,
 };
-use gtl_models::viewer::{
-    DiffDensity, DiffLayout, RenderOptions, Theme, ViewerTabKind as ModelViewerTabKind,
-    ViewerTabState as ModelViewerTabState,
-};
+use gtl_models::viewer::{self, DiffDensity, DiffLayout, RenderOptions, Theme};
 
 use super::{internal, settings};
 use crate::{
@@ -48,7 +45,7 @@ fn ensure_active_cache(app: &ViewerApp) -> Result<(), gtl_contracts::viewer::Vie
         active.filter(|id| {
             matches!(
                 session.tab(*id).map(|tab| tab.tab.state()),
-                Some(ModelViewerTabState::Ready)
+                Some(viewer::ViewerTabState::Ready)
             ) && session.cached_view_snapshot(*id).is_none()
         })
     };
@@ -82,28 +79,13 @@ fn project(
                 .tab(tab_id)
                 .map(|entry| entry.tab.state().clone())
                 .ok_or_else(|| internal("active viewer tab is missing", tab_id))?;
-            match state {
-                ModelViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON => {
-                    ViewerActiveState::Pending {
-                        tab_id: tab_id.into(),
+            match to_non_ready_active_state(tab_id, &state) {
+                Some(active) => active,
+                None => ready_active_view(session, tab_id, options).map(|view| {
+                    ViewerActiveState::Ready {
+                        view: Box::new(view),
                     }
-                }
-                ModelViewerTabState::Broken { code, reason } => ViewerActiveState::Broken {
-                    tab_id: tab_id.into(),
-                    code,
-                    reason,
-                },
-                ModelViewerTabState::Error { reason } => ViewerActiveState::Error {
-                    tab_id: tab_id.into(),
-                    message: reason,
-                },
-                ModelViewerTabState::Ready => {
-                    ready_active_view(session, tab_id, options).map(|view| {
-                        ViewerActiveState::Ready {
-                            view: Box::new(view),
-                        }
-                    })?
-                }
+                })?,
             }
         }
     };
@@ -290,26 +272,78 @@ pub(super) const fn from_theme(theme: ViewerTheme) -> Theme {
     }
 }
 
-const fn to_tab_kind(kind: ModelViewerTabKind) -> ViewerTabKind {
+const fn to_tab_kind(kind: viewer::ViewerTabKind) -> ViewerTabKind {
     match kind {
-        ModelViewerTabKind::Snapshot => ViewerTabKind::Snapshot,
-        ModelViewerTabKind::Live => ViewerTabKind::Live,
+        viewer::ViewerTabKind::Snapshot => ViewerTabKind::Snapshot,
+        viewer::ViewerTabKind::Live => ViewerTabKind::Live,
     }
 }
 
-fn to_tab_state(state: &ModelViewerTabState) -> ViewerTabState {
+fn to_tab_state(state: &viewer::ViewerTabState) -> ViewerTabState {
     match state {
-        ModelViewerTabState::Ready => ViewerTabState::Ready,
-        ModelViewerTabState::Broken { code, reason } => ViewerTabState::Broken {
-            code: code.clone(),
-            reason: reason.clone(),
-        },
-        ModelViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON => {
+        viewer::ViewerTabState::Ready => ViewerTabState::Ready,
+        viewer::ViewerTabState::Broken { .. } => ViewerTabState::Broken,
+        viewer::ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON => {
             ViewerTabState::Pending
         }
-        ModelViewerTabState::Error { reason } => ViewerTabState::Error {
-            message: reason.clone(),
+        viewer::ViewerTabState::Error { .. } => ViewerTabState::Error,
+    }
+}
+
+const SOURCE_DIRECTORY_NOT_FOUND_MESSAGE: &str =
+    "The configured Git repository directory was not found. Restore it and refresh.";
+const SOURCE_NOT_GIT_REPOSITORY_MESSAGE: &str =
+    "The configured directory is not a Git repository. Restore the repository and refresh.";
+const SOURCE_UNAVAILABLE_MESSAGE: &str =
+    "The live view source is unavailable. Restore it and refresh.";
+const RENDER_FAILED_MESSAGE: &str = "The diff could not be rendered. Please retry.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PublicFailure {
+    code: ViewerFailureCode,
+    message: &'static str,
+}
+
+fn broken_failure(code: &str) -> PublicFailure {
+    match code {
+        "DirNotFound" => PublicFailure {
+            code: ViewerFailureCode::RepositoryDirectoryNotFound,
+            message: SOURCE_DIRECTORY_NOT_FOUND_MESSAGE,
         },
+        "DirNotGitRepo" => PublicFailure {
+            code: ViewerFailureCode::RepositoryDirectoryNotGitRepository,
+            message: SOURCE_NOT_GIT_REPOSITORY_MESSAGE,
+        },
+        _ => PublicFailure {
+            code: ViewerFailureCode::SourceUnavailable,
+            message: SOURCE_UNAVAILABLE_MESSAGE,
+        },
+    }
+}
+
+fn to_non_ready_active_state(
+    tab_id: gtl_models::viewer::ViewerTabId,
+    state: &viewer::ViewerTabState,
+) -> Option<ViewerActiveState> {
+    let tab_id = tab_id.into();
+    match state {
+        viewer::ViewerTabState::Ready => None,
+        viewer::ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON => {
+            Some(ViewerActiveState::Pending { tab_id })
+        }
+        viewer::ViewerTabState::Broken { code, .. } => {
+            let failure = broken_failure(code);
+            Some(ViewerActiveState::Broken {
+                tab_id,
+                code: failure.code,
+                message: failure.message.into(),
+            })
+        }
+        viewer::ViewerTabState::Error { .. } => Some(ViewerActiveState::Error {
+            tab_id,
+            code: ViewerFailureCode::RenderFailed,
+            message: RENDER_FAILED_MESSAGE.into(),
+        }),
     }
 }
 
@@ -407,5 +441,90 @@ mod tests {
         ] {
             assert_eq!(from_render_options(to_render_options(options)), options);
         }
+    }
+
+    #[test]
+    fn broken_projection_never_serializes_the_source_path_or_probe_reason() {
+        let raw_reason =
+            "The git repo's directory at `/home/alice/private/customer-repo` was not found.";
+        let state = viewer::ViewerTabState::Broken {
+            code: "DirNotFound".into(),
+            reason: raw_reason.into(),
+        };
+        let tab = to_tab_state(&state);
+        let tab_id = gtl_models::viewer::ViewerTabId::try_new(7);
+        assert!(tab_id.is_ok());
+        let Ok(tab_id) = tab_id else {
+            return;
+        };
+        let active = to_non_ready_active_state(tab_id, &state);
+        assert!(active.is_some());
+        let Some(active) = active else {
+            return;
+        };
+        let payload = serde_json::to_string(&(tab, active));
+        assert!(payload.is_ok());
+        let Ok(payload) = payload else {
+            return;
+        };
+
+        assert!(!payload.contains("/home/alice"));
+        assert!(!payload.contains(raw_reason));
+        assert!(payload.contains("DirNotFound"));
+        assert!(payload.contains("was not found"));
+    }
+
+    #[test]
+    fn error_projection_never_serializes_raw_backend_diagnostics() {
+        let raw_reason = "git exited 128 while reading /srv/secret/repo: permission denied";
+        let state = viewer::ViewerTabState::Error {
+            reason: raw_reason.into(),
+        };
+        let tab = to_tab_state(&state);
+        let tab_id = gtl_models::viewer::ViewerTabId::try_new(7);
+        assert!(tab_id.is_ok());
+        let Ok(tab_id) = tab_id else {
+            return;
+        };
+        let active = to_non_ready_active_state(tab_id, &state);
+        assert!(active.is_some());
+        let Some(active) = active else {
+            return;
+        };
+        let payload = serde_json::to_string(&(tab, active));
+        assert!(payload.is_ok());
+        let Ok(payload) = payload else {
+            return;
+        };
+
+        assert!(!payload.contains("/srv/secret"));
+        assert!(!payload.contains(raw_reason));
+        assert!(payload.contains("RenderFailed"));
+        assert!(payload.contains("The diff could not be rendered. Please retry."));
+    }
+
+    #[test]
+    fn public_failure_messages_are_fixed_and_bounded() {
+        const MAX_MESSAGE_BYTES: usize = 96;
+        let failures = [
+            broken_failure("DirNotFound"),
+            broken_failure("DirNotGitRepo"),
+            broken_failure("unexpected-backend-code"),
+            PublicFailure {
+                code: ViewerFailureCode::RenderFailed,
+                message: RENDER_FAILED_MESSAGE,
+            },
+        ];
+
+        assert!(
+            failures
+                .iter()
+                .all(|failure| failure.message.len() <= MAX_MESSAGE_BYTES)
+        );
+        assert_eq!(
+            failures[2].code,
+            ViewerFailureCode::SourceUnavailable,
+            "unknown backend codes collapse to one public fallback"
+        );
     }
 }

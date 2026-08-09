@@ -1,5 +1,5 @@
-use dioxus::prelude::*;
-use gtl_contracts::viewer::{ViewerFeedback, ViewerShell, ViewerTheme};
+use dioxus::{core::spawn_forever, prelude::*};
+use gtl_contracts::viewer::{SetViewerPreference, ViewerFeedback, ViewerShell, ViewerTheme};
 
 use crate::{
     app::{application_navigation::ApplicationNavigation, application_router::Route},
@@ -18,6 +18,76 @@ pub(crate) enum ViewerShellLoad {
 struct ViewerShellOrder {
     request_generation: u64,
     revision_watermark: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ViewerRenderCommandTicket {
+    generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewerRenderCommand {
+    SetPreference(SetViewerPreference),
+    RefreshTab { tab_id: u64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewerRenderCommandSubmission {
+    Started(ViewerRenderCommandTicket),
+    Queued,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewerRenderCommandCompletion {
+    Stale,
+    Finished,
+    Continue {
+        ticket: ViewerRenderCommandTicket,
+        command: ViewerRenderCommand,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ViewerRenderCommandScheduler {
+    generation: u64,
+    active: Option<ViewerRenderCommandTicket>,
+    pending: Option<ViewerRenderCommand>,
+}
+
+impl ViewerRenderCommandScheduler {
+    fn submit(&mut self, command: ViewerRenderCommand) -> ViewerRenderCommandSubmission {
+        if self.active.is_some() {
+            self.pending = Some(command);
+            return ViewerRenderCommandSubmission::Queued;
+        }
+        let ticket = self.next_ticket();
+        self.active = Some(ticket);
+        ViewerRenderCommandSubmission::Started(ticket)
+    }
+
+    fn complete(&mut self, ticket: ViewerRenderCommandTicket) -> ViewerRenderCommandCompletion {
+        if self.active != Some(ticket) {
+            return ViewerRenderCommandCompletion::Stale;
+        }
+        let Some(command) = self.pending.take() else {
+            self.active = None;
+            return ViewerRenderCommandCompletion::Finished;
+        };
+        let ticket = self.next_ticket();
+        self.active = Some(ticket);
+        ViewerRenderCommandCompletion::Continue { ticket, command }
+    }
+
+    fn next_ticket(&mut self) -> ViewerRenderCommandTicket {
+        self.generation = self.generation.wrapping_add(1);
+        ViewerRenderCommandTicket {
+            generation: self.generation,
+        }
+    }
+
+    const fn is_pending(self) -> bool {
+        self.active.is_some()
+    }
 }
 
 impl ViewerShellOrder {
@@ -78,6 +148,8 @@ pub(crate) struct ViewerContext {
     shell: Signal<ViewerShellLoad>,
     shell_order: Signal<ViewerShellOrder>,
     reconnect_generation: Signal<u64>,
+    render_command_scheduler: Signal<ViewerRenderCommandScheduler>,
+    render_command_error: Signal<Option<ClientApiError>>,
 }
 
 impl ViewerContext {
@@ -94,8 +166,64 @@ impl ViewerContext {
             return ViewerShellReplacement::Stale;
         };
         self.shell_order.set(order);
+        self.render_command_error.set(None);
         self.shell.set(ViewerShellLoad::Ready(shell));
         ViewerShellReplacement::Accepted
+    }
+
+    pub(crate) fn set_preference(self, preference: SetViewerPreference) {
+        self.schedule_render_command(ViewerRenderCommand::SetPreference(preference));
+    }
+
+    pub(crate) fn refresh_tab(self, tab_id: u64) {
+        self.schedule_render_command(ViewerRenderCommand::RefreshTab { tab_id });
+    }
+
+    fn schedule_render_command(mut self, command: ViewerRenderCommand) {
+        self.render_command_error.set(None);
+        let submission = self.render_command_scheduler.write().submit(command);
+        if let ViewerRenderCommandSubmission::Started(ticket) = submission {
+            self.start_render_command(ticket, command);
+        }
+    }
+
+    fn start_render_command(self, ticket: ViewerRenderCommandTicket, command: ViewerRenderCommand) {
+        spawn_forever(async move {
+            let result = match command {
+                ViewerRenderCommand::SetPreference(preference) => {
+                    ViewerApi::set_preference(preference).await
+                }
+                ViewerRenderCommand::RefreshTab { tab_id } => ViewerApi::refresh_tab(tab_id).await,
+            };
+            self.complete_render_command(ticket, result);
+        });
+    }
+
+    fn complete_render_command(
+        mut self,
+        ticket: ViewerRenderCommandTicket,
+        result: Result<ViewerShell, ClientApiError>,
+    ) {
+        let next = match self.render_command_scheduler.write().complete(ticket) {
+            ViewerRenderCommandCompletion::Stale => return,
+            ViewerRenderCommandCompletion::Finished => None,
+            ViewerRenderCommandCompletion::Continue { ticket, command } => Some((ticket, command)),
+        };
+        match result {
+            Ok(shell) => self.replace_shell(shell),
+            Err(error) => self.render_command_error.set(Some(error)),
+        }
+        if let Some((ticket, command)) = next {
+            self.start_render_command(ticket, command);
+        }
+    }
+
+    pub(crate) fn render_command_pending(self) -> bool {
+        (self.render_command_scheduler)().is_pending()
+    }
+
+    pub(crate) fn render_command_error(self) -> Option<ClientApiError> {
+        (self.render_command_error)()
     }
 
     fn report_error(mut self, error: ClientApiError) {
@@ -103,6 +231,7 @@ impl ViewerContext {
     }
 
     pub(crate) fn reconnect(mut self) {
+        self.render_command_error.set(None);
         self.shell.set(ViewerShellLoad::Loading);
         *self.reconnect_generation.write() += 1;
     }
@@ -128,6 +257,7 @@ impl ViewerContext {
                         return;
                     };
                     self.shell_order.set(order);
+                    self.render_command_error.set(None);
                     self.shell.set(ViewerShellLoad::Ready(shell));
                 }
                 Err(error) => self.shell.set(ViewerShellLoad::Error(error)),
@@ -153,10 +283,14 @@ pub(crate) fn ApplicationLayout() -> Element {
     let shell = use_signal(|| ViewerShellLoad::Loading);
     let shell_order = use_signal(ViewerShellOrder::default);
     let reconnect_generation = use_signal(|| 0_u64);
+    let render_command_scheduler = use_signal(ViewerRenderCommandScheduler::default);
+    let render_command_error = use_signal(|| None::<ClientApiError>);
     let context = ViewerContext {
         shell,
         shell_order,
         reconnect_generation,
+        render_command_scheduler,
+        render_command_error,
     };
     use_context_provider(|| context);
 
@@ -222,7 +356,96 @@ fn ViewerFeedbackNotice(feedback: ViewerFeedback) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use super::ViewerShellOrder;
+    use gtl_contracts::viewer::{SetViewerPreference, ViewerDiffDensity, ViewerDiffLayout};
+
+    use super::{
+        ViewerRenderCommand, ViewerRenderCommandCompletion, ViewerRenderCommandScheduler,
+        ViewerRenderCommandSubmission, ViewerRenderCommandTicket, ViewerShellOrder,
+    };
+
+    #[test]
+    fn render_commands_run_the_latest_rapid_preference_after_the_active_preference() {
+        let mut scheduler = ViewerRenderCommandScheduler::default();
+        let layout_ticket = ViewerRenderCommandTicket { generation: 1 };
+        let density_ticket = ViewerRenderCommandTicket { generation: 2 };
+        let layout = ViewerRenderCommand::SetPreference(SetViewerPreference::Layout(
+            ViewerDiffLayout::Split,
+        ));
+        let density = ViewerRenderCommand::SetPreference(SetViewerPreference::Density(
+            ViewerDiffDensity::Full,
+        ));
+
+        assert_eq!(
+            scheduler.submit(layout),
+            ViewerRenderCommandSubmission::Started(layout_ticket)
+        );
+        assert_eq!(
+            scheduler.submit(density),
+            ViewerRenderCommandSubmission::Queued
+        );
+        assert_eq!(
+            scheduler.complete(layout_ticket),
+            ViewerRenderCommandCompletion::Continue {
+                ticket: density_ticket,
+                command: density,
+            }
+        );
+        assert!(scheduler.is_pending());
+        assert_eq!(
+            scheduler.complete(density_ticket),
+            ViewerRenderCommandCompletion::Finished
+        );
+        assert!(!scheduler.is_pending());
+    }
+
+    #[test]
+    fn refresh_commands_coalesce_to_the_latest_tab_after_the_active_preference() {
+        let mut scheduler = ViewerRenderCommandScheduler::default();
+        let layout_ticket = ViewerRenderCommandTicket { generation: 1 };
+        let refresh_ticket = ViewerRenderCommandTicket { generation: 2 };
+        let layout = ViewerRenderCommand::SetPreference(SetViewerPreference::Layout(
+            ViewerDiffLayout::Unified,
+        ));
+        let density = ViewerRenderCommand::SetPreference(SetViewerPreference::Density(
+            ViewerDiffDensity::Compact,
+        ));
+        let first_refresh = ViewerRenderCommand::RefreshTab { tab_id: 7 };
+        let latest_refresh = ViewerRenderCommand::RefreshTab { tab_id: 11 };
+
+        assert_eq!(
+            scheduler.submit(layout),
+            ViewerRenderCommandSubmission::Started(layout_ticket)
+        );
+        assert_eq!(
+            scheduler.submit(density),
+            ViewerRenderCommandSubmission::Queued
+        );
+        assert_eq!(
+            scheduler.submit(first_refresh),
+            ViewerRenderCommandSubmission::Queued
+        );
+        assert_eq!(
+            scheduler.submit(latest_refresh),
+            ViewerRenderCommandSubmission::Queued
+        );
+        assert_eq!(
+            scheduler.complete(layout_ticket),
+            ViewerRenderCommandCompletion::Continue {
+                ticket: refresh_ticket,
+                command: latest_refresh,
+            }
+        );
+        assert_eq!(
+            scheduler.complete(layout_ticket),
+            ViewerRenderCommandCompletion::Stale
+        );
+        assert!(scheduler.is_pending());
+        assert_eq!(
+            scheduler.complete(refresh_ticket),
+            ViewerRenderCommandCompletion::Finished
+        );
+        assert!(!scheduler.is_pending());
+    }
 
     #[test]
     fn stale_command_response_preserves_event_refresh_generation() {

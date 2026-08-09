@@ -160,6 +160,7 @@ fn with_viewer_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<t
         bridge::viewer_set_preference,
         bridge::viewer_list_history,
         bridge::viewer_open_history,
+        bridge::viewer_get_history_copy,
         bridge::viewer_get_settings,
         bridge::viewer_open_diff_file,
     ])

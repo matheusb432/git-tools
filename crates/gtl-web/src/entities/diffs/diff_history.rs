@@ -38,9 +38,8 @@ pub(crate) fn history_navigation(page: &ViewerHistoryPage) -> HistoryNavigation 
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::{
-        recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
-        viewer::{ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage, ViewerRecipeKind},
+    use gtl_contracts::viewer::{
+        ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage, ViewerRecipeKind,
     };
 
     use super::history_navigation;
@@ -53,13 +52,6 @@ mod tests {
             kind: ViewerRecipeKind::Diff,
             range_label: "main..HEAD".into(),
             rendered_at: "2026-08-09T00:00:00Z".into(),
-            recipe: Recipe {
-                source: RecipeSource::LocalRepo("/repo".into()),
-                op: RecipeOp::Diff {
-                    target: RecipeTarget::Unpushed { pinned: None },
-                },
-                name: None,
-            },
         }
     }
 

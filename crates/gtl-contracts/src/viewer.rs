@@ -58,8 +58,8 @@ pub enum ViewerTabKind {
 pub enum ViewerTabState {
     Pending,
     Ready,
-    Broken { code: String, reason: String },
-    Error { message: String },
+    Broken,
+    Error,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -119,6 +119,35 @@ pub struct ViewerAppliedExclusions {
     pub hidden_paths: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewerFailureCode {
+    #[serde(rename = "DirNotFound")]
+    RepositoryDirectoryNotFound,
+    #[serde(rename = "DirNotGitRepo")]
+    RepositoryDirectoryNotGitRepository,
+    #[serde(rename = "SourceUnavailable")]
+    SourceUnavailable,
+    #[serde(rename = "RenderFailed")]
+    RenderFailed,
+}
+
+impl ViewerFailureCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RepositoryDirectoryNotFound => "DirNotFound",
+            Self::RepositoryDirectoryNotGitRepository => "DirNotGitRepo",
+            Self::SourceUnavailable => "SourceUnavailable",
+            Self::RenderFailed => "RenderFailed",
+        }
+    }
+}
+
+impl std::fmt::Display for ViewerFailureCode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ViewerCommitSelection {
@@ -153,11 +182,12 @@ pub enum ViewerActiveState {
     },
     Broken {
         tab_id: u64,
-        code: String,
-        reason: String,
+        code: ViewerFailureCode,
+        message: String,
     },
     Error {
         tab_id: u64,
+        code: ViewerFailureCode,
         message: String,
     },
     Ready {
@@ -250,12 +280,29 @@ pub enum ViewerRecipeKind {
     MergeDiff,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ViewerHistoryCopyKind {
+    Diff,
+    MergeDiff,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerHistoryEntry {
     pub id: i64,
     pub title: String,
     pub repository_name: String,
     pub kind: ViewerRecipeKind,
+    pub range_label: String,
+    pub rendered_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerHistoryCopyPayload {
+    pub id: i64,
+    pub title: String,
+    pub repo_name: String,
+    pub kind: ViewerHistoryCopyKind,
     pub range_label: String,
     pub rendered_at: String,
     pub recipe: Recipe,
@@ -306,6 +353,11 @@ pub struct SelectViewerCommit {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenViewerHistory {
+    pub render_id: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GetViewerHistoryCopy {
     pub render_id: i64,
 }
 

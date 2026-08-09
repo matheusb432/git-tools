@@ -159,7 +159,7 @@ mod tests {
         let step = benchmark_step(
             Benchmark::ViewerRender,
             BenchmarkSelection::Standard {
-                case: Some(BenchmarkCase::ViewerRenderMaterializedShell45k),
+                case: Some(BenchmarkCase::ViewerRenderDiffDocumentShell45k),
                 sample_size: Some(20),
             },
             &["--save-baseline".to_owned(), "candidate".to_owned()],
@@ -175,7 +175,7 @@ mod tests {
                 "--bench",
                 "viewer_render",
                 "--",
-                "materialized-shell-45k",
+                "diff-document-shell-45k",
                 "--exact",
                 "--sample-size",
                 "20",
@@ -204,7 +204,7 @@ mod tests {
                 "--bench",
                 "viewer_render",
                 "--",
-                "^(materialized-shell-45k|materialized-shell-115-files)$",
+                "^(diff-document-shell-45k|diff-document-shell-115-files)$",
                 "--sample-size",
                 "100",
                 "--warm-up-time",

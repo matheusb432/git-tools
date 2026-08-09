@@ -38,6 +38,10 @@ fn closed_value_tokens_are_snake_case() {
         serde_json::to_value(ViewerTabKind::Snapshot).expect("tab kind serializes"),
         serde_json::to_value(ViewerFileStatus::Renamed).expect("file status serializes"),
         serde_json::to_value(ViewerRecipeKind::MergeDiff).expect("recipe kind serializes"),
+        serde_json::to_value(ViewerHistoryCopyKind::MergeDiff)
+            .expect("history copy kind serializes"),
+        serde_json::to_value(ViewerFailureCode::RepositoryDirectoryNotFound)
+            .expect("failure code serializes"),
         serde_json::to_value(ViewerDiffChunkContinuation::More).expect("continuation serializes"),
         serde_json::to_value(ViewerResource::HistoryEntry).expect("resource serializes"),
     ];
@@ -51,6 +55,8 @@ fn closed_value_tokens_are_snake_case() {
             json!("snapshot"),
             json!("renamed"),
             json!("merge_diff"),
+            json!("merge-diff"),
+            json!("DirNotFound"),
             json!("more"),
             json!("history_entry"),
         ]
@@ -60,16 +66,8 @@ fn closed_value_tokens_are_snake_case() {
 #[test]
 fn tagged_enums_pin_each_wire_discriminator() {
     assert_eq!(
-        serde_json::to_value(ViewerTabState::Broken {
-            code: "missing_artifact".into(),
-            reason: "The saved render is unavailable.".into(),
-        })
-        .expect("tab state serializes"),
-        json!({
-            "state": "broken",
-            "code": "missing_artifact",
-            "reason": "The saved render is unavailable."
-        })
+        serde_json::to_value(ViewerTabState::Broken).expect("tab state serializes"),
+        json!({"state": "broken"})
     );
     assert_eq!(
         serde_json::to_value(ViewerCommitSelection::Error {
@@ -216,7 +214,6 @@ fn diff_history_and_settings_shapes_round_trip() {
             kind: ViewerRecipeKind::MergeDiff,
             range_label: "main...release".into(),
             rendered_at: "2026-08-09T10:00:00Z".into(),
-            recipe: recipe(),
         }],
         total_count: 1,
         page_number: 1,
@@ -255,11 +252,11 @@ fn diff_history_and_settings_shapes_round_trip() {
         .expect("chunk deserializes"),
         chunk
     );
+    let history_json = serde_json::to_value(&history).expect("history serializes");
+    assert!(history_json.pointer("/entries/0/recipe").is_none());
+    assert!(!history_json.to_string().contains("/repos/git-tools"));
     assert_eq!(
-        serde_json::from_value::<ViewerHistoryPage>(
-            serde_json::to_value(&history).expect("history serializes")
-        )
-        .expect("history deserializes"),
+        serde_json::from_value::<ViewerHistoryPage>(history_json).expect("history deserializes"),
         history
     );
     assert_eq!(
@@ -268,5 +265,40 @@ fn diff_history_and_settings_shapes_round_trip() {
         )
         .expect("settings deserialize"),
         settings
+    );
+}
+
+#[test]
+fn explicit_history_copy_payload_keeps_the_established_recipe_json_shape() {
+    let payload = ViewerHistoryCopyPayload {
+        id: 31,
+        title: "Release diff".into(),
+        repo_name: "git-tools".into(),
+        kind: ViewerHistoryCopyKind::MergeDiff,
+        range_label: "main...release".into(),
+        rendered_at: "2026-08-09T10:00:00Z".into(),
+        recipe: recipe(),
+    };
+
+    assert_eq!(
+        serde_json::to_value(payload).expect("history copy payload serializes"),
+        json!({
+            "id": 31,
+            "title": "Release diff",
+            "repo_name": "git-tools",
+            "kind": "merge-diff",
+            "range_label": "main...release",
+            "rendered_at": "2026-08-09T10:00:00Z",
+            "recipe": {
+                "source": {"kind": "local_repo", "value": "/repos/git-tools"},
+                "op": {"op": "merge_diff", "base": "main"},
+                "name": "release"
+            }
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(GetViewerHistoryCopy { render_id: 31 })
+            .expect("history copy request serializes"),
+        json!({"render_id": 31})
     );
 }

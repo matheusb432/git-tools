@@ -24,13 +24,13 @@ fn render_viewer_boundaries(c: &mut Criterion) {
     );
     benchmark_materialized(
         c,
-        BenchmarkCase::ViewerRenderMaterializedShell45k,
+        BenchmarkCase::ViewerRenderDiffDocumentShell45k,
         BenchmarkCase::ViewerRenderMaterializedChunks45k,
         ViewerRenderBenchmark::fixture_45k,
     );
     benchmark_materialized(
         c,
-        BenchmarkCase::ViewerRenderMaterializedShell115Files,
+        BenchmarkCase::ViewerRenderDiffDocumentShell115Files,
         BenchmarkCase::ViewerRenderMaterializedChunks115Files,
         ViewerRenderBenchmark::fixture_115_files,
     );

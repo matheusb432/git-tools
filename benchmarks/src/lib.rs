@@ -19,8 +19,8 @@ where
 }
 
 const VIEWER_RENDER_FAST_CASES: &[BenchmarkCase] = &[
-    BenchmarkCase::ViewerRenderMaterializedShell45k,
-    BenchmarkCase::ViewerRenderMaterializedShell115Files,
+    BenchmarkCase::ViewerRenderDiffDocumentShell45k,
+    BenchmarkCase::ViewerRenderDiffDocumentShell115Files,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,9 +91,9 @@ pub enum BenchmarkCase {
     ViewCacheViewReplace45k,
     ViewerRenderRawArtifact,
     ViewerRenderRawArtifactSplitFull,
-    ViewerRenderMaterializedShell45k,
+    ViewerRenderDiffDocumentShell45k,
     ViewerRenderMaterializedChunks45k,
-    ViewerRenderMaterializedShell115Files,
+    ViewerRenderDiffDocumentShell115Files,
     ViewerRenderMaterializedChunks115Files,
 }
 
@@ -104,9 +104,9 @@ impl BenchmarkCase {
         Self::ViewCacheViewReplace45k,
         Self::ViewerRenderRawArtifact,
         Self::ViewerRenderRawArtifactSplitFull,
-        Self::ViewerRenderMaterializedShell45k,
+        Self::ViewerRenderDiffDocumentShell45k,
         Self::ViewerRenderMaterializedChunks45k,
-        Self::ViewerRenderMaterializedShell115Files,
+        Self::ViewerRenderDiffDocumentShell115Files,
         Self::ViewerRenderMaterializedChunks115Files,
     ];
 
@@ -117,9 +117,9 @@ impl BenchmarkCase {
             Self::ViewCacheViewReplace45k => "view-cache/view-replace/45k",
             Self::ViewerRenderRawArtifact => "raw-artifact",
             Self::ViewerRenderRawArtifactSplitFull => "raw-artifact-split-full",
-            Self::ViewerRenderMaterializedShell45k => "materialized-shell-45k",
+            Self::ViewerRenderDiffDocumentShell45k => "diff-document-shell-45k",
             Self::ViewerRenderMaterializedChunks45k => "materialized-chunks-45k",
-            Self::ViewerRenderMaterializedShell115Files => "materialized-shell-115-files",
+            Self::ViewerRenderDiffDocumentShell115Files => "diff-document-shell-115-files",
             Self::ViewerRenderMaterializedChunks115Files => "materialized-chunks-115-files",
         }
     }
@@ -130,9 +130,9 @@ impl BenchmarkCase {
             Self::ViewCacheViewWeight45k | Self::ViewCacheViewReplace45k => Benchmark::ViewCache,
             Self::ViewerRenderRawArtifact
             | Self::ViewerRenderRawArtifactSplitFull
-            | Self::ViewerRenderMaterializedShell45k
+            | Self::ViewerRenderDiffDocumentShell45k
             | Self::ViewerRenderMaterializedChunks45k
-            | Self::ViewerRenderMaterializedShell115Files
+            | Self::ViewerRenderDiffDocumentShell115Files
             | Self::ViewerRenderMaterializedChunks115Files => Benchmark::ViewerRender,
         }
     }

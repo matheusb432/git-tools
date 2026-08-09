@@ -1,14 +1,28 @@
-use gtl_application::settings::get_user_settings::{self, GetUserSettings};
+use gtl_application::settings::{
+    get_user_settings::{self, GetUserSettings},
+    set_key::{self, SetSettingKey},
+};
 use gtl_contracts::viewer::{
-    ViewerDiffExclusions, ViewerProjectDiffExclusions, ViewerResource, ViewerUserSettings,
+    ViewerApiError, ViewerDiffExclusions, ViewerProjectDiffExclusions, ViewerResource,
+    ViewerUserSettings,
 };
 use gtl_models::settings::UserSettings;
 
-use super::{shell, unavailable};
+use super::{internal, shell, unavailable};
 use crate::presentation::ViewerApp;
 
-pub(super) fn load(app: &ViewerApp) -> Result<UserSettings, gtl_contracts::viewer::ViewerApiError> {
-    get_user_settings::execute(GetUserSettings, &app.user_settings)
+pub(super) fn with_current<T>(
+    app: &ViewerApp,
+    operation: impl FnOnce(
+        &gtl_infra::user_config::TomlSettingsStore,
+        &UserSettings,
+    ) -> Result<T, ViewerApiError>,
+) -> Result<T, ViewerApiError> {
+    let store = app
+        .user_settings
+        .lock()
+        .map_err(|error| internal("failed to lock user settings", error))?;
+    let settings = get_user_settings::execute(GetUserSettings, &*store)
         .map(|response| response.settings)
         .map_err(|error| {
             unavailable(
@@ -16,19 +30,35 @@ pub(super) fn load(app: &ViewerApp) -> Result<UserSettings, gtl_contracts::viewe
                 "failed to load user settings",
                 error,
             )
-        })
+        })?;
+    operation(&store, &settings)
 }
 
-pub(super) fn get(
+pub(super) fn load(app: &ViewerApp) -> Result<UserSettings, ViewerApiError> {
+    with_current(app, |_store, settings| Ok(settings.clone()))
+}
+
+pub(super) fn set_root_key(
     app: &ViewerApp,
-) -> Result<ViewerUserSettings, gtl_contracts::viewer::ViewerApiError> {
-    let settings = load(app)?;
-    Ok(to_user_settings(
-        &settings,
-        app.user_settings
-            .path()
-            .map(|path| path.display().to_string()),
-    ))
+    key: String,
+    value_new: String,
+) -> Result<(), ViewerApiError> {
+    let mut store = app
+        .user_settings
+        .lock()
+        .map_err(|error| internal("failed to lock user settings", error))?;
+    set_key::execute(SetSettingKey { key, value_new }, &mut *store)
+        .map(|_| ())
+        .map_err(|error| internal("failed to persist viewer preference", error))
+}
+
+pub(super) fn get(app: &ViewerApp) -> Result<ViewerUserSettings, ViewerApiError> {
+    with_current(app, |store, settings| {
+        Ok(to_user_settings(
+            settings,
+            store.path().map(|path| path.display().to_string()),
+        ))
+    })
 }
 
 fn to_user_settings(

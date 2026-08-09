@@ -29,7 +29,7 @@ pub(crate) struct ViewerApp {
     pub(crate) recipe_worker: RecipeWorker,
     pub(crate) materializations: Arc<ViewMaterializations>,
     pending: Arc<PendingRecipes>,
-    pub(crate) user_settings: TomlSettingsStore,
+    pub(crate) user_settings: Arc<Mutex<TomlSettingsStore>>,
     pub(crate) restoration: Arc<RestorationGate>,
 }
 
@@ -59,7 +59,7 @@ impl ViewerApp {
             recipe_worker,
             materializations: Arc::new(ViewMaterializations::default()),
             pending: Arc::new(PendingRecipes::default()),
-            user_settings,
+            user_settings: Arc::new(Mutex::new(user_settings)),
             restoration: Arc::new(RestorationGate::default()),
         })
     }
