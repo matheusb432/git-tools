@@ -333,11 +333,15 @@ async fn assert_read_only_settings(driver: &WebDriver) -> Result<()> {
         .await
         .context("reload the packaged user-settings route")?;
     wait_for_read_only_settings(driver).await?;
-    support::selectors::by_accessible_name(driver, "Viewer")
-        .await?
-        .click()
-        .await
-        .context("return to diff viewer")?;
+    support::selectors::by_css(
+        driver,
+        r#"[role="tab"][aria-selected="true"]"#,
+        "active viewer tab",
+    )
+    .await?
+    .click()
+    .await
+    .context("return to diff viewer")?;
     Ok(())
 }
 

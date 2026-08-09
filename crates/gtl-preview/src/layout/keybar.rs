@@ -4,10 +4,11 @@ use gtl_application::diffs::View;
 use maud::{Markup, html};
 
 pub(super) fn keybar(view: &View) -> Markup {
-    let kbd = "rounded-sm border border-line-2 border-b-2 bg-sunk px-1.5 py-px font-mono text-[11px] text-ink-2";
+    let kbd =
+        "rounded-sm border border-line-2 border-b-2 bg-sunk px-1.5 py-px font-mono text-ink-2";
 
     html! {
-        footer class="keybar [grid-column:1/4] flex items-center gap-4 overflow-hidden border-t border-line bg-surface px-5 py-2 text-[11.5px] text-ink-3 print:hidden!" {
+        footer class="keybar [grid-column:1/4] flex items-center gap-4 overflow-hidden border-t border-line bg-surface px-5 py-2 text-ink-3 print:hidden!" {
             span class="overflow-hidden text-ellipsis whitespace-nowrap text-ink-2" {
                 (view.foot.cmd) " " span class="text-ink-3" { (view.foot.note) }
             }

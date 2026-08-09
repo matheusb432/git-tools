@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 use lucide_dioxus::LoaderCircle;
 
-const BUTTON_CLASSES: &str = "inline-flex shrink-0 cursor-pointer items-center justify-center whitespace-nowrap rounded-sm border [font:inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc disabled:cursor-not-allowed disabled:opacity-50";
+const BUTTON_CLASSES: &str = "inline-flex shrink-0 cursor-pointer items-center justify-center whitespace-nowrap rounded-sm border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc disabled:cursor-not-allowed disabled:opacity-50";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ButtonVariant {
@@ -18,19 +18,23 @@ pub(crate) enum ButtonVariant {
 impl ButtonVariant {
     const fn classes(self) -> &'static str {
         match self {
-            Self::Primary => "border-acc bg-acc text-bg hover:bg-acc-2",
-            Self::Secondary => {
-                "border-acc-line bg-acc-soft text-acc hover:border-acc hover:text-acc-2"
+            Self::Primary => {
+                "border-acc bg-acc text-bg hover:bg-acc-2 active:border-acc-2 active:bg-acc-2"
             }
-            Self::Pressed => "border-acc-line bg-acc-soft text-ink hover:border-acc hover:text-ink",
+            Self::Secondary => {
+                "border-acc-line bg-acc-soft text-acc hover:border-acc hover:text-acc-2 active:border-acc active:bg-acc active:text-bg"
+            }
+            Self::Pressed => {
+                "border-acc-line bg-acc-soft text-ink hover:border-acc active:border-acc active:bg-acc active:text-bg"
+            }
             Self::Destructive => {
-                "border-del-line bg-del-bg text-del hover:border-del hover:bg-del hover:text-bg"
+                "border-del-line bg-del-bg text-del hover:border-del hover:bg-del hover:text-bg active:border-del active:bg-del active:text-bg"
             }
             Self::Outline => {
-                "border-line-2 bg-surface-2 text-ink-2 hover:border-acc-line hover:text-ink"
+                "border-line-2 bg-surface-2 text-ink-2 hover:border-acc-line hover:text-ink active:border-line-2 active:bg-line active:text-ink"
             }
             Self::Ghost => {
-                "border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink"
+                "border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink active:border-line-2 active:bg-line active:text-ink"
             }
         }
     }
@@ -49,11 +53,11 @@ pub(crate) enum ButtonSize {
 impl ButtonSize {
     const fn classes(self) -> &'static str {
         match self {
-            Self::Small => "min-h-[27px] gap-1.5 px-2 py-1 text-[11.5px]",
-            Self::Medium => "h-9 gap-2 px-4 text-[13px]",
-            Self::IconCompact => "size-6 p-0 text-xs",
-            Self::IconSmall => "size-8 p-0 text-xs",
-            Self::IconMedium => "size-9 p-0 text-sm",
+            Self::Small => "min-h-7 gap-1.5 px-2",
+            Self::Medium => "h-9 gap-2 px-4",
+            Self::IconCompact => "size-6 p-0",
+            Self::IconSmall => "size-8 p-0",
+            Self::IconMedium => "size-9 p-0",
         }
     }
 }

@@ -4,7 +4,7 @@ use gtl_contracts::viewer::{SetViewerPreference, ViewerFeedback, ViewerShell, Vi
 use crate::{
     app::{application_navigation::ApplicationNavigation, application_router::Route},
     entities::diffs::{ViewerApi, theme_value},
-    shared::{bridge::ClientApiError, browser},
+    shared::{bridge::ClientApiError, browser, ui::FloatingNotice},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,7 +322,7 @@ pub(crate) fn ApplicationLayout() -> Element {
 
     rsx! {
         div {
-            class: "flex h-screen min-h-[32rem] flex-col overflow-hidden bg-bg text-ink antialiased",
+            class: "flex h-screen min-h-128 flex-col overflow-hidden bg-bg text-ink antialiased",
             "data-theme": theme_value(theme),
             ApplicationNavigation {}
             if let ViewerShellLoad::Ready(shell) = &state {
@@ -346,11 +346,7 @@ fn ViewerFeedbackNotice(feedback: ViewerFeedback) -> Element {
     };
 
     rsx! {
-        div {
-            class: "pointer-events-none fixed bottom-6 left-1/2 z-50 max-w-[min(47.5rem,calc(100vw-2rem))] -translate-x-1/2 rounded-panel border border-acc-line bg-surface px-3.5 py-2 text-[12.5px] text-ink shadow-[0_6px_18px_rgba(0,0,0,.22)]",
-            role: "status",
-            "{message}"
-        }
+        FloatingNotice { role: "status", "{message}" }
     }
 }
 

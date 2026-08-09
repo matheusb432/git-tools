@@ -8,23 +8,23 @@ use maud::{Markup, html};
 use super::ArtifactMobileNavigationTargets;
 use crate::text::plural;
 
-const CONTROL_CLASSES: &str = "cursor-pointer rounded-sm border border-line-2 bg-surface-2 px-2.5 py-1.5 text-[12px] text-ink-2 [font:inherit] hover:border-acc-line hover:text-ink print:hidden!";
+const CONTROL_CLASSES: &str = "cursor-pointer rounded-sm border border-line-2 bg-surface-2 px-2.5 py-1.5 text-ink-2 hover:border-acc-line hover:text-ink active:border-acc active:bg-acc-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc print:hidden!";
 
 // ! `.foldall` and `.ctx-toggle` remain enhancer hooks for their toggled states.
 pub(super) fn titlebar(view: &View, mobile_navigation: &ArtifactMobileNavigationTargets) -> Markup {
     html! {
         header class="titlebar [grid-column:1/4] flex items-center gap-4 border-b border-line bg-surface px-5 py-3 tablet:flex-wrap tablet:gap-2.5 tablet:px-3 tablet:py-2.5 mobile:gap-1.5 mobile:px-2 mobile:py-2 print:border-[#bbb] print:bg-[#f2f2f2]" {
-            div class="flex items-baseline gap-2 text-[18px] font-semibold tracking-[-0.01em] mobile:text-[15px]" {
+            div class="flex items-baseline gap-2 text-lg font-semibold tracking-tight mobile:text-base" {
                 span { "~/" b class="font-bold text-acc" { (view.repo_name) } }
-                span class="self-center rounded-sm border border-acc-line bg-acc-soft px-2 py-0.5 text-[12px] font-medium text-acc" { (view.title) }
+                span class="self-center rounded-sm border border-acc-line bg-acc-soft px-2 py-0.5 text-xs font-medium text-acc" { (view.title) }
             }
-            div class="branchline flex items-center gap-1.5 text-[12.5px] text-ink-2 tablet:order-3 tablet:w-full" {
+            div class="branchline flex items-center gap-1.5 text-ink-2 tablet:order-3 tablet:w-full" {
                 span class="text-acc" { (view.branch) }
                 span class="text-ink-3" { "→" }
                 span class="text-ink-3" { (view.upstream) }
             }
             @if let Some(excluded) = &view.exclusions {
-                span class="excl-chip flex-none cursor-help whitespace-nowrap rounded-sm border border-del-line bg-del-bg px-2 py-0.5 text-[12px] font-semibold text-del-ink"
+                span class="excl-chip flex-none cursor-help whitespace-nowrap rounded-sm border border-del-line bg-del-bg px-2 py-0.5 text-xs font-semibold text-del-ink"
                     title=(exclusion_tooltip(excluded)) {
                     (excluded.hidden_paths.len())
                     " file" (plural(excluded.hidden_paths.len()))

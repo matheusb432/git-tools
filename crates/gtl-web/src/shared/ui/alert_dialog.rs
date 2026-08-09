@@ -56,10 +56,10 @@ pub(crate) fn AlertDialog(
                     TriangleAlert { size: 18 }
                 }
                 div { class: "min-w-0",
-                    h2 { id: title_id, class: "text-sm font-semibold text-ink", "{title}" }
+                    h2 { id: title_id, class: "font-semibold text-ink", "{title}" }
                     p {
                         id: description_id,
-                        class: "mt-1 text-xs leading-5 text-ink-2",
+                        class: "mt-1 leading-5 text-ink-2",
                         "{description}"
                     }
                 }

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 
-const BADGE_CLASSES: &str = "inline-flex min-h-5 items-center justify-center rounded-sm border px-1.5 font-mono text-[10px] font-medium";
+const BADGE_CLASSES: &str = "inline-flex min-h-5 items-center justify-center rounded-sm border px-1.5 font-mono text-xs font-medium";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum BadgeVariant {

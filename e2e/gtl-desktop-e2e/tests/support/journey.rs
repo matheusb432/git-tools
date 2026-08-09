@@ -373,7 +373,7 @@ pub async fn select_split_layout(session: &TestSession) -> Result<()> {
         "open default-width display-controls dialog",
     )
     .await?;
-    by_accessible_name_within(driver, "#mobile-display-panel[open]", "Split")
+    by_accessible_name_within(driver, "#mobile-display-panel[open]", "Side by side")
         .await?
         .click()
         .await
@@ -383,7 +383,7 @@ pub async fn select_split_layout(session: &TestSession) -> Result<()> {
             driver,
             r#"
 const split = Array.from(document.querySelectorAll('button'))
-  .find((button) => button.textContent.trim() === 'Split' && button.offsetParent !== null);
+  .find((button) => button.textContent.trim() === 'Side by side' && button.offsetParent !== null);
 const host = document.querySelector(
   '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
@@ -605,9 +605,7 @@ async fn confirm_live_view_deletion(driver: &WebDriver) -> Result<()> {
 }
 
 async fn delete_active_live_view(driver: &WebDriver, repository: &str) -> Result<()> {
-    by_accessible_name(driver, "Delete live view")
-        .await?
-        .click()
+    open_compact_delete_dialog(driver)
         .await
         .with_context(|| format!("open {repository} deletion confirmation"))?;
     confirm_live_view_deletion(driver)

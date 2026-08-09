@@ -11,24 +11,22 @@ const TREE_PRESENTATION_CLASSES: &str = concat!(
     "compact:p-2.5 tablet:hidden print:hidden! ",
     "[&_.tree-body_ul]:m-0 [&_.tree-body_ul]:list-none [&_.tree-body_ul]:pl-2.5 [&_.tree-body>ul]:pl-0 ",
     "[&_.tnode]:min-w-0 ",
-    "[&_.tlabel]:flex [&_.tlabel]:cursor-pointer [&_.tlabel]:items-center [&_.tlabel]:gap-1.5 [&_.tlabel]:rounded-sm [&_.tlabel]:px-1.5 [&_.tlabel]:py-0.5 [&_.tlabel]:leading-[1.35] [&_.tlabel]:text-ink-2 ",
+    "[&_.tlabel]:flex [&_.tlabel]:cursor-pointer [&_.tlabel]:items-center [&_.tlabel]:gap-1.5 [&_.tlabel]:rounded-sm [&_.tlabel]:border-l-2 [&_.tlabel]:border-transparent [&_.tlabel]:px-1.5 [&_.tlabel]:py-0.5 [&_.tlabel]:leading-snug [&_.tlabel]:text-ink-2 ",
     "[&_.tdir>ul_.tfile>.tlabel]:pl-2 [&_.tlabel:hover]:bg-surface-2 [&_.tlabel:hover]:text-ink ",
     "[&_:is(.tdir>.tlabel,.tdir>.tlabel_.tname)]:text-ink-3 ",
-    "[&_.tfile.cur>.tlabel]:bg-acc-soft [&_.tfile.cur>.tlabel]:text-ink [&_.tfile.cur>.tlabel]:shadow-[inset_2px_0_0_var(--acc)] ",
+    "[&_.tfile.cur>.tlabel]:border-l-2 [&_.tfile.cur>.tlabel]:border-acc [&_.tfile.cur>.tlabel]:bg-acc-soft [&_.tfile.cur>.tlabel]:text-ink ",
     "[&_.tcaret]:size-0 [&_.tcaret]:flex-none [&_.tcaret]:border-y-4 [&_.tcaret]:border-y-transparent [&_.tcaret]:border-l-5 [&_.tcaret]:border-l-ink-3 ",
     "[&_.tdir.open>.tlabel_.tcaret]:rotate-90 [&_.tdir:not(.open)>ul]:hidden ",
     "[&_.tname]:min-w-0 [&_.tname]:flex-1 [&_.tname]:overflow-hidden [&_.tname]:text-ellipsis ",
-    "[&_.tfile.status-added>.tlabel]:bg-[color-mix(in_srgb,var(--add-bg)_42%,transparent)] ",
-    "[&_.tfile.status-deleted>.tlabel]:bg-[color-mix(in_srgb,var(--del-bg)_42%,transparent)] ",
-    "[&_.tfile.status-added>.tlabel:hover]:bg-[color-mix(in_srgb,var(--add-bg)_62%,var(--surface-2))] ",
-    "[&_.tfile.status-deleted>.tlabel:hover]:bg-[color-mix(in_srgb,var(--del-bg)_62%,var(--surface-2))] ",
-    "[&_.tstatus]:inline-flex [&_.tstatus]:size-[15px] [&_.tstatus]:flex-none [&_.tstatus]:items-center [&_.tstatus]:justify-center [&_.tstatus]:rounded-sm [&_.tstatus]:border [&_.tstatus]:border-line-2 [&_.tstatus]:text-[9.5px] [&_.tstatus]:leading-none [&_.tstatus]:font-bold ",
+    "[&_.tfile.status-added>.tlabel]:bg-add-bg/40 [&_.tfile.status-deleted>.tlabel]:bg-del-bg/40 ",
+    "[&_.tfile.status-added>.tlabel:hover]:bg-add-bg/60 [&_.tfile.status-deleted>.tlabel:hover]:bg-del-bg/60 ",
+    "[&_.tstatus]:inline-flex [&_.tstatus]:size-4 [&_.tstatus]:flex-none [&_.tstatus]:items-center [&_.tstatus]:justify-center [&_.tstatus]:rounded-sm [&_.tstatus]:border [&_.tstatus]:border-line-2 [&_.tstatus]:text-xs [&_.tstatus]:leading-none [&_.tstatus]:font-bold ",
     "[&_.tstatus.status-added]:border-add-line [&_.tstatus.status-added]:bg-add-bg [&_.tstatus.status-added]:text-add ",
     "[&_.tstatus.status-deleted]:border-del-line [&_.tstatus.status-deleted]:bg-del-bg [&_.tstatus.status-deleted]:text-del ",
     "[&_.tstatus.status-renamed]:border-acc-line [&_.tstatus.status-renamed]:bg-acc-soft [&_.tstatus.status-renamed]:text-acc ",
     "[&_.tstatus.status-modified]:bg-sunk [&_.tstatus.status-modified]:text-ink-3",
 );
-const STAT_CLASSES: &str = "rounded-sm border px-2 py-0.5 text-[11px]";
+const STAT_CLASSES: &str = "rounded-sm border px-2 py-0.5 text-xs";
 
 pub(super) struct ChangedFilesPresentation<'view> {
     commits_label: &'view str,
@@ -59,10 +57,10 @@ pub(super) fn tree(presentation: &ChangedFilesPresentation<'_>) -> Markup {
         aside class=(TREE_PRESENTATION_CLASSES) aria-label="Changed files tree" {
             div class="search relative mb-3 print:hidden!" {
                 input type="text"
-                    class="filter [font:inherit] w-full rounded-sm border border-line-2 bg-sunk px-2.5 py-2 text-[13px] text-ink focus:border-acc-line focus:shadow-[0_0_0_2px_var(--acc-soft)] focus:outline-none"
+                    class="filter w-full rounded-sm border border-line-2 bg-sunk px-2.5 py-2 text-ink outline-none hover:border-ink-3 focus-visible:border-acc focus-visible:ring-2 focus-visible:ring-acc-soft"
                     placeholder="Filter files…  /" aria-label="Filter files";
             }
-            div class="mx-1 mt-1.5 mb-2 flex justify-between text-[11px] tracking-[0.06em] text-ink-3 uppercase" {
+            div class="mx-1 mt-1.5 mb-2 flex justify-between tracking-wider text-ink-3 uppercase" {
                 span { (presentation.commits_label) " · " (presentation.files.len()) " file" (plural(presentation.files.len())) }
             }
             div class="mx-0.5 mb-3 flex flex-wrap gap-2" {
@@ -70,7 +68,7 @@ pub(super) fn tree(presentation: &ChangedFilesPresentation<'_>) -> Markup {
                 span class={ (STAT_CLASSES) " border-add-line text-add" } { "+" (presentation.total_added) }
                 span class={ (STAT_CLASSES) " border-del-line text-del" } { "−" (presentation.total_removed) }
             }
-            div class="tree-body text-[12.5px] whitespace-nowrap" {
+            div class="tree-body whitespace-nowrap" {
                 (render_directory(&presentation.root))
             }
         }
@@ -147,9 +145,9 @@ pub(super) fn mobile_popover(presentation: &ChangedFilesPresentation<'_>, target
             popover {
             header class="flex items-center justify-between border-b border-line bg-surface-2 px-4 py-3" {
                 div {
-                    strong class="block text-[13px]" { "Changed files" }
+                    strong class="block" { "Changed files" }
                     div class="flex flex-wrap items-center gap-1.5 pt-1" {
-                        span class="text-[11px] text-ink-3" {
+                        span class="text-xs text-ink-3" {
                             (presentation.files.len()) " file" (plural(presentation.files.len()))
                         }
                         span class={ (STAT_CLASSES) " border-add-line text-add" } title="Lines added" {
@@ -160,19 +158,19 @@ pub(super) fn mobile_popover(presentation: &ChangedFilesPresentation<'_>, target
                         }
                     }
                 }
-                button type="button" class="size-[30px] cursor-pointer rounded-sm border-0 bg-transparent text-xl text-ink-2 [font:inherit] hover:bg-line hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
+                button type="button" class="size-8 cursor-pointer rounded-sm border-0 bg-transparent text-xl text-ink-2 hover:bg-line hover:text-ink active:bg-acc-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
                     popovertarget=(target) popovertargetaction="hide" aria-label="Close changed files" { "×" }
             }
             div class="gtl-scroll h-[calc(100%_-_57px)] overflow-y-auto p-2" {
                 @for file in presentation.files {
                     @let status = file_status_presentation(file.status());
                     button type="button"
-                        class="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-2 text-left text-[12.5px] text-ink-2 [font:inherit] hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc"
+                        class="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-2 text-left text-ink-2 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc"
                         data-file-target=(slug(&file.path)) {
-                        span class={ "inline-flex size-[17px] flex-none items-center justify-center rounded-sm border text-[9.5px] font-bold " (status.badge_classes) }
+                        span class={ "inline-flex size-4 flex-none items-center justify-center rounded-sm border text-xs font-bold " (status.badge_classes) }
                             title=(status.label) { (status.code) }
                         span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" { (file.path) }
-                        span class="flex-none text-[11px]" {
+                        span class="flex-none text-xs" {
                             span class="text-add" { "+" (file.added) } " "
                             span class="text-del" { "−" (file.removed) }
                         }

@@ -10,7 +10,7 @@ use crate::{
     shared::{
         bridge::ClientApiError,
         browser,
-        ui::{Button, ButtonSize, ButtonState, ButtonVariant, Skeleton},
+        ui::{Button, ButtonSize, ButtonState, ButtonVariant, ScrollArea, Skeleton},
     },
 };
 
@@ -116,7 +116,7 @@ pub(crate) fn DiffHistoryView() -> Element {
                         span { aria_hidden: "true",
                             History { size: 16 }
                         }
-                        p { class: "font-mono text-[10px] font-semibold uppercase tracking-[0.14em]",
+                        p { class: "font-mono font-semibold tracking-widest uppercase",
                             "Render archive"
                         }
                     }
@@ -126,24 +126,22 @@ pub(crate) fn DiffHistoryView() -> Element {
                         tabindex: "-1",
                         "Diff history"
                     }
-                    p { class: "mt-1 text-xs text-ink-2",
+                    p { class: "mt-1 text-ink-2",
                         "Reopen a durable render or copy its complete recipe."
                     }
                 }
                 if let HistoryLoad::Ready(page) = &load {
-                    p { class: "font-mono text-[11px] tabular-nums text-ink-3",
-                        "{page.total_count} renders"
-                    }
+                    p { class: "font-mono tabular-nums text-ink-3", "{page.total_count} renders" }
                 }
             }
 
             section {
                 class: "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] bg-bg",
                 aria_label: "Recent diff renders",
-                div { class: "min-h-0 overflow-auto p-3 [scrollbar-color:var(--color-line-2)_transparent] [scrollbar-width:thin] sm:p-4",
+                ScrollArea { class: "min-h-0 overflow-auto p-3 sm:p-4",
                     if let Some(error) = action_error() {
                         div {
-                            class: "mb-3 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-xs text-del",
+                            class: "mb-3 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-del",
                             role: "alert",
                             "{error.message()}"
                         }
@@ -156,8 +154,8 @@ pub(crate) fn DiffHistoryView() -> Element {
                             let message = error.message();
                             rsx! {
                                 div { class: "grid min-h-64 place-content-center text-center", role: "alert",
-                                    p { class: "text-sm font-semibold text-ink", "History is unavailable" }
-                                    p { class: "mt-1 max-w-md text-xs leading-5 text-ink-2", "{message}" }
+                                    p { class: "font-semibold text-ink", "History is unavailable" }
+                                    p { class: "mt-1 max-w-md leading-5 text-ink-2", "{message}" }
                                     Button {
                                         class: "mx-auto mt-4",
                                         variant: ButtonVariant::Outline,
@@ -169,8 +167,8 @@ pub(crate) fn DiffHistoryView() -> Element {
                         }
                         HistoryLoad::Ready(page) if page.entries.is_empty() => rsx! {
                             div { class: "grid min-h-64 place-content-center text-center",
-                                p { class: "text-sm font-semibold text-ink", "No history yet" }
-                                p { class: "mt-1 text-xs text-ink-2", "Rendered diffs appear here after they are opened." }
+                                p { class: "font-semibold text-ink", "No history yet" }
+                                p { class: "mt-1 text-ink-2", "Rendered diffs appear here after they are opened." }
                             }
                         },
                         HistoryLoad::Ready(page) => rsx! {
@@ -265,14 +263,14 @@ fn HistoryRow(
         article { class: "grid min-w-0 gap-3 rounded-sm border border-line bg-surface px-3 py-3 hover:border-line-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(8rem,0.8fr)_auto] sm:items-center",
             div { class: "min-w-0",
                 div { class: "flex min-w-0 items-center gap-2",
-                    h2 { class: "truncate text-sm font-semibold text-ink", "{entry.title}" }
-                    span { class: "shrink-0 rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-acc",
+                    h2 { class: "truncate font-semibold text-ink", "{entry.title}" }
+                    span { class: "shrink-0 rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 font-mono text-xs font-semibold tracking-widest text-acc uppercase",
                         "{recipe_kind_label(entry.kind)}"
                     }
                 }
-                p { class: "mt-1 truncate font-mono text-[11px] text-ink-2", "{entry.range_label}" }
+                p { class: "mt-1 truncate font-mono text-ink-2", "{entry.range_label}" }
             }
-            div { class: "min-w-0 text-[11px] text-ink-2",
+            div { class: "min-w-0 text-ink-2",
                 p { class: "truncate", "{entry.repository_name}" }
                 time {
                     class: "mt-1 block truncate font-mono tabular-nums text-ink-3",
@@ -334,7 +332,7 @@ fn HistoryFooter(
                 aria_valuenow: page.page_number.to_string(),
                 span { class: "block h-full bg-acc", style: "width:{progress}%" }
             }
-            p { class: "hidden font-mono text-[10px] tabular-nums text-ink-3 sm:block",
+            p { class: "hidden font-mono text-xs tabular-nums text-ink-3 sm:block",
                 "{page.total_count} renders"
             }
             nav {

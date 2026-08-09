@@ -7,7 +7,7 @@ use crate::{
     shared::{
         bridge::ClientApiError,
         browser,
-        ui::{Button, ButtonVariant, Skeleton},
+        ui::{Button, ButtonVariant, ScrollArea, Skeleton},
     },
 };
 
@@ -45,50 +45,52 @@ pub(crate) fn UserSettingsView() -> Element {
 
     rsx! {
         document::Title { "Settings - git-tools" }
-        main { class: "h-full overflow-auto bg-bg px-4 py-5 [scrollbar-color:var(--color-line-2)_transparent] [scrollbar-width:thin] sm:px-6",
-            div { class: "mx-auto grid max-w-5xl gap-5",
-                header { class: "border-b border-line pb-4",
-                    div { class: "flex items-center gap-2 text-acc",
-                        span { aria_hidden: "true",
-                            Settings { size: 16 }
+        main { class: "h-full overflow-hidden bg-bg",
+            ScrollArea { class: "h-full overflow-auto px-4 py-5 sm:px-6",
+                div { class: "mx-auto grid max-w-5xl gap-5",
+                    header { class: "border-b border-line pb-4",
+                        div { class: "flex items-center gap-2 text-acc",
+                            span { aria_hidden: "true",
+                                Settings { size: 16 }
+                            }
+                            p { class: "font-mono font-semibold tracking-widest uppercase",
+                                "Effective configuration"
+                            }
                         }
-                        p { class: "font-mono text-[10px] font-semibold uppercase tracking-[0.14em]",
-                            "Effective configuration"
+                        h1 {
+                            id: "settings-heading",
+                            class: "mt-1 text-lg font-semibold tracking-tight text-ink focus:outline-none",
+                            tabindex: "-1",
+                            "User settings"
+                        }
+                        p { class: "mt-1 max-w-2xl leading-5 text-ink-2",
+                            "These values are resolved by git-tools. Edit the configuration file to change them."
                         }
                     }
-                    h1 {
-                        id: "settings-heading",
-                        class: "mt-1 text-lg font-semibold tracking-tight text-ink focus:outline-none",
-                        tabindex: "-1",
-                        "User settings"
-                    }
-                    p { class: "mt-1 max-w-2xl text-xs leading-5 text-ink-2",
-                        "These values are resolved by git-tools. Edit the configuration file to change them."
-                    }
-                }
 
-                match &load {
-                    SettingsLoad::Loading => rsx! {
-                        SettingsLoading {}
-                    },
-                    SettingsLoad::Error(error) => {
-                        let message = error.message();
-                        rsx! {
-                            section { class: "grid min-h-64 place-content-center text-center", role: "alert",
-                                p { class: "text-sm font-semibold text-ink", "Settings are unavailable" }
-                                p { class: "mt-1 max-w-md text-xs leading-5 text-ink-2", "{message}" }
-                                Button {
-                                    class: "mx-auto mt-4",
-                                    variant: ButtonVariant::Outline,
-                                    onclick: move |_| *reload.write() += 1,
-                                    "Try again"
+                    match &load {
+                        SettingsLoad::Loading => rsx! {
+                            SettingsLoading {}
+                        },
+                        SettingsLoad::Error(error) => {
+                            let message = error.message();
+                            rsx! {
+                                section { class: "grid min-h-64 place-content-center text-center", role: "alert",
+                                    p { class: "font-semibold text-ink", "Settings are unavailable" }
+                                    p { class: "mt-1 max-w-md leading-5 text-ink-2", "{message}" }
+                                    Button {
+                                        class: "mx-auto mt-4",
+                                        variant: ButtonVariant::Outline,
+                                        onclick: move |_| *reload.write() += 1,
+                                        "Try again"
+                                    }
                                 }
                             }
                         }
+                        SettingsLoad::Ready(settings) => rsx! {
+                            SettingsContent { settings: settings.clone() }
+                        },
                     }
-                    SettingsLoad::Ready(settings) => rsx! {
-                        SettingsContent { settings: settings.clone() }
-                    },
                 }
             }
         }
@@ -134,7 +136,7 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
                 span { class: "text-acc", aria_hidden: "true",
                     FileCog { size: 16 }
                 }
-                h2 { class: "text-sm font-semibold text-ink", "Viewer configuration" }
+                h2 { class: "font-semibold text-ink", "Viewer configuration" }
             }
             dl { class: "divide-y divide-line",
                 SettingsRow {
@@ -160,13 +162,13 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
                     value: if settings.push_confirmation_required { "Required".to_owned() } else { "Not required".to_owned() },
                 }
                 div { class: "grid gap-2 px-4 py-4 sm:grid-cols-[14rem_minmax(0,1fr)]",
-                    dt { class: "text-xs font-semibold text-ink-2", "Default diff exclusions" }
+                    dt { class: "font-semibold text-ink-2", "Default diff exclusions" }
                     dd { class: "m-0 flex min-w-0 flex-wrap gap-1.5",
                         if settings.diff_exclusions.default_extensions.is_empty() {
-                            span { class: "text-xs text-ink-3", "None" }
+                            span { class: "text-ink-3", "None" }
                         } else {
                             for extension in &settings.diff_exclusions.default_extensions {
-                                code { class: "rounded-sm border border-line-2 bg-sunk px-1.5 py-0.5 font-mono text-[11px] text-ink",
+                                code { class: "rounded-sm border border-line-2 bg-sunk px-1.5 py-0.5 font-mono text-xs text-ink",
                                     "*.{extension}"
                                 }
                             }
@@ -180,26 +182,26 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
             class: "overflow-hidden rounded-panel border border-line bg-surface",
             aria_label: "Project diff exclusions",
             header { class: "border-b border-line bg-surface-2 px-4 py-3",
-                h2 { class: "text-sm font-semibold text-ink", "Project exclusions" }
-                p { class: "mt-1 text-xs text-ink-2",
+                h2 { class: "font-semibold text-ink", "Project exclusions" }
+                p { class: "mt-1 text-ink-2",
                     "Repository-specific extension filters, sorted by project name."
                 }
             }
             if projects.is_empty() {
-                p { class: "px-4 py-5 text-xs text-ink-3", "No project-specific exclusions." }
+                p { class: "px-4 py-5 text-ink-3", "No project-specific exclusions." }
             } else {
                 dl { class: "divide-y divide-line",
                     for project in projects {
                         div { class: "grid gap-2 px-4 py-4 sm:grid-cols-[14rem_minmax(0,1fr)]",
-                            dt { class: "truncate font-mono text-xs font-semibold text-ink",
+                            dt { class: "truncate font-mono font-semibold text-ink",
                                 "{project.project_name}"
                             }
                             dd { class: "m-0 flex min-w-0 flex-wrap gap-1.5",
                                 if project.extensions.is_empty() {
-                                    span { class: "text-xs text-ink-3", "None" }
+                                    span { class: "text-ink-3", "None" }
                                 } else {
                                     for extension in project.extensions {
-                                        code { class: "rounded-sm border border-line-2 bg-sunk px-1.5 py-0.5 font-mono text-[11px] text-ink",
+                                        code { class: "rounded-sm border border-line-2 bg-sunk px-1.5 py-0.5 font-mono text-xs text-ink",
                                             "*.{extension}"
                                         }
                                     }
@@ -217,8 +219,8 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
 fn SettingsRow(term: String, value: String, #[props(default)] code: bool) -> Element {
     rsx! {
         div { class: "grid gap-2 px-4 py-4 sm:grid-cols-[14rem_minmax(0,1fr)]",
-            dt { class: "text-xs font-semibold text-ink-2", "{term}" }
-            dd { class: "m-0 min-w-0 break-words text-xs text-ink",
+            dt { class: "font-semibold text-ink-2", "{term}" }
+            dd { class: "m-0 min-w-0 break-words text-ink",
                 if code {
                     code { class: "font-mono", "{value}" }
                 } else {

@@ -22,6 +22,12 @@ mod tests {
     use super::*;
     use crate::fixtures::has_disallowed_external_url;
 
+    const THEME_TOKENS_SOURCE: &str = include_str!("styles/tokens.css");
+    const THEME_NAMES: [&str; 7] = [
+        "dark", "light", "hearth", "mirage", "glacier", "noir", "graphite",
+    ];
+    const SURFACE_TOKENS: [&str; 4] = ["--bg", "--surface", "--surface-2", "--sunk"];
+
     fn assert_selector_declaration(css: &str, selector: &str, declaration: &str) {
         assert!(
             css.split('}')
@@ -56,6 +62,70 @@ mod tests {
             }
             let selector = format!("[data-theme={theme}]{{");
             assert!(css.contains(&selector), "missing token block for `{theme}`");
+        }
+    }
+
+    #[test]
+    fn tertiary_text_meets_normal_text_contrast_on_every_theme_surface() {
+        for theme_name in THEME_NAMES {
+            let block = theme_block(THEME_TOKENS_SOURCE, theme_name)
+                .unwrap_or_else(|| panic!("missing or unterminated {theme_name} theme"));
+            let tertiary_ink = hex_token(block, "--ink-3")
+                .unwrap_or_else(|| panic!("missing {theme_name} tertiary ink"));
+
+            for surface_token in SURFACE_TOKENS {
+                let surface = hex_token(block, surface_token)
+                    .unwrap_or_else(|| panic!("missing {theme_name} {surface_token}"));
+                let ratio = contrast_ratio(tertiary_ink, surface);
+                assert!(
+                    ratio >= 4.5,
+                    "{theme_name} {surface_token} contrast is {ratio:.3}:1"
+                );
+            }
+        }
+    }
+
+    fn theme_block<'source>(source: &'source str, theme_name: &str) -> Option<&'source str> {
+        let selector = format!("[data-theme=\"{theme_name}\"]{{");
+        source
+            .split_once(&selector)
+            .and_then(|(_, block)| block.split_once('}'))
+            .map(|(block, _)| block)
+    }
+
+    fn hex_token(block: &str, token: &str) -> Option<[u8; 3]> {
+        let declaration = format!("{token}:");
+        let value = block
+            .split_once(&declaration)?
+            .1
+            .trim_start()
+            .strip_prefix('#')?;
+        let hex = value.get(..6)?;
+
+        Some([
+            u8::from_str_radix(&hex[0..2], 16).ok()?,
+            u8::from_str_radix(&hex[2..4], 16).ok()?,
+            u8::from_str_radix(&hex[4..6], 16).ok()?,
+        ])
+    }
+
+    fn contrast_ratio(left: [u8; 3], right: [u8; 3]) -> f64 {
+        let left = relative_luminance(left);
+        let right = relative_luminance(right);
+        (left.max(right) + 0.05) / (left.min(right) + 0.05)
+    }
+
+    fn relative_luminance(color: [u8; 3]) -> f64 {
+        let [red, green, blue] = color.map(linear_channel);
+        0.2126 * red + 0.7152 * green + 0.0722 * blue
+    }
+
+    fn linear_channel(channel: u8) -> f64 {
+        let channel = f64::from(channel) / 255.0;
+        if channel <= 0.04045 {
+            channel / 12.92
+        } else {
+            ((channel + 0.055) / 1.055).powf(2.4)
         }
     }
 
@@ -243,16 +313,16 @@ mod tests {
     fn file_status_indicators_stay_compact_trailing_and_discreet() {
         // Horizontal-wheel scroll math is covered by shared/wheel.test.ts.
         let css = preview_css();
-        assert_selector_declaration(css, ".tstatus", "width:15px;height:15px");
+        assert_selector_declaration(css, ".tstatus", "width:1rem;height:1rem");
         assert_selector_declaration(
             css,
             ".tfile.status-added>.tlabel",
-            "color-mix(in srgb,var(--add-bg) 42%,transparent)",
+            "background-color:color-mix(in oklab, var(--add-bg) 40%, transparent)",
         );
         assert_selector_declaration(
             css,
             ".tfile.status-deleted>.tlabel",
-            "color-mix(in srgb,var(--del-bg) 42%,transparent)",
+            "background-color:color-mix(in oklab, var(--del-bg) 40%, transparent)",
         );
         assert_selector_declaration(
             css,

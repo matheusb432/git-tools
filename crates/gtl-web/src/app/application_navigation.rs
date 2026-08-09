@@ -13,12 +13,15 @@ use crate::{
     shared::{
         bridge::ClientApiError,
         browser,
-        ui::{Button, ButtonSize, ButtonVariant},
+        ui::{
+            Button, ButtonSize, ButtonVariant, FloatingNotice, FloatingNoticeState, ScrollArea,
+            ScrollAreaVariant,
+        },
     },
 };
 
-const NAVIGATION_ACTION_CLASSES: &str = "mb-[7px] inline-flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-[12px] text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
-const NAVIGATION_ACTION_ACTIVE_CLASSES: &str = "mb-[7px] inline-flex h-8 flex-none items-center gap-2 rounded-sm border border-acc-line bg-acc-soft px-2.5 text-[12px] text-acc focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
+const NAVIGATION_ACTION_CLASSES: &str = "mb-2 inline-flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink active:border-acc-line active:bg-acc-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
+const NAVIGATION_ACTION_ACTIVE_CLASSES: &str = "mb-2 inline-flex h-8 flex-none items-center gap-2 rounded-sm border border-acc-line bg-acc-soft px-2.5 text-acc active:border-acc active:bg-acc-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
 
 #[component]
 pub(crate) fn ApplicationNavigation() -> Element {
@@ -42,16 +45,15 @@ pub(crate) fn ApplicationNavigation() -> Element {
 
     rsx! {
         nav {
-            class: "z-[70] flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2",
+            class: "z-70 flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2",
             aria_label: "Open diffs",
-            div {
-                class: "gtl-scroll-rail flex min-w-0 flex-1 items-end gap-1 overflow-x-auto",
+            ScrollArea {
+                variant: ScrollAreaVariant::Rail,
+                class: "flex min-w-0 flex-1 items-end gap-1 overflow-x-auto",
                 role: "tablist",
                 aria_label: "Open diffs",
                 if tabs.is_empty() {
-                    p { class: "mb-[7px] self-center px-2 text-[12px] text-ink-3",
-                        "No open diffs"
-                    }
+                    p { class: "mb-2 self-center px-2 text-ink-3", "No open diffs" }
                 }
                 for tab in &tabs {
                     {
@@ -63,10 +65,10 @@ pub(crate) fn ApplicationNavigation() -> Element {
                         rsx! {
                             div {
                                 key: "{tab.id}",
-                                class: if active { "flex min-w-28 max-w-60 shrink-0 items-center rounded-t-panel border border-b-0 border-line-2 bg-bg text-ink shadow-[inset_0_2px_0_var(--color-acc)]" } else { "flex min-w-28 max-w-60 shrink-0 items-center rounded-t-panel border border-b-0 border-transparent bg-surface-2 text-ink-2 hover:border-line-2 hover:text-ink" },
+                                class: if active { "flex min-w-28 max-w-60 shrink-0 items-center rounded-t-panel border border-b-0 border-acc-line bg-bg text-ink" } else { "flex min-w-28 max-w-60 shrink-0 items-center rounded-t-panel border border-b-0 border-transparent bg-surface-2 text-ink-2 hover:border-line-2 hover:text-ink" },
                                 button {
                                     id: tab_element_id(tab_id),
-                                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent py-2 pr-1 pl-2.5 text-left text-inherit [font:inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc",
+                                    class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent py-2 pr-1 pl-2.5 text-left text-inherit active:bg-acc-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc",
                                     r#type: "button",
                                     role: "tab",
                                     aria_selected: active.to_string(),
@@ -115,11 +117,11 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                         }
                                     },
                                     span {
-                                        class: "inline-flex size-[17px] flex-none items-center justify-center rounded-sm border border-line-2 text-[9px] font-bold text-ink-3",
+                                        class: "inline-flex size-4 flex-none items-center justify-center rounded-sm border border-line-2 text-xs font-bold text-ink-3",
                                         aria_hidden: "true",
                                         {tab_kind_label(tab.kind)}
                                     }
-                                    span { class: "min-w-0 truncate text-[12.5px]", "{tab.label}" }
+                                    span { class: "min-w-0 truncate", "{tab.label}" }
                                     if tab.kind == ViewerTabKind::Live {
                                         span { class: "sr-only", "Live" }
                                     }
@@ -160,25 +162,26 @@ pub(crate) fn ApplicationNavigation() -> Element {
             Link {
                 class: if matches!(route, Route::History {}) { NAVIGATION_ACTION_ACTIVE_CLASSES } else { NAVIGATION_ACTION_CLASSES },
                 to: Route::History {},
+                aria_label: "History",
                 aria_current: matches!(route, Route::History {}).then_some("page"),
                 span { aria_hidden: "true",
                     History { size: 14 }
                 }
                 "History"
                 if !tabs.is_empty() {
-                    span { class: "min-w-[18px] rounded-full bg-acc-soft px-1 text-center text-[10px] text-acc",
+                    span { class: "min-w-5 rounded-full bg-acc-soft px-1 text-center text-xs text-acc",
                         "{tabs.len()}"
                     }
                 }
             }
 
-            label { class: "mb-[7px] flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-[12px] text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line",
+            label { class: "mb-2 flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50",
                 span { class: "text-acc", aria_hidden: "true",
                     CircleDot { size: 9, fill: "currentColor" }
                 }
                 span { class: "sr-only", "Theme" }
                 select {
-                    class: "cursor-pointer appearance-none bg-transparent text-inherit outline-none",
+                    class: "cursor-pointer appearance-none bg-transparent text-inherit outline-none disabled:cursor-not-allowed",
                     value: theme_value(theme),
                     disabled: shell.is_none() || viewer.render_command_pending(),
                     aria_label: "Theme",
@@ -214,11 +217,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
             }
         }
         if let Some(error) = action_error() {
-            div {
-                class: "pointer-events-none fixed bottom-6 left-1/2 z-50 max-w-[min(44rem,calc(100vw-2rem))] -translate-x-1/2 rounded-panel border border-del-line bg-surface px-3.5 py-2 text-[12px] text-del",
-                role: "alert",
-                "{error.message()}"
-            }
+            FloatingNotice { state: FloatingNoticeState::Error, role: "alert", "{error.message()}" }
         }
     }
 }

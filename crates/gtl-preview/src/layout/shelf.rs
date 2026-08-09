@@ -16,20 +16,20 @@ const SHELF_STATE_CLASSES: &str = concat!(
     "[&_.cline.active_.merge-pill]:border-acc-line [&_.cline.active_.merge-pill]:bg-acc-soft [&_.cline.active_.merge-pill]:text-acc",
 );
 const COMMIT_CARD_CLASSES: &str = concat!(
-    "relative ml-1.5 rounded-r-sm border-l-2 border-line-2 py-1.5 pr-2 pl-[22px] ",
-    "hover:bg-surface-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-acc ",
-    "[&.has:hover]:shadow-[inset_2px_0_0_var(--acc)] [&.active]:shadow-[inset_2px_0_0_var(--acc)]",
+    "relative ml-1.5 rounded-r-sm border-l-2 border-line-2 py-1.5 pr-2 pl-6 ",
+    "hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-acc ",
+    "[&.has:hover]:border-l-acc [&.active]:border-l-acc [&.active]:bg-acc-soft",
 );
 const BEAD_CLASSES: &str = concat!(
-    "pointer-events-none absolute left-[-15px] top-[7px] flex size-[18px] items-center justify-center bg-transparent p-0 ",
-    "before:size-[9px] before:rounded-full before:border-2 before:border-line-2 before:bg-bg before:shadow-[0_0_0_3px_var(--surface)] before:content-['']",
+    "pointer-events-none absolute -left-4 top-2 flex size-5 items-center justify-center bg-transparent p-0 ",
+    "before:size-2.5 before:rounded-full before:border-2 before:border-line-2 before:bg-bg before:shadow-[0_0_0_3px_var(--surface)] before:content-['']",
 );
 const NOTES_ICON_CLASSES: &str = "h-2.5 w-3 flex-none opacity-[.85] [background:repeating-linear-gradient(var(--acc),var(--acc)_2px,transparent_2px,transparent_4px)]";
-const MERGE_PILL_CLASSES: &str = "whitespace-nowrap rounded-sm border border-line-2 bg-surface-2 px-1.5 py-px text-[10.5px] text-ink-3";
-const SHA_CLASSES: &str = "cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 text-[12px] text-acc [font:inherit]";
+const MERGE_PILL_CLASSES: &str = "whitespace-nowrap rounded-sm border border-line-2 bg-surface-2 px-1.5 py-px text-xs text-ink-3";
+const SHA_CLASSES: &str = "cursor-pointer rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 text-xs text-acc hover:border-acc active:bg-acc active:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
 const WHEN_CLASSES: &str =
-    "ml-auto whitespace-nowrap text-[11px] text-ink-3 [font-variant-numeric:tabular-nums]";
-const SUBJECT_CLASSES: &str = "text-[12.5px] leading-[1.42] text-ink-2 [overflow-wrap:anywhere]";
+    "ml-auto whitespace-nowrap text-ink-3 [font-variant-numeric:tabular-nums]";
+const SUBJECT_CLASSES: &str = "wrap-anywhere leading-normal text-ink-2";
 const POPOVER_CLASSES: &str = concat!(
     "fixed inset-auto m-0 w-[330px] max-w-[92vw] overflow-hidden rounded-panel border border-line-2 bg-surface p-0 text-ink ",
     "shadow-[0_14px_44px_rgba(0,0,0,.7)] [&::backdrop]:bg-transparent",
@@ -76,8 +76,8 @@ pub(super) fn shelf(presentation: &CommitShelfPresentation<'_>) -> Markup {
     html! {
         aside class={ "shelf " (SHELF_CLASSES) " " (SHELF_STATE_CLASSES) } aria-label="Commits in range" {
             div {
-                h3 class="mx-0.5 mt-1.5 mb-1 text-[11px] font-semibold tracking-[0.06em] text-ink-3 uppercase" { (presentation.commits_label) }
-                p class="mx-0.5 mt-0 mb-3 flex items-center gap-1.5 text-[11px] text-ink-3" {
+                h3 class="mx-0.5 mt-1.5 mb-1 font-semibold tracking-wider text-ink-3 uppercase" { (presentation.commits_label) }
+                p class="mx-0.5 mt-0 mb-3 flex items-center gap-1.5 text-ink-3" {
                     span class="size-2 flex-none rounded-full bg-acc shadow-[0_0_0_3px_var(--acc-soft)]" {}
                     (presentation.hint)
                 }
@@ -96,10 +96,10 @@ pub(super) fn mobile_popover(presentation: &CommitShelfPresentation<'_>, target:
             popover {
             header class="flex items-center justify-between border-b border-line bg-surface-2 px-4 py-3" {
                 div {
-                    strong class="block text-[13px]" { "Commit history" }
-                    span class="text-[11px] text-ink-3" { (presentation.commits_label) }
+                    strong class="block" { "Commit history" }
+                    span class="text-ink-3" { (presentation.commits_label) }
                 }
-                button type="button" class="size-[30px] cursor-pointer rounded-sm border-0 bg-transparent text-xl text-ink-2 [font:inherit] hover:bg-line hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
+                button type="button" class="size-8 cursor-pointer rounded-sm border-0 bg-transparent text-xl text-ink-2 hover:bg-line hover:text-ink active:bg-acc-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc"
                     popovertarget=(target) popovertargetaction="hide" aria-label="Close commits in range" { "×" }
             }
             div class="gtl-scroll h-[calc(100%_-_57px)] overflow-y-auto p-3" {
@@ -158,13 +158,13 @@ pub(super) fn commit_popovers(presentation: &CommitShelfPresentation<'_>) -> Mar
             @if commit_presentation.has_notes() {
                 div id={ "pop-" (commit.sha) } class={ "print:hidden! " (POPOVER_CLASSES) } popover {
                     div class="flex items-center gap-2 border-b border-line bg-surface-2 px-3 py-2.5" {
-                        span class="text-[12px] text-acc" { (commit.sha) }
+                        span class="text-xs text-acc" { (commit.sha) }
                         @if !commit.date.is_empty() {
-                            span class="ml-auto text-[11.5px] text-ink-3" { (commit.date) }
+                            span class="ml-auto text-ink-3" { (commit.date) }
                         }
                     }
-                    div class="px-3 pt-2.5 pb-1 text-[13px] font-semibold text-ink" { (commit.subject) }
-                    div class="px-3 pt-1 pb-3 text-[12.5px] leading-[1.6] whitespace-pre-wrap text-ink-2" { (commit.body.trim()) }
+                    div class="px-3 pt-2.5 pb-1 font-semibold text-ink" { (commit.subject) }
+                    div class="px-3 pt-1 pb-3 leading-relaxed whitespace-pre-wrap text-ink-2" { (commit.body.trim()) }
                 }
             }
         }

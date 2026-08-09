@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use lucide_dioxus::X;
 
 use super::{
-    Button, ButtonSize, ButtonVariant,
+    Button, ButtonSize, ButtonVariant, ScrollArea,
     dialog::{DialogState, sync_dialog},
 };
 
@@ -45,7 +45,7 @@ pub(crate) fn Popover(
             },
             div { class: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]",
                 header { class: "flex items-center justify-between gap-3 border-b border-line px-4 py-3",
-                    h2 { id: title_id, class: "text-sm font-semibold text-ink", "{title}" }
+                    h2 { id: title_id, class: "font-semibold text-ink", "{title}" }
                     Button {
                         size: ButtonSize::IconSmall,
                         variant: ButtonVariant::Ghost,
@@ -58,9 +58,7 @@ pub(crate) fn Popover(
                         }
                     }
                 }
-                div { class: "min-h-0 overflow-auto p-4 [scrollbar-color:var(--color-line-2)_transparent] [scrollbar-width:thin]",
-                    {children}
-                }
+                ScrollArea { class: "min-h-0 overflow-auto p-4", {children} }
             }
         }
     }
