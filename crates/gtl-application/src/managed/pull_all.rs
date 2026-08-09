@@ -2,22 +2,18 @@
 //! every managed repo, preserving the retired `push_pull.rs::pull_one`'s exact
 //! status/detail semantics.
 
-use std::path::PathBuf;
-
 use futures_util::{StreamExt as _, stream};
 use gtl_models::managed::ManagedRepo;
 
 use crate::{
     managed::logic::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
-    ports::{GitClient, GitEffect, ManagedManifest},
+    ports::{GitClient, GitEffect, ProjectClient, ProjectClientError},
 };
 
 const MAX_CONCURRENT_GIT_OPERATIONS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PullAll {
-    pub repos_file: PathBuf,
-    pub home_dir: PathBuf,
     pub dry: bool,
 }
 
@@ -30,6 +26,8 @@ pub struct PullAllOk {
 #[derive(Debug, thiserror::Error)]
 pub enum PullAllError {
     #[error(transparent)]
+    ProjectClient(#[from] ProjectClientError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
@@ -38,9 +36,9 @@ pub enum PullAllError {
 pub async fn execute(
     req: PullAll,
     git: &impl GitClient,
-    manifest: &impl ManagedManifest,
+    projects: &impl ProjectClient,
 ) -> Result<PullAllOk, PullAllError> {
-    let repos = manifest.load(&req.repos_file, &req.home_dir).await?;
+    let repos = projects.list_projects().await?;
     let dry = req.dry;
     let tasks = stream::iter(repos.into_iter().enumerate())
         .map(|(index, repo)| {
@@ -147,7 +145,7 @@ mod tests {
     use gtl_models::managed::ManagedRepo;
 
     use super::*;
-    use crate::testing::{FakeManagedManifest, ManagedGitScript, SyncOutput};
+    use crate::testing::{FakeProjectClient, ManagedGitScript, SyncOutput};
 
     fn repo(name: &str) -> ManagedRepo {
         ManagedRepo {
@@ -162,16 +160,12 @@ mod tests {
         repos: Vec<ManagedRepo>,
         request: PullAll,
     ) -> Result<PullAllOk, PullAllError> {
-        let manifest = FakeManagedManifest { repos, error: None };
-        execute(request, &remote.git_client(), &manifest).await
+        let projects = FakeProjectClient { repos, error: None };
+        execute(request, &remote.git_client(), &projects).await
     }
 
     fn req() -> PullAll {
-        PullAll {
-            repos_file: "/projects.toml".into(),
-            home_dir: "/home".into(),
-            dry: false,
-        }
+        PullAll { dry: false }
     }
 
     fn ready_remote() -> ManagedGitScript {

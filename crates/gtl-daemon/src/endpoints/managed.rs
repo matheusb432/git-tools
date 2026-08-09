@@ -15,20 +15,12 @@ use gtl_contracts::{
     },
 };
 
-pub(crate) fn to_push_all_request(dto: PushAllRequest) -> PushAll {
-    PushAll {
-        repos_file: dto.repos_file.into(),
-        home_dir: dto.home_dir.into(),
-        dry: dto.dry,
-    }
+pub(crate) fn to_push_all_request(dto: &PushAllRequest) -> PushAll {
+    PushAll { dry: dto.dry }
 }
 
-pub(crate) fn to_pull_all_request(dto: PullAllRequest) -> PullAll {
-    PullAll {
-        repos_file: dto.repos_file.into(),
-        home_dir: dto.home_dir.into(),
-        dry: dto.dry,
-    }
+pub(crate) fn to_pull_all_request(dto: &PullAllRequest) -> PullAll {
+    PullAll { dry: dto.dry }
 }
 
 fn to_exit_dto(exit: SyncExit) -> SyncExitDto {

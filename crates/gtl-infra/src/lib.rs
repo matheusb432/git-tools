@@ -4,6 +4,7 @@
 //! the git capture and clock adapters.
 
 pub mod app_state;
+pub mod sample_project_project_client;
 pub mod artifact_store;
 pub mod clock;
 pub mod configured_editor;
@@ -13,7 +14,6 @@ pub mod file_system;
 mod git_capture;
 pub mod git_client;
 mod git_process;
-pub mod managed_manifest;
 pub mod push_ledger;
 pub mod repo_discovery;
 pub mod store;

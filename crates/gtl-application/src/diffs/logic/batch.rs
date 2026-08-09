@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// One repo to include in a multi-repo render: its resolved top-level path and the
-/// label to show on its tab (relative path under the scan root, or the manifest name).
+/// label to show on its tab (relative path under the scan root, or the project title).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoRef {
     pub top: String,

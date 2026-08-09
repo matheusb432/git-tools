@@ -5,8 +5,8 @@ use axum::{
     routing::{get, post},
 };
 use gtl_infra::{
-    app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
-    git_client::HybridGitClient, managed_manifest::TokioManagedManifest,
+    app_state::SqliteAppState, sample_project_project_client::SampleProjectClient,
+    artifact_store::StoreArtifacts, clock::SystemClock, git_client::HybridGitClient,
     push_ledger::NoOpPushLedger, user_config::TomlSettingsStore,
 };
 use gtl_preview::MaudRenderer;
@@ -25,7 +25,7 @@ pub struct DaemonState {
     pub(crate) artifacts: StoreArtifacts,
     pub(crate) renderer: MaudRenderer,
     pub(crate) clock: SystemClock,
-    pub(crate) manifest: TokioManagedManifest,
+    pub(crate) projects: SampleProjectClient,
     pub(crate) ledger: NoOpPushLedger,
     pub(crate) app_state: SqliteAppState,
     pub(crate) user_settings: TomlSettingsStore,
@@ -50,7 +50,7 @@ impl DaemonState {
             artifacts: StoreArtifacts,
             renderer: MaudRenderer,
             clock: SystemClock,
-            manifest: TokioManagedManifest,
+            projects: SampleProjectClient::from_environment(),
             ledger: NoOpPushLedger,
             app_state,
             user_settings,

@@ -10,7 +10,7 @@ use gtl_contracts::{
     recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget},
 };
 
-use crate::{client::HttpClient, commands::managed::ManagedOptions};
+use crate::client::HttpClient;
 
 /// Save + open a live view: `path` targets one repo, `None` fans out over every
 /// managed repo with unpushed commits.
@@ -40,19 +40,10 @@ fn run_single(client: &HttpClient, path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// No `--path`: save every managed repo with unpushed commits (default manifest
-/// lookup), forwarding the ones that saved successfully as one batch.
+/// No `--path`: save every managed repo with unpushed commits, forwarding the ones that
+/// saved successfully as one batch.
 fn run_managed(client: &HttpClient) -> anyhow::Result<()> {
-    let options = ManagedOptions {
-        repos_file: None,
-        home_dir: None,
-        dry: false,
-        json: false,
-        color: false,
-        message_for_all: None,
-        interactive: false,
-    };
-    let tops = crate::recipe::selected_managed_repos(&options)?;
+    let tops = crate::recipe::selected_managed_repos()?;
     if tops.is_empty() {
         println!("diff live: no managed repos with unpushed commits");
         return Ok(());

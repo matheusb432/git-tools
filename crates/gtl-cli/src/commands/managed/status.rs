@@ -14,7 +14,7 @@ use super::{ManagedExit, ManagedOptions, ManagedRepo, ManagedRun};
 mod palette;
 
 pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
-    match super::manifest::load_repos(options) {
+    match super::project_catalog::load_projects() {
         Ok(repos) => status_run(
             status_repos::execute(status_repos::StatusRepos { repos }, &HybridGitClient),
             options,

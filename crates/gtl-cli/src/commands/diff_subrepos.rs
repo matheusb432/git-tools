@@ -15,10 +15,7 @@ use gtl_application::{
     recipes::RecipeRequest,
 };
 
-use crate::{
-    commands::{diff::DiffOutcome, managed::ManagedOptions},
-    viewer,
-};
+use crate::{commands::diff::DiffOutcome, viewer};
 
 pub fn run_scan(
     root: impl AsRef<Path>,
@@ -62,13 +59,9 @@ pub fn run_scan(
     })
 }
 
-pub fn run_managed_all(
-    root: impl AsRef<Path>,
-    options: &ManagedOptions,
-    raw: bool,
-) -> anyhow::Result<DiffOutcome> {
+pub fn run_managed_all(root: impl AsRef<Path>, raw: bool) -> anyhow::Result<DiffOutcome> {
     let root = canonical_root(root.as_ref())?;
-    let repos = crate::recipe::selected_managed_repos(options)?;
+    let repos = crate::recipe::selected_managed_repos()?;
     let recipe_intents = repos
         .iter()
         .map(|repo| DiffRecipeIntent {

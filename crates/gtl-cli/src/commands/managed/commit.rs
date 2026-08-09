@@ -61,7 +61,7 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
         };
     }
 
-    match super::manifest::load_repos(options) {
+    match super::project_catalog::load_projects() {
         Ok(repos) => {
             let execution = commit_all::execute(
                 commit_all::CommitAll {

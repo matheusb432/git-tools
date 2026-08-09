@@ -4,15 +4,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PushAllRequest {
-    pub repos_file: String,
-    pub home_dir: String,
     pub dry: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PullAllRequest {
-    pub repos_file: String,
-    pub home_dir: String,
     pub dry: bool,
 }
 

@@ -1,5 +1,5 @@
 //! The managed-repos feature: commit, prune, push, pull, status, and unpushed
-//! selection operations over already-resolved manifest entries.
+//! selection operations over already-resolved managed projects.
 
 pub mod commit_all;
 mod logic;

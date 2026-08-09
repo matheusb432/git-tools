@@ -31,7 +31,7 @@ pub struct PruneRepoResult {
 /// without `-y`) each repo only reports what *would* be deleted; otherwise branches are
 /// deleted. Any non-clean repo (a delete failure or a refusal) maps to [`ManagedExit::Warn`].
 pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRepoResult> {
-    match super::manifest::load_repos(options) {
+    match super::project_catalog::load_projects() {
         Ok(repos) => {
             let execution = prune_all::execute(
                 prune_all::PruneAll {

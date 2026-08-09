@@ -1,22 +1,18 @@
 //! The `push_all` vertical slice: fan a `git push` out across every managed repo,
 //! preserving the retired `push_pull.rs::push_one`'s exact status/detail semantics.
 
-use std::path::PathBuf;
-
 use futures_util::{StreamExt as _, stream};
 use gtl_models::managed::ManagedRepo;
 
 use crate::{
     managed::logic::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
-    ports::{Clock, GitClient, GitEffect, ManagedManifest, PushLedger},
+    ports::{Clock, GitClient, GitEffect, ProjectClient, ProjectClientError, PushLedger},
 };
 
 const MAX_CONCURRENT_GIT_OPERATIONS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PushAll {
-    pub repos_file: PathBuf,
-    pub home_dir: PathBuf,
     pub dry: bool,
 }
 
@@ -29,6 +25,8 @@ pub struct PushAllOk {
 #[derive(Debug, thiserror::Error)]
 pub enum PushAllError {
     #[error(transparent)]
+    ProjectClient(#[from] ProjectClientError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
@@ -37,11 +35,11 @@ pub enum PushAllError {
 pub async fn execute(
     req: PushAll,
     git: &impl GitClient,
-    manifest: &impl ManagedManifest,
+    projects: &impl ProjectClient,
     ledger: &impl PushLedger,
     clock: &impl Clock,
 ) -> Result<PushAllOk, PushAllError> {
-    let repos = manifest.load(&req.repos_file, &req.home_dir).await?;
+    let repos = projects.list_projects().await?;
     let dry = req.dry;
     let tasks = stream::iter(repos.into_iter().enumerate())
         .map(|(index, repo)| {
@@ -178,7 +176,7 @@ mod tests {
 
     use super::*;
     use crate::testing::{
-        FakeManagedManifest, FakePushLedger, FixedClock, ManagedGitScript, SyncOutput,
+        FakeProjectClient, FakePushLedger, FixedClock, ManagedGitScript, SyncOutput,
     };
 
     fn repo(name: &str) -> ManagedRepo {
@@ -194,12 +192,12 @@ mod tests {
         repos: Vec<ManagedRepo>,
         request: PushAll,
     ) -> Result<PushAllOk, PushAllError> {
-        let manifest = FakeManagedManifest { repos, error: None };
+        let projects = FakeProjectClient { repos, error: None };
         let git = remote.git_client();
         execute(
             request,
             &git,
-            &manifest,
+            &projects,
             &FakePushLedger::default(),
             &FixedClock("2026-07-03T00:00:00Z".into()),
         )
@@ -207,11 +205,7 @@ mod tests {
     }
 
     fn req() -> PushAll {
-        PushAll {
-            repos_file: "/projects.toml".into(),
-            home_dir: "/home".into(),
-            dry: false,
-        }
+        PushAll { dry: false }
     }
 
     #[tokio::test]
@@ -362,11 +356,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_manifest_load_failure_propagates_as_an_error() {
+    async fn a_project_client_failure_propagates_as_an_error() {
         let error = execute(
             req(),
             &ManagedGitScript::default().git_client(),
-            &FakeManagedManifest {
+            &FakeProjectClient {
                 repos: Vec::new(),
                 error: Some("boom".into()),
             },
@@ -374,7 +368,7 @@ mod tests {
             &FixedClock("2026-07-03T00:00:00Z".into()),
         )
         .await
-        .expect_err("manifest error propagates");
+        .expect_err("project client error propagates");
         assert!(format!("{error:#}").contains("boom"));
     }
 }

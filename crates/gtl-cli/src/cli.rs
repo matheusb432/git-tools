@@ -60,7 +60,7 @@ pub enum Command {
     /// Push existing commits, or stage all changes, commit with MESSAGE, and push.
     #[command(visible_alias = "p")]
     Push(PushArgs),
-    /// Pull every managed repo from the manifest.
+    /// Pull every active project listed by sample_project.
     Pull(PullArgs),
     /// Stage all changes and commit them, without pushing.
     Commit(CommitArgs),
@@ -159,7 +159,7 @@ pub struct PushArgs {
     /// Commit message. When present, changes are staged and committed before pushing.
     #[arg(allow_hyphen_values = true, conflicts_with = "recursive")]
     pub message: Option<String>,
-    /// Operate on every managed repo from the manifest.
+    /// Operate on every active project listed by sample_project.
     #[arg(long, conflicts_with = "recursive")]
     pub all: bool,
     /// Operate on the current repo plus nested subrepos under the current directory.
@@ -171,12 +171,6 @@ pub struct PushArgs {
     /// Emit machine-readable JSON for managed output.
     #[arg(long, requires = "all")]
     pub json: bool,
-    /// Path to the managed-repos manifest.
-    #[arg(long, requires = "all")]
-    pub repos_file: Option<String>,
-    /// Home directory used to resolve managed-repo paths.
-    #[arg(long, requires = "all")]
-    pub home_dir: Option<String>,
     /// Skip confirmation where the selected push mode supports it.
     #[arg(short = 'y', long = "yes")]
     pub yes: bool,
@@ -192,7 +186,7 @@ pub struct CommitArgs {
     /// Commit message.
     #[arg(allow_hyphen_values = true, required_unless_present = "all")]
     pub message: Option<String>,
-    /// Operate on every managed repo from the manifest.
+    /// Operate on every active project listed by sample_project.
     #[arg(long)]
     pub all: bool,
     /// Preview managed commit actions without committing.
@@ -201,12 +195,6 @@ pub struct CommitArgs {
     /// Emit machine-readable JSON for managed output.
     #[arg(long, requires = "all")]
     pub json: bool,
-    /// Path to the managed-repos manifest.
-    #[arg(long, requires = "all")]
-    pub repos_file: Option<String>,
-    /// Home directory used to resolve managed-repo paths.
-    #[arg(long, requires = "all")]
-    pub home_dir: Option<String>,
     /// Skip confirmation where the selected commit mode supports it.
     #[arg(short = 'y', long = "yes", conflicts_with = "all")]
     pub yes: bool,
@@ -215,7 +203,7 @@ pub struct CommitArgs {
 /// Arguments for `pull`.
 #[derive(Debug, Args)]
 pub struct PullArgs {
-    /// Pull every managed repo from the manifest.
+    /// Pull every active project listed by sample_project.
     #[arg(long, required = true)]
     pub all: bool,
     #[command(flatten)]
@@ -337,18 +325,12 @@ pub struct DiffTargetArgs {
     /// Only valid for the single-repo diff modes.
     #[arg(short = 'n', long = "name", value_name = "NAME", value_parser = non_empty_name)]
     pub name: Option<String>,
-    /// Path to the managed-repos manifest (overrides the default lookup).
-    #[arg(long, requires = "all")]
-    pub repos_file: Option<String>,
-    /// Home directory used to resolve managed-repo paths (overrides `$HOME`).
-    #[arg(long, requires = "all")]
-    pub home_dir: Option<String>,
     /// Persist the diff-preview theme to the user config and exit without rendering.
     /// The same `theme` key stays editable by hand in the config TOML.
     #[arg(
         long,
         value_name = "THEME",
-        conflicts_with_all = ["all", "unpushed", "target", "last", "recursive", "worktrees", "merge", "name", "repos_file", "home_dir"],
+        conflicts_with_all = ["all", "unpushed", "target", "last", "recursive", "worktrees", "merge", "name"],
     )]
     pub set_theme: Option<Theme>,
 }
@@ -384,7 +366,7 @@ impl Theme {
 /// Arguments for `status`. Default scope is the current repo; `--all` and `-r` widen it.
 #[derive(Debug, Args)]
 pub struct StatusArgs {
-    /// Report every managed repo from the manifest.
+    /// Report every active project listed by sample_project.
     #[arg(long, conflicts_with = "recursive")]
     pub all: bool,
     /// Report the current repo plus any nested subrepos under the current directory (linked
@@ -412,7 +394,7 @@ impl From<LsArgs> for StatusArgs {
 }
 
 /// Flags shared by read-only managed-repo status output.
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Copy, Args)]
 pub struct ManagedReadArgs {
     /// Emit machine-readable JSON instead of human text.
     #[arg(long)]
@@ -420,12 +402,6 @@ pub struct ManagedReadArgs {
     /// When to emit ANSI colors in human output.
     #[arg(long, value_enum, default_value_t = ColorChoice::Auto)]
     pub color: ColorChoice,
-    /// Path to the managed-repos manifest (overrides the default lookup).
-    #[arg(long)]
-    pub repos_file: Option<String>,
-    /// Home directory used to resolve managed-repo paths (overrides `$HOME`).
-    #[arg(long)]
-    pub home_dir: Option<String>,
 }
 
 /// ANSI color policy for human output.
@@ -466,22 +442,16 @@ pub struct PruneArgs {
     /// Actually delete (skip the prompt; required to delete in a non-interactive shell).
     #[arg(short = 'y', long = "yes")]
     pub yes: bool,
-    /// Prune every managed repo from the manifest instead of the current repo.
+    /// Prune every active project listed by sample_project instead of the current repo.
     #[arg(long)]
     pub all: bool,
     /// Emit machine-readable JSON instead of human text (with `--all`).
     #[arg(long, requires = "all")]
     pub json: bool,
-    /// Path to the managed-repos manifest (overrides the default lookup).
-    #[arg(long, requires = "all")]
-    pub repos_file: Option<String>,
-    /// Home directory used to resolve managed-repo paths (overrides `$HOME`).
-    #[arg(long, requires = "all")]
-    pub home_dir: Option<String>,
 }
 
 /// Flags shared by the managed-repo fan-out commands (`push --all`, `pull --all`, `commit --all`).
-#[derive(Debug, Clone, Args)]
+#[derive(Debug, Clone, Copy, Args)]
 pub struct ManagedArgs {
     /// Preview actions without performing them.
     #[arg(long)]
@@ -489,12 +459,6 @@ pub struct ManagedArgs {
     /// Emit machine-readable JSON instead of human text.
     #[arg(long)]
     pub json: bool,
-    /// Path to the managed-repos manifest (overrides the default lookup).
-    #[arg(long)]
-    pub repos_file: Option<String>,
-    /// Home directory used to resolve managed-repo paths (overrides `$HOME`).
-    #[arg(long)]
-    pub home_dir: Option<String>,
 }
 
 pub use gtl_application::diffs::DiffTarget;

@@ -101,11 +101,14 @@ fn dispatch(command: Command) -> ExitCode {
         ))),
         Command::Commit(args) => run_commit(args),
         Command::Switch(args) => run_switch(&args),
-        Command::Prune(args) => run_prune(args),
+        Command::Prune(args) => run_prune(&args),
         Command::Tag(args) => commands::tag::run(args.command, args.commits, args.state),
         Command::Worktree(args) => run_worktree(&args.command),
-        Command::Status(args) => managed_exit(&run_status(args)),
-        Command::Ls(args) => managed_exit(&run_status(args.into())),
+        Command::Status(args) => managed_exit(&run_status(&args)),
+        Command::Ls(args) => {
+            let args = args.into();
+            managed_exit(&run_status(&args))
+        }
         Command::Daemon(DaemonArgs { command }) => run_daemon_ctl(&command),
     }
 }
@@ -137,15 +140,10 @@ fn run_diff(args: DiffArgs) -> ExitCode {
                 DiffInvocation::Single { target, name } => {
                     diff_exit(commands::diff::run(&target, name.as_deref(), raw))
                 }
-                DiffInvocation::ManagedAll {
-                    repos_file,
-                    home_dir,
-                } => {
-                    let options = managed_diff_options(repos_file, home_dir);
-                    diff_exit(commands::canonical_working_directory().and_then(|root| {
-                        commands::diff_subrepos::run_managed_all(root, &options, raw)
-                    }))
-                }
+                DiffInvocation::ManagedAll => diff_exit(
+                    commands::canonical_working_directory()
+                        .and_then(|root| commands::diff_subrepos::run_managed_all(root, raw)),
+                ),
             }
         }
     }
@@ -172,16 +170,9 @@ fn run_commit(args: CommitArgs) -> ExitCode {
             message,
             dry,
             json,
-            repos_file,
-            home_dir,
             ..
         } => managed_exit(&commands::managed::run_commit_all(&managed_options(
-            ManagedArgs {
-                dry,
-                json,
-                repos_file,
-                home_dir,
-            },
+            ManagedArgs { dry, json },
             message,
         ))),
     }
@@ -296,18 +287,12 @@ enum DiffInvocation {
         target: DiffTarget,
         name: Option<String>,
     },
-    ManagedAll {
-        repos_file: Option<String>,
-        home_dir: Option<String>,
-    },
+    ManagedAll,
 }
 
 fn diff_invocation(args: DiffTargetArgs) -> DiffInvocation {
     if args.all {
-        return DiffInvocation::ManagedAll {
-            repos_file: args.repos_file,
-            home_dir: args.home_dir,
-        };
+        return DiffInvocation::ManagedAll;
     }
 
     let name = args.name.clone();
@@ -344,22 +329,13 @@ fn diff_target(args: DiffTargetArgs) -> DiffTarget {
 
 fn run_push_managed(args: PushArgs) -> ExitCode {
     let PushArgs {
-        message,
-        dry,
-        json,
-        repos_file,
-        home_dir,
-        ..
+        message, dry, json, ..
     } = args;
-    let repos_file = repos_file.map(Into::into);
-    let home_dir = home_dir.map(Into::into);
     let interactive = confirm::stdin_is_terminal();
     let dry = match plan_push::execute(PlanPush { message, dry }) {
         PlanPushOk::PushOnly { dry } => dry,
         PlanPushOk::CommitThenPush { message, dry } => {
             let run = commands::managed::run_commit_all(&ManagedOptions {
-                repos_file: repos_file.clone(),
-                home_dir: home_dir.clone(),
                 dry,
                 json,
                 color: false,
@@ -375,26 +351,12 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
     };
 
     managed_exit(&commands::managed::run_push_all(&ManagedOptions {
-        repos_file,
-        home_dir,
         dry,
         json,
         color: false,
         message_for_all: None,
         interactive,
     }))
-}
-
-fn managed_diff_options(repos_file: Option<String>, home_dir: Option<String>) -> ManagedOptions {
-    ManagedOptions {
-        repos_file: repos_file.map(Into::into),
-        home_dir: home_dir.map(Into::into),
-        dry: false,
-        json: false,
-        color: false,
-        message_for_all: None,
-        interactive: false,
-    }
 }
 
 /// Orchestrates `push "<message>"`: plan read-only, show the confirmation block, gate on
@@ -863,7 +825,7 @@ fn finish_switch(result: Result<&str, &str>) -> ExitCode {
 /// Orchestrates `prune`: `--all` fans out over managed repos (preview unless `-y`); the
 /// single-repo path plans read-only, shows the will-delete block, gates on `-y`/TTY like
 /// `push "<message>"`, then deletes. All git work is local; refusals → stderr, logs → stdout.
-fn run_prune(args: PruneArgs) -> ExitCode {
+fn run_prune(args: &PruneArgs) -> ExitCode {
     use gtl_application::branches::{
         apply_prune::{self, ApplyPrune, ApplyPruneError, PruneStatus},
         plan_prune::{self, PlanPrune, PlanPruneOk},
@@ -875,8 +837,6 @@ fn run_prune(args: PruneArgs) -> ExitCode {
 
     if args.all {
         let options = ManagedOptions {
-            repos_file: args.repos_file.map(Into::into),
-            home_dir: args.home_dir.map(Into::into),
             dry: !args.yes,
             json: args.json,
             color: false,
@@ -963,18 +923,13 @@ fn run_prune(args: PruneArgs) -> ExitCode {
     }
 }
 
-/// Dispatches `status` by scope: `--all` ⇒ managed manifest, `-r` ⇒ recursive scan of
+/// Dispatches `status` by scope: `--all` uses sample_project's active projects, `-r` recursively scans
 /// the current directory, default ⇒ the current repo alone.
-fn run_status(args: StatusArgs) -> ManagedRun<commands::managed::StatusResult> {
-    let StatusArgs {
-        all,
-        recursive,
-        read,
-    } = args;
-    let options = managed_read_options(read);
-    if all {
+fn run_status(args: &StatusArgs) -> ManagedRun<commands::managed::StatusResult> {
+    let options = managed_read_options(args.read);
+    if args.all {
         commands::managed::run_status(&options)
-    } else if recursive {
+    } else if args.recursive {
         let root = match commands::canonical_working_directory() {
             Ok(root) => root,
             Err(error) => return status_path_error(&error),
@@ -1014,8 +969,6 @@ fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
     };
 
     ManagedOptions {
-        repos_file: args.repos_file.map(Into::into),
-        home_dir: args.home_dir.map(Into::into),
         dry: false,
         json: args.json,
         color,
@@ -1027,8 +980,6 @@ fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
 /// Builds the [`ManagedOptions`] for a fan-out command from its parsed flags.
 fn managed_options(args: ManagedArgs, message_for_all: Option<String>) -> ManagedOptions {
     ManagedOptions {
-        repos_file: args.repos_file.map(Into::into),
-        home_dir: args.home_dir.map(Into::into),
         dry: args.dry,
         json: args.json,
         color: false,
@@ -1100,8 +1051,6 @@ mod tests {
             worktrees: false,
             merge: None,
             name: None,
-            repos_file: None,
-            home_dir: None,
             set_theme: None,
         }
     }
@@ -1155,24 +1104,6 @@ mod tests {
             run(&["commit".into(), "--all".into(), String::new()]),
             ExitCode::Usage
         );
-    }
-
-    #[test]
-    fn ls_exits_ok() {
-        // Hermetic: point at an empty manifest via `--repos-file` so this never reads the
-        // real `$HOME` manifest or touches the developer's actual repos (an empty
-        // `[[project]]` array parses to zero managed repos, which is a Clean status run).
-        let dir = tempfile::tempdir().expect("tempdir");
-        let repos_file = dir.path().join("projects.toml");
-        std::fs::write(&repos_file, "").expect("write empty manifest");
-
-        let exit = run(&[
-            "ls".into(),
-            "--repos-file".into(),
-            repos_file.display().to_string(),
-        ]);
-
-        assert_eq!(exit, ExitCode::Ok);
     }
 
     #[test]

@@ -2,18 +2,16 @@
 
 use gtl_models::{discovery::DiscoveredRepo, managed::ManagedRepo};
 
-use crate::commands::managed::{self, ManagedOptions};
+use crate::commands::managed;
 
 /// Mints a fresh batch identifier for recipes opened together.
 pub(crate) fn new_batch_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
 
-/// Loads the managed manifest and selects repositories with unpushed commits.
-pub(crate) fn selected_managed_repos(
-    options: &ManagedOptions,
-) -> anyhow::Result<Vec<DiscoveredRepo>> {
-    let repos = managed::load_repos(options)?;
+/// Loads sample_project's active projects and selects repositories with unpushed commits.
+pub(crate) fn selected_managed_repos() -> anyhow::Result<Vec<DiscoveredRepo>> {
+    let repos = managed::load_projects()?;
     select_managed_repos(repos)
 }
 

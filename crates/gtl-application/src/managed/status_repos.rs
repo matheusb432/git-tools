@@ -1,6 +1,6 @@
 //! The `managed/status_repos` query: classify each repo's status (branch,
 //! upstream/ahead, dirty counts) through the [`GitClient`] port. The repo list
-//! comes from the caller — the manifest for `status --all`, the discovery slice
+//! comes from the caller - sample_project's project catalogue for `status --all`, the discovery slice
 //! for `status -r`, the enclosing repo for plain `status` — so the classify
 //! rules live exactly once.
 

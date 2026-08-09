@@ -1,22 +1,20 @@
-//! Fanning git operations out across every repo listed in the `projects.toml` manifest
-//! (sample_project's managed-repos list): `push --all`, `pull --all`, `commit --all`, `status --all`,
+//! Fanning git operations out across every active project listed by sample_project: `push --all`,
+//! `pull --all`, `commit --all`, `status --all`,
 //! and `prune --all`. Each concern lives in its own submodule; this facade owns the shared
 //! request/response seam (`ManagedRepo`, `ManagedOptions`, `ManagedRun`, `ManagedExit`) and
 //! re-exports each submodule's entry points under the historical `managed::` path.
 
-use std::path::PathBuf;
-
 mod commit;
-mod manifest;
+mod project_catalog;
 mod prune_all;
 mod push_pull;
 mod push_summary;
 mod status;
 
 pub use commit::{CommitFile, CommitResult, run_commit_all};
-/// The manifest entry shape — the models type, shared with the application slices.
+/// The managed project shape shared with the application slices.
 pub use gtl_models::managed::ManagedRepo;
-pub use manifest::{sample_project_manifest_path, load_repos};
+pub use project_catalog::load_projects;
 pub use prune_all::{PruneRepoResult, PrunedBranch, run_prune_all};
 pub use push_pull::{PushPullResult, run_pull_all, run_push_all};
 pub(crate) use push_summary::{PushOutcome, PushSummary};
@@ -46,8 +44,6 @@ impl ManagedExit {
     reason = "independent CLI flags mirrored from argv, not a disguised state machine"
 )]
 pub struct ManagedOptions {
-    pub repos_file: Option<PathBuf>,
-    pub home_dir: Option<PathBuf>,
     pub dry: bool,
     pub json: bool,
     pub color: bool,

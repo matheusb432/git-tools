@@ -28,8 +28,8 @@ use gtl_models::{
 use crate::ports::{
     ArtifactMeta, ArtifactStore, Clock, GitClient, GitCommitReceipt, GitDiffFormat, GitDiffRequest,
     GitEffect, GitPushReceipt, GitRepositoryState, GitWorkingTree, HistoryRecord, HtmlRenderer,
-    LedgerEntry, ManagedManifest, MergedBranch, PlacedArtifact, PushLedger, RepoDiscovery,
-    UserSettingsEditError, UserSettingsLoadError, UserSettingsStore,
+    LedgerEntry, MergedBranch, PlacedArtifact, ProjectClient, ProjectClientError, PushLedger,
+    RepoDiscovery, UserSettingsEditError, UserSettingsLoadError, UserSettingsStore,
 };
 
 fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -708,18 +708,19 @@ impl ManagedGitScript {
     }
 }
 
-/// Scripted `ManagedManifest`: returns `repos` verbatim, or fails with `error`'s
-/// text if set (manifest-parse-failure path).
+/// Scripted project client: returns `repos` verbatim or fails with `error`'s text.
 #[derive(Debug, Default, Clone)]
-pub struct FakeManagedManifest {
+pub struct FakeProjectClient {
     pub repos: Vec<ManagedRepo>,
     pub error: Option<String>,
 }
 
-impl ManagedManifest for FakeManagedManifest {
-    async fn load(&self, _repos_file: &Path, _home_dir: &Path) -> anyhow::Result<Vec<ManagedRepo>> {
+impl ProjectClient for FakeProjectClient {
+    async fn list_projects(&self) -> Result<Vec<ManagedRepo>, ProjectClientError> {
         if let Some(message) = &self.error {
-            anyhow::bail!("{message}");
+            return Err(ProjectClientError::Unavailable {
+                message: message.clone(),
+            });
         }
         Ok(self.repos.clone())
     }

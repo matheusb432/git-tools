@@ -12,7 +12,6 @@ use serde::Serialize;
 
 use super::{
     ManagedExit, ManagedOptions, ManagedRun,
-    manifest::resolve_manifest_location,
     push_summary::{PushOutcome, PushSummary},
 };
 use crate::client::HttpClient;
@@ -83,44 +82,28 @@ fn exit_from_dto(exit: SyncExitDto) -> ManagedExit {
 pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
     let client = match HttpClient::ensure_daemon() {
         Ok(client) => client,
-        Err(error) => return manifest_error(&error),
+        Err(error) => return managed_error(&error),
     };
-    let (repos_file, home_dir) = match resolve_manifest_location(options) {
-        Ok(location) => location,
-        Err(error) => return manifest_error(&error),
-    };
-    let request = PushAllRequest {
-        repos_file: repos_file.to_string_lossy().into_owned(),
-        home_dir: home_dir.to_string_lossy().into_owned(),
-        dry: options.dry,
-    };
+    let request = PushAllRequest { dry: options.dry };
     match client.push_all(&request) {
         Ok(envelope) => finish(SyncOperation::Push, options, envelope),
-        Err(error) => manifest_error(&error),
+        Err(error) => managed_error(&error),
     }
 }
 
 pub fn run_pull_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
     let client = match HttpClient::ensure_daemon() {
         Ok(client) => client,
-        Err(error) => return manifest_error(&error),
+        Err(error) => return managed_error(&error),
     };
-    let (repos_file, home_dir) = match resolve_manifest_location(options) {
-        Ok(location) => location,
-        Err(error) => return manifest_error(&error),
-    };
-    let request = PullAllRequest {
-        repos_file: repos_file.to_string_lossy().into_owned(),
-        home_dir: home_dir.to_string_lossy().into_owned(),
-        dry: options.dry,
-    };
+    let request = PullAllRequest { dry: options.dry };
     match client.pull_all(&request) {
         Ok(envelope) => finish(SyncOperation::Pull, options, envelope),
-        Err(error) => manifest_error(&error),
+        Err(error) => managed_error(&error),
     }
 }
 
-fn manifest_error<T>(error: &anyhow::Error) -> ManagedRun<T> {
+fn managed_error<T>(error: &anyhow::Error) -> ManagedRun<T> {
     ManagedRun {
         exit: ManagedExit::Fail,
         results: Vec::new(),
@@ -144,16 +127,16 @@ fn finish(
                 || "daemon reported an error".to_string(),
                 |n| n.text.clone(),
             );
-        return manifest_error(&anyhow::anyhow!(text));
+        return managed_error(&anyhow::anyhow!(text));
     }
     let Some(data) = envelope.data else {
-        return manifest_error(&anyhow::anyhow!("daemon returned ok without data"));
+        return managed_error(&anyhow::anyhow!("daemon returned ok without data"));
     };
     let results: Vec<PushPullResult> = data.results.into_iter().map(PushPullResult::from).collect();
     let exit = exit_from_dto(data.exit);
     let stdout = match format_push_pull(operation, options.dry, options.json, &results, exit) {
         Ok(stdout) => stdout,
-        Err(error) => return manifest_error(&error.into()),
+        Err(error) => return managed_error(&error.into()),
     };
     ManagedRun {
         exit,

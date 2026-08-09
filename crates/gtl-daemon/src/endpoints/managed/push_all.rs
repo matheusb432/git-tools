@@ -17,11 +17,11 @@ pub async fn handle(
     request: Result<Json<PushAllRequest>, JsonRejection>,
 ) -> Result<Json<Envelope<SyncData>>, EndpointError> {
     let Json(request) = request.map_err(|error| EndpointError::bad_request(error.body_text()))?;
-    let request = super::to_push_all_request(request);
+    let request = super::to_push_all_request(&request);
     let response = gtl_application::managed::push_all::execute(
         request,
         &state.git,
-        &state.manifest,
+        &state.projects,
         &state.ledger,
         &state.clock,
     )

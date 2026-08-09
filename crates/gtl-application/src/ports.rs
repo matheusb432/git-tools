@@ -10,7 +10,7 @@ mod diff_viewer_client;
 mod file_system_client;
 mod git_client;
 mod html_renderer;
-mod managed_manifest;
+mod project_client;
 mod push_ledger;
 mod repo_discovery;
 mod user_settings_store;
@@ -30,7 +30,7 @@ pub use git_client::{
     GitRepositoryState, GitWorkingTree, MergedBranch,
 };
 pub use html_renderer::HtmlRenderer;
-pub use managed_manifest::ManagedManifest;
+pub use project_client::{ProjectClient, ProjectClientError};
 pub use push_ledger::{LedgerEntry, PushLedger};
 pub use repo_discovery::RepoDiscovery;
 pub use user_settings_store::{UserSettingsEditError, UserSettingsLoadError, UserSettingsStore};

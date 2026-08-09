@@ -6,7 +6,7 @@ use gtl_models::managed::ManagedRepo;
 use super::RecipeRequest;
 use crate::{managed::select_unpushed, ports::GitClient};
 
-/// Requests recipes for ahead repositories from an already-resolved manifest.
+/// Requests recipes for ahead repositories from an already-resolved project catalogue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildManagedRecipes {
     pub repos: Vec<ManagedRepo>,
@@ -61,7 +61,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_build_selects_only_ahead_repositories_and_keeps_manifest_order() {
+    fn managed_build_selects_only_ahead_repositories_and_keeps_project_order() {
         let git = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("origin/main\n"),
             ScriptedGitClient::applied("2\n"),
