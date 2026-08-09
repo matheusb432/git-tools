@@ -38,6 +38,12 @@ window.GtlDiffIsland?.setFilesFolded(folded);
 return null;
 ";
 
+const SET_COPY_CONTEXT_ENABLED_SCRIPT: &str = r"
+const enabled = await dioxus.recv();
+window.GtlDiffIsland?.setCopyContextEnabled(enabled);
+return null;
+";
+
 const DESTROY_SCRIPT: &str = r"
 window.GtlDiffIsland?.destroy();
 return null;
@@ -193,6 +199,15 @@ impl DiffIslandBridge {
         spawn(async move {
             let evaluator = document::eval(SET_FILES_FOLDED_SCRIPT);
             if evaluator.send(folded).is_ok() {
+                let _ = evaluator.join::<()>().await;
+            }
+        });
+    }
+
+    pub(crate) fn set_copy_context_enabled(enabled: bool) {
+        spawn(async move {
+            let evaluator = document::eval(SET_COPY_CONTEXT_ENABLED_SCRIPT);
+            if evaluator.send(enabled).is_ok() {
                 let _ = evaluator.join::<()>().await;
             }
         });

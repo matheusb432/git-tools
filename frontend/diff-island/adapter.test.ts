@@ -211,4 +211,22 @@ describe("createDiffIslandAdapter", () => {
     expect(host.shadowRoot?.querySelector<HTMLDetailsElement>("details.file")?.open).toBe(false);
     island.destroy();
   });
+
+  test("applies the desktop copy-context preference to the mounted document", () => {
+    installTrustedHtmlFixtures(new Map([[DOCUMENT_HTML, () => [diffDocument("src/lib.rs")]]]));
+    const host = document.createElement("section");
+    installOpenShadowRoot(host);
+    const island = createDiffIslandAdapter();
+    island.mount(host, prepared("tab-1:range"));
+    const documentRoot = must(
+      host.shadowRoot?.querySelector<HTMLElement>(DIFF_DOCUMENT_SELECTOR) ?? null,
+      "the document root",
+    );
+
+    island.setCopyContextEnabled(true);
+    expect(documentRoot.classList.contains("copy-ctx")).toBe(true);
+    island.setCopyContextEnabled(false);
+    expect(documentRoot.classList.contains("copy-ctx")).toBe(false);
+    island.destroy();
+  });
 });

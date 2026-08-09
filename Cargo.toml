@@ -49,7 +49,7 @@ command-group = "5.0.1"
 console = { version = "0.16.4", default-features = false, features = ["std"] }
 gtl-contracts = { path = "crates/gtl-contracts" }
 gtl-desktop = { path = "crates/gtl-desktop" }
-cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.10.0" }
+cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.10.1" }
 criterion = "0.8.2"
 directories = "6.0.0"
 gtl-models = { path = "crates/gtl-models" }

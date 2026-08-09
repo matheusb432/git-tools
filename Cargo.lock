@@ -1198,8 +1198,8 @@ dependencies = [
 
 [[package]]
 name = "cqrsy"
-version = "0.10.0"
-source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.10.0#bb4b8a672716102f50957d7cf20d9ad48d6d9371"
+version = "0.10.1"
+source = "git+file:///workspace/shared-libs/cqrsy?tag=v0.10.1#544e92d53a7b54cb1209d9e2eeb25ac29ea88064"
 dependencies = [
  "proc-macro2",
  "quote",

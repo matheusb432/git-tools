@@ -21,8 +21,8 @@
   --color-del: #f85149;
   --color-del-bg: rgb(248 81 73 / 20%);
   --color-del-line: rgb(248 81 73 / 42%);
-  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Maple Mono", "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: "Maple Mono", "Maple Mono NF", ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  --font-mono: "Maple Mono", "Maple Mono NF", ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
   --radius-sm: 4px;
   --radius-panel: 6px;
 }
@@ -192,7 +192,10 @@
 
   :root {
     background: var(--color-bg);
-    font-family: var(--font-sans);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
   }
 
   *,

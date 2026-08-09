@@ -42,7 +42,36 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  :is(.main, [data-gtl-diff-document]) {
+    padding: 0 22px 60px;
+  }
+
+  @media (min-width: 1600px) and (min-height: 900px) {
+    :is(.main, [data-gtl-diff-document]) {
+      padding-inline: 28px;
+    }
+  }
+
+  @media (min-width: 1025px) and (max-width: 1280px) {
+    :is(.main, [data-gtl-diff-document]) {
+      padding-inline: 16px;
+    }
+  }
+
+  @media (max-width: 1024px) {
+    :is(.main, [data-gtl-diff-document]) {
+      padding-right: 12px;
+      padding-bottom: 48px;
+      padding-left: 12px;
+    }
+  }
+
   @media (max-width: 760px) {
+    :is(.main, [data-gtl-diff-document]) {
+      padding-right: 4px;
+      padding-left: 4px;
+    }
+
     :is(.layout, [data-gtl-diff-document]) .dl .ln {
       padding-inline: 4px;
       font-size: 10px;

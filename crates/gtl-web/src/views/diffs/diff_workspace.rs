@@ -2,26 +2,25 @@ use dioxus::prelude::*;
 use gtl_contracts::viewer::{
     SetViewerPreference, ViewerActiveState, ViewerActiveView, ViewerCommitSelection,
     ViewerDiffChunkContinuation, ViewerDiffDensity, ViewerDiffLayout, ViewerDiffMaterialization,
-    ViewerFileStatus, ViewerPreferences, ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState,
-    ViewerTheme, ViewerViewIdentity,
+    ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerPreferences, ViewerShell,
+    ViewerTabKind, ViewerTheme, ViewerViewIdentity,
 };
 use lucide_dioxus::{
-    ChevronsDownUp, CircleCheck, Columns2, FileDiff, FolderTree, GitCommitHorizontal, ListFilter,
-    LoaderCircle, PanelLeft, RefreshCw, Rows3, Search, Trash2, TriangleAlert, X,
+    ChevronRight, CircleDot, FileDiff, GitCommitHorizontal, ListFilter, LoaderCircle, PanelLeft,
+    RefreshCw,
 };
 
 use crate::{
     app::application_layout::{ViewerContext, ViewerShellLoad},
     entities::diffs::{
-        DiffIslandAppendResult, DiffIslandBridge, ViewerApi, theme_from_value, theme_label,
-        theme_value, view_identity_value,
+        DiffIslandAppendResult, DiffIslandBridge, ViewerApi, theme_value, view_identity_value,
     },
     shared::{
         bridge::ClientApiError,
         browser,
         ui::{
             AlertDialog, Badge, BadgeVariant, Button, ButtonSize, ButtonState, ButtonVariant,
-            Popover, Skeleton, TextInput,
+            Popover, Skeleton, TextInput, TextInputLabelVisibility,
         },
     },
 };
@@ -46,7 +45,7 @@ pub(crate) fn DiffWorkspaceView() -> Element {
 
     rsx! {
         document::Title { "Viewer - git-tools" }
-        main { class: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-bg",
+        main { class: "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden bg-bg",
             h1 { id: "workspace-heading", class: "sr-only", tabindex: "-1", "Diff viewer" }
             match shell {
                 ViewerShellLoad::Loading => rsx! { WorkspaceLoading {} },
@@ -90,44 +89,8 @@ fn WorkspaceLoading() -> Element {
 
 #[component]
 fn WorkspaceShell(shell: ViewerShell) -> Element {
-    let viewer = use_context::<ViewerContext>();
-    let active_tab_id = active_tab_id(&shell.active);
-    let mut action_error = use_signal(|| None::<ClientApiError>);
-
     rsx! {
-        ViewerTabs {
-            tabs: shell.tabs.clone(),
-            active_tab_id,
-            onactivate: move |tab_id| {
-                action_error.set(None);
-                spawn(async move {
-                    match ViewerApi::activate_tab(tab_id).await {
-                        Ok(shell) => viewer.replace_shell(shell),
-                        Err(error) => action_error.set(Some(error)),
-                    }
-                });
-            },
-            onclose: move |request: CloseTabRequest| {
-                action_error.set(None);
-                spawn(async move {
-                    match ViewerApi::close_tab(request.tab_id).await {
-                        Ok(shell) => {
-                            viewer.replace_shell(shell);
-                            if let Some(focus_id) = request.focus_tab_id {
-                                browser::focus_element(tab_element_id(focus_id));
-                            } else {
-                                browser::focus_element("workspace-heading".to_owned());
-                            }
-                        }
-                        Err(error) => action_error.set(Some(error)),
-                    }
-                });
-            },
-        }
         section { id: "viewer-active-view", class: "flex h-full min-h-0 flex-col overflow-hidden", role: "tabpanel", aria_label: "Active diff",
-            if let Some(error) = action_error() {
-                div { class: "border-b border-del-line bg-del-bg px-4 py-2 text-xs text-del", role: "alert", "{error.message()}" }
-            }
             div { class: "min-h-0 flex-1 overflow-hidden",
                 match shell.active {
                     ViewerActiveState::Empty => rsx! { EmptyWorkspace {} },
@@ -188,152 +151,6 @@ fn WorkspaceFailure(title: String, message: String) -> Element {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CloseTabRequest {
-    tab_id: u64,
-    focus_tab_id: Option<u64>,
-}
-
-#[component]
-fn ViewerTabs(
-    tabs: Vec<ViewerTab>,
-    active_tab_id: Option<u64>,
-    onactivate: EventHandler<u64>,
-    onclose: EventHandler<CloseTabRequest>,
-) -> Element {
-    rsx! {
-        div { class: "flex min-h-11 min-w-0 items-stretch gap-px overflow-x-auto border-b border-line bg-surface px-2 [scrollbar-color:var(--color-line-2)_transparent] [scrollbar-width:thin]", role: "tablist", aria_label: "Open diffs",
-            if tabs.is_empty() {
-                p { class: "self-center px-2 text-xs text-ink-3", "No open diffs" }
-            }
-            for tab in &tabs {
-                {
-                    let tab_id = tab.id;
-                    let active = active_tab_id == Some(tab_id);
-                    let focus_tab_id = close_focus_target(&tabs, tab_id);
-                    let key_tabs = tabs.clone();
-                    rsx! {
-                        div { key: "{tab.id}", class: if active { "flex shrink-0 items-center border-b-2 border-acc bg-acc-soft" } else { "flex shrink-0 items-center border-b-2 border-transparent hover:bg-surface-2" },
-                            button {
-                                id: tab_element_id(tab_id),
-                                class: "flex h-full max-w-64 min-w-0 cursor-pointer items-center gap-2 bg-transparent px-3 text-left text-xs text-ink-2 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc",
-                                r#type: "button",
-                                role: "tab",
-                                aria_selected: active.to_string(),
-                                aria_controls: "viewer-active-view",
-                                tabindex: if active { "0" } else { "-1" },
-                                onclick: move |_| onactivate.call(tab_id),
-                                onkeydown: move |event| {
-                                    let movement = match event.key() {
-                                        Key::ArrowRight => Some(TabMovement::Next),
-                                        Key::ArrowLeft => Some(TabMovement::Previous),
-                                        Key::Home => Some(TabMovement::First),
-                                        Key::End => Some(TabMovement::Last),
-                                        _ => None,
-                                    };
-                                    if let Some(movement) = movement {
-                                        event.prevent_default();
-                                        let ids = key_tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
-                                        if let Some(target) = tab_focus_target(&ids, tab_id, movement) {
-                                            onactivate.call(target);
-                                            browser::focus_element(tab_element_id(target));
-                                        }
-                                    }
-                                },
-                                TabStateIndicator { state: tab.state.clone() }
-                                span { class: "truncate", "{tab.label}" }
-                                if tab.kind == ViewerTabKind::Live {
-                                    span { class: "rounded-sm border border-add-line bg-add-bg px-1 py-0.5 font-mono text-[8px] font-semibold uppercase tracking-[0.08em] text-add", "Live" }
-                                }
-                            }
-                            Button {
-                                size: ButtonSize::IconSmall,
-                                variant: ButtonVariant::Ghost,
-                                class: "mr-1",
-                                aria_label: "Close {tab.label}",
-                                title: "Close tab",
-                                onclick: move |_| onclose.call(CloseTabRequest { tab_id, focus_tab_id }),
-                                span { aria_hidden: "true", X { size: 13 } }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn active_tab_id(active: &ViewerActiveState) -> Option<u64> {
-    match active {
-        ViewerActiveState::Empty => None,
-        ViewerActiveState::Pending { tab_id }
-        | ViewerActiveState::Broken { tab_id, .. }
-        | ViewerActiveState::Error { tab_id, .. } => Some(*tab_id),
-        ViewerActiveState::Ready { view } => Some(view.identity.tab_id),
-    }
-}
-
-fn tab_element_id(tab_id: u64) -> String {
-    format!("viewer-tab-{tab_id}")
-}
-
-const fn tab_state_label(state: &ViewerTabState) -> &'static str {
-    match state {
-        ViewerTabState::Ready => "Ready",
-        ViewerTabState::Pending => "Rendering",
-        ViewerTabState::Broken => "Render stopped",
-        ViewerTabState::Error => "Render failed",
-    }
-}
-
-#[component]
-fn TabStateIndicator(state: ViewerTabState) -> Element {
-    let label = tab_state_label(&state);
-
-    rsx! {
-        span { class: "shrink-0", aria_hidden: "true",
-            match state {
-                ViewerTabState::Ready => rsx! {
-                    span { class: "block text-add", CircleCheck { size: 13 } }
-                },
-                ViewerTabState::Pending => rsx! {
-                    span { class: "block animate-spin text-acc motion-reduce:animate-none", LoaderCircle { size: 13 } }
-                },
-                ViewerTabState::Broken | ViewerTabState::Error => rsx! {
-                    span { class: "block text-del", TriangleAlert { size: 13 } }
-                },
-            }
-        }
-        span { class: "sr-only", ", {label}" }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TabMovement {
-    Next,
-    Previous,
-    First,
-    Last,
-}
-
-fn tab_focus_target(ids: &[u64], current: u64, movement: TabMovement) -> Option<u64> {
-    let current_index = ids.iter().position(|id| *id == current)?;
-    let target_index = match movement {
-        TabMovement::Next => (current_index + 1) % ids.len(),
-        TabMovement::Previous => current_index.checked_sub(1).unwrap_or(ids.len() - 1),
-        TabMovement::First => 0,
-        TabMovement::Last => ids.len() - 1,
-    };
-    ids.get(target_index).copied()
-}
-
-fn close_focus_target(tabs: &[ViewerTab], closing: u64) -> Option<u64> {
-    let index = tabs.iter().position(|tab| tab.id == closing)?;
-    tabs.get(index + 1)
-        .or_else(|| index.checked_sub(1).and_then(|previous| tabs.get(previous)))
-        .map(|tab| tab.id)
-}
-
 #[component]
 fn ReadyWorkspace(
     view: ViewerActiveView,
@@ -348,6 +165,7 @@ fn ReadyWorkspace(
     let mut mobile_panel = use_signal(|| None::<MobilePanel>);
     let mut file_filter = use_signal(String::new);
     let mut files_folded = use_signal(|| false);
+    let mut copy_context_enabled = use_signal(|| true);
     let tab_id = view.identity.tab_id;
 
     let onpreference = move |preference: SetViewerPreference| {
@@ -376,12 +194,12 @@ fn ReadyWorkspace(
             }
         });
     };
+    let footer = view.footer.clone();
 
     rsx! {
-        section { class: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden",
-            ViewTitlebar { view: view.clone() }
-            div { class: "border-b border-line bg-surface px-3 py-2",
-                div { class: "hidden items-center justify-between gap-3 xl:flex",
+        section { class: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
+            div { class: "border-b border-line bg-surface px-3 py-[7px] text-ink-2",
+                div { class: "hidden min-w-0 items-center justify-between gap-3 min-[761px]:flex",
                     DisplayControls {
                         preferences,
                         pending: viewer.render_command_pending(),
@@ -395,11 +213,17 @@ fn ReadyWorkspace(
                         },
                     }
                 }
-                div { class: "flex items-center gap-2 xl:hidden",
+                div { class: "flex items-center gap-2 min-[761px]:hidden",
                     MobilePanelButton { id: "mobile-display-trigger", label: "Display", icon: MobilePanel::Display, onclick: move |_| mobile_panel.set(Some(MobilePanel::Display)) }
                     MobilePanelButton { id: "mobile-files-trigger", label: "Files", icon: MobilePanel::Files, onclick: move |_| mobile_panel.set(Some(MobilePanel::Files)) }
                     MobilePanelButton { id: "mobile-commits-trigger", label: "Commits", icon: MobilePanel::Commits, onclick: move |_| mobile_panel.set(Some(MobilePanel::Commits)) }
-                    Button { class: "ml-auto", size: ButtonSize::IconSmall, variant: ButtonVariant::Ghost, aria_label: "Refresh diff", title: "Refresh diff", onclick: onrefresh,
+                    Button {
+                        class: "ml-auto",
+                        size: ButtonSize::IconSmall,
+                        variant: ButtonVariant::Ghost,
+                        aria_label: "Refresh diff",
+                        title: "Refresh diff",
+                        onclick: onrefresh,
                         if viewer.render_command_pending() {
                             span { class: "animate-spin motion-reduce:animate-none", aria_hidden: "true", LoaderCircle { size: 14 } }
                         } else {
@@ -407,30 +231,55 @@ fn ReadyWorkspace(
                         }
                     }
                 }
-                if let Some(error) = action_error().or_else(|| viewer.render_command_error()) {
-                    p { class: "mt-2 text-xs text-del", role: "alert", "{error.message()}" }
-                }
                 if viewer.render_command_pending() {
                     p { class: "sr-only", role: "status", "Applying the latest viewer update" }
                 }
             }
 
-            div { class: "grid min-h-0 grid-cols-1 gap-px bg-line xl:grid-cols-[15rem_minmax(0,1fr)_17rem]",
-                aside { class: "hidden min-h-0 overflow-hidden bg-surface xl:block", aria_label: "Changed files",
+            div {
+                class: "grid min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden min-[1025px]:grid-cols-[220px_minmax(0,1fr)_210px] min-[1281px]:grid-cols-[262px_minmax(0,1fr)_252px] min-[1600px]:grid-cols-[320px_minmax(0,1fr)_304px]",
+                ViewTitlebar {
+                    view: view.clone(),
+                    files_folded: files_folded(),
+                    copy_context_enabled: copy_context_enabled(),
+                    onfold: move |folded| files_folded.set(folded),
+                    oncontext: move |enabled| copy_context_enabled.set(enabled),
+                }
+                aside {
+                    class: "col-start-1 row-start-2 hidden min-h-0 overflow-hidden border-r border-line bg-surface min-[1025px]:block",
+                    aria_label: "Changed files",
                     FilesPanel {
                         view: view.clone(),
                         filter: file_filter(),
-                        folded: files_folded(),
                         onfilter: move |value| file_filter.set(value),
-                        onfold: move |folded| files_folded.set(folded),
                     }
                 }
-                DiffIsland { identity: view.identity, theme: preferences.theme, title: view.title.clone(), folded: files_folded() }
-                aside { class: "hidden min-h-0 overflow-hidden bg-surface xl:block", aria_label: "Commits",
-                    CommitsPanel { view: view.clone(), onselect: onselect_commit, onclear: onclear_commit }
+                DiffIsland {
+                    identity: view.identity,
+                    theme: preferences.theme,
+                    title: view.title.clone(),
+                    folded: files_folded(),
+                    copy_context_enabled: copy_context_enabled(),
                 }
+                aside {
+                    class: "col-start-3 row-start-2 hidden min-h-0 overflow-hidden border-l border-line bg-surface min-[1025px]:block",
+                    aria_label: "Commits",
+                    CommitsPanel {
+                        view: view.clone(),
+                        onselect: onselect_commit,
+                        onclear: onclear_commit,
+                    }
+                }
+                Keybar { footer }
             }
-            Keybar {}
+        }
+
+        if let Some(error) = action_error().or_else(|| viewer.render_command_error()) {
+            p {
+                class: "pointer-events-none fixed bottom-6 left-1/2 z-50 max-w-[min(44rem,calc(100vw-2rem))] -translate-x-1/2 rounded-panel border border-del-line bg-surface px-3.5 py-2 text-[12px] text-del",
+                role: "alert",
+                "{error.message()}"
+            }
         }
 
         Popover {
@@ -439,18 +288,33 @@ fn ReadyWorkspace(
             open: mobile_panel() == Some(MobilePanel::Display),
             title: "Display controls",
             onclose: move |()| mobile_panel.set(None),
-            DisplayControls {
-                preferences,
-                pending: viewer.render_command_pending(),
-                is_live,
-                delete_trigger_id: "delete-live-view-mobile",
-                onpreference,
-                onrefresh,
-                ondelete: move |_| {
-                    mobile_panel.set(None);
-                    delete_trigger_id.set("mobile-display-trigger".to_owned());
-                    delete_open.set(true);
-                },
+            div { class: "grid gap-3",
+                DisplayControls {
+                    preferences,
+                    pending: viewer.render_command_pending(),
+                    is_live,
+                    delete_trigger_id: "delete-live-view-mobile",
+                    onpreference,
+                    onrefresh,
+                    ondelete: move |_| {
+                        mobile_panel.set(None);
+                        delete_trigger_id.set("mobile-display-trigger".to_owned());
+                        delete_open.set(true);
+                    },
+                }
+                div { class: "grid grid-cols-2 gap-2",
+                    Button {
+                        variant: ButtonVariant::Outline,
+                        onclick: move |_| files_folded.set(!files_folded()),
+                        if files_folded() { "Expand all" } else { "Collapse all" }
+                    }
+                    Button {
+                        variant: if copy_context_enabled() { ButtonVariant::Pressed } else { ButtonVariant::Outline },
+                        aria_pressed: copy_context_enabled().to_string(),
+                        onclick: move |_| copy_context_enabled.set(!copy_context_enabled()),
+                        "+ context"
+                    }
+                }
             }
         }
         Popover {
@@ -462,9 +326,7 @@ fn ReadyWorkspace(
             FilesPanel {
                 view: view.clone(),
                 filter: file_filter(),
-                folded: files_folded(),
                 onfilter: move |value| file_filter.set(value),
-                onfold: move |folded| files_folded.set(folded),
             }
         }
         Popover {
@@ -509,33 +371,85 @@ fn ReadyWorkspace(
         }
     }
 }
-
 #[component]
-fn ViewTitlebar(view: ViewerActiveView) -> Element {
+fn ViewTitlebar(
+    view: ViewerActiveView,
+    files_folded: bool,
+    copy_context_enabled: bool,
+    onfold: EventHandler<bool>,
+    oncontext: EventHandler<bool>,
+) -> Element {
     rsx! {
-        header { class: "flex min-w-0 items-start justify-between gap-4 border-b border-line bg-surface px-4 py-3",
-            div { class: "min-w-0",
-                div { class: "flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-1",
-                    h2 { class: "truncate text-sm font-semibold text-ink", "{view.title}" }
-                    p { class: "truncate font-mono text-[10px] text-ink-3", "{view.repository_name}" }
+        header {
+            class: "col-span-3 row-start-1 flex min-w-0 items-center gap-4 border-b border-line bg-surface px-5 py-3 max-[1024px]:flex-wrap max-[1024px]:gap-2.5 max-[1024px]:px-3 max-[1024px]:py-2.5 max-[761px]:gap-1.5 max-[761px]:px-2 max-[761px]:py-2",
+            div { class: "flex min-w-0 items-baseline gap-2 text-[18px] font-semibold tracking-[-0.01em] max-[761px]:text-[15px]",
+                span { class: "truncate",
+                    "~/"
+                    b { class: "font-bold text-acc", "{view.repository_name}" }
                 }
-                div { class: "mt-1 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-ink-2",
-                    span { "{view.branch}" }
-                    if !view.upstream.is_empty() {
-                        span { class: "text-ink-3", "-> {view.upstream}" }
-                    }
-                    code { class: "truncate text-acc", "{view.command.lead}{view.command.range}{view.command.trail}" }
+                span { class: "flex-none self-center rounded-sm border border-acc-line bg-acc-soft px-2 py-0.5 text-[12px] font-medium text-acc", "{view.title}" }
+            }
+            div { class: "flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-2 max-[1024px]:order-3 max-[1024px]:w-full",
+                span { class: "truncate text-acc", "{view.branch}" }
+                if !view.upstream.is_empty() {
+                    span { class: "text-ink-3", "→" }
+                    span { class: "truncate text-ink-3", "{view.upstream}" }
                 }
             }
             if let Some(exclusions) = &view.exclusions {
-                span { class: "shrink-0 rounded-sm border border-line-2 bg-sunk px-2 py-1 font-mono text-[9px] text-ink-3", title: "Applied diff exclusions",
-                    "-{exclusions.extensions.len()} ext / -{exclusions.hidden_paths.len()} paths"
+                span {
+                    class: "flex-none cursor-help whitespace-nowrap rounded-sm border border-del-line bg-del-bg px-2 py-0.5 text-[12px] font-semibold text-del",
+                    title: exclusion_tooltip(exclusions),
+                    {exclusion_label(exclusions)}
+                }
+            }
+            div { class: "flex-1" }
+            div { class: "flex items-center gap-2 max-[761px]:hidden",
+                Button {
+                    size: ButtonSize::Small,
+                    variant: ButtonVariant::Outline,
+                    title: "Collapse or expand all files",
+                    onclick: move |_| onfold.call(!files_folded),
+                    if files_folded { "Expand all" } else { "Collapse all" }
+                }
+                Button {
+                    size: ButtonSize::Small,
+                    variant: if copy_context_enabled { ButtonVariant::Pressed } else { ButtonVariant::Outline },
+                    aria_pressed: copy_context_enabled.to_string(),
+                    title: "Prepend a commented path and line range when copying code",
+                    onclick: move |_| oncontext.call(!copy_context_enabled),
+                    "+ context"
                 }
             }
         }
     }
 }
 
+fn exclusion_label(exclusions: &gtl_contracts::viewer::ViewerAppliedExclusions) -> String {
+    let hidden_count = exclusions.hidden_paths.len();
+    let extension_label = if exclusions.extensions.is_empty() {
+        "configured".to_owned()
+    } else {
+        exclusions.extensions.join(", ")
+    };
+    format!(
+        "{hidden_count} file{} hidden · {extension_label}",
+        plural_suffix(hidden_count)
+    )
+}
+
+fn exclusion_tooltip(exclusions: &gtl_contracts::viewer::ViewerAppliedExclusions) -> String {
+    let mut tooltip = String::from("Hidden by git-tools config [diff.exclude]:");
+    for path in &exclusions.hidden_paths {
+        tooltip.push('\n');
+        tooltip.push_str(path);
+    }
+    tooltip
+}
+
+const fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
 #[component]
 fn DisplayControls(
     preferences: ViewerPreferences,
@@ -547,14 +461,14 @@ fn DisplayControls(
     ondelete: EventHandler<MouseEvent>,
 ) -> Element {
     rsx! {
-        div { class: "flex flex-wrap items-center gap-2",
-            div { class: "flex items-center rounded-sm border border-line-2 bg-sunk p-0.5", aria_label: "Diff layout",
+        div { class: "flex min-w-0 flex-wrap items-center gap-3",
+            div { class: "flex items-center gap-[3px]", role: "group", aria_label: "Layout",
+                span { class: "mr-[3px] text-[10px] font-bold tracking-[0.06em] text-ink-3 uppercase", "Layout" }
                 Button {
                     size: ButtonSize::Small,
                     variant: if preferences.render_options.layout == ViewerDiffLayout::Unified { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
                     aria_pressed: (preferences.render_options.layout == ViewerDiffLayout::Unified).to_string(),
                     onclick: move |_| onpreference.call(SetViewerPreference::Layout(ViewerDiffLayout::Unified)),
-                    span { aria_hidden: "true", Rows3 { size: 13 } }
                     "Unified"
                 }
                 Button {
@@ -562,17 +476,16 @@ fn DisplayControls(
                     variant: if preferences.render_options.layout == ViewerDiffLayout::Split { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
                     aria_pressed: (preferences.render_options.layout == ViewerDiffLayout::Split).to_string(),
                     onclick: move |_| onpreference.call(SetViewerPreference::Layout(ViewerDiffLayout::Split)),
-                    span { aria_hidden: "true", Columns2 { size: 13 } }
-                    "Split"
+                    "Side by side"
                 }
             }
-            div { class: "flex items-center rounded-sm border border-line-2 bg-sunk p-0.5", aria_label: "Diff density",
+            div { class: "flex items-center gap-[3px]", role: "group", aria_label: "View",
+                span { class: "mr-[3px] text-[10px] font-bold tracking-[0.06em] text-ink-3 uppercase", "View" }
                 Button {
                     size: ButtonSize::Small,
                     variant: if preferences.render_options.density == ViewerDiffDensity::Compact { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
                     aria_pressed: (preferences.render_options.density == ViewerDiffDensity::Compact).to_string(),
                     onclick: move |_| onpreference.call(SetViewerPreference::Density(ViewerDiffDensity::Compact)),
-                    span { aria_hidden: "true", ListFilter { size: 13 } }
                     "Changes"
                 }
                 Button {
@@ -580,43 +493,29 @@ fn DisplayControls(
                     variant: if preferences.render_options.density == ViewerDiffDensity::Full { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
                     aria_pressed: (preferences.render_options.density == ViewerDiffDensity::Full).to_string(),
                     onclick: move |_| onpreference.call(SetViewerPreference::Density(ViewerDiffDensity::Full)),
-                    span { aria_hidden: "true", FileDiff { size: 13 } }
-                    "Full"
-                }
-            }
-            label { class: "flex h-8 items-center gap-2 rounded-sm border border-line-2 bg-sunk px-2 text-xs text-ink-2",
-                span { "Theme" }
-                select {
-                    class: "cursor-pointer bg-transparent font-mono text-[10px] text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc",
-                    value: theme_value(preferences.theme),
-                    onchange: move |event| {
-                        if let Some(theme) = theme_from_value(&event.value()) {
-                            onpreference.call(SetViewerPreference::Theme(theme));
-                        }
-                    },
-                    for theme in [ViewerTheme::Dark, ViewerTheme::Light, ViewerTheme::Hearth, ViewerTheme::Mirage, ViewerTheme::Glacier, ViewerTheme::Noir, ViewerTheme::Graphite] {
-                        option { value: theme_value(theme), "{theme_label(theme)}" }
-                    }
-                }
-            }
-        }
-        div { class: "flex items-center gap-1",
-            Button { size: ButtonSize::IconSmall, variant: ButtonVariant::Ghost, aria_label: "Refresh diff", title: "Refresh diff", onclick: onrefresh,
-                if pending {
-                    span { class: "animate-spin motion-reduce:animate-none", aria_hidden: "true", LoaderCircle { size: 14 } }
-                } else {
-                    span { aria_hidden: "true", RefreshCw { size: 14 } }
+                    "Full file"
                 }
             }
             if is_live {
-                Button { id: delete_trigger_id, size: ButtonSize::IconSmall, variant: ButtonVariant::Ghost, aria_label: "Delete live view", title: "Delete live view", onclick: ondelete,
-                    span { class: "text-del", aria_hidden: "true", Trash2 { size: 14 } }
+                Button {
+                    size: ButtonSize::Small,
+                    variant: ButtonVariant::Ghost,
+                    state: if pending { ButtonState::Loading } else { ButtonState::Enabled },
+                    onclick: onrefresh,
+                    "Refresh"
+                }
+                Button {
+                    id: delete_trigger_id,
+                    class: "ml-2",
+                    size: ButtonSize::Small,
+                    variant: ButtonVariant::Destructive,
+                    onclick: ondelete,
+                    "Delete live view"
                 }
             }
         }
     }
 }
-
 #[component]
 fn MobilePanelButton(
     id: String,
@@ -638,14 +537,56 @@ fn MobilePanelButton(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WorkspaceLineTotals {
+    added: u64,
+    removed: u64,
+}
+
+impl WorkspaceLineTotals {
+    fn from_files(files: &[ViewerFileSummary]) -> Self {
+        Self {
+            added: files.iter().map(|file| u64::from(file.added)).sum(),
+            removed: files.iter().map(|file| u64::from(file.removed)).sum(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct WorkspaceFileTree {
+    directories: Vec<(String, Self)>,
+    files: Vec<(String, ViewerFileSummary)>,
+}
+
+impl WorkspaceFileTree {
+    fn from_files(files: &[ViewerFileSummary]) -> Self {
+        let mut root = Self::default();
+        for file in files {
+            root.insert(&file.path, file.clone());
+        }
+        root
+    }
+
+    fn insert(&mut self, path: &str, file: ViewerFileSummary) {
+        let Some((directory_name, remainder)) = path.split_once('/') else {
+            self.files.push((path.to_owned(), file));
+            return;
+        };
+        let index = self
+            .directories
+            .iter()
+            .position(|(name, _)| name == directory_name)
+            .unwrap_or_else(|| {
+                self.directories
+                    .push((directory_name.to_owned(), Self::default()));
+                self.directories.len() - 1
+            });
+        self.directories[index].1.insert(remainder, file);
+    }
+}
+
 #[component]
-fn FilesPanel(
-    view: ViewerActiveView,
-    filter: String,
-    folded: bool,
-    onfilter: EventHandler<String>,
-    onfold: EventHandler<bool>,
-) -> Element {
+fn FilesPanel(view: ViewerActiveView, filter: String, onfilter: EventHandler<String>) -> Element {
     let filter_normalized = filter.to_lowercase();
     let files = view
         .files
@@ -653,54 +594,82 @@ fn FilesPanel(
         .filter(|file| file.path.to_lowercase().contains(&filter_normalized))
         .cloned()
         .collect::<Vec<_>>();
+    let totals = WorkspaceLineTotals::from_files(&view.files);
+    let tree = WorkspaceFileTree::from_files(&files);
 
     rsx! {
-        div { class: "grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)]",
-            header { class: "flex items-center justify-between gap-2 border-b border-line px-3 py-2.5",
-                div { class: "flex min-w-0 items-center gap-2",
-                    span { class: "text-acc", aria_hidden: "true", FolderTree { size: 14 } }
-                    h3 { class: "truncate text-xs font-semibold text-ink", "Changed files" }
-                    span { class: "font-mono text-[9px] tabular-nums text-ink-3", "{view.files.len()}" }
-                }
-                Button {
-                    size: ButtonSize::IconSmall,
-                    variant: ButtonVariant::Ghost,
-                    aria_label: if folded { "Expand all files" } else { "Collapse all files" },
-                    title: if folded { "Expand all files" } else { "Collapse all files" },
-                    onclick: move |_| onfold.call(!folded),
-                    span { aria_hidden: "true", ChevronsDownUp { size: 13 } }
-                }
-            }
-            div { class: "border-b border-line px-3 py-2",
-                div { class: "mb-1 flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.08em] text-ink-3",
-                    span { aria_hidden: "true", Search { size: 11 } }
-                    "Filter"
-                }
+        div { class: "gtl-scroll h-full min-h-0 overflow-auto bg-surface p-3 max-[1280px]:p-2.5",
+            div { class: "relative mb-3",
                 TextInput {
-                    label: "Filter changed files",
-                    class: "h-8",
+                    label: "Filter files",
+                    label_visibility: TextInputLabelVisibility::Hidden,
+                    class: "h-[35px] py-2",
                     value: filter,
-                    placeholder: "src/render",
+                    placeholder: "Filter files…  /",
                     oninput: move |event: FormEvent| onfilter.call(event.value()),
                 }
             }
-            div { class: "min-h-0 overflow-auto p-1.5 [scrollbar-color:var(--color-line-2)_transparent] [scrollbar-width:thin]",
-                if files.is_empty() {
-                    p { class: "px-2 py-6 text-center text-xs text-ink-3", "No files match this filter." }
+            div { class: "mx-1 mt-1.5 mb-2 flex justify-between text-[11px] tracking-[0.06em] text-ink-3 uppercase",
+                span {
+                    "{view.commits_label} · {view.files.len()} file{plural_suffix(view.files.len())}"
                 }
-                for file in files {
-                    button {
-                        class: "group grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm border border-transparent bg-transparent px-2 py-2 text-left hover:border-line hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc",
-                        r#type: "button",
-                        onclick: move |_| DiffIslandBridge::scroll_to_file(file.anchor_id.clone()),
-                        span { class: "min-w-0",
-                            span { class: "block truncate font-mono text-[11px] text-ink", "{file.path}" }
-                            span { class: "mt-1 flex items-center gap-2 font-mono text-[9px] tabular-nums",
-                                span { class: "text-add", "+{file.added}" }
-                                span { class: "text-del", "-{file.removed}" }
+            }
+            div { class: "mx-0.5 mb-3 flex flex-wrap gap-2",
+                Badge {
+                    class: "px-2 py-0.5 text-[11px]",
+                    b { class: "font-bold text-ink", "{view.commits.len()}" }
+                    span { class: "ml-1", "commit{plural_suffix(view.commits.len())}" }
+                }
+                Badge { class: "px-2 py-0.5 text-[11px]", variant: BadgeVariant::Addition, "+{totals.added}" }
+                Badge { class: "px-2 py-0.5 text-[11px]", variant: BadgeVariant::Deletion, "−{totals.removed}" }
+            }
+            if files.is_empty() {
+                p { class: "rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic", "no files match this filter" }
+            } else {
+                WorkspaceFileTreeView { tree }
+            }
+        }
+    }
+}
+
+#[component]
+fn WorkspaceFileTreeView(tree: WorkspaceFileTree, #[props(default)] nested: bool) -> Element {
+    rsx! {
+        ul { class: if nested { "m-0 list-none p-0 pl-2.5" } else { "m-0 list-none p-0" },
+            for (directory_name, directory) in tree.directories {
+                li { class: "min-w-0",
+                    details { class: "group", open: true,
+                        summary { class: "flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-[1.35] text-ink-3 hover:bg-surface-2 hover:text-ink [&::-webkit-details-marker]:hidden",
+                            span { class: "flex-none transition-transform group-open:rotate-90 motion-reduce:transition-none", aria_hidden: "true", ChevronRight { size: 12 } }
+                            span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap", "{directory_name}" }
+                        }
+                        WorkspaceFileTreeView { tree: directory, nested: true }
+                    }
+                }
+            }
+            for (file_name, file) in tree.files {
+                {
+                    let anchor_id = file.anchor_id.clone();
+                    rsx! {
+                        li { class: "min-w-0",
+                            button {
+                                class: match file.status {
+                                    ViewerFileStatus::Added => "flex w-full cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-[color-mix(in_srgb,var(--color-add-bg)_42%,transparent)] px-1.5 py-0.5 text-left leading-[1.35] text-ink-2 [font:inherit] hover:bg-[color-mix(in_srgb,var(--color-add-bg)_62%,var(--color-surface-2))] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc",
+                                    ViewerFileStatus::Deleted => "flex w-full cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-[color-mix(in_srgb,var(--color-del-bg)_42%,transparent)] px-1.5 py-0.5 text-left leading-[1.35] text-ink-2 [font:inherit] hover:bg-[color-mix(in_srgb,var(--color-del-bg)_62%,var(--color-surface-2))] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc",
+                                    ViewerFileStatus::Renamed | ViewerFileStatus::Modified => "flex w-full cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent px-1.5 py-0.5 text-left leading-[1.35] text-ink-2 [font:inherit] hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc",
+                                },
+                                r#type: "button",
+                                title: file.path.clone(),
+                                onclick: move |_| DiffIslandBridge::scroll_to_file(anchor_id.clone()),
+                                Badge {
+                                    class: "size-[15px] min-h-0! flex-none px-0 text-[9.5px] leading-none font-bold",
+                                    variant: file_status_badge(file.status),
+                                    title: file_status_title(file.status),
+                                    "{file_status_label(file.status)}"
+                                }
+                                span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px]", "{file_name}" }
                             }
                         }
-                        Badge { variant: file_status_badge(file.status), "{file_status_label(file.status)}" }
                     }
                 }
             }
@@ -726,6 +695,15 @@ const fn file_status_label(status: ViewerFileStatus) -> &'static str {
     }
 }
 
+const fn file_status_title(status: ViewerFileStatus) -> &'static str {
+    match status {
+        ViewerFileStatus::Added => "Added",
+        ViewerFileStatus::Deleted => "Deleted",
+        ViewerFileStatus::Renamed => "Renamed",
+        ViewerFileStatus::Modified => "Modified",
+    }
+}
+
 #[component]
 fn CommitsPanel(
     view: ViewerActiveView,
@@ -744,43 +722,59 @@ fn CommitsPanel(
     );
 
     rsx! {
-        div { class: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)]",
-            header { class: "flex items-center justify-between gap-2 border-b border-line px-3 py-2.5",
-                div { class: "flex min-w-0 items-center gap-2",
-                    span { class: "text-acc", aria_hidden: "true", GitCommitHorizontal { size: 14 } }
-                    h3 { class: "truncate text-xs font-semibold text-ink", "{view.commits_label}" }
+        div { class: "gtl-scroll h-full min-h-0 overflow-auto bg-surface p-3 max-[1280px]:p-2.5",
+            div { class: "flex items-start justify-between gap-2",
+                div {
+                    h3 { class: "mx-0.5 mt-1.5 mb-1 text-[11px] font-semibold tracking-[0.06em] text-ink-3 uppercase", "{view.commits_label}" }
+                    p { class: "mx-0.5 mt-0 mb-3 flex items-center gap-1.5 text-[11px] text-ink-3",
+                        span { class: "flex-none text-acc", aria_hidden: "true", CircleDot { size: 8, fill: "currentColor" } }
+                        "hash = copy · hover = notes"
+                    }
                 }
                 if selected_sha.is_some() {
-                    Button { size: ButtonSize::Small, variant: ButtonVariant::Ghost, state: if selection_pending { ButtonState::Disabled } else { ButtonState::Enabled }, onclick: move |_| onclear.call(()), "Range" }
+                    Button {
+                        size: ButtonSize::Small,
+                        variant: ButtonVariant::Ghost,
+                        state: if selection_pending { ButtonState::Disabled } else { ButtonState::Enabled },
+                        onclick: move |_| onclear.call(()),
+                        "Range"
+                    }
                 }
             }
-            div { class: "min-h-0 overflow-auto p-1.5 [scrollbar-color:var(--color-line-2)_transparent] [scrollbar-width:thin]",
-                if let ViewerCommitSelection::Error { message, .. } = &view.commit_selection {
-                    p { class: "m-1 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-xs text-del", role: "alert", "{message}" }
-                }
-                if view.commits.is_empty() {
-                    p { class: "px-2 py-6 text-center text-xs text-ink-3", "No commits in this range." }
-                }
-                for commit in &view.commits {
-                    {
-                        let sha = commit.sha.clone();
-                        let selected = selected_sha == Some(commit.sha.as_str());
-                        rsx! {
-                            button {
-                                class: if selected { "grid w-full cursor-pointer gap-1 rounded-sm border border-acc-line bg-acc-soft px-2.5 py-2 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc" } else { "grid w-full cursor-pointer gap-1 rounded-sm border border-transparent bg-transparent px-2.5 py-2 text-left hover:border-line hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc" },
-                                r#type: "button",
-                                aria_pressed: selected.to_string(),
-                                disabled: selection_pending,
-                                onclick: move |_| onselect.call(sha.clone()),
-                                span { class: "flex min-w-0 items-center justify-between gap-2",
-                                    code { class: "font-mono text-[10px] font-semibold text-acc", "{commit.abbreviated_sha}" }
-                                    time { class: "truncate font-mono text-[9px] text-ink-3", datetime: commit.iso.clone(), "{commit.date}" }
-                                }
-                                span { class: "line-clamp-2 text-[11px] leading-4 text-ink", "{commit.subject}" }
+            if let ViewerCommitSelection::Error { message, .. } = &view.commit_selection {
+                p { class: "mb-2 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-[11px] text-del", role: "alert", "{message}" }
+            }
+            if view.commits.is_empty() {
+                p { class: "rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic", "no commits in range" }
+            }
+            for commit in &view.commits {
+                {
+                    let sha = commit.sha.clone();
+                    let selected = selected_sha == Some(commit.sha.as_str());
+                    rsx! {
+                        button {
+                            class: if selected {
+                                "relative ml-1.5 block w-[calc(100%_-_0.375rem)] cursor-pointer rounded-r-sm border-0 border-l-2 border-acc bg-acc-soft py-1.5 pr-2 pl-[22px] text-left [font:inherit] shadow-[inset_2px_0_0_var(--color-acc)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-acc"
+                            } else {
+                                "relative ml-1.5 block w-[calc(100%_-_0.375rem)] cursor-pointer rounded-r-sm border-0 border-l-2 border-line-2 bg-transparent py-1.5 pr-2 pl-[22px] text-left [font:inherit] hover:bg-surface-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-acc"
+                            },
+                            r#type: "button",
+                            aria_pressed: selected.to_string(),
+                            disabled: selection_pending,
+                            onclick: move |_| onselect.call(sha.clone()),
+                            span { class: if selected { "pointer-events-none absolute top-[7px] left-[-15px] flex size-[18px] items-center justify-center bg-surface text-acc" } else { "pointer-events-none absolute top-[7px] left-[-15px] flex size-[18px] items-center justify-center bg-surface text-line-2" }, aria_hidden: "true",
+                                CircleDot { size: 10 }
+                            }
+                            span { class: "mb-1 flex min-w-0 items-center gap-1.5",
+                                code { class: if selected { "rounded-sm border border-acc bg-acc px-1.5 py-0.5 text-[12px] text-bg" } else { "rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 text-[12px] text-acc" }, "{commit.abbreviated_sha}" }
                                 if commit.is_merge {
-                                    span { class: "w-max rounded-sm border border-line-2 px-1 py-0.5 font-mono text-[8px] uppercase tracking-[0.08em] text-ink-3", "Merge" }
+                                    Badge { class: "text-[10.5px]", variant: BadgeVariant::Neutral, "merge" }
+                                }
+                                if !commit.date.is_empty() {
+                                    time { class: "ml-auto truncate text-[11px] text-ink-3 tabular-nums", datetime: commit.iso.clone(), title: commit.iso.clone(), "{commit.date}" }
                                 }
                             }
+                            span { class: "block text-[12.5px] leading-[1.42] text-ink-2 [overflow-wrap:anywhere]", "{commit.subject}" }
                         }
                     }
                 }
@@ -788,7 +782,6 @@ fn CommitsPanel(
         }
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DiffIslandState {
     Loading,
@@ -826,12 +819,14 @@ fn DiffIsland(
     theme: ViewerTheme,
     title: String,
     folded: bool,
+    copy_context_enabled: bool,
 ) -> Element {
     let mut state = use_signal(|| DiffIslandState::Loading);
     let mut generation = use_signal(|| 0_u64);
     let mut mounted = use_signal(|| false);
     let mut active_identity = use_signal(|| identity);
     let mut folded_value = use_signal(|| folded);
+    let mut copy_context_value = use_signal(|| copy_context_enabled);
     let mut open_file_error = use_signal(|| None::<ClientApiError>);
 
     use_effect(use_reactive((&folded,), move |(folded,)| {
@@ -840,6 +835,16 @@ fn DiffIsland(
             DiffIslandBridge::set_files_folded(folded);
         }
     }));
+
+    use_effect(use_reactive(
+        (&copy_context_enabled,),
+        move |(copy_context_enabled,)| {
+            copy_context_value.set(copy_context_enabled);
+            if mounted() {
+                DiffIslandBridge::set_copy_context_enabled(copy_context_enabled);
+            }
+        },
+    ));
 
     use_effect(use_reactive((&identity,), move |(identity,)| {
         let request_generation = {
@@ -892,6 +897,7 @@ fn DiffIsland(
             }
             active_identity.set(identity);
             DiffIslandBridge::set_files_folded(folded_value());
+            DiffIslandBridge::set_copy_context_enabled(copy_context_value());
 
             let ViewerDiffMaterialization::Loading { load_id } = document.materialization else {
                 state.set(DiffIslandState::Complete);
@@ -959,7 +965,7 @@ fn DiffIsland(
     let shows_document = current_state.shows_document();
 
     rsx! {
-        section { class: "relative min-h-0 min-w-0 overflow-hidden bg-bg", aria_label: "Rendered diff",
+        section { class: "relative col-start-2 row-start-2 min-h-0 min-w-0 overflow-hidden bg-bg", aria_label: "Rendered diff",
             if current_state.is_busy() {
                 div { class: "absolute inset-x-0 top-0 z-10 border-b border-acc-line bg-acc-soft px-3 py-1.5 text-center text-[10px] text-acc", role: "status",
                     if current_state == DiffIslandState::Loading { "Preparing diff" } else { "Loading diff rows" }
@@ -988,49 +994,72 @@ fn DiffIsland(
 }
 
 #[component]
-fn Keybar() -> Element {
+fn Keybar(footer: ViewerFooter) -> Element {
+    const KEY_CLASSES: &str = "rounded-sm border border-line-2 border-b-2 bg-sunk px-1.5 py-px font-mono text-[11px] text-ink-2";
+
     rsx! {
-        footer { class: "flex min-h-8 items-center gap-4 overflow-x-auto border-t border-line bg-surface px-3 font-mono text-[9px] text-ink-3", aria_label: "Keyboard shortcuts",
-            span { class: "shrink-0", kbd { class: "text-ink", "<- ->" } " tabs" }
-            span { class: "shrink-0", kbd { class: "text-ink", "Home End" } " tab edges" }
-            span { class: "ml-auto hidden shrink-0 text-ink-2 sm:block", "Server-rendered rows" }
+        footer {
+            class: "col-span-3 row-start-3 flex items-center gap-4 overflow-hidden border-t border-line bg-surface px-5 py-2 text-[11.5px] text-ink-3",
+            aria_label: "Keyboard shortcuts",
+            span { class: "overflow-hidden text-ellipsis whitespace-nowrap text-ink-2",
+                "{footer.command} "
+                span { class: "text-ink-3", "{footer.note}" }
+            }
+            div { class: "flex-1" }
+            span { class: "flex-none", kbd { class: KEY_CLASSES, "j" } " " kbd { class: KEY_CLASSES, "k" } " file" }
+            span { class: "flex-none", kbd { class: KEY_CLASSES, "/" } " filter" }
+            span { class: "flex-none", kbd { class: KEY_CLASSES, "alt+shift+c" } " fold all" }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::ViewerTabState;
+    use gtl_contracts::viewer::{ViewerFileStatus, ViewerFileSummary};
 
-    use super::{TabMovement, close_focus_target, tab_focus_target, tab_state_label};
+    use super::{WorkspaceFileTree, WorkspaceLineTotals};
 
-    #[test]
-    fn tab_focus_wraps_and_supports_edges() {
-        let ids = [4, 8, 15];
-
-        assert_eq!(tab_focus_target(&ids, 15, TabMovement::Next), Some(4));
-        assert_eq!(tab_focus_target(&ids, 4, TabMovement::Previous), Some(15));
-        assert_eq!(tab_focus_target(&ids, 8, TabMovement::First), Some(4));
-        assert_eq!(tab_focus_target(&ids, 8, TabMovement::Last), Some(15));
+    fn file(path: &str, added: u32, removed: u32) -> ViewerFileSummary {
+        ViewerFileSummary {
+            path: path.to_owned(),
+            anchor_id: format!("f-{}", path.replace(['/', '.'], "-")),
+            added,
+            removed,
+            status: ViewerFileStatus::Modified,
+            can_open_in_editor: true,
+        }
     }
 
     #[test]
-    fn final_tab_close_targets_the_workspace_heading() {
-        let tabs = [super::ViewerTab {
-            id: 4,
-            label: "Only diff".to_owned(),
-            kind: super::ViewerTabKind::Snapshot,
-            state: ViewerTabState::Ready,
-        }];
+    fn changed_files_summary_retains_total_line_changes() {
+        let files = [file("src/added.rs", 3, 1), file("src/removed.rs", 1, 5)];
 
-        assert_eq!(close_focus_target(&tabs, 4), None);
+        assert_eq!(
+            WorkspaceLineTotals::from_files(&files),
+            WorkspaceLineTotals {
+                added: 4,
+                removed: 6,
+            }
+        );
     }
 
     #[test]
-    fn every_tab_state_has_a_non_color_label() {
-        assert_eq!(tab_state_label(&ViewerTabState::Ready), "Ready");
-        assert_eq!(tab_state_label(&ViewerTabState::Pending), "Rendering");
-        assert_eq!(tab_state_label(&ViewerTabState::Broken), "Render stopped");
-        assert_eq!(tab_state_label(&ViewerTabState::Error), "Render failed");
+    fn changed_files_tree_preserves_path_hierarchy() {
+        let files = [
+            file("crates/web/src/app.rs", 3, 1),
+            file("crates/web/src/view.rs", 1, 5),
+        ];
+
+        let tree = WorkspaceFileTree::from_files(&files);
+
+        assert_eq!(tree.directories[0].0, "crates");
+        assert_eq!(tree.directories[0].1.directories[0].0, "web");
+        assert_eq!(
+            tree.directories[0].1.directories[0].1.directories[0]
+                .1
+                .files[0]
+                .0,
+            "app.rs"
+        );
     }
 }

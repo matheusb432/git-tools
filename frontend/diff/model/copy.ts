@@ -57,10 +57,10 @@ export function readCopiedRows(
   };
 }
 
-/** A file outside any layout copies with context; inside one, the view's toggle decides. */
+/** A file outside a rendered view copies with context; inside one, the view's toggle decides. */
 export function copyContextEnabled(file: Element): boolean {
-  const layout = file.closest(".layout");
-  return !layout || layout.classList.contains("copy-ctx");
+  const view = file.closest(".layout") ?? file.closest("[data-gtl-diff-document]");
+  return !view || view.classList.contains("copy-ctx");
 }
 
 /** The commented `path, lines` line prepended to a copy. */

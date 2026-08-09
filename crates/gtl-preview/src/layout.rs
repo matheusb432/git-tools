@@ -60,7 +60,7 @@ pub(crate) fn view_body(
         } {
             (titlebar::titlebar(view, &mobile_navigation))
             (tree::tree(&changed_files))
-            main class="main gtl-scroll [grid-area:2/2] overflow-auto px-[22px] pt-0 pb-[60px] wide-screen:px-7 compact-desktop:px-4 tablet:px-3 mobile:px-1 tablet:pb-12 print:overflow-visible print:p-0" {
+            main class="main gtl-scroll [grid-area:2/2] overflow-auto print:overflow-visible print:p-0" {
                 (files::file_blocks(view, options)?)
             }
             (shelf::shelf(&commit_shelf))
@@ -172,11 +172,8 @@ mod tests {
             main.split_ascii_whitespace()
                 .any(|class| class == "overflow-auto")
         );
-        assert!(main.split_ascii_whitespace().any(|class| class == "pt-0"));
-        assert!(
-            main.split_ascii_whitespace()
-                .any(|class| class == "mobile:px-1")
-        );
+        assert!(!main.contains("px-"));
+        assert!(!main.contains("pb-"));
         assert!(!main.split_ascii_whitespace().any(|class| class == "pt-4"));
         assert!(!main.contains(concat!("scroll-", "smooth")));
         assert_eq!(html.matches(r"<main class=").count(), 1);

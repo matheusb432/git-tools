@@ -11,4 +11,4 @@ pub(crate) use badge::{Badge, BadgeVariant};
 pub(crate) use button::{Button, ButtonSize, ButtonState, ButtonVariant};
 pub(crate) use popover::Popover;
 pub(crate) use skeleton::Skeleton;
-pub(crate) use text_input::TextInput;
+pub(crate) use text_input::{TextInput, TextInputLabelVisibility};

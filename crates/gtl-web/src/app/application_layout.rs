@@ -348,7 +348,7 @@ fn ViewerFeedbackNotice(feedback: ViewerFeedback) -> Element {
     };
 
     rsx! {
-        div { class: "shrink-0 border-b border-acc-line bg-acc-soft px-4 py-2 text-xs text-acc", role: "status",
+        div { class: "pointer-events-none fixed bottom-6 left-1/2 z-50 max-w-[min(47.5rem,calc(100vw-2rem))] -translate-x-1/2 rounded-panel border border-acc-line bg-surface px-3.5 py-2 text-[12.5px] text-ink shadow-[0_6px_18px_rgba(0,0,0,.22)]", role: "status",
             "{message}"
         }
     }

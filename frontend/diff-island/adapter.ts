@@ -41,6 +41,7 @@ export type DiffIslandAdapter = {
   readonly appendChunk: (chain: DiffIslandChain, chunk: DiffChunk) => AppendDiffChunkResult;
   readonly scrollToFile: (targetId: string) => boolean;
   readonly setFilesFolded: (folded: boolean) => void;
+  readonly setCopyContextEnabled: (enabled: boolean) => void;
   readonly destroy: () => void;
 };
 
@@ -249,6 +250,10 @@ export function createDiffIslandAdapter(): DiffIslandAdapter {
     setFilesFolded(folded) {
       if (typeof folded !== "boolean") throw new TypeError("diff file folded state must be a boolean");
       if (mounted) setDiffDocumentFilesFolded(mounted.documentRoot, folded);
+    },
+    setCopyContextEnabled(enabled) {
+      if (typeof enabled !== "boolean") throw new TypeError("diff copy context state must be a boolean");
+      mounted?.documentRoot.classList.toggle("copy-ctx", enabled);
     },
     destroy,
   };

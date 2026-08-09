@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { extractCopyText } from "./copy";
+import { copyContextEnabled, extractCopyText } from "./copy";
 
 type RowDesc = {
   readonly text: string;
@@ -90,4 +90,15 @@ test("extractCopyText reads the rendered split pane when no unified pane exists"
   const file = makeSplitFileStub({ "data-comment": "//", "data-path": "src/a.ts" });
 
   expect(extractCopyText(file as Element)).toBe("// * src/a.ts, lines: 12\nconst x = 1");
+});
+
+test("diff-document copy context follows the shell-controlled document root", () => {
+  const documentRoot = {
+    classList: { contains: (): boolean => false },
+  };
+  const file = {
+    closest: (selector: string): object | null => (selector === "[data-gtl-diff-document]" ? documentRoot : null),
+  };
+
+  expect(copyContextEnabled(file as Element)).toBe(false);
 });
