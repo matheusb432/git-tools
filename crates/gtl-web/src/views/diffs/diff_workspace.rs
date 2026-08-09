@@ -48,18 +48,27 @@ pub(crate) fn DiffWorkspaceView() -> Element {
         main { class: "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden bg-bg",
             h1 { id: "workspace-heading", class: "sr-only", tabindex: "-1", "Diff viewer" }
             match shell {
-                ViewerShellLoad::Loading => rsx! { WorkspaceLoading {} },
+                ViewerShellLoad::Loading => rsx! {
+                    WorkspaceLoading {}
+                },
                 ViewerShellLoad::Error(error) => {
                     let message = error.message();
                     rsx! {
                         section { class: "grid h-full place-content-center px-5 text-center", role: "alert",
                             p { class: "text-sm font-semibold text-ink", "Viewer state is unavailable" }
                             p { class: "mt-1 max-w-md text-xs leading-5 text-ink-2", "{message}" }
-                            Button { class: "mx-auto mt-4", variant: ButtonVariant::Outline, onclick: move |_| viewer.reconnect(), "Try again" }
+                            Button {
+                                class: "mx-auto mt-4",
+                                variant: ButtonVariant::Outline,
+                                onclick: move |_| viewer.reconnect(),
+                                "Try again"
+                            }
                         }
                     }
+                }
+                ViewerShellLoad::Ready(shell) => rsx! {
+                    WorkspaceShell { shell }
                 },
-                ViewerShellLoad::Ready(shell) => rsx! { WorkspaceShell { shell } },
             }
         }
     }
@@ -68,7 +77,10 @@ pub(crate) fn DiffWorkspaceView() -> Element {
 #[component]
 fn WorkspaceLoading() -> Element {
     rsx! {
-        div { class: "grid h-full min-h-0 grid-rows-[2.75rem_3rem_minmax(0,1fr)]", role: "status", aria_label: "Loading viewer",
+        div {
+            class: "grid h-full min-h-0 grid-rows-[2.75rem_3rem_minmax(0,1fr)]",
+            role: "status",
+            aria_label: "Loading viewer",
             div { class: "flex items-center gap-2 border-b border-line bg-surface px-3",
                 Skeleton { class: "h-7 w-32" }
                 Skeleton { class: "h-7 w-40" }
@@ -90,11 +102,19 @@ fn WorkspaceLoading() -> Element {
 #[component]
 fn WorkspaceShell(shell: ViewerShell) -> Element {
     rsx! {
-        section { id: "viewer-active-view", class: "flex h-full min-h-0 flex-col overflow-hidden", role: "tabpanel", aria_label: "Active diff",
+        section {
+            id: "viewer-active-view",
+            class: "flex h-full min-h-0 flex-col overflow-hidden",
+            role: "tabpanel",
+            aria_label: "Active diff",
             div { class: "min-h-0 flex-1 overflow-hidden",
                 match shell.active {
-                    ViewerActiveState::Empty => rsx! { EmptyWorkspace {} },
-                    ViewerActiveState::Pending { .. } => rsx! { PendingWorkspace {} },
+                    ViewerActiveState::Empty => rsx! {
+                        EmptyWorkspace {}
+                    },
+                    ViewerActiveState::Pending { .. } => rsx! {
+                        PendingWorkspace {}
+                    },
                     ViewerActiveState::Broken { code, message, .. } => rsx! {
                         WorkspaceFailure { title: format!("Render stopped ({code})"), message }
                     },
@@ -102,17 +122,16 @@ fn WorkspaceShell(shell: ViewerShell) -> Element {
                         WorkspaceFailure { title: "Render failed".to_owned(), message }
                     },
                     ViewerActiveState::Ready { view } => {
-                        let is_live = shell.tabs.iter().any(|tab| {
-                            tab.id == view.identity.tab_id && tab.kind == ViewerTabKind::Live
-                        });
+                        let is_live = shell
+                            .tabs
+                            .iter()
+                            .any(|tab| {
+                                tab.id == view.identity.tab_id && tab.kind == ViewerTabKind::Live
+                            });
                         rsx! {
-                            ReadyWorkspace {
-                                view: *view,
-                                preferences: shell.preferences,
-                                is_live,
-                            }
+                            ReadyWorkspace { view: *view, preferences: shell.preferences, is_live }
                         }
-                    },
+                    }
                 }
             }
         }
@@ -123,9 +142,13 @@ fn WorkspaceShell(shell: ViewerShell) -> Element {
 fn EmptyWorkspace() -> Element {
     rsx! {
         section { class: "grid h-full place-content-center px-5 text-center",
-            span { class: "mx-auto text-acc", aria_hidden: "true", FileDiff { size: 22 } }
+            span { class: "mx-auto text-acc", aria_hidden: "true",
+                FileDiff { size: 22 }
+            }
             h2 { class: "mt-3 text-sm font-semibold text-ink", "No diff is open" }
-            p { class: "mt-1 max-w-md text-xs leading-5 text-ink-2", "Run a git-tools diff command to open a snapshot or live view." }
+            p { class: "mt-1 max-w-md text-xs leading-5 text-ink-2",
+                "Run a git-tools diff command to open a snapshot or live view."
+            }
         }
     }
 }
@@ -133,8 +156,14 @@ fn EmptyWorkspace() -> Element {
 #[component]
 fn PendingWorkspace() -> Element {
     rsx! {
-        section { class: "grid h-full place-content-center px-5 text-center", role: "status",
-            span { class: "mx-auto animate-spin text-acc motion-reduce:animate-none", aria_hidden: "true", LoaderCircle { size: 20 } }
+        section {
+            class: "grid h-full place-content-center px-5 text-center",
+            role: "status",
+            span {
+                class: "mx-auto animate-spin text-acc motion-reduce:animate-none",
+                aria_hidden: "true",
+                LoaderCircle { size: 20 }
+            }
             h2 { class: "mt-3 text-sm font-semibold text-ink", "Rendering diff" }
             p { class: "mt-1 text-xs text-ink-2", "The viewer will update when the render is ready." }
         }
@@ -144,7 +173,9 @@ fn PendingWorkspace() -> Element {
 #[component]
 fn WorkspaceFailure(title: String, message: String) -> Element {
     rsx! {
-        section { class: "grid h-full place-content-center px-5 text-center", role: "alert",
+        section {
+            class: "grid h-full place-content-center px-5 text-center",
+            role: "alert",
             h2 { class: "text-sm font-semibold text-ink", "{title}" }
             p { class: "mt-1 max-w-md text-xs leading-5 text-ink-2", "{message}" }
         }
@@ -214,9 +245,24 @@ fn ReadyWorkspace(
                     }
                 }
                 div { class: "flex items-center gap-2 min-[761px]:hidden",
-                    MobilePanelButton { id: "mobile-display-trigger", label: "Display", icon: MobilePanel::Display, onclick: move |_| mobile_panel.set(Some(MobilePanel::Display)) }
-                    MobilePanelButton { id: "mobile-files-trigger", label: "Files", icon: MobilePanel::Files, onclick: move |_| mobile_panel.set(Some(MobilePanel::Files)) }
-                    MobilePanelButton { id: "mobile-commits-trigger", label: "Commits", icon: MobilePanel::Commits, onclick: move |_| mobile_panel.set(Some(MobilePanel::Commits)) }
+                    MobilePanelButton {
+                        id: "mobile-display-trigger",
+                        label: "Display",
+                        icon: MobilePanel::Display,
+                        onclick: move |_| mobile_panel.set(Some(MobilePanel::Display)),
+                    }
+                    MobilePanelButton {
+                        id: "mobile-files-trigger",
+                        label: "Files",
+                        icon: MobilePanel::Files,
+                        onclick: move |_| mobile_panel.set(Some(MobilePanel::Files)),
+                    }
+                    MobilePanelButton {
+                        id: "mobile-commits-trigger",
+                        label: "Commits",
+                        icon: MobilePanel::Commits,
+                        onclick: move |_| mobile_panel.set(Some(MobilePanel::Commits)),
+                    }
                     Button {
                         class: "ml-auto",
                         size: ButtonSize::IconSmall,
@@ -225,9 +271,15 @@ fn ReadyWorkspace(
                         title: "Refresh diff",
                         onclick: onrefresh,
                         if viewer.render_command_pending() {
-                            span { class: "animate-spin motion-reduce:animate-none", aria_hidden: "true", LoaderCircle { size: 14 } }
+                            span {
+                                class: "animate-spin motion-reduce:animate-none",
+                                aria_hidden: "true",
+                                LoaderCircle { size: 14 }
+                            }
                         } else {
-                            span { aria_hidden: "true", RefreshCw { size: 14 } }
+                            span { aria_hidden: "true",
+                                RefreshCw { size: 14 }
+                            }
                         }
                     }
                 }
@@ -236,8 +288,7 @@ fn ReadyWorkspace(
                 }
             }
 
-            div {
-                class: "grid min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden min-[1025px]:grid-cols-[220px_minmax(0,1fr)_210px] min-[1281px]:grid-cols-[262px_minmax(0,1fr)_252px] min-[1600px]:grid-cols-[320px_minmax(0,1fr)_304px]",
+            div { class: "grid min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden min-[1025px]:grid-cols-[220px_minmax(0,1fr)_210px] min-[1281px]:grid-cols-[262px_minmax(0,1fr)_252px] min-[1600px]:grid-cols-[320px_minmax(0,1fr)_304px]",
                 ViewTitlebar {
                     view: view.clone(),
                     files_folded: files_folded(),
@@ -306,7 +357,11 @@ fn ReadyWorkspace(
                     Button {
                         variant: ButtonVariant::Outline,
                         onclick: move |_| files_folded.set(!files_folded()),
-                        if files_folded() { "Expand all" } else { "Collapse all" }
+                        if files_folded() {
+                            "Expand all"
+                        } else {
+                            "Collapse all"
+                        }
                     }
                     Button {
                         variant: if copy_context_enabled() { ButtonVariant::Pressed } else { ButtonVariant::Outline },
@@ -335,7 +390,11 @@ fn ReadyWorkspace(
             open: mobile_panel() == Some(MobilePanel::Commits),
             title: "Commits",
             onclose: move |()| mobile_panel.set(None),
-            CommitsPanel { view: view.clone(), onselect: onselect_commit, onclear: onclear_commit }
+            CommitsPanel {
+                view: view.clone(),
+                onselect: onselect_commit,
+                onclear: onclear_commit,
+            }
         }
         AlertDialog {
             id: "delete-live-view-dialog",
@@ -380,14 +439,15 @@ fn ViewTitlebar(
     oncontext: EventHandler<bool>,
 ) -> Element {
     rsx! {
-        header {
-            class: "col-span-3 row-start-1 flex min-w-0 items-center gap-4 border-b border-line bg-surface px-5 py-3 max-[1024px]:flex-wrap max-[1024px]:gap-2.5 max-[1024px]:px-3 max-[1024px]:py-2.5 max-[761px]:gap-1.5 max-[761px]:px-2 max-[761px]:py-2",
+        header { class: "col-span-3 row-start-1 flex min-w-0 items-center gap-4 border-b border-line bg-surface px-5 py-3 max-[1024px]:flex-wrap max-[1024px]:gap-2.5 max-[1024px]:px-3 max-[1024px]:py-2.5 max-[761px]:gap-1.5 max-[761px]:px-2 max-[761px]:py-2",
             div { class: "flex min-w-0 items-baseline gap-2 text-[18px] font-semibold tracking-[-0.01em] max-[761px]:text-[15px]",
                 span { class: "truncate",
                     "~/"
                     b { class: "font-bold text-acc", "{view.repository_name}" }
                 }
-                span { class: "flex-none self-center rounded-sm border border-acc-line bg-acc-soft px-2 py-0.5 text-[12px] font-medium text-acc", "{view.title}" }
+                span { class: "flex-none self-center rounded-sm border border-acc-line bg-acc-soft px-2 py-0.5 text-[12px] font-medium text-acc",
+                    "{view.title}"
+                }
             }
             div { class: "flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-2 max-[1024px]:order-3 max-[1024px]:w-full",
                 span { class: "truncate text-acc", "{view.branch}" }
@@ -410,7 +470,11 @@ fn ViewTitlebar(
                     variant: ButtonVariant::Outline,
                     title: "Collapse or expand all files",
                     onclick: move |_| onfold.call(!files_folded),
-                    if files_folded { "Expand all" } else { "Collapse all" }
+                    if files_folded {
+                        "Expand all"
+                    } else {
+                        "Collapse all"
+                    }
                 }
                 Button {
                     size: ButtonSize::Small,
@@ -462,8 +526,13 @@ fn DisplayControls(
 ) -> Element {
     rsx! {
         div { class: "flex min-w-0 flex-wrap items-center gap-3",
-            div { class: "flex items-center gap-[3px]", role: "group", aria_label: "Layout",
-                span { class: "mr-[3px] text-[10px] font-bold tracking-[0.06em] text-ink-3 uppercase", "Layout" }
+            div {
+                class: "flex items-center gap-[3px]",
+                role: "group",
+                aria_label: "Layout",
+                span { class: "mr-[3px] text-[10px] font-bold tracking-[0.06em] text-ink-3 uppercase",
+                    "Layout"
+                }
                 Button {
                     size: ButtonSize::Small,
                     variant: if preferences.render_options.layout == ViewerDiffLayout::Unified { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
@@ -479,8 +548,13 @@ fn DisplayControls(
                     "Side by side"
                 }
             }
-            div { class: "flex items-center gap-[3px]", role: "group", aria_label: "View",
-                span { class: "mr-[3px] text-[10px] font-bold tracking-[0.06em] text-ink-3 uppercase", "View" }
+            div {
+                class: "flex items-center gap-[3px]",
+                role: "group",
+                aria_label: "View",
+                span { class: "mr-[3px] text-[10px] font-bold tracking-[0.06em] text-ink-3 uppercase",
+                    "View"
+                }
                 Button {
                     size: ButtonSize::Small,
                     variant: if preferences.render_options.density == ViewerDiffDensity::Compact { ButtonVariant::Secondary } else { ButtonVariant::Ghost },
@@ -524,12 +598,22 @@ fn MobilePanelButton(
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     rsx! {
-        Button { id, size: ButtonSize::Small, variant: ButtonVariant::Outline, onclick,
+        Button {
+            id,
+            size: ButtonSize::Small,
+            variant: ButtonVariant::Outline,
+            onclick,
             span { aria_hidden: "true",
                 match icon {
-                    MobilePanel::Display => rsx! { ListFilter { size: 14 } },
-                    MobilePanel::Files => rsx! { PanelLeft { size: 14 } },
-                    MobilePanel::Commits => rsx! { GitCommitHorizontal { size: 14 } },
+                    MobilePanel::Display => rsx! {
+                        ListFilter { size: 14 }
+                    },
+                    MobilePanel::Files => rsx! {
+                        PanelLeft { size: 14 }
+                    },
+                    MobilePanel::Commits => rsx! {
+                        GitCommitHorizontal { size: 14 }
+                    },
                 }
             }
             "{label}"
@@ -610,21 +694,28 @@ fn FilesPanel(view: ViewerActiveView, filter: String, onfilter: EventHandler<Str
                 }
             }
             div { class: "mx-1 mt-1.5 mb-2 flex justify-between text-[11px] tracking-[0.06em] text-ink-3 uppercase",
-                span {
-                    "{view.commits_label} · {view.files.len()} file{plural_suffix(view.files.len())}"
-                }
+                span { "{view.commits_label} · {view.files.len()} file{plural_suffix(view.files.len())}" }
             }
             div { class: "mx-0.5 mb-3 flex flex-wrap gap-2",
-                Badge {
-                    class: "px-2 py-0.5 text-[11px]",
+                Badge { class: "px-2 py-0.5 text-[11px]",
                     b { class: "font-bold text-ink", "{view.commits.len()}" }
                     span { class: "ml-1", "commit{plural_suffix(view.commits.len())}" }
                 }
-                Badge { class: "px-2 py-0.5 text-[11px]", variant: BadgeVariant::Addition, "+{totals.added}" }
-                Badge { class: "px-2 py-0.5 text-[11px]", variant: BadgeVariant::Deletion, "−{totals.removed}" }
+                Badge {
+                    class: "px-2 py-0.5 text-[11px]",
+                    variant: BadgeVariant::Addition,
+                    "+{totals.added}"
+                }
+                Badge {
+                    class: "px-2 py-0.5 text-[11px]",
+                    variant: BadgeVariant::Deletion,
+                    "−{totals.removed}"
+                }
             }
             if files.is_empty() {
-                p { class: "rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic", "no files match this filter" }
+                p { class: "rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic",
+                    "no files match this filter"
+                }
             } else {
                 WorkspaceFileTreeView { tree }
             }
@@ -640,8 +731,14 @@ fn WorkspaceFileTreeView(tree: WorkspaceFileTree, #[props(default)] nested: bool
                 li { class: "min-w-0",
                     details { class: "group", open: true,
                         summary { class: "flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-[1.35] text-ink-3 hover:bg-surface-2 hover:text-ink [&::-webkit-details-marker]:hidden",
-                            span { class: "flex-none transition-transform group-open:rotate-90 motion-reduce:transition-none", aria_hidden: "true", ChevronRight { size: 12 } }
-                            span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap", "{directory_name}" }
+                            span {
+                                class: "flex-none transition-transform group-open:rotate-90 motion-reduce:transition-none",
+                                aria_hidden: "true",
+                                ChevronRight { size: 12 }
+                            }
+                            span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+                                "{directory_name}"
+                            }
                         }
                         WorkspaceFileTreeView { tree: directory, nested: true }
                     }
@@ -654,9 +751,15 @@ fn WorkspaceFileTreeView(tree: WorkspaceFileTree, #[props(default)] nested: bool
                         li { class: "min-w-0",
                             button {
                                 class: match file.status {
-                                    ViewerFileStatus::Added => "flex w-full cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-[color-mix(in_srgb,var(--color-add-bg)_42%,transparent)] px-1.5 py-0.5 text-left leading-[1.35] text-ink-2 [font:inherit] hover:bg-[color-mix(in_srgb,var(--color-add-bg)_62%,var(--color-surface-2))] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc",
-                                    ViewerFileStatus::Deleted => "flex w-full cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-[color-mix(in_srgb,var(--color-del-bg)_42%,transparent)] px-1.5 py-0.5 text-left leading-[1.35] text-ink-2 [font:inherit] hover:bg-[color-mix(in_srgb,var(--color-del-bg)_62%,var(--color-surface-2))] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc",
-                                    ViewerFileStatus::Renamed | ViewerFileStatus::Modified => "flex w-full cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent px-1.5 py-0.5 text-left leading-[1.35] text-ink-2 [font:inherit] hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc",
+                                    ViewerFileStatus::Added => {
+                                        "flex w-full cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-[color-mix(in_srgb,var(--color-add-bg)_42%,transparent)] px-1.5 py-0.5 text-left leading-[1.35] text-ink-2 [font:inherit] hover:bg-[color-mix(in_srgb,var(--color-add-bg)_62%,var(--color-surface-2))] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc"
+                                    }
+                                    ViewerFileStatus::Deleted => {
+                                        "flex w-full cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-[color-mix(in_srgb,var(--color-del-bg)_42%,transparent)] px-1.5 py-0.5 text-left leading-[1.35] text-ink-2 [font:inherit] hover:bg-[color-mix(in_srgb,var(--color-del-bg)_62%,var(--color-surface-2))] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc"
+                                    }
+                                    ViewerFileStatus::Renamed | ViewerFileStatus::Modified => {
+                                        "flex w-full cursor-pointer items-center gap-1.5 rounded-sm border-0 bg-transparent px-1.5 py-0.5 text-left leading-[1.35] text-ink-2 [font:inherit] hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-acc"
+                                    }
                                 },
                                 r#type: "button",
                                 title: file.path.clone(),
@@ -667,7 +770,9 @@ fn WorkspaceFileTreeView(tree: WorkspaceFileTree, #[props(default)] nested: bool
                                     title: file_status_title(file.status),
                                     "{file_status_label(file.status)}"
                                 }
-                                span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px]", "{file_name}" }
+                                span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px]",
+                                    "{file_name}"
+                                }
                             }
                         }
                     }
@@ -725,9 +830,13 @@ fn CommitsPanel(
         div { class: "gtl-scroll h-full min-h-0 overflow-auto bg-surface p-3 max-[1280px]:p-2.5",
             div { class: "flex items-start justify-between gap-2",
                 div {
-                    h3 { class: "mx-0.5 mt-1.5 mb-1 text-[11px] font-semibold tracking-[0.06em] text-ink-3 uppercase", "{view.commits_label}" }
+                    h3 { class: "mx-0.5 mt-1.5 mb-1 text-[11px] font-semibold tracking-[0.06em] text-ink-3 uppercase",
+                        "{view.commits_label}"
+                    }
                     p { class: "mx-0.5 mt-0 mb-3 flex items-center gap-1.5 text-[11px] text-ink-3",
-                        span { class: "flex-none text-acc", aria_hidden: "true", CircleDot { size: 8, fill: "currentColor" } }
+                        span { class: "flex-none text-acc", aria_hidden: "true",
+                            CircleDot { size: 8, fill: "currentColor" }
+                        }
                         "hash = copy · hover = notes"
                     }
                 }
@@ -742,10 +851,16 @@ fn CommitsPanel(
                 }
             }
             if let ViewerCommitSelection::Error { message, .. } = &view.commit_selection {
-                p { class: "mb-2 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-[11px] text-del", role: "alert", "{message}" }
+                p {
+                    class: "mb-2 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-[11px] text-del",
+                    role: "alert",
+                    "{message}"
+                }
             }
             if view.commits.is_empty() {
-                p { class: "rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic", "no commits in range" }
+                p { class: "rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic",
+                    "no commits in range"
+                }
             }
             for commit in &view.commits {
                 {
@@ -753,28 +868,35 @@ fn CommitsPanel(
                     let selected = selected_sha == Some(commit.sha.as_str());
                     rsx! {
                         button {
-                            class: if selected {
-                                "relative ml-1.5 block w-[calc(100%_-_0.375rem)] cursor-pointer rounded-r-sm border-0 border-l-2 border-acc bg-acc-soft py-1.5 pr-2 pl-[22px] text-left [font:inherit] shadow-[inset_2px_0_0_var(--color-acc)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-acc"
-                            } else {
-                                "relative ml-1.5 block w-[calc(100%_-_0.375rem)] cursor-pointer rounded-r-sm border-0 border-l-2 border-line-2 bg-transparent py-1.5 pr-2 pl-[22px] text-left [font:inherit] hover:bg-surface-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-acc"
-                            },
+                            class: if selected { "relative ml-1.5 block w-[calc(100%_-_0.375rem)] cursor-pointer rounded-r-sm border-0 border-l-2 border-acc bg-acc-soft py-1.5 pr-2 pl-[22px] text-left [font:inherit] shadow-[inset_2px_0_0_var(--color-acc)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-acc" } else { "relative ml-1.5 block w-[calc(100%_-_0.375rem)] cursor-pointer rounded-r-sm border-0 border-l-2 border-line-2 bg-transparent py-1.5 pr-2 pl-[22px] text-left [font:inherit] hover:bg-surface-2 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-acc" },
                             r#type: "button",
                             aria_pressed: selected.to_string(),
                             disabled: selection_pending,
                             onclick: move |_| onselect.call(sha.clone()),
-                            span { class: if selected { "pointer-events-none absolute top-[7px] left-[-15px] flex size-[18px] items-center justify-center bg-surface text-acc" } else { "pointer-events-none absolute top-[7px] left-[-15px] flex size-[18px] items-center justify-center bg-surface text-line-2" }, aria_hidden: "true",
+                            span {
+                                class: if selected { "pointer-events-none absolute top-[7px] left-[-15px] flex size-[18px] items-center justify-center bg-surface text-acc" } else { "pointer-events-none absolute top-[7px] left-[-15px] flex size-[18px] items-center justify-center bg-surface text-line-2" },
+                                aria_hidden: "true",
                                 CircleDot { size: 10 }
                             }
                             span { class: "mb-1 flex min-w-0 items-center gap-1.5",
-                                code { class: if selected { "rounded-sm border border-acc bg-acc px-1.5 py-0.5 text-[12px] text-bg" } else { "rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 text-[12px] text-acc" }, "{commit.abbreviated_sha}" }
+                                code { class: if selected { "rounded-sm border border-acc bg-acc px-1.5 py-0.5 text-[12px] text-bg" } else { "rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 text-[12px] text-acc" },
+                                    "{commit.abbreviated_sha}"
+                                }
                                 if commit.is_merge {
                                     Badge { class: "text-[10.5px]", variant: BadgeVariant::Neutral, "merge" }
                                 }
                                 if !commit.date.is_empty() {
-                                    time { class: "ml-auto truncate text-[11px] text-ink-3 tabular-nums", datetime: commit.iso.clone(), title: commit.iso.clone(), "{commit.date}" }
+                                    time {
+                                        class: "ml-auto truncate text-[11px] text-ink-3 tabular-nums",
+                                        datetime: commit.iso.clone(),
+                                        title: commit.iso.clone(),
+                                        "{commit.date}"
+                                    }
                                 }
                             }
-                            span { class: "block text-[12.5px] leading-[1.42] text-ink-2 [overflow-wrap:anywhere]", "{commit.subject}" }
+                            span { class: "block text-[12.5px] leading-[1.42] text-ink-2 [overflow-wrap:anywhere]",
+                                "{commit.subject}"
+                            }
                         }
                     }
                 }
@@ -965,17 +1087,33 @@ fn DiffIsland(
     let shows_document = current_state.shows_document();
 
     rsx! {
-        section { class: "relative col-start-2 row-start-2 min-h-0 min-w-0 overflow-hidden bg-bg", aria_label: "Rendered diff",
+        section {
+            class: "relative col-start-2 row-start-2 min-h-0 min-w-0 overflow-hidden bg-bg",
+            aria_label: "Rendered diff",
             if current_state.is_busy() {
-                div { class: "absolute inset-x-0 top-0 z-10 border-b border-acc-line bg-acc-soft px-3 py-1.5 text-center text-[10px] text-acc", role: "status",
-                    if current_state == DiffIslandState::Loading { "Preparing diff" } else { "Loading diff rows" }
+                div {
+                    class: "absolute inset-x-0 top-0 z-10 border-b border-acc-line bg-acc-soft px-3 py-1.5 text-center text-[10px] text-acc",
+                    role: "status",
+                    if current_state == DiffIslandState::Loading {
+                        "Preparing diff"
+                    } else {
+                        "Loading diff rows"
+                    }
                 }
             }
             if let DiffIslandState::Error(error) = current_state {
-                div { class: "absolute inset-x-4 top-4 z-10 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-xs text-del", role: "alert", "{error.message()}" }
+                div {
+                    class: "absolute inset-x-4 top-4 z-10 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-xs text-del",
+                    role: "alert",
+                    "{error.message()}"
+                }
             }
             if let Some(error) = open_file_error() {
-                div { class: "absolute inset-x-4 bottom-4 z-10 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-xs text-del", role: "alert", "{error.message()}" }
+                div {
+                    class: "absolute inset-x-4 bottom-4 z-10 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-xs text-del",
+                    role: "alert",
+                    "{error.message()}"
+                }
             }
             div {
                 id: "viewer-diff-island",
@@ -1006,9 +1144,20 @@ fn Keybar(footer: ViewerFooter) -> Element {
                 span { class: "text-ink-3", "{footer.note}" }
             }
             div { class: "flex-1" }
-            span { class: "flex-none", kbd { class: KEY_CLASSES, "j" } " " kbd { class: KEY_CLASSES, "k" } " file" }
-            span { class: "flex-none", kbd { class: KEY_CLASSES, "/" } " filter" }
-            span { class: "flex-none", kbd { class: KEY_CLASSES, "alt+shift+c" } " fold all" }
+            span { class: "flex-none",
+                kbd { class: KEY_CLASSES, "j" }
+                " "
+                kbd { class: KEY_CLASSES, "k" }
+                " file"
+            }
+            span { class: "flex-none",
+                kbd { class: KEY_CLASSES, "/" }
+                " filter"
+            }
+            span { class: "flex-none",
+                kbd { class: KEY_CLASSES, "alt+shift+c" }
+                " fold all"
+            }
         }
     }
 }

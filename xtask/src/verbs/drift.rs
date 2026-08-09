@@ -2,7 +2,7 @@
 
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
 use super::{dioxus_web, frontend};
 use crate::project;
@@ -41,7 +41,6 @@ fn git_clean(path: &str) -> bool {
 
 /// Rebuilds the bundle, validates its presentation policy, then diffs the committed output.
 pub fn run() -> Result<()> {
-    which::which("deno").context("required tool `deno` is missing; run `mise install deno`")?;
     let root = project::repository_root();
     let _lock = project::lock_frontend_assets(&root)?;
     frontend::build_unlocked(&root)?;

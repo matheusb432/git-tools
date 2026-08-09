@@ -35,6 +35,6 @@ pub(crate) fn Badge(
     let attributes = merge_attributes(vec![attributes, base]);
 
     rsx! {
-        span { ..attributes, {children} }
+        span { ..attributes,{children} }
     }
 }

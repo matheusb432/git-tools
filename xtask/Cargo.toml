@@ -21,7 +21,6 @@ ico.workspace = true
 image.workspace = true
 sha2.workspace = true
 tiny-skia.workspace = true
-which.workspace = true
 command-group.workspace = true
 zbus.workspace = true
 cargo_metadata.workspace = true

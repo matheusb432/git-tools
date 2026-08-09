@@ -52,10 +52,16 @@ pub(crate) fn AlertDialog(
                 }
             },
             div { class: "flex items-start gap-3 border-b border-line px-5 py-4",
-                span { class: "mt-0.5 shrink-0 text-del", aria_hidden: "true", TriangleAlert { size: 18 } }
+                span { class: "mt-0.5 shrink-0 text-del", aria_hidden: "true",
+                    TriangleAlert { size: 18 }
+                }
                 div { class: "min-w-0",
                     h2 { id: title_id, class: "text-sm font-semibold text-ink", "{title}" }
-                    p { id: description_id, class: "mt-1 text-xs leading-5 text-ink-2", "{description}" }
+                    p {
+                        id: description_id,
+                        class: "mt-1 text-xs leading-5 text-ink-2",
+                        "{description}"
+                    }
                 }
             }
             div { class: "flex justify-end gap-2 px-5 py-4",

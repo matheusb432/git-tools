@@ -1,6 +1,6 @@
 //! Cross-build the Windows CLI, daemon, and offline desktop viewer from Linux with cargo-xwin.
 
-use std::{path::Path, process::Command};
+use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
@@ -15,51 +15,6 @@ use crate::{
 /// The Windows cross-target. Production builds enable Tauri's custom protocol for embedded App
 /// assets.
 const WIN_TARGET: &str = "x86_64-pc-windows-msvc";
-
-/// Whether the Linux-to-Windows cross toolchain is ready, plus fix-hint lines when not.
-pub struct PreflightReport {
-    pub ok: bool,
-    pub lines: Vec<String>,
-}
-
-/// Decide whether the cross toolchain is ready. Pure: `have(tool)` probes PATH, `has_target`
-/// probes installed rustup targets. The injected-closure seam replaces the shell guards.
-pub fn preflight(
-    have: &dyn Fn(&str) -> bool,
-    has_target: &dyn Fn(&str) -> bool,
-) -> PreflightReport {
-    let mut lines = Vec::new();
-    let mut ok = true;
-    if !have("cargo-xwin") {
-        ok = false;
-        lines.push("cargo-xwin not found; run: mise install cargo:cargo-xwin".to_string());
-    }
-    if !has_target(WIN_TARGET) {
-        ok = false;
-        lines.push(format!(
-            "rustup target '{WIN_TARGET}' missing; run: mise install rust"
-        ));
-    }
-    PreflightReport { ok, lines }
-}
-
-/// Whether `tool` resolves to an executable on PATH. Uses the `which` crate -- no shell, no
-/// string interpolation, so there is no `sh -c` injection surface and it is cross-platform.
-fn on_path(tool: &str) -> bool {
-    which::which(tool).is_ok()
-}
-
-/// Whether `rustup target list --installed` contains `triple`.
-fn target_installed(triple: &str) -> bool {
-    Command::new("rustup")
-        .args(["target", "list", "--installed"])
-        .output()
-        .is_ok_and(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .any(|l| l.trim() == triple)
-        })
-}
 
 fn viewer_build_arguments(smoke: bool) -> Vec<&'static str> {
     let mut arguments = vec!["xwin", "build"];
@@ -88,29 +43,18 @@ fn cross_build_step(label: &str, arguments: &[&str], root: &Path) -> Step {
 /// Cross-build the Windows shippables. Smoke mode uses the debug Rust profile and skips artifact
 /// verification; both modes stage the complete offline frontend first.
 pub fn run(smoke: bool, force: bool) -> Result<()> {
-    // 1. Cross-toolchain preflight (side-effect-free decision).
-    let report = preflight(&on_path, &target_installed);
-    if !report.ok {
-        // Keep human hints on stderr and the machine-readable result on stdout.
-        for line in &report.lines {
-            eprintln!("{line}");
-        }
-        process::result_fail_step(Verb::SHIP, "preflight");
-        bail!("ship preflight failed");
-    }
-
-    // 2. Stage frontend bundles before drift-sensitive repository tests.
+    // 1. Stage frontend bundles before drift-sensitive repository tests.
     if let Err(error) = dioxus_web::build_release() {
         process::result_fail_step(Verb::SHIP, "dioxus-web");
         return Err(error).context("ship Dioxus Web release bundle failed");
     }
 
-    // 3. Repository gate; force skips only this test preflight.
+    // 2. Repository gate; force skips only this test preflight.
     if !force {
         process::run("ship-tests", "just", &["test", "--all"])?;
     }
 
-    // 4. Cross-build all three packages.
+    // 3. Cross-build all three packages.
     let profile: &[&str] = if smoke { &[] } else { &["--release"] };
     let mut cli_args = vec!["xwin", "build"];
     cli_args.extend_from_slice(profile);
@@ -138,7 +82,7 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
         return Err(error);
     }
 
-    // 5. Verify artifacts (release only).
+    // 4. Verify artifacts (release only).
     if !smoke {
         let target = project::cargo_target_directory(&root)
             .context("resolve Windows release artifact directory")?;
@@ -159,35 +103,6 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn preflight_fails_with_install_hint_when_cargo_xwin_missing() {
-        let r = preflight(&|t| t != "cargo-xwin", &|_| true);
-        assert!(!r.ok);
-        assert!(
-            r.lines
-                .iter()
-                .any(|l| l.contains("mise install cargo:cargo-xwin")),
-            "expected install hint, got {:?}",
-            r.lines
-        );
-    }
-
-    #[test]
-    fn preflight_fails_with_target_hint_when_target_missing() {
-        let r = preflight(&|_| true, &|tr| tr != WIN_TARGET);
-        assert!(!r.ok);
-        assert!(
-            r.lines.iter().any(|l| l.contains("mise install rust")),
-            "expected target hint, got {:?}",
-            r.lines
-        );
-    }
-
-    #[test]
-    fn preflight_ok_when_both_present() {
-        assert!(preflight(&|_| true, &|_| true).ok);
-    }
 
     #[test]
     fn viewer_cross_build_uses_the_production_app_feature() {

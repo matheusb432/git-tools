@@ -104,7 +104,9 @@ pub(crate) fn Button(
             },
             ..attributes,
             if state.is_loading() {
-                span { class: "shrink-0 animate-spin motion-reduce:animate-none", aria_hidden: "true",
+                span {
+                    class: "shrink-0 animate-spin motion-reduce:animate-none",
+                    aria_hidden: "true",
                     LoaderCircle { size: 14 }
                 }
             }

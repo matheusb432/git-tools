@@ -113,36 +113,60 @@ pub(crate) fn DiffHistoryView() -> Element {
             header { class: "flex flex-col gap-3 border-b border-line bg-surface px-4 py-4 sm:flex-row sm:items-end sm:justify-between",
                 div { class: "min-w-0",
                     div { class: "flex items-center gap-2 text-acc",
-                        span { aria_hidden: "true", History { size: 16 } }
-                        p { class: "font-mono text-[10px] font-semibold uppercase tracking-[0.14em]", "Render archive" }
+                        span { aria_hidden: "true",
+                            History { size: 16 }
+                        }
+                        p { class: "font-mono text-[10px] font-semibold uppercase tracking-[0.14em]",
+                            "Render archive"
+                        }
                     }
-                    h1 { id: "history-heading", class: "mt-1 text-lg font-semibold tracking-tight text-ink focus:outline-none", tabindex: "-1", "Diff history" }
-                    p { class: "mt-1 text-xs text-ink-2", "Reopen a durable render or copy its complete recipe." }
+                    h1 {
+                        id: "history-heading",
+                        class: "mt-1 text-lg font-semibold tracking-tight text-ink focus:outline-none",
+                        tabindex: "-1",
+                        "Diff history"
+                    }
+                    p { class: "mt-1 text-xs text-ink-2",
+                        "Reopen a durable render or copy its complete recipe."
+                    }
                 }
                 if let HistoryLoad::Ready(page) = &load {
-                    p { class: "font-mono text-[11px] tabular-nums text-ink-3", "{page.total_count} renders" }
+                    p { class: "font-mono text-[11px] tabular-nums text-ink-3",
+                        "{page.total_count} renders"
+                    }
                 }
             }
 
-            section { class: "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] bg-bg", aria_label: "Recent diff renders",
+            section {
+                class: "grid min-h-0 grid-rows-[minmax(0,1fr)_auto] bg-bg",
+                aria_label: "Recent diff renders",
                 div { class: "min-h-0 overflow-auto p-3 [scrollbar-color:var(--color-line-2)_transparent] [scrollbar-width:thin] sm:p-4",
                     if let Some(error) = action_error() {
-                        div { class: "mb-3 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-xs text-del", role: "alert",
+                        div {
+                            class: "mb-3 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-xs text-del",
+                            role: "alert",
                             "{error.message()}"
                         }
                     }
                     match &load {
-                        HistoryLoad::Loading => rsx! { HistoryLoading {} },
+                        HistoryLoad::Loading => rsx! {
+                            HistoryLoading {}
+                        },
                         HistoryLoad::Error(error) => {
                             let message = error.message();
                             rsx! {
                                 div { class: "grid min-h-64 place-content-center text-center", role: "alert",
                                     p { class: "text-sm font-semibold text-ink", "History is unavailable" }
                                     p { class: "mt-1 max-w-md text-xs leading-5 text-ink-2", "{message}" }
-                                    Button { class: "mx-auto mt-4", variant: ButtonVariant::Outline, onclick: move |_| *reload.write() += 1, "Try again" }
+                                    Button {
+                                        class: "mx-auto mt-4",
+                                        variant: ButtonVariant::Outline,
+                                        onclick: move |_| *reload.write() += 1,
+                                        "Try again"
+                                    }
                                 }
                             }
-                        },
+                        }
                         HistoryLoad::Ready(page) if page.entries.is_empty() => rsx! {
                             div { class: "grid min-h-64 place-content-center text-center",
                                 p { class: "text-sm font-semibold text-ink", "No history yet" }
@@ -182,10 +206,12 @@ pub(crate) fn DiffHistoryView() -> Element {
                                             action_error.set(None);
                                             spawn(async move {
                                                 match ViewerApi::get_history_copy(render_id).await {
-                                                    Ok(payload) => match browser::copy_json(&payload).await {
-                                                        Ok(()) => copied_id.set(Some(render_id)),
-                                                        Err(error) => action_error.set(Some(error)),
-                                                    },
+                                                    Ok(payload) => {
+                                                        match browser::copy_json(&payload).await {
+                                                            Ok(()) => copied_id.set(Some(render_id)),
+                                                            Err(error) => action_error.set(Some(error)),
+                                                        }
+                                                    }
                                                     Err(error) => action_error.set(Some(error)),
                                                 }
                                             });
@@ -197,7 +223,10 @@ pub(crate) fn DiffHistoryView() -> Element {
                     }
                 }
                 if let HistoryLoad::Ready(page) = &load && !page.entries.is_empty() {
-                    HistoryFooter { page: page.clone(), onnavigate: move |next| cursor.set(next) }
+                    HistoryFooter {
+                        page: page.clone(),
+                        onnavigate: move |next| cursor.set(next),
+                    }
                 }
             }
         }
@@ -207,7 +236,10 @@ pub(crate) fn DiffHistoryView() -> Element {
 #[component]
 fn HistoryLoading() -> Element {
     rsx! {
-        div { class: "grid gap-2", role: "status", aria_label: "Loading history",
+        div {
+            class: "grid gap-2",
+            role: "status",
+            aria_label: "Loading history",
             for _ in 0..6 {
                 div { class: "grid gap-2 rounded-sm border border-line bg-surface p-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(8rem,1fr)_auto]",
                     Skeleton { class: "h-4 w-3/5" }
@@ -234,13 +266,19 @@ fn HistoryRow(
             div { class: "min-w-0",
                 div { class: "flex min-w-0 items-center gap-2",
                     h2 { class: "truncate text-sm font-semibold text-ink", "{entry.title}" }
-                    span { class: "shrink-0 rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-acc", "{recipe_kind_label(entry.kind)}" }
+                    span { class: "shrink-0 rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 font-mono text-[9px] font-semibold uppercase tracking-[0.08em] text-acc",
+                        "{recipe_kind_label(entry.kind)}"
+                    }
                 }
                 p { class: "mt-1 truncate font-mono text-[11px] text-ink-2", "{entry.range_label}" }
             }
             div { class: "min-w-0 text-[11px] text-ink-2",
                 p { class: "truncate", "{entry.repository_name}" }
-                time { class: "mt-1 block truncate font-mono tabular-nums text-ink-3", datetime: entry.rendered_at.clone(), "{entry.rendered_at}" }
+                time {
+                    class: "mt-1 block truncate font-mono tabular-nums text-ink-3",
+                    datetime: entry.rendered_at.clone(),
+                    "{entry.rendered_at}"
+                }
             }
             div { class: "flex items-center justify-end gap-1",
                 Button {
@@ -249,7 +287,9 @@ fn HistoryRow(
                     state: if opening { ButtonState::Loading } else if open_disabled { ButtonState::Disabled } else { ButtonState::Enabled },
                     aria_label: "Open {entry.title}",
                     onclick: move |_| onopen.call(entry.id),
-                    span { aria_hidden: "true", ExternalLink { size: 14 } }
+                    span { aria_hidden: "true",
+                        ExternalLink { size: 14 }
+                    }
                     "Open"
                 }
                 Button {
@@ -259,7 +299,11 @@ fn HistoryRow(
                     title: if copied { "Copied" } else { "Copy render JSON" },
                     onclick: move |_| oncopy.call(entry.id),
                     span { aria_hidden: "true",
-                        if copied { Check { size: 14 } } else { Copy { size: 14 } }
+                        if copied {
+                            Check { size: 14 }
+                        } else {
+                            Copy { size: 14 }
+                        }
                     }
                 }
             }
@@ -281,16 +325,50 @@ fn HistoryFooter(
 
     rsx! {
         footer { class: "relative flex min-h-14 items-center justify-between gap-3 border-t border-line bg-surface px-3 sm:px-4",
-            div { class: "absolute inset-x-3 top-0 h-px bg-line sm:inset-x-4", role: "progressbar", aria_label: "History page position", aria_valuemin: "1", aria_valuemax: page.page_count.to_string(), aria_valuenow: page.page_number.to_string(),
+            div {
+                class: "absolute inset-x-3 top-0 h-px bg-line sm:inset-x-4",
+                role: "progressbar",
+                aria_label: "History page position",
+                aria_valuemin: "1",
+                aria_valuemax: page.page_count.to_string(),
+                aria_valuenow: page.page_number.to_string(),
                 span { class: "block h-full bg-acc", style: "width:{progress}%" }
             }
-            p { class: "hidden font-mono text-[10px] tabular-nums text-ink-3 sm:block", "{page.total_count} renders" }
-            nav { class: "ml-auto flex items-center gap-1", aria_label: "History pages",
-                HistoryPageButton { label: "First page", cursor: navigation.first, onclick: onnavigate, icon: HistoryPageIcon::First }
-                HistoryPageButton { label: "Previous page", cursor: navigation.previous, onclick: onnavigate, icon: HistoryPageIcon::Previous }
-                output { class: "min-w-20 px-2 text-center font-mono text-xs tabular-nums text-ink", aria_label: "Page {page.page_number} of {page.page_count}", "{page.page_number:02} / {page.page_count:02}" }
-                HistoryPageButton { label: "Next page", cursor: navigation.next, onclick: onnavigate, icon: HistoryPageIcon::Next }
-                HistoryPageButton { label: "Last page", cursor: navigation.last, onclick: onnavigate, icon: HistoryPageIcon::Last }
+            p { class: "hidden font-mono text-[10px] tabular-nums text-ink-3 sm:block",
+                "{page.total_count} renders"
+            }
+            nav {
+                class: "ml-auto flex items-center gap-1",
+                aria_label: "History pages",
+                HistoryPageButton {
+                    label: "First page",
+                    cursor: navigation.first,
+                    onclick: onnavigate,
+                    icon: HistoryPageIcon::First,
+                }
+                HistoryPageButton {
+                    label: "Previous page",
+                    cursor: navigation.previous,
+                    onclick: onnavigate,
+                    icon: HistoryPageIcon::Previous,
+                }
+                output {
+                    class: "min-w-20 px-2 text-center font-mono text-xs tabular-nums text-ink",
+                    aria_label: "Page {page.page_number} of {page.page_count}",
+                    "{page.page_number:02} / {page.page_count:02}"
+                }
+                HistoryPageButton {
+                    label: "Next page",
+                    cursor: navigation.next,
+                    onclick: onnavigate,
+                    icon: HistoryPageIcon::Next,
+                }
+                HistoryPageButton {
+                    label: "Last page",
+                    cursor: navigation.last,
+                    onclick: onnavigate,
+                    icon: HistoryPageIcon::Last,
+                }
             }
         }
     }
@@ -325,10 +403,18 @@ fn HistoryPageButton(
             },
             span { aria_hidden: "true",
                 match icon {
-                    HistoryPageIcon::First => rsx! { ChevronsLeft { size: 15 } },
-                    HistoryPageIcon::Previous => rsx! { ChevronLeft { size: 15 } },
-                    HistoryPageIcon::Next => rsx! { ChevronRight { size: 15 } },
-                    HistoryPageIcon::Last => rsx! { ChevronsRight { size: 15 } },
+                    HistoryPageIcon::First => rsx! {
+                        ChevronsLeft { size: 15 }
+                    },
+                    HistoryPageIcon::Previous => rsx! {
+                        ChevronLeft { size: 15 }
+                    },
+                    HistoryPageIcon::Next => rsx! {
+                        ChevronRight { size: 15 }
+                    },
+                    HistoryPageIcon::Last => rsx! {
+                        ChevronsRight { size: 15 }
+                    },
                 }
             }
         }

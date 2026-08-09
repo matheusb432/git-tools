@@ -28,7 +28,9 @@ pub(crate) fn TextInput(
     rsx! {
         div { class: if label_visibility == TextInputLabelVisibility::Hidden { "min-w-0" } else { "grid min-w-0 gap-1.5" },
             label { class: if label_visibility == TextInputLabelVisibility::Hidden { "block min-w-0" } else { "grid min-w-0 gap-1.5" },
-                span { class: if label_visibility == TextInputLabelVisibility::Hidden { "sr-only" } else { "text-xs font-semibold text-ink" }, "{label}" }
+                span { class: if label_visibility == TextInputLabelVisibility::Hidden { "sr-only" } else { "text-xs font-semibold text-ink" },
+                    "{label}"
+                }
                 input {
                     oninput: move |event| {
                         if let Some(handler) = &oninput {

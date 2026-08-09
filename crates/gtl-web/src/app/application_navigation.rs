@@ -49,7 +49,9 @@ pub(crate) fn ApplicationNavigation() -> Element {
                 role: "tablist",
                 aria_label: "Open diffs",
                 if tabs.is_empty() {
-                    p { class: "mb-[7px] self-center px-2 text-[12px] text-ink-3", "No open diffs" }
+                    p { class: "mb-[7px] self-center px-2 text-[12px] text-ink-3",
+                        "No open diffs"
+                    }
                 }
                 for tab in &tabs {
                     {
@@ -61,11 +63,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                         rsx! {
                             div {
                                 key: "{tab.id}",
-                                class: if active {
-                                    "flex min-w-28 max-w-60 shrink-0 items-center rounded-t-panel border border-b-0 border-line-2 bg-bg text-ink shadow-[inset_0_2px_0_var(--color-acc)]"
-                                } else {
-                                    "flex min-w-28 max-w-60 shrink-0 items-center rounded-t-panel border border-b-0 border-transparent bg-surface-2 text-ink-2 hover:border-line-2 hover:text-ink"
-                                },
+                                class: if active { "flex min-w-28 max-w-60 shrink-0 items-center rounded-t-panel border border-b-0 border-line-2 bg-bg text-ink shadow-[inset_0_2px_0_var(--color-acc)]" } else { "flex min-w-28 max-w-60 shrink-0 items-center rounded-t-panel border border-b-0 border-transparent bg-surface-2 text-ink-2 hover:border-line-2 hover:text-ink" },
                                 button {
                                     id: tab_element_id(tab_id),
                                     class: "flex min-w-0 flex-1 cursor-pointer items-center gap-2 border-0 bg-transparent py-2 pr-1 pl-2.5 text-left text-inherit [font:inherit] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc",
@@ -149,7 +147,9 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             }
                                         });
                                     },
-                                    span { aria_hidden: "true", X { size: 14 } }
+                                    span { aria_hidden: "true",
+                                        X { size: 14 }
+                                    }
                                 }
                             }
                         }
@@ -161,16 +161,21 @@ pub(crate) fn ApplicationNavigation() -> Element {
                 class: if matches!(route, Route::History {}) { NAVIGATION_ACTION_ACTIVE_CLASSES } else { NAVIGATION_ACTION_CLASSES },
                 to: Route::History {},
                 aria_current: matches!(route, Route::History {}).then_some("page"),
-                span { aria_hidden: "true", History { size: 14 } }
+                span { aria_hidden: "true",
+                    History { size: 14 }
+                }
                 "History"
                 if !tabs.is_empty() {
-                    span { class: "min-w-[18px] rounded-full bg-acc-soft px-1 text-center text-[10px] text-acc", "{tabs.len()}" }
+                    span { class: "min-w-[18px] rounded-full bg-acc-soft px-1 text-center text-[10px] text-acc",
+                        "{tabs.len()}"
+                    }
                 }
             }
 
-            label {
-                class: "mb-[7px] flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-[12px] text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line",
-                span { class: "text-acc", aria_hidden: "true", CircleDot { size: 9, fill: "currentColor" } }
+            label { class: "mb-[7px] flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-[12px] text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line",
+                span { class: "text-acc", aria_hidden: "true",
+                    CircleDot { size: 9, fill: "currentColor" }
+                }
                 span { class: "sr-only", "Theme" }
                 select {
                     class: "cursor-pointer appearance-none bg-transparent text-inherit outline-none",
@@ -182,7 +187,16 @@ pub(crate) fn ApplicationNavigation() -> Element {
                             viewer.set_preference(SetViewerPreference::Theme(theme));
                         }
                     },
-                    for option in [ViewerTheme::Dark, ViewerTheme::Light, ViewerTheme::Hearth, ViewerTheme::Mirage, ViewerTheme::Glacier, ViewerTheme::Noir, ViewerTheme::Graphite] {
+                    for option in [
+                        ViewerTheme::Dark,
+                        ViewerTheme::Light,
+                        ViewerTheme::Hearth,
+                        ViewerTheme::Mirage,
+                        ViewerTheme::Glacier,
+                        ViewerTheme::Noir,
+                        ViewerTheme::Graphite,
+                    ]
+                    {
                         option { value: theme_value(option), "{theme_label(option)}" }
                     }
                 }
@@ -194,7 +208,9 @@ pub(crate) fn ApplicationNavigation() -> Element {
                 aria_current: matches!(route, Route::Settings {}).then_some("page"),
                 aria_label: "User settings",
                 title: "User settings",
-                span { aria_hidden: "true", Settings { size: 15 } }
+                span { aria_hidden: "true",
+                    Settings { size: 15 }
+                }
             }
         }
         if let Some(error) = action_error() {
@@ -245,10 +261,16 @@ fn TabStateMarker(state: ViewerTabState) -> Element {
         match state {
             ViewerTabState::Ready => rsx! {},
             ViewerTabState::Pending => rsx! {
-                span { class: "flex-none animate-spin text-acc motion-reduce:animate-none", aria_hidden: "true", LoaderCircle { size: 13 } }
+                span {
+                    class: "flex-none animate-spin text-acc motion-reduce:animate-none",
+                    aria_hidden: "true",
+                    LoaderCircle { size: 13 }
+                }
             },
             ViewerTabState::Broken | ViewerTabState::Error => rsx! {
-                span { class: "flex-none text-del", aria_hidden: "true", TriangleAlert { size: 13 } }
+                span { class: "flex-none text-del", aria_hidden: "true",
+                    TriangleAlert { size: 13 }
+                }
             },
         }
         span { class: "sr-only", ", {label}" }

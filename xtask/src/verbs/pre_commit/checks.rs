@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 #[derive(Default)]
 pub(super) struct CheckPaths {
     pub(super) rust: Vec<PathBuf>,
+    pub(super) dioxus: Vec<PathBuf>,
     pub(super) toml: Vec<PathBuf>,
     pub(super) markdown: Vec<PathBuf>,
     pub(super) frontend_format: Vec<PathBuf>,
@@ -19,6 +20,11 @@ impl CheckPaths {
                 Some("md") => checks.markdown.push(path.clone()),
                 _ => {}
             }
+            if is_dioxus_source_path(path)
+                && path.extension().is_some_and(|extension| extension == "rs")
+            {
+                checks.dioxus.push(path.clone());
+            }
             if is_frontend_format_path(path) {
                 checks.frontend_format.push(path.clone());
             }
@@ -28,6 +34,10 @@ impl CheckPaths {
         }
         checks
     }
+}
+
+fn is_dioxus_source_path(path: &Path) -> bool {
+    path.starts_with(Path::new("crates/gtl-web/src"))
 }
 
 fn is_frontend_format_path(path: &Path) -> bool {
@@ -79,6 +89,7 @@ mod tests {
     fn groups_repository_formatter_and_linter_ownership() {
         let classified = CheckPaths::classify(&paths(&[
             "crates/gtl-models/src/lib.rs",
+            "crates/gtl-web/src/app.rs",
             "Cargo.toml",
             "docs/Guide Name.md",
             "frontend/shared/wheel.ts",
@@ -95,7 +106,11 @@ mod tests {
             ".github/workflows/check.yaml",
         ]));
 
-        assert_eq!(classified.rust, paths(&["crates/gtl-models/src/lib.rs"]));
+        assert_eq!(
+            classified.rust,
+            paths(&["crates/gtl-models/src/lib.rs", "crates/gtl-web/src/app.rs"])
+        );
+        assert_eq!(classified.dioxus, paths(&["crates/gtl-web/src/app.rs"]));
         assert_eq!(classified.toml, paths(&["Cargo.toml"]));
         assert_eq!(classified.markdown, paths(&["docs/Guide Name.md"]));
         assert_eq!(

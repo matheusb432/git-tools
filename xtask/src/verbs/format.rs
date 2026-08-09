@@ -1,11 +1,11 @@
 //! Formatting verbs.
 //!
 //! `run`/`check` drive the repository's complete formatter matrix (pinned-nightly rustfmt, Taplo,
-//! rumdl, and the Deno frontend formatter) as a [`Step`] plan. The aggregate read-only gate
-//! (`check`) and `fix` reuse the same plan through `check_steps` / `write_steps`; the linters live
-//! in the sibling `lint` module.
+//! Dioxus RSX, rumdl, and the Deno frontend formatter) as a [`Step`] plan. The aggregate
+//! read-only gate (`check`) and `fix` reuse the same plan through `check_steps` / `write_steps`;
+//! the linters live in the sibling `lint` module.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Args;
 
 use crate::{
@@ -14,6 +14,7 @@ use crate::{
     verb::Verb,
 };
 
+mod dioxus;
 pub(crate) mod markdown;
 mod rust;
 
@@ -51,8 +52,17 @@ pub(crate) fn run(verbose: bool) -> Result<()> {
 /// Verify formatting without modifying files (exits non-zero on drift).
 pub(crate) fn check(verbose: bool) -> Result<()> {
     task::check_all(&check_steps(verbose)?, "run `just fmt`")?;
+    check_dioxus()?;
     process::result(Verb::FORMAT_CHECK, Status::Pass);
     Ok(())
+}
+
+pub(crate) fn check_dioxus() -> Result<()> {
+    dioxus::check()
+}
+
+pub(crate) fn dioxus_check_step(directory: &std::path::Path) -> Step {
+    dioxus::check_step(directory)
 }
 
 /// The write-mode formatter plan, shared with `fix`.
@@ -67,9 +77,10 @@ pub(super) fn check_steps(verbose: bool) -> Result<Vec<Step>> {
 
 /// The complete formatter matrix for `mode`.
 fn format_steps(mode: FormatMode, verbose: bool) -> Result<Vec<Step>> {
-    which::which("taplo")
-        .context("required formatter `taplo` is missing; run `mise install taplo`")?;
     let mut steps = vec![rust::format_step(mode)?, taplo_step(mode, verbose)];
+    if matches!(mode, FormatMode::Write) {
+        steps.push(dioxus::format_step());
+    }
     steps.extend(markdown::format_step(mode)?);
     steps.push(frontend_step(mode));
     Ok(steps)

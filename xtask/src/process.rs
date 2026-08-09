@@ -8,10 +8,10 @@ use std::{
     ffi::OsStr,
     io::{self, Write as _},
     path::Path,
-    process::Command,
+    process::{Command, Stdio},
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 
 use crate::{task::Step, verb::Verb};
 
@@ -93,6 +93,47 @@ pub(crate) fn capture_bytes(label: &str, program: &str, args: &[&str]) -> Result
     Ok(output.stdout)
 }
 
+pub(crate) fn capture_bytes_with_stdin(
+    label: &str,
+    directory: Option<&Path>,
+    program: &str,
+    args: &[&str],
+    input: &[u8],
+) -> Result<Vec<u8>> {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(directory) = directory {
+        command.current_dir(directory);
+    }
+
+    let mut child = command.spawn().with_context(|| format!("start {label}"))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow!("{label} did not expose stdin"))?;
+    let input = input.to_vec();
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
+    let output = child
+        .wait_with_output()
+        .with_context(|| format!("wait for {label}"))?;
+    writer
+        .join()
+        .map_err(|_| anyhow!("{label} stdin writer panicked"))?
+        .with_context(|| format!("write input to {label}"))?;
+    if !output.status.success() {
+        bail!(
+            "{label} failed (exit {}): {}",
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(output.stdout)
+}
+
 /// Run a command with an optional working directory and explicit environment additions.
 ///
 /// Captures the child so callers can sequence cleanup deterministically, then replays both
@@ -133,6 +174,8 @@ pub(crate) fn result_fail_step(scope: Verb, step: &str) {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read as _;
+
     use super::*;
 
     #[test]
@@ -190,5 +233,32 @@ mod tests {
     #[test]
     fn removed_environment_child_does_not_observe_variable() {
         assert!(std::env::var_os("XTASK_PROC_REMOVED").is_none());
+    }
+
+    #[test]
+    fn captured_stdin_helper_propagates_input() {
+        let executable = std::env::current_exe().expect("test executable resolves");
+        let _output = capture_bytes_with_stdin(
+            "captured stdin child",
+            None,
+            executable.to_str().expect("test executable path is UTF-8"),
+            &[
+                "--exact",
+                "proc::tests::captured_stdin_child_observes_input",
+            ],
+            b"expected input",
+        )
+        .expect("captured child returns output");
+    }
+
+    #[test]
+    fn captured_stdin_child_observes_input() {
+        if std::env::args().any(|argument| argument == "--exact") {
+            let mut input = Vec::new();
+            io::stdin()
+                .read_to_end(&mut input)
+                .expect("read captured input");
+            assert_eq!(input, b"expected input");
+        }
     }
 }

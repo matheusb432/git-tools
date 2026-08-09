@@ -46,6 +46,11 @@ pub(crate) fn run() -> Result<()> {
             .with_current_directory(snapshot.directory()),
         );
     }
+    if !checks.dioxus.is_empty() {
+        steps.push(crate::verbs::format::dioxus_check_step(
+            snapshot.directory(),
+        ));
+    }
     if !checks.toml.is_empty() {
         steps.push(
             crate::task::Step::new("taplo", "taplo", ["fmt", "--check"])

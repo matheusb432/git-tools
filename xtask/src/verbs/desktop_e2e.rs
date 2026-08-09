@@ -475,7 +475,6 @@ fn cargo_runner_config(executable: &Path) -> String {
 }
 
 fn workflow() -> Result<()> {
-    require_tool("tauri-driver", "run `mise install cargo:tauri-driver`")?;
     build::run(BuildTarget::Cli)?;
     build::run(BuildTarget::Viewer)?;
     process::run(
@@ -513,7 +512,6 @@ fn workflow() -> Result<()> {
 }
 
 fn run_linux(sandbox: &Sandbox) -> Result<()> {
-    preflight_linux()?;
     let display = available_display(90..190)
         .context("no free isolated X display number in the 90..190 range")?;
     let display_value = format!(":{display}");
@@ -629,37 +627,6 @@ fn start_private_dbus(
     env.set("DBUS_SESSION_BUS_ADDRESS", address);
     let watcher = StatusNotifierWatcher::start(address)?;
     Ok((child, watcher))
-}
-
-fn preflight_linux() -> Result<()> {
-    for (tool, hint) in [
-        ("Xvfb", "run `mise bootstrap packages apply apt:xvfb`"),
-        ("openbox", "run `mise bootstrap packages apply apt:openbox`"),
-        (
-            "stalonetray",
-            "run `mise bootstrap packages apply apt:stalonetray`",
-        ),
-        (
-            "dbus-run-session",
-            "run `mise bootstrap packages apply apt:dbus-daemon`",
-        ),
-        ("xdotool", "run `mise bootstrap packages apply apt:xdotool`"),
-        (
-            "xwininfo",
-            "run `mise bootstrap packages apply apt:x11-utils`",
-        ),
-        (
-            "xdpyinfo",
-            "run `mise bootstrap packages apply apt:x11-utils`",
-        ),
-        (
-            "WebKitWebDriver",
-            "run `mise bootstrap packages apply apt:webkit2gtk-driver`",
-        ),
-    ] {
-        require_tool(tool, hint)?;
-    }
-    Ok(())
 }
 
 fn run_native_phase(
@@ -980,11 +947,6 @@ fn preserve_logs(sandbox: &Sandbox) -> Result<()> {
             fs::copy(entry.path(), destination.join(entry.file_name()))?;
         }
     }
-    Ok(())
-}
-
-fn require_tool(name: &str, hint: &str) -> Result<()> {
-    which::which(name).with_context(|| format!("required tool `{name}` is missing; {hint}"))?;
     Ok(())
 }
 

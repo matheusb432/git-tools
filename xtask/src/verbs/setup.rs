@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 use super::install;
 use crate::{
@@ -16,10 +16,6 @@ use crate::{
 };
 
 pub(crate) fn run() -> Result<()> {
-    if which::which("just").is_err() {
-        bail!("`just` not found on PATH; run `mise install just`, then run `just setup`");
-    }
-    which::which("deno").context("required tool `deno` is missing; run `mise install deno`")?;
     configure_git_hooks()?;
     process::run("frontend-dependencies", "deno", &["install", "--frozen"])?;
     process::run("build", "just", &["build"])?;

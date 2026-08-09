@@ -19,15 +19,21 @@ pub(crate) enum Route {
 
 #[component]
 fn Workspace() -> Element {
-    rsx! { DiffWorkspaceView {} }
+    rsx! {
+        DiffWorkspaceView {}
+    }
 }
 
 #[component]
 fn History() -> Element {
-    rsx! { DiffHistoryView {} }
+    rsx! {
+        DiffHistoryView {}
+    }
 }
 
 #[component]
 fn Settings() -> Element {
-    rsx! { UserSettingsView {} }
+    rsx! {
+        UserSettingsView {}
+    }
 }

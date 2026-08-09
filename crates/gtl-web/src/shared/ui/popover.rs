@@ -53,10 +53,14 @@ pub(crate) fn Popover(
                         title: "Close",
                         "data-dialog-initial-focus": "true",
                         onclick: move |_| onclose.call(()),
-                        span { aria_hidden: "true", X { size: 15 } }
+                        span { aria_hidden: "true",
+                            X { size: 15 }
+                        }
                     }
                 }
-                div { class: "min-h-0 overflow-auto p-4 [scrollbar-color:var(--color-line-2)_transparent] [scrollbar-width:thin]", {children} }
+                div { class: "min-h-0 overflow-auto p-4 [scrollbar-color:var(--color-line-2)_transparent] [scrollbar-width:thin]",
+                    {children}
+                }
             }
         }
     }

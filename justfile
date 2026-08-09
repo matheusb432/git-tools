@@ -63,7 +63,7 @@ bench *args:
 test *args:
     @cargo run --quiet -p xtask -- test {{ args }}
 
-# Apply pinned-nightly rustfmt, Taplo, rumdl, and Oxfmt across the repository. --verbose restores taplo's file-discovery logs.
+# Apply pinned-nightly rustfmt, Taplo, Dioxus RSX, rumdl, and Oxfmt across the repository. --verbose restores taplo's file-discovery logs.
 [group('quality')]
 fmt *args:
     cargo run --quiet -p xtask -- fmt {{ args }}

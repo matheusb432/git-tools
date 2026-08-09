@@ -330,9 +330,7 @@ pub(crate) fn ApplicationLayout() -> Element {
                     ViewerFeedbackNotice { feedback: feedback.clone() }
                 }
             }
-            div { class: "min-h-0 flex-1 overflow-hidden",
-                Outlet::<Route> {}
-            }
+            div { class: "min-h-0 flex-1 overflow-hidden", Outlet::<Route> {} }
         }
     }
 }
@@ -348,7 +346,9 @@ fn ViewerFeedbackNotice(feedback: ViewerFeedback) -> Element {
     };
 
     rsx! {
-        div { class: "pointer-events-none fixed bottom-6 left-1/2 z-50 max-w-[min(47.5rem,calc(100vw-2rem))] -translate-x-1/2 rounded-panel border border-acc-line bg-surface px-3.5 py-2 text-[12.5px] text-ink shadow-[0_6px_18px_rgba(0,0,0,.22)]", role: "status",
+        div {
+            class: "pointer-events-none fixed bottom-6 left-1/2 z-50 max-w-[min(47.5rem,calc(100vw-2rem))] -translate-x-1/2 rounded-panel border border-acc-line bg-surface px-3.5 py-2 text-[12.5px] text-ink shadow-[0_6px_18px_rgba(0,0,0,.22)]",
+            role: "status",
             "{message}"
         }
     }

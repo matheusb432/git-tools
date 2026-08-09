@@ -12,6 +12,7 @@ use crate::{
 /// Verifies formatting, runs the lint sweep, then checks configured ast-grep rules.
 pub(crate) fn run() -> Result<()> {
     task::check_all(&format::check_steps(false)?, "run `just fmt`")?;
+    format::check_dioxus()?;
     lint::linters()?;
     if let Some(step) = ast_grep::check_step() {
         task::check_all(&[step], "fix the reported ast-grep findings")?;

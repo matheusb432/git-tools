@@ -3,25 +3,18 @@
 
 use std::{ffi::OsStr, path::Path};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::{process, project};
 
-fn require_deno() -> Result<()> {
-    which::which("deno").context("required tool `deno` is missing; run `mise install deno`")?;
-    Ok(())
-}
-
 /// Build the committed offline viewer bundle in production mode.
 pub fn build() -> Result<()> {
-    require_deno()?;
     let root = project::repository_root();
     let _lock = project::lock_frontend_assets(&root)?;
     build_unlocked(&root)
 }
 
 pub(crate) fn build_unlocked(root: &Path) -> Result<()> {
-    require_deno()?;
     process::run_captured_with_env(
         "frontend-build",
         Some(root),
@@ -33,7 +26,6 @@ pub(crate) fn build_unlocked(root: &Path) -> Result<()> {
 
 /// Type-check and run the framework-free frontend unit tests.
 pub fn test() -> Result<()> {
-    require_deno()?;
     process::run(
         "frontend-typecheck",
         "deno",
@@ -44,6 +36,5 @@ pub fn test() -> Result<()> {
 
 /// Run the frontend compute benchmarks and stream their tables.
 pub fn bench() -> Result<()> {
-    require_deno()?;
     process::run("frontend-bench", "deno", &["task", "--frozen", "bench"])
 }

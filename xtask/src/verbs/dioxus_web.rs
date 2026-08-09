@@ -19,7 +19,6 @@ use crate::{
     verb::Verb,
 };
 
-const DIOXUS_CLI_VERSION: &str = "0.7.10";
 const DIST_DIRECTORY: &str = "crates/gtl-web/dist";
 const PUBLIC_DIRECTORY: &str = "crates/gtl-web/dist/public";
 const SOURCE_FINGERPRINT_PATH: &str = "crates/gtl-web/dist/.source-fingerprint";
@@ -198,7 +197,6 @@ pub(crate) fn build_release() -> Result<()> {
 }
 
 pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
-    require_dioxus_cli()?;
     let inputs_before = release_input_fingerprint(root)?;
     frontend::build_unlocked(root)?;
     build_styles_unlocked(root)?;
@@ -228,7 +226,6 @@ pub(crate) fn build_styles() -> Result<()> {
 }
 
 pub(crate) fn build_styles_unlocked(root: &Path) -> Result<()> {
-    which::which("deno").context("required tool `deno` is missing; run `mise install deno`")?;
     process::run_step(
         &Step::new(
             "dioxus-tailwind",
@@ -273,23 +270,6 @@ pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {
         "staged Dioxus Web assets changed after bundling; run `just web build`"
     );
     Ok(())
-}
-
-fn require_dioxus_cli() -> Result<()> {
-    which::which("dx")
-        .context("required tool `dx` is missing; run `mise install cargo:dioxus-cli`")?;
-    let version = process::capture("dioxus-version", "dx", &["--version"])?;
-    ensure!(
-        dioxus_version_matches(&version),
-        "required dx {DIOXUS_CLI_VERSION}, found `{}`; run `mise install cargo:dioxus-cli`",
-        version.trim()
-    );
-    Ok(())
-}
-
-fn dioxus_version_matches(output: &str) -> bool {
-    let mut fields = output.split_ascii_whitespace();
-    fields.next() == Some("dioxus") && fields.next() == Some(DIOXUS_CLI_VERSION)
 }
 
 fn clean_release_outputs(root: &Path, target: &Path) -> Result<()> {
@@ -791,12 +771,5 @@ mod tests {
                 .windows(2)
                 .any(|pair| pair == ["--hot-reload", "true"])
         );
-    }
-
-    #[test]
-    fn dioxus_version_requires_the_exact_pinned_release() {
-        assert!(dioxus_version_matches("dioxus 0.7.10 (57d6794)"));
-        assert!(!dioxus_version_matches("dioxus 0.7.100 (future)"));
-        assert!(!dioxus_version_matches("other 0.7.10"));
     }
 }
