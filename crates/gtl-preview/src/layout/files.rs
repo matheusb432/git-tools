@@ -11,10 +11,10 @@ use gtl_application::{
 use maud::{Markup, PreEscaped, html};
 
 use crate::{
+    diff_file_anchor_id,
     layout::{Surface, file_status::file_status_presentation},
     rows::{render_diff_lines, render_diff_split, unified_line_number_digits},
     syntax::PreviewResult,
-    text::slug,
 };
 
 const GIANT_FILE_CHARS: usize = 250_000;
@@ -46,7 +46,7 @@ struct FileBlockPresentation<'file> {
     diff: DiffPresentation<'file>,
     file_body: FileBodyPresentation,
     is_expanded: bool,
-    open_in_editor_route: Option<String>,
+    open_diff_file_action: OpenDiffFileAction<'file>,
     status: super::file_status::FileStatusPresentation,
 }
 
@@ -56,17 +56,17 @@ impl<'file> FileBlockPresentation<'file> {
         file: &'file FileDiff,
         file_index: usize,
         options: RenderOptions,
-        surface: Surface,
+        surface: FileBlockSurface,
     ) -> Self {
         Self {
             file,
             absolute_path: format!("{repo_root}/{}", file.path),
-            anchor_id: slug(&file.path),
+            anchor_id: diff_file_anchor_id(&file.path),
             comment_leader: crate::comment_syntax::comment_leader(&file.path),
             diff: DiffPresentation::new(file, file_index, options),
             file_body: file_body_presentation(surface, file),
             is_expanded: file.lines.iter().map(String::len).sum::<usize>() <= GIANT_FILE_CHARS,
-            open_in_editor_route: open_diff_file_route(surface, file),
+            open_diff_file_action: open_diff_file_action(surface, file),
             status: file_status_presentation(file.status()),
         }
     }
@@ -98,16 +98,60 @@ struct FileBodyPresentation {
     intrinsic_size: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+enum FileBlockSurface {
+    HtmxApp {
+        tab_id: gtl_application::viewer::ViewerTabId,
+    },
+    DiffDocument,
+    Artifact,
+}
+
+impl From<Surface> for FileBlockSurface {
+    fn from(surface: Surface) -> Self {
+        match surface {
+            Surface::App { tab_id } => Self::HtmxApp { tab_id },
+            Surface::Artifact { .. } => Self::Artifact,
+        }
+    }
+}
+
+enum OpenDiffFileAction<'file> {
+    Omitted,
+    Htmx { route: String },
+    Host { path: &'file str },
+}
+
+impl OpenDiffFileAction<'_> {
+    fn htmx_route(&self) -> Option<&str> {
+        match self {
+            Self::Htmx { route } => Some(route),
+            Self::Omitted | Self::Host { .. } => None,
+        }
+    }
+
+    fn host_path(&self) -> Option<&str> {
+        match self {
+            Self::Host { path } => Some(path),
+            Self::Omitted | Self::Htmx { .. } => None,
+        }
+    }
+
+    fn is_present(&self) -> bool {
+        !matches!(self, Self::Omitted)
+    }
+}
+
 // ! The app webview (wry/WebKitGTK) never marks swapped-in content-visibility:auto
 // ! subtrees relevant, so their rows would stay unpainted; only browser artifacts
 // ! opt into the offscreen-skip optimization (and its print escape hatches).
-fn file_body_presentation(surface: Surface, file: &FileDiff) -> FileBodyPresentation {
+fn file_body_presentation(surface: FileBlockSurface, file: &FileDiff) -> FileBodyPresentation {
     match surface {
-        Surface::App { .. } => FileBodyPresentation {
+        FileBlockSurface::HtmxApp { .. } | FileBlockSurface::DiffDocument => FileBodyPresentation {
             classes: "filebody single-variant overflow-hidden rounded-b-panel",
             intrinsic_size: None,
         },
-        Surface::Artifact { .. } => {
+        FileBlockSurface::Artifact => {
             let rows = file.lines.iter().filter(|l| !l.is_empty()).count();
             FileBodyPresentation {
                 classes: "filebody single-variant [content-visibility:auto] overflow-hidden rounded-b-panel print:block! print:[content-visibility:visible] print:overflow-visible",
@@ -117,17 +161,22 @@ fn file_body_presentation(surface: Surface, file: &FileDiff) -> FileBodyPresenta
     }
 }
 
-fn open_diff_file_route(surface: Surface, file: &FileDiff) -> Option<String> {
-    let Surface::App { tab_id } = surface else {
-        return None;
-    };
+fn open_diff_file_action(surface: FileBlockSurface, file: &FileDiff) -> OpenDiffFileAction<'_> {
     if file.status() == FileStatus::Deleted {
-        return None;
+        return OpenDiffFileAction::Omitted;
     }
-    let query = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("path", &file.path)
-        .finish();
-    Some(format!("/tabs/{tab_id}/files/open?{query}"))
+    match surface {
+        FileBlockSurface::HtmxApp { tab_id } => {
+            let query = url::form_urlencoded::Serializer::new(String::new())
+                .append_pair("path", &file.path)
+                .finish();
+            OpenDiffFileAction::Htmx {
+                route: format!("/tabs/{tab_id}/files/open?{query}"),
+            }
+        }
+        FileBlockSurface::DiffDocument => OpenDiffFileAction::Host { path: &file.path },
+        FileBlockSurface::Artifact => OpenDiffFileAction::Omitted,
+    }
 }
 
 pub(super) fn file_blocks(
@@ -135,7 +184,12 @@ pub(super) fn file_blocks(
     options: RenderOptions,
     surface: Surface,
 ) -> PreviewResult<Markup> {
-    file_blocks_with_mode(view, options, surface, FileBodyMode::Complete)
+    file_blocks_with_mode(
+        view,
+        options,
+        FileBlockSurface::from(surface),
+        FileBodyMode::Complete,
+    )
 }
 
 pub(super) fn file_block_shells(
@@ -143,7 +197,21 @@ pub(super) fn file_block_shells(
     options: RenderOptions,
     surface: Surface,
 ) -> PreviewResult<Markup> {
-    file_blocks_with_mode(view, options, surface, FileBodyMode::Shell)
+    file_blocks_with_mode(
+        view,
+        options,
+        FileBlockSurface::from(surface),
+        FileBodyMode::Shell,
+    )
+}
+
+pub(super) fn diff_document_shell(view: &View, options: RenderOptions) -> PreviewResult<Markup> {
+    file_blocks_with_mode(
+        view,
+        options,
+        FileBlockSurface::DiffDocument,
+        FileBodyMode::Shell,
+    )
 }
 
 #[derive(Clone, Copy)]
@@ -155,7 +223,7 @@ enum FileBodyMode {
 fn file_blocks_with_mode(
     view: &View,
     options: RenderOptions,
-    surface: Surface,
+    surface: FileBlockSurface,
     mode: FileBodyMode,
 ) -> PreviewResult<Markup> {
     if view.files.is_empty() {
@@ -201,15 +269,16 @@ fn file_blocks_with_mode(
                             button type="button" class=(COPY_BUTTON_CLASSES) data-copy-mode="code" data-copy-label="code" { "code" }
                         }
                         span class="flex-none text-[12.5px]" { span.a { "+" (file.added) } " " span.d { "−" (file.removed) } }
-                        @if let Some(open_in_editor_route) = &presentation.open_in_editor_route {
+                        @if presentation.open_diff_file_action.is_present() {
                             button type="button"
                                 class=(OPEN_IN_EDITOR_BUTTON_CLASSES)
                                 aria-label="Open in IDE"
                                 title="Open in IDE"
-                                hx-post=(open_in_editor_route)
-                                hx-disabled-elt="this"
-                                hx-sync="this:drop"
-                                hx-swap="none" {
+                                hx-post=[presentation.open_diff_file_action.htmx_route()]
+                                hx-disabled-elt=[presentation.open_diff_file_action.htmx_route().map(|_| "this")]
+                                hx-sync=[presentation.open_diff_file_action.htmx_route().map(|_| "this:drop")]
+                                hx-swap=[presentation.open_diff_file_action.htmx_route().map(|_| "none")]
+                                data-open-diff-file=[presentation.open_diff_file_action.host_path()] {
                                 (PreEscaped(OPEN_IN_EDITOR_ICON))
                             }
                         }

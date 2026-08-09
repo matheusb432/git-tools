@@ -70,6 +70,7 @@ mod tests {
     #[test]
     fn slug_normalizes_file_paths_to_anchor_ids() {
         assert_eq!(slug("src/a b.rs"), "f-src-a-b-rs");
+        assert_eq!(crate::diff_file_anchor_id("src/a b.rs"), slug("src/a b.rs"));
     }
 
     #[test]

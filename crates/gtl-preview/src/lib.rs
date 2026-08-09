@@ -24,6 +24,27 @@ pub use layout::mobile_controls::{
 use maud::Markup;
 pub use syntax::{PreviewError, PreviewResult};
 
+/// Returns the stable DOM anchor used for a server-rendered diff file.
+///
+/// Hosts use this value to connect their own changed-file navigation to the
+/// corresponding file block inside [`diff_document_shell`].
+#[must_use]
+pub fn diff_file_anchor_id(path: &str) -> String {
+    text::slug(path)
+}
+
+/// Builds the server-rendered file document for an app-owned diff island.
+///
+/// File headers and actions render immediately. Diff row targets remain empty so the host can
+/// append the bounded output from [`view_chunks`] without rendering rows in the client.
+///
+/// # Errors
+///
+/// Returns an error when the embedded rendering assets cannot be loaded.
+pub fn diff_document_shell(view: &View, options: RenderOptions) -> PreviewResult<Markup> {
+    layout::diff_document_shell(view, options)
+}
+
 // TODO: [gtl-web]: replace the desktop fragment APIs with a narrow Maud diff-document renderer.
 /// Builds one app-hosted diff view using the requested layout and density variant.
 ///

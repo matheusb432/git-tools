@@ -1,0 +1,353 @@
+//! Typed values exchanged by the desktop viewer and its Dioxus Web shell.
+
+use serde::{Deserialize, Serialize};
+
+use crate::recipes::Recipe;
+
+pub const VIEWER_STATE_CHANGED_EVENT: &str = "viewer-state-changed";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerTheme {
+    Dark,
+    Light,
+    Hearth,
+    Mirage,
+    Glacier,
+    Noir,
+    Graphite,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerDiffLayout {
+    Unified,
+    Split,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerDiffDensity {
+    Compact,
+    Full,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerRenderOptions {
+    pub layout: ViewerDiffLayout,
+    pub density: ViewerDiffDensity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerViewIdentity {
+    pub tab_id: u64,
+    pub range_generation: u64,
+    pub selection_generation: u64,
+    pub render_options: ViewerRenderOptions,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerTabKind {
+    Snapshot,
+    Live,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ViewerTabState {
+    Pending,
+    Ready,
+    Broken { code: String, reason: String },
+    Error { message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerTab {
+    pub id: u64,
+    pub label: String,
+    pub kind: ViewerTabKind,
+    pub state: ViewerTabState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerFileStatus {
+    Added,
+    Deleted,
+    Renamed,
+    Modified,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerFileSummary {
+    pub path: String,
+    pub anchor_id: String,
+    pub added: u32,
+    pub removed: u32,
+    pub status: ViewerFileStatus,
+    pub can_open_in_editor: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerCommitSummary {
+    pub sha: String,
+    pub abbreviated_sha: String,
+    pub subject: String,
+    pub body: String,
+    pub date: String,
+    pub iso: String,
+    pub is_merge: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerCommandLine {
+    pub lead: String,
+    pub range: String,
+    pub trail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerFooter {
+    pub command: String,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerAppliedExclusions {
+    pub extensions: Vec<String>,
+    pub hidden_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ViewerCommitSelection {
+    None,
+    Pending { sha: String },
+    Ready { sha: String },
+    Error { sha: String, message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerActiveView {
+    pub identity: ViewerViewIdentity,
+    pub title: String,
+    pub repository_name: String,
+    pub branch: String,
+    pub upstream: String,
+    pub command: ViewerCommandLine,
+    pub files: Vec<ViewerFileSummary>,
+    pub commits_label: String,
+    pub commits: Vec<ViewerCommitSummary>,
+    pub commit_selection: ViewerCommitSelection,
+    pub footer: ViewerFooter,
+    pub exclusions: Option<ViewerAppliedExclusions>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ViewerActiveState {
+    Empty,
+    Pending {
+        tab_id: u64,
+    },
+    Broken {
+        tab_id: u64,
+        code: String,
+        reason: String,
+    },
+    Error {
+        tab_id: u64,
+        message: String,
+    },
+    Ready {
+        view: Box<ViewerActiveView>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerPreferences {
+    pub theme: ViewerTheme,
+    pub render_options: ViewerRenderOptions,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ViewerFeedback {
+    TabClosed,
+    LiveViewDeleted,
+    SnapshotRecipesSkipped { labels: Vec<String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerShell {
+    pub revision: u64,
+    pub tabs: Vec<ViewerTab>,
+    pub active: ViewerActiveState,
+    pub preferences: ViewerPreferences,
+    pub feedback: Option<ViewerFeedback>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrepareDiffDocument {
+    pub identity: ViewerViewIdentity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerDiffDocument {
+    pub identity: ViewerViewIdentity,
+    pub html: String,
+    pub materialization: ViewerDiffMaterialization,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum ViewerDiffMaterialization {
+    Complete,
+    Loading { load_id: u64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoadViewerDiffChunk {
+    pub identity: ViewerViewIdentity,
+    pub load_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerDiffChunk {
+    pub identity: ViewerViewIdentity,
+    pub target_id: String,
+    pub html: String,
+    pub row_count: usize,
+    pub continuation: ViewerDiffChunkContinuation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerDiffChunkContinuation {
+    Complete,
+    More,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "cursor", rename_all = "snake_case")]
+pub enum ViewerHistoryCursor {
+    Newest,
+    OlderThan { render_id: i64, page: u32 },
+    NewerThan { render_id: i64, page: u32 },
+    Oldest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListViewerHistory {
+    pub cursor: ViewerHistoryCursor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerRecipeKind {
+    Diff,
+    MergeDiff,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerHistoryEntry {
+    pub id: i64,
+    pub title: String,
+    pub repository_name: String,
+    pub kind: ViewerRecipeKind,
+    pub range_label: String,
+    pub rendered_at: String,
+    pub recipe: Recipe,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerHistoryPage {
+    pub entries: Vec<ViewerHistoryEntry>,
+    pub total_count: u64,
+    pub page_number: u32,
+    pub page_count: u32,
+    pub has_newer: bool,
+    pub has_older: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerProjectDiffExclusions {
+    pub project_name: String,
+    pub extensions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerDiffExclusions {
+    pub default_extensions: Vec<String>,
+    pub projects: Vec<ViewerProjectDiffExclusions>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerUserSettings {
+    pub configuration_path: Option<String>,
+    pub configured_theme: Option<ViewerTheme>,
+    pub effective_theme: ViewerTheme,
+    pub render_options: ViewerRenderOptions,
+    pub push_confirmation_required: bool,
+    pub diff_exclusions: ViewerDiffExclusions,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerTabRequest {
+    pub tab_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectViewerCommit {
+    pub tab_id: u64,
+    pub sha: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenViewerHistory {
+    pub render_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenViewerDiffFile {
+    pub identity: ViewerViewIdentity,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "preference", content = "value", rename_all = "snake_case")]
+pub enum SetViewerPreference {
+    Layout(ViewerDiffLayout),
+    Density(ViewerDiffDensity),
+    Theme(ViewerTheme),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewerResource {
+    Shell,
+    Tab,
+    LiveView,
+    Commit,
+    DiffDocument,
+    DiffChunk,
+    HistoryEntry,
+    Settings,
+    DiffFile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ViewerApiError {
+    InvalidRequest,
+    NotFound { resource: ViewerResource },
+    Conflict,
+    Unavailable { resource: ViewerResource },
+    Internal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerStateChanged {
+    pub revision: u64,
+}

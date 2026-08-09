@@ -140,6 +140,18 @@ impl DiffExclusions {
             .unwrap_or(&self.default_exclusions)
     }
 
+    /// Returns the exclusions configured for the default project fallback.
+    pub const fn default_exclusions(&self) -> &ExcludedExtensions {
+        &self.default_exclusions
+    }
+
+    /// Iterates project-specific exclusions in project-name order.
+    pub fn project_exclusions(&self) -> impl ExactSizeIterator<Item = (&str, &ExcludedExtensions)> {
+        self.projects
+            .iter()
+            .map(|(project, extensions)| (project.as_str(), extensions))
+    }
+
     /// Whether no project has exclusions.
     pub fn is_empty(&self) -> bool {
         self.projects.is_empty()
@@ -249,6 +261,36 @@ mod tests {
             DiffExclusions::default()
                 .for_project_or_default("anything")
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn read_accessors_expose_sorted_projects_and_separate_defaults() {
+        let exclusions = DiffExclusions::new(
+            [
+                ("zeta".into(), vec!["rs"]),
+                (DiffExclusions::DEFAULT_KEY.into(), vec!["md"]),
+                ("alpha".into(), vec!["toml"]),
+            ],
+            None,
+        );
+
+        assert_eq!(exclusions.default_exclusions().extensions(), ["md"]);
+        assert_eq!(
+            exclusions
+                .project_exclusions()
+                .map(|(project, extensions)| {
+                    (
+                        project,
+                        extensions
+                            .extensions()
+                            .iter()
+                            .map(String::as_str)
+                            .collect::<Vec<_>>(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            [("alpha", vec!["toml"]), ("zeta", vec!["rs"])]
         );
     }
 

@@ -2,6 +2,7 @@
 //! center, commit shelf right) with titlebar and keybar spanning the full
 //! width. One module per region; this module owns their composition.
 
+mod diff_document;
 mod file_status;
 mod files;
 mod keybar;
@@ -10,6 +11,7 @@ mod shelf;
 mod titlebar;
 mod tree;
 
+pub(crate) use diff_document::shell as diff_document_shell;
 use gtl_application::{
     diffs::View,
     viewer::{RenderOptions, ViewerTabId},

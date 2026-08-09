@@ -36,6 +36,43 @@ pub(crate) struct CommitPatchTicket {
     pub(crate) selection_generation: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ActiveContentIdentity {
+    tab_id: ViewerTabId,
+    range_generation: u64,
+    selection_generation: u64,
+}
+
+impl ActiveContentIdentity {
+    pub(crate) const fn tab_id(self) -> ViewerTabId {
+        self.tab_id
+    }
+
+    pub(crate) const fn range_generation(self) -> u64 {
+        self.range_generation
+    }
+
+    pub(crate) const fn selection_generation(self) -> u64 {
+        self.selection_generation
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ActiveContentSnapshot {
+    identity: ActiveContentIdentity,
+    view: Arc<View>,
+}
+
+impl ActiveContentSnapshot {
+    pub(crate) const fn identity(&self) -> ActiveContentIdentity {
+        self.identity
+    }
+
+    pub(crate) fn view(&self) -> &View {
+        &self.view
+    }
+}
+
 #[derive(Debug, Clone)]
 enum CommitSelection {
     None,
@@ -495,6 +532,54 @@ impl ViewerSession {
         self.active
     }
 
+    pub(crate) fn active_content_identity(&self) -> Option<ActiveContentIdentity> {
+        let identity = self.active_displayed_content_identity()?;
+        let tab = self.tab(identity.tab_id())?;
+        if matches!(tab.selection, CommitSelection::Pending { .. }) {
+            return None;
+        }
+
+        Some(identity)
+    }
+
+    pub(crate) fn active_displayed_content_identity(&self) -> Option<ActiveContentIdentity> {
+        let tab = self.active.and_then(|id| self.tab(id))?;
+        if !matches!(tab.tab.state(), ViewerTabState::Ready) {
+            return None;
+        }
+
+        let selection_generation = match tab.selection {
+            CommitSelection::Pending { .. } => tab.selection_generation.wrapping_sub(1),
+            _ => tab.selection_generation,
+        };
+
+        Some(ActiveContentIdentity {
+            tab_id: tab.tab.id(),
+            range_generation: tab.generation,
+            selection_generation,
+        })
+    }
+
+    pub(crate) fn active_content_snapshot(&mut self) -> Option<ActiveContentSnapshot> {
+        let identity = self.active_content_identity()?;
+        let cached = self.cache.get(identity.tab_id()).cloned()?;
+        let view = match self.commit_selection_snapshot(identity.tab_id()) {
+            CommitSelectionSnapshot::None | CommitSelectionSnapshot::Error { .. } => cached.view,
+            CommitSelectionSnapshot::Ready { view, .. } => view,
+            CommitSelectionSnapshot::Pending { .. } => return None,
+        };
+
+        Some(ActiveContentSnapshot { identity, view })
+    }
+
+    pub(crate) fn active_content_is_current(&self, expected: ActiveContentIdentity) -> bool {
+        self.active_content_identity().is_some_and(|current| {
+            current.tab_id() == expected.tab_id()
+                && current.range_generation() == expected.range_generation()
+                && current.selection_generation() == expected.selection_generation()
+        })
+    }
+
     pub(crate) const fn revision(&self) -> u64 {
         self.revision
     }
@@ -711,6 +796,76 @@ mod tests {
             session.begin_commit_selection(id, &shas[0][..10]),
             Err(BeginCommitSelectionError::UnknownCommit)
         );
+    }
+
+    #[test]
+    fn content_identities_track_selection_and_refresh_transitions() {
+        let (mut session, id, shas) = ready_session_with_commits();
+        let range = session
+            .active_content_identity()
+            .expect("range content is ready");
+        assert_eq!(session.active_displayed_content_identity(), Some(range));
+
+        let (first_selection, _, _) = session
+            .begin_commit_selection(id, &shas[0])
+            .expect("commit can be selected");
+
+        assert!(session.active_content_identity().is_none());
+        assert_eq!(session.active_displayed_content_identity(), Some(range));
+        assert_eq!(
+            session.publish_commit_patch_if_current(first_selection, view("selected")),
+            PublishOutcome::Published
+        );
+        let selected = session
+            .active_content_identity()
+            .expect("selected commit content is ready");
+        assert_eq!(selected.tab_id(), range.tab_id());
+        assert_eq!(selected.range_generation(), range.range_generation());
+        assert_ne!(
+            selected.selection_generation(),
+            range.selection_generation()
+        );
+        assert_eq!(session.active_displayed_content_identity(), Some(selected));
+
+        let (second_selection, _, _) = session
+            .begin_commit_selection(id, &shas[1])
+            .expect("another commit can be selected");
+        assert!(session.active_content_identity().is_none());
+        assert_eq!(session.active_displayed_content_identity(), Some(selected));
+        assert_eq!(
+            session.set_commit_patch_error_if_current(second_selection, "failed".into()),
+            PublishOutcome::Published
+        );
+        let selection_error = session
+            .active_content_identity()
+            .expect("selection error displays range content");
+        assert_eq!(selection_error.tab_id(), range.tab_id());
+        assert_eq!(selection_error.range_generation(), range.range_generation());
+        assert_ne!(
+            selection_error.selection_generation(),
+            selected.selection_generation()
+        );
+        assert_eq!(
+            session.active_displayed_content_identity(),
+            Some(selection_error)
+        );
+
+        let refresh = session.begin_compute(id).expect("tab exists");
+        assert!(session.active_content_identity().is_none());
+        assert!(session.active_displayed_content_identity().is_none());
+        assert_eq!(
+            session.publish_labeled_if_current(
+                refresh,
+                CachedView::new(view("refreshed")),
+                "refreshed".into(),
+            ),
+            PublishOutcome::Published
+        );
+        let refreshed = session
+            .active_content_identity()
+            .expect("refreshed content is ready");
+        assert_eq!(refreshed.tab_id(), range.tab_id());
+        assert_ne!(refreshed.range_generation(), range.range_generation());
     }
 
     #[test]

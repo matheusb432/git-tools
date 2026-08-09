@@ -1,9 +1,9 @@
 use std::{collections::VecDeque, num::NonZeroU64, sync::Mutex};
 
-use gtl_application::viewer::{RenderOptions, ViewerTabState};
+use gtl_application::viewer::RenderOptions;
 use gtl_preview::ViewChunk;
 
-use crate::session::{CommitSelectionSnapshot, ComputeTicket, ViewerSession};
+use crate::session::{ActiveContentIdentity, ViewerSession};
 
 /// Identifies one active, non-zero view materialization.
 ///
@@ -32,8 +32,7 @@ impl std::fmt::Display for ViewLoadId {
 #[derive(Debug)]
 struct ActiveMaterialization {
     id: ViewLoadId,
-    ticket: ComputeTicket,
-    revision: u64,
+    content: ActiveContentIdentity,
     chunks: VecDeque<ViewChunk>,
 }
 
@@ -56,6 +55,12 @@ impl Default for MaterializationState {
 pub(crate) struct ChunkPage {
     pub(crate) chunk: ViewChunk,
     pub(crate) has_more: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreparedMaterialization {
+    Complete,
+    Loading(ViewLoadId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,48 +93,40 @@ impl ViewMaterializations {
         session: &Mutex<ViewerSession>,
         options: RenderOptions,
     ) -> Result<Option<ViewLoadId>, MaterializationError> {
+        let prepared = self.prepare_content(session, options)?;
+        Ok(match prepared {
+            None | Some(PreparedMaterialization::Complete) => None,
+            Some(PreparedMaterialization::Loading(load)) => Some(load),
+        })
+    }
+
+    pub(crate) fn prepare_content(
+        &self,
+        session: &Mutex<ViewerSession>,
+        options: RenderOptions,
+    ) -> Result<Option<PreparedMaterialization>, MaterializationError> {
         let snapshot = {
             let mut session = session
                 .lock()
                 .map_err(|_| MaterializationError::StatePoisoned)?;
-            let Some(tab_id) = session.active() else {
-                self.clear()?;
-                return Ok(None);
-            };
-            let Some(tab) = session.tab(tab_id) else {
-                return Err(MaterializationError::Conflict);
-            };
-            if !matches!(tab.tab.state(), ViewerTabState::Ready) {
+            if session.active().is_none() {
                 self.clear()?;
                 return Ok(None);
             }
-            let ticket = session
-                .current_ticket(tab_id)
-                .ok_or(MaterializationError::Conflict)?;
-            let cached = session
-                .cached_view_snapshot(tab_id)
-                .ok_or(MaterializationError::Conflict)?;
-            let view = match session.commit_selection_snapshot(tab_id) {
-                CommitSelectionSnapshot::Ready { view, .. } => view,
-                CommitSelectionSnapshot::None => cached.view,
-                CommitSelectionSnapshot::Pending { .. } | CommitSelectionSnapshot::Error { .. } => {
-                    self.clear()?;
-                    return Ok(None);
-                }
+            let Some(snapshot) = session.active_content_snapshot() else {
+                self.clear()?;
+                return Ok(None);
             };
-            (ticket, session.revision(), view)
+            snapshot
         };
 
-        let chunks = gtl_preview::view_chunks(&snapshot.2, options)
+        let chunks = gtl_preview::view_chunks(snapshot.view(), options)
             .map_err(|error| MaterializationError::Render(error.to_string()))?;
         {
             let session = session
                 .lock()
                 .map_err(|_| MaterializationError::StatePoisoned)?;
-            if session.active() != Some(snapshot.0.tab_id)
-                || session.current_ticket(snapshot.0.tab_id) != Some(snapshot.0)
-                || session.revision() != snapshot.1
-            {
+            if !session.active_content_is_current(snapshot.identity()) {
                 return Err(MaterializationError::Conflict);
             }
         }
@@ -137,15 +134,18 @@ impl ViewMaterializations {
             .state
             .lock()
             .map_err(|_| MaterializationError::StatePoisoned)?;
+        if chunks.is_empty() {
+            state.active = None;
+            return Ok(Some(PreparedMaterialization::Complete));
+        }
         let id = state.next_id.ok_or(MaterializationError::ExhaustedIds)?;
         state.next_id = id.get().checked_add(1).and_then(ViewLoadId::try_new);
         state.active = Some(ActiveMaterialization {
             id,
-            ticket: snapshot.0,
-            revision: snapshot.1,
+            content: snapshot.identity(),
             chunks,
         });
-        Ok(Some(id))
+        Ok(Some(PreparedMaterialization::Loading(id)))
     }
 
     pub(crate) fn next(
@@ -165,10 +165,7 @@ impl ViewMaterializations {
             .as_mut()
             .filter(|materialization| materialization.id == id)
             .ok_or(MaterializationError::Conflict)?;
-        if session.active() != Some(materialization.ticket.tab_id)
-            || session.current_ticket(materialization.ticket.tab_id) != Some(materialization.ticket)
-            || session.revision() != materialization.revision
-        {
+        if !session.active_content_is_current(materialization.content) {
             state.active = None;
             return Err(MaterializationError::Conflict);
         }
@@ -201,6 +198,7 @@ mod tests {
         viewer::{RenderOptions, ViewerTabKind},
     };
     use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource};
+    use gtl_models::diffs::Commit;
 
     use super::*;
     use crate::session::{CachedView, ViewerSession};
@@ -217,6 +215,10 @@ mod tests {
     }
 
     fn view(title: &str) -> Arc<View> {
+        view_with_line(title, "+new")
+    }
+
+    fn view_with_line(title: &str, line: &str) -> Arc<View> {
         Arc::new(View {
             exclusions: None,
             repo_name: "repo".into(),
@@ -228,7 +230,7 @@ mod tests {
                 path: "src/lib.rs".into(),
                 added: 1,
                 removed: 0,
-                lines: vec!["@@ -0,0 +1 @@".into(), "+new".into()],
+                lines: vec!["@@ -0,0 +1 @@".into(), line.into()],
                 full_lines: None,
             }],
             title: title.into(),
@@ -243,6 +245,126 @@ mod tests {
                 note: String::new(),
             },
         })
+    }
+
+    fn publish_ready(
+        session: &mut ViewerSession,
+        tab: gtl_models::viewer::ViewerTabId,
+        view: Arc<View>,
+    ) {
+        let ticket = session.begin_compute(tab).expect("tab exists");
+        assert_eq!(
+            session.publish_labeled_if_current(ticket, CachedView::new(view), "ready".into()),
+            crate::session::PublishOutcome::Published
+        );
+    }
+
+    #[test]
+    fn an_empty_chunk_stream_completes_without_consuming_a_load_id() {
+        let mut session = ViewerSession::new(1024 * 1024);
+        let tab = session
+            .open(recipe("/repo"), "batch".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
+        let mut empty = (*view("empty")).clone();
+        empty.files.clear();
+        publish_ready(&mut session, tab, Arc::new(empty));
+        let session = Mutex::new(session);
+        let materializations = ViewMaterializations::default();
+
+        assert_eq!(
+            materializations
+                .prepare_content(&session, RenderOptions::DEFAULT)
+                .expect("prepare empty"),
+            Some(PreparedMaterialization::Complete)
+        );
+
+        publish_ready(&mut session.lock().expect("session"), tab, view("nonempty"));
+        assert_eq!(
+            materializations
+                .prepare_content(&session, RenderOptions::DEFAULT)
+                .expect("prepare nonempty"),
+            Some(PreparedMaterialization::Loading(
+                ViewLoadId::try_new(1).expect("first load id")
+            ))
+        );
+    }
+
+    #[test]
+    fn a_ready_commit_selection_materializes_the_selected_view() {
+        let mut session = ViewerSession::new(1024 * 1024);
+        let tab = session
+            .open(recipe("/repo"), "batch".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
+        let sha = "a".repeat(40);
+        let mut range = (*view_with_line("range", "+range")).clone();
+        range.commits = vec![Commit {
+            sha: sha.clone(),
+            subject: "selected commit".into(),
+            ..Default::default()
+        }];
+        publish_ready(&mut session, tab, Arc::new(range));
+        let (ticket, _, _) = session
+            .begin_commit_selection(tab, &sha)
+            .expect("commit can be selected");
+        assert_eq!(
+            session
+                .publish_commit_patch_if_current(ticket, view_with_line("selected", "+selected")),
+            crate::session::PublishOutcome::Published
+        );
+        let session = Mutex::new(session);
+        let materializations = ViewMaterializations::default();
+
+        let load = match materializations
+            .prepare_content(&session, RenderOptions::DEFAULT)
+            .expect("prepare selection")
+            .expect("ready selection")
+        {
+            PreparedMaterialization::Loading(load) => load,
+            PreparedMaterialization::Complete => panic!("selected view contains diff rows"),
+        };
+        let page = materializations
+            .next(&session, load)
+            .expect("selected chunk");
+
+        assert!(page.chunk.html.contains("selected"));
+        assert!(!page.chunk.html.contains("+range"));
+    }
+
+    #[test]
+    fn a_commit_selection_error_materializes_the_range_view() {
+        let mut session = ViewerSession::new(1024 * 1024);
+        let tab = session
+            .open(recipe("/repo"), "batch".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
+        let sha = "a".repeat(40);
+        let mut range = (*view_with_line("range", "+range")).clone();
+        range.commits = vec![Commit {
+            sha: sha.clone(),
+            subject: "selected commit".into(),
+            ..Default::default()
+        }];
+        publish_ready(&mut session, tab, Arc::new(range));
+        let (ticket, _, _) = session
+            .begin_commit_selection(tab, &sha)
+            .expect("commit can be selected");
+        assert_eq!(
+            session.set_commit_patch_error_if_current(ticket, "render failed".into()),
+            crate::session::PublishOutcome::Published
+        );
+        let session = Mutex::new(session);
+        let materializations = ViewMaterializations::default();
+
+        let load = match materializations
+            .prepare_content(&session, RenderOptions::DEFAULT)
+            .expect("prepare range fallback")
+            .expect("range fallback is ready")
+        {
+            PreparedMaterialization::Loading(load) => load,
+            PreparedMaterialization::Complete => panic!("range view contains diff rows"),
+        };
+        let page = materializations.next(&session, load).expect("range chunk");
+
+        assert!(page.chunk.html.contains("range"));
     }
 
     #[test]
@@ -280,5 +402,43 @@ mod tests {
             materializations.next(&session, first_load),
             Err(MaterializationError::Conflict)
         ));
+    }
+
+    #[test]
+    fn changing_an_inactive_tab_keeps_the_active_chunk_chain_current() {
+        let mut session = ViewerSession::new(1024 * 1024);
+        let first = session
+            .open(recipe("/first"), "first".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
+        let first_ticket = session.begin_compute(first).expect("first ticket");
+        session.publish_labeled_if_current(
+            first_ticket,
+            CachedView::new(view("first")),
+            "first".into(),
+        );
+        let second = session
+            .open(recipe("/second"), "second".into(), ViewerTabKind::Snapshot)
+            .expect("tab id should be available");
+        let second_ticket = session.begin_compute(second).expect("second ticket");
+        session.publish_labeled_if_current(
+            second_ticket,
+            CachedView::new(view("second")),
+            "second".into(),
+        );
+        session.activate(first);
+        let session = Mutex::new(session);
+        let materializations = ViewMaterializations::default();
+        let first_load = materializations
+            .prepare(&session, RenderOptions::DEFAULT)
+            .expect("prepare first")
+            .expect("ready first");
+
+        session
+            .lock()
+            .expect("session")
+            .begin_compute(second)
+            .expect("second tab still exists");
+
+        assert!(materializations.next(&session, first_load).is_ok());
     }
 }
