@@ -139,7 +139,7 @@ fn render_directory(directory: &TreeDirectory<'_>) -> Markup {
 pub(super) fn mobile_popover(presentation: &ChangedFilesPresentation<'_>, target: &str) -> Markup {
     html! {
         aside id=(target)
-            data-preview-files-popover
+            data-artifact-files-popover
             class="fixed inset-3 m-0 h-[calc(100vh_-_24px)] w-[calc(100vw_-_24px)] max-w-none overflow-hidden rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)]"
             aria-label="Changed files"
             popover {
@@ -217,7 +217,7 @@ mod tests {
         let html = build_html(&sample_view(), RenderOptions::DEFAULT, None);
 
         let mobile_popover = html
-            .split_once(r#"id="preview-files-popover-0""#)
+            .split_once(r#"id="artifact-files-popover-0""#)
             .and_then(|(_, tail)| tail.split_once(r#"<div class="gtl-scroll"#))
             .map(|(header, _)| header)
             .expect("mobile changed-files popover header");

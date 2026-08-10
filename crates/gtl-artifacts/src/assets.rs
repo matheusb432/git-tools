@@ -2,8 +2,8 @@
 //! Both are generated, committed payloads whose readable sources live in this
 //! crate and under `frontend/diff`.
 
-const RAW_PREVIEW_CSS: &str = include_str!("embedded/generated/preview.css");
-pub(crate) const PREVIEW_BUNDLE: &str = include_str!("embedded/generated/preview.js");
+const RAW_ARTIFACT_CSS: &str = include_str!("embedded/generated/artifact.css");
+pub(crate) const ARTIFACT_BUNDLE: &str = include_str!("embedded/generated/artifact.js");
 
 // ! The compiler banner comment carries an https:// URL; artifacts ban `http(s)://`
 // ! outright so the offline contract stays a plain substring scan.
@@ -13,8 +13,8 @@ fn strip_stylesheet_banner(css: &str) -> &str {
         .map_or(css, |(_, tail)| tail.trim_start())
 }
 
-pub(crate) fn preview_css() -> &'static str {
-    strip_stylesheet_banner(RAW_PREVIEW_CSS)
+pub(crate) fn artifact_css() -> &'static str {
+    strip_stylesheet_banner(RAW_ARTIFACT_CSS)
 }
 
 #[cfg(test)]
@@ -37,14 +37,14 @@ mod tests {
     }
 
     #[test]
-    fn preview_assets_are_offline_payloads() {
-        let css = preview_css();
+    fn artifact_assets_are_offline_payloads() {
+        let css = artifact_css();
         assert!(!css.starts_with("/*!"), "compiler banner must be stripped");
         assert!(!css.contains("/*!"));
         assert!(css.contains(":host,:root,[data-theme=dark]{"));
-        assert!(!PREVIEW_BUNDLE.is_empty());
+        assert!(!ARTIFACT_BUNDLE.is_empty());
         assert!(!has_disallowed_external_url(css));
-        assert!(!has_disallowed_external_url(PREVIEW_BUNDLE));
+        assert!(!has_disallowed_external_url(ARTIFACT_BUNDLE));
     }
 
     #[test]
@@ -55,7 +55,7 @@ mod tests {
         use gtl_models::viewer::Theme;
         use strum::VariantArray as _;
 
-        let css = preview_css();
+        let css = artifact_css();
         for theme in Theme::VARIANTS {
             if *theme == Theme::Dark {
                 continue;
@@ -133,7 +133,7 @@ mod tests {
     fn preflight_reset_stays_layered_below_utilities() {
         // ! An unlayered reset beats every layered rule, stripping the 1px width that
         // ! border utilities apply; the base layer must also precede utilities.
-        let css = preview_css();
+        let css = artifact_css();
         assert!(css.contains("*,:before,:after{box-sizing:border-box;border:0 solid}"));
         let base = css.find("@layer base").expect("base layer present");
         let utilities = css
@@ -143,10 +143,10 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_emits_theme_scale_utilities() {
+    fn artifact_css_emits_theme_scale_utilities() {
         // ! The entry imports utilities.css without Tailwind's default theme, so any
         // ! scale utility compiles to nothing unless theme-map.css defines its token.
-        let css = preview_css();
+        let css = artifact_css();
         assert!(css.contains(".px-5{padding-inline:1.25rem}"));
         assert!(css.contains(".gap-4{gap:1rem}"));
         assert!(css.contains(".rounded-sm{border-radius:var(--r-sm)}"));
@@ -156,13 +156,13 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_carries_no_keyframe_animation() {
+    fn artifact_css_carries_no_keyframe_animation() {
         // ! An animation repaints every frame for as long as it runs, which the
         // ! diff rows cannot absorb: they are the render hot path, and any rule
         // ! reaching them costs per-row work on every paint. Transitions and
         // ! smooth scrolling are the xtask presentation gate's to police;
         // ! animations are not, so this is where the ban lives.
-        let css = preview_css();
+        let css = artifact_css();
 
         assert!(!css.contains("animation:"));
         assert!(!css.contains("animation-name:"));
@@ -170,15 +170,15 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_styles_intra_line_word_spans() {
-        let css = preview_css();
+    fn artifact_css_styles_intra_line_word_spans() {
+        let css = artifact_css();
         assert!(css.contains(".diff-split .sp-del .ciw{"));
         assert!(css.contains(".diff-split .sp-add .ciw{"));
     }
 
     #[test]
-    fn preview_css_emits_split_tracks_and_narrow_stack() {
-        let css = preview_css();
+    fn artifact_css_emits_split_tracks_and_narrow_stack() {
+        let css = artifact_css();
         assert!(css.contains("grid-template-columns:44px minmax(0,1fr) 44px minmax(0,1fr)"));
         assert!(css.contains("@media (max-width:1024px)"));
         assert!(!css.contains("@media not all and (min-width:1024px)"));
@@ -189,8 +189,8 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_keeps_mid_width_layout_rules_out_of_narrow_viewports() {
-        let css = preview_css();
+    fn artifact_css_keeps_mid_width_layout_rules_out_of_narrow_viewports() {
+        let css = artifact_css();
 
         assert!(css.contains("@media (min-width:1025px) and (max-width:1280px)"));
         assert!(css.contains("grid-template-columns:220px minmax(0,1fr) 210px"));
@@ -199,8 +199,8 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_keeps_narrow_split_metadata_rows_full_width() {
-        let css = preview_css();
+    fn artifact_css_keeps_narrow_split_metadata_rows_full_width() {
+        let css = artifact_css();
         assert!(css.contains("@media (max-width:1024px)"));
         let stacked_rows = css
             .find(
@@ -217,8 +217,8 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_tames_long_lines_without_wrap() {
-        let css = preview_css();
+    fn artifact_css_tames_long_lines_without_wrap() {
+        let css = artifact_css();
         let collapsed = ":is(.dl-long .code-text,.diff-split code.long .code-text)";
         let expanded =
             ":is(.dl-long.expanded .code-text,.diff-split code.long.expanded .code-text)";
@@ -231,8 +231,8 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_uses_single_aligned_unified_line_number_gutter() {
-        let css = preview_css();
+    fn artifact_css_uses_single_aligned_unified_line_number_gutter() {
+        let css = artifact_css();
         let document = ":is(.layout,[data-gtl-diff-document])";
 
         assert_selector_declaration(
@@ -293,8 +293,8 @@ mod tests {
     }
 
     #[test]
-    fn preview_css_uses_responsive_sidebar_columns() {
-        let css = preview_css();
+    fn artifact_css_uses_responsive_sidebar_columns() {
+        let css = artifact_css();
         assert!(css.contains("grid-template-columns:262px minmax(0,1fr) 252px"));
         assert!(css.contains("grid-template-columns:320px minmax(0,1fr) 304px"));
         assert!(css.contains("grid-template-columns:220px minmax(0,1fr) 210px"));
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn file_status_indicators_stay_compact_trailing_and_discreet() {
         // Horizontal-wheel scroll math is covered by shared/wheel.test.ts.
-        let css = preview_css();
+        let css = artifact_css();
         assert_selector_declaration(css, ".tstatus", "width:1rem;height:1rem");
         assert_selector_declaration(
             css,
@@ -339,7 +339,7 @@ mod tests {
         // ! attribute selector must stand alone. The base block keeps `:root` in
         // ! its selector list (alongside `[data-theme="dark"]`) because dark has
         // ! no themed block of its own to fall back to on a nested element.
-        let css = preview_css();
+        let css = artifact_css();
         assert!(css.contains("[data-theme=hearth]{"));
         assert!(css.contains("[data-theme=light]{"));
         assert!(css.contains(":host([data-theme=hearth]),[data-theme=hearth]{"));

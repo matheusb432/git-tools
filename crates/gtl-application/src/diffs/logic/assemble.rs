@@ -77,7 +77,7 @@ fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
     }
 }
 
-/// The assembled diff data for one preview: commits, changed files, and hidden paths.
+/// The assembled data for one diff artifact: commits, changed files, and hidden paths.
 pub(in crate::diffs) struct DiffData {
     pub commits: Vec<Commit>,
     pub files: Vec<FileDiff>,

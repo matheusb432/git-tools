@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::recipes::Recipe;
 
 pub const VIEWER_STATE_CHANGED_EVENT: &str = "viewer-state-changed";
+pub const VIEWER_DIFF_LINES_PAGE_MAX_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -79,8 +80,26 @@ pub enum ViewerFileStatus {
     Modified,
 }
 
+/// Opaque address of one file within an identity-bound diff view.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ViewerDiffFileId(String);
+
+impl ViewerDiffFileId {
+    /// Creates the stable ID for a file's source-order position.
+    pub fn for_index(index: usize) -> Self {
+        Self(format!("file-{index}"))
+    }
+
+    /// Returns the opaque wire value.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerFileSummary {
+    pub id: ViewerDiffFileId,
     pub path: String,
     pub anchor_id: String,
     pub added: u32,
@@ -252,6 +271,42 @@ pub struct ViewerDiffChunk {
     pub continuation: ViewerDiffChunkContinuation,
 }
 
+/// Source-line position within one identity-bound diff file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ViewerDiffCursor(u32);
+
+impl ViewerDiffCursor {
+    /// First line in a diff file.
+    pub const START: Self = Self(0);
+
+    /// Creates a cursor at a source-line position.
+    pub const fn new(position: u32) -> Self {
+        Self(position)
+    }
+
+    /// Returns the source-line position.
+    pub const fn position(self) -> u32 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoadViewerDiffLines {
+    pub identity: ViewerViewIdentity,
+    pub file: ViewerDiffFileId,
+    pub cursor: ViewerDiffCursor,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerDiffLines {
+    pub identity: ViewerViewIdentity,
+    pub file: ViewerDiffFileId,
+    pub cursor: ViewerDiffCursor,
+    pub lines: Vec<String>,
+    pub next: Option<ViewerDiffCursor>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewerDiffChunkContinuation {
@@ -386,6 +441,7 @@ pub enum ViewerResource {
     Commit,
     DiffDocument,
     DiffChunk,
+    DiffLines,
     HistoryEntry,
     Settings,
     DiffFile,

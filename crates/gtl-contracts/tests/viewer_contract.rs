@@ -43,6 +43,7 @@ fn closed_value_tokens_are_snake_case() {
         serde_json::to_value(ViewerFailureCode::RepositoryDirectoryNotFound)
             .expect("failure code serializes"),
         serde_json::to_value(ViewerDiffChunkContinuation::More).expect("continuation serializes"),
+        serde_json::to_value(ViewerResource::DiffLines).expect("resource serializes"),
         serde_json::to_value(ViewerResource::HistoryEntry).expect("resource serializes"),
     ];
 
@@ -58,6 +59,7 @@ fn closed_value_tokens_are_snake_case() {
             json!("merge-diff"),
             json!("DirNotFound"),
             json!("more"),
+            json!("diff_lines"),
             json!("history_entry"),
         ]
     );
@@ -143,6 +145,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() {
                     trail: String::new(),
                 },
                 files: vec![ViewerFileSummary {
+                    id: ViewerDiffFileId::for_index(0),
                     path: "src/lib.rs".into(),
                     anchor_id: "file-src-lib-rs".into(),
                     added: 4,
@@ -184,11 +187,59 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() {
         value["active"]["view"]["files"][0]["anchor_id"],
         "file-src-lib-rs"
     );
+    assert_eq!(value["active"]["view"]["files"][0]["id"], "file-0");
     assert!(value.pointer("/active/view/files/0/lines").is_none());
     assert!(value.pointer("/active/view/repository_root").is_none());
     assert_eq!(
         serde_json::from_value::<ViewerShell>(value).expect("shell deserializes"),
         shell
+    );
+}
+
+#[test]
+fn raw_diff_line_pages_pin_opaque_addressing_and_identity_echoes() {
+    let file = ViewerDiffFileId::for_index(3);
+    let cursor = ViewerDiffCursor::new(8);
+    let request = LoadViewerDiffLines {
+        identity: identity(),
+        file: file.clone(),
+        cursor,
+    };
+    let page = ViewerDiffLines {
+        identity: identity(),
+        file,
+        cursor,
+        lines: vec!["@@ -1 +1 @@".into(), "+client rendered".into()],
+        next: Some(ViewerDiffCursor::new(10)),
+    };
+
+    assert_eq!(
+        serde_json::to_value(&request).expect("line request serializes"),
+        json!({
+            "identity": {
+                "tab_id": 7,
+                "range_generation": 11,
+                "selection_generation": 13,
+                "render_options": {"layout": "split", "density": "full"}
+            },
+            "file": "file-3",
+            "cursor": 8
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<LoadViewerDiffLines>(
+            serde_json::to_value(&request).expect("line request serializes")
+        )
+        .expect("line request deserializes"),
+        request
+    );
+    let value = serde_json::to_value(&page).expect("line page serializes");
+    assert_eq!(value["file"], "file-3");
+    assert_eq!(value["cursor"], 8);
+    assert_eq!(value["next"], 10);
+    assert_eq!(
+        serde_json::from_value::<ViewerDiffLines>(value).expect("line page deserializes"),
+        page
     );
 }
 

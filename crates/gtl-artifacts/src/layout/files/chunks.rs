@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use gtl_application::{diffs::View, viewer::RenderOptions};
 
 use super::{diff_target_id, render_rows, selected_lines};
-use crate::{ViewChunk, syntax::PreviewResult};
+use crate::{ViewChunk, syntax::ArtifactResult};
 
 const MAX_CHUNK_ROWS: usize = 256;
 const MAX_CHUNK_BYTES: usize = 256 * 1024;
@@ -11,7 +11,7 @@ const MAX_CHUNK_BYTES: usize = 256 * 1024;
 pub(in crate::layout) fn view_chunks(
     view: &View,
     options: RenderOptions,
-) -> PreviewResult<VecDeque<ViewChunk>> {
+) -> ArtifactResult<VecDeque<ViewChunk>> {
     let mut chunks = VecDeque::new();
     for (file_index, file) in view.files.iter().enumerate() {
         let syntax = crate::syntax::syntax_for_path(&file.path)?;

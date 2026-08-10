@@ -19,7 +19,7 @@ use crate::{
     shared::{notes::Note, repository_name::from_path},
 };
 
-/// Render a diff preview for `target`, resolving the repository from `cwd`.
+/// Render a diff artifact for `target`, resolving the repository from `cwd`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiff {
     pub cwd: PathBuf,
@@ -189,7 +189,7 @@ pub fn execute(
         )?
     {
         notes.push(Note::info(format!(
-            "diff-preview: reusing {}",
+            "diff-artifact: reusing {}",
             hit.display()
         )));
         return Ok(RenderDiffOk {
@@ -210,7 +210,7 @@ pub fn execute(
     }
     if !view.has_diff_content() {
         notes.push(Note::warn(format!(
-            "diff-preview: {summary} — nothing to show (no commits or changes); skipping"
+            "diff-artifact: {summary} — nothing to show (no commits or changes); skipping"
         )));
         return Ok(RenderDiffOk {
             outcome: RenderDiffOutcome::Empty,
@@ -240,7 +240,7 @@ pub fn execute(
     let placed = store.place(&store_root, &meta, &html)?;
 
     notes.push(Note::info(format!(
-        "diff-preview: {summary}, {}",
+        "diff-artifact: {summary}, {}",
         legacy_count_label(file_count, "file")
     )));
     notes.push(Note::info(format!("wrote {}", placed.path.display())));
@@ -336,7 +336,7 @@ mod tests {
         assert_eq!(
             response.notes,
             vec![
-                Note::info("diff-preview: 1 unpushed commit(s), 1 file(s)"),
+                Note::info("diff-artifact: 1 unpushed commit(s), 1 file(s)"),
                 Note::info("wrote /repo/.artifacts/gtl/artifact.html"),
             ]
         );
@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(
             response.notes,
             vec![Note::warn(
-                "diff-preview: 0 unpushed commit(s) — nothing to show (no commits or changes); skipping"
+                "diff-artifact: 0 unpushed commit(s) — nothing to show (no commits or changes); skipping"
             )]
         );
     }
@@ -466,7 +466,7 @@ mod tests {
         );
         assert_eq!(
             response.notes,
-            vec![Note::info("diff-preview: reusing /store/existing.html")]
+            vec![Note::info("diff-artifact: reusing /store/existing.html")]
         );
     }
 
@@ -725,8 +725,8 @@ mod tests {
         assert_eq!(
             response.notes,
             vec![
-                Note::warn("diff-preview: no upstream; falling back to main"),
-                Note::info("diff-preview: main..working, 1 file(s)"),
+                Note::warn("diff-artifact: no upstream; falling back to main"),
+                Note::info("diff-artifact: main..working, 1 file(s)"),
                 Note::info("wrote /repo/.artifacts/gtl/artifact.html"),
             ]
         );

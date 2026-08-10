@@ -1,5 +1,5 @@
 #[cfg(feature = "syntax")]
-use crate::{SyntaxDefinition, highlight::attach_syntax_tokens};
+use crate::{SyntaxDefinition, highlight::DiffSyntaxHighlighter};
 use crate::{SyntaxToken, UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 
 /// Default source-line character limit for syntax and intraline parsing.
@@ -172,6 +172,41 @@ impl ParsedDiff {
     }
 }
 
+/// Rows and diagnostics produced from one incremental parser input batch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedDiffBatch {
+    rows: Vec<DiffRow>,
+    line_number_digits: u32,
+    syntax_diagnostics: Vec<SyntaxDiagnostic>,
+}
+
+impl ParsedDiffBatch {
+    /// Returns the rows produced by this batch.
+    pub fn rows(&self) -> &[DiffRow] {
+        &self.rows
+    }
+
+    /// Consumes the batch and returns its rows.
+    pub fn into_rows(self) -> Vec<DiffRow> {
+        self.rows
+    }
+
+    /// Consumes the batch and returns its rows and diagnostics.
+    pub fn into_parts(self) -> (Vec<DiffRow>, Vec<SyntaxDiagnostic>) {
+        (self.rows, self.syntax_diagnostics)
+    }
+
+    /// Returns the cumulative gutter width after this batch.
+    pub const fn line_number_digits(&self) -> u32 {
+        self.line_number_digits
+    }
+
+    /// Returns recoverable failures produced by this batch.
+    pub fn syntax_diagnostics(&self) -> &[SyntaxDiagnostic] {
+        &self.syntax_diagnostics
+    }
+}
+
 /// Stateful configuration for parsing one file's unified-diff lines.
 #[derive(Debug, Clone, Default)]
 pub struct DiffParser {
@@ -203,28 +238,78 @@ impl DiffParser {
         self
     }
 
+    /// Starts an incremental parser with this configuration.
+    pub fn stream(&self) -> DiffParserStream {
+        DiffParserStream {
+            options: self.options,
+            line_classifier: UnifiedDiffLineClassifier::default(),
+            line_numbers: LineNumberState::default(),
+            line_number_max: 0,
+            #[cfg(feature = "syntax")]
+            syntax: self.syntax.as_ref().map(DiffSyntaxHighlighter::new),
+        }
+    }
+
     /// Parses the raw unified-diff lines for one file.
     pub fn parse(&self, lines: &[String]) -> ParsedDiff {
+        let mut stream = self.stream();
+        let batch = stream.push(lines);
+        ParsedDiff {
+            rows: batch.rows,
+            line_number_digits: batch.line_number_digits,
+            options: self.options,
+            syntax_diagnostics: batch.syntax_diagnostics,
+        }
+    }
+}
+
+/// Incremental semantic parser for one file's unified-diff lines.
+pub struct DiffParserStream {
+    options: ParseOptions,
+    line_classifier: UnifiedDiffLineClassifier,
+    line_numbers: LineNumberState,
+    line_number_max: u32,
+    #[cfg(feature = "syntax")]
+    syntax: Option<DiffSyntaxHighlighter>,
+}
+
+impl DiffParserStream {
+    /// Parses the next source-ordered batch of raw diff lines.
+    pub fn push(&mut self, lines: &[String]) -> ParsedDiffBatch {
         #[allow(
             unused_mut,
             reason = "syntax-enabled builds attach tokens after row derivation"
         )]
-        let mut rows = derive_rows(lines, self.options);
+        let mut rows = derive_rows(
+            lines,
+            self.options,
+            &mut self.line_classifier,
+            &mut self.line_numbers,
+        );
+        self.line_number_max = self.line_number_max.max(line_number_max(&rows));
+
         #[allow(unused_mut)]
         let mut syntax_diagnostics = Vec::new();
-
         #[cfg(feature = "syntax")]
-        if let Some(syntax) = &self.syntax {
-            syntax_diagnostics = attach_syntax_tokens(&mut rows, syntax);
+        if let Some(syntax) = &mut self.syntax {
+            syntax_diagnostics = syntax.attach(&mut rows);
         }
 
-        let line_number_digits = line_number_digits(&rows);
-        ParsedDiff {
+        ParsedDiffBatch {
             rows,
-            line_number_digits,
-            options: self.options,
+            line_number_digits: self.line_number_digits(),
             syntax_diagnostics,
         }
+    }
+
+    /// Returns the cumulative gutter width after all accepted batches.
+    pub const fn line_number_digits(&self) -> u32 {
+        line_number_digits(self.line_number_max)
+    }
+
+    /// Returns the options used by this stream.
+    pub const fn options(&self) -> ParseOptions {
+        self.options
     }
 }
 
@@ -270,10 +355,13 @@ impl LineNumberState {
     }
 }
 
-fn derive_rows(lines: &[String], options: ParseOptions) -> Vec<DiffRow> {
+fn derive_rows(
+    lines: &[String],
+    options: ParseOptions,
+    line_classifier: &mut UnifiedDiffLineClassifier,
+    line_numbers: &mut LineNumberState,
+) -> Vec<DiffRow> {
     let mut rows = Vec::with_capacity(lines.len());
-    let mut line_classifier = UnifiedDiffLineClassifier::default();
-    let mut line_numbers = LineNumberState::default();
 
     for raw in lines {
         if raw.is_empty() {
@@ -295,14 +383,19 @@ fn derive_rows(lines: &[String], options: ParseOptions) -> Vec<DiffRow> {
     rows
 }
 
-fn line_number_digits(rows: &[DiffRow]) -> u32 {
-    let line_number_max = rows
-        .iter()
+fn line_number_max(rows: &[DiffRow]) -> u32 {
+    rows.iter()
         .flat_map(|row| [row.old_line_number, row.new_line_number])
         .flatten()
         .max()
-        .unwrap_or(0);
-    line_number_max.checked_ilog10().unwrap_or(0) + 1
+        .unwrap_or(0)
+}
+
+const fn line_number_digits(line_number_max: u32) -> u32 {
+    match line_number_max.checked_ilog10() {
+        Some(digits) => digits + 1,
+        None => 1,
+    }
 }
 
 /// Returns a diff source line with its leading marker removed.
@@ -456,5 +549,55 @@ mod tests {
             parsed.rows()[2].long_line_character_count(),
             Some(DEFAULT_MAX_LINE_CHARACTERS + 1)
         );
+    }
+
+    #[test]
+    fn streaming_pages_match_batch_parsing() {
+        let source = lines(&[
+            "--- a/file.rs",
+            "+++ b/file.rs",
+            "@@ -98,3 +998,4 @@",
+            " context",
+            "-old",
+            "+new",
+            "+overlong",
+            "",
+            "\\ No newline at end of file",
+            "Binary files differ",
+        ]);
+        let parser = DiffParser::with_options(ParseOptions::new(5));
+        let expected = parser.parse(&source);
+        let expected_split = expected.split_rows();
+
+        for boundary in 0..=source.len() {
+            let mut stream = parser.stream();
+            let mut split = crate::SplitDiffStream::new();
+            let mut rows = Vec::new();
+            let mut split_rows = Vec::new();
+            let mut diagnostics = Vec::new();
+
+            for page in [&source[..boundary], &source[boundary..]] {
+                let batch = stream.push(page);
+                let (batch_rows, batch_diagnostics) = batch.into_parts();
+                rows.extend(batch_rows.iter().cloned());
+                split_rows.extend(split.push(batch_rows));
+                diagnostics.extend(batch_diagnostics);
+            }
+            split_rows.extend(split.finish());
+
+            assert_eq!(rows, expected.rows(), "row boundary {boundary}");
+            assert_eq!(split_rows, expected_split, "split boundary {boundary}");
+            assert_eq!(
+                diagnostics,
+                expected.syntax_diagnostics(),
+                "diagnostic boundary {boundary}"
+            );
+            assert_eq!(
+                stream.line_number_digits(),
+                expected.line_number_digits(),
+                "gutter boundary {boundary}"
+            );
+            assert_eq!(stream.options(), expected.options());
+        }
     }
 }

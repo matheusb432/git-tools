@@ -6,12 +6,12 @@ use gtl_application::{
     diffs::{Cmd, FileDiff, Foot, View},
     ports::{ArtifactMeta, ArtifactStore, HtmlRenderer},
 };
+use gtl_artifacts::ArtifactRenderer;
 use gtl_infra::artifact_store::StoreArtifacts;
 use gtl_models::{
     diffs::DiffKind,
     viewer::{DiffDensity, DiffLayout, RenderOptions},
 };
-use gtl_preview::MaudRenderer;
 
 fn view(repo_root: &Path) -> View {
     View {
@@ -71,10 +71,10 @@ fn presentation_options_have_distinct_artifact_identities() {
     let view = view(repo.path());
     let options_default = RenderOptions::DEFAULT;
     let options_split_full = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
-    let html_default = MaudRenderer
+    let html_default = ArtifactRenderer
         .build_html(&view, options_default, None)
         .expect("embedded syntax assets should load");
-    let html_split_full = MaudRenderer
+    let html_split_full = ArtifactRenderer
         .build_html(&view, options_split_full, None)
         .expect("embedded syntax assets should load");
 

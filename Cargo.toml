@@ -10,7 +10,7 @@ members = [
   "crates/gtl-models",
   "crates/gtl-infra",
   "crates/gtl-parser",
-  "crates/gtl-preview",
+  "crates/gtl-artifacts",
   "crates/gtl-web",
   "crates/gtl-web-contracts",
   "e2e/gtl-browser-e2e",
@@ -28,7 +28,7 @@ default-members = [
   "crates/gtl-models",
   "crates/gtl-infra",
   "crates/gtl-parser",
-  "crates/gtl-preview",
+  "crates/gtl-artifacts",
   "xtask",
 ]
 
@@ -42,7 +42,7 @@ gtl-application = { path = "crates/gtl-application" }
 gtl-benchmarks = { path = "benchmarks" }
 gtl-contracts = { path = "crates/gtl-contracts" }
 gtl-desktop = { path = "crates/gtl-desktop" }
-gtl-preview = { path = "crates/gtl-preview" }
+gtl-artifacts = { path = "crates/gtl-artifacts" }
 gtl-models = { path = "crates/gtl-models" }
 gtl-parser = { path = "crates/gtl-parser", default-features = false }
 gtl-infra = { path = "crates/gtl-infra" }

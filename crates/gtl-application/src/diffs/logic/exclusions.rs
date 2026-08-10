@@ -89,8 +89,8 @@ mod tests {
         };
 
         assert_eq!(
-            note("diff-preview", &view).map(|note| note.text),
-            Some("diff-preview: 1 file(s) hidden by config [diff.exclude] (lock)".into())
+            note("diff-artifact", &view).map(|note| note.text),
+            Some("diff-artifact: 1 file(s) hidden by config [diff.exclude] (lock)".into())
         );
     }
 }

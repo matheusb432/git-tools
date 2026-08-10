@@ -4,10 +4,10 @@ use maud::{Markup, html};
 use super::files;
 use crate::{
     rows::{INTRALINE_PRESENTATION_CLASSES, ROW_PRESENTATION_CLASSES, SPLIT_PRESENTATION_CLASSES},
-    syntax::PreviewResult,
+    syntax::ArtifactResult,
 };
 
-pub(crate) fn diff_document_shell(view: &View, options: RenderOptions) -> PreviewResult<Markup> {
+pub(crate) fn diff_document_shell(view: &View, options: RenderOptions) -> ArtifactResult<Markup> {
     Ok(html! {
         div data-gtl-diff-document data-gtl-diff-scroller class={
             "diff-document copy-ctx "

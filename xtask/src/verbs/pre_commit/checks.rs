@@ -102,7 +102,7 @@ mod tests {
             "tsconfig.json",
             "vitest.config.mjs",
             "frontend/test/dom-stub.ts",
-            "crates/gtl-preview/src/styles/base.css",
+            "crates/gtl-artifacts/src/styles/base.css",
             ".github/workflows/check.yaml",
         ]));
 

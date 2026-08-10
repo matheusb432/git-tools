@@ -14,7 +14,7 @@ pub(crate) use diff_document::diff_document_shell;
 use gtl_application::{diffs::View, viewer::RenderOptions};
 use maud::{Markup, html};
 
-use crate::syntax::PreviewResult;
+use crate::syntax::ArtifactResult;
 
 struct ArtifactMobileNavigationTargets {
     files: String,
@@ -25,9 +25,9 @@ struct ArtifactMobileNavigationTargets {
 impl ArtifactMobileNavigationTargets {
     fn new(view_index: usize) -> Self {
         Self {
-            files: format!("preview-files-popover-{view_index}"),
-            commits: format!("preview-commits-popover-{view_index}"),
-            controls: format!("preview-controls-popover-{view_index}"),
+            files: format!("artifact-files-popover-{view_index}"),
+            commits: format!("artifact-commits-popover-{view_index}"),
+            controls: format!("artifact-controls-popover-{view_index}"),
         }
     }
 }
@@ -47,7 +47,7 @@ pub(crate) fn view_body(
     view: &View,
     options: RenderOptions,
     view_index: usize,
-) -> PreviewResult<Markup> {
+) -> ArtifactResult<Markup> {
     let mobile_navigation = ArtifactMobileNavigationTargets::new(view_index);
     let changed_files = tree::ChangedFilesPresentation::new(view);
     let commit_shelf = shelf::CommitShelfPresentation::new(view);
@@ -76,7 +76,7 @@ pub(crate) fn view_body(
 pub(crate) fn view_chunks(
     view: &View,
     options: RenderOptions,
-) -> PreviewResult<std::collections::VecDeque<crate::ViewChunk>> {
+) -> ArtifactResult<std::collections::VecDeque<crate::ViewChunk>> {
     files::view_chunks(view, options)
 }
 

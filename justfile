@@ -88,7 +88,7 @@ check:
 fix *args:
     cargo run --quiet -p xtask -- fix {{ args }}
 
-# Rebuild the committed diff-preview JS bundle and fail if it drifts from its TypeScript sources.
+# Rebuild the committed diff artifact JS bundle and fail if it drifts from its TypeScript sources.
 [group('quality')]
 drift-check:
     cargo run --quiet -p xtask -- drift-check

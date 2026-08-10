@@ -63,7 +63,7 @@ async fn raw_artifact_lifecycle() -> anyhow::Result<()> {
         .await?;
         support::click(
             &page.locator(
-                "[data-preview-files-popover]:popover-open [data-file-target='f-src-beta-rs']",
+                "[data-artifact-files-popover]:popover-open [data-file-target='f-src-beta-rs']",
             ),
             "navigate from raw mobile changed files",
         )

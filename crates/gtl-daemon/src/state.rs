@@ -4,12 +4,12 @@ use axum::{
     Router,
     routing::{get, post},
 };
+use gtl_artifacts::ArtifactRenderer;
 use gtl_infra::{
     app_state::SqliteAppState, sample_project_project_client::SampleProjectClient,
     artifact_store::StoreArtifacts, clock::SystemClock, git_client::HybridGitClient,
     push_ledger::NoOpPushLedger, user_config::TomlSettingsStore,
 };
-use gtl_preview::MaudRenderer;
 use tokio::sync::watch;
 
 use crate::{endpoints, lifecycle::ExeIdentity};
@@ -23,7 +23,7 @@ pub struct DaemonState {
     pub(crate) shutdown_tx: watch::Sender<bool>,
     pub(crate) git: HybridGitClient,
     pub(crate) artifacts: StoreArtifacts,
-    pub(crate) renderer: MaudRenderer,
+    pub(crate) renderer: ArtifactRenderer,
     pub(crate) clock: SystemClock,
     pub(crate) projects: SampleProjectClient,
     pub(crate) ledger: NoOpPushLedger,
@@ -48,7 +48,7 @@ impl DaemonState {
             shutdown_tx,
             git: HybridGitClient,
             artifacts: StoreArtifacts,
-            renderer: MaudRenderer,
+            renderer: ArtifactRenderer,
             clock: SystemClock,
             projects: SampleProjectClient::from_environment(),
             ledger: NoOpPushLedger,

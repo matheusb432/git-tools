@@ -5,7 +5,7 @@
     "import/no-cycle": "error"
   },
   "ignorePatterns": [
-    "crates/gtl-preview/src/embedded/generated",
+    "crates/gtl-artifacts/src/embedded/generated",
     "crates/gtl-web/assets/generated",
     "node_modules",
     "target"

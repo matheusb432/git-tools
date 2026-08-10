@@ -8,12 +8,12 @@ use std::{
 use anyhow::{Context, Result, bail};
 
 const AUTHORED_CSS_ALLOWED: &[&str] = &[
-    "crates/gtl-preview/src/styles/base.css",
-    "crates/gtl-preview/src/styles/theme-map.css",
-    "crates/gtl-preview/src/styles/tokens.css",
+    "crates/gtl-artifacts/src/styles/base.css",
+    "crates/gtl-artifacts/src/styles/theme-map.css",
+    "crates/gtl-artifacts/src/styles/tokens.css",
 ];
-const AUTHORED_CSS_ROOTS: &[&str] = &["crates/gtl-preview/src", "crates/gtl-desktop/src"];
-const GENERATED_CSS_PATH: &str = "crates/gtl-preview/src/embedded/generated/preview.css";
+const AUTHORED_CSS_ROOTS: &[&str] = &["crates/gtl-artifacts/src", "crates/gtl-desktop/src"];
+const GENERATED_CSS_PATH: &str = "crates/gtl-artifacts/src/embedded/generated/artifact.css";
 const TRAVERSAL_LIMITS: TraversalLimits = TraversalLimits {
     directory_depth_max: 32,
     directory_entry_count_max: 10_000,
@@ -261,14 +261,14 @@ mod tests {
         TraversalLimits, check_authored_css, check_compiled_css, inventory_authored_css_with_limits,
     };
 
-    const GENERATED_CSS_PATH: &str = "crates/gtl-preview/src/embedded/generated/preview.css";
+    const GENERATED_CSS_PATH: &str = "crates/gtl-artifacts/src/embedded/generated/artifact.css";
 
     fn repository_with_allowed_css() -> TempDir {
         let repository = TempDir::new().expect("temporary repository");
         for path in [
-            "crates/gtl-preview/src/styles/base.css",
-            "crates/gtl-preview/src/styles/theme-map.css",
-            "crates/gtl-preview/src/styles/tokens.css",
+            "crates/gtl-artifacts/src/styles/base.css",
+            "crates/gtl-artifacts/src/styles/theme-map.css",
+            "crates/gtl-artifacts/src/styles/tokens.css",
         ] {
             let path = repository.path().join(path);
             fs::create_dir_all(path.parent().expect("CSS parent directory"))
@@ -295,24 +295,24 @@ mod tests {
     }
 
     #[test]
-    fn authored_css_ignores_preview_generated_files() {
+    fn authored_css_ignores_artifact_generated_files() {
         let repository = repository_with_allowed_css();
         write_css(
             &repository,
-            "crates/gtl-preview/src/embedded/generated/extra.css",
+            "crates/gtl-artifacts/src/embedded/generated/extra.css",
         );
 
         assert!(check_authored_css(repository.path()).is_ok());
     }
 
     #[test]
-    fn authored_css_rejects_an_extra_preview_file() {
+    fn authored_css_rejects_an_extra_artifact_file() {
         let repository = repository_with_allowed_css();
-        let path = "crates/gtl-preview/src/styles/viewer.css";
+        let path = "crates/gtl-artifacts/src/styles/viewer.css";
         write_css(&repository, path);
 
         let error = check_authored_css(repository.path())
-            .expect_err("extra preview CSS should fail")
+            .expect_err("extra artifact CSS should fail")
             .to_string();
 
         assert!(error.contains(path), "{error}");
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn authored_css_rejects_directory_depth_over_limit() {
         let repository = repository_with_allowed_css();
-        let path = "crates/gtl-preview/src/nested/deeper";
+        let path = "crates/gtl-artifacts/src/nested/deeper";
         fs::create_dir_all(repository.path().join(path)).expect("create nested source directory");
         let limits = TraversalLimits {
             directory_depth_max: 1,
@@ -364,7 +364,7 @@ mod tests {
             .expect_err("source entry count should be bounded")
             .to_string();
 
-        assert!(error.contains("crates/gtl-preview/src"), "{error}");
+        assert!(error.contains("crates/gtl-artifacts/src"), "{error}");
         assert!(
             error.contains("directory entry count exceeds limit 0"),
             "{error}"

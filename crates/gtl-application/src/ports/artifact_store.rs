@@ -47,7 +47,7 @@ pub struct HistoryRecord {
     pub byte_size: u64,
 }
 
-/// The content-addressed artifact store behind the diff previews.
+/// The content-addressed store behind diff artifacts.
 pub trait ArtifactStore: Clone + Send + Sync + 'static {
     /// Place `html` and its metadata under `store_root`, addressed by content hash.
     /// Idempotent per content hash: identical HTML reuses the existing artifact.

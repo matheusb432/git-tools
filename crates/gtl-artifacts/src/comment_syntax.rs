@@ -1,6 +1,6 @@
 //! Resolve a source file's line-comment leader from its extension.
 //!
-//! The diff preview's "copy code" button prepends a commented context line
+//! The diff artifact's "copy code" button prepends a commented context line
 //! (`<leader> * <path>, lines: X..Y`). Each [`CommentAdapter`] claims the
 //! extensions that share one leader; unknown or extension-less paths fall back
 //! to [`DEFAULT_LEADER`] (`//`).

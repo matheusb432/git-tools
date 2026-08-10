@@ -10,12 +10,12 @@ export default defineConfig({
     target: "es2021",
     minify: true,
     emptyOutDir: false,
-    outDir: resolve(root, "crates/gtl-preview/src/embedded/generated"),
+    outDir: resolve(root, "crates/gtl-artifacts/src/embedded/generated"),
     lib: {
       entry: resolve(root, "frontend/diff/main.ts"),
-      name: "GtlDiffPreview",
+      name: "GtlDiffArtifact",
       formats: ["iife"],
-      fileName: () => "preview.js",
+      fileName: () => "artifact.js",
     },
   },
 });

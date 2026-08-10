@@ -99,9 +99,9 @@ describe("enhanceLayout", () => {
     const menu = document.createElement("aside");
     menu.setAttribute("popover", "");
     const foldAction = document.createElement("button");
-    foldAction.setAttribute("data-preview-action", "fold-all");
+    foldAction.setAttribute("data-artifact-action", "fold-all");
     const contextAction = document.createElement("button");
-    contextAction.setAttribute("data-preview-action", "toggle-context");
+    contextAction.setAttribute("data-artifact-action", "toggle-context");
     menu.appendChild(foldAction);
     menu.appendChild(contextAction);
     root.appendChild(context);
@@ -201,8 +201,8 @@ describe("enhanceLayout", () => {
     file.id = "file-mobile";
     file.open = false;
     const popover = document.createElement("aside");
-    popover.id = "preview-files-popover-3";
-    popover.setAttribute("data-preview-files-popover", "");
+    popover.id = "artifact-files-popover-3";
+    popover.setAttribute("data-artifact-files-popover", "");
     const hidePopover = vi.fn();
     Object.defineProperty(popover, "hidePopover", { value: hidePopover });
     const button = document.createElement("button");

@@ -23,7 +23,7 @@ pub struct Foot {
 pub struct View {
     pub repo_name: String,
     /// Absolute path to the repo root (git top-level), used to compose copy-able
-    /// absolute file paths in the preview. POSIX-joined with `path` at render time.
+    /// absolute file paths in the artifact. POSIX-joined with `path` at render time.
     pub repo_root: String,
     pub branch: String,
     pub upstream: String,
@@ -41,8 +41,8 @@ pub struct View {
 impl View {
     /// Returns whether the view contains at least one commit or changed file.
     ///
-    /// Snapshot previews require diff content. Live views may remain open without it so they can be
-    /// refreshed later.
+    /// Snapshot artifacts require diff content. Live views may remain open without it so they can
+    /// be refreshed later.
     ///
     /// # Examples
     ///

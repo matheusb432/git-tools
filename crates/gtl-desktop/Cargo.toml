@@ -22,7 +22,7 @@ gtl-contracts.workspace = true
 gtl-models.workspace = true
 gtl-infra.workspace = true
 lru.workspace = true
-gtl-preview.workspace = true
+gtl-artifacts.workspace = true
 raw-window-handle.workspace = true
 tauri = { workspace = true, features = ["tray-icon"] }
 tauri-plugin-single-instance.workspace = true

@@ -1,7 +1,12 @@
+use gtl_application::{
+    diffs::{FileDiff, View},
+    viewer::{DiffDensity, RenderOptions},
+};
 use gtl_contracts::viewer::{
-    LoadViewerDiffChunk, PrepareDiffDocument, ViewerApiError, ViewerDiffChunk,
-    ViewerDiffChunkContinuation, ViewerDiffDocument, ViewerDiffMaterialization, ViewerResource,
-    ViewerViewIdentity,
+    LoadViewerDiffChunk, LoadViewerDiffLines, PrepareDiffDocument,
+    VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerApiError, ViewerDiffChunk, ViewerDiffChunkContinuation,
+    ViewerDiffCursor, ViewerDiffDocument, ViewerDiffFileId, ViewerDiffLines,
+    ViewerDiffMaterialization, ViewerResource, ViewerViewIdentity,
 };
 
 use super::{internal, settings, shell, unavailable};
@@ -31,7 +36,7 @@ pub(super) fn prepare(
         }
         snapshot
     };
-    let html = gtl_preview::diff_document_shell(snapshot.view(), options)
+    let html = gtl_artifacts::diff_document_shell(snapshot.view(), options)
         .map_err(|error| internal("failed to render diff document", error))?
         .into_string();
     let rendered = ViewMaterializations::render_content(&snapshot, options)
@@ -73,6 +78,92 @@ pub(super) fn load(
             ViewerDiffChunkContinuation::Complete
         },
     })
+}
+
+pub(super) fn load_lines(
+    app: &ViewerApp,
+    request: LoadViewerDiffLines,
+) -> Result<ViewerDiffLines, ViewerApiError> {
+    let options = validated_current_options(app, request.identity)?;
+    let snapshot = {
+        let mut session = app
+            .session
+            .lock()
+            .map_err(|error| internal("failed to lock viewer session", error))?;
+        let snapshot = session
+            .active_content_snapshot()
+            .ok_or(ViewerApiError::Conflict)?;
+        if !shell::identity_matches(request.identity, snapshot.identity(), options) {
+            return Err(ViewerApiError::Conflict);
+        }
+        snapshot
+    };
+    let file = file_by_id(snapshot.view(), &request.file).ok_or(ViewerApiError::NotFound {
+        resource: ViewerResource::DiffFile,
+    })?;
+    let page = slice_line_page(selected_lines(file, options), request.cursor)?;
+    validate_current_request(app, request.identity, options)?;
+
+    Ok(ViewerDiffLines {
+        identity: request.identity,
+        file: request.file,
+        cursor: request.cursor,
+        lines: page.lines,
+        next: page.next,
+    })
+}
+
+fn file_by_id<'view>(view: &'view View, id: &ViewerDiffFileId) -> Option<&'view FileDiff> {
+    view.files.iter().enumerate().find_map(|(index, file)| {
+        (ViewerDiffFileId::for_index(index).as_str() == id.as_str()).then_some(file)
+    })
+}
+
+fn selected_lines(file: &FileDiff, options: RenderOptions) -> &[String] {
+    match (options.density(), file.full_lines.as_deref()) {
+        (DiffDensity::Full, Some(lines)) => lines,
+        (DiffDensity::Full | DiffDensity::Compact, _) => &file.lines,
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct DiffLinePage {
+    lines: Vec<String>,
+    next: Option<ViewerDiffCursor>,
+}
+
+fn slice_line_page(
+    lines: &[String],
+    cursor: ViewerDiffCursor,
+) -> Result<DiffLinePage, ViewerApiError> {
+    let start = usize::try_from(cursor.position()).map_err(|_| ViewerApiError::InvalidRequest)?;
+    if start > lines.len() {
+        return Err(ViewerApiError::InvalidRequest);
+    }
+
+    let mut page = Vec::new();
+    let mut bytes = 0usize;
+    for line in &lines[start..] {
+        let crosses_bound =
+            !page.is_empty() && bytes.saturating_add(line.len()) > VIEWER_DIFF_LINES_PAGE_MAX_BYTES;
+        if crosses_bound {
+            break;
+        }
+        bytes = bytes.saturating_add(line.len());
+        page.push(line.clone());
+    }
+
+    let end = start
+        .checked_add(page.len())
+        .ok_or(ViewerApiError::InvalidRequest)?;
+    let next = if end < lines.len() {
+        Some(ViewerDiffCursor::new(
+            u32::try_from(end).map_err(|_| ViewerApiError::InvalidRequest)?,
+        ))
+    } else {
+        None
+    };
+    Ok(DiffLinePage { lines: page, next })
 }
 
 fn publish_rendered(
@@ -157,7 +248,7 @@ mod tests {
     use super::*;
     use crate::{presentation::ViewerApp, session::CachedView};
 
-    fn ready_app() -> (tempfile::TempDir, ViewerApp, ViewerViewIdentity) {
+    fn ready_app_with_file(file: FileDiff) -> (tempfile::TempDir, ViewerApp, ViewerViewIdentity) {
         let directory = tempfile::tempdir().expect("temporary viewer data");
         let settings_path = directory.path().join("config.toml");
         let app = ViewerApp::open(
@@ -188,13 +279,7 @@ mod tests {
             branch: "feature".into(),
             upstream: "main".into(),
             commits: Vec::new(),
-            files: vec![FileDiff {
-                path: "src/lib.rs".into(),
-                added: 1,
-                removed: 0,
-                lines: vec!["@@ -0,0 +1 @@".into(), "+server rendered".into()],
-                full_lines: None,
-            }],
+            files: vec![file],
             title: "Feature diff".into(),
             cmd: Cmd {
                 lead: String::new(),
@@ -220,6 +305,16 @@ mod tests {
         (directory, app, identity)
     }
 
+    fn ready_app() -> (tempfile::TempDir, ViewerApp, ViewerViewIdentity) {
+        ready_app_with_file(FileDiff {
+            path: "src/lib.rs".into(),
+            added: 1,
+            removed: 0,
+            lines: vec!["@@ -0,0 +1 @@".into(), "+server rendered".into()],
+            full_lines: None,
+        })
+    }
+
     #[test]
     fn document_and_chunks_keep_all_diff_rows_on_the_rust_boundary() {
         let (_directory, app, identity) = ready_app();
@@ -236,6 +331,123 @@ mod tests {
         assert!(chunk.html.contains("server rendered"));
         assert!(chunk.row_count > 0);
         assert_eq!(chunk.continuation, ViewerDiffChunkContinuation::Complete);
+    }
+
+    #[test]
+    fn raw_line_pages_are_addressable_and_echo_the_validated_identity() {
+        let (_directory, app, identity) = ready_app();
+        let file = ViewerDiffFileId::for_index(0);
+
+        let page = load_lines(
+            &app,
+            LoadViewerDiffLines {
+                identity,
+                file: file.clone(),
+                cursor: ViewerDiffCursor::START,
+            },
+        )
+        .expect("raw diff lines");
+
+        assert_eq!(page.identity, identity);
+        assert_eq!(page.file, file);
+        assert_eq!(page.cursor, ViewerDiffCursor::START);
+        assert_eq!(page.lines, ["@@ -0,0 +1 @@", "+server rendered"]);
+        assert_eq!(page.next, None);
+    }
+
+    #[test]
+    fn raw_line_pages_isolate_an_oversized_line_and_always_advance() {
+        let oversized = format!("+{}", "x".repeat(VIEWER_DIFF_LINES_PAGE_MAX_BYTES));
+        let lines = vec![oversized.clone(), "+tail".into()];
+
+        let first = slice_line_page(&lines, ViewerDiffCursor::START).expect("first page");
+        let second =
+            slice_line_page(&lines, first.next.expect("next cursor")).expect("second page");
+
+        assert_eq!(first.lines, [oversized]);
+        assert_eq!(second.lines, ["+tail"]);
+        assert_eq!(second.next, None);
+    }
+
+    #[test]
+    fn raw_line_pages_stop_before_crossing_the_shared_byte_cap() {
+        let half = "x".repeat(VIEWER_DIFF_LINES_PAGE_MAX_BYTES / 2);
+        let lines = vec![half.clone(), half, "+next page".into()];
+
+        let first = slice_line_page(&lines, ViewerDiffCursor::START).expect("first page");
+
+        assert_eq!(
+            first.lines.iter().map(String::len).sum::<usize>(),
+            VIEWER_DIFF_LINES_PAGE_MAX_BYTES
+        );
+        assert_eq!(first.next, Some(ViewerDiffCursor::new(2)));
+    }
+
+    #[test]
+    fn full_density_pages_select_the_available_full_diff() {
+        let (_directory, app, mut identity) = ready_app_with_file(FileDiff {
+            path: "src/lib.rs".into(),
+            added: 1,
+            removed: 1,
+            lines: vec!["+compact".into()],
+            full_lines: Some(vec!["-full old".into(), "+full new".into()]),
+        });
+        super::super::actions::set_preference(
+            &app,
+            SetViewerPreference::Density(gtl_contracts::viewer::ViewerDiffDensity::Full),
+        )
+        .expect("set full density");
+        identity.render_options.density = gtl_contracts::viewer::ViewerDiffDensity::Full;
+
+        let page = load_lines(
+            &app,
+            LoadViewerDiffLines {
+                identity,
+                file: ViewerDiffFileId::for_index(0),
+                cursor: ViewerDiffCursor::START,
+            },
+        )
+        .expect("full diff lines");
+
+        assert_eq!(page.lines, ["-full old", "+full new"]);
+    }
+
+    #[test]
+    fn raw_line_pages_reject_unknown_files_and_out_of_range_cursors() {
+        let (_directory, app, identity) = ready_app();
+        let unknown = load_lines(
+            &app,
+            LoadViewerDiffLines {
+                identity,
+                file: ViewerDiffFileId::for_index(99),
+                cursor: ViewerDiffCursor::START,
+            },
+        );
+
+        assert_eq!(
+            unknown,
+            Err(ViewerApiError::NotFound {
+                resource: ViewerResource::DiffFile,
+            })
+        );
+        assert_eq!(
+            slice_line_page(&["one".into()], ViewerDiffCursor::new(2)),
+            Err(ViewerApiError::InvalidRequest)
+        );
+
+        let mut stale_identity = identity;
+        stale_identity.range_generation += 1;
+        assert_eq!(
+            load_lines(
+                &app,
+                LoadViewerDiffLines {
+                    identity: stale_identity,
+                    file: ViewerDiffFileId::for_index(0),
+                    cursor: ViewerDiffCursor::START,
+                }
+            ),
+            Err(ViewerApiError::Conflict)
+        );
     }
 
     #[test]

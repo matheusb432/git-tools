@@ -26,7 +26,7 @@ gtl-contracts.workspace = true
 # The view-cache target benchmarks the desktop-owned cache without exposing it in production builds.
 gtl-desktop = { workspace = true, features = ["benchmark-support"] }
 gtl-infra.workspace = true
-gtl-preview.workspace = true
+gtl-artifacts.workspace = true
 tempfile.workspace = true
 
 [lints]

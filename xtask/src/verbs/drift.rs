@@ -10,7 +10,7 @@ use crate::project;
 /// Tracked generated paths paired with the command that regenerates them.
 const BUNDLES: &[(&str, &str)] = &[
     (
-        "crates/gtl-preview/src/embedded/generated/",
+        "crates/gtl-artifacts/src/embedded/generated/",
         "just cli build",
     ),
     ("crates/gtl-web/assets/generated/", "just web build"),
@@ -63,7 +63,7 @@ mod tests {
     fn check_drift_fails_with_rebuild_hint_when_a_bundle_is_dirty() {
         let err = check_drift(BUNDLES, &|_| false).unwrap_err().to_string();
         assert!(
-            err.contains("crates/gtl-preview/src/embedded/generated/ is stale"),
+            err.contains("crates/gtl-artifacts/src/embedded/generated/ is stale"),
             "{err}"
         );
         assert!(err.contains("just cli build"), "{err}");

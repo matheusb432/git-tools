@@ -151,6 +151,7 @@ fn with_viewer_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<t
         bridge::viewer_get_shell,
         bridge::viewer_prepare_diff_document,
         bridge::viewer_load_diff_chunk,
+        bridge::viewer_load_diff_lines,
         bridge::viewer_activate_tab,
         bridge::viewer_close_tab,
         bridge::viewer_refresh_tab,

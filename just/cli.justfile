@@ -5,7 +5,7 @@ set working-directory := '..'
 _default:
     @just --list cli
 
-# Build the release CLI engine + gtl-daemon + the offline diff-preview bundle: target/release/{git-tools,gtl-daemon}[.exe].
+# Build the release CLI engine + gtl-daemon + the offline diff artifact bundle: target/release/{git-tools,gtl-daemon}[.exe].
 [group('cli')]
 build:
     cargo run --quiet -p xtask -- build --target cli

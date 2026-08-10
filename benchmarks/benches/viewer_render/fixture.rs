@@ -25,22 +25,22 @@ impl ViewerRenderBenchmark {
 
     pub(super) fn render_raw_artifact(&self, options: RenderOptions) -> String {
         require(
-            gtl_preview::build_html(&self.view, options, Some("dark")),
+            gtl_artifacts::build_html(&self.view, options, Some("dark")),
             "rendering the raw benchmark artifact",
         )
     }
 
     pub(super) fn render_diff_document_shell(&self, options: RenderOptions) -> String {
         require(
-            gtl_preview::diff_document_shell(&self.view, options),
+            gtl_artifacts::diff_document_shell(&self.view, options),
             "rendering the benchmark diff document shell",
         )
         .into_string()
     }
 
-    pub(super) fn render_chunks(&self, options: RenderOptions) -> Vec<gtl_preview::ViewChunk> {
+    pub(super) fn render_chunks(&self, options: RenderOptions) -> Vec<gtl_artifacts::ViewChunk> {
         require(
-            gtl_preview::view_chunks(&self.view, options),
+            gtl_artifacts::view_chunks(&self.view, options),
             "rendering the benchmark view chunks",
         )
         .into()

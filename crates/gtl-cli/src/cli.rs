@@ -22,7 +22,7 @@ fn non_empty_message(value: &str) -> Result<String, String> {
     }
 }
 
-/// git-tools — render git workflow HTML previews.
+/// git-tools — render Git workflow diff artifacts.
 #[derive(Debug, Parser)]
 #[command(
     name = "git-tools",
@@ -119,7 +119,7 @@ pub struct DiffArgs {
 /// Nested commands under `diff`.
 #[derive(Debug, Subcommand)]
 pub enum DiffSub {
-    /// Render a merge preview (three-dot diff) of a repo against a base branch.
+    /// Render a merge diff artifact (three-dot diff) against a base branch.
     Merge(MergeArgs),
     /// Save + open a persisted live view of unpushed work in a managed repo.
     Live(LiveArgs),
@@ -128,7 +128,7 @@ pub enum DiffSub {
 /// Arguments for `diff merge`.
 #[derive(Debug, Args)]
 pub struct MergeArgs {
-    /// Subrepo working tree to preview.
+    /// Subrepo working tree to render.
     #[arg(long = "repo")]
     pub repo_path: String,
     /// Base branch to merge into (default: main).
@@ -325,7 +325,7 @@ pub struct DiffTargetArgs {
     /// Only valid for the single-repo diff modes.
     #[arg(short = 'n', long = "name", value_name = "NAME", value_parser = non_empty_name)]
     pub name: Option<String>,
-    /// Persist the diff-preview theme to the user config and exit without rendering.
+    /// Persist the diff-artifact theme to the user config and exit without rendering.
     /// The same `theme` key stays editable by hand in the config TOML.
     #[arg(
         long,
@@ -335,7 +335,7 @@ pub struct DiffTargetArgs {
     pub set_theme: Option<Theme>,
 }
 
-/// Diff-preview color theme persisted to the user config by `diff --set-theme`.
+/// Diff artifact color theme persisted to the user config by `diff --set-theme`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 #[value(rename_all = "lower")]
 pub enum Theme {

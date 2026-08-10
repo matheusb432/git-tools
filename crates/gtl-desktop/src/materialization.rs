@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, num::NonZeroU64, sync::Mutex};
 
 use gtl_application::viewer::RenderOptions;
-use gtl_preview::ViewChunk;
+use gtl_artifacts::ViewChunk;
 
 use crate::session::{ActiveContentIdentity, ActiveContentSnapshot, ViewerSession};
 
@@ -17,7 +17,7 @@ impl ViewLoadId {
         NonZeroU64::new(value).map(Self)
     }
 
-    /// Returns the raw identifier required by the preview renderer boundary.
+    /// Returns the raw identifier required by the artifact renderer boundary.
     pub(crate) const fn get(self) -> u64 {
         self.0.get()
     }
@@ -98,7 +98,7 @@ impl ViewMaterializations {
         snapshot: &ActiveContentSnapshot,
         options: RenderOptions,
     ) -> Result<RenderedMaterialization, MaterializationError> {
-        let chunks = gtl_preview::view_chunks(snapshot.view(), options)
+        let chunks = gtl_artifacts::view_chunks(snapshot.view(), options)
             .map_err(|error| MaterializationError::Render(error.to_string()))?;
         Ok(RenderedMaterialization {
             identity: MaterializationIdentity {

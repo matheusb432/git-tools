@@ -21,7 +21,7 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Render a tabbed diff preview across every repo in `repos`, which the caller
+/// Render a tabbed diff artifact across every repo in `repos`, which the caller
 /// already filtered to upstream-present and unpushed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiffAll {
@@ -70,7 +70,7 @@ pub fn execute(
         &mut notes,
     )?;
 
-    let title = dated_title(clock, "diff-preview all");
+    let title = dated_title(clock, "diff-artifact all");
     let render_options = settings.viewer_render_options();
     let theme = settings.theme().map(|theme| theme.to_string());
     let html =

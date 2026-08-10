@@ -127,7 +127,7 @@ pub enum Command {
     /// Run a shared Rust benchmark without host display variables.
     #[command(name = Verb::BENCH.as_str())]
     Bench(BenchArguments),
-    /// Rebuild the committed diff-preview bundle and fail if it drifts from its TypeScript
+    /// Rebuild the committed diff-artifact bundle and fail if it drifts from its TypeScript
     /// sources. Requires Deno.
     #[command(name = Verb::DRIFT_CHECK.as_str())]
     DriftCheck,

@@ -22,7 +22,7 @@ use crate::{
     shared::notes::Note,
 };
 
-/// Render a tabbed diff preview across `repos`.
+/// Render a tabbed diff artifact across `repos`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiffSubrepos {
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
@@ -47,7 +47,7 @@ pub enum RenderDiffSubreposOutcome {
     Empty,
 }
 
-/// Everything that can go wrong rendering recursive multi-repo diff previews.
+/// Everything that can go wrong rendering recursive multi-repo diff artifacts.
 #[derive(Debug, thiserror::Error)]
 pub enum RenderDiffSubreposError {
     #[error(transparent)]
@@ -81,7 +81,7 @@ pub fn execute(
 
     if batch.views.is_empty() {
         notes.push(Note::warn(format!(
-            "diff -r: nothing to show across {} repo(s); no preview written",
+            "diff -r: nothing to show across {} repo(s); no artifact written",
             repos.len()
         )));
         return Ok(RenderDiffSubreposOk {
@@ -90,7 +90,7 @@ pub fn execute(
         });
     }
 
-    let title = dated_title(clock, "diff-preview subrepos");
+    let title = dated_title(clock, "diff-artifact subrepos");
     let render_options = settings.viewer_render_options();
     let theme = settings.theme().map(|theme| theme.to_string());
     let html =
@@ -200,7 +200,7 @@ mod tests {
         let artifact = store
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
-        assert_eq!(artifact.meta.title, "2026-07-02 diff-preview subrepos");
+        assert_eq!(artifact.meta.title, "2026-07-02 diff-artifact subrepos");
         assert_eq!(artifact.meta.repo_name, "subrepos");
     }
 
@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(
             response.notes,
             vec![Note::warn(
-                "diff -r: nothing to show across 1 repo(s); no preview written"
+                "diff -r: nothing to show across 1 repo(s); no artifact written"
             )]
         );
     }

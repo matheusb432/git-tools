@@ -12,7 +12,7 @@ pub enum DiffTargetRequest {
     Base { rev: String },
     /// An exact two-dot revision range.
     Range { range: String },
-    /// A three-dot merge preview against the base revision.
+    /// A three-dot merge diff against the base revision.
     Merge { base: String },
     /// The latest `count` commits.
     Last { count: u32 },
@@ -48,7 +48,7 @@ pub enum DiffTarget {
         range: String,
         pinned: Option<PinnedRange>,
     },
-    /// A three-dot merge preview against the base branch.
+    /// A three-dot merge diff against the base branch.
     Merge {
         base: String,
         pinned: Option<PinnedRange>,

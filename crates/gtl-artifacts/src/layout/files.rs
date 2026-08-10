@@ -14,7 +14,7 @@ use crate::{
     diff_file_anchor_id,
     layout::file_status::file_status_presentation,
     rows::{render_diff_lines, render_diff_split, unified_line_number_digits},
-    syntax::PreviewResult,
+    syntax::ArtifactResult,
 };
 
 const GIANT_FILE_CHARS: usize = 250_000;
@@ -151,7 +151,7 @@ fn open_diff_file_action(surface: FileBlockSurface, file: &FileDiff) -> OpenDiff
     }
 }
 
-pub(super) fn file_blocks(view: &View, options: RenderOptions) -> PreviewResult<Markup> {
+pub(super) fn file_blocks(view: &View, options: RenderOptions) -> ArtifactResult<Markup> {
     file_blocks_with_mode(
         view,
         options,
@@ -160,7 +160,7 @@ pub(super) fn file_blocks(view: &View, options: RenderOptions) -> PreviewResult<
     )
 }
 
-pub(super) fn diff_document_shell(view: &View, options: RenderOptions) -> PreviewResult<Markup> {
+pub(super) fn diff_document_shell(view: &View, options: RenderOptions) -> ArtifactResult<Markup> {
     file_blocks_with_mode(
         view,
         options,
@@ -180,7 +180,7 @@ fn file_blocks_with_mode(
     options: RenderOptions,
     surface: FileBlockSurface,
     mode: FileBodyMode,
-) -> PreviewResult<Markup> {
+) -> ArtifactResult<Markup> {
     if view.files.is_empty() {
         return Ok(
             html! { div class="empty rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic" { "no file changes" } },
@@ -255,7 +255,7 @@ fn file_diff_shell(presentation: &DiffPresentation<'_>) -> Markup {
     }
 }
 
-fn file_diff(presentation: &FileBlockPresentation<'_>) -> PreviewResult<Markup> {
+fn file_diff(presentation: &FileBlockPresentation<'_>) -> ArtifactResult<Markup> {
     let syntax = crate::syntax::syntax_for_path(&presentation.file.path)?;
     Ok(html! {
         div class=(presentation.diff.classes) style=[presentation.diff.style.as_deref()] {

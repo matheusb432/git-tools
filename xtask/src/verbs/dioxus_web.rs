@@ -46,14 +46,14 @@ const SOURCE_FILES: &[&str] = &[
 const SOURCE_DIRECTORIES: &[&str] = &[
     "crates/gtl-contracts/src",
     "crates/gtl-desktop/src",
-    "crates/gtl-preview/src",
+    "crates/gtl-artifacts/src",
     "crates/gtl-web/assets",
     "crates/gtl-web/src",
     "frontend/diff",
     "frontend/diff-island",
     "frontend/shared",
 ];
-const SOURCE_DIRECTORY_EXCLUSIONS: &[&str] = &["crates/gtl-preview/src/embedded"];
+const SOURCE_DIRECTORY_EXCLUSIONS: &[&str] = &["crates/gtl-artifacts/src/embedded"];
 const GENERATED_SOURCE_OUTPUTS: &[&str] = &[
     "crates/gtl-web/assets/diff-island.css",
     "crates/gtl-web/assets/generated",
@@ -90,7 +90,7 @@ const DIFF_ISLAND_STYLE_ARGUMENTS: &[&str] = &[
     "--allow-all",
     "npm:@tailwindcss/cli@4.3.3",
     "--input",
-    "crates/gtl-preview/src/styles/base.css",
+    "crates/gtl-artifacts/src/styles/base.css",
     "--output",
     "crates/gtl-web/assets/diff-island.css",
     "--minify",
@@ -857,7 +857,7 @@ mod tests {
         let fingerprint_before = source_fingerprint(root.path()).expect("fixture fingerprint");
         let embedded = root
             .path()
-            .join("crates/gtl-preview/src/embedded/generated/preview.css");
+            .join("crates/gtl-artifacts/src/embedded/generated/artifact.css");
         fs::create_dir_all(embedded.parent().expect("embedded parent"))
             .expect("embedded parent is writable");
         fs::write(embedded, "generated").expect("embedded output is writable");
@@ -910,7 +910,7 @@ mod tests {
         assert!(TAILWIND_ARGUMENTS.contains(&"crates/gtl-web/assets/tailwind.css"));
         assert_eq!(
             DIFF_ISLAND_STYLE_ARGUMENTS[5],
-            "crates/gtl-preview/src/styles/base.css"
+            "crates/gtl-artifacts/src/styles/base.css"
         );
         assert!(DIFF_ISLAND_STYLE_ARGUMENTS.contains(&"crates/gtl-web/assets/diff-island.css"));
     }

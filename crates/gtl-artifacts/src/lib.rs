@@ -16,7 +16,7 @@ mod text;
 pub use artifact::{build_html, build_tabbed_html};
 use gtl_application::{diffs::View, viewer::RenderOptions};
 use maud::Markup;
-pub use syntax::{PreviewError, PreviewResult};
+pub use syntax::{ArtifactError, ArtifactResult};
 
 /// Returns the stable DOM anchor used for a server-rendered diff file.
 ///
@@ -35,7 +35,7 @@ pub fn diff_file_anchor_id(path: &str) -> String {
 /// # Errors
 ///
 /// Returns an error when the embedded rendering assets cannot be loaded.
-pub fn diff_document_shell(view: &View, options: RenderOptions) -> PreviewResult<Markup> {
+pub fn diff_document_shell(view: &View, options: RenderOptions) -> ArtifactResult<Markup> {
     layout::diff_document_shell(view, options)
 }
 
@@ -55,15 +55,15 @@ pub struct ViewChunk {
 pub fn view_chunks(
     view: &View,
     options: RenderOptions,
-) -> PreviewResult<std::collections::VecDeque<ViewChunk>> {
+) -> ArtifactResult<std::collections::VecDeque<ViewChunk>> {
     layout::view_chunks(view, options)
 }
 
-/// The Maud-backed [`HtmlRenderer`](gtl_application::ports::HtmlRenderer) adapter.
+/// The [`HtmlRenderer`](gtl_application::ports::HtmlRenderer) adapter for offline artifacts.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct MaudRenderer;
+pub struct ArtifactRenderer;
 
-impl gtl_application::ports::HtmlRenderer for MaudRenderer {
+impl gtl_application::ports::HtmlRenderer for ArtifactRenderer {
     fn build_html(
         &self,
         view: &View,
@@ -171,7 +171,7 @@ pub(crate) mod fixtures {
             commits_label: "# commits".to_string(),
             foot: Foot {
                 cmd: "git diff origin/main..HEAD".to_string(),
-                note: "# read-only preview".to_string(),
+                note: "# read-only artifact".to_string(),
             },
         }
     }

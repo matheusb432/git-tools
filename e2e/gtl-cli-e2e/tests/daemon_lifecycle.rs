@@ -305,7 +305,7 @@ fn daemon_lifecycle_autostarts_reuses_restarts_recovers_and_stops() {
         output.status.success(),
         "diff failed\nstdout: {stdout}\nstderr: {stderr}"
     );
-    assert!(stdout.contains("diff-preview:"), "stdout: {stdout}");
+    assert!(stdout.contains("diff-artifact:"), "stdout: {stdout}");
     assert!(stdout.contains("wrote "), "stdout: {stdout}");
 
     let first_pid = fixture.daemon_pid();

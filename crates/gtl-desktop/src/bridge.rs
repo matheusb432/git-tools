@@ -7,10 +7,11 @@ mod shell;
 use std::fmt::Display;
 
 use gtl_contracts::viewer::{
-    GetViewerHistoryCopy, ListViewerHistory, LoadViewerDiffChunk, OpenViewerDiffFile,
-    OpenViewerHistory, PrepareDiffDocument, SelectViewerCommit, SetViewerPreference,
-    ViewerApiError, ViewerDiffChunk, ViewerDiffDocument, ViewerHistoryCopyPayload,
-    ViewerHistoryPage, ViewerResource, ViewerShell, ViewerTabRequest, ViewerUserSettings,
+    GetViewerHistoryCopy, ListViewerHistory, LoadViewerDiffChunk, LoadViewerDiffLines,
+    OpenViewerDiffFile, OpenViewerHistory, PrepareDiffDocument, SelectViewerCommit,
+    SetViewerPreference, ViewerApiError, ViewerDiffChunk, ViewerDiffDocument, ViewerDiffLines,
+    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerResource, ViewerShell, ViewerTabRequest,
+    ViewerUserSettings,
 };
 use tauri::State;
 
@@ -73,6 +74,18 @@ pub(crate) async fn viewer_load_diff_chunk(
     let app = app.inner().clone();
     run_blocking("diff chunk worker failed", move || {
         diff::load(&app, request)
+    })
+    .await
+}
+
+#[tauri::command]
+pub(crate) async fn viewer_load_diff_lines(
+    app: State<'_, ViewerApp>,
+    request: LoadViewerDiffLines,
+) -> Result<ViewerDiffLines, ViewerApiError> {
+    let app = app.inner().clone();
+    run_blocking("diff lines worker failed", move || {
+        diff::load_lines(&app, request)
     })
     .await
 }

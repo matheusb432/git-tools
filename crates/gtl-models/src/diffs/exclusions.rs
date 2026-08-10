@@ -158,7 +158,7 @@ impl DiffExclusions {
     }
 }
 
-/// The exclusion outcome a computed view carries so every surface (preview
+/// The exclusion outcome a computed view carries so every surface (artifact
 /// chip, CLI note) can state what was hidden and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedExclusions {

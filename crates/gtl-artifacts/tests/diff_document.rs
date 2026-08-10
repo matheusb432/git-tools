@@ -42,7 +42,7 @@ fn sample_view() -> View {
         commits_label: "# commits".to_string(),
         foot: Foot {
             cmd: "git diff origin/main..HEAD".to_string(),
-            note: "# read-only preview".to_string(),
+            note: "# read-only artifact".to_string(),
         },
     }
 }
@@ -54,7 +54,7 @@ fn selector(value: &str) -> Result<Selector> {
 #[test]
 fn diff_document_shell_contains_only_file_blocks_and_empty_row_targets() -> Result<()> {
     let shell =
-        gtl_preview::diff_document_shell(&sample_view(), RenderOptions::DEFAULT)?.into_string();
+        gtl_artifacts::diff_document_shell(&sample_view(), RenderOptions::DEFAULT)?.into_string();
     let fragment = Html::parse_fragment(&shell);
 
     assert_eq!(
@@ -107,12 +107,12 @@ fn diff_document_shell_contains_only_file_blocks_and_empty_row_targets() -> Resu
 #[test]
 fn chunks_recompose_the_complete_raw_artifact_rows() -> Result<()> {
     let view = sample_view();
-    let chunks = gtl_preview::view_chunks(&view, RenderOptions::DEFAULT)?;
+    let chunks = gtl_artifacts::view_chunks(&view, RenderOptions::DEFAULT)?;
     let recomposed = chunks
         .iter()
         .map(|chunk| chunk.html.as_str())
         .collect::<String>();
-    let artifact = gtl_preview::build_html(&view, RenderOptions::DEFAULT, None)?;
+    let artifact = gtl_artifacts::build_html(&view, RenderOptions::DEFAULT, None)?;
     let document = Html::parse_document(&artifact);
     let complete_rows = document
         .select(&selector(".main .diff")?)
@@ -128,7 +128,7 @@ fn chunks_recompose_the_complete_raw_artifact_rows() -> Result<()> {
 
 #[test]
 fn raw_artifact_retains_its_complete_layout_and_rows() -> Result<()> {
-    let artifact = gtl_preview::build_html(&sample_view(), RenderOptions::DEFAULT, None)?;
+    let artifact = gtl_artifacts::build_html(&sample_view(), RenderOptions::DEFAULT, None)?;
     let document = Html::parse_document(&artifact);
     let text = document.root_element().text().collect::<String>();
 

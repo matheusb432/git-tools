@@ -99,7 +99,7 @@ pub(super) fn build(
         files,
         exclusions: AppliedExclusions::from_hidden(excluded, hidden_paths),
     };
-    notes.extend(exclusions::note("diff-preview", &view));
+    notes.extend(exclusions::note("diff-artifact", &view));
 
     let summary = match target {
         DiffTarget::Range { .. } => base_ref.clone(),
@@ -222,7 +222,7 @@ fn unpushed_or_main_base(
                 .verify_commit(repo_path, "main")
                 .map_err(|_| anyhow::anyhow!(upstream_error))?;
             notes.push(Note::warn(
-                "diff-preview: no upstream; falling back to main",
+                "diff-artifact: no upstream; falling back to main",
             ));
             Ok(DiffBase {
                 ref_name: "main".to_string(),

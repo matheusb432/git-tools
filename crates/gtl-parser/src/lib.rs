@@ -17,10 +17,10 @@ mod token;
 pub use classify::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 pub use intraline::CharacterSpan;
 pub use model::{
-    DEFAULT_MAX_LINE_CHARACTERS, DiffParser, DiffRow, DiffRowKind, DiffSide, ParseOptions,
-    ParsedDiff, SyntaxDiagnostic, diff_line_body,
+    DEFAULT_MAX_LINE_CHARACTERS, DiffParser, DiffParserStream, DiffRow, DiffRowKind, DiffSide,
+    ParseOptions, ParsedDiff, ParsedDiffBatch, SyntaxDiagnostic, diff_line_body,
 };
-pub use split::{SplitDiffCell, SplitDiffRow};
+pub use split::{SplitDiffCell, SplitDiffRow, SplitDiffStream};
 #[cfg(feature = "bundled-syntaxes")]
 pub use syntax::bundled_syntax_catalog;
 #[cfg(feature = "syntax")]

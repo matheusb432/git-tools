@@ -9,9 +9,9 @@ use maud::{DOCTYPE, Markup, PreEscaped, html};
 pub use tabbed::build_tabbed_html;
 
 use crate::{
-    assets::{PREVIEW_BUNDLE, preview_css},
+    assets::{ARTIFACT_BUNDLE, artifact_css},
     layout::view_body,
-    syntax::PreviewResult,
+    syntax::ArtifactResult,
     text::plural,
 };
 
@@ -29,7 +29,7 @@ pub fn build_html(
     view: &View,
     options: RenderOptions,
     theme: Option<&str>,
-) -> PreviewResult<String> {
+) -> ArtifactResult<String> {
     let count = view.commits.len();
     let title = format!(
         "{} — {} · {count} commit{}",
@@ -52,11 +52,11 @@ fn document(title: &str, theme: Option<&str>, body: &Markup) -> String {
                 meta name="darkreader-lock";
                 title { (title) }
                 script { (PreEscaped(THEME_BOOT_JS)) }
-                style { (PreEscaped(preview_css())) }
+                style { (PreEscaped(artifact_css())) }
             }
             body {
                 (body)
-                script { (PreEscaped(PREVIEW_BUNDLE)) }
+                script { (PreEscaped(ARTIFACT_BUNDLE)) }
             }
         }
     }
@@ -111,19 +111,21 @@ mod tests {
         assert!(raw.contains(r#"aria-label="Changed files""#));
         assert!(raw.contains(r#"aria-label="Commits in range""#));
         assert!(raw.contains(r#"aria-label="View settings""#));
-        assert!(raw.contains(r#"id="preview-files-popover-0" data-preview-files-popover"#));
-        assert!(raw.contains(r#"id="preview-commits-popover-0" data-preview-commits-popover"#));
-        assert!(raw.contains(r#"popovertarget="preview-controls-popover-0""#));
-        assert!(raw.contains(r#"id="preview-controls-popover-0" class="preview-mobile-controls "#));
-        assert!(raw.contains(r#"data-preview-action="fold-all""#));
-        assert!(raw.contains(r#"data-preview-action="toggle-context""#));
+        assert!(raw.contains(r#"id="artifact-files-popover-0" data-artifact-files-popover"#));
+        assert!(raw.contains(r#"id="artifact-commits-popover-0" data-artifact-commits-popover"#));
+        assert!(raw.contains(r#"popovertarget="artifact-controls-popover-0""#));
+        assert!(
+            raw.contains(r#"id="artifact-controls-popover-0" class="artifact-mobile-controls "#)
+        );
+        assert!(raw.contains(r#"data-artifact-action="fold-all""#));
+        assert!(raw.contains(r#"data-artifact-action="toggle-context""#));
 
         for index in 0..2 {
-            for prefix in ["preview-files-popover", "preview-commits-popover"] {
+            for prefix in ["artifact-files-popover", "artifact-commits-popover"] {
                 let target = format!("{prefix}-{index}");
                 assert_eq!(tabbed.matches(&format!(r#"id="{target}""#)).count(), 1);
             }
-            let target = format!("preview-controls-popover-{index}");
+            let target = format!("artifact-controls-popover-{index}");
             assert_eq!(
                 tabbed
                     .matches(&format!(r#"popovertarget="{target}""#))
@@ -178,7 +180,7 @@ mod tests {
             commits_label: "# commits".to_string(),
             foot: Foot {
                 cmd: "git diff origin/main..HEAD".to_string(),
-                note: "# read-only preview".to_string(),
+                note: "# read-only artifact".to_string(),
             },
         };
 

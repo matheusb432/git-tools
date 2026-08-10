@@ -3474,16 +3474,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtl-artifacts"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "gtl-application",
+ "gtl-models",
+ "gtl-parser",
+ "maud",
+ "scraper",
+ "strum",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "gtl-benchmarks"
 version = "0.1.0"
 dependencies = [
  "clap",
  "criterion",
  "gtl-application",
+ "gtl-artifacts",
  "gtl-contracts",
  "gtl-desktop",
  "gtl-infra",
- "gtl-preview",
  "tempfile",
 ]
 
@@ -3550,9 +3564,9 @@ dependencies = [
  "anyhow",
  "axum",
  "gtl-application",
+ "gtl-artifacts",
  "gtl-contracts",
  "gtl-infra",
- "gtl-preview",
  "http-body-util",
  "rusqlite",
  "serde",
@@ -3571,10 +3585,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gtl-application",
+ "gtl-artifacts",
  "gtl-contracts",
  "gtl-infra",
  "gtl-models",
- "gtl-preview",
  "lru",
  "raw-window-handle",
  "serde_json",
@@ -3645,20 +3659,6 @@ version = "0.1.0"
 dependencies = [
  "similar",
  "syntect",
- "thiserror 2.0.19",
-]
-
-[[package]]
-name = "gtl-preview"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "gtl-application",
- "gtl-models",
- "gtl-parser",
- "maud",
- "scraper",
- "strum",
  "thiserror 2.0.19",
 ]
 

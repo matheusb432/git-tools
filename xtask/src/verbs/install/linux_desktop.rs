@@ -35,7 +35,7 @@ fn desktop_entry(viewer: &Path) -> String {
 Type=Application
 Name={APP_NAME}
 GenericName=Diff Viewer
-Comment=View git-tools diff previews
+Comment=View git-tools diff artifacts
 Exec={exec}
 TryExec={exec}
 Icon={APP_ID}

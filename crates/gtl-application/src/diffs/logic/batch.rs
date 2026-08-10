@@ -109,9 +109,9 @@ mod tests {
     fn dated_title_prefixes_label_with_yyyy_mm_dd() {
         let clock = FixedClock("2026-07-02T00:00:00Z".into());
 
-        let title = dated_title(&clock, "diff-preview subrepos");
+        let title = dated_title(&clock, "diff-artifact subrepos");
 
-        assert_eq!(title, "2026-07-02 diff-preview subrepos");
+        assert_eq!(title, "2026-07-02 diff-artifact subrepos");
     }
 
     #[test]

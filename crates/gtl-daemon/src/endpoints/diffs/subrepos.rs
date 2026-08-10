@@ -9,7 +9,7 @@ use gtl_contracts::{diffs::RenderDiffData, envelope::Envelope};
 
 use crate::{endpoints::EndpointError, state::DaemonState};
 
-/// Renders a diff-subrepos preview for the request body, returning the wire envelope.
+/// Renders a diff-subrepos artifact for the request body, returning the wire envelope.
 ///
 /// - `200` with an `ok`/`empty` envelope on success.
 /// - `400` with an error envelope when the JSON or target selection is invalid.

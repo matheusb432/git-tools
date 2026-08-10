@@ -29,10 +29,10 @@ pub(super) fn view_navigation(target: &str) -> Markup {
 }
 
 pub(super) fn popover(target: &str) -> Markup {
-    let preview_actions = preview_actions();
+    let artifact_actions = artifact_actions();
     html! {
         aside id=(target)
-            class="preview-mobile-controls fixed top-2 right-2 bottom-auto left-auto m-0 max-h-[calc(100vh_-_16px)] w-[min(320px,calc(100vw_-_16px))] max-w-none overflow-y-auto rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)]"
+            class="artifact-mobile-controls fixed top-2 right-2 bottom-auto left-auto m-0 max-h-[calc(100vh_-_16px)] w-[min(320px,calc(100vw_-_16px))] max-w-none overflow-y-auto rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-[0_24px_80px_rgba(0,0,0,.72)] [&::backdrop]:bg-[rgba(0,0,0,.42)]"
             popover {
             header class="sticky top-0 z-1 flex items-center justify-between border-b border-line bg-surface-2 px-3 py-2.5" {
                 div {
@@ -46,7 +46,7 @@ pub(super) fn popover(target: &str) -> Markup {
                     aria-label="Close view settings" { "x" }
             }
             div class="grid gap-3 p-3" {
-                (section("Diff", &preview_actions))
+                (section("Diff", &artifact_actions))
             }
         }
     }
@@ -61,15 +61,15 @@ fn section(title: &str, content: &Markup) -> Markup {
     }
 }
 
-fn preview_actions() -> Markup {
+fn artifact_actions() -> Markup {
     html! {
         div class="grid gap-2" {
             button type="button"
                 class=(MOBILE_MENU_BUTTON_CLASSES)
-                data-preview-action="fold-all" { "Collapse or expand all files" }
+                data-artifact-action="fold-all" { "Collapse or expand all files" }
             button type="button"
                 class=(MOBILE_MENU_BUTTON_CLASSES)
-                data-preview-action="toggle-context" { "Toggle copy context" }
+                data-artifact-action="toggle-context" { "Toggle copy context" }
         }
     }
 }

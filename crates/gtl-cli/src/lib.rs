@@ -196,7 +196,7 @@ fn run_daemon_ctl(command: &DaemonCommand) -> ExitCode {
     }
 }
 
-/// Persist the diff-preview theme to the user config and exit (no rendering).
+/// Persist the diff-artifact theme to the user config and exit (no rendering).
 fn run_set_theme(theme: Theme) -> ExitCode {
     let mut store = gtl_infra::user_config::TomlSettingsStore::from_environment();
     let Some(path) = store.path().map(Path::to_path_buf) else {
@@ -216,7 +216,7 @@ fn run_set_theme(theme: Theme) -> ExitCode {
     ) {
         Ok(_) => {
             println!(
-                "diff-preview theme set to \"{value_new}\" in {}",
+                "diff-artifact theme set to \"{value_new}\" in {}",
                 path.display()
             );
             ExitCode::Ok

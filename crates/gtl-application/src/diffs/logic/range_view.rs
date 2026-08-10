@@ -9,7 +9,7 @@ const LABEL_COMMITS_TO_MERGE: &str = "# commits to merge";
 const NOTE_UNPUSHED_WORK: &str = "# unpushed work";
 pub(crate) const NOTE_WORKING_TREE: &str = "# base → working tree";
 const NOTE_COMMIT_RANGE: &str = "# commit range";
-const NOTE_MERGE_PREVIEW: &str = "# merge preview";
+const NOTE_MERGE_DIFF: &str = "# merge diff";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RangePresentation {
@@ -47,7 +47,7 @@ impl RangeView {
             RangePresentation::Merge => (
                 TITLE_MERGE_DIFF,
                 LABEL_COMMITS_TO_MERGE.to_string(),
-                NOTE_MERGE_PREVIEW,
+                NOTE_MERGE_DIFF,
             ),
         };
 

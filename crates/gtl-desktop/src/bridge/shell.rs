@@ -3,9 +3,10 @@ use std::sync::Arc;
 use gtl_application::diffs::{FileStatus, View};
 use gtl_contracts::viewer::{
     ViewerActiveState, ViewerActiveView, ViewerAppliedExclusions, ViewerCommandLine,
-    ViewerCommitSelection, ViewerCommitSummary, ViewerFailureCode, ViewerFeedback,
-    ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerPreferences, ViewerRenderOptions,
-    ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme, ViewerViewIdentity,
+    ViewerCommitSelection, ViewerCommitSummary, ViewerDiffFileId, ViewerFailureCode,
+    ViewerFeedback, ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerPreferences,
+    ViewerRenderOptions, ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme,
+    ViewerViewIdentity,
 };
 use gtl_models::viewer::{self, DiffDensity, DiffLayout, RenderOptions, Theme};
 
@@ -148,11 +149,13 @@ fn to_active_view(
         files: view
             .files
             .iter()
-            .map(|file| {
+            .enumerate()
+            .map(|(index, file)| {
                 let status = file.status();
                 ViewerFileSummary {
+                    id: ViewerDiffFileId::for_index(index),
                     path: file.path.clone(),
-                    anchor_id: gtl_preview::diff_file_anchor_id(&file.path),
+                    anchor_id: gtl_artifacts::diff_file_anchor_id(&file.path),
                     added: file.added,
                     removed: file.removed,
                     status: to_file_status(status),
@@ -420,6 +423,8 @@ mod tests {
         let active = to_active_view(&view(), &view(), identity, &CommitSelectionSnapshot::None);
 
         assert_eq!(active.identity.tab_id, 7);
+        assert_eq!(active.files[0].id.as_str(), "file-0");
+        assert_eq!(active.files[1].id.as_str(), "file-1");
         assert_eq!(active.files[0].anchor_id, "f-src-a-b-rs");
         assert!(active.files[0].can_open_in_editor);
         assert!(!active.files[1].can_open_in_editor);

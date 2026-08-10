@@ -154,7 +154,7 @@ mod tests {
         assert_eq!(
             response.notes,
             vec![Note::warn(
-                "diff-preview: no upstream; falling back to main"
+                "diff-artifact: no upstream; falling back to main"
             )]
         );
         assert_eq!(response.view.foot.note, NOTE_WORKING_TREE);
@@ -317,7 +317,7 @@ index 333..444 100644\n\
         assert_eq!(applied.hidden_paths, ["docs/notes.md"]);
         assert!(
             response.notes.contains(&Note::info(
-                "diff-preview: 1 file(s) hidden by config [diff.exclude] (md)"
+                "diff-artifact: 1 file(s) hidden by config [diff.exclude] (md)"
             )),
             "exclusion note missing: {:?}",
             response.notes

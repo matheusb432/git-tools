@@ -62,70 +62,95 @@ pub enum SplitDiffRow {
     },
 }
 
-pub(crate) fn split_rows(rows: &[DiffRow]) -> Vec<SplitDiffRow> {
-    let mut output = Vec::with_capacity(rows.len());
-    let mut removed = Vec::new();
-    let mut added = Vec::new();
-
-    for row in rows {
-        match row.kind() {
-            DiffRowKind::Removed => removed.push(row),
-            DiffRowKind::Added => added.push(row),
-            DiffRowKind::Meta => {
-                flush_pairs(&mut output, &mut removed, &mut added);
-                output.push(SplitDiffRow::Meta {
-                    text: row.text().to_owned(),
-                });
-            }
-            DiffRowKind::Hunk => {
-                flush_pairs(&mut output, &mut removed, &mut added);
-                output.push(SplitDiffRow::Hunk {
-                    text: row.text().to_owned(),
-                });
-            }
-            DiffRowKind::Context => {
-                flush_pairs(&mut output, &mut removed, &mut added);
-                output.push(SplitDiffRow::Context {
-                    old_line_number: row.old_line_number().unwrap_or(0),
-                    new_line_number: row.new_line_number().unwrap_or(0),
-                    text: row.text().to_owned(),
-                    syntax_tokens: row.syntax_tokens().to_vec(),
-                    long_line_character_count: row.long_line_character_count(),
-                });
-            }
-        }
-    }
-    flush_pairs(&mut output, &mut removed, &mut added);
-
-    output
+/// Incremental side-by-side row derivation for one parsed file.
+#[derive(Debug, Default)]
+pub struct SplitDiffStream {
+    removed: Vec<DiffRow>,
+    added: Vec<DiffRow>,
 }
 
-fn flush_pairs(
-    output: &mut Vec<SplitDiffRow>,
-    removed: &mut Vec<&DiffRow>,
-    added: &mut Vec<&DiffRow>,
-) {
-    for index in 0..removed.len().max(added.len()) {
-        let old = removed.get(index).copied();
-        let new = added.get(index).copied();
-
-        let spans = match (old, new) {
-            (Some(old), Some(new))
-                if old.long_line_character_count().is_none()
-                    && new.long_line_character_count().is_none() =>
-            {
-                changed_spans(old.body(), new.body())
-            }
-            _ => ChangedLineSpans::default(),
-        };
-
-        output.push(SplitDiffRow::Pair {
-            old: old.map(|row| split_cell(row, spans.old.clone(), true)),
-            new: new.map(|row| split_cell(row, spans.new.clone(), false)),
-        });
+impl SplitDiffStream {
+    /// Starts an empty side-by-side stream.
+    pub const fn new() -> Self {
+        Self {
+            removed: Vec::new(),
+            added: Vec::new(),
+        }
     }
-    removed.clear();
-    added.clear();
+
+    /// Accepts parsed rows and returns every newly stable split row.
+    pub fn push(&mut self, rows: impl IntoIterator<Item = DiffRow>) -> Vec<SplitDiffRow> {
+        let mut output = Vec::new();
+
+        for row in rows {
+            match row.kind() {
+                DiffRowKind::Removed => self.removed.push(row),
+                DiffRowKind::Added => self.added.push(row),
+                DiffRowKind::Meta => {
+                    self.flush_pairs(&mut output);
+                    output.push(SplitDiffRow::Meta {
+                        text: row.text().to_owned(),
+                    });
+                }
+                DiffRowKind::Hunk => {
+                    self.flush_pairs(&mut output);
+                    output.push(SplitDiffRow::Hunk {
+                        text: row.text().to_owned(),
+                    });
+                }
+                DiffRowKind::Context => {
+                    self.flush_pairs(&mut output);
+                    output.push(SplitDiffRow::Context {
+                        old_line_number: row.old_line_number().unwrap_or(0),
+                        new_line_number: row.new_line_number().unwrap_or(0),
+                        text: row.text().to_owned(),
+                        syntax_tokens: row.syntax_tokens().to_vec(),
+                        long_line_character_count: row.long_line_character_count(),
+                    });
+                }
+            }
+        }
+
+        output
+    }
+
+    /// Flushes a trailing change run and completes the stream.
+    pub fn finish(mut self) -> Vec<SplitDiffRow> {
+        let mut output = Vec::new();
+        self.flush_pairs(&mut output);
+        output
+    }
+
+    fn flush_pairs(&mut self, output: &mut Vec<SplitDiffRow>) {
+        for index in 0..self.removed.len().max(self.added.len()) {
+            let old = self.removed.get(index);
+            let new = self.added.get(index);
+
+            let spans = match (old, new) {
+                (Some(old), Some(new))
+                    if old.long_line_character_count().is_none()
+                        && new.long_line_character_count().is_none() =>
+                {
+                    changed_spans(old.body(), new.body())
+                }
+                _ => ChangedLineSpans::default(),
+            };
+
+            output.push(SplitDiffRow::Pair {
+                old: old.map(|row| split_cell(row, spans.old.clone(), true)),
+                new: new.map(|row| split_cell(row, spans.new.clone(), false)),
+            });
+        }
+        self.removed.clear();
+        self.added.clear();
+    }
+}
+
+pub(crate) fn split_rows(rows: &[DiffRow]) -> Vec<SplitDiffRow> {
+    let mut stream = SplitDiffStream::new();
+    let mut output = stream.push(rows.iter().cloned());
+    output.extend(stream.finish());
+    output
 }
 
 fn split_cell(row: &DiffRow, intraline_spans: Vec<CharacterSpan>, old: bool) -> SplitDiffCell {
@@ -147,9 +172,12 @@ mod tests {
     use super::*;
     use crate::{DiffParser, ParseOptions};
 
+    fn lines(raw: &[&str]) -> Vec<String> {
+        raw.iter().map(ToString::to_string).collect()
+    }
+
     fn split(raw: &[&str]) -> Vec<SplitDiffRow> {
-        let lines = raw.iter().map(ToString::to_string).collect::<Vec<_>>();
-        DiffParser::new().parse(&lines).split_rows()
+        DiffParser::new().parse(&lines(raw)).split_rows()
     }
 
     #[test]
@@ -251,5 +279,27 @@ mod tests {
 
         assert!(old.intraline_spans().is_empty());
         assert_eq!(old.text(), "-b");
+    }
+
+    #[test]
+    fn streaming_split_buffers_only_an_unresolved_change_run() {
+        let source = lines(&[
+            "@@ -1,4 +1,3 @@",
+            "-old one",
+            "-old two",
+            "+new one",
+            " context",
+        ]);
+        let parsed = DiffParser::new().parse(&source);
+        let expected = parsed.split_rows();
+        let mut stream = SplitDiffStream::new();
+        let mut actual = stream.push(parsed.rows()[..2].iter().cloned());
+
+        assert!(matches!(actual.as_slice(), [SplitDiffRow::Hunk { .. }]));
+        assert!(stream.push(parsed.rows()[2..4].iter().cloned()).is_empty());
+        actual.extend(stream.push(parsed.rows()[4..].iter().cloned()));
+        actual.extend(stream.finish());
+
+        assert_eq!(actual, expected);
     }
 }

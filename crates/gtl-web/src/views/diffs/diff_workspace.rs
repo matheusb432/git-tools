@@ -1148,12 +1148,13 @@ fn Keybar(footer: ViewerFooter) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::{ViewerFileStatus, ViewerFileSummary};
+    use gtl_contracts::viewer::{ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary};
 
     use super::{WorkspaceFileTree, WorkspaceLineTotals};
 
     fn file(path: &str, added: u32, removed: u32) -> ViewerFileSummary {
         ViewerFileSummary {
+            id: ViewerDiffFileId::for_index(0),
             path: path.to_owned(),
             anchor_id: format!("f-{}", path.replace(['/', '.'], "-")),
             added,
