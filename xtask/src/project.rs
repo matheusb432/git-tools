@@ -86,12 +86,15 @@ impl TestDeclaration {
 }
 
 pub(crate) fn tests_unit() -> Result<Vec<TestDeclaration>> {
-    Ok(vec![TestDeclaration::new(
-        "unit",
-        Test::try_new("unit", surface::CARGO, "cargo")?
-            .args(["test", "--quiet"])
-            .verbose_arguments(["--", "--nocapture"]),
-    )])
+    Ok(vec![
+        TestDeclaration::new(
+            "unit",
+            Test::try_new("unit", surface::CARGO, "cargo")?
+                .args(["test", "--quiet"])
+                .verbose_arguments(["--", "--nocapture"]),
+        ),
+        parser_all_features()?,
+    ])
 }
 
 pub(crate) fn tests_e2e(executable: OsString) -> Result<Vec<TestDeclaration>> {
@@ -106,6 +109,7 @@ pub(crate) fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
                 .args(["test", "--workspace", "--quiet"])
                 .verbose_arguments(["--", "--nocapture"]),
         ),
+        parser_all_features()?,
         TestDeclaration::new(
             "web",
             Test::try_new("web", surface::VITEST, executable.clone())?.arg("frontend-test"),
@@ -114,6 +118,20 @@ pub(crate) fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
         cli_e2e()?,
         desktop_e2e(executable)?,
     ])
+}
+
+fn parser_all_features() -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
+        "parser-all-features",
+        Test::try_new("parser-all-features", surface::CARGO, "cargo")?.args([
+            "test",
+            "--locked",
+            "--quiet",
+            "-p",
+            "gtl-parser",
+            "--all-features",
+        ]),
+    ))
 }
 
 fn worker(

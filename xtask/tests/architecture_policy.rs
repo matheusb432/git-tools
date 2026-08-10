@@ -31,6 +31,34 @@ fn check_structure_rejects_application_dependency_on_infrastructure() {
 }
 
 #[test]
+fn check_structure_rejects_parser_dependency_on_a_workspace_package() {
+    let workspace = tempfile::tempdir().expect("create temporary workspace");
+    write_workspace(
+        workspace.path(),
+        &[
+            (
+                "gtl-parser",
+                "gtl-parser",
+                "[dependencies]\ngtl-models = { path = \"../gtl-models\" }\n",
+            ),
+            ("gtl-models", "gtl-models", ""),
+        ],
+    );
+
+    let output = xtask(workspace.path()).output().expect("run xtask");
+
+    assert_eq!(output.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains(
+            "[gtl-parser stays reusable] gtl-parser -> gtl-models: \
+             the reusable wasm parser must not depend on repository-specific packages"
+        ),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn check_structure_allows_build_dependencies() {
     let workspace = tempfile::tempdir().expect("create temporary workspace");
     write_workspace(

@@ -156,7 +156,10 @@ mod tests {
 
     #[test]
     fn unit_selects_default_member_tests() {
-        assert_eq!(selected_test_labels(Scope::Unit), ["unit"]);
+        assert_eq!(
+            selected_test_labels(Scope::Unit),
+            ["unit", "parser-all-features"]
+        );
     }
 
     #[test]
@@ -168,7 +171,14 @@ mod tests {
     fn all_selects_the_complete_test_suite_in_declaration_order() {
         assert_eq!(
             selected_test_labels(Scope::All),
-            ["unit", "web", "drift", "cli-e2e", "desktop-e2e"]
+            [
+                "unit",
+                "parser-all-features",
+                "web",
+                "drift",
+                "cli-e2e",
+                "desktop-e2e"
+            ]
         );
     }
 

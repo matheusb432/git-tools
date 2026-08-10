@@ -24,6 +24,33 @@ pub(super) fn linters() -> Result<()> {
     super::presentation::run()?;
     super::check_structure::run(None);
     process::run(
+        "gtl-parser-wasm-core",
+        "cargo",
+        &[
+            "check",
+            "--locked",
+            "-p",
+            "gtl-parser",
+            "--no-default-features",
+            "--target",
+            "wasm32-unknown-unknown",
+        ],
+    )?;
+    process::run(
+        "gtl-parser-wasm-all-features",
+        "cargo",
+        &[
+            "check",
+            "--locked",
+            "-p",
+            "gtl-parser",
+            "--all-features",
+            "--all-targets",
+            "--target",
+            "wasm32-unknown-unknown",
+        ],
+    )?;
+    process::run(
         "clippy",
         "cargo",
         &["clippy", "--workspace", "--all-targets"],
