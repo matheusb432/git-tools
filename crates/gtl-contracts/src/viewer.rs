@@ -320,7 +320,9 @@ pub struct ViewerHistoryPage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerProjectDiffExclusions {
+    // TODO: refactor to newtype.
     pub project_name: String,
+    // TODO: refactor to newtype here, in gtl-models and in gtl-web usages.
     pub extensions: Vec<String>,
 }
 

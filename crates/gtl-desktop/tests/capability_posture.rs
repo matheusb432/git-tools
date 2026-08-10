@@ -38,7 +38,7 @@ fn development_flavor_uses_the_dioxus_server_with_an_independent_identity() {
     assert_eq!(development["build"]["devUrl"], "http://127.0.0.1:8080");
     assert_eq!(
         development["build"]["beforeDevCommand"]["script"],
-        "cargo run --quiet -p xtask -- web-serve -- --addr 127.0.0.1 --port 8080 --open false"
+        "cargo run --quiet -p xtask -- web-serve -- --addr 127.0.0.1 --port 8080 --open false --interactive false"
     );
     assert_eq!(development["build"]["beforeDevCommand"]["cwd"], "../..");
     assert_eq!(development["build"]["beforeDevCommand"]["wait"], false);

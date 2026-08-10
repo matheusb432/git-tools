@@ -1,14 +1,20 @@
+pub mod ui;
+
 use dioxus::prelude::*;
 use gtl_contracts::viewer::ViewerUserSettings;
 use lucide_dioxus::{FileCog, Settings};
 
 use crate::{
-    entities::diffs::{ViewerApi, density_label, layout_label, theme_label},
+    entities::{
+        diffs::{density_label, layout_label, theme_label},
+        user_settings::UserSettingsApi,
+    },
     shared::{
         bridge::ClientApiError,
         browser,
         ui::{Button, ButtonVariant, ScrollArea, Skeleton},
     },
+    views::user_settings::ui::DiffExtensionExclusions,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,13 +30,13 @@ pub(crate) fn UserSettingsView() -> Element {
     let mut settings = use_signal(|| SettingsLoad::Loading);
 
     use_effect(move || {
-        browser::focus_element("settings-heading".into());
+        browser::focus_element(gtl_web_contracts::user_settings::SETTINGS_HEADING_ID.into());
     });
     use_effect(move || {
         let request_generation = reload();
         settings.set(SettingsLoad::Loading);
         spawn(async move {
-            let result = ViewerApi::get_settings().await;
+            let result = UserSettingsApi::get_settings().await;
             if reload() != request_generation {
                 return;
             }
@@ -58,7 +64,7 @@ pub(crate) fn UserSettingsView() -> Element {
                             }
                         }
                         h1 {
-                            id: "settings-heading",
+                            id: gtl_web_contracts::user_settings::SETTINGS_HEADING_ID,
                             class: "mt-1 text-lg font-semibold tracking-tight text-ink focus:outline-none",
                             tabindex: "-1",
                             "User settings"
@@ -127,53 +133,32 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
         .configuration_path
         .clone()
         .unwrap_or_else(|| "Built-in defaults".to_owned());
-
+    let push_confirmation_text = if settings.push_confirmation_required {
+        "Required".to_owned()
+    } else {
+        "Not required".to_owned()
+    };
     rsx! {
         section {
             class: "overflow-hidden rounded-panel border border-line bg-surface",
             aria_label: "Resolved viewer settings",
-            div { class: "flex items-center gap-2 border-b border-line bg-surface-2 px-4 py-3",
-                span { class: "text-acc", aria_hidden: "true",
-                    FileCog { size: 16 }
-                }
-                h2 { class: "font-semibold text-ink", "Viewer configuration" }
+            SettingsTableHeader {
+                icon: rsx! {
+                    FileCog {}
+                },
+                "Viewer configuration"
             }
             dl { class: "divide-y divide-line",
-                SettingsRow {
-                    term: "Configuration file",
-                    value: configuration_path,
-                    code: true,
+                SettingsRow { term: "Configuration file", "{configuration_path}" }
+                SettingsRow { term: "Configured theme", "{configured_theme}" }
+                SettingsRow { term: "Effective theme", "{theme_label(settings.effective_theme).to_owned()}" }
+                SettingsRow { term: "Diff layout", "{layout_label(settings.render_options.layout).to_owned()}" }
+                SettingsRow { term: "Diff density",
+                    "{density_label(settings.render_options.density).to_owned()}"
                 }
-                SettingsRow { term: "Configured theme", value: configured_theme }
-                SettingsRow {
-                    term: "Effective theme",
-                    value: theme_label(settings.effective_theme).to_owned(),
-                }
-                SettingsRow {
-                    term: "Diff layout",
-                    value: layout_label(settings.render_options.layout).to_owned(),
-                }
-                SettingsRow {
-                    term: "Diff density",
-                    value: density_label(settings.render_options.density).to_owned(),
-                }
-                SettingsRow {
-                    term: "Push confirmation",
-                    value: if settings.push_confirmation_required { "Required".to_owned() } else { "Not required".to_owned() },
-                }
-                div { class: "grid gap-2 px-4 py-4 sm:grid-cols-[14rem_minmax(0,1fr)]",
-                    dt { class: "font-semibold text-ink-2", "Default diff exclusions" }
-                    dd { class: "m-0 flex min-w-0 flex-wrap gap-1.5",
-                        if settings.diff_exclusions.default_extensions.is_empty() {
-                            span { class: "text-ink-3", "None" }
-                        } else {
-                            for extension in &settings.diff_exclusions.default_extensions {
-                                code { class: "rounded-sm border border-line-2 bg-sunk px-1.5 py-0.5 font-mono text-xs text-ink",
-                                    "*.{extension}"
-                                }
-                            }
-                        }
-                    }
+                SettingsRow { term: "Push confirmation", "{push_confirmation_text}" }
+                SettingsRow { term: "Default diff exclusions",
+                    DiffExtensionExclusions { file_extensions: settings.diff_exclusions.default_extensions }
                 }
             }
         }
@@ -181,33 +166,15 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
         section {
             class: "overflow-hidden rounded-panel border border-line bg-surface",
             aria_label: "Project diff exclusions",
-            header { class: "border-b border-line bg-surface-2 px-4 py-3",
-                h2 { class: "font-semibold text-ink", "Project exclusions" }
-                p { class: "mt-1 text-ink-2",
-                    "Repository-specific extension filters, sorted by project name."
-                }
+            SettingsTableHeader { subtitle: "Repository-specific extension filters, sorted by project name.",
+                "Project exclusions"
             }
             if projects.is_empty() {
-                p { class: "px-4 py-5 text-ink-3", "No project-specific exclusions." }
+                EmptySettingsRow { "No project-specific exclusions." }
             } else {
-                dl { class: "divide-y divide-line",
-                    for project in projects {
-                        div { class: "grid gap-2 px-4 py-4 sm:grid-cols-[14rem_minmax(0,1fr)]",
-                            dt { class: "truncate font-mono font-semibold text-ink",
-                                "{project.project_name}"
-                            }
-                            dd { class: "m-0 flex min-w-0 flex-wrap gap-1.5",
-                                if project.extensions.is_empty() {
-                                    span { class: "text-ink-3", "None" }
-                                } else {
-                                    for extension in project.extensions {
-                                        code { class: "rounded-sm border border-line-2 bg-sunk px-1.5 py-0.5 font-mono text-xs text-ink",
-                                            "*.{extension}"
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                for project in projects {
+                    SettingsRow { term: project.project_name,
+                        DiffExtensionExclusions { file_extensions: project.extensions }
                     }
                 }
             }
@@ -215,18 +182,43 @@ fn SettingsContent(settings: ViewerUserSettings) -> Element {
     }
 }
 
+// TODO: make SettingsTableHeader, SettingsRow and EmptySettingsRow into reusable primitives for a
+// DataTable atomic ui component.
 #[component]
-fn SettingsRow(term: String, value: String, #[props(default)] code: bool) -> Element {
+fn SettingsTableHeader(
+    icon: Option<Element>,
+    subtitle: Option<String>,
+    children: Element,
+) -> Element {
+    rsx! {
+        header { class: "border-b border-line bg-surface-2 px-4 py-3",
+            div { class: "flex items-center",
+                if icon.is_some() {
+                    span { class: "text-acc mr-2", aria_hidden: "true", {icon} }
+                }
+                h2 { class: "text-xl font-semibold text-ink", {children} }
+            }
+            if subtitle.is_some() {
+                h3 { class: "text-ink-2", {subtitle} }
+            }
+        }
+    }
+}
+
+#[component]
+fn SettingsRow(term: String, children: Element) -> Element {
     rsx! {
         div { class: "grid gap-2 px-4 py-4 sm:grid-cols-[14rem_minmax(0,1fr)]",
             dt { class: "font-semibold text-ink-2", "{term}" }
-            dd { class: "m-0 min-w-0 break-words text-ink",
-                if code {
-                    code { class: "font-mono", "{value}" }
-                } else {
-                    "{value}"
-                }
-            }
+            dd { class: "m-0 min-w-0 break-words text-ink", {children} }
         }
+    }
+}
+
+#[component]
+fn EmptySettingsRow(children: Element) -> Element {
+    rsx! {
+        p { class: "px-4 py-5 text-ink-3", {children} }
+
     }
 }

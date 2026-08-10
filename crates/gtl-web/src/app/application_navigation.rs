@@ -9,7 +9,7 @@ use super::{
     application_router::Route,
 };
 use crate::{
-    entities::diffs::{ViewerApi, theme_from_value, theme_label, theme_value},
+    entities::diffs::{DiffViewerApi, theme_from_value, theme_label, theme_value},
     shared::{
         bridge::ClientApiError,
         browser,
@@ -82,7 +82,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             return;
                                         }
                                         spawn(async move {
-                                            match ViewerApi::activate_tab(tab_id).await {
+                                            match DiffViewerApi::activate_tab(tab_id).await {
                                                 Ok(shell) => {
                                                     viewer.replace_shell(shell);
                                                     navigator.push(Route::Workspace {});
@@ -104,7 +104,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             let ids = key_tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
                                             if let Some(target) = tab_focus_target(&ids, tab_id, movement) {
                                                 spawn(async move {
-                                                    match ViewerApi::activate_tab(target).await {
+                                                    match DiffViewerApi::activate_tab(target).await {
                                                         Ok(shell) => {
                                                             viewer.replace_shell(shell);
                                                             navigator.push(Route::Workspace {});
@@ -136,7 +136,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                     onclick: move |_| {
                                         action_error.set(None);
                                         spawn(async move {
-                                            match ViewerApi::close_tab(tab_id).await {
+                                            match DiffViewerApi::close_tab(tab_id).await {
                                                 Ok(shell) => {
                                                     viewer.replace_shell(shell);
                                                     if let Some(focus_id) = focus_tab_id {

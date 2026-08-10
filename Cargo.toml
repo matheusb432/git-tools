@@ -12,6 +12,7 @@ members = [
   "crates/gtl-parser",
   "crates/gtl-preview",
   "crates/gtl-web",
+  "crates/gtl-web-contracts",
   "e2e/gtl-browser-e2e",
   "e2e/gtl-cli-e2e",
   "e2e/gtl-desktop-e2e",
@@ -37,9 +38,17 @@ rust-version = "1.97"
 publish = false
 
 [workspace.dependencies]
-anyhow = "1"
 gtl-application = { path = "crates/gtl-application" }
 gtl-benchmarks = { path = "benchmarks" }
+gtl-contracts = { path = "crates/gtl-contracts" }
+gtl-desktop = { path = "crates/gtl-desktop" }
+gtl-preview = { path = "crates/gtl-preview" }
+gtl-models = { path = "crates/gtl-models" }
+gtl-parser = { path = "crates/gtl-parser", default-features = false }
+gtl-infra = { path = "crates/gtl-infra" }
+gtl-web-contracts = { path = "crates/gtl-web-contracts" }
+
+anyhow = "1"
 assert_cmd = "2"
 axum = "0.8"
 base64 = "0.22.1"
@@ -49,20 +58,15 @@ clap = { version = "4", features = ["derive"] }
 clap-cargo = "0.18.3"
 command-group = "5.0.1"
 console = { version = "0.16.4", default-features = false, features = ["std"] }
-gtl-contracts = { path = "crates/gtl-contracts" }
-gtl-desktop = { path = "crates/gtl-desktop" }
 cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.10.1" }
 criterion = "0.8.2"
 directories = "6.0.0"
-gtl-models = { path = "crates/gtl-models" }
-gtl-parser = { path = "crates/gtl-parser", default-features = false }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gix = { version = "0.56", default-features = false, features = ["revision"] }
 http-body-util = "0.1"
 ico = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
 indicatif = { version = "0.18.6", default-features = false }
-gtl-infra = { path = "crates/gtl-infra" }
 jiff = { version = "0.2", default-features = false, features = ["std"] }
 lru = "0.18.1"
 libc = "0.2.186"
@@ -72,7 +76,6 @@ nutype = "0.7.0"
 parking_lot = "0.12.5"
 playwright-rs = "=0.15.0"
 predicates = "3"
-gtl-preview = { path = "crates/gtl-preview" }
 raw-window-handle = "0.6"
 reqwest = { version = "0.13", default-features = false, features = [
   "blocking",
@@ -116,7 +119,7 @@ uuid = { version = "1", features = ["v4"] }
 walkdir = "2.5.0"
 x11-dl = "2.21.0"
 zbus = "5.16.0"
-sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.6.0" }
+sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.6.2" }
 
 [profile.dev.package."*"]
 debug = false

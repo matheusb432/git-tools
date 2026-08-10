@@ -6,7 +6,7 @@ use lucide_dioxus::{
 
 use crate::{
     app::{application_layout::ViewerContext, application_router::Route},
-    entities::diffs::{ViewerApi, history_navigation, recipe_kind_label},
+    entities::diffs::{DiffHistoryApi, history_navigation, recipe_kind_label},
     shared::{
         bridge::ClientApiError,
         browser,
@@ -94,7 +94,7 @@ pub(crate) fn DiffHistoryView() -> Element {
         };
         history.set(HistoryLoad::Loading);
         spawn(async move {
-            let result = ViewerApi::list_history(requested_cursor).await;
+            let result = DiffHistoryApi::list_history(requested_cursor).await;
             if query_generation() != generation {
                 return;
             }
@@ -186,7 +186,7 @@ pub(crate) fn DiffHistoryView() -> Element {
                                             };
                                             action_error.set(None);
                                             spawn(async move {
-                                                let result = ViewerApi::open_history(render_id).await;
+                                                let result = DiffHistoryApi::open_history(render_id).await;
                                                 if !open_state().accepts(open_request) {
                                                     return;
                                                 }
@@ -203,7 +203,7 @@ pub(crate) fn DiffHistoryView() -> Element {
                                         oncopy: move |render_id: i64| {
                                             action_error.set(None);
                                             spawn(async move {
-                                                match ViewerApi::get_history_copy(render_id).await {
+                                                match DiffHistoryApi::get_history_copy(render_id).await {
                                                     Ok(payload) => {
                                                         match browser::copy_json(&payload).await {
                                                             Ok(()) => copied_id.set(Some(render_id)),

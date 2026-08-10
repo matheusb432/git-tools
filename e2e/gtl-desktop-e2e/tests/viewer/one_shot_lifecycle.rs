@@ -351,6 +351,8 @@ async fn wait_for_read_only_settings(driver: &WebDriver) -> Result<()> {
         wait::ASSERTION_TIMEOUT,
         || async {
             let result = driver
+                // TODO: use gtl_web_contracts::user_settings::SETTINGS_HEADING_ID here instead of
+                // raw 'settings-heading' string
                 .execute(
                     r#"
 const main = document.querySelector('main');

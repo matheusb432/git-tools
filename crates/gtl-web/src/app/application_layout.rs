@@ -3,7 +3,7 @@ use gtl_contracts::viewer::{SetViewerPreference, ViewerFeedback, ViewerShell, Vi
 
 use crate::{
     app::{application_navigation::ApplicationNavigation, application_router::Route},
-    entities::diffs::{ViewerApi, theme_value},
+    entities::diffs::{DiffViewerApi, theme_value},
     shared::{bridge::ClientApiError, browser, ui::FloatingNotice},
 };
 
@@ -191,9 +191,11 @@ impl ViewerContext {
         spawn_forever(async move {
             let result = match command {
                 ViewerRenderCommand::SetPreference(preference) => {
-                    ViewerApi::set_preference(preference).await
+                    DiffViewerApi::set_preference(preference).await
                 }
-                ViewerRenderCommand::RefreshTab { tab_id } => ViewerApi::refresh_tab(tab_id).await,
+                ViewerRenderCommand::RefreshTab { tab_id } => {
+                    DiffViewerApi::refresh_tab(tab_id).await
+                }
             };
             self.complete_render_command(ticket, result);
         });
@@ -244,7 +246,7 @@ impl ViewerContext {
         }
 
         spawn(async move {
-            let result = ViewerApi::get_shell().await;
+            let result = DiffViewerApi::get_shell().await;
             let order = (self.shell_order)();
             if !order.request_is_current(request_generation) {
                 return;
@@ -295,7 +297,7 @@ pub(crate) fn ApplicationLayout() -> Element {
     use_context_provider(|| context);
 
     let mut state_changes = use_future(move || async move {
-        if let Err(error) = ViewerApi::listen_for_state_changes(
+        if let Err(error) = DiffViewerApi::listen_for_state_changes(
             move || context.refresh(true),
             move |event| context.invalidate(event.revision),
         )

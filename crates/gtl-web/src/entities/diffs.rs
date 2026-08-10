@@ -1,9 +1,9 @@
-pub(crate) mod api;
+mod api;
 mod diff_history;
 mod diff_island;
 
-pub(crate) use api::ViewerApi;
-pub(crate) use diff_history::history_navigation;
+pub(crate) use api::DiffViewerApi;
+pub(crate) use diff_history::{DiffHistoryApi, history_navigation};
 pub(crate) use diff_island::{DiffIslandAppendResult, DiffIslandBridge};
 use gtl_contracts::viewer::{
     ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind, ViewerTheme, ViewerViewIdentity,

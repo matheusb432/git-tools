@@ -1,9 +1,7 @@
 use gtl_contracts::viewer::{
-    GetViewerHistoryCopy, ListViewerHistory, LoadViewerDiffChunk, OpenViewerDiffFile,
-    OpenViewerHistory, PrepareDiffDocument, SelectViewerCommit, SetViewerPreference,
-    VIEWER_STATE_CHANGED_EVENT, ViewerDiffChunk, ViewerDiffDocument, ViewerHistoryCopyPayload,
-    ViewerHistoryCursor, ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest,
-    ViewerUserSettings, ViewerViewIdentity,
+    LoadViewerDiffChunk, OpenViewerDiffFile, PrepareDiffDocument, SelectViewerCommit,
+    SetViewerPreference, VIEWER_STATE_CHANGED_EVENT, ViewerDiffChunk, ViewerDiffDocument,
+    ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerViewIdentity,
 };
 
 use crate::shared::bridge::{ClientApiError, TauriBridge};
@@ -18,15 +16,11 @@ const DELETE_LIVE_TAB_COMMAND: &str = "viewer_delete_live_tab";
 const SELECT_COMMIT_COMMAND: &str = "viewer_select_commit";
 const CLEAR_COMMIT_SELECTION_COMMAND: &str = "viewer_clear_commit_selection";
 const SET_PREFERENCE_COMMAND: &str = "viewer_set_preference";
-const LIST_HISTORY_COMMAND: &str = "viewer_list_history";
-const OPEN_HISTORY_COMMAND: &str = "viewer_open_history";
-const GET_HISTORY_COPY_COMMAND: &str = "viewer_get_history_copy";
-const GET_SETTINGS_COMMAND: &str = "viewer_get_settings";
 const OPEN_DIFF_FILE_COMMAND: &str = "viewer_open_diff_file";
 
-pub(crate) struct ViewerApi;
+pub(crate) struct DiffViewerApi;
 
-impl ViewerApi {
+impl DiffViewerApi {
     pub(crate) async fn get_shell() -> Result<ViewerShell, ClientApiError> {
         TauriBridge::invoke(GET_SHELL_COMMAND).await
     }
@@ -85,30 +79,6 @@ impl ViewerApi {
         preference: SetViewerPreference,
     ) -> Result<ViewerShell, ClientApiError> {
         TauriBridge::invoke_request(SET_PREFERENCE_COMMAND, &preference).await
-    }
-
-    pub(crate) async fn list_history(
-        cursor: ViewerHistoryCursor,
-    ) -> Result<ViewerHistoryPage, ClientApiError> {
-        TauriBridge::invoke_request(LIST_HISTORY_COMMAND, &ListViewerHistory { cursor }).await
-    }
-
-    pub(crate) async fn open_history(render_id: i64) -> Result<ViewerShell, ClientApiError> {
-        TauriBridge::invoke_request(OPEN_HISTORY_COMMAND, &OpenViewerHistory { render_id }).await
-    }
-
-    pub(crate) async fn get_history_copy(
-        render_id: i64,
-    ) -> Result<ViewerHistoryCopyPayload, ClientApiError> {
-        TauriBridge::invoke_request(
-            GET_HISTORY_COPY_COMMAND,
-            &GetViewerHistoryCopy { render_id },
-        )
-        .await
-    }
-
-    pub(crate) async fn get_settings() -> Result<ViewerUserSettings, ClientApiError> {
-        TauriBridge::invoke(GET_SETTINGS_COMMAND).await
     }
 
     pub(crate) async fn open_diff_file(

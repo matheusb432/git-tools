@@ -1,6 +1,7 @@
 mod alert_dialog;
 mod badge;
 mod button;
+pub mod code_text;
 mod dialog;
 mod floating_notice;
 mod popover;

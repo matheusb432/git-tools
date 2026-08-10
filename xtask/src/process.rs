@@ -8,7 +8,7 @@ use std::{
     ffi::OsStr,
     io::{self, Write as _},
     path::Path,
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -51,6 +51,13 @@ pub(crate) fn step_succeeds(step: &Step) -> Result<bool> {
         .status()
         .with_context(|| format!("spawning {}", step.label()))?;
     Ok(status.success())
+}
+
+/// Spawn one command plan without changing its terminal process group.
+pub(crate) fn spawn_step(step: &Step) -> Result<Child> {
+    step_command(step)
+        .spawn()
+        .with_context(|| format!("spawning {}", step.label()))
 }
 
 /// Build the child command for a step, applying its arguments and environment additions.
@@ -228,6 +235,54 @@ mod tests {
                 .expect("child starts")
                 .success()
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn development_child_remains_in_the_callers_process_group() {
+        const CHILD_MARKER: &str = "XTASK_PROC_GROUP_CHILD";
+        if std::env::var_os(CHILD_MARKER).is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            return;
+        }
+
+        let executable = std::env::current_exe().expect("test executable resolves");
+        let step = Step::new(
+            "process group child",
+            executable.to_string_lossy().into_owned(),
+            [
+                "--exact",
+                "process::tests::development_child_remains_in_the_callers_process_group",
+            ],
+        )
+        .with_environment(CHILD_MARKER, "1");
+        let parent_group = linux_process_group(std::process::id()).expect("parent process group");
+        let mut child = spawn_step(&step).expect("development child starts");
+        let child_group = linux_process_group(child.id());
+        child.kill().expect("development child stops");
+        child.wait().expect("development child is reaped");
+
+        assert_eq!(child_group.expect("child process group"), parent_group);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn linux_process_group(process_id: u32) -> std::io::Result<u32> {
+        let stat = std::fs::read_to_string(format!("/proc/{process_id}/stat"))?;
+        let (_, fields) = stat.rsplit_once(") ").ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "process stat has no command",
+            )
+        })?;
+        let group = fields.split_whitespace().nth(2).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "process stat has no process group",
+            )
+        })?;
+        group
+            .parse()
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
     }
 
     #[test]

@@ -1,14 +1,19 @@
 //! Deterministic Dioxus Web release staging for the Tauri viewer.
 
 use std::{
+    collections::BTreeSet,
     fmt::Write as _,
     fs::{self, File},
     io::{Read as _, Write as _},
     path::{Path, PathBuf},
-    process::{Child, Command},
+    process::{Child, Command, ExitStatus},
+    thread,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, bail, ensure};
+#[cfg(unix)]
+use command_group::{Signal, UnixChildExt};
 use sha2::{Digest, Sha256};
 
 use super::frontend;
@@ -110,6 +115,13 @@ const SERVE_ARGUMENTS: &[&str] = &[
     "true",
 ];
 const DIFF_ISLAND_WATCH_ARGUMENTS: &[&str] = &["task", "--frozen", "dev:diff-island"];
+const DEVELOPMENT_RUST_SOURCE_DIRECTORIES: &[&str] = &[
+    "crates/gtl-contracts/src",
+    "crates/gtl-web-contracts/src",
+    "crates/gtl-web/src",
+];
+const DEVELOPMENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const DEVELOPMENT_STOP_GRACE_PERIOD: Duration = Duration::from_secs(2);
 
 pub(crate) fn run() -> Result<()> {
     build_release()?;
@@ -148,11 +160,163 @@ pub(crate) fn serve(arguments: &[String]) -> Result<()> {
             &root,
         )?,
     ];
-    process::run_step(
-        &Step::new("dioxus-web-serve", "dx", SERVE_ARGUMENTS.iter().copied())
-            .with_arguments(arguments.iter().cloned())
-            .with_current_directory(root),
-    )
+    let step = development_serve_step(&root, arguments);
+    run_development_server(&step, &root)
+}
+
+fn development_serve_step(root: &Path, arguments: &[String]) -> Step {
+    Step::new("dioxus-web-serve", "dx", SERVE_ARGUMENTS.iter().copied())
+        .with_arguments(arguments.iter().cloned())
+        .with_environment("CARGO_INCREMENTAL", "1")
+        .with_environment("RUSTC_WRAPPER", "")
+        .with_current_directory(root)
+}
+
+fn run_development_server(step: &Step, root: &Path) -> Result<()> {
+    // Dioxus 0.7 snapshots its Rust source map at startup and silently ignores files created
+    // afterward. Restarting only for new Rust paths refreshes that map without sacrificing normal
+    // RSX hot reloads.
+    let mut known_sources = development_rust_sources(root)?;
+    loop {
+        let mut server = DevelopmentServer::spawn(step)?;
+        loop {
+            if let Some(status) = server.try_wait()? {
+                return development_server_result(step, status);
+            }
+
+            let current_sources = development_rust_sources(root)?;
+            let new_sources = new_development_rust_sources(&known_sources, &current_sources);
+            if !new_sources.is_empty() {
+                let paths = new_sources
+                    .iter()
+                    .map(|path| {
+                        path.strip_prefix(root)
+                            .unwrap_or(path)
+                            .display()
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                eprintln!(
+                    "dioxus-web-serve: restarting Dioxus to register new Rust source: {paths}"
+                );
+                server.stop()?;
+                known_sources = current_sources;
+                break;
+            }
+            thread::sleep(DEVELOPMENT_POLL_INTERVAL);
+        }
+    }
+}
+
+fn development_server_result(step: &Step, status: ExitStatus) -> Result<()> {
+    ensure!(
+        status.success(),
+        "{} failed (exit {})",
+        step.label(),
+        status.code().unwrap_or(-1)
+    );
+    Ok(())
+}
+
+fn development_rust_sources(root: &Path) -> Result<BTreeSet<PathBuf>> {
+    let mut sources = BTreeSet::new();
+    for directory in DEVELOPMENT_RUST_SOURCE_DIRECTORIES {
+        for path in collect_tree_files(&root.join(directory))? {
+            if path.extension().is_some_and(|extension| extension == "rs") {
+                sources.insert(path);
+            }
+        }
+    }
+    ensure!(
+        sources.len() <= FILE_COUNT_MAX,
+        "Dioxus development source inventory exceeds {FILE_COUNT_MAX} Rust files"
+    );
+    Ok(sources)
+}
+
+fn new_development_rust_sources(
+    known: &BTreeSet<PathBuf>,
+    current: &BTreeSet<PathBuf>,
+) -> Vec<PathBuf> {
+    current.difference(known).cloned().collect()
+}
+
+struct DevelopmentServer {
+    label: String,
+    child: Child,
+}
+
+impl DevelopmentServer {
+    fn spawn(step: &Step) -> Result<Self> {
+        Ok(Self {
+            label: step.label().to_owned(),
+            child: process::spawn_step(step)?,
+        })
+    }
+
+    fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
+        self.child
+            .try_wait()
+            .with_context(|| format!("poll {} process", self.label))
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        if self.try_wait()?.is_some() {
+            return Ok(());
+        }
+
+        self.request_stop()?;
+        let deadline = Instant::now() + DEVELOPMENT_STOP_GRACE_PERIOD;
+        loop {
+            if self.try_wait()?.is_some() {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                if let Err(error) = self.child.kill()
+                    && self.try_wait()?.is_none()
+                {
+                    return Err(error).context(format!("kill {} process", self.label));
+                }
+                self.child
+                    .wait()
+                    .with_context(|| format!("reap {} process", self.label))?;
+                return Ok(());
+            }
+            thread::sleep(DEVELOPMENT_POLL_INTERVAL);
+        }
+    }
+
+    #[cfg(unix)]
+    fn request_stop(&mut self) -> Result<()> {
+        if let Err(error) = self.child.signal(Signal::SIGINT)
+            && self.try_wait()?.is_none()
+        {
+            return Err(error).context(format!("stop {} process", self.label));
+        }
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn request_stop(&mut self) -> Result<()> {
+        if let Err(error) = self.child.kill()
+            && self.try_wait()?.is_none()
+        {
+            return Err(error).context(format!("stop {} process", self.label));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for DevelopmentServer {
+    fn drop(&mut self) {
+        if let Err(error) = self.stop() {
+            eprintln!(
+                "{}: failed to stop development server: {error:#}",
+                self.label
+            );
+        }
+    }
 }
 
 fn watch_arguments(arguments: &[&'static str]) -> Vec<&'static str> {
@@ -771,5 +935,46 @@ mod tests {
                 .windows(2)
                 .any(|pair| pair == ["--hot-reload", "true"])
         );
+    }
+
+    #[test]
+    fn development_serve_owns_the_incremental_compile_environment() {
+        let root = tempfile::tempdir().expect("temporary repository");
+        let forwarded = ["--port".to_owned(), "8081".to_owned()];
+
+        let step = development_serve_step(root.path(), &forwarded);
+
+        assert_eq!(step.program(), "dx");
+        assert!(step.arguments().ends_with(&forwarded));
+        assert_eq!(step.current_directory(), Some(root.path()));
+        assert!(
+            step.environment()
+                .contains(&("CARGO_INCREMENTAL".to_owned(), "1".to_owned()))
+        );
+        assert!(
+            step.environment()
+                .contains(&("RUSTC_WRAPPER".to_owned(), String::new()))
+        );
+    }
+
+    #[test]
+    fn development_source_inventory_exposes_only_new_rust_sources() {
+        let root = tempfile::tempdir().expect("temporary repository");
+        for directory in DEVELOPMENT_RUST_SOURCE_DIRECTORIES {
+            fs::create_dir_all(root.path().join(directory))
+                .expect("development source directory is writable");
+        }
+        let before = development_rust_sources(root.path()).expect("initial source inventory");
+        let rust_source = root
+            .path()
+            .join("crates/gtl-web/src/shared/ui/code_text.rs");
+        fs::create_dir_all(rust_source.parent().expect("Rust source parent"))
+            .expect("Rust source parent is writable");
+        fs::write(&rust_source, "pub fn code_text() {}").expect("Rust source fixture is writable");
+        fs::write(root.path().join("crates/gtl-web/src/notes.txt"), "not Rust")
+            .expect("non-Rust fixture is writable");
+        let after = development_rust_sources(root.path()).expect("updated source inventory");
+
+        assert_eq!(new_development_rust_sources(&before, &after), [rust_source]);
     }
 }

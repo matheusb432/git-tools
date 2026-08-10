@@ -2,6 +2,7 @@ use dioxus::prelude::document;
 use gtl_contracts::viewer::ViewerApiError;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+// TODO: review and refactor if these are necessary or can be implemented in a cleaner way
 const INVOKE_SCRIPT: &str = r#"
 const [command, args] = await dioxus.recv();
 const invoke = window.__TAURI__?.core?.invoke;

@@ -13,7 +13,7 @@ use lucide_dioxus::{
 use crate::{
     app::application_layout::{ViewerContext, ViewerShellLoad},
     entities::diffs::{
-        DiffIslandAppendResult, DiffIslandBridge, ViewerApi, theme_value, view_identity_value,
+        DiffIslandAppendResult, DiffIslandBridge, DiffViewerApi, theme_value, view_identity_value,
     },
     shared::{
         bridge::ClientApiError,
@@ -211,7 +211,7 @@ fn ReadyWorkspace(
     let onselect_commit = move |sha: String| {
         action_error.set(None);
         spawn(async move {
-            match ViewerApi::select_commit(tab_id, sha).await {
+            match DiffViewerApi::select_commit(tab_id, sha).await {
                 Ok(shell) => viewer.replace_shell(shell),
                 Err(error) => action_error.set(Some(error)),
             }
@@ -220,7 +220,7 @@ fn ReadyWorkspace(
     let onclear_commit = move |()| {
         action_error.set(None);
         spawn(async move {
-            match ViewerApi::clear_commit_selection(tab_id).await {
+            match DiffViewerApi::clear_commit_selection(tab_id).await {
                 Ok(shell) => viewer.replace_shell(shell),
                 Err(error) => action_error.set(Some(error)),
             }
@@ -414,7 +414,7 @@ fn ReadyWorkspace(
                 delete_pending.set(true);
                 action_error.set(None);
                 spawn(async move {
-                    match ViewerApi::delete_live_tab(tab_id).await {
+                    match DiffViewerApi::delete_live_tab(tab_id).await {
                         Ok(shell) => {
                             delete_open.set(false);
                             viewer.replace_shell(shell);
@@ -960,7 +960,7 @@ fn DiffIsland(
         state.set(DiffIslandState::Loading);
         open_file_error.set(None);
         spawn(async move {
-            let document = match ViewerApi::prepare_diff_document(identity).await {
+            let document = match DiffViewerApi::prepare_diff_document(identity).await {
                 Ok(document) if document.identity == identity => document,
                 Ok(_) => {
                     if generation() == request_generation {
@@ -1011,7 +1011,7 @@ fn DiffIsland(
             state.set(DiffIslandState::Streaming);
 
             for _ in 0..DIFF_CHUNK_COUNT_MAX {
-                let chunk = match ViewerApi::load_diff_chunk(identity, load_id).await {
+                let chunk = match DiffViewerApi::load_diff_chunk(identity, load_id).await {
                     Ok(chunk) if chunk.identity == identity => chunk,
                     Ok(_) => return,
                     Err(error) => {
@@ -1052,7 +1052,7 @@ fn DiffIsland(
             move |event| {
                 let identity = active_identity();
                 spawn(async move {
-                    if let Err(error) = ViewerApi::open_diff_file(identity, event.path).await {
+                    if let Err(error) = DiffViewerApi::open_diff_file(identity, event.path).await {
                         open_file_error.set(Some(error));
                     }
                 });
