@@ -9,6 +9,7 @@ mod classify;
 mod highlight;
 mod intraline;
 mod model;
+mod semantic;
 mod split;
 #[cfg(feature = "syntax")]
 mod syntax;
@@ -20,6 +21,7 @@ pub use model::{
     DEFAULT_MAX_LINE_CHARACTERS, DiffParser, DiffParserStream, DiffRow, DiffRowKind, DiffSide,
     ParseOptions, ParsedDiff, ParsedDiffBatch, SyntaxDiagnostic, diff_line_body,
 };
+pub use semantic::{SemanticTextChange, SemanticTextSpan};
 pub use split::{SplitDiffCell, SplitDiffRow, SplitDiffStream};
 #[cfg(feature = "bundled-syntaxes")]
 pub use syntax::bundled_syntax_catalog;

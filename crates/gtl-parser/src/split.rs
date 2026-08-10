@@ -1,6 +1,7 @@
 use crate::{
-    CharacterSpan, DiffRow, DiffRowKind, SyntaxToken,
+    CharacterSpan, DiffRow, DiffRowKind, SemanticTextSpan, SyntaxToken,
     intraline::{ChangedLineSpans, changed_spans},
+    semantic::semantic_text_spans,
 };
 
 /// One populated side of a paired side-by-side diff row.
@@ -10,6 +11,7 @@ pub struct SplitDiffCell {
     text: String,
     syntax_tokens: Vec<SyntaxToken>,
     intraline_spans: Vec<CharacterSpan>,
+    semantic_spans: Vec<SemanticTextSpan>,
     long_line_character_count: Option<usize>,
 }
 
@@ -34,6 +36,16 @@ impl SplitDiffCell {
         &self.intraline_spans
     }
 
+    /// Returns flat syntax and intraline spans over [`Self::body`].
+    pub fn semantic_spans(&self) -> &[SemanticTextSpan] {
+        &self.semantic_spans
+    }
+
+    /// Returns the marker-free source text.
+    pub fn body(&self) -> &str {
+        crate::diff_line_body(&self.text)
+    }
+
     /// Returns the source character count when this cell exceeds the parser limit.
     pub const fn long_line_character_count(&self) -> Option<usize> {
         self.long_line_character_count
@@ -54,6 +66,7 @@ pub enum SplitDiffRow {
         new_line_number: u32,
         text: String,
         syntax_tokens: Vec<SyntaxToken>,
+        semantic_spans: Vec<SemanticTextSpan>,
         long_line_character_count: Option<usize>,
     },
     Pair {
@@ -105,6 +118,7 @@ impl SplitDiffStream {
                         new_line_number: row.new_line_number().unwrap_or(0),
                         text: row.text().to_owned(),
                         syntax_tokens: row.syntax_tokens().to_vec(),
+                        semantic_spans: row.semantic_spans().to_vec(),
                         long_line_character_count: row.long_line_character_count(),
                     });
                 }
@@ -154,6 +168,7 @@ pub(crate) fn split_rows(rows: &[DiffRow]) -> Vec<SplitDiffRow> {
 }
 
 fn split_cell(row: &DiffRow, intraline_spans: Vec<CharacterSpan>, old: bool) -> SplitDiffCell {
+    let semantic_spans = semantic_text_spans(row.body(), row.syntax_tokens(), &intraline_spans);
     SplitDiffCell {
         line_number: if old {
             row.old_line_number().unwrap_or(0)
@@ -163,6 +178,7 @@ fn split_cell(row: &DiffRow, intraline_spans: Vec<CharacterSpan>, old: bool) -> 
         text: row.text().to_owned(),
         syntax_tokens: row.syntax_tokens().to_vec(),
         intraline_spans,
+        semantic_spans,
         long_line_character_count: row.long_line_character_count(),
     }
 }

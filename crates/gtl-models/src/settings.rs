@@ -1,5 +1,9 @@
 //! Immutable, validated user settings used by application operations.
 
+pub mod setting_key;
+
+pub use setting_key::*;
+
 use crate::{
     diffs::DiffExclusions,
     viewer::{RenderOptions, Theme},

@@ -152,6 +152,7 @@ fn render_split_rows(parsed: &[SplitDiffRow]) -> String {
                 text,
                 syntax_tokens,
                 long_line_character_count,
+                ..
             } => {
                 let _ = write!(
                     rows,

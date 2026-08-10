@@ -1,6 +1,9 @@
+use crate::{
+    SemanticTextSpan, SyntaxToken, UnifiedDiffLineClassifier, UnifiedDiffLineKind,
+    semantic::semantic_text_spans,
+};
 #[cfg(feature = "syntax")]
 use crate::{SyntaxDefinition, highlight::DiffSyntaxHighlighter};
-use crate::{SyntaxToken, UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 
 /// Default source-line character limit for syntax and intraline parsing.
 pub const DEFAULT_MAX_LINE_CHARACTERS: usize = 2000;
@@ -52,6 +55,7 @@ pub struct DiffRow {
     new_line_number: Option<u32>,
     text: String,
     syntax_tokens: Vec<SyntaxToken>,
+    semantic_spans: Vec<SemanticTextSpan>,
     long_line_character_count: Option<usize>,
 }
 
@@ -59,6 +63,7 @@ impl DiffRow {
     #[cfg(feature = "syntax")]
     pub(crate) fn set_syntax_tokens(&mut self, syntax_tokens: Vec<SyntaxToken>) {
         self.syntax_tokens = syntax_tokens;
+        self.semantic_spans = semantic_text_spans(self.body(), &self.syntax_tokens, &[]);
     }
 
     /// Returns the row's semantic role.
@@ -89,6 +94,11 @@ impl DiffRow {
     /// Returns semantic syntax tokens indexed over [`Self::body`].
     pub fn syntax_tokens(&self) -> &[SyntaxToken] {
         &self.syntax_tokens
+    }
+
+    /// Returns flat syntax spans over [`Self::body`].
+    pub fn semantic_spans(&self) -> &[SemanticTextSpan] {
+        &self.semantic_spans
     }
 
     /// Returns the source character count when this row exceeds the parser limit.
@@ -370,12 +380,19 @@ fn derive_rows(
 
         let (kind, old_line_number, new_line_number) =
             line_numbers.advance(line_classifier.classify(raw));
+        let semantic_spans = matches!(
+            kind,
+            DiffRowKind::Context | DiffRowKind::Added | DiffRowKind::Removed
+        )
+        .then(|| semantic_text_spans(diff_line_body(raw), &[], &[]))
+        .unwrap_or_default();
         rows.push(DiffRow {
             kind,
             old_line_number,
             new_line_number,
             text: raw.clone(),
             syntax_tokens: Vec::new(),
+            semantic_spans,
             long_line_character_count: long_line_character_count(raw, options.max_line_characters),
         });
     }

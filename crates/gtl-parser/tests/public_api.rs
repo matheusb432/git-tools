@@ -51,7 +51,7 @@ fn downstream_consumer_can_stream_parser_and_split_batches() {
 #[cfg(feature = "bundled-syntaxes")]
 #[test]
 fn downstream_consumer_can_attach_bundled_semantic_tokens() {
-    use gtl_parser::{SyntaxTokenClass, bundled_syntax_catalog};
+    use gtl_parser::{SemanticTextChange, SyntaxTokenClass, bundled_syntax_catalog};
 
     let syntax = bundled_syntax_catalog()
         .expect("bundled syntax catalog should load")
@@ -60,11 +60,10 @@ fn downstream_consumer_can_attach_bundled_semantic_tokens() {
         .with_syntax(syntax)
         .parse(&lines(&["@@ -0,0 +1 @@", "+let value = 1;"]));
 
-    assert!(
-        parsed.rows()[1]
-            .syntax_tokens()
-            .iter()
-            .any(|token| token.class() == SyntaxTokenClass::Number)
-    );
+    assert!(parsed.rows()[1].semantic_spans().iter().any(|span| {
+        span.text(parsed.rows()[1].body()) == "1"
+            && span.syntax_class() == Some(SyntaxTokenClass::Number)
+            && span.change() == SemanticTextChange::Unchanged
+    }));
     assert!(parsed.syntax_diagnostics().is_empty());
 }

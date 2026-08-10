@@ -193,7 +193,7 @@ fn SettingsTableHeader(
     rsx! {
         header { class: "border-b border-line bg-surface-2 px-4 py-3",
             div { class: "flex items-center",
-                if icon.is_some() {
+                if let Some(icon) = icon {
                     span { class: "text-acc mr-2", aria_hidden: "true", {icon} }
                 }
                 h2 { class: "text-xl font-semibold text-ink", {children} }

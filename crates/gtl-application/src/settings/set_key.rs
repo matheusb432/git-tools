@@ -1,6 +1,4 @@
-use std::str::FromStr as _;
-
-use gtl_models::viewer::{DiffDensity, DiffLayout, Theme};
+use gtl_models::settings::{SettingKeyValue, SettingKeyValueError};
 use thiserror::Error;
 
 use crate::ports::{UserSettingsEditError, UserSettingsStore};
@@ -10,6 +8,8 @@ use crate::ports::{UserSettingsEditError, UserSettingsStore};
 pub struct SetSettingKey {
     pub key: String,
     pub value_new: String,
+    // TODO: make this be the command param, refactor call sites. much cleaner this way.
+    // pub key_value: SettingKeyValue,
 }
 
 /// Describes the completed replacement and its previous value.
@@ -44,22 +44,12 @@ pub struct SetSettingKeyOk {
 }
 
 /// Reports a rejected or failed setting replacement.
-///
-/// # Examples
-///
-/// ```
-/// use gtl_application::settings::set_key::SetSettingKeyError;
-///
-/// let error = SetSettingKeyError::InvalidKey {
-///     key: "nested".into(),
-/// };
-/// assert!(error.to_string().contains("nested"));
-/// ```
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum SetSettingKeyError {
-    #[error("the key `{key}` is not a supported user setting")]
-    InvalidKey { key: String },
+    // TODO: move this somewhere else, post refactor
+    #[error(transparent)]
+    InvalidSettingKey(#[from] SettingKeyValueError),
     #[error("`{value}` is not a valid value for user setting `{key}`")]
     InvalidValue { key: String, value: String },
     #[error("user setting `{key}` must be a string")]
@@ -68,59 +58,15 @@ pub enum SetSettingKeyError {
     Settings(#[from] UserSettingsEditError),
 }
 
-fn validate(key: &str, value_new: &str) -> Result<(), SetSettingKeyError> {
-    let value_valid = match key {
-        "theme" => Theme::from_str(value_new).is_ok(),
-        "layout" => DiffLayout::from_str(value_new).is_ok(),
-        "density" => DiffDensity::from_str(value_new).is_ok(),
-        _ => {
-            return Err(SetSettingKeyError::InvalidKey {
-                key: key.to_owned(),
-            });
-        }
-    };
-    if !value_valid {
-        return Err(SetSettingKeyError::InvalidValue {
-            key: key.to_owned(),
-            value: value_new.to_owned(),
-        });
-    }
-    Ok(())
-}
-
 /// Validates and sets one supported scalar user setting.
-///
-/// # Errors
-///
-/// Returns [`SetSettingKeyError`] without changing the target document when
-/// validation or the store transaction fails.
-///
-/// # Examples
-///
-/// ```no_run
-/// use gtl_application::{
-///     ports::UserSettingsStore,
-///     settings::set_key::{self, SetSettingKey, SetSettingKeyError},
-/// };
-///
-/// fn set_layout(store: &mut impl UserSettingsStore) -> Result<(), SetSettingKeyError> {
-///     set_key::execute(
-///         SetSettingKey {
-///             key: "layout".into(),
-///             value_new: "split".into(),
-///         },
-///         store,
-///     )?;
-///     Ok(())
-/// }
-/// ```
 #[cqrsy::command]
 pub fn execute(
     command: SetSettingKey,
     settings_store: &mut impl UserSettingsStore,
 ) -> Result<SetSettingKeyOk, SetSettingKeyError> {
     let SetSettingKey { key, value_new } = command;
-    validate(&key, &value_new)?;
+    let _setting_key_value = SettingKeyValue::new(&key, &value_new)?;
+    // TODO: use '_setting_key_value' value post refactor
     let value_old = settings_store
         .set_string(&key, &value_new)
         .map_err(|error| match error {
@@ -141,7 +87,7 @@ pub fn execute(
 mod tests {
     use gtl_models::settings::UserSettings;
 
-    use super::{SetSettingKey, SetSettingKeyError, execute, validate};
+    use super::{SetSettingKey, SetSettingKeyError, execute};
     use crate::ports::{UserSettingsEditError, UserSettingsLoadError, UserSettingsStore};
 
     #[derive(Clone)]
@@ -165,40 +111,6 @@ mod tests {
 
         fn remove_string(&mut self, _key: &str) -> Result<Option<String>, UserSettingsEditError> {
             Err(UserSettingsEditError::InvalidValueShape)
-        }
-    }
-
-    #[test]
-    fn validation_rejects_unknown_keys_and_values() {
-        assert!(matches!(
-            validate("nested", "value"),
-            Err(SetSettingKeyError::InvalidKey { key }) if key == "nested"
-        ));
-        assert!(matches!(
-            validate("theme", "blue"),
-            Err(SetSettingKeyError::InvalidValue { key, value })
-                if key == "theme" && value == "blue"
-        ));
-    }
-
-    #[test]
-    fn validation_accepts_every_supported_value() {
-        use strum::VariantArray as _;
-
-        let theme_tokens: Vec<String> = gtl_models::viewer::Theme::VARIANTS
-            .iter()
-            .map(ToString::to_string)
-            .collect();
-        let supported: [(&str, Vec<&str>); 3] = [
-            ("theme", theme_tokens.iter().map(String::as_str).collect()),
-            ("layout", vec!["unified", "split"]),
-            ("density", vec!["compact", "full"]),
-        ];
-
-        for (key, values) in supported {
-            for value in values {
-                validate(key, value).expect("supported value");
-            }
         }
     }
 
