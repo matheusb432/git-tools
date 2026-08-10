@@ -3,7 +3,7 @@
 /// # Examples
 ///
 /// ```
-/// use gtl_application::diffs::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
+/// use gtl_parser::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 ///
 /// let mut classifier = UnifiedDiffLineClassifier::default();
 /// assert_eq!(
@@ -16,28 +16,30 @@
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnifiedDiffLineKind {
-    /// Represents file headers, mode changes, rename markers, binary notices, or no-newline
-    /// markers.
+    /// A file header, mode change, rename marker, binary notice, or no-newline marker.
     Meta,
-    /// Represents a valid hunk header and its absolute old/new starting line numbers.
+    /// A valid hunk header and its absolute old and new starting line numbers.
     Hunk {
         line_number_old: u32,
         line_number_new: u32,
     },
-    /// Represents a line present on both sides of the diff.
+    /// A line present on both sides of the diff.
     Context,
-    /// Represents a line present only on the new side.
+    /// A line present only on the new side.
     Added,
-    /// Represents a line present only on the old side.
+    /// A line present only on the old side.
     Removed,
 }
 
 /// Classifies unified-diff lines for one file in source order.
 ///
+/// A classifier instance must not be reused across files because file headers
+/// are distinguished from header-like hunk content through accumulated state.
+///
 /// # Examples
 ///
 /// ```
-/// use gtl_application::diffs::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
+/// use gtl_parser::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 ///
 /// let mut classifier = UnifiedDiffLineClassifier::default();
 /// assert_eq!(classifier.classify("--- a/file"), UnifiedDiffLineKind::Meta);
@@ -54,16 +56,6 @@ pub struct UnifiedDiffLineClassifier {
 
 impl UnifiedDiffLineClassifier {
     /// Classifies `raw` and advances hunk state when it is a valid hunk header.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use gtl_application::diffs::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
-    ///
-    /// let mut classifier = UnifiedDiffLineClassifier::default();
-    /// classifier.classify("@@ -4 +9 @@");
-    /// assert_eq!(classifier.classify("+new"), UnifiedDiffLineKind::Added);
-    /// ```
     pub fn classify(&mut self, raw: &str) -> UnifiedDiffLineKind {
         if let Some((line_number_old, line_number_new)) = hunk_line_numbers(raw) {
             self.hunk_started = true;
@@ -121,4 +113,33 @@ fn parse_range_start(raw: &str) -> Option<u32> {
     }
 
     start.parse().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_headers_stop_being_metadata_inside_a_hunk() {
+        let mut classifier = UnifiedDiffLineClassifier::default();
+
+        assert_eq!(classifier.classify("--- a/file"), UnifiedDiffLineKind::Meta);
+        classifier.classify("@@ -1 +1 @@");
+        assert_eq!(
+            classifier.classify("+++ literal"),
+            UnifiedDiffLineKind::Added
+        );
+        assert_eq!(
+            classifier.classify("--- heading"),
+            UnifiedDiffLineKind::Removed
+        );
+    }
+
+    #[test]
+    fn malformed_hunk_header_is_context() {
+        assert_eq!(
+            UnifiedDiffLineClassifier::default().classify("@@ garbage @@"),
+            UnifiedDiffLineKind::Context
+        );
+    }
 }

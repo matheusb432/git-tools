@@ -1,0 +1,19 @@
+[package]
+name = "gtl-parser"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+syntax = ["dep:syntect", "dep:thiserror"]
+bundled-syntaxes = ["syntax"]
+
+[dependencies]
+similar.workspace = true
+syntect = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+
+[lints]
+workspace = true

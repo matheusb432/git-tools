@@ -3509,6 +3509,7 @@ dependencies = [
  "futures-util",
  "gtl-contracts",
  "gtl-models",
+ "gtl-parser",
  "natord",
  "rusqlite",
  "semver",
@@ -3686,17 +3687,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtl-parser"
+version = "0.1.0"
+dependencies = [
+ "similar",
+ "syntect",
+ "thiserror 2.0.19",
+]
+
+[[package]]
 name = "gtl-preview"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "gtl-application",
  "gtl-models",
+ "gtl-parser",
  "maud",
  "scraper",
- "similar",
  "strum",
- "syntect",
  "thiserror 2.0.19",
 ]
 
@@ -6758,9 +6767,6 @@ name = "similar"
 version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6505efef05804732ed8a3f2d4f279429eb485bd69d5b0cc6b19cc02005cda16"
-dependencies = [
- "bstr",
-]
 
 [[package]]
 name = "siphasher"

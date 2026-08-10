@@ -1,9 +1,10 @@
 use std::path::Path;
 
 use gtl_models::diffs::{Commit, ExcludedExtensions};
+use gtl_parser::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 
 use crate::{
-    diffs::{FileDiff, FileStatus, UnifiedDiffLineClassifier, UnifiedDiffLineKind},
+    diffs::{FileDiff, FileStatus},
     ports::{GitClient, GitDiffFormat, GitDiffRequest},
 };
 

@@ -12,6 +12,7 @@ anyhow.workspace = true
 cqrsy.workspace = true
 gtl-contracts.workspace = true
 gtl-models.workspace = true
+gtl-parser.workspace = true
 futures-util.workspace = true
 natord.workspace = true
 rusqlite.workspace = true

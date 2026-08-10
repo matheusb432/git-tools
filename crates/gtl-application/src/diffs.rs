@@ -19,6 +19,5 @@ pub use logic::{
     batch::RepoRef,
     file::{FileDiff, FileStatus},
     target::{DiffTarget, DiffTargetRequest, DiffTargetRequestError, PinnedRange},
-    unified_diff::{UnifiedDiffLineClassifier, UnifiedDiffLineKind},
     view::{Cmd, Foot, View},
 };

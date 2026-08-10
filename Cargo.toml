@@ -9,12 +9,13 @@ members = [
   "crates/gtl-desktop",
   "crates/gtl-models",
   "crates/gtl-infra",
+  "crates/gtl-parser",
   "crates/gtl-preview",
+  "crates/gtl-web",
   "e2e/gtl-browser-e2e",
   "e2e/gtl-cli-e2e",
   "e2e/gtl-desktop-e2e",
   "xtask",
-  "crates/gtl-web",
 ]
 # Desktop and Criterion targets need webkit2gtk headers, so their packages are not default members.
 # xtask still uses the lightweight benchmark catalogue.
@@ -25,6 +26,7 @@ default-members = [
   "crates/gtl-daemon",
   "crates/gtl-models",
   "crates/gtl-infra",
+  "crates/gtl-parser",
   "crates/gtl-preview",
   "xtask",
 ]
@@ -53,6 +55,7 @@ cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.10.1" }
 criterion = "0.8.2"
 directories = "6.0.0"
 gtl-models = { path = "crates/gtl-models" }
+gtl-parser = { path = "crates/gtl-parser", default-features = false }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 gix = { version = "0.56", default-features = false, features = ["revision"] }
 http-body-util = "0.1"
@@ -87,7 +90,7 @@ serde_with = { version = "3", default-features = false, features = ["macros"] }
 semver = "1.0.28"
 shlex = "2.0.1"
 sha2 = "0.11.0"
-similar = "3.1.1"
+similar = { version = "3.1.1", default-features = false, features = ["text"] }
 strum = { version = "0.28.0", default-features = false, features = ["derive"] }
 syntect = { version = "5.3.0", default-features = false, features = [
   "parsing",

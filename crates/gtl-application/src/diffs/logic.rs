@@ -6,5 +6,4 @@ pub(super) mod file;
 pub(super) mod range;
 pub(super) mod range_view;
 pub(super) mod target;
-pub(super) mod unified_diff;
 pub(super) mod view;
