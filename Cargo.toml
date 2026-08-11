@@ -62,6 +62,9 @@ cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.10.1" }
 criterion = "0.8.2"
 directories = "6.0.0"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+flate2 = { version = "1.1.9", default-features = false, features = [
+  "rust_backend",
+] }
 gix = { version = "0.56", default-features = false, features = ["revision"] }
 http-body-util = "0.1"
 ico = "0.5"
@@ -126,6 +129,16 @@ debug = false
 debug = false
 
 [profile.release]
+strip = "symbols"
+
+[profile.artifact-web-release]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+incremental = false
+debug = false
 strip = "symbols"
 
 [profile.profiling]

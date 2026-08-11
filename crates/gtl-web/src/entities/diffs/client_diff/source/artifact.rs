@@ -1,9 +1,10 @@
 use std::{cell::RefCell, collections::HashMap};
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use gtl_contracts::viewer::{
     LoadViewerDiffLines, ViewerArtifactPage, ViewerArtifactPageId, ViewerDiffLines,
 };
+
+use crate::artifact_asset::{self, ArtifactAssetError, ArtifactAssetKind, PAGE_MAX_BYTES};
 
 thread_local! {
     static PAGE_CACHE: RefCell<HashMap<ViewerArtifactPageId, ViewerDiffLines>> =
@@ -12,11 +13,26 @@ thread_local! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ArtifactDiffSourceError {
-    Missing,
-    Invalid,
+    Asset(ArtifactAssetError),
+    InvalidPayload,
+    IdentityMismatch,
 }
 
-pub(super) fn load_artifact_diff_lines(
+impl ArtifactDiffSourceError {
+    pub(crate) fn message(self) -> &'static str {
+        match self {
+            Self::Asset(error) => error.message(ArtifactAssetKind::DiffPage),
+            Self::InvalidPayload => {
+                "The embedded diff page is invalid. Recreate this artifact to view it."
+            }
+            Self::IdentityMismatch => {
+                "The embedded diff page has a mismatched identity. Recreate this artifact to view it."
+            }
+        }
+    }
+}
+
+pub(super) async fn load_artifact_diff_lines(
     request: &LoadViewerDiffLines,
 ) -> Result<ViewerDiffLines, ArtifactDiffSourceError> {
     let id = ViewerArtifactPageId::for_request(request);
@@ -24,17 +40,11 @@ pub(super) fn load_artifact_diff_lines(
         return Ok(page);
     }
 
-    let document = web_sys::window()
-        .and_then(|window| window.document())
-        .ok_or(ArtifactDiffSourceError::Missing)?;
-    let element = document
-        .get_element_by_id(id.as_str())
-        .ok_or(ArtifactDiffSourceError::Missing)?;
-    let encoded = element
-        .text_content()
-        .ok_or(ArtifactDiffSourceError::Invalid)?;
-    let page = decode_page(encoded.trim(), request)?;
-    element.remove();
+    let bytes = artifact_asset::load(id.as_str(), PAGE_MAX_BYTES)
+        .await
+        .map_err(ArtifactDiffSourceError::Asset)?;
+    let page = decode_page(&bytes, request)?;
+    artifact_asset::remove(id.as_str());
     PAGE_CACHE.with(|cache| {
         cache.borrow_mut().insert(id, page.clone());
     });
@@ -42,21 +52,18 @@ pub(super) fn load_artifact_diff_lines(
 }
 
 fn decode_page(
-    encoded: &str,
+    bytes: &[u8],
     request: &LoadViewerDiffLines,
 ) -> Result<ViewerDiffLines, ArtifactDiffSourceError> {
-    let bytes = STANDARD
-        .decode(encoded)
-        .map_err(|_| ArtifactDiffSourceError::Invalid)?;
-    let embedded = serde_json::from_slice::<ViewerArtifactPage>(&bytes)
-        .map_err(|_| ArtifactDiffSourceError::Invalid)?;
+    let embedded = serde_json::from_slice::<ViewerArtifactPage>(bytes)
+        .map_err(|_| ArtifactDiffSourceError::InvalidPayload)?;
     let expected_id = ViewerArtifactPageId::for_request(request);
     if embedded.id != expected_id
         || embedded.page.identity != request.identity
         || embedded.page.file != request.file
         || embedded.page.cursor != request.cursor
     {
-        return Err(ArtifactDiffSourceError::Invalid);
+        return Err(ArtifactDiffSourceError::IdentityMismatch);
     }
     Ok(embedded.page)
 }
@@ -97,15 +104,23 @@ mod tests {
             next: None,
         };
         page.cursor = ViewerDiffCursor::new(6);
-        let encoded = STANDARD.encode(serde_json::to_vec(&ViewerArtifactPage {
+        let bytes = serde_json::to_vec(&ViewerArtifactPage {
             id: ViewerArtifactPageId::for_request(&request),
             page,
-        })?);
+        })?;
 
         assert_eq!(
-            decode_page(&encoded, &request),
-            Err(ArtifactDiffSourceError::Invalid)
+            decode_page(&bytes, &request),
+            Err(ArtifactDiffSourceError::IdentityMismatch)
         );
         Ok(())
+    }
+
+    #[test]
+    fn decoder_rejects_corrupt_json() {
+        assert_eq!(
+            decode_page(b"not JSON", &request()),
+            Err(ArtifactDiffSourceError::InvalidPayload)
+        );
     }
 }

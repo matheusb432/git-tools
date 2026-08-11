@@ -28,12 +28,130 @@ const PUBLIC_DIRECTORY: &str = "crates/gtl-web/dist/public";
 const SOURCE_FINGERPRINT_PATH: &str = "crates/gtl-web/dist/.source-fingerprint";
 const BUNDLE_FINGERPRINT_PATH: &str = "crates/gtl-web/dist/.bundle-fingerprint";
 const DESKTOP_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-web/release/web";
+const ARTIFACT_PROFILE: &str = "artifact-web-release";
 const ARTIFACT_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-artifact/release/web";
 const ARTIFACT_RUNTIME_SCRIPT_PATH: &str =
     "crates/gtl-artifacts/src/embedded/generated/artifact-runtime.js";
 const ARTIFACT_RUNTIME_WASM_PATH: &str =
     "crates/gtl-artifacts/src/embedded/generated/artifact-runtime.wasm";
-const ARTIFACT_WASM_DATA_URL_MARKER: &str = "__GTL_ARTIFACT_WASM_DATA_URL__";
+const ARTIFACT_RUNTIME_ASSET_ID: &str = "gtl-artifact-runtime";
+const ARTIFACT_RUNTIME_MAX_BYTES: usize = 16 * 1024 * 1024;
+const ARTIFACT_ASSET_LOADER: &str = r#"
+function gtlArtifactAssetError(code, id, cause) {
+    const error = new Error(`${code}: ${id}`);
+    error.name = "GtlArtifactAssetError";
+    error.code = code;
+    error.assetId = id;
+    if (cause !== undefined) error.cause = cause;
+    return error;
+}
+
+function gtlDecodeBase64(encoded, id) {
+    if (encoded.length === 0 || encoded.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
+        throw gtlArtifactAssetError("INVALID_BASE64", id);
+    }
+    const chunks = [];
+    for (let offset = 0; offset < encoded.length; offset += 32768) {
+        let decoded;
+        try {
+            decoded = atob(encoded.slice(offset, offset + 32768));
+        } catch (cause) {
+            throw gtlArtifactAssetError("INVALID_BASE64", id, cause);
+        }
+        const bytes = new Uint8Array(decoded.length);
+        for (let index = 0; index < decoded.length; index += 1) bytes[index] = decoded.charCodeAt(index);
+        chunks.push(bytes);
+    }
+    return chunks;
+}
+
+globalThis.__gtlLoadCompressedAsset = async function (id, maxBytes, removeAfterRead = false) {
+    if (typeof globalThis.DecompressionStream !== "function") {
+        throw gtlArtifactAssetError("UNAVAILABLE", id);
+    }
+    const node = document.getElementById(id);
+    if (node === null) throw gtlArtifactAssetError("MISSING", id);
+    if (node.dataset.encoding !== "base64" || node.dataset.compression !== "gzip") {
+        throw gtlArtifactAssetError("INVALID_METADATA", id);
+    }
+    const expectedText = node.dataset.uncompressedBytes;
+    if (expectedText === undefined || !/^(?:0|[1-9][0-9]*)$/.test(expectedText)) {
+        throw gtlArtifactAssetError("INVALID_METADATA", id);
+    }
+    const expectedBytes = Number(expectedText);
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || !Number.isSafeInteger(expectedBytes)) {
+        throw gtlArtifactAssetError("INVALID_METADATA", id);
+    }
+    if (expectedBytes > maxBytes) throw gtlArtifactAssetError("TOO_LARGE", id);
+    const encoded = (node.textContent ?? "").trim();
+    const encodedLimit = Math.ceil((maxBytes + 65536) / 3) * 4;
+    if (encoded.length > encodedLimit) throw gtlArtifactAssetError("TOO_LARGE", id);
+    const compressedChunks = gtlDecodeBase64(encoded, id);
+    let reader;
+    try {
+        reader = new Blob(compressedChunks)
+            .stream()
+            .pipeThrough(new DecompressionStream("gzip"))
+            .getReader();
+    } catch (cause) {
+        throw gtlArtifactAssetError("INVALID_GZIP", id, cause);
+    }
+    const outputChunks = [];
+    let outputBytes = 0;
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            outputBytes += value.byteLength;
+            if (outputBytes > maxBytes || outputBytes > expectedBytes) {
+                await reader.cancel();
+                throw gtlArtifactAssetError("TOO_LARGE", id);
+            }
+            outputChunks.push(value);
+        }
+    } catch (cause) {
+        if (cause?.name === "GtlArtifactAssetError") throw cause;
+        throw gtlArtifactAssetError("INVALID_GZIP", id, cause);
+    } finally {
+        reader.releaseLock();
+    }
+    if (outputBytes !== expectedBytes) throw gtlArtifactAssetError("INVALID_GZIP", id);
+    const output = new Uint8Array(outputBytes);
+    let offset = 0;
+    for (const chunk of outputChunks) {
+        output.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    if (removeAfterRead) node.remove();
+    return output;
+};
+
+globalThis.__gtlShowArtifactInitializationError = function (error) {
+    let target = document.getElementById("main");
+    if (target === null) {
+        target = document.createElement("main");
+        document.body.append(target);
+    }
+    const messages = {
+        UNAVAILABLE: "This browser cannot decompress this offline diff artifact.",
+        MISSING: "This diff artifact is missing its compressed runtime.",
+        INVALID_METADATA: "The embedded artifact runtime has invalid size metadata.",
+        INVALID_BASE64: "The embedded artifact runtime is not valid base64.",
+        INVALID_GZIP: "The embedded artifact runtime gzip stream is corrupt.",
+        TOO_LARGE: "The embedded artifact runtime exceeds its declared size limit.",
+    };
+    target.replaceChildren();
+    target.className = "grid h-screen place-content-center bg-bg px-5 text-center text-ink";
+    target.setAttribute("role", "alert");
+    const heading = document.createElement("h1");
+    heading.className = "font-semibold";
+    heading.textContent = "Unable to open diff artifact";
+    const detail = document.createElement("p");
+    detail.className = "mt-1 text-ink-2";
+    detail.textContent = messages[error?.code] ?? "The embedded artifact runtime is corrupt or incompatible.";
+    target.append(heading, detail);
+};
+"#;
 const SOURCE_FILES: &[&str] = &[
     "Cargo.lock",
     "Cargo.toml",
@@ -98,7 +216,8 @@ const DESKTOP_BUNDLE_ARGUMENTS: &[&str] = &[
 const ARTIFACT_BUILD_ARGUMENTS: &[&str] = &[
     "build",
     "--web",
-    "--release",
+    "--profile",
+    ARTIFACT_PROFILE,
     "--package",
     "gtl-web",
     "--bin",
@@ -431,6 +550,7 @@ pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {
 }
 
 fn build_artifact_runtime_unlocked(root: &Path, target: &Path) -> Result<()> {
+    verify_artifact_release_profile(root)?;
     clean_artifact_release_output(target)?;
     process::run_step(
         &Step::new(
@@ -454,7 +574,7 @@ fn build_artifact_runtime_unlocked(root: &Path, target: &Path) -> Result<()> {
         .context("generated artifact WASM file name is not UTF-8")?;
     let source = fs::read_to_string(&script)
         .with_context(|| format!("read generated artifact runtime {}", script.display()))?;
-    let runtime = embed_artifact_wasm_path(&source, wasm_name)?;
+    let runtime = embed_artifact_wasm_loader(&source, wasm_name)?;
     let wasm_bytes = fs::read(&wasm)
         .with_context(|| format!("read generated artifact WASM {}", wasm.display()))?;
     ensure!(!wasm_bytes.is_empty(), "generated artifact WASM is empty");
@@ -498,15 +618,16 @@ fn find_generated_asset(files: &[PathBuf], prefix: &str, extension: &str) -> Res
     Ok(matches[0].clone())
 }
 
-fn embed_artifact_wasm_path(source: &str, wasm_name: &str) -> Result<String> {
+fn embed_artifact_wasm_loader(source: &str, wasm_name: &str) -> Result<String> {
     let generated_path = format!("\"/./assets/{wasm_name}\"");
     ensure!(
         source.matches(&generated_path).count() == 1,
         "generated artifact runtime must reference its hashed WASM path exactly once"
     );
     ensure!(
-        !source.contains(ARTIFACT_WASM_DATA_URL_MARKER),
-        "generated artifact runtime already contains the WASM marker"
+        !source.contains("function gtlArtifactAssetError")
+            && !source.contains("__gtlShowArtifactInitializationError"),
+        "generated artifact runtime already contains the offline asset loader"
     );
     ensure!(
         !source.to_ascii_lowercase().contains("</script"),
@@ -519,18 +640,89 @@ fn embed_artifact_wasm_path(source: &str, wasm_name: &str) -> Result<String> {
 
     let runtime = source.replacen(
         &generated_path,
-        &format!("\"{ARTIFACT_WASM_DATA_URL_MARKER}\""),
+        &format!(
+            "globalThis.__gtlLoadCompressedAsset(\"{ARTIFACT_RUNTIME_ASSET_ID}\",{ARTIFACT_RUNTIME_MAX_BYTES},true)"
+        ),
         1,
     );
+    let (body, exports) = runtime
+        .rsplit_once(";export{")
+        .context("generated artifact runtime has no final export block")?;
+    let runtime = format!(
+        "{ARTIFACT_ASSET_LOADER}\n{body}.catch(globalThis.__gtlShowArtifactInitializationError);export{{{exports}"
+    );
     ensure!(
-        runtime.matches(ARTIFACT_WASM_DATA_URL_MARKER).count() == 1,
-        "embedded artifact runtime must contain exactly one WASM marker"
+        runtime
+            .matches(&format!(
+                "globalThis.__gtlLoadCompressedAsset(\"{ARTIFACT_RUNTIME_ASSET_ID}\""
+            ))
+            .count()
+            == 1,
+        "embedded artifact runtime must load exactly one compressed WASM asset"
     );
     ensure!(
         !runtime.contains("/./assets/"),
         "embedded artifact runtime retained a sibling asset path"
     );
     Ok(runtime)
+}
+
+fn verify_artifact_release_profile(root: &Path) -> Result<()> {
+    let manifest_path = root.join("Cargo.toml");
+    let manifest = fs::read_to_string(&manifest_path)
+        .with_context(|| format!("read {}", manifest_path.display()))?;
+    verify_artifact_release_profile_text(&manifest)
+}
+
+fn verify_artifact_release_profile_text(manifest: &str) -> Result<()> {
+    let document = manifest
+        .parse::<toml_edit::DocumentMut>()
+        .context("parse workspace Cargo.toml")?;
+    let profile = document
+        .get("profile")
+        .and_then(toml_edit::Item::as_table_like)
+        .and_then(|profiles| profiles.get(ARTIFACT_PROFILE))
+        .and_then(toml_edit::Item::as_table_like)
+        .context("workspace Cargo.toml is missing the artifact web release profile")?;
+    ensure!(
+        profile.get("inherits").and_then(toml_edit::Item::as_str) == Some("release"),
+        "artifact web release profile must inherit release"
+    );
+    ensure!(
+        profile.get("opt-level").and_then(toml_edit::Item::as_str) == Some("s"),
+        "artifact web release profile must use opt-level s"
+    );
+    ensure!(
+        profile.get("lto").and_then(toml_edit::Item::as_str) == Some("fat"),
+        "artifact web release profile must use fat LTO"
+    );
+    ensure!(
+        profile
+            .get("codegen-units")
+            .and_then(toml_edit::Item::as_integer)
+            == Some(1),
+        "artifact web release profile must use one codegen unit"
+    );
+    ensure!(
+        profile.get("panic").and_then(toml_edit::Item::as_str) == Some("abort"),
+        "artifact web release profile must abort on panic"
+    );
+    ensure!(
+        profile
+            .get("incremental")
+            .and_then(toml_edit::Item::as_bool)
+            == Some(false),
+        "artifact web release profile must disable incremental compilation"
+    );
+    ensure!(
+        profile.get("debug").and_then(toml_edit::Item::as_bool) == Some(false),
+        "artifact web release profile must disable debug symbols"
+    );
+    ensure!(
+        profile.get("strip").and_then(toml_edit::Item::as_str) == Some("symbols"),
+        "artifact web release profile must strip symbols"
+    );
+    Ok(())
 }
 
 fn clean_desktop_release_outputs(root: &Path, target: &Path) -> Result<()> {
@@ -1023,6 +1215,12 @@ mod tests {
         assert!(
             ARTIFACT_BUILD_ARGUMENTS
                 .windows(2)
+                .any(|pair| pair == ["--profile", ARTIFACT_PROFILE])
+        );
+        assert!(!ARTIFACT_BUILD_ARGUMENTS.contains(&"--release"));
+        assert!(
+            ARTIFACT_BUILD_ARGUMENTS
+                .windows(2)
                 .any(|pair| pair == ["--bin", "gtl-artifact"])
         );
         assert!(
@@ -1049,37 +1247,60 @@ mod tests {
     }
 
     #[test]
-    fn artifact_runtime_replaces_only_the_hashed_wasm_path() {
+    fn artifact_runtime_loads_only_the_compressed_wasm_node() {
         let source = r#"const fallback="gtl-artifact_bg.wasm";start({module_or_path:"/./assets/gtl-artifact_bg-dxh123.wasm"});"#;
 
-        let runtime = embed_artifact_wasm_path(source, "gtl-artifact_bg-dxh123.wasm")
+        let source = format!("{source}export{{start}}");
+        let runtime = embed_artifact_wasm_loader(&source, "gtl-artifact_bg-dxh123.wasm")
             .expect("hashed artifact path is replaceable");
 
-        assert!(runtime.contains(&format!(
-            "module_or_path:\"{ARTIFACT_WASM_DATA_URL_MARKER}\""
-        )));
+        assert!(runtime.contains("module_or_path:globalThis.__gtlLoadCompressedAsset"));
+        assert!(runtime.contains("new DecompressionStream(\"gzip\")"));
+        assert!(runtime.contains(".catch(globalThis.__gtlShowArtifactInitializationError)"));
         assert!(runtime.contains("fallback=\"gtl-artifact_bg.wasm\""));
         assert!(!runtime.contains("/./assets/"));
+        assert!(!runtime.contains("data:application/wasm"));
     }
 
     #[test]
     fn artifact_runtime_rejects_ambiguous_or_unsafe_scripts() {
         let path = "\"/./assets/gtl-artifact_bg-dxh123.wasm\"";
-        let ambiguous = format!("start({path});again({path});");
+        let ambiguous = format!("start({path});again({path});export{{start}}");
         assert!(
-            embed_artifact_wasm_path(&ambiguous, "gtl-artifact_bg-dxh123.wasm")
+            embed_artifact_wasm_loader(&ambiguous, "gtl-artifact_bg-dxh123.wasm")
                 .expect_err("ambiguous WASM paths must fail")
                 .to_string()
                 .contains("exactly once")
         );
         assert!(
-            embed_artifact_wasm_path(
-                &format!("start({path});</script>"),
+            embed_artifact_wasm_loader(
+                &format!("start({path});</script>;export{{start}}"),
                 "gtl-artifact_bg-dxh123.wasm"
             )
             .expect_err("an inline script terminator must fail")
             .to_string()
             .contains("safely")
+        );
+    }
+
+    #[test]
+    fn artifact_release_profile_keeps_every_size_setting_owned() {
+        verify_artifact_release_profile_text(include_str!("../../../Cargo.toml"))
+            .expect("workspace artifact profile is complete");
+
+        let incomplete = r#"
+[profile.release]
+strip = "symbols"
+
+[profile.artifact-web-release]
+inherits = "release"
+opt-level = "s"
+"#;
+        assert!(
+            verify_artifact_release_profile_text(incomplete)
+                .expect_err("an incomplete profile must fail")
+                .to_string()
+                .contains("fat LTO")
         );
     }
 

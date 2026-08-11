@@ -8,9 +8,11 @@ publish.workspace = true
 [features]
 default = []
 syntax = ["dep:syntect", "dep:thiserror"]
-bundled-syntaxes = ["syntax"]
+bundled-syntaxes = ["syntax", "dep:bincode", "dep:serde"]
 
 [dependencies]
+bincode = { version = "1.3.3", optional = true }
+serde = { workspace = true, optional = true }
 similar.workspace = true
 syntect = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }

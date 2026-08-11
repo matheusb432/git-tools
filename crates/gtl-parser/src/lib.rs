@@ -24,7 +24,9 @@ pub use model::{
 pub use semantic::{SemanticTextChange, SemanticTextSpan};
 pub use split::{SplitDiffCell, SplitDiffRow, SplitDiffStream};
 #[cfg(feature = "bundled-syntaxes")]
-pub use syntax::bundled_syntax_catalog;
+pub use syntax::{
+    SelectSyntaxPackError, SelectedSyntaxPack, bundled_syntax_catalog, select_bundled_syntax_pack,
+};
 #[cfg(feature = "syntax")]
 pub use syntax::{SyntaxCatalog, SyntaxCatalogError, SyntaxDefinition};
 pub use token::{SyntaxToken, SyntaxTokenClass};

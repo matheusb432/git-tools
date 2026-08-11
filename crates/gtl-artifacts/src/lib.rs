@@ -1,6 +1,7 @@
 //! Deterministic packing for self-contained, client-rendered diff artifacts.
 
 mod assets;
+mod compression;
 mod document;
 mod payload;
 
@@ -72,13 +73,15 @@ mod tests {
     }
 
     pub(crate) fn decode_payload<T: DeserializeOwned>(html: &str, id: &str) -> T {
-        let prefix = format!("<script id=\"{id}\" type=\"application/octet-stream\">");
+        let prefix = format!("<script id=\"{id}\" type=\"application/octet-stream\"");
         let encoded = html
             .split_once(&prefix)
+            .and_then(|(_, tail)| tail.split_once('>'))
             .and_then(|(_, tail)| tail.split_once("</script>"))
             .map(|(encoded, _)| encoded)
             .expect("artifact payload node");
-        let bytes = STANDARD.decode(encoded).expect("base64 artifact payload");
+        let compressed = STANDARD.decode(encoded).expect("base64 artifact payload");
+        let bytes = crate::compression::gunzip(&compressed).expect("gzip artifact payload");
         serde_json::from_slice(&bytes).expect("JSON artifact payload")
     }
 

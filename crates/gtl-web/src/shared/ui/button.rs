@@ -43,6 +43,7 @@ pub(crate) enum ButtonVariant {
 impl ButtonVariant {
     const fn classes(self) -> &'static str {
         match self {
+            // TODO: refactor so it doesn't repeat common styles?
             Self::Primary => {
                 "border border-acc bg-acc text-bg hover:bg-acc-2 active:border-acc-2 active:bg-acc-2"
             }

@@ -1,27 +1,35 @@
 use anyhow::{Result, ensure};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 pub(crate) const TAILWIND_CSS: &str = include_str!("../../gtl-web/assets/tailwind.css");
 
 const ARTIFACT_RUNTIME: &str = include_str!("embedded/generated/artifact-runtime.js");
 const ARTIFACT_WASM: &[u8] = include_bytes!("embedded/generated/artifact-runtime.wasm");
-const WASM_DATA_URL_MARKER: &str = "__GTL_ARTIFACT_WASM_DATA_URL__";
 
-pub(crate) fn inline_runtime() -> Result<String> {
+pub(crate) fn inline_runtime() -> Result<&'static str> {
     ensure!(
-        ARTIFACT_RUNTIME.matches(WASM_DATA_URL_MARKER).count() == 1,
-        "generated artifact runtime must contain exactly one WASM data URL marker"
+        ARTIFACT_RUNTIME
+            .matches("globalThis.__gtlLoadCompressedAsset")
+            .count()
+            >= 2,
+        "generated artifact runtime must install and use the compressed asset loader"
     );
     ensure!(
-        !ARTIFACT_RUNTIME.contains("</script"),
+        !ARTIFACT_RUNTIME.to_ascii_lowercase().contains("</script"),
         "generated artifact runtime cannot be embedded safely"
     );
-
-    let data_url = format!(
-        "data:application/wasm;base64,{}",
-        STANDARD.encode(ARTIFACT_WASM)
+    ensure!(
+        !ARTIFACT_RUNTIME.contains("data:application/wasm"),
+        "generated artifact runtime retained an uncompressed WASM data URL"
     );
-    Ok(ARTIFACT_RUNTIME.replace(WASM_DATA_URL_MARKER, &data_url))
+    ensure!(
+        !ARTIFACT_RUNTIME.contains("/./assets/") && !ARTIFACT_RUNTIME.contains("import("),
+        "generated artifact runtime retained an external dependency"
+    );
+    Ok(ARTIFACT_RUNTIME)
+}
+
+pub(crate) const fn wasm() -> &'static [u8] {
+    ARTIFACT_WASM
 }
 
 #[cfg(test)]
@@ -29,11 +37,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generated_runtime_has_one_offline_wasm_entrypoint() {
+    fn generated_runtime_has_one_compressed_offline_wasm_entrypoint() {
         let runtime = inline_runtime().expect("generated runtime is structurally valid");
 
-        assert_eq!(runtime.matches("data:application/wasm;base64,").count(), 1);
-        assert!(!runtime.contains(WASM_DATA_URL_MARKER));
+        assert_eq!(
+            runtime
+                .matches("globalThis.__gtlLoadCompressedAsset(\"gtl-artifact-runtime\"")
+                .count(),
+            1
+        );
+        assert!(!runtime.contains("data:application/wasm"));
         assert!(!runtime.contains("/./assets/"));
+        assert!(!runtime.contains("import("));
+        assert!(runtime.contains("DecompressionStream"));
+        assert!(runtime.contains("__gtlShowArtifactInitializationError"));
+        assert!(runtime.contains("This browser cannot decompress this offline diff artifact."));
+        assert!(runtime.contains("gzip stream is corrupt"));
+        assert!(ARTIFACT_WASM.len() <= 2_100_000);
+
+        let universal_pack = include_bytes!("../../gtl-parser/assets/syntaxes.packdump");
+        assert!(
+            !ARTIFACT_WASM
+                .windows(universal_pack.len())
+                .any(|window| window == universal_pack),
+            "artifact WASM retained the universal syntax pack"
+        );
     }
 }

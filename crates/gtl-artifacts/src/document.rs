@@ -3,9 +3,34 @@ use std::fmt::Write as _;
 use anyhow::{Context as _, Result, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use gtl_application::{diffs::View, viewer::RenderOptions};
-use gtl_contracts::viewer::VIEWER_ARTIFACT_MANIFEST_ID;
+use gtl_contracts::viewer::{
+    VIEWER_ARTIFACT_MANIFEST_ID, VIEWER_ARTIFACT_RUNTIME_ID, VIEWER_ARTIFACT_SYNTAX_ID,
+};
+use gtl_parser::select_bundled_syntax_pack;
 
-use crate::{assets, payload::project_payload};
+use crate::{assets, compression, payload::project_payload};
+
+struct PackedAsset {
+    id: String,
+    uncompressed_bytes: usize,
+    encoded: String,
+}
+
+impl PackedAsset {
+    fn binary(id: impl Into<String>, bytes: &[u8]) -> Result<Self> {
+        let compressed = compression::gzip(bytes)?;
+        Ok(Self {
+            id: id.into(),
+            uncompressed_bytes: bytes.len(),
+            encoded: STANDARD.encode(compressed),
+        })
+    }
+
+    fn json(id: impl Into<String>, payload: &(impl serde::Serialize + ?Sized)) -> Result<Self> {
+        let bytes = serde_json::to_vec(payload).context("serialize artifact payload")?;
+        Self::binary(id, &bytes)
+    }
+}
 
 /// Builds one self-contained, client-rendered diff artifact.
 pub fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> Result<String> {
@@ -36,6 +61,21 @@ fn build_document(
 ) -> Result<String> {
     let payload = project_payload(title, views, options, theme)?;
     let runtime = assets::inline_runtime()?;
+    let syntax_pack = select_bundled_syntax_pack(
+        views
+            .iter()
+            .flat_map(|view| view.files.iter())
+            .map(|file| file.path.as_str()),
+    )
+    .context("select artifact syntax grammars")?;
+    let runtime_asset = PackedAsset::binary(VIEWER_ARTIFACT_RUNTIME_ID, assets::wasm())?;
+    let syntax_asset = PackedAsset::binary(VIEWER_ARTIFACT_SYNTAX_ID, syntax_pack.as_bytes())?;
+    let manifest_asset = PackedAsset::json(VIEWER_ARTIFACT_MANIFEST_ID, &payload.manifest)?;
+    let page_assets = payload
+        .pages
+        .iter()
+        .map(|page| PackedAsset::json(page.id.as_str(), page))
+        .collect::<Result<Vec<_>>>()?;
     ensure!(
         !assets::TAILWIND_CSS.contains("</style"),
         "generated Tailwind CSS cannot be embedded safely"
@@ -44,10 +84,12 @@ fn build_document(
     let mut html = String::with_capacity(
         assets::TAILWIND_CSS.len()
             + runtime.len()
-            + payload
-                .pages
+            + runtime_asset.encoded.len()
+            + syntax_asset.encoded.len()
+            + manifest_asset.encoded.len()
+            + page_assets
                 .iter()
-                .map(|page| page.page.lines.iter().map(String::len).sum::<usize>())
+                .map(|asset| asset.encoded.len())
                 .sum::<usize>(),
     );
     write!(
@@ -57,9 +99,11 @@ fn build_document(
         assets::TAILWIND_CSS,
     )
     .context("write artifact document shell")?;
-    write_payload_node(&mut html, VIEWER_ARTIFACT_MANIFEST_ID, &payload.manifest)?;
-    for page in &payload.pages {
-        write_payload_node(&mut html, page.id.as_str(), page)?;
+    write_asset_node(&mut html, &runtime_asset)?;
+    write_asset_node(&mut html, &manifest_asset)?;
+    write_asset_node(&mut html, &syntax_asset)?;
+    for page in &page_assets {
+        write_asset_node(&mut html, page)?;
     }
     write!(
         html,
@@ -69,26 +113,52 @@ fn build_document(
     Ok(html)
 }
 
-fn write_payload_node(
-    html: &mut String,
-    id: &str,
-    payload: &(impl serde::Serialize + ?Sized),
-) -> Result<()> {
-    let bytes = serde_json::to_vec(payload).context("serialize artifact payload")?;
+fn write_asset_node(html: &mut String, asset: &PackedAsset) -> Result<()> {
     write!(
         html,
-        "<script id=\"{id}\" type=\"application/octet-stream\">{}</script>",
-        STANDARD.encode(bytes)
+        "<script id=\"{}\" type=\"application/octet-stream\" data-encoding=\"base64\" data-compression=\"gzip\" data-uncompressed-bytes=\"{}\">{}</script>",
+        asset.id, asset.uncompressed_bytes, asset.encoded,
     )
-    .context("write artifact payload")
+    .context("write compressed artifact asset")
 }
 
 #[cfg(test)]
 mod tests {
+    use gtl_application::diffs::FileDiff;
     use gtl_contracts::viewer::{ViewerArtifactManifest, ViewerArtifactPage};
 
     use super::*;
     use crate::tests::{decode_payload, has_disallowed_external_url, sample_view};
+
+    const TINY_BASELINE_BYTES: usize = 4_320_408;
+    const LARGE_BASELINE_BYTES: usize = 5_801_973;
+
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    struct AssetBytes {
+        raw: usize,
+        gzip: usize,
+        base64: usize,
+    }
+
+    impl std::ops::AddAssign for AssetBytes {
+        fn add_assign(&mut self, other: Self) {
+            self.raw += other.raw;
+            self.gzip += other.gzip;
+            self.base64 += other.base64;
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct ArtifactSizeEvidence {
+        html: usize,
+        runtime_javascript: usize,
+        tailwind_css: usize,
+        wasm: AssetBytes,
+        payload: AssetBytes,
+        syntax_pack: AssetBytes,
+        pages: usize,
+        lines: usize,
+    }
 
     #[test]
     fn document_contains_only_inert_data_and_inline_client_assets() {
@@ -107,11 +177,95 @@ mod tests {
 
         assert!(html.starts_with("<!doctype html>"));
         assert!(html.contains("<style>"));
-        assert!(html.contains("<script type=\"module\">"));
+        assert_eq!(html.matches("<script type=\"module\">").count(), 1);
+        assert_eq!(
+            html.matches(&format!("id=\"{VIEWER_ARTIFACT_RUNTIME_ID}\""))
+                .count(),
+            1
+        );
+        assert!(html.contains("data-compression=\"gzip\""));
+        assert!(!html.contains("data:application/wasm"));
         assert!(!html.contains("+client-rendered"));
         assert!(!has_disallowed_external_url(&html));
         assert_eq!(manifest.title, "api — diff · 0 commits");
         assert_eq!(page.page.lines[1], "+client-rendered");
+    }
+
+    #[test]
+    fn user_content_with_script_terminators_remains_encoded() {
+        let mut view = sample_view();
+        view.files[0]
+            .lines
+            .push("+</script><script>alert('unsafe')</script>".to_owned());
+        view.files[0].full_lines = Some(view.files[0].lines.clone());
+
+        let html = build_html(&view, RenderOptions::DEFAULT, None).expect("build safe artifact");
+        let manifest: ViewerArtifactManifest = decode_payload(&html, VIEWER_ARTIFACT_MANIFEST_ID);
+        let page_id = gtl_contracts::viewer::ViewerArtifactPageId::for_request(
+            &gtl_contracts::viewer::LoadViewerDiffLines {
+                identity: manifest.views[0].identity,
+                file: manifest.views[0].files[0].id.clone(),
+                cursor: gtl_contracts::viewer::ViewerDiffCursor::START,
+            },
+        );
+        let page: ViewerArtifactPage = decode_payload(&html, page_id.as_str());
+
+        assert!(!html.contains("alert('unsafe')"));
+        assert!(
+            page.page
+                .lines
+                .iter()
+                .any(|line| line.contains("alert('unsafe')"))
+        );
+    }
+
+    #[test]
+    fn tiny_artifact_has_a_deterministic_sub_2_5_mb_size_floor() {
+        let view = tiny_size_view();
+        let first =
+            build_html(&view, RenderOptions::DEFAULT, Some("dark")).expect("build tiny artifact");
+        let second =
+            build_html(&view, RenderOptions::DEFAULT, Some("dark")).expect("rebuild tiny artifact");
+        let evidence = size_evidence(std::slice::from_ref(&view), &first);
+
+        eprintln!("tiny artifact size evidence: {evidence:?}");
+        assert_eq!(
+            first, second,
+            "identical inputs must produce identical HTML"
+        );
+        assert!(evidence.html <= 2_500_000, "{evidence:?}");
+        assert!(is_reduced_by_at_least(
+            TINY_BASELINE_BYTES,
+            evidence.html,
+            40
+        ));
+        assert!(evidence.wasm.raw <= 2_100_000, "{evidence:?}");
+        assert!(evidence.wasm.gzip <= 800_000, "{evidence:?}");
+        assert!(evidence.syntax_pack.raw <= 128 * 1024, "{evidence:?}");
+        assert_eq!(evidence.lines, 12);
+        assert_eq!(evidence.pages, 1);
+    }
+
+    #[test]
+    fn independently_compressed_large_fixture_stays_below_3_mb() {
+        let view = large_size_view();
+        let html = build_html(&view, RenderOptions::DEFAULT, Some("dark"))
+            .expect("build representative large artifact");
+        let evidence = size_evidence(std::slice::from_ref(&view), &html);
+
+        eprintln!("large artifact size evidence: {evidence:?}");
+        assert!(evidence.lines > 20_000, "{evidence:?}");
+        assert!(evidence.pages > 200, "{evidence:?}");
+        assert!(evidence.html <= 3_000_000, "{evidence:?}");
+        assert!(is_reduced_by_at_least(
+            LARGE_BASELINE_BYTES,
+            evidence.html,
+            45
+        ));
+        assert_eq!(
+            html.matches("id=\"gtl-artifact-page-").count(),
+            evidence.pages
+        );
     }
 
     #[test]
@@ -142,5 +296,93 @@ mod tests {
             let page: ViewerArtifactPage = decode_payload(&html, id.as_str());
             assert_eq!(page.page.identity, active.identity);
         }
+    }
+
+    fn tiny_size_view() -> View {
+        let mut view = sample_view();
+        let mut lines = vec!["@@ -1,5 +1,6 @@".to_owned()];
+        for index in 0..11 {
+            lines.push(format!(
+                "+pub fn compact_fixture_{index}() -> usize {{ {index} * 17 }}"
+            ));
+        }
+        view.files[0].added = 11;
+        view.files[0].removed = 0;
+        view.files[0].lines.clone_from(&lines);
+        view.files[0].full_lines = Some(lines);
+        view
+    }
+
+    fn large_size_view() -> View {
+        let mut view = sample_view();
+        view.files = (0..205)
+            .map(|file_index| {
+                let mut lines = vec!["@@ -1,100 +1,100 @@".to_owned()];
+                lines.extend((0..100).map(|line_index| {
+                    format!(
+                        "+pub fn fixture_{file_index}_{line_index}() -> usize {{ {file_index} + {line_index} }}"
+                    )
+                }));
+                FileDiff {
+                    path: format!("src/generated_{file_index}.rs"),
+                    added: 100,
+                    removed: 0,
+                    full_lines: Some(lines.clone()),
+                    lines,
+                }
+            })
+            .collect();
+        view
+    }
+
+    fn size_evidence(views: &[View], html: &str) -> ArtifactSizeEvidence {
+        let payload = project_payload("size fixture", views, RenderOptions::DEFAULT, Some("dark"))
+            .expect("project size fixture payload");
+        let mut payload_bytes = measure_asset(html, VIEWER_ARTIFACT_MANIFEST_ID);
+        for page in &payload.pages {
+            payload_bytes += measure_asset(html, page.id.as_str());
+        }
+        let lines = payload.pages.iter().map(|page| page.page.lines.len()).sum();
+        ArtifactSizeEvidence {
+            html: html.len(),
+            runtime_javascript: assets::inline_runtime().expect("generated runtime").len(),
+            tailwind_css: assets::TAILWIND_CSS.len(),
+            wasm: measure_asset(html, VIEWER_ARTIFACT_RUNTIME_ID),
+            payload: payload_bytes,
+            syntax_pack: measure_asset(html, VIEWER_ARTIFACT_SYNTAX_ID),
+            pages: payload.pages.len(),
+            lines,
+        }
+    }
+
+    fn measure_asset(html: &str, id: &str) -> AssetBytes {
+        let marker = format!("id=\"{id}\"");
+        let (_, tail) = html.split_once(&marker).expect("artifact asset address");
+        let (attributes, tail) = tail.split_once('>').expect("artifact asset opening tag");
+        let (encoded, _) = tail
+            .split_once("</script>")
+            .expect("artifact asset closing tag");
+        let raw_marker = "data-uncompressed-bytes=\"";
+        let raw = attributes
+            .split_once(raw_marker)
+            .and_then(|(_, tail)| tail.split_once('"'))
+            .and_then(|(value, _)| value.parse::<usize>().ok())
+            .expect("artifact uncompressed byte count");
+        let gzip = STANDARD.decode(encoded).expect("artifact base64 bytes");
+        let decoded = compression::gunzip(&gzip).expect("artifact gzip bytes");
+
+        assert_eq!(decoded.len(), raw, "decoded byte metadata for {id}");
+        AssetBytes {
+            raw,
+            gzip: gzip.len(),
+            base64: encoded.len(),
+        }
+    }
+
+    fn is_reduced_by_at_least(baseline: usize, current: usize, percentage: usize) -> bool {
+        baseline
+            .saturating_sub(current)
+            .checked_mul(100)
+            .is_some_and(|reduction| reduction >= baseline.saturating_mul(percentage))
     }
 }

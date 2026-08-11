@@ -32,6 +32,14 @@ pub struct RawArtifactFixture {
     config: tempfile::NamedTempFile,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ArtifactFailure {
+    DecompressionUnavailable,
+    InvalidBase64,
+    InvalidGzip,
+    MissingPage,
+}
+
 impl Spec {
     pub async fn start(name: &str) -> Result<Self> {
         verify_runtime_environment()?;
@@ -133,6 +141,12 @@ pub async fn render_raw_diff(
     let cli_binary = env::var_os("GTL_E2E_CLI_BINARY")
         .map(PathBuf::from)
         .context("GTL_E2E_CLI_BINARY is required for browser E2E")?;
+    let mut stop_daemon = Command::new(&cli_binary);
+    stop_daemon
+        .args(["daemon", "stop"])
+        .current_dir(fixture.repository.path());
+    let output = command_output(stop_daemon, "git-tools daemon stop").await?;
+    ensure_success(&output, "git-tools daemon stop")?;
     let mut command = Command::new(&cli_binary);
     std::fs::write(
         fixture.config.path(),
@@ -156,6 +170,68 @@ pub async fn render_raw_diff(
         [] => bail!("git-tools diff --raw printed no file:// artifact URL"),
         _ => bail!("git-tools diff --raw printed multiple file:// artifact URLs"),
     }
+}
+
+pub fn apply_artifact_failure(url: &str, failure: ArtifactFailure) -> Result<()> {
+    let path = url
+        .strip_prefix("file://")
+        .map(Path::new)
+        .context("raw artifact URL is not a file URL")?;
+    let mut html = fs::read_to_string(path)
+        .with_context(|| format!("read raw artifact {}", path.display()))?;
+    match failure {
+        ArtifactFailure::DecompressionUnavailable => {
+            let module = "<script type=\"module\">";
+            let replacement = "<script>globalThis.DecompressionStream=undefined;</script><script type=\"module\">";
+            ensure!(
+                html.contains(module),
+                "raw artifact module script is missing"
+            );
+            html = html.replacen(module, replacement, 1);
+        }
+        ArtifactFailure::MissingPage => {
+            let marker = "<script id=\"gtl-artifact-page-";
+            let start = html
+                .find(marker)
+                .context("find compressed diff page node")?;
+            let end = html[start..]
+                .find("</script>")
+                .map(|offset| start + offset + "</script>".len())
+                .context("find compressed diff page node end")?;
+            html.replace_range(start..end, "");
+        }
+        ArtifactFailure::InvalidBase64 | ArtifactFailure::InvalidGzip => {
+            corrupt_artifact_runtime_bytes(&mut html, failure)?;
+        }
+    }
+    fs::write(path, html).with_context(|| format!("alter raw artifact {}", path.display()))
+}
+
+fn corrupt_artifact_runtime_bytes(html: &mut String, failure: ArtifactFailure) -> Result<()> {
+    let marker = "<script id=\"gtl-artifact-runtime\"";
+    let marker_offset = html.find(marker).context("find compressed runtime node")?;
+    let encoded_offset = html[marker_offset..]
+        .find('>')
+        .map(|offset| marker_offset + offset + 1)
+        .context("find compressed runtime payload")?;
+    let current = html[encoded_offset..]
+        .chars()
+        .next()
+        .context("compressed runtime payload is empty")?;
+    ensure!(current.is_ascii(), "compressed runtime base64 is not ASCII");
+    let replacement = match failure {
+        ArtifactFailure::InvalidBase64 => '!',
+        ArtifactFailure::InvalidGzip if current == 'A' => 'B',
+        ArtifactFailure::InvalidGzip => 'A',
+        ArtifactFailure::DecompressionUnavailable | ArtifactFailure::MissingPage => {
+            unreachable!("non-byte failures are handled before runtime corruption")
+        }
+    };
+    html.replace_range(
+        encoded_offset..encoded_offset + current.len_utf8(),
+        &replacement.to_string(),
+    );
+    Ok(())
 }
 
 pub async fn set_mobile_viewport(page: &Page) -> Result<()> {
@@ -183,6 +259,27 @@ pub async fn expect_every_file_is_collapsed(page: &Page) -> Result<()> {
         .to_have_count(0)
         .await
         .context("wait for every file section to collapse")
+}
+
+pub fn assert_no_browser_errors(page: &Page) -> Result<()> {
+    let page_errors = page.page_errors();
+    ensure!(
+        page_errors.is_empty(),
+        "offline artifact raised page errors: {}",
+        page_errors.join("; ")
+    );
+    let console_errors = page
+        .console_messages()
+        .into_iter()
+        .filter(|message| message.type_() == "error")
+        .map(|message| message.text().to_owned())
+        .collect::<Vec<_>>();
+    ensure!(
+        console_errors.is_empty(),
+        "offline artifact logged console errors: {}",
+        console_errors.join("; ")
+    );
+    Ok(())
 }
 
 pub async fn click(locator: &Locator, label: &str) -> Result<()> {

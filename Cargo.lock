@@ -3441,8 +3441,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "flate2",
  "gtl-application",
  "gtl-contracts",
+ "gtl-parser",
  "serde",
  "serde_json",
 ]
@@ -3568,6 +3570,7 @@ dependencies = [
  "command-group",
  "futures-util",
  "gtl-application",
+ "gtl-artifacts",
  "gtl-contracts",
  "gtl-infra",
  "serde",
@@ -3617,6 +3620,8 @@ dependencies = [
 name = "gtl-parser"
 version = "0.1.0"
 dependencies = [
+ "bincode",
+ "serde",
  "similar",
  "syntect",
  "thiserror 2.0.19",
@@ -3626,7 +3631,6 @@ dependencies = [
 name = "gtl-web"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "dioxus",
  "dioxus-primitives",
  "dioxus-sdk-time",
@@ -9081,6 +9085,7 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "tiny-skia",
+ "toml_edit 0.25.12+spec-1.1.0",
  "sample_project",
  "zbus",
 ]

@@ -5,9 +5,9 @@ use gtl_contracts::viewer::{
     LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffCursor, ViewerDiffLayout,
     ViewerDiffLines, ViewerFileSummary, ViewerViewIdentity,
 };
-use gtl_parser::{
-    DiffParser, DiffRow, SplitDiffRow, SplitDiffStream, SyntaxCatalog, bundled_syntax_catalog,
-};
+#[cfg(feature = "desktop")]
+use gtl_parser::bundled_syntax_catalog;
+use gtl_parser::{DiffParser, DiffRow, SplitDiffRow, SplitDiffStream, SyntaxCatalog};
 
 use self::source::ClientDiffSourceError;
 
@@ -57,7 +57,7 @@ pub(crate) enum ClientDiffFileError {
 }
 
 impl ClientDiffFileError {
-    pub(crate) const fn message(self) -> &'static str {
+    pub(crate) fn message(self) -> &'static str {
         match self {
             Self::Source(error) => error.message(),
             Self::InvalidPage => {
@@ -359,7 +359,12 @@ async fn load_workspace(
     identity: ViewerViewIdentity,
     files: Vec<ViewerFileSummary>,
 ) {
-    let syntax_catalog = bundled_syntax_catalog().ok();
+    let syntax_catalog = match source {
+        #[cfg(feature = "desktop")]
+        ClientDiffSource::Desktop => bundled_syntax_catalog().ok(),
+        #[cfg(feature = "artifact")]
+        ClientDiffSource::Artifact => crate::artifact::syntax_catalog(),
+    };
     let load = ClientDiffLoad {
         workspace,
         generation,

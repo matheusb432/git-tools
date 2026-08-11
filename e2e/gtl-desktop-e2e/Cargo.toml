@@ -20,6 +20,7 @@ anyhow.workspace = true
 command-group.workspace = true
 futures-util.workspace = true
 gtl-application.workspace = true
+gtl-artifacts.workspace = true
 gtl-contracts.workspace = true
 gtl-infra.workspace = true
 serde.workspace = true

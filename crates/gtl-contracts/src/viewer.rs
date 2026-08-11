@@ -6,7 +6,9 @@ use crate::recipes::Recipe;
 
 pub const VIEWER_STATE_CHANGED_EVENT: &str = "viewer-state-changed";
 pub const VIEWER_DIFF_LINES_PAGE_MAX_BYTES: usize = 256 * 1024;
+pub const VIEWER_ARTIFACT_RUNTIME_ID: &str = "gtl-artifact-runtime";
 pub const VIEWER_ARTIFACT_MANIFEST_ID: &str = "gtl-artifact-manifest";
+pub const VIEWER_ARTIFACT_SYNTAX_ID: &str = "gtl-artifact-syntaxes";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

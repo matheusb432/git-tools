@@ -19,13 +19,6 @@ pub(crate) enum ClientDiffSource {
 }
 
 impl ClientDiffSource {
-    #[cfg_attr(
-        not(feature = "desktop"),
-        expect(
-            clippy::unused_async,
-            reason = "artifact and desktop sources share one awaitable hook API"
-        )
-    )]
     pub(super) async fn load_diff_lines(
         self,
         request: LoadViewerDiffLines,
@@ -36,9 +29,9 @@ impl ClientDiffSource {
                 .await
                 .map_err(ClientDiffSourceError::Desktop),
             #[cfg(feature = "artifact")]
-            Self::Artifact => {
-                load_artifact_diff_lines(&request).map_err(ClientDiffSourceError::Artifact)
-            }
+            Self::Artifact => load_artifact_diff_lines(&request)
+                .await
+                .map_err(ClientDiffSourceError::Artifact),
         }
     }
 }
@@ -52,18 +45,12 @@ pub(crate) enum ClientDiffSourceError {
 }
 
 impl ClientDiffSourceError {
-    pub(crate) const fn message(self) -> &'static str {
+    pub(crate) fn message(self) -> &'static str {
         match self {
             #[cfg(feature = "desktop")]
             Self::Desktop(error) => error.message(),
             #[cfg(feature = "artifact")]
-            Self::Artifact(ArtifactDiffSourceError::Missing) => {
-                "The embedded diff page is missing. Reload this artifact to try again."
-            }
-            #[cfg(feature = "artifact")]
-            Self::Artifact(ArtifactDiffSourceError::Invalid) => {
-                "The embedded diff page is invalid. Recreate this artifact to view it."
-            }
+            Self::Artifact(error) => error.message(),
         }
     }
 }

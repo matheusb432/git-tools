@@ -1,8 +1,15 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use std::cell::RefCell;
+
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{VIEWER_ARTIFACT_MANIFEST_ID, ViewerArtifactManifest};
+use gtl_contracts::viewer::{
+    VIEWER_ARTIFACT_MANIFEST_ID, VIEWER_ARTIFACT_SYNTAX_ID, ViewerArtifactManifest,
+};
+use gtl_parser::SyntaxCatalog;
 
 use crate::{
+    artifact_asset::{
+        self, ArtifactAssetError, ArtifactAssetKind, MANIFEST_MAX_BYTES, SYNTAX_PACK_MAX_BYTES,
+    },
     entities::diffs::theme_value,
     shared::{
         browser,
@@ -11,36 +18,51 @@ use crate::{
     views::diffs::ArtifactDiffWorkspace,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ArtifactManifestError {
-    Missing,
-    Invalid,
+thread_local! {
+    static ARTIFACT_SYNTAX_CATALOG: RefCell<Option<SyntaxCatalog>> = const { RefCell::new(None) };
 }
 
-impl ArtifactManifestError {
-    const fn message(self) -> &'static str {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArtifactStartupError {
+    ManifestAsset(ArtifactAssetError),
+    InvalidManifest,
+    SyntaxAsset(ArtifactAssetError),
+    InvalidSyntaxCatalog,
+}
+
+impl ArtifactStartupError {
+    fn message(self) -> &'static str {
         match self {
-            Self::Missing => "This artifact does not contain its diff manifest.",
-            Self::Invalid => "This artifact contains an invalid diff manifest.",
+            Self::ManifestAsset(error) => error.message(ArtifactAssetKind::Manifest),
+            Self::InvalidManifest => "This artifact contains an invalid diff manifest.",
+            Self::SyntaxAsset(error) => error.message(ArtifactAssetKind::SyntaxCatalog),
+            Self::InvalidSyntaxCatalog => "This artifact contains an invalid syntax catalog.",
         }
     }
 }
 
 #[component]
 pub(crate) fn ArtifactApp() -> Element {
-    let manifest = use_signal(load_manifest);
+    let startup = use_resource(load_startup);
     let mut active_view = use_signal(|| 0_usize);
 
     use_effect(move || {
-        if let Ok(manifest) = &*manifest.read() {
+        if let Some(Ok(manifest)) = &*startup.read() {
             browser::apply_theme(theme_value(manifest.theme));
         }
     });
 
-    let loaded = manifest.read();
+    let loaded = startup.read();
     rsx! {
         match &*loaded {
-            Err(error) => rsx! {
+            None => rsx! {
+                main {
+                    class: "grid h-screen place-content-center bg-bg px-5 text-center text-ink",
+                    role: "status",
+                    "Opening diff artifact"
+                }
+            },
+            Some(Err(error)) => rsx! {
                 main {
                     class: "grid h-screen place-content-center bg-bg px-5 text-center text-ink",
                     role: "alert",
@@ -48,12 +70,12 @@ pub(crate) fn ArtifactApp() -> Element {
                     p { class: "mt-1 text-ink-2", "{error.message()}" }
                 }
             },
-            Ok(manifest) if manifest.views.is_empty() => rsx! {
+            Some(Ok(manifest)) if manifest.views.is_empty() => rsx! {
                 main { class: "grid h-screen place-content-center bg-bg px-5 text-center text-ink",
                     h1 { class: "font-semibold", "No diffs in this artifact" }
                 }
             },
-            Ok(manifest) => {
+            Some(Ok(manifest)) => {
                 let selected = active_view().min(manifest.views.len() - 1);
                 let view = manifest.views[selected].clone();
                 rsx! {
@@ -90,16 +112,24 @@ pub(crate) fn ArtifactApp() -> Element {
     }
 }
 
-fn load_manifest() -> Result<ViewerArtifactManifest, ArtifactManifestError> {
-    let document = web_sys::window()
-        .and_then(|window| window.document())
-        .ok_or(ArtifactManifestError::Missing)?;
-    let encoded = document
-        .get_element_by_id(VIEWER_ARTIFACT_MANIFEST_ID)
-        .and_then(|element| element.text_content())
-        .ok_or(ArtifactManifestError::Missing)?;
-    let bytes = STANDARD
-        .decode(encoded.trim())
-        .map_err(|_| ArtifactManifestError::Invalid)?;
-    serde_json::from_slice(&bytes).map_err(|_| ArtifactManifestError::Invalid)
+async fn load_startup() -> Result<ViewerArtifactManifest, ArtifactStartupError> {
+    let manifest_bytes = artifact_asset::load(VIEWER_ARTIFACT_MANIFEST_ID, MANIFEST_MAX_BYTES)
+        .await
+        .map_err(ArtifactStartupError::ManifestAsset)?;
+    let manifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|_| ArtifactStartupError::InvalidManifest)?;
+    artifact_asset::remove(VIEWER_ARTIFACT_MANIFEST_ID);
+
+    let syntax_bytes = artifact_asset::load(VIEWER_ARTIFACT_SYNTAX_ID, SYNTAX_PACK_MAX_BYTES)
+        .await
+        .map_err(ArtifactStartupError::SyntaxAsset)?;
+    let syntax_catalog = SyntaxCatalog::from_uncompressed_pack(&syntax_bytes)
+        .map_err(|_| ArtifactStartupError::InvalidSyntaxCatalog)?;
+    artifact_asset::remove(VIEWER_ARTIFACT_SYNTAX_ID);
+    ARTIFACT_SYNTAX_CATALOG.with(|catalog| catalog.replace(Some(syntax_catalog)));
+    Ok(manifest)
+}
+
+pub(crate) fn syntax_catalog() -> Option<SyntaxCatalog> {
+    ARTIFACT_SYNTAX_CATALOG.with(|catalog| catalog.borrow().clone())
 }

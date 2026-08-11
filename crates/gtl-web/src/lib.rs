@@ -2,6 +2,8 @@
 mod app;
 #[cfg(feature = "artifact")]
 mod artifact;
+#[cfg(feature = "artifact")]
+mod artifact_asset;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod entities;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
