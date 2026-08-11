@@ -19,6 +19,13 @@ pub(crate) enum ClientDiffSource {
 }
 
 impl ClientDiffSource {
+    #[cfg_attr(
+        not(feature = "desktop"),
+        expect(
+            clippy::unused_async,
+            reason = "artifact and desktop sources share one awaitable hook API"
+        )
+    )]
     pub(super) async fn load_diff_lines(
         self,
         request: LoadViewerDiffLines,

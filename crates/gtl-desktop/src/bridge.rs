@@ -60,7 +60,7 @@ pub(crate) async fn viewer_load_diff_lines(
 ) -> Result<ViewerDiffLines, ViewerApiError> {
     let app = app.inner().clone();
     run_blocking("diff lines worker failed", move || {
-        diff::load_lines(&app, request)
+        diff::load_lines(&app, &request)
     })
     .await
 }

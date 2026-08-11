@@ -3,13 +3,18 @@ use gtl_contracts::viewer::ViewerActiveView;
 #[cfg(feature = "artifact")]
 use lucide_dioxus::{History, Menu, SlidersHorizontal};
 
+#[cfg(feature = "artifact")]
+use self::titlebar::{ViewActions, ViewActionsLayout};
 use self::{
     commits_panel::CommitsPanel, files_panel::FilesPanel, keybar::Keybar, titlebar::ViewTitlebar,
 };
 #[cfg(feature = "artifact")]
 use crate::shared::{
     browser,
-    ui::{Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant, Popover},
+    ui::{
+        Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant, CountBadge, CountBadgeSize,
+        Popover,
+    },
 };
 use crate::{entities::diffs::ClientDiffSource, views::diffs::ClientDiffDocument};
 
@@ -48,7 +53,7 @@ pub(crate) fn ArtifactDiffWorkspace(view: ViewerActiveView) -> Element {
 
     let onnavigate = move |anchor_id: String| {
         mobile_panel.set(None);
-        browser::scroll_to_file(anchor_id.clone());
+        browser::scroll_to_file(&anchor_id);
         flashing_file.set(Some(anchor_id.clone()));
         spawn(async move {
             dioxus_sdk_time::sleep(std::time::Duration::from_millis(1_200)).await;
@@ -130,22 +135,12 @@ pub(crate) fn ArtifactDiffWorkspace(view: ViewerActiveView) -> Element {
             open: mobile_panel() == Some(ArtifactMobilePanel::View),
             title: "View settings",
             onclose: move |()| mobile_panel.set(None),
-            div { class: "grid grid-cols-2 gap-2",
-                Button {
-                    variant: ButtonVariant::Outline,
-                    onclick: move |_| files_folded.set(Some(!files_folded().unwrap_or(false))),
-                    if files_folded().unwrap_or(false) {
-                        "Expand all"
-                    } else {
-                        "Collapse all"
-                    }
-                }
-                Button {
-                    variant: if copy_context_enabled() { ButtonVariant::Pressed } else { ButtonVariant::Outline },
-                    aria_pressed: copy_context_enabled().to_string(),
-                    onclick: move |_| copy_context_enabled.set(!copy_context_enabled()),
-                    "+ context"
-                }
+            ViewActions {
+                layout: ViewActionsLayout::Panel,
+                files_folded: files_folded().unwrap_or(false),
+                copy_context_enabled: copy_context_enabled(),
+                onfold: move |folded| files_folded.set(Some(folded)),
+                oncontext: move |enabled| copy_context_enabled.set(enabled),
             }
         }
     }
@@ -165,33 +160,51 @@ fn ArtifactNavigationButton(
     rsx! {
         Button {
             id,
-            class: "relative hidden min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 border-0 bg-transparent px-1 py-1 text-[10px] leading-none text-ink-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-offset-[-2px] disabled:cursor-default disabled:opacity-35 mobile:flex",
+            class: "relative hidden min-w-0 flex-col justify-center gap-0.5 px-1 py-1 text-[10px] leading-none focus-visible:outline-offset-[-2px] disabled:cursor-default disabled:opacity-35 mobile:flex",
             layout: ButtonLayout::Content,
             size: ButtonSize::Content,
-            variant: ButtonVariant::Bare,
+            variant: ButtonVariant::Ghost,
             state: if enabled { ButtonState::Enabled } else { ButtonState::Disabled },
             aria_label,
             onclick,
-            span { class: "[&_svg]:size-5", aria_hidden: "true",
-                match panel {
-                    ArtifactMobilePanel::Files => rsx! {
-                        Menu { size: 20 }
-                    },
-                    ArtifactMobilePanel::Commits => rsx! {
-                        History { size: 20 }
-                    },
-                    ArtifactMobilePanel::View => rsx! {
-                        SlidersHorizontal { size: 20 }
-                    },
-                }
-            }
-            span { "{label}" }
+            ArtifactNavigationIcon { panel }
+            ArtifactNavigationLabel { label }
             if let Some(count) = count {
-                span { class: "absolute top-1 right-1 min-w-4 rounded-full bg-acc-soft px-1 py-0.5 text-center text-[9px] font-semibold leading-none text-acc",
-                    "{count}"
+                CountBadge {
+                    class: "absolute top-1 right-1",
+                    count,
+                    size: CountBadgeSize::Compact,
                 }
             }
         }
+    }
+}
+
+#[cfg(feature = "artifact")]
+#[component]
+fn ArtifactNavigationIcon(panel: ArtifactMobilePanel) -> Element {
+    rsx! {
+        span { class: "[&_svg]:size-5", aria_hidden: "true",
+            match panel {
+                ArtifactMobilePanel::Files => rsx! {
+                    Menu { size: 20 }
+                },
+                ArtifactMobilePanel::Commits => rsx! {
+                    History { size: 20 }
+                },
+                ArtifactMobilePanel::View => rsx! {
+                    SlidersHorizontal { size: 20 }
+                },
+            }
+        }
+    }
+}
+
+#[cfg(feature = "artifact")]
+#[component]
+fn ArtifactNavigationLabel(label: String) -> Element {
+    rsx! {
+        span { "{label}" }
     }
 }
 

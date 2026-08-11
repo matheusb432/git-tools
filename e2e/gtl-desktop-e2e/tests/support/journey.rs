@@ -427,7 +427,7 @@ pub async fn refresh_and_assert_alpha_v2(session: &TestSession) -> Result<()> {
 const diff = document.querySelector(
   '[data-gtl-diff-document][data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
-return diff?.dataset.viewIdentity !== arguments[0] && diff.textContent.includes('alpha-v2');
+return diff?.dataset.viewIdentity !== arguments[0] && diff?.textContent.includes('alpha-v2');
 "#,
                     vec![serde_json::json!(previous_identity)],
                 )

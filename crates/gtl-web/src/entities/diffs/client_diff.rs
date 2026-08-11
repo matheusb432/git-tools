@@ -219,9 +219,10 @@ impl ClientDiffWorkspace {
 pub(crate) fn use_client_diff_workspace(
     source: ClientDiffSource,
     identity: ViewerViewIdentity,
-    files: Vec<ViewerFileSummary>,
+    files: &[ViewerFileSummary],
     reload: u64,
 ) -> Signal<ClientDiffWorkspace> {
+    let files = files.to_owned();
     let initial_files = files.clone();
     let mut workspace = use_signal(move || ClientDiffWorkspace::loading(identity, initial_files));
     let mut generation = use_signal(|| 0_u64);
@@ -253,6 +254,103 @@ pub(crate) fn use_client_diff_workspace(
     workspace
 }
 
+#[derive(Clone, Copy)]
+struct ClientDiffLoad {
+    workspace: Signal<ClientDiffWorkspace>,
+    generation: Signal<u64>,
+    request_generation: u64,
+    source: ClientDiffSource,
+    identity: ViewerViewIdentity,
+}
+
+impl ClientDiffLoad {
+    fn is_current(self) -> bool {
+        *self.generation.peek() == self.request_generation
+    }
+
+    fn update_file(self, file_index: usize, update: impl FnOnce(&mut ClientDiffFile)) {
+        if !self.is_current() {
+            return;
+        }
+        let mut workspace = self.workspace;
+        let mut current = workspace.write();
+        if current.identity != self.identity {
+            return;
+        }
+        if let Some(file) = current.files.get_mut(file_index) {
+            update(file);
+        }
+    }
+
+    async fn load_file(
+        self,
+        file_index: usize,
+        file: &ViewerFileSummary,
+        syntax_catalog: Option<&SyntaxCatalog>,
+    ) {
+        let syntax = syntax_catalog.and_then(|catalog| catalog.syntax_for_path(&file.path));
+        let mut parser = DiffParser::new().with_syntax(syntax).stream();
+        let mut split = (self.identity.render_options.layout == ViewerDiffLayout::Split)
+            .then(SplitDiffStream::new);
+        let mut cursor = ViewerDiffCursor::START;
+
+        loop {
+            if !self.is_current() {
+                return;
+            }
+            let request = LoadViewerDiffLines {
+                identity: self.identity,
+                file: file.id.clone(),
+                cursor,
+            };
+            let page = match self.source.load_diff_lines(request.clone()).await {
+                Ok(page) => page,
+                Err(error) => {
+                    self.update_file(file_index, |file| {
+                        file.state = ClientDiffFileState::Error(ClientDiffFileError::Source(error));
+                    });
+                    return;
+                }
+            };
+            let Ok(next) = validate_page(&request, &page) else {
+                self.update_file(file_index, |file| {
+                    file.state = ClientDiffFileState::Error(ClientDiffFileError::InvalidPage);
+                });
+                return;
+            };
+
+            for lines in page.lines.chunks(CLIENT_LINE_BATCH_SIZE) {
+                let parsed = parser.push(lines);
+                let line_number_digits = parsed.line_number_digits();
+                let rows = parsed.into_rows();
+                self.update_file(file_index, |file| {
+                    file.line_number_digits = line_number_digits;
+                    match &mut split {
+                        Some(split) => file.rows.append_split(split.push(rows)),
+                        None => file.rows.append_unified(rows),
+                    }
+                });
+                yield_to_browser().await;
+                if !self.is_current() {
+                    return;
+                }
+            }
+
+            let Some(next) = next else {
+                let trailing_rows = split.map(SplitDiffStream::finish);
+                self.update_file(file_index, |file| {
+                    if let Some(rows) = trailing_rows {
+                        file.rows.append_split(rows);
+                    }
+                    file.state = ClientDiffFileState::Complete;
+                });
+                return;
+            };
+            cursor = next;
+        }
+    }
+}
+
 async fn load_workspace(
     workspace: Signal<ClientDiffWorkspace>,
     generation: Signal<u64>,
@@ -262,150 +360,21 @@ async fn load_workspace(
     files: Vec<ViewerFileSummary>,
 ) {
     let syntax_catalog = bundled_syntax_catalog().ok();
+    let load = ClientDiffLoad {
+        workspace,
+        generation,
+        request_generation,
+        source,
+        identity,
+    };
 
     for (file_index, file) in files.into_iter().enumerate() {
-        if !is_current(generation, request_generation) {
+        if !load.is_current() {
             return;
         }
-        load_file(
-            workspace,
-            generation,
-            request_generation,
-            source,
-            identity,
-            file_index,
-            &file,
-            syntax_catalog.as_ref(),
-        )
-        .await;
+        load.load_file(file_index, &file, syntax_catalog.as_ref())
+            .await;
     }
-}
-
-async fn load_file(
-    mut workspace: Signal<ClientDiffWorkspace>,
-    generation: Signal<u64>,
-    request_generation: u64,
-    source: ClientDiffSource,
-    identity: ViewerViewIdentity,
-    file_index: usize,
-    file: &ViewerFileSummary,
-    syntax_catalog: Option<&SyntaxCatalog>,
-) {
-    let syntax = syntax_catalog.and_then(|catalog| catalog.syntax_for_path(&file.path));
-    let mut parser = DiffParser::new().with_syntax(syntax).stream();
-    let mut split =
-        (identity.render_options.layout == ViewerDiffLayout::Split).then(SplitDiffStream::new);
-    let mut cursor = ViewerDiffCursor::START;
-
-    loop {
-        if !is_current(generation, request_generation) {
-            return;
-        }
-        let request = LoadViewerDiffLines {
-            identity,
-            file: file.id.clone(),
-            cursor,
-        };
-        let page = match source.load_diff_lines(request.clone()).await {
-            Ok(page) => page,
-            Err(error) => {
-                update_file(
-                    &mut workspace,
-                    generation,
-                    request_generation,
-                    identity,
-                    file_index,
-                    |file| {
-                        file.state = ClientDiffFileState::Error(ClientDiffFileError::Source(error))
-                    },
-                );
-                return;
-            }
-        };
-        let next = match validate_page(&request, &page) {
-            Ok(next) => next,
-            Err(()) => {
-                update_file(
-                    &mut workspace,
-                    generation,
-                    request_generation,
-                    identity,
-                    file_index,
-                    |file| {
-                        file.state = ClientDiffFileState::Error(ClientDiffFileError::InvalidPage)
-                    },
-                );
-                return;
-            }
-        };
-
-        for lines in page.lines.chunks(CLIENT_LINE_BATCH_SIZE) {
-            let parsed = parser.push(lines);
-            let line_number_digits = parsed.line_number_digits();
-            let rows = parsed.into_rows();
-            update_file(
-                &mut workspace,
-                generation,
-                request_generation,
-                identity,
-                file_index,
-                |file| {
-                    file.line_number_digits = line_number_digits;
-                    match &mut split {
-                        Some(split) => file.rows.append_split(split.push(rows)),
-                        None => file.rows.append_unified(rows),
-                    }
-                },
-            );
-            yield_to_browser().await;
-            if !is_current(generation, request_generation) {
-                return;
-            }
-        }
-
-        let Some(next) = next else {
-            let trailing_rows = split.map(SplitDiffStream::finish);
-            update_file(
-                &mut workspace,
-                generation,
-                request_generation,
-                identity,
-                file_index,
-                |file| {
-                    if let Some(rows) = trailing_rows {
-                        file.rows.append_split(rows);
-                    }
-                    file.state = ClientDiffFileState::Complete;
-                },
-            );
-            return;
-        };
-        cursor = next;
-    }
-}
-
-fn update_file(
-    workspace: &mut Signal<ClientDiffWorkspace>,
-    generation: Signal<u64>,
-    request_generation: u64,
-    identity: ViewerViewIdentity,
-    file_index: usize,
-    update: impl FnOnce(&mut ClientDiffFile),
-) {
-    if !is_current(generation, request_generation) {
-        return;
-    }
-    let mut current = workspace.write();
-    if current.identity != identity {
-        return;
-    }
-    if let Some(file) = current.files.get_mut(file_index) {
-        update(file);
-    }
-}
-
-fn is_current(generation: Signal<u64>, request_generation: u64) -> bool {
-    generation() == request_generation
 }
 
 fn validate_page(
@@ -434,10 +403,10 @@ fn validate_page(
         .position()
         .checked_add(line_count)
         .ok_or(())?;
-    if let Some(next) = page.next {
-        if page.lines.is_empty() || next.position() != expected_next {
-            return Err(());
-        }
+    if let Some(next) = page.next
+        && (page.lines.is_empty() || next.position() != expected_next)
+    {
+        return Err(());
     }
     Ok(page.next)
 }

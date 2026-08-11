@@ -8,7 +8,7 @@ use crate::presentation::ViewerApp;
 
 pub(super) fn load_lines(
     app: &ViewerApp,
-    request: LoadViewerDiffLines,
+    request: &LoadViewerDiffLines,
 ) -> Result<ViewerDiffLines, ViewerApiError> {
     let options = validated_current_options(app, request.identity)?;
     let snapshot = {
@@ -24,7 +24,7 @@ pub(super) fn load_lines(
         }
         snapshot
     };
-    let page = project_diff_lines(snapshot.view(), &request)?;
+    let page = project_diff_lines(snapshot.view(), request)?;
     validate_current_request(app, request.identity, options)?;
     Ok(page)
 }
@@ -160,7 +160,7 @@ mod tests {
 
         let page = load_lines(
             &app,
-            LoadViewerDiffLines {
+            &LoadViewerDiffLines {
                 identity,
                 file: file.clone(),
                 cursor: ViewerDiffCursor::START,
@@ -193,7 +193,7 @@ mod tests {
 
         let page = load_lines(
             &app,
-            LoadViewerDiffLines {
+            &LoadViewerDiffLines {
                 identity,
                 file: ViewerDiffFileId::for_index(0),
                 cursor: ViewerDiffCursor::START,
@@ -209,7 +209,7 @@ mod tests {
         let (_directory, app, identity) = ready_app();
         let unknown = load_lines(
             &app,
-            LoadViewerDiffLines {
+            &LoadViewerDiffLines {
                 identity,
                 file: ViewerDiffFileId::for_index(99),
                 cursor: ViewerDiffCursor::START,
@@ -225,7 +225,7 @@ mod tests {
         assert_eq!(
             load_lines(
                 &app,
-                LoadViewerDiffLines {
+                &LoadViewerDiffLines {
                     identity,
                     file: ViewerDiffFileId::for_index(0),
                     cursor: ViewerDiffCursor::new(3),
@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(
             load_lines(
                 &app,
-                LoadViewerDiffLines {
+                &LoadViewerDiffLines {
                     identity: stale_identity,
                     file: ViewerDiffFileId::for_index(0),
                     cursor: ViewerDiffCursor::START,

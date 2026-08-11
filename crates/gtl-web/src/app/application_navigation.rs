@@ -14,8 +14,8 @@ use crate::{
         bridge::ClientApiError,
         browser,
         ui::{
-            Button, ButtonSize, ButtonVariant, FloatingNotice, FloatingNoticeState, ScrollArea,
-            ScrollAreaVariant,
+            Button, ButtonSize, ButtonVariant, CountBadge, FloatingNotice, FloatingNoticeState,
+            ScrollArea, ScrollAreaVariant,
         },
     },
 };
@@ -169,9 +169,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                 }
                 "History"
                 if !tabs.is_empty() {
-                    span { class: "min-w-5 rounded-full bg-acc-soft px-1 text-center text-xs text-acc",
-                        "{tabs.len()}"
-                    }
+                    CountBadge { count: tabs.len() }
                 }
             }
 

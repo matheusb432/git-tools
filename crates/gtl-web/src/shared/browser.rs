@@ -35,9 +35,9 @@ pub(crate) fn focus_element(id: String) {
     });
 }
 
-pub(crate) fn scroll_to_file(id: String) {
+pub(crate) fn scroll_to_file(id: &str) {
     let Some(details) = document()
-        .and_then(|document| document.get_element_by_id(&id))
+        .and_then(|document| document.get_element_by_id(id))
         .and_then(|element| element.dyn_into::<HtmlDetailsElement>().ok())
     else {
         return;
@@ -47,13 +47,12 @@ pub(crate) fn scroll_to_file(id: String) {
 }
 
 pub(crate) async fn copy_text(text: &str) -> bool {
-    if let Some(window) = web_sys::window() {
-        if JsFuture::from(window.navigator().clipboard().write_text(text))
+    if let Some(window) = web_sys::window()
+        && JsFuture::from(window.navigator().clipboard().write_text(text))
             .await
             .is_ok()
-        {
-            return true;
-        }
+    {
+        return true;
     }
     exec_copy(text)
 }

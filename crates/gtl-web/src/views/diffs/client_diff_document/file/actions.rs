@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use dioxus::prelude::*;
+use lucide_dioxus::ExternalLink;
 
 use crate::{
     entities::diffs::ClientDiffFile,
@@ -8,6 +9,7 @@ use crate::{
         browser,
         ui::{Button, ButtonSize, ButtonVariant},
     },
+    views::diffs::{DiffLineChangeKind, DiffLineChangeText},
 };
 
 #[component]
@@ -114,9 +116,9 @@ async fn update_copy_state(mut state: Signal<CopyState>, payload: &str) {
 fn DiffLineStats(added: u32, removed: u32) -> Element {
     rsx! {
         span { class: "flex-none text-[12.5px]",
-            span { class: "text-add", "data-lines-added": added, "+{added}" }
+            DiffLineChangeText { kind: DiffLineChangeKind::Added, count: u64::from(added) }
             " "
-            span { class: "text-del", "data-lines-removed": removed, "−{removed}" }
+            DiffLineChangeText { kind: DiffLineChangeKind::Removed, count: u64::from(removed) }
         }
     }
 }
@@ -144,17 +146,7 @@ fn OpenInEditorAction(path: String, onopen: EventHandler<String>) -> Element {
 fn OpenInEditorIcon() -> Element {
     rsx! {
         span { aria_hidden: "true",
-            svg {
-                view_box: "0 0 16 16",
-                width: "16",
-                height: "16",
-                fill: "none",
-                stroke: "currentColor",
-                stroke_width: "1.5",
-                path { d: "M9 2.5h4.5V7" }
-                path { d: "m13.5 2.5-7 7" }
-                path { d: "M7 4H3.5A1.5 1.5 0 0 0 2 5.5v7A1.5 1.5 0 0 0 3.5 14h7a1.5 1.5 0 0 0 1.5-1.5V9" }
-            }
+            ExternalLink { size: 16, stroke_width: 2 }
         }
     }
 }

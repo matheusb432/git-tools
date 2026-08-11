@@ -6,22 +6,21 @@
 
 | Verb | What it does | Justfile entry |
 | -- | -- | -- |
-| `setup` | Configure the tracked `.githooks` directory, install frontend dependencies, build and install both artifacts, and ensure `~/.local/bin` is on PATH. | `just setup` |
+| `setup` | Configure the tracked `.githooks` directory, build and install both artifacts, and ensure `~/.local/bin` is on PATH. | `just setup` |
 | `install [--target cli\|viewer\|both]` | Place the prebuilt CLI (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the viewer on PATH (idempotent byte comparison: installed, updated, or unchanged; atomic replace is warm-tray-safe). | `just install` / `just cli install` / `just desktop install` |
 | `uninstall [--remove-config] [--force]` | Remove the CLI, alias, daemon, viewer, desktop entry, and icon; optionally delete repo-local config. | `just uninstall` / `just purge` |
-| `test [--verbose] [--scope unit\|e2e\|all]` | Default (`unit`): default-member Rust tests. `--e2e`: hermetic native and browser E2E. `--all`: all Rust, frontend, drift, and E2E. Run `just check` separately for the read-only quality gate. `--e2e`/`--all` are shorthands for `--scope`. | `just test` |
+| `test [--verbose] [--scope unit\|e2e\|all]` | Default (`unit`): default-member, parser all-feature, and Dioxus desktop/artifact Rust tests. `--e2e`: hermetic native and browser E2E. `--all`: workspace Rust, artifact-feature, drift, and E2E. Run `just check` separately for the read-only quality gate. `--e2e`/`--all` are shorthands for `--scope`. | `just test` |
 | `test coverage [cargo-llvm-cov args...]` | Collect workspace coverage with `cargo llvm-cov`; extra arguments are forwarded. | `just test coverage` |
-| `fmt` | Pinned-nightly rustfmt, Taplo, Dioxus RSX, rumdl, and Oxfmt, in place. | `just fmt` |
+| `fmt` | Pinned-nightly rustfmt, Taplo, Dioxus RSX, and rumdl, in place. | `just fmt` |
 | `fmt-check` | Verify formatting without writing (formatting only; exits non-zero on drift). | `just fmt-check` |
-| `lint` | Oxlint, the architecture lints, and full-workspace Clippy including desktop. | `just lint` |
+| `lint` | Architecture lints, parser WASM checks, and full-workspace Clippy including desktop. | `just lint` |
 | `check` | Complete read-only gate: formatting drift, then every linter. | `just check` |
-| `pre-commit` | Check staged whitespace and run only the formatters or frontend linter owned by staged files. | tracked Git hook |
-| `fix [clippy args...]` | Apply Clippy and Oxlint fixes before normalizing every formatter. | `just fix` |
+| `pre-commit` | Check staged whitespace and run only the Rust, Dioxus, TOML, or Markdown formatters owned by staged files. | tracked Git hook |
+| `fix [clippy args...]` | Apply Clippy fixes before normalizing every formatter. | `just fix` |
 | `build [--target cli\|viewer\|both]` | Build mandatory release artifact sets; the root build never soft-skips the viewer. | `just build` / scoped build recipes |
-| `frontend-test` | Type-check and unit-test the framework-free frontend. | `just cli test` |
 | `bench` | Run the shared Rust benchmarks; `--fast` selects the concise viewer-render preset. | `just bench` |
 | `check-structure` | Cargo dependency-direction policy for core, shared, adapter, and black-box test packages. Wired into `lint` / `check`; also runnable standalone. | (via `just check`) |
-| `drift-check` | Rebuild the committed diff-artifact JS bundle and fail if it drifts from its TypeScript sources. | `just drift-check` |
+| `drift-check` | Rebuild tracked Tailwind and Dioxus artifact assets and fail if they drift from Rust and CSS sources. | `just drift-check` |
 | `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |
 | `ship [--smoke] [--force]` | Run `just test --all` unless forced, then cross-build the three Win11 exes. `--smoke --force` is the fast linkage-only path. | `just ship` |
 

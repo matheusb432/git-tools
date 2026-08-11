@@ -1,7 +1,13 @@
 use dioxus::prelude::*;
 use gtl_contracts::viewer::{ViewerActiveView, ViewerAppliedExclusions};
 
-use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
+use crate::shared::ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ViewActionsLayout {
+    Panel,
+    Toolbar,
+}
 
 #[component]
 pub(super) fn ViewTitlebar(
@@ -14,53 +20,108 @@ pub(super) fn ViewTitlebar(
 ) -> Element {
     rsx! {
         header { class: "col-span-3 row-start-1 flex min-w-0 items-center gap-4 border-b border-line bg-surface px-5 py-3 tablet:flex-wrap tablet:gap-2.5 tablet:px-3 tablet:py-2.5 mobile:gap-1.5 mobile:px-2 mobile:py-2",
-            div { class: "flex min-w-0 items-baseline gap-2 text-lg font-semibold tracking-tight mobile:text-base",
-                span { class: "truncate",
-                    "~/"
-                    b { class: "font-bold text-acc", "{view.repository_name}" }
-                }
-                span { class: "flex-none self-center rounded-sm border border-acc-line bg-acc-soft px-2 py-0.5 text-xs font-medium text-acc",
-                    "{view.title}"
-                }
+            RepositoryIdentity {
+                repository_name: view.repository_name.clone(),
+                title: view.title.clone(),
             }
-            div { class: "flex min-w-0 items-center gap-1.5 text-ink-2 tablet:order-3 tablet:w-full",
-                span { class: "truncate text-acc", "{view.branch}" }
-                if !view.upstream.is_empty() {
-                    span { class: "text-ink-3", "→" }
-                    span { class: "truncate text-ink-3", "{view.upstream}" }
-                }
-            }
+            BranchRange { branch: view.branch.clone(), upstream: view.upstream.clone() }
             if let Some(exclusions) = &view.exclusions {
-                span {
-                    class: "flex-none cursor-help whitespace-nowrap rounded-sm border border-del-line bg-del-bg px-2 py-0.5 text-xs font-semibold text-del",
-                    title: exclusion_tooltip(exclusions),
-                    {exclusion_label(exclusions)}
-                }
+                ExclusionsBadge { exclusions: exclusions.clone() }
             }
             div { class: "flex-1" }
             if let Some(mobile_navigation) = mobile_navigation {
                 {mobile_navigation}
             }
-            div { class: "flex items-center gap-2 mobile:hidden",
-                Button {
-                    size: ButtonSize::Small,
-                    variant: ButtonVariant::Outline,
-                    title: "Collapse or expand all files",
-                    onclick: move |_| onfold.call(!files_folded),
-                    if files_folded {
-                        "Expand all"
-                    } else {
-                        "Collapse all"
-                    }
+            ViewActions {
+                layout: ViewActionsLayout::Toolbar,
+                files_folded,
+                copy_context_enabled,
+                onfold,
+                oncontext,
+            }
+        }
+    }
+}
+
+#[component]
+fn RepositoryIdentity(repository_name: String, title: String) -> Element {
+    rsx! {
+        div { class: "flex min-w-0 items-baseline gap-2 text-lg font-semibold tracking-tight mobile:text-base",
+            span { class: "truncate",
+                "~/"
+                b { class: "font-bold text-acc", "{repository_name}" }
+            }
+            Badge {
+                class: "flex-none self-center px-2 py-0.5 text-xs",
+                variant: BadgeVariant::Accent,
+                "{title}"
+            }
+        }
+    }
+}
+
+#[component]
+fn BranchRange(branch: String, upstream: String) -> Element {
+    rsx! {
+        div { class: "flex min-w-0 items-center gap-1.5 text-ink-2 tablet:order-3 tablet:w-full",
+            span { class: "truncate text-acc", "{branch}" }
+            if !upstream.is_empty() {
+                span { class: "text-ink-3", "\u{2192}" }
+                span { class: "truncate text-ink-3", "{upstream}" }
+            }
+        }
+    }
+}
+
+#[component]
+fn ExclusionsBadge(exclusions: ViewerAppliedExclusions) -> Element {
+    rsx! {
+        Badge {
+            class: "flex-none cursor-help whitespace-nowrap px-2 py-0.5 text-xs font-semibold",
+            variant: BadgeVariant::Deletion,
+            title: exclusion_tooltip(&exclusions),
+            {exclusion_label(&exclusions)}
+        }
+    }
+}
+
+#[component]
+pub(super) fn ViewActions(
+    layout: ViewActionsLayout,
+    files_folded: bool,
+    copy_context_enabled: bool,
+    onfold: EventHandler<bool>,
+    oncontext: EventHandler<bool>,
+) -> Element {
+    let container_classes = match layout {
+        ViewActionsLayout::Panel => "grid grid-cols-2 gap-2",
+        ViewActionsLayout::Toolbar => "flex items-center gap-2 mobile:hidden",
+    };
+    let button_size = match layout {
+        ViewActionsLayout::Panel => ButtonSize::Medium,
+        ViewActionsLayout::Toolbar => ButtonSize::Small,
+    };
+
+    rsx! {
+        div { class: "{container_classes}",
+            Button {
+                size: button_size,
+                variant: ButtonVariant::Outline,
+                title: "Collapse or expand all files",
+                onclick: move |_| onfold.call(!files_folded),
+                if files_folded {
+                    "Expand all"
+                } else {
+                    "Collapse all"
                 }
-                Button {
-                    size: ButtonSize::Small,
-                    variant: if copy_context_enabled { ButtonVariant::Pressed } else { ButtonVariant::Outline },
-                    aria_pressed: copy_context_enabled.to_string(),
-                    title: "Prepend a commented path and line range when copying code",
-                    onclick: move |_| oncontext.call(!copy_context_enabled),
-                    "+ context"
-                }
+            }
+            Button {
+                size: button_size,
+                variant: if copy_context_enabled { ButtonVariant::Pressed } else { ButtonVariant::Outline },
+                aria_pressed: copy_context_enabled.to_string(),
+                title: "Prepend a commented path and line range when copying code",
+                onclick: move |_| oncontext.call(!copy_context_enabled),
+                "+ context"
             }
         }
     }

@@ -10,6 +10,7 @@ use super::{
     commits_panel::CommitsPanel,
     display_controls::{DisplayControls, MobilePanelButton},
     files_panel::FilesPanel,
+    titlebar::{ViewActions, ViewActionsLayout},
 };
 use crate::{
     app::application_layout::{ViewerContext, ViewerShellLoad},
@@ -218,7 +219,7 @@ fn ReadyWorkspace(
         });
     };
     let onnavigate = move |anchor_id: String| {
-        browser::scroll_to_file(anchor_id.clone());
+        browser::scroll_to_file(&anchor_id);
         flashing_file.set(Some(anchor_id.clone()));
         spawn(async move {
             dioxus_sdk_time::sleep(std::time::Duration::from_millis(1_200)).await;
@@ -271,24 +272,9 @@ fn ReadyWorkspace(
                         icon: MobilePanel::Commits,
                         onclick: move |_| mobile_panel.set(Some(MobilePanel::Commits)),
                     }
-                    Button {
-                        class: "ml-auto",
-                        size: ButtonSize::IconSmall,
-                        variant: ButtonVariant::Ghost,
-                        aria_label: "Refresh diff",
-                        title: "Refresh diff",
-                        onclick: onrefresh,
-                        if viewer.render_command_pending() {
-                            span {
-                                class: "animate-spin motion-reduce:animate-none",
-                                aria_hidden: "true",
-                                LoaderCircle { size: 14 }
-                            }
-                        } else {
-                            span { aria_hidden: "true",
-                                RefreshCw { size: 14 }
-                            }
-                        }
+                    MobileRefreshButton {
+                        pending: viewer.render_command_pending(),
+                        onrefresh,
                     }
                 }
                 if viewer.render_command_pending() {
@@ -337,22 +323,12 @@ fn ReadyWorkspace(
                         delete_open.set(true);
                     },
                 }
-                div { class: "grid grid-cols-2 gap-2",
-                    Button {
-                        variant: ButtonVariant::Outline,
-                        onclick: move |_| files_folded.set(Some(!files_folded().unwrap_or(false))),
-                        if files_folded().unwrap_or(false) {
-                            "Expand all"
-                        } else {
-                            "Collapse all"
-                        }
-                    }
-                    Button {
-                        variant: if copy_context_enabled() { ButtonVariant::Pressed } else { ButtonVariant::Outline },
-                        aria_pressed: copy_context_enabled().to_string(),
-                        onclick: move |_| copy_context_enabled.set(!copy_context_enabled()),
-                        "+ context"
-                    }
+                ViewActions {
+                    layout: ViewActionsLayout::Panel,
+                    files_folded: files_folded().unwrap_or(false),
+                    copy_context_enabled: copy_context_enabled(),
+                    onfold: move |folded| files_folded.set(Some(folded)),
+                    oncontext: move |enabled| copy_context_enabled.set(enabled),
                 }
             }
         }
@@ -412,6 +388,26 @@ fn ReadyWorkspace(
                     delete_pending.set(false);
                 });
             },
+        }
+    }
+}
+
+#[component]
+fn MobileRefreshButton(pending: bool, onrefresh: EventHandler<MouseEvent>) -> Element {
+    rsx! {
+        Button {
+            class: "ml-auto",
+            size: ButtonSize::IconSmall,
+            variant: ButtonVariant::Ghost,
+            state: if pending { ButtonState::Loading } else { ButtonState::Enabled },
+            aria_label: "Refresh diff",
+            title: "Refresh diff",
+            onclick: onrefresh,
+            if !pending {
+                span { aria_hidden: "true",
+                    RefreshCw { size: 14 }
+                }
+            }
         }
     }
 }

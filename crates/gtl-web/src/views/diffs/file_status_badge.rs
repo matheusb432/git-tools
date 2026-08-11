@@ -3,24 +3,34 @@ use gtl_contracts::viewer::ViewerFileStatus;
 
 use crate::shared::ui::{Badge, BadgeVariant};
 
-#[component]
-pub(super) fn DiffFileStatusBadge(status: ViewerFileStatus) -> Element {
-    rsx! {
-        Badge {
-            class: "size-[15px] min-h-0 flex-none px-0 text-[9.5px] leading-none font-bold",
-            variant: badge_variant(status),
-            title: status_label(status),
-            aria_label: status_label(status),
-            "{status_code(status)}"
-        }
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum DiffFileStatusBadgeSize {
+    Compact,
+    #[default]
+    Header,
 }
 
-pub(super) const fn file_header_background(status: ViewerFileStatus) -> &'static str {
-    match status {
-        ViewerFileStatus::Added => "bg-[color-mix(in_srgb,var(--add-bg)_34%,var(--surface-2))]",
-        ViewerFileStatus::Deleted => "bg-[color-mix(in_srgb,var(--del-bg)_34%,var(--surface-2))]",
-        ViewerFileStatus::Renamed | ViewerFileStatus::Modified => "bg-surface-2",
+#[component]
+pub(crate) fn DiffFileStatusBadge(
+    status: ViewerFileStatus,
+    #[props(default)] size: DiffFileStatusBadgeSize,
+) -> Element {
+    let size_classes = match size {
+        DiffFileStatusBadgeSize::Compact => "size-4 min-h-0! flex-none px-0 leading-none font-bold",
+        DiffFileStatusBadgeSize::Header => {
+            "size-[15px] min-h-0! flex-none px-0 text-[9.5px] leading-none font-bold"
+        }
+    };
+    let label = status_label(status);
+
+    rsx! {
+        Badge {
+            class: "{size_classes}",
+            variant: badge_variant(status),
+            title: label,
+            aria_label: label,
+            "{status_code(status)}"
+        }
     }
 }
 

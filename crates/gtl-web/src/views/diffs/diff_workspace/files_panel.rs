@@ -3,9 +3,14 @@ use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 use gtl_contracts::viewer::{ViewerActiveView, ViewerFileStatus, ViewerFileSummary};
 use lucide_dioxus::ChevronRight;
 
-use crate::shared::ui::{
-    Badge, BadgeVariant, Button, ButtonLayout, ButtonSize, ButtonVariant, ScrollArea, TextInput,
-    TextInputLabelVisibility,
+use crate::{
+    shared::ui::{
+        Badge, Button, ButtonLayout, ButtonSize, ButtonVariant, EmptyNotice, ScrollArea, TextInput,
+        TextInputLabelVisibility,
+    },
+    views::diffs::{
+        DiffFileStatusBadge, DiffFileStatusBadgeSize, DiffLineChangeBadge, DiffLineChangeKind,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,36 +80,63 @@ pub(super) fn FilesPanel(
 
     rsx! {
         ScrollArea { class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
-            div { class: "relative mb-3",
-                TextInput {
-                    label: "Filter files",
-                    label_visibility: TextInputLabelVisibility::Hidden,
-                    class: "h-9 py-2",
-                    value: filter,
-                    placeholder: "Filter files…  /",
-                    oninput: move |event: FormEvent| onfilter.call(event.value()),
-                }
+            FilesFilter { filter, onfilter }
+            FilesPanelHeading {
+                commits_label: view.commits_label.clone(),
+                file_count: view.files.len(),
             }
-            div { class: "mx-1 mt-1.5 mb-2 flex justify-between tracking-wider text-ink-3 uppercase",
-                span {
-                    "{view.commits_label} · {view.files.len()} file{super::plural_suffix(view.files.len())}"
-                }
-            }
-            div { class: "mx-0.5 mb-3 flex flex-wrap gap-2",
-                Badge { class: "px-2 py-0.5",
-                    b { class: "font-bold text-ink", "{view.commits.len()}" }
-                    span { class: "ml-1", "commit{super::plural_suffix(view.commits.len())}" }
-                }
-                Badge { class: "px-2 py-0.5", variant: BadgeVariant::Addition, "+{totals.added}" }
-                Badge { class: "px-2 py-0.5", variant: BadgeVariant::Deletion, "−{totals.removed}" }
-            }
+            FilesPanelSummary { commit_count: view.commits.len(), totals }
             if files.is_empty() {
-                p { class: "rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic",
-                    "no files match this filter"
-                }
+                EmptyNotice { "no files match this filter" }
             } else {
                 WorkspaceFileTreeView { tree, onnavigate }
             }
+        }
+    }
+}
+
+#[component]
+fn FilesFilter(filter: String, onfilter: EventHandler<String>) -> Element {
+    rsx! {
+        div { class: "relative mb-3",
+            TextInput {
+                label: "Filter files",
+                label_visibility: TextInputLabelVisibility::Hidden,
+                class: "h-9 py-2",
+                value: filter,
+                placeholder: "Filter files\u{2026}  /",
+                oninput: move |event: FormEvent| onfilter.call(event.value()),
+            }
+        }
+    }
+}
+
+#[component]
+fn FilesPanelHeading(commits_label: String, file_count: usize) -> Element {
+    rsx! {
+        div { class: "mx-1 mt-1.5 mb-2 flex justify-between tracking-wider text-ink-3 uppercase",
+            span { "{commits_label} \u{00b7} {file_count} file{super::plural_suffix(file_count)}" }
+        }
+    }
+}
+
+#[component]
+fn FilesPanelSummary(commit_count: usize, totals: WorkspaceLineTotals) -> Element {
+    rsx! {
+        div { class: "mx-0.5 mb-3 flex flex-wrap gap-2",
+            CommitCountBadge { count: commit_count }
+            DiffLineChangeBadge { kind: DiffLineChangeKind::Added, count: totals.added }
+            DiffLineChangeBadge { kind: DiffLineChangeKind::Removed, count: totals.removed }
+        }
+    }
+}
+
+#[component]
+fn CommitCountBadge(count: usize) -> Element {
+    rsx! {
+        Badge { class: "px-2 py-0.5",
+            b { class: "font-bold text-ink", "{count}" }
+            span { class: "ml-1", "commit{super::plural_suffix(count)}" }
         }
     }
 }
@@ -118,97 +150,98 @@ fn WorkspaceFileTreeView(
     rsx! {
         ul { class: if nested { "m-0 list-none p-0 pl-2.5" } else { "m-0 list-none p-0" },
             for (directory_name, directory) in tree.directories {
-                li { class: "min-w-0",
-                    details { class: "group", open: true,
-                        summary { class: "flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-snug text-ink-3 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden",
-                            span {
-                                class: "flex-none transition-transform group-open:rotate-90 motion-reduce:transition-none",
-                                aria_hidden: "true",
-                                ChevronRight { size: 12 }
-                            }
-                            span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
-                                "{directory_name}"
-                            }
-                        }
-                        WorkspaceFileTreeView { tree: directory, onnavigate, nested: true }
-                    }
-                }
+                WorkspaceDirectoryItem { directory_name, directory, onnavigate }
             }
             for (file_name, file) in tree.files {
-                {
-                    let anchor_id = file.anchor_id.clone();
-                    let item_attributes = file_item_attributes(file.status);
-                    rsx! {
-                        li { class: "min-w-0",
-                            Button {
-                                layout: ButtonLayout::FullWidthStart,
-                                size: ButtonSize::Content,
-                                variant: ButtonVariant::Bare,
-                                attributes: item_attributes,
-                                "data-file-target": anchor_id.clone(),
-                                title: file.path.clone(),
-                                onclick: move |_| onnavigate.call(anchor_id.clone()),
-                                Badge {
-                                    class: "size-4 min-h-0! flex-none px-0 leading-none font-bold",
-                                    variant: file_status_badge(file.status),
-                                    title: file_status_title(file.status),
-                                    "{file_status_label(file.status)}"
-                                }
-                                span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
-                                    "{file_name}"
-                                }
-                            }
-                        }
-                    }
-                }
+                WorkspaceFileItem { file_name, file, onnavigate }
             }
         }
     }
 }
 
-fn file_item_attributes(status: ViewerFileStatus) -> Vec<Attribute> {
-    merge_attributes(vec![
-        attributes!(button {
-            class: "flex w-full cursor-pointer items-center gap-1.5 rounded-sm border-0 px-1.5 py-0.5 text-left leading-snug text-ink-2 hover:text-ink focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc"
+#[component]
+fn WorkspaceDirectoryItem(
+    directory_name: String,
+    directory: WorkspaceFileTree,
+    onnavigate: EventHandler<String>,
+) -> Element {
+    rsx! {
+        li { class: "min-w-0",
+            details { class: "group", open: true,
+                summary { class: "flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-snug text-ink-3 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden",
+                    WorkspaceDirectoryCaret {}
+                    WorkspaceTreeLabel { label: directory_name }
+                }
+                WorkspaceFileTreeView { tree: directory, onnavigate, nested: true }
+            }
+        }
+    }
+}
+
+#[component]
+fn WorkspaceDirectoryCaret() -> Element {
+    rsx! {
+        span {
+            class: "flex-none transition-transform group-open:rotate-90 motion-reduce:transition-none",
+            aria_hidden: "true",
+            ChevronRight { size: 12 }
+        }
+    }
+}
+
+#[component]
+fn WorkspaceFileItem(
+    file_name: String,
+    file: ViewerFileSummary,
+    onnavigate: EventHandler<String>,
+) -> Element {
+    let anchor_id = file.anchor_id.clone();
+    let tone_classes = file_item_tone_classes(file.status);
+    let item_attributes = merge_attributes(vec![
+        attributes!(div {
+            class: "gap-1.5 px-1.5 py-0.5 text-left leading-snug text-ink-2 hover:text-ink",
         }),
-        match status {
-            ViewerFileStatus::Added => attributes!(button {
-                class: "bg-add-bg/40 hover:bg-add-bg/60 active:bg-add-bg"
-            }),
-            ViewerFileStatus::Deleted => attributes!(button {
-                class: "bg-del-bg/40 hover:bg-del-bg/60 active:bg-del-bg"
-            }),
-            ViewerFileStatus::Renamed | ViewerFileStatus::Modified => attributes!(button {
-                class: "bg-transparent hover:bg-surface-2 active:bg-acc-soft"
-            }),
-        },
-    ])
-}
+        attributes!(div {
+            class: tone_classes,
+        }),
+    ]);
 
-const fn file_status_badge(status: ViewerFileStatus) -> BadgeVariant {
-    match status {
-        ViewerFileStatus::Added => BadgeVariant::Addition,
-        ViewerFileStatus::Deleted => BadgeVariant::Deletion,
-        ViewerFileStatus::Renamed => BadgeVariant::Accent,
-        ViewerFileStatus::Modified => BadgeVariant::Neutral,
+    rsx! {
+        li { class: "min-w-0",
+            Button {
+                layout: ButtonLayout::FullWidthStart,
+                size: ButtonSize::Content,
+                variant: ButtonVariant::Bare,
+                attributes: item_attributes,
+                "data-file-target": anchor_id.clone(),
+                title: file.path,
+                onclick: move |_| onnavigate.call(anchor_id.clone()),
+                DiffFileStatusBadge {
+                    status: file.status,
+                    size: DiffFileStatusBadgeSize::Compact,
+                }
+                WorkspaceTreeLabel { label: file_name }
+            }
+        }
     }
 }
 
-const fn file_status_label(status: ViewerFileStatus) -> &'static str {
-    match status {
-        ViewerFileStatus::Added => "A",
-        ViewerFileStatus::Deleted => "D",
-        ViewerFileStatus::Renamed => "R",
-        ViewerFileStatus::Modified => "M",
+#[component]
+fn WorkspaceTreeLabel(label: String) -> Element {
+    rsx! {
+        span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+            "{label}"
+        }
     }
 }
 
-const fn file_status_title(status: ViewerFileStatus) -> &'static str {
+const fn file_item_tone_classes(status: ViewerFileStatus) -> &'static str {
     match status {
-        ViewerFileStatus::Added => "Added",
-        ViewerFileStatus::Deleted => "Deleted",
-        ViewerFileStatus::Renamed => "Renamed",
-        ViewerFileStatus::Modified => "Modified",
+        ViewerFileStatus::Added => "bg-add-bg/40 hover:bg-add-bg/60 active:bg-add-bg",
+        ViewerFileStatus::Deleted => "bg-del-bg/40 hover:bg-del-bg/60 active:bg-del-bg",
+        ViewerFileStatus::Renamed | ViewerFileStatus::Modified => {
+            "bg-transparent hover:bg-surface-2 active:bg-acc-soft"
+        }
     }
 }
 

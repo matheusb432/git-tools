@@ -495,7 +495,7 @@ fn find_generated_asset(files: &[PathBuf], prefix: &str, extension: &str) -> Res
         matches.len() == 1,
         "Dioxus artifact build requires exactly one {prefix}*.{extension} asset"
     );
-    Ok(matches[0].to_path_buf())
+    Ok(matches[0].clone())
 }
 
 fn embed_artifact_wasm_path(source: &str, wasm_name: &str) -> Result<String> {

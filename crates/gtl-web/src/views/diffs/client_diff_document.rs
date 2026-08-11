@@ -4,7 +4,10 @@ use dioxus::prelude::*;
 use gtl_contracts::viewer::{ViewerActiveView, ViewerViewIdentity};
 
 use self::file::DiffFileCard;
-use crate::entities::diffs::{ClientDiffFile, ClientDiffSource, use_client_diff_workspace};
+use crate::{
+    entities::diffs::{ClientDiffFile, ClientDiffSource, use_client_diff_workspace},
+    shared::ui::EmptyNotice,
+};
 
 #[component]
 pub(crate) fn ClientDiffDocument(
@@ -16,7 +19,7 @@ pub(crate) fn ClientDiffDocument(
     onopen: Option<EventHandler<String>>,
 ) -> Element {
     let mut reload = use_signal(|| 0_u64);
-    let workspace = use_client_diff_workspace(source, view.identity, view.files.clone(), reload());
+    let workspace = use_client_diff_workspace(source, view.identity, &view.files, reload());
     let current = workspace();
     let is_loading = current.is_loading();
 
@@ -88,7 +91,7 @@ fn DiffDocumentBody(
             "data-layout": layout.as_str(),
             "data-density": density.as_str(),
             if files.is_empty() {
-                DiffEmptyState {}
+                EmptyNotice { "no file changes" }
             }
             for (index, file) in files.into_iter().enumerate() {
                 {
@@ -110,15 +113,6 @@ fn DiffDocumentBody(
                     }
                 }
             }
-        }
-    }
-}
-
-#[component]
-fn DiffEmptyState() -> Element {
-    rsx! {
-        div { class: "rounded-panel border border-dashed border-line-2 p-4 text-center text-ink-2 italic",
-            "no file changes"
         }
     }
 }

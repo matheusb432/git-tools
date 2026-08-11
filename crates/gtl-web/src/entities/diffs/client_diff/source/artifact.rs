@@ -87,7 +87,7 @@ mod tests {
     }
 
     #[test]
-    fn decoder_rejects_a_page_bound_to_another_request() {
+    fn decoder_rejects_a_page_bound_to_another_request() -> Result<(), serde_json::Error> {
         let request = request();
         let mut page = ViewerDiffLines {
             identity: request.identity,
@@ -97,17 +97,15 @@ mod tests {
             next: None,
         };
         page.cursor = ViewerDiffCursor::new(6);
-        let encoded = STANDARD.encode(
-            serde_json::to_vec(&ViewerArtifactPage {
-                id: ViewerArtifactPageId::for_request(&request),
-                page,
-            })
-            .expect("serialize embedded page"),
-        );
+        let encoded = STANDARD.encode(serde_json::to_vec(&ViewerArtifactPage {
+            id: ViewerArtifactPageId::for_request(&request),
+            page,
+        })?);
 
         assert_eq!(
             decode_page(&encoded, &request),
             Err(ArtifactDiffSourceError::Invalid)
         );
+        Ok(())
     }
 }

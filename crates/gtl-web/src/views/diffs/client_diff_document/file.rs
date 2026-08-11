@@ -1,16 +1,11 @@
 mod actions;
 mod rows;
-mod status;
 
 use dioxus::prelude::*;
 use gtl_contracts::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
-use self::{
-    actions::DiffFileActions,
-    rows::DiffFileBody,
-    status::{DiffFileStatusBadge, file_header_background},
-};
-use crate::entities::diffs::ClientDiffFile;
+use self::{actions::DiffFileActions, rows::DiffFileBody};
+use crate::{entities::diffs::ClientDiffFile, views::diffs::DiffFileStatusBadge};
 
 #[component]
 pub(super) fn DiffFileCard(
@@ -79,6 +74,16 @@ fn DiffFileHeader(
             DiffFileStatusBadge { status: file.summary.status }
             DiffFileActions { file, copy_context_enabled, onopen }
         }
+    }
+}
+
+const fn file_header_background(status: gtl_contracts::viewer::ViewerFileStatus) -> &'static str {
+    use gtl_contracts::viewer::ViewerFileStatus;
+
+    match status {
+        ViewerFileStatus::Added => "bg-[color-mix(in_srgb,var(--add-bg)_34%,var(--surface-2))]",
+        ViewerFileStatus::Deleted => "bg-[color-mix(in_srgb,var(--del-bg)_34%,var(--surface-2))]",
+        ViewerFileStatus::Renamed | ViewerFileStatus::Modified => "bg-surface-2",
     }
 }
 

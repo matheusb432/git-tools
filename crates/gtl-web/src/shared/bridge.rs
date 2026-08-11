@@ -180,6 +180,10 @@ mod bindings {
 mod bindings {
     use super::{ClientApiError, DeserializeOwned, Serialize};
 
+    #[expect(
+        clippy::unused_async,
+        reason = "the native stub keeps the same awaitable API as the WASM binding"
+    )]
     pub(super) async fn invoke<Arguments, Response>(
         _command: &'static str,
         _arguments: &Arguments,
@@ -191,6 +195,10 @@ mod bindings {
         Err(ClientApiError::Unavailable)
     }
 
+    #[expect(
+        clippy::unused_async,
+        reason = "the native stub keeps the same awaitable API as the WASM binding"
+    )]
     pub(super) async fn listen<Event, Ready, Handler>(
         _event_name: &'static str,
         _on_ready: Ready,
