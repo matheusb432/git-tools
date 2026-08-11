@@ -14,18 +14,10 @@ mod syntax;
 mod text;
 
 pub use artifact::{build_html, build_tabbed_html};
+pub use gtl_application::viewer::diff_file_anchor_id;
 use gtl_application::{diffs::View, viewer::RenderOptions};
 use maud::Markup;
 pub use syntax::{ArtifactError, ArtifactResult};
-
-/// Returns the stable DOM anchor used for a server-rendered diff file.
-///
-/// Hosts use this value to connect their own changed-file navigation to the
-/// corresponding file block inside [`diff_document_shell`].
-#[must_use]
-pub fn diff_file_anchor_id(path: &str) -> String {
-    text::slug(path)
-}
 
 /// Builds the server-rendered file document for an app-owned diff island.
 ///

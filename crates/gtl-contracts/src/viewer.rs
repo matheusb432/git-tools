@@ -101,11 +101,13 @@ impl ViewerDiffFileId {
 pub struct ViewerFileSummary {
     pub id: ViewerDiffFileId,
     pub path: String,
+    pub absolute_path: String,
     pub anchor_id: String,
     pub added: u32,
     pub removed: u32,
     pub status: ViewerFileStatus,
     pub can_open_in_editor: bool,
+    pub initially_expanded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -237,40 +239,6 @@ pub struct ViewerShell {
     pub feedback: Option<ViewerFeedback>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PrepareDiffDocument {
-    pub identity: ViewerViewIdentity,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ViewerDiffDocument {
-    pub identity: ViewerViewIdentity,
-    pub html: String,
-    pub materialization: ViewerDiffMaterialization,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum ViewerDiffMaterialization {
-    Complete,
-    Loading { load_id: u64 },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LoadViewerDiffChunk {
-    pub identity: ViewerViewIdentity,
-    pub load_id: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ViewerDiffChunk {
-    pub identity: ViewerViewIdentity,
-    pub target_id: String,
-    pub html: String,
-    pub row_count: usize,
-    pub continuation: ViewerDiffChunkContinuation,
-}
-
 /// Source-line position within one identity-bound diff file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -305,13 +273,6 @@ pub struct ViewerDiffLines {
     pub cursor: ViewerDiffCursor,
     pub lines: Vec<String>,
     pub next: Option<ViewerDiffCursor>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ViewerDiffChunkContinuation {
-    Complete,
-    More,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -439,8 +400,6 @@ pub enum ViewerResource {
     Tab,
     LiveView,
     Commit,
-    DiffDocument,
-    DiffChunk,
     DiffLines,
     HistoryEntry,
     Settings,

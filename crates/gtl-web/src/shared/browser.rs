@@ -1,68 +1,90 @@
-use dioxus::prelude::{document, spawn};
+use std::time::Duration;
+
+use dioxus::prelude::spawn;
 use serde::Serialize;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{HtmlDetailsElement, HtmlDocument, HtmlElement, HtmlTextAreaElement};
 
 use super::bridge::ClientApiError;
 
-const APPLY_THEME_SCRIPT: &str = r"
-const theme = await dioxus.recv();
-document.documentElement.dataset.theme = theme;
-return null;
-";
-
-const FOCUS_ELEMENT_SCRIPT: &str = r"
-const id = await dioxus.recv();
-requestAnimationFrame(() => document.getElementById(id)?.focus());
-return null;
-";
-
-const COPY_JSON_SCRIPT: &str = r"
-const value = await dioxus.recv();
-const text = JSON.stringify(value, null, 2);
-if (navigator.clipboard?.writeText) {
-    try {
-        await navigator.clipboard.writeText(text);
-        return null;
-    } catch (_error) {
-        // Fall through to the document command for WebViews without Clipboard API permission.
-    }
-}
-const textarea = document.createElement('textarea');
-textarea.value = text;
-textarea.style.position = 'fixed';
-textarea.style.opacity = '0';
-document.body.appendChild(textarea);
-textarea.select();
-const copied = document.execCommand('copy');
-textarea.remove();
-if (!copied) throw new Error('clipboard unavailable');
-return null;
-";
-
 pub(crate) fn apply_theme(theme: &'static str) {
-    spawn(async move {
-        let evaluator = document::eval(APPLY_THEME_SCRIPT);
-        if evaluator.send(theme).is_ok() {
-            let _ = evaluator.join::<()>().await;
-        }
-    });
+    let Some(root) = document().and_then(|document| document.document_element()) else {
+        return;
+    };
+    let _ = root.set_attribute("data-theme", theme);
 }
 
 pub(crate) fn focus_element(id: String) {
     spawn(async move {
-        let evaluator = document::eval(FOCUS_ELEMENT_SCRIPT);
-        if evaluator.send(id).is_ok() {
-            let _ = evaluator.join::<()>().await;
-        }
+        dioxus_sdk_time::sleep(Duration::ZERO).await;
+        let Some(element) = document()
+            .and_then(|document| document.get_element_by_id(&id))
+            .and_then(|element| element.dyn_into::<HtmlElement>().ok())
+        else {
+            return;
+        };
+        let _ = element.focus();
     });
 }
 
+pub(crate) fn scroll_to_file(id: String) {
+    let Some(details) = document()
+        .and_then(|document| document.get_element_by_id(&id))
+        .and_then(|element| element.dyn_into::<HtmlDetailsElement>().ok())
+    else {
+        return;
+    };
+    details.set_open(true);
+    details.scroll_into_view_with_bool(true);
+}
+
+pub(crate) async fn copy_text(text: &str) -> bool {
+    if let Some(window) = web_sys::window() {
+        if JsFuture::from(window.navigator().clipboard().write_text(text))
+            .await
+            .is_ok()
+        {
+            return true;
+        }
+    }
+    exec_copy(text)
+}
+
 pub(crate) async fn copy_json(value: &impl Serialize) -> Result<(), ClientApiError> {
-    let evaluator = document::eval(COPY_JSON_SCRIPT);
-    evaluator
-        .send(value)
-        .map_err(|_| ClientApiError::Unavailable)?;
-    evaluator
-        .join::<()>()
+    let text = serde_json::to_string_pretty(value).map_err(|_| ClientApiError::Unavailable)?;
+    copy_text(&text)
         .await
-        .map_err(|_| ClientApiError::Unavailable)
+        .then_some(())
+        .ok_or(ClientApiError::Unavailable)
+}
+
+fn exec_copy(text: &str) -> bool {
+    let Some(document) = document().and_then(|document| document.dyn_into::<HtmlDocument>().ok())
+    else {
+        return false;
+    };
+    let Some(body) = document.body() else {
+        return false;
+    };
+    let Ok(element) = document.create_element("textarea") else {
+        return false;
+    };
+    let Ok(textarea) = element.dyn_into::<HtmlTextAreaElement>() else {
+        return false;
+    };
+    textarea.set_value(text);
+    let _ = textarea.style().set_property("position", "fixed");
+    let _ = textarea.style().set_property("opacity", "0");
+    if body.append_child(&textarea).is_err() {
+        return false;
+    }
+    textarea.select();
+    let copied = document.exec_command("copy").unwrap_or(false);
+    let _ = body.remove_child(&textarea);
+    copied
+}
+
+fn document() -> Option<web_sys::Document> {
+    web_sys::window()?.document()
 }

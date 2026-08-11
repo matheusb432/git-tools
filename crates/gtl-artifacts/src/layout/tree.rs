@@ -1,10 +1,13 @@
 //! Left sidebar: the server-rendered changed-files tree, filter input, and range stats.
 
-use gtl_application::diffs::{FileDiff, View};
+use gtl_application::{
+    diffs::{FileDiff, View},
+    viewer::diff_file_anchor_id,
+};
 use maud::{Markup, html};
 
 use super::file_status::file_status_presentation;
-use crate::text::{plural, slug};
+use crate::text::plural;
 
 const TREE_PRESENTATION_CLASSES: &str = concat!(
     "tree gtl-scroll [grid-area:2/1] overflow-auto border-r border-line bg-surface p-3 ",
@@ -122,7 +125,7 @@ fn render_directory(directory: &TreeDirectory<'_>) -> Markup {
             @for (name, file) in &directory.files {
                 @let status = file_status_presentation(file.status());
                 li class={ "tnode tfile " (status.css_class) }
-                    data-target=(slug(&file.path))
+                    data-target=(diff_file_anchor_id(&file.path))
                     data-path=(file.path.to_lowercase()) {
                     div class="tlabel" {
                         span class={ "tstatus " (status.css_class) } title=(status.label) {
@@ -166,7 +169,7 @@ pub(super) fn mobile_popover(presentation: &ChangedFilesPresentation<'_>, target
                     @let status = file_status_presentation(file.status());
                     button type="button"
                         class="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-sm border-0 bg-transparent px-2 py-2 text-left text-ink-2 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc"
-                        data-file-target=(slug(&file.path)) {
+                        data-file-target=(diff_file_anchor_id(&file.path)) {
                         span class={ "inline-flex size-4 flex-none items-center justify-center rounded-sm border text-xs font-bold " (status.badge_classes) }
                             title=(status.label) { (status.code) }
                         span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" { (file.path) }

@@ -42,7 +42,6 @@ fn closed_value_tokens_are_snake_case() {
             .expect("history copy kind serializes"),
         serde_json::to_value(ViewerFailureCode::RepositoryDirectoryNotFound)
             .expect("failure code serializes"),
-        serde_json::to_value(ViewerDiffChunkContinuation::More).expect("continuation serializes"),
         serde_json::to_value(ViewerResource::DiffLines).expect("resource serializes"),
         serde_json::to_value(ViewerResource::HistoryEntry).expect("resource serializes"),
     ];
@@ -58,7 +57,6 @@ fn closed_value_tokens_are_snake_case() {
             json!("merge_diff"),
             json!("merge-diff"),
             json!("DirNotFound"),
-            json!("more"),
             json!("diff_lines"),
             json!("history_entry"),
         ]
@@ -87,11 +85,6 @@ fn tagged_enums_pin_each_wire_discriminator() {
         serde_json::to_value(ViewerActiveState::Pending { tab_id: 7 })
             .expect("active state serializes"),
         json!({"state": "pending", "tab_id": 7})
-    );
-    assert_eq!(
-        serde_json::to_value(ViewerDiffMaterialization::Loading { load_id: 19 })
-            .expect("materialization serializes"),
-        json!({"state": "loading", "load_id": 19})
     );
     assert_eq!(
         serde_json::to_value(ViewerHistoryCursor::OlderThan {
@@ -147,11 +140,13 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() {
                 files: vec![ViewerFileSummary {
                     id: ViewerDiffFileId::for_index(0),
                     path: "src/lib.rs".into(),
+                    absolute_path: "/repos/git-tools/src/lib.rs".into(),
                     anchor_id: "file-src-lib-rs".into(),
                     added: 4,
                     removed: 2,
                     status: ViewerFileStatus::Modified,
                     can_open_in_editor: true,
+                    initially_expanded: true,
                 }],
                 commits_label: "1 commit".into(),
                 commits: vec![ViewerCommitSummary {
@@ -245,18 +240,6 @@ fn raw_diff_line_pages_pin_opaque_addressing_and_identity_echoes() {
 
 #[test]
 fn diff_history_and_settings_shapes_round_trip() {
-    let document = ViewerDiffDocument {
-        identity: identity(),
-        html: "<details class=\"file\"></details>".into(),
-        materialization: ViewerDiffMaterialization::Loading { load_id: 29 },
-    };
-    let chunk = ViewerDiffChunk {
-        identity: identity(),
-        target_id: "viewer-diff-0".into(),
-        html: "<div class=\"row\"></div>".into(),
-        row_count: 1,
-        continuation: ViewerDiffChunkContinuation::Complete,
-    };
     let history = ViewerHistoryPage {
         entries: vec![ViewerHistoryEntry {
             id: 31,
@@ -290,19 +273,6 @@ fn diff_history_and_settings_shapes_round_trip() {
         },
     };
 
-    let document_json = serde_json::to_value(&document).expect("document serializes");
-    assert_eq!(document_json["materialization"]["state"], "loading");
-    assert_eq!(
-        serde_json::from_value::<ViewerDiffDocument>(document_json).expect("document deserializes"),
-        document
-    );
-    assert_eq!(
-        serde_json::from_value::<ViewerDiffChunk>(
-            serde_json::to_value(&chunk).expect("chunk serializes")
-        )
-        .expect("chunk deserializes"),
-        chunk
-    );
     let history_json = serde_json::to_value(&history).expect("history serializes");
     assert!(history_json.pointer("/entries/0/recipe").is_none());
     assert!(!history_json.to_string().contains("/repos/git-tools"));

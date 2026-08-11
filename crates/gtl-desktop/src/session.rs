@@ -564,14 +564,6 @@ impl ViewerSession {
         Some(ActiveContentSnapshot { identity, view })
     }
 
-    pub(crate) fn active_content_is_current(&self, expected: ActiveContentIdentity) -> bool {
-        self.active_content_identity().is_some_and(|current| {
-            current.tab_id() == expected.tab_id()
-                && current.range_generation() == expected.range_generation()
-                && current.selection_generation() == expected.selection_generation()
-        })
-    }
-
     pub(crate) const fn revision(&self) -> u64 {
         self.revision
     }

@@ -7,9 +7,8 @@ mod shell;
 use std::fmt::Display;
 
 use gtl_contracts::viewer::{
-    GetViewerHistoryCopy, ListViewerHistory, LoadViewerDiffChunk, LoadViewerDiffLines,
-    OpenViewerDiffFile, OpenViewerHistory, PrepareDiffDocument, SelectViewerCommit,
-    SetViewerPreference, ViewerApiError, ViewerDiffChunk, ViewerDiffDocument, ViewerDiffLines,
+    GetViewerHistoryCopy, ListViewerHistory, LoadViewerDiffLines, OpenViewerDiffFile,
+    OpenViewerHistory, SelectViewerCommit, SetViewerPreference, ViewerApiError, ViewerDiffLines,
     ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerResource, ViewerShell, ViewerTabRequest,
     ViewerUserSettings,
 };
@@ -50,30 +49,6 @@ pub(crate) async fn viewer_get_shell(
     let app = app.inner().clone();
     run_blocking("viewer shell worker failed", move || {
         shell::load(&app, None)
-    })
-    .await
-}
-
-#[tauri::command]
-pub(crate) async fn viewer_prepare_diff_document(
-    app: State<'_, ViewerApp>,
-    request: PrepareDiffDocument,
-) -> Result<ViewerDiffDocument, ViewerApiError> {
-    let app = app.inner().clone();
-    run_blocking("diff document worker failed", move || {
-        diff::prepare(&app, request)
-    })
-    .await
-}
-
-#[tauri::command]
-pub(crate) async fn viewer_load_diff_chunk(
-    app: State<'_, ViewerApp>,
-    request: LoadViewerDiffChunk,
-) -> Result<ViewerDiffChunk, ViewerApiError> {
-    let app = app.inner().clone();
-    run_blocking("diff chunk worker failed", move || {
-        diff::load(&app, request)
     })
     .await
 }

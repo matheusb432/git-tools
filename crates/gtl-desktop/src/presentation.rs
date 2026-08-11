@@ -14,7 +14,6 @@ use gtl_infra::{
 pub(crate) use restoration::RestorationGate;
 
 use crate::{
-    materialization::ViewMaterializations,
     recipe_worker::RecipeWorker,
     recipes::RecipeExecutor,
     session::{PendingRecipes, ViewerSession},
@@ -27,7 +26,6 @@ pub(crate) struct ViewerApp {
     pub(crate) configured_editor: GitConfiguredEditorClient,
     pub(crate) session: Arc<Mutex<ViewerSession>>,
     pub(crate) recipe_worker: RecipeWorker,
-    pub(crate) materializations: Arc<ViewMaterializations>,
     pending: Arc<PendingRecipes>,
     pub(crate) user_settings: Arc<Mutex<TomlSettingsStore>>,
     pub(crate) restoration: Arc<RestorationGate>,
@@ -57,7 +55,6 @@ impl ViewerApp {
             configured_editor: GitConfiguredEditorClient,
             session,
             recipe_worker,
-            materializations: Arc::new(ViewMaterializations::default()),
             pending: Arc::new(PendingRecipes::default()),
             user_settings: Arc::new(Mutex::new(user_settings)),
             restoration: Arc::new(RestorationGate::default()),

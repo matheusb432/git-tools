@@ -1,14 +1,13 @@
 use gtl_contracts::viewer::{
-    LoadViewerDiffChunk, OpenViewerDiffFile, PrepareDiffDocument, SelectViewerCommit,
-    SetViewerPreference, VIEWER_STATE_CHANGED_EVENT, ViewerDiffChunk, ViewerDiffDocument,
-    ViewerShell, ViewerStateChanged, ViewerTabRequest, ViewerViewIdentity,
+    LoadViewerDiffLines, OpenViewerDiffFile, SelectViewerCommit, SetViewerPreference,
+    VIEWER_STATE_CHANGED_EVENT, ViewerDiffLines, ViewerShell, ViewerStateChanged, ViewerTabRequest,
+    ViewerViewIdentity,
 };
 
 use crate::shared::bridge::{ClientApiError, TauriBridge};
 
 const GET_SHELL_COMMAND: &str = "viewer_get_shell";
-const PREPARE_DIFF_DOCUMENT_COMMAND: &str = "viewer_prepare_diff_document";
-const LOAD_DIFF_CHUNK_COMMAND: &str = "viewer_load_diff_chunk";
+const LOAD_DIFF_LINES_COMMAND: &str = "viewer_load_diff_lines";
 const ACTIVATE_TAB_COMMAND: &str = "viewer_activate_tab";
 const CLOSE_TAB_COMMAND: &str = "viewer_close_tab";
 const REFRESH_TAB_COMMAND: &str = "viewer_refresh_tab";
@@ -25,25 +24,10 @@ impl DiffViewerApi {
         TauriBridge::invoke(GET_SHELL_COMMAND).await
     }
 
-    pub(crate) async fn prepare_diff_document(
-        identity: ViewerViewIdentity,
-    ) -> Result<ViewerDiffDocument, ClientApiError> {
-        TauriBridge::invoke_request(
-            PREPARE_DIFF_DOCUMENT_COMMAND,
-            &PrepareDiffDocument { identity },
-        )
-        .await
-    }
-
-    pub(crate) async fn load_diff_chunk(
-        identity: ViewerViewIdentity,
-        load_id: u64,
-    ) -> Result<ViewerDiffChunk, ClientApiError> {
-        TauriBridge::invoke_request(
-            LOAD_DIFF_CHUNK_COMMAND,
-            &LoadViewerDiffChunk { identity, load_id },
-        )
-        .await
+    pub(crate) async fn load_diff_lines(
+        request: LoadViewerDiffLines,
+    ) -> Result<ViewerDiffLines, ClientApiError> {
+        TauriBridge::invoke_request(LOAD_DIFF_LINES_COMMAND, &request).await
     }
 
     pub(crate) async fn activate_tab(tab_id: u64) -> Result<ViewerShell, ClientApiError> {
@@ -97,8 +81,8 @@ impl DiffViewerApi {
         on_event: Handler,
     ) -> Result<(), ClientApiError>
     where
-        Ready: FnMut(),
-        Handler: FnMut(ViewerStateChanged),
+        Ready: FnMut() + 'static,
+        Handler: FnMut(ViewerStateChanged) + 'static,
     {
         TauriBridge::listen_to_event(VIEWER_STATE_CHANGED_EVENT, on_ready, on_event).await
     }

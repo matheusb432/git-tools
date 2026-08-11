@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
-use gtl_application::diffs::{FileStatus, View};
+use gtl_application::viewer::project_diff_view;
 use gtl_contracts::viewer::{
-    ViewerActiveState, ViewerActiveView, ViewerAppliedExclusions, ViewerCommandLine,
-    ViewerCommitSelection, ViewerCommitSummary, ViewerDiffFileId, ViewerFailureCode,
-    ViewerFeedback, ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerPreferences,
-    ViewerRenderOptions, ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme,
-    ViewerViewIdentity,
+    ViewerActiveState, ViewerActiveView, ViewerCommitSelection, ViewerFailureCode, ViewerFeedback,
+    ViewerPreferences, ViewerRenderOptions, ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState,
+    ViewerTheme, ViewerViewIdentity,
 };
 use gtl_models::viewer::{self, DiffDensity, DiffLayout, RenderOptions, Theme};
 
@@ -121,87 +119,25 @@ fn ready_active_view(
         | CommitSelectionSnapshot::Pending { .. }
         | CommitSelectionSnapshot::Error { .. } => Arc::clone(&range),
     };
-    Ok(to_active_view(
+    let commit_selection = match &selection {
+        CommitSelectionSnapshot::None => ViewerCommitSelection::None,
+        CommitSelectionSnapshot::Pending { sha } => {
+            ViewerCommitSelection::Pending { sha: sha.clone() }
+        }
+        CommitSelectionSnapshot::Ready { sha, .. } => {
+            ViewerCommitSelection::Ready { sha: sha.clone() }
+        }
+        CommitSelectionSnapshot::Error { sha, reason } => ViewerCommitSelection::Error {
+            sha: sha.clone(),
+            message: reason.clone(),
+        },
+    };
+    Ok(project_diff_view(
         &displayed,
         &range,
         to_identity(identity, options),
-        &selection,
+        commit_selection,
     ))
-}
-
-fn to_active_view(
-    view: &View,
-    range_view: &View,
-    identity: ViewerViewIdentity,
-    selection: &CommitSelectionSnapshot,
-) -> ViewerActiveView {
-    ViewerActiveView {
-        identity,
-        title: view.title.clone(),
-        repository_name: view.repo_name.clone(),
-        branch: view.branch.clone(),
-        upstream: view.upstream.clone(),
-        command: ViewerCommandLine {
-            lead: view.cmd.lead.clone(),
-            range: view.cmd.range.clone(),
-            trail: view.cmd.trail.clone(),
-        },
-        files: view
-            .files
-            .iter()
-            .enumerate()
-            .map(|(index, file)| {
-                let status = file.status();
-                ViewerFileSummary {
-                    id: ViewerDiffFileId::for_index(index),
-                    path: file.path.clone(),
-                    anchor_id: gtl_artifacts::diff_file_anchor_id(&file.path),
-                    added: file.added,
-                    removed: file.removed,
-                    status: to_file_status(status),
-                    can_open_in_editor: status != FileStatus::Deleted,
-                }
-            })
-            .collect(),
-        commits_label: range_view.commits_label.clone(),
-        commits: range_view
-            .commits
-            .iter()
-            .map(|commit| ViewerCommitSummary {
-                sha: commit.sha.clone(),
-                abbreviated_sha: commit.sha.chars().take(10).collect(),
-                subject: commit.subject.clone(),
-                body: commit.body.clone(),
-                date: commit.date.clone(),
-                iso: commit.iso.clone(),
-                is_merge: commit.is_merge(),
-            })
-            .collect(),
-        commit_selection: match selection {
-            CommitSelectionSnapshot::None => ViewerCommitSelection::None,
-            CommitSelectionSnapshot::Pending { sha } => {
-                ViewerCommitSelection::Pending { sha: sha.clone() }
-            }
-            CommitSelectionSnapshot::Ready { sha, .. } => {
-                ViewerCommitSelection::Ready { sha: sha.clone() }
-            }
-            CommitSelectionSnapshot::Error { sha, reason } => ViewerCommitSelection::Error {
-                sha: sha.clone(),
-                message: reason.clone(),
-            },
-        },
-        footer: ViewerFooter {
-            command: view.foot.cmd.clone(),
-            note: view.foot.note.clone(),
-        },
-        exclusions: view
-            .exclusions
-            .as_ref()
-            .map(|exclusions| ViewerAppliedExclusions {
-                extensions: exclusions.extensions.clone(),
-                hidden_paths: exclusions.hidden_paths.clone(),
-            }),
-    }
 }
 
 pub(super) fn to_identity(
@@ -350,91 +286,9 @@ fn to_non_ready_active_state(
     }
 }
 
-const fn to_file_status(status: FileStatus) -> ViewerFileStatus {
-    match status {
-        FileStatus::Added => ViewerFileStatus::Added,
-        FileStatus::Deleted => ViewerFileStatus::Deleted,
-        FileStatus::Renamed => ViewerFileStatus::Renamed,
-        FileStatus::Modified => ViewerFileStatus::Modified,
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use gtl_application::diffs::{Cmd, FileDiff, Foot};
-    use gtl_models::diffs::{AppliedExclusions, Commit};
-
     use super::*;
-
-    fn view() -> View {
-        View {
-            repo_name: "git-tools".into(),
-            repo_root: "/repo".into(),
-            branch: "feature".into(),
-            upstream: "origin/main".into(),
-            commits: vec![Commit {
-                sha: "0123456789abcdef0123456789abcdef01234567".into(),
-                subject: "subject".into(),
-                parents: vec!["one".into(), "two".into()],
-                ..Commit::default()
-            }],
-            files: vec![
-                FileDiff {
-                    path: "src/a b.rs".into(),
-                    added: 2,
-                    removed: 1,
-                    lines: vec!["new file mode 100644".into()],
-                    full_lines: None,
-                },
-                FileDiff {
-                    path: "removed.rs".into(),
-                    added: 0,
-                    removed: 1,
-                    lines: vec!["deleted file mode 100644".into()],
-                    full_lines: None,
-                },
-            ],
-            title: "Feature diff".into(),
-            cmd: Cmd {
-                lead: "git diff ".into(),
-                range: "main...feature".into(),
-                trail: " --".into(),
-            },
-            commits_label: "2 commits".into(),
-            foot: Foot {
-                cmd: "git diff".into(),
-                note: "generated".into(),
-            },
-            exclusions: Some(AppliedExclusions {
-                extensions: vec!["lock".into()],
-                hidden_paths: vec!["Cargo.lock".into()],
-            }),
-        }
-    }
-
-    #[test]
-    fn active_view_mapping_uses_the_renderer_anchor_and_range_commit_shelf() {
-        let identity = ViewerViewIdentity {
-            tab_id: 7,
-            range_generation: 8,
-            selection_generation: 9,
-            render_options: to_render_options(RenderOptions::DEFAULT),
-        };
-        let active = to_active_view(&view(), &view(), identity, &CommitSelectionSnapshot::None);
-
-        assert_eq!(active.identity.tab_id, 7);
-        assert_eq!(active.files[0].id.as_str(), "file-0");
-        assert_eq!(active.files[1].id.as_str(), "file-1");
-        assert_eq!(active.files[0].anchor_id, "f-src-a-b-rs");
-        assert!(active.files[0].can_open_in_editor);
-        assert!(!active.files[1].can_open_in_editor);
-        assert_eq!(active.commits[0].abbreviated_sha, "0123456789");
-        assert!(active.commits[0].is_merge);
-        assert_eq!(
-            active.exclusions.expect("applied exclusions").hidden_paths,
-            ["Cargo.lock"]
-        );
-    }
 
     #[test]
     fn render_option_mapping_round_trips_every_variant_pair() {

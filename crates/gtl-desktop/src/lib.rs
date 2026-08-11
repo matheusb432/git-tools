@@ -3,7 +3,6 @@
 pub use session::{CacheDisposition, CachedView, WeightedViewCache};
 mod bridge;
 mod live_view_restoration;
-mod materialization;
 mod pending_recipes;
 mod presentation;
 mod recipe_worker;
@@ -149,8 +148,6 @@ fn main_window_url() -> WebviewUrl {
 fn with_viewer_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.invoke_handler(tauri::generate_handler![
         bridge::viewer_get_shell,
-        bridge::viewer_prepare_diff_document,
-        bridge::viewer_load_diff_chunk,
         bridge::viewer_load_diff_lines,
         bridge::viewer_activate_tab,
         bridge::viewer_close_tab,

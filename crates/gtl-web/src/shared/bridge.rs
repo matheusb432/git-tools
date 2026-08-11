@@ -1,97 +1,9 @@
-use dioxus::prelude::document;
 use gtl_contracts::viewer::ViewerApiError;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-
-// TODO: review and refactor if these are necessary or can be implemented in a cleaner way
-const INVOKE_SCRIPT: &str = r#"
-const [command, args] = await dioxus.recv();
-const invoke = window.__TAURI__?.core?.invoke;
-if (typeof invoke !== "function") {
-    return { status: "unavailable" };
-}
-try {
-    const value = await invoke(command, args ?? {});
-    return { status: "ok", payload: value };
-} catch (error) {
-    if (error && typeof error === "object" && typeof error.kind === "string") {
-        return { status: "api_error", payload: error };
-    }
-    return { status: "unavailable" };
-}
-"#;
-
-const EVENT_SCRIPT: &str = r#"
-const eventName = await dioxus.recv();
-const listen = window.__TAURI__?.event?.listen;
-if (typeof listen !== "function") {
-    dioxus.send({ status: "unavailable" });
-    return;
-}
-const subscriptions = window.__GTL_TAURI_EVENT_SUBSCRIPTIONS__ ?? new Map();
-window.__GTL_TAURI_EVENT_SUBSCRIPTIONS__ = subscriptions;
-const stopSubscription = (subscription) => {
-    const unlisten = subscription?.unlisten;
-    if (typeof unlisten === "function") {
-        subscription.unlisten = null;
-        unlisten();
-    }
-};
-let subscription;
-try {
-    const previousSubscription = subscriptions.get(eventName);
-    stopSubscription(previousSubscription);
-    subscription = { unlisten: null };
-    subscriptions.set(eventName, subscription);
-    const unlisten = await listen(eventName, (event) => {
-        if (subscriptions.get(eventName) === subscription) {
-            dioxus.send({ status: "event", payload: event.payload });
-        }
-    });
-    subscription.unlisten = unlisten;
-    if (subscriptions.get(eventName) !== subscription) {
-        stopSubscription(subscription);
-        return;
-    }
-    dioxus.send({ status: "ready" });
-    try {
-        await dioxus.recv();
-    } finally {
-        if (subscriptions.get(eventName) === subscription) {
-            subscriptions.delete(eventName);
-        }
-        stopSubscription(subscription);
-    }
-} catch (_error) {
-    if (subscription && subscriptions.get(eventName) === subscription) {
-        subscriptions.delete(eventName);
-    }
-    stopSubscription(subscription);
-    dioxus.send({ status: "unavailable" });
-}
-"#;
-
-struct EventSubscriptionTeardown<SendTeardown: FnOnce()> {
-    send_teardown: Option<SendTeardown>,
-}
-
-impl<SendTeardown: FnOnce()> EventSubscriptionTeardown<SendTeardown> {
-    fn new(send_teardown: SendTeardown) -> Self {
-        Self {
-            send_teardown: Some(send_teardown),
-        }
-    }
-}
-
-impl<SendTeardown: FnOnce()> Drop for EventSubscriptionTeardown<SendTeardown> {
-    fn drop(&mut self) {
-        if let Some(send_teardown) = self.send_teardown.take() {
-            send_teardown();
-        }
-    }
-}
+use serde::{Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientApiError {
+    #[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
     Backend(ViewerApiError),
     Unavailable,
 }
@@ -116,22 +28,6 @@ impl ClientApiError {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(tag = "status", content = "payload", rename_all = "snake_case")]
-enum Invocation<T> {
-    Ok(T),
-    ApiError(ViewerApiError),
-    Unavailable,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "status", content = "payload", rename_all = "snake_case")]
-enum EventMessage<T> {
-    Ready,
-    Event(T),
-    Unavailable,
-}
-
 #[derive(Serialize)]
 struct CommandArguments<'request, Request> {
     request: &'request Request,
@@ -144,7 +40,7 @@ impl TauriBridge {
     where
         Response: DeserializeOwned,
     {
-        Self::invoke_with_arguments(command, ()).await
+        bindings::invoke(command, &()).await
     }
 
     pub(crate) async fn invoke_request<Request, Response>(
@@ -155,63 +51,146 @@ impl TauriBridge {
         Request: Serialize,
         Response: DeserializeOwned,
     {
-        Self::invoke_with_arguments(command, CommandArguments { request }).await
+        bindings::invoke(command, &CommandArguments { request }).await
     }
 
-    async fn invoke_with_arguments<Arguments, Response>(
+    pub(crate) async fn listen_to_event<Event, Ready, Handler>(
+        event_name: &'static str,
+        on_ready: Ready,
+        on_event: Handler,
+    ) -> Result<(), ClientApiError>
+    where
+        Event: DeserializeOwned + 'static,
+        Ready: FnMut() + 'static,
+        Handler: FnMut(Event) + 'static,
+    {
+        bindings::listen(event_name, on_ready, on_event).await
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+mod bindings {
+    use std::future;
+
+    use js_sys::{Function, Promise};
+    use serde::Deserialize;
+    use wasm_bindgen::{JsCast, closure::Closure, prelude::*};
+    use wasm_bindgen_futures::JsFuture;
+
+    use super::{ClientApiError, DeserializeOwned, Serialize, ViewerApiError};
+
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(
+            js_namespace = ["window", "__TAURI__", "core"],
+            js_name = invoke,
+            catch
+        )]
+        fn tauri_invoke(command: &str, arguments: &JsValue) -> Result<Promise, JsValue>;
+
+        #[wasm_bindgen(
+            js_namespace = ["window", "__TAURI__", "event"],
+            js_name = listen,
+            catch
+        )]
+        fn tauri_listen(event_name: &str, handler: &Function) -> Result<Promise, JsValue>;
+    }
+
+    #[derive(Deserialize)]
+    struct TauriEvent<Event> {
+        payload: Event,
+    }
+
+    struct EventSubscription {
+        _callback: Closure<dyn FnMut(JsValue)>,
+        unlisten: Function,
+    }
+
+    impl Drop for EventSubscription {
+        fn drop(&mut self) {
+            let _ = self.unlisten.call0(&JsValue::UNDEFINED);
+        }
+    }
+
+    pub(super) async fn invoke<Arguments, Response>(
         command: &'static str,
-        arguments: Arguments,
+        arguments: &Arguments,
     ) -> Result<Response, ClientApiError>
     where
         Arguments: Serialize,
         Response: DeserializeOwned,
     {
-        let evaluator = document::eval(INVOKE_SCRIPT);
-        evaluator
-            .send((command, arguments))
-            .map_err(|_| ClientApiError::Unavailable)?;
-
-        match evaluator
-            .join::<Invocation<Response>>()
-            .await
-            .map_err(|_| ClientApiError::Unavailable)?
-        {
-            Invocation::Ok(response) => Ok(response),
-            Invocation::ApiError(error) => Err(ClientApiError::Backend(error)),
-            Invocation::Unavailable => Err(ClientApiError::Unavailable),
-        }
+        let arguments =
+            serde_wasm_bindgen::to_value(arguments).map_err(|_| ClientApiError::Unavailable)?;
+        let promise = tauri_invoke(command, &arguments).map_err(invocation_error)?;
+        let response = JsFuture::from(promise).await.map_err(invocation_error)?;
+        serde_wasm_bindgen::from_value(response).map_err(|_| ClientApiError::Unavailable)
     }
 
-    pub(crate) async fn listen_to_event<Event, Ready, Handler>(
+    pub(super) async fn listen<Event, Ready, Handler>(
         event_name: &'static str,
         mut on_ready: Ready,
         mut on_event: Handler,
     ) -> Result<(), ClientApiError>
     where
-        Event: DeserializeOwned,
-        Ready: FnMut(),
-        Handler: FnMut(Event),
+        Event: DeserializeOwned + 'static,
+        Ready: FnMut() + 'static,
+        Handler: FnMut(Event) + 'static,
     {
-        let mut evaluator = document::eval(EVENT_SCRIPT);
-        evaluator
-            .send(event_name)
-            .map_err(|_| ClientApiError::Unavailable)?;
-        let event_evaluator = evaluator;
-        let _subscription_teardown = EventSubscriptionTeardown::new(move || {
-            let _ = event_evaluator.send(());
-        });
-
-        loop {
-            match evaluator
-                .recv::<EventMessage<Event>>()
-                .await
-                .map_err(|_| ClientApiError::Unavailable)?
-            {
-                EventMessage::Ready => on_ready(),
-                EventMessage::Event(event) => on_event(event),
-                EventMessage::Unavailable => return Err(ClientApiError::Unavailable),
+        let callback = Closure::new(move |value: JsValue| {
+            if let Ok(event) = serde_wasm_bindgen::from_value::<TauriEvent<Event>>(value) {
+                on_event(event.payload);
             }
-        }
+        });
+        let promise = tauri_listen(event_name, callback.as_ref().unchecked_ref())
+            .map_err(|_| ClientApiError::Unavailable)?;
+        let unlisten = JsFuture::from(promise)
+            .await
+            .map_err(|_| ClientApiError::Unavailable)?
+            .dyn_into::<Function>()
+            .map_err(|_| ClientApiError::Unavailable)?;
+        let _subscription = EventSubscription {
+            _callback: callback,
+            unlisten,
+        };
+        on_ready();
+        future::pending::<()>().await;
+        Ok(())
+    }
+
+    fn invocation_error(value: JsValue) -> ClientApiError {
+        serde_wasm_bindgen::from_value::<ViewerApiError>(value)
+            .map(ClientApiError::Backend)
+            .unwrap_or(ClientApiError::Unavailable)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+mod bindings {
+    use super::{ClientApiError, DeserializeOwned, Serialize};
+
+    pub(super) async fn invoke<Arguments, Response>(
+        _command: &'static str,
+        _arguments: &Arguments,
+    ) -> Result<Response, ClientApiError>
+    where
+        Arguments: Serialize,
+        Response: DeserializeOwned,
+    {
+        Err(ClientApiError::Unavailable)
+    }
+
+    pub(super) async fn listen<Event, Ready, Handler>(
+        _event_name: &'static str,
+        _on_ready: Ready,
+        _on_event: Handler,
+    ) -> Result<(), ClientApiError>
+    where
+        Event: DeserializeOwned + 'static,
+        Ready: FnMut() + 'static,
+        Handler: FnMut(Event) + 'static,
+    {
+        Err(ClientApiError::Unavailable)
     }
 }
 
@@ -219,38 +198,12 @@ impl TauriBridge {
 mod tests {
     use gtl_contracts::viewer::{ViewerApiError, ViewerResource};
 
-    use super::{ClientApiError, EventSubscriptionTeardown};
-
-    #[test]
-    fn restarting_event_subscription_keeps_exactly_one_listener_active() {
-        let active = std::cell::Cell::new(0);
-        let teardowns = std::cell::Cell::new(0);
-
-        let subscribe = || {
-            active.set(active.get() + 1);
-            EventSubscriptionTeardown::new(|| {
-                active.set(active.get() - 1);
-                teardowns.set(teardowns.get() + 1);
-            })
-        };
-
-        let mut subscription = Some(subscribe());
-        assert_eq!(active.get(), 1);
-
-        drop(subscription.take());
-        subscription = Some(subscribe());
-        assert_eq!(active.get(), 1);
-        assert_eq!(teardowns.get(), 1);
-
-        drop(subscription);
-        assert_eq!(active.get(), 0);
-        assert_eq!(teardowns.get(), 2);
-    }
+    use super::ClientApiError;
 
     #[test]
     fn backend_details_are_not_exposed_in_user_messages() {
         let unavailable = ClientApiError::Backend(ViewerApiError::Unavailable {
-            resource: ViewerResource::DiffDocument,
+            resource: ViewerResource::DiffLines,
         });
         let missing = ClientApiError::Backend(ViewerApiError::NotFound {
             resource: ViewerResource::HistoryEntry,

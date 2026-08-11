@@ -30,30 +30,6 @@ pub(crate) fn html_or_nbsp(raw: &str) -> String {
     }
 }
 
-pub(crate) fn slug(s: &str) -> String {
-    let mut body = String::new();
-    let mut last_dash = false;
-
-    for ch in s.chars() {
-        if ch.is_ascii_alphanumeric() {
-            body.push(ch.to_ascii_lowercase());
-            last_dash = false;
-        } else if !last_dash {
-            body.push('-');
-            last_dash = true;
-        }
-    }
-
-    while body.starts_with('-') {
-        body.remove(0);
-    }
-    while body.ends_with('-') {
-        body.pop();
-    }
-
-    format!("f-{body}")
-}
-
 pub(crate) fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
 }
@@ -65,16 +41,5 @@ mod tests {
     #[test]
     fn escape_html_escapes_metacharacters() {
         assert_eq!(escape_html("&<>\""), "&amp;&lt;&gt;&quot;");
-    }
-
-    #[test]
-    fn slug_normalizes_file_paths_to_anchor_ids() {
-        assert_eq!(slug("src/a b.rs"), "f-src-a-b-rs");
-        assert_eq!(crate::diff_file_anchor_id("src/a b.rs"), slug("src/a b.rs"));
-    }
-
-    #[test]
-    fn slug_preserves_prefix_when_normalized_body_is_empty() {
-        assert_eq!(slug("---"), "f-");
     }
 }

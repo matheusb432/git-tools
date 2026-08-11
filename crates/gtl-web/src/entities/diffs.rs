@@ -1,13 +1,14 @@
 mod api;
+mod client_diff;
 mod diff_history;
-mod diff_island;
 
 pub(crate) use api::DiffViewerApi;
-pub(crate) use diff_history::{DiffHistoryApi, history_navigation};
-pub(crate) use diff_island::{DiffIslandAppendResult, DiffIslandBridge};
-use gtl_contracts::viewer::{
-    ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind, ViewerTheme, ViewerViewIdentity,
+pub(crate) use client_diff::{
+    ClientDiffFile, ClientDiffFileState, ClientDiffRows, ClientDiffSource,
+    use_client_diff_workspace,
 };
+pub(crate) use diff_history::{DiffHistoryApi, history_navigation};
+use gtl_contracts::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind, ViewerTheme};
 
 pub(crate) const fn theme_value(theme: ViewerTheme) -> &'static str {
     match theme {
@@ -64,54 +65,5 @@ pub(crate) const fn recipe_kind_label(kind: ViewerRecipeKind) -> &'static str {
     match kind {
         ViewerRecipeKind::Diff => "Diff",
         ViewerRecipeKind::MergeDiff => "Merge diff",
-    }
-}
-
-pub(crate) fn view_identity_value(identity: ViewerViewIdentity) -> String {
-    format!(
-        "{}:{}:{}:{}:{}",
-        identity.tab_id,
-        identity.range_generation,
-        identity.selection_generation,
-        theme_safe_layout_value(identity.render_options.layout),
-        theme_safe_density_value(identity.render_options.density)
-    )
-}
-
-const fn theme_safe_layout_value(layout: ViewerDiffLayout) -> &'static str {
-    match layout {
-        ViewerDiffLayout::Unified => "unified",
-        ViewerDiffLayout::Split => "split",
-    }
-}
-
-const fn theme_safe_density_value(density: ViewerDiffDensity) -> &'static str {
-    match density {
-        ViewerDiffDensity::Compact => "compact",
-        ViewerDiffDensity::Full => "full",
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use gtl_contracts::viewer::{
-        ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions, ViewerViewIdentity,
-    };
-
-    use super::view_identity_value;
-
-    #[test]
-    fn island_identity_changes_for_every_rendering_generation_and_option() {
-        let identity = ViewerViewIdentity {
-            tab_id: 7,
-            range_generation: 3,
-            selection_generation: 2,
-            render_options: ViewerRenderOptions {
-                layout: ViewerDiffLayout::Split,
-                density: ViewerDiffDensity::Full,
-            },
-        };
-
-        assert_eq!(view_identity_value(identity), "7:3:2:split:full");
     }
 }

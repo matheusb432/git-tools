@@ -1,26 +1,9 @@
-use dioxus::prelude::{document, spawn};
-use serde::Serialize;
+use std::time::Duration;
 
-const SYNC_DIALOG_SCRIPT: &str = r#"
-const state = await dioxus.recv();
-const dialog = document.getElementById(state.id);
-if (!(dialog instanceof HTMLDialogElement)) return null;
-if (state.open && !dialog.open) {
-    dialog.showModal();
-    requestAnimationFrame(() => {
-        dialog.querySelector("[data-dialog-initial-focus]")?.focus();
-    });
-} else if (!state.open) {
-    if (dialog.open) dialog.close();
-    if (state.restoreFocus) {
-        requestAnimationFrame(() => document.getElementById(state.triggerId)?.focus());
-    }
-}
-return null;
-"#;
+use dioxus::prelude::spawn;
+use wasm_bindgen::JsCast;
+use web_sys::{HtmlDialogElement, HtmlElement};
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(super) struct DialogState {
     pub(super) id: String,
     pub(super) trigger_id: String,
@@ -30,9 +13,42 @@ pub(super) struct DialogState {
 
 pub(super) fn sync_dialog(state: DialogState) {
     spawn(async move {
-        let evaluator = document::eval(SYNC_DIALOG_SCRIPT);
-        if evaluator.send(state).is_ok() {
-            let _ = evaluator.join::<()>().await;
+        dioxus_sdk_time::sleep(Duration::ZERO).await;
+        let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+            return;
+        };
+        let Some(dialog) = document
+            .get_element_by_id(&state.id)
+            .and_then(|element| element.dyn_into::<HtmlDialogElement>().ok())
+        else {
+            return;
+        };
+
+        if state.open && !dialog.open() {
+            if dialog.show_modal().is_ok() {
+                dioxus_sdk_time::sleep(Duration::ZERO).await;
+                let initial_focus = dialog
+                    .query_selector("[data-dialog-initial-focus]")
+                    .ok()
+                    .flatten()
+                    .and_then(|element| element.dyn_into::<HtmlElement>().ok());
+                if let Some(element) = initial_focus {
+                    let _ = element.focus();
+                }
+            }
+        } else if !state.open {
+            if dialog.open() {
+                dialog.close();
+            }
+            if state.restore_focus {
+                dioxus_sdk_time::sleep(Duration::ZERO).await;
+                let trigger = document
+                    .get_element_by_id(&state.trigger_id)
+                    .and_then(|element| element.dyn_into::<HtmlElement>().ok());
+                if let Some(element) = trigger {
+                    let _ = element.focus();
+                }
+            }
         }
     });
 }

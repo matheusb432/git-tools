@@ -2,7 +2,25 @@ use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
 use lucide_dioxus::LoaderCircle;
 
-const BUTTON_CLASSES: &str = "inline-flex shrink-0 cursor-pointer items-center justify-center whitespace-nowrap rounded-sm border focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc disabled:cursor-not-allowed disabled:opacity-50";
+const BUTTON_CLASSES: &str = "cursor-pointer items-center whitespace-nowrap rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc disabled:cursor-not-allowed disabled:opacity-50";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ButtonLayout {
+    #[default]
+    Inline,
+    FullWidthStart,
+    Block,
+}
+
+impl ButtonLayout {
+    const fn classes(self) -> &'static str {
+        match self {
+            Self::Inline => "inline-flex shrink-0 justify-center",
+            Self::FullWidthStart => "flex w-full justify-start",
+            Self::Block => "block",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ButtonVariant {
@@ -11,37 +29,50 @@ pub(crate) enum ButtonVariant {
     Secondary,
     Pressed,
     Destructive,
+    Success,
+    Failure,
     Outline,
     Ghost,
+    Bare,
 }
 
 impl ButtonVariant {
     const fn classes(self) -> &'static str {
         match self {
             Self::Primary => {
-                "border-acc bg-acc text-bg hover:bg-acc-2 active:border-acc-2 active:bg-acc-2"
+                "border border-acc bg-acc text-bg hover:bg-acc-2 active:border-acc-2 active:bg-acc-2"
             }
             Self::Secondary => {
-                "border-acc-line bg-acc-soft text-acc hover:border-acc hover:text-acc-2 active:border-acc active:bg-acc active:text-bg"
+                "border border-acc-line bg-acc-soft text-acc hover:border-acc hover:text-acc-2 active:border-acc active:bg-acc active:text-bg"
             }
             Self::Pressed => {
-                "border-acc-line bg-acc-soft text-ink hover:border-acc active:border-acc active:bg-acc active:text-bg"
+                "border border-acc-line bg-acc-soft text-ink hover:border-acc active:border-acc active:bg-acc active:text-bg"
             }
             Self::Destructive => {
-                "border-del-line bg-del-bg text-del hover:border-del hover:bg-del hover:text-bg active:border-del active:bg-del active:text-bg"
+                "border border-del-line bg-del-bg text-del hover:border-del hover:bg-del hover:text-bg active:border-del active:bg-del active:text-bg"
+            }
+            Self::Success => {
+                "border border-add bg-add text-bg hover:border-add-line hover:bg-add-bg hover:text-add active:border-add active:bg-add active:text-bg"
+            }
+            Self::Failure => {
+                "border border-del bg-del text-bg hover:border-del-line hover:bg-del-bg hover:text-del active:border-del active:bg-del active:text-bg"
             }
             Self::Outline => {
-                "border-line-2 bg-surface-2 text-ink-2 hover:border-acc-line hover:text-ink active:border-line-2 active:bg-line active:text-ink"
+                "border border-line-2 bg-surface-2 text-ink-2 hover:border-acc-line hover:text-ink active:border-line-2 active:bg-line active:text-ink"
             }
             Self::Ghost => {
-                "border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink active:border-line-2 active:bg-line active:text-ink"
+                "border border-transparent bg-transparent text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink active:border-line-2 active:bg-line active:text-ink"
             }
+            Self::Bare => "",
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ButtonSize {
+    Content,
+    Micro,
+    Inline,
     Small,
     #[default]
     Medium,
@@ -53,6 +84,9 @@ pub(crate) enum ButtonSize {
 impl ButtonSize {
     const fn classes(self) -> &'static str {
         match self {
+            Self::Content => "",
+            Self::Micro => "min-h-5 gap-1 px-1.5 py-px text-[10px] tracking-[.04em]",
+            Self::Inline => "min-h-5 gap-1 px-1.5 py-px text-[11px]",
             Self::Small => "min-h-7 gap-1.5 px-2",
             Self::Medium => "h-9 gap-2 px-4",
             Self::IconCompact => "size-6 p-0",
@@ -83,6 +117,7 @@ impl ButtonState {
 #[component]
 pub(crate) fn Button(
     #[props(default)] variant: ButtonVariant,
+    #[props(default)] layout: ButtonLayout,
     #[props(default)] size: ButtonSize,
     #[props(default)] state: ButtonState,
     #[props(extends = GlobalAttributes)]
@@ -92,7 +127,12 @@ pub(crate) fn Button(
     children: Element,
 ) -> Element {
     let base = attributes!(button {
-        class: format!("{BUTTON_CLASSES} {} {}", variant.classes(), size.classes()),
+        class: format!(
+            "{BUTTON_CLASSES} {} {} {}",
+            layout.classes(),
+            variant.classes(),
+            size.classes()
+        ),
         r#type: "button",
         disabled: state.is_disabled(),
         aria_busy: state.is_loading().then_some("true"),
