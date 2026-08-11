@@ -12,7 +12,7 @@ pub(crate) const PRODUCTION_FEATURES: &str = "custom-protocol";
 
 pub(crate) fn run_cargo(label: &str, arguments: &[&str]) -> Result<()> {
     let root = project::repository_root();
-    let _lock = project::lock_frontend_assets(&root)?;
+    let _lock = project::lock_web_assets(&root)?;
     run_cargo_unlocked(label, arguments, &root)
 }
 

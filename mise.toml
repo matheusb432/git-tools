@@ -75,5 +75,5 @@ ast-grep = "0.44.1"
 zshrc = "activate"
 
 [tasks.bootstrap]
-description = "Configure this clone, install frontend dependencies, and build and install git-tools"
+description = "Configure this clone, build, and install git-tools"
 run = "just setup"

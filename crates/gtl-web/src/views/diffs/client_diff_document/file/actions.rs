@@ -114,9 +114,9 @@ async fn update_copy_state(mut state: Signal<CopyState>, payload: &str) {
 fn DiffLineStats(added: u32, removed: u32) -> Element {
     rsx! {
         span { class: "flex-none text-[12.5px]",
-            span { class: "text-add", "+{added}" }
+            span { class: "text-add", "data-lines-added": added, "+{added}" }
             " "
-            span { class: "text-del", "−{removed}" }
+            span { class: "text-del", "data-lines-removed": removed, "−{removed}" }
         }
     }
 }

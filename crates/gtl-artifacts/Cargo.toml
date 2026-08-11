@@ -6,15 +6,11 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+base64.workspace = true
 gtl-application.workspace = true
-gtl-models.workspace = true
-gtl-parser = { workspace = true, features = ["bundled-syntaxes"] }
-maud.workspace = true
-thiserror.workspace = true
+gtl-contracts.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-scraper.workspace = true
-strum.workspace = true

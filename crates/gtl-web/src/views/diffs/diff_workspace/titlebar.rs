@@ -8,6 +8,7 @@ pub(super) fn ViewTitlebar(
     view: ViewerActiveView,
     files_folded: bool,
     copy_context_enabled: bool,
+    mobile_navigation: Option<Element>,
     onfold: EventHandler<bool>,
     oncontext: EventHandler<bool>,
 ) -> Element {
@@ -37,6 +38,9 @@ pub(super) fn ViewTitlebar(
                 }
             }
             div { class: "flex-1" }
+            if let Some(mobile_navigation) = mobile_navigation {
+                {mobile_navigation}
+            }
             div { class: "flex items-center gap-2 mobile:hidden",
                 Button {
                     size: ButtonSize::Small,

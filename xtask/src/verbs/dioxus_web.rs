@@ -16,7 +16,6 @@ use anyhow::{Context, Result, bail, ensure};
 use command_group::{Signal, UnixChildExt};
 use sha2::{Digest, Sha256};
 
-use super::frontend;
 use crate::{
     process::{self, Status},
     project,
@@ -28,35 +27,41 @@ const DIST_DIRECTORY: &str = "crates/gtl-web/dist";
 const PUBLIC_DIRECTORY: &str = "crates/gtl-web/dist/public";
 const SOURCE_FINGERPRINT_PATH: &str = "crates/gtl-web/dist/.source-fingerprint";
 const BUNDLE_FINGERPRINT_PATH: &str = "crates/gtl-web/dist/.bundle-fingerprint";
-const DIOXUS_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-web/release/web";
+const DESKTOP_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-web/release/web";
+const ARTIFACT_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-artifact/release/web";
+const ARTIFACT_RUNTIME_SCRIPT_PATH: &str =
+    "crates/gtl-artifacts/src/embedded/generated/artifact-runtime.js";
+const ARTIFACT_RUNTIME_WASM_PATH: &str =
+    "crates/gtl-artifacts/src/embedded/generated/artifact-runtime.wasm";
+const ARTIFACT_WASM_DATA_URL_MARKER: &str = "__GTL_ARTIFACT_WASM_DATA_URL__";
 const SOURCE_FILES: &[&str] = &[
     "Cargo.lock",
     "Cargo.toml",
+    "deno.json",
     "deno.lock",
     "mise.lock",
     "mise.toml",
-    "package.json",
-    "tsconfig.json",
     "crates/gtl-contracts/Cargo.toml",
+    "crates/gtl-parser/Cargo.toml",
     "crates/gtl-web/Cargo.toml",
     "crates/gtl-web/Dioxus.toml",
     "crates/gtl-web/index.html",
+    "crates/gtl-web-contracts/Cargo.toml",
     "xtask/src/verbs/dioxus_web.rs",
 ];
 const SOURCE_DIRECTORIES: &[&str] = &[
     "crates/gtl-contracts/src",
     "crates/gtl-desktop/src",
     "crates/gtl-artifacts/src",
+    "crates/gtl-parser/src",
     "crates/gtl-web/assets",
     "crates/gtl-web/src",
-    "frontend/diff",
-    "frontend/diff-island",
-    "frontend/shared",
+    "crates/gtl-web-contracts/src",
 ];
 const SOURCE_DIRECTORY_EXCLUSIONS: &[&str] = &["crates/gtl-artifacts/src/embedded"];
 const GENERATED_SOURCE_OUTPUTS: &[&str] = &[
-    "crates/gtl-web/assets/diff-island.css",
-    "crates/gtl-web/assets/generated",
+    ARTIFACT_RUNTIME_SCRIPT_PATH,
+    ARTIFACT_RUNTIME_WASM_PATH,
     "crates/gtl-web/assets/tailwind.css",
 ];
 const FILE_COUNT_MAX: usize = 10_000;
@@ -66,8 +71,6 @@ const BUNDLE_FILE_BYTES_MAX: u64 = 64 * 1024 * 1024;
 const BUNDLE_BYTES_MAX: u64 = 256 * 1024 * 1024;
 const EXPECTED_BUNDLE_ASSETS: &[(&str, &str)] = &[
     ("app-icon-dxh", "ico"),
-    ("diff-island-dxh", "css"),
-    ("diff-island-dxh", "js"),
     ("focus-trap-dxh", "js"),
     ("gtl-web-dxh", "js"),
     ("gtl-web_bg-dxh", "wasm"),
@@ -77,30 +80,36 @@ const TAILWIND_ARGUMENTS: &[&str] = &[
     "run",
     "--frozen",
     "--allow-all",
-    "npm:@tailwindcss/cli@4.3.3",
+    "@tailwindcss/cli",
     "--input",
     "crates/gtl-web/src/app/assets/styles/tailwind.css",
     "--output",
     "crates/gtl-web/assets/tailwind.css",
     "--minify",
 ];
-const DIFF_ISLAND_STYLE_ARGUMENTS: &[&str] = &[
-    "run",
-    "--frozen",
-    "--allow-all",
-    "npm:@tailwindcss/cli@4.3.3",
-    "--input",
-    "crates/gtl-artifacts/src/styles/base.css",
-    "--output",
-    "crates/gtl-web/assets/diff-island.css",
-    "--minify",
-];
-const BUNDLE_ARGUMENTS: &[&str] = &[
+const DESKTOP_BUNDLE_ARGUMENTS: &[&str] = &[
     "bundle",
     "--web",
     "--release",
     "--package",
     "gtl-web",
+    "--locked",
+];
+const ARTIFACT_BUILD_ARGUMENTS: &[&str] = &[
+    "build",
+    "--web",
+    "--release",
+    "--package",
+    "gtl-web",
+    "--bin",
+    "gtl-artifact",
+    "--no-default-features",
+    "--features",
+    "artifact",
+    "--inject-loading-scripts",
+    "false",
+    "--debug-symbols",
+    "false",
     "--locked",
 ];
 const SERVE_ARGUMENTS: &[&str] = &[
@@ -114,9 +123,9 @@ const SERVE_ARGUMENTS: &[&str] = &[
     "--watch",
     "true",
 ];
-const DIFF_ISLAND_WATCH_ARGUMENTS: &[&str] = &["task", "--frozen", "dev:diff-island"];
 const DEVELOPMENT_RUST_SOURCE_DIRECTORIES: &[&str] = &[
     "crates/gtl-contracts/src",
+    "crates/gtl-parser/src",
     "crates/gtl-web-contracts/src",
     "crates/gtl-web/src",
 ];
@@ -136,30 +145,15 @@ pub(crate) fn run_styles() -> Result<()> {
 }
 
 pub(crate) fn serve(arguments: &[String]) -> Result<()> {
-    frontend::build()?;
     build_styles()?;
 
     let root = project::repository_root();
-    let _watchers = [
-        DevelopmentWatcher::spawn(
-            "dioxus-tailwind-watch",
-            "deno",
-            &watch_arguments(TAILWIND_ARGUMENTS),
-            &root,
-        )?,
-        DevelopmentWatcher::spawn(
-            "diff-island-tailwind-watch",
-            "deno",
-            &watch_arguments(DIFF_ISLAND_STYLE_ARGUMENTS),
-            &root,
-        )?,
-        DevelopmentWatcher::spawn(
-            "diff-island-script-watch",
-            "deno",
-            DIFF_ISLAND_WATCH_ARGUMENTS,
-            &root,
-        )?,
-    ];
+    let _tailwind_watcher = DevelopmentWatcher::spawn(
+        "dioxus-tailwind-watch",
+        "deno",
+        &watch_arguments(TAILWIND_ARGUMENTS),
+        &root,
+    )?;
     let step = development_serve_step(&root, arguments);
     run_development_server(&step, &root)
 }
@@ -356,19 +350,23 @@ impl Drop for DevelopmentWatcher {
 
 pub(crate) fn build_release() -> Result<()> {
     let root = project::repository_root();
-    let _lock = project::lock_frontend_assets(&root)?;
+    let _lock = project::lock_web_assets(&root)?;
     build_release_unlocked(&root)
 }
 
 pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
     let inputs_before = release_input_fingerprint(root)?;
-    frontend::build_unlocked(root)?;
-    build_styles_unlocked(root)?;
+    build_artifact_assets_unlocked(root)?;
     let target = project::cargo_target_directory(root)?;
-    clean_release_outputs(root, &target)?;
+    clean_desktop_release_outputs(root, &target)?;
     process::run_step(
-        &Step::new("dioxus-web-release", "dx", BUNDLE_ARGUMENTS.iter().copied())
-            .with_current_directory(root),
+        &Step::new(
+            "dioxus-web-release",
+            "dx",
+            DESKTOP_BUNDLE_ARGUMENTS.iter().copied(),
+        )
+        .with_environment("RUSTC_WRAPPER", "")
+        .with_current_directory(root),
     )?;
     let inputs_after = release_input_fingerprint(root)?;
     ensure!(
@@ -383,9 +381,21 @@ pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
     verify_staged_bundle(root)
 }
 
+pub(crate) fn build_artifact_assets_unlocked(root: &Path) -> Result<()> {
+    let inputs_before = release_input_fingerprint(root)?;
+    build_styles_unlocked(root)?;
+    let target = project::cargo_target_directory(root)?;
+    build_artifact_runtime_unlocked(root, &target)?;
+    ensure!(
+        release_input_fingerprint(root)? == inputs_before,
+        "offline artifact inputs changed during asset generation; retry the build"
+    );
+    Ok(())
+}
+
 pub(crate) fn build_styles() -> Result<()> {
     let root = project::repository_root();
-    let _lock = project::lock_frontend_assets(&root)?;
+    let _lock = project::lock_web_assets(&root)?;
     build_styles_unlocked(&root)
 }
 
@@ -397,23 +407,7 @@ pub(crate) fn build_styles_unlocked(root: &Path) -> Result<()> {
             TAILWIND_ARGUMENTS.iter().copied(),
         )
         .with_current_directory(root),
-    )?;
-    process::run_step(
-        &Step::new(
-            "diff-island-tailwind",
-            "deno",
-            DIFF_ISLAND_STYLE_ARGUMENTS.iter().copied(),
-        )
-        .with_current_directory(root),
     )
-}
-
-pub(crate) fn verify_staged_bundle_if_present() -> Result<()> {
-    let root = project::repository_root();
-    if root.join(DIST_DIRECTORY).exists() {
-        verify_staged_bundle(&root)?;
-    }
-    Ok(())
 }
 
 pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {
@@ -436,7 +430,110 @@ pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn clean_release_outputs(root: &Path, target: &Path) -> Result<()> {
+fn build_artifact_runtime_unlocked(root: &Path, target: &Path) -> Result<()> {
+    clean_artifact_release_output(target)?;
+    process::run_step(
+        &Step::new(
+            "dioxus-artifact-release",
+            "dx",
+            ARTIFACT_BUILD_ARGUMENTS.iter().copied(),
+        )
+        .with_environment("RUSTC_WRAPPER", "")
+        .with_current_directory(root),
+    )?;
+
+    let asset_directory = target
+        .join(ARTIFACT_INTERNAL_RELEASE_DIRECTORY)
+        .join("public/assets");
+    let files = collect_tree_files(&asset_directory)?;
+    let script = find_generated_asset(&files, "gtl-artifact-dxh", "js")?;
+    let wasm = find_generated_asset(&files, "gtl-artifact_bg-dxh", "wasm")?;
+    let wasm_name = wasm
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("generated artifact WASM file name is not UTF-8")?;
+    let source = fs::read_to_string(&script)
+        .with_context(|| format!("read generated artifact runtime {}", script.display()))?;
+    let runtime = embed_artifact_wasm_path(&source, wasm_name)?;
+    let wasm_bytes = fs::read(&wasm)
+        .with_context(|| format!("read generated artifact WASM {}", wasm.display()))?;
+    ensure!(!wasm_bytes.is_empty(), "generated artifact WASM is empty");
+    ensure!(
+        u64::try_from(wasm_bytes.len()).unwrap_or(u64::MAX) <= BUNDLE_FILE_BYTES_MAX,
+        "generated artifact WASM exceeds {BUNDLE_FILE_BYTES_MAX} bytes"
+    );
+
+    let script_output = root.join(ARTIFACT_RUNTIME_SCRIPT_PATH);
+    let wasm_output = root.join(ARTIFACT_RUNTIME_WASM_PATH);
+    let output_directory = script_output
+        .parent()
+        .context("artifact runtime script output has no parent")?;
+    ensure!(
+        wasm_output.parent() == Some(output_directory),
+        "artifact runtime outputs must share one generated directory"
+    );
+    fs::create_dir_all(output_directory)
+        .with_context(|| format!("create {}", output_directory.display()))?;
+    fs::write(&script_output, runtime)
+        .with_context(|| format!("write {}", script_output.display()))?;
+    fs::write(&wasm_output, wasm_bytes).with_context(|| format!("write {}", wasm_output.display()))
+}
+
+fn find_generated_asset(files: &[PathBuf], prefix: &str, extension: &str) -> Result<PathBuf> {
+    let matches = files
+        .iter()
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(prefix))
+                && path
+                    .extension()
+                    .is_some_and(|candidate| candidate == extension)
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        matches.len() == 1,
+        "Dioxus artifact build requires exactly one {prefix}*.{extension} asset"
+    );
+    Ok(matches[0].to_path_buf())
+}
+
+fn embed_artifact_wasm_path(source: &str, wasm_name: &str) -> Result<String> {
+    let generated_path = format!("\"/./assets/{wasm_name}\"");
+    ensure!(
+        source.matches(&generated_path).count() == 1,
+        "generated artifact runtime must reference its hashed WASM path exactly once"
+    );
+    ensure!(
+        !source.contains(ARTIFACT_WASM_DATA_URL_MARKER),
+        "generated artifact runtime already contains the WASM marker"
+    );
+    ensure!(
+        !source.to_ascii_lowercase().contains("</script"),
+        "generated artifact runtime cannot be embedded safely in HTML"
+    );
+    ensure!(
+        !source.contains("import("),
+        "generated artifact runtime contains an external dynamic import"
+    );
+
+    let runtime = source.replacen(
+        &generated_path,
+        &format!("\"{ARTIFACT_WASM_DATA_URL_MARKER}\""),
+        1,
+    );
+    ensure!(
+        runtime.matches(ARTIFACT_WASM_DATA_URL_MARKER).count() == 1,
+        "embedded artifact runtime must contain exactly one WASM marker"
+    );
+    ensure!(
+        !runtime.contains("/./assets/"),
+        "embedded artifact runtime retained a sibling asset path"
+    );
+    Ok(runtime)
+}
+
+fn clean_desktop_release_outputs(root: &Path, target: &Path) -> Result<()> {
     let dist = root.join(DIST_DIRECTORY);
     let web_crate = root.join("crates/gtl-web");
     ensure!(
@@ -447,11 +544,24 @@ fn clean_release_outputs(root: &Path, target: &Path) -> Result<()> {
         fs::remove_dir_all(&dist).with_context(|| format!("remove {}", dist.display()))?;
     }
 
-    let internal = target.join(DIOXUS_INTERNAL_RELEASE_DIRECTORY);
+    let internal = target.join(DESKTOP_INTERNAL_RELEASE_DIRECTORY);
     let internal_owner = target.join("dx/gtl-web/release");
     ensure!(
         internal.starts_with(&internal_owner) && internal != internal_owner,
         "Dioxus internal release path must remain inside its package release directory"
+    );
+    if internal.exists() {
+        fs::remove_dir_all(&internal).with_context(|| format!("remove {}", internal.display()))?;
+    }
+    Ok(())
+}
+
+fn clean_artifact_release_output(target: &Path) -> Result<()> {
+    let internal = target.join(ARTIFACT_INTERNAL_RELEASE_DIRECTORY);
+    let internal_owner = target.join("dx/gtl-artifact/release");
+    ensure!(
+        internal.starts_with(&internal_owner) && internal != internal_owner,
+        "Dioxus artifact path must remain inside its package release directory"
     );
     if internal.exists() {
         fs::remove_dir_all(&internal).with_context(|| format!("remove {}", internal.display()))?;
@@ -724,8 +834,6 @@ mod tests {
         for (name, contents) in [
             ("index.html", "<html></html>"),
             ("assets/app-icon-dxhone.ico", "icon"),
-            ("assets/diff-island-dxhone.css", "host{}"),
-            ("assets/diff-island-dxhone.js", "island"),
             ("assets/focus-trap-dxhone.js", "focus"),
             ("assets/gtl-web-dxhone.js", "app"),
             ("assets/gtl-web_bg-dxhone.wasm", "wasm"),
@@ -855,9 +963,7 @@ mod tests {
         let root = tempfile::tempdir().expect("temporary repository");
         fixture(root.path());
         let fingerprint_before = source_fingerprint(root.path()).expect("fixture fingerprint");
-        let embedded = root
-            .path()
-            .join("crates/gtl-artifacts/src/embedded/generated/artifact.css");
+        let embedded = root.path().join(ARTIFACT_RUNTIME_SCRIPT_PATH);
         fs::create_dir_all(embedded.parent().expect("embedded parent"))
             .expect("embedded parent is writable");
         fs::write(embedded, "generated").expect("embedded output is writable");
@@ -869,24 +975,29 @@ mod tests {
     }
 
     #[test]
-    fn clean_release_outputs_remove_staged_and_internal_old_assets() {
+    fn release_output_cleanup_is_bounded_to_each_dioxus_application() {
         let root = tempfile::tempdir().expect("temporary repository");
         let target = root.path().join("target");
         let staged = root.path().join(PUBLIC_DIRECTORY).join("old.js");
-        let internal = target
-            .join(DIOXUS_INTERNAL_RELEASE_DIRECTORY)
+        let desktop_internal = target
+            .join(DESKTOP_INTERNAL_RELEASE_DIRECTORY)
+            .join("public/assets/old.js");
+        let artifact_internal = target
+            .join(ARTIFACT_INTERNAL_RELEASE_DIRECTORY)
             .join("public/assets/old.js");
         let neighbor = target.join("dx/other-package/keep");
-        for path in [&staged, &internal, &neighbor] {
+        for path in [&staged, &desktop_internal, &artifact_internal, &neighbor] {
             fs::create_dir_all(path.parent().expect("old asset parent"))
                 .expect("old asset parent is writable");
             fs::write(path, "old").expect("old asset is writable");
         }
 
-        clean_release_outputs(root.path(), &target).expect("release outputs clean");
+        clean_desktop_release_outputs(root.path(), &target).expect("desktop outputs clean");
+        clean_artifact_release_output(&target).expect("artifact outputs clean");
 
         assert!(!root.path().join(DIST_DIRECTORY).exists());
-        assert!(!target.join(DIOXUS_INTERNAL_RELEASE_DIRECTORY).exists());
+        assert!(!target.join(DESKTOP_INTERNAL_RELEASE_DIRECTORY).exists());
+        assert!(!target.join(ARTIFACT_INTERNAL_RELEASE_DIRECTORY).exists());
         assert!(
             neighbor.exists(),
             "unrelated target output must be preserved"
@@ -896,7 +1007,7 @@ mod tests {
     #[test]
     fn release_commands_are_locked_and_write_the_crate_owned_inputs() {
         assert_eq!(
-            BUNDLE_ARGUMENTS,
+            DESKTOP_BUNDLE_ARGUMENTS,
             [
                 "bundle",
                 "--web",
@@ -906,25 +1017,25 @@ mod tests {
                 "--locked"
             ]
         );
-        assert_eq!(TAILWIND_ARGUMENTS[3], "npm:@tailwindcss/cli@4.3.3");
+        assert_eq!(TAILWIND_ARGUMENTS[3], "@tailwindcss/cli");
         assert!(TAILWIND_ARGUMENTS.contains(&"crates/gtl-web/assets/tailwind.css"));
-        assert_eq!(
-            DIFF_ISLAND_STYLE_ARGUMENTS[5],
-            "crates/gtl-artifacts/src/styles/base.css"
+        assert!(ARTIFACT_BUILD_ARGUMENTS.ends_with(&["--locked"]));
+        assert!(
+            ARTIFACT_BUILD_ARGUMENTS
+                .windows(2)
+                .any(|pair| pair == ["--bin", "gtl-artifact"])
         );
-        assert!(DIFF_ISLAND_STYLE_ARGUMENTS.contains(&"crates/gtl-web/assets/diff-island.css"));
+        assert!(
+            ARTIFACT_BUILD_ARGUMENTS
+                .windows(2)
+                .any(|pair| pair == ["--features", "artifact"])
+        );
     }
 
     #[test]
-    fn development_serve_watches_both_stylesheets_and_the_island_script() {
-        for arguments in [TAILWIND_ARGUMENTS, DIFF_ISLAND_STYLE_ARGUMENTS] {
-            let watched = watch_arguments(arguments);
-            assert!(watched.ends_with(&["--watch=always", "--poll=100"]));
-        }
-        assert_eq!(
-            DIFF_ISLAND_WATCH_ARGUMENTS,
-            ["task", "--frozen", "dev:diff-island"]
-        );
+    fn development_serve_watches_the_shared_tailwind_source() {
+        let watched = watch_arguments(TAILWIND_ARGUMENTS);
+        assert!(watched.ends_with(&["--watch=always", "--poll=100"]));
         assert!(
             SERVE_ARGUMENTS
                 .windows(2)
@@ -934,6 +1045,41 @@ mod tests {
             SERVE_ARGUMENTS
                 .windows(2)
                 .any(|pair| pair == ["--hot-reload", "true"])
+        );
+    }
+
+    #[test]
+    fn artifact_runtime_replaces_only_the_hashed_wasm_path() {
+        let source = r#"const fallback="gtl-artifact_bg.wasm";start({module_or_path:"/./assets/gtl-artifact_bg-dxh123.wasm"});"#;
+
+        let runtime = embed_artifact_wasm_path(source, "gtl-artifact_bg-dxh123.wasm")
+            .expect("hashed artifact path is replaceable");
+
+        assert!(runtime.contains(&format!(
+            "module_or_path:\"{ARTIFACT_WASM_DATA_URL_MARKER}\""
+        )));
+        assert!(runtime.contains("fallback=\"gtl-artifact_bg.wasm\""));
+        assert!(!runtime.contains("/./assets/"));
+    }
+
+    #[test]
+    fn artifact_runtime_rejects_ambiguous_or_unsafe_scripts() {
+        let path = "\"/./assets/gtl-artifact_bg-dxh123.wasm\"";
+        let ambiguous = format!("start({path});again({path});");
+        assert!(
+            embed_artifact_wasm_path(&ambiguous, "gtl-artifact_bg-dxh123.wasm")
+                .expect_err("ambiguous WASM paths must fail")
+                .to_string()
+                .contains("exactly once")
+        );
+        assert!(
+            embed_artifact_wasm_path(
+                &format!("start({path});</script>"),
+                "gtl-artifact_bg-dxh123.wasm"
+            )
+            .expect_err("an inline script terminator must fail")
+            .to_string()
+            .contains("safely")
         );
     }
 

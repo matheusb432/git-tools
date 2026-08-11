@@ -1,12 +1,16 @@
 use std::sync::Arc;
 
-use gtl_application::viewer::project_diff_view;
+use gtl_application::viewer::{project_diff_view, project_render_options, project_theme};
+#[cfg(test)]
+use gtl_contracts::viewer::ViewerRenderOptions;
 use gtl_contracts::viewer::{
     ViewerActiveState, ViewerActiveView, ViewerCommitSelection, ViewerFailureCode, ViewerFeedback,
-    ViewerPreferences, ViewerRenderOptions, ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState,
-    ViewerTheme, ViewerViewIdentity,
+    ViewerPreferences, ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme,
+    ViewerViewIdentity,
 };
-use gtl_models::viewer::{self, DiffDensity, DiffLayout, RenderOptions, Theme};
+use gtl_models::viewer::{self, RenderOptions, Theme};
+#[cfg(test)]
+use gtl_models::viewer::{DiffDensity, DiffLayout};
 
 use super::{internal, settings};
 use crate::{
@@ -93,8 +97,8 @@ fn project(
         tabs,
         active,
         preferences: ViewerPreferences {
-            theme: to_theme(theme),
-            render_options: to_render_options(options),
+            theme: project_theme(theme),
+            render_options: project_render_options(options),
         },
         feedback,
     })
@@ -148,7 +152,7 @@ pub(super) fn to_identity(
         tab_id: identity.tab_id().into(),
         range_generation: identity.range_generation(),
         selection_generation: identity.selection_generation(),
-        render_options: to_render_options(options),
+        render_options: project_render_options(options),
     }
 }
 
@@ -158,19 +162,6 @@ pub(super) fn identity_matches(
     options: RenderOptions,
 ) -> bool {
     expected == to_identity(actual, options)
-}
-
-pub(super) const fn to_render_options(options: RenderOptions) -> ViewerRenderOptions {
-    ViewerRenderOptions {
-        layout: match options.layout() {
-            DiffLayout::Unified => gtl_contracts::viewer::ViewerDiffLayout::Unified,
-            DiffLayout::Split => gtl_contracts::viewer::ViewerDiffLayout::Split,
-        },
-        density: match options.density() {
-            DiffDensity::Compact => gtl_contracts::viewer::ViewerDiffDensity::Compact,
-            DiffDensity::Full => gtl_contracts::viewer::ViewerDiffDensity::Full,
-        },
-    }
 }
 
 #[cfg(test)]
@@ -185,18 +176,6 @@ const fn from_render_options(options: ViewerRenderOptions) -> RenderOptions {
             gtl_contracts::viewer::ViewerDiffDensity::Full => DiffDensity::Full,
         },
     )
-}
-
-pub(super) const fn to_theme(theme: Theme) -> ViewerTheme {
-    match theme {
-        Theme::Dark => ViewerTheme::Dark,
-        Theme::Light => ViewerTheme::Light,
-        Theme::Hearth => ViewerTheme::Hearth,
-        Theme::Mirage => ViewerTheme::Mirage,
-        Theme::Glacier => ViewerTheme::Glacier,
-        Theme::Noir => ViewerTheme::Noir,
-        Theme::Graphite => ViewerTheme::Graphite,
-    }
 }
 
 pub(super) const fn from_theme(theme: ViewerTheme) -> Theme {
@@ -298,7 +277,10 @@ mod tests {
             RenderOptions::new(DiffLayout::Split, DiffDensity::Compact),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
         ] {
-            assert_eq!(from_render_options(to_render_options(options)), options);
+            assert_eq!(
+                from_render_options(project_render_options(options)),
+                options
+            );
         }
     }
 

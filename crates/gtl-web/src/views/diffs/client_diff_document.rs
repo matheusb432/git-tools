@@ -1,7 +1,7 @@
 mod file;
 
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{ViewerActiveView, ViewerDiffDensity, ViewerDiffLayout};
+use gtl_contracts::viewer::{ViewerActiveView, ViewerViewIdentity};
 
 use self::file::DiffFileCard;
 use crate::entities::diffs::{ClientDiffFile, ClientDiffSource, use_client_diff_workspace};
@@ -22,7 +22,7 @@ pub(crate) fn ClientDiffDocument(
 
     rsx! {
         section {
-            class: "relative col-start-2 row-start-2 min-h-0 min-w-0 overflow-hidden bg-bg",
+            class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
             aria_label: "Rendered diff",
             if is_loading {
                 DiffStreamingNotice {}
@@ -30,8 +30,7 @@ pub(crate) fn ClientDiffDocument(
             DiffDocumentBody {
                 title: view.title,
                 files: current.files,
-                layout: view.identity.render_options.layout,
-                density: view.identity.render_options.density,
+                identity: view.identity,
                 folded,
                 copy_context_enabled,
                 flashing_file,
@@ -58,8 +57,7 @@ fn DiffStreamingNotice() -> Element {
 fn DiffDocumentBody(
     title: String,
     files: Vec<ClientDiffFile>,
-    layout: ViewerDiffLayout,
-    density: ViewerDiffDensity,
+    identity: ViewerViewIdentity,
     folded: Option<bool>,
     copy_context_enabled: bool,
     flashing_file: Option<String>,
@@ -67,6 +65,16 @@ fn DiffDocumentBody(
     onopen: Option<EventHandler<String>>,
     onretry: EventHandler<()>,
 ) -> Element {
+    let layout = identity.render_options.layout;
+    let density = identity.render_options.density;
+    let view_identity = format!(
+        "{}:{}:{}:{}:{}",
+        identity.tab_id,
+        identity.range_generation,
+        identity.selection_generation,
+        layout.as_str(),
+        density.as_str(),
+    );
     rsx! {
         div {
             class: "h-full min-h-0 overflow-auto bg-bg px-[22px] pb-[60px] text-ink wide-screen:px-7 compact-desktop:px-4 tablet:px-3 tablet:pb-12 mobile:px-1 print:overflow-visible print:p-0",
@@ -76,6 +84,9 @@ fn DiffDocumentBody(
             "data-gtl-diff-document": "",
             "data-view-state": if is_loading { "streaming" } else { "complete" },
             "data-chunks-complete": (!is_loading).to_string(),
+            "data-view-identity": view_identity,
+            "data-layout": layout.as_str(),
+            "data-density": density.as_str(),
             if files.is_empty() {
                 DiffEmptyState {}
             }

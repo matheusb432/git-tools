@@ -13,7 +13,7 @@ async fn raw_artifact_lifecycle() -> anyhow::Result<()> {
 
         let page = &spec.session.page;
         let presentation =
-            page.locator("details.file[data-path='src/alpha.rs'] .diff-split.diff-full");
+            page.locator("#f-src-alpha-rs [data-layout='split'][data-density='full']");
         expect(presentation.clone())
             .to_have_count(1)
             .await
@@ -22,34 +22,34 @@ async fn raw_artifact_lifecycle() -> anyhow::Result<()> {
             .to_be_visible()
             .await
             .context("render representative split full presentation")?;
-        expect(page.locator(".layout[data-gtl-enhanced='true']"))
+        expect(page.locator("main[data-gtl-artifact-ready='true'] [data-view-state='complete']"))
             .to_have_count(1)
             .await
-            .context("wait for one enhanced raw layout")?;
+            .context("wait for the client-rendered raw artifact")?;
         support::click(
-            &page.locator(".tree-body .tfile[data-path='src/beta.rs'] .tlabel"),
+            &page.locator("aside[aria-label='Changed files'] [data-file-target='f-src-beta-rs']"),
             "navigate to the second raw artifact file",
         )
         .await?;
-        expect(page.locator(".tree-body .tfile.cur[data-path='src/beta.rs']"))
-            .to_have_count(1)
-            .await
-            .context("mark the second raw artifact file current")?;
-        expect(page.locator("details.file[data-path='src/beta.rs'][open]"))
+        expect(page.locator("details#f-src-beta-rs[open]"))
             .to_have_count(1)
             .await
             .context("open the second raw artifact file")?;
 
-        support::click(&page.locator("button.foldall"), "collapse all raw files").await?;
+        support::click(
+            &support::get_button(page, "Collapse all"),
+            "collapse all raw files",
+        )
+        .await?;
         support::expect_every_file_is_collapsed(page).await?;
 
         support::reload(page).await?;
-        expect(page.locator(".layout[data-gtl-enhanced='true']"))
+        expect(page.locator("main[data-gtl-artifact-ready='true'] [data-view-state='complete']"))
             .to_have_count(1)
             .await
-            .context("remount one enhancer lifecycle after raw reload")?;
+            .context("remount one client-rendered raw artifact after reload")?;
         support::click(
-            &page.locator("button.foldall"),
+            &support::get_button(page, "Collapse all"),
             "collapse files after reload",
         )
         .await?;
@@ -62,13 +62,11 @@ async fn raw_artifact_lifecycle() -> anyhow::Result<()> {
         )
         .await?;
         support::click(
-            &page.locator(
-                "[data-artifact-files-popover]:popover-open [data-file-target='f-src-beta-rs']",
-            ),
+            &page.locator("dialog[open] [data-file-target='f-src-beta-rs']"),
             "navigate from raw mobile changed files",
         )
         .await?;
-        expect(page.locator("details.file[data-path='src/beta.rs'][open]"))
+        expect(page.locator("details#f-src-beta-rs[open]"))
             .to_have_count(1)
             .await
             .context("open the mobile-selected raw file")?;

@@ -10,7 +10,7 @@ use super::{
     wait::{self, ASSERTION_TIMEOUT},
 };
 
-const COMPLETE_DIFF_SELECTOR: &str = "#viewer-diff-island[data-view-state='complete'][data-chunks-complete='true'][aria-busy='false']";
+const COMPLETE_DIFF_SELECTOR: &str = "[data-gtl-diff-document][data-view-state='complete'][data-chunks-complete='true'][aria-busy='false']";
 const DELETE_DESCRIPTION: &str =
     "This removes the saved live view and closes its tab. Render history remains available.";
 
@@ -22,7 +22,7 @@ pub async fn assert_forwarded_live_view(
     wait_for_active_live_view(driver, "live-view", expected_content, 1).await?;
     ensure!(
         driver.find_all(By::Css("iframe")).await?.is_empty(),
-        "viewer rendered an iframe instead of the server-rendered diff island"
+        "viewer rendered an iframe instead of the client-rendered diff document"
     );
     Ok(())
 }
@@ -116,14 +116,13 @@ pub async fn assert_first_paint(session: &TestSession) -> Result<()> {
         .driver()
         .execute(
             r"
-const host = document.querySelector('#viewer-diff-island');
-const rows = host?.shadowRoot?.querySelectorAll('[data-gtl-diff-document] .filebody .dl') ?? [];
+const rows = document.querySelectorAll('[data-gtl-diff-document] [data-gtl-diff-row]');
 return { count: rows.length, firstHeight: rows[0]?.offsetHeight ?? 0 };
 ",
             Vec::new(),
         )
         .await
-        .context("measure first server-rendered diff row")?;
+        .context("measure first client-rendered diff row")?;
     let rows = script_result.json();
     let count = rows["count"].as_u64().unwrap_or_default();
     let first_height = rows["firstHeight"].as_u64().unwrap_or_default();
@@ -167,25 +166,23 @@ pub async fn assert_chunked_live_view(
     let driver = session.driver();
     wait_for_active_live_view(driver, "live-chunked", "chunked-live-marker", 2).await?;
     wait::until(
-        "multiple diff chunks to materialize in the open shadow root",
+        "multiple diff line pages to render in the active document",
         ASSERTION_TIMEOUT,
         || async {
             let result = driver
                 .execute(
                     r"
-const host = document.querySelector(arguments[0]);
-const root = host?.shadowRoot;
-const documentElement = root?.querySelector('[data-gtl-diff-document]');
+const documentElement = document.querySelector(arguments[0]);
 return {
   hasDocument: documentElement !== null,
-  hasTarget: root?.querySelector('#viewer-diff-0') !== null,
-  rows: documentElement?.querySelectorAll('.filebody .dl').length ?? 0
+  hasTarget: documentElement?.querySelector('#viewer-diff-0') !== null,
+  rows: documentElement?.querySelectorAll('[data-gtl-diff-row]').length ?? 0
 };
 ",
                     vec![serde_json::json!(COMPLETE_DIFF_SELECTOR)],
                 )
                 .await
-                .context("inspect chunked diff island")?;
+                .context("inspect paged diff document")?;
             let observation = result.json();
             let row_count = observation["rows"].as_u64().unwrap_or_default();
             let ready = observation["hasDocument"].as_bool() == Some(true)
@@ -217,10 +214,9 @@ pub async fn assert_overlapping_live_updates(
                 .execute(
                     r#"
 const active = document.querySelector('[role="tab"][aria-selected="true"]');
-const host = document.querySelector(
-  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+const diff = document.querySelector(
+  '[data-gtl-diff-document][data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
-const diff = host?.shadowRoot?.querySelector('[data-gtl-diff-document]');
 return {
   tablists: document.querySelectorAll('[role="tablist"][aria-label="Open diffs"]').length,
   activeViews: document.querySelectorAll('#viewer-active-view').length,
@@ -277,7 +273,7 @@ pub async fn delete_temporary_live_views(
     wait_for_active_live_view(driver, "live-latest", "second-live-marker", 4).await?;
     delete_active_live_view(driver, "live-latest").await?;
 
-    wait_for_active_live_materialization(driver, "live-heavy", 3).await?;
+    wait_for_active_live_document(driver, "live-heavy", 3).await?;
     delete_active_live_view(driver, "live-heavy").await?;
 
     wait_for_active_live_view(driver, "live-chunked", "chunked-live-marker", 2).await?;
@@ -326,7 +322,7 @@ return active?.textContent.includes('Live')
   && text.includes('Render stopped (DirNotFound)')
   && text.includes('was not found')
   && !text.includes('Render failed')
-  && document.querySelector('#viewer-diff-island') === null;
+  && document.querySelector('[data-gtl-diff-document]') === null;
 "#,
             )
             .await?
@@ -384,12 +380,12 @@ pub async fn select_split_layout(session: &TestSession) -> Result<()> {
             r#"
 const split = Array.from(document.querySelectorAll('button'))
   .find((button) => button.textContent.trim() === 'Side by side' && button.offsetParent !== null);
-const host = document.querySelector(
-  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+const diff = document.querySelector(
+  '[data-gtl-diff-document][data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
 return split?.getAttribute('aria-pressed') === 'true'
-  && host?.dataset.viewIdentity.includes(':split:')
-  && host.shadowRoot?.querySelector('[data-gtl-diff-document] .diff-split') !== null;
+  && diff?.dataset.layout === 'split'
+  && diff.querySelector('[data-layout="split"]') !== null;
 "#,
         )
         .await?
@@ -410,12 +406,12 @@ return split?.getAttribute('aria-pressed') === 'true'
 
 pub async fn refresh_and_assert_alpha_v2(session: &TestSession) -> Result<()> {
     let driver = session.driver();
-    let previous_identity = by_css(driver, COMPLETE_DIFF_SELECTOR, "completed diff island")
+    let previous_identity = by_css(driver, COMPLETE_DIFF_SELECTOR, "completed diff document")
         .await?
         .attr("data-view-identity")
         .await
         .context("read pre-refresh diff identity")?
-        .context("completed diff island is missing its view identity")?;
+        .context("completed diff document is missing its view identity")?;
     by_accessible_name(driver, "Refresh diff")
         .await?
         .click()
@@ -428,11 +424,10 @@ pub async fn refresh_and_assert_alpha_v2(session: &TestSession) -> Result<()> {
             let result = driver
                 .execute(
                     r#"
-const host = document.querySelector(
-  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+const diff = document.querySelector(
+  '[data-gtl-diff-document][data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
-const text = host?.shadowRoot?.querySelector('[data-gtl-diff-document]')?.textContent ?? '';
-return host?.dataset.viewIdentity !== arguments[0] && text.includes('alpha-v2');
+return diff?.dataset.viewIdentity !== arguments[0] && diff.textContent.includes('alpha-v2');
 "#,
                     vec![serde_json::json!(previous_identity)],
                 )
@@ -453,13 +448,13 @@ pub async fn select_commit_patch_and_restore_range(session: &TestSession) -> Res
     let range_identity = by_css(
         driver,
         COMPLETE_DIFF_SELECTOR,
-        "completed range diff island",
+        "completed range diff document",
     )
     .await?
     .attr("data-view-identity")
     .await
     .context("read range diff identity")?
-    .context("completed range diff island is missing its view identity")?;
+    .context("completed range diff document is missing its view identity")?;
     let commit = commit_button(driver, "live view v2").await?;
     commit
         .click()
@@ -475,19 +470,18 @@ pub async fn select_commit_patch_and_restore_range(session: &TestSession) -> Res
                 r#"
 const shelf = document.querySelector('aside[aria-label="Commits"]');
 const selected = shelf?.querySelector('button[aria-pressed="true"]');
-const host = document.querySelector(
-  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+const diff = document.querySelector(
+  '[data-gtl-diff-document][data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
-const root = host?.shadowRoot;
-const text = root?.querySelector('[data-gtl-diff-document]')?.textContent ?? '';
-const file = root?.querySelector('details.file');
+const text = diff?.textContent ?? '';
+const file = diff?.querySelector('details[data-gtl-diff-file]');
 return selected?.textContent.includes('live view v2')
   && selected.disabled === false
-  && host?.dataset.viewIdentity !== arguments[0]
+  && diff?.dataset.viewIdentity !== arguments[0]
   && text.includes('alpha-v1')
   && text.includes('alpha-v2')
-  && file?.querySelector('.a')?.textContent.trim() === '+1'
-  && file?.querySelector('.d')?.textContent.trim() === '−1';
+  && file?.querySelector('[data-lines-added="1"]') !== null
+  && file?.querySelector('[data-lines-removed="1"]') !== null;
 "#,
                 &range_identity,
             )
@@ -499,13 +493,13 @@ return selected?.textContent.includes('live view v2')
     let selected_identity = by_css(
         driver,
         COMPLETE_DIFF_SELECTOR,
-        "completed selected-commit diff island",
+        "completed selected-commit diff document",
     )
     .await?
     .attr("data-view-identity")
     .await
     .context("read selected-commit diff identity")?
-    .context("selected-commit diff island is missing its view identity")?;
+    .context("selected-commit diff document is missing its view identity")?;
 
     by_accessible_name(driver, "Range")
         .await?
@@ -520,18 +514,17 @@ return selected?.textContent.includes('live view v2')
                 driver,
                 r#"
 const shelf = document.querySelector('aside[aria-label="Commits"]');
-const host = document.querySelector(
-  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+const diff = document.querySelector(
+  '[data-gtl-diff-document][data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
-const root = host?.shadowRoot;
-const text = root?.querySelector('[data-gtl-diff-document]')?.textContent ?? '';
-const file = root?.querySelector('details.file');
+const text = diff?.textContent ?? '';
+const file = diff?.querySelector('details[data-gtl-diff-file]');
 return shelf?.querySelector('button[aria-pressed="true"]') === null
-  && host?.dataset.viewIdentity !== arguments[0]
+  && diff?.dataset.viewIdentity !== arguments[0]
   && text.includes('alpha-v2')
   && !text.includes('alpha-v1')
-  && file?.querySelector('.a')?.textContent.trim() === '+1'
-  && file?.querySelector('.d')?.textContent.trim() === '−0';
+  && file?.querySelector('[data-lines-added="1"]') !== null
+  && file?.querySelector('[data-lines-removed="0"]') !== null;
 "#,
                 &selected_identity,
             )
@@ -659,10 +652,9 @@ async fn wait_for_active_live_view(
                 .execute(
                     r#"
 const active = document.querySelector('[role="tab"][aria-selected="true"]');
-const host = document.querySelector(
-  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+const documentElement = document.querySelector(
+  '[data-gtl-diff-document][data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
-const documentElement = host?.shadowRoot?.querySelector('[data-gtl-diff-document]');
 return document.querySelectorAll('[role="tablist"][aria-label="Open diffs"]').length === 1
   && document.querySelectorAll('[role="tab"]').length === arguments[2]
   && active?.textContent.includes(arguments[0])
@@ -683,30 +675,30 @@ return document.querySelectorAll('[role="tablist"][aria-label="Open diffs"]').le
     .await
 }
 
-async fn wait_for_active_live_materialization(
+async fn wait_for_active_live_document(
     driver: &WebDriver,
     repository: &str,
     tab_count: u64,
 ) -> Result<()> {
     wait::until(
-        &format!("{repository} live diff materialization to be active"),
+        &format!("{repository} live diff document to be active"),
         ASSERTION_TIMEOUT,
         || async {
             let result = driver
                 .execute(
                     r#"
 const active = document.querySelector('[role="tab"][aria-selected="true"]');
-const host = document.querySelector('#viewer-diff-island');
+const diff = document.querySelector('[data-gtl-diff-document]');
 return document.querySelectorAll('[role="tab"]').length === arguments[1]
   && active?.textContent.includes(arguments[0])
   && active.textContent.includes('Live')
   && document.querySelectorAll('#viewer-active-view').length === 1
-  && ['loading', 'streaming', 'complete'].includes(host?.dataset.viewState);
+  && ['streaming', 'complete'].includes(diff?.dataset.viewState);
 "#,
                     vec![serde_json::json!(repository), serde_json::json!(tab_count)],
                 )
                 .await
-                .context("inspect active Dioxus live materialization")?;
+                .context("inspect active Dioxus live document")?;
             Ok(result.json().as_bool().unwrap_or(false).then_some(()))
         },
     )
@@ -721,19 +713,18 @@ async fn assert_diff_excludes_with_row_count(
     let result = driver
         .execute(
             r#"
-const host = document.querySelector(
-  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+const documentElement = document.querySelector(
+  '[data-gtl-diff-document][data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
-const documentElement = host?.shadowRoot?.querySelector('[data-gtl-diff-document]');
 return {
   containsUnexpected: documentElement?.textContent.includes(arguments[0]) ?? false,
-  rows: documentElement?.querySelectorAll('.filebody .dl').length ?? 0
+  rows: documentElement?.querySelectorAll('[data-gtl-diff-row]').length ?? 0
 };
 "#,
             vec![serde_json::json!(unexpected)],
         )
         .await
-        .context("inspect replacement diff for stale chunks")?;
+        .context("inspect replacement diff for stale rows")?;
     let observation = result.json();
     ensure!(
         observation["containsUnexpected"].as_bool() == Some(false),
@@ -742,7 +733,7 @@ return {
     let rows = observation["rows"].as_u64().unwrap_or_default();
     ensure!(
         rows == expected_rows,
-        "replacement diff has {rows} rows instead of the original {expected_rows} chunked-fixture rows"
+        "replacement diff has {rows} rows instead of the original {expected_rows} paged-fixture rows"
     );
     Ok(())
 }
@@ -758,7 +749,7 @@ async fn wait_for_empty_viewer(driver: &WebDriver) -> Result<()> {
 return document.querySelectorAll('[role="tab"]').length === 0
   && document.querySelector('[role="tablist"][aria-label="Open diffs"]')?.textContent.includes('No open diffs')
   && document.querySelector('main')?.textContent.includes('No diff is open')
-  && document.querySelector('#viewer-diff-island') === null
+  && document.querySelector('[data-gtl-diff-document]') === null
   && !document.querySelector('#delete-live-view-dialog[open]');
 "#,
             )
@@ -833,13 +824,13 @@ async fn viewer_uses_split_layout(driver: &WebDriver) -> Result<bool> {
     script_bool(
         driver,
         r#"
-const host = document.querySelector(
-  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+const diff = document.querySelector(
+  '[data-gtl-diff-document][data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
 return document.querySelectorAll('[role="tab"]').length === 1
   && document.querySelector('[role="tab"][aria-selected="true"]')?.textContent.includes('Live')
-  && host?.dataset.viewIdentity.includes(':split:')
-  && host.shadowRoot?.querySelector('[data-gtl-diff-document] .diff-split') !== null;
+  && diff?.dataset.layout === 'split'
+  && diff.querySelector('[data-layout="split"]') !== null;
 "#,
     )
     .await

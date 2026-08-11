@@ -1,7 +1,7 @@
 //! Formatting verbs.
 //!
 //! `run`/`check` drive the repository's complete formatter matrix (pinned-nightly rustfmt, Taplo,
-//! Dioxus RSX, rumdl, and the Deno frontend formatter) as a [`Step`] plan. The aggregate
+//! Dioxus RSX, and rumdl) as a [`Step`] plan. The aggregate
 //! read-only gate (`check`) and `fix` reuse the same plan through `check_steps` / `write_steps`;
 //! the linters live in the sibling `lint` module.
 
@@ -82,7 +82,6 @@ fn format_steps(mode: FormatMode, verbose: bool) -> Result<Vec<Step>> {
         steps.push(dioxus::format_step());
     }
     steps.extend(markdown::format_step(mode)?);
-    steps.push(frontend_step(mode));
     Ok(steps)
 }
 
@@ -95,15 +94,6 @@ fn taplo_step(mode: FormatMode, verbose: bool) -> Step {
     } else {
         step.with_environment("RUST_LOG", "warn")
     }
-}
-
-/// `deno task --frozen format[:check]` — the framework-free frontend formatter (Oxfmt).
-fn frontend_step(mode: FormatMode) -> Step {
-    let task = match mode {
-        FormatMode::Write => "format",
-        FormatMode::Check => "format:check",
-    };
-    Step::new("frontend-format", "deno", ["task", "--frozen", task])
 }
 
 #[cfg(test)]
@@ -141,17 +131,5 @@ mod tests {
         let step = taplo_step(FormatMode::Write, true);
         assert!(argument_strings(&step).contains(&"--verbose"));
         assert!(step.environment().is_empty());
-    }
-
-    #[test]
-    fn frontend_task_matches_mode() {
-        assert_eq!(
-            argument_strings(&frontend_step(FormatMode::Write)),
-            ["task", "--frozen", "format"]
-        );
-        assert_eq!(
-            argument_strings(&frontend_step(FormatMode::Check)),
-            ["task", "--frozen", "format:check"]
-        );
     }
 }

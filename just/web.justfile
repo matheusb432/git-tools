@@ -10,12 +10,12 @@ _default:
 build:
     cargo run --quiet -p xtask -- web-build
 
-# Regenerate the tracked shell and diff-island stylesheets.
+# Regenerate the tracked shared Tailwind stylesheet.
 [group('web')]
 styles:
     cargo run --quiet -p xtask -- web-styles
 
-# Serve the Dioxus Web app with typed Rust, TypeScript, and stylesheet watchers.
+# Serve the Dioxus Web app with Rust and stylesheet watchers.
 [group('web')]
 serve *args:
     cargo run --quiet -p xtask -- web-serve {{ args }}

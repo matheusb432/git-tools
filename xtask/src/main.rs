@@ -41,8 +41,6 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::WebBuild => verbs::dioxus_web::run(),
         cli::Command::WebServe { arguments } => verbs::dioxus_web::serve(&arguments),
         cli::Command::WebStyles => verbs::dioxus_web::run_styles(),
-        cli::Command::FrontendTest => verbs::frontend::test(),
-        cli::Command::FrontendBench => verbs::frontend::bench(),
         cli::Command::Bench(arguments) => verbs::bench::run(&arguments),
         cli::Command::Fmt(arguments) => verbs::format::run(arguments.verbose),
         cli::Command::FmtCheck(arguments) => verbs::format::check(arguments.verbose),

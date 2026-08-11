@@ -1,4 +1,4 @@
-  /* Theme values: dark (default), light, hearth, mirage, glacier, noir, and
+/* Theme values: dark (default), light, hearth, mirage, glacier, noir, and
      graphite. Selectors below stay unqualified by `:root` (dark's block
      keeps `:root` alongside its own `[data-theme="dark"]`, since dark has no
      other block to fall back to) so a swatch element carrying `data-theme`

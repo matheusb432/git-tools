@@ -61,8 +61,8 @@ impl TauriBridge {
     ) -> Result<(), ClientApiError>
     where
         Event: DeserializeOwned + 'static,
-        Ready: FnMut() + 'static,
-        Handler: FnMut(Event) + 'static,
+        Ready: Fn() + 'static,
+        Handler: Fn(Event) + 'static,
     {
         bindings::listen(event_name, on_ready, on_event).await
     }
@@ -70,12 +70,11 @@ impl TauriBridge {
 
 #[cfg(target_arch = "wasm32")]
 mod bindings {
-    use std::future;
+    use std::{cell::RefCell, collections::HashMap};
 
-    use js_sys::{Function, Promise};
+    use js_sys::Function;
     use serde::Deserialize;
     use wasm_bindgen::{JsCast, closure::Closure, prelude::*};
-    use wasm_bindgen_futures::JsFuture;
 
     use super::{ClientApiError, DeserializeOwned, Serialize, ViewerApiError};
 
@@ -86,14 +85,17 @@ mod bindings {
             js_name = invoke,
             catch
         )]
-        fn tauri_invoke(command: &str, arguments: &JsValue) -> Result<Promise, JsValue>;
+        async fn tauri_invoke(command: &str, arguments: JsValue) -> Result<JsValue, JsValue>;
 
         #[wasm_bindgen(
             js_namespace = ["window", "__TAURI__", "event"],
             js_name = listen,
             catch
         )]
-        fn tauri_listen(event_name: &str, handler: &Function) -> Result<Promise, JsValue>;
+        async fn tauri_listen(
+            event_name: &str,
+            handler: &Closure<dyn Fn(JsValue)>,
+        ) -> Result<JsValue, JsValue>;
     }
 
     #[derive(Deserialize)]
@@ -102,8 +104,13 @@ mod bindings {
     }
 
     struct EventSubscription {
-        _callback: Closure<dyn FnMut(JsValue)>,
+        _callback: Closure<dyn Fn(JsValue)>,
         unlisten: Function,
+    }
+
+    thread_local! {
+        static EVENT_SUBSCRIPTIONS: RefCell<HashMap<&'static str, EventSubscription>> =
+            RefCell::new(HashMap::new());
     }
 
     impl Drop for EventSubscription {
@@ -122,39 +129,43 @@ mod bindings {
     {
         let arguments =
             serde_wasm_bindgen::to_value(arguments).map_err(|_| ClientApiError::Unavailable)?;
-        let promise = tauri_invoke(command, &arguments).map_err(invocation_error)?;
-        let response = JsFuture::from(promise).await.map_err(invocation_error)?;
+        let response = tauri_invoke(command, arguments)
+            .await
+            .map_err(invocation_error)?;
         serde_wasm_bindgen::from_value(response).map_err(|_| ClientApiError::Unavailable)
     }
 
     pub(super) async fn listen<Event, Ready, Handler>(
         event_name: &'static str,
-        mut on_ready: Ready,
-        mut on_event: Handler,
+        on_ready: Ready,
+        on_event: Handler,
     ) -> Result<(), ClientApiError>
     where
         Event: DeserializeOwned + 'static,
-        Ready: FnMut() + 'static,
-        Handler: FnMut(Event) + 'static,
+        Ready: Fn() + 'static,
+        Handler: Fn(Event) + 'static,
     {
         let callback = Closure::new(move |value: JsValue| {
-            if let Ok(event) = serde_wasm_bindgen::from_value::<TauriEvent<Event>>(value) {
+            let event = serde_wasm_bindgen::from_value::<TauriEvent<Event>>(value);
+            if let Ok(event) = event {
                 on_event(event.payload);
             }
         });
-        let promise = tauri_listen(event_name, callback.as_ref().unchecked_ref())
-            .map_err(|_| ClientApiError::Unavailable)?;
-        let unlisten = JsFuture::from(promise)
+        let unlisten = tauri_listen(event_name, &callback)
             .await
             .map_err(|_| ClientApiError::Unavailable)?
             .dyn_into::<Function>()
             .map_err(|_| ClientApiError::Unavailable)?;
-        let _subscription = EventSubscription {
-            _callback: callback,
-            unlisten,
-        };
+        EVENT_SUBSCRIPTIONS.with(|subscriptions| {
+            subscriptions.borrow_mut().insert(
+                event_name,
+                EventSubscription {
+                    _callback: callback,
+                    unlisten,
+                },
+            );
+        });
         on_ready();
-        future::pending::<()>().await;
         Ok(())
     }
 
@@ -187,8 +198,8 @@ mod bindings {
     ) -> Result<(), ClientApiError>
     where
         Event: DeserializeOwned + 'static,
-        Ready: FnMut() + 'static,
-        Handler: FnMut(Event) + 'static,
+        Ready: Fn() + 'static,
+        Handler: Fn(Event) + 'static,
     {
         Err(ClientApiError::Unavailable)
     }

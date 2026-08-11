@@ -145,6 +145,7 @@ fn WorkspaceFileTreeView(
                                 size: ButtonSize::Content,
                                 variant: ButtonVariant::Bare,
                                 attributes: item_attributes,
+                                "data-file-target": anchor_id.clone(),
                                 title: file.path.clone(),
                                 onclick: move |_| onnavigate.call(anchor_id.clone()),
                                 Badge {

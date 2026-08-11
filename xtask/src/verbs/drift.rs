@@ -1,21 +1,19 @@
-//! Rebuild tracked frontend assets, validate their presentation policy, and reject source drift.
+//! Rebuild tracked web assets and reject source drift.
 
 use std::process::Command;
 
 use anyhow::{Result, bail};
 
-use super::{dioxus_web, frontend};
+use super::dioxus_web;
 use crate::project;
 
 /// Tracked generated paths paired with the command that regenerates them.
 const BUNDLES: &[(&str, &str)] = &[
     (
         "crates/gtl-artifacts/src/embedded/generated/",
-        "just cli build",
+        "just web build",
     ),
-    ("crates/gtl-web/assets/generated/", "just web build"),
     ("crates/gtl-web/assets/tailwind.css", "just web styles"),
-    ("crates/gtl-web/assets/diff-island.css", "just web styles"),
 ];
 
 /// Fail if any generated path has checkout changes after a rebuild. `is_clean(path)` reports
@@ -39,14 +37,11 @@ fn git_clean(path: &str) -> bool {
         .is_ok_and(|output| output.status.success() && output.stdout.is_empty())
 }
 
-/// Rebuilds the bundle, validates its presentation policy, then diffs the committed output.
+/// Rebuilds the web assets, then diffs the committed output.
 pub fn run() -> Result<()> {
     let root = project::repository_root();
-    let _lock = project::lock_frontend_assets(&root)?;
-    frontend::build_unlocked(&root)?;
-    dioxus_web::build_styles_unlocked(&root)?;
-    dioxus_web::verify_staged_bundle_if_present()?;
-    super::presentation::run()?;
+    let _lock = project::lock_web_assets(&root)?;
+    dioxus_web::build_release_unlocked(&root)?;
     check_drift(BUNDLES, &git_clean)
 }
 
@@ -66,28 +61,18 @@ mod tests {
             err.contains("crates/gtl-artifacts/src/embedded/generated/ is stale"),
             "{err}"
         );
-        assert!(err.contains("just cli build"), "{err}");
+        assert!(err.contains("just web build"), "{err}");
     }
 
     #[test]
     fn check_drift_covers_the_tracked_dioxus_styles() {
         let err = check_drift(BUNDLES, &|path| {
-            path != "crates/gtl-web/assets/diff-island.css"
+            path != "crates/gtl-web/assets/tailwind.css"
         })
         .unwrap_err()
         .to_string();
 
-        assert!(err.contains("assets/diff-island.css is stale"), "{err}");
+        assert!(err.contains("assets/tailwind.css is stale"), "{err}");
         assert!(err.contains("just web styles"), "{err}");
-    }
-
-    #[test]
-    fn check_drift_covers_the_tracked_diff_island_script() {
-        let error = check_drift(BUNDLES, &|path| path != "crates/gtl-web/assets/generated/")
-            .expect_err("generated diff-island script drift must fail")
-            .to_string();
-
-        assert!(error.contains("assets/generated/ is stale"), "{error}");
-        assert!(error.contains("just web build"), "{error}");
     }
 }

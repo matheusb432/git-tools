@@ -121,10 +121,9 @@ async fn wait_for_ready_snapshot(
                 .execute(
                     r#"
 const active = document.querySelector('[role="tab"][aria-selected="true"]');
-const host = document.querySelector(
-  '#viewer-diff-island[data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
+const diff = document.querySelector(
+  '[data-gtl-diff-document][data-view-state="complete"][data-chunks-complete="true"][aria-busy="false"]'
 );
-const diff = host?.shadowRoot?.querySelector('[data-gtl-diff-document]');
 return document.querySelectorAll('[role="tablist"][aria-label="Open diffs"]').length === 1
   && document.querySelectorAll('[role="tab"]').length === arguments[2]
   && active?.textContent.includes(arguments[0])

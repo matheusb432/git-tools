@@ -19,8 +19,8 @@ where
 }
 
 const VIEWER_RENDER_FAST_CASES: &[BenchmarkCase] = &[
-    BenchmarkCase::ViewerRenderDiffDocumentShell45k,
-    BenchmarkCase::ViewerRenderDiffDocumentShell115Files,
+    BenchmarkCase::ViewerRenderRawArtifact,
+    BenchmarkCase::ViewerRenderRawArtifactSplitFull,
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,23 +91,15 @@ pub enum BenchmarkCase {
     ViewCacheViewReplace45k,
     ViewerRenderRawArtifact,
     ViewerRenderRawArtifactSplitFull,
-    ViewerRenderDiffDocumentShell45k,
-    ViewerRenderMaterializedChunks45k,
-    ViewerRenderDiffDocumentShell115Files,
-    ViewerRenderMaterializedChunks115Files,
 }
 
 impl BenchmarkCase {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 5] = [
         Self::AppStateRecordRender,
         Self::ViewCacheViewWeight45k,
         Self::ViewCacheViewReplace45k,
         Self::ViewerRenderRawArtifact,
         Self::ViewerRenderRawArtifactSplitFull,
-        Self::ViewerRenderDiffDocumentShell45k,
-        Self::ViewerRenderMaterializedChunks45k,
-        Self::ViewerRenderDiffDocumentShell115Files,
-        Self::ViewerRenderMaterializedChunks115Files,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -117,10 +109,6 @@ impl BenchmarkCase {
             Self::ViewCacheViewReplace45k => "view-cache/view-replace/45k",
             Self::ViewerRenderRawArtifact => "raw-artifact",
             Self::ViewerRenderRawArtifactSplitFull => "raw-artifact-split-full",
-            Self::ViewerRenderDiffDocumentShell45k => "diff-document-shell-45k",
-            Self::ViewerRenderMaterializedChunks45k => "materialized-chunks-45k",
-            Self::ViewerRenderDiffDocumentShell115Files => "diff-document-shell-115-files",
-            Self::ViewerRenderMaterializedChunks115Files => "materialized-chunks-115-files",
         }
     }
 
@@ -128,12 +116,9 @@ impl BenchmarkCase {
         match self {
             Self::AppStateRecordRender => Benchmark::AppStateRecordRender,
             Self::ViewCacheViewWeight45k | Self::ViewCacheViewReplace45k => Benchmark::ViewCache,
-            Self::ViewerRenderRawArtifact
-            | Self::ViewerRenderRawArtifactSplitFull
-            | Self::ViewerRenderDiffDocumentShell45k
-            | Self::ViewerRenderMaterializedChunks45k
-            | Self::ViewerRenderDiffDocumentShell115Files
-            | Self::ViewerRenderMaterializedChunks115Files => Benchmark::ViewerRender,
+            Self::ViewerRenderRawArtifact | Self::ViewerRenderRawArtifactSplitFull => {
+                Benchmark::ViewerRender
+            }
         }
     }
 }

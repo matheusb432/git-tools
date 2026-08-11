@@ -12,7 +12,7 @@ struct EdgePolicy {
     reason: &'static str,
 }
 
-const EDGE_POLICIES: [EdgePolicy; 5] = [
+const EDGE_POLICIES: [EdgePolicy; 4] = [
     EdgePolicy {
         from: "gtl-models",
         label: "gtl-models stays pure",
@@ -30,7 +30,6 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
             "xtask",
             "axum",
             "reqwest",
-            "maud",
             "sqlx",
         ],
         forbid_workspace_packages: false,
@@ -51,7 +50,6 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
             "xtask",
             "axum",
             "reqwest",
-            "maud",
             "sqlx",
         ],
         forbid_workspace_packages: false,
@@ -74,18 +72,10 @@ const EDGE_POLICIES: [EdgePolicy; 5] = [
             "xtask",
             "axum",
             "reqwest",
-            "maud",
             "sqlx",
         ],
         forbid_workspace_packages: false,
         reason: "wire DTOs must not depend on product behavior or runtime adapters",
-    },
-    EdgePolicy {
-        from: "gtl-infra",
-        label: "gtl-infra owns no templates",
-        forbidden: &["maud"],
-        forbid_workspace_packages: false,
-        reason: "presentation belongs to crates/gtl-artifacts, not the adapter layer",
     },
     EdgePolicy {
         from: "gtl-parser",
@@ -215,7 +205,7 @@ mod tests {
 
         assert!(dependency_is_forbidden(
             models_policy,
-            "maud",
+            "reqwest",
             &BTreeSet::new()
         ));
     }

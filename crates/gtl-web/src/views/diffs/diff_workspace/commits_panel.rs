@@ -1,17 +1,21 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
-use gtl_contracts::viewer::{ViewerActiveView, ViewerCommitSelection};
+use gtl_contracts::viewer::{ViewerActiveView, ViewerCommitSelection, ViewerCommitSummary};
 use lucide_dioxus::CircleDot;
 
-use crate::shared::ui::{
-    Badge, BadgeVariant, Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant, ScrollArea,
+use crate::shared::{
+    browser,
+    ui::{
+        Badge, BadgeVariant, Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant,
+        ScrollArea,
+    },
 };
 
 #[component]
 pub(super) fn CommitsPanel(
     view: ViewerActiveView,
-    onselect: EventHandler<String>,
-    onclear: EventHandler<()>,
+    onselect: Option<EventHandler<String>>,
+    onclear: Option<EventHandler<()>>,
 ) -> Element {
     let selected_sha = match &view.commit_selection {
         ViewerCommitSelection::None => None,
@@ -38,12 +42,16 @@ pub(super) fn CommitsPanel(
                         "hash = copy · hover = notes"
                     }
                 }
-                if selected_sha.is_some() {
+                if selected_sha.is_some() && onclear.is_some() {
                     Button {
                         size: ButtonSize::Small,
                         variant: ButtonVariant::Ghost,
                         state: if selection_pending { ButtonState::Disabled } else { ButtonState::Enabled },
-                        onclick: move |_| onclear.call(()),
+                        onclick: move |_| {
+                            if let Some(onclear) = onclear {
+                                onclear.call(());
+                            }
+                        },
                         "Range"
                     }
                 }
@@ -64,40 +72,24 @@ pub(super) fn CommitsPanel(
                 {
                     let sha = commit.sha.clone();
                     let selected = selected_sha == Some(commit.sha.as_str());
-                    let item_attributes = commit_item_attributes(selected);
+                    let item_attributes = commit_item_attributes(selected, onselect.is_some());
+                    let title = (!commit.body.is_empty()).then(|| commit.body.clone());
                     rsx! {
-                        Button {
-                            layout: ButtonLayout::Block,
-                            size: ButtonSize::Content,
-                            variant: ButtonVariant::Bare,
-                            state: if selection_pending { ButtonState::Disabled } else { ButtonState::Enabled },
-                            attributes: item_attributes,
-                            onclick: move |_| onselect.call(sha.clone()),
-                            span {
-                                class: "pointer-events-none absolute top-2 -left-4 flex size-5 items-center justify-center bg-surface",
-                                class: if selected { "text-acc" } else { "text-line-2" },
-                                aria_hidden: "true",
-                                CircleDot { size: 10 }
+                        if let Some(onselect) = onselect {
+                            Button {
+                                layout: ButtonLayout::Block,
+                                size: ButtonSize::Content,
+                                variant: ButtonVariant::Bare,
+                                state: if selection_pending { ButtonState::Disabled } else { ButtonState::Enabled },
+                                attributes: item_attributes,
+                                title: title.clone(),
+                                onclick: move |_| onselect.call(sha.clone()),
+                                CommitCardContent { commit: commit.clone(), selected, copy_hash: false }
                             }
-                            span { class: "mb-1 flex min-w-0 items-center gap-1.5",
-                                code {
-                                    class: "rounded-sm border px-1.5 py-0.5 text-xs",
-                                    class: if selected { "border-acc bg-acc text-bg" } else { "border-acc-line bg-acc-soft text-acc" },
-                                    "{commit.abbreviated_sha}"
-                                }
-                                if commit.is_merge {
-                                    Badge { variant: BadgeVariant::Neutral, "merge" }
-                                }
-                                if !commit.date.is_empty() {
-                                    time {
-                                        class: "ml-auto truncate text-ink-3 tabular-nums",
-                                        datetime: commit.iso.clone(),
-                                        title: commit.iso.clone(),
-                                        "{commit.date}"
-                                    }
-                                }
+                        } else {
+                            article { title: title.clone(), ..item_attributes,
+                                CommitCardContent { commit: commit.clone(), selected: false, copy_hash: true }
                             }
-                            span { class: "block wrap-anywhere leading-normal text-ink-2", "{commit.subject}" }
                         }
                     }
                 }
@@ -106,18 +98,72 @@ pub(super) fn CommitsPanel(
     }
 }
 
-fn commit_item_attributes(selected: bool) -> Vec<Attribute> {
+#[component]
+fn CommitCardContent(commit: ViewerCommitSummary, selected: bool, copy_hash: bool) -> Element {
+    let sha = commit.sha.clone();
+    rsx! {
+        span {
+            class: "pointer-events-none absolute top-2 -left-4 flex size-5 items-center justify-center bg-surface",
+            class: if selected { "text-acc" } else { "text-line-2" },
+            aria_hidden: "true",
+            CircleDot { size: 10 }
+        }
+        span { class: "mb-1 flex min-w-0 items-center gap-1.5",
+            if copy_hash {
+                Button {
+                    class: "rounded-sm border border-acc-line bg-acc-soft px-1.5 py-0.5 text-xs text-acc",
+                    size: ButtonSize::Content,
+                    variant: ButtonVariant::Bare,
+                    title: "Copy hash",
+                    onclick: move |_| {
+                        let sha = sha.clone();
+                        spawn(async move {
+                            browser::copy_text(&sha).await;
+                        });
+                    },
+                    code { "{commit.abbreviated_sha}" }
+                }
+            } else {
+                code {
+                    class: "rounded-sm border px-1.5 py-0.5 text-xs",
+                    class: if selected { "border-acc bg-acc text-bg" } else { "border-acc-line bg-acc-soft text-acc" },
+                    "{commit.abbreviated_sha}"
+                }
+            }
+            if commit.is_merge {
+                Badge { variant: BadgeVariant::Neutral, "merge" }
+            }
+            if !commit.date.is_empty() {
+                time {
+                    class: "ml-auto truncate text-ink-3 tabular-nums",
+                    datetime: commit.iso.clone(),
+                    title: commit.iso.clone(),
+                    "{commit.date}"
+                }
+            }
+        }
+        span { class: "block wrap-anywhere leading-normal text-ink-2", "{commit.subject}" }
+    }
+}
+
+fn commit_item_attributes(selected: bool, interactive: bool) -> Vec<Attribute> {
     merge_attributes(vec![
-        attributes!(button {
+        attributes!(div {
             class: "relative ml-1.5 w-[calc(100%_-_0.375rem)] rounded-r-sm border-0 border-l-2 py-1.5 pr-2 pl-6 text-left focus-visible:outline-offset-1",
-            aria_pressed: selected.to_string(),
         }),
+        interactive
+            .then(|| {
+                attributes!(button {
+                    aria_pressed: selected.to_string(),
+                })
+            })
+            .unwrap_or_default(),
         if selected {
-            attributes!(button {
+            attributes!(div {
                 class: "border-acc bg-acc-soft"
             })
         } else {
-            attributes!(button {
+            attributes!(div {
                 class: "border-line-2 bg-transparent hover:border-l-acc-line hover:bg-surface-2 active:bg-acc-soft",
             })
         },

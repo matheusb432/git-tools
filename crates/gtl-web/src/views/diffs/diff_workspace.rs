@@ -1,238 +1,53 @@
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{
-    SetViewerPreference, ViewerActiveState, ViewerActiveView, ViewerPreferences, ViewerShell,
-    ViewerTabKind,
-};
-use lucide_dioxus::{FileDiff, LoaderCircle, RefreshCw};
+use gtl_contracts::viewer::ViewerActiveView;
+#[cfg(feature = "artifact")]
+use lucide_dioxus::{History, Menu, SlidersHorizontal};
 
 use self::{
-    commits_panel::CommitsPanel,
-    display_controls::{DisplayControls, MobilePanelButton},
-    files_panel::FilesPanel,
-    keybar::Keybar,
-    titlebar::ViewTitlebar,
+    commits_panel::CommitsPanel, files_panel::FilesPanel, keybar::Keybar, titlebar::ViewTitlebar,
 };
-use crate::{
-    app::application_layout::{ViewerContext, ViewerShellLoad},
-    entities::diffs::{ClientDiffSource, DiffViewerApi},
-    shared::{
-        bridge::ClientApiError,
-        browser,
-        ui::{
-            AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, FloatingNotice,
-            FloatingNoticeState, Popover, Skeleton,
-        },
-    },
-    views::diffs::ClientDiffDocument,
+#[cfg(feature = "artifact")]
+use crate::shared::{
+    browser,
+    ui::{Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant, Popover},
 };
+use crate::{entities::diffs::ClientDiffSource, views::diffs::ClientDiffDocument};
 
 mod commits_panel;
+#[cfg(feature = "desktop")]
+mod desktop;
+#[cfg(feature = "desktop")]
 mod display_controls;
 mod files_panel;
 mod keybar;
 mod titlebar;
 
+#[cfg(feature = "desktop")]
+pub(crate) use desktop::DiffWorkspaceView;
+
+#[cfg(feature = "artifact")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MobilePanel {
-    Display,
+enum ArtifactMobilePanel {
     Files,
     Commits,
+    View,
 }
 
+#[cfg(feature = "artifact")]
 #[component]
-pub(crate) fn DiffWorkspaceView() -> Element {
-    let viewer = use_context::<ViewerContext>();
-    let shell = viewer.read();
-
-    use_effect(move || {
-        browser::focus_element("workspace-heading".into());
-    });
-
-    rsx! {
-        document::Title { "Viewer - git-tools" }
-        main { class: "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden bg-bg",
-            h1 { id: "workspace-heading", class: "sr-only", tabindex: "-1", "Diff viewer" }
-            match shell {
-                ViewerShellLoad::Loading => rsx! {
-                    WorkspaceLoading {}
-                },
-                ViewerShellLoad::Error(error) => {
-                    let message = error.message();
-                    rsx! {
-                        section { class: "grid h-full place-content-center px-5 text-center", role: "alert",
-                            p { class: "font-semibold text-ink", "Viewer state is unavailable" }
-                            p { class: "mt-1 max-w-md leading-5 text-ink-2", "{message}" }
-                            Button {
-                                class: "mx-auto mt-4",
-                                variant: ButtonVariant::Outline,
-                                onclick: move |_| viewer.reconnect(),
-                                "Try again"
-                            }
-                        }
-                    }
-                }
-                ViewerShellLoad::Ready(shell) => rsx! {
-                    WorkspaceShell { shell }
-                },
-            }
-        }
-    }
-}
-
-#[component]
-fn WorkspaceLoading() -> Element {
-    rsx! {
-        div {
-            class: "grid h-full min-h-0 grid-rows-[2.75rem_3rem_minmax(0,1fr)]",
-            role: "status",
-            aria_label: "Loading viewer",
-            div { class: "flex items-center gap-2 border-b border-line bg-surface px-3",
-                Skeleton { class: "h-7 w-32" }
-                Skeleton { class: "h-7 w-40" }
-            }
-            div { class: "flex items-center gap-2 border-b border-line bg-surface px-3",
-                Skeleton { class: "h-7 w-52" }
-                Skeleton { class: "ml-auto h-7 w-28" }
-            }
-            div { class: "grid min-h-0 grid-cols-1 gap-px bg-line xl:grid-cols-[15rem_minmax(0,1fr)_16rem]",
-                Skeleton { class: "hidden h-full rounded-none xl:block" }
-                Skeleton { class: "h-full rounded-none" }
-                Skeleton { class: "hidden h-full rounded-none xl:block" }
-            }
-            span { class: "sr-only", "Loading viewer" }
-        }
-    }
-}
-
-#[component]
-fn WorkspaceShell(shell: ViewerShell) -> Element {
-    rsx! {
-        section {
-            id: "viewer-active-view",
-            class: "flex h-full min-h-0 flex-col overflow-hidden",
-            role: "tabpanel",
-            aria_label: "Active diff",
-            div { class: "min-h-0 flex-1 overflow-hidden",
-                match shell.active {
-                    ViewerActiveState::Empty => rsx! {
-                        EmptyWorkspace {}
-                    },
-                    ViewerActiveState::Pending { .. } => rsx! {
-                        PendingWorkspace {}
-                    },
-                    ViewerActiveState::Broken { code, message, .. } => rsx! {
-                        WorkspaceFailure { title: format!("Render stopped ({code})"), message }
-                    },
-                    ViewerActiveState::Error { message, .. } => rsx! {
-                        WorkspaceFailure { title: "Render failed".to_owned(), message }
-                    },
-                    ViewerActiveState::Ready { view } => {
-                        let is_live = shell
-                            .tabs
-                            .iter()
-                            .any(|tab| {
-                                tab.id == view.identity.tab_id && tab.kind == ViewerTabKind::Live
-                            });
-                        rsx! {
-                            ReadyWorkspace { view: *view, preferences: shell.preferences, is_live }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn EmptyWorkspace() -> Element {
-    rsx! {
-        section { class: "grid h-full place-content-center px-5 text-center",
-            span { class: "mx-auto text-acc", aria_hidden: "true",
-                FileDiff { size: 22 }
-            }
-            h2 { class: "mt-3 font-semibold text-ink", "No diff is open" }
-            p { class: "mt-1 max-w-md leading-5 text-ink-2",
-                "Run a git-tools diff command to open a snapshot or live view."
-            }
-        }
-    }
-}
-
-#[component]
-fn PendingWorkspace() -> Element {
-    rsx! {
-        section {
-            class: "grid h-full place-content-center px-5 text-center",
-            role: "status",
-            span {
-                class: "mx-auto animate-spin text-acc motion-reduce:animate-none",
-                aria_hidden: "true",
-                LoaderCircle { size: 20 }
-            }
-            h2 { class: "mt-3 font-semibold text-ink", "Rendering diff" }
-            p { class: "mt-1 text-ink-2", "The viewer will update when the render is ready." }
-        }
-    }
-}
-
-#[component]
-fn WorkspaceFailure(title: String, message: String) -> Element {
-    rsx! {
-        section {
-            class: "grid h-full place-content-center px-5 text-center",
-            role: "alert",
-            h2 { class: "font-semibold text-ink", "{title}" }
-            p { class: "mt-1 max-w-md leading-5 text-ink-2", "{message}" }
-        }
-    }
-}
-
-#[component]
-fn ReadyWorkspace(
-    view: ViewerActiveView,
-    preferences: ViewerPreferences,
-    is_live: bool,
-) -> Element {
-    let viewer = use_context::<ViewerContext>();
-    let mut action_error = use_signal(|| None::<ClientApiError>);
-    let mut delete_open = use_signal(|| false);
-    let mut delete_pending = use_signal(|| false);
-    let mut delete_trigger_id = use_signal(|| "delete-live-view-desktop".to_owned());
-    let mut mobile_panel = use_signal(|| None::<MobilePanel>);
+pub(crate) fn ArtifactDiffWorkspace(view: ViewerActiveView) -> Element {
+    let mut mobile_panel = use_signal(|| None::<ArtifactMobilePanel>);
     let mut file_filter = use_signal(String::new);
     let mut files_folded = use_signal(|| None::<bool>);
     let mut copy_context_enabled = use_signal(|| true);
     let mut flashing_file = use_signal(|| None::<String>);
     let tab_id = view.identity.tab_id;
-    let identity = view.identity;
+    let files_trigger = format!("artifact-files-trigger-{tab_id}");
+    let commits_trigger = format!("artifact-commits-trigger-{tab_id}");
+    let view_trigger = format!("artifact-view-trigger-{tab_id}");
 
-    let onpreference = move |preference: SetViewerPreference| {
-        action_error.set(None);
-        viewer.set_preference(preference);
-    };
-    let onrefresh = move |_| {
-        action_error.set(None);
-        viewer.refresh_tab(tab_id);
-    };
-    let onselect_commit = move |sha: String| {
-        action_error.set(None);
-        spawn(async move {
-            match DiffViewerApi::select_commit(tab_id, sha).await {
-                Ok(shell) => viewer.replace_shell(shell),
-                Err(error) => action_error.set(Some(error)),
-            }
-        });
-    };
-    let onclear_commit = move |()| {
-        action_error.set(None);
-        spawn(async move {
-            match DiffViewerApi::clear_commit_selection(tab_id).await {
-                Ok(shell) => viewer.replace_shell(shell),
-                Err(error) => action_error.set(Some(error)),
-            }
-        });
-    };
     let onnavigate = move |anchor_id: String| {
+        mobile_panel.set(None);
         browser::scroll_to_file(anchor_id.clone());
         flashing_file.set(Some(anchor_id.clone()));
         spawn(async move {
@@ -242,163 +57,56 @@ fn ReadyWorkspace(
             }
         });
     };
-    let onopen = move |path: String| {
-        action_error.set(None);
-        spawn(async move {
-            if let Err(error) = DiffViewerApi::open_diff_file(identity, path).await {
-                action_error.set(Some(error));
-            }
-        });
+    let mobile_navigation = rsx! {
+        ArtifactNavigationButton {
+            id: files_trigger.clone(),
+            label: "Files",
+            aria_label: "Changed files",
+            panel: ArtifactMobilePanel::Files,
+            count: view.files.len(),
+            enabled: !view.files.is_empty(),
+            onclick: move |_| mobile_panel.set(Some(ArtifactMobilePanel::Files)),
+        }
+        ArtifactNavigationButton {
+            id: commits_trigger.clone(),
+            label: "History",
+            aria_label: "Commits in range",
+            panel: ArtifactMobilePanel::Commits,
+            count: view.commits.len(),
+            enabled: !view.commits.is_empty(),
+            onclick: move |_| mobile_panel.set(Some(ArtifactMobilePanel::Commits)),
+        }
+        ArtifactNavigationButton {
+            id: view_trigger.clone(),
+            label: "View",
+            aria_label: "View settings",
+            panel: ArtifactMobilePanel::View,
+            enabled: true,
+            onclick: move |_| mobile_panel.set(Some(ArtifactMobilePanel::View)),
+        }
     };
-    let footer = view.footer.clone();
 
     rsx! {
-        section { class: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
-            div { class: "border-b border-line bg-surface px-3 py-2 text-ink-2",
-                div { class: "hidden min-w-0 items-center justify-between gap-3 expanded:flex",
-                    DisplayControls {
-                        preferences,
-                        pending: viewer.render_command_pending(),
-                        is_live,
-                        delete_trigger_id: "delete-live-view-desktop",
-                        onpreference,
-                        onrefresh,
-                        ondelete: move |_| {
-                            delete_trigger_id.set("delete-live-view-desktop".to_owned());
-                            delete_open.set(true);
-                        },
-                    }
-                }
-                div { class: "flex items-center gap-2 expanded:hidden",
-                    MobilePanelButton {
-                        id: "mobile-display-trigger",
-                        label: "Display",
-                        icon: MobilePanel::Display,
-                        onclick: move |_| mobile_panel.set(Some(MobilePanel::Display)),
-                    }
-                    MobilePanelButton {
-                        id: "mobile-files-trigger",
-                        label: "Files",
-                        icon: MobilePanel::Files,
-                        onclick: move |_| mobile_panel.set(Some(MobilePanel::Files)),
-                    }
-                    MobilePanelButton {
-                        id: "mobile-commits-trigger",
-                        label: "Commits",
-                        icon: MobilePanel::Commits,
-                        onclick: move |_| mobile_panel.set(Some(MobilePanel::Commits)),
-                    }
-                    Button {
-                        class: "ml-auto",
-                        size: ButtonSize::IconSmall,
-                        variant: ButtonVariant::Ghost,
-                        aria_label: "Refresh diff",
-                        title: "Refresh diff",
-                        onclick: onrefresh,
-                        if viewer.render_command_pending() {
-                            span {
-                                class: "animate-spin motion-reduce:animate-none",
-                                aria_hidden: "true",
-                                LoaderCircle { size: 14 }
-                            }
-                        } else {
-                            span { aria_hidden: "true",
-                                RefreshCw { size: 14 }
-                            }
-                        }
-                    }
-                }
-                if viewer.render_command_pending() {
-                    p { class: "sr-only", role: "status", "Applying the latest viewer update" }
-                }
+        section { class: "h-full min-h-0 overflow-hidden",
+            DiffWorkspaceDocument {
+                source: ClientDiffSource::Artifact,
+                view: view.clone(),
+                files_folded: files_folded(),
+                copy_context_enabled: copy_context_enabled(),
+                file_filter: file_filter(),
+                flashing_file: flashing_file(),
+                onfold: move |folded| files_folded.set(Some(folded)),
+                oncontext: move |enabled| copy_context_enabled.set(enabled),
+                onfilter: move |value| file_filter.set(value),
+                onnavigate,
+                mobile_navigation,
             }
-
-            div { class: "grid min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden workspace:grid-cols-[220px_minmax(0,1fr)_210px] expanded:grid-cols-[262px_minmax(0,1fr)_252px] wide-screen:grid-cols-[320px_minmax(0,1fr)_304px]",
-                ViewTitlebar {
-                    view: view.clone(),
-                    files_folded: files_folded().unwrap_or(false),
-                    copy_context_enabled: copy_context_enabled(),
-                    onfold: move |folded| files_folded.set(Some(folded)),
-                    oncontext: move |enabled| copy_context_enabled.set(enabled),
-                }
-                aside {
-                    class: "col-start-1 row-start-2 hidden min-h-0 overflow-hidden border-r border-line bg-surface workspace:block",
-                    aria_label: "Changed files",
-                    FilesPanel {
-                        view: view.clone(),
-                        filter: file_filter(),
-                        onfilter: move |value| file_filter.set(value),
-                        onnavigate,
-                    }
-                }
-                ClientDiffDocument {
-                    source: ClientDiffSource::Desktop,
-                    view: view.clone(),
-                    folded: files_folded(),
-                    copy_context_enabled: copy_context_enabled(),
-                    flashing_file: flashing_file(),
-                    onopen,
-                }
-                aside {
-                    class: "col-start-3 row-start-2 hidden min-h-0 overflow-hidden border-l border-line bg-surface workspace:block",
-                    aria_label: "Commits",
-                    CommitsPanel {
-                        view: view.clone(),
-                        onselect: onselect_commit,
-                        onclear: onclear_commit,
-                    }
-                }
-                Keybar { footer }
-            }
-        }
-
-        if let Some(error) = action_error().or_else(|| viewer.render_command_error()) {
-            FloatingNotice { state: FloatingNoticeState::Error, role: "alert", "{error.message()}" }
         }
 
         Popover {
-            id: "mobile-display-panel",
-            trigger_id: "mobile-display-trigger",
-            open: mobile_panel() == Some(MobilePanel::Display),
-            title: "Display controls",
-            onclose: move |()| mobile_panel.set(None),
-            div { class: "grid gap-3",
-                DisplayControls {
-                    preferences,
-                    pending: viewer.render_command_pending(),
-                    is_live,
-                    delete_trigger_id: "delete-live-view-mobile",
-                    onpreference,
-                    onrefresh,
-                    ondelete: move |_| {
-                        mobile_panel.set(None);
-                        delete_trigger_id.set("mobile-display-trigger".to_owned());
-                        delete_open.set(true);
-                    },
-                }
-                div { class: "grid grid-cols-2 gap-2",
-                    Button {
-                        variant: ButtonVariant::Outline,
-                        onclick: move |_| files_folded.set(Some(!files_folded().unwrap_or(false))),
-                        if files_folded().unwrap_or(false) {
-                            "Expand all"
-                        } else {
-                            "Collapse all"
-                        }
-                    }
-                    Button {
-                        variant: if copy_context_enabled() { ButtonVariant::Pressed } else { ButtonVariant::Outline },
-                        aria_pressed: copy_context_enabled().to_string(),
-                        onclick: move |_| copy_context_enabled.set(!copy_context_enabled()),
-                        "+ context"
-                    }
-                }
-            }
-        }
-        Popover {
-            id: "mobile-files-panel",
-            trigger_id: "mobile-files-trigger",
-            open: mobile_panel() == Some(MobilePanel::Files),
+            id: format!("artifact-files-panel-{tab_id}"),
+            trigger_id: files_trigger,
+            open: mobile_panel() == Some(ArtifactMobilePanel::Files),
             title: "Changed files",
             onclose: move |()| mobile_panel.set(None),
             FilesPanel {
@@ -409,52 +117,153 @@ fn ReadyWorkspace(
             }
         }
         Popover {
-            id: "mobile-commits-panel",
-            trigger_id: "mobile-commits-trigger",
-            open: mobile_panel() == Some(MobilePanel::Commits),
+            id: format!("artifact-commits-panel-{tab_id}"),
+            trigger_id: commits_trigger,
+            open: mobile_panel() == Some(ArtifactMobilePanel::Commits),
             title: "Commits",
             onclose: move |()| mobile_panel.set(None),
-            CommitsPanel {
-                view: view.clone(),
-                onselect: onselect_commit,
-                onclear: onclear_commit,
-            }
+            CommitsPanel { view: view.clone() }
         }
-        AlertDialog {
-            id: "delete-live-view-dialog",
-            trigger_id: delete_trigger_id(),
-            open: delete_open(),
-            title: "Delete live view",
-            description: "This removes the saved live view and closes its tab. Render history remains available.",
-            confirm_label: "Delete live view",
-            confirm_state: if delete_pending() { ButtonState::Loading } else { ButtonState::Enabled },
-            cancel_disabled: delete_pending(),
-            oncancel: move |()| {
-                if !delete_pending() {
-                    delete_open.set(false);
-                }
-            },
-            onconfirm: move |()| {
-                if delete_pending() {
-                    return;
-                }
-                delete_pending.set(true);
-                action_error.set(None);
-                spawn(async move {
-                    match DiffViewerApi::delete_live_tab(tab_id).await {
-                        Ok(shell) => {
-                            delete_open.set(false);
-                            viewer.replace_shell(shell);
-                        }
-                        Err(error) => action_error.set(Some(error)),
+        Popover {
+            id: format!("artifact-view-panel-{tab_id}"),
+            trigger_id: view_trigger,
+            open: mobile_panel() == Some(ArtifactMobilePanel::View),
+            title: "View settings",
+            onclose: move |()| mobile_panel.set(None),
+            div { class: "grid grid-cols-2 gap-2",
+                Button {
+                    variant: ButtonVariant::Outline,
+                    onclick: move |_| files_folded.set(Some(!files_folded().unwrap_or(false))),
+                    if files_folded().unwrap_or(false) {
+                        "Expand all"
+                    } else {
+                        "Collapse all"
                     }
-                    delete_pending.set(false);
-                });
-            },
+                }
+                Button {
+                    variant: if copy_context_enabled() { ButtonVariant::Pressed } else { ButtonVariant::Outline },
+                    aria_pressed: copy_context_enabled().to_string(),
+                    onclick: move |_| copy_context_enabled.set(!copy_context_enabled()),
+                    "+ context"
+                }
+            }
         }
     }
 }
 
-pub(super) const fn plural_suffix(count: usize) -> &'static str {
+#[cfg(feature = "artifact")]
+#[component]
+fn ArtifactNavigationButton(
+    id: String,
+    label: String,
+    aria_label: String,
+    panel: ArtifactMobilePanel,
+    count: Option<usize>,
+    enabled: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    rsx! {
+        Button {
+            id,
+            class: "relative hidden min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 border-0 bg-transparent px-1 py-1 text-[10px] leading-none text-ink-2 hover:bg-surface-2 hover:text-ink focus-visible:outline-offset-[-2px] disabled:cursor-default disabled:opacity-35 mobile:flex",
+            layout: ButtonLayout::Content,
+            size: ButtonSize::Content,
+            variant: ButtonVariant::Bare,
+            state: if enabled { ButtonState::Enabled } else { ButtonState::Disabled },
+            aria_label,
+            onclick,
+            span { class: "[&_svg]:size-5", aria_hidden: "true",
+                match panel {
+                    ArtifactMobilePanel::Files => rsx! {
+                        Menu { size: 20 }
+                    },
+                    ArtifactMobilePanel::Commits => rsx! {
+                        History { size: 20 }
+                    },
+                    ArtifactMobilePanel::View => rsx! {
+                        SlidersHorizontal { size: 20 }
+                    },
+                }
+            }
+            span { "{label}" }
+            if let Some(count) = count {
+                span { class: "absolute top-1 right-1 min-w-4 rounded-full bg-acc-soft px-1 py-0.5 text-center text-[9px] font-semibold leading-none text-acc",
+                    "{count}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn DiffWorkspaceDocument(
+    source: ClientDiffSource,
+    view: ViewerActiveView,
+    files_folded: Option<bool>,
+    copy_context_enabled: bool,
+    file_filter: String,
+    flashing_file: Option<String>,
+    onfold: EventHandler<bool>,
+    oncontext: EventHandler<bool>,
+    onfilter: EventHandler<String>,
+    onnavigate: EventHandler<String>,
+    mobile_navigation: Option<Element>,
+    onselect_commit: Option<EventHandler<String>>,
+    onclear_commit: Option<EventHandler<()>>,
+    onopen: Option<EventHandler<String>>,
+) -> Element {
+    let footer = view.footer.clone();
+
+    rsx! {
+        div { class: "grid h-full min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden workspace:grid-cols-[220px_minmax(0,1fr)_210px] expanded:grid-cols-[262px_minmax(0,1fr)_252px] wide-screen:grid-cols-[320px_minmax(0,1fr)_304px]",
+            ViewTitlebar {
+                view: view.clone(),
+                files_folded: files_folded.unwrap_or(false),
+                copy_context_enabled,
+                mobile_navigation,
+                onfold,
+                oncontext,
+            }
+            aside {
+                class: "col-start-1 row-start-2 hidden min-h-0 overflow-hidden border-r border-line bg-surface workspace:block",
+                aria_label: "Changed files",
+                FilesPanel {
+                    view: view.clone(),
+                    filter: file_filter,
+                    onfilter,
+                    onnavigate,
+                }
+            }
+            ClientDiffDocument {
+                source,
+                view: view.clone(),
+                folded: files_folded,
+                copy_context_enabled,
+                flashing_file,
+                onopen,
+            }
+            aside {
+                class: "col-start-3 row-start-2 hidden min-h-0 overflow-hidden border-l border-line bg-surface workspace:block",
+                aria_label: "Commits",
+                CommitsPanel {
+                    view,
+                    onselect: onselect_commit,
+                    onclear: onclear_commit,
+                }
+            }
+            Keybar { footer }
+        }
+    }
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MobilePanel {
+    Display,
+    Files,
+    Commits,
+}
+
+const fn plural_suffix(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
 }

@@ -1,5 +1,5 @@
 @import "tailwindcss" source(none);
-@import "../../../../../gtl-artifacts/src/styles/tokens.css";
+@import "./tokens.css";
 @source "../../../**/*.rs";
 
 @custom-variant mobile (@media (max-width: 760px));

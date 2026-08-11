@@ -8,6 +8,8 @@ const BUTTON_CLASSES: &str = "cursor-pointer items-center whitespace-nowrap roun
 pub(crate) enum ButtonLayout {
     #[default]
     Inline,
+    #[cfg(feature = "artifact")]
+    Content,
     FullWidthStart,
     Block,
 }
@@ -16,6 +18,8 @@ impl ButtonLayout {
     const fn classes(self) -> &'static str {
         match self {
             Self::Inline => "inline-flex shrink-0 justify-center",
+            #[cfg(feature = "artifact")]
+            Self::Content => "",
             Self::FullWidthStart => "flex w-full justify-start",
             Self::Block => "block",
         }
@@ -76,8 +80,10 @@ pub(crate) enum ButtonSize {
     Small,
     #[default]
     Medium,
+    #[cfg(feature = "desktop")]
     IconCompact,
     IconSmall,
+    #[cfg(feature = "desktop")]
     IconMedium,
 }
 
@@ -89,8 +95,10 @@ impl ButtonSize {
             Self::Inline => "min-h-5 gap-1 px-1.5 py-px text-[11px]",
             Self::Small => "min-h-7 gap-1.5 px-2",
             Self::Medium => "h-9 gap-2 px-4",
+            #[cfg(feature = "desktop")]
             Self::IconCompact => "size-6 p-0",
             Self::IconSmall => "size-8 p-0",
+            #[cfg(feature = "desktop")]
             Self::IconMedium => "size-9 p-0",
         }
     }
@@ -101,16 +109,27 @@ pub(crate) enum ButtonState {
     #[default]
     Enabled,
     Disabled,
+    #[cfg(feature = "desktop")]
     Loading,
 }
 
 impl ButtonState {
     const fn is_disabled(self) -> bool {
-        matches!(self, Self::Disabled | Self::Loading)
+        match self {
+            Self::Enabled => false,
+            Self::Disabled => true,
+            #[cfg(feature = "desktop")]
+            Self::Loading => true,
+        }
     }
 
     const fn is_loading(self) -> bool {
-        matches!(self, Self::Loading)
+        match self {
+            Self::Enabled => false,
+            Self::Disabled => false,
+            #[cfg(feature = "desktop")]
+            Self::Loading => true,
+        }
     }
 }
 

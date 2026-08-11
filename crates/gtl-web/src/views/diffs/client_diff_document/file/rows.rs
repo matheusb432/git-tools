@@ -36,10 +36,8 @@ fn DiffFileRows(
     file_index: usize,
     onretry: EventHandler<()>,
 ) -> Element {
-    let density_label = match density {
-        ViewerDiffDensity::Compact => "compact",
-        ViewerDiffDensity::Full => "full",
-    };
+    let density_label = density.as_str();
+    let layout_label = layout.as_str();
     let style = (layout == ViewerDiffLayout::Unified).then(|| {
         format!(
             "--unified-line-number-width:calc({}ch + 8px)",
@@ -52,7 +50,9 @@ fn DiffFileRows(
             id: "viewer-diff-{file_index}",
             class: "overflow-x-hidden text-[14px] leading-[22px]",
             style,
-            aria_label: "{density_label} diff rows",
+            aria_label: "{layout_label} {density_label} diff rows",
+            "data-layout": layout_label,
+            "data-density": density_label,
             match &file.rows {
                 ClientDiffRows::Unified(batches) => rsx! {
                     for (batch_index, batch) in batches.iter().enumerate() {

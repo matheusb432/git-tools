@@ -179,7 +179,7 @@ pub fn get_button(page: &Page, name: &str) -> Locator {
 }
 
 pub async fn expect_every_file_is_collapsed(page: &Page) -> Result<()> {
-    expect(page.locator("details.file[open]"))
+    expect(page.locator("details[data-gtl-diff-file][open]"))
         .to_have_count(0)
         .await
         .context("wait for every file section to collapse")

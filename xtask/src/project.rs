@@ -26,12 +26,12 @@ pub(crate) fn cargo_target_directory(root: &Path) -> Result<PathBuf> {
     Ok(metadata.target_directory.into_std_path_buf())
 }
 
-pub(crate) struct FrontendAssetLock(File);
+pub(crate) struct WebAssetLock(File);
 
-impl FrontendAssetLock {
+impl WebAssetLock {
     fn acquire_at(target: &Path) -> Result<Self> {
-        let path = target.join("xtask/frontend-assets.lock");
-        fs::create_dir_all(path.parent().context("frontend asset lock parent")?)
+        let path = target.join("xtask/web-assets.lock");
+        fs::create_dir_all(path.parent().context("web asset lock parent")?)
             .with_context(|| format!("create lock parent for {}", path.display()))?;
         let file = OpenOptions::new()
             .create(true)
@@ -39,23 +39,23 @@ impl FrontendAssetLock {
             .read(true)
             .write(true)
             .open(&path)
-            .with_context(|| format!("open frontend asset lock {}", path.display()))?;
+            .with_context(|| format!("open web asset lock {}", path.display()))?;
         file.lock()
-            .with_context(|| format!("acquire frontend asset lock {}", path.display()))?;
+            .with_context(|| format!("acquire web asset lock {}", path.display()))?;
         Ok(Self(file))
     }
 }
 
-impl Drop for FrontendAssetLock {
+impl Drop for WebAssetLock {
     fn drop(&mut self) {
         if let Err(error) = self.0.unlock() {
-            eprintln!("failed to release frontend asset lock: {error}");
+            eprintln!("failed to release web asset lock: {error}");
         }
     }
 }
 
-pub(crate) fn lock_frontend_assets(root: &Path) -> Result<FrontendAssetLock> {
-    FrontendAssetLock::acquire_at(&cargo_target_directory(root)?)
+pub(crate) fn lock_web_assets(root: &Path) -> Result<WebAssetLock> {
+    WebAssetLock::acquire_at(&cargo_target_directory(root)?)
 }
 
 pub(crate) struct TestDeclaration {
@@ -94,6 +94,8 @@ pub(crate) fn tests_unit() -> Result<Vec<TestDeclaration>> {
                 .verbose_arguments(["--", "--nocapture"]),
         ),
         parser_all_features()?,
+        web_desktop()?,
+        web_artifact()?,
     ])
 }
 
@@ -110,10 +112,7 @@ pub(crate) fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
                 .verbose_arguments(["--", "--nocapture"]),
         ),
         parser_all_features()?,
-        TestDeclaration::new(
-            "web",
-            Test::try_new("web", surface::VITEST, executable.clone())?.arg("frontend-test"),
-        ),
+        web_artifact()?,
         worker("drift", &executable, "drift-check")?,
         cli_e2e()?,
         desktop_e2e(executable)?,
@@ -130,6 +129,30 @@ fn parser_all_features() -> Result<TestDeclaration> {
             "-p",
             "gtl-parser",
             "--all-features",
+        ]),
+    ))
+}
+
+fn web_desktop() -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
+        "web-desktop",
+        Test::try_new("web-desktop", surface::CARGO, "cargo")?
+            .args(["test", "--locked", "--quiet", "-p", "gtl-web"]),
+    ))
+}
+
+fn web_artifact() -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
+        "web-artifact",
+        Test::try_new("web-artifact", surface::CARGO, "cargo")?.args([
+            "test",
+            "--locked",
+            "--quiet",
+            "-p",
+            "gtl-web",
+            "--no-default-features",
+            "--features",
+            "artifact",
         ]),
     ))
 }
@@ -182,13 +205,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn frontend_asset_lock_serializes_release_transactions() {
+    fn web_asset_lock_serializes_release_transactions() {
         let target = tempfile::tempdir().expect("temporary target directory");
-        let guard = FrontendAssetLock::acquire_at(target.path()).expect("first lock is acquired");
+        let guard = WebAssetLock::acquire_at(target.path()).expect("first lock is acquired");
         let contender = OpenOptions::new()
             .read(true)
             .write(true)
-            .open(target.path().join("xtask/frontend-assets.lock"))
+            .open(target.path().join("xtask/web-assets.lock"))
             .expect("lock contender opens");
 
         assert!(contender.try_lock().is_err());

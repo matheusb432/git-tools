@@ -287,6 +287,7 @@ pub(crate) fn ApplicationLayout() -> Element {
     let reconnect_generation = use_signal(|| 0_u64);
     let render_command_scheduler = use_signal(ViewerRenderCommandScheduler::default);
     let render_command_error = use_signal(|| None::<ClientApiError>);
+    let state_change_revision = use_signal(|| None::<u64>);
     let context = ViewerContext {
         shell,
         shell_order,
@@ -299,7 +300,14 @@ pub(crate) fn ApplicationLayout() -> Element {
     let mut state_changes = use_future(move || async move {
         if let Err(error) = DiffViewerApi::listen_for_state_changes(
             move || context.refresh(true),
-            move |event| context.invalidate(event.revision),
+            move |event| {
+                let mut revision = state_change_revision;
+                revision.with_mut(|revision| {
+                    *revision = Some(
+                        revision.map_or(event.revision, |current| current.max(event.revision)),
+                    );
+                });
+            },
         )
         .await
         {
@@ -310,6 +318,13 @@ pub(crate) fn ApplicationLayout() -> Element {
         let reconnect_generation = reconnect_generation();
         if reconnect_generation > 0 {
             state_changes.restart();
+        }
+    });
+    use_effect(move || {
+        if let Some(revision) = state_change_revision() {
+            spawn(async move {
+                context.invalidate(revision);
+            });
         }
     });
 

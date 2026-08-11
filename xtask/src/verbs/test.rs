@@ -158,7 +158,7 @@ mod tests {
     fn unit_selects_default_member_tests() {
         assert_eq!(
             selected_test_labels(Scope::Unit),
-            ["unit", "parser-all-features"]
+            ["unit", "parser-all-features", "web-desktop", "web-artifact"]
         );
     }
 
@@ -174,7 +174,7 @@ mod tests {
             [
                 "unit",
                 "parser-all-features",
-                "web",
+                "web-artifact",
                 "drift",
                 "cli-e2e",
                 "desktop-e2e"

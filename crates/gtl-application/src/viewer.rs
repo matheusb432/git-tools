@@ -9,7 +9,10 @@ mod logic;
 pub mod prepare_recipe;
 mod probe_recipe;
 
-pub use diff_view::{diff_file_anchor_id, project_diff_lines, project_diff_view};
+pub use diff_view::{
+    diff_file_anchor_id, project_diff_lines, project_diff_view, project_render_options,
+    project_theme,
+};
 pub use dto::{
     ViewerDocument, ViewerDocumentError, ViewerHistoryEntry, ViewerHistoryPage, ViewerSettings,
     ViewerView,

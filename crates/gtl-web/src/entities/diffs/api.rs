@@ -81,8 +81,8 @@ impl DiffViewerApi {
         on_event: Handler,
     ) -> Result<(), ClientApiError>
     where
-        Ready: FnMut() + 'static,
-        Handler: FnMut(ViewerStateChanged) + 'static,
+        Ready: Fn() + 'static,
+        Handler: Fn(ViewerStateChanged) + 'static,
     {
         TauriBridge::listen_to_event(VIEWER_STATE_CHANGED_EVENT, on_ready, on_event).await
     }

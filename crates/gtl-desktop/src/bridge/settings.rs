@@ -8,7 +8,7 @@ use gtl_contracts::viewer::{
 };
 use gtl_models::settings::UserSettings;
 
-use super::{internal, shell, unavailable};
+use super::{internal, unavailable};
 use crate::presentation::ViewerApp;
 
 pub(super) fn with_current<T>(
@@ -65,13 +65,15 @@ fn to_user_settings(
     settings: &UserSettings,
     configuration_path: Option<String>,
 ) -> ViewerUserSettings {
-    let configured_theme = settings.theme().map(shell::to_theme);
+    let configured_theme = settings.theme().map(gtl_application::viewer::project_theme);
     let exclusions = settings.diff_exclusions();
     ViewerUserSettings {
         configuration_path,
         configured_theme,
         effective_theme: configured_theme.unwrap_or(gtl_contracts::viewer::ViewerTheme::Dark),
-        render_options: shell::to_render_options(settings.viewer_render_options()),
+        render_options: gtl_application::viewer::project_render_options(
+            settings.viewer_render_options(),
+        ),
         push_confirmation_required: settings.push_confirmation_required(),
         diff_exclusions: ViewerDiffExclusions {
             default_extensions: exclusions.default_exclusions().extensions().to_vec(),

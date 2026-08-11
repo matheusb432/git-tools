@@ -17,11 +17,9 @@ pub(crate) fn run() -> Result<()> {
     Ok(())
 }
 
-/// The read-only linter sweep: frontend lint and presentation policy, architecture lints, and
-/// full-workspace Clippy. Shared with the aggregate `check` gate.
+/// The read-only linter sweep: architecture lints, dependency checks, and full-workspace Clippy.
+/// Shared with the aggregate `check` gate.
 pub(super) fn linters() -> Result<()> {
-    process::run("frontend-lint", "deno", &["task", "--frozen", "lint"])?;
-    super::presentation::run()?;
     super::check_structure::run(None);
     process::run(
         "gtl-parser-wasm-core",
@@ -57,7 +55,7 @@ pub(super) fn linters() -> Result<()> {
     )
 }
 
-/// Machine-applicable Clippy fixes (plus any `clippy_extra`), then Oxlint fixes.
+/// Machine-applicable Clippy fixes plus any `clippy_extra`.
 pub(super) fn fix(clippy_extra: &[String]) -> Result<()> {
     let mut args = vec![
         "clippy".to_string(),
@@ -69,10 +67,5 @@ pub(super) fn fix(clippy_extra: &[String]) -> Result<()> {
     ];
     args.extend_from_slice(clippy_extra);
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-    process::run("clippy-fix", "cargo", &args)?;
-    process::run(
-        "frontend-lint-fix",
-        "deno",
-        &["task", "--frozen", "lint:fix"],
-    )
+    process::run("clippy-fix", "cargo", &args)
 }

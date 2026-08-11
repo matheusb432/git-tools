@@ -17,7 +17,6 @@ use crate::{
 
 pub(crate) fn run() -> Result<()> {
     configure_git_hooks()?;
-    process::run("frontend-dependencies", "deno", &["install", "--frozen"])?;
     process::run("build", "just", &["build"])?;
     install::run_install(InstallTarget::Both)?;
     ensure_path_on_zshrc()?;

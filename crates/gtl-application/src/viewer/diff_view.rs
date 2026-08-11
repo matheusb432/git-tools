@@ -2,12 +2,45 @@ use gtl_contracts::viewer::{
     LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerActiveView, ViewerApiError,
     ViewerAppliedExclusions, ViewerCommandLine, ViewerCommitSelection, ViewerCommitSummary,
     ViewerDiffCursor, ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLines, ViewerFileStatus,
-    ViewerFileSummary, ViewerFooter, ViewerResource, ViewerViewIdentity,
+    ViewerFileSummary, ViewerFooter, ViewerRenderOptions, ViewerResource, ViewerTheme,
+    ViewerViewIdentity,
 };
 
-use crate::diffs::{FileDiff, FileStatus, View};
+use crate::{
+    diffs::{FileDiff, FileStatus, View},
+    viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
+};
 
 const GIANT_FILE_CHARACTERS: usize = 250_000;
+
+/// Projects validated application rendering options into the shared client contract.
+#[must_use]
+pub const fn project_render_options(options: RenderOptions) -> ViewerRenderOptions {
+    ViewerRenderOptions {
+        layout: match options.layout() {
+            DiffLayout::Unified => gtl_contracts::viewer::ViewerDiffLayout::Unified,
+            DiffLayout::Split => gtl_contracts::viewer::ViewerDiffLayout::Split,
+        },
+        density: match options.density() {
+            DiffDensity::Compact => ViewerDiffDensity::Compact,
+            DiffDensity::Full => ViewerDiffDensity::Full,
+        },
+    }
+}
+
+/// Projects a validated application theme into the shared client contract.
+#[must_use]
+pub const fn project_theme(theme: Theme) -> ViewerTheme {
+    match theme {
+        Theme::Dark => ViewerTheme::Dark,
+        Theme::Light => ViewerTheme::Light,
+        Theme::Hearth => ViewerTheme::Hearth,
+        Theme::Mirage => ViewerTheme::Mirage,
+        Theme::Glacier => ViewerTheme::Glacier,
+        Theme::Noir => ViewerTheme::Noir,
+        Theme::Graphite => ViewerTheme::Graphite,
+    }
+}
 
 /// Returns the stable document anchor for a file in a rendered diff view.
 #[must_use]
@@ -181,12 +214,18 @@ mod tests {
     use gtl_contracts::viewer::{
         LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerApiError,
         ViewerCommitSelection, ViewerDiffCursor, ViewerDiffDensity, ViewerDiffFileId,
-        ViewerDiffLayout, ViewerRenderOptions, ViewerResource, ViewerViewIdentity,
+        ViewerDiffLayout, ViewerRenderOptions, ViewerResource, ViewerTheme, ViewerViewIdentity,
     };
     use gtl_models::diffs::{AppliedExclusions, Commit};
 
-    use super::{diff_file_anchor_id, project_diff_lines, project_diff_view};
-    use crate::diffs::{Cmd, FileDiff, Foot, View};
+    use super::{
+        diff_file_anchor_id, project_diff_lines, project_diff_view, project_render_options,
+        project_theme,
+    };
+    use crate::{
+        diffs::{Cmd, FileDiff, Foot, View},
+        viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
+    };
 
     fn identity(density: ViewerDiffDensity) -> ViewerViewIdentity {
         ViewerViewIdentity {
@@ -250,6 +289,18 @@ mod tests {
     fn file_anchor_normalizes_paths_and_keeps_a_stable_prefix() {
         assert_eq!(diff_file_anchor_id("src/a b.rs"), "f-src-a-b-rs");
         assert_eq!(diff_file_anchor_id("---"), "f-");
+    }
+
+    #[test]
+    fn shared_contract_projection_covers_every_render_option_and_theme() {
+        assert_eq!(
+            project_render_options(RenderOptions::new(DiffLayout::Split, DiffDensity::Full)),
+            ViewerRenderOptions {
+                layout: ViewerDiffLayout::Split,
+                density: ViewerDiffDensity::Full,
+            }
+        );
+        assert_eq!(project_theme(Theme::Graphite), ViewerTheme::Graphite);
     }
 
     #[test]

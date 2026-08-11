@@ -1,27 +1,26 @@
+#[cfg(feature = "desktop")]
 mod api;
 mod client_diff;
+#[cfg(feature = "desktop")]
 mod diff_history;
 
+#[cfg(feature = "desktop")]
 pub(crate) use api::DiffViewerApi;
 pub(crate) use client_diff::{
     ClientDiffFile, ClientDiffFileState, ClientDiffRows, ClientDiffSource,
     use_client_diff_workspace,
 };
+#[cfg(feature = "desktop")]
 pub(crate) use diff_history::{DiffHistoryApi, history_navigation};
-use gtl_contracts::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind, ViewerTheme};
+use gtl_contracts::viewer::ViewerTheme;
+#[cfg(feature = "desktop")]
+use gtl_contracts::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind};
 
 pub(crate) const fn theme_value(theme: ViewerTheme) -> &'static str {
-    match theme {
-        ViewerTheme::Dark => "dark",
-        ViewerTheme::Light => "light",
-        ViewerTheme::Hearth => "hearth",
-        ViewerTheme::Mirage => "mirage",
-        ViewerTheme::Glacier => "glacier",
-        ViewerTheme::Noir => "noir",
-        ViewerTheme::Graphite => "graphite",
-    }
+    theme.as_str()
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) const fn theme_label(theme: ViewerTheme) -> &'static str {
     match theme {
         ViewerTheme::Dark => "Dark",
@@ -34,6 +33,7 @@ pub(crate) const fn theme_label(theme: ViewerTheme) -> &'static str {
     }
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) fn theme_from_value(value: &str) -> Option<ViewerTheme> {
     match value {
         "dark" => Some(ViewerTheme::Dark),
@@ -47,6 +47,7 @@ pub(crate) fn theme_from_value(value: &str) -> Option<ViewerTheme> {
     }
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) const fn layout_label(layout: ViewerDiffLayout) -> &'static str {
     match layout {
         ViewerDiffLayout::Unified => "Unified",
@@ -54,6 +55,7 @@ pub(crate) const fn layout_label(layout: ViewerDiffLayout) -> &'static str {
     }
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) const fn density_label(density: ViewerDiffDensity) -> &'static str {
     match density {
         ViewerDiffDensity::Compact => "Changes",
@@ -61,6 +63,7 @@ pub(crate) const fn density_label(density: ViewerDiffDensity) -> &'static str {
     }
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) const fn recipe_kind_label(kind: ViewerRecipeKind) -> &'static str {
     match kind {
         ViewerRecipeKind::Diff => "Diff",

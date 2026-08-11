@@ -35,7 +35,7 @@ async fn viewer_live_lifecycle() -> anyhow::Result<()> {
                 .context("assert mobile navigation")?;
             let chunked_row_count = support::assert_chunked_live_view(session, &fixture)
                 .await
-                .context("assert chunked diff materialization")?;
+                .context("assert paged diff rendering")?;
             support::assert_overlapping_live_updates(session, &fixture)
                 .await
                 .context("assert overlapping live updates")?;

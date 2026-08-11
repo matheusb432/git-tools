@@ -1,11 +1,17 @@
+#[cfg(feature = "desktop")]
 use std::time::Duration;
 
+#[cfg(feature = "desktop")]
 use dioxus::prelude::spawn;
+#[cfg(feature = "desktop")]
 use serde::Serialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{HtmlDetailsElement, HtmlDocument, HtmlElement, HtmlTextAreaElement};
+#[cfg(feature = "desktop")]
+use web_sys::HtmlElement;
+use web_sys::{HtmlDetailsElement, HtmlDocument, HtmlTextAreaElement};
 
+#[cfg(feature = "desktop")]
 use super::bridge::ClientApiError;
 
 pub(crate) fn apply_theme(theme: &'static str) {
@@ -15,6 +21,7 @@ pub(crate) fn apply_theme(theme: &'static str) {
     let _ = root.set_attribute("data-theme", theme);
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) fn focus_element(id: String) {
     spawn(async move {
         dioxus_sdk_time::sleep(Duration::ZERO).await;
@@ -51,6 +58,7 @@ pub(crate) async fn copy_text(text: &str) -> bool {
     exec_copy(text)
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) async fn copy_json(value: &impl Serialize) -> Result<(), ClientApiError> {
     let text = serde_json::to_string_pretty(value).map_err(|_| ClientApiError::Unavailable)?;
     copy_text(&text)

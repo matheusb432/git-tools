@@ -6,6 +6,7 @@ use crate::recipes::Recipe;
 
 pub const VIEWER_STATE_CHANGED_EVENT: &str = "viewer-state-changed";
 pub const VIEWER_DIFF_LINES_PAGE_MAX_BYTES: usize = 256 * 1024;
+pub const VIEWER_ARTIFACT_MANIFEST_ID: &str = "gtl-artifact-manifest";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -19,6 +20,21 @@ pub enum ViewerTheme {
     Graphite,
 }
 
+impl ViewerTheme {
+    /// Returns the stable theme token used by serialized state and document roots.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Dark => "dark",
+            Self::Light => "light",
+            Self::Hearth => "hearth",
+            Self::Mirage => "mirage",
+            Self::Glacier => "glacier",
+            Self::Noir => "noir",
+            Self::Graphite => "graphite",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewerDiffLayout {
@@ -26,11 +42,31 @@ pub enum ViewerDiffLayout {
     Split,
 }
 
+impl ViewerDiffLayout {
+    /// Returns the stable layout token used by serialized state and document roots.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unified => "unified",
+            Self::Split => "split",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewerDiffDensity {
     Compact,
     Full,
+}
+
+impl ViewerDiffDensity {
+    /// Returns the stable density token used by serialized state and document roots.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Compact => "compact",
+            Self::Full => "full",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -275,6 +311,47 @@ pub struct ViewerDiffLines {
     pub next: Option<ViewerDiffCursor>,
 }
 
+/// Opaque address of one embedded raw-line page in an offline artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ViewerArtifactPageId(String);
+
+impl ViewerArtifactPageId {
+    /// Derives the page address from every identity-bound request dimension.
+    pub fn for_request(request: &LoadViewerDiffLines) -> Self {
+        let layout = request.identity.render_options.layout.as_str();
+        let density = request.identity.render_options.density.as_str();
+        Self(format!(
+            "gtl-artifact-page-{}-{}-{}-{layout}-{density}-{}-{}",
+            request.identity.tab_id,
+            request.identity.range_generation,
+            request.identity.selection_generation,
+            request.file.as_str(),
+            request.cursor.position(),
+        ))
+    }
+
+    /// Returns the opaque artifact-local address.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// One independently decodable raw-line page embedded in an offline artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerArtifactPage {
+    pub id: ViewerArtifactPageId,
+    pub page: ViewerDiffLines,
+}
+
+/// Metadata required to start the client-rendered offline artifact.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerArtifactManifest {
+    pub title: String,
+    pub theme: ViewerTheme,
+    pub views: Vec<ViewerActiveView>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "cursor", rename_all = "snake_case")]
 pub enum ViewerHistoryCursor {
@@ -419,4 +496,41 @@ pub enum ViewerApiError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerStateChanged {
     pub revision: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request() -> LoadViewerDiffLines {
+        LoadViewerDiffLines {
+            identity: ViewerViewIdentity {
+                tab_id: 3,
+                range_generation: 5,
+                selection_generation: 7,
+                render_options: ViewerRenderOptions {
+                    layout: ViewerDiffLayout::Unified,
+                    density: ViewerDiffDensity::Compact,
+                },
+            },
+            file: ViewerDiffFileId::for_index(11),
+            cursor: ViewerDiffCursor::new(13),
+        }
+    }
+
+    #[test]
+    fn artifact_page_ids_bind_every_request_identity_dimension() {
+        let request = request();
+        let expected = ViewerArtifactPageId::for_request(&request);
+        let mut changed_cursor = request.clone();
+        changed_cursor.cursor = ViewerDiffCursor::new(14);
+        let mut changed_file = request.clone();
+        changed_file.file = ViewerDiffFileId::for_index(12);
+        let mut changed_layout = request.clone();
+        changed_layout.identity.render_options.layout = ViewerDiffLayout::Split;
+
+        assert_ne!(expected, ViewerArtifactPageId::for_request(&changed_cursor));
+        assert_ne!(expected, ViewerArtifactPageId::for_request(&changed_file));
+        assert_ne!(expected, ViewerArtifactPageId::for_request(&changed_layout));
+    }
 }

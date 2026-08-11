@@ -64,56 +64,6 @@ pub(crate) fn run() -> Result<()> {
             snapshot.directory(),
         ));
     }
-    if !checks.frontend_format.is_empty() {
-        steps.push(
-            crate::task::Step::new(
-                "frontend-format",
-                "deno",
-                [
-                    "task".to_string(),
-                    "--frozen".to_string(),
-                    "format:check:files".to_string(),
-                    "--".to_string(),
-                    format!(
-                        "--config={}",
-                        snapshot.directory().join(".oxfmtrc.json").display()
-                    ),
-                ],
-            )
-            .with_arguments(
-                checks
-                    .frontend_format
-                    .into_iter()
-                    .map(|path| snapshot.directory().join(path))
-                    .map(|path| path_text(&path)),
-            ),
-        );
-    }
-    if !checks.frontend_lint.is_empty() {
-        steps.push(
-            crate::task::Step::new(
-                "frontend-lint",
-                "deno",
-                [
-                    "task".to_string(),
-                    "--frozen".to_string(),
-                    "lint:files".to_string(),
-                    "--".to_string(),
-                    format!(
-                        "--config={}",
-                        snapshot.directory().join(".oxlintrc.json").display()
-                    ),
-                ],
-            )
-            .with_arguments(
-                checks
-                    .frontend_lint
-                    .into_iter()
-                    .map(|path| snapshot.directory().join(path))
-                    .map(|path| path_text(&path)),
-            ),
-        );
-    }
     task::run_all(&steps)?;
 
     process::result(Verb::PRE_COMMIT, Status::Pass);

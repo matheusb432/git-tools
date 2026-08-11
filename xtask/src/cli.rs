@@ -28,8 +28,7 @@ pub struct Cli {
 /// `conflicts_with` (see the commented `--all` example), never a runtime `if a && b`.
 #[derive(Subcommand)]
 pub enum Command {
-    /// Configure hooks, install frontend dependencies, build and install both artifacts, and
-    /// ensure `~/.local/bin` is on PATH.
+    /// Configure hooks, build and install both artifacts, and ensure `~/.local/bin` is on PATH.
     #[command(name = Verb::SETUP.as_str())]
     Setup,
     /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the
@@ -53,7 +52,7 @@ pub enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Format Rust, TOML, Markdown, and frontend sources with the repository's complete pinned
+    /// Format Rust, TOML, Markdown, and Dioxus sources with the repository's complete pinned
     /// formatter matrix, in place. `--verbose` restores taplo's file-discovery logs.
     #[command(name = Verb::FORMAT.as_str())]
     Fmt(FormatArguments),
@@ -62,16 +61,16 @@ pub enum Command {
     /// file-discovery logs.
     #[command(name = Verb::FORMAT_CHECK.as_str())]
     FmtCheck(FormatArguments),
-    /// Run Oxlint, presentation and architecture policy, dependency checks, and workspace Clippy.
+    /// Run architecture policy, dependency checks, and workspace Clippy.
     #[command(name = Verb::LINT.as_str())]
     Lint,
     /// Run formatting checks, the lint sweep, and configured ast-grep rules.
     #[command(name = Verb::CHECK.as_str())]
     Check,
-    /// Check staged whitespace, formatting, and frontend lint without scanning unrelated files.
+    /// Check staged whitespace and formatting without scanning unrelated files.
     #[command(name = Verb::PRE_COMMIT.as_str())]
     PreCommit,
-    /// Apply autofixable Rust and frontend lints, then run every configured formatter.
+    /// Apply autofixable Rust lints, then run every configured formatter.
     #[command(name = Verb::FIX.as_str())]
     Fix {
         /// Extra arguments forwarded to Cargo Clippy.
@@ -105,7 +104,7 @@ pub enum Command {
         #[arg(long, value_enum, default_value_t = BuildTarget::Both)]
         target: BuildTarget,
     },
-    /// Build the framework-free assets and stage the release Dioxus Web bundle.
+    /// Build the offline artifact runtime and stage the release Dioxus Web bundle.
     #[command(name = Verb::WEB_BUILD.as_str())]
     WebBuild,
     /// Serve the Dioxus shell with repository-owned asset watchers.
@@ -115,20 +114,13 @@ pub enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         arguments: Vec<String>,
     },
-    /// Generate the tracked Dioxus shell and diff-island stylesheets.
+    /// Generate the tracked shared Tailwind stylesheet.
     #[command(name = Verb::WEB_STYLES.as_str())]
     WebStyles,
-    /// Type-check and test the framework-free frontend sources.
-    #[command(name = Verb::FRONTEND_TEST.as_str())]
-    FrontendTest,
-    /// Run the frontend compute benchmarks (tinybench through vitest bench).
-    #[command(name = Verb::FRONTEND_BENCH.as_str())]
-    FrontendBench,
     /// Run a shared Rust benchmark without host display variables.
     #[command(name = Verb::BENCH.as_str())]
     Bench(BenchArguments),
-    /// Rebuild the committed diff-artifact bundle and fail if it drifts from its TypeScript
-    /// sources. Requires Deno.
+    /// Rebuild committed web assets and fail if generated output drifts from its Rust sources.
     #[command(name = Verb::DRIFT_CHECK.as_str())]
     DriftCheck,
     /// Reject forbidden outward Cargo dependency edges.

@@ -8,6 +8,11 @@ use gtl_parser::{
 
 use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
 
+const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-[14px] text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]";
+const SPLIT_CODE_CELL_CLASSES: &str = "min-w-0 border-0 px-3 text-[14px] text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]";
+const UNIFIED_GUTTER_CLASSES: &str = "col-start-1 row-start-1 select-none whitespace-nowrap px-0 text-center text-[14px] [font-variant-numeric:tabular-nums] mobile:text-[13px]";
+const UNIFIED_ROW_SHELL_CLASSES: &str = "relative grid grid-cols-[max(28px,var(--unified-line-number-width,28px))_minmax(0,1fr)] items-start whitespace-normal";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HeaderTone {
     Meta,
@@ -120,79 +125,69 @@ fn UnifiedSourceRow(row: DiffRow, tone: UnifiedSourceTone) -> Element {
 
 #[component]
 fn UnifiedHeaderRowShell(tone: HeaderTone, children: Element) -> Element {
-    match tone {
-        HeaderTone::Meta => rsx! {
-            div { class: "relative grid grid-cols-[max(28px,var(--unified-line-number-width,28px))_minmax(0,1fr)] items-start whitespace-normal opacity-60",
-                {children}
-            }
-        },
-        HeaderTone::Hunk => rsx! {
-            div { class: "relative grid grid-cols-[max(28px,var(--unified-line-number-width,28px))_minmax(0,1fr)] items-start bg-sunk whitespace-normal",
-                {children}
-            }
-        },
+    let tone_classes = match tone {
+        HeaderTone::Meta => "opacity-60",
+        HeaderTone::Hunk => "bg-sunk",
+    };
+    rsx! {
+        div {
+            class: "{UNIFIED_ROW_SHELL_CLASSES}",
+            class: "{tone_classes}",
+            "data-gtl-diff-row": "",
+            {children}
+        }
     }
 }
 
 #[component]
 fn UnifiedSourceRowShell(tone: UnifiedSourceTone, children: Element) -> Element {
-    match tone {
-        UnifiedSourceTone::Context => rsx! {
-            div { class: "relative grid grid-cols-[max(28px,var(--unified-line-number-width,28px))_minmax(0,1fr)] items-start whitespace-normal",
-                {children}
-            }
-        },
-        UnifiedSourceTone::Added => rsx! {
-            div { class: "relative grid grid-cols-[max(28px,var(--unified-line-number-width,28px))_minmax(0,1fr)] items-start bg-[color-mix(in_srgb,var(--add-bg)_50%,transparent)] whitespace-normal",
-                {children}
-            }
-        },
-        UnifiedSourceTone::Removed => rsx! {
-            div { class: "relative grid grid-cols-[max(28px,var(--unified-line-number-width,28px))_minmax(0,1fr)] items-start bg-[color-mix(in_srgb,var(--del-bg)_50%,transparent)] whitespace-normal",
-                {children}
-            }
-        },
+    let tone_classes = match tone {
+        UnifiedSourceTone::Context => "",
+        UnifiedSourceTone::Added => "bg-[color-mix(in_srgb,var(--add-bg)_50%,transparent)]",
+        UnifiedSourceTone::Removed => "bg-[color-mix(in_srgb,var(--del-bg)_50%,transparent)]",
+    };
+    rsx! {
+        div {
+            class: "{UNIFIED_ROW_SHELL_CLASSES}",
+            class: "{tone_classes}",
+            "data-gtl-diff-row": "",
+            {children}
+        }
     }
 }
 
 #[component]
 fn UnifiedGutter(number: Option<u32>, tone: UnifiedGutterTone) -> Element {
     let line_number = number.map(|value| value.to_string());
-    match tone {
-        UnifiedGutterTone::Hidden => rsx! {
-            span { class: "hidden" }
-        },
-        UnifiedGutterTone::Neutral => rsx! {
-            span { class: "col-start-1 row-start-1 select-none whitespace-nowrap bg-transparent px-0 text-center text-[14px] text-ink-3 [font-variant-numeric:tabular-nums] mobile:text-[13px]",
-                {line_number}
-            }
-        },
-        UnifiedGutterTone::Added => rsx! {
-            span { class: "col-start-1 row-start-1 select-none whitespace-nowrap bg-add-gut px-0 text-center text-[14px] text-add [font-variant-numeric:tabular-nums] mobile:text-[13px]",
-                {line_number}
-            }
-        },
-        UnifiedGutterTone::Removed => rsx! {
-            span { class: "col-start-1 row-start-1 select-none whitespace-nowrap bg-del-gut px-0 text-center text-[14px] text-del [font-variant-numeric:tabular-nums] mobile:text-[13px]",
-                {line_number}
-            }
-        },
+    let gutter_classes = match tone {
+        UnifiedGutterTone::Hidden => "hidden",
+        UnifiedGutterTone::Neutral | UnifiedGutterTone::Added | UnifiedGutterTone::Removed => {
+            UNIFIED_GUTTER_CLASSES
+        }
+    };
+    let tone_classes = match tone {
+        UnifiedGutterTone::Hidden => "",
+        UnifiedGutterTone::Neutral => "bg-transparent text-ink-3",
+        UnifiedGutterTone::Added => "bg-add-gut text-add",
+        UnifiedGutterTone::Removed => "bg-del-gut text-del",
+    };
+    rsx! {
+        span { class: "{gutter_classes}", class: "{tone_classes}", {line_number} }
     }
 }
 
 #[component]
 fn UnifiedHeaderCode(tone: HeaderTone, text: String) -> Element {
-    match tone {
-        HeaderTone::Hunk => rsx! {
-            code { class: "col-[1/-1] min-w-0 border-0 bg-transparent px-3 text-[14px] font-semibold text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]",
-                "{text}"
-            }
-        },
-        HeaderTone::Meta => rsx! {
-            code { class: "col-[1/-1] min-w-0 border-0 bg-transparent px-3 text-[14px] text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]",
-                "{text}"
-            }
-        },
+    let tone_classes = match tone {
+        HeaderTone::Meta => "",
+        HeaderTone::Hunk => "font-semibold",
+    };
+    rsx! {
+        code {
+            class: "{HEADER_CODE_CLASSES} col-[1/-1]",
+            class: "{tone_classes}",
+            "{text}"
+        }
     }
 }
 
@@ -268,28 +263,26 @@ fn SplitDiffRowView(row: SplitDiffRow) -> Element {
 
 #[component]
 fn SplitHeaderRow(tone: HeaderTone, text: String) -> Element {
-    match tone {
-        HeaderTone::Hunk => rsx! {
-            div { class: "grid grid-cols-[minmax(0,1fr)] items-stretch bg-sunk whitespace-normal",
-                code { class: "min-w-0 border-0 bg-transparent px-3 text-[14px] font-semibold text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]",
-                    "{text}"
-                }
-            }
-        },
-        HeaderTone::Meta => rsx! {
-            div { class: "grid grid-cols-[minmax(0,1fr)] items-stretch whitespace-normal opacity-60",
-                code { class: "min-w-0 border-0 bg-transparent px-3 text-[14px] text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]",
-                    "{text}"
-                }
-            }
-        },
+    let (shell_tone_classes, code_tone_classes) = match tone {
+        HeaderTone::Meta => ("opacity-60", ""),
+        HeaderTone::Hunk => ("bg-sunk", "font-semibold"),
+    };
+    rsx! {
+        div {
+            class: "grid grid-cols-[minmax(0,1fr)] items-stretch whitespace-normal",
+            class: "{shell_tone_classes}",
+            "data-gtl-diff-row": "",
+            code { class: "{HEADER_CODE_CLASSES}", class: "{code_tone_classes}", "{text}" }
+        }
     }
 }
 
 #[component]
 fn SplitRowShell(children: Element) -> Element {
     rsx! {
-        div { class: "grid grid-cols-[44px_minmax(0,1fr)_44px_minmax(0,1fr)] items-stretch whitespace-normal tablet:grid-cols-[44px_minmax(0,1fr)] mobile:grid-cols-[30px_minmax(0,1fr)]",
+        div {
+            class: "grid grid-cols-[44px_minmax(0,1fr)_44px_minmax(0,1fr)] items-stretch whitespace-normal tablet:grid-cols-[44px_minmax(0,1fr)] mobile:grid-cols-[30px_minmax(0,1fr)]",
+            "data-gtl-diff-row": "",
             {children}
         }
     }
@@ -342,17 +335,16 @@ fn SplitCell(cell: Option<SplitDiffCell>, side: SplitSide) -> Element {
 #[component]
 fn SplitGutter(side: SplitSide, number: Option<u32>) -> Element {
     let line_number = number.map(|value| value.to_string());
-    match side {
-        SplitSide::Old => rsx! {
-            span { class: "select-none whitespace-nowrap px-2 text-right text-[12px] text-ink-3 [font-variant-numeric:tabular-nums] mobile:px-1 mobile:text-[10px]",
-                {line_number}
-            }
-        },
-        SplitSide::New => rsx! {
-            span { class: "select-none whitespace-nowrap border-l border-line px-2 text-right text-[12px] text-ink-3 [font-variant-numeric:tabular-nums] tablet:border-t tablet:border-l-0 mobile:px-1 mobile:text-[10px]",
-                {line_number}
-            }
-        },
+    let side_classes = match side {
+        SplitSide::Old => "",
+        SplitSide::New => "border-l border-line tablet:border-t tablet:border-l-0",
+    };
+    rsx! {
+        span {
+            class: "select-none whitespace-nowrap px-2 text-right text-[12px] text-ink-3 [font-variant-numeric:tabular-nums] mobile:px-1 mobile:text-[10px]",
+            class: "{side_classes}",
+            {line_number}
+        }
     }
 }
 
@@ -372,56 +364,26 @@ fn SplitCodeCell(
         SplitCellPresentation::Removed => ChangedTextTone::Removed,
         SplitCellPresentation::Added => ChangedTextTone::Added,
     };
+    let presentation_classes = match presentation {
+        SplitCellPresentation::OldContext => "bg-transparent",
+        SplitCellPresentation::NewContext => "bg-transparent tablet:border-t tablet:border-line",
+        SplitCellPresentation::Removed => "bg-del-bg",
+        SplitCellPresentation::Added => "bg-add-bg tablet:border-t tablet:border-line",
+    };
 
-    match presentation {
-        SplitCellPresentation::OldContext => rsx! {
-            code { class: "min-w-0 border-0 bg-transparent px-3 text-[14px] text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]",
-                SplitCodeContent {
-                    marker,
-                    body,
-                    long_text: text,
-                    semantic_spans,
-                    changed_text_tone,
-                    long_line_character_count,
-                }
+    rsx! {
+        code {
+            class: "{SPLIT_CODE_CELL_CLASSES}",
+            class: "{presentation_classes}",
+            SplitCodeContent {
+                marker,
+                body,
+                long_text: text,
+                semantic_spans,
+                changed_text_tone,
+                long_line_character_count,
             }
-        },
-        SplitCellPresentation::NewContext => rsx! {
-            code { class: "min-w-0 border-0 bg-transparent px-3 text-[14px] text-code whitespace-pre-wrap [overflow-wrap:anywhere] tablet:border-t tablet:border-line mobile:px-2 mobile:text-[13px] print:text-[#111]",
-                SplitCodeContent {
-                    marker,
-                    body,
-                    long_text: text,
-                    semantic_spans,
-                    changed_text_tone,
-                    long_line_character_count,
-                }
-            }
-        },
-        SplitCellPresentation::Removed => rsx! {
-            code { class: "min-w-0 border-0 bg-del-bg px-3 text-[14px] text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]",
-                SplitCodeContent {
-                    marker,
-                    body,
-                    long_text: text,
-                    semantic_spans,
-                    changed_text_tone,
-                    long_line_character_count,
-                }
-            }
-        },
-        SplitCellPresentation::Added => rsx! {
-            code { class: "min-w-0 border-0 bg-add-bg px-3 text-[14px] text-code whitespace-pre-wrap [overflow-wrap:anywhere] tablet:border-t tablet:border-line mobile:px-2 mobile:text-[13px] print:text-[#111]",
-                SplitCodeContent {
-                    marker,
-                    body,
-                    long_text: text,
-                    semantic_spans,
-                    changed_text_tone,
-                    long_line_character_count,
-                }
-            }
-        },
+        }
     }
 }
 
@@ -456,16 +418,13 @@ fn SplitMarker(marker: Option<char>) -> Element {
 
 #[component]
 fn SplitPad(side: SplitSide) -> Element {
+    let side_classes = match side {
+        SplitSide::Old => "bg-sunk",
+        SplitSide::New => "bg-sunk tablet:border-t tablet:border-line",
+    };
     rsx! {
         SplitGutter { side, number: None }
-        match side {
-            SplitSide::Old => rsx! {
-                code { class: "min-w-0 border-0 bg-sunk px-3 text-[14px] text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]" }
-            },
-            SplitSide::New => rsx! {
-                code { class: "min-w-0 border-0 bg-sunk px-3 text-[14px] text-code whitespace-pre-wrap [overflow-wrap:anywhere] tablet:border-t tablet:border-line mobile:px-2 mobile:text-[13px] print:text-[#111]" }
-            },
-        }
+        code { class: "{SPLIT_CODE_CELL_CLASSES}", class: "{side_classes}" }
     }
 }
 
@@ -505,17 +464,11 @@ fn LongLine(text: String, character_count: usize) -> Element {
 
 #[component]
 fn LongLineText(text: String, expanded: bool) -> Element {
-    if expanded {
-        rsx! {
-            span { class: "min-w-0 flex-1 overflow-x-auto text-clip whitespace-pre [scrollbar-color:var(--acc)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[linear-gradient(125deg,var(--acc),var(--acc-2))] [&::-webkit-scrollbar-thumb:hover]:bg-[linear-gradient(125deg,var(--acc-2),var(--acc))]",
-                "{text}"
-            }
-        }
-    } else {
-        rsx! {
-            span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-pre [scrollbar-color:var(--acc)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[linear-gradient(125deg,var(--acc),var(--acc-2))] [&::-webkit-scrollbar-thumb:hover]:bg-[linear-gradient(125deg,var(--acc-2),var(--acc))]",
-                "{text}"
-            }
+    rsx! {
+        span {
+            class: "min-w-0 flex-1 whitespace-pre [scrollbar-color:var(--acc)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[linear-gradient(125deg,var(--acc),var(--acc-2))] [&::-webkit-scrollbar-thumb:hover]:bg-[linear-gradient(125deg,var(--acc-2),var(--acc))]",
+            class: if expanded { "overflow-x-auto text-clip" } else { "overflow-hidden text-ellipsis" },
+            "{text}"
         }
     }
 }

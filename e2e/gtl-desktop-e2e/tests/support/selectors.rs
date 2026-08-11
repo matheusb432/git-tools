@@ -24,20 +24,10 @@ const displayed = (element) => {
   return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
 };
 const selector = "[aria-label], [aria-labelledby], input, select, textarea, img, button, a, [role]";
-const findIn = (root) => {
-  const match = Array.from(root.querySelectorAll(selector))
-    .find((element) => displayed(element) && accessibleName(element) === expected);
-  if (match) return match;
-  for (const element of root.querySelectorAll("*")) {
-    if (!element.shadowRoot) continue;
-    const nested = findIn(element.shadowRoot);
-    if (nested) return nested;
-  }
-  return null;
-};
 const scope = typeof scopeSelector === "string" ? document.querySelector(scopeSelector) : document;
 if (!scope) return null;
-return findIn(scope);
+return Array.from(scope.querySelectorAll(selector))
+  .find((element) => displayed(element) && accessibleName(element) === expected) ?? null;
 "#;
 
 pub async fn by_accessible_name(driver: &WebDriver, expected: &str) -> Result<WebElement> {

@@ -31,10 +31,13 @@ pub(super) fn DiffFileCard(
         }
     }));
     let anchor_id = file.summary.anchor_id.clone();
+    let path = file.summary.path.clone();
 
     rsx! {
         details {
             id: anchor_id,
+            "data-gtl-diff-file": "",
+            "data-path": path,
             class: "group/file mb-2.5 rounded-panel border border-line bg-surface [&:not([open])>summary]:rounded-panel [&:not([open])>summary]:border-b-0 print:break-inside-avoid print:[&[hidden]]:block!",
             class: if is_flashing { "outline outline-acc outline-offset-[-1px]" },
             open: open(),

@@ -17,12 +17,12 @@ _default:
 help: _preflight
     @"{{ _bin }}" --help
 
-# Start the debug desktop viewer with watched Rust, TypeScript, and CSS sources.
+# Start the debug desktop viewer with watched Rust and CSS sources.
 [group('build')]
 up:
     just desktop up
 
-# Build both the CLI engine (+ diff bundle) and the desktop viewer.
+# Build both the CLI engine (+ offline artifact runtime) and the desktop viewer.
 [group('build')]
 build:
     cargo run --quiet -p xtask -- build
@@ -63,7 +63,7 @@ bench *args:
 test *args:
     @cargo run --quiet -p xtask -- test {{ args }}
 
-# Apply pinned-nightly rustfmt, Taplo, Dioxus RSX, rumdl, and Oxfmt across the repository. --verbose restores taplo's file-discovery logs.
+# Apply pinned-nightly rustfmt, Taplo, Dioxus RSX, and rumdl across the repository. --verbose restores taplo's file-discovery logs.
 [group('quality')]
 fmt *args:
     cargo run --quiet -p xtask -- fmt {{ args }}
@@ -73,7 +73,7 @@ fmt *args:
 fmt-check *args:
     cargo run --quiet -p xtask -- fmt-check {{ args }}
 
-# Run Oxlint, presentation and architecture policy, dependency checks, and workspace Clippy.
+# Run architecture policy, dependency checks, and workspace Clippy.
 [group('quality')]
 lint:
     cargo run --quiet -p xtask -- lint
@@ -83,12 +83,12 @@ lint:
 check:
     cargo run --quiet -p xtask -- check
 
-# Apply Clippy and Oxlint fixes first, then normalize every formatter; extra args go to Clippy.
+# Apply Clippy fixes first, then normalize every formatter; extra args go to Clippy.
 [group('quality')]
 fix *args:
     cargo run --quiet -p xtask -- fix {{ args }}
 
-# Rebuild the committed diff artifact JS bundle and fail if it drifts from its TypeScript sources.
+# Rebuild committed web assets and fail if generated output drifts from its Rust sources.
 [group('quality')]
 drift-check:
     cargo run --quiet -p xtask -- drift-check
@@ -105,7 +105,7 @@ doctor:
 ship *args:
     cargo run --quiet -p xtask -- ship {{ args }}
 
-# Configure this clone, install frontend dependencies, build, and install git-tools.
+# Configure this clone, build, and install git-tools.
 setup:
     cargo run --quiet -p xtask -- setup
 

@@ -1,4 +1,4 @@
-use gtl_application::viewer::project_diff_lines;
+use gtl_application::viewer::{project_diff_lines, project_render_options};
 use gtl_contracts::viewer::{
     LoadViewerDiffLines, ViewerApiError, ViewerDiffLines, ViewerViewIdentity,
 };
@@ -34,7 +34,7 @@ pub(super) fn validated_current_options(
     identity: ViewerViewIdentity,
 ) -> Result<gtl_models::viewer::RenderOptions, ViewerApiError> {
     let options = settings::load(app)?.viewer_render_options();
-    if shell::to_render_options(options) != identity.render_options {
+    if project_render_options(options) != identity.render_options {
         return Err(ViewerApiError::Conflict);
     }
     Ok(options)
