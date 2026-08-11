@@ -1,0 +1,17 @@
+{
+  "[rust]": {
+    "editor.quickSuggestions": {
+      "strings": "on"
+    }
+  },
+  "tailwindCSS.experimental.configFile": {
+    "crates/gtl-web/src/app/assets/styles/tailwind.css": "crates/gtl-web/src/**/*.rs"
+  },
+  "tailwindCSS.experimental.classRegex": [
+    "class\\s*:\\s*\"([^\"]*)\"",
+    "(?:const|static)\\s+[A-Z][A-Z0-9_]*_CLASSES\\s*:\\s*&str\\s*=\\s*\"([^\"]*)\""
+  ],
+  "tailwindCSS.includeLanguages": {
+    "rust": "html"
+  }
+}

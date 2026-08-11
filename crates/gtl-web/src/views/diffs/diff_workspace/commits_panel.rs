@@ -14,6 +14,7 @@ use crate::shared::{
 #[component]
 pub(super) fn CommitsPanel(
     view: ViewerActiveView,
+    // TODO: use signal instead of drilled prop.
     onselect: Option<EventHandler<String>>,
     onclear: Option<EventHandler<()>>,
 ) -> Element {
@@ -132,6 +133,8 @@ fn CommitCard(
         }),
     ]);
 
+    // TODO: remove if `onselect` does not meaningfully change view state. if it's null, just keep
+    // the button disabled.
     if let Some(onselect) = onselect {
         let sha = commit.sha.clone();
         return rsx! {
@@ -144,7 +147,7 @@ fn CommitCard(
                 aria_pressed: selected.to_string(),
                 title,
                 onclick: move |_| onselect.call(sha.clone()),
-                CommitCardContent { commit, selected, copy_hash: false }
+                CommitCardContent { commit, selected }
             }
         };
     }
@@ -154,13 +157,13 @@ fn CommitCard(
             class: "{COMMIT_CARD_CLASSES}",
             class: "{tone_classes}",
             title,
-            CommitCardContent { commit, selected, copy_hash: true }
+            CommitCardContent { commit, selected }
         }
     }
 }
 
 #[component]
-fn CommitCardContent(commit: ViewerCommitSummary, selected: bool, copy_hash: bool) -> Element {
+fn CommitCardContent(commit: ViewerCommitSummary, selected: bool) -> Element {
     rsx! {
         CommitTimelineMarker { selected }
         span { class: "mb-1 flex min-w-0 items-center gap-1.5",
@@ -168,7 +171,6 @@ fn CommitCardContent(commit: ViewerCommitSummary, selected: bool, copy_hash: boo
                 sha: commit.sha.clone(),
                 abbreviated_sha: commit.abbreviated_sha.clone(),
                 selected,
-                copy_enabled: copy_hash,
             }
             if commit.is_merge {
                 Badge { variant: BadgeVariant::Neutral, "merge" }
@@ -194,26 +196,23 @@ fn CommitTimelineMarker(selected: bool) -> Element {
 }
 
 #[component]
-fn CommitHash(sha: String, abbreviated_sha: String, selected: bool, copy_enabled: bool) -> Element {
-    if copy_enabled {
-        return rsx! {
-            Button {
-                size: ButtonSize::Inline,
-                variant: ButtonVariant::Secondary,
-                title: "Copy hash",
-                onclick: move |_| {
-                    let sha = sha.clone();
-                    spawn(async move {
-                        browser::copy_text(&sha).await;
-                    });
-                },
-                code { "{abbreviated_sha}" }
-            }
-        };
+fn CommitHash(sha: String, abbreviated_sha: String, selected: bool) -> Element {
+    fn copy_commit_hash(sha: String) {
+        spawn(async move {
+            browser::copy_text(&sha).await;
+            // TODO: add toast notif upon completion
+        });
     }
 
     rsx! {
-        Badge { variant: if selected { BadgeVariant::Selected } else { BadgeVariant::Accent },
+        Button {
+            size: ButtonSize::Inline,
+            variant: ButtonVariant::Secondary,
+            title: "Copy hash",
+            onclick: move |e: Event<MouseData>| {
+                e.stop_propagation();
+                copy_commit_hash(sha.clone());
+            },
             code { "{abbreviated_sha}" }
         }
     }
@@ -234,7 +233,7 @@ fn CommitDate(date: String, iso: String) -> Element {
 #[component]
 fn CommitSubject(subject: String) -> Element {
     rsx! {
-        span { class: "block wrap-anywhere leading-normal text-ink-2", "{subject}" }
+        span { class: "block text-wrap leading-normal text-ink-2", "{subject}" }
     }
 }
 

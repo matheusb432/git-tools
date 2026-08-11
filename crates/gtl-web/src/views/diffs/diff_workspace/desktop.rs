@@ -200,6 +200,8 @@ fn ReadyWorkspace(
         action_error.set(None);
         viewer.refresh_tab(tab_id);
     };
+    // TODO: make it toggle upon selecting already active commit. it currently just selects and
+    // renders it again, wastefully
     let onselect_commit = move |sha: String| {
         action_error.set(None);
         spawn(async move {
@@ -346,6 +348,7 @@ fn ReadyWorkspace(
             }
         }
         Popover {
+            // TODO: organize this more intuitively. not obvious that this is where the mobile view is.
             id: "mobile-commits-panel",
             trigger_id: "mobile-commits-trigger",
             open: mobile_panel() == Some(MobilePanel::Commits),
