@@ -11,12 +11,12 @@ use gtl_application::{
     diffs::View,
     viewer::initial_recipe_label::{self, InitialRecipeLabel},
 };
-use gtl_contracts::recipes::{Recipe, RecipeSource};
 use gtl_models::{
     diffs::Commit,
     live_views::LiveSource,
     viewer::{ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState},
 };
+use gtl_wire::recipes::{Recipe, RecipeSource};
 pub(crate) use pending::{PendingRecipes, PendingRecipesError};
 
 /// Marks a tab whose view is still being computed.
@@ -620,7 +620,7 @@ mod tests {
         diffs::{Cmd, Foot, View},
         viewer::{ViewerTabId, ViewerTabKind},
     };
-    use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+    use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::*;
 
@@ -651,10 +651,7 @@ mod tests {
                 trail: String::new(),
             },
             commits_label: String::new(),
-            foot: Foot {
-                cmd: String::new(),
-                note: String::new(),
-            },
+            foot: Foot { cmd: String::new() },
         })
     }
 
@@ -1069,7 +1066,7 @@ mod tests {
             source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
-                    pinned: Some(gtl_contracts::recipes::PinnedRange {
+                    pinned: Some(gtl_wire::recipes::PinnedRange {
                         base: "a".repeat(40),
                         head: head.repeat(40),
                     }),

@@ -30,10 +30,7 @@ const BUNDLE_FINGERPRINT_PATH: &str = "crates/gtl-web/dist/.bundle-fingerprint";
 const DESKTOP_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-web/release/web";
 const ARTIFACT_PROFILE: &str = "artifact-web-release";
 const ARTIFACT_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-artifact/release/web";
-const ARTIFACT_RUNTIME_SCRIPT_PATH: &str =
-    "crates/gtl-artifacts/src/embedded/generated/artifact-runtime.js";
-const ARTIFACT_RUNTIME_WASM_PATH: &str =
-    "crates/gtl-artifacts/src/embedded/generated/artifact-runtime.wasm";
+const ARTIFACT_RUNTIME_CACHE_DIRECTORY: &str = "target/generated/gtl-artifacts";
 const ARTIFACT_RUNTIME_ASSET_ID: &str = "gtl-artifact-runtime";
 const ARTIFACT_RUNTIME_MAX_BYTES: usize = 16 * 1024 * 1024;
 const ARTIFACT_ASSET_LOADER: &str = r#"
@@ -159,7 +156,7 @@ const SOURCE_FILES: &[&str] = &[
     "deno.lock",
     "mise.lock",
     "mise.toml",
-    "crates/gtl-contracts/Cargo.toml",
+    "crates/gtl-wire/Cargo.toml",
     "crates/gtl-parser/Cargo.toml",
     "crates/gtl-web/Cargo.toml",
     "crates/gtl-web/Dioxus.toml",
@@ -168,7 +165,7 @@ const SOURCE_FILES: &[&str] = &[
     "xtask/src/verbs/dioxus_web.rs",
 ];
 const SOURCE_DIRECTORIES: &[&str] = &[
-    "crates/gtl-contracts/src",
+    "crates/gtl-wire/src",
     "crates/gtl-desktop/src",
     "crates/gtl-artifacts/src",
     "crates/gtl-parser/src",
@@ -176,12 +173,7 @@ const SOURCE_DIRECTORIES: &[&str] = &[
     "crates/gtl-web/src",
     "crates/gtl-web-contracts/src",
 ];
-const SOURCE_DIRECTORY_EXCLUSIONS: &[&str] = &["crates/gtl-artifacts/src/embedded"];
-const GENERATED_SOURCE_OUTPUTS: &[&str] = &[
-    ARTIFACT_RUNTIME_SCRIPT_PATH,
-    ARTIFACT_RUNTIME_WASM_PATH,
-    "crates/gtl-web/assets/tailwind.css",
-];
+const GENERATED_SOURCE_OUTPUTS: &[&str] = &["crates/gtl-web/assets/tailwind.css"];
 const FILE_COUNT_MAX: usize = 10_000;
 const FILE_BYTES_MAX: u64 = 32 * 1024 * 1024;
 const SOURCE_BYTES_MAX: u64 = 256 * 1024 * 1024;
@@ -243,7 +235,7 @@ const SERVE_ARGUMENTS: &[&str] = &[
     "true",
 ];
 const DEVELOPMENT_RUST_SOURCE_DIRECTORIES: &[&str] = &[
-    "crates/gtl-contracts/src",
+    "crates/gtl-wire/src",
     "crates/gtl-parser/src",
     "crates/gtl-web-contracts/src",
     "crates/gtl-web/src",
@@ -583,20 +575,34 @@ fn build_artifact_runtime_unlocked(root: &Path, target: &Path) -> Result<()> {
         "generated artifact WASM exceeds {BUNDLE_FILE_BYTES_MAX} bytes"
     );
 
-    let script_output = root.join(ARTIFACT_RUNTIME_SCRIPT_PATH);
-    let wasm_output = root.join(ARTIFACT_RUNTIME_WASM_PATH);
-    let output_directory = script_output
+    replace_artifact_runtime_cache(root, &runtime, &wasm_bytes)
+}
+
+fn replace_artifact_runtime_cache(root: &Path, runtime: &str, wasm: &[u8]) -> Result<()> {
+    let output_directory = root.join(ARTIFACT_RUNTIME_CACHE_DIRECTORY);
+    let output_parent = output_directory
         .parent()
-        .context("artifact runtime script output has no parent")?;
-    ensure!(
-        wasm_output.parent() == Some(output_directory),
-        "artifact runtime outputs must share one generated directory"
-    );
-    fs::create_dir_all(output_directory)
-        .with_context(|| format!("create {}", output_directory.display()))?;
-    fs::write(&script_output, runtime)
-        .with_context(|| format!("write {}", script_output.display()))?;
-    fs::write(&wasm_output, wasm_bytes).with_context(|| format!("write {}", wasm_output.display()))
+        .context("artifact runtime cache has no parent")?;
+    fs::create_dir_all(output_parent)
+        .with_context(|| format!("create {}", output_parent.display()))?;
+    let staging_directory = tempfile::Builder::new()
+        .prefix(".gtl-artifacts-")
+        .tempdir_in(output_parent)
+        .with_context(|| format!("stage artifact runtime in {}", output_parent.display()))?;
+    fs::write(
+        staging_directory.path().join("artifact-runtime.js"),
+        runtime,
+    )
+    .context("write staged artifact runtime JavaScript")?;
+    fs::write(staging_directory.path().join("artifact-runtime.wasm"), wasm)
+        .context("write staged artifact runtime WASM")?;
+
+    if output_directory.exists() {
+        fs::remove_dir_all(&output_directory)
+            .with_context(|| format!("replace {}", output_directory.display()))?;
+    }
+    fs::rename(staging_directory.keep(), &output_directory)
+        .with_context(|| format!("publish {}", output_directory.display()))
 }
 
 fn find_generated_asset(files: &[PathBuf], prefix: &str, extension: &str) -> Result<PathBuf> {
@@ -852,20 +858,8 @@ fn fingerprint_sources(root: &Path, include_generated: bool) -> Result<String> {
         .iter()
         .map(|path| root.join(path))
         .collect::<Vec<_>>();
-    let excluded_paths = SOURCE_DIRECTORY_EXCLUSIONS
-        .iter()
-        .map(|path| root.join(path))
-        .collect::<Vec<_>>();
     for directory in SOURCE_DIRECTORIES {
-        files.extend(
-            collect_tree_files(&root.join(directory))?
-                .into_iter()
-                .filter(|path| {
-                    excluded_paths
-                        .iter()
-                        .all(|excluded| !path.starts_with(excluded))
-                }),
-        );
+        files.extend(collect_tree_files(&root.join(directory))?);
     }
     files.sort();
     files.dedup();
@@ -1015,9 +1009,6 @@ mod tests {
                 .expect("fixture directory is writable");
             fs::write(path, directory).expect("fixture directory source is writable");
         }
-        for excluded in SOURCE_DIRECTORY_EXCLUSIONS {
-            fs::create_dir_all(root.join(excluded)).expect("excluded directory is writable");
-        }
     }
 
     fn stage_fresh_bundle(root: &Path) {
@@ -1096,7 +1087,7 @@ mod tests {
         fixture(root.path());
         stage_fresh_bundle(root.path());
         fs::write(
-            root.path().join("crates/gtl-contracts/src/fixture.txt"),
+            root.path().join("crates/gtl-wire/src/fixture.txt"),
             "changed",
         )
         .expect("fixture contract changes");
@@ -1147,22 +1138,6 @@ mod tests {
         assert!(
             total_error.contains("bundle exceeds 9 bytes"),
             "{total_error}"
-        );
-    }
-
-    #[test]
-    fn source_fingerprint_ignores_generated_embedded_outputs() {
-        let root = tempfile::tempdir().expect("temporary repository");
-        fixture(root.path());
-        let fingerprint_before = source_fingerprint(root.path()).expect("fixture fingerprint");
-        let embedded = root.path().join(ARTIFACT_RUNTIME_SCRIPT_PATH);
-        fs::create_dir_all(embedded.parent().expect("embedded parent"))
-            .expect("embedded parent is writable");
-        fs::write(embedded, "generated").expect("embedded output is writable");
-
-        assert_eq!(
-            source_fingerprint(root.path()).expect("fixture fingerprint"),
-            fingerprint_before
         );
     }
 

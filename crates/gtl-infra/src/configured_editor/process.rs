@@ -266,16 +266,12 @@ mod tests {
 
     #[test]
     #[ignore = "subprocess helper"]
-    #[allow(
-        clippy::zombie_processes,
-        reason = "the parent must exit while its descendant retains stdout"
-    )]
     fn stdout_holder_parent_exits_after_spawning_descendant() {
         if !Path::new(STDOUT_HOLDER_PARENT_MARKER).is_file() {
             return;
         }
         fs::write(STDOUT_HOLDER_DESCENDANT_MARKER, b"ready").expect("write descendant marker");
-        let child = Command::new(std::env::current_exe().expect("current test executable"))
+        let mut child = Command::new(std::env::current_exe().expect("current test executable"))
             .args(["stdout_holder_descendant_waits", "--ignored", "--nocapture"])
             .current_dir(std::env::current_dir().expect("current directory"))
             .stdin(Stdio::null())
@@ -285,6 +281,13 @@ mod tests {
             .expect("spawn stdout-holding descendant");
         fs::write(STDOUT_HOLDER_DESCENDANT_PID, child.id().to_string())
             .expect("write descendant pid");
+        assert!(
+            child
+                .try_wait()
+                .expect("check stdout-holding descendant")
+                .is_none(),
+            "stdout-holding descendant exited before its parent"
+        );
         println!("configured-editor");
     }
 

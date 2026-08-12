@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
 use gtl_application::viewer::{project_diff_view, project_render_options, project_theme};
+use gtl_models::viewer::{self, RenderOptions, Theme};
 #[cfg(test)]
-use gtl_contracts::viewer::ViewerRenderOptions;
-use gtl_contracts::viewer::{
+use gtl_models::viewer::{DiffDensity, DiffLayout};
+#[cfg(test)]
+use gtl_wire::viewer::ViewerRenderOptions;
+use gtl_wire::viewer::{
     ViewerActiveState, ViewerActiveView, ViewerCommitSelection, ViewerFailureCode, ViewerFeedback,
     ViewerPreferences, ViewerShell, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme,
     ViewerViewIdentity,
 };
-use gtl_models::viewer::{self, RenderOptions, Theme};
-#[cfg(test)]
-use gtl_models::viewer::{DiffDensity, DiffLayout};
 
 use super::{internal, settings};
 use crate::{
@@ -24,7 +24,7 @@ use crate::{
 pub(super) fn load(
     app: &ViewerApp,
     feedback: Option<ViewerFeedback>,
-) -> Result<ViewerShell, gtl_contracts::viewer::ViewerApiError> {
+) -> Result<ViewerShell, gtl_wire::viewer::ViewerApiError> {
     live_view_restoration::restore(app)
         .map_err(|error| internal("failed to restore saved live views", error))?;
     ensure_active_cache(app)?;
@@ -38,7 +38,7 @@ pub(super) fn load(
     project(&mut session, options, theme, feedback)
 }
 
-fn ensure_active_cache(app: &ViewerApp) -> Result<(), gtl_contracts::viewer::ViewerApiError> {
+fn ensure_active_cache(app: &ViewerApp) -> Result<(), gtl_wire::viewer::ViewerApiError> {
     let refresh = {
         let mut session = app
             .session
@@ -64,7 +64,7 @@ fn project(
     options: RenderOptions,
     theme: Theme,
     feedback: Option<ViewerFeedback>,
-) -> Result<ViewerShell, gtl_contracts::viewer::ViewerApiError> {
+) -> Result<ViewerShell, gtl_wire::viewer::ViewerApiError> {
     let revision = session.revision();
     let tabs = session
         .tabs()
@@ -108,13 +108,13 @@ fn ready_active_view(
     session: &mut ViewerSession,
     tab_id: gtl_models::viewer::ViewerTabId,
     options: RenderOptions,
-) -> Result<ViewerActiveView, gtl_contracts::viewer::ViewerApiError> {
+) -> Result<ViewerActiveView, gtl_wire::viewer::ViewerApiError> {
     let identity = session
         .active_displayed_content_identity()
-        .ok_or(gtl_contracts::viewer::ViewerApiError::Conflict)?;
+        .ok_or(gtl_wire::viewer::ViewerApiError::Conflict)?;
     let range = session
         .cached_view_snapshot(tab_id)
-        .ok_or(gtl_contracts::viewer::ViewerApiError::Conflict)?
+        .ok_or(gtl_wire::viewer::ViewerApiError::Conflict)?
         .view;
     let selection = session.commit_selection_snapshot(tab_id);
     let displayed = match &selection {
@@ -168,12 +168,12 @@ pub(super) fn identity_matches(
 const fn from_render_options(options: ViewerRenderOptions) -> RenderOptions {
     RenderOptions::new(
         match options.layout {
-            gtl_contracts::viewer::ViewerDiffLayout::Unified => DiffLayout::Unified,
-            gtl_contracts::viewer::ViewerDiffLayout::Split => DiffLayout::Split,
+            gtl_wire::viewer::ViewerDiffLayout::Unified => DiffLayout::Unified,
+            gtl_wire::viewer::ViewerDiffLayout::Split => DiffLayout::Split,
         },
         match options.density {
-            gtl_contracts::viewer::ViewerDiffDensity::Compact => DiffDensity::Compact,
-            gtl_contracts::viewer::ViewerDiffDensity::Full => DiffDensity::Full,
+            gtl_wire::viewer::ViewerDiffDensity::Compact => DiffDensity::Compact,
+            gtl_wire::viewer::ViewerDiffDensity::Full => DiffDensity::Full,
         },
     )
 }
@@ -286,8 +286,7 @@ mod tests {
 
     #[test]
     fn broken_projection_never_serializes_the_source_path_or_probe_reason() {
-        let raw_reason =
-            "The git repo's directory at `/home/alice/private/customer-repo` was not found.";
+        let raw_reason = "The git repo's directory at `/workspace/repository` was not found.";
         let state = viewer::ViewerTabState::Broken {
             code: "DirNotFound".into(),
             reason: raw_reason.into(),
@@ -309,7 +308,7 @@ mod tests {
             return;
         };
 
-        assert!(!payload.contains("/home/alice"));
+        assert!(!payload.contains("/workspace/repository"));
         assert!(!payload.contains(raw_reason));
         assert!(payload.contains("DirNotFound"));
         assert!(payload.contains("was not found"));

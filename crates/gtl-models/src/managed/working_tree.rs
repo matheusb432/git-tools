@@ -1,6 +1,5 @@
 //! Data shapes for a repo's working-tree state, shared by the `commit` and
-//! `status` fan-outs. Dumb carriers — the `managed::working_tree` application
-//! reader builds them.
+//! `status` fan-outs. Managed application operations build these dumb carriers.
 
 use serde::Serialize;
 

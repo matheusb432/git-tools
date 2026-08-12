@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_contracts::viewer::ViewerFileStatus;
+use gtl_wire::viewer::ViewerFileStatus;
 
 use crate::shared::ui::{Badge, BadgeVariant};
 
@@ -18,7 +18,7 @@ pub(crate) fn DiffFileStatusBadge(
     let size_classes = match size {
         DiffFileStatusBadgeSize::Compact => "size-4 min-h-0! flex-none px-0 leading-none font-bold",
         DiffFileStatusBadgeSize::Header => {
-            "size-[15px] min-h-0! flex-none px-0 text-[9.5px] leading-none font-bold"
+            "size-4 min-h-0! flex-none px-0 text-xs leading-none font-bold"
         }
     };
     let label = status_label(status);

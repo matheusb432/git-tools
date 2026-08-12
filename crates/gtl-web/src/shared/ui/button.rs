@@ -76,7 +76,6 @@ impl ButtonVariant {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ButtonSize {
     Content,
-    Micro,
     Inline,
     Small,
     #[default]
@@ -92,8 +91,7 @@ impl ButtonSize {
     const fn classes(self) -> &'static str {
         match self {
             Self::Content => "",
-            Self::Micro => "min-h-5 gap-1 px-1.5 py-px text-[10px] tracking-[.04em]",
-            Self::Inline => "min-h-5 gap-1 px-1.5 py-px text-[11px]",
+            Self::Inline => "min-h-5 gap-1 px-1.5 py-px text-xs",
             Self::Small => "min-h-7 gap-1.5 px-2",
             Self::Medium => "h-9 gap-2 px-4",
             #[cfg(feature = "desktop")]

@@ -12,7 +12,8 @@ pub use crate::diffs::compute_merge_diff::DEFAULT_BASE;
 use crate::{
     diffs::{
         compute_merge_diff::{self, ComputeMergeDiff},
-        logic::{exclusions, range_view::TITLE_MERGE_DIFF},
+        exclusions,
+        range_view::TITLE_MERGE_DIFF,
     },
     ports::{ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsStore},
     shared::notes::Note,
@@ -64,7 +65,7 @@ pub fn execute(
         app_settings,
         source,
     )?;
-    let store_root = super::logic::artifacts::root(Path::new(&computed.top));
+    let store_root = super::artifacts::root(Path::new(&computed.top));
     let view = computed.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();

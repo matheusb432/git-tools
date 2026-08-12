@@ -5,7 +5,7 @@ use axum::{
     extract::{State, rejection::JsonRejection},
 };
 use gtl_application::diffs::render_diff_all::RenderDiffAll;
-use gtl_contracts::{diffs::RenderDiffData, envelope::Envelope};
+use gtl_wire::{diffs::RenderDiffData, envelope::Envelope};
 
 use crate::{endpoints::EndpointError, state::DaemonState};
 

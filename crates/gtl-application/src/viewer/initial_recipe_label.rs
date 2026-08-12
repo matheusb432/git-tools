@@ -1,6 +1,6 @@
-use gtl_contracts::recipes::Recipe;
+use gtl_wire::recipes::Recipe;
 
-use super::logic::recipe_label;
+use super::recipe_label;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InitialRecipeLabel {
@@ -24,7 +24,7 @@ pub fn execute(query: InitialRecipeLabel) -> InitialRecipeLabelOk {
 mod tests {
     use std::num::NonZeroU32;
 
-    use gtl_contracts::recipes::{RecipeOp, RecipeSource, RecipeTarget};
+    use gtl_wire::recipes::{RecipeOp, RecipeSource, RecipeTarget};
 
     use super::*;
     use crate::testing::viewer::recipe;

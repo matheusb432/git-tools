@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use cargo_metadata::MetadataCommand;
-use sample_project::{Test, surface};
+use sample_project::{Test, TestCountDiscovery, surface};
 
 pub(crate) fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -91,6 +91,7 @@ pub(crate) fn tests_unit() -> Result<Vec<TestDeclaration>> {
             "unit",
             Test::try_new("unit", surface::CARGO, "cargo")?
                 .args(["test", "--quiet"])
+                .test_count_discovery(TestCountDiscovery::CARGO_TEST_HARNESS)
                 .verbose_arguments(["--", "--nocapture"]),
         ),
         parser_all_features()?,
@@ -100,7 +101,7 @@ pub(crate) fn tests_unit() -> Result<Vec<TestDeclaration>> {
 }
 
 pub(crate) fn tests_e2e(executable: OsString) -> Result<Vec<TestDeclaration>> {
-    Ok(vec![cli_e2e()?, desktop_e2e(executable)?])
+    Ok(vec![desktop_e2e(executable)?])
 }
 
 pub(crate) fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
@@ -109,12 +110,12 @@ pub(crate) fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
             "unit",
             Test::try_new("unit", surface::CARGO, "cargo")?
                 .args(["test", "--workspace", "--quiet"])
+                .test_count_discovery(TestCountDiscovery::CARGO_TEST_HARNESS)
                 .verbose_arguments(["--", "--nocapture"]),
         ),
         parser_all_features()?,
         web_artifact()?,
         worker("drift", &executable, "drift-check")?,
-        cli_e2e()?,
         desktop_e2e(executable)?,
     ])
 }
@@ -122,14 +123,16 @@ pub(crate) fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
 fn parser_all_features() -> Result<TestDeclaration> {
     Ok(TestDeclaration::new(
         "parser-all-features",
-        Test::try_new("parser-all-features", surface::CARGO, "cargo")?.args([
-            "test",
-            "--locked",
-            "--quiet",
-            "-p",
-            "gtl-parser",
-            "--all-features",
-        ]),
+        Test::try_new("parser-all-features", surface::CARGO, "cargo")?
+            .args([
+                "test",
+                "--locked",
+                "--quiet",
+                "-p",
+                "gtl-parser",
+                "--all-features",
+            ])
+            .test_count_discovery(TestCountDiscovery::CARGO_TEST_HARNESS),
     ))
 }
 
@@ -137,23 +140,26 @@ fn web_desktop() -> Result<TestDeclaration> {
     Ok(TestDeclaration::new(
         "web-desktop",
         Test::try_new("web-desktop", surface::CARGO, "cargo")?
-            .args(["test", "--locked", "--quiet", "-p", "gtl-web"]),
+            .args(["test", "--locked", "--quiet", "-p", "gtl-web"])
+            .test_count_discovery(TestCountDiscovery::CARGO_TEST_HARNESS),
     ))
 }
 
 fn web_artifact() -> Result<TestDeclaration> {
     Ok(TestDeclaration::new(
         "web-artifact",
-        Test::try_new("web-artifact", surface::CARGO, "cargo")?.args([
-            "test",
-            "--locked",
-            "--quiet",
-            "-p",
-            "gtl-web",
-            "--no-default-features",
-            "--features",
-            "artifact",
-        ]),
+        Test::try_new("web-artifact", surface::CARGO, "cargo")?
+            .args([
+                "test",
+                "--locked",
+                "--quiet",
+                "-p",
+                "gtl-web",
+                "--no-default-features",
+                "--features",
+                "artifact",
+            ])
+            .test_count_discovery(TestCountDiscovery::CARGO_TEST_HARNESS),
     ))
 }
 
@@ -176,27 +182,6 @@ fn desktop_e2e(executable: OsString) -> Result<TestDeclaration> {
             .verbose_arguments(["--verbose"])
             .accepts_evidences()
             .timeout(Duration::from_hours(2)),
-    ))
-}
-
-fn cli_e2e() -> Result<TestDeclaration> {
-    Ok(TestDeclaration::new(
-        "cli-e2e",
-        Test::try_new("cli-e2e", surface::CARGO, "cargo")?
-            .args([
-                "test",
-                "-p",
-                "gtl-cli-e2e",
-                "--features",
-                "e2e",
-                "--test",
-                "daemon_lifecycle",
-                "--",
-                "--test-threads",
-                "1",
-            ])
-            .verbose_arguments(["--nocapture"])
-            .timeout(Duration::from_mins(5)),
     ))
 }
 

@@ -12,7 +12,6 @@ use gtl_application::{
         render_diff_subrepos::RenderDiffSubrepos,
     },
     ports::DiffRenderRequest,
-    recipes::RecipeRequest,
 };
 
 use crate::{commands::diff::DiffOutcome, viewer};
@@ -38,7 +37,7 @@ pub fn run_scan(
         .iter()
         .map(|repo| DiffRecipeIntent {
             repo_path: repo.path.clone(),
-            operation: RecipeRequest::Diff(target.clone()),
+            operation: crate::recipe::diff_operation(&target),
             name: Some(repo.label.clone()),
         })
         .collect();
@@ -66,7 +65,7 @@ pub fn run_managed_all(root: impl AsRef<Path>, raw: bool) -> anyhow::Result<Diff
         .iter()
         .map(|repo| DiffRecipeIntent {
             repo_path: repo.path.clone(),
-            operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
+            operation: crate::recipe::diff_operation(&DiffTarget::Unpushed { pinned: None }),
             name: Some(repo.label.clone()),
         })
         .collect();

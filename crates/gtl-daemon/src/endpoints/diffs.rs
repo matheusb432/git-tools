@@ -14,7 +14,7 @@ use gtl_application::{
     },
     shared::notes,
 };
-use gtl_contracts::{
+use gtl_wire::{
     diffs::RenderDiffData,
     envelope::{Envelope, Note, NoteLevel, Outcome},
 };

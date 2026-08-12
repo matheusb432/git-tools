@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::history::{
     RecentRenderRecord, RecentRenderRowError,
-    logic::persistence::{RECENT_RENDER_SELECT, RecentRenderRow},
+    persistence::{RECENT_RENDER_SELECT, RecentRenderRow},
 };
 
 /// Requests one recent render by its stable persisted-row identity.
@@ -31,17 +31,12 @@ pub enum GetRecentRenderError {
 }
 
 /// Gets a recent render from the application database connection.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "cqrsy requires request-first operations to take requests by value"
-)]
 pub fn execute(
-    query: GetRecentRender,
+    query: &GetRecentRender,
     connection: &Connection,
 ) -> Result<GetRecentRenderOk, GetRecentRenderError> {
-    let GetRecentRender { id } = query;
     Ok(GetRecentRenderOk {
-        entry: get_recent_render(connection, id)?,
+        entry: get_recent_render(connection, query.id)?,
     })
 }
 
@@ -62,7 +57,7 @@ fn get_recent_render(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::history::logic::persistence::{seed_recent_render, store_test};
+    use crate::history::persistence::{seed_recent_render, store_test};
 
     #[test]
     fn recent_render_is_looked_up_by_stable_id() {
@@ -70,7 +65,7 @@ mod tests {
         let connection = store_test();
         seed_recent_render(&connection, i64::from(id), "render");
 
-        let response = execute(GetRecentRender { id }, &connection).expect("lookup succeeds");
+        let response = execute(&GetRecentRender { id }, &connection).expect("lookup succeeds");
 
         assert_eq!(response.entry.expect("record exists").id, id);
     }
@@ -80,7 +75,7 @@ mod tests {
         let id = RenderHistoryId::try_new(99).expect("positive id");
 
         let connection = store_test();
-        let response = execute(GetRecentRender { id }, &connection).expect("lookup succeeds");
+        let response = execute(&GetRecentRender { id }, &connection).expect("lookup succeeds");
 
         assert!(response.entry.is_none());
     }

@@ -6,8 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
-use gtl_application::ports::{ArtifactMeta, ArtifactStore, HistoryRecord, PlacedArtifact};
-use gtl_models::{diffs::DiffKind, viewer::RenderOptions};
+use gtl_application::ports::{
+    ArtifactMeta, ArtifactRangeKey, ArtifactStore, HistoryRecord, PlacedArtifact,
+};
 
 /// The default store adapter: places artifacts into and looks them up out of the
 /// on-disk content-addressed store.
@@ -55,12 +56,7 @@ impl ArtifactStore for StoreArtifacts {
         &self,
         store_root: &Path,
         repo_root: &Path,
-        kind: DiffKind,
-        base_sha: &str,
-        head_sha: &str,
-        render_options: RenderOptions,
-        theme: Option<&str>,
-        excluded_extensions: &[String],
+        key: &ArtifactRangeKey,
     ) -> anyhow::Result<Option<PathBuf>> {
         let canonical =
             std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
@@ -68,16 +64,7 @@ impl ArtifactStore for StoreArtifacts {
             crate::git_capture::root_commit(repo_root).as_deref(),
             &canonical,
         );
-        Ok(crate::store::lookup_by_range(
-            store_root,
-            &repo_id,
-            kind,
-            base_sha,
-            head_sha,
-            render_options,
-            theme,
-            excluded_extensions,
-        ))
+        Ok(crate::store::lookup_by_range(store_root, &repo_id, key))
     }
 
     fn list_history(&self, store_root: &Path) -> anyhow::Result<Vec<HistoryRecord>> {
@@ -101,7 +88,10 @@ impl ArtifactStore for StoreArtifacts {
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::viewer::{DiffDensity, DiffLayout, RenderOptions};
+    use gtl_models::{
+        diffs::DiffKind,
+        viewer::{DiffDensity, DiffLayout, RenderOptions},
+    };
 
     use super::*;
     use crate::store::Sidecar;

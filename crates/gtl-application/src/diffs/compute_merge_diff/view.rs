@@ -6,11 +6,9 @@ use super::DEFAULT_BASE;
 use crate::{
     diffs::{
         PinnedRange, View,
-        logic::{
-            assemble::{DiffData, assemble},
-            range::DiffRanges,
-            range_view::{RangePresentation, RangeView},
-        },
+        assemble::{DiffData, assemble},
+        range::DiffRanges,
+        range_view::{RangePresentation, RangeView},
     },
     ports::GitClient,
     shared::repository_name::from_path,
@@ -39,21 +37,19 @@ pub(super) fn build(
         .filter(|base| !base.is_empty())
         .unwrap_or(DEFAULT_BASE);
 
-    #[expect(
-        clippy::single_match_else,
-        reason = "the repository rule requires match for conditional initializers"
-    )]
-    let (io_ranges, view_ranges) = match pinned {
-        Some(pin) => (
-            DiffRanges::exact(pin.git_range()),
-            DiffRanges::exact(pin.display_range()),
-        ),
-        None => {
+    let (io_ranges, view_ranges) = pinned.map_or_else(
+        || -> anyhow::Result<_> {
             source.verify_commit(Path::new(&top), base)?;
             let symbolic = DiffRanges::merge(base);
-            (symbolic.clone(), symbolic)
-        }
-    };
+            Ok((symbolic.clone(), symbolic))
+        },
+        |pin| {
+            Ok((
+                DiffRanges::exact(pin.git_range()),
+                DiffRanges::exact(pin.display_range()),
+            ))
+        },
+    )?;
     let range_view = RangeView::new(&view_ranges.diff, RangePresentation::Merge);
     let DiffData {
         commits,

@@ -32,7 +32,7 @@ pub(super) fn DiffFileActions(
 #[component]
 fn DiffCopyActions(file: ClientDiffFile, copy_context_enabled: bool) -> Element {
     rsx! {
-        span { class: "flex flex-none gap-[5px] print:hidden!",
+        span { class: "flex flex-none gap-2 print:hidden!",
             DiffCopyAction { label: "path", payload: file.summary.path.clone() }
             DiffCopyAction { label: "abs", payload: file.summary.absolute_path.clone() }
             DiffCodeCopyAction { file, include_context: copy_context_enabled }
@@ -98,7 +98,7 @@ fn CopyButton(label: &'static str, state: CopyState, onclick: EventHandler<Mouse
         CopyState::Failed => ButtonVariant::Failure,
     };
     rsx! {
-        Button { size: ButtonSize::Micro, variant, onclick, "{display}" }
+        Button { size: ButtonSize::Small, variant, onclick, "{display}" }
     }
 }
 
@@ -115,7 +115,7 @@ async fn update_copy_state(mut state: Signal<CopyState>, payload: &str) {
 #[component]
 fn DiffLineStats(added: u32, removed: u32) -> Element {
     rsx! {
-        span { class: "flex-none text-[12.5px]",
+        span { class: "flex-none text-sm",
             DiffLineChangeText { kind: DiffLineChangeKind::Added, count: u64::from(added) }
             " "
             DiffLineChangeText { kind: DiffLineChangeKind::Removed, count: u64::from(removed) }

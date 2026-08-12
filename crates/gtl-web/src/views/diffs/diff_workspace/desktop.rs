@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{
-    SetViewerPreference, ViewerActiveState, ViewerActiveView, ViewerPreferences, ViewerShell,
-    ViewerTabKind,
+use gtl_wire::viewer::{
+    OpenViewerDiffFile, SelectViewerCommit, SetViewerPreference, ViewerActiveState,
+    ViewerActiveView, ViewerPreferences, ViewerShell, ViewerTabKind, ViewerTabRequest,
 };
 use lucide_dioxus::{FileDiff, LoaderCircle, RefreshCw};
 
@@ -205,7 +205,7 @@ fn ReadyWorkspace(
     let onselect_commit = move |sha: String| {
         action_error.set(None);
         spawn(async move {
-            match DiffViewerApi::select_commit(tab_id, sha).await {
+            match DiffViewerApi::select_commit(SelectViewerCommit { tab_id, sha }).await {
                 Ok(shell) => viewer.replace_shell(shell),
                 Err(error) => action_error.set(Some(error)),
             }
@@ -214,7 +214,7 @@ fn ReadyWorkspace(
     let onclear_commit = move |()| {
         action_error.set(None);
         spawn(async move {
-            match DiffViewerApi::clear_commit_selection(tab_id).await {
+            match DiffViewerApi::clear_commit_selection(ViewerTabRequest { tab_id }).await {
                 Ok(shell) => viewer.replace_shell(shell),
                 Err(error) => action_error.set(Some(error)),
             }
@@ -233,7 +233,9 @@ fn ReadyWorkspace(
     let onopen = move |path: String| {
         action_error.set(None);
         spawn(async move {
-            if let Err(error) = DiffViewerApi::open_diff_file(identity, path).await {
+            if let Err(error) =
+                DiffViewerApi::open_diff_file(OpenViewerDiffFile { identity, path }).await
+            {
                 action_error.set(Some(error));
             }
         });
@@ -381,7 +383,7 @@ fn ReadyWorkspace(
                 delete_pending.set(true);
                 action_error.set(None);
                 spawn(async move {
-                    match DiffViewerApi::delete_live_tab(tab_id).await {
+                    match DiffViewerApi::delete_live_tab(ViewerTabRequest { tab_id }).await {
                         Ok(shell) => {
                             delete_open.set(false);
                             viewer.replace_shell(shell);

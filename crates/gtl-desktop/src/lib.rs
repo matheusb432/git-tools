@@ -15,7 +15,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use gtl_contracts::{
+use gtl_wire::{
     recipes::{OpenRecipes, decode_token},
     viewer::VIEWER_STATE_CHANGED_EVENT,
 };
@@ -169,13 +169,20 @@ fn with_viewer_commands(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<t
 fn window_xid(window: &tauri::WebviewWindow) -> Option<u64> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match window.window_handle().ok()?.as_raw() {
-        // ! `XlibWindowHandle::window` is `c_ulong` — u64 on Linux but u32 on Windows (LLP64),
-        // ! so this `.into()` is a real cross-platform widening, not the no-op it looks like here.
-        #[allow(clippy::useless_conversion)]
-        RawWindowHandle::Xlib(h) => Some(h.window.into()),
+        RawWindowHandle::Xlib(handle) => Some(xlib_window_id(handle)),
         RawWindowHandle::Xcb(h) => Some(u64::from(h.window.get())),
         _ => None,
     }
+}
+
+#[cfg(all(target_pointer_width = "64", not(target_os = "windows")))]
+const fn xlib_window_id(handle: raw_window_handle::XlibWindowHandle) -> u64 {
+    handle.window
+}
+
+#[cfg(any(not(target_pointer_width = "64"), target_os = "windows"))]
+const fn xlib_window_id(handle: raw_window_handle::XlibWindowHandle) -> u64 {
+    u64::from(handle.window)
 }
 
 fn handle_window_event(window: &tauri::Window, event: &WindowEvent) {
@@ -302,10 +309,10 @@ mod tests {
         }
     }
 
-    fn recipe_batch(id: &str) -> gtl_contracts::recipes::OpenRecipes {
-        gtl_contracts::recipes::OpenRecipes {
+    fn recipe_batch(id: &str) -> gtl_wire::recipes::OpenRecipes {
+        gtl_wire::recipes::OpenRecipes {
             batch_id: id.into(),
-            kind: gtl_contracts::recipes::RecipeBatchKind::Snapshot,
+            kind: gtl_wire::recipes::RecipeBatchKind::Snapshot,
             recipes: Vec::new(),
         }
     }
@@ -316,10 +323,10 @@ mod tests {
         let second = recipe_batch("second");
         let argv = vec![
             "gtl-viewer".into(),
-            gtl_contracts::recipes::encode_token(&first).expect("first batch encodes"),
+            gtl_wire::recipes::encode_token(&first).expect("first batch encodes"),
             "gtl-recipe://malformed".into(),
             "--flag".into(),
-            gtl_contracts::recipes::encode_token(&second).expect("second batch encodes"),
+            gtl_wire::recipes::encode_token(&second).expect("second batch encodes"),
         ];
 
         assert_eq!(recipes_from_argv(&argv), vec![first, second]);
@@ -330,9 +337,7 @@ mod tests {
         let batch = recipe_batch("warm");
 
         assert_eq!(
-            recipes_from_argv(&[
-                gtl_contracts::recipes::encode_token(&batch).expect("batch encodes")
-            ]),
+            recipes_from_argv(&[gtl_wire::recipes::encode_token(&batch).expect("batch encodes")]),
             vec![batch]
         );
     }

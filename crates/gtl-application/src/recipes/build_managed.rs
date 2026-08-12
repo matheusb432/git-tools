@@ -1,16 +1,15 @@
 //! Builds snapshot recipes for managed repositories with unpushed commits.
 
-use gtl_contracts::recipes::Recipe;
 use gtl_models::managed::ManagedRepo;
+use gtl_wire::recipes::{Recipe, RecipeOp};
 
-use super::RecipeRequest;
 use crate::{managed::select_unpushed, ports::GitClient};
 
 /// Requests recipes for ahead repositories from an already-resolved project catalogue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildManagedRecipes {
     pub repos: Vec<ManagedRepo>,
-    pub operation: RecipeRequest,
+    pub operation: RecipeOp,
 }
 
 /// Reports a failure while selecting managed repositories.
@@ -37,7 +36,7 @@ pub fn execute(
     Ok(selected
         .into_iter()
         .map(|repo| {
-            super::logic::build_resolved(repo.path, query.operation.clone(), Some(repo.label), git)
+            super::build_resolved(repo.path, query.operation.clone(), Some(repo.label), git)
         })
         .collect())
 }
@@ -46,11 +45,11 @@ pub fn execute(
 mod tests {
     use std::path::PathBuf;
 
-    use gtl_contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
     use gtl_models::managed::ManagedRepo;
+    use gtl_wire::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::{BuildManagedRecipes, execute};
-    use crate::{diffs::DiffTarget, recipes::RecipeRequest, testing::ScriptedGitClient};
+    use crate::testing::ScriptedGitClient;
 
     fn repo(name: &str) -> ManagedRepo {
         ManagedRepo {
@@ -80,7 +79,9 @@ mod tests {
         let recipes = execute(
             BuildManagedRecipes {
                 repos: vec![repo("api"), repo("clean"), repo("web")],
-                operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
+                operation: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
             },
             &git,
         )
@@ -122,7 +123,9 @@ mod tests {
         let recipes = execute(
             BuildManagedRecipes {
                 repos: vec![repo("api")],
-                operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
+                operation: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
             },
             &git,
         )

@@ -1,9 +1,9 @@
 //! The `history/record_render` vertical slice: record one render in the app history log.
 
-use gtl_contracts::recipes::Recipe;
+use gtl_wire::recipes::Recipe;
 use rusqlite::{Connection, params};
 
-use crate::{history::logic::persistence::RecipeColumns, ports::Clock};
+use crate::{history::persistence::RecipeColumns, ports::Clock};
 
 const RECENT_RENDERS_CAP: usize = 500;
 
@@ -24,17 +24,13 @@ pub enum RecordRenderError {
 }
 
 /// Records a render through the application database connection.
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "application operations keep request-first values consistent"
-)]
 pub fn execute(
-    req: RecordRender,
+    req: &RecordRender,
     connection: &mut Connection,
     clock: &impl Clock,
 ) -> Result<(), RecordRenderError> {
     let rendered_at = clock.now_iso();
-    record_render(connection, &req, &rendered_at)?;
+    record_render(connection, req, &rendered_at)?;
     Ok(())
 }
 
@@ -107,11 +103,11 @@ fn record_render(
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
+    use gtl_wire::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::*;
     use crate::{
-        history::{RecentRenderRecord, list_recent_render_page, logic::persistence::store_test},
+        history::{RecentRenderRecord, list_recent_render_page, persistence::store_test},
         testing::FixedClock,
     };
 
@@ -184,7 +180,7 @@ mod tests {
     fn records_a_render_stamped_by_the_clock() {
         let mut connection = store_test();
         let clock = FixedClock("2026-07-07T00:00:00Z".into());
-        execute(command("gt · unpushed"), &mut connection, &clock).expect("record succeeds");
+        execute(&command("gt · unpushed"), &mut connection, &clock).expect("record succeeds");
 
         let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
@@ -205,13 +201,13 @@ mod tests {
     fn repeated_renders_share_one_touched_project_source() {
         let mut connection = store_test();
         execute(
-            command("first"),
+            &command("first"),
             &mut connection,
             &FixedClock("2026-07-07T00:00:00Z".into()),
         )
         .expect("record succeeds");
         execute(
-            command("second"),
+            &command("second"),
             &mut connection,
             &FixedClock("2026-07-08T00:00:00Z".into()),
         )
@@ -231,13 +227,13 @@ mod tests {
         repeated.title = "repeated".into();
 
         execute(
-            first,
+            &first,
             &mut connection,
             &FixedClock("2026-07-07T00:00:00Z".into()),
         )
         .expect("first record succeeds");
         execute(
-            repeated,
+            &repeated,
             &mut connection,
             &FixedClock("2026-07-08T00:00:00Z".into()),
         )
@@ -274,7 +270,7 @@ mod tests {
         ];
 
         for command in commands {
-            execute(command, &mut connection, &clock).expect("distinct record succeeds");
+            execute(&command, &mut connection, &clock).expect("distinct record succeeds");
         }
 
         assert_eq!(list_recent(&connection).len(), 5);
@@ -289,7 +285,7 @@ mod tests {
         // so pruning them must also collect its project_sources row.
         for index in 0..5 {
             execute(
-                command_for_recipe(
+                &command_for_recipe(
                     format!("render {index}"),
                     "gt",
                     pinned_recipe(
@@ -305,7 +301,7 @@ mod tests {
         }
         for index in 5..(RECENT_RENDERS_CAP + 5) {
             execute(
-                command_for_recipe(
+                &command_for_recipe(
                     format!("render {index}"),
                     "gt",
                     pinned_recipe(

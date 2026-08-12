@@ -2,16 +2,15 @@
 
 use std::path::PathBuf;
 
-use gtl_contracts::recipes::Recipe;
+use gtl_wire::recipes::{Recipe, RecipeOp};
 
-use super::RecipeRequest;
-use crate::{discovery::resolve_repo_top, ports::GitClient, recipes::logic::build_resolved};
+use crate::{discovery::resolve_repo_top, ports::GitClient, recipes::build_resolved};
 
 /// Requests one complete snapshot recipe for a repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinRecipe {
     pub repo_path: PathBuf,
-    pub operation: RecipeRequest,
+    pub operation: RecipeOp,
     pub name: Option<String>,
 }
 
@@ -56,19 +55,15 @@ pub fn execute(query: PinRecipe, git: &impl GitClient) -> Result<Recipe, PinReci
 mod tests {
     use std::{num::NonZeroU32, path::PathBuf};
 
-    use gtl_contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
+    use gtl_wire::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::{PinRecipe, execute};
-    use crate::{
-        diffs::{self, DiffTarget},
-        recipes::RecipeRequest,
-        testing::ScriptedGitClient,
-    };
+    use crate::testing::ScriptedGitClient;
 
     fn pin(
-        operation: RecipeRequest,
+        operation: RecipeOp,
         outputs: Vec<crate::testing::GitResponse>,
-    ) -> gtl_contracts::recipes::Recipe {
+    ) -> gtl_wire::recipes::Recipe {
         execute(
             PinRecipe {
                 repo_path: "/work/repo/nested".into(),
@@ -83,10 +78,12 @@ mod tests {
     #[test]
     fn exact_range_is_pinned_to_immutable_shas() {
         let recipe = pin(
-            RecipeRequest::Diff(DiffTarget::Range {
-                range: "main..HEAD".into(),
-                pinned: None,
-            }),
+            RecipeOp::Diff {
+                target: RecipeTarget::Range {
+                    range: "main..HEAD".into(),
+                    pinned: None,
+                },
+            },
             vec![
                 ScriptedGitClient::applied("/work/repo\n"),
                 ScriptedGitClient::applied("base-sha\n"),
@@ -96,7 +93,7 @@ mod tests {
 
         assert_eq!(
             recipe,
-            gtl_contracts::recipes::Recipe {
+            gtl_wire::recipes::Recipe {
                 source: RecipeSource::LocalRepo(PathBuf::from("/work/repo")),
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Range {
@@ -116,7 +113,9 @@ mod tests {
     fn every_pinnable_operation_preserves_its_symbolic_identity() {
         let cases = [
             (
-                RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
+                RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
                 RecipeOp::Diff {
                     target: RecipeTarget::Unpushed {
                         pinned: Some(PinnedRange {
@@ -127,10 +126,12 @@ mod tests {
                 },
             ),
             (
-                RecipeRequest::Diff(DiffTarget::Last {
-                    count: NonZeroU32::new(3).unwrap(),
-                    pinned: None,
-                }),
+                RecipeOp::Diff {
+                    target: RecipeTarget::Last {
+                        count: NonZeroU32::new(3).unwrap(),
+                        pinned: None,
+                    },
+                },
                 RecipeOp::Diff {
                     target: RecipeTarget::Last {
                         count: NonZeroU32::new(3).unwrap(),
@@ -142,10 +143,12 @@ mod tests {
                 },
             ),
             (
-                RecipeRequest::Diff(DiffTarget::Merge {
-                    base: "release".into(),
-                    pinned: None,
-                }),
+                RecipeOp::Diff {
+                    target: RecipeTarget::Merge {
+                        base: "release".into(),
+                        pinned: None,
+                    },
+                },
                 RecipeOp::Diff {
                     target: RecipeTarget::Merge {
                         base: "release".into(),
@@ -157,8 +160,9 @@ mod tests {
                 },
             ),
             (
-                RecipeRequest::MergeDiff {
+                RecipeOp::MergeDiff {
                     base: Some("release".into()),
+                    pinned: None,
                 },
                 RecipeOp::MergeDiff {
                     base: Some("release".into()),
@@ -169,7 +173,10 @@ mod tests {
                 },
             ),
             (
-                RecipeRequest::MergeDiff { base: None },
+                RecipeOp::MergeDiff {
+                    base: None,
+                    pinned: None,
+                },
                 RecipeOp::MergeDiff {
                     base: None,
                     pinned: Some(PinnedRange {
@@ -195,18 +202,22 @@ mod tests {
 
     #[test]
     fn base_and_existing_pins_are_preserved_without_resolution() {
-        let pinned = diffs::PinnedRange {
+        let pinned = PinnedRange {
             base: "already-base".into(),
             head: "already-head".into(),
         };
         let base = pin(
-            RecipeRequest::Diff(DiffTarget::Base("main".into())),
+            RecipeOp::Diff {
+                target: RecipeTarget::Base { rev: "main".into() },
+            },
             vec![ScriptedGitClient::applied("/work/repo\n")],
         );
         let existing = pin(
-            RecipeRequest::Diff(DiffTarget::Unpushed {
-                pinned: Some(pinned),
-            }),
+            RecipeOp::Diff {
+                target: RecipeTarget::Unpushed {
+                    pinned: Some(pinned),
+                },
+            },
             vec![ScriptedGitClient::applied("/work/repo\n")],
         );
 
@@ -232,17 +243,21 @@ mod tests {
     #[test]
     fn failed_or_unsupported_resolution_falls_back_to_symbolic_values() {
         let unresolved = pin(
-            RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
+            RecipeOp::Diff {
+                target: RecipeTarget::Unpushed { pinned: None },
+            },
             vec![
                 ScriptedGitClient::applied("/work/repo\n"),
                 ScriptedGitClient::rejected("no upstream"),
             ],
         );
         let three_dot = pin(
-            RecipeRequest::Diff(DiffTarget::Range {
-                range: "main...HEAD".into(),
-                pinned: None,
-            }),
+            RecipeOp::Diff {
+                target: RecipeTarget::Range {
+                    range: "main...HEAD".into(),
+                    pinned: None,
+                },
+            },
             vec![ScriptedGitClient::applied("/work/repo\n")],
         );
 
@@ -273,7 +288,9 @@ mod tests {
         let recipe = execute(
             PinRecipe {
                 repo_path: "/work/repo".into(),
-                operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
+                operation: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
                 name: Some("repo".into()),
             },
             &git,

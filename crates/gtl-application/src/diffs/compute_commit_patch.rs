@@ -7,10 +7,8 @@ use gtl_models::diffs::{AppliedExclusions, Commit};
 use crate::{
     diffs::{
         Cmd, Foot, View,
-        logic::{
-            assemble::{DiffData, assemble},
-            view::sort_files_tree_order,
-        },
+        assemble::{DiffData, assemble},
+        view::sort_files_tree_order,
     },
     ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
     shared::repository_name::from_path,
@@ -80,7 +78,6 @@ pub fn execute(
         commits_label: "# selected commit".into(),
         foot: Foot {
             cmd: format!("git show --format=fuller {}", commit.sha),
-            note: "# standalone commit patch".into(),
         },
         commits,
         files,

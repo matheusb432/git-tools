@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use gtl_application::viewer::ViewerTabKind;
-use gtl_contracts::recipes::{OpenRecipes, Recipe, RecipeBatchKind};
+use gtl_wire::recipes::{OpenRecipes, Recipe, RecipeBatchKind};
 
 use crate::{presentation::ViewerApp, recipes::RecipeError, session::PendingRecipesError};
 
@@ -111,7 +111,7 @@ const fn viewer_tab_kind(kind: RecipeBatchKind) -> ViewerTabKind {
 mod tests {
     use std::path::PathBuf;
 
-    use gtl_contracts::recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource};
+    use gtl_wire::recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource};
 
     use super::*;
 

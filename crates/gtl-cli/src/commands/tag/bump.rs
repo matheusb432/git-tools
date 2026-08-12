@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use gtl_contracts::{
+use gtl_wire::{
     envelope::Outcome,
     tags::{BumpTagRequest, DryRunTagBumpRequest, TagBumpLevelDto, TagBumpPreview},
 };
@@ -144,7 +144,7 @@ const fn level_name(level: TagBumpLevelDto) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::tags::{TagBumpLevelDto, TagBumpPreview};
+    use gtl_wire::tags::{TagBumpLevelDto, TagBumpPreview};
 
     use super::render_preview;
 

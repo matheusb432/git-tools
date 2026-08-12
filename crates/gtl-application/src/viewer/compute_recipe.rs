@@ -1,4 +1,4 @@
-use gtl_contracts::recipes::{self, Recipe, RecipeOp, RecipeTarget};
+use gtl_wire::recipes::{self, Recipe, RecipeOp, RecipeTarget};
 
 use crate::{
     diffs::{

@@ -2,6 +2,7 @@ use std::{future::Future, panic::AssertUnwindSafe, path::PathBuf, pin::Pin};
 
 use anyhow::{Context, Result};
 use futures_util::FutureExt;
+use thirtyfour::{By, WebDriver, WebElement};
 
 pub mod evidence;
 pub mod fixture;
@@ -9,15 +10,50 @@ pub mod selectors;
 pub mod session;
 pub mod wait;
 
-mod journey;
+pub async fn active_tab(driver: &WebDriver) -> Result<WebElement> {
+    wait::until("active diff tab", wait::ASSERTION_TIMEOUT, || async {
+        let tabs = driver
+            .find_all(By::Css("[role='tab'][aria-selected='true']"))
+            .await?;
+        for tab in tabs {
+            if tab.is_displayed().await? {
+                return Ok(Some(tab));
+            }
+        }
+        Ok(None)
+    })
+    .await
+}
 
-pub use journey::{
-    assert_chunked_live_view, assert_configured_editor_launch, assert_default_navigation_reachable,
-    assert_durable_empty_state, assert_first_paint, assert_forwarded_live_view,
-    assert_mobile_navigation, assert_overlapping_live_updates, assert_restarted_live_view,
-    delete_and_assert_empty_state, delete_temporary_live_views, refresh_and_assert_alpha_v2,
-    refresh_and_assert_unavailable, select_commit_patch_and_restore_range, select_split_layout,
-};
+pub async fn wait_for_active_diff(
+    driver: &WebDriver,
+    repository: &str,
+    marker: &str,
+) -> Result<()> {
+    wait::until(
+        &format!("{repository} diff containing {marker}"),
+        wait::ASSERTION_TIMEOUT,
+        || async {
+            let active_tabs = driver
+                .find_all(By::Css("[role='tab'][aria-selected='true']"))
+                .await?;
+            let Some(active_tab) = active_tabs.into_iter().next() else {
+                return Ok(None);
+            };
+            let title = active_tab.attr("title").await?.unwrap_or_default();
+            if !active_tab.is_displayed().await? || !title.contains(repository) {
+                return Ok(None);
+            }
+
+            let main = driver.find(By::Css("main")).await?;
+            if main.is_displayed().await? && main.text().await?.contains(marker) {
+                return Ok(Some(()));
+            }
+            Ok(None)
+        },
+    )
+    .await
+}
 
 pub async fn run_test<F>(name: &'static str, body: F) -> Result<()>
 where

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gtl_contracts::recipes::Recipe;
+use gtl_wire::recipes::Recipe;
 
 use super::{
     ViewerTabKind, ViewerTabState,
@@ -101,7 +101,7 @@ pub fn execute(
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::recipes::{RecipeOp, RecipeTarget};
+    use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
     use super::*;
     use crate::{

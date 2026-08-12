@@ -4,7 +4,7 @@
 //! commits is saved and forwarded as one batch.
 
 use anyhow::Context as _;
-use gtl_contracts::{
+use gtl_wire::{
     envelope::Outcome,
     live_views::{SaveLiveViewData, SaveLiveViewRequest},
     recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget},

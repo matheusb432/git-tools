@@ -230,7 +230,7 @@ mod tests {
     use std::{path::PathBuf, sync::mpsc::RecvTimeoutError};
 
     use gtl_application::viewer::{ViewerTabId, ViewerTabKind};
-    use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource};
+    use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource};
 
     use super::*;
     use crate::{recipes::ReservedRecipeComputation, session::ComputeTicket};

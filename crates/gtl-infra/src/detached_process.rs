@@ -1,14 +1,14 @@
 use std::path::Path;
 
-#[cfg(target_os = "linux")]
-mod linux;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod unix;
 
 #[cfg(windows)]
 mod windows;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn platform_spawn(program: &Path, arguments: &[&str]) -> std::io::Result<()> {
-    linux::spawn(program, arguments)
+    unix::spawn(program, arguments)
 }
 
 #[cfg(windows)]
@@ -16,7 +16,7 @@ fn platform_spawn(program: &Path, arguments: &[&str]) -> std::io::Result<()> {
     windows::spawn(program, arguments)
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn platform_spawn(_program: &Path, _arguments: &[&str]) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -24,13 +24,13 @@ fn platform_spawn(_program: &Path, _arguments: &[&str]) -> std::io::Result<()> {
     ))
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn platform_spawn_in(
     program: &Path,
     arguments: &[&str],
     working_directory: &Path,
 ) -> std::io::Result<()> {
-    linux::spawn_in(program, arguments, working_directory)
+    unix::spawn_in(program, arguments, working_directory)
 }
 
 #[cfg(windows)]
@@ -42,7 +42,7 @@ fn platform_spawn_in(
     windows::spawn_in(program, arguments, working_directory)
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn platform_spawn_in(
     _program: &Path,
     _arguments: &[&str],

@@ -36,7 +36,6 @@ pub(super) fn view_with_lines(line_count: usize) -> View {
         commits_label: "0 commits".into(),
         foot: Foot {
             cmd: "git diff origin/main..HEAD".into(),
-            note: "benchmark fixture".into(),
         },
     }
 }

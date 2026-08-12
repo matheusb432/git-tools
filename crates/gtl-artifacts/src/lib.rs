@@ -67,7 +67,6 @@ mod tests {
             commits_label: "0 commits".to_owned(),
             foot: Foot {
                 cmd: "git diff origin/main..HEAD".to_owned(),
-                note: "# read-only artifact".to_owned(),
             },
         }
     }

@@ -5,7 +5,7 @@ use futures_util::{StreamExt as _, stream};
 use gtl_models::managed::ManagedRepo;
 
 use crate::{
-    managed::logic::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
+    managed::sync::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
     ports::{Clock, GitClient, GitEffect, ProjectClient, ProjectClientError, PushLedger},
 };
 
@@ -65,7 +65,7 @@ pub async fn execute(
         }
         results.push(outcome.result);
     }
-    let exit = service::classify_exit(&results);
+    let exit = sync::classify_exit(&results);
     Ok(PushAllOk { results, exit })
 }
 
@@ -75,7 +75,7 @@ struct PushOneOutcome {
 }
 
 fn push_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> PushOneOutcome {
-    let branch = match service::preflight(git, repo, "detached HEAD - nothing to push") {
+    let branch = match sync::preflight(git, repo, "detached HEAD - nothing to push") {
         Preflight::Done(result) => {
             return PushOneOutcome {
                 result,
@@ -88,7 +88,7 @@ fn push_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> PushOneOutco
     let ahead = synced_ahead(git, repo);
     if ahead == Some(0) {
         return PushOneOutcome {
-            result: service::result(
+            result: sync::result(
                 repo,
                 &branch,
                 SyncStatus::UpToDate,
@@ -102,20 +102,20 @@ fn push_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> PushOneOutco
         Ok(outcome) => outcome,
         Err(error) => {
             return PushOneOutcome {
-                result: service::result(repo, &branch, SyncStatus::Fail, &error.to_string()),
+                result: sync::result(repo, &branch, SyncStatus::Fail, &error.to_string()),
                 ledger_ahead: None,
             };
         }
     };
     let result = match outcome {
-        GitEffect::Rejected(detail) => service::result(
+        GitEffect::Rejected(detail) => sync::result(
             repo,
             &branch,
             SyncStatus::Fail,
             &push_failure_detail(&detail),
         ),
         GitEffect::Applied(receipt) if receipt.up_to_date => {
-            service::result(repo, &branch, SyncStatus::UpToDate, "up to date")
+            sync::result(repo, &branch, SyncStatus::UpToDate, "up to date")
         }
         GitEffect::Applied(receipt) => {
             let status = if dry {
@@ -123,7 +123,7 @@ fn push_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> PushOneOutco
             } else {
                 SyncStatus::Pushed
             };
-            service::result(repo, &branch, status, &receipt.detail)
+            sync::result(repo, &branch, status, &receipt.detail)
         }
     };
     PushOneOutcome {

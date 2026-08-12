@@ -1,5 +1,7 @@
 use dioxus::{core::spawn_forever, prelude::*};
-use gtl_contracts::viewer::{SetViewerPreference, ViewerFeedback, ViewerShell, ViewerTheme};
+use gtl_wire::viewer::{
+    SetViewerPreference, ViewerFeedback, ViewerShell, ViewerTabRequest, ViewerTheme,
+};
 
 use crate::{
     app::{application_navigation::ApplicationNavigation, application_router::Route},
@@ -28,7 +30,7 @@ struct ViewerRenderCommandTicket {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ViewerRenderCommand {
     SetPreference(SetViewerPreference),
-    RefreshTab { tab_id: u64 },
+    RefreshTab(ViewerTabRequest),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,7 +178,7 @@ impl ViewerContext {
     }
 
     pub(crate) fn refresh_tab(self, tab_id: u64) {
-        self.schedule_render_command(ViewerRenderCommand::RefreshTab { tab_id });
+        self.schedule_render_command(ViewerRenderCommand::RefreshTab(ViewerTabRequest { tab_id }));
     }
 
     fn schedule_render_command(mut self, command: ViewerRenderCommand) {
@@ -193,8 +195,8 @@ impl ViewerContext {
                 ViewerRenderCommand::SetPreference(preference) => {
                     DiffViewerApi::set_preference(preference).await
                 }
-                ViewerRenderCommand::RefreshTab { tab_id } => {
-                    DiffViewerApi::refresh_tab(tab_id).await
+                ViewerRenderCommand::RefreshTab(request) => {
+                    DiffViewerApi::refresh_tab(request).await
                 }
             };
             self.complete_render_command(ticket, result);
@@ -369,7 +371,9 @@ fn ViewerFeedbackNotice(feedback: ViewerFeedback) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::{SetViewerPreference, ViewerDiffDensity, ViewerDiffLayout};
+    use gtl_wire::viewer::{
+        SetViewerPreference, ViewerDiffDensity, ViewerDiffLayout, ViewerTabRequest,
+    };
 
     use super::{
         ViewerRenderCommand, ViewerRenderCommandCompletion, ViewerRenderCommandScheduler,
@@ -422,8 +426,8 @@ mod tests {
         let density = ViewerRenderCommand::SetPreference(SetViewerPreference::Density(
             ViewerDiffDensity::Compact,
         ));
-        let first_refresh = ViewerRenderCommand::RefreshTab { tab_id: 7 };
-        let latest_refresh = ViewerRenderCommand::RefreshTab { tab_id: 11 };
+        let first_refresh = ViewerRenderCommand::RefreshTab(ViewerTabRequest { tab_id: 7 });
+        let latest_refresh = ViewerRenderCommand::RefreshTab(ViewerTabRequest { tab_id: 11 });
 
         assert_eq!(
             scheduler.submit(layout),

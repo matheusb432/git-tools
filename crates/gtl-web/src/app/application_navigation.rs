@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{
-    SetViewerPreference, ViewerActiveState, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme,
+use gtl_wire::viewer::{
+    SetViewerPreference, ViewerActiveState, ViewerTab, ViewerTabKind, ViewerTabRequest,
+    ViewerTabState, ViewerTheme,
 };
 use lucide_dioxus::{CircleDot, History, LoaderCircle, Settings, TriangleAlert, X};
 
@@ -82,7 +83,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             return;
                                         }
                                         spawn(async move {
-                                            match DiffViewerApi::activate_tab(tab_id).await {
+                                            match DiffViewerApi::activate_tab(ViewerTabRequest { tab_id }).await {
                                                 Ok(shell) => {
                                                     viewer.replace_shell(shell);
                                                     navigator.push(Route::Workspace {});
@@ -104,7 +105,11 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             let ids = key_tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
                                             if let Some(target) = tab_focus_target(&ids, tab_id, movement) {
                                                 spawn(async move {
-                                                    match DiffViewerApi::activate_tab(target).await {
+                                                    match DiffViewerApi::activate_tab(ViewerTabRequest {
+                                                            tab_id: target,
+                                                        })
+                                                        .await
+                                                    {
                                                         Ok(shell) => {
                                                             viewer.replace_shell(shell);
                                                             navigator.push(Route::Workspace {});
@@ -136,7 +141,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                     onclick: move |_| {
                                         action_error.set(None);
                                         spawn(async move {
-                                            match DiffViewerApi::close_tab(tab_id).await {
+                                            match DiffViewerApi::close_tab(ViewerTabRequest { tab_id }).await {
                                                 Ok(shell) => {
                                                     viewer.replace_shell(shell);
                                                     if let Some(focus_id) = focus_tab_id {
@@ -302,7 +307,7 @@ fn close_focus_target(tabs: &[ViewerTab], closing: u64) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::{ViewerTab, ViewerTabKind, ViewerTabState};
+    use gtl_wire::viewer::{ViewerTab, ViewerTabKind, ViewerTabState};
 
     use super::{TabMovement, close_focus_target, tab_focus_target, tab_state_label};
 

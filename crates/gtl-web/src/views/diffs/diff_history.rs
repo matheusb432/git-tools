@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage};
+use gtl_wire::viewer::{
+    GetViewerHistoryCopy, ListViewerHistory, OpenViewerHistory, ViewerHistoryCursor,
+    ViewerHistoryEntry, ViewerHistoryPage,
+};
 use lucide_dioxus::{
     Check, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Copy, ExternalLink, History,
 };
@@ -22,50 +25,50 @@ enum HistoryLoad {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct HistoryOpenRequest {
-    render_id: i64,
+struct HistoryOpenTicket {
+    request: OpenViewerHistory,
     generation: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct HistoryOpenState {
     generation: u64,
-    request: Option<HistoryOpenRequest>,
+    ticket: Option<HistoryOpenTicket>,
 }
 
 impl HistoryOpenState {
-    fn begin(&mut self, render_id: i64) -> Option<HistoryOpenRequest> {
-        if self.request.is_some() {
+    fn begin(&mut self, render_id: i64) -> Option<HistoryOpenTicket> {
+        if self.ticket.is_some() {
             return None;
         }
 
         self.generation = self.generation.wrapping_add(1);
-        let request = HistoryOpenRequest {
-            render_id,
+        let ticket = HistoryOpenTicket {
+            request: OpenViewerHistory { render_id },
             generation: self.generation,
         };
-        self.request = Some(request);
-        Some(request)
+        self.ticket = Some(ticket);
+        Some(ticket)
     }
 
-    const fn accepts(self, request: HistoryOpenRequest) -> bool {
-        matches!(self.request, Some(current) if current.render_id == request.render_id && current.generation == request.generation)
+    fn accepts(self, ticket: HistoryOpenTicket) -> bool {
+        self.ticket == Some(ticket)
     }
 
-    fn finish(&mut self, request: HistoryOpenRequest) -> bool {
-        if !self.accepts(request) {
+    fn finish(&mut self, ticket: HistoryOpenTicket) -> bool {
+        if !self.accepts(ticket) {
             return false;
         }
-        self.request = None;
+        self.ticket = None;
         true
     }
 
     const fn is_pending(self) -> bool {
-        self.request.is_some()
+        self.ticket.is_some()
     }
 
     const fn is_opening(self, render_id: i64) -> bool {
-        matches!(self.request, Some(request) if request.render_id == render_id)
+        matches!(self.ticket, Some(ticket) if ticket.request.render_id == render_id)
     }
 }
 
@@ -94,7 +97,10 @@ pub(crate) fn DiffHistoryView() -> Element {
         };
         history.set(HistoryLoad::Loading);
         spawn(async move {
-            let result = DiffHistoryApi::list_history(requested_cursor).await;
+            let result = DiffHistoryApi::list_history(ListViewerHistory {
+                cursor: requested_cursor,
+            })
+            .await;
             if query_generation() != generation {
                 return;
             }
@@ -181,16 +187,16 @@ pub(crate) fn DiffHistoryView() -> Element {
                                         open_disabled: open_state().is_pending(),
                                         copied: copied_id() == Some(entry.id),
                                         onopen: move |render_id: i64| {
-                                            let Some(open_request) = open_state.write().begin(render_id) else {
+                                            let Some(open_ticket) = open_state.write().begin(render_id) else {
                                                 return;
                                             };
                                             action_error.set(None);
                                             spawn(async move {
-                                                let result = DiffHistoryApi::open_history(render_id).await;
-                                                if !open_state().accepts(open_request) {
+                                                let result = DiffHistoryApi::open_history(open_ticket.request).await;
+                                                if !open_state().accepts(open_ticket) {
                                                     return;
                                                 }
-                                                let _ = open_state.write().finish(open_request);
+                                                let _ = open_state.write().finish(open_ticket);
                                                 match result {
                                                     Ok(shell) => {
                                                         viewer.replace_shell(shell);
@@ -203,7 +209,9 @@ pub(crate) fn DiffHistoryView() -> Element {
                                         oncopy: move |render_id: i64| {
                                             action_error.set(None);
                                             spawn(async move {
-                                                match DiffHistoryApi::get_history_copy(render_id).await {
+                                                match DiffHistoryApi::get_history_copy(GetViewerHistoryCopy { render_id })
+                                                    .await
+                                                {
                                                     Ok(payload) => {
                                                         match browser::copy_json(&payload).await {
                                                             Ok(()) => copied_id.set(Some(render_id)),
@@ -421,13 +429,15 @@ fn HistoryPageButton(
 
 #[cfg(test)]
 mod tests {
+    use gtl_wire::viewer::OpenViewerHistory;
+
     use super::HistoryOpenState;
 
     #[test]
     fn history_open_is_page_wide_and_rejects_stale_completion() {
         let mut state = HistoryOpenState::default();
-        let first = super::HistoryOpenRequest {
-            render_id: 9,
+        let first = super::HistoryOpenTicket {
+            request: OpenViewerHistory { render_id: 9 },
             generation: 1,
         };
         assert_eq!(state.begin(9), Some(first));
@@ -437,8 +447,8 @@ mod tests {
         assert_eq!(state.begin(10), None);
 
         assert!(state.finish(first));
-        let second = super::HistoryOpenRequest {
-            render_id: 10,
+        let second = super::HistoryOpenTicket {
+            request: OpenViewerHistory { render_id: 10 },
             generation: 2,
         };
         assert_eq!(state.begin(10), Some(second));

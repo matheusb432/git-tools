@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_contracts::viewer::ViewerActiveView;
+use gtl_wire::viewer::ViewerActiveView;
 #[cfg(feature = "artifact")]
 use lucide_dioxus::{History, Menu, SlidersHorizontal};
 
@@ -75,7 +75,6 @@ pub(crate) fn ArtifactDiffWorkspace(view: ViewerActiveView) -> Element {
         ArtifactNavigationButton {
             id: commits_trigger.clone(),
             label: "History",
-            aria_label: "Commits in range",
             panel: ArtifactMobilePanel::Commits,
             count: view.commits.len(),
             enabled: !view.commits.is_empty(),
@@ -151,21 +150,22 @@ pub(crate) fn ArtifactDiffWorkspace(view: ViewerActiveView) -> Element {
 fn ArtifactNavigationButton(
     id: String,
     label: String,
-    aria_label: String,
+    aria_label: Option<String>,
     panel: ArtifactMobilePanel,
     count: Option<usize>,
     enabled: bool,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
+    let aria_label_display = aria_label.unwrap_or_else(|| label.clone());
     rsx! {
         Button {
             id,
-            class: "relative hidden min-w-0 flex-col justify-center gap-0.5 px-1 py-1 text-[10px] leading-none focus-visible:outline-offset-[-2px] disabled:cursor-default disabled:opacity-35 mobile:flex",
+            class: "relative hidden min-w-0 flex-col justify-center gap-0.5 px-1 py-1 text- leading-none focus-visible:-outline-offset-2 disabled:cursor-default disabled:opacity-35 mobile:flex",
             layout: ButtonLayout::Content,
             size: ButtonSize::Content,
             variant: ButtonVariant::Ghost,
             state: if enabled { ButtonState::Enabled } else { ButtonState::Disabled },
-            aria_label,
+            aria_label: aria_label_display,
             onclick,
             ArtifactNavigationIcon { panel }
             ArtifactNavigationLabel { label }
@@ -277,6 +277,11 @@ enum MobilePanel {
     Commits,
 }
 
-const fn plural_suffix(count: usize) -> &'static str {
-    if count == 1 { "" } else { "s" }
+// TODO: refactor these to cleaner, intl compatible shape
+const fn file_label(count: usize) -> &'static str {
+    if count == 1 { "file" } else { "files" }
+}
+
+const fn commit_label(count: usize) -> &'static str {
+    if count == 1 { "commit" } else { "commits" }
 }

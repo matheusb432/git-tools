@@ -4,11 +4,9 @@ use std::path::PathBuf;
 
 use super::{
     add::{self, AddTag},
+    git_command_error::GitCommandError,
     label,
-    logic::{
-        git_command_error::GitCommandError,
-        outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
-    },
+    outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
     push,
 };
 use crate::ports::GitClient;

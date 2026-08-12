@@ -8,10 +8,7 @@ use std::{
 
 use anyhow::{Context as _, Result, bail, ensure};
 use command_group::{CommandGroup, GroupChild};
-use playwright_rs::{
-    expect,
-    protocol::{AriaRole, ClickOptions, GetByRoleOptions, Locator, Page, Viewport},
-};
+use playwright_rs::protocol::{AriaRole, ClickOptions, GetByRoleOptions, Locator, Page};
 
 use crate::harness::{
     browser::{self, OPERATION_TIMEOUT, Session, operation},
@@ -29,15 +26,6 @@ pub struct Spec {
 
 pub struct RawArtifactFixture {
     repository: tempfile::TempDir,
-    config: tempfile::NamedTempFile,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ArtifactFailure {
-    DecompressionUnavailable,
-    InvalidBase64,
-    InvalidGzip,
-    MissingPage,
 }
 
 impl Spec {
@@ -103,8 +91,6 @@ pub async fn repository_with_raw_changes() -> Result<RawArtifactFixture> {
         "fn beta_1() {}\nfn beta_2() {}\nfn beta_3() {}\nfn beta_4() {}\nfn beta_5() {}\nfn beta_6() {}\nfn beta_7() {}\nfn beta_8() {}\nfn beta_9() {}\n",
     )
     .context("write beta base fixture")?;
-    std::fs::write(repository.path().join("large.txt"), "base\n")
-        .context("write large-file base fixture")?;
     git(repository.path(), &["add", "."]).await?;
     git(repository.path(), &["commit", "-q", "-m", "base"]).await?;
     git(repository.path(), &["switch", "-q", "-c", "feature"]).await?;
@@ -118,44 +104,22 @@ pub async fn repository_with_raw_changes() -> Result<RawArtifactFixture> {
         "fn beta_1() {}\nfn beta_2() {}\nfn beta_3() {}\nfn beta_4() {}\nfn beta_5() { println!(\"beta-marker\"); }\nfn beta_6() {}\nfn beta_7() {}\nfn beta_8() {}\nfn beta_9() {}\n",
     )
     .context("write beta change fixture")?;
-    std::fs::write(
-        repository.path().join("large.txt"),
-        format!("large-marker-{}\n", "x".repeat(250_000)),
-    )
-    .context("write giant raw artifact fixture")?;
     git(repository.path(), &["add", "."]).await?;
     git(
         repository.path(),
         &["commit", "-q", "-m", "artifact change"],
     )
     .await?;
-    let config = tempfile::NamedTempFile::new().context("create raw artifact config")?;
-    Ok(RawArtifactFixture { repository, config })
+    Ok(RawArtifactFixture { repository })
 }
 
-pub async fn render_raw_diff(
-    fixture: &RawArtifactFixture,
-    layout: &str,
-    density: &str,
-) -> Result<String> {
+pub async fn render_raw_diff(fixture: &RawArtifactFixture) -> Result<String> {
     let cli_binary = env::var_os("GTL_E2E_CLI_BINARY")
         .map(PathBuf::from)
         .context("GTL_E2E_CLI_BINARY is required for browser E2E")?;
-    let mut stop_daemon = Command::new(&cli_binary);
-    stop_daemon
-        .args(["daemon", "stop"])
-        .current_dir(fixture.repository.path());
-    let output = command_output(stop_daemon, "git-tools daemon stop").await?;
-    ensure_success(&output, "git-tools daemon stop")?;
     let mut command = Command::new(&cli_binary);
-    std::fs::write(
-        fixture.config.path(),
-        format!("layout = {layout:?}\ndensity = {density:?}\n"),
-    )
-    .context("write raw artifact presentation config")?;
     command
         .args(["diff", "--raw"])
-        .env("GIT_TOOLS_CONFIG", fixture.config.path())
         .current_dir(fixture.repository.path());
     let output = command_output(command, "git-tools diff --raw").await?;
     ensure_success(&output, "git-tools diff --raw")?;
@@ -172,114 +136,12 @@ pub async fn render_raw_diff(
     }
 }
 
-pub fn apply_artifact_failure(url: &str, failure: ArtifactFailure) -> Result<()> {
-    let path = url
-        .strip_prefix("file://")
-        .map(Path::new)
-        .context("raw artifact URL is not a file URL")?;
-    let mut html = fs::read_to_string(path)
-        .with_context(|| format!("read raw artifact {}", path.display()))?;
-    match failure {
-        ArtifactFailure::DecompressionUnavailable => {
-            let module = "<script type=\"module\">";
-            let replacement = "<script>globalThis.DecompressionStream=undefined;</script><script type=\"module\">";
-            ensure!(
-                html.contains(module),
-                "raw artifact module script is missing"
-            );
-            html = html.replacen(module, replacement, 1);
-        }
-        ArtifactFailure::MissingPage => {
-            let marker = "<script id=\"gtl-artifact-page-";
-            let start = html
-                .find(marker)
-                .context("find compressed diff page node")?;
-            let end = html[start..]
-                .find("</script>")
-                .map(|offset| start + offset + "</script>".len())
-                .context("find compressed diff page node end")?;
-            html.replace_range(start..end, "");
-        }
-        ArtifactFailure::InvalidBase64 | ArtifactFailure::InvalidGzip => {
-            corrupt_artifact_runtime_bytes(&mut html, failure)?;
-        }
-    }
-    fs::write(path, html).with_context(|| format!("alter raw artifact {}", path.display()))
-}
-
-fn corrupt_artifact_runtime_bytes(html: &mut String, failure: ArtifactFailure) -> Result<()> {
-    let marker = "<script id=\"gtl-artifact-runtime\"";
-    let marker_offset = html.find(marker).context("find compressed runtime node")?;
-    let encoded_offset = html[marker_offset..]
-        .find('>')
-        .map(|offset| marker_offset + offset + 1)
-        .context("find compressed runtime payload")?;
-    let current = html[encoded_offset..]
-        .chars()
-        .next()
-        .context("compressed runtime payload is empty")?;
-    ensure!(current.is_ascii(), "compressed runtime base64 is not ASCII");
-    let replacement = match failure {
-        ArtifactFailure::InvalidBase64 => '!',
-        ArtifactFailure::InvalidGzip if current == 'A' => 'B',
-        ArtifactFailure::InvalidGzip => 'A',
-        ArtifactFailure::DecompressionUnavailable | ArtifactFailure::MissingPage => {
-            unreachable!("non-byte failures are handled before runtime corruption")
-        }
-    };
-    html.replace_range(
-        encoded_offset..encoded_offset + current.len_utf8(),
-        &replacement.to_string(),
-    );
-    Ok(())
-}
-
-pub async fn set_mobile_viewport(page: &Page) -> Result<()> {
-    operation("set mobile Chromium viewport", async {
-        page.set_viewport_size(Viewport {
-            width: 390,
-            height: 844,
-        })
-        .await
-        .context("set mobile Chromium viewport")
-    })
-    .await
-}
-
 #[must_use]
 pub fn get_button(page: &Page, name: &str) -> Locator {
     page.get_by_role(
         AriaRole::Button,
         Some(GetByRoleOptions::default().name(name).exact(true)),
     )
-}
-
-pub async fn expect_every_file_is_collapsed(page: &Page) -> Result<()> {
-    expect(page.locator("details[data-gtl-diff-file][open]"))
-        .to_have_count(0)
-        .await
-        .context("wait for every file section to collapse")
-}
-
-pub fn assert_no_browser_errors(page: &Page) -> Result<()> {
-    let page_errors = page.page_errors();
-    ensure!(
-        page_errors.is_empty(),
-        "offline artifact raised page errors: {}",
-        page_errors.join("; ")
-    );
-    let console_errors = page
-        .console_messages()
-        .into_iter()
-        .filter(|message| message.type_() == "error")
-        .map(|message| message.text().to_owned())
-        .collect::<Vec<_>>();
-    ensure!(
-        console_errors.is_empty(),
-        "offline artifact logged console errors: {}",
-        console_errors.join("; ")
-    );
-    Ok(())
 }
 
 pub async fn click(locator: &Locator, label: &str) -> Result<()> {
@@ -305,16 +167,6 @@ pub async fn goto(page: &Page, url: &str) -> Result<()> {
         .await
         .context("navigate to offline artifact")
         .map(|_| ())
-    })
-    .await
-}
-
-pub async fn reload(page: &Page) -> Result<()> {
-    operation("reload offline artifact", async {
-        page.reload(None)
-            .await
-            .context("reload offline artifact")
-            .map(|_| ())
     })
     .await
 }

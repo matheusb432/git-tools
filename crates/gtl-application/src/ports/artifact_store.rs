@@ -25,6 +25,17 @@ pub struct ArtifactMeta {
     pub excluded_extensions: Vec<String>,
 }
 
+/// Values that must match before a stored commit-range artifact can be reused.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ArtifactRangeKey {
+    pub kind: DiffKind,
+    pub base_sha: String,
+    pub head_sha: String,
+    pub render_options: RenderOptions,
+    pub theme: Option<String>,
+    pub excluded_extensions: Vec<String>,
+}
+
 /// A placed artifact: where it landed and whether an identical one already existed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlacedArtifact {
@@ -61,20 +72,11 @@ pub trait ArtifactStore: Clone + Send + Sync + 'static {
     /// Find an existing artifact for a pure commit range rendered under the same
     /// renderer layout, density, theme, and exclusion set, or `None` on a miss
     /// (always `None` for `WorkTree`, which is never range-addressable).
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "the explicit fields are the persisted range-reuse key"
-    )]
     fn lookup_by_range(
         &self,
         store_root: &Path,
         repo_root: &Path,
-        kind: DiffKind,
-        base_sha: &str,
-        head_sha: &str,
-        render_options: RenderOptions,
-        theme: Option<&str>,
-        excluded_extensions: &[String],
+        key: &ArtifactRangeKey,
     ) -> anyhow::Result<Option<PathBuf>>;
 
     /// Every recorded artifact under `store_root`, across all repos, unordered

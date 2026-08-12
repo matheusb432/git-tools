@@ -2,7 +2,7 @@ mod actions;
 mod rows;
 
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{ViewerDiffDensity, ViewerDiffLayout};
+use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
 use self::{actions::DiffFileActions, rows::DiffFileBody};
 use crate::{entities::diffs::ClientDiffFile, views::diffs::DiffFileStatusBadge};
@@ -63,7 +63,7 @@ fn DiffFileHeader(
     let background_classes = file_header_background(file.summary.status);
     rsx! {
         summary {
-            class: "sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line px-2.5 py-2 text-[12.5px] hover:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden mobile:flex-wrap mobile:gap-x-1.5 mobile:px-2 mobile:py-1.5 print:static print:bg-[#f2f2f2]",
+            class: "sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line px-2.5 py-2 hover:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden mobile:flex-wrap mobile:gap-x-1.5 mobile:px-2 mobile:py-1.5 print:static print:bg-[#f2f2f2]",
             class: "{background_classes}",
             onclick: move |event| {
                 event.prevent_default();
@@ -77,8 +77,8 @@ fn DiffFileHeader(
     }
 }
 
-const fn file_header_background(status: gtl_contracts::viewer::ViewerFileStatus) -> &'static str {
-    use gtl_contracts::viewer::ViewerFileStatus;
+const fn file_header_background(status: gtl_wire::viewer::ViewerFileStatus) -> &'static str {
+    use gtl_wire::viewer::ViewerFileStatus;
 
     match status {
         ViewerFileStatus::Added => "bg-[color-mix(in_srgb,var(--add-bg)_34%,var(--surface-2))]",

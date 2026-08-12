@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_contracts::viewer::ViewerFooter;
+use gtl_wire::viewer::ViewerFooter;
 
 #[component]
 pub(super) fn Keybar(footer: ViewerFooter) -> Element {
@@ -7,7 +7,7 @@ pub(super) fn Keybar(footer: ViewerFooter) -> Element {
         footer {
             class: "col-span-3 row-start-3 flex items-center gap-4 overflow-hidden border-t border-line bg-surface px-5 py-2 text-ink-3",
             aria_label: "Keyboard shortcuts",
-            KeybarCommand { command: footer.command, note: footer.note }
+            KeybarCommand { command: footer.command }
             div { class: "flex-1" }
             KeybarShortcut { keys: vec!["j", "k"], label: "file" }
             KeybarShortcut { keys: vec!["/"], label: "filter" }
@@ -17,12 +17,9 @@ pub(super) fn Keybar(footer: ViewerFooter) -> Element {
 }
 
 #[component]
-fn KeybarCommand(command: String, note: String) -> Element {
+fn KeybarCommand(command: String) -> Element {
     rsx! {
-        span { class: "overflow-hidden text-ellipsis whitespace-nowrap text-ink-2",
-            "{command} "
-            span { class: "text-ink-3", "{note}" }
-        }
+        span { class: "overflow-hidden text-ellipsis whitespace-nowrap text-ink-2", {command} }
     }
 }
 

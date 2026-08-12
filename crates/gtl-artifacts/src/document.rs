@@ -3,10 +3,11 @@ use std::fmt::Write as _;
 use anyhow::{Context as _, Result, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use gtl_application::{diffs::View, viewer::RenderOptions};
-use gtl_contracts::viewer::{
+use gtl_parser::select_bundled_syntax_pack;
+use gtl_wire::viewer::{
     VIEWER_ARTIFACT_MANIFEST_ID, VIEWER_ARTIFACT_RUNTIME_ID, VIEWER_ARTIFACT_SYNTAX_ID,
 };
-use gtl_parser::select_bundled_syntax_pack;
+use sha2::{Digest as _, Sha256};
 
 use crate::{assets, compression, payload::project_payload};
 
@@ -30,6 +31,16 @@ impl PackedAsset {
         let bytes = serde_json::to_vec(payload).context("serialize artifact payload")?;
         Self::binary(id, &bytes)
     }
+}
+
+fn content_security_policy(runtime: &str, stylesheet: &str) -> String {
+    let runtime_sha256 = STANDARD.encode(Sha256::digest(runtime.as_bytes()));
+    let stylesheet_sha256 = STANDARD.encode(Sha256::digest(stylesheet.as_bytes()));
+    // Dioxus Web 0.7.10 requires string evaluation, and diff rows set one CSS custom property
+    // inline. Every script and stylesheet element still requires its exact generated hash.
+    format!(
+        "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; script-src 'sha256-{runtime_sha256}' 'unsafe-eval' 'wasm-unsafe-eval'; script-src-attr 'none'; style-src 'sha256-{stylesheet_sha256}'; style-src-attr 'unsafe-inline'; worker-src 'none'"
+    )
 }
 
 /// Builds one self-contained, client-rendered diff artifact.
@@ -80,10 +91,12 @@ fn build_document(
         !assets::TAILWIND_CSS.contains("</style"),
         "generated Tailwind CSS cannot be embedded safely"
     );
+    let content_security_policy = content_security_policy(runtime, assets::TAILWIND_CSS);
 
     let mut html = String::with_capacity(
         assets::TAILWIND_CSS.len()
             + runtime.len()
+            + content_security_policy.len()
             + runtime_asset.encoded.len()
             + syntax_asset.encoded.len()
             + manifest_asset.encoded.len()
@@ -94,8 +107,9 @@ fn build_document(
     );
     write!(
         html,
-        "<!doctype html><html lang=\"en\" data-theme=\"{}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark light\"><meta name=\"darkreader-lock\"><title>git-tools diff</title><style>{}</style></head><body><div id=\"main\"></div>",
+        "<!doctype html><html lang=\"en\" data-theme=\"{}\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"{}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark light\"><meta name=\"darkreader-lock\"><title>git-tools diff</title><style>{}</style></head><body><div id=\"main\"></div>",
         payload.manifest.theme.as_str(),
+        content_security_policy,
         assets::TAILWIND_CSS,
     )
     .context("write artifact document shell")?;
@@ -125,7 +139,7 @@ fn write_asset_node(html: &mut String, asset: &PackedAsset) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use gtl_application::diffs::FileDiff;
-    use gtl_contracts::viewer::{ViewerArtifactManifest, ViewerArtifactPage};
+    use gtl_wire::viewer::{ViewerArtifactManifest, ViewerArtifactPage};
 
     use super::*;
     use crate::tests::{decode_payload, has_disallowed_external_url, sample_view};
@@ -166,16 +180,52 @@ mod tests {
             .expect("build client-rendered artifact");
         let manifest: ViewerArtifactManifest = decode_payload(&html, VIEWER_ARTIFACT_MANIFEST_ID);
         let active = &manifest.views[0];
-        let first_page_id = gtl_contracts::viewer::ViewerArtifactPageId::for_request(
-            &gtl_contracts::viewer::LoadViewerDiffLines {
+        let first_page_id = gtl_wire::viewer::ViewerArtifactPageId::for_request(
+            &gtl_wire::viewer::LoadViewerDiffLines {
                 identity: active.identity,
                 file: active.files[0].id.clone(),
-                cursor: gtl_contracts::viewer::ViewerDiffCursor::START,
+                cursor: gtl_wire::viewer::ViewerDiffCursor::START,
             },
         );
         let page: ViewerArtifactPage = decode_payload(&html, first_page_id.as_str());
+        let policy = html
+            .split_once("<meta http-equiv=\"Content-Security-Policy\" content=\"")
+            .and_then(|(_, tail)| tail.split_once("\">"))
+            .map(|(policy, _)| policy)
+            .expect("artifact content security policy");
 
         assert!(html.starts_with("<!doctype html>"));
+        assert!(
+            html.find("Content-Security-Policy") < html.find("<style>"),
+            "content security policy must precede active content"
+        );
+        for directive in [
+            "default-src 'none'",
+            "base-uri 'none'",
+            "connect-src 'none'",
+            "form-action 'none'",
+            "frame-src 'none'",
+            "object-src 'none'",
+            "script-src 'sha256-",
+            "script-src-attr 'none'",
+            "style-src 'sha256-",
+            "style-src-attr 'unsafe-inline'",
+            "worker-src 'none'",
+        ] {
+            assert!(
+                policy.contains(directive),
+                "missing CSP directive: {directive}"
+            );
+        }
+        let runtime_sha256 = STANDARD.encode(Sha256::digest(
+            assets::inline_runtime()
+                .expect("generated runtime")
+                .as_bytes(),
+        ));
+        let stylesheet_sha256 = STANDARD.encode(Sha256::digest(assets::TAILWIND_CSS.as_bytes()));
+        assert!(policy.contains(&format!("script-src 'sha256-{runtime_sha256}'")));
+        assert!(policy.contains("'unsafe-eval' 'wasm-unsafe-eval'"));
+        assert!(policy.contains(&format!("style-src 'sha256-{stylesheet_sha256}'")));
         assert!(html.contains("<style>"));
         assert_eq!(html.matches("<script type=\"module\">").count(), 1);
         assert_eq!(
@@ -201,11 +251,11 @@ mod tests {
 
         let html = build_html(&view, RenderOptions::DEFAULT, None).expect("build safe artifact");
         let manifest: ViewerArtifactManifest = decode_payload(&html, VIEWER_ARTIFACT_MANIFEST_ID);
-        let page_id = gtl_contracts::viewer::ViewerArtifactPageId::for_request(
-            &gtl_contracts::viewer::LoadViewerDiffLines {
+        let page_id = gtl_wire::viewer::ViewerArtifactPageId::for_request(
+            &gtl_wire::viewer::LoadViewerDiffLines {
                 identity: manifest.views[0].identity,
                 file: manifest.views[0].files[0].id.clone(),
-                cursor: gtl_contracts::viewer::ViewerDiffCursor::START,
+                cursor: gtl_wire::viewer::ViewerDiffCursor::START,
             },
         );
         let page: ViewerArtifactPage = decode_payload(&html, page_id.as_str());
@@ -286,11 +336,11 @@ mod tests {
             manifest.views[1].identity.tab_id
         );
         for active in &manifest.views {
-            let id = gtl_contracts::viewer::ViewerArtifactPageId::for_request(
-                &gtl_contracts::viewer::LoadViewerDiffLines {
+            let id = gtl_wire::viewer::ViewerArtifactPageId::for_request(
+                &gtl_wire::viewer::LoadViewerDiffLines {
                     identity: active.identity,
                     file: active.files[0].id.clone(),
-                    cursor: gtl_contracts::viewer::ViewerDiffCursor::START,
+                    cursor: gtl_wire::viewer::ViewerDiffCursor::START,
                 },
             );
             let page: ViewerArtifactPage = decode_payload(&html, id.as_str());

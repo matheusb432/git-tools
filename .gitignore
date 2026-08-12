@@ -1,7 +1,7 @@
 /target
 *.exe
 *.pdb
-/.artifacts
+.artifacts
 .claude/skills
 /coverage
 /report
@@ -15,14 +15,13 @@ node_modules/
 # Repo-local editing link to the global git-tools config.
 /config/local/config.toml
 
-*.local.*
+*.local
 
 /.cache/playwright-driver/
 .artifacts/
 
 /secrets/
 
-artifact-runtime.wasm
 
 *.env
 !*.env.example

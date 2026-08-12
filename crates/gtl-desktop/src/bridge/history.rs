@@ -6,7 +6,8 @@ use gtl_application::history::{
         self, ListRecentRenderPage, ListRecentRenderPageOk, RecentRenderPageCursor,
     },
 };
-use gtl_contracts::{
+use gtl_models::viewer::{RenderHistoryId, ViewerTabKind};
+use gtl_wire::{
     recipes::RecipeOp,
     viewer::{
         GetViewerHistoryCopy, ListViewerHistory, OpenViewerHistory, ViewerApiError,
@@ -14,7 +15,6 @@ use gtl_contracts::{
         ViewerHistoryPage, ViewerRecipeKind, ViewerResource, ViewerShell,
     },
 };
-use gtl_models::viewer::{RenderHistoryId, ViewerTabKind};
 
 use super::{internal, shell};
 use crate::{presentation::ViewerApp, recipes::RecipeError};
@@ -64,7 +64,7 @@ fn get_history_record(
         .app_state
         .connection_lock()
         .map_err(|error| internal("failed to lock render history", format_args!("{error:#}")))?;
-    get_recent_render::execute(get_recent_render::GetRecentRender { id }, &connection)
+    get_recent_render::execute(&get_recent_render::GetRecentRender { id }, &connection)
         .map_err(|error| internal("failed to load render history entry", error))?
         .entry
         .ok_or(ViewerApiError::NotFound {
@@ -154,7 +154,7 @@ fn map_recipe_error(error: RecipeError) -> ViewerApiError {
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource};
+    use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource};
 
     use super::*;
 
@@ -184,7 +184,7 @@ mod tests {
             range_label: "main...feature".into(),
             rendered_at: "2026-08-09T12:00:00Z".into(),
             recipe: Recipe {
-                source: RecipeSource::LocalRepo("/home/alice/private/customer-repo".into()),
+                source: RecipeSource::LocalRepo("/workspace/repository".into()),
                 op: RecipeOp::MergeDiff {
                     base: None,
                     pinned: None,
@@ -206,7 +206,7 @@ mod tests {
         assert_eq!(entry.id, 7);
         assert_eq!(entry.kind, ViewerRecipeKind::MergeDiff);
         assert!(!payload.contains("recipe"));
-        assert!(!payload.contains("/home/alice"));
+        assert!(!payload.contains("/workspace/repository"));
     }
 
     #[test]
@@ -221,10 +221,7 @@ mod tests {
         assert_eq!(json["repo_name"], "git-tools");
         assert!(json.get("repository_name").is_none());
         assert_eq!(json["kind"], "merge-diff");
-        assert_eq!(
-            json["recipe"]["source"]["value"],
-            "/home/alice/private/customer-repo"
-        );
+        assert_eq!(json["recipe"]["source"]["value"], "/workspace/repository");
     }
 
     #[test]
@@ -232,7 +229,7 @@ mod tests {
         let recipe = Recipe {
             source: RecipeSource::LocalRepo("/repo".into()),
             op: RecipeOp::Diff {
-                target: gtl_contracts::recipes::RecipeTarget::Unpushed { pinned: None },
+                target: gtl_wire::recipes::RecipeTarget::Unpushed { pinned: None },
             },
             name: None,
         };
@@ -241,7 +238,7 @@ mod tests {
 
         assert_eq!(
             to_history_copy_payload(record).kind,
-            gtl_contracts::viewer::ViewerHistoryCopyKind::Diff
+            gtl_wire::viewer::ViewerHistoryCopyKind::Diff
         );
     }
 }

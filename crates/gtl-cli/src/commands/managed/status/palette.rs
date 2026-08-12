@@ -22,28 +22,28 @@ impl StatusColorPalette {
         let file: StatusColorPaletteToml =
             toml::from_str(raw).context("failed to parse embedded status color palette TOML")?;
         Ok(Self {
-            brackets: Rgb::from_hex(&file.brackets_color)
+            brackets: Rgb::from_hex(&file.brackets)
                 .context("invalid brackets_color in status color palette")?,
-            ahead_arrow: Rgb::from_hex(&file.ahead_arrow_color)
+            ahead_arrow: Rgb::from_hex(&file.ahead_arrow)
                 .context("invalid ahead_arrow_color in status color palette")?,
-            checkmark: Rgb::from_hex(&file.checkmark_color)
+            checkmark: Rgb::from_hex(&file.checkmark)
                 .context("invalid checkmark_color in status color palette")?,
-            change_markers: Rgb::from_hex(&file.change_markers_color)
+            change_markers: Rgb::from_hex(&file.change_markers)
                 .context("invalid change_markers_color in status color palette")?,
         })
     }
 }
 
 #[derive(Debug, Deserialize)]
-#[expect(
-    clippy::struct_field_names,
-    reason = "field names mirror the TOML keys of config/status-colors.toml verbatim"
-)]
 struct StatusColorPaletteToml {
-    brackets_color: String,
-    ahead_arrow_color: String,
-    checkmark_color: String,
-    change_markers_color: String,
+    #[serde(rename = "brackets_color")]
+    brackets: String,
+    #[serde(rename = "ahead_arrow_color")]
+    ahead_arrow: String,
+    #[serde(rename = "checkmark_color")]
+    checkmark: String,
+    #[serde(rename = "change_markers_color")]
+    change_markers: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,9 +91,9 @@ mod tests {
         let raw = std::fs::read_to_string("../../config/status-colors.toml").unwrap();
         let file: StatusColorPaletteToml = toml::from_str(&raw).unwrap();
 
-        assert_eq!(file.brackets_color, "#f28500");
-        assert_eq!(file.ahead_arrow_color, "#f28500");
-        assert_eq!(file.checkmark_color, "#2ecc71");
-        assert_eq!(file.change_markers_color, "#ff4d4d");
+        assert_eq!(file.brackets, "#f28500");
+        assert_eq!(file.ahead_arrow, "#f28500");
+        assert_eq!(file.checkmark, "#2ecc71");
+        assert_eq!(file.change_markers, "#ff4d4d");
     }
 }

@@ -4,8 +4,7 @@
 //! `#[cqrsy::command]` or `#[cqrsy::query]` `execute` function. cqrsy validates
 //! its signature at compile time and generates no dispatch runtime. Callers
 //! import the operation module and invoke `operation::execute(...)` directly.
-//! This crate depends on the inward-facing models and operation crates plus the
-//! app-agnostic recipe DTOs from `contracts` shared with process adapters.
+//! This crate depends on inward-facing models plus typed wire values shared with process adapters.
 
 pub mod branches;
 pub mod diffs;
@@ -24,4 +23,5 @@ pub mod viewer;
 pub mod worktrees;
 
 #[cfg(any(test, feature = "testing"))]
+#[path = "tests/mod.rs"]
 pub mod testing;

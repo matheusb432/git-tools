@@ -120,7 +120,7 @@ pub enum Command {
     /// Run a shared Rust benchmark without host display variables.
     #[command(name = Verb::BENCH.as_str())]
     Bench(BenchArguments),
-    /// Rebuild committed web assets and fail if generated output drifts from its Rust sources.
+    /// Rebuild web assets and fail if the tracked stylesheet drifts from its sources.
     #[command(name = Verb::DRIFT_CHECK.as_str())]
     DriftCheck,
     /// Reject forbidden outward Cargo dependency edges.

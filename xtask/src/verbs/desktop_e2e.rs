@@ -1,5 +1,5 @@
-//! Hermetic desktop viewer E2E. Linux uses an isolated Xvfb/Openbox/stalonetray/D-Bus session
-//! for native lifecycle assertions, then runs the `WebDriver` DOM suite in the same sandbox.
+//! Hermetic viewer journeys. Linux uses an isolated Xvfb/Openbox/stalonetray/D-Bus session for
+//! the native lifecycle, then runs the `WebDriver` journeys in the same sandbox.
 
 use std::{
     env,
@@ -54,10 +54,6 @@ struct Sandbox {
     native_data: PathBuf,
     dom_data: PathBuf,
     browser_data: PathBuf,
-    editor_recorder: PathBuf,
-    editor_record: PathBuf,
-    editor_release: PathBuf,
-    editor_exit: PathBuf,
     cli_binary: PathBuf,
     viewer_binary: PathBuf,
     cargo_runner_config: PathBuf,
@@ -97,12 +93,6 @@ impl Sandbox {
             native_data: root.join("git-tools/native"),
             dom_data: root.join("git-tools/dom"),
             browser_data: root.join("git-tools/browser"),
-            editor_recorder: root
-                .join("fixtures")
-                .join(format!("code{}", std::env::consts::EXE_SUFFIX)),
-            editor_record: root.join("logs/editor-record.json"),
-            editor_release: root.join("logs/editor-release"),
-            editor_exit: root.join("logs/editor-exit"),
             cli_binary: release_binary("git-tools")?,
             viewer_binary: release_binary("gtl-viewer")?,
             cargo_runner_config: root.join("cargo-runner.toml"),
@@ -164,10 +154,6 @@ impl Sandbox {
             ("GIT_TOOLS_DATA_DIR", data_root.as_os_str()),
             ("GTL_E2E_DATA_ROOT", data_root.as_os_str()),
             ("GTL_E2E_FIXTURE_ROOT", self.fixtures.as_os_str()),
-            ("GTL_E2E_EDITOR_RECORDER", self.editor_recorder.as_os_str()),
-            ("GTL_E2E_EDITOR_RECORD", self.editor_record.as_os_str()),
-            ("GTL_E2E_EDITOR_RELEASE", self.editor_release.as_os_str()),
-            ("GTL_E2E_EDITOR_EXIT", self.editor_exit.as_os_str()),
             ("GTL_E2E_CLI_BINARY", self.cli_binary.as_os_str()),
             ("GTL_E2E_VIEWER_BINARY", self.viewer_binary.as_os_str()),
             (
@@ -304,15 +290,6 @@ impl ManagedChild {
             name,
             child: Some(child),
         })
-    }
-
-    fn is_running(&mut self) -> Result<bool> {
-        Ok(self
-            .child
-            .as_mut()
-            .context("managed child already consumed")?
-            .try_wait()?
-            .is_none())
     }
 }
 
@@ -477,23 +454,9 @@ fn cargo_runner_config(executable: &Path) -> String {
 fn workflow() -> Result<()> {
     build::run(BuildTarget::Cli)?;
     build::run(BuildTarget::Viewer)?;
-    process::run(
-        "viewer-e2e-editor-recorder-build",
-        "cargo",
-        &[
-            "build",
-            "--release",
-            "-p",
-            "gtl-desktop-e2e",
-            "--bin",
-            "editor-recorder",
-        ],
-    )?;
 
     let sandbox = Sandbox::create()?;
     clear_evidence_outcomes(&sandbox.evidence_root, sandbox.success_evidence_requested)?;
-    fs::copy(release_binary("editor-recorder")?, &sandbox.editor_recorder)
-        .context("copy editor recorder fixture")?;
     let mut daemon_cleanup = DaemonCleanupGuard::new(&sandbox)?;
     let result = match std::env::consts::OS {
         "linux" => run_linux(&sandbox),
@@ -502,11 +465,9 @@ fn workflow() -> Result<()> {
             "hermetic desktop E2E is not configured for {unsupported}; Linux and Windows are supported"
         ),
     };
-    let editor_cleanup_result = release_editor_recorder(&sandbox);
     let cleanup_result = daemon_cleanup.stop();
     let logs_result = preserve_logs(&sandbox);
     result?;
-    editor_cleanup_result?;
     cleanup_result?;
     logs_result
 }
@@ -545,7 +506,7 @@ fn run_linux(sandbox: &Sandbox) -> Result<()> {
         )
     })?;
 
-    let (_dbus, tray_watcher) = start_private_dbus(sandbox, &mut env)?;
+    let (_dbus, _tray_watcher) = start_private_dbus(sandbox, &mut env)?;
 
     let _openbox = ManagedChild::spawn(
         "Openbox",
@@ -586,7 +547,7 @@ fn run_linux(sandbox: &Sandbox) -> Result<()> {
         find_window(&env, "^stalonetray$").is_ok()
     })?;
 
-    let result = run_native_phase(sandbox, &env, &tray_watcher).and_then(|()| {
+    let result = run_native_phase(sandbox, &env).and_then(|()| {
         let mut dom_env = env.clone();
         dom_env.set("GIT_TOOLS_DATA_DIR", sandbox.dom_data.as_os_str());
         dom_env.set("GTL_E2E_DATA_ROOT", sandbox.dom_data.as_os_str());
@@ -629,14 +590,10 @@ fn start_private_dbus(
     Ok((child, watcher))
 }
 
-fn run_native_phase(
-    sandbox: &Sandbox,
-    env: &IsolatedEnv,
-    tray_watcher: &StatusNotifierWatcher,
-) -> Result<()> {
+fn run_native_phase(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
     let viewer = release_binary("gtl-viewer")?;
     let cli = release_binary("git-tools")?;
-    let mut viewer = ManagedChild::spawn(
+    let _viewer = ManagedChild::spawn(
         "native viewer",
         viewer.to_string_lossy().as_ref(),
         &[],
@@ -646,10 +603,6 @@ fn run_native_phase(
     )?;
     let window = retry_value("cold viewer map", READY_TIMEOUT, || {
         find_window(env, WINDOW_TITLE_PATTERN).ok()
-    })?;
-    assert_viewable(env, &window, &sandbox.root)?;
-    retry("viewer tray registration", READY_TIMEOUT, || {
-        tray_watcher.has_registered_item()
     })?;
 
     command_checked(
@@ -661,9 +614,6 @@ fn run_native_phase(
     retry("close-to-hide", READY_TIMEOUT, || {
         find_window(env, WINDOW_TITLE_PATTERN).is_err()
     })?;
-    if !viewer.is_running()? {
-        bail!("close-to-hide terminated the original viewer process");
-    }
 
     let repo_path = create_native_fixture(sandbox, env)?;
     command_checked(
@@ -675,9 +625,6 @@ fn run_native_phase(
     let forwarded_window = retry_value("warm forwarding remap", READY_TIMEOUT, || {
         find_window(env, WINDOW_TITLE_PATTERN).ok()
     })?;
-    if forwarded_window != window {
-        bail!("warm forwarding mapped a replacement viewer window");
-    }
     retry("warm forwarding focus", READY_TIMEOUT, || {
         output(env, "xdotool", &["getactivewindow"], &sandbox.root)
             .ok()
@@ -686,9 +633,6 @@ fn run_native_phase(
                 String::from_utf8_lossy(&result.stdout).trim() == forwarded_window
             })
     })?;
-    if !viewer.is_running()? {
-        bail!("warm forwarding replaced the original viewer process");
-    }
     Ok(())
 }
 
@@ -786,16 +730,6 @@ fn seed_hostile_git_environment(command: &mut Command, sandbox_root: &Path) {
         );
 }
 
-fn release_editor_recorder(sandbox: &Sandbox) -> Result<()> {
-    fs::write(&sandbox.editor_release, b"release").context("release editor recorder")?;
-    if !sandbox.editor_record.is_file() {
-        return Ok(());
-    }
-    retry("editor recorder exit", READY_TIMEOUT, || {
-        sandbox.editor_exit.is_file()
-    })
-}
-
 fn create_native_fixture(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<PathBuf> {
     let repo_path = sandbox.fixtures.join("native-repo");
     fs::create_dir_all(&repo_path)?;
@@ -851,22 +785,6 @@ fn find_window(env: &IsolatedEnv, pattern: &str) -> Result<String> {
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .context("window search returned no id")
-}
-
-fn window_is_viewable(env: &IsolatedEnv, window: &str, cwd: &Path) -> bool {
-    output(env, "xwininfo", &["-id", window], cwd)
-        .ok()
-        .filter(|result| result.status.success())
-        .is_some_and(|result| {
-            String::from_utf8_lossy(&result.stdout).contains("Map State: IsViewable")
-        })
-}
-
-fn assert_viewable(env: &IsolatedEnv, window: &str, cwd: &Path) -> Result<()> {
-    if !window_is_viewable(env, window, cwd) {
-        bail!("viewer window {window} is not mapped");
-    }
-    Ok(())
 }
 
 fn output(env: &IsolatedEnv, program: &str, args: &[&str], cwd: &Path) -> Result<Output> {

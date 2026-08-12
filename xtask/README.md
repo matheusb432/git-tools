@@ -20,7 +20,7 @@
 | `build [--target cli\|viewer\|both]` | Build mandatory release artifact sets; the root build never soft-skips the viewer. | `just build` / scoped build recipes |
 | `bench` | Run the shared Rust benchmarks; `--fast` selects the concise viewer-render preset. | `just bench` |
 | `check-structure` | Cargo dependency-direction policy for core, shared, adapter, and black-box test packages. Wired into `lint` / `check`; also runnable standalone. | (via `just check`) |
-| `drift-check` | Rebuild tracked Tailwind and Dioxus artifact assets and fail if they drift from Rust and CSS sources. | `just drift-check` |
+| `drift-check` | Rebuild web assets and fail if the tracked Tailwind output drifts from its sources. | `just drift-check` |
 | `gen-icon` | Render the gtl-viewer icon assets — `icon.png` (1024²) + a multi-resolution `icon.ico` — from code with tiny-skia (the `.ico` is required by tauri-build on Windows). | `just desktop gen-icon` |
 | `ship [--smoke] [--force]` | Run `just test --all` unless forced, then cross-build the three Win11 exes. `--smoke --force` is the fast linkage-only path. | `just ship` |
 

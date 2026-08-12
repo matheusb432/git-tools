@@ -5,7 +5,7 @@ use gtl_application::{
     diffs::present_diff::{PresentDiff, PresentDiffOk},
     ports::FileSystemClient,
 };
-use gtl_contracts::envelope::{Note, NoteLevel};
+use gtl_wire::envelope::{Note, NoteLevel};
 
 pub mod daemon_ctl;
 pub mod diff;
@@ -26,7 +26,7 @@ pub(crate) fn canonical_working_directory() -> anyhow::Result<PathBuf> {
 }
 
 /// Forward one recipe batch to the single-instance viewer as one argv token.
-pub(crate) fn forward_recipes(batch: &gtl_contracts::recipes::OpenRecipes) -> anyhow::Result<()> {
+pub(crate) fn forward_recipes(batch: &gtl_wire::recipes::OpenRecipes) -> anyhow::Result<()> {
     use crate::viewer::{no_open_requested, resolve_viewer_bin};
 
     if no_open_requested() {
@@ -34,7 +34,7 @@ pub(crate) fn forward_recipes(batch: &gtl_contracts::recipes::OpenRecipes) -> an
     }
     let bin = resolve_viewer_bin()
         .context("gtl-viewer is not installed; cannot forward the recipe batch")?;
-    let token = gtl_contracts::recipes::encode_token(batch)
+    let token = gtl_wire::recipes::encode_token(batch)
         .context("failed to encode the viewer recipe batch")?;
     gtl_infra::detached_process::spawn(&bin, &[token.as_str()])
         .context("failed to spawn gtl-viewer to forward the recipe batch")
@@ -76,10 +76,10 @@ fn finish_presentation(outcome: PresentDiffOk) -> diff::DiffOutcome {
     }
 }
 
-/// Print a daemon envelope's wire [`Note`](gtl_contracts::envelope::Note)s: `Info` to
+/// Print a daemon envelope's wire [`Note`](gtl_wire::envelope::Note)s: `Info` to
 /// stdout, `Warn` to stderr, verbatim. `Error` notes are skipped — the caller
 /// turns them into the returned error so the exit path prints them once.
-pub(crate) fn print_wire_notes(notes: &[gtl_contracts::envelope::Note]) {
+pub(crate) fn print_wire_notes(notes: &[gtl_wire::envelope::Note]) {
     for note in notes {
         match note.level {
             NoteLevel::Info => println!("{}", note.text),

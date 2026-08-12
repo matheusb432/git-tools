@@ -1,7 +1,7 @@
 mod file;
 
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{ViewerActiveView, ViewerViewIdentity};
+use gtl_wire::viewer::{ViewerActiveView, ViewerViewIdentity};
 
 use self::file::DiffFileCard;
 use crate::{

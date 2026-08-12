@@ -4,7 +4,7 @@ use std::path::Path;
 
 use gtl_application::{
     diffs::{Cmd, FileDiff, Foot, View},
-    ports::{ArtifactMeta, ArtifactStore, HtmlRenderer},
+    ports::{ArtifactMeta, ArtifactRangeKey, ArtifactStore, HtmlRenderer},
 };
 use gtl_artifacts::ArtifactRenderer;
 use gtl_infra::artifact_store::StoreArtifacts;
@@ -41,7 +41,6 @@ fn view(repo_root: &Path) -> View {
         commits_label: "Commits".into(),
         foot: Foot {
             cmd: "git diff aaaa..bbbb".into(),
-            note: String::new(),
         },
         exclusions: None,
     }
@@ -58,6 +57,17 @@ fn artifact_meta(repo_root: &Path, render_options: RenderOptions) -> ArtifactMet
         head_committed_at: "2026-07-21T00:00:00Z".into(),
         generated_at: "2026-07-21T00:01:00Z".into(),
         title: "diff".into(),
+        render_options,
+        theme: None,
+        excluded_extensions: Vec::new(),
+    }
+}
+
+fn artifact_range_key(render_options: RenderOptions) -> ArtifactRangeKey {
+    ArtifactRangeKey {
+        kind: DiffKind::TwoDot,
+        base_sha: "aaaa".into(),
+        head_sha: "bbbb".into(),
         render_options,
         theme: None,
         excluded_extensions: Vec::new(),
@@ -101,12 +111,7 @@ fn presentation_options_have_distinct_artifact_identities() {
             .lookup_by_range(
                 store_root.path(),
                 repo.path(),
-                DiffKind::TwoDot,
-                "aaaa",
-                "bbbb",
-                options_default,
-                None,
-                &[],
+                &artifact_range_key(options_default),
             )
             .unwrap(),
         Some(artifact_default.path),
@@ -116,12 +121,7 @@ fn presentation_options_have_distinct_artifact_identities() {
             .lookup_by_range(
                 store_root.path(),
                 repo.path(),
-                DiffKind::TwoDot,
-                "aaaa",
-                "bbbb",
-                options_split_full,
-                None,
-                &[],
+                &artifact_range_key(options_split_full),
             )
             .unwrap(),
         Some(artifact_split_full.path),

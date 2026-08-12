@@ -2,8 +2,7 @@
 
 pub mod build_managed;
 pub mod build_subrepos;
-mod dto;
-mod logic;
 pub mod pin;
+mod resolution;
 
-pub use dto::RecipeRequest;
+pub(crate) use resolution::build_resolved;

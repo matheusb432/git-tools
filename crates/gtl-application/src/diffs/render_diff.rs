@@ -4,17 +4,16 @@
 
 use std::path::{Path, PathBuf};
 
-use gtl_models::{diffs::DiffKind, viewer::RenderOptions};
+use gtl_models::diffs::DiffKind;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{
-        DiffTarget, DiffTargetRequest, DiffTargetRequestError, diff_computation,
-        logic::range::DiffRanges,
+        DiffTarget, DiffTargetRequest, DiffTargetRequestError, diff_computation, range::DiffRanges,
     },
     ports::{
-        ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsLoadError,
-        UserSettingsStore,
+        ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, GitClient, HtmlRenderer,
+        UserSettingsLoadError, UserSettingsStore,
     },
     shared::{notes::Note, repository_name::from_path},
 };
@@ -53,35 +52,6 @@ pub enum RenderDiffError {
     Settings(#[from] UserSettingsLoadError),
     #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the explicit fields are the persisted range-reuse key"
-)]
-fn range_fast_path(
-    source: &impl GitClient,
-    store: &impl ArtifactStore,
-    top: &str,
-    store_root: &Path,
-    target: &DiffTarget,
-    render_options: RenderOptions,
-    theme: Option<&str>,
-    excluded_extensions: &[String],
-) -> anyhow::Result<Option<PathBuf>> {
-    let Some((kind, base_sha, head_sha)) = resolved_range(source, top, target) else {
-        return Ok(None); // worktree mode or unresolved ⇒ no fast-path
-    };
-    store.lookup_by_range(
-        store_root,
-        Path::new(top),
-        kind,
-        &base_sha,
-        &head_sha,
-        render_options,
-        theme,
-        excluded_extensions,
-    )
 }
 
 // ! Returns (kind, base_sha, head_sha) only for pure commit ranges; None for
@@ -168,7 +138,7 @@ pub fn execute(
     let render_options = settings.viewer_render_options();
     let theme = settings.theme().map(|theme| theme.to_string());
     let top = source.top_level(&cwd)?;
-    let store_root = super::logic::artifacts::root(Path::new(&top));
+    let store_root = super::artifacts::root(Path::new(&top));
     let excluded = settings
         .diff_exclusions()
         .for_project_or_default(&from_path(&top));
@@ -177,15 +147,18 @@ pub fn execute(
     // ! the active rendering settings, so a prior identical artifact can be
     // ! reused without the expensive assemble — never across a config change.
     if name.is_none()
-        && let Some(hit) = range_fast_path(
-            source,
-            store,
-            &top,
+        && let Some((kind, base_sha, head_sha)) = resolved_range(source, &top, &target)
+        && let Some(hit) = store.lookup_by_range(
             &store_root,
-            &target,
-            render_options,
-            theme.as_deref(),
-            excluded.extensions(),
+            Path::new(&top),
+            &ArtifactRangeKey {
+                kind,
+                base_sha,
+                head_sha,
+                render_options,
+                theme: theme.clone(),
+                excluded_extensions: excluded.extensions().to_vec(),
+            },
         )?
     {
         notes.push(Note::info(format!(
@@ -279,6 +252,7 @@ mod tests {
     use super::{RenderDiff, RenderDiffError, RenderDiffOutcome, execute};
     use crate::{
         diffs::{DiffTarget, DiffTargetRequest},
+        ports::ArtifactRangeKey,
         shared::notes::Note,
         testing::{
             FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
@@ -296,6 +270,17 @@ mod tests {
 
     fn settings(theme: Option<Theme>, exclusions: DiffExclusions) -> UserSettings {
         UserSettings::new(theme, RenderOptions::DEFAULT, true, exclusions)
+    }
+
+    fn range_key(base_sha: &str, head_sha: &str) -> ArtifactRangeKey {
+        ArtifactRangeKey {
+            kind: DiffKind::TwoDot,
+            base_sha: base_sha.to_owned(),
+            head_sha: head_sha.to_owned(),
+            render_options: RenderOptions::DEFAULT,
+            theme: None,
+            excluded_extensions: Vec::new(),
+        }
     }
 
     #[test]
@@ -431,15 +416,7 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        store.range_hit_insert(
-            DiffKind::TwoDot,
-            "sha-a",
-            "sha-b",
-            RenderOptions::DEFAULT,
-            None,
-            &[],
-            "/store/existing.html",
-        );
+        store.range_hit_insert(range_key("sha-a", "sha-b"), "/store/existing.html");
 
         let response = execute(
             req(
@@ -488,15 +465,7 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         // A hit exists for this range rendered WITHOUT exclusions…
-        store.range_hit_insert(
-            DiffKind::TwoDot,
-            "sha-a",
-            "sha-b",
-            RenderOptions::DEFAULT,
-            None,
-            &[],
-            "/store/unfiltered.html",
-        );
+        store.range_hit_insert(range_key("sha-a", "sha-b"), "/store/unfiltered.html");
 
         // …but this render runs with an md filter for the repo, so it must
         // recompute instead of serving the stale unfiltered artifact.
@@ -553,12 +522,10 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         store.range_hit_insert(
-            DiffKind::TwoDot,
-            "sha-a",
-            "sha-b",
-            RenderOptions::DEFAULT,
-            Some("dark"),
-            &[],
+            ArtifactRangeKey {
+                theme: Some("dark".into()),
+                ..range_key("sha-a", "sha-b")
+            },
             "/store/dark.html",
         );
 
@@ -600,12 +567,10 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         store.range_hit_insert(
-            DiffKind::TwoDot,
-            "sha-a",
-            "sha-b",
-            RenderOptions::DEFAULT,
-            None,
-            &["md"],
+            ArtifactRangeKey {
+                excluded_extensions: vec!["md".into()],
+                ..range_key("sha-a", "sha-b")
+            },
             "/store/filtered.html",
         );
 
@@ -657,15 +622,7 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         // A range hit exists, but a named run must ignore the fast-path entirely.
-        store.range_hit_insert(
-            DiffKind::TwoDot,
-            "sha-a",
-            "sha-b",
-            RenderOptions::DEFAULT,
-            None,
-            &[],
-            "/store/existing.html",
-        );
+        store.range_hit_insert(range_key("sha-a", "sha-b"), "/store/existing.html");
 
         let mut request = req(
             "/repo",

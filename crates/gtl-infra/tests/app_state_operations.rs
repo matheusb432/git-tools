@@ -21,8 +21,8 @@ use gtl_application::{
     ports::{Clock, GitRepositoryState},
     testing::FakeGitClient,
 };
-use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 use gtl_infra::app_state::SqliteAppState;
+use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 use rusqlite::Connection;
 
 const CONCURRENT_SAVE_BUSY_RETRY_COUNT_MAX: i32 = 4_000;
@@ -117,7 +117,7 @@ fn public_operations_use_the_migrated_schema() {
     {
         let mut connection = state.connection_lock().expect("lock state connection");
         record_render::execute(
-            RecordRender {
+            &RecordRender {
                 recipe: unpushed_diff_recipe(),
                 title: "alpha · unpushed".into(),
                 repo_name: "alpha".into(),
@@ -137,7 +137,7 @@ fn public_operations_use_the_migrated_schema() {
     let id = history.entries[0].id;
     let found = {
         let connection = state.connection_lock().expect("lock state connection");
-        get_recent_render::execute(GetRecentRender { id }, &connection).expect("get recent render")
+        get_recent_render::execute(&GetRecentRender { id }, &connection).expect("get recent render")
     };
     assert_eq!(
         found.entry.expect("recent render").title,
@@ -308,7 +308,7 @@ fn prune_failure_rolls_back_the_render_insertion() {
     let result = {
         let mut connection = state.connection_lock().expect("lock record connection");
         record_render::execute(
-            RecordRender {
+            &RecordRender {
                 recipe: unpushed_diff_recipe(),
                 title: "failed insertion".into(),
                 repo_name: "alpha".into(),

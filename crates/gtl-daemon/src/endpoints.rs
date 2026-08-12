@@ -9,7 +9,7 @@ pub mod shutdown;
 pub mod tags;
 
 pub(crate) use error::EndpointError;
-use gtl_contracts::envelope::{Envelope, Note, NoteLevel, Outcome};
+use gtl_wire::envelope::{Envelope, Note, NoteLevel, Outcome};
 
 /// Build an error envelope carrying a single `Error`-level note.
 pub(crate) fn error_envelope<D>(text: String) -> Envelope<D> {

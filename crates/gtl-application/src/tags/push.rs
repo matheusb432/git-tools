@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 
 use gtl_models::tags::Tag;
 
-use super::logic::{
+use super::{
     git_command_error::GitCommandError,
     outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
-    parse,
+    refs,
 };
 use crate::ports::GitClient;
 
@@ -51,7 +51,7 @@ pub fn execute(command: PushTags, git: &impl GitClient) -> Result<TagActionOutco
 
 fn push(command: PushTags, git: &impl GitClient) -> Result<TagActionOutcome, GitCommandError> {
     let PushTags { repo_path } = command;
-    let refs = parse::load(git, &repo_path)?;
+    let refs = refs::load(git, &repo_path)?;
     let pending = refs.pending().into_iter().cloned().collect::<Vec<_>>();
     if pending.is_empty() {
         return Ok(TagActionOutcome::new(
@@ -69,7 +69,7 @@ pub(super) fn push_named(
     names: &[String],
     created: TagActionOutcome,
 ) -> Result<TagActionOutcome, GitCommandError> {
-    let refs = parse::load(git, repo_path)
+    let refs = refs::load(git, repo_path)
         .map_err(|error| error.with_prior_progress(created.progress.clone()))?;
 
     let mut pending = Vec::new();
@@ -140,7 +140,7 @@ mod tests {
 
     use super::{PushTags, PushTagsError, execute, push_refspecs};
     use crate::{
-        tags::logic::outcome::{
+        tags::outcome::{
             TagActionOutcome, TagActionStatus, TagOperationProgress, TagRemotePushProgress,
         },
         testing::ScriptedGitClient,

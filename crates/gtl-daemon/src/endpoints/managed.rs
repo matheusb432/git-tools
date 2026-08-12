@@ -8,7 +8,7 @@ use gtl_application::managed::{
     pull_all::{PullAll, PullAllOk},
     push_all::{PushAll, PushAllOk},
 };
-use gtl_contracts::{
+use gtl_wire::{
     envelope::{Envelope, Outcome},
     managed::{
         PullAllRequest, PushAllRequest, RepoSyncResultDto, RepoSyncStatusDto, SyncData, SyncExitDto,

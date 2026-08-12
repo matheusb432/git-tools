@@ -5,7 +5,7 @@ use axum::{
     extract::{State, rejection::JsonRejection},
 };
 use gtl_application::tags::bump_tag::BumpTagOk;
-use gtl_contracts::{
+use gtl_wire::{
     envelope::Envelope,
     tags::{BumpTagData, BumpTagRequest},
 };

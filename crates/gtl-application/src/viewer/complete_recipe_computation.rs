@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use gtl_contracts::recipes::Recipe;
+use gtl_wire::recipes::{Recipe, RecipeOp, RecipeTarget};
 
-use super::{ViewerTabKind, logic::recipe_label};
+use super::{ViewerTabKind, recipe_label};
 use crate::diffs::View;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,17 +28,48 @@ pub fn execute(command: CompleteRecipeComputation) -> CompleteRecipeComputationO
     }
 
     CompleteRecipeComputationOk::Publish {
-        label: recipe_label::computed(&recipe, &view),
+        label: computed_label(&recipe, &view),
         view: Arc::new(view),
     }
+}
+
+fn computed_label(recipe: &Recipe, view: &View) -> String {
+    if let Some(name) = &recipe.name {
+        return name.clone();
+    }
+
+    let repo = &view.repo_name;
+    match &recipe.op {
+        RecipeOp::Diff { target } => computed_diff_label(repo, target, view),
+        RecipeOp::MergeDiff { .. } => merge_label(repo, view),
+    }
+}
+
+fn computed_diff_label(repo: &str, target: &RecipeTarget, view: &View) -> String {
+    match target {
+        RecipeTarget::Unpushed { .. } => {
+            format!("{repo}: {}", recipe_label::commit_count(view.commits.len()))
+        }
+        RecipeTarget::Base { rev } => format!("{repo}: {rev}->working"),
+        RecipeTarget::Range { range, .. } => format!("{repo}: {range}"),
+        RecipeTarget::Merge { .. } => merge_label(repo, view),
+        RecipeTarget::Last { count, .. } => format!(
+            "{repo}: last {}",
+            recipe_label::commit_count(count.get() as usize)
+        ),
+    }
+}
+
+fn merge_label(repo: &str, view: &View) -> String {
+    format!("{repo}: merge {}->{}", view.branch, view.upstream)
 }
 
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU32;
 
-    use gtl_contracts::recipes::{RecipeOp, RecipeTarget};
     use gtl_models::diffs::Commit;
+    use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
     use super::*;
     use crate::testing::viewer::{empty_view, recipe};

@@ -64,9 +64,7 @@ mod tests {
     use crate::{
         diffs::{
             DiffTarget, PinnedRange,
-            logic::range_view::{
-                LABEL_COMMITS_IN_RANGE, LABEL_UNPUSHED_COMMITS, NOTE_WORKING_TREE,
-            },
+            range_view::{LABEL_COMMITS_IN_RANGE, LABEL_UNPUSHED_COMMITS},
         },
         testing::{
             FakeGitClient, FixedUserSettingsStore,
@@ -157,7 +155,6 @@ mod tests {
                 "diff-artifact: no upstream; falling back to main"
             )]
         );
-        assert_eq!(response.view.foot.note, NOTE_WORKING_TREE);
     }
 
     #[test]

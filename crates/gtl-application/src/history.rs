@@ -3,7 +3,7 @@
 pub mod get_recent_render;
 pub mod list;
 pub mod list_recent_render_page;
-mod logic;
+mod persistence;
 pub mod record_render;
 
-pub use logic::persistence::{RecentRenderRecord, RecentRenderRowError};
+pub use persistence::{RecentRenderRecord, RecentRenderRowError};

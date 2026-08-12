@@ -6,8 +6,8 @@ use gtl_application::{
         render_merge_diff::RenderMergeDiff,
     },
     ports::DiffRenderRequest,
-    recipes::RecipeRequest,
 };
+use gtl_wire::recipes::RecipeOp;
 
 use crate::{commands::diff::DiffOutcome, viewer};
 
@@ -25,8 +25,9 @@ pub fn run(
         batch_id: crate::recipe::new_batch_id(),
         recipes: vec![DiffRecipeIntent {
             repo_path: cwd,
-            operation: RecipeRequest::MergeDiff {
+            operation: RecipeOp::MergeDiff {
                 base: base.map(str::to_string),
+                pinned: None,
             },
             name: None,
         }],

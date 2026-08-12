@@ -71,7 +71,7 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
                 },
                 &HybridGitClient,
             );
-            project_commit_execution(options.json, execution)
+            project_commit_execution(options.output.is_json(), execution)
         }
         Err(error) => ManagedRun {
             exit: ManagedExit::Fail,

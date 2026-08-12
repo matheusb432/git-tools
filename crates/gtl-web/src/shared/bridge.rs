@@ -1,4 +1,4 @@
-use gtl_contracts::viewer::ViewerApiError;
+use gtl_wire::viewer::ViewerApiError;
 use serde::{Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -178,44 +178,38 @@ mod bindings {
 
 #[cfg(not(target_arch = "wasm32"))]
 mod bindings {
+    use std::future::{Ready, ready};
+
     use super::{ClientApiError, DeserializeOwned, Serialize};
 
-    #[expect(
-        clippy::unused_async,
-        reason = "the native stub keeps the same awaitable API as the WASM binding"
-    )]
-    pub(super) async fn invoke<Arguments, Response>(
+    pub(super) fn invoke<Arguments, Response>(
         _command: &'static str,
         _arguments: &Arguments,
-    ) -> Result<Response, ClientApiError>
+    ) -> Ready<Result<Response, ClientApiError>>
     where
         Arguments: Serialize,
         Response: DeserializeOwned,
     {
-        Err(ClientApiError::Unavailable)
+        ready(Err(ClientApiError::Unavailable))
     }
 
-    #[expect(
-        clippy::unused_async,
-        reason = "the native stub keeps the same awaitable API as the WASM binding"
-    )]
-    pub(super) async fn listen<Event, Ready, Handler>(
+    pub(super) fn listen<Event, OnReady, Handler>(
         _event_name: &'static str,
-        _on_ready: Ready,
+        _on_ready: OnReady,
         _on_event: Handler,
-    ) -> Result<(), ClientApiError>
+    ) -> Ready<Result<(), ClientApiError>>
     where
         Event: DeserializeOwned + 'static,
-        Ready: Fn() + 'static,
+        OnReady: Fn() + 'static,
         Handler: Fn(Event) + 'static,
     {
-        Err(ClientApiError::Unavailable)
+        ready(Err(ClientApiError::Unavailable))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::{ViewerApiError, ViewerResource};
+    use gtl_wire::viewer::{ViewerApiError, ViewerResource};
 
     use super::ClientApiError;
 

@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::Context;
-use gtl_models::viewer::RenderOptions;
+use gtl_application::ports::ArtifactRangeKey;
 
 use crate::store::{
     id::content_hash,
@@ -160,36 +160,27 @@ fn atomic_write(final_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 /// Find an existing artifact for a pure commit range rendered under the same
 /// layout, density, theme, and exclusion set. Returns `None` for `WorkTree`
 /// (never range-addressable) or on a miss. Scans the flat store's sidecars.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the explicit fields are the persisted range-reuse key"
-)]
 pub fn lookup_by_range(
     store_root: &Path,
     repo_id: &str,
-    kind: DiffKind,
-    base_sha: &str,
-    head_sha: &str,
-    render_options: RenderOptions,
-    theme: Option<&str>,
-    excluded_extensions: &[String],
+    key: &ArtifactRangeKey,
 ) -> Option<PathBuf> {
-    if kind == DiffKind::WorkTree {
+    if key.kind == DiffKind::WorkTree {
         return None;
     }
-    let layout = render_options.layout().to_string();
-    let density = render_options.density().to_string();
+    let layout = key.render_options.layout().to_string();
+    let density = key.render_options.density().to_string();
     for artifact in read_sidecars_paired(store_root) {
         if artifact.sidecar.repo_id == repo_id
-            && artifact.sidecar.kind == kind
-            && artifact.sidecar.base_sha == base_sha
-            && artifact.sidecar.head_sha == head_sha
+            && artifact.sidecar.kind == key.kind
+            && artifact.sidecar.base_sha == key.base_sha
+            && artifact.sidecar.head_sha == key.head_sha
             && artifact.sidecar.layout == layout
             && artifact.sidecar.density == density
             && artifact.sidecar.theme_recorded
             && artifact.sidecar.renderer_version == RENDERER_VERSION
-            && artifact.sidecar.theme.as_deref() == theme
-            && artifact.sidecar.excluded_extensions == excluded_extensions
+            && artifact.sidecar.theme == key.theme
+            && artifact.sidecar.excluded_extensions == key.excluded_extensions
         {
             return Some(artifact.html_path);
         }
@@ -272,6 +263,17 @@ mod tests {
             theme: None,
             theme_recorded: true,
             renderer_version: RENDERER_VERSION,
+            excluded_extensions: Vec::new(),
+        }
+    }
+
+    fn range_key(kind: DiffKind, base_sha: &str, head_sha: &str) -> ArtifactRangeKey {
+        ArtifactRangeKey {
+            kind,
+            base_sha: base_sha.into(),
+            head_sha: head_sha.into(),
+            render_options: RenderOptions::DEFAULT,
+            theme: None,
             excluded_extensions: Vec::new(),
         }
     }
@@ -402,23 +404,13 @@ mod tests {
         let hit = lookup_by_range(
             tmp.path(),
             "repo0000",
-            DiffKind::TwoDot,
-            "aaaa",
-            "bbbb",
-            RenderOptions::DEFAULT,
-            None,
-            &[],
+            &range_key(DiffKind::TwoDot, "aaaa", "bbbb"),
         );
         assert!(hit.is_some());
         let miss = lookup_by_range(
             tmp.path(),
             "repo0000",
-            DiffKind::TwoDot,
-            "aaaa",
-            "cccc",
-            RenderOptions::DEFAULT,
-            None,
-            &[],
+            &range_key(DiffKind::TwoDot, "aaaa", "cccc"),
         );
         assert!(miss.is_none());
     }
@@ -434,12 +426,7 @@ mod tests {
             lookup_by_range(
                 tmp.path(),
                 "repoAAAA",
-                DiffKind::TwoDot,
-                "aaaa",
-                "bbbb",
-                RenderOptions::DEFAULT,
-                None,
-                &[],
+                &range_key(DiffKind::TwoDot, "aaaa", "bbbb"),
             )
             .is_none()
         );
@@ -447,12 +434,7 @@ mod tests {
             lookup_by_range(
                 tmp.path(),
                 "repoBBBB",
-                DiffKind::TwoDot,
-                "aaaa",
-                "bbbb",
-                RenderOptions::DEFAULT,
-                None,
-                &[],
+                &range_key(DiffKind::TwoDot, "aaaa", "bbbb"),
             )
             .is_some()
         );
@@ -461,21 +443,14 @@ mod tests {
     #[test]
     fn lookup_by_range_requires_the_same_exclusion_set() {
         let tmp = tempfile::tempdir().unwrap();
-        // An artifact rendered without exclusions (or by a pre-exclusion build,
-        // whose sidecar lacks the field entirely) …
+        // An artifact rendered without exclusions cannot satisfy a filtered lookup.
         let sc = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
         place(tmp.path(), "repo0000", "<html>unfiltered</html>", &sc).unwrap();
-        // … must never satisfy a render running under an active filter.
-        let filtered = lookup_by_range(
-            tmp.path(),
-            "repo0000",
-            DiffKind::TwoDot,
-            "aaaa",
-            "bbbb",
-            RenderOptions::DEFAULT,
-            None,
-            &["md".to_string()],
-        );
+        let filtered_key = ArtifactRangeKey {
+            excluded_extensions: vec!["md".into()],
+            ..range_key(DiffKind::TwoDot, "aaaa", "bbbb")
+        };
+        let filtered = lookup_by_range(tmp.path(), "repo0000", &filtered_key);
         assert!(filtered.is_none(), "stale unfiltered artifact was reused");
 
         // And a filtered artifact is only reusable under the identical set.
@@ -488,29 +463,16 @@ mod tests {
             &filtered_sidecar,
         )
         .unwrap();
+        let matching_key = ArtifactRangeKey {
+            excluded_extensions: vec!["md".into()],
+            ..range_key(DiffKind::TwoDot, "cccc", "dddd")
+        };
+        assert!(lookup_by_range(tmp.path(), "repo0000", &matching_key).is_some());
         assert!(
             lookup_by_range(
                 tmp.path(),
                 "repo0000",
-                DiffKind::TwoDot,
-                "cccc",
-                "dddd",
-                RenderOptions::DEFAULT,
-                None,
-                &["md".to_string()],
-            )
-            .is_some()
-        );
-        assert!(
-            lookup_by_range(
-                tmp.path(),
-                "repo0000",
-                DiffKind::TwoDot,
-                "cccc",
-                "dddd",
-                RenderOptions::DEFAULT,
-                None,
-                &[]
+                &range_key(DiffKind::TwoDot, "cccc", "dddd"),
             )
             .is_none(),
             "filtered artifact must not serve an unfiltered render"
@@ -527,32 +489,19 @@ mod tests {
         dark.excluded_extensions = vec!["md".to_string()];
         place(tmp.path(), "repo0000", "<html>dark</html>", &dark).unwrap();
 
-        assert!(
-            lookup_by_range(
-                tmp.path(),
-                "repo0000",
-                DiffKind::TwoDot,
-                "aaaa",
-                "bbbb",
-                RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
-                Some("dark"),
-                &["md".to_string()],
-            )
-            .is_some()
-        );
-        assert!(
-            lookup_by_range(
-                tmp.path(),
-                "repo0000",
-                DiffKind::TwoDot,
-                "aaaa",
-                "bbbb",
-                RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
-                Some("light"),
-                &["md".to_string()],
-            )
-            .is_none()
-        );
+        let dark_key = ArtifactRangeKey {
+            render_options: RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
+            theme: Some("dark".into()),
+            excluded_extensions: vec!["md".into()],
+            ..range_key(DiffKind::TwoDot, "aaaa", "bbbb")
+        };
+
+        assert!(lookup_by_range(tmp.path(), "repo0000", &dark_key).is_some());
+        let light_key = ArtifactRangeKey {
+            theme: Some("light".into()),
+            ..dark_key
+        };
+        assert!(lookup_by_range(tmp.path(), "repo0000", &light_key).is_none());
 
         let mut legacy = sidecar(DiffKind::TwoDot, "cccc", "dddd");
         legacy.theme_recorded = false;
@@ -561,12 +510,7 @@ mod tests {
             lookup_by_range(
                 tmp.path(),
                 "repo0000",
-                DiffKind::TwoDot,
-                "cccc",
-                "dddd",
-                RenderOptions::DEFAULT,
-                None,
-                &[],
+                &range_key(DiffKind::TwoDot, "cccc", "dddd"),
             )
             .is_none(),
             "sidecars without theme metadata must not satisfy range reuse"
@@ -580,25 +524,15 @@ mod tests {
         split.layout = DiffLayout::Split.to_string();
         place(tmp.path(), "repo0000", "<html>split</html>", &split).unwrap();
 
-        let hit = lookup_by_range(
-            tmp.path(),
-            "repo0000",
-            DiffKind::TwoDot,
-            "aaaa",
-            "bbbb",
-            RenderOptions::new(DiffLayout::Split, DiffDensity::Compact),
-            None,
-            &[],
-        );
+        let split_key = ArtifactRangeKey {
+            render_options: RenderOptions::new(DiffLayout::Split, DiffDensity::Compact),
+            ..range_key(DiffKind::TwoDot, "aaaa", "bbbb")
+        };
+        let hit = lookup_by_range(tmp.path(), "repo0000", &split_key);
         let miss = lookup_by_range(
             tmp.path(),
             "repo0000",
-            DiffKind::TwoDot,
-            "aaaa",
-            "bbbb",
-            RenderOptions::DEFAULT,
-            None,
-            &[],
+            &range_key(DiffKind::TwoDot, "aaaa", "bbbb"),
         );
 
         assert!(hit.is_some());
@@ -612,25 +546,15 @@ mod tests {
         full.density = DiffDensity::Full.to_string();
         place(tmp.path(), "repo0000", "<html>full</html>", &full).unwrap();
 
-        let hit = lookup_by_range(
-            tmp.path(),
-            "repo0000",
-            DiffKind::TwoDot,
-            "aaaa",
-            "bbbb",
-            RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
-            None,
-            &[],
-        );
+        let full_key = ArtifactRangeKey {
+            render_options: RenderOptions::new(DiffLayout::Unified, DiffDensity::Full),
+            ..range_key(DiffKind::TwoDot, "aaaa", "bbbb")
+        };
+        let hit = lookup_by_range(tmp.path(), "repo0000", &full_key);
         let miss = lookup_by_range(
             tmp.path(),
             "repo0000",
-            DiffKind::TwoDot,
-            "aaaa",
-            "bbbb",
-            RenderOptions::DEFAULT,
-            None,
-            &[],
+            &range_key(DiffKind::TwoDot, "aaaa", "bbbb"),
         );
 
         assert!(hit.is_some());
@@ -647,12 +571,7 @@ mod tests {
         let miss = lookup_by_range(
             tmp.path(),
             "repo0000",
-            DiffKind::TwoDot,
-            "aaaa",
-            "bbbb",
-            RenderOptions::DEFAULT,
-            None,
-            &[],
+            &range_key(DiffKind::TwoDot, "aaaa", "bbbb"),
         );
         assert!(
             miss.is_none(),
@@ -664,12 +583,7 @@ mod tests {
         let hit = lookup_by_range(
             tmp.path(),
             "repo0000",
-            DiffKind::TwoDot,
-            "aaaa",
-            "bbbb",
-            RenderOptions::DEFAULT,
-            None,
-            &[],
+            &range_key(DiffKind::TwoDot, "aaaa", "bbbb"),
         );
         assert!(hit.is_some(), "current renderer artifact must hit");
     }
@@ -678,17 +592,7 @@ mod tests {
     fn worktree_is_never_range_addressable() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(
-            lookup_by_range(
-                tmp.path(),
-                "r",
-                DiffKind::WorkTree,
-                "a",
-                "b",
-                RenderOptions::DEFAULT,
-                None,
-                &[],
-            )
-            .is_none()
+            lookup_by_range(tmp.path(), "r", &range_key(DiffKind::WorkTree, "a", "b"),).is_none()
         );
     }
 

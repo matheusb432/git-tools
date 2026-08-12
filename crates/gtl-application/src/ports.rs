@@ -15,12 +15,13 @@ mod push_ledger;
 mod repo_discovery;
 mod user_settings_store;
 
-pub use artifact_store::{ArtifactMeta, ArtifactStore, HistoryRecord, PlacedArtifact};
+pub use artifact_store::{
+    ArtifactMeta, ArtifactRangeKey, ArtifactStore, HistoryRecord, PlacedArtifact,
+};
 pub use clock::Clock;
 pub use configured_editor_client::ConfiguredEditorClient;
 pub use diff_viewer_client::{
-    DiffRenderOutcome, DiffRenderRequest, DiffRenderResponse, DiffViewerBatch, DiffViewerClient,
-    DiffViewerRecipe, DiffViewerRecipeOperation,
+    DiffRenderOutcome, DiffRenderRequest, DiffRenderResponse, DiffViewerClient,
 };
 pub use file_system_client::{
     FileSystemClient, FileSystemClientError, FileSystemClientErrorKind, FileSystemEntryKind,

@@ -4,9 +4,6 @@ version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
 
-[package.metadata.sample_project.evidences]
-TEST_EVIDENCES_OUTPUT_PATH = ".artifacts/e2e"
-
 [[bin]]
 name = "xtask"
 path = "src/main.rs"

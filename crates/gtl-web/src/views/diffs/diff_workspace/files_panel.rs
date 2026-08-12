@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
-use gtl_contracts::viewer::{ViewerActiveView, ViewerFileStatus, ViewerFileSummary};
+use gtl_wire::viewer::{ViewerActiveView, ViewerFileStatus, ViewerFileSummary};
 use lucide_dioxus::ChevronRight;
 
 use crate::{
@@ -113,9 +113,10 @@ fn FilesFilter(filter: String, onfilter: EventHandler<String>) -> Element {
 
 #[component]
 fn FilesPanelHeading(commits_label: String, file_count: usize) -> Element {
+    let file_label = super::file_label(file_count);
     rsx! {
         div { class: "mx-1 mt-1.5 mb-2 flex justify-between tracking-wider text-ink-3 uppercase",
-            span { "{commits_label} \u{00b7} {file_count} file{super::plural_suffix(file_count)}" }
+            span { "# {file_count} {file_label}" }
         }
     }
 }
@@ -133,10 +134,11 @@ fn FilesPanelSummary(commit_count: usize, totals: WorkspaceLineTotals) -> Elemen
 
 #[component]
 fn CommitCountBadge(count: usize) -> Element {
+    let commit_label = super::commit_label(count);
     rsx! {
         Badge { class: "px-2 py-0.5",
             b { class: "font-bold text-ink", "{count}" }
-            span { class: "ml-1", "commit{super::plural_suffix(count)}" }
+            span { class: "ml-1", {commit_label} }
         }
     }
 }
@@ -247,7 +249,7 @@ const fn file_item_tone_classes(status: ViewerFileStatus) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::{ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary};
+    use gtl_wire::viewer::{ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary};
 
     use super::{WorkspaceFileTree, WorkspaceLineTotals};
 

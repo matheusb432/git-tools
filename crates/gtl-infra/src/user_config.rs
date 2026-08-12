@@ -9,12 +9,12 @@ use std::{
 
 use anyhow::Context;
 use gtl_application::ports::{UserSettingsEditError, UserSettingsLoadError, UserSettingsStore};
-use gtl_contracts::settings::{RawSettingValue, UserSettingsDocument};
 use gtl_models::{
     diffs::DiffExclusions,
     settings::UserSettings,
     viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
 };
+use gtl_wire::settings::{RawSettingValue, UserSettingsDocument};
 
 fn default_settings() -> UserSettings {
     UserSettings::new(

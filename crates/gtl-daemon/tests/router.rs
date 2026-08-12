@@ -228,6 +228,53 @@ async fn malformed_render_json_is_a_400_error_envelope() {
 }
 
 #[tokio::test]
+async fn tag_bump_applies_preview_to_the_requested_repository() {
+    let fixture = Fixture::new();
+    git(
+        &fixture.repository,
+        &["tag", "-a", "v1.2.3", "-m", "release"],
+    );
+    let dry_run = fixture
+        .post(
+            "/tags/bump/dry-run",
+            json!({
+                "repo_path": fixture.repository,
+                "level": "patch",
+                "message": "next release",
+                "push": false
+            }),
+        )
+        .await;
+
+    assert_eq!(dry_run.status(), StatusCode::OK);
+    let dry_run = body_json(dry_run).await;
+    assert_eq!(dry_run["outcome"], "ok");
+    assert_eq!(
+        dry_run["data"]["repo_path"],
+        fixture.repository.to_string_lossy().as_ref()
+    );
+    assert_eq!(dry_run["data"]["base_tag"], "v1.2.3");
+    assert_eq!(dry_run["data"]["next_tag"], "v1.2.4");
+
+    let applied = fixture
+        .post("/tags/bump", json!({"preview": dry_run["data"].clone()}))
+        .await;
+
+    assert_eq!(applied.status(), StatusCode::OK);
+    let applied = body_json(applied).await;
+    assert_eq!(applied["outcome"], "ok");
+    assert_eq!(applied["data"]["tag"], "v1.2.4");
+    assert_eq!(applied["data"]["status"], "created");
+    let tag = Command::new("git")
+        .args(["tag", "--list", "v1.2.4"])
+        .current_dir(&fixture.repository)
+        .output()
+        .expect("list applied tag");
+    assert!(tag.status.success());
+    assert_eq!(tag.stdout, b"v1.2.4\n");
+}
+
+#[tokio::test]
 async fn tag_bump_rejects_a_stale_preview_before_mutation() {
     let fixture = Fixture::new();
     git(

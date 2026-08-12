@@ -2,11 +2,11 @@ use gtl_application::settings::{
     get_user_settings::{self, GetUserSettings},
     set_key::{self, SetSettingKey},
 };
-use gtl_contracts::viewer::{
+use gtl_models::settings::UserSettings;
+use gtl_wire::viewer::{
     ViewerApiError, ViewerDiffExclusions, ViewerProjectDiffExclusions, ViewerResource,
     ViewerUserSettings,
 };
-use gtl_models::settings::UserSettings;
 
 use super::{internal, unavailable};
 use crate::presentation::ViewerApp;
@@ -70,7 +70,7 @@ fn to_user_settings(
     ViewerUserSettings {
         configuration_path,
         configured_theme,
-        effective_theme: configured_theme.unwrap_or(gtl_contracts::viewer::ViewerTheme::Dark),
+        effective_theme: configured_theme.unwrap_or(gtl_wire::viewer::ViewerTheme::Dark),
         render_options: gtl_application::viewer::project_render_options(
             settings.viewer_render_options(),
         ),

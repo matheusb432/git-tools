@@ -14,7 +14,9 @@ use crate::{
         DiffTarget, DiffTargetArgs, ManagedArgs, ManagedReadArgs, MergeArgs, PruneArgs, PushArgs,
         StatusArgs, SwitchArgs, Theme, WorktreeCommand,
     },
-    commands::managed::{ManagedExit, ManagedOptions, ManagedRun, PushOutcome, PushSummary},
+    commands::managed::{
+        ManagedExit, ManagedOptions, ManagedOutput, ManagedRun, PushOutcome, PushSummary,
+    },
     confirm::{Confirmation, DefaultAnswer, RealConfirm},
 };
 
@@ -126,12 +128,12 @@ fn run_diff(args: DiffArgs) -> ExitCode {
             if let Some(theme) = args.target.set_theme {
                 return run_set_theme(theme);
             }
-            if args.target.recursive {
+            if args.target.scope.recursive {
                 return diff_exit(commands::canonical_working_directory().and_then(|root| {
                     commands::diff_subrepos::run_scan(
                         root,
                         args.target.last,
-                        args.target.worktrees,
+                        args.target.scope.worktrees,
                         raw,
                     )
                 }));
@@ -168,12 +170,10 @@ fn run_commit(args: CommitArgs) -> ExitCode {
         CommitArgs {
             all: true,
             message,
-            dry,
-            json,
+            managed,
             ..
         } => managed_exit(&commands::managed::run_commit_all(&managed_options(
-            ManagedArgs { dry, json },
-            message,
+            managed, message,
         ))),
     }
 }
@@ -291,7 +291,7 @@ enum DiffInvocation {
 }
 
 fn diff_invocation(args: DiffTargetArgs) -> DiffInvocation {
-    if args.all {
+    if args.scope.all {
         return DiffInvocation::ManagedAll;
     }
 
@@ -329,7 +329,9 @@ fn diff_target(args: DiffTargetArgs) -> DiffTarget {
 
 fn run_push_managed(args: PushArgs) -> ExitCode {
     let PushArgs {
-        message, dry, json, ..
+        message,
+        managed: ManagedArgs { dry, json },
+        ..
     } = args;
     let interactive = confirm::stdin_is_terminal();
     let dry = match plan_push::execute(PlanPush { message, dry }) {
@@ -337,8 +339,7 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
         PlanPushOk::CommitThenPush { message, dry } => {
             let run = commands::managed::run_commit_all(&ManagedOptions {
                 dry,
-                json,
-                color: false,
+                output: ManagedOutput::from_flags(json, false),
                 message_for_all: Some(message),
                 interactive,
             });
@@ -352,8 +353,7 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
 
     managed_exit(&commands::managed::run_push_all(&ManagedOptions {
         dry,
-        json,
-        color: false,
+        output: ManagedOutput::from_flags(json, false),
         message_for_all: None,
         interactive,
     }))
@@ -838,8 +838,7 @@ fn run_prune(args: &PruneArgs) -> ExitCode {
     if args.all {
         let options = ManagedOptions {
             dry: !args.yes,
-            json: args.json,
-            color: false,
+            output: ManagedOutput::from_flags(args.json, false),
             message_for_all: None,
             interactive: confirm::stdin_is_terminal(),
         };
@@ -970,8 +969,7 @@ fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
 
     ManagedOptions {
         dry: false,
-        json: args.json,
-        color,
+        output: ManagedOutput::from_flags(args.json, color),
         message_for_all: None,
         interactive: false,
     }
@@ -981,8 +979,7 @@ fn managed_read_options(args: ManagedReadArgs) -> ManagedOptions {
 fn managed_options(args: ManagedArgs, message_for_all: Option<String>) -> ManagedOptions {
     ManagedOptions {
         dry: args.dry,
-        json: args.json,
-        color: false,
+        output: ManagedOutput::from_flags(args.json, false),
         message_for_all,
         interactive: confirm::stdin_is_terminal(),
     }
@@ -1043,12 +1040,14 @@ mod tests {
 
     fn target_args(target: Option<&str>) -> DiffTargetArgs {
         DiffTargetArgs {
-            all: false,
+            scope: crate::cli::DiffScopeArgs {
+                all: false,
+                recursive: false,
+                worktrees: false,
+            },
             unpushed: false,
             target: target.map(str::to_owned),
             last: None,
-            recursive: false,
-            worktrees: false,
             merge: None,
             name: None,
             set_theme: None,

@@ -1,5 +1,5 @@
 use gtl_application::{live_views, viewer::ViewerTabKind};
-use gtl_contracts::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
+use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
 use crate::presentation::ViewerApp;
 

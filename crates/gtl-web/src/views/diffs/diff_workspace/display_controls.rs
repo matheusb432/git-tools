@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{
+use gtl_wire::viewer::{
     SetViewerPreference, ViewerDiffDensity, ViewerDiffLayout, ViewerPreferences,
 };
 use lucide_dioxus::{GitCommitHorizontal, ListFilter, PanelLeft};

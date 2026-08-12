@@ -4,10 +4,7 @@ use std::path::{Path, PathBuf};
 
 use gtl_models::tags::Tag;
 
-use super::{
-    BumpLevel,
-    logic::{bump::decide_tag_version, git_command_error::GitCommandError},
-};
+use super::{BumpLevel, git_command_error::GitCommandError, version::decide_tag_version};
 use crate::ports::{GitClient, GitEffect};
 
 /// Requests a tag-bump proposal without changing Git state.

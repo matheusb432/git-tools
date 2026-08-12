@@ -10,7 +10,7 @@ use gtl_application::{
         prepare_recipe::{self, PrepareRecipe, PrepareRecipeError, PrepareRecipeOk},
     },
 };
-use gtl_contracts::recipes::Recipe;
+use gtl_wire::recipes::Recipe;
 
 use crate::{
     presentation::ViewerApp,
@@ -213,7 +213,7 @@ impl RecipeExecutor {
                 if published == PublishOutcome::Stale {
                     return Err(RecipeError::Stale);
                 }
-                record_render(&self.app_state, &self.clock, history);
+                record_render(&self.app_state, &self.clock, &history);
             }
         }
         Ok(())
@@ -372,7 +372,7 @@ pub(crate) enum SelectCommitError {
 fn record_render(
     app_state: &gtl_infra::app_state::SqliteAppState,
     clock: &impl gtl_application::ports::Clock,
-    request: RecordRender,
+    request: &RecordRender,
 ) {
     let mut connection = match app_state.connection_lock() {
         Ok(connection) => connection,

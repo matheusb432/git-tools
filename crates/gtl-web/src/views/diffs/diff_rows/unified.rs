@@ -8,8 +8,8 @@ use super::{
     content::{ChangedTextTone, CodeCellContent, non_breaking_if_empty},
 };
 
-const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-[14px] text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]";
-const UNIFIED_GUTTER_CLASSES: &str = "col-start-1 row-start-1 select-none whitespace-nowrap px-0 text-center text-[14px] [font-variant-numeric:tabular-nums] mobile:text-[13px]";
+const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-sm text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
+const UNIFIED_GUTTER_CLASSES: &str = "col-start-1 row-start-1 select-none whitespace-nowrap px-0 text-center text-sm [font-variant-numeric:tabular-nums]";
 const UNIFIED_ROW_SHELL_CLASSES: &str = "relative grid grid-cols-[max(28px,var(--unified-line-number-width,28px))_minmax(0,1fr)] items-start whitespace-normal";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,7 +170,7 @@ fn UnifiedCodeCell(
     long_line_character_count: Option<usize>,
 ) -> Element {
     rsx! {
-        code { class: "col-start-2 row-start-1 min-w-0 border-0 bg-transparent py-0 pr-1 pl-3 text-[14px] text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:text-[13px] print:text-[#111]",
+        code { class: "col-start-2 row-start-1 min-w-0 border-0 bg-transparent py-0 pr-1 pl-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] print:text-[#111]",
             CodeCellContent {
                 text,
                 semantic_spans,

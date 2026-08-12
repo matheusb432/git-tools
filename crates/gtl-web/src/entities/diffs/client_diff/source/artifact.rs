@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::HashMap};
 
-use gtl_contracts::viewer::{
+use gtl_wire::viewer::{
     LoadViewerDiffLines, ViewerArtifactPage, ViewerArtifactPageId, ViewerDiffLines,
 };
 
@@ -70,7 +70,7 @@ fn decode_page(
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::{
+    use gtl_wire::viewer::{
         ViewerDiffCursor, ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout,
         ViewerRenderOptions, ViewerViewIdentity,
     };

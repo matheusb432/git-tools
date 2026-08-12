@@ -4,10 +4,9 @@ use gtl_application::{
         render_diff::RenderDiff,
     },
     ports::DiffRenderRequest,
-    recipes::RecipeRequest,
 };
 
-use crate::{cli::DiffTarget, viewer};
+use crate::{cli::DiffTarget, recipe, viewer};
 
 pub enum DiffOutcome {
     Rendered(std::path::PathBuf),
@@ -26,7 +25,7 @@ pub fn run(target: &DiffTarget, name: Option<&str>, raw: bool) -> anyhow::Result
         batch_id: crate::recipe::new_batch_id(),
         recipes: vec![DiffRecipeIntent {
             repo_path: cwd,
-            operation: RecipeRequest::Diff(target.clone()),
+            operation: recipe::diff_operation(target),
             name: name.map(str::to_string),
         }],
         raw,

@@ -6,7 +6,7 @@ use gtl_application::{
         project_theme,
     },
 };
-use gtl_contracts::viewer::{
+use gtl_wire::viewer::{
     LoadViewerDiffLines, ViewerArtifactManifest, ViewerArtifactPage, ViewerArtifactPageId,
     ViewerCommitSelection, ViewerDiffCursor, ViewerViewIdentity,
 };
@@ -58,7 +58,7 @@ pub(crate) fn project_payload(
 
 fn project_pages(
     view: &View,
-    active: &gtl_contracts::viewer::ViewerActiveView,
+    active: &gtl_wire::viewer::ViewerActiveView,
     pages: &mut Vec<ViewerArtifactPage>,
 ) -> Result<()> {
     for file in &active.files {
@@ -95,7 +95,7 @@ fn project_pages(
 #[cfg(test)]
 mod tests {
     use gtl_application::viewer::{DiffDensity, DiffLayout};
-    use gtl_contracts::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerTheme};
+    use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerTheme};
 
     use super::*;
     use crate::tests::sample_view;

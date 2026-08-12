@@ -1,7 +1,5 @@
 use gtl_application::viewer::{project_diff_lines, project_render_options};
-use gtl_contracts::viewer::{
-    LoadViewerDiffLines, ViewerApiError, ViewerDiffLines, ViewerViewIdentity,
-};
+use gtl_wire::viewer::{LoadViewerDiffLines, ViewerApiError, ViewerDiffLines, ViewerViewIdentity};
 
 use super::{internal, settings, shell};
 use crate::presentation::ViewerApp;
@@ -77,11 +75,11 @@ mod tests {
         diffs::{Cmd, FileDiff, Foot, View},
         viewer::{RenderOptions, ViewerTabKind},
     };
-    use gtl_contracts::{
+    use gtl_infra::user_config::TomlSettingsStore;
+    use gtl_wire::{
         recipes::{Recipe, RecipeOp, RecipeSource},
         viewer::{SetViewerPreference, ViewerDiffCursor, ViewerDiffFileId, ViewerResource},
     };
-    use gtl_infra::user_config::TomlSettingsStore;
 
     use super::*;
     use crate::{presentation::ViewerApp, session::CachedView};
@@ -125,10 +123,7 @@ mod tests {
                 trail: String::new(),
             },
             commits_label: String::new(),
-            foot: Foot {
-                cmd: String::new(),
-                note: String::new(),
-            },
+            foot: Foot { cmd: String::new() },
             exclusions: None,
         });
         assert_eq!(
@@ -186,10 +181,10 @@ mod tests {
         });
         super::super::actions::set_preference(
             &app,
-            SetViewerPreference::Density(gtl_contracts::viewer::ViewerDiffDensity::Full),
+            SetViewerPreference::Density(gtl_wire::viewer::ViewerDiffDensity::Full),
         )
         .expect("set full density");
-        identity.render_options.density = gtl_contracts::viewer::ViewerDiffDensity::Full;
+        identity.render_options.density = gtl_wire::viewer::ViewerDiffDensity::Full;
 
         let page = load_lines(
             &app,

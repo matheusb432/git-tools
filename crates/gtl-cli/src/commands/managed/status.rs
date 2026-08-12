@@ -95,7 +95,11 @@ pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun
 }
 
 fn status_run(results: Vec<StatusResult>, options: &ManagedOptions) -> ManagedRun<StatusResult> {
-    match format_status(options.json, options.color, &results) {
+    match format_status(
+        options.output.is_json(),
+        options.output.color_enabled(),
+        &results,
+    ) {
         Ok(stdout) => ManagedRun {
             exit: ManagedExit::Clean,
             results,

@@ -6,11 +6,11 @@ use gtl_application::{
     },
     live_views,
 };
-use gtl_contracts::viewer::{
+use gtl_models::viewer::{ViewerTabId, ViewerTabState};
+use gtl_wire::viewer::{
     OpenViewerDiffFile, SelectViewerCommit, SetViewerPreference, ViewerApiError, ViewerFeedback,
     ViewerResource, ViewerShell, ViewerTabRequest,
 };
-use gtl_models::viewer::{ViewerTabId, ViewerTabState};
 
 use super::{diff, internal, settings, shell, unavailable};
 use crate::{
@@ -229,16 +229,16 @@ fn preference_pair(preference: SetViewerPreference) -> (&'static str, String) {
         SetViewerPreference::Layout(layout) => (
             "layout",
             match layout {
-                gtl_contracts::viewer::ViewerDiffLayout::Unified => "unified",
-                gtl_contracts::viewer::ViewerDiffLayout::Split => "split",
+                gtl_wire::viewer::ViewerDiffLayout::Unified => "unified",
+                gtl_wire::viewer::ViewerDiffLayout::Split => "split",
             }
             .into(),
         ),
         SetViewerPreference::Density(density) => (
             "density",
             match density {
-                gtl_contracts::viewer::ViewerDiffDensity::Compact => "compact",
-                gtl_contracts::viewer::ViewerDiffDensity::Full => "full",
+                gtl_wire::viewer::ViewerDiffDensity::Compact => "compact",
+                gtl_wire::viewer::ViewerDiffDensity::Full => "full",
             }
             .into(),
         ),
@@ -294,7 +294,7 @@ fn map_open_diff_file_error(error: OpenDiffFileInConfiguredEditorError) -> Viewe
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::{ViewerDiffLayout, ViewerTheme};
+    use gtl_wire::viewer::{ViewerDiffLayout, ViewerTheme};
 
     use super::*;
 

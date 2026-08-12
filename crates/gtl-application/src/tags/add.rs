@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use super::logic::{
+use super::{
     git_command_error::GitCommandError,
     outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
 };
@@ -97,7 +97,7 @@ mod tests {
 
     use super::{AddTag, execute, validate};
     use crate::{
-        tags::logic::outcome::{
+        tags::outcome::{
             TagActionOutcome, TagActionStatus, TagOperationProgress, TagRemotePushProgress,
         },
         testing::ScriptedGitClient,

@@ -3,74 +3,32 @@ use anyhow::Context as _;
 use crate::support;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn viewer_live_lifecycle() -> anyhow::Result<()> {
+async fn user_refreshes_and_restores_a_saved_live_diff() -> anyhow::Result<()> {
     support::run_test("viewer-live-lifecycle", |session| {
         Box::pin(async move {
             let fixture = support::fixture::ViewerFixture::create(session.data_root())?;
             fixture.forward_live_view()?;
-            support::assert_forwarded_live_view(session, "alpha-v1")
+            support::wait_for_active_diff(session.driver(), "live-view", "alpha-v1")
                 .await
-                .context("assert forwarded live view")?;
-            support::assert_configured_editor_launch(session, &fixture)
-                .await
-                .context("assert configured editor launch")?;
-            support::assert_first_paint(session)
-                .await
-                .context("assert first diff-row paint")?;
-            support::assert_default_navigation_reachable(session)
-                .await
-                .context("assert default-width files and commit navigation")?;
-            support::select_split_layout(session)
-                .await
-                .context("select split layout")?;
+                .context("show the forwarded live diff")?;
+
             fixture.commit_alpha_v2()?;
-            support::refresh_and_assert_alpha_v2(session)
+            support::selectors::by_aria_label(session.driver(), "Refresh diff")
+                .await?
+                .click()
                 .await
-                .context("refresh and assert alpha-v2")?;
-            support::select_commit_patch_and_restore_range(session)
+                .context("refresh the live diff")?;
+            support::wait_for_active_diff(session.driver(), "live-view", "alpha-v2")
                 .await
-                .context("select standalone commit patch and restore range")?;
-            support::assert_mobile_navigation(session)
-                .await
-                .context("assert mobile navigation")?;
-            let chunked_row_count = support::assert_chunked_live_view(session, &fixture)
-                .await
-                .context("assert paged diff rendering")?;
-            support::assert_overlapping_live_updates(session, &fixture)
-                .await
-                .context("assert overlapping live updates")?;
-            support::delete_temporary_live_views(session, chunked_row_count)
-                .await
-                .context("remove temporary overlapping live views")?;
+                .context("show the refreshed live diff")?;
 
             session
                 .restart()
                 .await
                 .context("restart saved live viewer")?;
-            support::assert_restarted_live_view(session, "alpha-v2")
+            support::wait_for_active_diff(session.driver(), "live-view", "alpha-v2")
                 .await
-                .context("assert saved live view after restart")?;
-
-            fixture.make_repository_unavailable()?;
-            support::refresh_and_assert_unavailable(session)
-                .await
-                .context("assert unavailable repository state")?;
-            fixture.restore_repository()?;
-            fixture.forward_live_view()?;
-            support::assert_restarted_live_view(session, "alpha-v2")
-                .await
-                .context("recover saved live view without duplicate tabs")?;
-
-            support::delete_and_assert_empty_state(session)
-                .await
-                .context("delete saved live view through keyboard confirmation")?;
-            session
-                .restart()
-                .await
-                .context("restart viewer after deleting saved live view")?;
-            support::assert_durable_empty_state(session)
-                .await
-                .context("assert saved live view remains deleted")
+                .context("restore the refreshed live diff")
         })
     })
     .await

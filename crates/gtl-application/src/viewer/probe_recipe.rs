@@ -1,4 +1,4 @@
-use gtl_contracts::recipes::{Recipe, RecipeSource};
+use gtl_wire::recipes::{Recipe, RecipeSource};
 
 use super::{ViewerTabKind, ViewerTabState};
 use crate::{
@@ -63,7 +63,7 @@ pub fn execute(
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::recipes::RecipeOp;
+    use gtl_wire::recipes::RecipeOp;
 
     use super::*;
     use crate::{

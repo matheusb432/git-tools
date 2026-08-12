@@ -5,12 +5,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use gtl_contracts::viewer::ViewerStateChanged;
 use gtl_infra::{
     app_state::SqliteAppState, clock::SystemClock, configured_editor::GitConfiguredEditorClient,
     file_system::LocalFileSystemClient, git_client::HybridGitClient,
     user_config::TomlSettingsStore,
 };
+use gtl_wire::viewer::ViewerStateChanged;
 pub(crate) use restoration::RestorationGate;
 
 use crate::{

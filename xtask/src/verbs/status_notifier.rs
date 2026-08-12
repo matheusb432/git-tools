@@ -11,15 +11,19 @@ struct WatcherInterface {
     hosts: Arc<Mutex<Vec<String>>>,
 }
 
+struct StatusNotifierCaller(Option<String>);
+
+impl From<Header<'_>> for StatusNotifierCaller {
+    fn from(header: Header<'_>) -> Self {
+        Self(header.sender().map(ToString::to_string))
+    }
+}
+
 #[zbus::interface(name = "org.kde.StatusNotifierWatcher")]
 impl WatcherInterface {
-    #[expect(
-        clippy::needless_pass_by_value,
-        reason = "zbus interface arguments are decoded as owned D-Bus values"
-    )]
-    fn register_status_notifier_item(&self, service: String, #[zbus(header)] header: Header<'_>) {
-        let sender = header.sender().map(ToString::to_string);
-        let item = registered_item_id(&service, sender.as_deref());
+    fn register_status_notifier_item(&self, service: &str, #[zbus(header)] header: Header<'_>) {
+        let StatusNotifierCaller(sender) = header.into();
+        let item = registered_item_id(service, sender.as_deref());
         if let Ok(mut items) = self.items.lock()
             && !items.contains(&item)
         {
@@ -54,10 +58,9 @@ impl WatcherInterface {
     }
 }
 
-/// Owns the watcher bus name and exposes registrations observed in the private session.
+/// Owns the watcher bus name in the private session.
 pub struct StatusNotifierWatcher {
     _connection: Connection,
-    items: Arc<Mutex<Vec<String>>>,
 }
 
 impl StatusNotifierWatcher {
@@ -78,13 +81,7 @@ impl StatusNotifierWatcher {
             .context("connect StatusNotifierWatcher to private D-Bus")?;
         Ok(Self {
             _connection: connection,
-            items,
         })
-    }
-
-    /// Report whether the viewer registered at least one production tray item.
-    pub fn has_registered_item(&self) -> bool {
-        self.items.lock().is_ok_and(|items| !items.is_empty())
     }
 }
 

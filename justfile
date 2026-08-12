@@ -88,7 +88,7 @@ check:
 fix *args:
     cargo run --quiet -p xtask -- fix {{ args }}
 
-# Rebuild committed web assets and fail if generated output drifts from its Rust sources.
+# Rebuild web assets and fail if the tracked stylesheet drifts from its sources.
 [group('quality')]
 drift-check:
     cargo run --quiet -p xtask -- drift-check

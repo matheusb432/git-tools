@@ -3,10 +3,8 @@
 use std::path::{Path, PathBuf};
 
 use super::{
-    logic::{
-        git_command_error::GitCommandError,
-        outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
-    },
+    git_command_error::GitCommandError,
+    outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
     push,
 };
 use crate::ports::GitClient;
@@ -97,7 +95,7 @@ mod tests {
 
     use super::{LabelTag, execute, validate};
     use crate::{
-        tags::logic::outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
+        tags::outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
         testing::ScriptedGitClient,
     };
 

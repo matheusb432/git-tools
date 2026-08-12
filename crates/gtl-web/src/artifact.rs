@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{
+use gtl_parser::SyntaxCatalog;
+use gtl_wire::viewer::{
     VIEWER_ARTIFACT_MANIFEST_ID, VIEWER_ARTIFACT_SYNTAX_ID, ViewerArtifactManifest,
 };
-use gtl_parser::SyntaxCatalog;
 
 use crate::{
     artifact_asset::{

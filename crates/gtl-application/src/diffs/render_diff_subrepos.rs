@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     diffs::{
         DiffTarget, DiffTargetRequest, DiffTargetRequestError,
-        logic::batch::{RepoRef, dated_title, render_batch},
+        batch::{RepoRef, dated_title, render_batch},
     },
     ports::{
         ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsLoadError,
@@ -73,7 +73,7 @@ pub fn execute(
         repos,
         target,
     } = req;
-    let store_root = super::logic::artifacts::root(&root);
+    let store_root = super::artifacts::root(&root);
     let target = DiffTarget::try_from(target)?;
     let settings = app_settings.load()?;
     let mut notes = Vec::new();

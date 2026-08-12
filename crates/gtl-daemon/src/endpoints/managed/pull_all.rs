@@ -4,7 +4,7 @@ use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
 };
-use gtl_contracts::{
+use gtl_wire::{
     envelope::Envelope,
     managed::{PullAllRequest, SyncData},
 };

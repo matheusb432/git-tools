@@ -18,7 +18,7 @@ tauri-build.workspace = true
 [dependencies]
 anyhow.workspace = true
 gtl-application.workspace = true
-gtl-contracts.workspace = true
+gtl-wire.workspace = true
 gtl-models.workspace = true
 gtl-infra.workspace = true
 lru.workspace = true

@@ -1,19 +1,16 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+use gtl_wire::recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp};
 
 use crate::{
-    diffs::{DiffTarget, PinnedRange},
-    ports::{
-        DiffRenderOutcome, DiffRenderRequest, DiffViewerBatch, DiffViewerClient, DiffViewerRecipe,
-        DiffViewerRecipeOperation, GitClient,
-    },
-    recipes::RecipeRequest,
-    shared::{git_range_pinning, notes::Note},
+    ports::{DiffRenderOutcome, DiffRenderRequest, DiffViewerClient, GitClient},
+    shared::notes::Note,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffRecipeIntent {
     pub repo_path: PathBuf,
-    pub operation: RecipeRequest,
+    pub operation: RecipeOp,
     pub name: Option<String>,
 }
 
@@ -115,18 +112,22 @@ fn build_batch(
     batch_id: String,
     intents: Vec<DiffRecipeIntent>,
     git: &impl GitClient,
-) -> Result<DiffViewerBatch, PresentDiffError> {
+) -> Result<OpenRecipes, PresentDiffError> {
     let recipes = intents
         .into_iter()
         .map(|intent| build_recipe(intent, git))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(DiffViewerBatch { batch_id, recipes })
+    Ok(OpenRecipes {
+        batch_id,
+        kind: RecipeBatchKind::Snapshot,
+        recipes,
+    })
 }
 
 fn build_recipe(
     intent: DiffRecipeIntent,
     git: &impl GitClient,
-) -> Result<DiffViewerRecipe, PresentDiffError> {
+) -> Result<Recipe, PresentDiffError> {
     let source = git
         .top_level(&intent.repo_path)
         .map(PathBuf::from)
@@ -134,72 +135,22 @@ fn build_recipe(
             repo_path: intent.repo_path,
             source,
         })?;
-    let operation = match intent.operation {
-        RecipeRequest::Diff(target) => {
-            DiffViewerRecipeOperation::Diff(pin_target(&source, target, git))
-        }
-        RecipeRequest::MergeDiff { base } => DiffViewerRecipeOperation::MergeDiff {
-            pinned: git_range_pinning::resolve_merge_range(&source, base.as_deref(), git)
-                .map(to_pinned_range),
-            base,
-        },
-    };
-    Ok(DiffViewerRecipe {
+    Ok(crate::recipes::build_resolved(
         source,
-        operation,
-        name: intent.name,
-    })
-}
-
-fn pin_target(repo_path: &Path, target: DiffTarget, git: &impl GitClient) -> DiffTarget {
-    match target {
-        DiffTarget::Unpushed { pinned: None } => DiffTarget::Unpushed {
-            pinned: git_range_pinning::resolve_range(repo_path, "@{u}", "HEAD", git)
-                .map(to_pinned_range),
-        },
-        DiffTarget::Range {
-            range,
-            pinned: None,
-        } => DiffTarget::Range {
-            pinned: git_range_pinning::resolve_exact_range(repo_path, &range, git)
-                .map(to_pinned_range),
-            range,
-        },
-        DiffTarget::Merge { base, pinned: None } => DiffTarget::Merge {
-            pinned: git_range_pinning::resolve_merge_range(repo_path, Some(&base), git)
-                .map(to_pinned_range),
-            base,
-        },
-        DiffTarget::Last {
-            count,
-            pinned: None,
-        } => DiffTarget::Last {
-            pinned: git_range_pinning::resolve_range(
-                repo_path,
-                &format!("HEAD~{count}"),
-                "HEAD",
-                git,
-            )
-            .map(to_pinned_range),
-            count,
-        },
-        target => target,
-    }
-}
-
-fn to_pinned_range(range: git_range_pinning::ResolvedGitRange) -> PinnedRange {
-    PinnedRange {
-        base: range.base,
-        head: range.head,
-    }
+        intent.operation,
+        intent.name,
+        git,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
+    use gtl_wire::recipes::{OpenRecipes, RecipeTarget};
+
     use super::*;
     use crate::{
-        diffs::{DiffTargetRequest, PinnedRange, render_diff::RenderDiff},
-        ports::{DiffRenderResponse, DiffViewerBatch, DiffViewerClient, DiffViewerRecipeOperation},
+        diffs::{DiffTargetRequest, render_diff::RenderDiff},
+        ports::{DiffRenderResponse, DiffViewerClient},
         testing::FakeGitClient,
     };
 
@@ -210,7 +161,7 @@ mod tests {
     }
 
     impl DiffViewerClient for FakeViewer {
-        fn forward(&self, _batch: &DiffViewerBatch) -> anyhow::Result<()> {
+        fn forward(&self, _batch: &OpenRecipes) -> anyhow::Result<()> {
             match &self.forward_error {
                 Some(error) => anyhow::bail!("{error}"),
                 None => Ok(()),
@@ -235,7 +186,9 @@ mod tests {
             batch_id: "batch".into(),
             recipes: vec![DiffRecipeIntent {
                 repo_path: "/repo".into(),
-                operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
+                operation: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
                 name: None,
             }],
             raw,
@@ -272,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn graphical_default_forwards_a_pinned_recipe() {
+    fn graphical_default_uses_the_viewer_surface() {
         let viewer = FakeViewer {
             forward_error: None,
             render: DiffRenderOutcome::Empty,
@@ -312,21 +265,5 @@ mod tests {
         assert_eq!(outcome.surface, DiffSurface::Artifact);
         assert_eq!(outcome.artifact, Some("/tmp/diff.html".into()));
         assert_eq!(outcome.notes, vec![Note::info("rendered")]);
-    }
-
-    #[test]
-    fn recipe_pinning_stays_inside_the_application_operation() {
-        let operation = build_recipe(request(false, true, true).recipes.remove(0), &git())
-            .expect("recipe should resolve");
-
-        assert_eq!(
-            operation.operation,
-            DiffViewerRecipeOperation::Diff(DiffTarget::Unpushed {
-                pinned: Some(PinnedRange {
-                    base: "base".into(),
-                    head: "head".into(),
-                }),
-            })
-        );
     }
 }

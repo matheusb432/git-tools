@@ -1,7 +1,7 @@
 pub mod ui;
 
 use dioxus::prelude::*;
-use gtl_contracts::viewer::ViewerUserSettings;
+use gtl_wire::viewer::ViewerUserSettings;
 use lucide_dioxus::{FileCog, Settings};
 
 use crate::{

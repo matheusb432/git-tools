@@ -12,7 +12,7 @@ use gtl_application::diffs::{
     render_diff::RenderDiff, render_diff_all::RenderDiffAll,
     render_diff_subrepos::RenderDiffSubrepos, render_merge_diff::RenderMergeDiff,
 };
-use gtl_contracts::{
+use gtl_wire::{
     diffs::RenderDiffData,
     envelope::Envelope,
     live_views::{SaveLiveViewData, SaveLiveViewRequest},

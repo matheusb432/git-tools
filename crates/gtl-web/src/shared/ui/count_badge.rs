@@ -15,7 +15,7 @@ impl CountBadgeSize {
     const fn classes(self) -> &'static str {
         match self {
             #[cfg(feature = "artifact")]
-            Self::Compact => "min-w-4 px-1 py-0.5 text-[9px] font-semibold leading-none",
+            Self::Compact => "min-w-4 px-1 py-0.5 text-xs font-semibold leading-none",
             Self::Regular => "min-w-5 px-1 text-xs",
         }
     }

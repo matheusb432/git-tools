@@ -6,7 +6,7 @@ use futures_util::{StreamExt as _, stream};
 use gtl_models::managed::ManagedRepo;
 
 use crate::{
-    managed::logic::service::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
+    managed::sync::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
     ports::{GitClient, GitEffect, ProjectClient, ProjectClientError},
 };
 
@@ -58,12 +58,12 @@ pub async fn execute(
         .into_iter()
         .map(|(_, result)| result)
         .collect::<Vec<_>>();
-    let exit = service::classify_exit(&results);
+    let exit = sync::classify_exit(&results);
     Ok(PullAllOk { results, exit })
 }
 
 fn pull_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> RepoSyncResult {
-    let branch = match service::preflight(git, repo, "detached HEAD - nothing to pull onto") {
+    let branch = match sync::preflight(git, repo, "detached HEAD - nothing to pull onto") {
         Preflight::Done(result) => return result,
         Preflight::Ready { branch } => branch,
     };
@@ -72,10 +72,10 @@ fn pull_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> RepoSyncResu
         Ok(GitEffect::Applied(_)) => {}
         Ok(GitEffect::Rejected(detail)) => {
             let detail = format!("fetch failed: {detail}");
-            return service::result(repo, &branch, SyncStatus::Fail, &detail);
+            return sync::result(repo, &branch, SyncStatus::Fail, &detail);
         }
         Err(error) => {
-            return service::result(
+            return sync::result(
                 repo,
                 &branch,
                 SyncStatus::Fail,
@@ -88,7 +88,7 @@ fn pull_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> RepoSyncResu
     match git.revision_exists(&repo.path, &remote_branch) {
         Ok(true) => {}
         _ => {
-            return service::result(
+            return sync::result(
                 repo,
                 &branch,
                 SyncStatus::Warn,
@@ -99,7 +99,7 @@ fn pull_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> RepoSyncResu
 
     let range = format!("origin/{branch}...{branch}");
     let Ok(Some((behind, ahead))) = git.ahead_behind(&repo.path, &range) else {
-        return service::result(repo, &branch, SyncStatus::Fail, "rev-list failed");
+        return sync::result(repo, &branch, SyncStatus::Fail, "rev-list failed");
     };
 
     if behind == 0 {
@@ -108,15 +108,15 @@ fn pull_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> RepoSyncResu
         } else {
             "up to date".to_string()
         };
-        return service::result(repo, &branch, SyncStatus::UpToDate, &detail);
+        return sync::result(repo, &branch, SyncStatus::UpToDate, &detail);
     }
     if ahead > 0 {
         let detail = format!("diverged (ahead {ahead}, behind {behind}) - resolve manually");
-        return service::result(repo, &branch, SyncStatus::Fail, &detail);
+        return sync::result(repo, &branch, SyncStatus::Fail, &detail);
     }
     if dry {
         let detail = format!("behind by {behind} - fast-forward");
-        return service::result(repo, &branch, SyncStatus::WouldPull, &detail);
+        return sync::result(repo, &branch, SyncStatus::WouldPull, &detail);
     }
 
     let merge_ref = format!("origin/{branch}");
@@ -126,7 +126,7 @@ fn pull_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> RepoSyncResu
                 "fast-forwarded {behind} commit{}",
                 if behind == 1 { "" } else { "s" }
             );
-            service::result(repo, &branch, SyncStatus::Pulled, &detail)
+            sync::result(repo, &branch, SyncStatus::Pulled, &detail)
         }
         Ok(GitEffect::Rejected(detail)) => {
             let detail = detail
@@ -134,9 +134,9 @@ fn pull_one(git: &impl GitClient, repo: &ManagedRepo, dry: bool) -> RepoSyncResu
                 .find(|line| line.starts_with("error:") || line.starts_with("fatal:"))
                 .map_or("ff merge failed", str::trim)
                 .to_string();
-            service::result(repo, &branch, SyncStatus::Fail, &detail)
+            sync::result(repo, &branch, SyncStatus::Fail, &detail)
         }
-        Err(error) => service::result(repo, &branch, SyncStatus::Fail, &error.to_string()),
+        Err(error) => sync::result(repo, &branch, SyncStatus::Fail, &error.to_string()),
     }
 }
 

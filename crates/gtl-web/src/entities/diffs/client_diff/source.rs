@@ -1,4 +1,4 @@
-use gtl_contracts::viewer::{LoadViewerDiffLines, ViewerDiffLines};
+use gtl_wire::viewer::{LoadViewerDiffLines, ViewerDiffLines};
 
 #[cfg(feature = "artifact")]
 use self::artifact::{ArtifactDiffSourceError, load_artifact_diff_lines};

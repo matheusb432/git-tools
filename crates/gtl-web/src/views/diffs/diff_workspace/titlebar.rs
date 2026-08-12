@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{ViewerActiveView, ViewerAppliedExclusions};
+use gtl_wire::viewer::{ViewerActiveView, ViewerAppliedExclusions};
 
 use crate::shared::ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant};
 
@@ -134,10 +134,8 @@ fn exclusion_label(exclusions: &ViewerAppliedExclusions) -> String {
     } else {
         exclusions.extensions.join(", ")
     };
-    format!(
-        "{hidden_count} file{} hidden · {extension_label}",
-        super::plural_suffix(hidden_count)
-    )
+    let file_label = super::file_label(hidden_count);
+    format!("{hidden_count} {file_label} hidden · {extension_label}")
 }
 
 fn exclusion_tooltip(exclusions: &ViewerAppliedExclusions) -> String {

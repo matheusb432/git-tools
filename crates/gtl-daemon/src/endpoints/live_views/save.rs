@@ -6,7 +6,7 @@ use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
 };
-use gtl_contracts::{
+use gtl_wire::{
     envelope::Envelope,
     live_views::{SaveLiveViewData, SaveLiveViewRequest},
 };

@@ -19,7 +19,7 @@ const EDGE_POLICIES: [EdgePolicy; 4] = [
         forbidden: &[
             "gtl-application",
             "gtl-benchmarks",
-            "gtl-contracts",
+            "gtl-wire",
             "gtl-infra",
             "gtl-artifacts",
             "gtl-cli",
@@ -56,8 +56,8 @@ const EDGE_POLICIES: [EdgePolicy; 4] = [
         reason: "use cases may depend on models and wire contracts, not adapters or process roots",
     },
     EdgePolicy {
-        from: "gtl-contracts",
-        label: "gtl-contracts stay wire-only",
+        from: "gtl-wire",
+        label: "gtl-wire stay wire-only",
         forbidden: &[
             "gtl-models",
             "gtl-application",

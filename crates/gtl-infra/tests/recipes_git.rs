@@ -2,14 +2,9 @@
 
 use std::{path::Path, process::Command};
 
-use gtl_application::{
-    diffs::DiffTarget,
-    recipes::{
-        RecipeRequest,
-        build_subrepos::{self, BuildSubrepoRecipes},
-    },
-};
+use gtl_application::recipes::build_subrepos::{self, BuildSubrepoRecipes};
 use gtl_infra::{git_client::HybridGitClient, repo_discovery::WalkdirRepoDiscovery};
+use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
 fn git(repository: &Path, arguments: &[&str]) -> String {
     let output = Command::new("git")
@@ -75,7 +70,9 @@ fn real_git_subrepo_build_pins_each_repository_independently() {
     let recipes = build_subrepos::execute(
         BuildSubrepoRecipes {
             root: temporary.path().into(),
-            operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
+            operation: RecipeOp::Diff {
+                target: RecipeTarget::Unpushed { pinned: None },
+            },
             include_worktrees: false,
         },
         &WalkdirRepoDiscovery,

@@ -12,9 +12,9 @@ pub(crate) use client_diff::{
 };
 #[cfg(feature = "desktop")]
 pub(crate) use diff_history::{DiffHistoryApi, history_navigation};
-use gtl_contracts::viewer::ViewerTheme;
+use gtl_wire::viewer::ViewerTheme;
 #[cfg(feature = "desktop")]
-use gtl_contracts::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind};
+use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind};
 
 pub(crate) const fn theme_value(theme: ViewerTheme) -> &'static str {
     theme.as_str()

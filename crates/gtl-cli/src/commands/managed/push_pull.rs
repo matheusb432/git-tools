@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use gtl_contracts::{
+use gtl_wire::{
     envelope::{Envelope, NoteLevel, Outcome},
     managed::{
         PullAllRequest, PushAllRequest, RepoSyncResultDto, RepoSyncStatusDto, SyncData, SyncExitDto,
@@ -134,7 +134,13 @@ fn finish(
     };
     let results: Vec<PushPullResult> = data.results.into_iter().map(PushPullResult::from).collect();
     let exit = exit_from_dto(data.exit);
-    let stdout = match format_push_pull(operation, options.dry, options.json, &results, exit) {
+    let stdout = match format_push_pull(
+        operation,
+        options.dry,
+        options.output.is_json(),
+        &results,
+        exit,
+    ) {
         Ok(stdout) => stdout,
         Err(error) => return managed_error(&error.into()),
     };

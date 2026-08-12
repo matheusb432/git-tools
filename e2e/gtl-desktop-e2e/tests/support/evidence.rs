@@ -24,28 +24,6 @@ pub async fn capture(driver: &WebDriver, name: &str, passed: bool) -> Result<Opt
     std::fs::create_dir_all(directory)
         .with_context(|| format!("create evidence directory {}", directory.display()))?;
     wait::within(
-        "disable animations before evidence capture",
-        WEBDRIVER_OPERATION_TIMEOUT,
-        async {
-            driver
-                .execute(
-            r#"
-const id = "desktop-e2e-stable-capture";
-if (!document.getElementById(id)) {
-  const style = document.createElement("style");
-  style.id = id;
-  style.textContent = "*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }";
-  document.head.appendChild(style);
-}
-"#,
-                    Vec::new(),
-                )
-                .await
-                .context("disable animations before evidence capture")
-        },
-    )
-    .await?;
-    wait::within(
         &format!("capture evidence {}", path.display()),
         WEBDRIVER_OPERATION_TIMEOUT,
         async { driver.screenshot(&path).await.map_err(anyhow::Error::from) },

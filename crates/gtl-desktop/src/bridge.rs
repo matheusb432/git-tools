@@ -6,7 +6,7 @@ mod shell;
 
 use std::fmt::Display;
 
-use gtl_contracts::viewer::{
+use gtl_wire::viewer::{
     GetViewerHistoryCopy, ListViewerHistory, LoadViewerDiffLines, OpenViewerDiffFile,
     OpenViewerHistory, SelectViewerCommit, SetViewerPreference, ViewerApiError, ViewerDiffLines,
     ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerResource, ViewerShell, ViewerTabRequest,

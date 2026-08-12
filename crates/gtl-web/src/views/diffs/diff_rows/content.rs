@@ -111,12 +111,12 @@ fn SemanticSpan(
             SyntaxSpan { text, syntax_class }
         },
         ChangedTextTone::Removed => rsx! {
-            span { class: "rounded-[2px] bg-[color-mix(in_srgb,var(--del)_34%,transparent)]",
+            span { class: "rounded-xs bg-[color-mix(in_srgb,var(--del)_34%,transparent)]",
                 SyntaxSpan { text, syntax_class }
             }
         },
         ChangedTextTone::Added => rsx! {
-            span { class: "rounded-[2px] bg-[color-mix(in_srgb,var(--add)_34%,transparent)]",
+            span { class: "rounded-xs bg-[color-mix(in_srgb,var(--add)_34%,transparent)]",
                 SyntaxSpan { text, syntax_class }
             }
         },

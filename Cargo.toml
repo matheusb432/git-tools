@@ -4,7 +4,7 @@ members = [
   "benchmarks",
   "crates/gtl-application",
   "crates/gtl-cli",
-  "crates/gtl-contracts",
+  "crates/gtl-wire",
   "crates/gtl-daemon",
   "crates/gtl-desktop",
   "crates/gtl-models",
@@ -14,7 +14,6 @@ members = [
   "crates/gtl-web",
   "crates/gtl-web-contracts",
   "e2e/gtl-browser-e2e",
-  "e2e/gtl-cli-e2e",
   "e2e/gtl-desktop-e2e",
   "xtask",
 ]
@@ -23,7 +22,7 @@ members = [
 default-members = [
   "crates/gtl-application",
   "crates/gtl-cli",
-  "crates/gtl-contracts",
+  "crates/gtl-wire",
   "crates/gtl-daemon",
   "crates/gtl-models",
   "crates/gtl-infra",
@@ -40,7 +39,7 @@ publish = false
 [workspace.dependencies]
 gtl-application = { path = "crates/gtl-application" }
 gtl-benchmarks = { path = "benchmarks" }
-gtl-contracts = { path = "crates/gtl-contracts" }
+gtl-wire = { path = "crates/gtl-wire" }
 gtl-desktop = { path = "crates/gtl-desktop" }
 gtl-artifacts = { path = "crates/gtl-artifacts" }
 gtl-models = { path = "crates/gtl-models" }
@@ -120,7 +119,9 @@ uuid = { version = "1", features = ["v4"] }
 walkdir = "2.5.0"
 x11-dl = "2.21.0"
 zbus = "5.16.0"
-sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.6.2" }
+sample_project = { git = "ssh://git@github.com/matheusb432/sample_project.git", tag = "v0.8.2", features = [
+  "json",
+] }
 
 [profile.dev.package."*"]
 debug = false

@@ -2,14 +2,10 @@
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
-use sample_project::Run;
+use sample_project::{OutputPath, Run};
 
 use crate::{process, project, task::Step};
 
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "CLI flags map directly to Clap arguments"
-)]
 #[derive(Args)]
 #[command(args_conflicts_with_subcommands = true)]
 pub(crate) struct TestArguments {
@@ -21,9 +17,15 @@ pub(crate) struct TestArguments {
     /// Emit one JSON report to stdout.
     #[arg(long)]
     pub(crate) json: bool,
-    /// Provide an evidence directory to E2E tests and save report.json.
+    /// Provide an evidence directory to E2E tests.
     #[arg(long)]
     pub(crate) evidences: bool,
+    #[command(flatten)]
+    selection: TestSelectionArguments,
+}
+
+#[derive(Args)]
+struct TestSelectionArguments {
     /// Test scope.
     #[arg(
         long,
@@ -67,15 +69,17 @@ pub(crate) fn run(arguments: &TestArguments) -> Result<()> {
     }
 
     let executable = std::env::current_exe().context("resolve the xtask executable")?;
-    let declarations = selected_tests(arguments.scope, executable.into_os_string())?;
+    let scope = arguments.selection.scope;
+    let declarations = selected_tests(scope, executable.into_os_string())?;
     let tests = declarations
         .into_iter()
         .map(project::TestDeclaration::into_test);
 
-    Run::try_new(arguments.scope.to_string(), tests)?
+    Run::try_new(scope.to_string(), tests)?
         .verbose(arguments.verbose)
         .json(arguments.json)
-        .evidences_from_cargo_manifest(arguments.evidences, include_str!("../../Cargo.toml"))?
+        .output_path(OutputPath::default())
+        .try_with_evidences(arguments.evidences)?
         .execute()?;
 
     Ok(())
@@ -163,8 +167,8 @@ mod tests {
     }
 
     #[test]
-    fn e2e_selects_both_process_boundary_suites() {
-        assert_eq!(selected_test_labels(Scope::E2e), ["cli-e2e", "desktop-e2e"]);
+    fn e2e_selects_the_viewer_journeys() {
+        assert_eq!(selected_test_labels(Scope::E2e), ["desktop-e2e"]);
     }
 
     #[test]
@@ -176,7 +180,6 @@ mod tests {
                 "parser-all-features",
                 "web-artifact",
                 "drift",
-                "cli-e2e",
                 "desktop-e2e"
             ]
         );

@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use gtl_models::managed::{ManagedRepo, status::StatusResult};
+use gtl_models::managed::{ManagedRepo, status::StatusResult, working_tree::DirtyState};
 
 use crate::ports::GitClient;
 
@@ -46,7 +46,7 @@ fn status_one(git: &impl GitClient, repo: &ManagedRepo) -> StatusResult {
     result.present = true;
     result.branch = git.current_branch(&repo.path).unwrap_or_default();
 
-    let dirty = super::logic::working_tree::dirty_state(git, &repo.path);
+    let dirty = working_tree_state(git, &repo.path);
     result.untracked_count = dirty
         .files
         .iter()
@@ -98,6 +98,14 @@ fn status_one(git: &impl GitClient, repo: &ManagedRepo) -> StatusResult {
         "pending".to_string()
     };
     result
+}
+
+fn working_tree_state(git: &impl GitClient, repo_path: &Path) -> DirtyState {
+    super::working_tree::read(git, repo_path).unwrap_or(DirtyState {
+        present: true,
+        dirty: false,
+        files: Vec::new(),
+    })
 }
 
 /// The current branch's upstream tracking ref and how many commits it is ahead of that ref
@@ -255,5 +263,25 @@ mod tests {
 
         assert_eq!(results[0].ahead, 0);
         assert_eq!(results[0].state, "clean");
+    }
+
+    #[test]
+    fn rejected_working_tree_read_degrades_to_clean() {
+        let runner = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::rejected("status unavailable"),
+            ScriptedGitClient::applied("origin/main\n"),
+            ScriptedGitClient::applied("0\n"),
+        ]);
+
+        let results = execute(
+            StatusRepos {
+                repos: vec![repo("api")],
+            },
+            &runner,
+        );
+
+        assert_eq!(results[0].state, "clean");
+        assert!(!results[0].dirty);
     }
 }

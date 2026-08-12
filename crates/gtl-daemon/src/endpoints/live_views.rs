@@ -7,7 +7,7 @@ use gtl_application::{
     live_views::save::{SaveLiveView, SaveLiveViewOk, SaveLiveViewOutcome},
     shared::notes,
 };
-use gtl_contracts::{
+use gtl_wire::{
     envelope::{Envelope, Note, NoteLevel, Outcome},
     live_views::{SaveLiveViewData, SaveLiveViewRequest},
 };

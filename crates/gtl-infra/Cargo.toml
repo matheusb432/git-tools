@@ -9,7 +9,7 @@ anyhow.workspace = true
 gtl-application.workspace = true
 command-group.workspace = true
 directories.workspace = true
-gtl-contracts.workspace = true
+gtl-wire.workspace = true
 gtl-models.workspace = true
 gix.workspace = true
 jiff.workspace = true
@@ -30,7 +30,7 @@ toml.workspace = true
 toml_edit.workspace = true
 walkdir.workspace = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc.workspace = true
 
 [dev-dependencies]

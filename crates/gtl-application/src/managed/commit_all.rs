@@ -2,7 +2,7 @@
 
 use gtl_models::managed::{ManagedRepo, working_tree::CommitFile};
 
-use super::logic::working_tree;
+use super::working_tree;
 use crate::ports::{GitClient, GitEffect};
 
 /// Requests one local commit attempt for every resolved managed repository.
@@ -123,11 +123,9 @@ fn commit_one(
     message: Option<&str>,
     dry: bool,
 ) -> Result<CommitResult, CommitAttemptError> {
-    let state = working_tree::dirty_state_checked(git, &repo.path).map_err(|source| {
-        CommitAttemptError {
-            failed_result: None,
-            source,
-        }
+    let state = working_tree::read(git, &repo.path).map_err(|source| CommitAttemptError {
+        failed_result: None,
+        source,
     })?;
     let mut result = CommitResult {
         name: repo.name.clone(),

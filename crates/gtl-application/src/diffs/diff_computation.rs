@@ -5,13 +5,11 @@ use gtl_models::diffs::{AppliedExclusions, DiffExclusions};
 use crate::{
     diffs::{
         DiffTarget, PinnedRange, View,
-        logic::{
-            assemble::{DiffData, assemble},
-            exclusions,
-            range::DiffRanges,
-            range_view::{RangePresentation, RangeView},
-            view::sort_files_tree_order,
-        },
+        assemble::{DiffData, assemble},
+        exclusions,
+        range::DiffRanges,
+        range_view::{RangePresentation, RangeView},
+        view::sort_files_tree_order,
     },
     ports::GitClient,
     shared::{notes::Note, repository_name::from_path},

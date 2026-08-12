@@ -1,4 +1,4 @@
-use gtl_contracts::viewer::{
+use gtl_wire::viewer::{
     LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerActiveView, ViewerApiError,
     ViewerAppliedExclusions, ViewerCommandLine, ViewerCommitSelection, ViewerCommitSummary,
     ViewerDiffCursor, ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLines, ViewerFileStatus,
@@ -18,8 +18,8 @@ const GIANT_FILE_CHARACTERS: usize = 250_000;
 pub const fn project_render_options(options: RenderOptions) -> ViewerRenderOptions {
     ViewerRenderOptions {
         layout: match options.layout() {
-            DiffLayout::Unified => gtl_contracts::viewer::ViewerDiffLayout::Unified,
-            DiffLayout::Split => gtl_contracts::viewer::ViewerDiffLayout::Split,
+            DiffLayout::Unified => gtl_wire::viewer::ViewerDiffLayout::Unified,
+            DiffLayout::Split => gtl_wire::viewer::ViewerDiffLayout::Split,
         },
         density: match options.density() {
             DiffDensity::Compact => ViewerDiffDensity::Compact,
@@ -106,7 +106,6 @@ pub fn project_diff_view(
         commit_selection,
         footer: ViewerFooter {
             command: view.foot.cmd.clone(),
-            note: view.foot.note.clone(),
         },
         exclusions: view
             .exclusions
@@ -211,19 +210,20 @@ const fn viewer_file_status(status: FileStatus) -> ViewerFileStatus {
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::{
+    use gtl_models::diffs::{AppliedExclusions, Commit};
+    use gtl_wire::viewer::{
         LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerApiError,
         ViewerCommitSelection, ViewerDiffCursor, ViewerDiffDensity, ViewerDiffFileId,
         ViewerDiffLayout, ViewerRenderOptions, ViewerResource, ViewerTheme, ViewerViewIdentity,
     };
-    use gtl_models::diffs::{AppliedExclusions, Commit};
 
     use super::{
         diff_file_anchor_id, project_diff_lines, project_diff_view, project_render_options,
         project_theme,
     };
     use crate::{
-        diffs::{Cmd, FileDiff, Foot, View},
+        diffs::{Cmd, FileDiff, View},
+        testing,
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
     };
 
@@ -242,9 +242,6 @@ mod tests {
     fn view() -> View {
         View {
             repo_name: "git-tools".into(),
-            repo_root: "/repo".into(),
-            branch: "feature".into(),
-            upstream: "origin/main".into(),
             commits: vec![Commit {
                 sha: "0123456789abcdef0123456789abcdef01234567".into(),
                 subject: "subject".into(),
@@ -274,14 +271,11 @@ mod tests {
                 trail: " --".into(),
             },
             commits_label: "2 commits".into(),
-            foot: Foot {
-                cmd: "git diff".into(),
-                note: "generated".into(),
-            },
             exclusions: Some(AppliedExclusions {
                 extensions: vec!["lock".into()],
                 hidden_paths: vec!["Cargo.lock".into()],
             }),
+            ..testing::diffs::view()
         }
     }
 

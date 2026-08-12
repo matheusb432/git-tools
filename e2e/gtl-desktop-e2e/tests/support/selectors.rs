@@ -1,96 +1,46 @@
+use std::time::Duration;
+
 use anyhow::{Context, Result};
-use thirtyfour::{By, WebDriver, WebElement};
+use thirtyfour::{By, WebDriver, WebElement, prelude::ElementQueryable as _};
 
-use super::wait::{self, ASSERTION_TIMEOUT};
+use super::wait::ASSERTION_TIMEOUT;
 
-const ACCESSIBLE_NAME_SCRIPT: &str = r#"
-const expected = arguments[0];
-const scopeSelector = arguments[1];
-const normalize = (value) => (value ?? "").replace(/\s+/g, " ").trim();
-const elementRoot = (element) => element.getRootNode();
-const labelledByText = (element) => (element.getAttribute("aria-labelledby") ?? "")
-  .split(/\s+/).filter(Boolean)
-  .map((id) => elementRoot(element).getElementById?.(id)?.textContent ?? "").join(" ");
-const associatedLabelText = (element) => (element instanceof HTMLInputElement ||
-  element instanceof HTMLSelectElement || element instanceof HTMLTextAreaElement)
-  ? Array.from(element.labels ?? []).map((label) => label.textContent ?? "").join(" ") : "";
-const accessibleName = (element) => normalize(element.getAttribute("aria-label")) ||
-  normalize(labelledByText(element)) || normalize(associatedLabelText(element)) ||
-  normalize(element.closest("label")?.textContent) || normalize(element.getAttribute("alt")) ||
-  ((element instanceof HTMLButtonElement || element instanceof HTMLAnchorElement ||
-    element.hasAttribute("role")) ? normalize(element.textContent) : "");
-const displayed = (element) => {
-  const style = window.getComputedStyle(element);
-  return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
-};
-const selector = "[aria-label], [aria-labelledby], input, select, textarea, img, button, a, [role]";
-const scope = typeof scopeSelector === "string" ? document.querySelector(scopeSelector) : document;
-if (!scope) return null;
-return Array.from(scope.querySelectorAll(selector))
-  .find((element) => displayed(element) && accessibleName(element) === expected) ?? null;
-"#;
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-pub async fn by_accessible_name(driver: &WebDriver, expected: &str) -> Result<WebElement> {
-    wait::until(
-        &format!("displayed element with accessible name {expected:?}"),
-        ASSERTION_TIMEOUT,
-        || async {
-            let result = driver
-                .execute(
-                    ACCESSIBLE_NAME_SCRIPT,
-                    vec![serde_json::json!(expected), serde_json::Value::Null],
-                )
-                .await
-                .with_context(|| format!("find element with accessible name {expected:?}"))?;
-            if result.json().is_null() {
-                return Ok(None);
-            }
-            result
-                .element()
-                .map(Some)
-                .with_context(|| format!("convert accessible element {expected:?}"))
-        },
-    )
-    .await
+pub async fn by_aria_label(driver: &WebDriver, expected: &str) -> Result<WebElement> {
+    let selector = format!(r#"[aria-label="{}"]"#, css_string(expected));
+    driver
+        .query(By::Css(&selector))
+        .ignore_errors(true)
+        .and_displayed()
+        .wait(ASSERTION_TIMEOUT, POLL_INTERVAL)
+        .first()
+        .await
+        .with_context(|| format!("find visible element labelled {expected:?}"))
 }
 
-pub async fn by_accessible_name_within(
+pub async fn by_aria_label_containing(
     driver: &WebDriver,
-    scope_selector: &str,
-    expected: &str,
+    prefix: &str,
+    contained: &str,
 ) -> Result<WebElement> {
-    wait::until(
-        &format!("displayed element with accessible name {expected:?} within {scope_selector}"),
-        ASSERTION_TIMEOUT,
-        || async {
-            let result = driver
-                .execute(
-                    ACCESSIBLE_NAME_SCRIPT,
-                    vec![
-                        serde_json::json!(expected),
-                        serde_json::json!(scope_selector),
-                    ],
-                )
-                .await
-                .with_context(|| {
-                    format!(
-                        "find element with accessible name {expected:?} within {scope_selector}"
-                    )
-                })?;
-            if result.json().is_null() {
-                return Ok(None);
-            }
-            result.element().map(Some).with_context(|| {
-                format!("convert accessible element {expected:?} within {scope_selector}")
-            })
-        },
-    )
-    .await
+    let selector = format!(
+        r#"[aria-label^="{}"][aria-label*="{}"]"#,
+        css_string(prefix),
+        css_string(contained)
+    );
+    driver
+        .query(By::Css(&selector))
+        .ignore_errors(true)
+        .and_displayed()
+        .wait(ASSERTION_TIMEOUT, POLL_INTERVAL)
+        .first()
+        .await
+        .with_context(|| {
+            format!("find visible element labelled {prefix:?} containing {contained:?}")
+        })
 }
 
-pub async fn by_css(driver: &WebDriver, selector: &str, description: &str) -> Result<WebElement> {
-    wait::until(description, ASSERTION_TIMEOUT, || async {
-        Ok(driver.find_all(By::Css(selector)).await?.into_iter().next())
-    })
-    .await
+fn css_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }

@@ -39,16 +39,35 @@ impl ManagedExit {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "independent CLI flags mirrored from argv, not a disguised state machine"
-)]
 pub struct ManagedOptions {
     pub dry: bool,
-    pub json: bool,
-    pub color: bool,
+    pub output: ManagedOutput,
     pub message_for_all: Option<String>,
     pub interactive: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedOutput {
+    Text { color: bool },
+    Json,
+}
+
+impl ManagedOutput {
+    pub const fn from_flags(json: bool, color: bool) -> Self {
+        if json {
+            Self::Json
+        } else {
+            Self::Text { color }
+        }
+    }
+
+    pub const fn is_json(self) -> bool {
+        matches!(self, Self::Json)
+    }
+
+    pub const fn color_enabled(self) -> bool {
+        matches!(self, Self::Text { color: true })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

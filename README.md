@@ -15,7 +15,7 @@ Run `gtl --help` and `gtl <command> --help` for the authoritative command refere
 Development runs on Ubuntu 24.04. Windows 11 is a release target, not a development host.
 
 ```sh
-git clone git@github.com:matheusb432/git-tools.git
+git clone git@github.com:OWNER/git-tools.git
 cd git-tools
 sh xtask/bootstrap.sh
 ```

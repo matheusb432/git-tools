@@ -1,13 +1,13 @@
 use std::{path::Path, sync::Arc, time::Duration};
 
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{
-    LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffCursor, ViewerDiffLayout,
-    ViewerDiffLines, ViewerFileSummary, ViewerViewIdentity,
-};
 #[cfg(feature = "desktop")]
 use gtl_parser::bundled_syntax_catalog;
 use gtl_parser::{DiffParser, DiffRow, SplitDiffRow, SplitDiffStream, SyntaxCatalog};
+use gtl_wire::viewer::{
+    LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffCursor, ViewerDiffLayout,
+    ViewerDiffLines, ViewerFileSummary, ViewerViewIdentity,
+};
 
 use self::source::ClientDiffSourceError;
 
@@ -422,7 +422,7 @@ async fn yield_to_browser() {
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::{
+    use gtl_wire::viewer::{
         VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffDensity, ViewerDiffFileId, ViewerRenderOptions,
     };
 
@@ -529,7 +529,7 @@ mod tests {
             anchor_id: "file-src-example-rs".into(),
             added: 1,
             removed: 1,
-            status: gtl_contracts::viewer::ViewerFileStatus::Modified,
+            status: gtl_wire::viewer::ViewerFileStatus::Modified,
             can_open_in_editor: true,
             initially_expanded: true,
         };

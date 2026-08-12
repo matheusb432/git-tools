@@ -1,8 +1,5 @@
-//! `xtask gen-icon` — render the gtl-viewer app/tray icon (single source of truth, ported from
-//! the retired `generate_icon.py`). Draws the "diff lines" mark — a dark-slate squircle holding
-//! stacked code lines (red removed, green added) with a +/- gutter — using tiny-skia's analytic
-//! anti-aliasing, then writes `icon.png` (1024²) and a multi-resolution `icon.ico`. The `.ico` is
-//! required by tauri-build's Windows resource step. Pure compute + file I/O; no child processes.
+//! Renders the desktop application and tray icon from one vector-style source.
+//! Writes PNG and multi-resolution ICO assets without child processes.
 
 use std::path::{Path, PathBuf};
 
@@ -21,16 +18,10 @@ type Rgb = (u8, u8, u8);
 /// A rectangle as `(left, top, right, bottom)`.
 type Rect = (f32, f32, f32, f32);
 
-// Geometry is authored in a 512×512 design space (the approved mockup); the icon is rendered on a
-// supersampled canvas and downsampled to each emitted size for crisp, smooth edges.
-const DESIGN: f32 = 512.0;
+// Geometry uses a 512x512 design grid and renders at 4x before downsampling.
 const RENDER: u32 = 2048;
 const FINAL: u32 = 1024;
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "RENDER = 2048 is exactly representable in f32"
-)]
-const K: f32 = RENDER as f32 / DESIGN; // design → canvas scale (4×)
+const K: f32 = 4.0;
 
 const GREEN: Rgb = (34, 197, 94);
 const RED: Rgb = (239, 68, 68);
@@ -52,7 +43,7 @@ pub fn run() -> Result<()> {
     image::imageops::resize(&img, FINAL, FINAL, image::imageops::FilterType::Lanczos3)
         .save(&png_path)
         .with_context(|| format!("writing {}", png_path.display()))?;
-    println!("wrote {} ({FINAL}×{FINAL})", png_path.display());
+    println!("wrote {} ({FINAL}x{FINAL})", png_path.display());
 
     let ico_path = dir.join("icon.ico");
     write_ico(&img, &ico_path)?;
@@ -67,23 +58,23 @@ fn icons_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/gtl-desktop/icons")
 }
 
-/// Draw the full icon into a `RENDER`-square premultiplied canvas.
+/// Draw the full icon into a premultiplied render canvas.
 fn render() -> Result<Pixmap> {
     let mut pixmap = Pixmap::new(RENDER, RENDER).context("allocating icon canvas")?;
 
     // Tile: a rounded square with a vertical slate gradient, a faint top sheen, and a border.
-    let (l, t, r, b) = (sx(40.0), sx(40.0), sx(472.0), sx(472.0));
-    let tile = rrect((l, t, r, b), sx(96.0)).context("tile path")?;
+    let (left, top, right, bottom) = (sx(40.0), sx(40.0), sx(472.0), sx(472.0));
+    let tile = rounded_rect((left, top, right, bottom), sx(96.0)).context("tile path")?;
     fill(
         &mut pixmap,
         &tile,
-        &gradient(t, b, SLATE_TOP, 255, SLATE_BOT, 255)?,
+        &gradient(top, bottom, SLATE_TOP, 255, SLATE_BOT, 255)?,
     );
     // Sheen: white ~10% at the top, fading to nothing by mid-tile.
     fill(
         &mut pixmap,
         &tile,
-        &gradient(t, t + (b - t) * 0.5, WHITE, 26, WHITE, 0)?,
+        &gradient(top, top + (bottom - top) * 0.5, WHITE, 26, WHITE, 0)?,
     );
     stroke(&mut pixmap, &tile, BORDER, 140, sx(2.0));
 
@@ -96,11 +87,8 @@ fn render() -> Result<Pixmap> {
     Ok(pixmap)
 }
 
-/// One diff row in design coords: a faint full-width highlight, a `+`/`-` gutter sign, the code
-/// line.
-fn row(pixmap: &mut Pixmap, y: f32, color: Rgb, w: f32, plus: bool) {
-    // The highlight is a *semi-transparent* band (alpha 30) painted with `Source` (replace), not
-    // blended — this reproduces the approved PIL look, where it reads pale over a light background.
+/// One diff row in design coordinates: highlight, gutter sign, and code line.
+fn row(pixmap: &mut Pixmap, y: f32, color: Rgb, width: f32, added: bool) {
     solid(
         pixmap,
         (78.0, y - 12.0, 434.0, y + 32.0),
@@ -117,8 +105,8 @@ fn row(pixmap: &mut Pixmap, y: f32, color: Rgb, w: f32, plus: bool) {
         color,
         255,
         over,
-    ); // gutter horizontal bar
-    if plus {
+    );
+    if added {
         solid(
             pixmap,
             (103.0, y - 4.0, 109.0, y + 24.0),
@@ -126,47 +114,71 @@ fn row(pixmap: &mut Pixmap, y: f32, color: Rgb, w: f32, plus: bool) {
             color,
             255,
             over,
-        ); // gutter vertical bar
+        );
     }
     solid(
         pixmap,
-        (150.0, y + 1.0, 150.0 + w, y + 19.0),
+        (150.0, y + 1.0, 150.0 + width, y + 19.0),
         9.0,
         color,
         255,
         over,
-    ); // code line
+    );
 }
 
-/// Design-space → canvas-space scale.
-fn sx(v: f32) -> f32 {
-    v * K
+/// Scale a design-space coordinate to the render canvas.
+fn sx(value: f32) -> f32 {
+    value * K
 }
 
-/// A rounded-rectangle path (canvas coords); corners are cubic approximations of circular arcs.
-#[expect(
-    clippy::many_single_char_names,
-    reason = "geometry: l/t/r/b/c keep the cubic-arc formulas readable"
-)]
-fn rrect(rect: Rect, radius: f32) -> Option<tiny_skia::Path> {
-    let (l, t, r, b) = rect;
-    let rad = radius.min((r - l) / 2.0).min((b - t) / 2.0);
-    let c = rad * 0.552_284_8; // cubic control offset for a near-circular corner
-    let mut pb = PathBuilder::new();
-    pb.move_to(l + rad, t);
-    pb.line_to(r - rad, t);
-    pb.cubic_to(r - rad + c, t, r, t + rad - c, r, t + rad);
-    pb.line_to(r, b - rad);
-    pb.cubic_to(r, b - rad + c, r - rad + c, b, r - rad, b);
-    pb.line_to(l + rad, b);
-    pb.cubic_to(l + rad - c, b, l, b - rad + c, l, b - rad);
-    pb.line_to(l, t + rad);
-    pb.cubic_to(l, t + rad - c, l + rad - c, t, l + rad, t);
-    pb.close();
-    pb.finish()
+/// Build a rounded rectangle with cubic approximations of circular corners.
+fn rounded_rect(rect: Rect, radius: f32) -> Option<tiny_skia::Path> {
+    let (left, top, right, bottom) = rect;
+    let radius = radius.min((right - left) / 2.0).min((bottom - top) / 2.0);
+    let control_offset = radius * 0.552_284_8;
+    let mut path = PathBuilder::new();
+    path.move_to(left + radius, top);
+    path.line_to(right - radius, top);
+    path.cubic_to(
+        right - radius + control_offset,
+        top,
+        right,
+        top + radius - control_offset,
+        right,
+        top + radius,
+    );
+    path.line_to(right, bottom - radius);
+    path.cubic_to(
+        right,
+        bottom - radius + control_offset,
+        right - radius + control_offset,
+        bottom,
+        right - radius,
+        bottom,
+    );
+    path.line_to(left + radius, bottom);
+    path.cubic_to(
+        left + radius - control_offset,
+        bottom,
+        left,
+        bottom - radius + control_offset,
+        left,
+        bottom - radius,
+    );
+    path.line_to(left, top + radius);
+    path.cubic_to(
+        left,
+        top + radius - control_offset,
+        left + radius - control_offset,
+        top,
+        left + radius,
+        top,
+    );
+    path.close();
+    path.finish()
 }
 
-/// A vertical linear-gradient paint between two RGBA colors (canvas y-coords).
+/// Create a vertical linear-gradient paint between two RGBA colors.
 fn gradient(y0: f32, y1: f32, c0: Rgb, a0: u8, c1: Rgb, a1: u8) -> Result<Paint<'static>> {
     let shader = LinearGradient::new(
         Point::from_xy(0.0, y0),
@@ -186,9 +198,9 @@ fn gradient(y0: f32, y1: f32, c0: Rgb, a0: u8, c1: Rgb, a1: u8) -> Result<Paint<
     })
 }
 
-fn solid_paint(color: Rgb, a: u8) -> Paint<'static> {
+fn solid_paint(color: Rgb, alpha: u8) -> Paint<'static> {
     let mut paint = Paint::default();
-    paint.set_color(Color::from_rgba8(color.0, color.1, color.2, a));
+    paint.set_color(Color::from_rgba8(color.0, color.1, color.2, alpha));
     paint.anti_alias = true;
     paint
 }
@@ -197,20 +209,18 @@ fn fill(pixmap: &mut Pixmap, path: &tiny_skia::Path, paint: &Paint) {
     pixmap.fill_path(path, paint, FillRule::Winding, Transform::identity(), None);
 }
 
-/// Fill a rounded rect given in *design* coords with a solid color and blend mode.
-fn solid(pixmap: &mut Pixmap, rect: Rect, radius: f32, color: Rgb, a: u8, blend: BlendMode) {
+/// Fill a rounded rectangle given in design coordinates.
+fn solid(pixmap: &mut Pixmap, rect: Rect, radius: f32, color: Rgb, alpha: u8, blend: BlendMode) {
     let (left, top, right, bottom) = rect;
-    if let Some(path) = rrect((sx(left), sx(top), sx(right), sx(bottom)), sx(radius)) {
-        let mut paint = solid_paint(color, a);
+    if let Some(path) = rounded_rect((sx(left), sx(top), sx(right), sx(bottom)), sx(radius)) {
+        let mut paint = solid_paint(color, alpha);
         paint.blend_mode = blend;
         fill(pixmap, &path, &paint);
     }
 }
 
-fn stroke(pixmap: &mut Pixmap, path: &tiny_skia::Path, color: Rgb, a: u8, width: f32) {
-    // `Source` (replace) so the alpha-140 border stays semi-transparent like the PIL original,
-    // rather than blending opaque over the slate.
-    let mut paint = solid_paint(color, a);
+fn stroke(pixmap: &mut Pixmap, path: &tiny_skia::Path, color: Rgb, alpha: u8, width: f32) {
+    let mut paint = solid_paint(color, alpha);
     paint.blend_mode = BlendMode::Source;
     let stroke = Stroke {
         width,
@@ -221,13 +231,13 @@ fn stroke(pixmap: &mut Pixmap, path: &tiny_skia::Path, color: Rgb, a: u8, width:
 
 /// Convert a premultiplied tiny-skia canvas to a straight-alpha `image` RGBA buffer.
 fn to_rgba_image(pixmap: &Pixmap) -> image::RgbaImage {
-    let (w, h) = (pixmap.width(), pixmap.height());
-    let mut img = image::RgbaImage::new(w, h);
-    for (output, input) in img.pixels_mut().zip(pixmap.pixels()) {
+    let (width, height) = (pixmap.width(), pixmap.height());
+    let mut image = image::RgbaImage::new(width, height);
+    for (output, input) in image.pixels_mut().zip(pixmap.pixels()) {
         let color = input.demultiply();
         *output = image::Rgba([color.red(), color.green(), color.blue(), color.alpha()]);
     }
-    img
+    image
 }
 
 /// Write a multi-resolution `.ico` by Lanczos-downsampling the full render to each size.

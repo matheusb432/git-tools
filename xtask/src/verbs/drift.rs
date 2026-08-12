@@ -8,13 +8,7 @@ use super::dioxus_web;
 use crate::project;
 
 /// Tracked generated paths paired with the command that regenerates them.
-const BUNDLES: &[(&str, &str)] = &[
-    (
-        "crates/gtl-artifacts/src/embedded/generated/",
-        "just web build",
-    ),
-    ("crates/gtl-web/assets/tailwind.css", "just web styles"),
-];
+const BUNDLES: &[(&str, &str)] = &[("crates/gtl-web/assets/tailwind.css", "just web styles")];
 
 /// Fail if any generated path has checkout changes after a rebuild. `is_clean(path)` reports
 /// whether the path matches its committed state; injected so the
@@ -55,22 +49,8 @@ mod tests {
     }
 
     #[test]
-    fn check_drift_fails_with_rebuild_hint_when_a_bundle_is_dirty() {
+    fn check_drift_fails_with_rebuild_hint_when_tailwind_is_dirty() {
         let err = check_drift(BUNDLES, &|_| false).unwrap_err().to_string();
-        assert!(
-            err.contains("crates/gtl-artifacts/src/embedded/generated/ is stale"),
-            "{err}"
-        );
-        assert!(err.contains("just web build"), "{err}");
-    }
-
-    #[test]
-    fn check_drift_covers_the_tracked_dioxus_styles() {
-        let err = check_drift(BUNDLES, &|path| {
-            path != "crates/gtl-web/assets/tailwind.css"
-        })
-        .unwrap_err()
-        .to_string();
 
         assert!(err.contains("assets/tailwind.css is stale"), "{err}");
         assert!(err.contains("just web styles"), "{err}");

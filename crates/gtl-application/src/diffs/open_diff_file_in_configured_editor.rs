@@ -180,11 +180,12 @@ mod tests {
         OpenDiffFileInConfiguredEditorError, execute,
     };
     use crate::{
-        diffs::{Cmd, FileDiff, FileStatus, Foot, View},
+        diffs::{FileDiff, FileStatus, View},
         ports::{
             ConfiguredEditorClient, FileSystemClient, FileSystemClientError,
             FileSystemClientErrorKind, FileSystemEntryKind,
         },
+        testing,
     };
 
     #[derive(Clone, Default)]
@@ -336,11 +337,7 @@ mod tests {
 
     fn view<'path>(paths_and_statuses: impl IntoIterator<Item = (&'path str, FileStatus)>) -> View {
         View {
-            repo_name: "git-tools".into(),
             repo_root: "/repos/git-tools".into(),
-            branch: "main".into(),
-            upstream: "origin/main".into(),
-            commits: Vec::new(),
             files: paths_and_statuses
                 .into_iter()
                 .map(|(path, status)| FileDiff {
@@ -354,18 +351,7 @@ mod tests {
                     full_lines: None,
                 })
                 .collect(),
-            title: "Diff".into(),
-            cmd: Cmd {
-                lead: String::new(),
-                range: String::new(),
-                trail: String::new(),
-            },
-            commits_label: "Commits".into(),
-            foot: Foot {
-                cmd: "git diff".into(),
-                note: String::new(),
-            },
-            exclusions: None,
+            ..testing::diffs::view()
         }
     }
 

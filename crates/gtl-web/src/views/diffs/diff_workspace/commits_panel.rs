@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
-use gtl_contracts::viewer::{ViewerActiveView, ViewerCommitSelection, ViewerCommitSummary};
+use gtl_wire::viewer::{ViewerActiveView, ViewerCommitSelection, ViewerCommitSummary};
 use lucide_dioxus::CircleDot;
 
 use crate::shared::{
@@ -97,7 +97,7 @@ fn CommitPanelHint() -> Element {
             span { class: "flex-none text-acc", aria_hidden: "true",
                 CircleDot { size: 8, fill: "currentColor" }
             }
-            "hash = copy \u{00b7} hover = notes"
+            "click hash to copy"
         }
     }
 }

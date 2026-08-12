@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_contracts::viewer::{ViewerDiffDensity, ViewerDiffLayout};
+use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
 use crate::{
     entities::diffs::{ClientDiffFile, ClientDiffFileState, ClientDiffRows},
@@ -48,7 +48,7 @@ fn DiffFileRows(
     rsx! {
         div {
             id: "viewer-diff-{file_index}",
-            class: "overflow-x-hidden text-[14px] leading-[22px]",
+            class: "overflow-x-hidden text-sm leading-5",
             style,
             aria_label: "{layout_label} {density_label} diff rows",
             "data-layout": layout_label,

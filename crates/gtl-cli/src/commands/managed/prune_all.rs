@@ -41,7 +41,7 @@ pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRe
                 },
                 &HybridGitClient,
             );
-            project_prune_execution(onto, options.dry, options.json, execution)
+            project_prune_execution(onto, options.dry, options.output.is_json(), execution)
         }
         Err(error) => ManagedRun {
             exit: ManagedExit::Fail,

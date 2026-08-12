@@ -10,7 +10,7 @@ use gtl_application::tags::{
     bump_tag::{BumpTag, BumpTagOk},
     dry_run_tag_bump::{DryRunTagBump, DryRunTagBumpOk, TagBumpPreview},
 };
-use gtl_contracts::{
+use gtl_wire::{
     envelope::{Envelope, Note, NoteLevel, Outcome},
     tags::{BumpTagData, BumpTagRequest, DryRunTagBumpRequest, TagBumpLevelDto, TagBumpStatusDto},
 };
@@ -29,7 +29,7 @@ pub(crate) fn to_dry_run_request(
 
 pub(crate) fn to_dry_run_envelope(
     response: DryRunTagBumpOk,
-) -> Envelope<gtl_contracts::tags::TagBumpPreview> {
+) -> Envelope<gtl_wire::tags::TagBumpPreview> {
     match response {
         DryRunTagBumpOk::Ready(preview) => Envelope {
             outcome: Outcome::Ok,
@@ -99,8 +99,8 @@ fn absolute_path(value: String) -> Result<PathBuf, crate::endpoints::EndpointErr
     }
 }
 
-fn to_preview_dto(preview: TagBumpPreview) -> gtl_contracts::tags::TagBumpPreview {
-    gtl_contracts::tags::TagBumpPreview {
+fn to_preview_dto(preview: TagBumpPreview) -> gtl_wire::tags::TagBumpPreview {
+    gtl_wire::tags::TagBumpPreview {
         repo_path: preview.repo_path.to_string_lossy().into_owned(),
         branch: preview.branch,
         target_sha: preview.target_sha,

@@ -19,10 +19,10 @@ impl Clock for BenchmarkClock {
 
 fn request() -> RecordRender {
     RecordRender {
-        recipe: gtl_contracts::recipes::Recipe {
-            source: gtl_contracts::recipes::RecipeSource::LocalRepo("/repos/gt".into()),
-            op: gtl_contracts::recipes::RecipeOp::Diff {
-                target: gtl_contracts::recipes::RecipeTarget::Unpushed { pinned: None },
+        recipe: gtl_wire::recipes::Recipe {
+            source: gtl_wire::recipes::RecipeSource::LocalRepo("/repos/gt".into()),
+            op: gtl_wire::recipes::RecipeOp::Diff {
+                target: gtl_wire::recipes::RecipeTarget::Unpushed { pinned: None },
             },
             name: None,
         },
@@ -44,7 +44,7 @@ fn record_render(criterion: &mut Criterion) {
             |request| {
                 let mut connection = require(app_state.connection_lock(), "locking app state");
                 require(
-                    record_render::execute(black_box(request), &mut connection, &BenchmarkClock),
+                    record_render::execute(black_box(&request), &mut connection, &BenchmarkClock),
                     "recording a render",
                 );
             },

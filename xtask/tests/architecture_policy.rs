@@ -70,7 +70,7 @@ fn check_structure_allows_build_dependencies() {
                 "[build-dependencies]\ngtl-infra = { path = \"../gtl-infra\" }\n",
             ),
             ("gtl-infra", "gtl-infra", ""),
-            ("gtl-contracts", "gtl-contracts", ""),
+            ("gtl-wire", "gtl-wire", ""),
         ],
     );
 

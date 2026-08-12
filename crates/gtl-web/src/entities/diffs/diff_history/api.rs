@@ -1,6 +1,6 @@
-use gtl_contracts::viewer::{
+use gtl_wire::viewer::{
     GetViewerHistoryCopy, ListViewerHistory, OpenViewerHistory, ViewerHistoryCopyPayload,
-    ViewerHistoryCursor, ViewerHistoryPage, ViewerShell,
+    ViewerHistoryPage, ViewerShell,
 };
 
 use crate::shared::bridge::{ClientApiError, TauriBridge};
@@ -13,22 +13,20 @@ pub(crate) struct DiffHistoryApi;
 
 impl DiffHistoryApi {
     pub(crate) async fn list_history(
-        cursor: ViewerHistoryCursor,
+        request: ListViewerHistory,
     ) -> Result<ViewerHistoryPage, ClientApiError> {
-        TauriBridge::invoke_request(LIST_HISTORY_COMMAND, &ListViewerHistory { cursor }).await
+        TauriBridge::invoke_request(LIST_HISTORY_COMMAND, &request).await
     }
 
-    pub(crate) async fn open_history(render_id: i64) -> Result<ViewerShell, ClientApiError> {
-        TauriBridge::invoke_request(OPEN_HISTORY_COMMAND, &OpenViewerHistory { render_id }).await
+    pub(crate) async fn open_history(
+        request: OpenViewerHistory,
+    ) -> Result<ViewerShell, ClientApiError> {
+        TauriBridge::invoke_request(OPEN_HISTORY_COMMAND, &request).await
     }
 
     pub(crate) async fn get_history_copy(
-        render_id: i64,
+        request: GetViewerHistoryCopy,
     ) -> Result<ViewerHistoryCopyPayload, ClientApiError> {
-        TauriBridge::invoke_request(
-            GET_HISTORY_COPY_COMMAND,
-            &GetViewerHistoryCopy { render_id },
-        )
-        .await
+        TauriBridge::invoke_request(GET_HISTORY_COPY_COMMAND, &request).await
     }
 }

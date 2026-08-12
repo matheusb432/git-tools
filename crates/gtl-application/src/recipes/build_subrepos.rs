@@ -2,9 +2,8 @@
 
 use std::path::PathBuf;
 
-use gtl_contracts::recipes::Recipe;
+use gtl_wire::recipes::{Recipe, RecipeOp};
 
-use super::RecipeRequest;
 use crate::{
     discovery::find_repo_tops,
     ports::{GitClient, RepoDiscovery},
@@ -14,7 +13,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuildSubrepoRecipes {
     pub root: PathBuf,
-    pub operation: RecipeRequest,
+    pub operation: RecipeOp,
     pub include_worktrees: bool,
 }
 
@@ -49,7 +48,7 @@ pub fn execute(
     Ok(repos
         .into_iter()
         .map(|repo| {
-            super::logic::build_resolved(repo.path, query.operation.clone(), Some(repo.label), git)
+            super::build_resolved(repo.path, query.operation.clone(), Some(repo.label), git)
         })
         .collect())
 }
@@ -58,12 +57,10 @@ pub fn execute(
 mod tests {
     use std::{num::NonZeroU32, path::PathBuf};
 
-    use gtl_contracts::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
+    use gtl_wire::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::{BuildSubrepoRecipes, execute};
-    use crate::{
-        diffs::DiffTarget, ports::RepoDiscovery, recipes::RecipeRequest, testing::ScriptedGitClient,
-    };
+    use crate::{ports::RepoDiscovery, testing::ScriptedGitClient};
 
     #[derive(Clone)]
     struct WorktreeAwareDiscovery;
@@ -96,10 +93,12 @@ mod tests {
         let recipes = execute(
             BuildSubrepoRecipes {
                 root: "/scan".into(),
-                operation: RecipeRequest::Diff(DiffTarget::Last {
-                    count: NonZeroU32::new(2).unwrap(),
-                    pinned: None,
-                }),
+                operation: RecipeOp::Diff {
+                    target: RecipeTarget::Last {
+                        count: NonZeroU32::new(2).unwrap(),
+                        pinned: None,
+                    },
+                },
                 include_worktrees: false,
             },
             &WorktreeAwareDiscovery,
@@ -116,7 +115,7 @@ mod tests {
         );
         assert_eq!(
             recipes[0],
-            gtl_contracts::recipes::Recipe {
+            gtl_wire::recipes::Recipe {
                 source: RecipeSource::LocalRepo("/real/api".into()),
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Last {
@@ -143,7 +142,9 @@ mod tests {
         let recipes = execute(
             BuildSubrepoRecipes {
                 root: "/scan".into(),
-                operation: RecipeRequest::Diff(DiffTarget::Base("main".into())),
+                operation: RecipeOp::Diff {
+                    target: RecipeTarget::Base { rev: "main".into() },
+                },
                 include_worktrees: true,
             },
             &WorktreeAwareDiscovery,
@@ -167,7 +168,9 @@ mod tests {
         let recipes = execute(
             BuildSubrepoRecipes {
                 root: "/scan".into(),
-                operation: RecipeRequest::Diff(DiffTarget::Unpushed { pinned: None }),
+                operation: RecipeOp::Diff {
+                    target: RecipeTarget::Unpushed { pinned: None },
+                },
                 include_worktrees: false,
             },
             &WorktreeAwareDiscovery,

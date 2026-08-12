@@ -18,10 +18,10 @@ const PROJECTS_JSON: &str = r##"[
         "groups": ["rust"]
     },
     {
-        "id": "sample_project",
-        "title": "sample_project",
-        "mux_session_name": "sample_project",
-        "source": {"kind": "directory", "value": "/srv/sample_project"},
+        "id": "SMP",
+        "title": "sample-api",
+        "mux_session_name": "sample-api",
+        "source": {"kind": "directory", "value": "/srv/sample-api"},
         "git_remote": null,
         "is_paused": false,
         "affiliation": "personal",
@@ -51,8 +51,8 @@ async fn invokes_json_project_list_and_uses_sample_project_owned_fields() -> any
     assert_eq!(projects[0].name, "git-tools");
     assert_eq!(projects[0].path, Path::new("/home/u/tools/git-tools"));
     assert_eq!(projects[0].remote, "git@example.test:tools/git-tools.git");
-    assert_eq!(projects[1].name, "sample_project");
-    assert_eq!(projects[1].path, Path::new("/srv/sample_project"));
+    assert_eq!(projects[1].name, "sample-api");
+    assert_eq!(projects[1].path, Path::new("/srv/sample-api"));
     assert_eq!(projects[1].remote, "");
     Ok(())
 }

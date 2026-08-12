@@ -151,10 +151,6 @@ pub struct LiveArgs {
 
 /// Arguments for `push`.
 #[derive(Debug, Args)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "independent clap flags mirrored from argv, not a disguised state machine"
-)]
 pub struct PushArgs {
     /// Commit message. When present, changes are staged and committed before pushing.
     #[arg(allow_hyphen_values = true, conflicts_with = "recursive")]
@@ -165,12 +161,8 @@ pub struct PushArgs {
     /// Operate on the current repo plus nested subrepos under the current directory.
     #[arg(short = 'r', long, conflicts_with = "all")]
     pub recursive: bool,
-    /// Preview managed push actions without pushing.
-    #[arg(long, requires = "all")]
-    pub dry: bool,
-    /// Emit machine-readable JSON for managed output.
-    #[arg(long, requires = "all")]
-    pub json: bool,
+    #[command(flatten)]
+    pub managed: ManagedArgs,
     /// Skip confirmation where the selected push mode supports it.
     #[arg(short = 'y', long = "yes")]
     pub yes: bool,
@@ -178,10 +170,6 @@ pub struct PushArgs {
 
 /// Arguments for `commit`.
 #[derive(Debug, Args)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "independent clap flags mirrored from argv, not a disguised state machine"
-)]
 pub struct CommitArgs {
     /// Commit message.
     #[arg(allow_hyphen_values = true, required_unless_present = "all")]
@@ -189,12 +177,8 @@ pub struct CommitArgs {
     /// Operate on every active project listed by sample_project.
     #[arg(long)]
     pub all: bool,
-    /// Preview managed commit actions without committing.
-    #[arg(long, requires = "all")]
-    pub dry: bool,
-    /// Emit machine-readable JSON for managed output.
-    #[arg(long, requires = "all")]
-    pub json: bool,
+    #[command(flatten)]
+    pub managed: ManagedArgs,
     /// Skip confirmation where the selected commit mode supports it.
     #[arg(short = 'y', long = "yes", conflicts_with = "all")]
     pub yes: bool,
@@ -294,14 +278,9 @@ pub enum WorktreeCommand {
 
 /// Target flags for the root `diff` command.
 #[derive(Debug, Args)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "independent clap flags mirrored from argv, not a disguised state machine"
-)]
 pub struct DiffTargetArgs {
-    /// Render one tabbed HTML diff for all managed repos with unpushed commits.
-    #[arg(long, conflicts_with_all = ["target", "last", "unpushed", "recursive"])]
-    pub all: bool,
+    #[command(flatten)]
+    pub scope: DiffScopeArgs,
     /// Diff unpushed work (`@{u}..HEAD`); this is also the default when no target is supplied.
     #[arg(long, conflicts_with_all = ["target", "last", "recursive"])]
     pub unpushed: bool,
@@ -311,12 +290,6 @@ pub struct DiffTargetArgs {
     /// Diff the last N commits (`HEAD~N..HEAD`); bare `-l` diffs the last commit.
     #[arg(short = 'l', long = "last", value_name = "N", num_args = 0..=1, default_missing_value = "1")]
     pub last: Option<NonZeroU32>,
-    /// Render one tabbed HTML diff for every git repo under the current directory.
-    #[arg(short = 'r', long = "recursive", conflicts_with_all = ["all", "target", "merge", "name"])]
-    pub recursive: bool,
-    /// Include nested linked worktrees in a recursive diff scan.
-    #[arg(short = 'w', long = "worktrees", requires = "recursive")]
-    pub worktrees: bool,
     /// Diff what merging HEAD into BASE would introduce (`BASE...HEAD`).
     #[arg(short = 'm', long = "merge", value_name = "BASE", conflicts_with_all = ["target", "last", "unpushed", "all", "recursive"])]
     pub merge: Option<String>,
@@ -333,6 +306,20 @@ pub struct DiffTargetArgs {
         conflicts_with_all = ["all", "unpushed", "target", "last", "recursive", "worktrees", "merge", "name"],
     )]
     pub set_theme: Option<Theme>,
+}
+
+/// Repository selection flags for the root `diff` command.
+#[derive(Debug, Args)]
+pub struct DiffScopeArgs {
+    /// Render one tabbed HTML diff for all managed repos with unpushed commits.
+    #[arg(long, conflicts_with_all = ["target", "last", "unpushed", "recursive"])]
+    pub all: bool,
+    /// Render one tabbed HTML diff for every git repo under the current directory.
+    #[arg(short = 'r', long = "recursive", conflicts_with_all = ["all", "target", "merge", "name"])]
+    pub recursive: bool,
+    /// Include nested linked worktrees in a recursive diff scan.
+    #[arg(short = 'w', long = "worktrees", requires = "recursive")]
+    pub worktrees: bool,
 }
 
 /// Diff artifact color theme persisted to the user config by `diff --set-theme`.
@@ -454,10 +441,10 @@ pub struct PruneArgs {
 #[derive(Debug, Clone, Copy, Args)]
 pub struct ManagedArgs {
     /// Preview actions without performing them.
-    #[arg(long)]
+    #[arg(long, requires = "all")]
     pub dry: bool,
     /// Emit machine-readable JSON instead of human text.
-    #[arg(long)]
+    #[arg(long, requires = "all")]
     pub json: bool,
 }
 
@@ -541,6 +528,16 @@ mod tests {
     #[test]
     fn parse_args_push_recursive_rejects_message() {
         assert!(Cli::parse_args(&["push".into(), "-r".into(), "save work".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_args_managed_flags_require_all() {
+        for command in ["push", "commit", "pull"] {
+            for flag in ["--dry", "--json"] {
+                assert!(Cli::parse_args(&[command.into(), flag.into()]).is_err());
+                assert!(Cli::parse_args(&[command.into(), "--all".into(), flag.into()]).is_ok());
+            }
+        }
     }
 
     #[test]

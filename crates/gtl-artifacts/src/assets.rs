@@ -2,8 +2,10 @@ use anyhow::{Result, ensure};
 
 pub(crate) const TAILWIND_CSS: &str = include_str!("../../gtl-web/assets/tailwind.css");
 
-const ARTIFACT_RUNTIME: &str = include_str!("embedded/generated/artifact-runtime.js");
-const ARTIFACT_WASM: &[u8] = include_bytes!("embedded/generated/artifact-runtime.wasm");
+const ARTIFACT_RUNTIME: &str =
+    include_str!("../../../target/generated/gtl-artifacts/artifact-runtime.js");
+const ARTIFACT_WASM: &[u8] =
+    include_bytes!("../../../target/generated/gtl-artifacts/artifact-runtime.wasm");
 
 pub(crate) fn inline_runtime() -> Result<&'static str> {
     ensure!(

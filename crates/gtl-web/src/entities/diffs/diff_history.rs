@@ -1,7 +1,7 @@
 mod api;
 
 pub(crate) use api::DiffHistoryApi;
-use gtl_contracts::viewer::{ViewerHistoryCursor, ViewerHistoryPage};
+use gtl_wire::viewer::{ViewerHistoryCursor, ViewerHistoryPage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct HistoryNavigation {
@@ -41,7 +41,7 @@ pub(crate) fn history_navigation(page: &ViewerHistoryPage) -> HistoryNavigation 
 
 #[cfg(test)]
 mod tests {
-    use gtl_contracts::viewer::{
+    use gtl_wire::viewer::{
         ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage, ViewerRecipeKind,
     };
 

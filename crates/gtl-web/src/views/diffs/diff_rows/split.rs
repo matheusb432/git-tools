@@ -8,8 +8,8 @@ use super::{
     content::{ChangedTextTone, LongLine, SemanticText, non_breaking_if_empty},
 };
 
-const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-[14px] text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]";
-const SPLIT_CODE_CELL_CLASSES: &str = "min-w-0 border-0 px-3 text-[14px] text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 mobile:text-[13px] print:text-[#111]";
+const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-sm text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
+const SPLIT_CODE_CELL_CLASSES: &str = "min-w-0 border-0 px-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SplitSide {
@@ -157,7 +157,7 @@ fn SplitGutter(side: SplitSide, number: Option<u32>) -> Element {
     };
     rsx! {
         span {
-            class: "select-none whitespace-nowrap px-2 text-right text-[12px] text-ink-3 [font-variant-numeric:tabular-nums] mobile:px-1 mobile:text-[10px]",
+            class: "select-none whitespace-nowrap px-2 text-right text-xs text-ink-3 [font-variant-numeric:tabular-nums] mobile:px-1",
             class: "{side_classes}",
             {line_number}
         }
