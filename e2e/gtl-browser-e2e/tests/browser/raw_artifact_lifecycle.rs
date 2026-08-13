@@ -1,4 +1,5 @@
 use anyhow::Context as _;
+use gtl_web_contracts::test_ids;
 use playwright_rs::expect;
 
 use crate::support;
@@ -23,7 +24,7 @@ async fn user_opens_and_navigates_an_offline_diff() -> anyhow::Result<()> {
         .await?;
         support::click(
             &page
-                .locator("aside[aria-label='Changed files']")
+                .locator(test_ids::CHANGED_FILES_PANEL.selector())
                 .get_by_text("beta.rs", true),
             "navigate to the second raw artifact file",
         )

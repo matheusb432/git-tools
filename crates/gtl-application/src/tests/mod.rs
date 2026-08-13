@@ -666,6 +666,7 @@ impl ProjectClient for FakeProjectClient {
         if let Some(message) = &self.error {
             return Err(ProjectClientError::Unavailable {
                 message: message.clone(),
+                source: Box::new(std::io::Error::other(message.clone())),
             });
         }
         Ok(self.repos.clone())

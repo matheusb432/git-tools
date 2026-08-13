@@ -15,6 +15,9 @@ playwright-rs.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 
+[dev-dependencies]
+gtl-web-contracts.workspace = true
+
 [[bin]]
 name = "install-browsers"
 path = "src/bin/install-browsers.rs"

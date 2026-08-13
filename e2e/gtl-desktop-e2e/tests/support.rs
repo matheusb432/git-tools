@@ -2,28 +2,13 @@ use std::{future::Future, panic::AssertUnwindSafe, path::PathBuf, pin::Pin};
 
 use anyhow::{Context, Result};
 use futures_util::FutureExt;
-use thirtyfour::{By, WebDriver, WebElement};
+use thirtyfour::{By, WebDriver};
 
 pub mod evidence;
 pub mod fixture;
 pub mod selectors;
 pub mod session;
 pub mod wait;
-
-pub async fn active_tab(driver: &WebDriver) -> Result<WebElement> {
-    wait::until("active diff tab", wait::ASSERTION_TIMEOUT, || async {
-        let tabs = driver
-            .find_all(By::Css("[role='tab'][aria-selected='true']"))
-            .await?;
-        for tab in tabs {
-            if tab.is_displayed().await? {
-                return Ok(Some(tab));
-            }
-        }
-        Ok(None)
-    })
-    .await
-}
 
 pub async fn wait_for_active_diff(
     driver: &WebDriver,

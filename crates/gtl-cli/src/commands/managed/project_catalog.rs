@@ -1,7 +1,7 @@
 //! Managed repository catalogue supplied by sample_project.
 
 use anyhow::Context as _;
-use gtl_infra::sample_project_project_client::SampleProjectClient;
+use gtl_infra::managed_repo_client::ManagedRepoClient;
 use gtl_models::managed::ManagedRepo;
 
 pub fn load_projects() -> anyhow::Result<Vec<ManagedRepo>> {
@@ -10,6 +10,6 @@ pub fn load_projects() -> anyhow::Result<Vec<ManagedRepo>> {
         .build()
         .context("starting the sample_project project client runtime")?;
     runtime
-        .block_on(SampleProjectClient::from_environment().list_projects())
+        .block_on(ManagedRepoClient::from_environment().list_projects())
         .map_err(anyhow::Error::new)
 }

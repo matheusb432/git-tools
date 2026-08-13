@@ -10,7 +10,7 @@ dioxus-sdk-time = "0.7.0"
 dioxus-primitives = { git = "https://github.com/DioxusLabs/components", rev = "bf007c15d0cf4d04d3181cc46cf12325aa773955", version = "0.0.1", default-features = false }
 gtl-wire.workspace = true
 gtl-parser.workspace = true
-gtl-web-contracts = { workspace = true, optional = true }
+gtl-web-contracts.workspace = true
 js-sys = { version = "0.3.102", default-features = false, features = [
   "std",
 ], optional = true }
@@ -53,7 +53,6 @@ artifact = ["web", "dep:js-sys", "gtl-parser/syntax"]
 desktop = [
   "web",
   "dioxus/router",
-  "dep:gtl-web-contracts",
   "dep:js-sys",
   "dep:serde-wasm-bindgen",
   "gtl-parser/bundled-syntaxes",

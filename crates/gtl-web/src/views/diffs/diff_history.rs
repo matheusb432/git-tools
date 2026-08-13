@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
     GetViewerHistoryCopy, ListViewerHistory, OpenViewerHistory, ViewerHistoryCursor,
     ViewerHistoryEntry, ViewerHistoryPage,
@@ -292,6 +293,7 @@ fn HistoryRow(
                     variant: ButtonVariant::Outline,
                     state: if opening { ButtonState::Loading } else if open_disabled { ButtonState::Disabled } else { ButtonState::Enabled },
                     aria_label: "Open {entry.title}",
+                    "data-testid": test_ids::HISTORY_ENTRY_OPEN.value(),
                     onclick: move |_| onopen.call(entry.id),
                     span { aria_hidden: "true",
                         ExternalLink { size: 14 }

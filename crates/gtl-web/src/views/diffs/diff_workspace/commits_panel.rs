@@ -222,7 +222,7 @@ fn CommitHash(sha: String, abbreviated_sha: String, selected: bool) -> Element {
 fn CommitDate(date: String, iso: String) -> Element {
     rsx! {
         time {
-            class: "ml-auto truncate text-ink-3 tabular-nums",
+            class: "ml-auto truncate text-ink-3 text-xs tabular-nums",
             datetime: iso.clone(),
             title: iso,
             "{date}"

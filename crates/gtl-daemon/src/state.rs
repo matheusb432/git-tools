@@ -6,8 +6,8 @@ use axum::{
 };
 use gtl_artifacts::ArtifactRenderer;
 use gtl_infra::{
-    app_state::SqliteAppState, sample_project_project_client::SampleProjectClient,
-    artifact_store::StoreArtifacts, clock::SystemClock, git_client::HybridGitClient,
+    app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
+    git_client::HybridGitClient, managed_repo_client::ManagedRepoClient,
     push_ledger::NoOpPushLedger, user_config::TomlSettingsStore,
 };
 use tokio::sync::watch;
@@ -25,7 +25,7 @@ pub struct DaemonState {
     pub(crate) artifacts: StoreArtifacts,
     pub(crate) renderer: ArtifactRenderer,
     pub(crate) clock: SystemClock,
-    pub(crate) projects: SampleProjectClient,
+    pub(crate) projects: ManagedRepoClient,
     pub(crate) ledger: NoOpPushLedger,
     pub(crate) app_state: SqliteAppState,
     pub(crate) user_settings: TomlSettingsStore,
@@ -50,7 +50,7 @@ impl DaemonState {
             artifacts: StoreArtifacts,
             renderer: ArtifactRenderer,
             clock: SystemClock,
-            projects: SampleProjectClient::from_environment(),
+            projects: ManagedRepoClient::from_environment(),
             ledger: NoOpPushLedger,
             app_state,
             user_settings,

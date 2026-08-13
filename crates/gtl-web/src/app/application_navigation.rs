@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
     SetViewerPreference, ViewerActiveState, ViewerTab, ViewerTabKind, ViewerTabRequest,
     ViewerTabState, ViewerTheme,
@@ -16,19 +17,18 @@ use crate::{
         browser,
         ui::{
             Button, ButtonSize, ButtonVariant, CountBadge, FloatingNotice, FloatingNoticeState,
-            ScrollArea, ScrollAreaVariant,
+            IconDropdown, MENU_ACTION_HOST_CLASSES, MenuActionContent, ScrollArea,
+            ScrollAreaVariant,
         },
     },
 };
 
-const NAVIGATION_ACTION_CLASSES: &str = "mb-2 inline-flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink active:border-acc-line active:bg-acc-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
-const NAVIGATION_ACTION_ACTIVE_CLASSES: &str = "mb-2 inline-flex h-8 flex-none items-center gap-2 rounded-sm border border-acc-line bg-acc-soft px-2.5 text-acc active:border-acc active:bg-acc-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-acc";
+const VIEWER_MENU_ID: &str = "viewer-menu";
 
 #[component]
 pub(crate) fn ApplicationNavigation() -> Element {
     let viewer = use_context::<ViewerContext>();
     let navigator = use_navigator();
-    let route = use_route::<Route>();
     let mut action_error = use_signal(|| None::<ClientApiError>);
     let shell = match viewer.read() {
         ViewerShellLoad::Ready(shell) => Some(shell),
@@ -40,14 +40,11 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let tabs = shell
         .as_ref()
         .map_or_else(Vec::new, |shell| shell.tabs.clone());
-    let theme = shell
-        .as_ref()
-        .map_or(ViewerTheme::Dark, |shell| shell.preferences.theme);
 
     rsx! {
         nav {
             class: "z-70 flex min-w-0 shrink-0 items-end gap-2.5 border-b border-line bg-surface px-3 pt-2",
-            aria_label: "Open diffs",
+            aria_label: "Viewer navigation",
             ScrollArea {
                 variant: ScrollAreaVariant::Rail,
                 class: "flex min-w-0 flex-1 items-end gap-1 overflow-x-auto",
@@ -138,6 +135,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                     class: "mr-1 text-del",
                                     aria_label: "Close {tab_label}",
                                     title: "Close tab",
+                                    "data-testid": test_ids::VIEWER_TAB_CLOSE.value(),
                                     onclick: move |_| {
                                         action_error.set(None);
                                         spawn(async move {
@@ -164,63 +162,96 @@ pub(crate) fn ApplicationNavigation() -> Element {
                 }
             }
 
-            Link {
-                class: if matches!(route, Route::History {}) { NAVIGATION_ACTION_ACTIVE_CLASSES } else { NAVIGATION_ACTION_CLASSES },
-                to: Route::History {},
-                aria_label: "History",
-                aria_current: matches!(route, Route::History {}).then_some("page"),
-                span { aria_hidden: "true",
-                    History { size: 14 }
+            IconDropdown {
+                id: VIEWER_MENU_ID,
+                aria_label: "Viewer menu",
+                trigger_test_id: test_ids::VIEWER_MENU_TRIGGER.value(),
+                div { class: "flex items-center justify-between gap-3 border-b border-line px-3 py-2.5",
+                    strong { class: "text-xs font-semibold text-ink", "Viewer" }
+                    span { class: "text-xs text-ink-3", "3 actions" }
                 }
-                "History"
-                if !tabs.is_empty() {
-                    CountBadge { count: tabs.len() }
-                }
-            }
-
-            label { class: "mb-2 flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50",
-                span { class: "text-acc", aria_hidden: "true",
-                    CircleDot { size: 9, fill: "currentColor" }
-                }
-                span { class: "sr-only", "Theme" }
-                select {
-                    class: "cursor-pointer appearance-none bg-transparent text-inherit outline-none disabled:cursor-not-allowed",
-                    value: theme_value(theme),
-                    disabled: shell.is_none() || viewer.render_command_pending(),
-                    aria_label: "Theme",
-                    onchange: move |event| {
-                        if let Some(theme) = theme_from_value(&event.value()) {
-                            viewer.set_preference(SetViewerPreference::Theme(theme));
+                div { class: "grid gap-0.5 p-1.5",
+                    Link {
+                        class: MENU_ACTION_HOST_CLASSES,
+                        to: Route::History {},
+                        aria_label: "History",
+                        "data-testid": test_ids::VIEWER_HISTORY_OPEN.value(),
+                        onclick: move |_| browser::hide_popover(VIEWER_MENU_ID),
+                        MenuActionContent {
+                            icon: rsx! {
+                                History { size: 15 }
+                            },
+                            label: "History",
+                            description: "Browse saved renders",
+                            if !tabs.is_empty() {
+                                CountBadge { count: tabs.len() }
+                            }
                         }
-                    },
-                    for option in [
-                        ViewerTheme::Dark,
-                        ViewerTheme::Light,
-                        ViewerTheme::Hearth,
-                        ViewerTheme::Mirage,
-                        ViewerTheme::Glacier,
-                        ViewerTheme::Noir,
-                        ViewerTheme::Graphite,
-                    ]
-                    {
-                        option { value: theme_value(option), "{theme_label(option)}" }
                     }
-                }
-            }
-
-            Link {
-                class: if matches!(route, Route::Settings {}) { NAVIGATION_ACTION_ACTIVE_CLASSES } else { NAVIGATION_ACTION_CLASSES },
-                to: Route::Settings {},
-                aria_current: matches!(route, Route::Settings {}).then_some("page"),
-                aria_label: "User settings",
-                title: "User settings",
-                span { aria_hidden: "true",
-                    Settings { size: 15 }
+                    ThemePicker {}
+                    Link {
+                        class: MENU_ACTION_HOST_CLASSES,
+                        to: Route::Settings {},
+                        aria_label: "User settings",
+                        onclick: move |_| browser::hide_popover(VIEWER_MENU_ID),
+                        MenuActionContent {
+                            icon: rsx! {
+                                Settings { size: 15 }
+                            },
+                            label: "Settings",
+                            description: "Viewer defaults",
+                        }
+                    }
                 }
             }
         }
         if let Some(error) = action_error() {
             FloatingNotice { state: FloatingNoticeState::Error, role: "alert", "{error.message()}" }
+        }
+    }
+}
+
+// TODO: move to settings view
+#[component]
+fn ThemePicker() -> Element {
+    let viewer = use_context::<ViewerContext>();
+    let shell = match viewer.read() {
+        ViewerShellLoad::Ready(shell) => Some(shell),
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => None,
+    };
+    let theme = shell
+        .as_ref()
+        .map_or(ViewerTheme::Dark, |shell| shell.preferences.theme);
+
+    rsx! {
+        label { class: "flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50",
+            span { class: "text-acc", aria_hidden: "true",
+                CircleDot { size: 9, fill: "currentColor" }
+            }
+            span { class: "sr-only", "Theme" }
+            select {
+                class: "cursor-pointer appearance-none bg-transparent text-inherit outline-none disabled:cursor-not-allowed",
+                value: theme_value(theme),
+                disabled: shell.is_none() || viewer.render_command_pending(),
+                aria_label: "Theme",
+                onchange: move |event| {
+                    if let Some(theme) = theme_from_value(&event.value()) {
+                        viewer.set_preference(SetViewerPreference::Theme(theme));
+                    }
+                },
+                for option in [
+                    ViewerTheme::Dark,
+                    ViewerTheme::Light,
+                    ViewerTheme::Hearth,
+                    ViewerTheme::Mirage,
+                    ViewerTheme::Glacier,
+                    ViewerTheme::Noir,
+                    ViewerTheme::Graphite,
+                ]
+                {
+                    option { value: theme_value(option), "{theme_label(option)}" }
+                }
+            }
         }
     }
 }

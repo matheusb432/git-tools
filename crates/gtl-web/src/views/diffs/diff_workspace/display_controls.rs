@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
     SetViewerPreference, ViewerDiffDensity, ViewerDiffLayout, ViewerPreferences,
 };
@@ -157,6 +158,7 @@ fn LiveViewActions(
             variant: ButtonVariant::Ghost,
             state: if pending { ButtonState::Loading } else { ButtonState::Enabled },
             onclick: onrefresh,
+            "data-testid": test_ids::LIVE_VIEW_REFRESH.value(),
             "Refresh"
         }
         Button {

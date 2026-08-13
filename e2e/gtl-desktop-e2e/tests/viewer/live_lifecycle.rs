@@ -1,4 +1,5 @@
 use anyhow::Context as _;
+use gtl_web_contracts::test_ids;
 
 use crate::support;
 
@@ -13,7 +14,7 @@ async fn user_refreshes_and_restores_a_saved_live_diff() -> anyhow::Result<()> {
                 .context("show the forwarded live diff")?;
 
             fixture.commit_alpha_v2()?;
-            support::selectors::by_aria_label(session.driver(), "Refresh diff")
+            support::selectors::by_test_id(session.driver(), test_ids::LIVE_VIEW_REFRESH)
                 .await?
                 .click()
                 .await

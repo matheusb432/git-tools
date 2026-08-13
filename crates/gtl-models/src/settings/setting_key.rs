@@ -32,7 +32,7 @@ impl SettingKeyValue {
     }
 
     // TODO: create newtype for the key itself, this should not return a string.
-    pub fn key(&self) -> String {
+    pub fn key(self) -> String {
         match self {
             SettingKeyValue::Theme(_) => THEME,
             SettingKeyValue::Layout(_) => LAYOUT,

@@ -5,9 +5,17 @@ use gtl_models::managed::ManagedRepo;
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectClientError {
     #[error("project catalogue is unavailable: {message}")]
-    Unavailable { message: String },
+    Unavailable {
+        message: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("project catalogue returned invalid data: {message}")]
-    InvalidData { message: String },
+    InvalidData {
+        message: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
 pub trait ProjectClient: Clone + Send + Sync + 'static {

@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::ViewerActiveView;
 #[cfg(feature = "artifact")]
 use lucide_dioxus::{History, Menu, SlidersHorizontal};
@@ -243,6 +244,7 @@ fn DiffWorkspaceDocument(
                 FilesPanel {
                     view: view.clone(),
                     filter: file_filter,
+                    test_id: Some(test_ids::CHANGED_FILES_PANEL.value().to_owned()),
                     onfilter,
                     onnavigate,
                 }

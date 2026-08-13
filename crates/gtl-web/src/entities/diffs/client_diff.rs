@@ -19,6 +19,7 @@ const CLIENT_LINE_BATCH_SIZE: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClientDiffRows {
+    // TODO: refactor. vec<arc<vec<_>>> , i mean. $_$
     Unified(Vec<Arc<Vec<DiffRow>>>),
     Split(Vec<Arc<Vec<SplitDiffRow>>>),
 }

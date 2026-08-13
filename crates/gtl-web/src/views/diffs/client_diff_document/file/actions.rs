@@ -9,7 +9,6 @@ use crate::{
         browser,
         ui::{Button, ButtonSize, ButtonVariant},
     },
-    views::diffs::{DiffLineChangeKind, DiffLineChangeText},
 };
 
 #[component]
@@ -19,9 +18,8 @@ pub(super) fn DiffFileActions(
     onopen: Option<EventHandler<String>>,
 ) -> Element {
     rsx! {
-        span { class: "flex flex-none items-center gap-2 mobile:basis-full mobile:justify-end",
+        span { class: "flex flex-none items-center gap-2 mobile:hidden",
             DiffCopyActions { file: file.clone(), copy_context_enabled }
-            DiffLineStats { added: file.summary.added, removed: file.summary.removed }
             if let Some(onopen) = onopen.filter(|_| file.summary.can_open_in_editor) {
                 OpenInEditorAction { path: file.summary.path, onopen }
             }
@@ -85,6 +83,7 @@ fn DiffCodeCopyAction(file: ClientDiffFile, include_context: bool) -> Element {
     }
 }
 
+// TODO: restyle. looks a bit ugly
 #[component]
 fn CopyButton(label: &'static str, state: CopyState, onclick: EventHandler<MouseEvent>) -> Element {
     let display = match state {
@@ -113,21 +112,11 @@ async fn update_copy_state(mut state: Signal<CopyState>, payload: &str) {
 }
 
 #[component]
-fn DiffLineStats(added: u32, removed: u32) -> Element {
-    rsx! {
-        span { class: "flex-none text-sm",
-            DiffLineChangeText { kind: DiffLineChangeKind::Added, count: u64::from(added) }
-            " "
-            DiffLineChangeText { kind: DiffLineChangeKind::Removed, count: u64::from(removed) }
-        }
-    }
-}
-
-#[component]
 fn OpenInEditorAction(path: String, onopen: EventHandler<String>) -> Element {
     rsx! {
+        // TODO: make it use icon button primitive (create it)
         Button {
-            class: "size-[22px] p-0",
+            class: "p-0",
             size: ButtonSize::Content,
             variant: ButtonVariant::Ghost,
             aria_label: "Open in IDE",

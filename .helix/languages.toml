@@ -1,0 +1,7 @@
+[[language]]
+name = "rust"
+auto-format = true
+formatter = { command = "/usr/bin/bash", args = [
+  "-c",
+  'exec /usr/bin/bash "$(git rev-parse --show-toplevel)/.helix/format-rust.sh"',
+] }

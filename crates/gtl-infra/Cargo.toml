@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+sample_project-client.workspace = true
 gtl-application.workspace = true
 command-group.workspace = true
 directories.workspace = true
@@ -20,12 +21,6 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = [
-  "io-util",
-  "macros",
-  "process",
-  "time",
-] }
 toml.workspace = true
 toml_edit.workspace = true
 walkdir.workspace = true
@@ -35,7 +30,6 @@ libc.workspace = true
 
 [dev-dependencies]
 gtl-application = { workspace = true, features = ["testing"] }
-tokio = { workspace = true, features = ["fs", "macros", "rt", "sync"] }
 
 [lints]
 workspace = true

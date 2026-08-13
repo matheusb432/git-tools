@@ -65,6 +65,7 @@ impl WorkspaceFileTree {
 pub(super) fn FilesPanel(
     view: ViewerActiveView,
     filter: String,
+    test_id: Option<String>,
     onfilter: EventHandler<String>,
     onnavigate: EventHandler<String>,
 ) -> Element {
@@ -79,7 +80,9 @@ pub(super) fn FilesPanel(
     let tree = WorkspaceFileTree::from_files(&files);
 
     rsx! {
-        ScrollArea { class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
+        ScrollArea {
+            class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
+            "data-testid": test_id,
             FilesFilter { filter, onfilter }
             FilesPanelHeading {
                 commits_label: view.commits_label.clone(),

@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
     OpenViewerDiffFile, SelectViewerCommit, SetViewerPreference, ViewerActiveState,
     ViewerActiveView, ViewerPreferences, ViewerShell, ViewerTabKind, ViewerTabRequest,
@@ -407,6 +408,7 @@ fn MobileRefreshButton(pending: bool, onrefresh: EventHandler<MouseEvent>) -> El
             state: if pending { ButtonState::Loading } else { ButtonState::Enabled },
             aria_label: "Refresh diff",
             title: "Refresh diff",
+            "data-testid": test_ids::LIVE_VIEW_REFRESH.value(),
             onclick: onrefresh,
             if !pending {
                 span { aria_hidden: "true",

@@ -5,7 +5,10 @@ use dioxus::prelude::*;
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
 use self::{actions::DiffFileActions, rows::DiffFileBody};
-use crate::{entities::diffs::ClientDiffFile, views::diffs::DiffFileStatusBadge};
+use crate::{
+    entities::diffs::ClientDiffFile,
+    views::diffs::{DiffFileStatusBadge, DiffLineChangeKind, DiffLineChangeText},
+};
 
 #[component]
 pub(super) fn DiffFileCard(
@@ -33,6 +36,7 @@ pub(super) fn DiffFileCard(
             id: anchor_id,
             "data-gtl-diff-file": "",
             "data-path": path,
+            // TODO: review stlying
             class: "group/file mb-2.5 rounded-panel border border-line bg-surface [&:not([open])>summary]:rounded-panel [&:not([open])>summary]:border-b-0 print:break-inside-avoid print:[&[hidden]]:block!",
             class: if is_flashing { "outline outline-acc outline-offset-[-1px]" },
             open: open(),
@@ -55,12 +59,15 @@ pub(super) fn DiffFileCard(
 
 #[component]
 fn DiffFileHeader(
+    // TODO: refactor - this must **not** need the entire diff rows!
+    // this must be shared state too, not drilled props.
     file: ClientDiffFile,
     mut open: Signal<bool>,
     copy_context_enabled: bool,
     onopen: Option<EventHandler<String>>,
 ) -> Element {
     let background_classes = file_header_background(file.summary.status);
+    let file_summary = file.summary.clone();
     rsx! {
         summary {
             class: "sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line px-2.5 py-2 hover:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden mobile:flex-wrap mobile:gap-x-1.5 mobile:px-2 mobile:py-1.5 print:static print:bg-[#f2f2f2]",
@@ -70,9 +77,10 @@ fn DiffFileHeader(
                 open.toggle();
             },
             DiffFileCaret {}
-            DiffFilePath { path: file.summary.path.clone() }
-            DiffFileStatusBadge { status: file.summary.status }
+            DiffFilePath { path: file_summary.path.clone() }
+            DiffFileStatusBadge { status: file_summary.status }
             DiffFileActions { file, copy_context_enabled, onopen }
+            DiffLineStats { added: file_summary.added, removed: file_summary.removed }
         }
     }
 }
@@ -102,6 +110,17 @@ fn DiffFilePath(path: String) -> Element {
     rsx! {
         span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink",
             "{path}"
+        }
+    }
+}
+
+#[component]
+fn DiffLineStats(added: u32, removed: u32) -> Element {
+    rsx! {
+        span { class: "flex-none text-sm",
+            DiffLineChangeText { kind: DiffLineChangeKind::Added, count: u64::from(added) }
+            " "
+            DiffLineChangeText { kind: DiffLineChangeKind::Removed, count: u64::from(removed) }
         }
     }
 }

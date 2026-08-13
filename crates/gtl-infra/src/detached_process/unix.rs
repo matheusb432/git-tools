@@ -84,6 +84,16 @@ mod tests {
         )
         .expect("spawn detached child");
 
+        let wait_for_process_id = |path: &Path, timeout| -> u32 {
+            let deadline = Instant::now() + timeout;
+            while Instant::now() < deadline {
+                if let Ok(value) = fs::read_to_string(path) {
+                    return value.trim().parse().expect("numeric process id");
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            panic!("timed out waiting for {}", path.display());
+        };
         let process_id = wait_for_process_id(
             &temporary.path().join(DETACHED_CHILD_PID),
             Duration::from_secs(1),
@@ -108,16 +118,5 @@ mod tests {
         }
         fs::write(DETACHED_CHILD_PID, std::process::id().to_string())
             .expect("write detached child pid");
-    }
-
-    fn wait_for_process_id(path: &Path, timeout: Duration) -> u32 {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            if let Ok(value) = fs::read_to_string(path) {
-                return value.trim().parse().expect("numeric process id");
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-        panic!("timed out waiting for {}", path.display());
     }
 }

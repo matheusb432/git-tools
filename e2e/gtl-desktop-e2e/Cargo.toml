@@ -12,6 +12,7 @@ e2e = []
 anyhow.workspace = true
 command-group.workspace = true
 futures-util.workspace = true
+gtl-web-contracts.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 thirtyfour.workspace = true

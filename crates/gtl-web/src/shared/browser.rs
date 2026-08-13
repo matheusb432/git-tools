@@ -35,6 +35,17 @@ pub(crate) fn focus_element(id: String) {
     });
 }
 
+#[cfg(feature = "desktop")]
+pub(crate) fn hide_popover(id: &str) {
+    let Some(element) = document()
+        .and_then(|document| document.get_element_by_id(id))
+        .and_then(|element| element.dyn_into::<HtmlElement>().ok())
+    else {
+        return;
+    };
+    let _ = element.hide_popover();
+}
+
 pub(crate) fn scroll_to_file(id: &str) {
     let Some(details) = document()
         .and_then(|document| document.get_element_by_id(id))
