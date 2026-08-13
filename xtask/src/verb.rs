@@ -8,14 +8,10 @@ pub(crate) struct Verb(&'static str);
 impl Verb {
     pub(crate) const BENCH: Self = Self("bench");
     pub(crate) const BUILD: Self = Self("build");
-    pub(crate) const CHECK: Self = Self("check");
+    pub(crate) const CHECK_DIOXUS_FORMAT: Self = Self("check-dioxus-format");
     pub(crate) const CHECK_STRUCTURE: Self = Self("check-structure");
     pub(crate) const DESKTOP_E2E: Self = Self("desktop-e2e");
     pub(crate) const DRIFT_CHECK: Self = Self("drift-check");
-    pub(crate) const FIX: Self = Self("fix");
-    pub(crate) const FORMAT: Self = Self("fmt");
-    pub(crate) const FORMAT_CHECK: Self = Self("fmt-check");
-    pub(crate) const LINT: Self = Self("lint");
     pub(crate) const PRE_COMMIT: Self = Self("pre-commit");
     pub(crate) const GEN_ICON: Self = Self("gen-icon");
     pub(crate) const INSTALL: Self = Self("install");

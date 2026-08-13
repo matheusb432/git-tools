@@ -15,16 +15,8 @@ use crate::{process, task::Step};
 const PACKAGE: &str = "gtl-web";
 const SOURCE_FILE_COUNT_MAX: usize = 512;
 
-pub(super) fn format_step() -> Step {
-    Step::new("dioxus-rsx-format", "dx", write_arguments())
-}
-
 pub(super) fn check_step(directory: &Path) -> Step {
     Step::new("dioxus-rsx-format", "dx", check_arguments()).with_current_directory(directory)
-}
-
-fn write_arguments() -> [&'static str; 4] {
-    ["fmt", "--package", PACKAGE, "--locked"]
 }
 
 fn check_arguments() -> [&'static str; 5] {
@@ -104,14 +96,6 @@ fn collect_source_files(directory: &Path, files: &mut Vec<PathBuf>) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn writes_only_the_selected_package_rsx() {
-        assert_eq!(
-            write_arguments(),
-            ["fmt", "--package", "gtl-web", "--locked"]
-        );
-    }
 
     #[test]
     fn checks_only_the_selected_package_rsx() {

@@ -1,9 +1,9 @@
 //! `xtask` — this repo's embedded dev/release automation harness.
 //!
 //! Invoked as `cargo run -p xtask -- <verb>` from the justfile; never installed (it is a
-//! workspace member built on demand). Recipe bodies stay one-line forwarders into these verbs;
-//! all automation *logic* lives here in Rust, not in shell. Add verbs under `verbs/` and wire the
-//! new arm into `cli::Command` plus the dispatch below.
+//! workspace member built on demand). Direct quality-tool invocations stay in the justfile while
+//! typed and nontrivial automation remains here. Add verbs under `verbs/` and wire the new arm
+//! into `cli::Command` plus the dispatch below.
 
 use anyhow::Result;
 use clap::Parser;
@@ -42,12 +42,8 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::WebServe { arguments } => verbs::dioxus_web::serve(&arguments),
         cli::Command::WebStyles => verbs::dioxus_web::run_styles(),
         cli::Command::Bench(arguments) => verbs::bench::run(&arguments),
-        cli::Command::Fmt(arguments) => verbs::format::run(arguments.verbose),
-        cli::Command::FmtCheck(arguments) => verbs::format::check(arguments.verbose),
-        cli::Command::Lint => verbs::lint::run(),
-        cli::Command::Check => verbs::check::run(),
+        cli::Command::CheckDioxusFormat => verbs::format::check_dioxus(),
         cli::Command::PreCommit => verbs::pre_commit::run(),
-        cli::Command::Fix { extra } => verbs::fix::run(&extra),
         cli::Command::DriftCheck => verbs::drift::run(),
         cli::Command::CheckStructure => {
             verbs::check_structure::run(None);

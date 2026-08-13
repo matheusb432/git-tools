@@ -8,7 +8,7 @@
 - Inspect status and worktrees; commit, push, pull, prune, switch branches, and manage tags without replacing Git's underlying repository model.
 - Run status, commit, push, pull, diff, and prune operations across active projects listed by sample_project.
 
-Run `gtl --help` and `gtl <command> --help` for the authoritative command reference. ADR statuses are tracked in [docs/adr/adr.toml](docs/adr/adr.toml), and repository automation is documented in [xtask/README.md](xtask/README.md).
+Run `gtl --help` and `gtl <command> --help` for the authoritative command reference. ADR statuses are tracked in [docs/adr/adr.toml](docs/adr/adr.toml), and repository automation is indexed by `just --list` and the xtask CLI doc comments.
 
 ## Install
 

@@ -1,13 +1,11 @@
-//! Labeled command steps and run/check orchestration.
+//! Labeled command steps and run orchestration.
 //!
 //! A [`Step`] is one child process to spawn; [`run_all`] executes a plan and bails on the first
-//! failure, while [`check_all`] runs every step and reports the complete set that failed. The
-//! quality verbs build their plans as `Step` vectors so the read-only gate can name every drifted
-//! or failing tool at once.
+//! failure.
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use crate::process;
 
@@ -103,49 +101,4 @@ pub(crate) fn run_all(steps: &[Step]) -> Result<()> {
         process::run_step(step)?;
     }
     Ok(())
-}
-
-/// Run every step, then bail listing all that failed with the shared `remediation` hint.
-pub(crate) fn check_all(steps: &[Step], remediation: &str) -> Result<()> {
-    let outcomes = steps
-        .iter()
-        .map(|step| process::step_succeeds(step).map(|success| (step.label(), success)))
-        .collect::<Result<Vec<_>>>()?;
-    if let Some(message) = failure_message(&outcomes, remediation) {
-        bail!(message);
-    }
-    Ok(())
-}
-
-fn failure_message(outcomes: &[(&str, bool)], remediation: &str) -> Option<String> {
-    let failed = outcomes
-        .iter()
-        .filter_map(|(label, success)| (!*success).then_some(*label))
-        .collect::<Vec<_>>();
-    if failed.is_empty() {
-        None
-    } else {
-        Some(format!(
-            "check failed in: {} — {remediation}",
-            failed.join(", ")
-        ))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn failure_message_lists_failed_steps() {
-        let outcomes = [("cargo-fmt", false), ("taplo", true), ("clippy", false)];
-        assert_eq!(
-            failure_message(&outcomes, "run `just fix`").as_deref(),
-            Some("check failed in: cargo-fmt, clippy — run `just fix`")
-        );
-        assert_eq!(
-            failure_message(&[("cargo-fmt", true)], "run `just fix`"),
-            None
-        );
-    }
 }

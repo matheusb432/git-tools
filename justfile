@@ -1,6 +1,8 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 set windows-shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
+rustfmt_toolchain := trim(read('.rustfmt-nightly'))
+
 mod cli 'just/cli.justfile'
 mod desktop 'just/desktop.justfile'
 mod web 'just/web.justfile'
@@ -66,27 +68,45 @@ test *args:
 # Apply pinned-nightly rustfmt, Taplo, Dioxus RSX, and rumdl across the repository. --verbose restores taplo's file-discovery logs.
 [group('quality')]
 fmt *args:
-    cargo run --quiet -p xtask -- fmt {{ args }}
+    #!/usr/bin/bash
+    set -euo pipefail
+    cargo +{{ rustfmt_toolchain }} fmt
+    if [[ "{{ args }}" == *"--verbose"* ]]; then taplo fmt {{ args }}; else RUST_LOG=warn taplo fmt; fi
+    dx fmt --package gtl-web --locked
+    markdown_files=()
+    while IFS= read -r -d '' file; do [[ -f "$file" ]] && markdown_files+=("$file"); done < <(git ls-files --cached --others --exclude-standard -z -- '*.md')
+    if ((${#markdown_files[@]})); then rumdl fmt "${markdown_files[@]}"; fi
 
 # Check formatting without modifying files (exits non-zero on drift); formatting only. --verbose restores taplo's file-discovery logs.
 [group('quality')]
 fmt-check *args:
-    cargo run --quiet -p xtask -- fmt-check {{ args }}
+    #!/usr/bin/bash
+    set -euo pipefail
+    cargo +{{ rustfmt_toolchain }} fmt --check
+    if [[ "{{ args }}" == *"--verbose"* ]]; then taplo fmt --check {{ args }}; else RUST_LOG=warn taplo fmt --check; fi
+    markdown_files=()
+    while IFS= read -r -d '' file; do [[ -f "$file" ]] && markdown_files+=("$file"); done < <(git ls-files --cached --others --exclude-standard -z -- '*.md')
+    if ((${#markdown_files[@]})); then rumdl fmt --check "${markdown_files[@]}"; fi
+    cargo run --quiet -p xtask -- check-dioxus-format
 
 # Run architecture policy, dependency checks, and workspace Clippy.
 [group('quality')]
 lint:
-    cargo run --quiet -p xtask -- lint
+    cargo run --quiet -p xtask -- check-structure
+    cargo check --locked -p gtl-parser --no-default-features --target wasm32-unknown-unknown
+    cargo check --locked -p gtl-parser --all-features --all-targets --target wasm32-unknown-unknown
+    cargo clippy --workspace --all-targets
 
 # Complete read-only quality gate: formatting, lint, and configured ast-grep rules.
 [group('quality')]
-check:
-    cargo run --quiet -p xtask -- check
+check: fmt-check lint
+    ast-grep scan
 
 # Apply Clippy fixes first, then normalize every formatter; extra args go to Clippy.
 [group('quality')]
 fix *args:
-    cargo run --quiet -p xtask -- fix {{ args }}
+    cargo clippy --workspace --all-targets --fix --allow-dirty --allow-staged {{ args }}
+    just fmt
 
 # Rebuild web assets and fail if the tracked stylesheet drifts from its sources.
 [group('quality')]
