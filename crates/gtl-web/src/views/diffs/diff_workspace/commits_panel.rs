@@ -14,7 +14,6 @@ use crate::shared::{
 #[component]
 pub(super) fn CommitsPanel(
     view: ViewerActiveView,
-    // TODO: use signal instead of drilled prop.
     onselect: Option<EventHandler<String>>,
     onclear: Option<EventHandler<()>>,
 ) -> Element {
@@ -48,6 +47,7 @@ pub(super) fn CommitsPanel(
                     let selected = selected_sha == Some(commit.sha.as_str());
                     rsx! {
                         CommitCard {
+                            key: "{commit.sha}",
                             commit: commit.clone(),
                             selected,
                             selection_pending,

@@ -210,6 +210,7 @@ impl std::fmt::Display for ViewerFailureCode {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ViewerCommitSelection {
     None,
+    // TODO: refactor `sha` to me a newtype in `models`.
     Pending { sha: String },
     Ready { sha: String },
     Error { sha: String, message: String },
@@ -229,6 +230,41 @@ pub struct ViewerActiveView {
     pub commit_selection: ViewerCommitSelection,
     pub footer: ViewerFooter,
     pub exclusions: Option<ViewerAppliedExclusions>,
+}
+
+// TODO: move this logic to a client context once a context to manage ViewerActiveView state is
+// created
+// TODO: make `commit_sha` into a newtype here and everywhere its used, including wire.
+/// Makes decision to handle commit selection in UI
+pub fn make_commit_selection_action(
+    commit_selection: &ViewerCommitSelection,
+    tab_id: u64,
+    commit_sha: String,
+) -> CommitSelectionAction {
+    match commit_selection {
+        ViewerCommitSelection::Ready { sha } if sha.as_str() == commit_sha.as_str() => {
+            CommitSelectionAction::UnselectCommit
+        }
+        ViewerCommitSelection::None
+        | ViewerCommitSelection::Error { .. }
+        | ViewerCommitSelection::Ready { .. } => {
+            CommitSelectionAction::FetchCommit(SelectViewerCommit {
+                tab_id,
+                sha: commit_sha,
+            })
+        }
+        ViewerCommitSelection::Pending { .. } => CommitSelectionAction::NoAction,
+    }
+}
+
+// TODO: move models to feature slice of diff workspace
+/// Contextualized action to for UI commit selection
+pub enum CommitSelectionAction {
+    /// Must unselect commit
+    UnselectCommit,
+    /// Must fetch given commit with `SelectViewerCommit` request
+    FetchCommit(SelectViewerCommit),
+    NoAction,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
