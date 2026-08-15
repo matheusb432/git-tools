@@ -1,10 +1,15 @@
-use anyhow::Context as _;
+use std::time::Duration;
+
+use anyhow::{Context as _, Result};
 use gtl_web_contracts::test_ids;
+use thirtyfour::{
+    By, WebDriver, WebElement, prelude::ElementQueryable as _, stringmatch::StringMatch,
+};
 
 use crate::support;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn user_refreshes_and_restores_a_saved_live_diff() -> anyhow::Result<()> {
+async fn user_refreshes_toggles_commit_and_restores_a_saved_live_diff() -> Result<()> {
     support::run_test("viewer-live-lifecycle", |session| {
         Box::pin(async move {
             let fixture = support::fixture::ViewerFixture::create(session.data_root())?;
@@ -23,6 +28,20 @@ async fn user_refreshes_and_restores_a_saved_live_diff() -> anyhow::Result<()> {
                 .await
                 .context("show the refreshed live diff")?;
 
+            let commit_card =
+                wait_for_commit_card_selection(session.driver(), "live view v2", false).await?;
+            commit_card
+                .click()
+                .await
+                .context("select the live view v2 commit")?;
+            let commit_card =
+                wait_for_commit_card_selection(session.driver(), "live view v2", true).await?;
+            commit_card
+                .click()
+                .await
+                .context("toggle off the live view v2 commit")?;
+            wait_for_commit_card_selection(session.driver(), "live view v2", false).await?;
+
             session
                 .restart()
                 .await
@@ -33,4 +52,23 @@ async fn user_refreshes_and_restores_a_saved_live_diff() -> anyhow::Result<()> {
         })
     })
     .await
+}
+
+async fn wait_for_commit_card_selection(
+    driver: &WebDriver,
+    subject: &str,
+    selected: bool,
+) -> Result<WebElement> {
+    let aria_pressed = if selected { "true" } else { "false" };
+    driver
+        .query(By::Css("[aria-label='Commits'] button[aria-pressed]"))
+        .ignore_errors(true)
+        .with_text(StringMatch::new(subject).partial())
+        .with_attribute("aria-pressed", aria_pressed)
+        .and_enabled()
+        .and_displayed()
+        .wait(support::wait::ASSERTION_TIMEOUT, Duration::from_millis(100))
+        .first()
+        .await
+        .with_context(|| format!("find {subject} commit card aria-pressed={aria_pressed}"))
 }

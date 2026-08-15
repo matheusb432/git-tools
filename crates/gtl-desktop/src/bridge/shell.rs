@@ -125,14 +125,14 @@ fn ready_active_view(
     };
     let commit_selection = match &selection {
         CommitSelectionSnapshot::None => ViewerCommitSelection::None,
-        CommitSelectionSnapshot::Pending { sha } => {
-            ViewerCommitSelection::Pending { sha: sha.clone() }
+        CommitSelectionSnapshot::Pending { id } => {
+            ViewerCommitSelection::Pending { id: id.clone() }
         }
-        CommitSelectionSnapshot::Ready { sha, .. } => {
-            ViewerCommitSelection::Ready { sha: sha.clone() }
+        CommitSelectionSnapshot::Ready { id, .. } => {
+            ViewerCommitSelection::Ready { id: id.clone() }
         }
-        CommitSelectionSnapshot::Error { sha, reason } => ViewerCommitSelection::Error {
-            sha: sha.clone(),
+        CommitSelectionSnapshot::Error { id, reason } => ViewerCommitSelection::Error {
+            id: id.clone(),
             message: reason.clone(),
         },
     };

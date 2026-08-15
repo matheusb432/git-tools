@@ -1,5 +1,6 @@
 //! Typed values exchanged by the desktop viewer and its Dioxus Web shell.
 
+use gtl_models::diffs::CommitId;
 use serde::{Deserialize, Serialize};
 
 use crate::recipes::Recipe;
@@ -150,8 +151,7 @@ pub struct ViewerFileSummary {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerCommitSummary {
-    pub sha: String,
-    pub abbreviated_sha: String,
+    pub id: CommitId,
     pub subject: String,
     pub body: String,
     pub date: String,
@@ -210,9 +210,9 @@ impl std::fmt::Display for ViewerFailureCode {
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ViewerCommitSelection {
     None,
-    Pending { sha: String },
-    Ready { sha: String },
-    Error { sha: String, message: String },
+    Pending { id: CommitId },
+    Ready { id: CommitId },
+    Error { id: CommitId, message: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,6 +229,40 @@ pub struct ViewerActiveView {
     pub commit_selection: ViewerCommitSelection,
     pub footer: ViewerFooter,
     pub exclusions: Option<ViewerAppliedExclusions>,
+}
+
+// TODO: move this logic to a client context once a context to manage ViewerActiveView state is
+// created
+/// Makes decision to handle commit selection in UI
+pub fn make_commit_selection_action(
+    commit_selection: &ViewerCommitSelection,
+    tab_id: u64,
+    commit_id: CommitId,
+) -> CommitSelectionAction {
+    match commit_selection {
+        ViewerCommitSelection::Ready { id } if id == &commit_id => {
+            CommitSelectionAction::UnselectCommit
+        }
+        ViewerCommitSelection::None
+        | ViewerCommitSelection::Error { .. }
+        | ViewerCommitSelection::Ready { .. } => {
+            CommitSelectionAction::FetchCommit(SelectViewerCommit {
+                tab_id,
+                id: commit_id,
+            })
+        }
+        ViewerCommitSelection::Pending { .. } => CommitSelectionAction::NoAction,
+    }
+}
+
+// TODO: move models to feature slice of diff workspace
+/// Contextualized action to for UI commit selection
+pub enum CommitSelectionAction {
+    /// Must unselect commit
+    UnselectCommit,
+    /// Must fetch given commit with `SelectViewerCommit` request
+    FetchCommit(SelectViewerCommit),
+    NoAction,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -444,7 +478,7 @@ pub struct ViewerTabRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectViewerCommit {
     pub tab_id: u64,
-    pub sha: String,
+    pub id: CommitId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

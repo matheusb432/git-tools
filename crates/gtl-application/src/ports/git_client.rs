@@ -4,7 +4,10 @@ use std::{
 };
 
 use gtl_models::{
-    diffs::Commit, managed::working_tree::CommitFile, tags::Tag, worktrees::Worktree,
+    diffs::{Commit, CommitId},
+    managed::working_tree::CommitFile,
+    tags::Tag,
+    worktrees::Worktree,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +33,7 @@ pub enum GitEffect<T> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitCommitReceipt {
     pub detail: String,
-    pub identity: Option<String>,
+    pub id: Option<CommitId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,7 +52,14 @@ pub struct GitWorkingTree {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergedBranch {
     pub name: String,
-    pub sha: String,
+    pub id: CommitId,
+}
+
+/// One validated commit and subject returned by a brief Git log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitLogEntry {
+    pub id: CommitId,
+    pub subject: String,
 }
 
 /// Classification of a path as a working-tree repository.
@@ -120,7 +130,11 @@ pub trait GitClient: Clone + Send + Sync + 'static {
 
     fn previous_checkout(&self, repo_path: &Path) -> anyhow::Result<Option<String>>;
 
-    fn brief_log(&self, repo_path: &Path, range: &str) -> anyhow::Result<GitEffect<Vec<String>>>;
+    fn brief_log(
+        &self,
+        repo_path: &Path,
+        range: &str,
+    ) -> anyhow::Result<GitEffect<Vec<CommitLogEntry>>>;
 
     fn diff_stat(
         &self,
@@ -207,23 +221,20 @@ pub trait GitClient: Clone + Send + Sync + 'static {
     /// Confirm `rev` resolves to a commit; errors when it does not.
     fn verify_commit(&self, repo_path: &Path, rev: &str) -> anyhow::Result<()>;
 
-    /// The abbreviated sha for `rev`.
-    fn short_ref(&self, repo_path: &Path, rev: &str) -> anyhow::Result<String>;
-
     /// The commits in `range`, newest first.
     fn log_commits(&self, repo_path: &Path, range: &str) -> anyhow::Result<Vec<Commit>>;
 
     /// A unified diff or changed-path listing for a revision range.
     fn diff(&self, repo_path: &Path, request: &GitDiffRequest) -> anyhow::Result<String>;
 
-    /// The repo's stable oldest root-commit sha, or `None` for a repo with no commits.
-    fn root_commit(&self, repo_path: &Path) -> Option<String>;
+    /// The repository's stable oldest root commit, or `None` when it has no commits.
+    fn root_commit(&self, repo_path: &Path) -> Option<CommitId>;
 
-    /// Resolve `rev` to its full 40-char sha.
-    fn resolve_sha(&self, repo_path: &Path, rev: &str) -> anyhow::Result<String>;
+    /// Resolves `rev` to its full validated commit ID.
+    fn resolve_commit_id(&self, repo_path: &Path, rev: &str) -> anyhow::Result<CommitId>;
 
     /// The best common ancestor of two revisions.
-    fn merge_base(&self, repo_path: &Path, left: &str, right: &str) -> anyhow::Result<String>;
+    fn merge_base(&self, repo_path: &Path, left: &str, right: &str) -> anyhow::Result<CommitId>;
 
     /// The committer date of `rev` as a display string; never fails (empty on error).
     fn committed_at(&self, repo_path: &Path, rev: &str) -> String;

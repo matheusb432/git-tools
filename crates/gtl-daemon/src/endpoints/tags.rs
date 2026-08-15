@@ -49,7 +49,7 @@ pub(crate) fn to_bump_request(
         preview: TagBumpPreview {
             repo_path,
             branch: preview.branch,
-            target_sha: preview.target_sha,
+            target_id: preview.target_id,
             level: from_level_dto(preview.level),
             base_tag: preview.base_tag,
             next_tag: preview.next_tag,
@@ -103,7 +103,7 @@ fn to_preview_dto(preview: TagBumpPreview) -> gtl_wire::tags::TagBumpPreview {
     gtl_wire::tags::TagBumpPreview {
         repo_path: preview.repo_path.to_string_lossy().into_owned(),
         branch: preview.branch,
-        target_sha: preview.target_sha,
+        target_id: preview.target_id,
         level: to_level_dto(preview.level),
         base_tag: preview.base_tag,
         next_tag: preview.next_tag,

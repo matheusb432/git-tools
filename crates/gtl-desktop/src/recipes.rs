@@ -10,6 +10,7 @@ use gtl_application::{
         prepare_recipe::{self, PrepareRecipe, PrepareRecipeError, PrepareRecipeOk},
     },
 };
+use gtl_models::diffs::CommitId;
 use gtl_wire::recipes::Recipe;
 
 use crate::{
@@ -292,7 +293,7 @@ impl ViewerApp {
     pub(crate) fn select_commit(
         &self,
         tab_id: ViewerTabId,
-        sha: &str,
+        commit_id: &CommitId,
     ) -> Result<(), SelectCommitError> {
         let reserved = {
             let mut session = self
@@ -300,7 +301,7 @@ impl ViewerApp {
                 .lock()
                 .map_err(|error| SelectCommitError::Failed(error.to_string()))?;
             let (ticket, repo_root, commit) = session
-                .begin_commit_selection(tab_id, sha)
+                .begin_commit_selection(tab_id, commit_id)
                 .map_err(SelectCommitError::Reserve)?;
             ReservedCommitPatchComputation {
                 repo_root,

@@ -32,7 +32,6 @@ pub(crate) struct ChangedLineSpans {
 pub(crate) fn changed_spans(old: &str, new: &str) -> ChangedLineSpans {
     let diff = TextDiff::from_chars(old, new);
     let mut spans = ChangedLineSpans::default();
-    // TODO: why usize? could use u32, instead.
     let mut old_idx = 0usize;
     let mut new_idx = 0usize;
     let mut saw_common = false;

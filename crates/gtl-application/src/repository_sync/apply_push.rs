@@ -159,9 +159,7 @@ pub fn execute(command: ApplyPush, git: &impl GitClient) -> Result<ApplyPushOk, 
                     ));
                 }
             };
-            progress.commit = CommitProgress::Created {
-                identity: receipt.identity,
-            };
+            progress.commit = CommitProgress::Created { id: receipt.id };
             match push(git, &target, &progress)? {
                 None => {
                     progress.pushed = true;
@@ -388,7 +386,7 @@ mod tests {
             result.progress,
             PushProgress {
                 commit: CommitProgress::Created {
-                    identity: Some("abc1234".into()),
+                    id: Some(crate::testing::commit_id_fixture("abc1234")),
                 },
                 pushed: false,
             }
@@ -422,7 +420,7 @@ mod tests {
             progress,
             PushProgress {
                 commit: CommitProgress::Created {
-                    identity: Some("abc1234".into()),
+                    id: Some(crate::testing::commit_id_fixture("abc1234")),
                 },
                 pushed: false,
             }

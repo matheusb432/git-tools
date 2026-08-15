@@ -1,5 +1,6 @@
 use std::num::NonZeroU32;
 
+pub use gtl_models::diffs::PinnedRange;
 use serde::{Deserialize, Serialize};
 
 /// The unchecked request form of a diff target selection.
@@ -24,16 +25,6 @@ pub enum DiffTargetRequestError {
     /// A latest-commit selection cannot contain zero commits.
     #[error("last count must be >= 1")]
     LastCountZero,
-}
-
-/// A commit range resolved to immutable SHAs at invocation time. `None` means
-/// "resolve symbolically at compute time".
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PinnedRange {
-    /// Full SHA of the range base (exclusive end).
-    pub base: String,
-    /// Full SHA of the range head (inclusive end).
-    pub head: String,
 }
 
 /// A validated diff target resolved from an invocation request.
@@ -96,50 +87,18 @@ impl From<&DiffTarget> for DiffTargetRequest {
     }
 }
 
-impl PinnedRange {
-    /// The exact range git computes over.
-    pub fn git_range(&self) -> String {
-        format!("{}..{}", self.base, self.head)
-    }
-
-    /// The abbreviated range shown in the footer/cmd (10-char SHAs — honest
-    /// and copy-reproducible, unlike a symbolic range that drifts).
-    pub fn display_range(&self) -> String {
-        format!("{}..{}", abbrev(&self.base), abbrev(&self.head))
-    }
-
-    /// The abbreviated base shown as the view's upstream label.
-    pub fn display_base(&self) -> String {
-        abbrev(&self.base).to_string()
-    }
-}
-
-/// First 10 chars of `sha` (char-boundary safe: pinned identities normally
-/// hold ASCII hex, but they arrive from untrusted recipe tokens).
-fn abbrev(sha: &str) -> &str {
-    sha.char_indices()
-        .nth(10)
-        .map_or(sha, |(index, _)| &sha[..index])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn pinned_range_display_is_short_identity_and_char_boundary_safe() {
-        let short = PinnedRange {
-            base: "abc".into(),
-            head: "def".into(),
-        };
-        assert_eq!(short.display_range(), "abc..def");
-
-        let pin = PinnedRange {
-            base: "ééééééééééé".into(),
-            head: "abc".into(),
-        };
-        assert_eq!(pin.display_base(), "éééééééééé");
-        assert_eq!(pin.display_range(), "éééééééééé..abc");
+    fn pinned_range_display_uses_the_supported_ten_character_width() {
+        let pin = crate::testing::pinned_range(
+            "1111111111111111111111111111111111111111",
+            "2222222222222222222222222222222222222222",
+        );
+        assert_eq!(pin.display_base(), "1111111111");
+        assert_eq!(pin.display_range(), "1111111111..2222222222");
     }
 
     #[test]
@@ -152,10 +111,10 @@ mod tests {
 
     #[test]
     fn models_targets_map_back_to_their_symbolic_requests() {
-        let pinned_range = Some(PinnedRange {
-            base: "base-sha".into(),
-            head: "head-sha".into(),
-        });
+        let pinned_range = Some(crate::testing::pinned_range(
+            "1111111111111111111111111111111111111111",
+            "2222222222222222222222222222222222222222",
+        ));
         let cases = [
             (
                 DiffTarget::Unpushed {

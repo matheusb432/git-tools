@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gtl_models::diffs::DiffKind;
+use gtl_models::diffs::{DiffKind, PinnedRange};
 use serde::{Deserialize, Serialize};
 
 pub use crate::diffs::compute_merge_diff::DEFAULT_BASE;
@@ -70,17 +70,21 @@ pub fn execute(
     let commit_count = view.commits.len();
     let file_count = view.files.len();
     let html = renderer.build_html(&view, computed.render_options, computed.theme.as_deref())?;
+    let commit_range = source
+        .resolve_commit_id(Path::new(&computed.top), &computed.base)
+        .ok()
+        .zip(
+            source
+                .resolve_commit_id(Path::new(&computed.top), "HEAD")
+                .ok(),
+        )
+        .map(|(base, head)| PinnedRange { base, head });
 
     let meta = ArtifactMeta {
         repo_root: PathBuf::from(&computed.top),
         repo_name: view.repo_name.clone(),
         kind: DiffKind::from_diff_range(&computed.diff_range),
-        base_sha: source
-            .resolve_sha(Path::new(&computed.top), &computed.base)
-            .unwrap_or_default(),
-        head_sha: source
-            .resolve_sha(Path::new(&computed.top), "HEAD")
-            .unwrap_or_default(),
+        commit_range,
         range_label: computed.diff_range.clone(),
         head_committed_at: source.committed_at(Path::new(&computed.top), "HEAD"),
         generated_at: clock.now_iso(),

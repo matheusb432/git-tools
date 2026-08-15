@@ -225,7 +225,7 @@ mod tests {
             result.results[0].action,
             PruneAction::WouldDelete(vec![PruneBranch {
                 name: "feature/done".into(),
-                sha: "bbbbbbb".into(),
+                id: crate::testing::commit_id_fixture("bbbbbbb"),
             }])
         );
     }
@@ -262,7 +262,7 @@ mod tests {
             api.deleted,
             vec![PruneBranch {
                 name: "feature/api".into(),
-                sha: "bbbbbbb".into(),
+                id: crate::testing::commit_id_fixture("bbbbbbb"),
             }]
         );
 
@@ -303,7 +303,7 @@ mod tests {
             applied.deleted,
             vec![PruneBranch {
                 name: "feature/first".into(),
-                sha: "bbbbbbb".into(),
+                id: crate::testing::commit_id_fixture("bbbbbbb"),
             }]
         );
         assert_eq!(applied.failed, Vec::<PruneFailure>::new());

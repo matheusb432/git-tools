@@ -25,14 +25,18 @@ impl ArtifactStore for StoreArtifacts {
         let canonical =
             std::fs::canonicalize(&meta.repo_root).unwrap_or_else(|_| meta.repo_root.clone());
         let root_commit = crate::git_capture::root_commit(&meta.repo_root);
-        let repo_id = crate::store::repo_id(root_commit.as_deref(), &canonical);
+        let repo_id = crate::store::repo_id(root_commit.as_ref(), &canonical);
+        let (base_sha, head_sha) = meta.commit_range.as_ref().map_or_else(
+            || (String::new(), String::new()),
+            |range| (range.base.to_string(), range.head.to_string()),
+        );
         let sidecar = crate::store::Sidecar {
             repo_id: repo_id.clone(),
             repo_name: meta.repo_name.clone(),
             repo_root: meta.repo_root.to_string_lossy().into_owned(),
             kind: meta.kind,
-            base_sha: meta.base_sha.clone(),
-            head_sha: meta.head_sha.clone(),
+            base_sha,
+            head_sha,
             range_label: meta.range_label.clone(),
             head_committed_at: meta.head_committed_at.clone(),
             generated_at: meta.generated_at.clone(),
@@ -61,7 +65,7 @@ impl ArtifactStore for StoreArtifacts {
         let canonical =
             std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
         let repo_id = crate::store::repo_id(
-            crate::git_capture::root_commit(repo_root).as_deref(),
+            crate::git_capture::root_commit(repo_root).as_ref(),
             &canonical,
         );
         Ok(crate::store::lookup_by_range(store_root, &repo_id, key))
@@ -94,7 +98,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::store::Sidecar;
+    use crate::{store::Sidecar, testing::pinned_range};
 
     #[test]
     fn place_persists_render_options_from_artifact_metadata() {
@@ -103,8 +107,7 @@ mod tests {
             repo_root: dir.path().to_path_buf(),
             repo_name: "git-tools".into(),
             kind: DiffKind::TwoDot,
-            base_sha: "aaa".into(),
-            head_sha: "bbb".into(),
+            commit_range: Some(pinned_range("a", "b")),
             range_label: "main..HEAD".into(),
             head_committed_at: "2026-07-03T00:00:00Z".into(),
             generated_at: "2026-07-03T00:01:00Z".into(),

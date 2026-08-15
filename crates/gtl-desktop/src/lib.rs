@@ -8,6 +8,8 @@ mod presentation;
 mod recipe_worker;
 mod recipes;
 mod session;
+#[cfg(test)]
+mod testing;
 mod window_activation;
 
 use std::sync::{

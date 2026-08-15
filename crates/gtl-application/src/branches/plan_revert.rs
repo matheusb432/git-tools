@@ -2,6 +2,8 @@
 
 use std::path::{Path, PathBuf};
 
+use gtl_models::diffs::CommitId;
+
 use crate::ports::{GitClient, GitEffect};
 
 /// Requests a read-only branch recovery plan for one repository path.
@@ -16,7 +18,7 @@ pub struct PlanRevert {
 pub struct RevertTarget {
     pub top: PathBuf,
     pub onto: String,
-    pub prior_sha: String,
+    pub prior_id: CommitId,
 }
 
 /// Represents a refused or ready branch recovery.
@@ -85,7 +87,7 @@ pub fn execute(query: PlanRevert, git: &impl GitClient) -> Result<PlanRevertOk, 
     }
 
     let prior_ref = format!("{onto}@{{1}}");
-    let Some(prior_sha) = git.resolve_sha(&top, &prior_ref).ok() else {
+    let Some(prior_id) = git.resolve_commit_id(&top, &prior_ref).ok() else {
         return Ok(PlanRevertOk::Refused(format!(
             "no prior position for '{onto}' in the reflog"
         )));
@@ -100,7 +102,7 @@ pub fn execute(query: PlanRevert, git: &impl GitClient) -> Result<PlanRevertOk, 
     Ok(PlanRevertOk::Ready(RevertTarget {
         top,
         onto,
-        prior_sha,
+        prior_id,
     }))
 }
 
@@ -154,7 +156,7 @@ mod tests {
             PlanRevertOk::Ready(RevertTarget {
                 top: "/home/me/repo".into(),
                 onto: "main".into(),
-                prior_sha: "abc123".into(),
+                prior_id: crate::testing::commit_id_fixture("abc123"),
             })
         );
     }

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gtl_models::tags::Tag;
+use gtl_models::{diffs::CommitId, tags::Tag};
 
 use super::{BumpLevel, git_command_error::GitCommandError, version::decide_tag_version};
 use crate::ports::{GitClient, GitEffect};
@@ -21,7 +21,7 @@ pub struct DryRunTagBump {
 pub struct TagBumpPreview {
     pub repo_path: PathBuf,
     pub branch: String,
-    pub target_sha: String,
+    pub target_id: CommitId,
     pub level: BumpLevel,
     pub base_tag: String,
     pub next_tag: String,
@@ -103,12 +103,12 @@ fn read_preview(
         Err(rejection) => return Ok(Err(rejection.to_string())),
     };
     let branch = git.current_branch(&repo_path)?;
-    let target_sha = git.resolve_sha(&repo_path, "HEAD")?;
+    let target_id = git.resolve_commit_id(&repo_path, "HEAD")?;
 
     Ok(Ok(TagBumpPreview {
         repo_path,
         branch,
-        target_sha,
+        target_id,
         level: query.level,
         base_tag: decision.base_tag,
         next_tag: decision.next_tag,
@@ -138,9 +138,9 @@ mod tests {
     fn pushed_preview_uses_local_tags_without_querying_origin() {
         let git = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("/repo"),
-            ScriptedGitClient::applied("commit-a\t\t\tv1.2.3\t"),
+            ScriptedGitClient::applied("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t\tv1.2.3\t\t100"),
             ScriptedGitClient::applied("main"),
-            ScriptedGitClient::applied("target-sha"),
+            ScriptedGitClient::applied("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
         ]);
 
         let result = execute(

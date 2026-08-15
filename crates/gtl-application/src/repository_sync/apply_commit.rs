@@ -107,9 +107,7 @@ pub fn execute(
             ));
         }
     };
-    progress = CommitProgress::Created {
-        identity: receipt.identity,
-    };
+    progress = CommitProgress::Created { id: receipt.id };
 
     Ok(ApplyCommitOk::new(
         CommitStatus::Committed,
@@ -235,7 +233,7 @@ mod tests {
         assert_eq!(
             result.progress,
             CommitProgress::Created {
-                identity: Some("abc1234".into()),
+                id: Some(crate::testing::commit_id_fixture("abc1234")),
             }
         );
     }

@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use gtl_models::tags::Tag;
 
-pub(super) const LOCAL_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=2)\t%(contents:lines=1)\t%(creatordate:unix)";
+use super::try_commit_id_fixture;
+
+pub(super) const LOCAL_TAG_FORMAT_ARG: &str = "--format=%(objectname)\t%(*objectname)\t%(refname:strip=2)\t%(contents:lines=1)\t%(creatordate:unix)";
 
 pub(super) fn parse_remote_refs(stdout: &str) -> BTreeMap<String, String> {
     stdout
@@ -22,10 +24,9 @@ pub(super) fn parse_refs(stdout: &str) -> BTreeMap<String, Tag> {
     stdout
         .lines()
         .filter_map(|line| {
-            let mut fields = line.splitn(5, '\t');
+            let mut fields = line.splitn(4, '\t');
             let object = fields.next()?.to_string();
             let peeled_commit = fields.next()?.to_string();
-            let peeled_short = fields.next()?.to_string();
             let name = fields.next()?.to_string();
             let message_and_date = fields.next().unwrap_or_default();
             let (message, created_at) = match message_and_date.rsplit_once('\t') {
@@ -45,25 +46,14 @@ pub(super) fn parse_refs(stdout: &str) -> BTreeMap<String, Tag> {
             } else {
                 object.clone()
             };
-            let commit_short = if peeled_short.is_empty() {
-                object.chars().take(7).collect()
-            } else {
-                peeled_short
-            };
+            let commit = try_commit_id_fixture(&commit).ok()?;
             let message = annotated
                 .then(|| message.trim().to_string())
                 .filter(|message| !message.is_empty());
             let tag = if annotated {
-                Tag::annotated(
-                    name.clone(),
-                    object,
-                    commit,
-                    commit_short,
-                    created_at,
-                    message,
-                )
+                Tag::annotated(name.clone(), object, commit, created_at, message)
             } else {
-                Tag::lightweight(name.clone(), commit, commit_short, created_at)
+                Tag::lightweight(name.clone(), commit, created_at)
             };
             Some((name, tag))
         })

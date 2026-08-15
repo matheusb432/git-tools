@@ -17,4 +17,6 @@ pub mod managed_repo_client;
 pub mod push_ledger;
 pub mod repo_discovery;
 pub mod store;
+#[cfg(test)]
+mod testing;
 pub mod user_config;

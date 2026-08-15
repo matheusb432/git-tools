@@ -1,5 +1,6 @@
 //! Wire DTOs for the stateless tag-bump dry-run and mutation protocol.
 
+use gtl_models::diffs::CommitId;
 use serde::{Deserialize, Serialize};
 
 /// The `SemVer` component advanced by a tag bump.
@@ -25,7 +26,7 @@ pub struct DryRunTagBumpRequest {
 pub struct TagBumpPreview {
     pub repo_path: String,
     pub branch: String,
-    pub target_sha: String,
+    pub target_id: CommitId,
     pub level: TagBumpLevelDto,
     pub base_tag: String,
     pub next_tag: String,
@@ -62,12 +63,13 @@ mod tests {
     use serde_json::json;
 
     use super::{BumpTagRequest, DryRunTagBumpRequest, TagBumpLevelDto, TagBumpPreview};
+    use crate::testing::commit_id;
 
     fn preview() -> TagBumpPreview {
         TagBumpPreview {
             repo_path: "/repo".into(),
             branch: "main".into(),
-            target_sha: "abc123".into(),
+            target_id: commit_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             level: TagBumpLevelDto::Minor,
             base_tag: "v0.30.0".into(),
             next_tag: "v0.31.0".into(),
@@ -124,7 +126,7 @@ mod tests {
                 "next_tag",
                 "push",
                 "repo_path",
-                "target_sha",
+                "target_id",
             ]
         );
     }

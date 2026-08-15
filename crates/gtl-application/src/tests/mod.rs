@@ -17,20 +17,62 @@ use std::{
     },
 };
 
+#[cfg(test)]
+use gtl_models::diffs::PinnedRange;
 use gtl_models::{
-    diffs::{Commit, DiffExclusions},
+    diffs::{Commit, CommitId, CommitIdError, DiffExclusions},
     managed::ManagedRepo,
     settings::UserSettings,
     viewer::RenderOptions,
 };
 
 use crate::ports::{
-    ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, GitClient, GitCommitReceipt,
-    GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState, GitWorkingTree,
-    HistoryRecord, HtmlRenderer, LedgerEntry, MergedBranch, PlacedArtifact, ProjectClient,
-    ProjectClientError, PushLedger, RepoDiscovery, UserSettingsEditError, UserSettingsLoadError,
-    UserSettingsStore,
+    ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, CommitLogEntry, GitClient,
+    GitCommitReceipt, GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState,
+    GitWorkingTree, HistoryRecord, HtmlRenderer, LedgerEntry, MergedBranch, PlacedArtifact,
+    ProjectClient, ProjectClientError, PushLedger, RepoDiscovery, UserSettingsEditError,
+    UserSettingsLoadError, UserSettingsStore,
 };
+
+fn try_commit_id_fixture(raw: &str) -> Result<CommitId, CommitIdError> {
+    if let Ok(id) = raw.try_into() {
+        return Ok(id);
+    }
+    let seed = if !raw.is_empty() && raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        raw.to_ascii_lowercase()
+    } else {
+        let encoded = raw
+            .bytes()
+            .flat_map(|byte| {
+                [
+                    "0123456789abcdef".as_bytes()[usize::from(byte >> 4)],
+                    "0123456789abcdef".as_bytes()[usize::from(byte & 0x0f)],
+                ]
+            })
+            .map(char::from)
+            .collect::<String>();
+        if encoded.is_empty() {
+            "0".to_owned()
+        } else {
+            encoded
+        }
+    };
+    let value = seed.chars().cycle().take(40).collect::<String>();
+    value.try_into()
+}
+
+#[cfg(test)]
+pub(crate) fn commit_id_fixture(raw: &str) -> CommitId {
+    try_commit_id_fixture(raw).expect("generated fixture commit ID is valid")
+}
+
+#[cfg(test)]
+pub(crate) fn pinned_range(base: &str, head: &str) -> PinnedRange {
+    PinnedRange {
+        base: commit_id_fixture(base),
+        head: commit_id_fixture(head),
+    }
+}
 
 fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
@@ -170,7 +212,7 @@ pub struct FakeGitClient {
     pub diff_output: String,
     pub full_diff_output: String,
     pub known_revs: Vec<String>,
-    pub shas: HashMap<String, String>,
+    pub commit_ids: HashMap<String, CommitId>,
     pub committed_at: String,
     pub repository_state: Option<GitRepositoryState>,
     pub repository_probe_error: Option<String>,
@@ -312,7 +354,11 @@ impl GitClient for FakeGitClient {
     fn previous_checkout(&self, _repo: &Path) -> anyhow::Result<Option<String>> {
         Ok(None)
     }
-    fn brief_log(&self, _repo: &Path, _range: &str) -> anyhow::Result<GitEffect<Vec<String>>> {
+    fn brief_log(
+        &self,
+        _repo: &Path,
+        _range: &str,
+    ) -> anyhow::Result<GitEffect<Vec<CommitLogEntry>>> {
         Ok(GitEffect::Applied(Vec::new()))
     }
     fn diff_stat(
@@ -329,7 +375,7 @@ impl GitClient for FakeGitClient {
     fn commit(&self, _repo: &Path, _message: &str) -> anyhow::Result<GitEffect<GitCommitReceipt>> {
         Ok(GitEffect::Applied(GitCommitReceipt {
             detail: "committed".into(),
-            identity: None,
+            id: None,
         }))
     }
     fn switch(&self, _repo: &Path, _branch: &str) -> anyhow::Result<GitEffect<()>> {
@@ -421,9 +467,6 @@ impl GitClient for FakeGitClient {
             anyhow::bail!("unknown revision {rev}")
         }
     }
-    fn short_ref(&self, _repo: &Path, rev: &str) -> anyhow::Result<String> {
-        Ok(rev.to_string())
-    }
     fn log_commits(&self, repo_path: &Path, _range: &str) -> anyhow::Result<Vec<Commit>> {
         Ok(self
             .per_repo
@@ -450,18 +493,17 @@ impl GitClient for FakeGitClient {
         }
         Ok(self.scripted_diff(repo_path))
     }
-    fn root_commit(&self, _repo: &Path) -> Option<String> {
-        Some("rootsha".into())
+    fn root_commit(&self, _repo: &Path) -> Option<CommitId> {
+        try_commit_id_fixture("root").ok()
     }
-    fn resolve_sha(&self, _repo: &Path, rev: &str) -> anyhow::Result<String> {
-        Ok(self
-            .shas
+    fn resolve_commit_id(&self, _repo: &Path, rev: &str) -> anyhow::Result<CommitId> {
+        self.commit_ids
             .get(rev)
             .cloned()
-            .unwrap_or_else(|| format!("sha-{rev}")))
+            .map_or_else(|| try_commit_id_fixture(rev).map_err(Into::into), Ok)
     }
-    fn merge_base(&self, _repo: &Path, left: &str, right: &str) -> anyhow::Result<String> {
-        Ok(format!("merge-base-{left}-{right}"))
+    fn merge_base(&self, _repo: &Path, left: &str, right: &str) -> anyhow::Result<CommitId> {
+        try_commit_id_fixture(&format!("merge-base-{left}-{right}")).map_err(Into::into)
     }
     fn committed_at(&self, _repo: &Path, _rev: &str) -> String {
         self.committed_at.clone()
@@ -873,17 +915,17 @@ impl GitClient for ScriptedGitClient {
                 "for-each-ref",
                 "--merged",
                 into,
-                "--format=%(refname:short) %(objectname:short)",
+                "--format=%(refname:short) %(objectname)",
                 "refs/heads/",
             ],
             |output| {
                 output
                     .lines()
                     .filter_map(|line| {
-                        let (name, sha) = line.trim().split_once(char::is_whitespace)?;
+                        let (name, raw_id) = line.trim().split_once(char::is_whitespace)?;
                         Some(MergedBranch {
                             name: name.to_string(),
-                            sha: sha.trim().to_string(),
+                            id: try_commit_id_fixture(raw_id.trim()).ok()?,
                         })
                     })
                     .collect()
@@ -894,12 +936,15 @@ impl GitClient for ScriptedGitClient {
         &self,
         repo_path: &Path,
     ) -> anyhow::Result<GitEffect<Vec<gtl_models::worktrees::Worktree>>> {
-        scripted_effect(
+        match scripted_effect(
             self,
             repo_path,
             &["worktree", "list", "--porcelain"],
             worktrees::parse,
-        )
+        )? {
+            GitEffect::Applied(worktrees) => worktrees.map(GitEffect::Applied),
+            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
+        }
     }
     fn local_tags(
         &self,
@@ -927,20 +972,35 @@ impl GitClient for ScriptedGitClient {
     fn previous_checkout(&self, repo_path: &Path) -> anyhow::Result<Option<String>> {
         scripted_capture(self, repo_path, &["rev-parse", "@{-1}"])
     }
-    fn brief_log(&self, repo_path: &Path, range: &str) -> anyhow::Result<GitEffect<Vec<String>>> {
-        scripted_effect(
+    fn brief_log(
+        &self,
+        repo_path: &Path,
+        range: &str,
+    ) -> anyhow::Result<GitEffect<Vec<CommitLogEntry>>> {
+        match scripted_effect(
             self,
             repo_path,
-            &["log", "--format=%h %s", range],
-            |output| {
+            &["log", "--format=%H%x1f%s", range],
+            |output| -> anyhow::Result<Vec<CommitLogEntry>> {
                 output
                     .lines()
                     .map(str::trim)
                     .filter(|line| !line.is_empty())
-                    .map(str::to_string)
+                    .map(|line| {
+                        let (raw_id, subject) = line.split_once('\x1f').ok_or_else(|| {
+                            anyhow::anyhow!("git log entry omitted its subject delimiter")
+                        })?;
+                        Ok(CommitLogEntry {
+                            id: try_commit_id_fixture(raw_id)?,
+                            subject: subject.trim().to_owned(),
+                        })
+                    })
                     .collect()
             },
-        )
+        )? {
+            GitEffect::Applied(commits) => commits.map(GitEffect::Applied),
+            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
+        }
     }
     fn diff_stat(
         &self,
@@ -968,7 +1028,7 @@ impl GitClient for ScriptedGitClient {
                 detail: last_non_empty_line(output)
                     .unwrap_or("committed")
                     .to_string(),
-                identity: commit_identity(output),
+                id: commit_identity(output),
             }
         })
     }
@@ -1077,10 +1137,6 @@ impl GitClient for ScriptedGitClient {
         .then_some(())
         .ok_or_else(|| anyhow::anyhow!("not a commit"))
     }
-    fn short_ref(&self, repo_path: &Path, revision: &str) -> anyhow::Result<String> {
-        scripted_capture(self, repo_path, &["rev-parse", "--short", revision])?
-            .ok_or_else(|| anyhow::anyhow!("unknown revision"))
-    }
     fn log_commits(&self, repo_path: &Path, range: &str) -> anyhow::Result<Vec<Commit>> {
         let Some(raw) = scripted_capture(
             self,
@@ -1095,13 +1151,13 @@ impl GitClient for ScriptedGitClient {
         else {
             return Ok(Vec::new());
         };
-        Ok(raw
-            .split('\u{1e}')
-            .filter_map(|record| {
+        raw.split('\u{1e}')
+            .map(str::trim)
+            .filter(|record| !record.is_empty())
+            .map(|record| -> Result<Commit, CommitIdError> {
                 let mut fields = record.trim().split('\u{1f}');
-                let sha = fields.next()?.trim();
-                (!sha.is_empty()).then(|| Commit {
-                    sha: sha.chars().take(9).collect(),
+                Ok(Commit {
+                    id: fields.next().unwrap_or_default().trim().try_into()?,
                     subject: fields.next().unwrap_or_default().trim().to_string(),
                     body: fields.next().unwrap_or_default().trim().to_string(),
                     date: fields.next().unwrap_or_default().trim().to_string(),
@@ -1110,24 +1166,33 @@ impl GitClient for ScriptedGitClient {
                         .next()
                         .unwrap_or_default()
                         .split_whitespace()
-                        .map(|parent| parent.chars().take(9).collect())
-                        .collect(),
+                        .map(TryInto::try_into)
+                        .collect::<Result<Vec<_>, _>>()?,
                 })
             })
-            .collect())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
     fn diff(&self, _repo: &Path, _request: &GitDiffRequest) -> anyhow::Result<String> {
         anyhow::bail!("ScriptedGitClient does not implement diff output")
     }
-    fn root_commit(&self, _repo: &Path) -> Option<String> {
+    fn root_commit(&self, _repo: &Path) -> Option<CommitId> {
         None
     }
-    fn resolve_sha(&self, repo_path: &Path, revision: &str) -> anyhow::Result<String> {
-        scripted_capture(self, repo_path, &["rev-parse", revision])?
-            .ok_or_else(|| anyhow::anyhow!("unknown revision"))
+    fn resolve_commit_id(&self, repo_path: &Path, revision: &str) -> anyhow::Result<CommitId> {
+        scripted_capture(
+            self,
+            repo_path,
+            &["rev-parse", &format!("{revision}^{{commit}}")],
+        )?
+        .map(|raw| try_commit_id_fixture(&raw))
+        .transpose()?
+        .ok_or_else(|| anyhow::anyhow!("unknown revision"))
     }
-    fn merge_base(&self, repo_path: &Path, left: &str, right: &str) -> anyhow::Result<String> {
+    fn merge_base(&self, repo_path: &Path, left: &str, right: &str) -> anyhow::Result<CommitId> {
         scripted_capture(self, repo_path, &["merge-base", left, right])?
+            .map(|raw| try_commit_id_fixture(&raw))
+            .transpose()?
             .ok_or_else(|| anyhow::anyhow!("no merge base"))
     }
     fn committed_at(&self, _repo: &Path, _revision: &str) -> String {
@@ -1135,7 +1200,7 @@ impl GitClient for ScriptedGitClient {
     }
 }
 
-fn commit_identity(output: &str) -> Option<String> {
+fn commit_identity(output: &str) -> Option<CommitId> {
     output.lines().rev().find_map(|line| {
         let line = strip_ansi_csi(line);
         let (header, subject) = line.trim().strip_prefix('[')?.split_once(']')?;
@@ -1143,9 +1208,7 @@ fn commit_identity(output: &str) -> Option<String> {
             return None;
         }
         let identity = header.split_whitespace().next_back()?;
-        ((4..=64).contains(&identity.len())
-            && identity.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .then(|| identity.to_string())
+        try_commit_id_fixture(identity).ok()
     })
 }
 

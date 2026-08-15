@@ -94,8 +94,7 @@ pub fn project_diff_view(
             .commits
             .iter()
             .map(|commit| ViewerCommitSummary {
-                sha: commit.sha.clone(),
-                abbreviated_sha: commit.sha.chars().take(10).collect(),
+                id: commit.id.clone(),
                 subject: commit.subject.clone(),
                 body: commit.body.clone(),
                 date: commit.date.clone(),
@@ -210,7 +209,7 @@ const fn viewer_file_status(status: FileStatus) -> ViewerFileStatus {
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::diffs::{AppliedExclusions, Commit};
+    use gtl_models::diffs::{AppliedExclusions, CommitIdAbbreviation};
     use gtl_wire::viewer::{
         LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerApiError,
         ViewerCommitSelection, ViewerDiffCursor, ViewerDiffDensity, ViewerDiffFileId,
@@ -242,12 +241,14 @@ mod tests {
     fn view() -> View {
         View {
             repo_name: "git-tools".into(),
-            commits: vec![Commit {
-                sha: "0123456789abcdef0123456789abcdef01234567".into(),
-                subject: "subject".into(),
-                parents: vec!["one".into(), "two".into()],
-                ..Commit::default()
-            }],
+            commits: vec![testing::diffs::commit_with(
+                "0123456789abcdef0123456789abcdef01234567",
+                "subject",
+                &[
+                    "1111111111111111111111111111111111111111",
+                    "2222222222222222222222222222222222222222",
+                ],
+            )],
             files: vec![
                 FileDiff {
                     path: "src/a b.rs".into(),
@@ -313,7 +314,12 @@ mod tests {
         assert_eq!(active.files[0].anchor_id, "f-src-a-b-rs");
         assert!(active.files[0].can_open_in_editor);
         assert!(!active.files[1].can_open_in_editor);
-        assert_eq!(active.commits[0].abbreviated_sha, "0123456789");
+        assert_eq!(
+            active.commits[0]
+                .id
+                .abbreviated(CommitIdAbbreviation::TenCharacters),
+            "0123456789"
+        );
         assert!(active.commits[0].is_merge);
         assert_eq!(
             active.exclusions.expect("applied exclusions").hidden_paths,

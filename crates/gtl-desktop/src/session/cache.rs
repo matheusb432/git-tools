@@ -127,12 +127,16 @@ fn view_weight(view: &View) -> usize {
 }
 
 fn commit_weight(commit: &Commit) -> usize {
-    string_weight(&commit.sha)
+    commit.id.as_ref().len()
         + string_weight(&commit.subject)
         + string_weight(&commit.body)
         + string_weight(&commit.date)
         + string_weight(&commit.iso)
-        + commit.parents.iter().map(string_weight).sum::<usize>()
+        + commit
+            .parents
+            .iter()
+            .map(|parent| parent.as_ref().len())
+            .sum::<usize>()
 }
 
 fn file_weight(file: &FileDiff) -> usize {

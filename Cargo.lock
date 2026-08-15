@@ -3593,6 +3593,7 @@ version = "0.1.0"
 dependencies = [
  "nutype",
  "serde",
+ "serde_json",
  "strum",
  "thiserror 2.0.19",
 ]
@@ -3615,6 +3616,7 @@ dependencies = [
  "dioxus",
  "dioxus-primitives",
  "dioxus-sdk-time",
+ "gtl-models",
  "gtl-parser",
  "gtl-web-contracts",
  "gtl-wire",
@@ -3637,6 +3639,7 @@ name = "gtl-wire"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "gtl-models",
  "serde",
  "serde_json",
  "serde_with",
@@ -8932,9 +8935,9 @@ dependencies = [
 
 [[package]]
 name = "sample_project"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5dd66e9da64a1230c3fcb1a032e39009dbbaa374a8d624e2efd1859ffb9b8c26"
+checksum = "b6e31a9b48b7a9ec1aecf6b563e087267339e8afc678ead5fc9b918e00582536"
 dependencies = [
  "command-group",
  "console",

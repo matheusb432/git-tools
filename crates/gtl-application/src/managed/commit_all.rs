@@ -1,6 +1,9 @@
 //! Commits dirty working trees across already-resolved managed repositories.
 
-use gtl_models::managed::{ManagedRepo, working_tree::CommitFile};
+use gtl_models::{
+    diffs::CommitId,
+    managed::{ManagedRepo, working_tree::CommitFile},
+};
 
 use super::working_tree;
 use crate::ports::{GitClient, GitEffect};
@@ -39,7 +42,7 @@ pub struct CommitResult {
     pub files: Vec<CommitFile>,
     pub action: CommitAction,
     pub detail: String,
-    pub commit: Option<String>,
+    pub id: Option<CommitId>,
     /// True when `git add -A` completed successfully for this attempt.
     pub staged: bool,
 }
@@ -134,7 +137,7 @@ fn commit_one(
         files: state.files,
         action: CommitAction::Clean,
         detail: String::new(),
-        commit: None,
+        id: None,
         staged: false,
     };
 
@@ -191,7 +194,7 @@ fn commit_one(
         GitEffect::Applied(receipt) => {
             result.action = CommitAction::Committed;
             result.detail = receipt.detail;
-            result.commit = receipt.identity;
+            result.id = receipt.id;
         }
         GitEffect::Rejected(detail) => {
             result.action = CommitAction::Fail;
@@ -274,7 +277,7 @@ mod tests {
                 }],
                 action: CommitAction::Committed,
                 detail: "[main abc1234] save".into(),
-                commit: Some("abc1234".into()),
+                id: Some(crate::testing::commit_id_fixture("abc1234")),
                 staged: true,
             }]
         );
@@ -291,7 +294,10 @@ mod tests {
         let result = execute(commit(vec![repo("api")], Some("save"), false), &git)
             .expect("Git transport remains available");
 
-        assert_eq!(result.results[0].commit.as_deref(), Some("abc1234"));
+        assert_eq!(
+            result.results[0].id,
+            Some(crate::testing::commit_id_fixture("abc1234"))
+        );
     }
 
     #[test]
@@ -307,7 +313,10 @@ mod tests {
         let result = execute(commit(vec![repo("api")], Some("save"), false), &git)
             .expect("Git transport remains available");
 
-        assert_eq!(result.results[0].commit.as_deref(), Some("abc1234"));
+        assert_eq!(
+            result.results[0].id,
+            Some(crate::testing::commit_id_fixture("abc1234"))
+        );
     }
 
     #[test]
@@ -338,7 +347,7 @@ mod tests {
         assert_eq!(result.exit, CommitExit::Warn);
         assert_eq!(result.results[0].action, CommitAction::WouldCommit);
         assert_eq!(result.results[0].detail, "1 change(s)");
-        assert_eq!(result.results[0].commit, None);
+        assert_eq!(result.results[0].id, None);
     }
 
     #[test]
@@ -429,7 +438,10 @@ mod tests {
         assert_eq!(completed_results.len(), 1);
         assert_eq!(completed_results[0].name, "api");
         assert_eq!(completed_results[0].action, CommitAction::Committed);
-        assert_eq!(completed_results[0].commit.as_deref(), Some("abc1234"));
+        assert_eq!(
+            completed_results[0].id,
+            Some(crate::testing::commit_id_fixture("abc1234"))
+        );
         assert_eq!(failed_result, None);
         assert_eq!(source.to_string(), "git transport unavailable");
     }

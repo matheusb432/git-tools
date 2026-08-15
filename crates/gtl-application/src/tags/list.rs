@@ -1,8 +1,8 @@
 //! Lists local tags as structured commit groups.
 
-use std::{cmp::Ordering, collections::BTreeMap, path::PathBuf};
+use std::{cmp::Ordering, collections::HashMap, path::PathBuf};
 
-use gtl_models::tags::Tag;
+use gtl_models::{diffs::CommitId, tags::Tag};
 
 use super::{compare_tags, git_command_error::GitCommandError, refs};
 use crate::ports::GitClient;
@@ -86,12 +86,9 @@ pub fn execute(query: ListTags, git: &impl GitClient) -> Result<ListTagsOk, List
 }
 
 fn group_tags(tags: Vec<Tag>) -> Vec<TagGroup> {
-    let mut by_commit = BTreeMap::<String, Vec<Tag>>::new();
+    let mut by_commit = HashMap::<CommitId, Vec<Tag>>::new();
     for tag in tags {
-        by_commit
-            .entry(tag.commit().to_string())
-            .or_default()
-            .push(tag);
+        by_commit.entry(tag.commit().clone()).or_default().push(tag);
     }
 
     let mut groups = by_commit
@@ -150,15 +147,18 @@ mod tests {
         Tag::annotated(
             name.into(),
             object.into(),
-            commit.into(),
-            commit.into(),
+            crate::testing::commit_id_fixture(commit),
             Some(created_at),
             Some(message.into()),
         )
     }
 
     fn lightweight_tag(name: &str, commit: &str, created_at: i64) -> Tag {
-        Tag::lightweight(name.into(), commit.into(), commit.into(), Some(created_at))
+        Tag::lightweight(
+            name.into(),
+            crate::testing::commit_id_fixture(commit),
+            Some(created_at),
+        )
     }
 
     #[test]
@@ -262,8 +262,7 @@ mod tests {
         let canonical = Tag::annotated(
             "v1.0.0".into(),
             "tag-object".into(),
-            "commit-a".into(),
-            "commit-a".into(),
+            crate::testing::commit_id_fixture("commit-a"),
             Some(100),
             None,
         );

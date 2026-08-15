@@ -57,9 +57,8 @@ const EDGE_POLICIES: [EdgePolicy; 4] = [
     },
     EdgePolicy {
         from: "gtl-wire",
-        label: "gtl-wire stay wire-only",
+        label: "gtl-wire stays transport-only",
         forbidden: &[
-            "gtl-models",
             "gtl-application",
             "gtl-benchmarks",
             "gtl-infra",
@@ -75,7 +74,7 @@ const EDGE_POLICIES: [EdgePolicy; 4] = [
             "sqlx",
         ],
         forbid_workspace_packages: false,
-        reason: "wire DTOs must not depend on product behavior or runtime adapters",
+        reason: "wire DTOs may depend on pure model values, not use cases, adapters, frameworks, or process roots",
     },
     EdgePolicy {
         from: "gtl-parser",
@@ -206,6 +205,25 @@ mod tests {
         assert!(dependency_is_forbidden(
             models_policy,
             "reqwest",
+            &BTreeSet::new()
+        ));
+    }
+
+    #[test]
+    fn wire_policy_accepts_models_and_rejects_application_behavior() {
+        let wire_policy = EDGE_POLICIES
+            .iter()
+            .find(|policy| policy.from == "gtl-wire")
+            .expect("wire policy should exist");
+
+        assert!(!dependency_is_forbidden(
+            wire_policy,
+            "gtl-models",
+            &BTreeSet::new()
+        ));
+        assert!(dependency_is_forbidden(
+            wire_policy,
+            "gtl-application",
             &BTreeSet::new()
         ));
     }

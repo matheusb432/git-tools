@@ -200,9 +200,15 @@ mod tests {
     fn git() -> FakeGitClient {
         FakeGitClient {
             top_level: Some("/repo".into()),
-            shas: [
-                ("@{u}".to_string(), "base".to_string()),
-                ("HEAD".to_string(), "head".to_string()),
+            commit_ids: [
+                (
+                    "@{u}".to_string(),
+                    crate::testing::commit_id_fixture("base"),
+                ),
+                (
+                    "HEAD".to_string(),
+                    crate::testing::commit_id_fixture("head"),
+                ),
             ]
             .into(),
             ..FakeGitClient::default()

@@ -46,7 +46,7 @@ mod tests {
     use std::path::PathBuf;
 
     use gtl_models::managed::ManagedRepo;
-    use gtl_wire::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
+    use gtl_wire::recipes::{RecipeOp, RecipeSource, RecipeTarget};
 
     use super::{BuildManagedRecipes, execute};
     use crate::testing::ScriptedGitClient;
@@ -102,10 +102,7 @@ mod tests {
             recipes[0].op,
             RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
-                    pinned: Some(PinnedRange {
-                        base: "api-base".into(),
-                        head: "api-head".into(),
-                    })
+                    pinned: Some(crate::testing::pinned_range("api-base", "api-head"))
                 }
             }
         );

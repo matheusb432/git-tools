@@ -227,10 +227,10 @@ index 333..444 100644\n\
             ComputeMergeDiff {
                 cwd: PathBuf::from("/repo"),
                 base: None,
-                pinned: Some(PinnedRange {
-                    base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
-                    head: "1111111111222222222233333333334444444444".into(),
-                }),
+                pinned: Some(crate::testing::pinned_range(
+                    "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd",
+                    "1111111111222222222233333333334444444444",
+                )),
             },
             &source,
         )

@@ -1,8 +1,10 @@
-use gtl_wire::recipes::{self, Recipe, RecipeOp, RecipeTarget};
+#[cfg(test)]
+use gtl_wire::recipes;
+use gtl_wire::recipes::{Recipe, RecipeOp, RecipeTarget};
 
 use crate::{
     diffs::{
-        DiffTarget, PinnedRange, View,
+        DiffTarget, View,
         compute_diff::{self, ComputeDiff},
         compute_merge_diff::{self, ComputeMergeDiff},
     },
@@ -49,11 +51,7 @@ pub fn execute(
         }
         RecipeOp::MergeDiff { base, pinned } => {
             compute_merge_diff::execute(
-                ComputeMergeDiff {
-                    cwd,
-                    base,
-                    pinned: pinned.map(application_pin),
-                },
+                ComputeMergeDiff { cwd, base, pinned },
                 user_settings,
                 source,
             )?
@@ -66,29 +64,11 @@ pub fn execute(
 
 fn diff_target(target: RecipeTarget) -> DiffTarget {
     match target {
-        RecipeTarget::Unpushed { pinned } => DiffTarget::Unpushed {
-            pinned: pinned.map(application_pin),
-        },
+        RecipeTarget::Unpushed { pinned } => DiffTarget::Unpushed { pinned },
         RecipeTarget::Base { rev } => DiffTarget::Base(rev),
-        RecipeTarget::Range { range, pinned } => DiffTarget::Range {
-            range,
-            pinned: pinned.map(application_pin),
-        },
-        RecipeTarget::Merge { base, pinned } => DiffTarget::Merge {
-            base,
-            pinned: pinned.map(application_pin),
-        },
-        RecipeTarget::Last { count, pinned } => DiffTarget::Last {
-            count,
-            pinned: pinned.map(application_pin),
-        },
-    }
-}
-
-fn application_pin(pin: recipes::PinnedRange) -> PinnedRange {
-    PinnedRange {
-        base: pin.base,
-        head: pin.head,
+        RecipeTarget::Range { range, pinned } => DiffTarget::Range { range, pinned },
+        RecipeTarget::Merge { base, pinned } => DiffTarget::Merge { base, pinned },
+        RecipeTarget::Last { count, pinned } => DiffTarget::Last { count, pinned },
     }
 }
 
@@ -116,10 +96,10 @@ mod tests {
     }
 
     fn pin() -> recipes::PinnedRange {
-        recipes::PinnedRange {
-            base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
-            head: "1111111111222222222233333333334444444444".into(),
-        }
+        crate::testing::pinned_range(
+            "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd",
+            "1111111111222222222233333333334444444444",
+        )
     }
 
     #[test]
@@ -145,7 +125,12 @@ mod tests {
     #[test]
     fn diff_recipe_targets_preserve_their_ranges() {
         let cases = [
-            (RecipeTarget::Base { rev: "v1".into() }, "diff", "v1", "v1"),
+            (
+                RecipeTarget::Base { rev: "v1".into() },
+                "diff",
+                "7631763176",
+                "7631763176",
+            ),
             (
                 RecipeTarget::Range {
                     range: "v1..v2".into(),

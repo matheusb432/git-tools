@@ -6,10 +6,9 @@
 //! differ across runs of the same repo + operation); live recipes are always
 //! unpinned, so full `Recipe` equality still governs their identity.
 //!
-//! This module is app-agnostic: it holds pure serde DTOs and their codec without depending on
-//! `models`. [`RecipeTarget`] mirrors `gtl_application::diffs::DiffTarget`'s shape.
-//! Process roots map application targets into the wire type, and the application viewer maps them
-//! back before computing a diff.
+//! This module is app-agnostic: it holds pure serde DTOs and their codec. [`RecipeTarget`] mirrors
+//! `gtl_application::diffs::DiffTarget`'s shape. Process roots map application targets into the
+//! wire type, and the application viewer maps them back before computing a diff.
 //!
 //! This module also hosts the argv-token codec Phase 5 uses to hand a batch of
 //! recipes from the CLI to the single-instance viewer: [`OpenRecipes`] is a
@@ -23,6 +22,7 @@
 use std::{num::NonZeroU32, path::PathBuf};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+pub use gtl_models::diffs::PinnedRange;
 use serde::{Deserialize, Serialize};
 
 /// The identity of the repository a recipe renders from.
@@ -36,19 +36,8 @@ pub enum RecipeSource {
     LocalRepo(PathBuf),
 }
 
-/// A commit range resolved to immutable SHAs at invocation time. `None` on a
-/// target means "resolve symbolically at compute time" — the live behavior.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PinnedRange {
-    /// Full SHA of the range base (exclusive end).
-    pub base: String,
-    /// Full SHA of the range head (inclusive end).
-    pub head: String,
-}
-
-/// A hand-maintained serde mirror of `gtl_application::diffs::DiffTarget`. This crate
-/// carries no `models` dependency (it must stay app-agnostic); the mapping onto
-/// the models type lives in the consuming crate.
+/// A hand-maintained serde mirror of `gtl_application::diffs::DiffTarget`; the mapping onto the
+/// application type lives in the consuming crate.
 #[serde_with::skip_serializing_none]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "target", rename_all = "snake_case")]
@@ -195,6 +184,7 @@ pub fn decode_token(token: &str) -> Option<OpenRecipes> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::pinned_range;
 
     fn diff_recipe() -> Recipe {
         Recipe {
@@ -423,10 +413,10 @@ mod tests {
             source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
-                    pinned: Some(PinnedRange {
-                        base: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
-                        head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
-                    }),
+                    pinned: Some(pinned_range(
+                        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                    )),
                 },
             },
             name: None,
@@ -442,10 +432,7 @@ mod tests {
 
     #[test]
     fn unpinned_projection_strips_every_pin() {
-        let pin = Some(PinnedRange {
-            base: "a".repeat(40),
-            head: "b".repeat(40),
-        });
+        let pin = Some(pinned_range("a".repeat(40), "b".repeat(40)));
         let cases = vec![
             RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
@@ -495,10 +482,7 @@ mod tests {
             source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
-                    pinned: Some(PinnedRange {
-                        base: "a".repeat(40),
-                        head: head.repeat(40),
-                    }),
+                    pinned: Some(pinned_range("a".repeat(40), head.repeat(40))),
                 },
             },
             name: None,

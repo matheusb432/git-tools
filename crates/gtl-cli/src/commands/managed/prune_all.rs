@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 
 use gtl_application::managed::prune_all::{self, PruneAction, PruneExit};
 use gtl_infra::git_client::HybridGitClient;
+use gtl_models::diffs::CommitId;
 use serde::Serialize;
 
 use super::{ManagedExit, ManagedOptions, ManagedRun};
@@ -12,7 +13,7 @@ use super::{ManagedExit, ManagedOptions, ManagedRun};
 #[serde(rename_all = "PascalCase")]
 pub struct PrunedBranch {
     pub name: String,
-    pub sha: String,
+    pub id: CommitId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -130,7 +131,7 @@ fn project_repo_result(name: String, action: PruneAction) -> PruneRepoResult {
                 .into_iter()
                 .map(|branch| PrunedBranch {
                     name: branch.name,
-                    sha: branch.sha,
+                    id: branch.id,
                 })
                 .collect(),
             failed: Vec::new(),
@@ -143,7 +144,7 @@ fn project_repo_result(name: String, action: PruneAction) -> PruneRepoResult {
                 .iter()
                 .map(|branch| PrunedBranch {
                     name: branch.name.clone(),
-                    sha: branch.sha.clone(),
+                    id: branch.id.clone(),
                 })
                 .collect(),
             failed: result
@@ -202,6 +203,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::testing::commit_id;
 
     #[test]
     fn application_results_project_to_the_existing_json_shape() {
@@ -213,7 +215,7 @@ mod tests {
                     status: PruneStatus::Partial,
                     deleted: vec![PruneBranch {
                         name: "feature/done".into(),
-                        sha: "aaaaaaa".into(),
+                        id: commit_id("a"),
                     }],
                     failed: vec![PruneFailure {
                         name: "feature/blocked".into(),
@@ -236,13 +238,13 @@ mod tests {
                 "    \"Deleted\": [\n",
                 "      {\n",
                 "        \"Name\": \"feature/done\",\n",
-                "        \"Sha\": \"aaaaaaa\"\n",
+                "        \"Id\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n",
                 "      }\n",
                 "    ],\n",
                 "    \"Failed\": [\n",
                 "      \"feature/blocked\"\n",
                 "    ],\n",
-                "    \"Detail\": \"deleted 1 branch.\\nrecover: git branch feature/done aaaaaaa\\nfailed: feature/blocked — branch is checked out\"\n",
+                "    \"Detail\": \"deleted 1 branch.\\nrecover: git branch feature/done aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\nfailed: feature/blocked — branch is checked out\"\n",
                 "  }\n",
                 "]",
             )
@@ -257,7 +259,7 @@ mod tests {
                 status: PruneStatus::Ok,
                 deleted: vec![PruneBranch {
                     name: "feature/api".into(),
-                    sha: "aaaaaaa".into(),
+                    id: commit_id("a"),
                 }],
                 failed: Vec::new(),
             }),
@@ -268,7 +270,7 @@ mod tests {
                 status: PruneStatus::Ok,
                 deleted: vec![PruneBranch {
                     name: "feature/web".into(),
-                    sha: "bbbbbbb".into(),
+                    id: commit_id("b"),
                 }],
                 failed: Vec::new(),
             }),

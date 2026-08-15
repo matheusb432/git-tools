@@ -2,10 +2,13 @@
 
 use std::{path::Path, process::Command};
 
-use gtl_application::repository_sync::{
-    CommitProgress,
-    apply_commit::{self, ApplyCommit},
-    plan_commit::CommitTarget,
+use gtl_application::{
+    ports::GitClient as _,
+    repository_sync::{
+        CommitProgress,
+        apply_commit::{self, ApplyCommit},
+        plan_commit::CommitTarget,
+    },
 };
 use gtl_infra::git_client::HybridGitClient;
 use gtl_models::repository::PendingChanges;
@@ -72,11 +75,25 @@ fn real_git_apply_commit_ignores_post_commit_stderr() {
     )
     .expect("current-repository commit succeeds through real Git");
     let apply_identity = match applied.progress {
-        CommitProgress::Created { identity } => identity,
+        CommitProgress::Created { id } => id,
         progress => panic!("expected a created commit, got {progress:?}"),
     };
     assert_eq!(
-        apply_identity.as_deref(),
-        Some(git(apply_repo.path(), &["rev-parse", "--short", "HEAD"]).as_str())
+        apply_identity.as_ref().map(ToString::to_string),
+        Some(git(apply_repo.path(), &["rev-parse", "HEAD"]))
     );
+}
+
+#[test]
+fn real_git_resolves_an_annotated_tag_to_its_commit_id() {
+    let repo = tempfile::tempdir().unwrap();
+    init_dirty_repo(repo.path());
+    git(repo.path(), &["tag", "-am", "release", "v1.0.0"]);
+
+    let id = HybridGitClient
+        .resolve_commit_id(repo.path(), "v1.0.0")
+        .expect("annotated tag resolves to its commit");
+
+    assert_eq!(id.as_ref(), git(repo.path(), &["rev-parse", "HEAD"]));
+    assert_ne!(id.as_ref(), git(repo.path(), &["rev-parse", "v1.0.0"]));
 }

@@ -1,7 +1,12 @@
 use std::collections::BTreeMap;
 
 use gtl_application::ports::GitWorkingTree;
-use gtl_models::{managed::working_tree::CommitFile, tags::Tag, worktrees::Worktree};
+use gtl_models::{
+    diffs::{CommitId, CommitIdError},
+    managed::working_tree::CommitFile,
+    tags::Tag,
+    worktrees::Worktree,
+};
 
 pub(super) fn parse_working_tree(raw: &str) -> GitWorkingTree {
     let mut tree = GitWorkingTree::default();
@@ -25,29 +30,55 @@ pub(super) fn parse_working_tree(raw: &str) -> GitWorkingTree {
     tree
 }
 
-pub(super) fn parse_worktrees(raw: &str) -> Vec<Worktree> {
+struct WorktreeBuilder {
+    path: String,
+    id: Option<CommitId>,
+    branch: Option<String>,
+    detached: bool,
+    bare: bool,
+    locked: Option<String>,
+    prunable: Option<String>,
+}
+
+impl WorktreeBuilder {
+    fn finish(self) -> anyhow::Result<Worktree> {
+        Ok(Worktree {
+            path: self.path,
+            id: self
+                .id
+                .ok_or_else(|| anyhow::anyhow!("Git worktree output omitted its HEAD commit ID"))?,
+            branch: self.branch,
+            detached: self.detached,
+            bare: self.bare,
+            locked: self.locked,
+            prunable: self.prunable,
+        })
+    }
+}
+
+pub(super) fn parse_worktrees(raw: &str) -> anyhow::Result<Vec<Worktree>> {
     let mut worktrees = Vec::new();
-    let mut current = None;
+    let mut current: Option<WorktreeBuilder> = None;
     for line in raw.lines() {
         if line.is_empty() {
             if let Some(worktree) = current.take() {
-                worktrees.push(worktree);
+                worktrees.push(worktree.finish()?);
             }
         } else if let Some(path) = line.strip_prefix("worktree ") {
-            if let Some(worktree) = current.replace(Worktree {
+            if let Some(worktree) = current.replace(WorktreeBuilder {
                 path: path.to_string(),
-                head: String::new(),
+                id: None,
                 branch: None,
                 detached: false,
                 bare: false,
                 locked: None,
                 prunable: None,
             }) {
-                worktrees.push(worktree);
+                worktrees.push(worktree.finish()?);
             }
         } else if let Some(worktree) = current.as_mut() {
             if let Some(head) = line.strip_prefix("HEAD ") {
-                worktree.head = head.to_string();
+                worktree.id = Some(head.try_into()?);
             } else if let Some(branch) = line.strip_prefix("branch ") {
                 worktree.branch = Some(
                     branch
@@ -67,19 +98,19 @@ pub(super) fn parse_worktrees(raw: &str) -> Vec<Worktree> {
         }
     }
     if let Some(worktree) = current {
-        worktrees.push(worktree);
+        worktrees.push(worktree.finish()?);
     }
-    worktrees
+    Ok(worktrees)
 }
 
-pub(super) fn parse_local_tags(output: &str) -> BTreeMap<String, Tag> {
+pub(super) fn parse_local_tags(output: &str) -> Result<BTreeMap<String, Tag>, CommitIdError> {
     output
         .lines()
+        .filter(|line| !line.trim().is_empty())
         .filter_map(|line| {
-            let mut fields = line.splitn(5, '\t');
+            let mut fields = line.splitn(4, '\t');
             let object = fields.next()?.to_string();
             let peeled_commit = fields.next()?.to_string();
-            let peeled_short = fields.next()?.to_string();
             let name = fields.next()?.to_string();
             let message_and_date = fields.next().unwrap_or_default();
             let (message, created_at) = message_and_date
@@ -93,24 +124,20 @@ pub(super) fn parse_local_tags(output: &str) -> BTreeMap<String, Tag> {
             } else {
                 object.clone()
             };
-            let short = if peeled_short.is_empty() {
-                object.chars().take(7).collect()
-            } else {
-                peeled_short
-            };
-            let tag = if annotated {
-                Tag::annotated(
-                    name.clone(),
-                    object,
-                    commit,
-                    short,
-                    created_at,
-                    Some(message.trim().to_string()).filter(|message| !message.is_empty()),
-                )
-            } else {
-                Tag::lightweight(name.clone(), commit, short, created_at)
-            };
-            Some((name, tag))
+            Some(commit.try_into().map(|commit: CommitId| {
+                let tag = if annotated {
+                    Tag::annotated(
+                        name.clone(),
+                        object,
+                        commit,
+                        created_at,
+                        Some(message.trim().to_string()).filter(|message| !message.is_empty()),
+                    )
+                } else {
+                    Tag::lightweight(name.clone(), commit, created_at)
+                };
+                (name, tag)
+            }))
         })
         .collect()
 }
@@ -128,7 +155,9 @@ pub(super) fn parse_remote_tags(output: &str) -> BTreeMap<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_working_tree;
+    use gtl_models::diffs::CommitIdError;
+
+    use super::{parse_local_tags, parse_working_tree};
 
     #[test]
     fn porcelain_status_becomes_a_semantic_working_tree() {
@@ -137,5 +166,13 @@ mod tests {
         assert_eq!(tree.files.len(), 4);
         assert_eq!(tree.staged, 2);
         assert_eq!(tree.unprepared, 3);
+    }
+
+    #[test]
+    fn local_tags_reject_an_invalid_resolved_commit_id() {
+        assert_eq!(
+            parse_local_tags("invalid\t\tv1.0.0\t\t100"),
+            Err(CommitIdError)
+        );
     }
 }

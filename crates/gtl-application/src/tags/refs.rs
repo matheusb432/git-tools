@@ -109,8 +109,7 @@ mod tests {
     fn local_tag(name: &str, object: &str, created_at: i64) -> Tag {
         Tag::lightweight(
             name.into(),
-            object.into(),
-            object.chars().take(7).collect(),
+            crate::testing::commit_id_fixture(object),
             Some(created_at),
         )
     }
@@ -140,8 +139,14 @@ mod tests {
             ("v1.1.0".into(), local_tag("v1.1.0", "object-b", 110)),
         ]);
         let remote = BTreeMap::from([
-            ("v1.0.0".into(), "object-a".into()),
-            ("v1.1.0".into(), "old-object".into()),
+            (
+                "v1.0.0".into(),
+                crate::testing::commit_id_fixture("object-a").to_string(),
+            ),
+            (
+                "v1.1.0".into(),
+                crate::testing::commit_id_fixture("old-object").to_string(),
+            ),
         ]);
         let refs = TagRefs::new(local, Some(remote));
 
@@ -174,8 +179,14 @@ mod tests {
             ("v1.1.0".into(), local_tag("v1.1.0", "object-b", 110)),
         ]);
         let remote = BTreeMap::from([
-            ("v1.0.0".into(), "object-a".into()),
-            ("v1.1.0".into(), "old-object".into()),
+            (
+                "v1.0.0".into(),
+                crate::testing::commit_id_fixture("object-a").to_string(),
+            ),
+            (
+                "v1.1.0".into(),
+                crate::testing::commit_id_fixture("old-object").to_string(),
+            ),
         ]);
 
         let states = TagRefs::new(local, Some(remote))

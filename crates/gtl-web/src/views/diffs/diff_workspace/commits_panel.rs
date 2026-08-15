@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
+use gtl_models::diffs::{CommitId, CommitIdAbbreviation};
 use gtl_wire::viewer::{ViewerActiveView, ViewerCommitSelection, ViewerCommitSummary};
 use lucide_dioxus::CircleDot;
 
@@ -14,15 +15,14 @@ use crate::shared::{
 #[component]
 pub(super) fn CommitsPanel(
     view: ViewerActiveView,
-    // TODO: use signal instead of drilled prop.
-    onselect: Option<EventHandler<String>>,
+    onselect: Option<EventHandler<CommitId>>,
     onclear: Option<EventHandler<()>>,
 ) -> Element {
-    let selected_sha = match &view.commit_selection {
+    let selected_id = match &view.commit_selection {
         ViewerCommitSelection::None => None,
-        ViewerCommitSelection::Pending { sha }
-        | ViewerCommitSelection::Ready { sha }
-        | ViewerCommitSelection::Error { sha, .. } => Some(sha.as_str()),
+        ViewerCommitSelection::Pending { id }
+        | ViewerCommitSelection::Ready { id }
+        | ViewerCommitSelection::Error { id, .. } => Some(id),
     };
     let selection_pending = matches!(
         &view.commit_selection,
@@ -33,7 +33,7 @@ pub(super) fn CommitsPanel(
         ScrollArea { class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
             CommitsPanelHeader {
                 label: view.commits_label.clone(),
-                selection_active: selected_sha.is_some(),
+                selection_active: selected_id.is_some(),
                 selection_pending,
                 onclear,
             }
@@ -45,9 +45,10 @@ pub(super) fn CommitsPanel(
             }
             for commit in &view.commits {
                 {
-                    let selected = selected_sha == Some(commit.sha.as_str());
+                    let selected = selected_id == Some(&commit.id);
                     rsx! {
                         CommitCard {
+                            key: "{commit.id}",
                             commit: commit.clone(),
                             selected,
                             selection_pending,
@@ -97,7 +98,7 @@ fn CommitPanelHint() -> Element {
             span { class: "flex-none text-acc", aria_hidden: "true",
                 CircleDot { size: 8, fill: "currentColor" }
             }
-            "click hash to copy"
+            "click ID to copy"
         }
     }
 }
@@ -120,7 +121,7 @@ fn CommitCard(
     commit: ViewerCommitSummary,
     selected: bool,
     selection_pending: bool,
-    onselect: Option<EventHandler<String>>,
+    onselect: Option<EventHandler<CommitId>>,
 ) -> Element {
     let title = (!commit.body.is_empty()).then(|| commit.body.clone());
     let tone_classes = commit_card_tone_classes(selected);
@@ -136,7 +137,7 @@ fn CommitCard(
     // TODO: remove if `onselect` does not meaningfully change view state. if it's null, just keep
     // the button disabled.
     if let Some(onselect) = onselect {
-        let sha = commit.sha.clone();
+        let id = commit.id.clone();
         return rsx! {
             Button {
                 layout: ButtonLayout::Block,
@@ -146,7 +147,7 @@ fn CommitCard(
                 attributes: card_attributes,
                 aria_pressed: selected.to_string(),
                 title,
-                onclick: move |_| onselect.call(sha.clone()),
+                onclick: move |_| onselect.call(id.clone()),
                 CommitCardContent { commit, selected }
             }
         };
@@ -167,11 +168,7 @@ fn CommitCardContent(commit: ViewerCommitSummary, selected: bool) -> Element {
     rsx! {
         CommitTimelineMarker { selected }
         span { class: "mb-1 flex min-w-0 items-center gap-1.5",
-            CommitHash {
-                sha: commit.sha.clone(),
-                abbreviated_sha: commit.abbreviated_sha.clone(),
-                selected,
-            }
+            CommitIdButton { id: commit.id.clone() }
             if commit.is_merge {
                 Badge { variant: BadgeVariant::Neutral, "merge" }
             }
@@ -196,24 +193,26 @@ fn CommitTimelineMarker(selected: bool) -> Element {
 }
 
 #[component]
-fn CommitHash(sha: String, abbreviated_sha: String, selected: bool) -> Element {
-    fn copy_commit_hash(sha: String) {
+fn CommitIdButton(id: CommitId) -> Element {
+    fn copy_commit_id(id: CommitId) {
         spawn(async move {
-            browser::copy_text(&sha).await;
+            browser::copy_text(id.as_ref()).await;
             // TODO: add toast notif upon completion
         });
     }
+
+    let abbreviated_id = id.abbreviated(CommitIdAbbreviation::TenCharacters);
 
     rsx! {
         Button {
             size: ButtonSize::Inline,
             variant: ButtonVariant::Secondary,
-            title: "Copy hash",
+            title: "Copy commit ID",
             onclick: move |e: Event<MouseData>| {
                 e.stop_propagation();
-                copy_commit_hash(sha.clone());
+                copy_commit_id(id.clone());
             },
-            code { "{abbreviated_sha}" }
+            code { "{abbreviated_id}" }
         }
     }
 }

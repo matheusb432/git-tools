@@ -121,7 +121,7 @@ fn render_preview(preview: &TagBumpPreview) -> String {
         preview.base_tag,
         level_name(preview.level),
         preview.next_tag,
-        preview.target_sha,
+        preview.target_id,
         message,
         publish,
     )
@@ -147,13 +147,14 @@ mod tests {
     use gtl_wire::tags::{TagBumpLevelDto, TagBumpPreview};
 
     use super::render_preview;
+    use crate::testing::commit_id;
 
     #[test]
     fn preview_names_the_exact_tag_target_message_and_push_ref() {
         let preview = TagBumpPreview {
             repo_path: "/repo/git-tools".into(),
             branch: "main".into(),
-            target_sha: "0123456789abcdef".into(),
+            target_id: commit_id("0123456789abcdef0123456789abcdef01234567"),
             level: TagBumpLevelDto::Patch,
             base_tag: "v0.30.0".into(),
             next_tag: "v0.30.1".into(),
@@ -163,7 +164,7 @@ mod tests {
 
         assert_eq!(
             render_preview(&preview),
-            "Tag bump review:\n  repository: git-tools (/repo/git-tools)\n  branch: main\n  base tag: v0.30.0\n  bump: patch\n  create: annotated tag v0.30.1\n  target: 0123456789abcdef\n  message:\n    release\n    notes\n  push: origin (refs/tags/v0.30.1 only)"
+            "Tag bump review:\n  repository: git-tools (/repo/git-tools)\n  branch: main\n  base tag: v0.30.0\n  bump: patch\n  create: annotated tag v0.30.1\n  target: 0123456789abcdef0123456789abcdef01234567\n  message:\n    release\n    notes\n  push: origin (refs/tags/v0.30.1 only)"
         );
     }
 }

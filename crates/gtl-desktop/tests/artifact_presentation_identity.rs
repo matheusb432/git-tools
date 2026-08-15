@@ -9,9 +9,20 @@ use gtl_application::{
 use gtl_artifacts::ArtifactRenderer;
 use gtl_infra::artifact_store::StoreArtifacts;
 use gtl_models::{
-    diffs::DiffKind,
+    diffs::{DiffKind, PinnedRange},
     viewer::{DiffDensity, DiffLayout, RenderOptions},
 };
+
+fn pinned_range() -> PinnedRange {
+    PinnedRange {
+        base: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .try_into()
+            .expect("fixture base commit ID is valid"),
+        head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            .try_into()
+            .expect("fixture head commit ID is valid"),
+    }
+}
 
 fn view(repo_root: &Path) -> View {
     View {
@@ -51,8 +62,7 @@ fn artifact_meta(repo_root: &Path, render_options: RenderOptions) -> ArtifactMet
         repo_root: repo_root.to_path_buf(),
         repo_name: "git-tools".into(),
         kind: DiffKind::TwoDot,
-        base_sha: "aaaa".into(),
-        head_sha: "bbbb".into(),
+        commit_range: Some(pinned_range()),
         range_label: "aaaa..bbbb".into(),
         head_committed_at: "2026-07-21T00:00:00Z".into(),
         generated_at: "2026-07-21T00:01:00Z".into(),
@@ -66,8 +76,7 @@ fn artifact_meta(repo_root: &Path, render_options: RenderOptions) -> ArtifactMet
 fn artifact_range_key(render_options: RenderOptions) -> ArtifactRangeKey {
     ArtifactRangeKey {
         kind: DiffKind::TwoDot,
-        base_sha: "aaaa".into(),
-        head_sha: "bbbb".into(),
+        commit_range: pinned_range(),
         render_options,
         theme: None,
         excluded_extensions: Vec::new(),

@@ -1,6 +1,9 @@
 use gtl_models::diffs::Commit;
 
-use crate::diffs::{Cmd, Foot, View};
+use crate::{
+    diffs::{Cmd, Foot, View},
+    testing::commit_id_fixture,
+};
 
 pub(crate) const DIFF_SINGLE_FILE: &str = "diff --git a/f.txt b/f.txt\n\
 index 111..222 100644\n\
@@ -12,11 +15,21 @@ index 111..222 100644\n\
 +new line\n\
 +extra line\n";
 
-pub(crate) fn commit(sha: &str) -> Commit {
+pub(crate) fn commit(id_prefix: &str) -> Commit {
+    commit_with(id_prefix, "feat: work", &[])
+}
+
+pub(crate) fn commit_with(id: &str, subject: &str, parents: &[&str]) -> Commit {
     Commit {
-        sha: sha.to_owned(),
-        subject: "feat: work".into(),
-        ..Default::default()
+        id: commit_id_fixture(id),
+        subject: subject.into(),
+        body: String::new(),
+        date: String::new(),
+        iso: String::new(),
+        parents: parents
+            .iter()
+            .map(|parent| commit_id_fixture(parent))
+            .collect(),
     }
 }
 

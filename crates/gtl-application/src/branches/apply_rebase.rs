@@ -2,6 +2,8 @@
 
 use std::fmt::Write as _;
 
+use gtl_models::diffs::{CommitId, CommitIdAbbreviation};
+
 use super::{BranchRecovery, plan_rebase::RebaseTarget};
 use crate::ports::{GitClient, GitEffect};
 
@@ -48,8 +50,8 @@ impl ApplyRebaseOk {
 /// Identifies one feature commit promoted by the fast-forward.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PromotedCommit {
-    /// Stores the abbreviated commit identity displayed in the result detail.
-    pub sha: String,
+    /// Identifies the promoted commit using its full validated Git commit ID.
+    pub id: CommitId,
     /// Stores the commit subject displayed beside the identity.
     pub subject: String,
 }
@@ -121,15 +123,12 @@ fn promoted_commits(
         .map_err(|source| transport("read promoted commits", progress.clone(), source))?
     {
         GitEffect::Rejected(_) => Ok(None),
-        GitEffect::Applied(lines) => Ok(Some(
-            lines
+        GitEffect::Applied(entries) => Ok(Some(
+            entries
                 .into_iter()
-                .filter_map(|line| {
-                    let (sha, subject) = line.split_once(char::is_whitespace)?;
-                    Some(PromotedCommit {
-                        sha: sha.to_string(),
-                        subject: subject.trim().to_string(),
-                    })
+                .map(|entry| PromotedCommit {
+                    id: entry.id,
+                    subject: entry.subject,
                 })
                 .collect(),
         )),
@@ -153,7 +152,12 @@ fn rebase_log(target: &RebaseTarget, commits: &[PromotedCommit]) -> String {
         commits.len()
     );
     for commit in commits {
-        let _ = write!(detail, "\n  {}  {}", commit.sha, commit.subject);
+        let _ = write!(
+            detail,
+            "\n  {}  {}",
+            commit.id.abbreviated(CommitIdAbbreviation::SevenCharacters),
+            commit.subject
+        );
     }
     detail
 }
@@ -177,7 +181,10 @@ mod tests {
     fn successful_fast_forward_reports_promoted_commits() {
         let git = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("switched\n"),
-            ScriptedGitClient::applied("123456789 feat: add a\nabcdef123 feat: add b\n"),
+            ScriptedGitClient::applied(concat!(
+                "1234567890123456789012345678901234567890\x1ffeat: add a\n",
+                "abcdef1234567890abcdef1234567890abcdef12\x1ffeat: add b\n"
+            )),
             ScriptedGitClient::applied("Fast-forward\n"),
         ]);
 
@@ -190,8 +197,8 @@ mod tests {
             concat!(
                 "switched to 'main' from 'feat/x'\n",
                 "fast-forwarded main +2 commits:\n",
-                "  123456789  feat: add a\n",
-                "  abcdef123  feat: add b",
+                "  1234567  feat: add a\n",
+                "  abcdef1  feat: add b",
             )
         );
     }

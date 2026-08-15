@@ -77,10 +77,8 @@ pub(in crate::diffs) fn sort_files_tree_order(files: &mut [FileDiff]) {
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::diffs::Commit;
-
     use super::*;
-    use crate::testing::diffs::view;
+    use crate::testing::diffs::{commit, view};
 
     fn file() -> FileDiff {
         FileDiff {
@@ -97,7 +95,7 @@ mod tests {
         let mut view = view();
         assert!(!view.has_diff_content());
 
-        view.commits.push(Commit::default());
+        view.commits.push(commit("abc1234"));
         assert!(view.has_diff_content());
 
         view.commits.clear();

@@ -158,6 +158,7 @@ fn format_commit(exit: ManagedExit, json: bool, results: &[CommitResult]) -> Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::commit_id;
 
     #[test]
     fn commit_action_wire_tokens_are_byte_stable() {
@@ -183,7 +184,7 @@ mod tests {
             }],
             action: CommitAction::Committed,
             detail: "[main abc1234] save".into(),
-            commit: Some("abc1234".into()),
+            id: Some(commit_id("a")),
             staged: true,
         }];
 
@@ -221,7 +222,7 @@ mod tests {
             }],
             action: CommitAction::Committed,
             detail: "[main abc1234] save".into(),
-            commit: Some("abc1234".into()),
+            id: Some(commit_id("a")),
             staged: true,
         };
         let execution = Err(commit_all::CommitAllError::Transport {

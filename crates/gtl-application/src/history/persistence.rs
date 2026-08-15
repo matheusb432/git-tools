@@ -146,8 +146,14 @@ impl RecentRenderRow {
         };
         let pinned = match (&self.pinned_base, &self.pinned_head) {
             (Some(base), Some(head)) => Some(PinnedRange {
-                base: base.clone(),
-                head: head.clone(),
+                base: base
+                    .as_str()
+                    .try_into()
+                    .map_err(|error| format!("pinned base is invalid: {error}"))?,
+                head: head
+                    .as_str()
+                    .try_into()
+                    .map_err(|error| format!("pinned head is invalid: {error}"))?,
             }),
             (None, None) => None,
             _ => return Err("pinned base and head must be present together".into()),
@@ -274,6 +280,8 @@ pub(super) fn store_test() -> Connection {
 /// seeded project source across calls.
 #[cfg(test)]
 pub(super) fn seed_recent_render(connection: &Connection, id: i64, title: &str) {
+    let pinned_base = format!("{id:040x}");
+    let pinned_head = format!("{:040x}", id + 1_000);
     connection
         .execute_batch(&format!(
             "INSERT OR IGNORE INTO project_sources (id, kind, value, created_at) \
@@ -281,7 +289,7 @@ pub(super) fn seed_recent_render(connection: &Connection, id: i64, title: &str) 
              INSERT INTO recent_renders \
              (id, source_id, operation_id, target_id, pinned_base, pinned_head, \
               title, repo_name, range_label, rendered_at) \
-             VALUES ({id}, 7, 1, 1, 'base-{id}', 'head-{id}', '{title}', \
+             VALUES ({id}, 7, 1, 1, '{pinned_base}', '{pinned_head}', '{title}', \
              'git-tools', 'main..HEAD', '2026-07-11T00:00:00Z');"
         ))
         .expect("seed recent render");
@@ -326,10 +334,10 @@ mod tests {
     /// shape must survive a record -> list round trip unchanged.
     #[test]
     fn every_recipe_shape_round_trips_through_the_relational_codec() {
-        let pin = Some(PinnedRange {
-            base: "a".repeat(40),
-            head: "b".repeat(40),
-        });
+        let pin = Some(crate::testing::pinned_range(
+            &"a".repeat(40),
+            &"b".repeat(40),
+        ));
         let targets = [
             RecipeTarget::Unpushed {
                 pinned: pin.clone(),

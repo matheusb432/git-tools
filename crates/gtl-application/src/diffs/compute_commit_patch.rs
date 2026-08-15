@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gtl_models::diffs::{AppliedExclusions, Commit};
+use gtl_models::diffs::{AppliedExclusions, Commit, CommitIdAbbreviation};
 
 use crate::{
     diffs::{
@@ -14,7 +14,8 @@ use crate::{
     shared::repository_name::from_path,
 };
 
-const EMPTY_TREE_SHA: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const EMPTY_TREE_ID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+const EMPTY_TREE_ABBREVIATED_ID: &str = "4b825dc642";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputeCommitPatch {
@@ -44,12 +45,13 @@ pub fn execute(
         .diff_exclusions()
         .for_project_or_default(&repo_name);
     let commit = request.commit;
-    let base = commit
-        .parents
-        .first()
-        .map_or(EMPTY_TREE_SHA, String::as_str);
-    let diff_range = format!("{base}..{}", commit.sha);
-    let log_range = format!("{}^!", commit.sha);
+    let abbreviation = CommitIdAbbreviation::TenCharacters;
+    let (base, base_abbreviated) = commit.parents.first().map_or_else(
+        || (EMPTY_TREE_ID, EMPTY_TREE_ABBREVIATED_ID.to_owned()),
+        |parent| (parent.as_ref(), parent.abbreviated(abbreviation)),
+    );
+    let diff_range = format!("{base}..{}", commit.id);
+    let log_range = format!("{}^!", commit.id);
     let DiffData {
         commits,
         mut files,
@@ -63,21 +65,21 @@ pub fn execute(
     )?;
     sort_files_tree_order(&mut files);
 
-    let short_sha = abbreviate(&commit.sha);
+    let abbreviated_id = commit.id.abbreviated(abbreviation);
     Ok(View {
         repo_name,
         repo_root: top.into_owned(),
         branch: source.current_branch(Path::new(&repo_path))?,
-        upstream: abbreviate(base),
-        title: format!("commit {short_sha}"),
+        upstream: base_abbreviated.clone(),
+        title: format!("commit {abbreviated_id}"),
         cmd: Cmd {
             lead: "git diff ".into(),
-            range: format!("{}..{short_sha}", abbreviate(base)),
+            range: format!("{base_abbreviated}..{abbreviated_id}"),
             trail: String::new(),
         },
         commits_label: "# selected commit".into(),
         foot: Foot {
-            cmd: format!("git show --format=fuller {}", commit.sha),
+            cmd: format!("git show --format=fuller {}", commit.id),
         },
         commits,
         files,
@@ -85,28 +87,20 @@ pub fn execute(
     })
 }
 
-fn abbreviate(sha: &str) -> String {
-    sha.chars().take(10).collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use gtl_models::diffs::Commit;
-
     use super::*;
-    use crate::testing::{FakeGitClient, FixedUserSettingsStore, diffs::DIFF_SINGLE_FILE};
+    use crate::testing::{
+        FakeGitClient, FixedUserSettingsStore,
+        diffs::{DIFF_SINGLE_FILE, commit_with},
+    };
 
-    const COMMIT_SHA: &str = "1111111111222222222233333333334444444444";
-    const PARENT_SHA: &str = "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd";
+    const COMMIT_ID: &str = "1111111111222222222233333333334444444444";
+    const PARENT_ID: &str = "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd";
 
     #[test]
     fn computes_a_standalone_first_parent_patch() {
-        let commit = Commit {
-            sha: COMMIT_SHA.into(),
-            subject: "selected".into(),
-            parents: vec![PARENT_SHA.into()],
-            ..Default::default()
-        };
+        let commit = commit_with(COMMIT_ID, "selected", &[PARENT_ID]);
         let source = FakeGitClient {
             branch: "feature".into(),
             commits: vec![commit.clone()],
@@ -134,11 +128,7 @@ mod tests {
 
     #[test]
     fn root_commit_uses_the_empty_tree_as_its_parent() {
-        let commit = Commit {
-            sha: COMMIT_SHA.into(),
-            subject: "root".into(),
-            ..Default::default()
-        };
+        let commit = commit_with(COMMIT_ID, "root", &[]);
         let source = FakeGitClient {
             branch: "main".into(),
             commits: vec![commit.clone()],

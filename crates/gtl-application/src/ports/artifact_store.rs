@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use gtl_models::{diffs::DiffKind, viewer::RenderOptions};
+use gtl_models::{
+    diffs::{DiffKind, PinnedRange},
+    viewer::RenderOptions,
+};
 
 /// Everything the store needs to record one rendered artifact. `generated_at` is
 /// supplied by the caller (via [`crate::ports::Clock`]) so placement stays deterministic in tests.
@@ -9,8 +12,8 @@ pub struct ArtifactMeta {
     pub repo_root: PathBuf,
     pub repo_name: String,
     pub kind: DiffKind,
-    pub base_sha: String,
-    pub head_sha: String,
+    /// The immutable commit range behind this artifact, absent for worktree and batch artifacts.
+    pub commit_range: Option<PinnedRange>,
     pub range_label: String,
     pub head_committed_at: String,
     pub generated_at: String,
@@ -29,8 +32,7 @@ pub struct ArtifactMeta {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ArtifactRangeKey {
     pub kind: DiffKind,
-    pub base_sha: String,
-    pub head_sha: String,
+    pub commit_range: PinnedRange,
     pub render_options: RenderOptions,
     pub theme: Option<String>,
     pub excluded_extensions: Vec<String>,

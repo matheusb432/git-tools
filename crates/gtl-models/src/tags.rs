@@ -1,5 +1,7 @@
 //! Structured local tag values independent of Git transport and presentation.
 
+use crate::diffs::CommitId;
+
 /// Identifies whether a local tag object is known by origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TagState {
@@ -22,8 +24,7 @@ enum TagKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag {
     name: String,
-    commit: String,
-    commit_short: String,
+    commit: CommitId,
     created_at: Option<i64>,
     kind: TagKind,
     state: Option<TagState>,
@@ -34,15 +35,13 @@ impl Tag {
     pub fn annotated(
         name: String,
         object: String,
-        commit: String,
-        commit_short: String,
+        commit: CommitId,
         created_at: Option<i64>,
         message: Option<String>,
     ) -> Self {
         Self {
             name,
             commit,
-            commit_short,
             created_at,
             kind: TagKind::Annotated { object, message },
             state: None,
@@ -50,16 +49,10 @@ impl Tag {
     }
 
     /// Creates a lightweight tag whose ref object is its resolved commit.
-    pub fn lightweight(
-        name: String,
-        commit: String,
-        commit_short: String,
-        created_at: Option<i64>,
-    ) -> Self {
+    pub fn lightweight(name: String, commit: CommitId, created_at: Option<i64>) -> Self {
         Self {
             name,
             commit,
-            commit_short,
             created_at,
             kind: TagKind::Lightweight,
             state: None,
@@ -70,18 +63,13 @@ impl Tag {
     pub fn object(&self) -> &str {
         match &self.kind {
             TagKind::Annotated { object, .. } => object,
-            TagKind::Lightweight => &self.commit,
+            TagKind::Lightweight => self.commit.as_ref(),
         }
     }
 
     /// Returns the full commit identifier the tag resolves to.
-    pub fn commit(&self) -> &str {
+    pub const fn commit(&self) -> &CommitId {
         &self.commit
-    }
-
-    /// Returns the abbreviated commit identifier used for presentation.
-    pub fn commit_short(&self) -> &str {
-        &self.commit_short
     }
 
     /// Returns the local tag name without the `refs/tags/` prefix.
@@ -122,16 +110,17 @@ impl Tag {
 mod tests {
     use super::{Tag, TagState};
 
+    const COMMIT_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    fn commit_id() -> crate::diffs::CommitId {
+        COMMIT_ID.try_into().expect("fixture commit ID is valid")
+    }
+
     #[test]
     fn lightweight_tag_uses_its_commit_as_the_ref_object() {
-        let tag = Tag::lightweight(
-            "stable".into(),
-            "commit-a".into(),
-            "commit".into(),
-            Some(100),
-        );
+        let tag = Tag::lightweight("stable".into(), commit_id(), Some(100));
 
-        assert_eq!(tag.object(), "commit-a");
+        assert_eq!(tag.object(), COMMIT_ID);
         assert_eq!(tag.message(), None);
         assert!(!tag.is_annotated());
         assert_eq!(tag.state(), None);
@@ -142,26 +131,20 @@ mod tests {
         let tag = Tag::annotated(
             "v1.0.0".into(),
             "tag-object".into(),
-            "commit-a".into(),
-            "commit".into(),
+            commit_id(),
             Some(100),
             Some("release".into()),
         );
 
         assert_eq!(tag.object(), "tag-object");
-        assert_eq!(tag.commit(), "commit-a");
+        assert_eq!(tag.commit().as_ref(), COMMIT_ID);
         assert_eq!(tag.message(), Some("release"));
         assert!(tag.is_annotated());
     }
 
     #[test]
     fn state_transition_changes_only_the_tag_state() {
-        let mut tag = Tag::lightweight(
-            "stable".into(),
-            "commit-a".into(),
-            "commit".into(),
-            Some(100),
-        );
+        let mut tag = Tag::lightweight("stable".into(), commit_id(), Some(100));
         let original_object = tag.object().to_string();
 
         tag.set_state(TagState::Remote);

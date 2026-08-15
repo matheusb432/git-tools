@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::{
     verb::Verb,
-    verbs::{bench::BenchArguments, format::FormatArguments, test::TestArguments},
+    verbs::{bench::BenchArguments, test::TestArguments},
 };
 
 /// xtask — this repo's embedded dev/release automation (xtask).
@@ -23,9 +23,9 @@ pub struct Cli {
     pub command: Command,
 }
 
-/// The verb surface. Each arm is one automation task its justfile recipe forwards into
-/// (`cargo run -p xtask -- <verb>`). Express mutually-exclusive flags with clap's
-/// `conflicts_with` (see the commented `--all` example), never a runtime `if a && b`.
+/// The verb surface. Each arm is one typed automation task exposed by the justfile or its
+/// nontrivial workflow. Express mutually-exclusive flags with clap's `conflicts_with`, never a
+/// runtime `if a && b`.
 #[derive(Subcommand)]
 pub enum Command {
     /// Configure hooks, build and install both artifacts, and ensure `~/.local/bin` is on PATH.
@@ -52,31 +52,12 @@ pub enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Format Rust, TOML, Markdown, and Dioxus sources with the repository's complete pinned
-    /// formatter matrix, in place. `--verbose` restores taplo's file-discovery logs.
-    #[command(name = Verb::FORMAT.as_str())]
-    Fmt(FormatArguments),
-    /// Check formatting without modifying files; exits non-zero on drift. Formatting only — the
-    /// linters live under `lint` and the aggregate `check` gate. `--verbose` restores taplo's
-    /// file-discovery logs.
-    #[command(name = Verb::FORMAT_CHECK.as_str())]
-    FmtCheck(FormatArguments),
-    /// Run architecture policy, dependency checks, and workspace Clippy.
-    #[command(name = Verb::LINT.as_str())]
-    Lint,
-    /// Run formatting checks, the lint sweep, and configured ast-grep rules.
-    #[command(name = Verb::CHECK.as_str())]
-    Check,
+    /// Validate Dioxus RSX formatting without allowing the formatter to rewrite source files.
+    #[command(name = Verb::CHECK_DIOXUS_FORMAT.as_str(), hide = true)]
+    CheckDioxusFormat,
     /// Check staged whitespace and formatting without scanning unrelated files.
     #[command(name = Verb::PRE_COMMIT.as_str())]
     PreCommit,
-    /// Apply autofixable Rust lints, then run every configured formatter.
-    #[command(name = Verb::FIX.as_str())]
-    Fix {
-        /// Extra arguments forwarded to Cargo Clippy.
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        extra: Vec<String>,
-    },
     /// Run the selected test scope, terse by default. The default excludes desktop tests;
     /// `--e2e` is hermetic viewer E2E only; `--all` is the complete repository test suite.
     #[command(name = Verb::TEST.as_str())]

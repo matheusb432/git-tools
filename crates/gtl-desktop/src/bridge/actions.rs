@@ -126,11 +126,10 @@ pub(super) fn select_commit(
 ) -> Result<ViewerShell, ViewerApiError> {
     let SelectViewerCommit {
         tab_id: raw_tab_id,
-        sha,
+        id,
     } = request;
     let tab_id = tab_id(raw_tab_id)?;
-    let sha = validated_sha(&sha)?;
-    app.select_commit(tab_id, &sha)
+    app.select_commit(tab_id, &id)
         .map_err(map_select_commit_error)?;
     shell::load(app, None)
 }
@@ -217,13 +216,6 @@ fn refresh_pending_active_tab(app: &ViewerApp) -> Result<(), ViewerApiError> {
     Ok(())
 }
 
-fn validated_sha(raw: &str) -> Result<String, ViewerApiError> {
-    if raw.len() != 40 || !raw.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(ViewerApiError::InvalidRequest);
-    }
-    Ok(raw.to_ascii_lowercase())
-}
-
 fn preference_pair(preference: SetViewerPreference) -> (&'static str, String) {
     match preference {
         SetViewerPreference::Layout(layout) => (
@@ -297,21 +289,6 @@ mod tests {
     use gtl_wire::viewer::{ViewerDiffLayout, ViewerTheme};
 
     use super::*;
-
-    #[test]
-    fn commit_identity_is_full_hex_and_normalized() {
-        let uppercase = "ABCDEF0123456789ABCDEF0123456789ABCDEF01";
-
-        assert_eq!(
-            validated_sha(uppercase).expect("valid SHA"),
-            uppercase.to_ascii_lowercase()
-        );
-        assert_eq!(validated_sha("abc"), Err(ViewerApiError::InvalidRequest));
-        assert_eq!(
-            validated_sha("gggggggggggggggggggggggggggggggggggggggg"),
-            Err(ViewerApiError::InvalidRequest)
-        );
-    }
 
     #[test]
     fn preferences_map_only_to_supported_root_setting_keys() {

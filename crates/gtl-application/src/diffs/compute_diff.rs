@@ -87,10 +87,10 @@ mod tests {
     }
 
     fn pin() -> PinnedRange {
-        PinnedRange {
-            base: "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd".into(),
-            head: "1111111111222222222233333333334444444444".into(),
-        }
+        crate::testing::pinned_range(
+            "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd",
+            "1111111111222222222233333333334444444444",
+        )
     }
 
     #[test]

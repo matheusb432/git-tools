@@ -12,7 +12,7 @@ use gtl_application::{
     viewer::initial_recipe_label::{self, InitialRecipeLabel},
 };
 use gtl_models::{
-    diffs::Commit,
+    diffs::{Commit, CommitId},
     live_views::LiveSource,
     viewer::{ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState},
 };
@@ -96,9 +96,9 @@ enum CommitSelection {
 #[derive(Debug, Clone)]
 pub(crate) enum CommitSelectionSnapshot {
     None,
-    Pending { sha: String },
-    Ready { sha: String, view: Arc<View> },
-    Error { sha: String, reason: String },
+    Pending { id: CommitId },
+    Ready { id: CommitId, view: Arc<View> },
+    Error { id: CommitId, reason: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,7 +295,7 @@ impl ViewerSession {
     pub(crate) fn begin_commit_selection(
         &mut self,
         id: ViewerTabId,
-        sha: &str,
+        commit_id: &CommitId,
     ) -> Result<(CommitPatchTicket, PathBuf, Commit), BeginCommitSelectionError> {
         if self.active != Some(id) {
             return Err(BeginCommitSelectionError::StaleRange);
@@ -315,7 +315,7 @@ impl ViewerSession {
             .view
             .commits
             .iter()
-            .find(|commit| commit.sha == sha)
+            .find(|commit| &commit.id == commit_id)
             .cloned()
             .ok_or(BeginCommitSelectionError::UnknownCommit)?;
         let tab = self
@@ -351,8 +351,8 @@ impl ViewerSession {
         let Some(base) = self.cache.get(ticket.tab_id).cloned() else {
             return PublishOutcome::Stale;
         };
-        let sha = match self.tab(ticket.tab_id).map(|tab| &tab.selection) {
-            Some(CommitSelection::Pending { commit }) => commit.sha.clone(),
+        let selected_id = match self.tab(ticket.tab_id).map(|tab| &tab.selection) {
+            Some(CommitSelection::Pending { commit }) => commit.id.clone(),
             _ => return PublishOutcome::Stale,
         };
         let selected = base.with_selected(Arc::clone(&patch));
@@ -375,7 +375,7 @@ impl ViewerSession {
         else {
             return PublishOutcome::Stale;
         };
-        debug_assert_eq!(commit.sha, sha);
+        debug_assert_eq!(commit.id, selected_id);
         tab.selection = CommitSelection::Ready { commit, transient };
         self.bump_revision();
         PublishOutcome::Published
@@ -428,10 +428,10 @@ impl ViewerSession {
         match &tab.selection {
             CommitSelection::None => CommitSelectionSnapshot::None,
             CommitSelection::Pending { commit } => CommitSelectionSnapshot::Pending {
-                sha: commit.sha.clone(),
+                id: commit.id.clone(),
             },
             CommitSelection::Error { commit, reason } => CommitSelectionSnapshot::Error {
-                sha: commit.sha.clone(),
+                id: commit.id.clone(),
                 reason: reason.clone(),
             },
             CommitSelection::Ready { commit, transient } => {
@@ -442,10 +442,10 @@ impl ViewerSession {
                 });
                 view.map_or_else(
                     || CommitSelectionSnapshot::Pending {
-                        sha: commit.sha.clone(),
+                        id: commit.id.clone(),
                     },
                     |view| CommitSelectionSnapshot::Ready {
-                        sha: commit.sha.clone(),
+                        id: commit.id.clone(),
                         view,
                     },
                 )
@@ -672,31 +672,28 @@ mod tests {
         (session, id)
     }
 
-    fn ready_session_with_commits() -> (ViewerSession, ViewerTabId, Vec<String>) {
+    fn ready_session_with_commits() -> (ViewerSession, ViewerTabId, Vec<CommitId>) {
         let mut session = ViewerSession::new(1024 * 1024);
         let id = session
             .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
         let ticket = session.begin_compute(id).expect("tab exists");
-        let shas = vec![
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
+        let ids = vec![
+            crate::testing::commit_id("a"),
+            crate::testing::commit_id("b"),
         ];
         let mut range = (*view("range")).clone();
-        range.commits = shas
+        range.commits = ids
             .iter()
-            .map(|sha| gtl_models::diffs::Commit {
-                sha: sha.clone(),
-                subject: format!("commit {}", &sha[..1]),
-                ..Default::default()
-            })
+            .enumerate()
+            .map(|(index, id)| crate::testing::commit(id.as_ref(), format!("commit {index}")))
             .collect();
         session.publish_labeled_if_current(
             ticket,
             CachedView::new(Arc::new(range)),
             "ready".into(),
         );
-        (session, id, shas)
+        (session, id, ids)
     }
 
     #[test]
@@ -723,13 +720,13 @@ mod tests {
 
     #[test]
     fn selected_patch_replaces_only_the_displayed_view_until_cleared() {
-        let (mut session, id, shas) = ready_session_with_commits();
+        let (mut session, id, ids) = ready_session_with_commits();
         let (ticket, repo_root, commit) = session
-            .begin_commit_selection(id, &shas[0])
+            .begin_commit_selection(id, &ids[0])
             .expect("cached commit can be selected");
 
         assert_eq!(repo_root, PathBuf::from("/repo"));
-        assert_eq!(commit.sha, shas[0]);
+        assert_eq!(commit.id, ids[0]);
         assert!(matches!(
             session.commit_selection_snapshot(id),
             CommitSelectionSnapshot::Pending { .. }
@@ -740,7 +737,8 @@ mod tests {
         );
         assert!(matches!(
             session.commit_selection_snapshot(id),
-            CommitSelectionSnapshot::Ready { sha, view } if sha == shas[0] && view.title == "patch"
+            CommitSelectionSnapshot::Ready { id: selected_id, view }
+                if selected_id == ids[0] && view.title == "patch"
         ));
         assert_eq!(
             session
@@ -767,13 +765,13 @@ mod tests {
 
     #[test]
     fn a_pending_commit_selection_rejects_another_reservation_until_cleared() {
-        let (mut session, id, shas) = ready_session_with_commits();
+        let (mut session, id, ids) = ready_session_with_commits();
         let (first, _, _) = session
-            .begin_commit_selection(id, &shas[0])
+            .begin_commit_selection(id, &ids[0])
             .expect("first selection");
 
         assert_eq!(
-            session.begin_commit_selection(id, &shas[1]),
+            session.begin_commit_selection(id, &ids[1]),
             Err(BeginCommitSelectionError::SelectionPending)
         );
 
@@ -791,24 +789,25 @@ mod tests {
 
     #[test]
     fn commit_selection_requires_an_exact_cached_identity() {
-        let (mut session, id, shas) = ready_session_with_commits();
+        let (mut session, id, _) = ready_session_with_commits();
+        let unknown_id = crate::testing::commit_id("c");
 
         assert_eq!(
-            session.begin_commit_selection(id, &shas[0][..10]),
+            session.begin_commit_selection(id, &unknown_id),
             Err(BeginCommitSelectionError::UnknownCommit)
         );
     }
 
     #[test]
     fn content_identities_track_selection_and_refresh_transitions() {
-        let (mut session, id, shas) = ready_session_with_commits();
+        let (mut session, id, ids) = ready_session_with_commits();
         let range = session
             .active_content_identity()
             .expect("range content is ready");
         assert_eq!(session.active_displayed_content_identity(), Some(range));
 
         let (first_selection, _, _) = session
-            .begin_commit_selection(id, &shas[0])
+            .begin_commit_selection(id, &ids[0])
             .expect("commit can be selected");
 
         assert!(session.active_content_identity().is_none());
@@ -829,7 +828,7 @@ mod tests {
         assert_eq!(session.active_displayed_content_identity(), Some(selected));
 
         let (second_selection, _, _) = session
-            .begin_commit_selection(id, &shas[1])
+            .begin_commit_selection(id, &ids[1])
             .expect("another commit can be selected");
         assert!(session.active_content_identity().is_none());
         assert_eq!(session.active_displayed_content_identity(), Some(selected));
@@ -1066,10 +1065,7 @@ mod tests {
             source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
-                    pinned: Some(gtl_wire::recipes::PinnedRange {
-                        base: "a".repeat(40),
-                        head: head.repeat(40),
-                    }),
+                    pinned: Some(crate::testing::pinned_range("a", head)),
                 },
             },
             name: None,

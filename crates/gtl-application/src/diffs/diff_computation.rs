@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use gtl_models::diffs::{AppliedExclusions, DiffExclusions};
+use gtl_models::diffs::{AppliedExclusions, CommitIdAbbreviation, DiffExclusions};
 
 use crate::{
     diffs::{
@@ -142,7 +142,9 @@ fn resolve_target_ranges(
         }
         DiffTarget::Base(base) => {
             source.verify_commit(repo_path, base)?;
-            let short = source.short_ref(repo_path, base)?;
+            let short = source
+                .resolve_commit_id(repo_path, base)?
+                .abbreviated(CommitIdAbbreviation::TenCharacters);
             ResolvedTarget {
                 base_ref: short.clone(),
                 io_ranges: DiffRanges::working_tree(base),

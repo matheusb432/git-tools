@@ -1,5 +1,8 @@
 use gtl_application::tags::{ListTagsOk, TagGroup};
-use gtl_models::tags::{Tag, TagState};
+use gtl_models::{
+    diffs::CommitIdAbbreviation,
+    tags::{Tag, TagState},
+};
 
 use crate::cli::TagCommand;
 
@@ -127,7 +130,7 @@ fn render_group(group: &TagGroup, commits: bool) -> Vec<String> {
             let Some(first) = tags.first() else {
                 return Vec::new();
             };
-            let mut lines = vec![first.commit_short().to_string()];
+            let mut lines = vec![abbreviated_commit(first)];
             lines.extend(tags.iter().map(render_label));
             lines
         }
@@ -138,10 +141,15 @@ fn render_tag(tag: &Tag, commits: bool) -> String {
     let state = render_state(tag.state());
     let message = render_message(tag);
     if commits {
-        format!("{} {}{state}{message}", tag.commit_short(), tag.name())
+        format!("{} {}{state}{message}", abbreviated_commit(tag), tag.name())
     } else {
         format!("{}{state}{message}", tag.name())
     }
+}
+
+fn abbreviated_commit(tag: &Tag) -> String {
+    tag.commit()
+        .abbreviated(CommitIdAbbreviation::SevenCharacters)
 }
 
 fn render_label(tag: &Tag) -> String {
@@ -227,25 +235,20 @@ mod tests {
     use gtl_models::tags::{Tag, TagState};
 
     use super::render_list;
+    use crate::testing::commit_id;
 
-    fn annotated(name: &str, commit_short: &str, message: &str) -> Tag {
+    fn annotated(name: &str, commit_prefix: &str, message: &str) -> Tag {
         Tag::annotated(
             name.into(),
             format!("{name}-object"),
-            format!("{commit_short}-full"),
-            commit_short.into(),
+            commit_id(commit_prefix),
             Some(100),
             Some(message.into()),
         )
     }
 
-    fn lightweight(name: &str, commit_short: &str) -> Tag {
-        Tag::lightweight(
-            name.into(),
-            format!("{commit_short}-full"),
-            commit_short.into(),
-            Some(110),
-        )
+    fn lightweight(name: &str, commit_prefix: &str) -> Tag {
+        Tag::lightweight(name.into(), commit_id(commit_prefix), Some(110))
     }
 
     #[test]

@@ -68,11 +68,13 @@ fn merge_label(repo: &str, view: &View) -> String {
 mod tests {
     use std::num::NonZeroU32;
 
-    use gtl_models::diffs::Commit;
     use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
     use super::*;
-    use crate::testing::viewer::{empty_view, recipe};
+    use crate::testing::{
+        diffs::commit,
+        viewer::{empty_view, recipe},
+    };
 
     #[test]
     fn computed_labels_preserve_recipe_intent() {
@@ -133,7 +135,7 @@ mod tests {
 
         for (op, commit_count, expected) in cases {
             let mut view = empty_view();
-            view.commits = (0..commit_count).map(|_| Commit::default()).collect();
+            view.commits = (0..commit_count).map(|_| commit("abc1234")).collect();
             let response = execute(CompleteRecipeComputation {
                 recipe: recipe(op),
                 kind: ViewerTabKind::Live,

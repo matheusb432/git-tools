@@ -73,7 +73,7 @@ pub fn execute(command: BumpTag, git: &impl GitClient) -> Result<BumpTagOk, Bump
             tag: tag.clone(),
             message: preview.message,
         },
-        &preview.target_sha,
+        preview.target_id.as_ref(),
         git,
     );
     let outcome = match created {

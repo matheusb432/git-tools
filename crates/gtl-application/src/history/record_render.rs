@@ -72,8 +72,8 @@ fn record_render(
             columns.operation,
             columns.target,
             columns.argument,
-            columns.pinned.as_ref().map(|pin| pin.base.as_str()),
-            columns.pinned.as_ref().map(|pin| pin.head.as_str()),
+            columns.pinned.as_ref().map(|pin| pin.base.as_ref()),
+            columns.pinned.as_ref().map(|pin| pin.head.as_ref()),
             columns.recipe_name,
             request.title,
             request.repo_name,
@@ -103,7 +103,7 @@ fn record_render(
 
 #[cfg(test)]
 mod tests {
-    use gtl_wire::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
+    use gtl_wire::recipes::{RecipeOp, RecipeSource, RecipeTarget};
 
     use super::*;
     use crate::{
@@ -126,10 +126,7 @@ mod tests {
             source: RecipeSource::LocalRepo(repo.into()),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
-                    pinned: Some(PinnedRange {
-                        base: base.into(),
-                        head: head.into(),
-                    }),
+                    pinned: Some(crate::testing::pinned_range(base, head)),
                 },
             },
             name: None,

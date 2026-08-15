@@ -29,6 +29,8 @@ pub mod viewer;
 
 mod confirm;
 mod diff_viewer_client;
+#[cfg(test)]
+mod testing;
 
 /// Process exit codes. Stable contract every caller (and justfile shim) depends on.
 /// Extend with command-specific codes as the tool grows (keep 0/1/2 stable).

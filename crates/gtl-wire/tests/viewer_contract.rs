@@ -1,10 +1,17 @@
 use std::path::PathBuf;
 
+use gtl_models::diffs::{CommitId, CommitIdError};
 use gtl_wire::{
     recipes::{Recipe, RecipeOp, RecipeSource},
     viewer::*,
 };
 use serde_json::json;
+
+const COMMIT_ID: &str = "abcdef0123456789abcdef0123456789abcdef01";
+
+fn commit_id() -> Result<CommitId, CommitIdError> {
+    COMMIT_ID.try_into()
+}
 
 fn identity() -> ViewerViewIdentity {
     ViewerViewIdentity {
@@ -64,20 +71,20 @@ fn closed_value_tokens_are_snake_case() {
 }
 
 #[test]
-fn tagged_enums_pin_each_wire_discriminator() {
+fn tagged_enums_pin_each_wire_discriminator() -> Result<(), CommitIdError> {
     assert_eq!(
         serde_json::to_value(ViewerTabState::Broken).expect("tab state serializes"),
         json!({"state": "broken"})
     );
     assert_eq!(
         serde_json::to_value(ViewerCommitSelection::Error {
-            sha: "abcdef".into(),
+            id: commit_id()?,
             message: "The commit could not be rendered.".into(),
         })
         .expect("commit selection serializes"),
         json!({
             "state": "error",
-            "sha": "abcdef",
+            "id": COMMIT_ID,
             "message": "The commit could not be rendered."
         })
     );
@@ -113,10 +120,12 @@ fn tagged_enums_pin_each_wire_discriminator() {
         .expect("API error serializes"),
         json!({"kind": "not_found", "resource": "diff_file"})
     );
+
+    Ok(())
 }
 
 #[test]
-fn ready_shell_contains_semantic_metadata_without_diff_rows() {
+fn ready_shell_contains_semantic_metadata_without_diff_rows() -> Result<(), CommitIdError> {
     let shell = ViewerShell {
         revision: 23,
         tabs: vec![ViewerTab {
@@ -150,8 +159,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() {
                 }],
                 commits_label: "1 commit".into(),
                 commits: vec![ViewerCommitSummary {
-                    sha: "abcdef0123456789".into(),
-                    abbreviated_sha: "abcdef0123".into(),
+                    id: commit_id()?,
                     subject: "feat: add shell".into(),
                     body: String::new(),
                     date: "2 hours ago".into(),
@@ -182,12 +190,55 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() {
         "file-src-lib-rs"
     );
     assert_eq!(value["active"]["view"]["files"][0]["id"], "file-0");
+    assert_eq!(value["active"]["view"]["commits"][0]["id"], COMMIT_ID);
+    assert!(value.pointer("/active/view/commits/0/sha").is_none());
+    assert!(
+        value
+            .pointer("/active/view/commits/0/abbreviated_sha")
+            .is_none()
+    );
     assert!(value.pointer("/active/view/files/0/lines").is_none());
     assert!(value.pointer("/active/view/repository_root").is_none());
     assert_eq!(
         serde_json::from_value::<ViewerShell>(value).expect("shell deserializes"),
         shell
     );
+
+    Ok(())
+}
+
+#[test]
+fn commit_selection_requests_reject_invalid_commit_ids() {
+    assert!(
+        serde_json::from_value::<SelectViewerCommit>(json!({
+            "tab_id": 7,
+            "id": "abcdef"
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn commit_selection_compares_complete_typed_identities() {
+    let selected_id: CommitId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        .try_into()
+        .expect("fixture commit ID is valid");
+    let same_prefix_different_id: CommitId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
+        .try_into()
+        .expect("fixture commit ID is valid");
+    let selection = ViewerCommitSelection::Ready {
+        id: selected_id.clone(),
+    };
+
+    assert!(matches!(
+        make_commit_selection_action(&selection, 7, selected_id),
+        CommitSelectionAction::UnselectCommit
+    ));
+    assert!(matches!(
+        make_commit_selection_action(&selection, 7, same_prefix_different_id.clone()),
+        CommitSelectionAction::FetchCommit(SelectViewerCommit { tab_id: 7, id })
+            if id == same_prefix_different_id
+    ));
 }
 
 #[test]

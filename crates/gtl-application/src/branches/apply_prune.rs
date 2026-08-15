@@ -110,11 +110,11 @@ mod tests {
         ]);
         let deleted = PruneBranch {
             name: "feature/done".into(),
-            sha: "aaaaaaa".into(),
+            id: crate::testing::commit_id_fixture("aaaaaaa"),
         };
         let failed = PruneBranch {
             name: "fix/z".into(),
-            sha: "bbbbbbb".into(),
+            id: crate::testing::commit_id_fixture("bbbbbbb"),
         };
 
         let result = execute(
@@ -148,11 +148,11 @@ mod tests {
         let branches = vec![
             PruneBranch {
                 name: "feature/first".into(),
-                sha: "aaaaaaa".into(),
+                id: crate::testing::commit_id_fixture("aaaaaaa"),
             },
             PruneBranch {
                 name: "feature/second".into(),
-                sha: "bbbbbbb".into(),
+                id: crate::testing::commit_id_fixture("bbbbbbb"),
             },
         ];
 
@@ -184,7 +184,7 @@ mod tests {
                 top: "/repo".into(),
                 branches: vec![PruneBranch {
                     name: "feature/blocked".into(),
-                    sha: "aaaaaaa".into(),
+                    id: crate::testing::commit_id_fixture("aaaaaaa"),
                 }],
             },
             &git,
@@ -213,7 +213,7 @@ mod tests {
                 top: "/repo".into(),
                 branches: vec![PruneBranch {
                     name: "feature/done".into(),
-                    sha: "aaaaaaa".into(),
+                    id: crate::testing::commit_id_fixture("aaaaaaa"),
                 }],
             },
             &git,

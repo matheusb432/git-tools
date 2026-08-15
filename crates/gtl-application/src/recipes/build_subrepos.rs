@@ -57,7 +57,7 @@ pub fn execute(
 mod tests {
     use std::{num::NonZeroU32, path::PathBuf};
 
-    use gtl_wire::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
+    use gtl_wire::recipes::{RecipeOp, RecipeSource, RecipeTarget};
 
     use super::{BuildSubrepoRecipes, execute};
     use crate::{ports::RepoDiscovery, testing::ScriptedGitClient};
@@ -120,10 +120,7 @@ mod tests {
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Last {
                         count: NonZeroU32::new(2).unwrap(),
-                        pinned: Some(PinnedRange {
-                            base: "api-base".into(),
-                            head: "api-head".into(),
-                        }),
+                        pinned: Some(crate::testing::pinned_range("api-base", "api-head",)),
                     }
                 },
                 name: Some("api".into()),

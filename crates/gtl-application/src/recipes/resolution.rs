@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use gtl_wire::recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
+use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
 use crate::{ports::GitClient, shared::git_range_pinning};
 
@@ -20,21 +20,13 @@ pub(crate) fn build_resolved(
     }
 }
 
-fn resolved_pin_to_recipe(pin: git_range_pinning::ResolvedGitRange) -> PinnedRange {
-    PinnedRange {
-        base: pin.base,
-        head: pin.head,
-    }
-}
-
 fn pin_operation(repo_top: &Path, operation: RecipeOp, git: &impl GitClient) -> RecipeOp {
     match operation {
         RecipeOp::Diff { target } => RecipeOp::Diff {
             target: pin_target(repo_top, target, git),
         },
         RecipeOp::MergeDiff { base, pinned: None } => RecipeOp::MergeDiff {
-            pinned: git_range_pinning::resolve_merge_range(repo_top, base.as_deref(), git)
-                .map(resolved_pin_to_recipe),
+            pinned: git_range_pinning::resolve_merge_range(repo_top, base.as_deref(), git),
             base,
         },
         operation @ RecipeOp::MergeDiff {
@@ -46,8 +38,7 @@ fn pin_operation(repo_top: &Path, operation: RecipeOp, git: &impl GitClient) -> 
 fn pin_target(repo_top: &Path, target: RecipeTarget, git: &impl GitClient) -> RecipeTarget {
     match target {
         RecipeTarget::Unpushed { pinned: None } => RecipeTarget::Unpushed {
-            pinned: git_range_pinning::resolve_range(repo_top, "@{u}", "HEAD", git)
-                .map(resolved_pin_to_recipe),
+            pinned: git_range_pinning::resolve_range(repo_top, "@{u}", "HEAD", git),
         },
         RecipeTarget::Last {
             count,
@@ -59,20 +50,17 @@ fn pin_target(repo_top: &Path, target: RecipeTarget, git: &impl GitClient) -> Re
                 &format!("HEAD~{count}"),
                 "HEAD",
                 git,
-            )
-            .map(resolved_pin_to_recipe),
+            ),
         },
         RecipeTarget::Range {
             range,
             pinned: None,
         } => RecipeTarget::Range {
-            pinned: git_range_pinning::resolve_exact_range(repo_top, &range, git)
-                .map(resolved_pin_to_recipe),
+            pinned: git_range_pinning::resolve_exact_range(repo_top, &range, git),
             range,
         },
         RecipeTarget::Merge { base, pinned: None } => RecipeTarget::Merge {
-            pinned: git_range_pinning::resolve_merge_range(repo_top, Some(&base), git)
-                .map(resolved_pin_to_recipe),
+            pinned: git_range_pinning::resolve_merge_range(repo_top, Some(&base), git),
             base,
         },
         target => target,

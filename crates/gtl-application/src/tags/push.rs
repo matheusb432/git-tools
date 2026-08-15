@@ -146,11 +146,15 @@ mod tests {
         testing::ScriptedGitClient,
     };
 
-    const LOCAL_TAG: &str = "object-v1\t\t\tv1.0.0\t\t100\n";
+    const LOCAL_TAG: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t\tv1.0.0\t\t100\n";
 
     fn tag(name: &str) -> Tag {
         let commit = format!("object-{name}");
-        Tag::lightweight(name.into(), commit, format!("short-{name}"), None)
+        Tag::lightweight(
+            name.into(),
+            crate::testing::commit_id_fixture(&commit),
+            None,
+        )
     }
 
     #[test]
@@ -276,7 +280,9 @@ mod tests {
     fn push_is_a_noop_when_origin_already_holds_every_local_tag_object() {
         let git = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied(LOCAL_TAG),
-            ScriptedGitClient::applied("object-v1\trefs/tags/v1.0.0\n"),
+            ScriptedGitClient::applied(
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\trefs/tags/v1.0.0\n",
+            ),
         ]);
 
         let outcome = execute(

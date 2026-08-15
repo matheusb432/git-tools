@@ -173,8 +173,8 @@ pub fn lookup_by_range(
     for artifact in read_sidecars_paired(store_root) {
         if artifact.sidecar.repo_id == repo_id
             && artifact.sidecar.kind == key.kind
-            && artifact.sidecar.base_sha == key.base_sha
-            && artifact.sidecar.head_sha == key.head_sha
+            && artifact.sidecar.base_sha == key.commit_range.base.as_ref()
+            && artifact.sidecar.head_sha == key.commit_range.head.as_ref()
             && artifact.sidecar.layout == layout
             && artifact.sidecar.density == density
             && artifact.sidecar.theme_recorded
@@ -244,6 +244,7 @@ mod tests {
     use gtl_models::viewer::{DiffDensity, DiffLayout, RenderOptions};
 
     use super::*;
+    use crate::testing::pinned_range;
 
     fn sidecar(kind: DiffKind, base: &str, head: &str) -> Sidecar {
         Sidecar {
@@ -251,8 +252,8 @@ mod tests {
             repo_name: "r".into(),
             repo_root: "/r".into(),
             kind,
-            base_sha: base.into(),
-            head_sha: head.into(),
+            base_sha: commit_id_text(base),
+            head_sha: commit_id_text(head),
             range_label: "x".into(),
             head_committed_at: "t".into(),
             generated_at: "t".into(),
@@ -270,12 +271,15 @@ mod tests {
     fn range_key(kind: DiffKind, base_sha: &str, head_sha: &str) -> ArtifactRangeKey {
         ArtifactRangeKey {
             kind,
-            base_sha: base_sha.into(),
-            head_sha: head_sha.into(),
+            commit_range: pinned_range(base_sha, head_sha),
             render_options: RenderOptions::DEFAULT,
             theme: None,
             excluded_extensions: Vec::new(),
         }
+    }
+
+    fn commit_id_text(prefix: &str) -> String {
+        prefix.chars().cycle().take(40).collect()
     }
 
     #[test]

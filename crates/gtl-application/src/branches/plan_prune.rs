@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use gtl_models::diffs::CommitId;
+
 use crate::ports::{GitClient, GitEffect};
 
 /// Requests a read-only branch-prune plan for one repository path.
@@ -15,7 +17,7 @@ pub struct PlanPrune {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PruneBranch {
     pub name: String,
-    pub sha: String,
+    pub id: CommitId,
 }
 
 /// Represents a refused, unnecessary, or ready branch prune.
@@ -93,7 +95,7 @@ pub fn execute(query: PlanPrune, git: &impl GitClient) -> Result<PlanPruneOk, Pl
             } else {
                 Some(PruneBranch {
                     name: branch.name,
-                    sha: branch.sha,
+                    id: branch.id,
                 })
             }
         })
@@ -140,7 +142,7 @@ mod tests {
         assert!(matches!(plan, PlanPruneOk::Ready { branches, .. }
         if branches == vec![PruneBranch {
             name: "feature/done".into(),
-            sha: "ccccccc".into()
+            id: crate::testing::commit_id_fixture("ccccccc")
         }]));
     }
 

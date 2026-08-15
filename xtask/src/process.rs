@@ -1,8 +1,8 @@
 //! Shared process execution and the `RESULT scope=… status=…` output contract. Every verb spawns
 //! children and emits its result line through this module — never spawn ad hoc per verb.
 //!
-//! Command plans expressed as [`crate::task::Step`] run through [`run_step`] and [`step_succeeds`];
-//! cleanup-sensitive workflows capture and replay child output through [`run_captured_with_env`].
+//! Command plans expressed as [`crate::task::Step`] run through [`run_step`]; cleanup-sensitive
+//! workflows capture and replay child output through [`run_captured_with_env`].
 
 use std::{
     ffi::OsStr,
@@ -45,14 +45,6 @@ pub(crate) fn run_step(step: &Step) -> Result<()> {
     Ok(())
 }
 
-/// Run one command plan and report whether it succeeded (used by the read-only gate).
-pub(crate) fn step_succeeds(step: &Step) -> Result<bool> {
-    let status = step_command(step)
-        .status()
-        .with_context(|| format!("spawning {}", step.label()))?;
-    Ok(status.success())
-}
-
 /// Spawn one command plan without changing its terminal process group.
 pub(crate) fn spawn_step(step: &Step) -> Result<Child> {
     step_command(step)
@@ -82,11 +74,6 @@ pub fn run(label: &str, program: &str, args: &[&str]) -> Result<()> {
         bail!("{label} failed (exit {})", status.code().unwrap_or(-1));
     }
     Ok(())
-}
-
-/// Run `program args…` and capture stdout as UTF-8; error on non-zero exit.
-pub fn capture(label: &str, program: &str, args: &[&str]) -> Result<String> {
-    String::from_utf8(capture_bytes(label, program, args)?).context("non-UTF-8 output")
 }
 
 pub(crate) fn capture_bytes(label: &str, program: &str, args: &[&str]) -> Result<Vec<u8>> {

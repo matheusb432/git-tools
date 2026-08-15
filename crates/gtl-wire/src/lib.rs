@@ -9,3 +9,6 @@ pub mod recipes;
 pub mod settings;
 pub mod tags;
 pub mod viewer;
+
+#[cfg(test)]
+mod testing;

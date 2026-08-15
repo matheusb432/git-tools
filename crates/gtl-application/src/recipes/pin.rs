@@ -55,10 +55,15 @@ pub fn execute(query: PinRecipe, git: &impl GitClient) -> Result<Recipe, PinReci
 mod tests {
     use std::{num::NonZeroU32, path::PathBuf};
 
-    use gtl_wire::recipes::{PinnedRange, RecipeOp, RecipeSource, RecipeTarget};
+    use gtl_wire::recipes::{RecipeOp, RecipeSource, RecipeTarget};
 
     use super::{PinRecipe, execute};
     use crate::testing::ScriptedGitClient;
+
+    const BASE_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const HEAD_ID: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const EXISTING_BASE_ID: &str = "cccccccccccccccccccccccccccccccccccccccc";
+    const EXISTING_HEAD_ID: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
     fn pin(
         operation: RecipeOp,
@@ -76,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_range_is_pinned_to_immutable_shas() {
+    fn exact_range_is_pinned_to_immutable_commit_ids() {
         let recipe = pin(
             RecipeOp::Diff {
                 target: RecipeTarget::Range {
@@ -86,8 +91,8 @@ mod tests {
             },
             vec![
                 ScriptedGitClient::applied("/work/repo\n"),
-                ScriptedGitClient::applied("base-sha\n"),
-                ScriptedGitClient::applied("head-sha\n"),
+                ScriptedGitClient::applied(BASE_ID),
+                ScriptedGitClient::applied(HEAD_ID),
             ],
         );
 
@@ -98,10 +103,7 @@ mod tests {
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Range {
                         range: "main..HEAD".into(),
-                        pinned: Some(PinnedRange {
-                            base: "base-sha".into(),
-                            head: "head-sha".into(),
-                        }),
+                        pinned: Some(crate::testing::pinned_range(BASE_ID, HEAD_ID)),
                     },
                 },
                 name: Some("repo".into()),
@@ -118,10 +120,7 @@ mod tests {
                 },
                 RecipeOp::Diff {
                     target: RecipeTarget::Unpushed {
-                        pinned: Some(PinnedRange {
-                            base: "base-sha".into(),
-                            head: "head-sha".into(),
-                        }),
+                        pinned: Some(crate::testing::pinned_range(BASE_ID, HEAD_ID)),
                     },
                 },
             ),
@@ -135,10 +134,7 @@ mod tests {
                 RecipeOp::Diff {
                     target: RecipeTarget::Last {
                         count: NonZeroU32::new(3).unwrap(),
-                        pinned: Some(PinnedRange {
-                            base: "base-sha".into(),
-                            head: "head-sha".into(),
-                        }),
+                        pinned: Some(crate::testing::pinned_range(BASE_ID, HEAD_ID)),
                     },
                 },
             ),
@@ -152,10 +148,7 @@ mod tests {
                 RecipeOp::Diff {
                     target: RecipeTarget::Merge {
                         base: "release".into(),
-                        pinned: Some(PinnedRange {
-                            base: "base-sha".into(),
-                            head: "head-sha".into(),
-                        }),
+                        pinned: Some(crate::testing::pinned_range(BASE_ID, HEAD_ID)),
                     },
                 },
             ),
@@ -166,10 +159,7 @@ mod tests {
                 },
                 RecipeOp::MergeDiff {
                     base: Some("release".into()),
-                    pinned: Some(PinnedRange {
-                        base: "base-sha".into(),
-                        head: "head-sha".into(),
-                    }),
+                    pinned: Some(crate::testing::pinned_range(BASE_ID, HEAD_ID)),
                 },
             ),
             (
@@ -179,10 +169,7 @@ mod tests {
                 },
                 RecipeOp::MergeDiff {
                     base: None,
-                    pinned: Some(PinnedRange {
-                        base: "base-sha".into(),
-                        head: "head-sha".into(),
-                    }),
+                    pinned: Some(crate::testing::pinned_range(BASE_ID, HEAD_ID)),
                 },
             ),
         ];
@@ -192,8 +179,8 @@ mod tests {
                 operation,
                 vec![
                     ScriptedGitClient::applied("/work/repo\n"),
-                    ScriptedGitClient::applied("base-sha\n"),
-                    ScriptedGitClient::applied("head-sha\n"),
+                    ScriptedGitClient::applied(BASE_ID),
+                    ScriptedGitClient::applied(HEAD_ID),
                 ],
             );
             assert_eq!(recipe.op, expected);
@@ -202,10 +189,7 @@ mod tests {
 
     #[test]
     fn base_and_existing_pins_are_preserved_without_resolution() {
-        let pinned = PinnedRange {
-            base: "already-base".into(),
-            head: "already-head".into(),
-        };
+        let pinned = crate::testing::pinned_range(EXISTING_BASE_ID, EXISTING_HEAD_ID);
         let base = pin(
             RecipeOp::Diff {
                 target: RecipeTarget::Base { rev: "main".into() },
@@ -231,10 +215,10 @@ mod tests {
             existing.op,
             RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
-                    pinned: Some(PinnedRange {
-                        base: "already-base".into(),
-                        head: "already-head".into(),
-                    })
+                    pinned: Some(crate::testing::pinned_range(
+                        EXISTING_BASE_ID,
+                        EXISTING_HEAD_ID,
+                    ))
                 }
             }
         );

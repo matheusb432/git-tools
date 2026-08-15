@@ -1,6 +1,6 @@
 //! Recipe batch identity and managed-repository selection.
 
-use gtl_application::diffs::{DiffTarget, PinnedRange};
+use gtl_application::diffs::DiffTarget;
 use gtl_models::{discovery::DiscoveredRepo, managed::ManagedRepo};
 use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
@@ -15,29 +15,22 @@ pub(crate) fn diff_operation(target: &DiffTarget) -> RecipeOp {
     RecipeOp::Diff {
         target: match target {
             DiffTarget::Unpushed { pinned } => RecipeTarget::Unpushed {
-                pinned: pinned.as_ref().map(to_wire_pin),
+                pinned: pinned.clone(),
             },
             DiffTarget::Base(rev) => RecipeTarget::Base { rev: rev.clone() },
             DiffTarget::Range { range, pinned } => RecipeTarget::Range {
                 range: range.clone(),
-                pinned: pinned.as_ref().map(to_wire_pin),
+                pinned: pinned.clone(),
             },
             DiffTarget::Merge { base, pinned } => RecipeTarget::Merge {
                 base: base.clone(),
-                pinned: pinned.as_ref().map(to_wire_pin),
+                pinned: pinned.clone(),
             },
             DiffTarget::Last { count, pinned } => RecipeTarget::Last {
                 count: *count,
-                pinned: pinned.as_ref().map(to_wire_pin),
+                pinned: pinned.clone(),
             },
         },
-    }
-}
-
-fn to_wire_pin(pin: &PinnedRange) -> gtl_wire::recipes::PinnedRange {
-    gtl_wire::recipes::PinnedRange {
-        base: pin.base.clone(),
-        head: pin.head.clone(),
     }
 }
 
@@ -58,10 +51,11 @@ fn select_managed_repos(repos: Vec<ManagedRepo>) -> anyhow::Result<Vec<Discovere
 mod tests {
     use std::num::NonZeroU32;
 
-    use gtl_application::diffs::{DiffTarget, PinnedRange};
+    use gtl_application::diffs::DiffTarget;
     use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
     use super::{diff_operation, new_batch_id};
+    use crate::testing::pinned_range;
 
     #[test]
     fn new_batch_id_yields_distinct_uuids() {
@@ -70,14 +64,8 @@ mod tests {
 
     #[test]
     fn diff_operation_preserves_every_target_field() {
-        let pin = PinnedRange {
-            base: "base".into(),
-            head: "head".into(),
-        };
-        let wire_pin = gtl_wire::recipes::PinnedRange {
-            base: "base".into(),
-            head: "head".into(),
-        };
+        let pin = pinned_range("a", "b");
+        let wire_pin = pinned_range("a", "b");
 
         for (target, expected) in [
             (

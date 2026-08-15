@@ -1,7 +1,8 @@
 {
   "version": "5",
   "specifiers": {
-    "npm:@tailwindcss/cli@4.3.3": "4.3.3"
+    "npm:@tailwindcss/cli@4.3.3": "4.3.3",
+    "npm:tailwindcss@4.3.3": "4.3.3"
   },
   "npm": {
     "@jridgewell/gen-mapping@0.3.13": {
@@ -384,7 +385,8 @@
   },
   "workspace": {
     "dependencies": [
-      "npm:@tailwindcss/cli@4.3.3"
+      "npm:@tailwindcss/cli@4.3.3",
+      "npm:tailwindcss@4.3.3"
     ]
   }
 }

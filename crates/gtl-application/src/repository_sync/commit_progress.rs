@@ -1,5 +1,7 @@
 //! Completed staging and commit steps for current-repository operations.
 
+use gtl_models::diffs::CommitId;
+
 /// Reports the furthest completed local commit step.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CommitProgress {
@@ -8,6 +10,6 @@ pub enum CommitProgress {
     Unchanged,
     /// Staging completed, but commit creation did not.
     Staged,
-    /// Commit creation completed, with its parsed identity when Git reported one.
-    Created { identity: Option<String> },
+    /// Commit creation completed, with its full ID when Git reported one.
+    Created { id: Option<CommitId> },
 }

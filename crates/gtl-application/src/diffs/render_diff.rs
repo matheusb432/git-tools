@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use gtl_models::diffs::DiffKind;
+use gtl_models::diffs::{DiffKind, PinnedRange};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -54,24 +54,47 @@ pub enum RenderDiffError {
     Unexpected(#[from] anyhow::Error),
 }
 
-// ! Returns (kind, base_sha, head_sha) only for pure commit ranges; None for
+// ! Returns the kind and immutable IDs only for pure commit ranges; None for
 // ! worktree (Hash) mode. It follows compute target resolution without assembling a view.
 fn resolved_range(
     source: &impl GitClient,
     top: &str,
     target: &DiffTarget,
-) -> Option<(DiffKind, String, String)> {
+) -> Option<(DiffKind, PinnedRange)> {
     let repo_path = Path::new(top);
-    let diff_range = match target {
+    let (kind, range) = match target {
+        DiffTarget::Range {
+            pinned: Some(range),
+            ..
+        }
+        | DiffTarget::Last {
+            pinned: Some(range),
+            ..
+        }
+        | DiffTarget::Unpushed {
+            pinned: Some(range),
+        } => return Some((DiffKind::TwoDot, range.clone())),
+        DiffTarget::Merge {
+            pinned: Some(range),
+            ..
+        } => return Some((DiffKind::ThreeDot, range.clone())),
         DiffTarget::Range {
             range,
             pinned: None,
-        } => DiffRanges::exact(range).diff,
+        } => {
+            let diff_range = DiffRanges::exact(range).diff;
+            (DiffKind::TwoDot, diff_range)
+        }
         DiffTarget::Last {
             count,
             pinned: None,
-        } => DiffRanges::exact(format!("HEAD~{count}..HEAD")).diff,
-        DiffTarget::Merge { base, pinned: None } => DiffRanges::merge(base).diff,
+        } => (
+            DiffKind::TwoDot,
+            DiffRanges::exact(format!("HEAD~{count}..HEAD")).diff,
+        ),
+        DiffTarget::Merge { base, pinned: None } => {
+            (DiffKind::ThreeDot, DiffRanges::merge(base).diff)
+        }
         DiffTarget::Unpushed { pinned: None } => {
             // No upstream means the compute core falls back to Hash (worktree) mode; not fast-path
             // eligible, and the fallback warning is emitted there (once), not here.
@@ -79,46 +102,17 @@ fn resolved_range(
             else {
                 return None;
             };
-            DiffRanges::unpushed(&upstream).diff
+            (DiffKind::TwoDot, DiffRanges::unpushed(&upstream).diff)
         }
-        // Pinned targets already carry resolved SHAs, but the fast path keys on
-        // symbolic upstream resolution (`source.upstream`/`resolve_sha` against a
-        // ref); a pinned target skips that resolution entirely, so it's simplest
-        // (and correct) to treat every pinned target as fast-path ineligible, same
-        // as `Base` (Hash mode ⇒ worktree, never fast-path eligible).
-        DiffTarget::Range {
-            pinned: Some(_), ..
-        }
-        | DiffTarget::Merge {
-            pinned: Some(_), ..
-        }
-        | DiffTarget::Unpushed { pinned: Some(_) }
-        | DiffTarget::Last {
-            pinned: Some(_), ..
-        }
-        | DiffTarget::Base(_) => return None,
+        DiffTarget::Base(_) => return None,
     };
-    let kind = DiffKind::from_diff_range(&diff_range);
-    if kind == DiffKind::WorkTree {
-        return None;
-    }
     let base = source
-        .resolve_sha(repo_path, range_base(&diff_range))
+        .resolve_commit_id(repo_path, range_base(&range))
         .ok()?;
     let head = source
-        .resolve_sha(repo_path, diff_range.rsplit("..").next()?)
+        .resolve_commit_id(repo_path, range.rsplit("..").next()?)
         .ok()?;
-    Some((kind, base, head))
-}
-
-// ! head = text after the last `..`; worktree mode has no commit head ⇒ sentinel.
-fn head_sha_for(source: &impl GitClient, top: &str, range: &str) -> String {
-    if range.contains("..") {
-        let tip = range.rsplit("..").next().unwrap_or("HEAD");
-        source.resolve_sha(Path::new(top), tip).unwrap_or_default()
-    } else {
-        "WORKTREE".to_string()
-    }
+    Some((kind, PinnedRange { base, head }))
 }
 
 /// Renders a diff through the diff ports.
@@ -143,18 +137,17 @@ pub fn execute(
         .diff_exclusions()
         .for_project_or_default(&from_path(&top));
 
-    // ! Fast-path: pure commit ranges are fully determined by resolved shas plus
+    // ! Fast-path: pure commit ranges are fully determined by resolved commit IDs plus
     // ! the active rendering settings, so a prior identical artifact can be
     // ! reused without the expensive assemble — never across a config change.
     if name.is_none()
-        && let Some((kind, base_sha, head_sha)) = resolved_range(source, &top, &target)
+        && let Some((kind, commit_range)) = resolved_range(source, &top, &target)
         && let Some(hit) = store.lookup_by_range(
             &store_root,
             Path::new(&top),
             &ArtifactRangeKey {
                 kind,
-                base_sha,
-                head_sha,
+                commit_range,
                 render_options,
                 theme: theme.clone(),
                 excluded_extensions: excluded.extensions().to_vec(),
@@ -174,6 +167,7 @@ pub fn execute(
         });
     }
 
+    let commit_range = resolved_range(source, &top, &target).map(|(_, range)| range);
     let computed = diff_computation::build(source, &top, &target, settings.diff_exclusions())?;
     let mut view = computed.view;
     let summary = computed.summary;
@@ -198,10 +192,7 @@ pub fn execute(
         repo_root: PathBuf::from(&top),
         repo_name: view.repo_name.clone(),
         kind: DiffKind::from_diff_range(&view.cmd.range),
-        base_sha: source
-            .resolve_sha(repo_path, range_base(&view.cmd.range))
-            .unwrap_or_default(),
-        head_sha: head_sha_for(source, &top, &view.cmd.range),
+        commit_range,
         range_label: view.cmd.range.clone(),
         head_committed_at: source.committed_at(repo_path, "HEAD"),
         generated_at: clock.now_iso(),
@@ -272,11 +263,10 @@ mod tests {
         UserSettings::new(theme, RenderOptions::DEFAULT, true, exclusions)
     }
 
-    fn range_key(base_sha: &str, head_sha: &str) -> ArtifactRangeKey {
+    fn range_key(base_id: &str, head_id: &str) -> ArtifactRangeKey {
         ArtifactRangeKey {
             kind: DiffKind::TwoDot,
-            base_sha: base_sha.to_owned(),
-            head_sha: head_sha.to_owned(),
+            commit_range: crate::testing::pinned_range(base_id, head_id),
             render_options: RenderOptions::DEFAULT,
             theme: None,
             excluded_extensions: Vec::new(),
@@ -406,9 +396,9 @@ mod tests {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
-            shas: [
-                ("a".to_string(), "sha-a".to_string()),
-                ("b".to_string(), "sha-b".to_string()),
+            commit_ids: [
+                ("a".to_string(), crate::testing::commit_id_fixture("id-a")),
+                ("b".to_string(), crate::testing::commit_id_fixture("id-b")),
             ]
             .into_iter()
             .collect(),
@@ -416,7 +406,7 @@ mod tests {
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
-        store.range_hit_insert(range_key("sha-a", "sha-b"), "/store/existing.html");
+        store.range_hit_insert(range_key("id-a", "id-b"), "/store/existing.html");
 
         let response = execute(
             req(
@@ -454,9 +444,9 @@ mod tests {
             branch: "feature".into(),
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
-            shas: [
-                ("a".to_string(), "sha-a".to_string()),
-                ("b".to_string(), "sha-b".to_string()),
+            commit_ids: [
+                ("a".to_string(), crate::testing::commit_id_fixture("id-a")),
+                ("b".to_string(), crate::testing::commit_id_fixture("id-b")),
             ]
             .into_iter()
             .collect(),
@@ -465,7 +455,7 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         // A hit exists for this range rendered WITHOUT exclusions…
-        store.range_hit_insert(range_key("sha-a", "sha-b"), "/store/unfiltered.html");
+        store.range_hit_insert(range_key("id-a", "id-b"), "/store/unfiltered.html");
 
         // …but this render runs with an md filter for the repo, so it must
         // recompute instead of serving the stale unfiltered artifact.
@@ -511,9 +501,9 @@ mod tests {
             branch: "feature".into(),
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
-            shas: [
-                ("a".to_string(), "sha-a".to_string()),
-                ("b".to_string(), "sha-b".to_string()),
+            commit_ids: [
+                ("a".to_string(), crate::testing::commit_id_fixture("id-a")),
+                ("b".to_string(), crate::testing::commit_id_fixture("id-b")),
             ]
             .into_iter()
             .collect(),
@@ -524,7 +514,7 @@ mod tests {
         store.range_hit_insert(
             ArtifactRangeKey {
                 theme: Some("dark".into()),
-                ..range_key("sha-a", "sha-b")
+                ..range_key("id-a", "id-b")
             },
             "/store/dark.html",
         );
@@ -556,9 +546,9 @@ mod tests {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
-            shas: [
-                ("a".to_string(), "sha-a".to_string()),
-                ("b".to_string(), "sha-b".to_string()),
+            commit_ids: [
+                ("a".to_string(), crate::testing::commit_id_fixture("id-a")),
+                ("b".to_string(), crate::testing::commit_id_fixture("id-b")),
             ]
             .into_iter()
             .collect(),
@@ -569,7 +559,7 @@ mod tests {
         store.range_hit_insert(
             ArtifactRangeKey {
                 excluded_extensions: vec!["md".into()],
-                ..range_key("sha-a", "sha-b")
+                ..range_key("id-a", "id-b")
             },
             "/store/filtered.html",
         );
@@ -611,9 +601,9 @@ mod tests {
             branch: "feature".into(),
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
-            shas: [
-                ("a".to_string(), "sha-a".to_string()),
-                ("b".to_string(), "sha-b".to_string()),
+            commit_ids: [
+                ("a".to_string(), crate::testing::commit_id_fixture("id-a")),
+                ("b".to_string(), crate::testing::commit_id_fixture("id-b")),
             ]
             .into_iter()
             .collect(),
@@ -622,7 +612,7 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         // A range hit exists, but a named run must ignore the fast-path entirely.
-        store.range_hit_insert(range_key("sha-a", "sha-b"), "/store/existing.html");
+        store.range_hit_insert(range_key("id-a", "id-b"), "/store/existing.html");
 
         let mut request = req(
             "/repo",

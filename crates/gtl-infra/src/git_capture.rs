@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::anyhow;
 use gtl_application::ports::{GitDiffFormat, GitDiffRequest};
-use gtl_models::diffs::Commit;
+use gtl_models::diffs::{Commit, CommitId, CommitIdError};
 
 pub(crate) fn run_git(repo_path: impl AsRef<Path>, args: &[&str]) -> anyhow::Result<String> {
     let output = crate::git_process::run(repo_path.as_ref(), args)?;
@@ -27,7 +27,7 @@ pub(crate) fn log_commits(repo_path: impl AsRef<Path>, range: &str) -> anyhow::R
             range,
         ],
     )?;
-    Ok(parse_commit_log(&raw))
+    parse_commit_log(&raw).map_err(Into::into)
 }
 
 pub(crate) fn diff(
@@ -54,22 +54,27 @@ pub(crate) fn diff(
     run_git(repo_path, &args)
 }
 
-/// The repo's oldest root-commit sha (lexicographically smallest when several
-/// roots exist), or `None` for a repo with no commits. Stable repo identity.
-pub(crate) fn root_commit(repo_path: impl AsRef<Path>) -> Option<String> {
+/// The repository's oldest root commit (lexicographically smallest when several
+/// roots exist), or `None` for a repository with no commits.
+pub(crate) fn root_commit(repo_path: impl AsRef<Path>) -> Option<CommitId> {
     let out = run_git(repo_path, &["rev-list", "--max-parents=0", "HEAD"]).ok()?;
     out.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
         .min()
-        .map(str::to_string)
+        .and_then(|id| id.try_into().ok())
 }
 
-/// The merge base of `a` and `b` as a full sha.
-pub(crate) fn merge_base(repo_path: impl AsRef<Path>, a: &str, b: &str) -> anyhow::Result<String> {
-    Ok(run_git(repo_path, &["merge-base", a, b])?
+/// The validated merge base of `a` and `b`.
+pub(crate) fn merge_base(
+    repo_path: impl AsRef<Path>,
+    a: &str,
+    b: &str,
+) -> anyhow::Result<CommitId> {
+    run_git(repo_path, &["merge-base", a, b])?
         .trim()
-        .to_string())
+        .try_into()
+        .map_err(Into::into)
 }
 
 /// The committer date of `rev` as a strict ISO-8601 string (empty on failure).
@@ -79,14 +84,14 @@ pub(crate) fn committed_at(repo_path: impl AsRef<Path>, rev: &str) -> String {
         .unwrap_or_default()
 }
 
-pub(crate) fn parse_commit_log(raw: &str) -> Vec<Commit> {
+pub(crate) fn parse_commit_log(raw: &str) -> Result<Vec<Commit>, CommitIdError> {
     raw.split('\x1e')
         .map(str::trim)
         .filter(|record| !record.is_empty())
         .map(|record| {
             let mut fields = record.split('\x1f');
-            Commit {
-                sha: fields.next().unwrap_or("").to_string(),
+            Ok(Commit {
+                id: fields.next().unwrap_or_default().try_into()?,
                 subject: fields.next().unwrap_or("").to_string(),
                 body: fields.next().unwrap_or("").to_string(),
                 date: fields.next().unwrap_or("").to_string(),
@@ -95,9 +100,9 @@ pub(crate) fn parse_commit_log(raw: &str) -> Vec<Commit> {
                     .next()
                     .unwrap_or("")
                     .split_whitespace()
-                    .map(str::to_string)
-                    .collect(),
-            }
+                    .map(TryInto::try_into)
+                    .collect::<Result<Vec<_>, _>>()?,
+            })
         })
         .collect()
 }
@@ -106,32 +111,41 @@ pub(crate) fn parse_commit_log(raw: &str) -> Vec<Commit> {
 mod tests {
     use super::*;
 
+    const COMMIT_ID_ONE: &str = "1111111111111111111111111111111111111111";
+    const COMMIT_ID_TWO: &str = "2222222222222222222222222222222222222222";
+    const COMMIT_ID_THREE: &str = "3333333333333333333333333333333333333333";
+    const COMMIT_ID_FOUR: &str = "4444444444444444444444444444444444444444";
+
     #[test]
     fn parse_commit_log_retains_full_commit_identities() {
         let raw = concat!(
-            "123456789abcdef\x1fadd renderer\x1fbody text\nmore body\x1f2026-06-08 13:45\x1f2026-06-08T13:45:00-03:00\x1e",
-            "abcdef123456789\x1ffix parser\x1f\x1f2026-06-09 09:10\x1f2026-06-09T09:10:00-03:00\x1e",
+            "1111111111111111111111111111111111111111\x1fadd renderer\x1fbody text\nmore body\x1f2026-06-08 13:45\x1f2026-06-08T13:45:00-03:00\x1e",
+            "2222222222222222222222222222222222222222\x1ffix parser\x1f\x1f2026-06-09 09:10\x1f2026-06-09T09:10:00-03:00\x1e",
         );
 
-        let commits = parse_commit_log(raw);
+        let commits = parse_commit_log(raw).expect("valid commit log");
 
         assert_eq!(commits.len(), 2);
-        assert_eq!(commits[0].sha, "123456789abcdef");
+        assert_eq!(commits[0].id.to_string(), COMMIT_ID_ONE);
         assert_eq!(commits[0].subject, "add renderer");
         assert_eq!(commits[0].body, "body text\nmore body");
         assert_eq!(commits[0].date, "2026-06-08 13:45");
         assert_eq!(commits[0].iso, "2026-06-08T13:45:00-03:00");
-        assert_eq!(commits[1].sha, "abcdef123456789");
+        assert_eq!(commits[1].id.to_string(), COMMIT_ID_TWO);
         assert_eq!(commits[1].subject, "fix parser");
         assert_eq!(commits[1].body, "");
     }
 
     #[test]
     fn parse_commit_log_trims_blank_records_and_defaults_missing_fields() {
-        let commits = parse_commit_log(" \n\x1e9876543210fedcb\x1fsubject only\x1e");
+        let commits = parse_commit_log(concat!(
+            " \n\x1e",
+            "3333333333333333333333333333333333333333\x1fsubject only\x1e"
+        ))
+        .expect("valid commit log");
 
         assert_eq!(commits.len(), 1);
-        assert_eq!(commits[0].sha, "9876543210fedcb");
+        assert_eq!(commits[0].id.to_string(), COMMIT_ID_THREE);
         assert_eq!(commits[0].subject, "subject only");
         assert_eq!(commits[0].body, "");
         assert_eq!(commits[0].date, "");
@@ -142,19 +156,31 @@ mod tests {
     fn parse_commit_log_reads_parents_and_flags_merge() {
         // record fields: sha · subject · body · date · iso · parents(space-sep)
         let raw = concat!(
-            "merge12345678\x1fMerge branch 'sub'\x1f\x1f2026-06-08 13:45\x1f2026-06-08T13:45:00-03:00\x1faaaaaaaaa111 bbbbbbbbb222\x1e",
-            "plain98765432\x1ffeat: x\x1f\x1f2026-06-09 09:10\x1f2026-06-09T09:10:00-03:00\x1faaaaaaaaa111\x1e",
+            "1111111111111111111111111111111111111111\x1fMerge branch 'sub'\x1f\x1f2026-06-08 13:45\x1f2026-06-08T13:45:00-03:00\x1f3333333333333333333333333333333333333333 4444444444444444444444444444444444444444\x1e",
+            "2222222222222222222222222222222222222222\x1ffeat: x\x1f\x1f2026-06-09 09:10\x1f2026-06-09T09:10:00-03:00\x1f3333333333333333333333333333333333333333\x1e",
         );
 
-        let commits = parse_commit_log(raw);
+        let commits = parse_commit_log(raw).expect("valid commit log");
 
         assert_eq!(
-            commits[0].parents,
-            vec!["aaaaaaaaa111".to_string(), "bbbbbbbbb222".to_string()]
+            commits[0]
+                .parents
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            [COMMIT_ID_THREE, COMMIT_ID_FOUR]
         );
         assert!(commits[0].is_merge());
-        assert_eq!(commits[1].parents, vec!["aaaaaaaaa111".to_string()]);
+        assert_eq!(commits[1].parents[0].to_string(), COMMIT_ID_THREE);
         assert!(!commits[1].is_merge());
+    }
+
+    #[test]
+    fn parse_commit_log_rejects_invalid_git_output_identity() {
+        assert_eq!(
+            parse_commit_log("not-a-commit-id\x1fsubject\x1e"),
+            Err(CommitIdError)
+        );
     }
 
     #[test]
@@ -179,11 +205,11 @@ mod tests {
         g(&["add", "."]);
         g(&["commit", "-qm", "first"]);
         let root = root_commit(d.to_str().unwrap()).unwrap();
-        assert_eq!(root.len(), 40);
+        assert_eq!(root.as_ref().len(), 40);
         let head = run_git(d, &["rev-parse", "HEAD"])
             .unwrap()
             .trim()
             .to_string();
-        assert_eq!(root, head); // single commit ⇒ root == HEAD
+        assert_eq!(root.as_ref(), head); // single commit ⇒ root == HEAD
     }
 }

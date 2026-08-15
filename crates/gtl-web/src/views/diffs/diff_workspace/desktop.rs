@@ -1,8 +1,10 @@
 use dioxus::prelude::*;
+use gtl_models::diffs::CommitId;
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
-    OpenViewerDiffFile, SelectViewerCommit, SetViewerPreference, ViewerActiveState,
+    CommitSelectionAction, OpenViewerDiffFile, SetViewerPreference, ViewerActiveState,
     ViewerActiveView, ViewerPreferences, ViewerShell, ViewerTabKind, ViewerTabRequest,
+    make_commit_selection_action,
 };
 use lucide_dioxus::{FileDiff, LoaderCircle, RefreshCw};
 
@@ -201,18 +203,9 @@ fn ReadyWorkspace(
         action_error.set(None);
         viewer.refresh_tab(tab_id);
     };
-    // TODO: make it toggle upon selecting already active commit. it currently just selects and
-    // renders it again, wastefully
-    let onselect_commit = move |sha: String| {
-        action_error.set(None);
-        spawn(async move {
-            match DiffViewerApi::select_commit(SelectViewerCommit { tab_id, sha }).await {
-                Ok(shell) => viewer.replace_shell(shell),
-                Err(error) => action_error.set(Some(error)),
-            }
-        });
-    };
-    let onclear_commit = move |()| {
+
+    // TODO: remove unit from param
+    let onclear_commit = use_callback(move |()| {
         action_error.set(None);
         spawn(async move {
             match DiffViewerApi::clear_commit_selection(ViewerTabRequest { tab_id }).await {
@@ -220,7 +213,25 @@ fn ReadyWorkspace(
                 Err(error) => action_error.set(Some(error)),
             }
         });
-    };
+    });
+
+    let commit_selection = view.commit_selection.clone();
+    let onselect_commit = use_callback(move |id: CommitId| {
+        match make_commit_selection_action(&commit_selection, tab_id, id) {
+            CommitSelectionAction::FetchCommit(request) => {
+                action_error.set(None);
+                spawn(async move {
+                    match DiffViewerApi::select_commit(request).await {
+                        Ok(shell) => viewer.replace_shell(shell),
+                        Err(error) => action_error.set(Some(error)),
+                    }
+                });
+            }
+            CommitSelectionAction::UnselectCommit => onclear_commit.call(()),
+            CommitSelectionAction::NoAction => {}
+        }
+    });
+
     let onnavigate = move |anchor_id: String| {
         browser::scroll_to_file(&anchor_id);
         flashing_file.set(Some(anchor_id.clone()));

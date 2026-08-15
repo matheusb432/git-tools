@@ -10,10 +10,14 @@ use std::{
 use anyhow::Context as _;
 use gix::bstr::ByteSlice;
 use gtl_application::ports::{
-    GitClient, GitCommitReceipt, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState,
-    GitWorkingTree, MergedBranch,
+    CommitLogEntry, GitClient, GitCommitReceipt, GitDiffRequest, GitEffect, GitPushReceipt,
+    GitRepositoryState, GitWorkingTree, MergedBranch,
 };
-use gtl_models::{diffs::Commit, tags::Tag, worktrees::Worktree};
+use gtl_models::{
+    diffs::{Commit, CommitId},
+    tags::Tag,
+    worktrees::Worktree,
+};
 
 use self::parsing::{parse_local_tags, parse_remote_tags, parse_working_tree, parse_worktrees};
 
@@ -119,46 +123,59 @@ impl GitClient for HybridGitClient {
         repo_path: &Path,
         into: &str,
     ) -> anyhow::Result<GitEffect<Vec<MergedBranch>>> {
-        effect(
+        match effect(
             repo_path,
             &[
                 "for-each-ref",
                 "--merged",
                 into,
-                "--format=%(refname:short) %(objectname:short)",
+                "--format=%(refname:short) %(objectname)",
                 "refs/heads/",
             ],
-            |output| {
+            |output| -> anyhow::Result<Vec<MergedBranch>> {
                 output
                     .lines()
-                    .filter_map(|line| {
-                        let (name, sha) = line.trim().split_once(char::is_whitespace)?;
-                        Some(MergedBranch {
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .map(|line| {
+                        let (name, raw_id) = line
+                            .split_once(char::is_whitespace)
+                            .ok_or_else(|| anyhow::anyhow!("Git branch output omitted its ID"))?;
+                        Ok(MergedBranch {
                             name: name.to_string(),
-                            sha: sha.trim().to_string(),
+                            id: raw_id.trim().try_into()?,
                         })
                     })
                     .collect()
             },
-        )
+        )? {
+            GitEffect::Applied(branches) => branches.map(GitEffect::Applied),
+            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
+        }
     }
     fn worktrees(&self, repo_path: &Path) -> anyhow::Result<GitEffect<Vec<Worktree>>> {
-        effect(
+        match effect(
             repo_path,
             &["worktree", "list", "--porcelain"],
             parse_worktrees,
-        )
+        )? {
+            GitEffect::Applied(worktrees) => worktrees.map(GitEffect::Applied),
+            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
+        }
     }
     fn local_tags(&self, repo_path: &Path) -> anyhow::Result<GitEffect<BTreeMap<String, Tag>>> {
-        effect(
+        match effect(
             repo_path,
             &[
                 "for-each-ref",
-                "--format=%(objectname)\t%(*objectname)\t%(*objectname:short)\t%(refname:strip=2)\t%(contents:lines=1)\t%(creatordate:unix)",
+                "--format=%(objectname)\t%(*objectname)\t%(refname:strip=2)\t%(contents:lines=1)\t%(creatordate:unix)",
                 "refs/tags",
             ],
             parse_local_tags,
-        )
+        )? {
+            GitEffect::Applied(tags) => tags.map(GitEffect::Applied).map_err(Into::into),
+            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
+        }
     }
     fn remote_tags(
         &self,
@@ -174,15 +191,19 @@ impl GitClient for HybridGitClient {
     fn previous_checkout(&self, repo_path: &Path) -> anyhow::Result<Option<String>> {
         capture(repo_path, &["rev-parse", "@{-1}"])
     }
-    fn brief_log(&self, repo_path: &Path, range: &str) -> anyhow::Result<GitEffect<Vec<String>>> {
-        effect(repo_path, &["log", "--format=%h %s", range], |output| {
-            output
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_string)
-                .collect()
-        })
+    fn brief_log(
+        &self,
+        repo_path: &Path,
+        range: &str,
+    ) -> anyhow::Result<GitEffect<Vec<CommitLogEntry>>> {
+        match effect(
+            repo_path,
+            &["log", "--format=%H%x1f%s", range],
+            parse_brief_log,
+        )? {
+            GitEffect::Applied(commits) => commits.map(GitEffect::Applied),
+            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
+        }
     }
     fn diff_stat(
         &self,
@@ -204,11 +225,18 @@ impl GitClient for HybridGitClient {
         repo_path: &Path,
         message: &str,
     ) -> anyhow::Result<GitEffect<GitCommitReceipt>> {
-        effect(repo_path, &["commit", "-m", message], |stdout| {
+        let result = effect(repo_path, &["commit", "-m", message], |stdout| {
             GitCommitReceipt {
-                identity: commit_identity(stdout),
+                id: None,
                 detail: last_line(stdout).unwrap_or("committed").to_string(),
             }
+        })?;
+        Ok(match result {
+            GitEffect::Applied(mut receipt) => {
+                receipt.id = self.resolve_commit_id(repo_path, "HEAD").ok();
+                GitEffect::Applied(receipt)
+            }
+            GitEffect::Rejected(detail) => GitEffect::Rejected(detail),
         })
     }
     fn switch(&self, repo_path: &Path, branch: &str) -> anyhow::Result<GitEffect<()>> {
@@ -310,27 +338,26 @@ impl GitClient for HybridGitClient {
         repository.rev_parse_single(format!("{rev}^{{commit}}").as_bytes().as_bstr())?;
         Ok(())
     }
-    fn short_ref(&self, repo_path: &Path, rev: &str) -> anyhow::Result<String> {
-        Ok(self.resolve_sha(repo_path, rev)?.chars().take(7).collect())
-    }
     fn log_commits(&self, repo_path: &Path, range: &str) -> anyhow::Result<Vec<Commit>> {
         crate::git_capture::log_commits(repo_path, range)
     }
     fn diff(&self, repo_path: &Path, request: &GitDiffRequest) -> anyhow::Result<String> {
         crate::git_capture::diff(repo_path, request)
     }
-    fn root_commit(&self, repo_path: &Path) -> Option<String> {
+    fn root_commit(&self, repo_path: &Path) -> Option<CommitId> {
         crate::git_capture::root_commit(repo_path)
     }
-    fn resolve_sha(&self, repo_path: &Path, rev: &str) -> anyhow::Result<String> {
+    fn resolve_commit_id(&self, repo_path: &Path, rev: &str) -> anyhow::Result<CommitId> {
         let repository = gix::discover(repo_path)?;
-        match repository.rev_parse_single(rev.as_bytes().as_bstr()) {
-            Ok(object) => Ok(object.detach().to_string()),
-            Err(native_error) => capture(repo_path, &["rev-parse", rev])?
-                .ok_or_else(|| anyhow::Error::new(native_error)),
-        }
+        let commit_revision = format!("{rev}^{{commit}}");
+        let raw_id = match repository.rev_parse_single(commit_revision.as_bytes().as_bstr()) {
+            Ok(object) => object.detach().to_string(),
+            Err(native_error) => capture(repo_path, &["rev-parse", &commit_revision])?
+                .ok_or_else(|| anyhow::Error::new(native_error))?,
+        };
+        raw_id.try_into().map_err(Into::into)
     }
-    fn merge_base(&self, repo_path: &Path, left: &str, right: &str) -> anyhow::Result<String> {
+    fn merge_base(&self, repo_path: &Path, left: &str, right: &str) -> anyhow::Result<CommitId> {
         crate::git_capture::merge_base(repo_path, left, right)
     }
     fn committed_at(&self, repo_path: &Path, rev: &str) -> String {
@@ -375,15 +402,46 @@ fn last_line(output: &str) -> Option<&str> {
         .find(|line| !line.is_empty())
 }
 
-fn commit_identity(output: &str) -> Option<String> {
-    output.lines().rev().find_map(|line| {
-        let (header, subject) = line.trim().strip_prefix('[')?.split_once(']')?;
-        if subject.trim().is_empty() {
-            return None;
-        }
-        let identity = header.split_whitespace().next_back()?;
-        ((4..=64).contains(&identity.len())
-            && identity.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .then(|| identity.to_string())
-    })
+fn parse_brief_log(output: &str) -> anyhow::Result<Vec<CommitLogEntry>> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let (raw_id, subject) = line
+                .split_once('\x1f')
+                .ok_or_else(|| anyhow::anyhow!("git log entry omitted its subject delimiter"))?;
+            let id: CommitId = raw_id.try_into()?;
+            Ok(CommitLogEntry {
+                id,
+                subject: subject.trim().to_owned(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_brief_log;
+
+    #[test]
+    fn brief_log_retains_validated_full_commit_ids() {
+        let output = concat!(
+            "1111111111111111111111111111111111111111\x1ffeat: one\n",
+            "2222222222222222222222222222222222222222\x1ffix: two\n"
+        );
+
+        let commits = parse_brief_log(output).expect("valid brief log");
+        assert_eq!(
+            commits[0].id.to_string(),
+            "1111111111111111111111111111111111111111"
+        );
+        assert_eq!(commits[0].subject, "feat: one");
+        assert_eq!(
+            commits[1].id.to_string(),
+            "2222222222222222222222222222222222222222"
+        );
+        assert_eq!(commits[1].subject, "fix: two");
+        assert!(parse_brief_log("invalid\x1fsubject").is_err());
+    }
 }

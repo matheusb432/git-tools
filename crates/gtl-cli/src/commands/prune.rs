@@ -3,6 +3,7 @@
 use std::fmt::Write as _;
 
 use gtl_application::branches::{apply_prune::ApplyPruneOk, plan_prune::PruneBranch};
+use gtl_models::diffs::CommitIdAbbreviation;
 
 /// Renders the destructive branch-prune confirmation block.
 pub fn confirmation(onto: &str, branches: &[PruneBranch]) -> String {
@@ -11,7 +12,12 @@ pub fn confirmation(onto: &str, branches: &[PruneBranch]) -> String {
         branches.len()
     );
     for branch in branches {
-        let _ = write!(text, "\n  {}  {}", branch.name, branch.sha);
+        let _ = write!(
+            text,
+            "\n  {}  {}",
+            branch.name,
+            branch.id.abbreviated(CommitIdAbbreviation::SevenCharacters)
+        );
     }
     text
 }
@@ -27,7 +33,7 @@ pub fn render_result(result: &ApplyPruneOk) -> String {
         let _ = write!(
             detail,
             "\nrecover: git branch {} {}",
-            branch.name, branch.sha
+            branch.name, branch.id
         );
     }
     for failure in &result.failed {
@@ -48,12 +54,13 @@ mod tests {
     };
 
     use super::*;
+    use crate::testing::commit_id;
 
     #[test]
     fn confirmation_renders_the_selected_branches() {
         let branches = vec![PruneBranch {
             name: "feature/done".into(),
-            sha: "aaaaaaa".into(),
+            id: commit_id("a"),
         }];
 
         assert_eq!(
@@ -69,11 +76,11 @@ mod tests {
             deleted: vec![
                 PruneBranch {
                     name: "feature/first".into(),
-                    sha: "aaaaaaa".into(),
+                    id: commit_id("a"),
                 },
                 PruneBranch {
                     name: "feature/second".into(),
-                    sha: "bbbbbbb".into(),
+                    id: commit_id("b"),
                 },
             ],
             failed: vec![PruneFailure {
@@ -84,7 +91,7 @@ mod tests {
 
         assert_eq!(
             render_result(&result),
-            "deleted 2 branches.\nrecover: git branch feature/first aaaaaaa\nrecover: git branch feature/second bbbbbbb\nfailed: fix/blocked — branch is checked out"
+            "deleted 2 branches.\nrecover: git branch feature/first aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nrecover: git branch feature/second bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nfailed: fix/blocked — branch is checked out"
         );
     }
 }

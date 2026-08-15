@@ -1,4 +1,4 @@
-use gtl_models::worktrees::Worktree;
+use gtl_models::{diffs::CommitIdAbbreviation, worktrees::Worktree};
 
 pub(crate) fn render_list(worktrees: &[Worktree]) -> String {
     let rows = worktrees
@@ -44,11 +44,9 @@ fn branch_label(worktree: &Worktree) -> String {
 }
 
 fn short_head(worktree: &Worktree) -> String {
-    if worktree.head.is_empty() {
-        "-".to_string()
-    } else {
-        worktree.head.chars().take(7).collect()
-    }
+    worktree
+        .id
+        .abbreviated(CommitIdAbbreviation::SevenCharacters)
 }
 
 fn details(worktree: &Worktree) -> String {
@@ -93,13 +91,14 @@ fn column_width<'src>(header: &str, values: impl Iterator<Item = &'src str>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::commit_id;
 
     #[test]
     fn render_list_keeps_git_fields_in_the_aligned_table() {
         let worktrees = vec![
             Worktree {
                 path: "/repo".to_string(),
-                head: "123456789abcdef".to_string(),
+                id: commit_id("123456789abcdef"),
                 branch: Some("main".to_string()),
                 detached: false,
                 bare: false,
@@ -108,7 +107,7 @@ mod tests {
             },
             Worktree {
                 path: "/linked".to_string(),
-                head: "abcdef123456789".to_string(),
+                id: commit_id("abcdef123456789"),
                 branch: Some("feature/worktree".to_string()),
                 detached: false,
                 bare: true,

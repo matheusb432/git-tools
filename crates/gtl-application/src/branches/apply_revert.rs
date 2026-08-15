@@ -78,7 +78,7 @@ pub fn execute(
     progress.branch_switched = true;
     progress.recovery = Some(BranchRecovery::switch_to(&target.onto));
 
-    match git.move_branch(&target.top, &target.onto, &target.prior_sha) {
+    match git.move_branch(&target.top, &target.onto, target.prior_id.as_ref()) {
         Ok(GitEffect::Applied(())) => {
             progress.force_move_done = true;
             progress.recovery = None;
@@ -86,7 +86,7 @@ pub fn execute(
                 RevertStatus::Reverted,
                 format!(
                     "reverted '{}' to {} and switched back",
-                    target.onto, target.prior_sha
+                    target.onto, target.prior_id
                 ),
                 progress,
             ))
@@ -122,7 +122,7 @@ mod tests {
         let target = RevertTarget {
             top: ".".into(),
             onto: "main".into(),
-            prior_sha: "abc123".into(),
+            prior_id: crate::testing::commit_id_fixture("abc123"),
         };
 
         let result =
@@ -132,7 +132,9 @@ mod tests {
             result,
             ApplyRevertOk {
                 status: RevertStatus::Reverted,
-                detail: "reverted 'main' to abc123 and switched back".into(),
+                detail:
+                    "reverted 'main' to abc123abc123abc123abc123abc123abc123abc1 and switched back"
+                        .into(),
                 progress: RevertProgress {
                     branch_switched: true,
                     force_move_done: true,
@@ -150,7 +152,7 @@ mod tests {
         let target = RevertTarget {
             top: ".".into(),
             onto: "main".into(),
-            prior_sha: "abc123".into(),
+            prior_id: crate::testing::commit_id_fixture("abc123"),
         };
 
         let error = execute(ApplyRevert { target }, &git)
@@ -175,7 +177,7 @@ mod tests {
         let target = RevertTarget {
             top: ".".into(),
             onto: "main".into(),
-            prior_sha: "abc123".into(),
+            prior_id: crate::testing::commit_id_fixture("abc123"),
         };
 
         let result = execute(ApplyRevert { target }, &git)
@@ -204,7 +206,7 @@ mod tests {
         let target = RevertTarget {
             top: ".".into(),
             onto: "main".into(),
-            prior_sha: "abc123".into(),
+            prior_id: crate::testing::commit_id_fixture("abc123"),
         };
 
         let error = execute(ApplyRevert { target }, &git).expect_err("force-move transport fails");
