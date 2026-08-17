@@ -12,17 +12,17 @@ pub(super) fn note(label: &str, view: &View) -> Option<Note> {
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::diffs::AppliedExclusions;
+    use gtl_models::diffs::{AppliedExclusions, ExcludedExtensions};
 
     use super::note;
-    use crate::{diffs::View, testing::diffs::view};
+    use crate::{diffs::View, utils::diffs::view};
 
     #[test]
     fn note_describes_the_applied_exclusion() {
         let view = View {
             exclusions: Some(AppliedExclusions {
-                hidden_paths: vec!["Cargo.lock".into()],
-                extensions: vec!["lock".into()],
+                hidden_paths: vec![crate::utils::repository_relative_path("Cargo.lock")],
+                extensions: ExcludedExtensions::new(["lock"]),
             }),
             ..view()
         };

@@ -6,7 +6,10 @@ mod document;
 mod payload;
 
 pub use document::{build_html, build_tabbed_html};
-use gtl_application::{diffs::View, viewer::RenderOptions};
+use gtl_application::{
+    diffs::View,
+    viewer::{RenderOptions, Theme},
+};
 
 /// The [`HtmlRenderer`](gtl_application::ports::HtmlRenderer) adapter for offline artifacts.
 #[derive(Debug, Clone, Copy, Default)]
@@ -17,7 +20,7 @@ impl gtl_application::ports::HtmlRenderer for ArtifactRenderer {
         &self,
         view: &View,
         options: RenderOptions,
-        theme: Option<&str>,
+        theme: Option<Theme>,
     ) -> anyhow::Result<String> {
         build_html(view, options, theme)
     }
@@ -27,7 +30,7 @@ impl gtl_application::ports::HtmlRenderer for ArtifactRenderer {
         title: &str,
         views: &[View],
         options: RenderOptions,
-        theme: Option<&str>,
+        theme: Option<Theme>,
     ) -> anyhow::Result<String> {
         build_tabbed_html(title, views, options, theme)
     }
@@ -37,20 +40,25 @@ impl gtl_application::ports::HtmlRenderer for ArtifactRenderer {
 mod tests {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use gtl_application::diffs::{Cmd, FileDiff, Foot, View};
+    use gtl_models::{
+        diffs::DiffLineCount,
+        git::{BranchName, GitHead, GitRevision},
+    };
     use serde::de::DeserializeOwned;
 
     pub(crate) fn sample_view() -> View {
         View {
             exclusions: None,
-            repo_name: "api".to_owned(),
-            repo_root: "/repo/api".to_owned(),
-            branch: "main".to_owned(),
-            upstream: "origin/main".to_owned(),
+            repo_name: gtl_models::paths::ProjectName::try_from("api").unwrap(),
+            repo_root: gtl_models::paths::RepositoryRoot::try_new("/repo/api".into()).unwrap(),
+            branch: GitHead::Branch(BranchName::try_new("main").unwrap()),
+            upstream: GitRevision::try_new("origin/main").unwrap(),
             commits: Vec::new(),
             files: vec![FileDiff {
-                path: "src/lib.rs".to_owned(),
-                added: 1,
-                removed: 1,
+                path: gtl_models::paths::RepositoryRelativePath::try_new("src/lib.rs".into())
+                    .unwrap(),
+                added: DiffLineCount::new(1),
+                removed: DiffLineCount::new(1),
                 lines: vec!["@@ -1 +1 @@".to_owned(), "+client-rendered".to_owned()],
                 full_lines: Some(vec![
                     "@@ -1 +1 @@".to_owned(),

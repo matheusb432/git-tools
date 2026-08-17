@@ -1,5 +1,4 @@
-use std::path::Path;
-
+use gtl_models::paths::{ProjectName, RepositoryRoot};
 use gtl_wire::{
     envelope::Outcome,
     tags::{BumpTagRequest, DryRunTagBumpRequest, TagBumpLevelDto, TagBumpPreview},
@@ -127,11 +126,8 @@ fn render_preview(preview: &TagBumpPreview) -> String {
     )
 }
 
-fn repository_name(repo_path: &str) -> String {
-    Path::new(repo_path).file_name().map_or_else(
-        || repo_path.to_string(),
-        |name| name.to_string_lossy().into_owned(),
-    )
+fn repository_name(repo_path: &RepositoryRoot) -> ProjectName {
+    repo_path.project_name()
 }
 
 const fn level_name(level: TagBumpLevelDto) -> &'static str {
@@ -144,20 +140,21 @@ const fn level_name(level: TagBumpLevelDto) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::git::{BranchName, GitHead, TagName};
     use gtl_wire::tags::{TagBumpLevelDto, TagBumpPreview};
 
     use super::render_preview;
-    use crate::testing::commit_id;
+    use crate::testing::{commit_id, repository_root};
 
     #[test]
     fn preview_names_the_exact_tag_target_message_and_push_ref() {
         let preview = TagBumpPreview {
-            repo_path: "/repo/git-tools".into(),
-            branch: "main".into(),
+            repo_path: repository_root("/repo/git-tools"),
+            branch: GitHead::Branch(BranchName::try_new("main").unwrap()),
             target_id: commit_id("0123456789abcdef0123456789abcdef01234567"),
             level: TagBumpLevelDto::Patch,
-            base_tag: "v0.30.0".into(),
-            next_tag: "v0.30.1".into(),
+            base_tag: TagName::try_new("v0.30.0").unwrap(),
+            next_tag: TagName::try_new("v0.30.1").unwrap(),
             message: "release\nnotes".into(),
             push: true,
         };

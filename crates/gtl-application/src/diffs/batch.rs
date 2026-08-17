@@ -3,12 +3,16 @@
 //! whether an empty or errored view is skipped-and-counted (diff-subrepos) or kept
 //! and propagated (diff-all).
 
-use gtl_models::settings::UserSettings;
+use gtl_models::{
+    paths::{ProjectName, RepositoryRoot},
+    settings::UserSettings,
+    timestamps::MachineTimestamp,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     diffs::{DiffTarget, View, diff_computation},
-    ports::{Clock, GitClient},
+    ports::GitClient,
     shared::notes::Note,
 };
 
@@ -16,12 +20,12 @@ use crate::{
 /// label to show on its tab (relative path under the scan root, or the project title).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepoRef {
-    pub top: String,
-    pub label: String,
+    pub top: RepositoryRoot,
+    pub label: ProjectName,
 }
 
 /// The views collected from a batch render, plus how many were skipped.
-pub(super) struct BatchBuild {
+pub(crate) struct BatchBuild {
     pub views: Vec<View>,
     pub skipped: usize,
 }
@@ -31,7 +35,7 @@ pub(super) struct BatchBuild {
 /// counted as a skip (diff-subrepos); when false, a build error propagates and every
 /// view is kept regardless of emptiness (diff --all -- matches its current no-skip
 /// behavior exactly, do not "fix" this asymmetry).
-pub(super) fn render_batch(
+pub(crate) fn render_batch(
     source: &impl GitClient,
     target: &DiffTarget,
     settings: &UserSettings,
@@ -68,10 +72,9 @@ pub(super) fn render_batch(
     Ok(BatchBuild { views, skipped })
 }
 
-/// `{YYYY-MM-DD} {label}`, dated from `clock` (its `now_iso()` is already ISO-8601, so
-/// the first 10 chars are the date -- no new date-formatting dependency needed).
-pub(super) fn dated_title(clock: &impl Clock, label: &str) -> String {
-    let date = &clock.now_iso()[..10];
+/// `{YYYY-MM-DD} {label}`, dated from `clock`.
+pub(crate) fn dated_title(timestamp: &MachineTimestamp, label: &str) -> String {
+    let date = timestamp.date();
     format!("{date} {label}")
 }
 
@@ -82,21 +85,22 @@ mod tests {
     use super::{RepoRef, dated_title, render_batch};
     use crate::{
         diffs::DiffTarget,
-        testing::{
-            FakeGitClient, FixedClock, RepoOverride, default_user_settings,
+        utils::{
+            FakeGitClient, RepoOverride, default_user_settings,
             diffs::{DIFF_SINGLE_FILE, commit},
+            project_name, repository_root,
         },
     };
 
     fn two_repos() -> Vec<RepoRef> {
         vec![
             RepoRef {
-                top: "/repo-a".into(),
-                label: "repo-a".into(),
+                top: repository_root("/repo-a"),
+                label: project_name("repo-a"),
             },
             RepoRef {
-                top: "/repo-b".into(),
-                label: "repo-b".into(),
+                top: repository_root("/repo-b"),
+                label: project_name("repo-b"),
             },
         ]
     }
@@ -107,9 +111,10 @@ mod tests {
 
     #[test]
     fn dated_title_prefixes_label_with_yyyy_mm_dd() {
-        let clock = FixedClock("2026-07-02T00:00:00Z".into());
+        let timestamp = gtl_models::timestamps::MachineTimestamp::try_from("2026-07-02T00:00:00Z")
+            .expect("fixture clock timestamp is valid");
 
-        let title = dated_title(&clock, "diff-artifact subrepos");
+        let title = dated_title(&timestamp, "diff-artifact subrepos");
 
         assert_eq!(title, "2026-07-02 diff-artifact subrepos");
     }
@@ -144,7 +149,7 @@ mod tests {
 
         assert_eq!(batch.views.len(), 1);
         assert_eq!(batch.skipped, 1);
-        assert_eq!(batch.views[0].repo_name, "repo-b");
+        assert_eq!(batch.views[0].repo_name.as_str(), "repo-b");
     }
 
     #[test]
@@ -155,8 +160,8 @@ mod tests {
             ..Default::default()
         };
         let repos = vec![RepoRef {
-            top: "/repo".into(),
-            label: "repo".into(),
+            top: repository_root("/repo"),
+            label: project_name("repo"),
         }];
         let mut notes = Vec::new();
 
@@ -226,7 +231,7 @@ diff --git a/notes.md b/notes.md\n\
             );
         }
         let exclusions = gtl_models::diffs::DiffExclusions::new(
-            [("repo-a".to_string(), vec!["md".to_string()])],
+            [(project_name("repo-a"), vec!["md".to_string()])],
             None,
         );
         let settings = settings(exclusions);

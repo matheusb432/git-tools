@@ -60,7 +60,7 @@ clap = { version = "4", features = ["derive"] }
 clap-cargo = "0.18.3"
 command-group = "5.0.1"
 console = { version = "0.16.4", default-features = false, features = ["std"] }
-cqrsy = { git = "file:///workspace/shared-libs/cqrsy", tag = "v0.10.1" }
+cqrsy = { git = "ssh://git@github.com/matheusb432/cqrsy.git", rev = "544e92d53a7b54cb1209d9e2eeb25ac29ea88064" }
 criterion = "0.8.2"
 directories = "6.0.0"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -72,7 +72,7 @@ http-body-util = "0.1"
 ico = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
 indicatif = { version = "0.18.6", default-features = false }
-jiff = { version = "0.2", default-features = false, features = ["std"] }
+jiff = { version = "0.2", default-features = false }
 lru = "0.18.1"
 libc = "0.2.186"
 natord = "1.0.9"

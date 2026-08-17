@@ -1,11 +1,14 @@
-use gtl_models::{diffs::CommitIdAbbreviation, worktrees::Worktree};
+use gtl_models::{
+    diffs::CommitIdAbbreviation,
+    worktrees::{Worktree, WorktreeCheckout, WorktreeKind},
+};
 
 pub(crate) fn render_list(worktrees: &[Worktree]) -> String {
     let rows = worktrees
         .iter()
         .enumerate()
         .map(|(index, worktree)| WorktreeRow {
-            path: worktree.path.clone(),
+            path: worktree.path().to_string(),
             branch: branch_label(worktree),
             head: short_head(worktree),
             state: if index == 0 { "primary" } else { "linked" }.to_string(),
@@ -34,30 +37,28 @@ pub(crate) fn render_list(worktrees: &[Worktree]) -> String {
 }
 
 fn branch_label(worktree: &Worktree) -> String {
-    if let Some(branch) = &worktree.branch {
-        branch.clone()
-    } else if worktree.detached {
-        "detached".to_string()
-    } else {
-        "-".to_string()
+    match worktree.kind() {
+        WorktreeKind::Checkout(WorktreeCheckout::Branch(branch)) => branch.to_string(),
+        WorktreeKind::Checkout(WorktreeCheckout::Detached) => "detached".to_string(),
+        WorktreeKind::Bare => "-".to_string(),
     }
 }
 
 fn short_head(worktree: &Worktree) -> String {
     worktree
-        .id
+        .id()
         .abbreviated(CommitIdAbbreviation::SevenCharacters)
 }
 
 fn details(worktree: &Worktree) -> String {
     let mut details = Vec::new();
-    if worktree.bare {
+    if matches!(worktree.kind(), WorktreeKind::Bare) {
         details.push("bare".to_string());
     }
-    if let Some(reason) = &worktree.locked {
+    if let Some(reason) = worktree.locked() {
         details.push(detail_with_reason("locked", reason));
     }
-    if let Some(reason) = &worktree.prunable {
+    if let Some(reason) = worktree.prunable() {
         details.push(detail_with_reason("prunable", reason));
     }
     details.join(", ")
@@ -91,29 +92,25 @@ fn column_width<'src>(header: &str, values: impl Iterator<Item = &'src str>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::commit_id;
+    use crate::testing::{branch_name, commit_id, repository_root};
 
     #[test]
     fn render_list_keeps_git_fields_in_the_aligned_table() {
         let worktrees = vec![
-            Worktree {
-                path: "/repo".to_string(),
-                id: commit_id("123456789abcdef"),
-                branch: Some("main".to_string()),
-                detached: false,
-                bare: false,
-                locked: None,
-                prunable: None,
-            },
-            Worktree {
-                path: "/linked".to_string(),
-                id: commit_id("abcdef123456789"),
-                branch: Some("feature/worktree".to_string()),
-                detached: false,
-                bare: true,
-                locked: Some("maintenance".to_string()),
-                prunable: None,
-            },
+            Worktree::new(
+                repository_root("/repo"),
+                commit_id("123456789abcdef"),
+                WorktreeKind::Checkout(WorktreeCheckout::Branch(branch_name("main"))),
+                None,
+                None,
+            ),
+            Worktree::new(
+                repository_root("/linked"),
+                commit_id("abcdef123456789"),
+                WorktreeKind::Checkout(WorktreeCheckout::Branch(branch_name("feature/worktree"))),
+                Some("maintenance".to_string()),
+                None,
+            ),
         ];
 
         assert_eq!(
@@ -121,7 +118,7 @@ mod tests {
             concat!(
                 "PATH     BRANCH            HEAD     STATE    DETAILS\n",
                 "/repo    main              1234567  primary  \n",
-                "/linked  feature/worktree  abcdef1  linked   bare, locked: maintenance",
+                "/linked  feature/worktree  abcdef1  linked   locked: maintenance",
             )
         );
     }

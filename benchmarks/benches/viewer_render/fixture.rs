@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use gtl_application::{diffs::View, viewer::RenderOptions};
+use gtl_application::{
+    diffs::View,
+    viewer::{RenderOptions, Theme},
+};
 use gtl_benchmarks::require;
 
 use super::view_fixture;
@@ -19,7 +22,7 @@ impl ViewerRenderBenchmark {
 
     pub(super) fn render_raw_artifact(&self, options: RenderOptions) -> String {
         require(
-            gtl_artifacts::build_html(&self.view, options, Some("dark")),
+            gtl_artifacts::build_html(&self.view, options, Some(Theme::Dark)),
             "rendering the raw benchmark artifact",
         )
     }

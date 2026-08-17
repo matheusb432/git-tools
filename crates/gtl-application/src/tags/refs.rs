@@ -1,21 +1,25 @@
-use std::{collections::BTreeMap, path::Path};
+use std::collections::BTreeMap;
 
-use gtl_models::tags::{Tag, TagState};
+use gtl_models::{
+    git::{GitObjectId, RemoteName, TagName},
+    paths::RepositoryRoot,
+    tags::{Tag, TagState},
+};
 
 use super::{compare_tags, git_command_error::GitCommandError};
 use crate::ports::{GitClient, GitEffect};
 
 pub(super) struct TagRefs {
-    local: BTreeMap<String, Tag>,
+    local: BTreeMap<TagName, Tag>,
     /// Tag name to the object id origin's `refs/tags/<name>` points at, or
     /// `None` when origin was not queried.
-    remote: Option<BTreeMap<String, String>>,
+    remote: Option<BTreeMap<TagName, GitObjectId>>,
 }
 
 impl TagRefs {
     pub(super) fn new(
-        local: BTreeMap<String, Tag>,
-        remote: Option<BTreeMap<String, String>>,
+        local: BTreeMap<TagName, Tag>,
+        remote: Option<BTreeMap<TagName, GitObjectId>>,
     ) -> Self {
         Self { local, remote }
     }
@@ -30,7 +34,7 @@ impl TagRefs {
         pending
     }
 
-    pub(super) fn local(&self, name: &str) -> Option<&Tag> {
+    pub(super) fn local(&self, name: &TagName) -> Option<&Tag> {
         self.local.get(name)
     }
 
@@ -60,7 +64,10 @@ impl TagRefs {
     }
 }
 
-pub(super) fn load(git: &impl GitClient, repo_path: &Path) -> Result<TagRefs, GitCommandError> {
+pub(super) fn load(
+    git: &impl GitClient,
+    repo_path: &RepositoryRoot,
+) -> Result<TagRefs, GitCommandError> {
     Ok(TagRefs::new(
         local_refs(git, repo_path)?,
         Some(remote_refs(git, repo_path)?),
@@ -69,15 +76,15 @@ pub(super) fn load(git: &impl GitClient, repo_path: &Path) -> Result<TagRefs, Gi
 
 pub(super) fn load_local(
     git: &impl GitClient,
-    repo_path: &Path,
+    repo_path: &RepositoryRoot,
 ) -> Result<TagRefs, GitCommandError> {
     Ok(TagRefs::new(local_refs(git, repo_path)?, None))
 }
 
 fn local_refs(
     git: &impl GitClient,
-    repo_path: &Path,
-) -> Result<BTreeMap<String, Tag>, GitCommandError> {
+    repo_path: &RepositoryRoot,
+) -> Result<BTreeMap<TagName, Tag>, GitCommandError> {
     match git.local_tags(repo_path)? {
         GitEffect::Applied(tags) => Ok(tags),
         GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
@@ -88,9 +95,9 @@ fn local_refs(
 
 fn remote_refs(
     git: &impl GitClient,
-    repo_path: &Path,
-) -> Result<BTreeMap<String, String>, GitCommandError> {
-    match git.remote_tags(repo_path, "origin")? {
+    repo_path: &RepositoryRoot,
+) -> Result<BTreeMap<TagName, GitObjectId>, GitCommandError> {
+    match git.remote_tags(repo_path, &RemoteName::origin())? {
         GitEffect::Applied(tags) => Ok(tags),
         GitEffect::Rejected(detail) => Err(GitCommandError::rejected(format!(
             "git ls-remote failed: {detail}"
@@ -102,31 +109,51 @@ fn remote_refs(
 mod tests {
     use std::collections::BTreeMap;
 
-    use gtl_models::tags::{Tag, TagState};
+    use gtl_models::{
+        git::{GitObjectId, TagName},
+        tags::{Tag, TagState},
+    };
 
     use super::TagRefs;
 
     fn local_tag(name: &str, object: &str, created_at: i64) -> Tag {
         Tag::lightweight(
-            name.into(),
-            crate::testing::commit_id_fixture(object),
-            Some(created_at),
+            crate::utils::tag_name(name),
+            crate::utils::commit_id_fixture(object),
+            Some(
+                gtl_models::timestamps::MachineTimestamp::from_unix_seconds(created_at)
+                    .expect("fixture tag timestamp is in range"),
+            ),
+        )
+    }
+
+    fn local_entry(name: &str, object: &str, created_at: i64) -> (TagName, Tag) {
+        (
+            crate::utils::tag_name(name),
+            local_tag(name, object, created_at),
+        )
+    }
+
+    fn remote_entry(name: &str, object: &str) -> (TagName, GitObjectId) {
+        (
+            crate::utils::tag_name(name),
+            crate::utils::git_object_id(object),
         )
     }
 
     #[test]
     fn pending_tags_keep_the_listing_order_not_the_ref_name_order() {
         let local = BTreeMap::from([
-            ("v0.10.0".into(), local_tag("v0.10.0", "object-a", 100)),
-            ("v0.2.0".into(), local_tag("v0.2.0", "object-b", 100)),
-            ("v0.9.0".into(), local_tag("v0.9.0", "object-c", 100)),
+            local_entry("v0.10.0", "object-a", 100),
+            local_entry("v0.2.0", "object-b", 100),
+            local_entry("v0.9.0", "object-c", 100),
         ]);
         let refs = TagRefs::new(local, Some(BTreeMap::new()));
 
         assert_eq!(
             refs.pending()
                 .into_iter()
-                .map(Tag::name)
+                .map(|tag| tag.name().to_string())
                 .collect::<Vec<_>>(),
             vec!["v0.2.0", "v0.9.0", "v0.10.0"]
         );
@@ -135,25 +162,19 @@ mod tests {
     #[test]
     fn pending_tags_are_local_refs_not_known_at_the_same_remote_object() {
         let local = BTreeMap::from([
-            ("v1.0.0".into(), local_tag("v1.0.0", "object-a", 100)),
-            ("v1.1.0".into(), local_tag("v1.1.0", "object-b", 110)),
+            local_entry("v1.0.0", "object-a", 100),
+            local_entry("v1.1.0", "object-b", 110),
         ]);
         let remote = BTreeMap::from([
-            (
-                "v1.0.0".into(),
-                crate::testing::commit_id_fixture("object-a").to_string(),
-            ),
-            (
-                "v1.1.0".into(),
-                crate::testing::commit_id_fixture("old-object").to_string(),
-            ),
+            remote_entry("v1.0.0", "object-a"),
+            remote_entry("v1.1.0", "old-object"),
         ]);
         let refs = TagRefs::new(local, Some(remote));
 
         assert_eq!(
             refs.pending()
                 .into_iter()
-                .map(Tag::name)
+                .map(|tag| tag.name().to_string())
                 .collect::<Vec<_>>(),
             vec!["v1.1.0"]
         );
@@ -161,7 +182,7 @@ mod tests {
 
     #[test]
     fn listing_without_a_remote_query_leaves_every_tag_state_unknown() {
-        let local = BTreeMap::from([("v1.0.0".into(), local_tag("v1.0.0", "object-a", 100))]);
+        let local = BTreeMap::from([local_entry("v1.0.0", "object-a", 100)]);
 
         let states = TagRefs::new(local, None)
             .into_listed()
@@ -175,18 +196,12 @@ mod tests {
     #[test]
     fn listing_marks_tags_remote_only_when_origin_holds_the_same_object() {
         let local = BTreeMap::from([
-            ("v1.0.0".into(), local_tag("v1.0.0", "object-a", 100)),
-            ("v1.1.0".into(), local_tag("v1.1.0", "object-b", 110)),
+            local_entry("v1.0.0", "object-a", 100),
+            local_entry("v1.1.0", "object-b", 110),
         ]);
         let remote = BTreeMap::from([
-            (
-                "v1.0.0".into(),
-                crate::testing::commit_id_fixture("object-a").to_string(),
-            ),
-            (
-                "v1.1.0".into(),
-                crate::testing::commit_id_fixture("old-object").to_string(),
-            ),
+            remote_entry("v1.0.0", "object-a"),
+            remote_entry("v1.1.0", "old-object"),
         ]);
 
         let states = TagRefs::new(local, Some(remote))

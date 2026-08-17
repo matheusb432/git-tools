@@ -98,8 +98,9 @@ fn save_one(client: &HttpClient, path: &str) -> anyhow::Result<SaveLiveViewData>
 
 /// Map a saved live view onto the recipe that renders its unpushed work.
 fn live_recipe(data: &SaveLiveViewData) -> Recipe {
+    let gtl_models::live_views::LiveSource::LocalRepo { path } = &data.source;
     Recipe {
-        source: RecipeSource::LocalRepo(data.source_value.clone().into()),
+        source: RecipeSource::LocalRepo(path.clone()),
         op: RecipeOp::Diff {
             target: RecipeTarget::Unpushed { pinned: None },
         },
@@ -131,6 +132,7 @@ fn live_degrade_note(err: &anyhow::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{project_name, repository_root};
 
     #[test]
     fn live_degrade_note_conveys_the_save_without_claiming_a_browser_render() {
@@ -147,22 +149,21 @@ mod tests {
     }
 
     #[test]
-    fn live_recipe_maps_source_value_to_an_unpushed_diff_recipe() {
+    fn live_recipe_maps_the_typed_source_to_an_unpushed_diff_recipe() {
         let data = SaveLiveViewData {
-            source_kind: "LocalRepo".to_string(),
-            source_value: "/repos/three".to_string(),
-            display_name: "three".to_string(),
-            already_saved: true,
+            source: gtl_models::live_views::LiveSource::local_repo(repository_root("/repos/three")),
+            display_name: project_name("three"),
+            disposition: gtl_wire::live_views::SaveLiveViewDisposition::Refreshed,
         };
 
         assert_eq!(
             live_recipe(&data),
             Recipe {
-                source: RecipeSource::LocalRepo("/repos/three".into()),
+                source: RecipeSource::LocalRepo(repository_root("/repos/three")),
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None }
                 },
-                name: Some("three".into()),
+                name: Some(project_name("three")),
             }
         );
     }

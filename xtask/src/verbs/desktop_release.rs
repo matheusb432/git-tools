@@ -4,15 +4,15 @@ use std::{fs, path::Path};
 
 use anyhow::{Context, Result};
 
-use super::dioxus_web;
-use crate::{process, project, task::Step};
+use super::{dioxus_web, lock_web_assets, repository_root};
+use crate::{process, task::Step};
 
 const PRODUCTION_CONFIG_PATH: &str = "crates/gtl-desktop/tauri.production.conf.json";
 pub(crate) const PRODUCTION_FEATURES: &str = "custom-protocol";
 
 pub(crate) fn run_cargo(label: &str, arguments: &[&str]) -> Result<()> {
-    let root = project::repository_root();
-    let _lock = project::lock_web_assets(&root)?;
+    let root = repository_root();
+    let _lock = lock_web_assets(&root)?;
     run_cargo_unlocked(label, arguments, &root)
 }
 

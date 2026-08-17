@@ -1,8 +1,9 @@
 //! The keyset-paginated query for the desktop viewer's recent render history.
 
-use std::num::NonZeroUsize;
-
-use gtl_models::viewer::RenderHistoryId;
+use gtl_models::viewer::{
+    HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
+    RenderHistoryId,
+};
 use rusqlite::{Connection, params_from_iter};
 
 use crate::history::{
@@ -19,11 +20,11 @@ pub enum RecentRenderPageCursor {
     Newest,
     OlderThan {
         render: RenderHistoryId,
-        page: NonZeroUsize,
+        page: HistoryPageNumber,
     },
     NewerThan {
         render: RenderHistoryId,
-        page: NonZeroUsize,
+        page: HistoryPageNumber,
     },
     Oldest,
 }
@@ -36,9 +37,8 @@ pub struct ListRecentRenderPage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListRecentRenderPageOk {
     pub entries: Vec<RecentRenderRecord>,
-    pub total_count: usize,
-    pub page_number: usize,
-    pub page_count: usize,
+    pub total_count: HistoryRenderCount,
+    pub position: HistoryPagePosition,
     pub has_newer: bool,
     pub has_older: bool,
 }
@@ -60,23 +60,41 @@ pub fn execute(
             row.get::<_, i64>(0)
         })
         .map_err(anyhow::Error::from)?;
-    let total_count = usize::try_from(total_count).map_err(anyhow::Error::from)?;
-    let page_count = total_count.div_ceil(RECENT_RENDER_PAGE_SIZE);
-    let (entries, has_newer, has_older) = list_page(connection, query.cursor, total_count)?;
+    let total_count = u64::try_from(total_count).map_err(anyhow::Error::from)?;
+    let query_total_count = usize::try_from(total_count).map_err(anyhow::Error::from)?;
+    let page_count = query_total_count.div_ceil(RECENT_RENDER_PAGE_SIZE);
+    let (entries, has_newer, has_older) = list_page(connection, query.cursor, query_total_count)?;
     let page_number = match query.cursor {
-        RecentRenderPageCursor::Newest => usize::from(total_count > 0),
+        RecentRenderPageCursor::Newest => usize::from(query_total_count > 0),
         RecentRenderPageCursor::OlderThan { page, .. }
-        | RecentRenderPageCursor::NewerThan { page, .. } => page.get().min(page_count),
+        | RecentRenderPageCursor::NewerThan { page, .. } => usize::try_from(u32::from(page))
+            .map_err(anyhow::Error::from)?
+            .min(page_count),
         RecentRenderPageCursor::Oldest => page_count,
     };
+    let position = history_page_position(page_number, page_count)?;
     Ok(ListRecentRenderPageOk {
         entries,
-        total_count,
-        page_number,
-        page_count,
+        total_count: HistoryRenderCount::new(total_count),
+        position,
         has_newer,
         has_older,
     })
+}
+
+fn history_page_position(
+    page_number: usize,
+    page_count: usize,
+) -> Result<HistoryPagePosition, ListRecentRenderPageError> {
+    if page_count == 0 {
+        return Ok(HistoryPagePosition::Empty);
+    }
+    let page_number = u32::try_from(page_number).map_err(anyhow::Error::from)?;
+    let page_count = u32::try_from(page_count).map_err(anyhow::Error::from)?;
+    let page_number = HistoryPageNumber::try_new(page_number).map_err(anyhow::Error::from)?;
+    let page_count = HistoryPageCount::try_new(page_count).map_err(anyhow::Error::from)?;
+    let page = HistoryPage::new(page_number, page_count).map_err(anyhow::Error::from)?;
+    Ok(HistoryPagePosition::Page(page))
 }
 
 fn list_page(
@@ -148,7 +166,10 @@ fn list_page(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::history::persistence::{seed_recent_render, store_test};
+    use crate::history::{
+        list_recent_render_page,
+        persistence::{seed_recent_render, store_test},
+    };
 
     fn seed_history(connection: &Connection, count: i64) {
         for id in 1..=count {
@@ -163,25 +184,38 @@ mod tests {
             .collect()
     }
 
+    fn page_number(value: u32) -> HistoryPageNumber {
+        HistoryPageNumber::try_new(value).expect("fixture page number is positive")
+    }
+
+    fn page_position(number: u32, count: u32) -> HistoryPagePosition {
+        HistoryPagePosition::Page(
+            HistoryPage::new(
+                page_number(number),
+                HistoryPageCount::try_new(count).expect("fixture page count is positive"),
+            )
+            .expect("fixture page is within the page count"),
+        )
+    }
+
     #[test]
     fn pages_through_history_with_id_keysets() {
         let connection = store_test();
         seed_history(&connection, 65);
 
-        let first = execute(ListRecentRenderPage::default(), &connection).expect("first page");
+        let first = list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
+            .expect("first page");
         assert_eq!(ids(&first), (36..=65).rev().collect::<Vec<_>>());
-        assert_eq!(
-            (first.page_number, first.page_count, first.total_count),
-            (1, 3, 65)
-        );
+        assert_eq!(first.position, page_position(1, 3));
+        assert_eq!(first.total_count, HistoryRenderCount::new(65));
         assert!(!first.has_newer);
         assert!(first.has_older);
 
-        let second = execute(
+        let second = list_recent_render_page::execute(
             ListRecentRenderPage {
                 cursor: RecentRenderPageCursor::OlderThan {
                     render: first.entries.last().expect("first page row").id,
-                    page: NonZeroUsize::new(2).expect("positive page"),
+                    page: page_number(2),
                 },
             },
             &connection,
@@ -191,7 +225,7 @@ mod tests {
         assert!(second.has_newer);
         assert!(second.has_older);
 
-        let last = execute(
+        let last = list_recent_render_page::execute(
             ListRecentRenderPage {
                 cursor: RecentRenderPageCursor::Oldest,
             },
@@ -199,15 +233,15 @@ mod tests {
         )
         .expect("last page");
         assert_eq!(ids(&last), (1..=5).rev().collect::<Vec<_>>());
-        assert_eq!(last.page_number, 3);
+        assert_eq!(last.position, page_position(3, 3));
         assert!(last.has_newer);
         assert!(!last.has_older);
 
-        let previous = execute(
+        let previous = list_recent_render_page::execute(
             ListRecentRenderPage {
                 cursor: RecentRenderPageCursor::NewerThan {
                     render: last.entries.first().expect("last page row").id,
-                    page: NonZeroUsize::new(2).expect("positive page"),
+                    page: page_number(2),
                 },
             },
             &connection,
@@ -220,13 +254,12 @@ mod tests {
     fn empty_history_has_no_pages_or_navigation() {
         let connection = store_test();
 
-        let page = execute(ListRecentRenderPage::default(), &connection).expect("empty page");
+        let page = list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
+            .expect("empty page");
 
         assert!(page.entries.is_empty());
-        assert_eq!(
-            (page.total_count, page.page_number, page.page_count),
-            (0, 0, 0)
-        );
+        assert_eq!(page.total_count, HistoryRenderCount::default());
+        assert_eq!(page.position, HistoryPagePosition::Empty);
         assert!(!page.has_newer);
         assert!(!page.has_older);
     }
@@ -260,12 +293,32 @@ mod tests {
         let connection = store_test();
         seed_recent_render(&connection, 0, "invalid");
 
-        let error = execute(ListRecentRenderPage::default(), &connection)
+        let error = list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
             .expect_err("corrupt row identity rejects");
 
         assert!(matches!(
             error,
-            ListRecentRenderPageError::InvalidRow(RecentRenderRowError::InvalidId { id: 0 })
+            ListRecentRenderPageError::InvalidRow(RecentRenderRowError::Id { id: 0 })
+        ));
+    }
+
+    #[test]
+    fn timezone_less_render_timestamp_remains_a_typed_page_error() {
+        let connection = store_test();
+        seed_recent_render(&connection, 7, "invalid timestamp");
+        connection
+            .execute(
+                "UPDATE recent_renders SET rendered_at = '2026-07-11T00:00:00' WHERE id = 7",
+                [],
+            )
+            .expect("corrupt persisted timestamp");
+
+        let error = list_recent_render_page::execute(ListRecentRenderPage::default(), &connection)
+            .expect_err("timezone-less timestamp must reject");
+
+        assert!(matches!(
+            error,
+            ListRecentRenderPageError::InvalidRow(RecentRenderRowError::Timestamp { id: 7, .. })
         ));
     }
 }

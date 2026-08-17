@@ -1,7 +1,17 @@
 //! Typed values exchanged by the desktop viewer and its Dioxus Web shell.
 
-use gtl_models::diffs::CommitId;
-use serde::{Deserialize, Serialize};
+use gtl_models::{
+    diffs::{CommitId, DiffLineCount, ExcludedExtensions},
+    git::{GitHead, GitRevision},
+    paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
+    timestamps::MachineTimestamp,
+    viewer::{
+        HistoryPageNumber, HistoryPagePosition, HistoryRenderCount, RenderHistoryId,
+        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerShellRevision, ViewerTabId,
+    },
+};
+use nutype::nutype;
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
 use crate::recipes::Recipe;
 
@@ -80,9 +90,9 @@ pub struct ViewerRenderOptions {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerViewIdentity {
-    pub tab_id: u64,
-    pub range_generation: u64,
-    pub selection_generation: u64,
+    pub tab_id: ViewerTabId,
+    pub range_generation: ViewerRangeGeneration,
+    pub selection_generation: ViewerSelectionGeneration,
     pub render_options: ViewerRenderOptions,
 }
 
@@ -104,7 +114,7 @@ pub enum ViewerTabState {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerTab {
-    pub id: u64,
+    pub id: ViewerTabId,
     pub label: String,
     pub kind: ViewerTabKind,
     pub state: ViewerTabState,
@@ -121,8 +131,13 @@ pub enum ViewerFileStatus {
 
 /// Opaque address of one file within an identity-bound diff view.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
 pub struct ViewerDiffFileId(String);
+
+impl AsRef<str> for ViewerDiffFileId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
 
 impl ViewerDiffFileId {
     /// Creates the stable ID for a file's source-order position.
@@ -132,31 +147,95 @@ impl ViewerDiffFileId {
 
     /// Returns the opaque wire value.
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.as_ref()
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerFileSummary {
     pub id: ViewerDiffFileId,
-    pub path: String,
-    pub absolute_path: String,
+    pub path: RepositoryRelativePath,
+    pub absolute_path: AbsoluteFilePath,
     pub anchor_id: String,
-    pub added: u32,
-    pub removed: u32,
+    pub added: DiffLineCount,
+    pub removed: DiffLineCount,
     pub status: ViewerFileStatus,
     pub can_open_in_editor: bool,
     pub initially_expanded: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ViewerCommitSummary {
     pub id: CommitId,
     pub subject: String,
     pub body: String,
-    pub date: String,
-    pub iso: String,
+    pub committed_at: MachineTimestamp,
     pub is_merge: bool,
+}
+
+#[derive(Serialize)]
+struct ViewerCommitSummaryRef<'a> {
+    id: &'a CommitId,
+    subject: &'a str,
+    body: &'a str,
+    date: String,
+    iso: &'a MachineTimestamp,
+    is_merge: bool,
+}
+
+impl Serialize for ViewerCommitSummary {
+    fn serialize<SerializerType>(
+        &self,
+        serializer: SerializerType,
+    ) -> Result<SerializerType::Ok, SerializerType::Error>
+    where
+        SerializerType: Serializer,
+    {
+        ViewerCommitSummaryRef {
+            id: &self.id,
+            subject: &self.subject,
+            body: &self.body,
+            date: self.committed_at.display_minute(),
+            iso: &self.committed_at,
+            is_merge: self.is_merge,
+        }
+        .serialize(serializer)
+    }
+}
+
+#[derive(Deserialize)]
+struct ViewerCommitSummaryFields {
+    id: CommitId,
+    subject: String,
+    body: String,
+    date: String,
+    iso: MachineTimestamp,
+    is_merge: bool,
+}
+
+impl<'de> Deserialize<'de> for ViewerCommitSummary {
+    fn deserialize<DeserializerType>(
+        deserializer: DeserializerType,
+    ) -> Result<Self, DeserializerType::Error>
+    where
+        DeserializerType: Deserializer<'de>,
+    {
+        let fields = ViewerCommitSummaryFields::deserialize(deserializer)?;
+        let expected_date = fields.iso.display_minute();
+        if fields.date != expected_date {
+            return Err(DeserializerType::Error::custom(format!(
+                "commit display timestamp `{}` does not match `{expected_date}`",
+                fields.date
+            )));
+        }
+        Ok(Self {
+            id: fields.id,
+            subject: fields.subject,
+            body: fields.body,
+            committed_at: fields.iso,
+            is_merge: fields.is_merge,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,36 +252,26 @@ pub struct ViewerFooter {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerAppliedExclusions {
-    pub extensions: Vec<String>,
-    pub hidden_paths: Vec<String>,
+    pub extensions: ExcludedExtensions,
+    pub hidden_paths: Vec<RepositoryRelativePath>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewerFailureCode {
-    #[serde(rename = "DirNotFound")]
     RepositoryDirectoryNotFound,
-    #[serde(rename = "DirNotGitRepo")]
     RepositoryDirectoryNotGitRepository,
-    #[serde(rename = "SourceUnavailable")]
     SourceUnavailable,
-    #[serde(rename = "RenderFailed")]
     RenderFailed,
 }
 
 impl ViewerFailureCode {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::RepositoryDirectoryNotFound => "DirNotFound",
-            Self::RepositoryDirectoryNotGitRepository => "DirNotGitRepo",
+            Self::RepositoryDirectoryNotFound => "RepositoryDirectoryNotFound",
+            Self::RepositoryDirectoryNotGitRepository => "RepositoryDirectoryNotGitRepository",
             Self::SourceUnavailable => "SourceUnavailable",
             Self::RenderFailed => "RenderFailed",
         }
-    }
-}
-
-impl std::fmt::Display for ViewerFailureCode {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(self.as_str())
     }
 }
 
@@ -219,9 +288,9 @@ pub enum ViewerCommitSelection {
 pub struct ViewerActiveView {
     pub identity: ViewerViewIdentity,
     pub title: String,
-    pub repository_name: String,
-    pub branch: String,
-    pub upstream: String,
+    pub repository_name: ProjectName,
+    pub branch: GitHead,
+    pub upstream: GitRevision,
     pub command: ViewerCommandLine,
     pub files: Vec<ViewerFileSummary>,
     pub commits_label: String,
@@ -236,7 +305,7 @@ pub struct ViewerActiveView {
 /// Makes decision to handle commit selection in UI
 pub fn make_commit_selection_action(
     commit_selection: &ViewerCommitSelection,
-    tab_id: u64,
+    tab_id: ViewerTabId,
     commit_id: CommitId,
 ) -> CommitSelectionAction {
     match commit_selection {
@@ -270,15 +339,15 @@ pub enum CommitSelectionAction {
 pub enum ViewerActiveState {
     Empty,
     Pending {
-        tab_id: u64,
+        tab_id: ViewerTabId,
     },
     Broken {
-        tab_id: u64,
+        tab_id: ViewerTabId,
         code: ViewerFailureCode,
         message: String,
     },
     Error {
-        tab_id: u64,
+        tab_id: ViewerTabId,
         code: ViewerFailureCode,
         message: String,
     },
@@ -303,7 +372,7 @@ pub enum ViewerFeedback {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerShell {
-    pub revision: u64,
+    pub revision: ViewerShellRevision,
     pub tabs: Vec<ViewerTab>,
     pub active: ViewerActiveState,
     pub preferences: ViewerPreferences,
@@ -311,24 +380,22 @@ pub struct ViewerShell {
 }
 
 /// Source-line position within one identity-bound diff file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
+#[nutype(
+    const_fn,
+    default = 0,
+    derive(
+        Debug,
+        Clone,
+        Copy,
+        Default,
+        PartialEq,
+        Eq,
+        Hash,
+        Serialize,
+        Deserialize
+    )
+)]
 pub struct ViewerDiffCursor(u32);
-
-impl ViewerDiffCursor {
-    /// First line in a diff file.
-    pub const START: Self = Self(0);
-
-    /// Creates a cursor at a source-line position.
-    pub const fn new(position: u32) -> Self {
-        Self(position)
-    }
-
-    /// Returns the source-line position.
-    pub const fn position(self) -> u32 {
-        self.0
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LoadViewerDiffLines {
@@ -348,8 +415,13 @@ pub struct ViewerDiffLines {
 
 /// Opaque address of one embedded raw-line page in an offline artifact.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
 pub struct ViewerArtifactPageId(String);
+
+impl AsRef<str> for ViewerArtifactPageId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
 
 impl ViewerArtifactPageId {
     /// Derives the page address from every identity-bound request dimension.
@@ -359,16 +431,16 @@ impl ViewerArtifactPageId {
         Self(format!(
             "gtl-artifact-page-{}-{}-{}-{layout}-{density}-{}-{}",
             request.identity.tab_id,
-            request.identity.range_generation,
-            request.identity.selection_generation,
+            request.identity.range_generation.value(),
+            request.identity.selection_generation.value(),
             request.file.as_str(),
-            request.cursor.position(),
+            request.cursor.into_inner(),
         ))
     }
 
     /// Returns the opaque artifact-local address.
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.as_ref()
     }
 }
 
@@ -391,8 +463,14 @@ pub struct ViewerArtifactManifest {
 #[serde(tag = "cursor", rename_all = "snake_case")]
 pub enum ViewerHistoryCursor {
     Newest,
-    OlderThan { render_id: i64, page: u32 },
-    NewerThan { render_id: i64, page: u32 },
+    OlderThan {
+        render_id: RenderHistoryId,
+        page: HistoryPageNumber,
+    },
+    NewerThan {
+        render_id: RenderHistoryId,
+        page: HistoryPageNumber,
+    },
     Oldest,
 }
 
@@ -417,46 +495,43 @@ pub enum ViewerHistoryCopyKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerHistoryEntry {
-    pub id: i64,
+    pub id: RenderHistoryId,
     pub title: String,
-    pub repository_name: String,
+    pub repository_name: ProjectName,
     pub kind: ViewerRecipeKind,
     pub range_label: String,
-    pub rendered_at: String,
+    pub rendered_at: MachineTimestamp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerHistoryCopyPayload {
-    pub id: i64,
+    pub id: RenderHistoryId,
     pub title: String,
-    pub repo_name: String,
+    pub repo_name: ProjectName,
     pub kind: ViewerHistoryCopyKind,
     pub range_label: String,
-    pub rendered_at: String,
+    pub rendered_at: MachineTimestamp,
     pub recipe: Recipe,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerHistoryPage {
     pub entries: Vec<ViewerHistoryEntry>,
-    pub total_count: u64,
-    pub page_number: u32,
-    pub page_count: u32,
+    pub total_count: HistoryRenderCount,
+    pub position: HistoryPagePosition,
     pub has_newer: bool,
     pub has_older: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerProjectDiffExclusions {
-    // TODO: refactor to newtype.
-    pub project_name: String,
-    // TODO: refactor to newtype here, in gtl-models and in gtl-web usages.
-    pub extensions: Vec<String>,
+    pub project_name: ProjectName,
+    pub extensions: ExcludedExtensions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerDiffExclusions {
-    pub default_extensions: Vec<String>,
+    pub default_extensions: ExcludedExtensions,
     pub projects: Vec<ViewerProjectDiffExclusions>,
 }
 
@@ -472,29 +547,29 @@ pub struct ViewerUserSettings {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerTabRequest {
-    pub tab_id: u64,
+    pub tab_id: ViewerTabId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectViewerCommit {
-    pub tab_id: u64,
+    pub tab_id: ViewerTabId,
     pub id: CommitId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenViewerHistory {
-    pub render_id: i64,
+    pub render_id: RenderHistoryId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GetViewerHistoryCopy {
-    pub render_id: i64,
+    pub render_id: RenderHistoryId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenViewerDiffFile {
     pub identity: ViewerViewIdentity,
-    pub path: String,
+    pub path: RepositoryRelativePath,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -530,7 +605,7 @@ pub enum ViewerApiError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerStateChanged {
-    pub revision: u64,
+    pub revision: ViewerShellRevision,
 }
 
 #[cfg(test)]
@@ -540,9 +615,9 @@ mod tests {
     fn request() -> LoadViewerDiffLines {
         LoadViewerDiffLines {
             identity: ViewerViewIdentity {
-                tab_id: 3,
-                range_generation: 5,
-                selection_generation: 7,
+                tab_id: ViewerTabId::try_new(3).expect("positive tab ID"),
+                range_generation: ViewerRangeGeneration::new(5),
+                selection_generation: ViewerSelectionGeneration::new(7),
                 render_options: ViewerRenderOptions {
                     layout: ViewerDiffLayout::Unified,
                     density: ViewerDiffDensity::Compact,

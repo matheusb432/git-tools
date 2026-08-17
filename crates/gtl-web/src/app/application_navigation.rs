@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_models::viewer::ViewerTabId;
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
     SetViewerPreference, ViewerActiveState, ViewerTab, ViewerTabKind, ViewerTabRequest,
@@ -256,7 +257,7 @@ fn ThemePicker() -> Element {
     }
 }
 
-const fn active_tab_id(active: &ViewerActiveState) -> Option<u64> {
+const fn active_tab_id(active: &ViewerActiveState) -> Option<ViewerTabId> {
     match active {
         ViewerActiveState::Empty => None,
         ViewerActiveState::Pending { tab_id }
@@ -266,7 +267,7 @@ const fn active_tab_id(active: &ViewerActiveState) -> Option<u64> {
     }
 }
 
-fn tab_element_id(tab_id: u64) -> String {
+fn tab_element_id(tab_id: ViewerTabId) -> String {
     format!("viewer-tab-{tab_id}")
 }
 
@@ -318,7 +319,11 @@ enum TabMovement {
     Last,
 }
 
-fn tab_focus_target(ids: &[u64], current: u64, movement: TabMovement) -> Option<u64> {
+fn tab_focus_target(
+    ids: &[ViewerTabId],
+    current: ViewerTabId,
+    movement: TabMovement,
+) -> Option<ViewerTabId> {
     let current_index = ids.iter().position(|id| *id == current)?;
     let target_index = match movement {
         TabMovement::Next => (current_index + 1) % ids.len(),
@@ -329,7 +334,7 @@ fn tab_focus_target(ids: &[u64], current: u64, movement: TabMovement) -> Option<
     ids.get(target_index).copied()
 }
 
-fn close_focus_target(tabs: &[ViewerTab], closing: u64) -> Option<u64> {
+fn close_focus_target(tabs: &[ViewerTab], closing: ViewerTabId) -> Option<ViewerTabId> {
     let index = tabs.iter().position(|tab| tab.id == closing)?;
     tabs.get(index + 1)
         .or_else(|| index.checked_sub(1).and_then(|previous| tabs.get(previous)))
@@ -341,27 +346,42 @@ mod tests {
     use gtl_wire::viewer::{ViewerTab, ViewerTabKind, ViewerTabState};
 
     use super::{TabMovement, close_focus_target, tab_focus_target, tab_state_label};
+    use crate::test_support::{TestResult, viewer_tab_id};
 
     #[test]
-    fn tab_focus_wraps_and_supports_edges() {
-        let ids = [4, 8, 15];
+    fn tab_focus_wraps_and_supports_edges() -> TestResult {
+        let ids = [viewer_tab_id(4)?, viewer_tab_id(8)?, viewer_tab_id(15)?];
 
-        assert_eq!(tab_focus_target(&ids, 15, TabMovement::Next), Some(4));
-        assert_eq!(tab_focus_target(&ids, 4, TabMovement::Previous), Some(15));
-        assert_eq!(tab_focus_target(&ids, 8, TabMovement::First), Some(4));
-        assert_eq!(tab_focus_target(&ids, 8, TabMovement::Last), Some(15));
+        assert_eq!(
+            tab_focus_target(&ids, viewer_tab_id(15)?, TabMovement::Next),
+            Some(viewer_tab_id(4)?)
+        );
+        assert_eq!(
+            tab_focus_target(&ids, viewer_tab_id(4)?, TabMovement::Previous),
+            Some(viewer_tab_id(15)?)
+        );
+        assert_eq!(
+            tab_focus_target(&ids, viewer_tab_id(8)?, TabMovement::First),
+            Some(viewer_tab_id(4)?)
+        );
+        assert_eq!(
+            tab_focus_target(&ids, viewer_tab_id(8)?, TabMovement::Last),
+            Some(viewer_tab_id(15)?)
+        );
+        Ok(())
     }
 
     #[test]
-    fn final_tab_close_targets_the_workspace_heading() {
+    fn final_tab_close_targets_the_workspace_heading() -> TestResult {
         let tabs = [ViewerTab {
-            id: 4,
+            id: viewer_tab_id(4)?,
             label: "Only diff".to_owned(),
             kind: ViewerTabKind::Snapshot,
             state: ViewerTabState::Ready,
         }];
 
-        assert_eq!(close_focus_target(&tabs, 4), None);
+        assert_eq!(close_focus_target(&tabs, viewer_tab_id(4)?), None);
+        Ok(())
     }
 
     #[test]

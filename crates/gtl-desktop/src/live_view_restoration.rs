@@ -1,4 +1,5 @@
-use gtl_application::{live_views, viewer::ViewerTabKind};
+use gtl_application::{live_views, live_views::list_live_views, viewer::ViewerTabKind};
+use gtl_models::{live_views::LiveSource, recipes::RecipeBatchId};
 use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
 use crate::presentation::ViewerApp;
@@ -10,7 +11,7 @@ pub(crate) fn restore(app: &ViewerApp) -> Result<bool, String> {
                 .app_state
                 .connection_lock()
                 .map_err(|error| format!("{error:#}"))?;
-            live_views::list::execute(live_views::list::ListLiveViews, &connection)
+            list_live_views::execute(list_live_views::ListLiveViews, &connection)
                 .map_err(|error| format!("{error:#}"))?
                 .views
         };
@@ -18,12 +19,13 @@ pub(crate) fn restore(app: &ViewerApp) -> Result<bool, String> {
         {
             let mut session = app.session.lock().map_err(|error| error.to_string())?;
             for record in records {
-                let Some(recipe) = restored_recipe(record) else {
-                    continue;
-                };
                 newest = Some(
                     session
-                        .open(recipe, "restored-live".into(), ViewerTabKind::Live)
+                        .open(
+                            restored_recipe(record),
+                            RecipeBatchId::generate(),
+                            ViewerTabKind::Live,
+                        )
                         .ok_or_else(|| "viewer tab ids exhausted".to_owned())?,
                 );
             }
@@ -36,38 +38,40 @@ pub(crate) fn restore(app: &ViewerApp) -> Result<bool, String> {
     })
 }
 
-fn restored_recipe(record: live_views::LiveViewRecord) -> Option<Recipe> {
-    if record.source_kind != "LocalRepo" {
-        return None;
-    }
-    Some(Recipe {
-        source: RecipeSource::LocalRepo(record.source_value.into()),
+fn restored_recipe(record: live_views::LiveViewRecord) -> Recipe {
+    let LiveSource::LocalRepo { path } = record.source;
+    Recipe {
+        source: RecipeSource::LocalRepo(path),
         op: RecipeOp::Diff {
             target: RecipeTarget::Unpushed { pinned: None },
         },
         name: Some(record.display_name),
-    })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{project_name, repository_root};
 
-    fn record(source_kind: &str) -> live_views::LiveViewRecord {
+    fn record() -> live_views::LiveViewRecord {
         live_views::LiveViewRecord {
-            source_kind: source_kind.into(),
-            source_value: "/repos/gt".into(),
-            display_name: "git-tools".into(),
-            created_at: "2026-08-09T12:00:00Z".into(),
+            source: LiveSource::local_repo(repository_root("/repos/gt")),
+            display_name: project_name("git-tools"),
+            created_at: gtl_models::timestamps::MachineTimestamp::try_from("2026-08-09T12:00:00Z")
+                .expect("fixture creation timestamp is valid"),
             last_opened_at: None,
         }
     }
 
     #[test]
     fn persisted_local_repository_restores_as_an_unpushed_live_recipe() {
-        let recipe = restored_recipe(record("LocalRepo")).expect("supported live source");
+        let recipe = restored_recipe(record());
 
-        assert_eq!(recipe.name.as_deref(), Some("git-tools"));
+        assert_eq!(
+            recipe.name.as_ref().map(|name| name.as_str()),
+            Some("git-tools")
+        );
         assert!(matches!(
             recipe,
             Recipe {
@@ -76,12 +80,7 @@ mod tests {
                     target: RecipeTarget::Unpushed { pinned: None }
                 },
                 ..
-            } if path == std::path::Path::new("/repos/gt")
+            } if path == repository_root("/repos/gt")
         ));
-    }
-
-    #[test]
-    fn unknown_persisted_source_kind_is_ignored() {
-        assert!(restored_recipe(record("RemoteRepo")).is_none());
     }
 }

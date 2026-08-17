@@ -1,4 +1,4 @@
-use gtl_models::viewer::RenderOptions;
+use gtl_models::viewer::{RenderOptions, Theme};
 
 use crate::diffs::View;
 
@@ -9,7 +9,7 @@ pub trait HtmlRenderer: Clone + Send + Sync + 'static {
         &self,
         view: &View,
         options: RenderOptions,
-        theme: Option<&str>,
+        theme: Option<Theme>,
     ) -> anyhow::Result<String>;
 
     /// Renders several views as one tab-stripped document (diff-subrepos / diff --all).
@@ -18,6 +18,6 @@ pub trait HtmlRenderer: Clone + Send + Sync + 'static {
         title: &str,
         views: &[View],
         options: RenderOptions,
-        theme: Option<&str>,
+        theme: Option<Theme>,
     ) -> anyhow::Result<String>;
 }

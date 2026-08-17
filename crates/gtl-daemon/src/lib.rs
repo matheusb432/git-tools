@@ -9,12 +9,10 @@ pub mod state;
 
 use std::time::Duration;
 
+use gtl_wire::daemon::{DaemonLoopbackPort, DaemonProcessId, PortFile};
 use tokio::sync::watch;
 
-use crate::{
-    lifecycle::{ExeIdentity, PortFile},
-    state::DaemonState,
-};
+use crate::state::DaemonState;
 
 /// Boot and serve the daemon until a shutdown signal or `POST /shutdown`.
 /// Implements the lifecycle contract (lock, bind, port file, graceful teardown).
@@ -33,13 +31,13 @@ pub async fn run() -> anyhow::Result<()> {
     };
     let app_state = gtl_infra::app_state::SqliteAppState::open(&store_root)?;
     let exe = std::env::current_exe()?;
-    let identity = ExeIdentity::of(&exe)?;
+    let identity = gtl_infra::daemon::executable_identity(&exe)?;
 
     let port = startup::daemon_port()?;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    let bound = listener.local_addr()?.port();
-    let pid = std::process::id();
-    lifecycle::write_port_file(&store_root, PortFile { port: bound, pid })?;
+    let bound = DaemonLoopbackPort::new(listener.local_addr()?.port().try_into()?);
+    let pid = DaemonProcessId::new(std::process::id().try_into()?);
+    gtl_infra::daemon::write_port_file(&store_root, PortFile { port: bound, pid })?;
 
     let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
     let app = state::router(DaemonState::new(
@@ -51,7 +49,7 @@ pub async fn run() -> anyhow::Result<()> {
         gtl_infra::user_config::TomlSettingsStore::from_environment(),
     ));
 
-    tracing::info!(port = bound, "gtl-daemon listening on 127.0.0.1");
+    tracing::info!(port = %bound, "gtl-daemon listening on 127.0.0.1");
     let graceful = async move {
         let signal = startup::shutdown_signal();
         tokio::select! {
@@ -62,7 +60,7 @@ pub async fn run() -> anyhow::Result<()> {
     let serve_result = axum::serve(listener, app)
         .with_graceful_shutdown(graceful)
         .await;
-    lifecycle::remove_port_file_if_own(&store_root, pid);
+    gtl_infra::daemon::remove_port_file_if_own(&store_root, pid);
     drop(daemon_lock);
     serve_result?;
     Ok(())

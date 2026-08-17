@@ -2,7 +2,7 @@
 
 use std::{fmt::Write as _, path::Path};
 
-use gtl_models::managed::push_subrepos::{Dest, RepoTarget};
+use gtl_models::repository::recursive_push::{Dest, RepoTarget};
 
 pub(crate) fn confirmation(root: &Path, targets: &[RepoTarget]) -> String {
     let mut out = format!(
@@ -32,24 +32,23 @@ pub(crate) fn confirmation(root: &Path, targets: &[RepoTarget]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
+    use crate::testing::{branch_name, project_name, remote_name, repository_root};
 
     #[test]
     fn confirmation_lists_push_destinations_and_skips() {
         let targets = vec![
             RepoTarget {
-                path: PathBuf::from("/repos/api"),
-                label: "api".into(),
+                path: repository_root("/repos/api"),
+                label: project_name("api"),
                 dest: Dest::Push {
-                    branch: "main".into(),
-                    remote: "origin".into(),
+                    branch: branch_name("main"),
+                    remote: remote_name("origin"),
                 },
             },
             RepoTarget {
-                path: PathBuf::from("/repos/web"),
-                label: "web".into(),
+                path: repository_root("/repos/web"),
+                label: project_name("web"),
                 dest: Dest::Skip {
                     reason: "no upstream tracking branch".into(),
                 },
@@ -67,11 +66,11 @@ mod tests {
     #[test]
     fn confirmation_marks_already_synced_repos() {
         let targets = vec![RepoTarget {
-            path: PathBuf::from("/repos/api"),
-            label: "api".into(),
+            path: repository_root("/repos/api"),
+            label: project_name("api"),
             dest: Dest::Synced {
-                branch: "main".into(),
-                remote: "origin".into(),
+                branch: branch_name("main"),
+                remote: remote_name("origin"),
             },
         }];
         let text = confirmation(Path::new("/repos"), &targets);

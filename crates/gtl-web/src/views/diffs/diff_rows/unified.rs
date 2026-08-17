@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use dioxus::prelude::*;
-use gtl_parser::{DiffRow, DiffRowKind, SemanticTextSpan};
+use gtl_parser::{CharacterCount, DiffRow, DiffRowKind, SemanticTextSpan, SourceLineNumber};
 
 use super::{
     HeaderTone,
@@ -129,7 +129,7 @@ fn UnifiedSourceRowShell(tone: UnifiedSourceTone, children: Element) -> Element 
 }
 
 #[component]
-fn UnifiedGutter(number: Option<u32>, tone: UnifiedGutterTone) -> Element {
+fn UnifiedGutter(number: Option<SourceLineNumber>, tone: UnifiedGutterTone) -> Element {
     let line_number = number.map(|value| value.to_string());
     let gutter_classes = match tone {
         UnifiedGutterTone::Hidden => "hidden",
@@ -167,7 +167,7 @@ fn UnifiedHeaderCode(tone: HeaderTone, text: String) -> Element {
 fn UnifiedCodeCell(
     text: String,
     semantic_spans: Vec<SemanticTextSpan>,
-    long_line_character_count: Option<usize>,
+    long_line_character_count: Option<CharacterCount>,
 ) -> Element {
     rsx! {
         code { class: "col-start-2 row-start-1 min-w-0 border-0 bg-transparent py-0 pr-1 pl-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] print:text-[#111]",
@@ -178,5 +178,29 @@ fn UnifiedCodeCell(
                 long_line_character_count,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gtl_parser::{CharacterCount, DiffParser, ParseOptions};
+
+    use super::*;
+
+    #[test]
+    fn renders_typed_line_numbers_absent_gutters_and_long_line_counts() {
+        let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3))).parse(&[
+            "@@ -9999 +10000 @@".to_owned(),
+            "-abcd".to_owned(),
+            "+abce".to_owned(),
+        ]);
+        let html = dioxus_ssr::render_element(rsx! {
+            UnifiedDiffRowBatch { rows: Arc::new(parsed.into_rows()) }
+        });
+
+        assert!(html.contains(">9999</span>"));
+        assert!(html.contains(">10000</span>"));
+        assert_eq!(html.matches("class=\"hidden").count(), 4);
+        assert_eq!(html.matches("4 chars").count(), 2);
     }
 }

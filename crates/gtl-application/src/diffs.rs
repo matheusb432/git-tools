@@ -1,11 +1,11 @@
 //! The diffs feature: engine utilities, the artifact-producing render slices
-//! (`render_diff`/`render_diff_all`/`render_merge_diff`/`render_diff_subrepos`),
+//! (`render_diff`/`render_project_diff`/`render_merge_diff`/`render_diff_subrepos`),
 //! and the view-only compute slices the native viewer dispatches
 //! (`compute_diff`/`compute_merge_diff`).
 
-mod artifacts;
+pub(crate) mod artifacts;
 mod assemble;
-mod batch;
+pub(crate) mod batch;
 pub mod compute_commit_patch;
 pub mod compute_diff;
 pub mod compute_merge_diff;
@@ -17,7 +17,6 @@ pub mod present_diff;
 mod range;
 mod range_view;
 pub mod render_diff;
-pub mod render_diff_all;
 pub mod render_diff_subrepos;
 pub mod render_merge_diff;
 mod target;

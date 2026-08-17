@@ -8,34 +8,22 @@ use std::{
 };
 
 use anyhow::Context as _;
-use gtl_application::diffs::{
-    render_diff::RenderDiff, render_diff_all::RenderDiffAll,
-    render_diff_subrepos::RenderDiffSubrepos, render_merge_diff::RenderMergeDiff,
+use gtl_application::{
+    diffs::{
+        render_diff::RenderDiff, render_diff_subrepos::RenderDiffSubrepos,
+        render_merge_diff::RenderMergeDiff,
+    },
+    projects::render_project_diff::RenderProjectDiff,
 };
 use gtl_wire::{
+    daemon::{DaemonLoopbackPort, DaemonProcessId, Health, PortFile},
     diffs::RenderDiffData,
     envelope::Envelope,
     live_views::{SaveLiveViewData, SaveLiveViewRequest},
-    managed::{PullAllRequest, PushAllRequest, SyncData},
+    projects::{PullAllRequest, PushAllRequest, SyncData},
     tags::{BumpTagData, BumpTagRequest, DryRunTagBumpRequest, TagBumpPreview},
 };
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
-
-/// The `/health` identity payload, deserialized from a running daemon.
-#[derive(Debug, Deserialize)]
-struct Health {
-    pid: u32,
-    version: String,
-    exe_len: u64,
-    exe_modified_ms: u64,
-}
-
-/// The discovery record under the store root (`<store_root>/daemon.json`).
-#[derive(Debug, Deserialize)]
-struct PortFile {
-    port: u16,
-    pid: u32,
-}
+use serde::{Serialize, de::DeserializeOwned};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DaemonLockOwnership {
@@ -54,12 +42,18 @@ impl Drop for DaemonLockStartup {
 }
 
 enum DaemonOwnerWait {
-    Healthy { port: u16, health: Health },
+    Healthy {
+        port: DaemonLoopbackPort,
+        health: Health,
+    },
     Released,
 }
 
 enum DaemonReplacementOutcome {
-    Healthy { port: u16, health: Health },
+    Healthy {
+        port: DaemonLoopbackPort,
+        health: Health,
+    },
     Released,
 }
 
@@ -67,9 +61,9 @@ enum DaemonReplacementOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DaemonStatus {
     /// Listening localhost port.
-    pub port: u16,
+    pub port: DaemonLoopbackPort,
     /// Process identifier reported by the health endpoint.
-    pub pid: u32,
+    pub pid: DaemonProcessId,
     /// Daemon package version.
     pub version: String,
 }
@@ -133,7 +127,7 @@ impl HttpClient {
     /// port file.
     fn spawn_and_connect(
         bin: &Path,
-        stale_pid: Option<u32>,
+        stale_pid: Option<DaemonProcessId>,
     ) -> anyhow::Result<(Self, DaemonStatus)> {
         gtl_infra::detached_process::spawn(bin, &[])
             .with_context(|| format!("spawn gtl-daemon ({})", bin.display()))?;
@@ -154,7 +148,7 @@ impl HttpClient {
     }
 
     /// Build the blocking client for a resolved port (connect-timeout only).
-    fn connect(port: u16) -> anyhow::Result<Self> {
+    fn connect(port: DaemonLoopbackPort) -> anyhow::Result<Self> {
         let http = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(1))
             .build()
@@ -204,7 +198,7 @@ impl HttpClient {
 
     pub(crate) fn render_diff_all(
         &self,
-        request: &RenderDiffAll,
+        request: &RenderProjectDiff,
     ) -> anyhow::Result<Envelope<RenderDiffData>> {
         self.post_json("/diffs/all", request)
     }
@@ -300,7 +294,7 @@ const SPAWN_DEADLINE: Duration = Duration::from_secs(5);
 const SPAWN_POLL_STEP: Duration = Duration::from_millis(50);
 
 /// The pinned port from `GIT_TOOLS_DAEMON_PORT`, if it parses.
-fn pinned_port() -> Option<u16> {
+fn pinned_port() -> Option<DaemonLoopbackPort> {
     std::env::var("GIT_TOOLS_DAEMON_PORT")
         .ok()
         .and_then(|raw| raw.trim().parse().ok())
@@ -324,11 +318,10 @@ fn daemon_bin() -> PathBuf {
 /// Read `<store_root>/daemon.json`, `None` when absent or malformed.
 fn read_port_file() -> Option<PortFile> {
     let root = gtl_infra::data_root::resolve().ok()?;
-    let raw = std::fs::read_to_string(root.join("daemon.json")).ok()?;
-    serde_json::from_str(&raw).ok()
+    gtl_infra::daemon::read_port_file(&root)
 }
 
-fn daemon_candidate(timeout: Duration) -> Option<(u16, Health)> {
+fn daemon_candidate(timeout: Duration) -> Option<(DaemonLoopbackPort, Health)> {
     let deadline = Instant::now() + timeout;
     let port_pinned = pinned_port();
     let port_discovered = read_port_file().map(|port_file| port_file.port);
@@ -352,11 +345,13 @@ fn daemon_candidate(timeout: Duration) -> Option<(u16, Health)> {
     }
 }
 
-fn daemon_candidate_or_wait() -> anyhow::Result<Option<(u16, Health)>> {
+fn daemon_candidate_or_wait() -> anyhow::Result<Option<(DaemonLoopbackPort, Health)>> {
     daemon_candidate_or_wait_with_budget(SPAWN_DEADLINE)
 }
 
-fn daemon_candidate_or_wait_with_budget(budget: Duration) -> anyhow::Result<Option<(u16, Health)>> {
+fn daemon_candidate_or_wait_with_budget(
+    budget: Duration,
+) -> anyhow::Result<Option<(DaemonLoopbackPort, Health)>> {
     let started_at = Instant::now();
     let health_budget = budget.min(HEALTH_TIMEOUT);
     if !health_budget.is_zero()
@@ -400,9 +395,9 @@ fn wait_for_daemon_owner(budget: Duration) -> anyhow::Result<DaemonOwnerWait> {
 
 fn wait_for_matching_daemon(
     bin: &Path,
-    stale_pid: Option<u32>,
+    stale_pid: Option<DaemonProcessId>,
     budget: Duration,
-) -> Option<(u16, Health)> {
+) -> Option<(DaemonLoopbackPort, Health)> {
     let deadline = Instant::now() + budget;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -480,7 +475,7 @@ fn acquire_daemon_lock_startup(budget: Duration) -> anyhow::Result<Option<Daemon
 }
 
 /// `GET /health` with an overall `timeout`; `None` on any failure.
-fn health(port: u16, timeout: Duration) -> Option<Health> {
+fn health(port: DaemonLoopbackPort, timeout: Duration) -> Option<Health> {
     let client = reqwest::blocking::Client::builder()
         .timeout(timeout)
         .build()
@@ -493,21 +488,13 @@ fn health(port: u16, timeout: Duration) -> Option<Health> {
         .ok()
 }
 
-/// Whether the file at `bin` has the same length + mtime-ms the daemon reported
-/// (mirrors `gtl_daemon::lifecycle::ExeIdentity::of`).
+/// Whether the file at `bin` has the executable identity reported by the daemon.
 fn identity_matches(health: &Health, bin: &Path) -> bool {
-    let Ok(meta) = std::fs::metadata(bin) else {
-        return false;
-    };
-    let modified_ms = meta
-        .modified()
-        .ok()
-        .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX));
-    meta.len() == health.exe_len && modified_ms == health.exe_modified_ms
+    gtl_infra::daemon::executable_identity(bin)
+        .is_ok_and(|identity| identity == health.exe_identity)
 }
 
-fn status_from(port: u16, health: Health) -> DaemonStatus {
+fn status_from(port: DaemonLoopbackPort, health: Health) -> DaemonStatus {
     DaemonStatus {
         port,
         pid: health.pid,
@@ -516,7 +503,7 @@ fn status_from(port: u16, health: Health) -> DaemonStatus {
 }
 
 /// Best-effort `POST /shutdown` to a daemon on `port`.
-fn shutdown(port: u16, timeout: Duration) {
+fn shutdown(port: DaemonLoopbackPort, timeout: Duration) {
     if timeout.is_zero() {
         return;
     }
@@ -531,7 +518,7 @@ fn shutdown(port: u16, timeout: Duration) {
 }
 
 /// Poll until `port` stops reporting `pid`, or `budget` elapses.
-fn wait_until_pid_gone(port: u16, pid: u32, budget: Duration) -> bool {
+fn wait_until_pid_gone(port: DaemonLoopbackPort, pid: DaemonProcessId, budget: Duration) -> bool {
     let deadline = Instant::now() + budget;
     loop {
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -553,9 +540,9 @@ fn wait_until_pid_gone(port: u16, pid: u32, budget: Duration) -> bool {
 
 fn wait_for_replacement(
     bin: &Path,
-    pid_stale: u32,
+    pid_stale: DaemonProcessId,
     budget: Duration,
-) -> anyhow::Result<Option<(u16, Health)>> {
+) -> anyhow::Result<Option<(DaemonLoopbackPort, Health)>> {
     let deadline = Instant::now() + budget;
     loop {
         if daemon_lock_ownership()? == DaemonLockOwnership::Free {
@@ -604,7 +591,7 @@ fn wait_until_lock_free(budget: Duration) -> anyhow::Result<bool> {
     }
 }
 
-fn stop_daemon_process(port: u16, pid: u32) -> anyhow::Result<Duration> {
+fn stop_daemon_process(port: DaemonLoopbackPort, pid: DaemonProcessId) -> anyhow::Result<Duration> {
     let started_at = Instant::now();
     shutdown(port, STOP_BUDGET);
     let remaining = STOP_BUDGET.saturating_sub(started_at.elapsed());
@@ -614,7 +601,7 @@ fn stop_daemon_process(port: u16, pid: u32) -> anyhow::Result<Duration> {
     Ok(STOP_BUDGET.saturating_sub(started_at.elapsed()))
 }
 
-fn stop_healthy_daemon(port: u16, pid: u32) -> anyhow::Result<()> {
+fn stop_healthy_daemon(port: DaemonLoopbackPort, pid: DaemonProcessId) -> anyhow::Result<()> {
     let remaining = stop_daemon_process(port, pid)?;
     if !wait_until_lock_free(remaining)? {
         anyhow::bail!("gtl-daemon did not release daemon.lock within 2s");
@@ -623,8 +610,8 @@ fn stop_healthy_daemon(port: u16, pid: u32) -> anyhow::Result<()> {
 }
 
 fn replace_healthy_daemon(
-    port: u16,
-    pid: u32,
+    port: DaemonLoopbackPort,
+    pid: DaemonProcessId,
     bin: &Path,
 ) -> anyhow::Result<DaemonReplacementOutcome> {
     let remaining = stop_daemon_process(port, pid)?;
@@ -645,33 +632,35 @@ mod tests {
         },
     };
 
+    use gtl_wire::daemon::{
+        DaemonProcessId, ExeIdentity, ExecutableByteLength, ExecutableModifiedUnixMillis,
+    };
+
     use super::*;
+
+    fn process_id(value: u32) -> DaemonProcessId {
+        DaemonProcessId::new(value.try_into().expect("positive fixture process ID"))
+    }
 
     #[test]
     fn identity_matches_real_file_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("gtl-daemon-fake");
         std::fs::write(&path, b"0123456789").unwrap();
-        let meta = std::fs::metadata(&path).unwrap();
-        let ms = u64::try_from(
-            meta.modified()
-                .unwrap()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis(),
-        )
-        .expect("mtime in ms fits u64 for eons");
+        let exe_identity = gtl_infra::daemon::executable_identity(&path).unwrap();
 
         let health = Health {
-            pid: 1,
+            pid: process_id(1),
             version: "0.1.0".into(),
-            exe_len: meta.len(),
-            exe_modified_ms: ms,
+            exe_identity,
         };
         assert!(identity_matches(&health, &path));
 
         let mismatched = Health {
-            exe_len: meta.len() + 1,
+            exe_identity: ExeIdentity::new(
+                ExecutableByteLength::new(11),
+                exe_identity.modified_unix_millis,
+            ),
             ..health
         };
         assert!(!identity_matches(&mismatched, &path));
@@ -680,19 +669,14 @@ mod tests {
     #[test]
     fn identity_does_not_match_a_missing_file() {
         let health = Health {
-            pid: 1,
+            pid: process_id(1),
             version: "0.1.0".into(),
-            exe_len: 10,
-            exe_modified_ms: 0,
+            exe_identity: ExeIdentity::new(
+                ExecutableByteLength::new(10),
+                ExecutableModifiedUnixMillis::new(0),
+            ),
         };
         assert!(!identity_matches(&health, Path::new("/no/such/gtl-daemon")));
-    }
-
-    #[test]
-    fn port_file_json_parses() {
-        let pf: PortFile = serde_json::from_str(r#"{"port":4321,"pid":99}"#).unwrap();
-        assert_eq!(pf.port, 4321);
-        assert_eq!(pf.pid, 99);
     }
 
     #[test]
@@ -733,6 +717,8 @@ mod tests {
             }
         });
 
+        let port =
+            DaemonLoopbackPort::new(port.try_into().expect("listener assigned a non-zero port"));
         let client = HttpClient::connect(port).unwrap();
         let result = client.post_json::<_, serde_json::Value>(
             "/diffs/render",

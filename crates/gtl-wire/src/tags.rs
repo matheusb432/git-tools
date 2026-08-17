@@ -1,6 +1,10 @@
 //! Wire DTOs for the stateless tag-bump dry-run and mutation protocol.
 
-use gtl_models::diffs::CommitId;
+use gtl_models::{
+    diffs::CommitId,
+    git::{GitHead, TagName},
+    paths::RepositoryRoot,
+};
 use serde::{Deserialize, Serialize};
 
 /// The `SemVer` component advanced by a tag bump.
@@ -24,12 +28,12 @@ pub struct DryRunTagBumpRequest {
 /// The exact mutation displayed before the user confirms a tag bump.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TagBumpPreview {
-    pub repo_path: String,
-    pub branch: String,
+    pub repo_path: RepositoryRoot,
+    pub branch: GitHead,
     pub target_id: CommitId,
     pub level: TagBumpLevelDto,
-    pub base_tag: String,
-    pub next_tag: String,
+    pub base_tag: TagName,
+    pub next_tag: TagName,
     pub message: String,
     pub push: bool,
 }
@@ -53,13 +57,17 @@ pub enum TagBumpStatusDto {
 /// The result of attempting the exact displayed tag mutation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BumpTagData {
-    pub tag: String,
+    pub tag: TagName,
     pub status: TagBumpStatusDto,
     pub detail: String,
 }
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::{
+        git::{BranchName, GitHead, TagName},
+        paths::RepositoryRoot,
+    };
     use serde_json::json;
 
     use super::{BumpTagRequest, DryRunTagBumpRequest, TagBumpLevelDto, TagBumpPreview};
@@ -67,12 +75,12 @@ mod tests {
 
     fn preview() -> TagBumpPreview {
         TagBumpPreview {
-            repo_path: "/repo".into(),
-            branch: "main".into(),
+            repo_path: RepositoryRoot::try_new("/repo".into()).expect("absolute root"),
+            branch: GitHead::Branch(BranchName::try_new("main").unwrap()),
             target_id: commit_id("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             level: TagBumpLevelDto::Minor,
-            base_tag: "v0.30.0".into(),
-            next_tag: "v0.31.0".into(),
+            base_tag: TagName::try_new("v0.30.0").unwrap(),
+            next_tag: TagName::try_new("v0.31.0").unwrap(),
             message: "release".into(),
             push: true,
         }

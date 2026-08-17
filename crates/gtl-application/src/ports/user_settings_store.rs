@@ -1,6 +1,6 @@
 use std::{io, path::PathBuf};
 
-use gtl_models::settings::UserSettings;
+use gtl_models::settings::{SettingKey, SettingKeyValue, UserSettings};
 
 /// A strict user-settings snapshot could not be loaded.
 #[derive(Debug, thiserror::Error)]
@@ -44,13 +44,12 @@ pub trait UserSettingsStore: Clone + Send + Sync + 'static {
     /// Loads the latest complete settings snapshot.
     fn load(&self) -> Result<UserSettings, UserSettingsLoadError>;
 
-    /// Replaces one root string and returns its previous value.
-    fn set_string(
+    /// Applies one typed scalar mutation and returns its previous value.
+    fn set_value(
         &mut self,
-        key: &str,
-        value_new: &str,
+        mutation: SettingKeyValue,
     ) -> Result<Option<String>, UserSettingsEditError>;
 
-    /// Removes one root string and returns its previous value.
-    fn remove_string(&mut self, key: &str) -> Result<Option<String>, UserSettingsEditError>;
+    /// Removes one supported scalar setting and returns its previous value.
+    fn remove_key(&mut self, key: SettingKey) -> Result<Option<String>, UserSettingsEditError>;
 }

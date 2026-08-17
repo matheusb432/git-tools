@@ -1,4 +1,6 @@
 use gtl_application::diffs::{Cmd, FileDiff, Foot, View};
+use gtl_benchmarks::require;
+use gtl_models::git::{BranchName, GitHead, GitRevision, RemoteName};
 
 const FIXTURE_LINE_COUNT: usize = 45_000;
 
@@ -15,15 +17,24 @@ pub(super) fn view_with_lines(line_count: usize) -> View {
 
     View {
         exclusions: None,
-        repo_name: "benchmark".into(),
-        repo_root: "/fixtures/benchmark".into(),
-        branch: "main".into(),
-        upstream: "origin/main".into(),
+        repo_name: require(
+            gtl_models::paths::ProjectName::try_from("benchmark"),
+            "creating the benchmark project name",
+        ),
+        repo_root: require(
+            gtl_models::paths::RepositoryRoot::try_new("/fixtures/benchmark".into()),
+            "creating the benchmark repository root",
+        ),
+        branch: GitHead::Branch(BranchName::main()),
+        upstream: GitRevision::remote_tracking(&RemoteName::origin(), &BranchName::main()),
         commits: vec![],
         files: vec![FileDiff {
-            path: "src/large.rs".into(),
-            added: 0,
-            removed: 0,
+            path: require(
+                gtl_models::paths::RepositoryRelativePath::try_new("src/large.rs".into()),
+                "creating the benchmark file path",
+            ),
+            added: gtl_models::diffs::DiffLineCount::default(),
+            removed: gtl_models::diffs::DiffLineCount::default(),
             full_lines: Some(lines.clone()),
             lines,
         }],

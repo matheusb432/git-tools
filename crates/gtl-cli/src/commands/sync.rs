@@ -1,16 +1,19 @@
 use std::fmt::Write as _;
 
-use gtl_application::repository_sync::{plan_commit::CommitTarget, plan_push::PushTarget};
-use gtl_models::repository::PendingChanges;
+use gtl_application::repositories::{plan_commit::CommitTarget, plan_push::PushTarget};
+use gtl_models::{git::CommitCount, repository::PendingChanges};
+
+fn remote_label(target: &PushTarget) -> String {
+    target.remote_url.as_ref().map_or_else(
+        || target.remote.to_string(),
+        |url| format!("{} ({url})", target.remote),
+    )
+}
 
 /// Builds the review block printed before the current-repo stage/commit/push flow runs.
 /// Spells out every side effect so the user confirms an action, not just a repository.
 pub fn confirmation(command: &str, target: &PushTarget, message: &str) -> String {
-    let remote = if target.remote_url.is_empty() {
-        target.remote.clone()
-    } else {
-        format!("{} ({})", target.remote, target.remote_url)
-    };
+    let remote = remote_label(target);
     let dest = format!("{}/{}", target.remote, target.branch);
     let PendingChanges {
         changed,
@@ -28,24 +31,25 @@ pub fn confirmation(command: &str, target: &PushTarget, message: &str) -> String
         message
     );
 
-    if changed > 0 {
-        if unprepared > 0 {
+    if !changed.is_zero() {
+        if !unprepared.is_zero() {
             let _ = write!(
                 out,
                 "\n  • stage {unprepared} unprepared change(s) with `git add -A`"
             );
         }
-        let staged_note = if staged > 0 {
-            format!(" ({staged} already staged)")
-        } else {
+        let staged_note = if staged.is_zero() {
             String::new()
+        } else {
+            format!(" ({staged} already staged)")
         };
         let _ = write!(
             out,
             "\n  • commit {changed} change(s){staged_note} as a single commit"
         );
-        let _ = write!(out, "\n  • push {} commit(s) to {dest}", ahead + 1);
-    } else if ahead > 0 {
+        let pushed_count = ahead.into_inner().saturating_add(1);
+        let _ = write!(out, "\n  • push {pushed_count} commit(s) to {dest}");
+    } else if ahead != CommitCount::default() {
         let _ = write!(
             out,
             "\n  • nothing to commit; push {ahead} unpushed commit(s) to {dest}"
@@ -59,11 +63,7 @@ pub fn confirmation(command: &str, target: &PushTarget, message: &str) -> String
 
 /// Builds the review block printed before a plain current-repo push.
 pub fn push_confirmation(target: &PushTarget) -> String {
-    let remote = if target.remote_url.is_empty() {
-        target.remote.clone()
-    } else {
-        format!("{} ({})", target.remote, target.remote_url)
-    };
+    let remote = remote_label(target);
     let dest = format!("{}/{}", target.remote, target.branch);
     let PendingChanges { changed, ahead, .. } = target.pending;
 
@@ -75,13 +75,13 @@ pub fn push_confirmation(target: &PushTarget) -> String {
         remote
     );
 
-    if changed > 0 {
+    if !changed.is_zero() {
         let _ = write!(
             out,
             "\n  • refuse to push while {changed} uncommitted change(s) are present"
         );
         out.push_str("\n  • push only existing commits; it will not stage or create a commit");
-    } else if ahead > 0 {
+    } else if ahead != CommitCount::default() {
         let _ = write!(out, "\n  • push {ahead} unpushed commit(s) to {dest}");
     } else {
         out.push_str("\n  • nothing to push — already up to date");
@@ -107,25 +107,25 @@ pub fn commit_confirmation(target: &CommitTarget, message: &str) -> String {
         message
     );
 
-    if changed > 0 {
-        if unprepared > 0 {
+    if changed.is_zero() {
+        out.push_str("\n  • nothing to commit — working tree clean");
+    } else {
+        if !unprepared.is_zero() {
             let _ = write!(
                 out,
                 "\n  • stage {unprepared} unprepared change(s) with `git add -A`"
             );
         }
-        let staged_note = if staged > 0 {
-            format!(" ({staged} already staged)")
-        } else {
+        let staged_note = if staged.is_zero() {
             String::new()
+        } else {
+            format!(" ({staged} already staged)")
         };
         let _ = write!(
             out,
             "\n  • commit {changed} change(s){staged_note} as a single commit"
         );
         out.push_str("\n  • leave the commit local; it will not push");
-    } else {
-        out.push_str("\n  • nothing to commit — working tree clean");
     }
 
     out
@@ -133,36 +133,38 @@ pub fn commit_confirmation(target: &CommitTarget, message: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
+    use crate::testing::{
+        branch_name, commit_count, path_count, project_name, remote_name, remote_url,
+        repository_root,
+    };
 
     fn push_target() -> PushTarget {
         PushTarget {
-            name: "repo-a".into(),
-            top: PathBuf::from("/home/me/work/repo-a"),
-            branch: "main".into(),
-            remote: "origin".into(),
-            remote_url: "git@github.com:me/repo-a.git".into(),
+            name: project_name("repo-a"),
+            top: repository_root("/home/me/work/repo-a"),
+            branch: branch_name("main"),
+            remote: remote_name("origin"),
+            remote_url: Some(remote_url("git@github.com:me/repo-a.git")),
             pending: PendingChanges {
-                changed: 2,
-                staged: 0,
-                unprepared: 2,
-                ahead: 2,
+                changed: path_count(2),
+                staged: path_count(0),
+                unprepared: path_count(2),
+                ahead: commit_count(2),
             },
         }
     }
 
     fn commit_target() -> CommitTarget {
         CommitTarget {
-            name: "repo-a".into(),
-            top: PathBuf::from("/home/me/work/repo-a"),
-            branch: "main".into(),
+            name: project_name("repo-a"),
+            top: repository_root("/home/me/work/repo-a"),
+            branch: branch_name("main"),
             pending: PendingChanges {
-                changed: 3,
-                staged: 1,
-                unprepared: 2,
-                ahead: 0,
+                changed: path_count(3),
+                staged: path_count(1),
+                unprepared: path_count(2),
+                ahead: commit_count(0),
             },
         }
     }
@@ -184,7 +186,7 @@ mod tests {
     #[test]
     fn confirmation_omits_empty_remote_url_parens() {
         let mut target = push_target();
-        target.remote_url = String::new();
+        target.remote_url = None;
         let text = confirmation("push", &target, "save work");
         assert!(text.contains("origin"));
         let remote_line = text
@@ -201,10 +203,10 @@ mod tests {
     fn confirmation_spells_out_stage_commit_push_for_a_dirty_repo() {
         let mut target = push_target();
         target.pending = PendingChanges {
-            changed: 3,
-            staged: 1,
-            unprepared: 2,
-            ahead: 1,
+            changed: path_count(3),
+            staged: path_count(1),
+            unprepared: path_count(2),
+            ahead: commit_count(1),
         };
         let text = confirmation("push", &target, "save work");
         assert!(text.contains("stage 2 unprepared change(s)"), "{text}");
@@ -219,7 +221,7 @@ mod tests {
     fn confirmation_clean_but_ahead_says_push_only() {
         let mut target = push_target();
         target.pending = PendingChanges {
-            ahead: 3,
+            ahead: commit_count(3),
             ..PendingChanges::default()
         };
         let text = confirmation("push", &target, "ignored");
@@ -241,7 +243,7 @@ mod tests {
     fn push_only_confirmation_omits_message_and_commit_language() {
         let mut target = push_target();
         target.pending = PendingChanges {
-            ahead: 3,
+            ahead: commit_count(3),
             ..PendingChanges::default()
         };
 

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use gtl_models::paths::ProjectName;
 use gtl_wire::recipes::{Recipe, RecipeOp, RecipeTarget};
 
 use super::{ViewerTabKind, recipe_label};
@@ -35,7 +36,7 @@ pub fn execute(command: CompleteRecipeComputation) -> CompleteRecipeComputationO
 
 fn computed_label(recipe: &Recipe, view: &View) -> String {
     if let Some(name) = &recipe.name {
-        return name.clone();
+        return name.to_string();
     }
 
     let repo = &view.repo_name;
@@ -45,7 +46,7 @@ fn computed_label(recipe: &Recipe, view: &View) -> String {
     }
 }
 
-fn computed_diff_label(repo: &str, target: &RecipeTarget, view: &View) -> String {
+fn computed_diff_label(repo: &ProjectName, target: &RecipeTarget, view: &View) -> String {
     match target {
         RecipeTarget::Unpushed { .. } => {
             format!("{repo}: {}", recipe_label::commit_count(view.commits.len()))
@@ -60,7 +61,7 @@ fn computed_diff_label(repo: &str, target: &RecipeTarget, view: &View) -> String
     }
 }
 
-fn merge_label(repo: &str, view: &View) -> String {
+fn merge_label(repo: &ProjectName, view: &View) -> String {
     format!("{repo}: merge {}->{}", view.branch, view.upstream)
 }
 
@@ -71,9 +72,12 @@ mod tests {
     use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
     use super::*;
-    use crate::testing::{
-        diffs::commit,
-        viewer::{empty_view, recipe},
+    use crate::{
+        utils::{
+            diffs::commit,
+            viewer::{empty_view, recipe},
+        },
+        viewer::complete_recipe_computation,
     };
 
     #[test]
@@ -88,7 +92,9 @@ mod tests {
             ),
             (
                 RecipeOp::Diff {
-                    target: RecipeTarget::Base { rev: "v1".into() },
+                    target: RecipeTarget::Base {
+                        rev: crate::utils::git_revision("v1"),
+                    },
                 },
                 0,
                 "project: v1->working",
@@ -96,7 +102,7 @@ mod tests {
             (
                 RecipeOp::Diff {
                     target: RecipeTarget::Range {
-                        range: "v1..v2".into(),
+                        range: crate::utils::git_range("v1..v2"),
                         pinned: None,
                     },
                 },
@@ -106,7 +112,7 @@ mod tests {
             (
                 RecipeOp::Diff {
                     target: RecipeTarget::Merge {
-                        base: "main".into(),
+                        base: crate::utils::git_revision("main"),
                         pinned: None,
                     },
                 },
@@ -125,7 +131,7 @@ mod tests {
             ),
             (
                 RecipeOp::MergeDiff {
-                    base: Some("main".into()),
+                    base: Some(crate::utils::git_revision("main")),
                     pinned: None,
                 },
                 0,
@@ -136,7 +142,7 @@ mod tests {
         for (op, commit_count, expected) in cases {
             let mut view = empty_view();
             view.commits = (0..commit_count).map(|_| commit("abc1234")).collect();
-            let response = execute(CompleteRecipeComputation {
+            let response = complete_recipe_computation::execute(CompleteRecipeComputation {
                 recipe: recipe(op),
                 kind: ViewerTabKind::Live,
                 view,
@@ -155,9 +161,9 @@ mod tests {
             base: None,
             pinned: None,
         });
-        named.name = Some("Release review".into());
+        named.name = Some(crate::utils::project_name("Release review"));
 
-        let response = execute(CompleteRecipeComputation {
+        let response = complete_recipe_computation::execute(CompleteRecipeComputation {
             recipe: named,
             kind: ViewerTabKind::Live,
             view: empty_view(),

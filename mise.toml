@@ -9,19 +9,14 @@ locked = true
 _.path = ["/usr/lib/llvm-18/bin"]
 
 [tools]
-rust = [
-  { version = "stable", profile = "minimal", components = [
-    "clippy",
-    "rustfmt",
-    "llvm-tools",
-  ], targets = [
-    "wasm32-unknown-unknown",
-    "x86_64-pc-windows-msvc",
-  ] },
-  { version = "nightly-2026-06-23", profile = "minimal", components = [
-    "rustfmt",
-  ] },
-]
+rust = { version = "stable", profile = "minimal", components = [
+  "clippy",
+  "rustfmt",
+  "llvm-tools",
+], targets = [
+  "wasm32-unknown-unknown",
+  "x86_64-pc-windows-msvc",
+] }
 deno = "2.9.2"
 just = "1.56.0"
 taplo = "0.10.0"

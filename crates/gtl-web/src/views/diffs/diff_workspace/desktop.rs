@@ -110,7 +110,7 @@ fn WorkspaceShell(shell: ViewerShell) -> Element {
                         PendingWorkspace {}
                     },
                     ViewerActiveState::Broken { code, message, .. } => rsx! {
-                        WorkspaceFailure { title: format!("Render stopped ({code})"), message }
+                        WorkspaceFailure { title: format!("Render stopped ({})", code.as_str()), message }
                     },
                     ViewerActiveState::Error { message, .. } => rsx! {
                         WorkspaceFailure { title: "Render failed".to_owned(), message }
@@ -242,7 +242,7 @@ fn ReadyWorkspace(
             }
         });
     };
-    let onopen = move |path: String| {
+    let onopen = move |path: gtl_models::paths::RepositoryRelativePath| {
         action_error.set(None);
         spawn(async move {
             if let Err(error) =

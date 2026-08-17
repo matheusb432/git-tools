@@ -4,12 +4,12 @@
 pub mod save;
 
 use gtl_application::{
-    live_views::save::{SaveLiveView, SaveLiveViewOk, SaveLiveViewOutcome},
+    live_views::save_live_view::{SaveLiveView, SaveLiveViewOk, SaveLiveViewOutcome},
     shared::notes,
 };
 use gtl_wire::{
     envelope::{Envelope, Note, NoteLevel, Outcome},
-    live_views::{SaveLiveViewData, SaveLiveViewRequest},
+    live_views::{SaveLiveViewData, SaveLiveViewDisposition, SaveLiveViewRequest},
 };
 
 /// Map the wire request into the application command.
@@ -24,24 +24,33 @@ pub(crate) fn to_request(dto: SaveLiveViewRequest) -> SaveLiveView {
 pub(crate) fn to_envelope(resp: SaveLiveViewOk) -> Envelope<SaveLiveViewData> {
     let notes = resp.notes.iter().map(to_note).collect();
     match resp.outcome {
-        SaveLiveViewOutcome::Saved {
-            record,
-            already_saved,
-        } => Envelope {
-            outcome: Outcome::Ok,
-            notes,
-            data: Some(SaveLiveViewData {
-                source_kind: record.source_kind,
-                source_value: record.source_value,
-                display_name: record.display_name,
-                already_saved,
-            }),
-        },
+        SaveLiveViewOutcome::Created { record } => {
+            saved_envelope(notes, record, SaveLiveViewDisposition::Created)
+        }
+        SaveLiveViewOutcome::Refreshed { record } => {
+            saved_envelope(notes, record, SaveLiveViewDisposition::Refreshed)
+        }
         SaveLiveViewOutcome::Rejected { .. } => Envelope {
             outcome: Outcome::Error,
             notes,
             data: None,
         },
+    }
+}
+
+fn saved_envelope(
+    notes: Vec<Note>,
+    record: gtl_application::live_views::LiveViewRecord,
+    disposition: SaveLiveViewDisposition,
+) -> Envelope<SaveLiveViewData> {
+    Envelope {
+        outcome: Outcome::Ok,
+        notes,
+        data: Some(SaveLiveViewData {
+            source: record.source,
+            display_name: record.display_name,
+            disposition,
+        }),
     }
 }
 

@@ -1,8 +1,9 @@
+use gtl_models::live_views::LiveSource;
 use gtl_wire::recipes::{Recipe, RecipeSource};
 
 use super::{ViewerTabKind, ViewerTabState};
 use crate::{
-    live_views::probe::{self, ProbeOutcome, ProbeSource},
+    live_views::probe_source::{self, ProbeOutcome, ProbeSource},
     ports::GitClient,
 };
 
@@ -26,7 +27,7 @@ pub enum ProbeRecipeOutcome {
 #[derive(Debug, thiserror::Error)]
 pub enum ProbeRecipeError {
     #[error(transparent)]
-    Probe(#[from] probe::ProbeSourceError),
+    Probe(#[from] probe_source::ProbeSourceError),
 }
 
 #[cqrsy::query]
@@ -41,10 +42,9 @@ pub fn execute(
     }
 
     let RecipeSource::LocalRepo(path) = query.recipe.source;
-    let response = probe::execute(
+    let response = probe_source::execute(
         ProbeSource {
-            source_kind: "LocalRepo".into(),
-            source_value: path.display().to_string(),
+            source: LiveSource::local_repo(path),
         },
         git,
     )?;
@@ -68,7 +68,8 @@ mod tests {
     use super::*;
     use crate::{
         ports::GitRepositoryState,
-        testing::{FakeGitClient, viewer::recipe},
+        utils::{FakeGitClient, viewer::recipe},
+        viewer::probe_recipe,
     };
 
     fn git(repository_state: GitRepositoryState) -> FakeGitClient {
@@ -80,7 +81,7 @@ mod tests {
 
     #[test]
     fn snapshot_does_not_probe_its_source() {
-        let response = execute(
+        let response = probe_recipe::execute(
             ProbeRecipe {
                 recipe: recipe(RecipeOp::MergeDiff {
                     base: None,
@@ -97,7 +98,7 @@ mod tests {
 
     #[test]
     fn missing_live_source_is_broken() {
-        let response = execute(
+        let response = probe_recipe::execute(
             ProbeRecipe {
                 recipe: recipe(RecipeOp::MergeDiff {
                     base: None,
@@ -122,7 +123,7 @@ mod tests {
 
     #[test]
     fn non_repository_live_source_is_broken() {
-        let response = execute(
+        let response = probe_recipe::execute(
             ProbeRecipe {
                 recipe: recipe(RecipeOp::MergeDiff {
                     base: None,
@@ -147,7 +148,7 @@ mod tests {
 
     #[test]
     fn valid_live_source_is_ready() {
-        let response = execute(
+        let response = probe_recipe::execute(
             ProbeRecipe {
                 recipe: recipe(RecipeOp::MergeDiff {
                     base: None,
@@ -156,7 +157,7 @@ mod tests {
                 kind: ViewerTabKind::Live,
             },
             &git(GitRepositoryState::Repository {
-                top_level: "/repos/project".into(),
+                top_level: crate::utils::repository_root("/repos/project"),
             }),
         )
         .expect("live probe succeeds");
@@ -166,7 +167,7 @@ mod tests {
 
     #[test]
     fn unexpected_live_probe_failure_is_returned() {
-        let error = execute(
+        let error = probe_recipe::execute(
             ProbeRecipe {
                 recipe: recipe(RecipeOp::MergeDiff {
                     base: None,

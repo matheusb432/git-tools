@@ -6,16 +6,13 @@
 //! import the operation module and invoke `operation::execute(...)` directly.
 //! This crate depends on inward-facing models plus typed wire values shared with process adapters.
 
-pub mod branches;
 pub mod diffs;
-pub mod discovery;
 pub mod history;
 pub mod live_views;
-pub mod managed;
 pub mod ports;
-pub mod push_subrepos;
+pub mod projects;
 pub mod recipes;
-pub mod repository_sync;
+pub mod repositories;
 pub mod settings;
 pub mod shared;
 pub mod tags;
@@ -23,5 +20,4 @@ pub mod viewer;
 pub mod worktrees;
 
 #[cfg(any(test, feature = "testing"))]
-#[path = "tests/mod.rs"]
-pub mod testing;
+pub mod utils;

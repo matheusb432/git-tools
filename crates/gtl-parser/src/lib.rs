@@ -5,6 +5,7 @@
 //! tokens. It performs no file system, process, network, or rendering work.
 
 mod classify;
+mod coordinate;
 #[cfg(feature = "syntax")]
 mod highlight;
 mod intraline;
@@ -16,6 +17,7 @@ mod syntax;
 mod token;
 
 pub use classify::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
+pub use coordinate::{CharacterCount, CharacterOffset, LineNumberDigitWidth, SourceLineNumber};
 pub use intraline::CharacterSpan;
 pub use model::{
     DEFAULT_MAX_LINE_CHARACTERS, DiffParser, DiffParserStream, DiffRow, DiffRowKind, DiffSide,

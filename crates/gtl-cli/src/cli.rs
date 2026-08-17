@@ -335,17 +335,16 @@ pub enum Theme {
     Graphite,
 }
 
-impl Theme {
-    /// Returns the config-file token for this theme.
-    pub fn as_config_str(self) -> &'static str {
-        match self {
-            Self::Dark => "dark",
-            Self::Light => "light",
-            Self::Hearth => "hearth",
-            Self::Mirage => "mirage",
-            Self::Glacier => "glacier",
-            Self::Noir => "noir",
-            Self::Graphite => "graphite",
+impl From<Theme> for gtl_models::viewer::Theme {
+    fn from(theme: Theme) -> Self {
+        match theme {
+            Theme::Dark => Self::Dark,
+            Theme::Light => Self::Light,
+            Theme::Hearth => Self::Hearth,
+            Theme::Mirage => Self::Mirage,
+            Theme::Glacier => Self::Glacier,
+            Theme::Noir => Self::Noir,
+            Theme::Graphite => Self::Graphite,
         }
     }
 }

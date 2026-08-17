@@ -1,6 +1,8 @@
-use std::path::Path;
-
-use gtl_models::diffs::{AppliedExclusions, CommitIdAbbreviation, DiffExclusions};
+use gtl_models::{
+    diffs::{AppliedExclusions, CommitIdAbbreviation, DiffExclusions},
+    git::{GitRange, GitRevision},
+    paths::RepositoryRoot,
+};
 
 use crate::{
     diffs::{
@@ -12,7 +14,7 @@ use crate::{
         view::sort_files_tree_order,
     },
     ports::GitClient,
-    shared::{notes::Note, repository_name::from_path},
+    shared::notes::Note,
 };
 
 pub(super) struct DiffComputation {
@@ -22,7 +24,7 @@ pub(super) struct DiffComputation {
 }
 
 struct ResolvedTarget {
-    base_ref: String,
+    base_ref: GitRevision,
     io_ranges: DiffRanges,
     view_ranges: DiffRanges,
     presentation: RangePresentation,
@@ -30,18 +32,18 @@ struct ResolvedTarget {
 }
 
 impl ResolvedTarget {
-    fn pinned(pin: &PinnedRange, base_ref: String, presentation: RangePresentation) -> Self {
+    fn pinned(pin: &PinnedRange, base_ref: GitRevision, presentation: RangePresentation) -> Self {
         Self {
             base_ref,
-            io_ranges: DiffRanges::exact(pin.git_range()),
-            view_ranges: DiffRanges::exact(pin.display_range()),
+            io_ranges: DiffRanges::exact(pin.to_git_range()),
+            view_ranges: DiffRanges::exact(pin.to_display_range()),
             presentation,
             fallback_to_main: false,
         }
     }
 
     fn same_ranges(
-        base_ref: String,
+        base_ref: GitRevision,
         ranges: DiffRanges,
         presentation: RangePresentation,
         fallback_to_main: bool,
@@ -58,14 +60,13 @@ impl ResolvedTarget {
 
 pub(super) fn build(
     source: &impl GitClient,
-    top: &str,
+    top: &RepositoryRoot,
     target: &DiffTarget,
     exclusions: &DiffExclusions,
 ) -> anyhow::Result<DiffComputation> {
     let mut notes = Vec::new();
-    let repo_path = Path::new(top);
-    let branch = source.current_branch(repo_path)?;
-    let repo_name = from_path(top);
+    let branch = source.current_branch(top)?;
+    let repo_name = top.project_name();
     let excluded = exclusions.for_project_or_default(&repo_name);
 
     let ResolvedTarget {
@@ -81,12 +82,12 @@ pub(super) fn build(
         commits,
         mut files,
         hidden_paths,
-    } = assemble(source, repo_path, &io_ranges.diff, &io_ranges.log, excluded)?;
+    } = assemble(source, top, &io_ranges.diff, &io_ranges.log, excluded)?;
     sort_files_tree_order(&mut files);
 
     let view = View {
         repo_name: repo_name.clone(),
-        repo_root: top.to_string(),
+        repo_root: top.clone(),
         branch,
         upstream: base_ref.clone(),
         title: range_view.title,
@@ -100,7 +101,7 @@ pub(super) fn build(
     notes.extend(exclusions::note("diff-artifact", &view));
 
     let summary = match target {
-        DiffTarget::Range { .. } => base_ref.clone(),
+        DiffTarget::Range { .. } => base_ref.to_string(),
         DiffTarget::Base(_) => format!("{base_ref}..working"),
         DiffTarget::Merge { .. } => format!("to merge into {base_ref}"),
         DiffTarget::Unpushed { .. } if fallback_to_main => format!("{base_ref}..working"),
@@ -116,35 +117,38 @@ pub(super) fn build(
 
 fn resolve_target_ranges(
     source: &impl GitClient,
-    top: &str,
+    top: &RepositoryRoot,
     target: &DiffTarget,
     notes: &mut Vec<Note>,
 ) -> anyhow::Result<ResolvedTarget> {
-    let repo_path = Path::new(top);
     let resolved = match target {
         DiffTarget::Range {
             pinned: Some(pin), ..
         }
         | DiffTarget::Last {
             pinned: Some(pin), ..
-        } => ResolvedTarget::pinned(pin, pin.display_range(), RangePresentation::Exact),
+        } => ResolvedTarget::pinned(
+            pin,
+            GitRevision::from(&pin.to_display_range()),
+            RangePresentation::Exact,
+        ),
         DiffTarget::Range {
             range,
             pinned: None,
         } => {
             verify_exact_range(source, top, range)?;
             ResolvedTarget::same_ranges(
-                range.clone(),
-                DiffRanges::exact(range),
+                GitRevision::from(range),
+                DiffRanges::exact(range.clone()),
                 RangePresentation::Exact,
                 false,
             )
         }
         DiffTarget::Base(base) => {
-            source.verify_commit(repo_path, base)?;
-            let short = source
-                .resolve_commit_id(repo_path, base)?
-                .abbreviated(CommitIdAbbreviation::TenCharacters);
+            source.verify_commit(top, base)?;
+            let short = source.resolve_commit_id(top, base)?;
+            let short =
+                GitRevision::abbreviated_commit(&short, CommitIdAbbreviation::TenCharacters);
             ResolvedTarget {
                 base_ref: short.clone(),
                 io_ranges: DiffRanges::working_tree(base),
@@ -158,7 +162,7 @@ fn resolve_target_ranges(
             pinned: Some(pin),
         } => ResolvedTarget::pinned(pin, base.clone(), RangePresentation::Merge),
         DiffTarget::Merge { base, pinned: None } => {
-            source.verify_commit(repo_path, base)?;
+            source.verify_commit(top, base)?;
             ResolvedTarget::same_ranges(
                 base.clone(),
                 DiffRanges::merge(base),
@@ -167,7 +171,7 @@ fn resolve_target_ranges(
             )
         }
         DiffTarget::Unpushed { pinned: Some(pin) } => {
-            ResolvedTarget::pinned(pin, pin.display_base(), RangePresentation::Exact)
+            ResolvedTarget::pinned(pin, pin.to_display_base(), RangePresentation::Exact)
         }
         DiffTarget::Unpushed { pinned: None } => {
             let base = unpushed_or_main_base(source, top, notes)?;
@@ -188,10 +192,10 @@ fn resolve_target_ranges(
             count,
             pinned: None,
         } => {
-            let range = format!("HEAD~{count}..HEAD");
+            let range = GitRange::head_commits(*count);
             verify_exact_range(source, top, &range)?;
             ResolvedTarget::same_ranges(
-                range.clone(),
+                GitRevision::from(&range),
                 DiffRanges::exact(range),
                 RangePresentation::Exact,
                 false,
@@ -202,30 +206,29 @@ fn resolve_target_ranges(
 }
 
 struct DiffBase {
-    ref_name: String,
+    ref_name: GitRevision,
     is_upstream: bool,
 }
 
 fn unpushed_or_main_base(
     source: &impl GitClient,
-    top: &str,
+    top: &RepositoryRoot,
     notes: &mut Vec<Note>,
 ) -> anyhow::Result<DiffBase> {
-    let repo_path = Path::new(top);
-    match source.upstream(repo_path) {
+    match source.upstream(top) {
         Ok(crate::ports::GitEffect::Applied(upstream)) => Ok(DiffBase {
-            ref_name: upstream,
+            ref_name: GitRevision::from(&upstream),
             is_upstream: true,
         }),
         Ok(crate::ports::GitEffect::Rejected(upstream_error)) => {
             source
-                .verify_commit(repo_path, "main")
+                .verify_commit(top, &GitRevision::main())
                 .map_err(|_| anyhow::anyhow!(upstream_error))?;
             notes.push(Note::warn(
                 "diff-artifact: no upstream; falling back to main",
             ));
             Ok(DiffBase {
-                ref_name: "main".to_string(),
+                ref_name: GitRevision::main(),
                 is_upstream: false,
             })
         }
@@ -233,15 +236,20 @@ fn unpushed_or_main_base(
     }
 }
 
-fn verify_exact_range(source: &impl GitClient, top: &str, range: &str) -> anyhow::Result<()> {
-    let Some((start, end)) = range.split_once("..") else {
+fn verify_exact_range(
+    source: &impl GitClient,
+    top: &RepositoryRoot,
+    range: &GitRange,
+) -> anyhow::Result<()> {
+    let Some((start, end)) = range.as_ref().split_once("..") else {
         anyhow::bail!("range must use <start>..<end>");
     };
     if start.trim().is_empty() || end.trim().is_empty() {
         anyhow::bail!("range must use <start>..<end>");
     }
-    let repo_path = Path::new(top);
-    source.verify_commit(repo_path, start)?;
-    source.verify_commit(repo_path, end)?;
+    let start = GitRevision::try_new(start.to_owned())?;
+    let end = GitRevision::try_new(end.to_owned())?;
+    source.verify_commit(top, &start)?;
+    source.verify_commit(top, &end)?;
     Ok(())
 }

@@ -3,9 +3,9 @@
 //! `recent_renders` and its `project_sources` / `render_operations` /
 //! `render_targets` vocabulary tables.
 
-use std::{num::NonZeroU32, path::PathBuf};
+use std::num::NonZeroU32;
 
-use gtl_models::viewer::RenderHistoryId;
+use gtl_models::{paths::ProjectName, timestamps::MachineTimestamp, viewer::RenderHistoryId};
 use gtl_wire::recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
 #[cfg(test)]
 use rusqlite::Connection;
@@ -19,9 +19,9 @@ pub struct RecentRenderRecord {
     pub id: RenderHistoryId,
     pub recipe: Recipe,
     pub title: String,
-    pub repo_name: String,
+    pub repo_name: ProjectName,
     pub range_label: String,
-    pub rendered_at: String,
+    pub rendered_at: MachineTimestamp,
 }
 
 /// The relational projection of one [`Recipe`], ready to bind as SQL
@@ -34,7 +34,7 @@ pub(super) struct RecipeColumns {
     pub(super) target: Option<&'static str>,
     pub(super) argument: Option<String>,
     pub(super) pinned: Option<PinnedRange>,
-    pub(super) recipe_name: Option<String>,
+    pub(super) recipe_name: Option<ProjectName>,
 }
 
 impl RecipeColumns {
@@ -44,12 +44,12 @@ impl RecipeColumns {
             RecipeOp::Diff { target } => {
                 let (target_name, argument, pinned) = match target {
                     RecipeTarget::Unpushed { pinned } => ("unpushed", None, pinned.clone()),
-                    RecipeTarget::Base { rev } => ("base", Some(rev.clone()), None),
+                    RecipeTarget::Base { rev } => ("base", Some(rev.to_string()), None),
                     RecipeTarget::Range { range, pinned } => {
-                        ("range", Some(range.clone()), pinned.clone())
+                        ("range", Some(range.to_string()), pinned.clone())
                     }
                     RecipeTarget::Merge { base, pinned } => {
-                        ("merge", Some(base.clone()), pinned.clone())
+                        ("merge", Some(base.to_string()), pinned.clone())
                     }
                     RecipeTarget::Last { count, pinned } => {
                         ("last", Some(count.to_string()), pinned.clone())
@@ -57,9 +57,12 @@ impl RecipeColumns {
                 };
                 ("diff", Some(target_name), argument, pinned)
             }
-            RecipeOp::MergeDiff { base, pinned } => {
-                ("merge_diff", None, base.clone(), pinned.clone())
-            }
+            RecipeOp::MergeDiff { base, pinned } => (
+                "merge_diff",
+                None,
+                base.as_ref().map(ToString::to_string),
+                pinned.clone(),
+            ),
         };
         Self {
             source_kind: SOURCE_KIND_DIRECTORY,
@@ -122,26 +125,40 @@ impl RecentRenderRow {
 
     pub(super) fn try_into_record(self) -> Result<RecentRenderRecord, RecentRenderRowError> {
         let id = RenderHistoryId::try_new(self.id)
-            .map_err(|_| RecentRenderRowError::InvalidId { id: self.id })?;
-        let recipe =
-            self.decode_recipe()
-                .map_err(|reason| RecentRenderRowError::InvalidRecipe {
-                    id: self.id,
-                    reason,
-                })?;
+            .map_err(|_| RecentRenderRowError::Id { id: self.id })?;
+        let recipe = self
+            .decode_recipe()
+            .map_err(|reason| RecentRenderRowError::Recipe {
+                id: self.id,
+                reason,
+            })?;
         Ok(RecentRenderRecord {
             id,
             recipe,
             title: self.title,
-            repo_name: self.repo_name,
+            repo_name: ProjectName::try_new(self.repo_name).map_err(|error| {
+                RecentRenderRowError::ProjectName {
+                    id: self.id,
+                    field: "repo_name",
+                    reason: error.to_string(),
+                }
+            })?,
             range_label: self.range_label,
-            rendered_at: self.rendered_at,
+            rendered_at: MachineTimestamp::try_from(self.rendered_at).map_err(|error| {
+                RecentRenderRowError::Timestamp {
+                    id: self.id,
+                    reason: error.to_string(),
+                }
+            })?,
         })
     }
 
     fn decode_recipe(&self) -> Result<Recipe, String> {
         let source = match self.source_kind.as_str() {
-            SOURCE_KIND_DIRECTORY => RecipeSource::LocalRepo(PathBuf::from(&self.source_value)),
+            SOURCE_KIND_DIRECTORY => RecipeSource::LocalRepo(
+                gtl_models::paths::RepositoryRoot::try_new(self.source_value.clone().into())
+                    .map_err(|error| format!("source repository root is invalid: {error}"))?,
+            ),
             other => return Err(format!("unknown project-source kind '{other}'")),
         };
         let pinned = match (&self.pinned_base, &self.pinned_head) {
@@ -163,7 +180,12 @@ impl RecentRenderRow {
                 target: self.decode_target(pinned)?,
             },
             "merge_diff" => RecipeOp::MergeDiff {
-                base: self.argument.clone(),
+                base: self
+                    .argument
+                    .clone()
+                    .map(gtl_models::git::GitRevision::try_new)
+                    .transpose()
+                    .map_err(|_| "merge-diff base revision is empty".to_owned())?,
                 pinned,
             },
             other => return Err(format!("unknown render operation '{other}'")),
@@ -171,7 +193,12 @@ impl RecentRenderRow {
         Ok(Recipe {
             source,
             op,
-            name: self.recipe_name.clone(),
+            name: self
+                .recipe_name
+                .clone()
+                .map(ProjectName::try_new)
+                .transpose()
+                .map_err(|error| format!("recipe name is invalid: {error}"))?,
         })
     }
 
@@ -188,14 +215,19 @@ impl RecentRenderRow {
                 if pinned.is_some() {
                     return Err("target 'base' does not accept a pin".into());
                 }
-                RecipeTarget::Base { rev: argument()? }
+                RecipeTarget::Base {
+                    rev: gtl_models::git::GitRevision::try_new(argument()?)
+                        .map_err(|_| "target 'base' revision is empty".to_owned())?,
+                }
             }
             "range" => RecipeTarget::Range {
-                range: argument()?,
+                range: gtl_models::git::GitRange::try_new(argument()?)
+                    .map_err(|_| "target 'range' expression is empty".to_owned())?,
                 pinned,
             },
             "merge" => RecipeTarget::Merge {
-                base: argument()?,
+                base: gtl_models::git::GitRevision::try_new(argument()?)
+                    .map_err(|_| "target 'merge' base revision is empty".to_owned())?,
                 pinned,
             },
             "last" => RecipeTarget::Last {
@@ -214,9 +246,17 @@ impl RecentRenderRow {
 #[derive(Debug, thiserror::Error)]
 pub enum RecentRenderRowError {
     #[error("recent_renders row id {id} violates the positive-ID invariant")]
-    InvalidId { id: i64 },
+    Id { id: i64 },
     #[error("recent_renders row id {id} holds an undecodable recipe: {reason}")]
-    InvalidRecipe { id: i64, reason: String },
+    Recipe { id: i64, reason: String },
+    #[error("recent_renders row id {id} has invalid {field}: {reason}")]
+    ProjectName {
+        id: i64,
+        field: &'static str,
+        reason: String,
+    },
+    #[error("recent_renders row id {id} has an invalid rendered_at timestamp: {reason}")]
+    Timestamp { id: i64, reason: String },
 }
 
 #[cfg(test)]
@@ -302,7 +342,7 @@ mod tests {
     use super::*;
     use crate::{
         history::{list_recent_render_page, record_render},
-        testing::FixedClock,
+        utils::FixedClock,
     };
 
     fn assert_round_trips(recipe: &Recipe) {
@@ -311,11 +351,11 @@ mod tests {
             &record_render::RecordRender {
                 recipe: recipe.clone(),
                 title: "t".into(),
-                repo_name: "gt".into(),
+                repo_name: crate::utils::project_name("gt"),
                 range_label: "main..HEAD".into(),
             },
             &mut connection,
-            &FixedClock("2026-07-11T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-11T00:00:00Z"),
         )
         .expect("record succeeds");
 
@@ -334,23 +374,20 @@ mod tests {
     /// shape must survive a record -> list round trip unchanged.
     #[test]
     fn every_recipe_shape_round_trips_through_the_relational_codec() {
-        let pin = Some(crate::testing::pinned_range(
-            &"a".repeat(40),
-            &"b".repeat(40),
-        ));
+        let pin = Some(crate::utils::pinned_range(&"a".repeat(40), &"b".repeat(40)));
         let targets = [
             RecipeTarget::Unpushed {
                 pinned: pin.clone(),
             },
             RecipeTarget::Base {
-                rev: "HEAD~2".into(),
+                rev: crate::utils::git_revision("HEAD~2"),
             },
             RecipeTarget::Range {
-                range: "a..b".into(),
+                range: crate::utils::git_range("a..b"),
                 pinned: None,
             },
             RecipeTarget::Merge {
-                base: "main".into(),
+                base: crate::utils::git_revision("main"),
                 pinned: pin.clone(),
             },
             RecipeTarget::Last {
@@ -363,7 +400,7 @@ mod tests {
             .map(|target| RecipeOp::Diff { target })
             .chain([
                 RecipeOp::MergeDiff {
-                    base: Some("main".into()),
+                    base: Some(crate::utils::git_revision("main")),
                     pinned: None,
                 },
                 RecipeOp::MergeDiff {
@@ -373,9 +410,9 @@ mod tests {
             ]);
         for (index, op) in ops.enumerate() {
             assert_round_trips(&Recipe {
-                source: RecipeSource::LocalRepo("/repos/gt".into()),
+                source: RecipeSource::LocalRepo(crate::utils::repository_root("/repos/gt")),
                 op,
-                name: (index % 2 == 0).then(|| "named".into()),
+                name: (index % 2 == 0).then(|| crate::utils::project_name("named")),
             });
         }
     }

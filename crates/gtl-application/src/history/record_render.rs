@@ -1,5 +1,6 @@
 //! The `history/record_render` vertical slice: record one render in the app history log.
 
+use gtl_models::{paths::ProjectName, timestamps::MachineTimestamp};
 use gtl_wire::recipes::Recipe;
 use rusqlite::{Connection, params};
 
@@ -12,7 +13,7 @@ const RECENT_RENDERS_CAP: usize = 500;
 pub struct RecordRender {
     pub recipe: Recipe,
     pub title: String,
-    pub repo_name: String,
+    pub repo_name: ProjectName,
     pub range_label: String,
 }
 
@@ -29,7 +30,7 @@ pub fn execute(
     connection: &mut Connection,
     clock: &impl Clock,
 ) -> Result<(), RecordRenderError> {
-    let rendered_at = clock.now_iso();
+    let rendered_at = clock.now().map_err(anyhow::Error::from)?;
     record_render(connection, req, &rendered_at)?;
     Ok(())
 }
@@ -37,7 +38,7 @@ pub fn execute(
 fn record_render(
     connection: &mut Connection,
     request: &RecordRender,
-    rendered_at: &str,
+    rendered_at: &MachineTimestamp,
 ) -> anyhow::Result<()> {
     let columns = RecipeColumns::from_recipe(&request.recipe);
     let transaction = connection.transaction()?;
@@ -51,7 +52,11 @@ fn record_render(
              RETURNING id",
         )?
         .query_row(
-            params![columns.source_kind, columns.source_value, rendered_at],
+            params![
+                columns.source_kind,
+                columns.source_value,
+                rendered_at.as_ref()
+            ],
             |row| row.get(0),
         )?;
     {
@@ -74,11 +79,11 @@ fn record_render(
             columns.argument,
             columns.pinned.as_ref().map(|pin| pin.base.as_ref()),
             columns.pinned.as_ref().map(|pin| pin.head.as_ref()),
-            columns.recipe_name,
+            columns.recipe_name.as_ref().map(|name| name.as_str()),
             request.title,
-            request.repo_name,
+            request.repo_name.as_str(),
             request.range_label,
-            rendered_at,
+            rendered_at.as_ref(),
         ])?;
     }
     {
@@ -107,13 +112,15 @@ mod tests {
 
     use super::*;
     use crate::{
-        history::{RecentRenderRecord, list_recent_render_page, persistence::store_test},
-        testing::FixedClock,
+        history::{
+            RecentRenderRecord, list_recent_render_page, persistence::store_test, record_render,
+        },
+        utils::FixedClock,
     };
 
     fn recipe(repo: &str) -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(repo.into()),
+            source: RecipeSource::LocalRepo(crate::utils::repository_root(repo)),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None },
             },
@@ -123,10 +130,10 @@ mod tests {
 
     fn pinned_recipe(repo: &str, base: &str, head: &str) -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(repo.into()),
+            source: RecipeSource::LocalRepo(crate::utils::repository_root(repo)),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
-                    pinned: Some(crate::testing::pinned_range(base, head)),
+                    pinned: Some(crate::utils::pinned_range(base, head)),
                 },
             },
             name: None,
@@ -143,13 +150,13 @@ mod tests {
 
     fn command_for_recipe(
         title: impl Into<String>,
-        repo_name: impl Into<String>,
+        repo_name: &str,
         recipe: Recipe,
     ) -> RecordRender {
         RecordRender {
             recipe,
             title: title.into(),
-            repo_name: repo_name.into(),
+            repo_name: crate::utils::project_name(repo_name),
             range_label: "origin/main..HEAD".into(),
         }
     }
@@ -176,8 +183,9 @@ mod tests {
     #[test]
     fn records_a_render_stamped_by_the_clock() {
         let mut connection = store_test();
-        let clock = FixedClock("2026-07-07T00:00:00Z".into());
-        execute(&command("gt · unpushed"), &mut connection, &clock).expect("record succeeds");
+        let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
+        record_render::execute(&command("gt · unpushed"), &mut connection, &clock)
+            .expect("record succeeds");
 
         let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
@@ -187,9 +195,12 @@ mod tests {
                 id: gtl_models::viewer::RenderHistoryId::try_new(1).expect("positive id"),
                 recipe: recipe("/repos/gt"),
                 title: "gt · unpushed".into(),
-                repo_name: "gt".into(),
+                repo_name: crate::utils::project_name("gt"),
                 range_label: "origin/main..HEAD".into(),
-                rendered_at: "2026-07-07T00:00:00Z".into(),
+                rendered_at: gtl_models::timestamps::MachineTimestamp::try_from(
+                    "2026-07-07T00:00:00Z",
+                )
+                .expect("fixture render timestamp is valid"),
             }
         );
     }
@@ -197,16 +208,16 @@ mod tests {
     #[test]
     fn repeated_renders_share_one_touched_project_source() {
         let mut connection = store_test();
-        execute(
+        record_render::execute(
             &command("first"),
             &mut connection,
-            &FixedClock("2026-07-07T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-07T00:00:00Z"),
         )
         .expect("record succeeds");
-        execute(
+        record_render::execute(
             &command("second"),
             &mut connection,
-            &FixedClock("2026-07-08T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-08T00:00:00Z"),
         )
         .expect("record succeeds");
 
@@ -223,29 +234,29 @@ mod tests {
         let mut repeated = first.clone();
         repeated.title = "repeated".into();
 
-        execute(
+        record_render::execute(
             &first,
             &mut connection,
-            &FixedClock("2026-07-07T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-07T00:00:00Z"),
         )
         .expect("first record succeeds");
-        execute(
+        record_render::execute(
             &repeated,
             &mut connection,
-            &FixedClock("2026-07-08T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-08T00:00:00Z"),
         )
         .expect("repeated fingerprint is a successful no-op");
 
         let renders = list_recent(&connection);
         assert_eq!(renders.len(), 1);
         assert_eq!(renders[0].title, "first");
-        assert_eq!(renders[0].rendered_at, "2026-07-07T00:00:00Z");
+        assert_eq!(renders[0].rendered_at.as_ref(), "2026-07-07T00:00:00Z");
     }
 
     #[test]
     fn every_fingerprint_field_distinguishes_a_render() {
         let mut connection = store_test();
-        let clock = FixedClock("2026-07-07T00:00:00Z".into());
+        let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
         let commands = [
             command_for_recipe("original", "gt", pinned_recipe("/repos/gt", "base", "head")),
             command_for_recipe(
@@ -267,7 +278,8 @@ mod tests {
         ];
 
         for command in commands {
-            execute(&command, &mut connection, &clock).expect("distinct record succeeds");
+            record_render::execute(&command, &mut connection, &clock)
+                .expect("distinct record succeeds");
         }
 
         assert_eq!(list_recent(&connection).len(), 5);
@@ -276,12 +288,12 @@ mod tests {
     #[test]
     fn recording_past_the_cap_prunes_oldest_rows_and_orphaned_sources() {
         let mut connection = store_test();
-        let clock = FixedClock("2026-07-07T00:00:00Z".into());
+        let clock = FixedClock::from_raw("2026-07-07T00:00:00Z");
 
         // The first five renders come from a repo no later render references,
         // so pruning them must also collect its project_sources row.
         for index in 0..5 {
-            execute(
+            record_render::execute(
                 &command_for_recipe(
                     format!("render {index}"),
                     "gt",
@@ -297,7 +309,7 @@ mod tests {
             .expect("record succeeds");
         }
         for index in 5..(RECENT_RENDERS_CAP + 5) {
-            execute(
+            record_render::execute(
                 &command_for_recipe(
                     format!("render {index}"),
                     "gt",

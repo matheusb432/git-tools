@@ -6,6 +6,7 @@ use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
 };
+use gtl_application::live_views::save_live_view;
 use gtl_wire::{
     envelope::Envelope,
     live_views::{SaveLiveViewData, SaveLiveViewRequest},
@@ -30,13 +31,8 @@ pub async fn handle(
         let mut connection = state
             .app_state
             .connection_lock()
-            .map_err(gtl_application::live_views::save::SaveLiveViewError::from)?;
-        gtl_application::live_views::save::execute(
-            request,
-            &state.git,
-            &mut connection,
-            &state.clock,
-        )
+            .map_err(save_live_view::SaveLiveViewError::from)?;
+        save_live_view::execute(request, &state.git, &mut connection, &state.clock)
     })
     .await
     .map_err(EndpointError::task_join)?

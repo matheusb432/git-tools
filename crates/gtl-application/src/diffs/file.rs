@@ -1,9 +1,11 @@
+use gtl_models::{diffs::DiffLineCount, paths::RepositoryRelativePath};
+
 /// One changed file with its path, line counts, and raw diff lines.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileDiff {
-    pub path: String,
-    pub added: u32,
-    pub removed: u32,
+    pub path: RepositoryRelativePath,
+    pub added: DiffLineCount,
+    pub removed: DiffLineCount,
     pub lines: Vec<String>,
     pub full_lines: Option<Vec<String>>,
 }

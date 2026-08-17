@@ -1,3 +1,4 @@
+use gtl_models::paths::RepositoryRelativePath;
 use gtl_wire::viewer::{
     LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerActiveView, ViewerApiError,
     ViewerAppliedExclusions, ViewerCommandLine, ViewerCommitSelection, ViewerCommitSummary,
@@ -44,11 +45,11 @@ pub const fn project_theme(theme: Theme) -> ViewerTheme {
 
 /// Returns the stable document anchor for a file in a rendered diff view.
 #[must_use]
-pub fn diff_file_anchor_id(path: &str) -> String {
+pub fn diff_file_anchor_id(path: &RepositoryRelativePath) -> String {
     let mut body = String::new();
     let mut last_was_separator = false;
 
-    for character in path.chars() {
+    for character in path.to_string_lossy().chars() {
         if character.is_ascii_alphanumeric() {
             body.push(character.to_ascii_lowercase());
             last_was_separator = false;
@@ -97,8 +98,7 @@ pub fn project_diff_view(
                 id: commit.id.clone(),
                 subject: commit.subject.clone(),
                 body: commit.body.clone(),
-                date: commit.date.clone(),
-                iso: commit.iso.clone(),
+                committed_at: commit.committed_at.clone(),
                 is_merge: commit.is_merge(),
             })
             .collect(),
@@ -128,7 +128,7 @@ pub fn project_diff_lines(
     })?;
     let lines = selected_lines(file, request.identity.render_options.density);
     let start =
-        usize::try_from(request.cursor.position()).map_err(|_| ViewerApiError::InvalidRequest)?;
+        usize::try_from(request.cursor.into_inner()).map_err(|_| ViewerApiError::InvalidRequest)?;
     if start > lines.len() {
         return Err(ViewerApiError::InvalidRequest);
     }
@@ -171,7 +171,7 @@ fn project_file(
     ViewerFileSummary {
         id: ViewerDiffFileId::for_index(index),
         path: file.path.clone(),
-        absolute_path: format!("{}/{}", view.repo_root, file.path),
+        absolute_path: view.repo_root.join(&file.path),
         anchor_id: diff_file_anchor_id(&file.path),
         added: file.added,
         removed: file.removed,
@@ -209,7 +209,10 @@ const fn viewer_file_status(status: FileStatus) -> ViewerFileStatus {
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::diffs::{AppliedExclusions, CommitIdAbbreviation};
+    use gtl_models::{
+        diffs::{AppliedExclusions, CommitIdAbbreviation, DiffLineCount, ExcludedExtensions},
+        viewer::{ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId},
+    };
     use gtl_wire::viewer::{
         LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerApiError,
         ViewerCommitSelection, ViewerDiffCursor, ViewerDiffDensity, ViewerDiffFileId,
@@ -222,15 +225,15 @@ mod tests {
     };
     use crate::{
         diffs::{Cmd, FileDiff, View},
-        testing,
+        utils,
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
     };
 
     fn identity(density: ViewerDiffDensity) -> ViewerViewIdentity {
         ViewerViewIdentity {
-            tab_id: 7,
-            range_generation: 8,
-            selection_generation: 9,
+            tab_id: ViewerTabId::try_new(7).expect("positive tab ID"),
+            range_generation: ViewerRangeGeneration::new(8),
+            selection_generation: ViewerSelectionGeneration::new(9),
             render_options: ViewerRenderOptions {
                 layout: ViewerDiffLayout::Unified,
                 density,
@@ -240,8 +243,8 @@ mod tests {
 
     fn view() -> View {
         View {
-            repo_name: "git-tools".into(),
-            commits: vec![testing::diffs::commit_with(
+            repo_name: utils::project_name("git-tools"),
+            commits: vec![utils::diffs::commit_with(
                 "0123456789abcdef0123456789abcdef01234567",
                 "subject",
                 &[
@@ -251,16 +254,16 @@ mod tests {
             )],
             files: vec![
                 FileDiff {
-                    path: "src/a b.rs".into(),
-                    added: 2,
-                    removed: 1,
+                    path: utils::repository_relative_path("src/a b.rs"),
+                    added: DiffLineCount::new(2),
+                    removed: DiffLineCount::new(1),
                     lines: vec!["new file mode 100644".into(), "+compact".into()],
                     full_lines: Some(vec!["new file mode 100644".into(), "+full".into()]),
                 },
                 FileDiff {
-                    path: "removed.rs".into(),
-                    added: 0,
-                    removed: 1,
+                    path: utils::repository_relative_path("removed.rs"),
+                    added: DiffLineCount::default(),
+                    removed: DiffLineCount::new(1),
                     lines: vec!["deleted file mode 100644".into()],
                     full_lines: None,
                 },
@@ -273,17 +276,23 @@ mod tests {
             },
             commits_label: "2 commits".into(),
             exclusions: Some(AppliedExclusions {
-                extensions: vec!["lock".into()],
-                hidden_paths: vec!["Cargo.lock".into()],
+                extensions: ExcludedExtensions::new(["lock"]),
+                hidden_paths: vec![utils::repository_relative_path("Cargo.lock")],
             }),
-            ..testing::diffs::view()
+            ..utils::diffs::view()
         }
     }
 
     #[test]
     fn file_anchor_normalizes_paths_and_keeps_a_stable_prefix() {
-        assert_eq!(diff_file_anchor_id("src/a b.rs"), "f-src-a-b-rs");
-        assert_eq!(diff_file_anchor_id("---"), "f-");
+        assert_eq!(
+            diff_file_anchor_id(&utils::repository_relative_path("src/a b.rs")),
+            "f-src-a-b-rs"
+        );
+        assert_eq!(
+            diff_file_anchor_id(&utils::repository_relative_path("---")),
+            "f-"
+        );
     }
 
     #[test]
@@ -308,7 +317,7 @@ mod tests {
             ViewerCommitSelection::None,
         );
 
-        assert_eq!(active.identity.tab_id, 7);
+        assert_eq!(u64::from(active.identity.tab_id), 7);
         assert_eq!(active.files[0].id.as_str(), "file-0");
         assert_eq!(active.files[1].id.as_str(), "file-1");
         assert_eq!(active.files[0].anchor_id, "f-src-a-b-rs");
@@ -322,7 +331,13 @@ mod tests {
         );
         assert!(active.commits[0].is_merge);
         assert_eq!(
-            active.exclusions.expect("applied exclusions").hidden_paths,
+            active
+                .exclusions
+                .expect("applied exclusions")
+                .hidden_paths
+                .into_iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
             ["Cargo.lock"]
         );
     }
@@ -337,7 +352,7 @@ mod tests {
         let compact_request = LoadViewerDiffLines {
             identity: identity(ViewerDiffDensity::Compact),
             file: ViewerDiffFileId::for_index(0),
-            cursor: ViewerDiffCursor::START,
+            cursor: ViewerDiffCursor::default(),
         };
 
         let first = project_diff_lines(&view, &compact_request).expect("first compact page");
@@ -360,7 +375,7 @@ mod tests {
             &LoadViewerDiffLines {
                 identity: identity(ViewerDiffDensity::Full),
                 file: ViewerDiffFileId::for_index(0),
-                cursor: ViewerDiffCursor::START,
+                cursor: ViewerDiffCursor::default(),
             },
         )
         .expect("full page");
@@ -371,7 +386,7 @@ mod tests {
             &LoadViewerDiffLines {
                 identity: identity(ViewerDiffDensity::Compact),
                 file: ViewerDiffFileId::for_index(99),
-                cursor: ViewerDiffCursor::START,
+                cursor: ViewerDiffCursor::default(),
             },
         );
         assert_eq!(

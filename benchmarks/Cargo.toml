@@ -22,6 +22,7 @@ clap.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 gtl-application.workspace = true
+gtl-models.workspace = true
 gtl-wire.workspace = true
 # The view-cache target benchmarks the desktop-owned cache without exposing it in production builds.
 gtl-desktop = { workspace = true, features = ["benchmark-support"] }

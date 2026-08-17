@@ -1,12 +1,13 @@
-use std::num::NonZeroUsize;
-
 use gtl_application::history::{
     RecentRenderRecord, get_recent_render,
     list_recent_render_page::{
         self, ListRecentRenderPage, ListRecentRenderPageOk, RecentRenderPageCursor,
     },
 };
-use gtl_models::viewer::{RenderHistoryId, ViewerTabKind};
+use gtl_models::{
+    recipes::RecipeBatchId,
+    viewer::{RenderHistoryId, ViewerTabKind},
+};
 use gtl_wire::{
     recipes::RecipeOp,
     viewer::{
@@ -23,14 +24,14 @@ pub(super) fn list(
     app: &ViewerApp,
     request: ListViewerHistory,
 ) -> Result<ViewerHistoryPage, ViewerApiError> {
-    let cursor = to_cursor(request.cursor)?;
+    let cursor = to_cursor(request.cursor);
     let connection = app
         .app_state
         .connection_lock()
         .map_err(|error| internal("failed to lock render history", format_args!("{error:#}")))?;
     let page = list_recent_render_page::execute(ListRecentRenderPage { cursor }, &connection)
         .map_err(|error| internal("failed to list render history", error))?;
-    to_history_page(page)
+    Ok(to_history_page(page))
 }
 
 pub(super) fn open(
@@ -38,10 +39,9 @@ pub(super) fn open(
     request: OpenViewerHistory,
 ) -> Result<ViewerShell, ViewerApiError> {
     let entry = get_history_record(app, request.render_id)?;
-    let id = entry.id;
     app.open_recipe(
         &entry.recipe,
-        format!("history-{id}"),
+        RecipeBatchId::generate(),
         ViewerTabKind::Snapshot,
     )
     .map_err(map_recipe_error)?;
@@ -57,9 +57,8 @@ pub(super) fn copy(
 
 fn get_history_record(
     app: &ViewerApp,
-    render_id: i64,
+    id: RenderHistoryId,
 ) -> Result<RecentRenderRecord, ViewerApiError> {
-    let id = RenderHistoryId::try_new(render_id).map_err(|_| ViewerApiError::InvalidRequest)?;
     let connection = app
         .app_state
         .connection_lock()
@@ -72,46 +71,29 @@ fn get_history_record(
         })
 }
 
-fn to_cursor(cursor: ViewerHistoryCursor) -> Result<RecentRenderPageCursor, ViewerApiError> {
+fn to_cursor(cursor: ViewerHistoryCursor) -> RecentRenderPageCursor {
     match cursor {
-        ViewerHistoryCursor::Newest => Ok(RecentRenderPageCursor::Newest),
-        ViewerHistoryCursor::Oldest => Ok(RecentRenderPageCursor::Oldest),
-        ViewerHistoryCursor::OlderThan { render_id, page } => {
-            Ok(RecentRenderPageCursor::OlderThan {
-                render: RenderHistoryId::try_new(render_id)
-                    .map_err(|_| ViewerApiError::InvalidRequest)?,
-                page: page_number(page)?,
-            })
-        }
-        ViewerHistoryCursor::NewerThan { render_id, page } => {
-            Ok(RecentRenderPageCursor::NewerThan {
-                render: RenderHistoryId::try_new(render_id)
-                    .map_err(|_| ViewerApiError::InvalidRequest)?,
-                page: page_number(page)?,
-            })
-        }
+        ViewerHistoryCursor::Newest => RecentRenderPageCursor::Newest,
+        ViewerHistoryCursor::Oldest => RecentRenderPageCursor::Oldest,
+        ViewerHistoryCursor::OlderThan { render_id, page } => RecentRenderPageCursor::OlderThan {
+            render: render_id,
+            page,
+        },
+        ViewerHistoryCursor::NewerThan { render_id, page } => RecentRenderPageCursor::NewerThan {
+            render: render_id,
+            page,
+        },
     }
 }
 
-fn page_number(page: u32) -> Result<NonZeroUsize, ViewerApiError> {
-    usize::try_from(page)
-        .ok()
-        .and_then(NonZeroUsize::new)
-        .ok_or(ViewerApiError::InvalidRequest)
-}
-
-fn to_history_page(page: ListRecentRenderPageOk) -> Result<ViewerHistoryPage, ViewerApiError> {
-    Ok(ViewerHistoryPage {
+fn to_history_page(page: ListRecentRenderPageOk) -> ViewerHistoryPage {
+    ViewerHistoryPage {
         entries: page.entries.into_iter().map(to_history_entry).collect(),
-        total_count: u64::try_from(page.total_count)
-            .map_err(|error| internal("history count exceeds the wire range", error))?,
-        page_number: u32::try_from(page.page_number)
-            .map_err(|error| internal("history page number exceeds the wire range", error))?,
-        page_count: u32::try_from(page.page_count)
-            .map_err(|error| internal("history page count exceeds the wire range", error))?,
+        total_count: page.total_count,
+        position: page.position,
         has_newer: page.has_newer,
         has_older: page.has_older,
-    })
+    }
 }
 
 fn to_history_entry(record: RecentRenderRecord) -> ViewerHistoryEntry {
@@ -120,7 +102,7 @@ fn to_history_entry(record: RecentRenderRecord) -> ViewerHistoryEntry {
         RecipeOp::MergeDiff { .. } => ViewerRecipeKind::MergeDiff,
     };
     ViewerHistoryEntry {
-        id: record.id.into(),
+        id: record.id,
         title: record.title,
         repository_name: record.repo_name,
         kind,
@@ -135,7 +117,7 @@ fn to_history_copy_payload(record: RecentRenderRecord) -> ViewerHistoryCopyPaylo
         RecipeOp::MergeDiff { .. } => ViewerHistoryCopyKind::MergeDiff,
     };
     ViewerHistoryCopyPayload {
-        id: record.id.into(),
+        id: record.id,
         title: record.title,
         repo_name: record.repo_name,
         kind,
@@ -154,25 +136,25 @@ fn map_recipe_error(error: RecipeError) -> ViewerApiError {
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::viewer::HistoryPageNumber;
     use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource};
 
     use super::*;
+    use crate::testing::{project_name, repository_root};
 
     #[test]
-    fn cursor_rejects_nonpositive_ids_and_zero_pages() {
-        assert_eq!(
-            to_cursor(ViewerHistoryCursor::OlderThan {
-                render_id: 0,
-                page: 1,
-            }),
-            Err(ViewerApiError::InvalidRequest)
-        );
+    fn cursor_mapping_preserves_the_validated_page_role() {
+        let page = HistoryPageNumber::try_new(2).expect("positive page number");
+
         assert_eq!(
             to_cursor(ViewerHistoryCursor::NewerThan {
-                render_id: 1,
-                page: 0,
+                render_id: RenderHistoryId::try_new(1).expect("positive render ID"),
+                page,
             }),
-            Err(ViewerApiError::InvalidRequest)
+            RecentRenderPageCursor::NewerThan {
+                render: RenderHistoryId::try_new(1).expect("positive render ID"),
+                page,
+            }
         );
     }
 
@@ -180,16 +162,17 @@ mod tests {
         RecentRenderRecord {
             id: RenderHistoryId::try_new(7).expect("positive render id"),
             title: "Saved diff".into(),
-            repo_name: "git-tools".into(),
+            repo_name: project_name("git-tools"),
             range_label: "main...feature".into(),
-            rendered_at: "2026-08-09T12:00:00Z".into(),
+            rendered_at: gtl_models::timestamps::MachineTimestamp::try_from("2026-08-09T12:00:00Z")
+                .expect("fixture render timestamp is valid"),
             recipe: Recipe {
-                source: RecipeSource::LocalRepo("/workspace/repository".into()),
+                source: RecipeSource::LocalRepo(repository_root("/workspace/repository")),
                 op: RecipeOp::MergeDiff {
                     base: None,
                     pinned: None,
                 },
-                name: Some("saved".into()),
+                name: Some(project_name("saved")),
             },
         }
     }
@@ -203,7 +186,7 @@ mod tests {
             return;
         };
 
-        assert_eq!(entry.id, 7);
+        assert_eq!(i64::from(entry.id), 7);
         assert_eq!(entry.kind, ViewerRecipeKind::MergeDiff);
         assert!(!payload.contains("recipe"));
         assert!(!payload.contains("/workspace/repository"));
@@ -227,7 +210,7 @@ mod tests {
     #[test]
     fn history_copy_kind_is_derived_from_the_recipe_operation() {
         let recipe = Recipe {
-            source: RecipeSource::LocalRepo("/repo".into()),
+            source: RecipeSource::LocalRepo(repository_root("/repo")),
             op: RecipeOp::Diff {
                 target: gtl_wire::recipes::RecipeTarget::Unpushed { pinned: None },
             },

@@ -69,7 +69,7 @@ fn project(
     let tabs = session
         .tabs()
         .map(|entry| ViewerTab {
-            id: entry.tab.id().into(),
+            id: entry.tab.id(),
             label: entry.tab.label().to_owned(),
             kind: to_tab_kind(entry.tab.kind()),
             state: to_tab_state(entry.tab.state()),
@@ -149,7 +149,7 @@ pub(super) fn to_identity(
     options: RenderOptions,
 ) -> ViewerViewIdentity {
     ViewerViewIdentity {
-        tab_id: identity.tab_id().into(),
+        tab_id: identity.tab_id(),
         range_generation: identity.range_generation(),
         selection_generation: identity.selection_generation(),
         render_options: project_render_options(options),
@@ -243,7 +243,6 @@ fn to_non_ready_active_state(
     tab_id: gtl_models::viewer::ViewerTabId,
     state: &viewer::ViewerTabState,
 ) -> Option<ViewerActiveState> {
-    let tab_id = tab_id.into();
     match state {
         viewer::ViewerTabState::Ready => None,
         viewer::ViewerTabState::Error { reason } if reason == RENDER_PENDING_REASON => {
@@ -310,7 +309,7 @@ mod tests {
 
         assert!(!payload.contains("/workspace/repository"));
         assert!(!payload.contains(raw_reason));
-        assert!(payload.contains("DirNotFound"));
+        assert!(payload.contains("RepositoryDirectoryNotFound"));
         assert!(payload.contains("was not found"));
     }
 

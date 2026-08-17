@@ -1,10 +1,10 @@
-//! Test runner.
+use std::{ffi::OsString, time::Duration};
 
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
-use sample_project::{OutputPath, Run};
+use sample_project::{OutputPath, Run, Test, TestCountDiscovery, surface};
 
-use crate::{process, project, task::Step};
+use crate::{process, task::Step};
 
 #[derive(Args)]
 #[command(args_conflicts_with_subcommands = true)]
@@ -63,6 +63,29 @@ pub(crate) enum Scope {
     All,
 }
 
+struct TestDeclaration {
+    #[cfg(test)]
+    label: &'static str,
+    test: Test,
+}
+
+impl TestDeclaration {
+    fn new(label: &'static str, test: Test) -> Self {
+        #[cfg(not(test))]
+        let _ = label;
+        Self {
+            #[cfg(test)]
+            label,
+            test,
+        }
+    }
+
+    #[cfg(test)]
+    fn label(&self) -> &'static str {
+        self.label
+    }
+}
+
 pub(crate) fn run(arguments: &TestArguments) -> Result<()> {
     if let Some(TestCommand::Coverage(coverage)) = &arguments.command {
         return test_coverage(&coverage.arguments_extra);
@@ -71,9 +94,7 @@ pub(crate) fn run(arguments: &TestArguments) -> Result<()> {
     let executable = std::env::current_exe().context("resolve the xtask executable")?;
     let scope = arguments.selection.scope;
     let declarations = selected_tests(scope, executable.into_os_string())?;
-    let tests = declarations
-        .into_iter()
-        .map(project::TestDeclaration::into_test);
+    let tests = declarations.into_iter().map(|declaration| declaration.test);
 
     Run::try_new(scope.to_string(), tests)?
         .verbose(arguments.verbose)
@@ -98,11 +119,28 @@ fn test_coverage(arguments_extra: &[String]) -> Result<()> {
 }
 
 fn test_coverage_step(arguments_extra: &[String]) -> Step {
-    let mut step = Step::new("test coverage", "cargo", ["llvm-cov", "--workspace"]);
-    if !coverage_output_is_explicit(arguments_extra) {
-        step = step.with_arguments(["--quiet"]);
+    let mut arguments = vec!["llvm-cov".to_string()];
+    if !cargo_package_scope_is_explicit(arguments_extra) {
+        arguments.push("--workspace".to_string());
     }
-    step.with_arguments(arguments_extra.iter().cloned())
+    if !coverage_output_is_explicit(arguments_extra) {
+        arguments.push("--quiet".to_string());
+    }
+    Step::new("test coverage", "cargo", arguments).with_arguments(arguments_extra.iter().cloned())
+}
+
+fn cargo_package_scope_is_explicit(arguments: &[String]) -> bool {
+    arguments
+        .iter()
+        .take_while(|argument| argument.as_str() != "--")
+        .any(|argument| {
+            matches!(
+                argument.as_str(),
+                "-p" | "--package" | "--workspace" | "--all" | "--manifest-path"
+            ) || argument.starts_with("-p=")
+                || argument.starts_with("--package=")
+                || argument.starts_with("--manifest-path=")
+        })
 }
 
 fn coverage_cleanup_is_required(arguments: &[String]) -> bool {
@@ -124,15 +162,112 @@ fn coverage_output_is_explicit(arguments: &[String]) -> bool {
         })
 }
 
-fn selected_tests(
-    scope: Scope,
-    executable: std::ffi::OsString,
-) -> Result<Vec<project::TestDeclaration>> {
+fn selected_tests(scope: Scope, executable: OsString) -> Result<Vec<TestDeclaration>> {
     match scope {
-        Scope::Unit => project::tests_unit(),
-        Scope::E2e => project::tests_e2e(executable),
-        Scope::All => project::tests_all(executable),
+        Scope::Unit => tests_unit(),
+        Scope::E2e => tests_e2e(executable),
+        Scope::All => tests_all(executable),
     }
+}
+
+fn tests_unit() -> Result<Vec<TestDeclaration>> {
+    Ok(vec![
+        TestDeclaration::new(
+            "unit",
+            Test::try_new("unit", surface::CARGO, "cargo")?
+                .args(["test", "--quiet"])
+                .test_count_discovery(TestCountDiscovery::CARGO_TEST_HARNESS)
+                .verbose_arguments(["--", "--nocapture"]),
+        ),
+        parser_all_features()?,
+        web_desktop()?,
+        web_artifact()?,
+    ])
+}
+
+fn tests_e2e(executable: OsString) -> Result<Vec<TestDeclaration>> {
+    Ok(vec![desktop_e2e(executable)?])
+}
+
+fn tests_all(executable: OsString) -> Result<Vec<TestDeclaration>> {
+    Ok(vec![
+        TestDeclaration::new(
+            "unit",
+            Test::try_new("unit", surface::CARGO, "cargo")?
+                .args(["test", "--workspace", "--quiet"])
+                .test_count_discovery(TestCountDiscovery::CARGO_TEST_HARNESS)
+                .verbose_arguments(["--", "--nocapture"]),
+        ),
+        parser_all_features()?,
+        web_artifact()?,
+        worker("drift", &executable, "drift-check")?,
+        desktop_e2e(executable)?,
+    ])
+}
+
+fn parser_all_features() -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
+        "parser-all-features",
+        Test::try_new("parser-all-features", surface::CARGO, "cargo")?
+            .args([
+                "test",
+                "--locked",
+                "--quiet",
+                "-p",
+                "gtl-parser",
+                "--all-features",
+            ])
+            .test_count_discovery(TestCountDiscovery::CARGO_TEST_HARNESS),
+    ))
+}
+
+fn web_desktop() -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
+        "web-desktop",
+        Test::try_new("web-desktop", surface::CARGO, "cargo")?
+            .args(["test", "--locked", "--quiet", "-p", "gtl-web"])
+            .test_count_discovery(TestCountDiscovery::CARGO_TEST_HARNESS),
+    ))
+}
+
+fn web_artifact() -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
+        "web-artifact",
+        Test::try_new("web-artifact", surface::CARGO, "cargo")?
+            .args([
+                "test",
+                "--locked",
+                "--quiet",
+                "-p",
+                "gtl-web",
+                "--no-default-features",
+                "--features",
+                "artifact",
+            ])
+            .test_count_discovery(TestCountDiscovery::CARGO_TEST_HARNESS),
+    ))
+}
+
+fn worker(
+    label: &'static str,
+    executable: &OsString,
+    verb: &'static str,
+) -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
+        label,
+        Test::try_new(label, surface::OPAQUE, executable.clone())?.arg(verb),
+    ))
+}
+
+fn desktop_e2e(executable: OsString) -> Result<TestDeclaration> {
+    Ok(TestDeclaration::new(
+        "desktop-e2e",
+        Test::try_new("desktop-e2e", surface::OPAQUE, executable)?
+            .arg("desktop-e2e-worker")
+            .verbose_arguments(["--verbose"])
+            .accepts_evidences()
+            .timeout(Duration::from_hours(2)),
+    ))
 }
 
 impl std::fmt::Display for Scope {
@@ -150,7 +285,7 @@ fn selected_test_labels(scope: Scope) -> Vec<&'static str> {
     selected_tests(scope, "xtask".into())
         .expect("static test declarations are valid")
         .iter()
-        .map(project::TestDeclaration::label)
+        .map(TestDeclaration::label)
         .collect()
 }
 
@@ -186,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn test_coverage_forwards_cargo_llvm_cov_arguments() {
+    fn test_coverage_defaults_to_workspace_and_forwards_arguments() {
         let step = test_coverage_step(&["--show-missing-lines".to_string()]);
 
         assert_eq!(step.label(), "test coverage");
@@ -195,6 +330,13 @@ mod tests {
             step.arguments(),
             ["llvm-cov", "--workspace", "--quiet", "--show-missing-lines"]
         );
+    }
+
+    #[test]
+    fn test_coverage_preserves_a_package_scope() {
+        let step = test_coverage_step(&["--package=xtask".to_string()]);
+
+        assert_eq!(step.arguments(), ["llvm-cov", "--quiet", "--package=xtask"]);
     }
 
     #[test]

@@ -6,9 +6,8 @@ use std::{
 };
 
 use gtl_infra::{
-    app_state::SqliteAppState, clock::SystemClock, configured_editor::GitConfiguredEditorClient,
-    file_system::LocalFileSystemClient, git_client::HybridGitClient,
-    user_config::TomlSettingsStore,
+    app_state::SqliteAppState, clock::SystemClock, file_system::LocalFileSystemClient,
+    git_client::HybridGitClient, text_editor::GitTextEditorClient, user_config::TomlSettingsStore,
 };
 use gtl_wire::viewer::ViewerStateChanged;
 pub(crate) use restoration::RestorationGate;
@@ -16,14 +15,14 @@ pub(crate) use restoration::RestorationGate;
 use crate::{
     recipe_worker::RecipeWorker,
     recipes::RecipeExecutor,
-    session::{PendingRecipes, ViewerSession},
+    session::{PendingRecipes, ViewCacheWeight, ViewerSession},
 };
 
 #[derive(Clone)]
 pub(crate) struct ViewerApp {
     pub(crate) app_state: SqliteAppState,
     pub(crate) file_system: LocalFileSystemClient,
-    pub(crate) configured_editor: GitConfiguredEditorClient,
+    pub(crate) text_editor: GitTextEditorClient,
     pub(crate) session: Arc<Mutex<ViewerSession>>,
     pub(crate) recipe_worker: RecipeWorker,
     pending: Arc<PendingRecipes>,
@@ -35,7 +34,7 @@ impl ViewerApp {
     pub(crate) fn open(
         data_root: &Path,
         user_settings: TomlSettingsStore,
-        max_cache_weight: usize,
+        max_cache_weight: ViewCacheWeight,
     ) -> anyhow::Result<Self> {
         let app_state = SqliteAppState::open(data_root)?;
         let clock = SystemClock;
@@ -52,7 +51,7 @@ impl ViewerApp {
         Ok(Self {
             app_state,
             file_system: LocalFileSystemClient,
-            configured_editor: GitConfiguredEditorClient,
+            text_editor: GitTextEditorClient,
             session,
             recipe_worker,
             pending: Arc::new(PendingRecipes::default()),

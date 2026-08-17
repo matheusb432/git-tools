@@ -1,5 +1,6 @@
 //! Semantic-version selection shared by tag-bump operations.
 
+use gtl_models::git::TagName;
 use semver::Version;
 
 /// The `SemVer` component advanced by a tag bump.
@@ -12,8 +13,8 @@ pub enum BumpLevel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct TagVersionDecision {
-    pub(super) base_tag: String,
-    pub(super) next_tag: String,
+    pub(super) base_tag: TagName,
+    pub(super) next_tag: TagName,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,8 +86,8 @@ pub(super) fn decide_tag_version<'tag>(
 
     let next = bump_version(base.clone(), level)?;
     Ok(TagVersionDecision {
-        base_tag: format!("v{base}"),
-        next_tag: format!("v{next}"),
+        base_tag: TagName::semantic_version(base.major, base.minor, base.patch),
+        next_tag: TagName::semantic_version(next.major, next.minor, next.patch),
     })
 }
 
@@ -136,6 +137,8 @@ fn checked_increment(
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::git::TagName;
+
     use super::{BumpLevel, TagVersionDecision, TagVersionRejection, decide_tag_version};
 
     #[test]
@@ -150,8 +153,8 @@ mod tests {
             assert_eq!(
                 decide_tag_version(["v0.30.0"], level),
                 Ok(TagVersionDecision {
-                    base_tag: "v0.30.0".into(),
-                    next_tag: next_tag.into(),
+                    base_tag: TagName::try_new("v0.30.0").unwrap(),
+                    next_tag: TagName::try_new(next_tag).unwrap(),
                 })
             );
         }
@@ -162,8 +165,8 @@ mod tests {
         assert_eq!(
             decide_tag_version(["v0.9.0", "0.29.1", "v0.30.0", "v0.10.0"], BumpLevel::Patch,),
             Ok(TagVersionDecision {
-                base_tag: "v0.30.0".into(),
-                next_tag: "v0.30.1".into(),
+                base_tag: TagName::try_new("v0.30.0").unwrap(),
+                next_tag: TagName::try_new("v0.30.1").unwrap(),
             })
         );
     }

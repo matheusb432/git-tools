@@ -1,20 +1,22 @@
-use std::{
-    num::NonZeroU32,
-    path::{Path, PathBuf},
-};
+use std::{num::NonZeroU32, path::Path};
 
 use anyhow::Context as _;
 use gtl_application::{
     diffs::{
         DiffTarget, DiffTargetRequest, RepoRef,
         present_diff::{DiffRecipeIntent, PresentDiff},
-        render_diff_all::RenderDiffAll,
         render_diff_subrepos::RenderDiffSubrepos,
     },
     ports::DiffRenderRequest,
+    projects::render_project_diff::RenderProjectDiff,
+    repositories::find_repository_roots,
+};
+use gtl_models::{
+    paths::RepositoryRoot,
+    repository::traversal::{RepositoryTarget, RepositoryTraversalScope},
 };
 
-use crate::{commands::diff::DiffOutcome, viewer};
+use crate::commands::diff::DiffOutcome;
 
 pub fn run_scan(
     root: impl AsRef<Path>,
@@ -36,7 +38,7 @@ pub fn run_scan(
     let recipe_intents = repos
         .iter()
         .map(|repo| DiffRecipeIntent {
-            repo_path: repo.path.clone(),
+            repo_root: repo.path.clone(),
             operation: crate::recipe::diff_operation(&target),
             name: Some(repo.label.clone()),
         })
@@ -52,9 +54,7 @@ pub fn run_scan(
         }),
         batch_id: crate::recipe::new_batch_id(),
         recipes: recipe_intents,
-        raw,
-        has_display: viewer::has_display(),
-        effects_enabled: !viewer::no_open_requested(),
+        mode: super::presentation_mode(raw),
     })
 }
 
@@ -64,47 +64,48 @@ pub fn run_managed_all(root: impl AsRef<Path>, raw: bool) -> anyhow::Result<Diff
     let recipe_intents = repos
         .iter()
         .map(|repo| DiffRecipeIntent {
-            repo_path: repo.path.clone(),
+            repo_root: repo.path.clone(),
             operation: crate::recipe::diff_operation(&DiffTarget::Unpushed { pinned: None }),
             name: Some(repo.label.clone()),
         })
         .collect();
     super::present(PresentDiff {
-        render: DiffRenderRequest::ManagedAll(RenderDiffAll {
+        render: DiffRenderRequest::Projects(RenderProjectDiff {
             root,
             repos: to_repo_refs(repos),
         }),
         batch_id: crate::recipe::new_batch_id(),
         recipes: recipe_intents,
-        raw,
-        has_display: viewer::has_display(),
-        effects_enabled: !viewer::no_open_requested(),
+        mode: super::presentation_mode(raw),
     })
 }
 
-fn canonical_root(root: &Path) -> anyhow::Result<PathBuf> {
-    std::fs::canonicalize(root).with_context(|| format!("failed to resolve {}", root.display()))
+fn canonical_root(root: &Path) -> anyhow::Result<RepositoryRoot> {
+    let canonical = std::fs::canonicalize(root)
+        .with_context(|| format!("failed to resolve {}", root.display()))?;
+    RepositoryRoot::try_new(canonical).context("canonical scan root is not absolute")
 }
 
-fn scan_repo_tops(
-    root: &Path,
-    include_worktrees: bool,
-) -> anyhow::Result<Vec<gtl_models::discovery::DiscoveredRepo>> {
-    Ok(gtl_application::discovery::find_repo_tops::execute(
-        gtl_application::discovery::find_repo_tops::FindRepoTops {
+fn scan_repo_tops(root: &Path, include_worktrees: bool) -> anyhow::Result<Vec<RepositoryTarget>> {
+    let scope = if include_worktrees {
+        RepositoryTraversalScope::IncludeLinkedWorktrees
+    } else {
+        RepositoryTraversalScope::ExcludeLinkedWorktrees
+    };
+    Ok(find_repository_roots::execute(
+        find_repository_roots::FindRepositoryRoots {
             root: root.to_path_buf(),
-            include_worktrees,
+            scope,
         },
-        &gtl_infra::repo_discovery::WalkdirRepoDiscovery,
         &gtl_infra::git_client::HybridGitClient,
     )?)
 }
 
-fn to_repo_refs(repos: Vec<gtl_models::discovery::DiscoveredRepo>) -> Vec<RepoRef> {
+fn to_repo_refs(repos: Vec<RepositoryTarget>) -> Vec<RepoRef> {
     repos
         .into_iter()
         .map(|repo| RepoRef {
-            top: repo.path.to_string_lossy().into_owned(),
+            top: repo.path,
             label: repo.label,
         })
         .collect()

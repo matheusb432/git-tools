@@ -1,5 +1,7 @@
-/// A source of the current time as an ISO-8601 string.
+use gtl_models::timestamps::{MachineTimestamp, TimestampError};
+
+/// A source of the current machine time.
 pub trait Clock: Clone + Send + Sync + 'static {
-    /// The current instant as a strict ISO-8601 timestamp string.
-    fn now_iso(&self) -> String;
+    /// Returns the current offset-qualified machine timestamp.
+    fn now(&self) -> Result<MachineTimestamp, TimestampError>;
 }

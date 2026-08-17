@@ -1,15 +1,17 @@
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
+
+use gtl_models::paths::{AbsoluteFilePath, RepositoryRelativePath, RepositoryRoot};
 
 use crate::{
     diffs::{FileStatus, View},
     ports::{
-        ConfiguredEditorClient, FileSystemClient, FileSystemClientError, FileSystemClientErrorKind,
-        FileSystemEntryKind,
+        FileSystemClient, FileSystemClientError, FileSystemClientErrorKind, FileSystemEntryKind,
+        TextEditorClient,
     },
 };
 
 pub struct OpenDiffFileInConfiguredEditor {
-    pub diff_file_path: PathBuf,
+    pub diff_file_path: RepositoryRelativePath,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -18,8 +20,6 @@ pub enum OpenDiffFileInConfiguredEditorError {
     FileNotInCurrentDiff,
     #[error("deleted diff files cannot be opened")]
     DiffFileDeleted,
-    #[error("the diff file path is not a normalized relative path")]
-    DiffFilePathInvalid,
     #[error("the diff file is unavailable")]
     DiffFileUnavailable,
     #[error("the diff file resolves outside the repository")]
@@ -30,21 +30,21 @@ pub enum OpenDiffFileInConfiguredEditorError {
     ConfiguredEditorDiscovery(String),
     #[error("configured editor command is invalid: {0}")]
     ConfiguredEditorCommand(String),
-    #[error("configured editor launch failed: {0}")]
-    ConfiguredEditorLaunch(String),
+    #[error("configured editor open failed: {0}")]
+    ConfiguredEditorOpen(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ConfiguredEditorLaunch {
+struct TextEditorInvocation {
     program: PathBuf,
     arguments: Vec<String>,
 }
 
-impl ConfiguredEditorLaunch {
+impl TextEditorInvocation {
     fn try_new(
         configured_command: &str,
-        repository_root: &Path,
-        file_path: &Path,
+        repository_root: &RepositoryRoot,
+        file_path: &AbsoluteFilePath,
     ) -> Result<Self, OpenDiffFileInConfiguredEditorError> {
         let mut words = shlex::split(configured_command).ok_or_else(|| {
             OpenDiffFileInConfiguredEditorError::ConfiguredEditorCommand(
@@ -75,12 +75,12 @@ impl ConfiguredEditorLaunch {
             words.retain(|argument| argument != "--wait" && argument != "-w");
             words.extend([
                 "--reuse-window".into(),
-                repository_root.to_string_lossy().into_owned(),
+                repository_root.as_ref().to_string_lossy().into_owned(),
                 "--goto".into(),
-                file_path.to_string_lossy().into_owned(),
+                file_path.as_path().to_string_lossy().into_owned(),
             ]);
         } else {
-            words.push(file_path.to_string_lossy().into_owned());
+            words.push(file_path.as_path().to_string_lossy().into_owned());
         }
 
         Ok(Self {
@@ -95,55 +95,51 @@ pub fn execute(
     command: OpenDiffFileInConfiguredEditor,
     current_view: &View,
     file_system: &impl FileSystemClient,
-    configured_editor: &impl ConfiguredEditorClient,
+    text_editor: &impl TextEditorClient,
 ) -> Result<(), OpenDiffFileInConfiguredEditorError> {
     let OpenDiffFileInConfiguredEditor { diff_file_path } = command;
-    let relative_path = diff_file_path.as_path();
     let file = current_view
         .files
         .iter()
-        .find(|file| Path::new(&file.path) == relative_path)
+        .find(|file| file.path == diff_file_path)
         .ok_or(OpenDiffFileInConfiguredEditorError::FileNotInCurrentDiff)?;
     if file.status() == FileStatus::Deleted {
         return Err(OpenDiffFileInConfiguredEditorError::DiffFileDeleted);
     }
 
-    let path_is_normalized_relative = !relative_path.as_os_str().is_empty()
-        && relative_path
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-        && relative_path
-            .to_string_lossy()
-            .split(['/', '\\'])
-            .all(|component| !matches!(component, "" | "." | ".."));
-    if !path_is_normalized_relative {
-        return Err(OpenDiffFileInConfiguredEditorError::DiffFilePathInvalid);
-    }
-
-    let repository_root = canonicalize_required(file_system, Path::new(&current_view.repo_root))?;
-    let file_path = canonicalize_required(file_system, &repository_root.join(relative_path))?;
-    if !file_path.starts_with(&repository_root) {
+    let repository_root = RepositoryRoot::try_new(canonicalize_required(
+        file_system,
+        current_view.repo_root.as_ref(),
+    )?)
+    .map_err(|error| OpenDiffFileInConfiguredEditorError::FileSystem(error.to_string()))?;
+    let candidate_file_path = repository_root.join(&diff_file_path);
+    let file_path = AbsoluteFilePath::try_new(canonicalize_required(
+        file_system,
+        candidate_file_path.as_path(),
+    )?)
+    .map_err(|error| OpenDiffFileInConfiguredEditorError::FileSystem(error.to_string()))?;
+    if !file_path.starts_with(repository_root.as_ref()) {
         return Err(OpenDiffFileInConfiguredEditorError::DiffFileOutsideRepository);
     }
     if file_system
-        .entry_kind(&file_path)
+        .entry_kind(file_path.as_path())
         .map_err(|error| map_file_system_error(&error))?
         != FileSystemEntryKind::File
     {
         return Err(OpenDiffFileInConfiguredEditorError::DiffFileUnavailable);
     }
 
-    let configured_command = configured_editor
-        .read_configured_command(&repository_root)
+    let configured_command = text_editor
+        .read_command(&repository_root)
         .map_err(|error| {
             OpenDiffFileInConfiguredEditorError::ConfiguredEditorDiscovery(error.to_string())
         })?;
-    let launch =
-        ConfiguredEditorLaunch::try_new(&configured_command, &repository_root, &file_path)?;
-    configured_editor
-        .launch(&launch.program, &launch.arguments, &repository_root)
+    let invocation =
+        TextEditorInvocation::try_new(&configured_command, &repository_root, &file_path)?;
+    text_editor
+        .open_in_file(&invocation.program, &invocation.arguments, &repository_root)
         .map_err(|error| {
-            OpenDiffFileInConfiguredEditorError::ConfiguredEditorLaunch(error.to_string())
+            OpenDiffFileInConfiguredEditorError::ConfiguredEditorOpen(error.to_string())
         })
 }
 
@@ -175,17 +171,21 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
+    use gtl_models::{
+        diffs::DiffLineCount,
+        paths::{RepositoryRelativePath, RepositoryRoot},
+    };
+
     use super::{
-        ConfiguredEditorLaunch, OpenDiffFileInConfiguredEditor,
-        OpenDiffFileInConfiguredEditorError, execute,
+        OpenDiffFileInConfiguredEditor, OpenDiffFileInConfiguredEditorError, TextEditorInvocation,
     };
     use crate::{
-        diffs::{FileDiff, FileStatus, View},
+        diffs::{FileDiff, FileStatus, View, open_diff_file_in_configured_editor},
         ports::{
-            ConfiguredEditorClient, FileSystemClient, FileSystemClientError,
-            FileSystemClientErrorKind, FileSystemEntryKind,
+            FileSystemClient, FileSystemClientError, FileSystemClientErrorKind,
+            FileSystemEntryKind, TextEditorClient,
         },
-        testing,
+        utils,
     };
 
     #[derive(Clone, Default)]
@@ -252,84 +252,72 @@ mod tests {
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
-    struct RecordedLaunch {
+    struct RecordedOpen {
         program: PathBuf,
         arguments: Vec<String>,
         working_directory: PathBuf,
     }
 
     #[derive(Clone, Default)]
-    struct ScriptedConfiguredEditor {
-        configured_command_results: Arc<Mutex<VecDeque<anyhow::Result<String>>>>,
-        launch_result: Arc<Mutex<Option<anyhow::Result<()>>>>,
-        launches: Arc<Mutex<Vec<RecordedLaunch>>>,
+    struct ScriptedTextEditor {
+        command_results: Arc<Mutex<VecDeque<anyhow::Result<String>>>>,
+        open_result: Arc<Mutex<Option<anyhow::Result<()>>>>,
+        opens: Arc<Mutex<Vec<RecordedOpen>>>,
     }
 
-    impl ScriptedConfiguredEditor {
-        fn with_configured_command(configured_command: anyhow::Result<String>) -> Self {
+    impl ScriptedTextEditor {
+        fn with_command(configured_command: anyhow::Result<String>) -> Self {
             Self {
-                configured_command_results: Arc::new(Mutex::new(
-                    [configured_command].into_iter().collect(),
-                )),
+                command_results: Arc::new(Mutex::new([configured_command].into_iter().collect())),
                 ..Self::default()
             }
         }
 
-        fn with_launch_result(
-            configured_command: String,
-            launch_result: anyhow::Result<()>,
-        ) -> Self {
+        fn with_open_result(configured_command: String, open_result: anyhow::Result<()>) -> Self {
             Self {
-                configured_command_results: Arc::new(Mutex::new(
+                command_results: Arc::new(Mutex::new(
                     [Ok(configured_command)].into_iter().collect(),
                 )),
-                launch_result: Arc::new(Mutex::new(Some(launch_result))),
+                open_result: Arc::new(Mutex::new(Some(open_result))),
                 ..Self::default()
             }
         }
 
-        fn launch(&self) -> Option<RecordedLaunch> {
-            self.launches
-                .lock()
-                .expect("launches lock")
-                .first()
-                .cloned()
+        fn opened(&self) -> Option<RecordedOpen> {
+            self.opens.lock().expect("opens lock").first().cloned()
         }
 
-        fn configured_commands_remaining(&self) -> usize {
-            self.configured_command_results
+        fn commands_remaining(&self) -> usize {
+            self.command_results
                 .lock()
-                .expect("configured command results lock")
+                .expect("command results lock")
                 .len()
         }
     }
 
-    impl ConfiguredEditorClient for ScriptedConfiguredEditor {
-        fn read_configured_command(&self, _: &Path) -> anyhow::Result<String> {
-            self.configured_command_results
+    impl TextEditorClient for ScriptedTextEditor {
+        fn read_command(&self, _: &RepositoryRoot) -> anyhow::Result<String> {
+            self.command_results
                 .lock()
-                .expect("configured command results lock")
+                .expect("command results lock")
                 .pop_front()
                 .expect("a scripted configured command result")
         }
 
-        fn launch(
+        fn open_in_file(
             &self,
             program: &Path,
             arguments: &[String],
-            working_directory: &Path,
+            working_directory: &RepositoryRoot,
         ) -> anyhow::Result<()> {
-            self.launches
+            self.opens.lock().expect("opens lock").push(RecordedOpen {
+                program: program.to_path_buf(),
+                arguments: arguments.to_vec(),
+                working_directory: working_directory.as_ref().to_path_buf(),
+            });
+            self.open_result
                 .lock()
-                .expect("launches lock")
-                .push(RecordedLaunch {
-                    program: program.to_path_buf(),
-                    arguments: arguments.to_vec(),
-                    working_directory: working_directory.to_path_buf(),
-                });
-            self.launch_result
-                .lock()
-                .expect("launch result lock")
+                .expect("open result lock")
                 .take()
                 .unwrap_or(Ok(()))
         }
@@ -337,13 +325,13 @@ mod tests {
 
     fn view<'path>(paths_and_statuses: impl IntoIterator<Item = (&'path str, FileStatus)>) -> View {
         View {
-            repo_root: "/repos/git-tools".into(),
+            repo_root: utils::repository_root("/repos/git-tools"),
             files: paths_and_statuses
                 .into_iter()
                 .map(|(path, status)| FileDiff {
-                    path: path.into(),
-                    added: 1,
-                    removed: 0,
+                    path: utils::repository_relative_path(path),
+                    added: DiffLineCount::new(1),
+                    removed: DiffLineCount::default(),
                     lines: match status {
                         FileStatus::Deleted => vec!["deleted file mode 100644".into()],
                         _ => Vec::new(),
@@ -351,13 +339,14 @@ mod tests {
                     full_lines: None,
                 })
                 .collect(),
-            ..testing::diffs::view()
+            ..utils::diffs::view()
         }
     }
 
-    fn command(diff_file_path: impl Into<PathBuf>) -> OpenDiffFileInConfiguredEditor {
+    fn command(diff_file_path: impl AsRef<Path>) -> OpenDiffFileInConfiguredEditor {
         OpenDiffFileInConfiguredEditor {
-            diff_file_path: diff_file_path.into(),
+            diff_file_path: RepositoryRelativePath::try_new(diff_file_path.as_ref().to_path_buf())
+                .expect("fixture diff path is repository-relative"),
         }
     }
 
@@ -382,21 +371,21 @@ mod tests {
                 "C:/Program Files/VSCodium/vscodium.exe",
             ),
         ] {
-            let launch = ConfiguredEditorLaunch::try_new(
+            let invocation = TextEditorInvocation::try_new(
                 configured_command,
-                Path::new("/repos/git-tools"),
-                Path::new("/repos/git-tools/src/main.rs"),
+                &utils::repository_root("/repos/git-tools"),
+                &utils::absolute_file_path("/repos/git-tools/src/main.rs"),
             )
             .expect("configured command parses");
 
-            assert_eq!(launch.program, PathBuf::from(expected_program));
+            assert_eq!(invocation.program, PathBuf::from(expected_program));
             assert!(
-                !launch
+                !invocation
                     .arguments
                     .iter()
                     .any(|argument| argument == "--wait" || argument == "-w")
             );
-            assert!(launch.arguments.ends_with(&[
+            assert!(invocation.arguments.ends_with(&[
                 String::from("--reuse-window"),
                 String::from("/repos/git-tools"),
                 String::from("--goto"),
@@ -406,22 +395,21 @@ mod tests {
     }
 
     #[test]
-    fn current_modified_file_launches_the_configured_editor() {
+    fn current_modified_file_opens_in_the_configured_text_editor() {
         let file_system = available_file_system();
-        let configured_editor =
-            ScriptedConfiguredEditor::with_configured_command(Ok("helix --reuse".into()));
+        let text_editor = ScriptedTextEditor::with_command(Ok("helix --reuse".into()));
 
-        execute(
+        open_diff_file_in_configured_editor::execute(
             command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &file_system,
-            &configured_editor,
+            &text_editor,
         )
-        .expect("configured editor launches");
+        .expect("configured text editor opens");
 
         assert_eq!(
-            configured_editor.launch(),
-            Some(RecordedLaunch {
+            text_editor.opened(),
+            Some(RecordedOpen {
                 program: PathBuf::from("helix"),
                 arguments: vec!["--reuse".into(), "/repos/git-tools/src/main.rs".into()],
                 working_directory: PathBuf::from("/repos/git-tools"),
@@ -431,16 +419,16 @@ mod tests {
 
     #[test]
     fn generic_editor_preserves_configured_arguments_and_appends_file() {
-        let launch = ConfiguredEditorLaunch::try_new(
+        let invocation = TextEditorInvocation::try_new(
             r#""/opt/IDE Suite/editor" --reuse"#,
-            Path::new("/repos/git-tools"),
-            Path::new("/repos/git-tools/src/main.rs"),
+            &utils::repository_root("/repos/git-tools"),
+            &utils::absolute_file_path("/repos/git-tools/src/main.rs"),
         )
         .expect("configured command parses");
 
-        assert_eq!(launch.program, PathBuf::from("/opt/IDE Suite/editor"));
+        assert_eq!(invocation.program, PathBuf::from("/opt/IDE Suite/editor"));
         assert_eq!(
-            launch.arguments,
+            invocation.arguments,
             vec![
                 String::from("--reuse"),
                 String::from("/repos/git-tools/src/main.rs"),
@@ -449,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn absent_deleted_or_changed_diff_entry_is_rejected_before_launch() {
+    fn absent_deleted_or_changed_diff_entry_is_rejected_before_open() {
         for (command_path, current_view, expected_error) in [
             (
                 PathBuf::from("src/missing.rs"),
@@ -469,41 +457,26 @@ mod tests {
         ] {
             let file_system =
                 ScriptedFileSystem::with_canonicalize_results([Ok(PathBuf::from("unused"))]);
-            let configured_editor = ScriptedConfiguredEditor::default();
+            let text_editor = ScriptedTextEditor::default();
 
-            let error = execute(
+            let error = open_diff_file_in_configured_editor::execute(
                 command(command_path),
                 &current_view,
                 &file_system,
-                &configured_editor,
+                &text_editor,
             )
             .expect_err("invalid diff entry is rejected");
 
             assert_eq!(error.to_string(), expected_error.to_string());
             assert_eq!(file_system.canonicalize_results_remaining(), 1);
-            assert_eq!(configured_editor.launch(), None);
+            assert_eq!(text_editor.opened(), None);
         }
     }
 
     #[test]
-    fn absolute_parent_or_non_normal_path_is_rejected_before_file_system_access() {
+    fn absolute_parent_or_non_normal_path_is_rejected_by_the_request_type() {
         for path in ["/tmp/outside", "../outside", "src/./main.rs", ""] {
-            let file_system =
-                ScriptedFileSystem::with_canonicalize_results([Ok(PathBuf::from("unused"))]);
-
-            let error = execute(
-                command(path),
-                &view([(path, FileStatus::Modified)]),
-                &file_system,
-                &ScriptedConfiguredEditor::default(),
-            )
-            .expect_err("non-normal diff path is rejected");
-
-            assert!(matches!(
-                error,
-                OpenDiffFileInConfiguredEditorError::DiffFilePathInvalid
-            ));
-            assert_eq!(file_system.canonicalize_results_remaining(), 1);
+            assert!(RepositoryRelativePath::try_new(path.into()).is_err());
         }
     }
 
@@ -516,9 +489,8 @@ mod tests {
                 "missing",
             )),
         ]);
-        let not_found_editor =
-            ScriptedConfiguredEditor::with_configured_command(Ok("helix".into()));
-        let not_found_error = execute(
+        let not_found_editor = ScriptedTextEditor::with_command(Ok("helix".into()));
+        let not_found_error = open_diff_file_in_configured_editor::execute(
             command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &not_found_file_system,
@@ -529,8 +501,8 @@ mod tests {
             not_found_error,
             OpenDiffFileInConfiguredEditorError::DiffFileUnavailable
         ));
-        assert_eq!(not_found_editor.configured_commands_remaining(), 1);
-        assert_eq!(not_found_editor.launch(), None);
+        assert_eq!(not_found_editor.commands_remaining(), 1);
+        assert_eq!(not_found_editor.opened(), None);
 
         let non_file_system = ScriptedFileSystem::with_results(
             [
@@ -539,8 +511,8 @@ mod tests {
             ],
             [Ok(FileSystemEntryKind::Other)],
         );
-        let non_file_editor = ScriptedConfiguredEditor::with_configured_command(Ok("helix".into()));
-        let non_file_error = execute(
+        let non_file_editor = ScriptedTextEditor::with_command(Ok("helix".into()));
+        let non_file_error = open_diff_file_in_configured_editor::execute(
             command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &non_file_system,
@@ -551,15 +523,15 @@ mod tests {
             non_file_error,
             OpenDiffFileInConfiguredEditorError::DiffFileUnavailable
         ));
-        assert_eq!(non_file_editor.configured_commands_remaining(), 1);
-        assert_eq!(non_file_editor.launch(), None);
+        assert_eq!(non_file_editor.commands_remaining(), 1);
+        assert_eq!(non_file_editor.opened(), None);
 
         let escaping_file_system = ScriptedFileSystem::with_canonicalize_results([
             Ok(PathBuf::from("/repos/git-tools")),
             Ok(PathBuf::from("/repos/outside.rs")),
         ]);
-        let escaping_editor = ScriptedConfiguredEditor::with_configured_command(Ok("helix".into()));
-        let escaping_error = execute(
+        let escaping_editor = ScriptedTextEditor::with_command(Ok("helix".into()));
+        let escaping_error = open_diff_file_in_configured_editor::execute(
             command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &escaping_file_system,
@@ -570,21 +542,20 @@ mod tests {
             escaping_error,
             OpenDiffFileInConfiguredEditorError::DiffFileOutsideRepository
         ));
-        assert_eq!(escaping_editor.configured_commands_remaining(), 1);
-        assert_eq!(escaping_editor.launch(), None);
+        assert_eq!(escaping_editor.commands_remaining(), 1);
+        assert_eq!(escaping_editor.opened(), None);
     }
 
     #[test]
-    fn empty_or_invalidly_quoted_configured_command_is_rejected_before_launch() {
+    fn empty_or_invalidly_quoted_configured_command_is_rejected_before_open() {
         for configured_command in ["", "   ", "\"unterminated"] {
-            let configured_editor =
-                ScriptedConfiguredEditor::with_configured_command(Ok(configured_command.into()));
+            let text_editor = ScriptedTextEditor::with_command(Ok(configured_command.into()));
 
-            let error = execute(
+            let error = open_diff_file_in_configured_editor::execute(
                 command("src/main.rs"),
                 &view([("src/main.rs", FileStatus::Modified)]),
                 &available_file_system(),
-                &configured_editor,
+                &text_editor,
             )
             .expect_err("invalid configured command is rejected");
 
@@ -592,20 +563,20 @@ mod tests {
                 error,
                 OpenDiffFileInConfiguredEditorError::ConfiguredEditorCommand(_)
             ));
-            assert_eq!(configured_editor.launch(), None);
+            assert_eq!(text_editor.opened(), None);
         }
     }
 
     #[test]
-    fn file_system_editor_discovery_and_launch_failures_remain_distinct() {
-        let file_system_error = execute(
+    fn file_system_editor_discovery_and_open_failures_remain_distinct() {
+        let file_system_error = open_diff_file_in_configured_editor::execute(
             command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &ScriptedFileSystem::with_canonicalize_results([Err(FileSystemClientError::new(
                 FileSystemClientErrorKind::Other,
                 "filesystem failure",
             ))]),
-            &ScriptedConfiguredEditor::default(),
+            &ScriptedTextEditor::default(),
         )
         .expect_err("filesystem failure is surfaced");
         assert!(matches!(
@@ -613,13 +584,11 @@ mod tests {
             OpenDiffFileInConfiguredEditorError::FileSystem(_)
         ));
 
-        let discovery_error = execute(
+        let discovery_error = open_diff_file_in_configured_editor::execute(
             command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &available_file_system(),
-            &ScriptedConfiguredEditor::with_configured_command(Err(anyhow::anyhow!(
-                "discovery failure"
-            ))),
+            &ScriptedTextEditor::with_command(Err(anyhow::anyhow!("discovery failure"))),
         )
         .expect_err("configured editor discovery failure is surfaced");
         assert!(matches!(
@@ -627,19 +596,19 @@ mod tests {
             OpenDiffFileInConfiguredEditorError::ConfiguredEditorDiscovery(_)
         ));
 
-        let launch_error = execute(
+        let open_error = open_diff_file_in_configured_editor::execute(
             command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &available_file_system(),
-            &ScriptedConfiguredEditor::with_launch_result(
+            &ScriptedTextEditor::with_open_result(
                 "helix".into(),
-                Err(anyhow::anyhow!("launch failure")),
+                Err(anyhow::anyhow!("open failure")),
             ),
         )
-        .expect_err("configured editor launch failure is surfaced");
+        .expect_err("configured editor open failure is surfaced");
         assert!(matches!(
-            launch_error,
-            OpenDiffFileInConfiguredEditorError::ConfiguredEditorLaunch(_)
+            open_error,
+            OpenDiffFileInConfiguredEditorError::ConfiguredEditorOpen(_)
         ));
     }
 }

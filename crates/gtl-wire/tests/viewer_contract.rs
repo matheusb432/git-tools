@@ -1,6 +1,14 @@
-use std::path::PathBuf;
-
-use gtl_models::diffs::{CommitId, CommitIdError};
+use gtl_models::{
+    diffs::{CommitId, ExcludedExtensions},
+    git::{BranchName, GitHead, GitRevision},
+    paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath, RepositoryRoot},
+    timestamps::MachineTimestamp,
+    viewer::{
+        HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
+        RenderHistoryId, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerShellRevision,
+        ViewerTabId,
+    },
+};
 use gtl_wire::{
     recipes::{Recipe, RecipeOp, RecipeSource},
     viewer::*,
@@ -9,35 +17,83 @@ use serde_json::json;
 
 const COMMIT_ID: &str = "abcdef0123456789abcdef0123456789abcdef01";
 
-fn commit_id() -> Result<CommitId, CommitIdError> {
-    COMMIT_ID.try_into()
+type TestResult<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+fn commit_id() -> TestResult<CommitId> {
+    Ok(COMMIT_ID.try_into()?)
 }
 
-fn identity() -> ViewerViewIdentity {
-    ViewerViewIdentity {
-        tab_id: 7,
-        range_generation: 11,
-        selection_generation: 13,
+fn tab_id(value: u64) -> TestResult<ViewerTabId> {
+    Ok(ViewerTabId::try_new(value)?)
+}
+
+fn render_id(value: i64) -> TestResult<RenderHistoryId> {
+    Ok(RenderHistoryId::try_new(value)?)
+}
+
+fn page_number(value: u32) -> TestResult<HistoryPageNumber> {
+    Ok(HistoryPageNumber::try_new(value)?)
+}
+
+fn page_position(number: u32, count: u32) -> TestResult<HistoryPagePosition> {
+    Ok(HistoryPagePosition::Page(HistoryPage::new(
+        page_number(number)?,
+        HistoryPageCount::try_new(count)?,
+    )?))
+}
+
+fn revision(value: &str) -> TestResult<GitRevision> {
+    Ok(GitRevision::try_new(value.to_owned())?)
+}
+
+fn head(value: &str) -> TestResult<GitHead> {
+    if value == "HEAD" {
+        return Ok(GitHead::Detached);
+    }
+    Ok(GitHead::Branch(BranchName::try_new(value.to_owned())?))
+}
+
+fn root(value: &str) -> TestResult<RepositoryRoot> {
+    Ok(RepositoryRoot::try_new(value.into())?)
+}
+
+fn project_name(value: &str) -> TestResult<ProjectName> {
+    Ok(ProjectName::try_new(value.to_owned())?)
+}
+
+fn relative_path(value: &str) -> TestResult<RepositoryRelativePath> {
+    Ok(RepositoryRelativePath::try_new(value.into())?)
+}
+
+fn absolute_file_path(value: &str) -> TestResult<AbsoluteFilePath> {
+    Ok(AbsoluteFilePath::try_new(value.into())?)
+}
+
+fn identity() -> TestResult<ViewerViewIdentity> {
+    Ok(ViewerViewIdentity {
+        tab_id: tab_id(7)?,
+        range_generation: ViewerRangeGeneration::new(11),
+        selection_generation: ViewerSelectionGeneration::new(13),
         render_options: ViewerRenderOptions {
             layout: ViewerDiffLayout::Split,
             density: ViewerDiffDensity::Full,
         },
-    }
+    })
 }
 
-fn recipe() -> Recipe {
-    Recipe {
-        source: RecipeSource::LocalRepo(PathBuf::from("/repos/git-tools")),
+fn recipe() -> TestResult<Recipe> {
+    Ok(Recipe {
+        source: RecipeSource::LocalRepo(root("/repos/git-tools")?),
         op: RecipeOp::MergeDiff {
-            base: Some("main".into()),
+            base: Some(revision("main")?),
             pinned: None,
         },
-        name: Some("release".into()),
-    }
+        name: Some(project_name("release")?),
+    })
 }
 
 #[test]
-fn closed_value_tokens_are_snake_case() {
+fn closed_value_tokens_keep_their_wire_contracts() {
     let values = [
         serde_json::to_value(ViewerTheme::Graphite).expect("theme serializes"),
         serde_json::to_value(ViewerDiffLayout::Unified).expect("layout serializes"),
@@ -47,8 +103,6 @@ fn closed_value_tokens_are_snake_case() {
         serde_json::to_value(ViewerRecipeKind::MergeDiff).expect("recipe kind serializes"),
         serde_json::to_value(ViewerHistoryCopyKind::MergeDiff)
             .expect("history copy kind serializes"),
-        serde_json::to_value(ViewerFailureCode::RepositoryDirectoryNotFound)
-            .expect("failure code serializes"),
         serde_json::to_value(ViewerResource::DiffLines).expect("resource serializes"),
         serde_json::to_value(ViewerResource::HistoryEntry).expect("resource serializes"),
     ];
@@ -63,7 +117,6 @@ fn closed_value_tokens_are_snake_case() {
             json!("renamed"),
             json!("merge_diff"),
             json!("merge-diff"),
-            json!("DirNotFound"),
             json!("diff_lines"),
             json!("history_entry"),
         ]
@@ -71,7 +124,37 @@ fn closed_value_tokens_are_snake_case() {
 }
 
 #[test]
-fn tagged_enums_pin_each_wire_discriminator() -> Result<(), CommitIdError> {
+fn viewer_failure_codes_use_full_variant_names() {
+    for (code, name) in [
+        (
+            ViewerFailureCode::RepositoryDirectoryNotFound,
+            "RepositoryDirectoryNotFound",
+        ),
+        (
+            ViewerFailureCode::RepositoryDirectoryNotGitRepository,
+            "RepositoryDirectoryNotGitRepository",
+        ),
+        (ViewerFailureCode::SourceUnavailable, "SourceUnavailable"),
+        (ViewerFailureCode::RenderFailed, "RenderFailed"),
+    ] {
+        let value = serde_json::to_value(code).expect("failure code serializes");
+
+        assert_eq!(code.as_str(), name);
+        assert_eq!(value, json!(name));
+        assert_eq!(
+            serde_json::from_value::<ViewerFailureCode>(value)
+                .expect("full failure code deserializes"),
+            code
+        );
+    }
+
+    for abbreviated in ["DirNotFound", "DirNotGitRepo"] {
+        assert!(serde_json::from_value::<ViewerFailureCode>(json!(abbreviated)).is_err());
+    }
+}
+
+#[test]
+fn tagged_enums_pin_each_wire_discriminator() -> TestResult {
     assert_eq!(
         serde_json::to_value(ViewerTabState::Broken).expect("tab state serializes"),
         json!({"state": "broken"})
@@ -89,14 +172,14 @@ fn tagged_enums_pin_each_wire_discriminator() -> Result<(), CommitIdError> {
         })
     );
     assert_eq!(
-        serde_json::to_value(ViewerActiveState::Pending { tab_id: 7 })
+        serde_json::to_value(ViewerActiveState::Pending { tab_id: tab_id(7)? })
             .expect("active state serializes"),
         json!({"state": "pending", "tab_id": 7})
     );
     assert_eq!(
         serde_json::to_value(ViewerHistoryCursor::OlderThan {
-            render_id: 41,
-            page: 3,
+            render_id: render_id(41)?,
+            page: page_number(3)?,
         })
         .expect("history cursor serializes"),
         json!({"cursor": "older_than", "render_id": 41, "page": 3})
@@ -125,22 +208,32 @@ fn tagged_enums_pin_each_wire_discriminator() -> Result<(), CommitIdError> {
 }
 
 #[test]
-fn ready_shell_contains_semantic_metadata_without_diff_rows() -> Result<(), CommitIdError> {
+fn history_cursor_rejects_zero_during_wire_deserialization() {
+    let result = serde_json::from_value::<ViewerHistoryCursor>(
+        json!({"cursor": "older_than", "render_id": 41, "page": 0}),
+    );
+
+    assert!(result.is_err());
+}
+
+#[test]
+fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
+    let identity = identity()?;
     let shell = ViewerShell {
-        revision: 23,
+        revision: ViewerShellRevision::new(23),
         tabs: vec![ViewerTab {
-            id: 7,
+            id: tab_id(7)?,
             label: "git-tools".into(),
             kind: ViewerTabKind::Live,
             state: ViewerTabState::Ready,
         }],
         active: ViewerActiveState::Ready {
             view: Box::new(ViewerActiveView {
-                identity: identity(),
+                identity,
                 title: "feature vs main".into(),
-                repository_name: "git-tools".into(),
-                branch: "feature".into(),
-                upstream: "origin/main".into(),
+                repository_name: project_name("git-tools")?,
+                branch: head("feature")?,
+                upstream: revision("origin/main")?,
                 command: ViewerCommandLine {
                     lead: "git diff ".into(),
                     range: "main...HEAD".into(),
@@ -148,11 +241,11 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> Result<(), Comm
                 },
                 files: vec![ViewerFileSummary {
                     id: ViewerDiffFileId::for_index(0),
-                    path: "src/lib.rs".into(),
-                    absolute_path: "/repos/git-tools/src/lib.rs".into(),
+                    path: relative_path("src/lib.rs")?,
+                    absolute_path: absolute_file_path("/repos/git-tools/src/lib.rs")?,
                     anchor_id: "file-src-lib-rs".into(),
-                    added: 4,
-                    removed: 2,
+                    added: gtl_models::diffs::DiffLineCount::new(4),
+                    removed: gtl_models::diffs::DiffLineCount::new(2),
                     status: ViewerFileStatus::Modified,
                     can_open_in_editor: true,
                     initially_expanded: true,
@@ -162,8 +255,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> Result<(), Comm
                     id: commit_id()?,
                     subject: "feat: add shell".into(),
                     body: String::new(),
-                    date: "2 hours ago".into(),
-                    iso: "2026-08-09T10:00:00Z".into(),
+                    committed_at: MachineTimestamp::try_from("2026-08-09T10:00:00Z")?,
                     is_merge: false,
                 }],
                 commit_selection: ViewerCommitSelection::None,
@@ -171,14 +263,14 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> Result<(), Comm
                     command: "gtl diff".into(),
                 },
                 exclusions: Some(ViewerAppliedExclusions {
-                    extensions: vec!["md".into()],
-                    hidden_paths: vec!["README.md".into()],
+                    extensions: ExcludedExtensions::new(["md"]),
+                    hidden_paths: vec![relative_path("README.md")?],
                 }),
             }),
         },
         preferences: ViewerPreferences {
             theme: ViewerTheme::Dark,
-            render_options: identity().render_options,
+            render_options: identity.render_options,
         },
         feedback: None,
     };
@@ -191,6 +283,14 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> Result<(), Comm
     );
     assert_eq!(value["active"]["view"]["files"][0]["id"], "file-0");
     assert_eq!(value["active"]["view"]["commits"][0]["id"], COMMIT_ID);
+    assert_eq!(
+        value["active"]["view"]["commits"][0]["date"],
+        "2026-08-09 10:00"
+    );
+    assert_eq!(
+        value["active"]["view"]["commits"][0]["iso"],
+        "2026-08-09T10:00:00Z"
+    );
     assert!(value.pointer("/active/view/commits/0/sha").is_none());
     assert!(
         value
@@ -219,39 +319,55 @@ fn commit_selection_requests_reject_invalid_commit_ids() {
 }
 
 #[test]
-fn commit_selection_compares_complete_typed_identities() {
-    let selected_id: CommitId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        .try_into()
-        .expect("fixture commit ID is valid");
-    let same_prefix_different_id: CommitId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab"
-        .try_into()
-        .expect("fixture commit ID is valid");
+fn commit_summary_rejects_a_display_value_inconsistent_with_its_machine_timestamp() {
+    let summary = serde_json::from_value::<ViewerCommitSummary>(json!({
+        "id": COMMIT_ID,
+        "subject": "subject",
+        "body": "",
+        "date": "2026-08-09 11:00",
+        "iso": "2026-08-09T10:00:00Z",
+        "is_merge": false
+    }));
+
+    assert!(summary.is_err());
+}
+
+#[test]
+fn commit_selection_compares_complete_typed_identities() -> TestResult {
+    let selected_id: CommitId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".try_into()?;
+    let same_prefix_different_id: CommitId =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab".try_into()?;
+    let tab_id = tab_id(7)?;
     let selection = ViewerCommitSelection::Ready {
         id: selected_id.clone(),
     };
 
     assert!(matches!(
-        make_commit_selection_action(&selection, 7, selected_id),
+        make_commit_selection_action(&selection, tab_id, selected_id),
         CommitSelectionAction::UnselectCommit
     ));
     assert!(matches!(
-        make_commit_selection_action(&selection, 7, same_prefix_different_id.clone()),
-        CommitSelectionAction::FetchCommit(SelectViewerCommit { tab_id: 7, id })
-            if id == same_prefix_different_id
+        make_commit_selection_action(&selection, tab_id, same_prefix_different_id.clone()),
+        CommitSelectionAction::FetchCommit(SelectViewerCommit {
+            tab_id: fetched_tab_id,
+            id,
+        }) if fetched_tab_id == tab_id && id == same_prefix_different_id
     ));
+    Ok(())
 }
 
 #[test]
-fn raw_diff_line_pages_pin_opaque_addressing_and_identity_echoes() {
+fn raw_diff_line_pages_pin_opaque_addressing_and_identity_echoes() -> TestResult {
     let file = ViewerDiffFileId::for_index(3);
     let cursor = ViewerDiffCursor::new(8);
+    let identity = identity()?;
     let request = LoadViewerDiffLines {
-        identity: identity(),
+        identity,
         file: file.clone(),
         cursor,
     };
     let page = ViewerDiffLines {
-        identity: identity(),
+        identity,
         file,
         cursor,
         lines: vec!["@@ -1 +1 @@".into(), "+client rendered".into()],
@@ -286,22 +402,22 @@ fn raw_diff_line_pages_pin_opaque_addressing_and_identity_echoes() {
         serde_json::from_value::<ViewerDiffLines>(value).expect("line page deserializes"),
         page
     );
+    Ok(())
 }
 
 #[test]
-fn diff_history_and_settings_shapes_round_trip() {
+fn diff_history_and_settings_shapes_round_trip() -> TestResult {
     let history = ViewerHistoryPage {
         entries: vec![ViewerHistoryEntry {
-            id: 31,
+            id: render_id(31)?,
             title: "Release diff".into(),
-            repository_name: "git-tools".into(),
+            repository_name: project_name("git-tools")?,
             kind: ViewerRecipeKind::MergeDiff,
             range_label: "main...release".into(),
-            rendered_at: "2026-08-09T10:00:00Z".into(),
+            rendered_at: MachineTimestamp::try_from("2026-08-09T10:00:00Z")?,
         }],
-        total_count: 1,
-        page_number: 1,
-        page_count: 1,
+        total_count: HistoryRenderCount::new(1),
+        position: page_position(1, 1)?,
         has_newer: false,
         has_older: false,
     };
@@ -315,15 +431,19 @@ fn diff_history_and_settings_shapes_round_trip() {
         },
         push_confirmation_required: true,
         diff_exclusions: ViewerDiffExclusions {
-            default_extensions: vec!["md".into()],
+            default_extensions: ExcludedExtensions::new(["md"]),
             projects: vec![ViewerProjectDiffExclusions {
-                project_name: "git-tools".into(),
-                extensions: vec!["js".into()],
+                project_name: project_name("git-tools")?,
+                extensions: ExcludedExtensions::new(["js"]),
             }],
         },
     };
 
     let history_json = serde_json::to_value(&history).expect("history serializes");
+    assert_eq!(
+        history_json["entries"][0]["rendered_at"],
+        "2026-08-09T10:00:00Z"
+    );
     assert!(history_json.pointer("/entries/0/recipe").is_none());
     assert!(!history_json.to_string().contains("/repos/git-tools"));
     assert_eq!(
@@ -337,18 +457,19 @@ fn diff_history_and_settings_shapes_round_trip() {
         .expect("settings deserialize"),
         settings
     );
+    Ok(())
 }
 
 #[test]
-fn explicit_history_copy_payload_keeps_the_established_recipe_json_shape() {
+fn explicit_history_copy_payload_keeps_the_established_recipe_json_shape() -> TestResult {
     let payload = ViewerHistoryCopyPayload {
-        id: 31,
+        id: render_id(31)?,
         title: "Release diff".into(),
-        repo_name: "git-tools".into(),
+        repo_name: project_name("git-tools")?,
         kind: ViewerHistoryCopyKind::MergeDiff,
         range_label: "main...release".into(),
-        rendered_at: "2026-08-09T10:00:00Z".into(),
-        recipe: recipe(),
+        rendered_at: MachineTimestamp::try_from("2026-08-09T10:00:00Z")?,
+        recipe: recipe()?,
     };
 
     assert_eq!(
@@ -368,8 +489,11 @@ fn explicit_history_copy_payload_keeps_the_established_recipe_json_shape() {
         })
     );
     assert_eq!(
-        serde_json::to_value(GetViewerHistoryCopy { render_id: 31 })
-            .expect("history copy request serializes"),
+        serde_json::to_value(GetViewerHistoryCopy {
+            render_id: render_id(31)?,
+        })
+        .expect("history copy request serializes"),
         json!({"render_id": 31})
     );
+    Ok(())
 }

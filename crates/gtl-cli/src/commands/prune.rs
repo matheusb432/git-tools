@@ -2,11 +2,11 @@
 
 use std::fmt::Write as _;
 
-use gtl_application::branches::{apply_prune::ApplyPruneOk, plan_prune::PruneBranch};
-use gtl_models::diffs::CommitIdAbbreviation;
+use gtl_application::repositories::{apply_prune::ApplyPruneOk, plan_prune::PruneBranch};
+use gtl_models::{diffs::CommitIdAbbreviation, git::BranchName};
 
 /// Renders the destructive branch-prune confirmation block.
-pub fn confirmation(onto: &str, branches: &[PruneBranch]) -> String {
+pub fn confirmation(onto: &BranchName, branches: &[PruneBranch]) -> String {
     let mut text = format!(
         "will delete {} branch(es) merged into '{onto}':",
         branches.len()
@@ -48,23 +48,23 @@ fn plural(count: usize) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use gtl_application::branches::{
+    use gtl_application::repositories::{
         apply_prune::{ApplyPruneOk, PruneFailure, PruneStatus},
         plan_prune::PruneBranch,
     };
 
     use super::*;
-    use crate::testing::commit_id;
+    use crate::testing::{branch_name, commit_id};
 
     #[test]
     fn confirmation_renders_the_selected_branches() {
         let branches = vec![PruneBranch {
-            name: "feature/done".into(),
+            name: branch_name("feature/done"),
             id: commit_id("a"),
         }];
 
         assert_eq!(
-            confirmation("main", &branches),
+            confirmation(&branch_name("main"), &branches),
             "will delete 1 branch(es) merged into 'main':\n  feature/done  aaaaaaa"
         );
     }
@@ -75,16 +75,16 @@ mod tests {
             status: PruneStatus::Partial,
             deleted: vec![
                 PruneBranch {
-                    name: "feature/first".into(),
+                    name: branch_name("feature/first"),
                     id: commit_id("a"),
                 },
                 PruneBranch {
-                    name: "feature/second".into(),
+                    name: branch_name("feature/second"),
                     id: commit_id("b"),
                 },
             ],
             failed: vec![PruneFailure {
-                name: "fix/blocked".into(),
+                name: branch_name("fix/blocked"),
                 reason: "branch is checked out".into(),
             }],
         };

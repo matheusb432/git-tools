@@ -27,7 +27,7 @@ mod tests {
     use gtl_wire::recipes::{RecipeOp, RecipeSource, RecipeTarget};
 
     use super::*;
-    use crate::testing::viewer::recipe;
+    use crate::{utils::viewer::recipe, viewer::initial_recipe_label};
 
     #[test]
     fn labels_preserve_recipe_intent() {
@@ -40,14 +40,16 @@ mod tests {
             ),
             (
                 RecipeOp::Diff {
-                    target: RecipeTarget::Base { rev: "v1".into() },
+                    target: RecipeTarget::Base {
+                        rev: crate::utils::git_revision("v1"),
+                    },
                 },
                 "project: v1->working",
             ),
             (
                 RecipeOp::Diff {
                     target: RecipeTarget::Range {
-                        range: "v1..v2".into(),
+                        range: crate::utils::git_range("v1..v2"),
                         pinned: None,
                     },
                 },
@@ -56,16 +58,7 @@ mod tests {
             (
                 RecipeOp::Diff {
                     target: RecipeTarget::Merge {
-                        base: String::new(),
-                        pinned: None,
-                    },
-                },
-                "project: merge",
-            ),
-            (
-                RecipeOp::Diff {
-                    target: RecipeTarget::Merge {
-                        base: "release".into(),
+                        base: crate::utils::git_revision("release"),
                         pinned: None,
                     },
                 },
@@ -82,14 +75,14 @@ mod tests {
             ),
             (
                 RecipeOp::MergeDiff {
-                    base: Some("  ".into()),
+                    base: None,
                     pinned: None,
                 },
                 "project: merge ->main",
             ),
             (
                 RecipeOp::MergeDiff {
-                    base: Some("release".into()),
+                    base: Some(crate::utils::git_revision("release")),
                     pinned: None,
                 },
                 "project: merge ->release",
@@ -97,7 +90,7 @@ mod tests {
         ];
 
         for (op, expected) in cases {
-            let response = execute(InitialRecipeLabel { recipe: recipe(op) });
+            let response = initial_recipe_label::execute(InitialRecipeLabel { recipe: recipe(op) });
 
             assert_eq!(response.label, expected);
         }
@@ -109,9 +102,9 @@ mod tests {
             base: None,
             pinned: None,
         });
-        named.name = Some("Release review".into());
+        named.name = Some(crate::utils::project_name("Release review"));
 
-        let response = execute(InitialRecipeLabel { recipe: named });
+        let response = initial_recipe_label::execute(InitialRecipeLabel { recipe: named });
 
         assert_eq!(response.label, "Release review");
     }
@@ -122,10 +115,10 @@ mod tests {
             base: None,
             pinned: None,
         });
-        root.source = RecipeSource::LocalRepo("/".into());
+        root.source = RecipeSource::LocalRepo(crate::utils::repository_root("/"));
 
-        let response = execute(InitialRecipeLabel { recipe: root });
+        let response = initial_recipe_label::execute(InitialRecipeLabel { recipe: root });
 
-        assert_eq!(response.label, "/: merge ->main");
+        assert_eq!(response.label, "repo: merge ->main");
     }
 }

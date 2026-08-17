@@ -16,12 +16,8 @@ use anyhow::{Context, Result, bail, ensure};
 use command_group::{Signal, UnixChildExt};
 use sha2::{Digest, Sha256};
 
-use crate::{
-    process::{self, Status},
-    project,
-    task::Step,
-    verb::Verb,
-};
+use super::{cargo_target_directory, lock_web_assets, repository_root};
+use crate::{process, task::Step};
 
 const DIST_DIRECTORY: &str = "crates/gtl-web/dist";
 const PUBLIC_DIRECTORY: &str = "crates/gtl-web/dist/public";
@@ -243,22 +239,10 @@ const DEVELOPMENT_RUST_SOURCE_DIRECTORIES: &[&str] = &[
 const DEVELOPMENT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const DEVELOPMENT_STOP_GRACE_PERIOD: Duration = Duration::from_secs(2);
 
-pub(crate) fn run() -> Result<()> {
-    build_release()?;
-    process::result(Verb::WEB_BUILD, Status::Done);
-    Ok(())
-}
-
-pub(crate) fn run_styles() -> Result<()> {
-    build_styles()?;
-    process::result(Verb::WEB_STYLES, Status::Done);
-    Ok(())
-}
-
 pub(crate) fn serve(arguments: &[String]) -> Result<()> {
     build_styles()?;
 
-    let root = project::repository_root();
+    let root = repository_root();
     let _tailwind_watcher = DevelopmentWatcher::spawn(
         "dioxus-tailwind-watch",
         "deno",
@@ -460,15 +444,15 @@ impl Drop for DevelopmentWatcher {
 }
 
 pub(crate) fn build_release() -> Result<()> {
-    let root = project::repository_root();
-    let _lock = project::lock_web_assets(&root)?;
+    let root = repository_root();
+    let _lock = lock_web_assets(&root)?;
     build_release_unlocked(&root)
 }
 
 pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
     let inputs_before = release_input_fingerprint(root)?;
     build_artifact_assets_unlocked(root)?;
-    let target = project::cargo_target_directory(root)?;
+    let target = cargo_target_directory(root)?;
     clean_desktop_release_outputs(root, &target)?;
     process::run_step(
         &Step::new(
@@ -495,7 +479,7 @@ pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
 pub(crate) fn build_artifact_assets_unlocked(root: &Path) -> Result<()> {
     let inputs_before = release_input_fingerprint(root)?;
     build_styles_unlocked(root)?;
-    let target = project::cargo_target_directory(root)?;
+    let target = cargo_target_directory(root)?;
     build_artifact_runtime_unlocked(root, &target)?;
     ensure!(
         release_input_fingerprint(root)? == inputs_before,
@@ -505,8 +489,8 @@ pub(crate) fn build_artifact_assets_unlocked(root: &Path) -> Result<()> {
 }
 
 pub(crate) fn build_styles() -> Result<()> {
-    let root = project::repository_root();
-    let _lock = project::lock_web_assets(&root)?;
+    let root = repository_root();
+    let _lock = lock_web_assets(&root)?;
     build_styles_unlocked(&root)
 }
 

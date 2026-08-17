@@ -1,5 +1,6 @@
 use crate::{
-    CharacterSpan, DiffRow, DiffRowKind, SemanticTextSpan, SyntaxToken,
+    CharacterCount, CharacterSpan, DiffRow, DiffRowKind, SemanticTextSpan, SourceLineNumber,
+    SyntaxToken,
     intraline::{ChangedLineSpans, changed_spans},
     semantic::semantic_text_spans,
 };
@@ -7,17 +8,17 @@ use crate::{
 /// One populated side of a paired side-by-side diff row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitDiffCell {
-    line_number: u32,
+    line_number: SourceLineNumber,
     text: String,
     syntax_tokens: Vec<SyntaxToken>,
     intraline_spans: Vec<CharacterSpan>,
     semantic_spans: Vec<SemanticTextSpan>,
-    long_line_character_count: Option<usize>,
+    long_line_character_count: Option<CharacterCount>,
 }
 
 impl SplitDiffCell {
     /// Returns the line number for this side.
-    pub const fn line_number(&self) -> u32 {
+    pub const fn line_number(&self) -> SourceLineNumber {
         self.line_number
     }
 
@@ -47,7 +48,7 @@ impl SplitDiffCell {
     }
 
     /// Returns the source character count when this cell exceeds the parser limit.
-    pub const fn long_line_character_count(&self) -> Option<usize> {
+    pub const fn long_line_character_count(&self) -> Option<CharacterCount> {
         self.long_line_character_count
     }
 }
@@ -62,12 +63,12 @@ pub enum SplitDiffRow {
         text: String,
     },
     Context {
-        old_line_number: u32,
-        new_line_number: u32,
+        old_line_number: SourceLineNumber,
+        new_line_number: SourceLineNumber,
         text: String,
         syntax_tokens: Vec<SyntaxToken>,
         semantic_spans: Vec<SemanticTextSpan>,
-        long_line_character_count: Option<usize>,
+        long_line_character_count: Option<CharacterCount>,
     },
     Pair {
         old: Option<SplitDiffCell>,
@@ -114,8 +115,8 @@ impl SplitDiffStream {
                 DiffRowKind::Context => {
                     self.flush_pairs(&mut output);
                     output.push(SplitDiffRow::Context {
-                        old_line_number: row.old_line_number().unwrap_or(0),
-                        new_line_number: row.new_line_number().unwrap_or(0),
+                        old_line_number: row.old_line_number().unwrap_or_default(),
+                        new_line_number: row.new_line_number().unwrap_or_default(),
                         text: row.text().to_owned(),
                         syntax_tokens: row.syntax_tokens().to_vec(),
                         semantic_spans: row.semantic_spans().to_vec(),
@@ -171,9 +172,9 @@ fn split_cell(row: &DiffRow, intraline_spans: Vec<CharacterSpan>, old: bool) -> 
     let semantic_spans = semantic_text_spans(row.body(), row.syntax_tokens(), &intraline_spans);
     SplitDiffCell {
         line_number: if old {
-            row.old_line_number().unwrap_or(0)
+            row.old_line_number().unwrap_or_default()
         } else {
-            row.new_line_number().unwrap_or(0)
+            row.new_line_number().unwrap_or_default()
         },
         text: row.text().to_owned(),
         syntax_tokens: row.syntax_tokens().to_vec(),
@@ -208,8 +209,14 @@ mod tests {
         else {
             panic!("first pair row must have both sides");
         };
-        assert_eq!((old.line_number(), old.text()), (1, "-a"));
-        assert_eq!((new.line_number(), new.text()), (1, "+c"));
+        assert_eq!(
+            (old.line_number(), old.text()),
+            (SourceLineNumber::new(1), "-a")
+        );
+        assert_eq!(
+            (new.line_number(), new.text()),
+            (SourceLineNumber::new(1), "+c")
+        );
 
         assert!(matches!(
             rows[2],
@@ -242,7 +249,7 @@ mod tests {
         };
         assert_eq!(
             (*old_line_number, *new_line_number, text.as_str()),
-            (2, 1, " mid")
+            (SourceLineNumber::new(2), SourceLineNumber::new(1), " mid")
         );
     }
 
@@ -267,7 +274,7 @@ mod tests {
             .into_iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>();
-        let rows = DiffParser::with_options(ParseOptions::new(3))
+        let rows = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3)))
             .parse(&lines)
             .split_rows();
         let SplitDiffRow::Pair {

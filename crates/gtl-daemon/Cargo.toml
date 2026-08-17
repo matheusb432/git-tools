@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 gtl-application.workspace = true
+gtl-models.workspace = true
 axum.workspace = true
 gtl-wire.workspace = true
 gtl-infra.workspace = true

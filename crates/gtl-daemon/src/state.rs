@@ -7,26 +7,26 @@ use axum::{
 use gtl_artifacts::ArtifactRenderer;
 use gtl_infra::{
     app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
-    git_client::HybridGitClient, managed_repo_client::ManagedRepoClient,
-    push_ledger::NoOpPushLedger, user_config::TomlSettingsStore,
+    git_client::HybridGitClient, project_repository_client::ProjectRepositoryClient,
+    user_config::TomlSettingsStore,
 };
+use gtl_wire::daemon::{DaemonProcessId, ExeIdentity};
 use tokio::sync::watch;
 
-use crate::{endpoints, lifecycle::ExeIdentity};
+use crate::endpoints;
 
 /// Production adapters owned by the daemon process root.
 #[derive(Clone)]
 pub struct DaemonState {
     pub(crate) identity: ExeIdentity,
     pub(crate) version: &'static str,
-    pub(crate) pid: u32,
+    pub(crate) pid: DaemonProcessId,
     pub(crate) shutdown_tx: watch::Sender<bool>,
     pub(crate) git: HybridGitClient,
     pub(crate) artifacts: StoreArtifacts,
     pub(crate) renderer: ArtifactRenderer,
     pub(crate) clock: SystemClock,
-    pub(crate) projects: ManagedRepoClient,
-    pub(crate) ledger: NoOpPushLedger,
+    pub(crate) projects: ProjectRepositoryClient,
     pub(crate) app_state: SqliteAppState,
     pub(crate) user_settings: TomlSettingsStore,
 }
@@ -36,7 +36,7 @@ impl DaemonState {
     pub fn new(
         identity: ExeIdentity,
         version: &'static str,
-        pid: u32,
+        pid: DaemonProcessId,
         shutdown_tx: watch::Sender<bool>,
         app_state: SqliteAppState,
         user_settings: TomlSettingsStore,
@@ -50,8 +50,7 @@ impl DaemonState {
             artifacts: StoreArtifacts,
             renderer: ArtifactRenderer,
             clock: SystemClock,
-            projects: ManagedRepoClient::from_environment(),
-            ledger: NoOpPushLedger,
+            projects: ProjectRepositoryClient::from_environment(),
             app_state,
             user_settings,
         }
@@ -69,11 +68,11 @@ pub fn router(state: DaemonState) -> Router {
         .route("/diffs/all", post(endpoints::diffs::all::handle))
         .route(
             "/managed/push-all",
-            post(endpoints::managed::push_all::handle),
+            post(endpoints::projects::push_all::handle),
         )
         .route(
             "/managed/pull-all",
-            post(endpoints::managed::pull_all::handle),
+            post(endpoints::projects::pull_all::handle),
         )
         .route(
             "/live-views/save",

@@ -5,7 +5,10 @@ use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
 };
-use gtl_application::diffs::render_diff::{RenderDiff, RenderDiffError};
+use gtl_application::diffs::{
+    render_diff,
+    render_diff::{RenderDiff, RenderDiffError},
+};
 use gtl_wire::{diffs::RenderDiffData, envelope::Envelope};
 
 use crate::{endpoints::EndpointError, state::DaemonState};
@@ -21,7 +24,7 @@ pub async fn handle(
 ) -> Result<Json<Envelope<RenderDiffData>>, EndpointError> {
     let Json(request) = request.map_err(|error| EndpointError::bad_request(error.body_text()))?;
     let response = tokio::task::spawn_blocking(move || {
-        gtl_application::diffs::render_diff::execute(
+        render_diff::execute(
             request,
             &state.user_settings,
             &state.git,

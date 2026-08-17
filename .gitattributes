@@ -1,6 +1,6 @@
 # Force LF in every worktree regardless of core.autocrlf, so text files are
-# byte-identical across OSes — CRLF breaks exact \n-string test asserts (Pester)
-# and tooling that round-trips these files.
+# byte-identical across OSes. CRLF breaks exact \n-string assertions and tools
+# that round-trip these files.
 * text=auto eol=lf
 # Shell scripts especially: CRLF makes Ubuntu bash fail with "bad interpreter".
 *.sh text eol=lf

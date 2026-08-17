@@ -11,6 +11,7 @@ use anyhow::Context;
 use gtl_application::ports::{UserSettingsEditError, UserSettingsLoadError, UserSettingsStore};
 use gtl_models::{
     diffs::DiffExclusions,
+    paths::ProjectName,
     settings::UserSettings,
     viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
 };
@@ -70,7 +71,13 @@ fn exclusions(
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        resolved.insert(project, extensions);
+        let project_name = ProjectName::try_new(project.clone()).map_err(|error| {
+            invalid_configuration(
+                path,
+                format!("`diff.exclude.{project}` has an invalid project name: {error}"),
+            )
+        })?;
+        resolved.insert(project_name, extensions);
     }
     Ok(DiffExclusions::new(resolved, None))
 }
@@ -189,23 +196,27 @@ impl UserSettingsStore for TomlSettingsStore {
         load_from(self.path.as_deref())
     }
 
-    fn set_string(
+    fn set_value(
         &mut self,
-        key: &str,
-        value_new: &str,
+        mutation: gtl_models::settings::SettingKeyValue,
     ) -> Result<Option<String>, UserSettingsEditError> {
+        let key = mutation.key();
+        let value_new = mutation.value();
         string_editor::edit(
             self.required_path()?,
-            key,
-            string_editor::StringEdit::Set(value_new),
+            key.as_str(),
+            string_editor::StringEdit::Set(&value_new),
         )
         .map(|outcome| outcome.value_old)
     }
 
-    fn remove_string(&mut self, key: &str) -> Result<Option<String>, UserSettingsEditError> {
+    fn remove_key(
+        &mut self,
+        key: gtl_models::settings::SettingKey,
+    ) -> Result<Option<String>, UserSettingsEditError> {
         string_editor::edit(
             self.required_path()?,
-            key,
+            key.as_str(),
             string_editor::StringEdit::Remove,
         )
         .map(|outcome| outcome.value_old)
@@ -240,6 +251,8 @@ fn config_path() -> Option<PathBuf> {
 mod tests {
     use std::io::Write;
 
+    use gtl_application::settings::{remove_setting_key, set_setting_key};
+    use gtl_models::paths::RepositoryRelativePath;
     use tempfile::NamedTempFile;
 
     use super::*;
@@ -324,14 +337,24 @@ mod tests {
         assert!(
             settings
                 .diff_exclusions()
-                .for_project_or_default("git-tools")
-                .matches("frontend.js")
+                .for_project_or_default(
+                    &ProjectName::try_from("git-tools").expect("valid fixture project name"),
+                )
+                .matches(
+                    &RepositoryRelativePath::try_new("frontend.js".into())
+                        .expect("valid fixture repository-relative path"),
+                )
         );
         assert!(
             settings
                 .diff_exclusions()
-                .for_project_or_default("unconfigured")
-                .matches("README.md")
+                .for_project_or_default(
+                    &ProjectName::try_from("unconfigured").expect("valid fixture project name"),
+                )
+                .matches(
+                    &RepositoryRelativePath::try_new("README.md".into())
+                        .expect("valid fixture repository-relative path"),
+                )
         );
     }
 
@@ -361,17 +384,16 @@ mod tests {
             .expect("seed config");
         let mut store = TomlSettingsStore::new(Some(path.clone()));
 
-        let set = gtl_application::settings::set_key::execute(
-            gtl_application::settings::set_key::SetSettingKey {
-                key: "theme".into(),
-                value_new: "light".into(),
+        let set = set_setting_key::execute(
+            set_setting_key::SetSettingKey {
+                mutation: gtl_models::settings::SettingKeyValue::Theme(Theme::Light),
             },
             &mut store,
         )
         .expect("set theme");
-        let removed = gtl_application::settings::remove_key::execute(
-            gtl_application::settings::remove_key::RemoveSettingKey {
-                key: "layout".into(),
+        let removed = remove_setting_key::execute(
+            remove_setting_key::RemoveSettingKey {
+                key: gtl_models::settings::SettingKey::Layout,
             },
             &mut store,
         )
@@ -405,9 +427,9 @@ mod tests {
         std::fs::write(&path, raw).expect("seed config");
         let mut store = TomlSettingsStore::new(Some(path.clone()));
 
-        let error = gtl_application::settings::remove_key::execute(
-            gtl_application::settings::remove_key::RemoveSettingKey {
-                key: "layout".into(),
+        let error = remove_setting_key::execute(
+            remove_setting_key::RemoveSettingKey {
+                key: gtl_models::settings::SettingKey::Layout,
             },
             &mut store,
         )
@@ -415,8 +437,8 @@ mod tests {
 
         assert!(matches!(
             error,
-            gtl_application::settings::remove_key::RemoveSettingKeyError::InvalidValueShape { key }
-                if key == "layout"
+            remove_setting_key::RemoveSettingKeyError::InvalidValueShape { key }
+                if key == gtl_models::settings::SettingKey::Layout
         ));
         assert_eq!(std::fs::read(path).unwrap(), raw);
     }
@@ -429,17 +451,16 @@ mod tests {
         std::fs::write(&path, raw).expect("seed config");
         let mut store = TomlSettingsStore::new(Some(path.clone()));
 
-        let error = gtl_application::settings::set_key::execute(
-            gtl_application::settings::set_key::SetSettingKey {
-                key: "theme".into(),
-                value_new: "light".into(),
+        let error = set_setting_key::execute(
+            set_setting_key::SetSettingKey {
+                mutation: gtl_models::settings::SettingKeyValue::Theme(Theme::Light),
             },
             &mut store,
         )
         .expect_err("malformed TOML is rejected");
         assert!(matches!(
             error,
-            gtl_application::settings::set_key::SetSettingKeyError::Settings(
+            set_setting_key::SetSettingKeyError::Settings(
                 UserSettingsEditError::InvalidConfiguration { path: error_path, .. }
             ) if error_path == path
         ));

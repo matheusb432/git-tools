@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use dioxus::prelude::*;
+use gtl_models::paths::RepositoryRelativePath;
 use lucide_dioxus::ExternalLink;
 
 use crate::{
@@ -15,13 +16,13 @@ use crate::{
 pub(super) fn DiffFileActions(
     file: ClientDiffFile,
     copy_context_enabled: bool,
-    onopen: Option<EventHandler<String>>,
+    onopen: Option<EventHandler<RepositoryRelativePath>>,
 ) -> Element {
     rsx! {
         span { class: "flex flex-none items-center gap-2 mobile:hidden",
             DiffCopyActions { file: file.clone(), copy_context_enabled }
             if let Some(onopen) = onopen.filter(|_| file.summary.can_open_in_editor) {
-                OpenInEditorAction { path: file.summary.path, onopen }
+                OpenInTextEditorAction { path: file.summary.path, onopen }
             }
         }
     }
@@ -31,8 +32,14 @@ pub(super) fn DiffFileActions(
 fn DiffCopyActions(file: ClientDiffFile, copy_context_enabled: bool) -> Element {
     rsx! {
         span { class: "flex flex-none gap-2 print:hidden!",
-            DiffCopyAction { label: "path", payload: file.summary.path.clone() }
-            DiffCopyAction { label: "abs", payload: file.summary.absolute_path.clone() }
+            DiffCopyAction {
+                label: "path",
+                payload: file.summary.path.to_string_lossy().into_owned(),
+            }
+            DiffCopyAction {
+                label: "abs",
+                payload: file.summary.absolute_path.as_path().to_string_lossy().into_owned(),
+            }
             DiffCodeCopyAction { file, include_context: copy_context_enabled }
         }
     }
@@ -112,27 +119,30 @@ async fn update_copy_state(mut state: Signal<CopyState>, payload: &str) {
 }
 
 #[component]
-fn OpenInEditorAction(path: String, onopen: EventHandler<String>) -> Element {
+fn OpenInTextEditorAction(
+    path: RepositoryRelativePath,
+    onopen: EventHandler<RepositoryRelativePath>,
+) -> Element {
     rsx! {
         // TODO: make it use icon button primitive (create it)
         Button {
             class: "p-0",
             size: ButtonSize::Content,
             variant: ButtonVariant::Ghost,
-            aria_label: "Open in IDE",
-            title: "Open in IDE",
+            aria_label: "Open in text editor",
+            title: "Open in text editor",
             onclick: move |event: MouseEvent| {
                 event.prevent_default();
                 event.stop_propagation();
                 onopen.call(path.clone());
             },
-            OpenInEditorIcon {}
+            OpenInTextEditorIcon {}
         }
     }
 }
 
 #[component]
-fn OpenInEditorIcon() -> Element {
+fn OpenInTextEditorIcon() -> Element {
     rsx! {
         span { aria_hidden: "true",
             ExternalLink { size: 16, stroke_width: 2 }

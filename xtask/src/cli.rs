@@ -1,17 +1,9 @@
-//! Command-line surface for `xtask`. clap derives `--help` from these doc comments,
-//! so they are the single source of truth for the verb documentation. Add each
-//! new automation verb here as a `Command` arm; let clap validate, don't hand-roll guards.
-
 use std::{ffi::OsString, path::PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::{
-    verb::Verb,
-    verbs::{bench::BenchArguments, test::TestArguments},
-};
+use crate::verbs::{Verb, bench::BenchArguments, test::TestArguments};
 
-/// xtask — this repo's embedded dev/release automation (xtask).
 #[derive(Parser)]
 #[command(
     version,
@@ -23,17 +15,14 @@ pub struct Cli {
     pub command: Command,
 }
 
-/// The verb surface. Each arm is one typed automation task exposed by the justfile or its
-/// nontrivial workflow. Express mutually-exclusive flags with clap's `conflicts_with`, never a
-/// runtime `if a && b`.
 #[derive(Subcommand)]
 pub enum Command {
-    /// Configure hooks, build and install both artifacts, and ensure `~/.local/bin` is on PATH.
+    /// Build and install both artifacts, and ensure `~/.local/bin` is on PATH.
     #[command(name = Verb::SETUP.as_str())]
     Setup,
     /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the
     /// desktop viewer on PATH. Builds are owned by the justfile; this only copies the
-    /// already-built artifacts. Migrates `scripts/install.sh`.
+    /// already-built artifacts.
     #[command(name = Verb::INSTALL.as_str())]
     Install {
         /// Which artifact(s) to place: `cli`, `viewer`, or `both` (default).
@@ -41,7 +30,7 @@ pub enum Command {
         target: InstallTarget,
     },
     /// Remove the installed CLI binary + `gtl` alias + `gtl-daemon` and the desktop viewer from
-    /// PATH. Migrates `scripts/install.sh uninstall`.
+    /// PATH.
     #[command(name = Verb::UNINSTALL.as_str())]
     Uninstall {
         /// Also delete repo-local git-tools.toml / git-tools.secrets.toml (refused
@@ -108,8 +97,6 @@ pub enum Command {
     #[command(name = Verb::CHECK_STRUCTURE.as_str())]
     CheckStructure,
     /// Render the gtl-viewer icon assets (`crates/gtl-desktop/icons/icon.{png,ico}`) from code.
-    /// Ports the retired Python generator; the multi-res `.ico` is required by tauri-build on
-    /// Windows.
     #[command(name = Verb::GEN_ICON.as_str())]
     GenIcon,
     /// Cross-build the Win11 shippables (CLI + viewer + gtl-daemon) from this Linux host via

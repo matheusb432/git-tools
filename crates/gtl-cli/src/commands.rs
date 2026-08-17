@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
 use gtl_application::{
-    diffs::present_diff::{PresentDiff, PresentDiffOk},
+    diffs::{
+        present_diff,
+        present_diff::{DiffPresentationMode, PresentDiff, PresentDiffOk},
+    },
     ports::FileSystemClient,
 };
 use gtl_wire::envelope::{Note, NoteLevel};
@@ -54,7 +57,7 @@ fn file_url(path: &Path) -> String {
 }
 
 pub(crate) fn present(command: PresentDiff) -> anyhow::Result<diff::DiffOutcome> {
-    let outcome = gtl_application::diffs::present_diff::execute(
+    let outcome = present_diff::execute(
         command,
         &crate::diff_viewer_client::CliDiffViewerClient,
         &gtl_infra::git_client::HybridGitClient,
@@ -63,16 +66,42 @@ pub(crate) fn present(command: PresentDiff) -> anyhow::Result<diff::DiffOutcome>
 }
 
 fn finish_presentation(outcome: PresentDiffOk) -> diff::DiffOutcome {
-    crate::diff_viewer_client::print_notes(&outcome.notes);
-    match (outcome.surface, outcome.artifact) {
-        (gtl_application::diffs::present_diff::DiffSurface::Viewer, None) => {
+    match outcome {
+        PresentDiffOk::Viewer { notes } => {
+            crate::diff_viewer_client::print_notes(&notes);
             diff::DiffOutcome::Forwarded
         }
-        (_, Some(artifact)) => {
-            println!("{}", file_url(&artifact));
-            diff::DiffOutcome::Rendered(artifact)
+        PresentDiffOk::Artifact { outcome, notes, .. } => {
+            crate::diff_viewer_client::print_notes(&notes);
+            match outcome {
+                gtl_application::ports::DiffRenderOutcome::Rendered(placement) => {
+                    let artifact = placement.into_path();
+                    println!("{}", file_url(artifact.as_path()));
+                    diff::DiffOutcome::Rendered(artifact)
+                }
+                gtl_application::ports::DiffRenderOutcome::Empty => diff::DiffOutcome::Empty,
+            }
         }
-        (_, None) => diff::DiffOutcome::Empty,
+    }
+}
+
+pub(crate) fn presentation_mode(raw: bool) -> DiffPresentationMode {
+    classify_presentation_mode(
+        raw,
+        crate::viewer::has_display(),
+        !crate::viewer::no_open_requested(),
+    )
+}
+
+fn classify_presentation_mode(
+    raw: bool,
+    has_display: bool,
+    effects_enabled: bool,
+) -> DiffPresentationMode {
+    if raw || !has_display || !effects_enabled {
+        DiffPresentationMode::ArtifactOnly
+    } else {
+        DiffPresentationMode::ViewerWithArtifactFallback
     }
 }
 
@@ -111,6 +140,24 @@ pub(crate) fn error_text(notes: &[Note]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presentation_facts_collapse_into_one_application_mode() {
+        assert_eq!(
+            classify_presentation_mode(false, true, true),
+            DiffPresentationMode::ViewerWithArtifactFallback
+        );
+        for facts in [
+            (true, true, true),
+            (false, false, true),
+            (false, true, false),
+        ] {
+            assert_eq!(
+                classify_presentation_mode(facts.0, facts.1, facts.2),
+                DiffPresentationMode::ArtifactOnly
+            );
+        }
+    }
 
     #[test]
     fn file_url_builds_a_triple_slash_url_for_a_unix_absolute_path() {

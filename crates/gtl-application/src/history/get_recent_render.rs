@@ -57,7 +57,10 @@ fn get_recent_render(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::history::persistence::{seed_recent_render, store_test};
+    use crate::history::{
+        get_recent_render,
+        persistence::{seed_recent_render, store_test},
+    };
 
     #[test]
     fn recent_render_is_looked_up_by_stable_id() {
@@ -65,7 +68,8 @@ mod tests {
         let connection = store_test();
         seed_recent_render(&connection, i64::from(id), "render");
 
-        let response = execute(&GetRecentRender { id }, &connection).expect("lookup succeeds");
+        let response = get_recent_render::execute(&GetRecentRender { id }, &connection)
+            .expect("lookup succeeds");
 
         assert_eq!(response.entry.expect("record exists").id, id);
     }
@@ -75,7 +79,8 @@ mod tests {
         let id = RenderHistoryId::try_new(99).expect("positive id");
 
         let connection = store_test();
-        let response = execute(&GetRecentRender { id }, &connection).expect("lookup succeeds");
+        let response = get_recent_render::execute(&GetRecentRender { id }, &connection)
+            .expect("lookup succeeds");
 
         assert!(response.entry.is_none());
     }

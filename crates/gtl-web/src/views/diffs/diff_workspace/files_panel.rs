@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
+use gtl_models::diffs::DiffLineCount;
 use gtl_wire::viewer::{ViewerActiveView, ViewerFileStatus, ViewerFileSummary};
 use lucide_dioxus::ChevronRight;
 
@@ -15,15 +16,19 @@ use crate::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WorkspaceLineTotals {
-    added: u64,
-    removed: u64,
+    added: DiffLineCount,
+    removed: DiffLineCount,
 }
 
 impl WorkspaceLineTotals {
     fn from_files(files: &[ViewerFileSummary]) -> Self {
         Self {
-            added: files.iter().map(|file| u64::from(file.added)).sum(),
-            removed: files.iter().map(|file| u64::from(file.removed)).sum(),
+            added: files.iter().fold(DiffLineCount::default(), |total, file| {
+                total.saturating_add(file.added)
+            }),
+            removed: files.iter().fold(DiffLineCount::default(), |total, file| {
+                total.saturating_add(file.removed)
+            }),
         }
     }
 }
@@ -38,7 +43,7 @@ impl WorkspaceFileTree {
     fn from_files(files: &[ViewerFileSummary]) -> Self {
         let mut root = Self::default();
         for file in files {
-            root.insert(&file.path, file.clone());
+            root.insert(file.path.to_string_lossy().as_ref(), file.clone());
         }
         root
     }
@@ -73,7 +78,12 @@ pub(super) fn FilesPanel(
     let files = view
         .files
         .iter()
-        .filter(|file| file.path.to_lowercase().contains(&filter_normalized))
+        .filter(|file| {
+            file.path
+                .to_string_lossy()
+                .to_lowercase()
+                .contains(&filter_normalized)
+        })
         .cloned()
         .collect::<Vec<_>>();
     let totals = WorkspaceLineTotals::from_files(&view.files);
@@ -129,8 +139,11 @@ fn FilesPanelSummary(commit_count: usize, totals: WorkspaceLineTotals) -> Elemen
     rsx! {
         div { class: "mx-0.5 mb-3 flex flex-wrap gap-2",
             CommitCountBadge { count: commit_count }
-            DiffLineChangeBadge { kind: DiffLineChangeKind::Added, count: totals.added }
-            DiffLineChangeBadge { kind: DiffLineChangeKind::Removed, count: totals.removed }
+            DiffLineChangeBadge { kind: DiffLineChangeKind::Added, count: totals.added.value() }
+            DiffLineChangeBadge {
+                kind: DiffLineChangeKind::Removed,
+                count: totals.removed.value(),
+            }
         }
     }
 }
@@ -219,7 +232,7 @@ fn WorkspaceFileItem(
                 variant: ButtonVariant::Bare,
                 attributes: item_attributes,
                 "data-file-target": anchor_id.clone(),
-                title: file.path,
+                title: file.path.to_string_lossy().into_owned(),
                 onclick: move |_| onnavigate.call(anchor_id.clone()),
                 DiffFileStatusBadge {
                     status: file.status,
@@ -252,42 +265,45 @@ const fn file_item_tone_classes(status: ViewerFileStatus) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::diffs::DiffLineCount;
     use gtl_wire::viewer::{ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary};
 
     use super::{WorkspaceFileTree, WorkspaceLineTotals};
+    use crate::test_support::{TestResult, absolute_file_path, repository_relative_path};
 
-    fn file(path: &str, added: u32, removed: u32) -> ViewerFileSummary {
-        ViewerFileSummary {
+    fn file(path: &str, added: u64, removed: u64) -> TestResult<ViewerFileSummary> {
+        Ok(ViewerFileSummary {
             id: ViewerDiffFileId::for_index(0),
-            path: path.to_owned(),
-            absolute_path: format!("/repo/{path}"),
+            path: repository_relative_path(path)?,
+            absolute_path: absolute_file_path(format!("/repo/{path}"))?,
             anchor_id: format!("f-{}", path.replace(['/', '.'], "-")),
-            added,
-            removed,
+            added: DiffLineCount::new(added),
+            removed: DiffLineCount::new(removed),
             status: ViewerFileStatus::Modified,
             can_open_in_editor: true,
             initially_expanded: true,
-        }
+        })
     }
 
     #[test]
-    fn changed_files_summary_retains_total_line_changes() {
-        let files = [file("src/added.rs", 3, 1), file("src/removed.rs", 1, 5)];
+    fn changed_files_summary_retains_total_line_changes() -> TestResult {
+        let files = [file("src/added.rs", 3, 1)?, file("src/removed.rs", 1, 5)?];
 
         assert_eq!(
             WorkspaceLineTotals::from_files(&files),
             WorkspaceLineTotals {
-                added: 4,
-                removed: 6,
+                added: DiffLineCount::new(4),
+                removed: DiffLineCount::new(6),
             }
         );
+        Ok(())
     }
 
     #[test]
-    fn changed_files_tree_preserves_path_hierarchy() {
+    fn changed_files_tree_preserves_path_hierarchy() -> TestResult {
         let files = [
-            file("crates/web/src/app.rs", 3, 1),
-            file("crates/web/src/view.rs", 1, 5),
+            file("crates/web/src/app.rs", 3, 1)?,
+            file("crates/web/src/view.rs", 1, 5)?,
         ];
 
         let tree = WorkspaceFileTree::from_files(&files);
@@ -301,5 +317,6 @@ mod tests {
                 .0,
             "app.rs"
         );
+        Ok(())
     }
 }

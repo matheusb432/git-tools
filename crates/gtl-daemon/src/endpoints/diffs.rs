@@ -8,10 +8,11 @@ pub mod subrepos;
 use gtl_application::{
     diffs::{
         render_diff::{RenderDiffOk, RenderDiffOutcome},
-        render_diff_all::RenderDiffAllOk,
         render_diff_subrepos::{RenderDiffSubreposOk, RenderDiffSubreposOutcome},
         render_merge_diff::RenderMergeDiffOk,
     },
+    ports::PlacedArtifact,
+    projects::render_project_diff::RenderProjectDiffOk,
     shared::notes,
 };
 use gtl_wire::{
@@ -23,13 +24,10 @@ use gtl_wire::{
 pub(crate) fn to_envelope(resp: RenderDiffOk) -> Envelope<RenderDiffData> {
     let notes = resp.notes.iter().map(to_note).collect();
     match resp.outcome {
-        RenderDiffOutcome::Rendered { artifact, reused } => Envelope {
+        RenderDiffOutcome::Rendered(placement) => Envelope {
             outcome: Outcome::Ok,
             notes,
-            data: Some(RenderDiffData {
-                artifact: artifact.to_string_lossy().into_owned(),
-                reused,
-            }),
+            data: Some(to_render_data(&placement)),
         },
         RenderDiffOutcome::Empty => Envelope {
             outcome: Outcome::Empty,
@@ -39,43 +37,44 @@ pub(crate) fn to_envelope(resp: RenderDiffOk) -> Envelope<RenderDiffData> {
     }
 }
 
-/// Shared by every response shaped `{artifact, reused, notes}`.
-fn ok_envelope(
-    artifact: &std::path::Path,
-    reused: bool,
-    notes: &[notes::Note],
-) -> Envelope<RenderDiffData> {
+/// Shared by every response containing one placed artifact and notes.
+fn ok_envelope(placement: &PlacedArtifact, notes: &[notes::Note]) -> Envelope<RenderDiffData> {
     Envelope {
         outcome: Outcome::Ok,
         notes: notes.iter().map(to_note).collect(),
-        data: Some(RenderDiffData {
-            artifact: artifact.to_string_lossy().into_owned(),
-            reused,
-        }),
+        data: Some(to_render_data(placement)),
+    }
+}
+
+fn to_render_data(placement: &PlacedArtifact) -> RenderDiffData {
+    match placement {
+        PlacedArtifact::Created { path } => RenderDiffData::Created {
+            artifact: path.clone(),
+        },
+        PlacedArtifact::Reused { path } => RenderDiffData::Reused {
+            artifact: path.clone(),
+        },
     }
 }
 
 /// Project a successful application response onto the wire envelope.
 pub(crate) fn to_merge_envelope(resp: &RenderMergeDiffOk) -> Envelope<RenderDiffData> {
-    ok_envelope(&resp.artifact, resp.reused, &resp.notes)
+    ok_envelope(&resp.placement, &resp.notes)
 }
 
 /// Project a successful application response onto the wire envelope.
-pub(crate) fn to_all_envelope(resp: &RenderDiffAllOk) -> Envelope<RenderDiffData> {
-    ok_envelope(&resp.artifact, resp.reused, &resp.notes)
+pub(crate) fn to_all_envelope(resp: &RenderProjectDiffOk) -> Envelope<RenderDiffData> {
+    ok_envelope(&resp.placement, &resp.notes)
 }
 
 /// Project a successful application response onto the wire envelope.
 pub(crate) fn to_subrepos_envelope(resp: RenderDiffSubreposOk) -> Envelope<RenderDiffData> {
     let notes = resp.notes.iter().map(to_note).collect();
     match resp.outcome {
-        RenderDiffSubreposOutcome::Rendered { artifact, reused } => Envelope {
+        RenderDiffSubreposOutcome::Rendered(placement) => Envelope {
             outcome: Outcome::Ok,
             notes,
-            data: Some(RenderDiffData {
-                artifact: artifact.to_string_lossy().into_owned(),
-                reused,
-            }),
+            data: Some(to_render_data(&placement)),
         },
         RenderDiffSubreposOutcome::Empty => Envelope {
             outcome: Outcome::Empty,

@@ -5,9 +5,11 @@
 //! already-discovered [`RepoRef`]s to the resident daemon over HTTP, which
 //! dispatches this application request directly.
 
-use std::path::PathBuf;
-
-use gtl_models::diffs::DiffKind;
+use gtl_models::{
+    artifacts::ArtifactDiffIdentity,
+    diffs::ExcludedExtensions,
+    paths::{ProjectName, RepositoryRoot},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -16,8 +18,8 @@ use crate::{
         batch::{RepoRef, dated_title, render_batch},
     },
     ports::{
-        ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsLoadError,
-        UserSettingsStore,
+        ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, PlacedArtifact,
+        UserSettingsLoadError, UserSettingsStore,
     },
     shared::notes::Note,
 };
@@ -26,7 +28,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RenderDiffSubrepos {
     /// Canonicalized scan root (used for `ArtifactMeta.repo_root`).
-    pub root: PathBuf,
+    pub root: RepositoryRoot,
     pub target: DiffTargetRequest,
     pub repos: Vec<RepoRef>,
 }
@@ -41,8 +43,8 @@ pub struct RenderDiffSubreposOk {
 /// What the batch render produced: a stored artifact, or every repo was empty.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderDiffSubreposOutcome {
-    /// An artifact landed at `artifact`; `reused` when an identical one already existed.
-    Rendered { artifact: PathBuf, reused: bool },
+    /// An artifact was created or reused by the store.
+    Rendered(PlacedArtifact),
     /// Every repo's view was empty (or errored); nothing was rendered.
     Empty,
 }
@@ -90,23 +92,22 @@ pub fn execute(
         });
     }
 
-    let title = dated_title(clock, "diff-artifact subrepos");
+    let generated_at = clock.now().map_err(anyhow::Error::from)?;
+    let title = dated_title(&generated_at, "diff-artifact subrepos");
     let render_options = settings.viewer_render_options();
-    let theme = settings.theme().map(|theme| theme.to_string());
-    let html =
-        renderer.build_tabbed_html(&title, &batch.views, render_options, theme.as_deref())?;
+    let theme = settings.theme();
+    let html = renderer.build_tabbed_html(&title, &batch.views, render_options, theme)?;
     let meta = ArtifactMeta {
         repo_root: root,
-        repo_name: "subrepos".to_string(),
-        kind: DiffKind::WorkTree,
-        commit_range: None,
+        repo_name: ProjectName::try_from("subrepos").map_err(anyhow::Error::from)?,
+        identity: ArtifactDiffIdentity::WorkTree,
         range_label: String::new(),
-        head_committed_at: String::new(),
-        generated_at: clock.now_iso(),
+        head_committed_at: None,
+        generated_at,
         title: title.clone(),
         render_options,
         theme,
-        excluded_extensions: Vec::new(),
+        excluded_extensions: ExcludedExtensions::default(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
@@ -120,12 +121,9 @@ pub fn execute(
             batch.skipped
         )));
     }
-    notes.push(Note::info(format!("wrote {}", placed.path.display())));
+    notes.push(Note::info(format!("wrote {}", placed.path().display())));
     Ok(RenderDiffSubreposOk {
-        outcome: RenderDiffSubreposOutcome::Rendered {
-            artifact: placed.path,
-            reused: placed.reused,
-        },
+        outcome: RenderDiffSubreposOutcome::Rendered(placed),
         notes,
     })
 }
@@ -140,11 +138,11 @@ mod tests {
         viewer::{RenderOptions, Theme},
     };
 
-    use super::{RenderDiffSubrepos, RenderDiffSubreposOutcome, RepoRef, execute};
+    use super::{RenderDiffSubrepos, RenderDiffSubreposOutcome, RepoRef};
     use crate::{
-        diffs::DiffTargetRequest,
+        diffs::{DiffTargetRequest, render_diff_subrepos},
         shared::notes::Note,
-        testing::{
+        utils::{
             FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
@@ -152,7 +150,7 @@ mod tests {
 
     fn req(repos: Vec<RepoRef>) -> RenderDiffSubrepos {
         RenderDiffSubrepos {
-            root: PathBuf::from("/scan-root"),
+            root: crate::utils::repository_root("/scan-root"),
             target: DiffTargetRequest::Unpushed,
             repos,
         }
@@ -168,26 +166,25 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         let repos = vec![RepoRef {
-            top: "/repo-a".into(),
-            label: "repo-a".into(),
+            top: crate::utils::repository_root("/repo-a"),
+            label: crate::utils::project_name("repo-a"),
         }];
 
-        let response = execute(
+        let response = render_diff_subrepos::execute(
             req(repos),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
         assert_eq!(
             response.outcome,
-            RenderDiffSubreposOutcome::Rendered {
-                artifact: PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"),
-                reused: false,
-            }
+            RenderDiffSubreposOutcome::Rendered(crate::ports::PlacedArtifact::Created {
+                path: crate::utils::absolute_file_path("/scan-root/.artifacts/gtl/artifact.html",),
+            })
         );
         assert_eq!(
             response.notes,
@@ -200,7 +197,10 @@ mod tests {
             .artifact(&PathBuf::from("/scan-root/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.title, "2026-07-02 diff-artifact subrepos");
-        assert_eq!(artifact.meta.repo_name, "subrepos");
+        assert_eq!(
+            artifact.meta.repo_name,
+            crate::utils::project_name("subrepos")
+        );
     }
 
     #[test]
@@ -213,17 +213,17 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
         let repos = vec![RepoRef {
-            top: "/repo-a".into(),
-            label: "repo-a".into(),
+            top: crate::utils::repository_root("/repo-a"),
+            label: crate::utils::project_name("repo-a"),
         }];
 
-        let response = execute(
+        let response = render_diff_subrepos::execute(
             req(repos),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
@@ -260,24 +260,24 @@ diff --git a/notes.md b/notes.md\n\
             Some(Theme::Noir),
             RenderOptions::DEFAULT,
             true,
-            DiffExclusions::new([("repo-a".to_string(), vec!["md"])], None),
+            DiffExclusions::new([(crate::utils::project_name("repo-a"), vec!["md"])], None),
         ));
         let store = InMemoryArtifactStore::default();
 
-        execute(
+        render_diff_subrepos::execute(
             RenderDiffSubrepos {
-                root: PathBuf::from("/scan-root"),
+                root: crate::utils::repository_root("/scan-root"),
                 target: DiffTargetRequest::Unpushed,
                 repos: vec![RepoRef {
-                    top: "/repo-a".into(),
-                    label: "repo-a".into(),
+                    top: crate::utils::repository_root("/repo-a"),
+                    label: crate::utils::project_name("repo-a"),
                 }],
             },
             &app_settings,
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 

@@ -106,7 +106,8 @@ mod tests {
     use super::*;
     use crate::{
         ports::GitRepositoryState,
-        testing::{FakeGitClient, FixedUserSettingsStore, viewer::recipe},
+        utils::{FakeGitClient, FixedUserSettingsStore, viewer::recipe},
+        viewer::prepare_recipe,
     };
 
     fn source() -> FakeGitClient {
@@ -120,7 +121,7 @@ mod tests {
 
     #[test]
     fn missing_live_source_stops_before_computation() {
-        let response = execute(
+        let response = prepare_recipe::execute(
             PrepareRecipe {
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
@@ -140,7 +141,7 @@ mod tests {
 
     #[test]
     fn ready_live_recipe_returns_a_publish_decision() {
-        let response = execute(
+        let response = prepare_recipe::execute(
             PrepareRecipe {
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },

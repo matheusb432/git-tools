@@ -1,4 +1,7 @@
-use gtl_parser::{DiffParser, DiffRowKind, SplitDiffRow, SplitDiffStream};
+use gtl_parser::{
+    CharacterCount, DiffParser, DiffRowKind, ParseOptions, SourceLineNumber, SplitDiffRow,
+    SplitDiffStream,
+};
 
 fn lines(raw: &[&str]) -> Vec<String> {
     raw.iter().map(ToString::to_string).collect()
@@ -15,8 +18,15 @@ fn downstream_consumer_can_parse_unified_and_split_rows() {
     ]));
 
     assert_eq!(parsed.rows()[3].kind(), DiffRowKind::Removed);
-    assert_eq!(parsed.rows()[3].old_line_number(), Some(4));
-    assert_eq!(parsed.rows()[4].new_line_number(), Some(8));
+    assert_eq!(
+        parsed.rows()[3].old_line_number(),
+        Some(SourceLineNumber::new(4))
+    );
+    assert_eq!(parsed.rows()[3].new_line_number(), None);
+    assert_eq!(
+        parsed.rows()[4].new_line_number(),
+        Some(SourceLineNumber::new(8))
+    );
     assert!(matches!(
         parsed.split_rows()[3],
         SplitDiffRow::Pair {
@@ -24,6 +34,47 @@ fn downstream_consumer_can_parse_unified_and_split_rows() {
             new: Some(_)
         }
     ));
+}
+
+#[test]
+fn downstream_consumer_can_read_parser_coordinate_values() {
+    let parsed = DiffParser::new().parse(&lines(&["@@ -42 +42 @@", " keep"]));
+
+    assert_eq!(
+        parsed.rows()[1]
+            .old_line_number()
+            .map(SourceLineNumber::into_inner),
+        Some(42)
+    );
+    assert_eq!(parsed.line_number_digits().get(), 2);
+}
+
+#[test]
+fn downstream_consumer_receives_typed_offsets_counts_and_digit_widths() {
+    let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3)))
+        .parse(&lines(&["@@ -9999 +10000 @@", "-abcd", "+abce"]));
+    let SplitDiffRow::Pair {
+        old: Some(old),
+        new: Some(new),
+    } = &parsed.split_rows()[1]
+    else {
+        panic!("changed rows should pair");
+    };
+
+    assert_eq!(old.line_number(), SourceLineNumber::new(9_999));
+    assert_eq!(new.line_number(), SourceLineNumber::new(10_000));
+    assert_eq!(
+        old.long_line_character_count(),
+        Some(CharacterCount::new(4))
+    );
+    assert_eq!(parsed.line_number_digits().get(), 5);
+
+    let parsed = DiffParser::new().parse(&lines(&["@@ -1 +1 @@", "-abcd", "+abce"]));
+    let SplitDiffRow::Pair { old: Some(old), .. } = &parsed.split_rows()[1] else {
+        panic!("short changed rows should pair");
+    };
+    assert_eq!(old.intraline_spans()[0].start().into_inner(), 3);
+    assert_eq!(old.intraline_spans()[0].end().into_inner(), 4);
 }
 
 #[test]

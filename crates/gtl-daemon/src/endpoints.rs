@@ -4,7 +4,7 @@ pub mod diffs;
 mod error;
 pub mod health;
 pub mod live_views;
-pub mod managed;
+pub mod projects;
 pub mod shutdown;
 pub mod tags;
 

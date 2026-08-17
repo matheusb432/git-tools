@@ -4,8 +4,7 @@ use std::process::Command;
 
 use anyhow::{Result, bail};
 
-use super::dioxus_web;
-use crate::project;
+use super::{dioxus_web, lock_web_assets, repository_root};
 
 /// Tracked generated paths paired with the command that regenerates them.
 const BUNDLES: &[(&str, &str)] = &[("crates/gtl-web/assets/tailwind.css", "just web styles")];
@@ -26,15 +25,15 @@ fn check_drift(bundles: &[(&str, &str)], is_clean: &dyn Fn(&str) -> bool) -> Res
 fn git_clean(path: &str) -> bool {
     Command::new("git")
         .args(["status", "--short", "--untracked-files=all", "--", path])
-        .current_dir(project::repository_root())
+        .current_dir(repository_root())
         .output()
         .is_ok_and(|output| output.status.success() && output.stdout.is_empty())
 }
 
 /// Rebuilds the web assets, then diffs the committed output.
 pub fn run() -> Result<()> {
-    let root = project::repository_root();
-    let _lock = project::lock_web_assets(&root)?;
+    let root = repository_root();
+    let _lock = lock_web_assets(&root)?;
     dioxus_web::build_release_unlocked(&root)?;
     check_drift(BUNDLES, &git_clean)
 }

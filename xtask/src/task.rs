@@ -1,15 +1,5 @@
-//! Labeled command steps and run orchestration.
-//!
-//! A [`Step`] is one child process to spawn; [`run_all`] executes a plan and bails on the first
-//! failure.
-
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
-
-use crate::process;
-
-/// One labeled child process: `program arguments…` with optional environment additions.
 pub(crate) struct Step {
     label: String,
     program: String,
@@ -35,7 +25,6 @@ impl Step {
         }
     }
 
-    /// Append more arguments (e.g. a variable file list) to an existing step.
     pub(crate) fn with_arguments(
         mut self,
         arguments_extra: impl IntoIterator<Item: Into<String>>,
@@ -45,7 +34,6 @@ impl Step {
         self
     }
 
-    /// Set an environment variable applied when the step spawns.
     pub(crate) fn with_environment(
         mut self,
         key: impl Into<String>,
@@ -55,7 +43,6 @@ impl Step {
         self
     }
 
-    /// Remove inherited environment variables before the step spawns.
     pub(crate) fn without_environment(
         mut self,
         names: impl IntoIterator<Item = impl Into<String>>,
@@ -93,12 +80,4 @@ impl Step {
     pub(crate) fn current_directory(&self) -> Option<&Path> {
         self.current_directory.as_deref()
     }
-}
-
-/// Run every step in order, bailing on the first failure.
-pub(crate) fn run_all(steps: &[Step]) -> Result<()> {
-    for step in steps {
-        process::run_step(step)?;
-    }
-    Ok(())
 }

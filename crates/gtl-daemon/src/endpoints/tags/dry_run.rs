@@ -4,6 +4,7 @@ use axum::{
     Json,
     extract::{State, rejection::JsonRejection},
 };
+use gtl_application::tags::dry_run_tag_bump;
 use gtl_wire::{
     envelope::Envelope,
     tags::{DryRunTagBumpRequest, TagBumpPreview},
@@ -17,11 +18,10 @@ pub async fn handle(
 ) -> Result<Json<Envelope<TagBumpPreview>>, EndpointError> {
     let Json(request) = request.map_err(|error| EndpointError::bad_request(error.body_text()))?;
     let request = super::to_dry_run_request(request)?;
-    let response = tokio::task::spawn_blocking(move || {
-        gtl_application::tags::dry_run_tag_bump::execute(request, &state.git)
-    })
-    .await
-    .map_err(EndpointError::task_join)?
-    .map_err(EndpointError::unexpected)?;
+    let response =
+        tokio::task::spawn_blocking(move || dry_run_tag_bump::execute(request, &state.git))
+            .await
+            .map_err(EndpointError::task_join)?
+            .map_err(EndpointError::unexpected)?;
     Ok(Json(super::to_dry_run_envelope(response)))
 }

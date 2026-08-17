@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_models::viewer::RenderHistoryId;
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
     GetViewerHistoryCopy, ListViewerHistory, OpenViewerHistory, ViewerHistoryCursor,
@@ -28,22 +29,32 @@ enum HistoryLoad {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct HistoryOpenTicket {
     request: OpenViewerHistory,
-    generation: u64,
+    generation: HistoryOpenGeneration,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct HistoryOpenGeneration(u64);
+
+impl HistoryOpenGeneration {
+    #[must_use]
+    const fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct HistoryOpenState {
-    generation: u64,
+    generation: HistoryOpenGeneration,
     ticket: Option<HistoryOpenTicket>,
 }
 
 impl HistoryOpenState {
-    fn begin(&mut self, render_id: i64) -> Option<HistoryOpenTicket> {
+    fn begin(&mut self, render_id: RenderHistoryId) -> Option<HistoryOpenTicket> {
         if self.ticket.is_some() {
             return None;
         }
 
-        self.generation = self.generation.wrapping_add(1);
+        self.generation = self.generation.next();
         let ticket = HistoryOpenTicket {
             request: OpenViewerHistory { render_id },
             generation: self.generation,
@@ -68,8 +79,18 @@ impl HistoryOpenState {
         self.ticket.is_some()
     }
 
-    const fn is_opening(self, render_id: i64) -> bool {
+    fn is_opening(self, render_id: RenderHistoryId) -> bool {
         matches!(self.ticket, Some(ticket) if ticket.request.render_id == render_id)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct HistoryQueryGeneration(u64);
+
+impl HistoryQueryGeneration {
+    #[must_use]
+    const fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
     }
 }
 
@@ -79,11 +100,11 @@ pub(crate) fn DiffHistoryView() -> Element {
     let navigator = use_navigator();
     let mut cursor = use_signal(|| ViewerHistoryCursor::Newest);
     let mut reload = use_signal(|| 0_u64);
-    let mut query_generation = use_signal(|| 0_u64);
+    let mut query_generation = use_signal(HistoryQueryGeneration::default);
     let mut history = use_signal(|| HistoryLoad::Loading);
     let mut action_error = use_signal(|| None::<ClientApiError>);
     let mut open_state = use_signal(HistoryOpenState::default);
-    let mut copied_id = use_signal(|| None::<i64>);
+    let mut copied_id = use_signal(|| None::<RenderHistoryId>);
 
     use_effect(move || {
         browser::focus_element("history-heading".into());
@@ -93,7 +114,7 @@ pub(crate) fn DiffHistoryView() -> Element {
         let _reload = reload();
         let generation = {
             let mut generation = query_generation.write();
-            *generation += 1;
+            *generation = generation.next();
             *generation
         };
         history.set(HistoryLoad::Loading);
@@ -187,7 +208,7 @@ pub(crate) fn DiffHistoryView() -> Element {
                                         opening: open_state().is_opening(entry.id),
                                         open_disabled: open_state().is_pending(),
                                         copied: copied_id() == Some(entry.id),
-                                        onopen: move |render_id: i64| {
+                                        onopen: move |render_id: RenderHistoryId| {
                                             let Some(open_ticket) = open_state.write().begin(render_id) else {
                                                 return;
                                             };
@@ -207,7 +228,7 @@ pub(crate) fn DiffHistoryView() -> Element {
                                                 }
                                             });
                                         },
-                                        oncopy: move |render_id: i64| {
+                                        oncopy: move |render_id: RenderHistoryId| {
                                             action_error.set(None);
                                             spawn(async move {
                                                 match DiffHistoryApi::get_history_copy(GetViewerHistoryCopy { render_id })
@@ -265,8 +286,8 @@ fn HistoryRow(
     opening: bool,
     open_disabled: bool,
     copied: bool,
-    onopen: EventHandler<i64>,
-    oncopy: EventHandler<i64>,
+    onopen: EventHandler<RenderHistoryId>,
+    oncopy: EventHandler<RenderHistoryId>,
 ) -> Element {
     rsx! {
         article { class: "grid min-w-0 gap-3 rounded-sm border border-line bg-surface px-3 py-3 hover:border-line-2 sm:grid-cols-[minmax(0,1.4fr)_minmax(8rem,0.8fr)_auto] sm:items-center",
@@ -283,7 +304,7 @@ fn HistoryRow(
                 p { class: "truncate", "{entry.repository_name}" }
                 time {
                     class: "mt-1 block truncate font-mono tabular-nums text-ink-3",
-                    datetime: entry.rendered_at.clone(),
+                    datetime: entry.rendered_at.to_string(),
                     "{entry.rendered_at}"
                 }
             }
@@ -324,12 +345,13 @@ fn HistoryFooter(
     page: ViewerHistoryPage,
     onnavigate: EventHandler<ViewerHistoryCursor>,
 ) -> Element {
+    let Some(position) = page.position.page() else {
+        return rsx! {};
+    };
     let navigation = history_navigation(&page);
-    let progress = page
-        .page_number
-        .saturating_mul(100)
-        .checked_div(page.page_count)
-        .unwrap_or(0);
+    let page_number = u32::from(position.number());
+    let page_count = u32::from(position.count());
+    let progress = position.progress_percent();
 
     rsx! {
         footer { class: "relative flex min-h-14 items-center justify-between gap-3 border-t border-line bg-surface px-3 sm:px-4",
@@ -338,8 +360,8 @@ fn HistoryFooter(
                 role: "progressbar",
                 aria_label: "History page position",
                 aria_valuemin: "1",
-                aria_valuemax: page.page_count.to_string(),
-                aria_valuenow: page.page_number.to_string(),
+                aria_valuemax: page_count.to_string(),
+                aria_valuenow: page_number.to_string(),
                 span { class: "block h-full bg-acc", style: "width:{progress}%" }
             }
             p { class: "hidden font-mono text-xs tabular-nums text-ink-3 sm:block",
@@ -362,8 +384,8 @@ fn HistoryFooter(
                 }
                 output {
                     class: "min-w-20 px-2 text-center font-mono text-xs tabular-nums text-ink",
-                    aria_label: "Page {page.page_number} of {page.page_count}",
-                    "{page.page_number:02} / {page.page_count:02}"
+                    aria_label: "Page {page_number} of {page_count}",
+                    "{page_number:02} / {page_count:02}"
                 }
                 HistoryPageButton {
                     label: "Next page",
@@ -433,28 +455,34 @@ fn HistoryPageButton(
 mod tests {
     use gtl_wire::viewer::OpenViewerHistory;
 
-    use super::HistoryOpenState;
+    use super::{HistoryOpenGeneration, HistoryOpenState};
+    use crate::test_support::{TestResult, render_history_id};
 
     #[test]
-    fn history_open_is_page_wide_and_rejects_stale_completion() {
+    fn history_open_is_page_wide_and_rejects_stale_completion() -> TestResult {
         let mut state = HistoryOpenState::default();
         let first = super::HistoryOpenTicket {
-            request: OpenViewerHistory { render_id: 9 },
-            generation: 1,
+            request: OpenViewerHistory {
+                render_id: render_history_id(9)?,
+            },
+            generation: HistoryOpenGeneration(1),
         };
-        assert_eq!(state.begin(9), Some(first));
+        assert_eq!(state.begin(render_history_id(9)?), Some(first));
 
         assert!(state.is_pending());
-        assert!(state.is_opening(9));
-        assert_eq!(state.begin(10), None);
+        assert!(state.is_opening(render_history_id(9)?));
+        assert_eq!(state.begin(render_history_id(10)?), None);
 
         assert!(state.finish(first));
         let second = super::HistoryOpenTicket {
-            request: OpenViewerHistory { render_id: 10 },
-            generation: 2,
+            request: OpenViewerHistory {
+                render_id: render_history_id(10)?,
+            },
+            generation: HistoryOpenGeneration(2),
         };
-        assert_eq!(state.begin(10), Some(second));
+        assert_eq!(state.begin(render_history_id(10)?), Some(second));
         assert!(!state.accepts(first));
         assert!(state.accepts(second));
+        Ok(())
     }
 }

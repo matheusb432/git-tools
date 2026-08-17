@@ -1,18 +1,19 @@
 //! Shared symbolic-range resolution for recipe-building interactors.
 
-use std::path::Path;
-
+use gtl_models::{
+    git::GitRevision,
+    paths::{ProjectName, RepositoryRoot},
+};
 use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
 use crate::{ports::GitClient, shared::git_range_pinning};
 
 pub(crate) fn build_resolved(
-    repo_top: impl Into<std::path::PathBuf>,
+    repo_top: RepositoryRoot,
     operation: RecipeOp,
-    name: Option<String>,
+    name: Option<ProjectName>,
     git: &impl GitClient,
 ) -> Recipe {
-    let repo_top = repo_top.into();
     Recipe {
         op: pin_operation(&repo_top, operation, git),
         source: RecipeSource::LocalRepo(repo_top),
@@ -20,13 +21,13 @@ pub(crate) fn build_resolved(
     }
 }
 
-fn pin_operation(repo_top: &Path, operation: RecipeOp, git: &impl GitClient) -> RecipeOp {
+fn pin_operation(repo_top: &RepositoryRoot, operation: RecipeOp, git: &impl GitClient) -> RecipeOp {
     match operation {
         RecipeOp::Diff { target } => RecipeOp::Diff {
             target: pin_target(repo_top, target, git),
         },
         RecipeOp::MergeDiff { base, pinned: None } => RecipeOp::MergeDiff {
-            pinned: git_range_pinning::resolve_merge_range(repo_top, base.as_deref(), git),
+            pinned: git_range_pinning::resolve_merge_range(repo_top, base.as_ref(), git),
             base,
         },
         operation @ RecipeOp::MergeDiff {
@@ -35,10 +36,19 @@ fn pin_operation(repo_top: &Path, operation: RecipeOp, git: &impl GitClient) -> 
     }
 }
 
-fn pin_target(repo_top: &Path, target: RecipeTarget, git: &impl GitClient) -> RecipeTarget {
+fn pin_target(
+    repo_top: &RepositoryRoot,
+    target: RecipeTarget,
+    git: &impl GitClient,
+) -> RecipeTarget {
     match target {
         RecipeTarget::Unpushed { pinned: None } => RecipeTarget::Unpushed {
-            pinned: git_range_pinning::resolve_range(repo_top, "@{u}", "HEAD", git),
+            pinned: git_range_pinning::resolve_range(
+                repo_top,
+                &GitRevision::upstream(),
+                &GitRevision::head(),
+                git,
+            ),
         },
         RecipeTarget::Last {
             count,
@@ -47,8 +57,8 @@ fn pin_target(repo_top: &Path, target: RecipeTarget, git: &impl GitClient) -> Re
             count,
             pinned: git_range_pinning::resolve_range(
                 repo_top,
-                &format!("HEAD~{count}"),
-                "HEAD",
+                &GitRevision::head_ancestor(count),
+                &GitRevision::head(),
                 git,
             ),
         },

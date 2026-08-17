@@ -2,9 +2,10 @@
 
 use std::fmt::Write as _;
 
+use gtl_models::{git::BranchName, paths::ProjectName};
 use gtl_wire::{
     envelope::{Envelope, NoteLevel, Outcome},
-    managed::{
+    projects::{
         PullAllRequest, PushAllRequest, RepoSyncResultDto, RepoSyncStatusDto, SyncData, SyncExitDto,
     },
 };
@@ -46,7 +47,7 @@ enum PushPullFormatError {
         "repository `{repo}` returned pull-only status `{status}` while formatting push results"
     )]
     PullOnlyStatus {
-        repo: String,
+        repo: ProjectName,
         status: RepoSyncStatusDto,
     },
 }
@@ -54,8 +55,8 @@ enum PushPullFormatError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PushPullResult {
-    pub name: String,
-    pub branch: String,
+    pub name: ProjectName,
+    pub branch: Option<BranchName>,
     pub status: RepoSyncStatusDto,
     pub detail: String,
 }
@@ -189,10 +190,11 @@ fn format_push_pull(
         "REPO", "BRANCH", "STATUS"
     );
     for result in results {
+        let branch = result.branch.as_ref().map_or("-", AsRef::as_ref);
         let _ = writeln!(
             out,
             "{:<30} {:<18} {:<12} {}",
-            result.name, result.branch, result.status, result.detail
+            result.name, branch, result.status, result.detail
         );
     }
     if let Some(outcomes) = push_outcomes {

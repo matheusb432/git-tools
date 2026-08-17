@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_parser::LineNumberDigitWidth;
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
 use crate::{
@@ -38,12 +39,7 @@ fn DiffFileRows(
 ) -> Element {
     let density_label = density.as_str();
     let layout_label = layout.as_str();
-    let style = (layout == ViewerDiffLayout::Unified).then(|| {
-        format!(
-            "--unified-line-number-width:calc({}ch + 8px)",
-            file.line_number_digits
-        )
-    });
+    let style = unified_line_number_width_style(layout, file.line_number_digits);
 
     rsx! {
         div {
@@ -68,6 +64,14 @@ fn DiffFileRows(
             DiffFileLoadState { state: file.state, onretry }
         }
     }
+}
+
+fn unified_line_number_width_style(
+    layout: ViewerDiffLayout,
+    line_number_digit_width: LineNumberDigitWidth,
+) -> Option<String> {
+    (layout == ViewerDiffLayout::Unified)
+        .then(|| format!("--unified-line-number-width:calc({line_number_digit_width}ch + 8px)"))
 }
 
 #[component]
@@ -109,5 +113,28 @@ fn DiffFileLoadError(message: &'static str, onretry: EventHandler<()>) -> Elemen
                 "Retry"
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gtl_parser::DiffParser;
+
+    use super::*;
+
+    #[test]
+    fn digit_width_sizes_only_the_unified_line_number_gutter() {
+        let width = DiffParser::new()
+            .parse(&["@@ -9999 +10000 @@".to_owned(), " keep".to_owned()])
+            .line_number_digits();
+
+        assert_eq!(
+            unified_line_number_width_style(ViewerDiffLayout::Unified, width),
+            Some("--unified-line-number-width:calc(5ch + 8px)".to_owned())
+        );
+        assert_eq!(
+            unified_line_number_width_style(ViewerDiffLayout::Split, width),
+            None
+        );
     }
 }

@@ -10,7 +10,7 @@ use gtl_application::{
         prepare_recipe::{self, PrepareRecipe, PrepareRecipeError, PrepareRecipeOk},
     },
 };
-use gtl_models::diffs::CommitId;
+use gtl_models::{diffs::CommitId, recipes::RecipeBatchId};
 use gtl_wire::recipes::Recipe;
 
 use crate::{
@@ -53,7 +53,7 @@ pub(crate) struct ReservedRecipeComputation {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ReservedCommitPatchComputation {
-    pub(crate) repo_root: std::path::PathBuf,
+    pub(crate) repo_root: gtl_models::paths::RepositoryRoot,
     pub(crate) commit: gtl_models::diffs::Commit,
     pub(crate) ticket: CommitPatchTicket,
 }
@@ -77,7 +77,7 @@ impl ReservedRecipeComputation {
     fn reserve_open(
         session: &Mutex<ViewerSession>,
         recipe: &Recipe,
-        batch_id: String,
+        batch_id: RecipeBatchId,
         kind: ViewerTabKind,
     ) -> Result<(ViewerTabId, Self), RecipeError> {
         let mut session = session
@@ -275,7 +275,7 @@ impl ViewerApp {
     pub(crate) fn open_recipe(
         &self,
         recipe: &Recipe,
-        batch_id: String,
+        batch_id: RecipeBatchId,
         kind: ViewerTabKind,
     ) -> Result<ViewerTabId, RecipeError> {
         let (tab_id, reserved) =

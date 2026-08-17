@@ -13,7 +13,10 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use gtl_daemon::{lifecycle::ExeIdentity, state::DaemonState};
+use gtl_daemon::state::DaemonState;
+use gtl_wire::daemon::{
+    DaemonProcessId, ExeIdentity, ExecutableByteLength, ExecutableModifiedUnixMillis,
+};
 use http_body_util::BodyExt as _;
 use serde_json::{Value, json};
 use tempfile::TempDir;
@@ -92,12 +95,12 @@ impl Fixture {
         let app_state =
             gtl_infra::app_state::SqliteAppState::open(&data_root).expect("open app state");
         let app = gtl_daemon::state::router(DaemonState::new(
-            ExeIdentity {
-                exe_len: 4242,
-                exe_modified_ms: 111,
-            },
+            ExeIdentity::new(
+                ExecutableByteLength::new(4242),
+                ExecutableModifiedUnixMillis::new(111),
+            ),
             "9.9.9",
-            4242,
+            DaemonProcessId::new(4242.try_into().expect("positive fixture process ID")),
             shutdown_sender,
             app_state.clone(),
             gtl_infra::user_config::TomlSettingsStore::new(None),
@@ -354,7 +357,7 @@ async fn live_view_save_ignores_legacy_data_root_and_uses_daemon_store() {
     assert_eq!(json["outcome"], "ok");
     assert_eq!(json["data"]["source_kind"], "LocalRepo");
     assert_eq!(json["data"]["display_name"], "repo");
-    assert_eq!(json["data"]["already_saved"], false);
+    assert_eq!(json["data"]["disposition"], "created");
 
     let connection = rusqlite::Connection::open(fixture.data_root.join("gtl.db"))
         .expect("open daemon app database");

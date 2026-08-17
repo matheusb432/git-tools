@@ -1,5 +1,3 @@
-//! Repository-local dependency, hook, build, and installation setup.
-
 use std::{
     env, fs,
     io::Write,
@@ -9,27 +7,13 @@ use std::{
 use anyhow::{Context, Result};
 
 use super::install;
-use crate::{
-    cli::InstallTarget,
-    process::{self, Status},
-    verb::Verb,
-};
+use crate::{cli::InstallTarget, process, task::Step};
 
 pub(crate) fn run() -> Result<()> {
-    configure_git_hooks()?;
-    process::run("build", "just", &["build"])?;
+    process::run_step(&Step::new("build", "just", ["build"]))?;
     install::run_install(InstallTarget::Both)?;
     ensure_path_on_zshrc()?;
-    process::result(Verb::SETUP, Status::Pass);
     Ok(())
-}
-
-fn configure_git_hooks() -> Result<()> {
-    process::run(
-        "git-hooks",
-        "git",
-        &["config", "core.hooksPath", ".githooks"],
-    )
 }
 
 fn needs_path_entry(path_var: &str, binary_directory: &Path) -> bool {

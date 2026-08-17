@@ -40,14 +40,11 @@ pub(crate) fn to_dry_run_envelope(
     }
 }
 
-pub(crate) fn to_bump_request(
-    dto: BumpTagRequest,
-) -> Result<BumpTag, crate::endpoints::EndpointError> {
+pub(crate) fn to_bump_request(dto: BumpTagRequest) -> BumpTag {
     let preview = dto.preview;
-    let repo_path = absolute_path(preview.repo_path)?;
-    Ok(BumpTag {
+    BumpTag {
         preview: TagBumpPreview {
-            repo_path,
+            repo_path: preview.repo_path,
             branch: preview.branch,
             target_id: preview.target_id,
             level: from_level_dto(preview.level),
@@ -56,27 +53,28 @@ pub(crate) fn to_bump_request(
             message: preview.message,
             push: preview.push,
         },
-    })
+    }
 }
 
 pub(crate) fn to_bump_envelope(response: BumpTagOk) -> Envelope<BumpTagData> {
     match response {
         BumpTagOk::Applied { tag, outcome } => {
-            let status = to_status_dto(outcome.status);
+            let status = to_status_dto(outcome.status());
+            let detail = outcome.detail().to_owned();
             let data = BumpTagData {
                 tag,
                 status,
-                detail: outcome.detail.clone(),
+                detail: detail.clone(),
             };
-            if outcome.status == TagActionStatus::Failed {
-                error_envelope(outcome.detail, Some(data))
+            if outcome.is_failed() {
+                error_envelope(detail, Some(data))
             } else {
                 Envelope {
                     outcome: Outcome::Ok,
-                    notes: (!outcome.detail.is_empty())
+                    notes: (!detail.is_empty())
                         .then_some(Note {
                             level: NoteLevel::Info,
-                            text: outcome.detail,
+                            text: detail,
                         })
                         .into_iter()
                         .collect(),
@@ -101,7 +99,7 @@ fn absolute_path(value: String) -> Result<PathBuf, crate::endpoints::EndpointErr
 
 fn to_preview_dto(preview: TagBumpPreview) -> gtl_wire::tags::TagBumpPreview {
     gtl_wire::tags::TagBumpPreview {
-        repo_path: preview.repo_path.to_string_lossy().into_owned(),
+        repo_path: preview.repo_path,
         branch: preview.branch,
         target_id: preview.target_id,
         level: to_level_dto(preview.level),

@@ -20,14 +20,12 @@ clap-cargo.workspace = true
 gtl-wire.workspace = true
 gtl-models.workspace = true
 gtl-infra.workspace = true
-jiff.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 tokio = { workspace = true, features = ["rt"] }
-uuid.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true

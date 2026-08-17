@@ -1,12 +1,14 @@
 //! Revalidates and applies one exact tag-bump proposal.
 
+use gtl_models::git::{GitRevision, TagName};
+
 use super::{
-    DryRunTagBump, DryRunTagBumpOk, TagBumpPreview,
-    add::{self, AddTag},
+    DryRunTagBumpOk, TagBumpPreview,
+    add_tag::{self, AddTag},
     dry_run_tag_bump,
     git_command_error::GitCommandError,
-    outcome::{TagActionOutcome, TagActionStatus, TagOperationProgress},
-    push,
+    outcome::{TagActionOutcome, TagOperationProgress},
+    push_tags,
 };
 use crate::ports::GitClient;
 
@@ -20,7 +22,7 @@ pub struct BumpTag {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BumpTagOk {
     Applied {
-        tag: String,
+        tag: TagName,
         outcome: TagActionOutcome,
     },
     Rejected {
@@ -44,9 +46,9 @@ pub enum BumpTagError {
 #[cqrsy::command]
 pub fn execute(command: BumpTag, git: &impl GitClient) -> Result<BumpTagOk, BumpTagError> {
     let BumpTag { preview } = command;
-    let current = match dry_run_tag_bump::execute(
-        DryRunTagBump {
-            repo_path: preview.repo_path.clone(),
+    let current = match dry_run_tag_bump::execute_resolved(
+        dry_run_tag_bump::DryRunResolvedTagBump {
+            repo_root: preview.repo_path.clone(),
             level: preview.level,
             message: preview.message.clone(),
             push: preview.push,
@@ -67,19 +69,24 @@ pub fn execute(command: BumpTag, git: &impl GitClient) -> Result<BumpTagOk, Bump
     }
 
     let tag = preview.next_tag.clone();
-    let created = add::create_at(
+    let created = add_tag::create_at(
         AddTag {
             repo_path: preview.repo_path.clone(),
             tag: tag.clone(),
             message: preview.message,
         },
-        preview.target_id.as_ref(),
+        &GitRevision::from(&preview.target_id),
         git,
     );
     let outcome = match created {
-        Ok(outcome) if outcome.status == TagActionStatus::Failed => outcome,
+        Ok(outcome) if outcome.is_failed() => outcome,
         Ok(outcome) if preview.push => {
-            match push::push_named(git, &preview.repo_path, std::slice::from_ref(&tag), outcome) {
+            match push_tags::push_named(
+                git,
+                &preview.repo_path,
+                std::slice::from_ref(&tag),
+                &outcome,
+            ) {
                 Ok(outcome) => outcome,
                 Err(error) => return finish_git_error(error, tag),
             }
@@ -91,11 +98,11 @@ pub fn execute(command: BumpTag, git: &impl GitClient) -> Result<BumpTagOk, Bump
     Ok(BumpTagOk::Applied { tag, outcome })
 }
 
-fn finish_git_error(error: GitCommandError, tag: String) -> Result<BumpTagOk, BumpTagError> {
+fn finish_git_error(error: GitCommandError, tag: TagName) -> Result<BumpTagOk, BumpTagError> {
     match error {
         GitCommandError::Rejected { detail, progress } => Ok(BumpTagOk::Applied {
             tag,
-            outcome: TagActionOutcome::failed(detail).with_progress(*progress),
+            outcome: TagActionOutcome::failed_with_progress(detail, *progress),
         }),
         GitCommandError::Transport { source, progress } => Err(BumpTagError::Unexpected {
             progress: *progress,

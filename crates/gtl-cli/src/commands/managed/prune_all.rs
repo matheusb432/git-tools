@@ -2,9 +2,13 @@
 
 use std::fmt::Write as _;
 
-use gtl_application::managed::prune_all::{self, PruneAction, PruneExit};
+use gtl_application::projects::prune_branches::{self, PruneAction, PruneExit};
 use gtl_infra::git_client::HybridGitClient;
-use gtl_models::diffs::CommitId;
+use gtl_models::{
+    diffs::CommitId,
+    git::{BranchName, GitEffectMode},
+    paths::ProjectName,
+};
 use serde::Serialize;
 
 use super::{ManagedExit, ManagedOptions, ManagedRun};
@@ -12,33 +16,37 @@ use super::{ManagedExit, ManagedOptions, ManagedRun};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PrunedBranch {
-    pub name: String,
+    pub name: BranchName,
     pub id: CommitId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct PruneRepoResult {
-    pub name: String,
+    pub name: ProjectName,
     pub present: bool,
     /// Branches deleted (or, in dry mode, that would be deleted).
     pub deleted: Vec<PrunedBranch>,
     /// Names of branches that failed to delete.
-    pub failed: Vec<String>,
+    pub failed: Vec<BranchName>,
     pub detail: String,
 }
 
 /// Fan out `prune` over every managed repo. With `options.dry` (set when `--all` is used
 /// without `-y`) each repo only reports what *would* be deleted; otherwise branches are
 /// deleted. Any non-clean repo (a delete failure or a refusal) maps to [`ManagedExit::Warn`].
-pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRepoResult> {
+pub fn run_prune_all(onto: &BranchName, options: &ManagedOptions) -> ManagedRun<PruneRepoResult> {
     match super::project_catalog::load_projects() {
         Ok(repos) => {
-            let execution = prune_all::execute(
-                prune_all::PruneAll {
+            let execution = prune_branches::execute(
+                prune_branches::PruneBranches {
                     repos,
-                    onto: onto.into(),
-                    dry: options.dry,
+                    onto: onto.clone(),
+                    mode: if options.dry {
+                        GitEffectMode::DryRun
+                    } else {
+                        GitEffectMode::Apply
+                    },
                 },
                 &HybridGitClient,
             );
@@ -54,10 +62,10 @@ pub fn run_prune_all(onto: &str, options: &ManagedOptions) -> ManagedRun<PruneRe
 }
 
 fn project_prune_execution(
-    onto: &str,
+    onto: &BranchName,
     dry: bool,
     json: bool,
-    execution: Result<prune_all::PruneAllOk, prune_all::PruneAllError>,
+    execution: Result<prune_branches::PruneBranchesOk, prune_branches::PruneBranchesError>,
 ) -> ManagedRun<PruneRepoResult> {
     match execution {
         Ok(execution) => {
@@ -77,7 +85,7 @@ fn project_prune_execution(
         Err(error) => {
             let stderr = format!("{error:#}");
             let results = match error {
-                prune_all::PruneAllError::Transport {
+                prune_branches::PruneBranchesError::Transport {
                     mut completed_results,
                     failed_result,
                     ..
@@ -100,14 +108,14 @@ fn project_prune_execution(
     }
 }
 
-fn project_repo_results(results: Vec<prune_all::PruneRepoResult>) -> Vec<PruneRepoResult> {
+fn project_repo_results(results: Vec<prune_branches::PruneRepoResult>) -> Vec<PruneRepoResult> {
     results
         .into_iter()
         .map(|result| project_repo_result(result.name, result.action))
         .collect()
 }
 
-fn project_repo_result(name: String, action: PruneAction) -> PruneRepoResult {
+fn project_repo_result(name: ProjectName, action: PruneAction) -> PruneRepoResult {
     match action {
         PruneAction::Absent => PruneRepoResult {
             name,
@@ -157,7 +165,7 @@ fn project_repo_result(name: String, action: PruneAction) -> PruneRepoResult {
     }
 }
 
-fn format_prune(onto: &str, dry: bool, json: bool, results: &[PruneRepoResult]) -> String {
+fn format_prune(onto: &BranchName, dry: bool, json: bool, results: &[PruneRepoResult]) -> String {
     if json {
         return serde_json::to_string_pretty(results).unwrap_or_else(|_| "[]".to_string());
     }
@@ -195,37 +203,37 @@ fn format_prune(onto: &str, dry: bool, json: bool, results: &[PruneRepoResult]) 
 #[cfg(test)]
 mod tests {
     use gtl_application::{
-        branches::{
+        projects::prune_branches::{self, PruneAction, PruneBranchesOk, PruneExit},
+        repositories::{
             apply_prune::{ApplyPruneOk, PruneFailure, PruneStatus},
             plan_prune::PruneBranch,
         },
-        managed::prune_all::{self, PruneAction, PruneAllOk, PruneExit},
     };
 
     use super::*;
-    use crate::testing::commit_id;
+    use crate::testing::{branch_name, commit_id, project_name};
 
     #[test]
     fn application_results_project_to_the_existing_json_shape() {
-        let execution = PruneAllOk {
+        let execution = PruneBranchesOk {
             exit: PruneExit::Warn,
-            results: vec![prune_all::PruneRepoResult {
-                name: "api".into(),
+            results: vec![prune_branches::PruneRepoResult {
+                name: project_name("api"),
                 action: PruneAction::Applied(ApplyPruneOk {
                     status: PruneStatus::Partial,
                     deleted: vec![PruneBranch {
-                        name: "feature/done".into(),
+                        name: branch_name("feature/done"),
                         id: commit_id("a"),
                     }],
                     failed: vec![PruneFailure {
-                        name: "feature/blocked".into(),
+                        name: branch_name("feature/blocked"),
                         reason: "branch is checked out".into(),
                     }],
                 }),
             }],
         };
 
-        let run = project_prune_execution("main", false, true, Ok(execution));
+        let run = project_prune_execution(&branch_name("main"), false, true, Ok(execution));
 
         assert_eq!(run.exit, ManagedExit::Warn);
         assert_eq!(
@@ -253,36 +261,36 @@ mod tests {
 
     #[test]
     fn transport_failure_projection_preserves_completed_stdout_and_stderr() {
-        let completed_result = prune_all::PruneRepoResult {
-            name: "api".into(),
+        let completed_result = prune_branches::PruneRepoResult {
+            name: project_name("api"),
             action: PruneAction::Applied(ApplyPruneOk {
                 status: PruneStatus::Ok,
                 deleted: vec![PruneBranch {
-                    name: "feature/api".into(),
+                    name: branch_name("feature/api"),
                     id: commit_id("a"),
                 }],
                 failed: Vec::new(),
             }),
         };
-        let failed_result = prune_all::PruneRepoResult {
-            name: "web".into(),
+        let failed_result = prune_branches::PruneRepoResult {
+            name: project_name("web"),
             action: PruneAction::Applied(ApplyPruneOk {
                 status: PruneStatus::Ok,
                 deleted: vec![PruneBranch {
-                    name: "feature/web".into(),
+                    name: branch_name("feature/web"),
                     id: commit_id("b"),
                 }],
                 failed: Vec::new(),
             }),
         };
-        let execution = Err(prune_all::PruneAllError::Transport {
-            failed_repo: "web".into(),
+        let execution = Err(prune_branches::PruneBranchesError::Transport {
+            failed_repo: project_name("web"),
             completed_results: vec![completed_result],
             failed_result: Some(Box::new(failed_result)),
             source: anyhow::anyhow!("git transport unavailable"),
         });
 
-        let run = project_prune_execution("main", false, false, execution);
+        let run = project_prune_execution(&branch_name("main"), false, false, execution);
 
         assert_eq!(run.exit, ManagedExit::Warn);
         assert_eq!(run.results.len(), 2);
@@ -299,7 +307,7 @@ mod tests {
         );
         assert_eq!(
             run.stderr,
-            "managed prune failed for 'web': git transport unavailable"
+            "project prune failed for 'web': git transport unavailable"
         );
     }
 }

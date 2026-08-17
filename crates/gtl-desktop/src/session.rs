@@ -1,12 +1,12 @@
 mod cache;
 mod pending;
 
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 #[cfg(feature = "benchmark-support")]
-pub use cache::{CacheDisposition, CachedView, WeightedViewCache};
+pub use cache::{CacheDisposition, CachedView, ViewCacheWeight, WeightedViewCache};
 #[cfg(not(feature = "benchmark-support"))]
-pub(crate) use cache::{CachedView, WeightedViewCache};
+pub(crate) use cache::{CachedView, ViewCacheWeight, WeightedViewCache};
 use gtl_application::{
     diffs::View,
     viewer::initial_recipe_label::{self, InitialRecipeLabel},
@@ -14,7 +14,11 @@ use gtl_application::{
 use gtl_models::{
     diffs::{Commit, CommitId},
     live_views::LiveSource,
-    viewer::{ViewerTab, ViewerTabId, ViewerTabKind, ViewerTabState},
+    recipes::RecipeBatchId,
+    viewer::{
+        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerShellRevision, ViewerTab,
+        ViewerTabId, ViewerTabKind, ViewerTabState,
+    },
 };
 use gtl_wire::recipes::{Recipe, RecipeSource};
 pub(crate) use pending::{PendingRecipes, PendingRecipesError};
@@ -26,21 +30,21 @@ pub(crate) const RENDER_PENDING_REASON: &str = "render pending";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ComputeTicket {
     pub(crate) tab_id: ViewerTabId,
-    pub(crate) generation: u64,
+    pub(crate) generation: ViewerRangeGeneration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CommitPatchTicket {
     pub(crate) tab_id: ViewerTabId,
-    pub(crate) range_generation: u64,
-    pub(crate) selection_generation: u64,
+    pub(crate) range_generation: ViewerRangeGeneration,
+    pub(crate) selection_generation: ViewerSelectionGeneration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ActiveContentIdentity {
     tab_id: ViewerTabId,
-    range_generation: u64,
-    selection_generation: u64,
+    range_generation: ViewerRangeGeneration,
+    selection_generation: ViewerSelectionGeneration,
 }
 
 impl ActiveContentIdentity {
@@ -48,11 +52,11 @@ impl ActiveContentIdentity {
         self.tab_id
     }
 
-    pub(crate) const fn range_generation(self) -> u64 {
+    pub(crate) const fn range_generation(self) -> ViewerRangeGeneration {
         self.range_generation
     }
 
-    pub(crate) const fn selection_generation(self) -> u64 {
+    pub(crate) const fn selection_generation(self) -> ViewerSelectionGeneration {
         self.selection_generation
     }
 }
@@ -127,9 +131,9 @@ pub(crate) enum CloseOutcome {
 pub(crate) struct SessionTab {
     pub(crate) tab: ViewerTab,
     pub(crate) recipe: Recipe,
-    pub(crate) batch_id: String,
-    generation: u64,
-    selection_generation: u64,
+    pub(crate) batch_id: RecipeBatchId,
+    generation: ViewerRangeGeneration,
+    selection_generation: ViewerSelectionGeneration,
     selection: CommitSelection,
 }
 
@@ -139,24 +143,24 @@ pub(crate) struct ViewerSession {
     cache: WeightedViewCache,
     active: Option<ViewerTabId>,
     next_id: Option<u64>,
-    revision: u64,
+    revision: ViewerShellRevision,
 }
 
 impl ViewerSession {
-    pub(crate) fn new(max_cache_weight: usize) -> Self {
+    pub(crate) fn new(max_cache_weight: ViewCacheWeight) -> Self {
         Self {
             tabs: Vec::new(),
             cache: WeightedViewCache::new(max_cache_weight),
             active: None,
             next_id: Some(1),
-            revision: 0,
+            revision: ViewerShellRevision::default(),
         }
     }
 
     pub(crate) fn open(
         &mut self,
         recipe: Recipe,
-        batch_id: String,
+        batch_id: RecipeBatchId,
         kind: ViewerTabKind,
     ) -> Option<ViewerTabId> {
         let label = initial_recipe_label::execute(InitialRecipeLabel {
@@ -169,7 +173,7 @@ impl ViewerSession {
     fn open_labeled(
         &mut self,
         recipe: Recipe,
-        batch_id: String,
+        batch_id: RecipeBatchId,
         kind: ViewerTabKind,
         label: String,
     ) -> Option<ViewerTabId> {
@@ -211,8 +215,8 @@ impl ViewerSession {
             ),
             recipe,
             batch_id,
-            generation: 0,
-            selection_generation: 0,
+            generation: ViewerRangeGeneration::default(),
+            selection_generation: ViewerSelectionGeneration::default(),
             selection: CommitSelection::None,
         });
         self.active = Some(id);
@@ -225,8 +229,8 @@ impl ViewerSession {
         self.cache.remove(id);
         // Tickets are process-local and short-lived; wrapping would require 2^64 mutations while
         // one ticket remains in flight before an old ticket could compare equal again.
-        tab.generation = tab.generation.wrapping_add(1);
-        tab.selection_generation = tab.selection_generation.wrapping_add(1);
+        tab.generation = tab.generation.next();
+        tab.selection_generation = tab.selection_generation.next();
         tab.selection = CommitSelection::None;
         tab.tab = ViewerTab::new(
             id,
@@ -296,7 +300,10 @@ impl ViewerSession {
         &mut self,
         id: ViewerTabId,
         commit_id: &CommitId,
-    ) -> Result<(CommitPatchTicket, PathBuf, Commit), BeginCommitSelectionError> {
+    ) -> Result<
+        (CommitPatchTicket, gtl_models::paths::RepositoryRoot, Commit),
+        BeginCommitSelectionError,
+    > {
         if self.active != Some(id) {
             return Err(BeginCommitSelectionError::StaleRange);
         }
@@ -326,7 +333,7 @@ impl ViewerSession {
         if !matches!(tab.tab.state(), ViewerTabState::Ready) {
             return Err(BeginCommitSelectionError::StaleRange);
         }
-        tab.selection_generation = tab.selection_generation.wrapping_add(1);
+        tab.selection_generation = tab.selection_generation.next();
         tab.selection = CommitSelection::Pending {
             commit: commit.clone(),
         };
@@ -335,7 +342,7 @@ impl ViewerSession {
             range_generation: tab.generation,
             selection_generation: tab.selection_generation,
         };
-        let repo_root = PathBuf::from(&cached.view.repo_root);
+        let repo_root = cached.view.repo_root.clone();
         self.bump_revision();
         Ok((ticket, repo_root, commit))
     }
@@ -410,7 +417,7 @@ impl ViewerSession {
         let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
             return false;
         };
-        tab.selection_generation = tab.selection_generation.wrapping_add(1);
+        tab.selection_generation = tab.selection_generation.next();
         tab.selection = CommitSelection::None;
         if let Some(cached) = self.cache.get(id).cloned()
             && cached.selected.is_some()
@@ -541,7 +548,7 @@ impl ViewerSession {
         }
 
         let selection_generation = match tab.selection {
-            CommitSelection::Pending { .. } => tab.selection_generation.wrapping_sub(1),
+            CommitSelection::Pending { .. } => tab.selection_generation.previous(),
             _ => tab.selection_generation,
         };
 
@@ -564,12 +571,12 @@ impl ViewerSession {
         Some(ActiveContentSnapshot { identity, view })
     }
 
-    pub(crate) const fn revision(&self) -> u64 {
+    pub(crate) const fn revision(&self) -> ViewerShellRevision {
         self.revision
     }
 
     fn bump_revision(&mut self) {
-        self.revision = self.revision.wrapping_add(1);
+        self.revision = self.revision.next();
     }
 
     fn clear_every_commit_selection(&mut self) {
@@ -614,7 +621,7 @@ impl ViewerSession {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, sync::Arc};
+    use std::sync::Arc;
 
     use gtl_application::{
         diffs::{Cmd, Foot, View},
@@ -623,10 +630,21 @@ mod tests {
     use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
     use super::*;
+    use crate::testing::{git_head, git_revision, project_name, repository_root};
+
+    fn cache_weight(bytes: usize) -> ViewCacheWeight {
+        ViewCacheWeight::new(bytes)
+    }
+
+    fn batch_id(sequence: u64) -> RecipeBatchId {
+        format!("00000000-0000-0000-0000-{sequence:012x}")
+            .parse()
+            .expect("fixture batch ID is valid")
+    }
 
     fn recipe() -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(PathBuf::from("/repo")),
+            source: RecipeSource::LocalRepo(repository_root("/repo")),
             op: RecipeOp::MergeDiff {
                 base: None,
                 pinned: None,
@@ -638,10 +656,10 @@ mod tests {
     fn view(title: &str) -> Arc<View> {
         Arc::new(View {
             exclusions: None,
-            repo_name: "repo".into(),
-            repo_root: "/repo".into(),
-            branch: "feature".into(),
-            upstream: "main".into(),
+            repo_name: project_name("repo"),
+            repo_root: repository_root("/repo"),
+            branch: git_head("feature"),
+            upstream: git_revision("main"),
             commits: Vec::new(),
             files: Vec::new(),
             title: title.into(),
@@ -656,9 +674,9 @@ mod tests {
     }
 
     fn ready_session() -> (ViewerSession, ViewerTabId) {
-        let mut session = ViewerSession::new(1024);
+        let mut session = ViewerSession::new(cache_weight(1024));
         let id = session
-            .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
+            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
         let ticket = session.begin_compute(id).expect("tab exists");
         assert_eq!(
@@ -673,9 +691,9 @@ mod tests {
     }
 
     fn ready_session_with_commits() -> (ViewerSession, ViewerTabId, Vec<CommitId>) {
-        let mut session = ViewerSession::new(1024 * 1024);
+        let mut session = ViewerSession::new(cache_weight(1024 * 1024));
         let id = session
-            .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
+            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
         let ticket = session.begin_compute(id).expect("tab exists");
         let ids = vec![
@@ -698,9 +716,9 @@ mod tests {
 
     #[test]
     fn active_content_snapshot_shares_the_cached_view_allocation() {
-        let mut session = ViewerSession::new(1024);
+        let mut session = ViewerSession::new(cache_weight(1024));
         let id = session
-            .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
+            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
         let ticket = session.begin_compute(id).expect("tab exists");
         let view = view("shared");
@@ -725,7 +743,7 @@ mod tests {
             .begin_commit_selection(id, &ids[0])
             .expect("cached commit can be selected");
 
-        assert_eq!(repo_root, PathBuf::from("/repo"));
+        assert_eq!(repo_root, repository_root("/repo"));
         assert_eq!(commit.id, ids[0]);
         assert!(matches!(
             session.commit_selection_snapshot(id),
@@ -870,33 +888,33 @@ mod tests {
 
     #[test]
     fn reopening_a_recipe_reuses_its_tab_and_updates_the_batch() {
-        let mut session = ViewerSession::new(128 * 1024 * 1024);
+        let mut session = ViewerSession::new(cache_weight(128 * 1024 * 1024));
         let first = session
-            .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
+            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
         let second = session
-            .open(recipe(), "batch-2".into(), ViewerTabKind::Snapshot)
+            .open(recipe(), batch_id(2), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
 
         assert_eq!(first, second);
-        assert_eq!(session.tab(first).expect("tab").batch_id, "batch-2");
+        assert_eq!(session.tab(first).expect("tab").batch_id, batch_id(2));
     }
 
     #[test]
     fn reopening_a_recipe_updates_its_authoritative_kind() {
-        let mut session = ViewerSession::new(1024);
+        let mut session = ViewerSession::new(cache_weight(1024));
         let id = session
-            .open(recipe(), "snapshot".into(), ViewerTabKind::Snapshot)
+            .open(recipe(), batch_id(3), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
 
         let reopened = session
-            .open(recipe(), "live".into(), ViewerTabKind::Live)
+            .open(recipe(), batch_id(4), ViewerTabKind::Live)
             .expect("tab id should be available");
 
         assert_eq!(reopened, id);
         let tab = session.tab(id).expect("tab");
         assert_eq!(tab.tab.kind(), ViewerTabKind::Live);
-        assert_eq!(tab.batch_id, "live");
+        assert_eq!(tab.batch_id, batch_id(4));
     }
 
     #[test]
@@ -996,10 +1014,10 @@ mod tests {
 
     #[test]
     fn shell_visible_mutations_advance_the_session_revision() {
-        let mut session = ViewerSession::new(1024);
+        let mut session = ViewerSession::new(cache_weight(1024));
         let start = session.revision();
         let id = session
-            .open(recipe(), "batch".into(), ViewerTabKind::Snapshot)
+            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
         assert!(session.revision() > start);
         let opened = session.revision();
@@ -1038,14 +1056,14 @@ mod tests {
 
     #[test]
     fn activating_a_tab_updates_the_active_identity() {
-        let mut session = ViewerSession::new(1024);
+        let mut session = ViewerSession::new(cache_weight(1024));
         let first = session
-            .open(recipe(), "batch-1".into(), ViewerTabKind::Snapshot)
+            .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
         let mut other = recipe();
-        other.source = RecipeSource::LocalRepo(PathBuf::from("/other"));
+        other.source = RecipeSource::LocalRepo(repository_root("/other"));
         let second = session
-            .open(other, "batch-1".into(), ViewerTabKind::Live)
+            .open(other, batch_id(1), ViewerTabKind::Live)
             .expect("tab id should be available");
 
         assert!(session.activate(first));
@@ -1062,7 +1080,7 @@ mod tests {
 
     fn pinned_unpushed_recipe(head: &str) -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            source: RecipeSource::LocalRepo(repository_root("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
                     pinned: Some(crate::testing::pinned_range("a", head)),
@@ -1074,18 +1092,18 @@ mod tests {
 
     #[test]
     fn open_dedupes_snapshot_tabs_by_unpinned_identity_and_adopts_the_new_pin() {
-        let mut session = ViewerSession::new(1024 * 1024);
+        let mut session = ViewerSession::new(cache_weight(1024 * 1024));
         let first = session
             .open(
                 pinned_unpushed_recipe("b"),
-                "batch-1".into(),
+                batch_id(1),
                 ViewerTabKind::Snapshot,
             )
             .expect("tab id should be available");
         let second = session
             .open(
                 pinned_unpushed_recipe("c"),
-                "batch-2".into(),
+                batch_id(2),
                 ViewerTabKind::Snapshot,
             )
             .expect("tab id should be available");
@@ -1101,30 +1119,23 @@ mod tests {
 
     #[test]
     fn open_keeps_distinct_symbolic_intents_as_distinct_tabs() {
-        let mut session = ViewerSession::new(1024 * 1024);
+        let mut session = ViewerSession::new(cache_weight(1024 * 1024));
         let range_recipe = |range: &str| Recipe {
-            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            source: RecipeSource::LocalRepo(repository_root("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Range {
-                    range: range.into(),
+                    range: gtl_models::git::GitRange::try_new(range.to_owned())
+                        .expect("fixture range is non-empty"),
                     pinned: None,
                 },
             },
             name: None,
         };
         let a = session
-            .open(
-                range_recipe("a..b"),
-                "batch-1".into(),
-                ViewerTabKind::Snapshot,
-            )
+            .open(range_recipe("a..b"), batch_id(1), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
         let b = session
-            .open(
-                range_recipe("c..d"),
-                "batch-2".into(),
-                ViewerTabKind::Snapshot,
-            )
+            .open(range_recipe("c..d"), batch_id(2), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
         assert_ne!(a, b);
     }

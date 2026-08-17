@@ -8,6 +8,8 @@
 
 use std::{collections::BTreeMap, path::Path};
 
+use crate::paths::{ProjectName, RepositoryRelativePath};
+
 /// The normalized extension set excluded for one project.
 ///
 /// Extensions are stored lowercase without a leading dot; matching compares a
@@ -18,14 +20,18 @@ use std::{collections::BTreeMap, path::Path};
 /// # Examples
 ///
 /// ```
-/// use gtl_models::diffs::ExcludedExtensions;
+/// use gtl_models::{diffs::ExcludedExtensions, paths::RepositoryRelativePath};
 ///
 /// let excluded = ExcludedExtensions::new(["md", ".LOCK"]);
-/// assert!(excluded.matches("docs/planning/plan.MD"));
-/// assert!(excluded.matches("Cargo.lock"));
-/// assert!(!excluded.matches("src/main.rs"));
+/// let plan = RepositoryRelativePath::try_new("docs/planning/plan.MD".into()).unwrap();
+/// let lock = RepositoryRelativePath::try_new("Cargo.lock".into()).unwrap();
+/// let source = RepositoryRelativePath::try_new("src/main.rs".into()).unwrap();
+/// assert!(excluded.matches(&plan));
+/// assert!(excluded.matches(&lock));
+/// assert!(!excluded.matches(&source));
 /// ```
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
 pub struct ExcludedExtensions(Vec<String>);
 
 impl ExcludedExtensions {
@@ -52,11 +58,11 @@ impl ExcludedExtensions {
     }
 
     /// Whether `path`'s final extension is excluded (case-insensitive).
-    pub fn matches(&self, path: &str) -> bool {
+    pub fn matches(&self, path: &RepositoryRelativePath) -> bool {
         if self.0.is_empty() {
             return false;
         }
-        Path::new(path)
+        Path::new(path.as_path())
             .extension()
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| {
@@ -77,23 +83,28 @@ impl ExcludedExtensions {
 /// # Examples
 ///
 /// ```
-/// use gtl_models::diffs::DiffExclusions;
+/// use gtl_models::{
+///     diffs::DiffExclusions,
+///     paths::{ProjectName, RepositoryRelativePath},
+/// };
 ///
-/// let exclusions = DiffExclusions::new([("git-tools".to_string(), vec!["md".to_string()])], None);
+/// let project = ProjectName::try_new("git-tools".to_owned()).unwrap();
+/// let other = ProjectName::try_new("other".to_owned()).unwrap();
+/// let exclusions = DiffExclusions::new([(project.clone(), vec!["md".to_string()])], None);
 /// assert!(
 ///     exclusions
-///         .for_project_or_default("git-tools")
-///         .matches("README.md")
+///         .for_project_or_default(&project)
+///         .matches(&RepositoryRelativePath::try_new("README.md".into()).unwrap())
 /// );
 /// assert!(
 ///     !exclusions
-///         .for_project_or_default("other")
-///         .matches("README.md")
+///         .for_project_or_default(&other)
+///         .matches(&RepositoryRelativePath::try_new("README.md".into()).unwrap())
 /// );
 /// ```
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiffExclusions {
-    projects: BTreeMap<String, ExcludedExtensions>,
+    projects: BTreeMap<ProjectName, ExcludedExtensions>,
     // TODO: use builder pattern
     default_exclusions: ExcludedExtensions,
 }
@@ -105,7 +116,7 @@ impl DiffExclusions {
     /// set and dropping projects whose set normalizes to empty.
     pub fn new<I, S>(config_keys: I, default_key: Option<&'static str>) -> Self
     where
-        I: IntoIterator<Item = (String, Vec<S>)>,
+        I: IntoIterator<Item = (ProjectName, Vec<S>)>,
         S: AsRef<str>,
     {
         let default_key_effective = default_key.unwrap_or(Self::DEFAULT_KEY).to_string();
@@ -116,7 +127,7 @@ impl DiffExclusions {
                 .into_iter()
                 .filter_map(|(project, raw)| {
                     // TODO: study cleaner way to do this
-                    if project == default_key_effective {
+                    if project.as_str() == default_key_effective {
                         default_exclusions = Some(ExcludedExtensions::new(raw));
                         None
                     } else {
@@ -130,12 +141,12 @@ impl DiffExclusions {
     }
 
     /// The excluded extensions for `project`
-    pub fn for_project(&self, project: &str) -> Option<&ExcludedExtensions> {
+    pub fn for_project(&self, project: &ProjectName) -> Option<&ExcludedExtensions> {
         self.projects.get(project)
     }
 
     /// The excluded extensions for `project` or the default exclusions
-    pub fn for_project_or_default(&self, project: &str) -> &ExcludedExtensions {
+    pub fn for_project_or_default(&self, project: &ProjectName) -> &ExcludedExtensions {
         self.for_project(project)
             .unwrap_or(&self.default_exclusions)
     }
@@ -146,10 +157,10 @@ impl DiffExclusions {
     }
 
     /// Iterates project-specific exclusions in project-name order.
-    pub fn project_exclusions(&self) -> impl ExactSizeIterator<Item = (&str, &ExcludedExtensions)> {
-        self.projects
-            .iter()
-            .map(|(project, extensions)| (project.as_str(), extensions))
+    pub fn project_exclusions(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&ProjectName, &ExcludedExtensions)> {
+        self.projects.iter()
     }
 
     /// Whether no project has exclusions.
@@ -163,33 +174,44 @@ impl DiffExclusions {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedExclusions {
     /// The configured extensions that were in force (normalized, sorted).
-    pub extensions: Vec<String>,
+    pub extensions: ExcludedExtensions,
     /// The paths hidden from the view, in diff order.
-    pub hidden_paths: Vec<String>,
+    pub hidden_paths: Vec<RepositoryRelativePath>,
 }
 
 impl AppliedExclusions {
     /// `Some` summary only when the filter actually hid files — a configured
     /// but idle filter stays invisible.
-    pub fn from_hidden(excluded: &ExcludedExtensions, hidden_paths: Vec<String>) -> Option<Self> {
+    pub fn from_hidden(
+        excluded: &ExcludedExtensions,
+        hidden_paths: Vec<RepositoryRelativePath>,
+    ) -> Option<Self> {
         if hidden_paths.is_empty() {
             return None;
         }
         Some(Self {
-            extensions: excluded.extensions().to_vec(),
+            extensions: excluded.clone(),
             hidden_paths,
         })
     }
 
     /// The extensions joined for display: `"md, lock"`.
     pub fn extensions_label(&self) -> String {
-        self.extensions.join(", ")
+        self.extensions.extensions().join(", ")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn project(name: &str) -> ProjectName {
+        ProjectName::try_new(name.to_owned()).expect("project name")
+    }
+
+    fn path(value: &str) -> RepositoryRelativePath {
+        RepositoryRelativePath::try_new(value.into()).expect("repository-relative path")
+    }
 
     #[test]
     fn new_normalizes_case_dots_whitespace_and_duplicates() {
@@ -200,41 +222,49 @@ mod tests {
     #[test]
     fn matches_final_extension_case_insensitively() {
         let excluded = ExcludedExtensions::new(["md"]);
-        assert!(excluded.matches("README.md"));
-        assert!(excluded.matches("docs/adr/0001.MD"));
-        assert!(!excluded.matches("src/md/main.rs"));
+        assert!(excluded.matches(&path("README.md")));
+        assert!(excluded.matches(&path("docs/adr/0001.MD")));
+        assert!(!excluded.matches(&path("src/md/main.rs")));
     }
 
     #[test]
     fn matches_only_the_final_extension_of_compound_names() {
         let excluded = ExcludedExtensions::new(["gz"]);
-        assert!(excluded.matches("dist/bundle.tar.gz"));
-        assert!(!ExcludedExtensions::new(["tar"]).matches("dist/bundle.tar.gz"));
+        assert!(excluded.matches(&path("dist/bundle.tar.gz")));
+        assert!(!ExcludedExtensions::new(["tar"]).matches(&path("dist/bundle.tar.gz")));
     }
 
     #[test]
     fn extensionless_and_dotfile_paths_never_match() {
         let excluded = ExcludedExtensions::new(["gitignore", "makefile"]);
-        assert!(!excluded.matches(".gitignore"));
-        assert!(!excluded.matches("Makefile"));
+        assert!(!excluded.matches(&path(".gitignore")));
+        assert!(!excluded.matches(&path("Makefile")));
     }
 
     #[test]
     fn empty_set_matches_nothing() {
-        assert!(!ExcludedExtensions::default().matches("README.md"));
+        assert!(!ExcludedExtensions::default().matches(&path("README.md")));
     }
 
     #[test]
     fn from_projects_drops_projects_that_normalize_to_empty() {
         let exclusions = DiffExclusions::new(
             [
-                ("kept".to_string(), vec!["md"]),
-                ("dropped".to_string(), vec!["", " . "]),
+                (project("kept"), vec!["md"]),
+                (project("dropped"), vec!["", " . "]),
             ],
             None,
         );
-        assert!(exclusions.for_project_or_default("kept").matches("a.md"));
-        assert!(exclusions.for_project_or_default("dropped").is_empty());
+        assert!(
+            exclusions
+                .for_project_or_default(&project("kept"))
+                .matches(&path("a.md"))
+        );
+        assert!(
+            exclusions
+                .for_project_or_default(&project("dropped"))
+                .is_empty()
+        );
     }
 
     #[test]
@@ -242,24 +272,36 @@ mod tests {
         let default_key = DiffExclusions::DEFAULT_KEY;
         let exclusions = DiffExclusions::new(
             [
-                ("proj1".into(), vec!["md"]),
-                (default_key.into(), vec!["ts", "py"]),
-                ("proj2".into(), vec!["ts"]),
+                (project("proj1"), vec!["md"]),
+                (project(default_key), vec!["ts", "py"]),
+                (project("proj2"), vec!["ts"]),
             ],
             Some(default_key),
         );
-        assert!(exclusions.for_project_or_default("proj1").matches("a.md"));
-        assert!(exclusions.for_project_or_default("proj2").matches("a.ts"));
-        assert!(exclusions.for_project(default_key).is_none());
-        assert!(exclusions.for_project("proj3").is_none());
-        assert!(exclusions.for_project_or_default("proj3").matches("a.py"));
+        assert!(
+            exclusions
+                .for_project_or_default(&project("proj1"))
+                .matches(&path("a.md"))
+        );
+        assert!(
+            exclusions
+                .for_project_or_default(&project("proj2"))
+                .matches(&path("a.ts"))
+        );
+        assert!(exclusions.for_project(&project(default_key)).is_none());
+        assert!(exclusions.for_project(&project("proj3")).is_none());
+        assert!(
+            exclusions
+                .for_project_or_default(&project("proj3"))
+                .matches(&path("a.py"))
+        );
     }
 
     #[test]
     fn for_project_or_default_falls_back_to_the_empty_set() {
         assert!(
             DiffExclusions::default()
-                .for_project_or_default("anything")
+                .for_project_or_default(&project("anything"))
                 .is_empty()
         );
     }
@@ -268,9 +310,9 @@ mod tests {
     fn read_accessors_expose_sorted_projects_and_separate_defaults() {
         let exclusions = DiffExclusions::new(
             [
-                ("zeta".into(), vec!["rs"]),
-                (DiffExclusions::DEFAULT_KEY.into(), vec!["md"]),
-                ("alpha".into(), vec!["toml"]),
+                (project("zeta"), vec!["rs"]),
+                (project(DiffExclusions::DEFAULT_KEY), vec!["md"]),
+                (project("alpha"), vec!["toml"]),
             ],
             None,
         );
@@ -281,7 +323,7 @@ mod tests {
                 .project_exclusions()
                 .map(|(project, extensions)| {
                     (
-                        project,
+                        project.as_str(),
                         extensions
                             .extensions()
                             .iter()
@@ -299,10 +341,10 @@ mod tests {
         let excluded = ExcludedExtensions::new(["md"]);
         assert_eq!(AppliedExclusions::from_hidden(&excluded, Vec::new()), None);
 
-        let applied = AppliedExclusions::from_hidden(&excluded, vec!["README.md".into()])
+        let applied = AppliedExclusions::from_hidden(&excluded, vec![path("README.md")])
             .expect("hidden path yields a summary");
-        assert_eq!(applied.extensions, ["md"]);
-        assert_eq!(applied.hidden_paths, ["README.md"]);
+        assert_eq!(applied.extensions.extensions(), ["md"]);
+        assert_eq!(applied.hidden_paths, [path("README.md")]);
         assert_eq!(applied.extensions_label(), "md");
     }
 }

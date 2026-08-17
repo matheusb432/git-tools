@@ -1,6 +1,7 @@
 use std::num::NonZeroU32;
 
 pub use gtl_models::diffs::PinnedRange;
+use gtl_models::git::{GitRange, GitRevision};
 use serde::{Deserialize, Serialize};
 
 /// The unchecked request form of a diff target selection.
@@ -25,6 +26,12 @@ pub enum DiffTargetRequestError {
     /// A latest-commit selection cannot contain zero commits.
     #[error("last count must be >= 1")]
     LastCountZero,
+    /// A revision selection cannot be empty.
+    #[error("Git revision must not be empty")]
+    EmptyRevision,
+    /// A range selection cannot be empty.
+    #[error("Git range must not be empty")]
+    EmptyRange,
 }
 
 /// A validated diff target resolved from an invocation request.
@@ -33,15 +40,15 @@ pub enum DiffTarget {
     /// Unpushed work: `@{u}..HEAD`, or the pinned resolution thereof.
     Unpushed { pinned: Option<PinnedRange> },
     /// A single base commit diffed against the working tree (never pinnable).
-    Base(String),
+    Base(GitRevision),
     /// An exact `<start>..<end>` commit range.
     Range {
-        range: String,
+        range: GitRange,
         pinned: Option<PinnedRange>,
     },
     /// A three-dot merge diff against the base branch.
     Merge {
-        base: String,
+        base: GitRevision,
         pinned: Option<PinnedRange>,
     },
     /// The last N commits (`HEAD~N..HEAD`).
@@ -57,12 +64,18 @@ impl TryFrom<DiffTargetRequest> for DiffTarget {
     fn try_from(request: DiffTargetRequest) -> Result<Self, Self::Error> {
         Ok(match request {
             DiffTargetRequest::Unpushed => Self::Unpushed { pinned: None },
-            DiffTargetRequest::Base { rev } => Self::Base(rev),
+            DiffTargetRequest::Base { rev } => Self::Base(
+                GitRevision::try_new(rev).map_err(|_| DiffTargetRequestError::EmptyRevision)?,
+            ),
             DiffTargetRequest::Range { range } => Self::Range {
-                range,
+                range: GitRange::try_new(range).map_err(|_| DiffTargetRequestError::EmptyRange)?,
                 pinned: None,
             },
-            DiffTargetRequest::Merge { base } => Self::Merge { base, pinned: None },
+            DiffTargetRequest::Merge { base } => Self::Merge {
+                base: GitRevision::try_new(base)
+                    .map_err(|_| DiffTargetRequestError::EmptyRevision)?,
+                pinned: None,
+            },
             DiffTargetRequest::Last { count } => Self::Last {
                 count: NonZeroU32::new(count).ok_or(DiffTargetRequestError::LastCountZero)?,
                 pinned: None,
@@ -77,11 +90,15 @@ impl From<&DiffTarget> for DiffTargetRequest {
     fn from(target: &DiffTarget) -> Self {
         match target {
             DiffTarget::Unpushed { .. } => Self::Unpushed,
-            DiffTarget::Base(rev) => Self::Base { rev: rev.clone() },
-            DiffTarget::Range { range, .. } => Self::Range {
-                range: range.clone(),
+            DiffTarget::Base(rev) => Self::Base {
+                rev: rev.to_string(),
             },
-            DiffTarget::Merge { base, .. } => Self::Merge { base: base.clone() },
+            DiffTarget::Range { range, .. } => Self::Range {
+                range: range.to_string(),
+            },
+            DiffTarget::Merge { base, .. } => Self::Merge {
+                base: base.to_string(),
+            },
             DiffTarget::Last { count, .. } => Self::Last { count: count.get() },
         }
     }
@@ -93,7 +110,7 @@ mod tests {
 
     #[test]
     fn pinned_range_display_uses_the_supported_ten_character_width() {
-        let pin = crate::testing::pinned_range(
+        let pin = crate::utils::pinned_range(
             "1111111111111111111111111111111111111111",
             "2222222222222222222222222222222222222222",
         );
@@ -111,7 +128,7 @@ mod tests {
 
     #[test]
     fn models_targets_map_back_to_their_symbolic_requests() {
-        let pinned_range = Some(crate::testing::pinned_range(
+        let pinned_range = Some(crate::utils::pinned_range(
             "1111111111111111111111111111111111111111",
             "2222222222222222222222222222222222222222",
         ));
@@ -123,12 +140,12 @@ mod tests {
                 DiffTargetRequest::Unpushed,
             ),
             (
-                DiffTarget::Base("main".into()),
+                DiffTarget::Base(GitRevision::try_new("main").unwrap()),
                 DiffTargetRequest::Base { rev: "main".into() },
             ),
             (
                 DiffTarget::Range {
-                    range: "main..feature".into(),
+                    range: GitRange::try_new("main..feature").unwrap(),
                     pinned: pinned_range.clone(),
                 },
                 DiffTargetRequest::Range {
@@ -137,7 +154,7 @@ mod tests {
             ),
             (
                 DiffTarget::Merge {
-                    base: "main".into(),
+                    base: GitRevision::try_new("main").unwrap(),
                     pinned: pinned_range.clone(),
                 },
                 DiffTargetRequest::Merge {

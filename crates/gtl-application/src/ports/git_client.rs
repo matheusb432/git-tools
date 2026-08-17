@@ -1,12 +1,18 @@
 use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
 };
 
 use gtl_models::{
     diffs::{Commit, CommitId},
-    managed::working_tree::CommitFile,
+    git::{
+        AheadBehind, BranchName, CommitCount, GitDiffSpec, GitEffectMode, GitHead, GitObjectId,
+        GitRange, GitRefName, GitRevision, RemoteName, RemoteUrl, TagName,
+    },
+    paths::{RepositoryRelativePath, RepositoryRoot},
+    repository::{PathCount, working_tree::CommitFile},
     tags::Tag,
+    timestamps::MachineTimestamp,
     worktrees::Worktree,
 };
 
@@ -19,9 +25,9 @@ pub enum GitDiffFormat {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitDiffRequest {
-    pub range: String,
+    pub spec: GitDiffSpec,
     pub format: GitDiffFormat,
-    pub excluded_paths: Vec<String>,
+    pub excluded_paths: Vec<RepositoryRelativePath>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,25 +39,33 @@ pub enum GitEffect<T> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitCommitReceipt {
     pub detail: String,
-    pub id: Option<CommitId>,
+    pub id: CommitId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GitPushReceipt {
-    pub detail: String,
-    pub up_to_date: bool,
+pub enum GitPushReceipt {
+    UpToDate { detail: String },
+    Updated { detail: String },
+}
+
+impl GitPushReceipt {
+    pub fn detail(&self) -> &str {
+        match self {
+            Self::UpToDate { detail } | Self::Updated { detail } => detail,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct GitWorkingTree {
     pub files: Vec<CommitFile>,
-    pub staged: usize,
-    pub unprepared: usize,
+    pub staged: PathCount,
+    pub unprepared: PathCount,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergedBranch {
-    pub name: String,
+    pub name: BranchName,
     pub id: CommitId,
 }
 
@@ -66,7 +80,7 @@ pub struct CommitLogEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitRepositoryState {
     /// A repository, identified by its canonical top-level directory.
-    Repository { top_level: PathBuf },
+    Repository { top_level: RepositoryRoot },
     /// The candidate directory does not exist.
     NotFound,
     /// The directory exists but is not inside a Git worktree.
@@ -75,113 +89,156 @@ pub enum GitRepositoryState {
 
 /// Git repository effects used by application operations.
 pub trait GitClient: Clone + Send + Sync + 'static {
-    fn repo_present(&self, repo_path: &Path) -> bool;
+    fn repo_present(&self, repo_path: &RepositoryRoot) -> bool;
 
     /// Classifies `dir` as a worktree repository, missing path, or non-repository path.
     fn probe_repository(&self, dir: &Path) -> anyhow::Result<GitRepositoryState>;
 
     /// Returns the canonical worktree root containing `dir`, or `None` outside a repository.
-    fn discover_top(&self, dir: &Path) -> anyhow::Result<Option<PathBuf>>;
+    fn discover_top(&self, dir: &Path) -> anyhow::Result<Option<RepositoryRoot>>;
 
     /// Absolute path of the repository containing `dir`; errors when `dir` is not a git repo.
-    fn top_level(&self, dir: &Path) -> anyhow::Result<String>;
+    fn top_level(&self, dir: &Path) -> anyhow::Result<RepositoryRoot>;
 
     /// The current branch name (`HEAD`'s `--abbrev-ref`).
-    fn current_branch(&self, repo_path: &Path) -> anyhow::Result<String>;
+    fn current_branch(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitHead>;
 
     /// The configured upstream tracking ref.
-    fn upstream(&self, repo_path: &Path) -> anyhow::Result<GitEffect<String>>;
+    fn upstream(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<GitRefName>>;
 
-    fn branch_remote(&self, repo_path: &Path, branch: &str) -> anyhow::Result<Option<String>>;
+    fn branch_remote(
+        &self,
+        repo_path: &RepositoryRoot,
+        branch: &BranchName,
+    ) -> anyhow::Result<Option<RemoteName>>;
 
-    fn remote_url(&self, repo_path: &Path, remote: &str) -> anyhow::Result<Option<String>>;
+    fn remote_url(
+        &self,
+        repo_path: &RepositoryRoot,
+        remote: &RemoteName,
+    ) -> anyhow::Result<Option<RemoteUrl>>;
 
-    fn revision_exists(&self, repo_path: &Path, revision: &str) -> anyhow::Result<bool>;
+    fn revision_exists(
+        &self,
+        repo_path: &RepositoryRoot,
+        revision: &GitRevision,
+    ) -> anyhow::Result<bool>;
 
-    fn commit_count(&self, repo_path: &Path, range: &str) -> anyhow::Result<Option<usize>>;
+    fn commit_count(
+        &self,
+        repo_path: &RepositoryRoot,
+        range: &GitRange,
+    ) -> anyhow::Result<Option<CommitCount>>;
 
-    fn ahead_behind(&self, repo_path: &Path, range: &str)
-    -> anyhow::Result<Option<(usize, usize)>>;
+    fn ahead_behind(
+        &self,
+        repo_path: &RepositoryRoot,
+        range: &GitRange,
+    ) -> anyhow::Result<Option<AheadBehind>>;
 
     fn is_ancestor(
         &self,
-        repo_path: &Path,
-        ancestor: &str,
-        descendant: &str,
+        repo_path: &RepositoryRoot,
+        ancestor: &GitRevision,
+        descendant: &GitRevision,
     ) -> anyhow::Result<bool>;
 
-    fn working_tree(&self, repo_path: &Path) -> anyhow::Result<GitEffect<GitWorkingTree>>;
+    fn working_tree(&self, repo_path: &RepositoryRoot)
+    -> anyhow::Result<GitEffect<GitWorkingTree>>;
 
     fn merged_branches(
         &self,
-        repo_path: &Path,
-        into: &str,
+        repo_path: &RepositoryRoot,
+        into: &GitRevision,
     ) -> anyhow::Result<GitEffect<Vec<MergedBranch>>>;
 
-    fn worktrees(&self, repo_path: &Path) -> anyhow::Result<GitEffect<Vec<Worktree>>>;
+    fn worktrees(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<Vec<Worktree>>>;
 
-    fn local_tags(&self, repo_path: &Path) -> anyhow::Result<GitEffect<BTreeMap<String, Tag>>>;
+    fn local_tags(
+        &self,
+        repo_path: &RepositoryRoot,
+    ) -> anyhow::Result<GitEffect<BTreeMap<TagName, Tag>>>;
 
     fn remote_tags(
         &self,
-        repo_path: &Path,
-        remote: &str,
-    ) -> anyhow::Result<GitEffect<BTreeMap<String, String>>>;
+        repo_path: &RepositoryRoot,
+        remote: &RemoteName,
+    ) -> anyhow::Result<GitEffect<BTreeMap<TagName, GitObjectId>>>;
 
-    fn previous_checkout(&self, repo_path: &Path) -> anyhow::Result<Option<String>>;
+    fn previous_checkout(&self, repo_path: &RepositoryRoot) -> anyhow::Result<Option<GitRevision>>;
 
     fn brief_log(
         &self,
-        repo_path: &Path,
-        range: &str,
+        repo_path: &RepositoryRoot,
+        range: &GitRange,
     ) -> anyhow::Result<GitEffect<Vec<CommitLogEntry>>>;
 
     fn diff_stat(
         &self,
-        repo_path: &Path,
-        before: &str,
-        after: &str,
+        repo_path: &RepositoryRoot,
+        before: &GitRevision,
+        after: &GitRevision,
     ) -> anyhow::Result<GitEffect<String>>;
 
-    fn stage_all(&self, repo_path: &Path) -> anyhow::Result<GitEffect<()>>;
+    fn stage_all(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<()>>;
 
     fn commit(
         &self,
-        repo_path: &Path,
+        repo_path: &RepositoryRoot,
         message: &str,
     ) -> anyhow::Result<GitEffect<GitCommitReceipt>>;
 
-    fn switch(&self, repo_path: &Path, branch: &str) -> anyhow::Result<GitEffect<()>>;
+    fn switch(
+        &self,
+        repo_path: &RepositoryRoot,
+        branch: &BranchName,
+    ) -> anyhow::Result<GitEffect<()>>;
 
-    fn switch_previous(&self, repo_path: &Path) -> anyhow::Result<GitEffect<()>>;
+    fn switch_previous(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<()>>;
 
-    fn fast_forward(&self, repo_path: &Path, revision: &str) -> anyhow::Result<GitEffect<String>>;
+    fn fast_forward(
+        &self,
+        repo_path: &RepositoryRoot,
+        revision: &GitRevision,
+    ) -> anyhow::Result<GitEffect<String>>;
 
     fn move_branch(
         &self,
-        repo_path: &Path,
-        branch: &str,
-        revision: &str,
+        repo_path: &RepositoryRoot,
+        branch: &BranchName,
+        revision: &GitRevision,
     ) -> anyhow::Result<GitEffect<()>>;
 
-    fn delete_branch(&self, repo_path: &Path, branch: &str) -> anyhow::Result<GitEffect<()>>;
+    fn delete_branch(
+        &self,
+        repo_path: &RepositoryRoot,
+        branch: &BranchName,
+    ) -> anyhow::Result<GitEffect<()>>;
 
-    fn soft_reset(&self, repo_path: &Path, revision: &str) -> anyhow::Result<GitEffect<()>>;
+    fn soft_reset(
+        &self,
+        repo_path: &RepositoryRoot,
+        revision: &GitRevision,
+    ) -> anyhow::Result<GitEffect<()>>;
 
     fn push_branch(
         &self,
-        repo_path: &Path,
-        remote: &str,
-        branch: &str,
-        dry_run: bool,
+        repo_path: &RepositoryRoot,
+        remote: &RemoteName,
+        branch: &BranchName,
+        mode: GitEffectMode,
     ) -> anyhow::Result<GitEffect<GitPushReceipt>>;
 
-    fn fetch(&self, repo_path: &Path, remote: &str) -> anyhow::Result<GitEffect<String>>;
+    fn fetch(
+        &self,
+        repo_path: &RepositoryRoot,
+        remote: &RemoteName,
+    ) -> anyhow::Result<GitEffect<String>>;
 
     fn create_annotated_tag(
         &self,
-        repo_path: &Path,
-        tag: &str,
+        repo_path: &RepositoryRoot,
+        tag: &TagName,
         message: &str,
     ) -> anyhow::Result<GitEffect<()>>;
 
@@ -190,12 +247,12 @@ pub trait GitClient: Clone + Send + Sync + 'static {
     /// Existing adapters safely reject non-`HEAD` revisions until they override this method.
     fn create_annotated_tag_at(
         &self,
-        repo_path: &Path,
-        tag: &str,
-        revision: &str,
+        repo_path: &RepositoryRoot,
+        tag: &TagName,
+        revision: &GitRevision,
         message: &str,
     ) -> anyhow::Result<GitEffect<()>> {
-        if revision == "HEAD" {
+        if revision.as_ref() == "HEAD" {
             self.create_annotated_tag(repo_path, tag, message)
         } else {
             Ok(GitEffect::Rejected(
@@ -206,36 +263,53 @@ pub trait GitClient: Clone + Send + Sync + 'static {
 
     fn create_lightweight_tag(
         &self,
-        repo_path: &Path,
-        tag: &str,
-        revision: &str,
+        repo_path: &RepositoryRoot,
+        tag: &TagName,
+        revision: &GitRevision,
     ) -> anyhow::Result<GitEffect<()>>;
 
     fn push_tag_refs(
         &self,
-        repo_path: &Path,
-        remote: &str,
-        tags: &[String],
+        repo_path: &RepositoryRoot,
+        remote: &RemoteName,
+        tags: &BTreeSet<GitRefName>,
     ) -> anyhow::Result<GitEffect<String>>;
 
     /// Confirm `rev` resolves to a commit; errors when it does not.
-    fn verify_commit(&self, repo_path: &Path, rev: &str) -> anyhow::Result<()>;
+    fn verify_commit(&self, repo_path: &RepositoryRoot, rev: &GitRevision) -> anyhow::Result<()>;
 
     /// The commits in `range`, newest first.
-    fn log_commits(&self, repo_path: &Path, range: &str) -> anyhow::Result<Vec<Commit>>;
+    fn log_commits(
+        &self,
+        repo_path: &RepositoryRoot,
+        range: &GitRange,
+    ) -> anyhow::Result<Vec<Commit>>;
 
     /// A unified diff or changed-path listing for a revision range.
-    fn diff(&self, repo_path: &Path, request: &GitDiffRequest) -> anyhow::Result<String>;
+    fn diff(&self, repo_path: &RepositoryRoot, request: &GitDiffRequest) -> anyhow::Result<String>;
 
     /// The repository's stable oldest root commit, or `None` when it has no commits.
-    fn root_commit(&self, repo_path: &Path) -> Option<CommitId>;
+    fn root_commit(&self, repo_path: &RepositoryRoot) -> Option<CommitId>;
 
     /// Resolves `rev` to its full validated commit ID.
-    fn resolve_commit_id(&self, repo_path: &Path, rev: &str) -> anyhow::Result<CommitId>;
+    fn resolve_commit_id(
+        &self,
+        repo_path: &RepositoryRoot,
+        rev: &GitRevision,
+    ) -> anyhow::Result<CommitId>;
 
     /// The best common ancestor of two revisions.
-    fn merge_base(&self, repo_path: &Path, left: &str, right: &str) -> anyhow::Result<CommitId>;
+    fn merge_base(
+        &self,
+        repo_path: &RepositoryRoot,
+        left: &GitRevision,
+        right: &GitRevision,
+    ) -> anyhow::Result<CommitId>;
 
-    /// The committer date of `rev` as a display string; never fails (empty on error).
-    fn committed_at(&self, repo_path: &Path, rev: &str) -> String;
+    /// The committer timestamp of `rev`; returns `None` when Git or decoding fails.
+    fn committed_at(
+        &self,
+        repo_path: &RepositoryRoot,
+        rev: &GitRevision,
+    ) -> Option<MachineTimestamp>;
 }

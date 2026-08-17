@@ -1,17 +1,17 @@
 use crate::{
-    SemanticTextSpan, SyntaxToken, UnifiedDiffLineClassifier, UnifiedDiffLineKind,
-    semantic::semantic_text_spans,
+    CharacterCount, LineNumberDigitWidth, SemanticTextSpan, SourceLineNumber, SyntaxToken,
+    UnifiedDiffLineClassifier, UnifiedDiffLineKind, semantic::semantic_text_spans,
 };
 #[cfg(feature = "syntax")]
 use crate::{SyntaxDefinition, highlight::DiffSyntaxHighlighter};
 
 /// Default source-line character limit for syntax and intraline parsing.
-pub const DEFAULT_MAX_LINE_CHARACTERS: usize = 2000;
+pub const DEFAULT_MAX_LINE_CHARACTERS: CharacterCount = CharacterCount::new(2000);
 
 /// Configuration for unified-diff parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParseOptions {
-    max_line_characters: usize,
+    max_line_characters: CharacterCount,
 }
 
 impl ParseOptions {
@@ -19,14 +19,14 @@ impl ParseOptions {
     ///
     /// The leading diff marker is excluded from the count. Lines longer than
     /// this limit remain in the output but skip syntax and intraline parsing.
-    pub const fn new(max_line_characters: usize) -> Self {
+    pub const fn new(max_line_characters: CharacterCount) -> Self {
         Self {
             max_line_characters,
         }
     }
 
     /// Returns the source-line character limit.
-    pub const fn max_line_characters(self) -> usize {
+    pub const fn max_line_characters(self) -> CharacterCount {
         self.max_line_characters
     }
 }
@@ -51,12 +51,12 @@ pub enum DiffRowKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffRow {
     kind: DiffRowKind,
-    old_line_number: Option<u32>,
-    new_line_number: Option<u32>,
+    old_line_number: Option<SourceLineNumber>,
+    new_line_number: Option<SourceLineNumber>,
     text: String,
     syntax_tokens: Vec<SyntaxToken>,
     semantic_spans: Vec<SemanticTextSpan>,
-    long_line_character_count: Option<usize>,
+    long_line_character_count: Option<CharacterCount>,
 }
 
 impl DiffRow {
@@ -72,12 +72,12 @@ impl DiffRow {
     }
 
     /// Returns the old-side line number when the row exists on that side.
-    pub const fn old_line_number(&self) -> Option<u32> {
+    pub const fn old_line_number(&self) -> Option<SourceLineNumber> {
         self.old_line_number
     }
 
     /// Returns the new-side line number when the row exists on that side.
-    pub const fn new_line_number(&self) -> Option<u32> {
+    pub const fn new_line_number(&self) -> Option<SourceLineNumber> {
         self.new_line_number
     }
 
@@ -102,7 +102,7 @@ impl DiffRow {
     }
 
     /// Returns the source character count when this row exceeds the parser limit.
-    pub const fn long_line_character_count(&self) -> Option<usize> {
+    pub const fn long_line_character_count(&self) -> Option<CharacterCount> {
         self.long_line_character_count
     }
 }
@@ -145,7 +145,7 @@ impl SyntaxDiagnostic {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedDiff {
     rows: Vec<DiffRow>,
-    line_number_digits: u32,
+    line_number_digits: LineNumberDigitWidth,
     options: ParseOptions,
     syntax_diagnostics: Vec<SyntaxDiagnostic>,
 }
@@ -162,7 +162,7 @@ impl ParsedDiff {
     }
 
     /// Returns the number of decimal digits needed by the largest gutter value.
-    pub const fn line_number_digits(&self) -> u32 {
+    pub const fn line_number_digits(&self) -> LineNumberDigitWidth {
         self.line_number_digits
     }
 
@@ -186,7 +186,7 @@ impl ParsedDiff {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedDiffBatch {
     rows: Vec<DiffRow>,
-    line_number_digits: u32,
+    line_number_digits: LineNumberDigitWidth,
     syntax_diagnostics: Vec<SyntaxDiagnostic>,
 }
 
@@ -207,7 +207,7 @@ impl ParsedDiffBatch {
     }
 
     /// Returns the cumulative gutter width after this batch.
-    pub const fn line_number_digits(&self) -> u32 {
+    pub const fn line_number_digits(&self) -> LineNumberDigitWidth {
         self.line_number_digits
     }
 
@@ -254,7 +254,7 @@ impl DiffParser {
             options: self.options,
             line_classifier: UnifiedDiffLineClassifier::default(),
             line_numbers: LineNumberState::default(),
-            line_number_max: 0,
+            line_number_max: SourceLineNumber::default(),
             #[cfg(feature = "syntax")]
             syntax: self.syntax.as_ref().map(DiffSyntaxHighlighter::new),
         }
@@ -278,7 +278,7 @@ pub struct DiffParserStream {
     options: ParseOptions,
     line_classifier: UnifiedDiffLineClassifier,
     line_numbers: LineNumberState,
-    line_number_max: u32,
+    line_number_max: SourceLineNumber,
     #[cfg(feature = "syntax")]
     syntax: Option<DiffSyntaxHighlighter>,
 }
@@ -313,8 +313,8 @@ impl DiffParserStream {
     }
 
     /// Returns the cumulative gutter width after all accepted batches.
-    pub const fn line_number_digits(&self) -> u32 {
-        line_number_digits(self.line_number_max)
+    pub const fn line_number_digits(&self) -> LineNumberDigitWidth {
+        LineNumberDigitWidth::from_source_line_number_max(self.line_number_max)
     }
 
     /// Returns the options used by this stream.
@@ -333,33 +333,41 @@ impl LineNumberState {
     fn advance(
         &mut self,
         line_kind: UnifiedDiffLineKind,
-    ) -> (DiffRowKind, Option<u32>, Option<u32>) {
+    ) -> (
+        DiffRowKind,
+        Option<SourceLineNumber>,
+        Option<SourceLineNumber>,
+    ) {
         match line_kind {
             UnifiedDiffLineKind::Meta => (DiffRowKind::Meta, None, None),
             UnifiedDiffLineKind::Hunk {
                 line_number_old,
                 line_number_new,
             } => {
-                self.old = line_number_old;
-                self.new = line_number_new;
+                self.old = line_number_old.into_inner();
+                self.new = line_number_new.into_inner();
                 (DiffRowKind::Hunk, None, None)
             }
             UnifiedDiffLineKind::Added => {
                 let new = self.new;
                 self.new += 1;
-                (DiffRowKind::Added, None, Some(new))
+                (DiffRowKind::Added, None, Some(SourceLineNumber::new(new)))
             }
             UnifiedDiffLineKind::Removed => {
                 let old = self.old;
                 self.old += 1;
-                (DiffRowKind::Removed, Some(old), None)
+                (DiffRowKind::Removed, Some(SourceLineNumber::new(old)), None)
             }
             UnifiedDiffLineKind::Context => {
                 let old = self.old;
                 let new = self.new;
                 self.old += 1;
                 self.new += 1;
-                (DiffRowKind::Context, Some(old), Some(new))
+                (
+                    DiffRowKind::Context,
+                    Some(SourceLineNumber::new(old)),
+                    Some(SourceLineNumber::new(new)),
+                )
             }
         }
     }
@@ -400,19 +408,12 @@ fn derive_rows(
     rows
 }
 
-fn line_number_max(rows: &[DiffRow]) -> u32 {
+fn line_number_max(rows: &[DiffRow]) -> SourceLineNumber {
     rows.iter()
         .flat_map(|row| [row.old_line_number, row.new_line_number])
         .flatten()
         .max()
-        .unwrap_or(0)
-}
-
-const fn line_number_digits(line_number_max: u32) -> u32 {
-    match line_number_max.checked_ilog10() {
-        Some(digits) => digits + 1,
-        None => 1,
-    }
+        .unwrap_or_default()
 }
 
 /// Returns a diff source line with its leading marker removed.
@@ -420,10 +421,13 @@ pub fn diff_line_body(raw: &str) -> &str {
     raw.get(1..).unwrap_or("")
 }
 
-fn long_line_character_count(raw: &str, max_line_characters: usize) -> Option<usize> {
+fn long_line_character_count(
+    raw: &str,
+    max_line_characters: CharacterCount,
+) -> Option<CharacterCount> {
     let marker = usize::from(matches!(raw.as_bytes().first(), Some(b'+' | b'-' | b' ')));
     let count = raw.chars().count().saturating_sub(marker);
-    (count > max_line_characters).then_some(count)
+    (count > max_line_characters.into_inner()).then_some(CharacterCount::new(count))
 }
 
 #[cfg(test)]
@@ -455,20 +459,23 @@ mod tests {
         assert_eq!(rows[2].kind(), DiffRowKind::Context);
         assert_eq!(
             (rows[2].old_line_number(), rows[2].new_line_number()),
-            (Some(3), Some(7))
+            (
+                Some(SourceLineNumber::new(3)),
+                Some(SourceLineNumber::new(7))
+            )
         );
         assert_eq!(rows[3].kind(), DiffRowKind::Removed);
         assert_eq!(
             (rows[3].old_line_number(), rows[3].new_line_number()),
-            (Some(4), None)
+            (Some(SourceLineNumber::new(4)), None)
         );
         assert_eq!(rows[4].kind(), DiffRowKind::Added);
         assert_eq!(
             (rows[4].old_line_number(), rows[4].new_line_number()),
-            (None, Some(8))
+            (None, Some(SourceLineNumber::new(8)))
         );
         assert_eq!(rows[4].text(), "+new");
-        assert_eq!(parsed.line_number_digits(), 1);
+        assert_eq!(parsed.line_number_digits().get(), 1);
     }
 
     #[test]
@@ -491,14 +498,17 @@ mod tests {
         assert_eq!(rows[4].kind(), DiffRowKind::Added);
         assert_eq!(rows[5].kind(), DiffRowKind::Added);
         assert_eq!(rows[6].kind(), DiffRowKind::Context);
-        assert_eq!(rows[6].new_line_number(), Some(3));
+        assert_eq!(rows[6].new_line_number(), Some(SourceLineNumber::new(3)));
     }
 
     #[test]
     fn malformed_hunk_header_degrades_to_context() {
         let parsed = DiffParser::new().parse(&lines(&["@@ garbage @@"]));
         assert_eq!(parsed.rows()[0].kind(), DiffRowKind::Context);
-        assert_eq!(parsed.rows()[0].old_line_number(), Some(0));
+        assert_eq!(
+            parsed.rows()[0].old_line_number(),
+            Some(SourceLineNumber::default())
+        );
     }
 
     #[test]
@@ -506,8 +516,21 @@ mod tests {
         let parsed = DiffParser::new().parse(&lines(&["@@ -3 +7 @@", " keep"]));
 
         assert_eq!(parsed.rows()[0].kind(), DiffRowKind::Hunk);
-        assert_eq!(parsed.rows()[1].old_line_number(), Some(3));
-        assert_eq!(parsed.rows()[1].new_line_number(), Some(7));
+        assert_eq!(
+            parsed.rows()[1].old_line_number(),
+            Some(SourceLineNumber::new(3))
+        );
+        assert_eq!(
+            parsed.rows()[1].new_line_number(),
+            Some(SourceLineNumber::new(7))
+        );
+    }
+
+    #[test]
+    fn digit_width_tracks_the_largest_source_line_number() {
+        let parsed = DiffParser::new().parse(&lines(&["@@ -9999 +10000 @@", " keep"]));
+
+        assert_eq!(parsed.line_number_digits().get(), 5);
     }
 
     #[test]
@@ -539,32 +562,36 @@ mod tests {
 
     #[test]
     fn explicit_line_limit_marks_only_overlong_rows() {
-        let parsed = DiffParser::with_options(ParseOptions::new(3)).parse(&lines(&[
-            "@@ -1 +1 @@",
-            "+abc",
-            "+abcd",
-        ]));
+        let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3)))
+            .parse(&lines(&["@@ -1 +1 @@", "+abc", "+abcd"]));
 
         assert_eq!(parsed.rows()[1].long_line_character_count(), None);
-        assert_eq!(parsed.rows()[2].long_line_character_count(), Some(4));
-        assert_eq!(parsed.options().max_line_characters(), 3);
+        assert_eq!(
+            parsed.rows()[2].long_line_character_count(),
+            Some(CharacterCount::new(4))
+        );
+        assert_eq!(
+            parsed.options().max_line_characters(),
+            CharacterCount::new(3)
+        );
     }
 
     #[test]
     fn line_limit_counts_marker_free_characters() {
-        let without_marker = "x".repeat(DEFAULT_MAX_LINE_CHARACTERS + 1);
-        let at_limit = format!("+{}", "x".repeat(DEFAULT_MAX_LINE_CHARACTERS));
+        let character_limit = DEFAULT_MAX_LINE_CHARACTERS.into_inner();
+        let without_marker = "x".repeat(character_limit + 1);
+        let at_limit = format!("+{}", "x".repeat(character_limit));
         let over_limit = format!("+{without_marker}");
         let parsed = DiffParser::new().parse(&[without_marker, at_limit, over_limit]);
 
         assert_eq!(
             parsed.rows()[0].long_line_character_count(),
-            Some(DEFAULT_MAX_LINE_CHARACTERS + 1)
+            Some(CharacterCount::new(character_limit + 1))
         );
         assert_eq!(parsed.rows()[1].long_line_character_count(), None);
         assert_eq!(
             parsed.rows()[2].long_line_character_count(),
-            Some(DEFAULT_MAX_LINE_CHARACTERS + 1)
+            Some(CharacterCount::new(character_limit + 1))
         );
     }
 
@@ -582,7 +609,7 @@ mod tests {
             "\\ No newline at end of file",
             "Binary files differ",
         ]);
-        let parser = DiffParser::with_options(ParseOptions::new(5));
+        let parser = DiffParser::with_options(ParseOptions::new(CharacterCount::new(5)));
         let expected = parser.parse(&source);
         let expected_split = expected.split_rows();
 

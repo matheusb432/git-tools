@@ -1,8 +1,6 @@
 set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 set windows-shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 
-rustfmt_toolchain := trim(read('.rustfmt-nightly'))
-
 mod cli 'just/cli.justfile'
 mod desktop 'just/desktop.justfile'
 mod web 'just/web.justfile'
@@ -65,12 +63,12 @@ bench *args:
 test *args:
     @cargo run --quiet -p xtask -- test {{ args }}
 
-# Apply pinned-nightly rustfmt, Taplo, Dioxus RSX, and rumdl across the repository. --verbose restores taplo's file-discovery logs.
+# Apply rustfmt, Taplo, Dioxus RSX, and rumdl across the repository. --verbose restores taplo's file-discovery logs.
 [group('quality')]
 fmt *args:
     #!/usr/bin/bash
     set -euo pipefail
-    cargo +{{ rustfmt_toolchain }} fmt
+    cargo fmt
     if [[ "{{ args }}" == *"--verbose"* ]]; then taplo fmt {{ args }}; else RUST_LOG=warn taplo fmt; fi
     dx fmt --package gtl-web --locked
     markdown_files=()
@@ -82,7 +80,7 @@ fmt *args:
 fmt-check *args:
     #!/usr/bin/bash
     set -euo pipefail
-    cargo +{{ rustfmt_toolchain }} fmt --check
+    cargo fmt --check
     if [[ "{{ args }}" == *"--verbose"* ]]; then taplo fmt --check {{ args }}; else RUST_LOG=warn taplo fmt --check; fi
     markdown_files=()
     while IFS= read -r -d '' file; do [[ -f "$file" ]] && markdown_files+=("$file"); done < <(git ls-files --cached --others --exclude-standard -z -- '*.md')
@@ -113,12 +111,10 @@ fix *args:
 drift-check:
     cargo run --quiet -p xtask -- drift-check
 
-# Report missing mise state and verify the tracked Git hook wiring.
-[group('quality')]
+# Report missing Mise-managed tools without changing the host.
+[group('setup')]
 doctor:
     @mise ls --local --missing --locked --no-header
-    test "$(git config --local --get core.hooksPath)" = ".githooks"
-    test -x .githooks/pre-commit
 
 # Cross-build all three Win11 exes; runs `just test --all` first unless -f/--force. --smoke selects a debug linkage build; use `--smoke --force` for the fast smoke path.
 [group('windows')]
@@ -126,9 +122,11 @@ ship *args:
     cargo run --quiet -p xtask -- ship {{ args }}
 
 # Configure this clone, build, and install git-tools.
+[group('setup')]
 setup:
     cargo run --quiet -p xtask -- setup
 
-# Converge the Ubuntu development environment and run repository setup (fresh machine: `sh xtask/bootstrap.sh`).
+# Converge the Ubuntu development environment and run repository setup.
+[group('setup')]
 bootstrap *args:
     mise bootstrap --yes {{ args }}

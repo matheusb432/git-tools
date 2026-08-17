@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use std::{
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, Barrier, Mutex, mpsc},
     thread,
     time::{Duration, Instant},
@@ -14,14 +14,19 @@ use gtl_application::{
         record_render::{self, RecordRender, RecordRenderError},
     },
     live_views::{
-        list::{self, ListLiveViews},
-        remove::{self, RemoveLiveView},
-        save::{self, SaveLiveView, SaveLiveViewOutcome},
+        list_live_views::{self, ListLiveViews},
+        remove_live_view::{self, RemoveLiveView},
+        save_live_view::{self, SaveLiveView, SaveLiveViewOutcome},
     },
     ports::{Clock, GitRepositoryState},
-    testing::FakeGitClient,
+    utils::FakeGitClient,
 };
 use gtl_infra::app_state::SqliteAppState;
+use gtl_models::{
+    live_views::LiveSource,
+    paths::{ProjectName, RepositoryRoot},
+    timestamps::MachineTimestamp,
+};
 use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 use rusqlite::Connection;
 
@@ -52,15 +57,20 @@ fn concurrent_save_busy_handler(retry_count: i32) -> bool {
 struct ClockTest;
 
 impl Clock for ClockTest {
-    fn now_iso(&self) -> String {
-        "2026-07-19T00:00:00Z".into()
+    fn now(&self) -> Result<MachineTimestamp, gtl_models::timestamps::TimestampError> {
+        Ok(MachineTimestamp::try_from("2026-07-19T00:00:00Z")
+            .expect("fixture clock timestamp is valid"))
     }
 }
 
-fn git(top_level: impl Into<PathBuf>) -> FakeGitClient {
+fn repository_root(path: &Path) -> RepositoryRoot {
+    RepositoryRoot::try_new(path.to_path_buf()).expect("fixture repository root is absolute")
+}
+
+fn git(top_level: &Path) -> FakeGitClient {
     FakeGitClient {
         repository_state: Some(GitRepositoryState::Repository {
-            top_level: top_level.into(),
+            top_level: repository_root(top_level),
         }),
         ..Default::default()
     }
@@ -68,7 +78,7 @@ fn git(top_level: impl Into<PathBuf>) -> FakeGitClient {
 
 fn unpushed_diff_recipe() -> Recipe {
     Recipe {
-        source: RecipeSource::LocalRepo("/repos/alpha".into()),
+        source: RecipeSource::LocalRepo(repository_root(Path::new("/repos/alpha"))),
         op: RecipeOp::Diff {
             target: RecipeTarget::Unpushed { pinned: None },
         },
@@ -78,7 +88,7 @@ fn unpushed_diff_recipe() -> Recipe {
 
 fn save_live_view(state: &SqliteAppState, top_level: &Path) {
     let mut connection = state.connection_lock().expect("lock state connection");
-    let response = save::execute(
+    let response = save_live_view::execute(
         SaveLiveView {
             path: top_level.to_path_buf(),
         },
@@ -89,16 +99,13 @@ fn save_live_view(state: &SqliteAppState, top_level: &Path) {
     .expect("save live view");
     assert!(matches!(
         response.outcome,
-        SaveLiveViewOutcome::Saved {
-            already_saved: false,
-            ..
-        }
+        SaveLiveViewOutcome::Created { .. }
     ));
 }
 
 fn list_live_views(state: &SqliteAppState) -> Vec<gtl_application::live_views::LiveViewRecord> {
     let connection = state.connection_lock().expect("lock state connection");
-    list::execute(ListLiveViews, &connection)
+    list_live_views::execute(ListLiveViews, &connection)
         .expect("list live views")
         .views
 }
@@ -112,7 +119,7 @@ fn public_operations_use_the_migrated_schema() {
     save_live_view(&state, top_level);
     let live_views = list_live_views(&state);
     assert_eq!(live_views.len(), 1);
-    assert_eq!(live_views[0].display_name, "alpha");
+    assert_eq!(live_views[0].display_name.as_str(), "alpha");
 
     {
         let mut connection = state.connection_lock().expect("lock state connection");
@@ -120,7 +127,7 @@ fn public_operations_use_the_migrated_schema() {
             &RecordRender {
                 recipe: unpushed_diff_recipe(),
                 title: "alpha · unpushed".into(),
-                repo_name: "alpha".into(),
+                repo_name: ProjectName::try_from("alpha").unwrap(),
                 range_label: "origin/main..HEAD".into(),
             },
             &mut connection,
@@ -146,16 +153,15 @@ fn public_operations_use_the_migrated_schema() {
 
     let removed = {
         let connection = state.connection_lock().expect("lock state connection");
-        remove::execute(
+        remove_live_view::execute(
             RemoveLiveView {
-                source_kind: "LocalRepo".into(),
-                source_value: top_level.display().to_string(),
+                source: LiveSource::local_repo(repository_root(top_level)),
             },
             &connection,
         )
         .expect("remove live view")
     };
-    assert!(removed.removed);
+    assert_eq!(removed, remove_live_view::RemoveLiveViewOk::Removed);
     assert!(list_live_views(&state).is_empty());
 }
 
@@ -202,17 +208,18 @@ fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
             thread::spawn(move || {
                 barrier.wait();
                 let mut connection = state.connection_lock().expect("lock state connection");
-                let result = save::execute(
+                let result = save_live_view::execute(
                     SaveLiveView {
                         path: "/repos/concurrent".into(),
                     },
-                    &git("/repos/concurrent"),
+                    &git(Path::new("/repos/concurrent")),
                     &mut connection,
                     &ClockTest,
                 )
                 .map_err(|error| error.to_string())
                 .and_then(|response| match response.outcome {
-                    SaveLiveViewOutcome::Saved { already_saved, .. } => Ok(already_saved),
+                    SaveLiveViewOutcome::Created { .. } => Ok(false),
+                    SaveLiveViewOutcome::Refreshed { .. } => Ok(true),
                     SaveLiveViewOutcome::Rejected { rejection } => Err(rejection.to_string()),
                 });
                 let _ = completion_sender.send(result);
@@ -268,12 +275,12 @@ fn concurrent_save_serializes_existence_check_and_upsert_across_connections() {
         "save workers must not panic"
     );
 
-    let mut already_saved_values: Vec<_> = completion_results
+    let mut refresh_flags: Vec<_> = completion_results
         .into_iter()
         .map(|result| result.expect("save succeeds"))
         .collect();
-    already_saved_values.sort_unstable();
-    assert_eq!(already_saved_values, vec![false, true]);
+    refresh_flags.sort_unstable();
+    assert_eq!(refresh_flags, vec![false, true]);
 }
 
 #[test]
@@ -311,7 +318,7 @@ fn prune_failure_rolls_back_the_render_insertion() {
             &RecordRender {
                 recipe: unpushed_diff_recipe(),
                 title: "failed insertion".into(),
-                repo_name: "alpha".into(),
+                repo_name: ProjectName::try_from("alpha").unwrap(),
                 range_label: "origin/main..HEAD".into(),
             },
             &mut connection,

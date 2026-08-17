@@ -2,10 +2,12 @@
 
 use std::fmt::Write as _;
 
-pub use gtl_application::managed::commit_all::CommitResult;
-use gtl_application::managed::commit_all::{self, CommitAction, CommitExit};
+pub use gtl_application::projects::commit_repositories::CommitResult;
+use gtl_application::projects::commit_repositories::{
+    self, CommitAction, CommitExit, CommitRepositoriesMode,
+};
 use gtl_infra::git_client::HybridGitClient;
-pub use gtl_models::managed::working_tree::CommitFile;
+pub use gtl_models::repository::working_tree::CommitFile;
 use serde::Serialize;
 
 use super::{ManagedExit, ManagedOptions, ManagedRun};
@@ -18,7 +20,7 @@ struct CommitResultJson<'a> {
     dirty: bool,
     files: &'a [CommitFile],
     action: &'static str,
-    detail: &'a str,
+    detail: String,
 }
 
 fn action_wire(action: CommitAction) -> &'static str {
@@ -63,11 +65,16 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
 
     match super::project_catalog::load_projects() {
         Ok(repos) => {
-            let execution = commit_all::execute(
-                commit_all::CommitAll {
+            let execution = commit_repositories::execute(
+                commit_repositories::CommitRepositories {
                     repos,
-                    message: options.message_for_all.clone(),
-                    dry: options.dry,
+                    mode: if options.dry {
+                        CommitRepositoriesMode::DryRun
+                    } else {
+                        CommitRepositoriesMode::Apply {
+                            message: options.message_for_all.clone(),
+                        }
+                    },
                 },
                 &HybridGitClient,
             );
@@ -84,7 +91,10 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
 
 fn project_commit_execution(
     json: bool,
-    execution: Result<commit_all::CommitAllOk, commit_all::CommitAllError>,
+    execution: Result<
+        commit_repositories::CommitRepositoriesOk,
+        commit_repositories::CommitRepositoriesError,
+    >,
 ) -> ManagedRun<CommitResult> {
     match execution {
         Ok(result) => {
@@ -100,7 +110,7 @@ fn project_commit_execution(
         Err(error) => {
             let stderr = format!("{error:#}");
             let results = match error {
-                commit_all::CommitAllError::Transport {
+                commit_repositories::CommitRepositoriesError::Transport {
                     mut completed_results,
                     failed_result,
                     ..
@@ -129,12 +139,12 @@ fn format_commit(exit: ManagedExit, json: bool, results: &[CommitResult]) -> Str
         let projected = results
             .iter()
             .map(|result| CommitResultJson {
-                name: &result.name,
-                present: result.present,
-                dirty: result.dirty,
-                files: &result.files,
-                action: action_wire(result.action),
-                detail: &result.detail,
+                name: result.name(),
+                present: result.is_present(),
+                dirty: result.is_dirty(),
+                files: result.files(),
+                action: action_wire(result.action()),
+                detail: result.detail().into_owned(),
             })
             .collect::<Vec<_>>();
         return serde_json::to_string_pretty(&projected).unwrap_or_else(|_| "[]".to_string());
@@ -146,9 +156,9 @@ fn format_commit(exit: ManagedExit, json: bool, results: &[CommitResult]) -> Str
         let _ = writeln!(
             out,
             "{:<30} {:<14} {}",
-            result.name,
-            action_wire(result.action),
-            result.detail
+            result.name(),
+            action_wire(result.action()),
+            result.detail()
         );
     }
     let _ = write!(out, "\nexit {}  -  {} repos", exit.code(), results.len());
@@ -157,8 +167,26 @@ fn format_commit(exit: ManagedExit, json: bool, results: &[CommitResult]) -> Str
 
 #[cfg(test)]
 mod tests {
+    use gtl_application::projects::commit_repositories::CommitOutcome;
+    use gtl_models::repository::working_tree::ChangedFiles;
+
     use super::*;
-    use crate::testing::commit_id;
+    use crate::testing::{commit_id, project_name, repository_relative_path};
+
+    fn committed_result() -> CommitResult {
+        CommitResult::new(
+            project_name("api"),
+            CommitOutcome::Committed {
+                files: ChangedFiles::try_new(vec![CommitFile {
+                    status: "M".into(),
+                    path: repository_relative_path("src/lib.rs"),
+                }])
+                .expect("fixture changed files are non-empty"),
+                detail: "[main abc1234] save".into(),
+                id: commit_id("a"),
+            },
+        )
+    }
 
     #[test]
     fn commit_action_wire_tokens_are_byte_stable() {
@@ -174,19 +202,7 @@ mod tests {
 
     #[test]
     fn commit_json_projection_is_byte_stable_and_omits_application_metadata() {
-        let results = vec![CommitResult {
-            name: "api".into(),
-            present: true,
-            dirty: true,
-            files: vec![CommitFile {
-                status: "M".into(),
-                path: "src/lib.rs".into(),
-            }],
-            action: CommitAction::Committed,
-            detail: "[main abc1234] save".into(),
-            id: Some(commit_id("a")),
-            staged: true,
-        }];
+        let results = vec![committed_result()];
 
         assert_eq!(
             format_commit(ManagedExit::Clean, true, &results),
@@ -212,21 +228,9 @@ mod tests {
 
     #[test]
     fn transport_failure_projection_preserves_completed_stdout_and_stderr() {
-        let completed_result = CommitResult {
-            name: "api".into(),
-            present: true,
-            dirty: true,
-            files: vec![CommitFile {
-                status: "M".into(),
-                path: "src/lib.rs".into(),
-            }],
-            action: CommitAction::Committed,
-            detail: "[main abc1234] save".into(),
-            id: Some(commit_id("a")),
-            staged: true,
-        };
-        let execution = Err(commit_all::CommitAllError::Transport {
-            failed_repo: "web".into(),
+        let completed_result = committed_result();
+        let execution = Err(commit_repositories::CommitRepositoriesError::Transport {
+            failed_repo: project_name("web"),
             completed_results: vec![completed_result.clone()],
             failed_result: None,
             source: anyhow::anyhow!("git transport unavailable"),
@@ -246,7 +250,7 @@ mod tests {
         );
         assert_eq!(
             run.stderr,
-            "managed commit failed for 'web': git transport unavailable"
+            "project commit failed for 'web': git transport unavailable"
         );
     }
 }

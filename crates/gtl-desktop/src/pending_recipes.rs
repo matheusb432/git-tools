@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use gtl_application::viewer::ViewerTabKind;
+use gtl_models::recipes::RecipeBatchId;
 use gtl_wire::recipes::{OpenRecipes, Recipe, RecipeBatchKind};
 
 use crate::{presentation::ViewerApp, recipes::RecipeError, session::PendingRecipesError};
@@ -61,7 +62,7 @@ fn process_transaction(app: &ViewerApp) -> Result<(), ProcessPendingRecipesError
         .try_drain()
         .map_err(ProcessPendingRecipesError::Queue)?;
     match process(batches, |recipe, batch_id, kind| {
-        app.open_recipe(recipe, batch_id.into(), viewer_tab_kind(kind))
+        app.open_recipe(recipe, batch_id, viewer_tab_kind(kind))
     }) {
         Ok(()) => Ok(()),
         Err(failure) => match app.pending().prepend(failure.remainder) {
@@ -82,13 +83,13 @@ struct PendingFailure<E> {
 
 fn process<T, E>(
     batches: Vec<OpenRecipes>,
-    mut open: impl FnMut(&Recipe, &str, RecipeBatchKind) -> Result<T, E>,
+    mut open: impl FnMut(&Recipe, RecipeBatchId, RecipeBatchKind) -> Result<T, E>,
 ) -> Result<(), PendingFailure<E>> {
     let mut batches = VecDeque::from(batches);
     while let Some(mut batch) = batches.pop_front() {
         let mut recipes = VecDeque::from(std::mem::take(&mut batch.recipes));
         while let Some(recipe) = recipes.pop_front() {
-            if let Err(reason) = open(&recipe, &batch.batch_id, batch.kind) {
+            if let Err(reason) = open(&recipe, batch.batch_id, batch.kind) {
                 recipes.push_front(recipe);
                 batch.recipes = recipes.into_iter().collect();
                 let mut remainder = vec![batch];
@@ -109,15 +110,20 @@ const fn viewer_tab_kind(kind: RecipeBatchKind) -> ViewerTabKind {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use gtl_wire::recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource};
 
     use super::*;
+    use crate::testing::repository_root;
+
+    fn batch_id(sequence: u64) -> RecipeBatchId {
+        format!("00000000-0000-0000-0000-{sequence:012x}")
+            .parse()
+            .expect("fixture batch ID is valid")
+    }
 
     fn named(path: &str) -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(path.into()),
+            source: RecipeSource::LocalRepo(repository_root(path)),
             op: RecipeOp::MergeDiff {
                 base: None,
                 pinned: None,
@@ -130,12 +136,12 @@ mod tests {
     fn processing_preserves_fifo_failure_remainder_for_retry() {
         let batches = vec![
             OpenRecipes {
-                batch_id: "first".into(),
+                batch_id: batch_id(1),
                 kind: RecipeBatchKind::Snapshot,
                 recipes: vec![named("/one"), named("/fail"), named("/three")],
             },
             OpenRecipes {
-                batch_id: "second".into(),
+                batch_id: batch_id(2),
                 kind: RecipeBatchKind::Snapshot,
                 recipes: vec![named("/four")],
             },
@@ -143,7 +149,7 @@ mod tests {
         let mut opened = Vec::new();
         let failure = process(batches, |recipe, batch, _kind| {
             let path = recipe.cwd().display().to_string();
-            opened.push((batch.to_string(), path.clone()));
+            opened.push((batch, path.clone()));
             if path == "/fail" {
                 Err(String::from("boom"))
             } else {
@@ -154,29 +160,26 @@ mod tests {
 
         assert_eq!(
             opened,
-            vec![
-                ("first".into(), "/one".into()),
-                ("first".into(), "/fail".into())
-            ]
+            vec![(batch_id(1), "/one".into()), (batch_id(1), "/fail".into())]
         );
         assert_eq!(failure.remainder[0].recipes.len(), 2);
         assert_eq!(
             failure.remainder[0].recipes[0].cwd(),
-            PathBuf::from("/fail")
+            repository_root("/fail")
         );
-        assert_eq!(failure.remainder[1].batch_id, "second");
+        assert_eq!(failure.remainder[1].batch_id, batch_id(2));
     }
 
     #[test]
     fn processing_visits_batches_and_recipes_in_fifo_order() {
         let batches = vec![
             OpenRecipes {
-                batch_id: "first".into(),
+                batch_id: batch_id(1),
                 kind: RecipeBatchKind::Snapshot,
                 recipes: vec![named("/one"), named("/two")],
             },
             OpenRecipes {
-                batch_id: "second".into(),
+                batch_id: batch_id(2),
                 kind: RecipeBatchKind::Live,
                 recipes: vec![named("/three")],
             },
@@ -184,7 +187,7 @@ mod tests {
         let mut opened = Vec::new();
 
         process(batches, |recipe, batch, kind| {
-            opened.push((batch.to_owned(), recipe.cwd().display().to_string(), kind));
+            opened.push((batch, recipe.cwd().display().to_string(), kind));
             Ok::<_, String>(())
         })
         .expect("all recipes open");
@@ -192,9 +195,9 @@ mod tests {
         assert_eq!(
             opened,
             [
-                ("first".into(), "/one".into(), RecipeBatchKind::Snapshot),
-                ("first".into(), "/two".into(), RecipeBatchKind::Snapshot),
-                ("second".into(), "/three".into(), RecipeBatchKind::Live),
+                (batch_id(1), "/one".into(), RecipeBatchKind::Snapshot),
+                (batch_id(1), "/two".into(), RecipeBatchKind::Snapshot),
+                (batch_id(2), "/three".into(), RecipeBatchKind::Live),
             ]
         );
     }

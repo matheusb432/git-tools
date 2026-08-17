@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use tempfile::TempDir;
 
-use crate::process;
+use crate::{process, task::Step};
 
 pub(super) struct StagedSnapshot {
     directory: TempDir,
@@ -34,11 +34,15 @@ impl StagedSnapshot {
             .to_str()
             .context("staged snapshot path is not UTF-8")?;
         let prefix = format!("{directory_text}{}", std::path::MAIN_SEPARATOR);
-        process::run(
+        process::run_step(&Step::new(
             "staged snapshot",
             "git",
-            &["checkout-index", "--all", &format!("--prefix={prefix}")],
-        )?;
+            [
+                "checkout-index".to_string(),
+                "--all".to_string(),
+                format!("--prefix={prefix}"),
+            ],
+        ))?;
         let paths = paths
             .into_iter()
             .filter(|path| {

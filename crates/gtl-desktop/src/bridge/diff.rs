@@ -76,13 +76,20 @@ mod tests {
         viewer::{RenderOptions, ViewerTabKind},
     };
     use gtl_infra::user_config::TomlSettingsStore;
+    use gtl_models::{diffs::DiffLineCount, recipes::RecipeBatchId};
     use gtl_wire::{
         recipes::{Recipe, RecipeOp, RecipeSource},
         viewer::{SetViewerPreference, ViewerDiffCursor, ViewerDiffFileId, ViewerResource},
     };
 
     use super::*;
-    use crate::{presentation::ViewerApp, session::CachedView};
+    use crate::{
+        presentation::ViewerApp,
+        session::{CachedView, ViewCacheWeight},
+        testing::{
+            git_head, git_revision, project_name, repository_relative_path, repository_root,
+        },
+    };
 
     fn ready_app_with_file(file: FileDiff) -> (tempfile::TempDir, ViewerApp, ViewerViewIdentity) {
         let directory = tempfile::tempdir().expect("temporary viewer data");
@@ -90,30 +97,30 @@ mod tests {
         let app = ViewerApp::open(
             directory.path(),
             TomlSettingsStore::new(Some(settings_path)),
-            1024 * 1024,
+            ViewCacheWeight::new(1024 * 1024),
         )
         .expect("open viewer app");
         let mut session = app.session.lock().expect("viewer session");
         let tab_id = session
             .open(
                 Recipe {
-                    source: RecipeSource::LocalRepo("/repo".into()),
+                    source: RecipeSource::LocalRepo(repository_root("/repo")),
                     op: RecipeOp::MergeDiff {
                         base: None,
                         pinned: None,
                     },
                     name: None,
                 },
-                "bridge-test".into(),
+                RecipeBatchId::generate(),
                 ViewerTabKind::Snapshot,
             )
             .expect("tab id");
         let ticket = session.begin_compute(tab_id).expect("compute ticket");
         let view = Arc::new(View {
-            repo_name: "git-tools".into(),
-            repo_root: "/repo".into(),
-            branch: "feature".into(),
-            upstream: "main".into(),
+            repo_name: project_name("git-tools"),
+            repo_root: repository_root("/repo"),
+            branch: git_head("feature"),
+            upstream: git_revision("main"),
             commits: Vec::new(),
             files: vec![file],
             title: "Feature diff".into(),
@@ -140,9 +147,9 @@ mod tests {
 
     fn ready_app() -> (tempfile::TempDir, ViewerApp, ViewerViewIdentity) {
         ready_app_with_file(FileDiff {
-            path: "src/lib.rs".into(),
-            added: 1,
-            removed: 0,
+            path: repository_relative_path("src/lib.rs"),
+            added: DiffLineCount::new(1),
+            removed: DiffLineCount::default(),
             lines: vec!["@@ -0,0 +1 @@".into(), "+server rendered".into()],
             full_lines: None,
         })
@@ -158,14 +165,14 @@ mod tests {
             &LoadViewerDiffLines {
                 identity,
                 file: file.clone(),
-                cursor: ViewerDiffCursor::START,
+                cursor: ViewerDiffCursor::default(),
             },
         )
         .expect("raw diff lines");
 
         assert_eq!(page.identity, identity);
         assert_eq!(page.file, file);
-        assert_eq!(page.cursor, ViewerDiffCursor::START);
+        assert_eq!(page.cursor, ViewerDiffCursor::default());
         assert_eq!(page.lines, ["@@ -0,0 +1 @@", "+server rendered"]);
         assert_eq!(page.next, None);
     }
@@ -173,9 +180,9 @@ mod tests {
     #[test]
     fn full_density_pages_select_the_available_full_diff() {
         let (_directory, app, mut identity) = ready_app_with_file(FileDiff {
-            path: "src/lib.rs".into(),
-            added: 1,
-            removed: 1,
+            path: repository_relative_path("src/lib.rs"),
+            added: DiffLineCount::new(1),
+            removed: DiffLineCount::new(1),
             lines: vec!["+compact".into()],
             full_lines: Some(vec!["-full old".into(), "+full new".into()]),
         });
@@ -191,7 +198,7 @@ mod tests {
             &LoadViewerDiffLines {
                 identity,
                 file: ViewerDiffFileId::for_index(0),
-                cursor: ViewerDiffCursor::START,
+                cursor: ViewerDiffCursor::default(),
             },
         )
         .expect("full diff lines");
@@ -207,7 +214,7 @@ mod tests {
             &LoadViewerDiffLines {
                 identity,
                 file: ViewerDiffFileId::for_index(99),
-                cursor: ViewerDiffCursor::START,
+                cursor: ViewerDiffCursor::default(),
             },
         );
 
@@ -230,14 +237,14 @@ mod tests {
         );
 
         let mut stale_identity = identity;
-        stale_identity.range_generation += 1;
+        stale_identity.range_generation = stale_identity.range_generation.next();
         assert_eq!(
             load_lines(
                 &app,
                 &LoadViewerDiffLines {
                     identity: stale_identity,
                     file: ViewerDiffFileId::for_index(0),
-                    cursor: ViewerDiffCursor::START,
+                    cursor: ViewerDiffCursor::default(),
                 }
             ),
             Err(ViewerApiError::Conflict)

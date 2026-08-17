@@ -1,14 +1,18 @@
 use std::collections::BTreeMap;
 
+use anyhow::Context as _;
 use gtl_application::ports::GitWorkingTree;
 use gtl_models::{
-    diffs::{CommitId, CommitIdError},
-    managed::working_tree::CommitFile,
+    diffs::CommitId,
+    git::{BranchName, GitObjectId, TagName},
+    paths::{RepositoryRelativePath, RepositoryRoot},
+    repository::working_tree::CommitFile,
     tags::Tag,
-    worktrees::Worktree,
+    timestamps::MachineTimestamp,
+    worktrees::{Worktree, WorktreeCheckout, WorktreeKind},
 };
 
-pub(super) fn parse_working_tree(raw: &str) -> GitWorkingTree {
+pub(super) fn parse_working_tree(raw: &str) -> anyhow::Result<GitWorkingTree> {
     let mut tree = GitWorkingTree::default();
     for line in raw.lines().filter(|line| !line.is_empty()) {
         let bytes = line.as_bytes();
@@ -17,42 +21,50 @@ pub(super) fn parse_working_tree(raw: &str) -> GitWorkingTree {
         }
         tree.files.push(CommitFile {
             status: line.get(0..2).unwrap_or("").trim().to_string(),
-            path: line.get(3..).unwrap_or("").to_string(),
+            path: RepositoryRelativePath::try_new(line.get(3..).unwrap_or("").into())?,
         });
         let (index, worktree) = (bytes[0], bytes[1]);
         if index == b'?' && worktree == b'?' {
-            tree.unprepared += 1;
+            tree.unprepared.increment();
         } else {
-            tree.staged += usize::from(index != b' ');
-            tree.unprepared += usize::from(worktree != b' ');
+            if index != b' ' {
+                tree.staged.increment();
+            }
+            if worktree != b' ' {
+                tree.unprepared.increment();
+            }
         }
     }
-    tree
+    Ok(tree)
 }
 
 struct WorktreeBuilder {
-    path: String,
+    path: RepositoryRoot,
     id: Option<CommitId>,
-    branch: Option<String>,
-    detached: bool,
-    bare: bool,
+    kind: Option<WorktreeKind>,
     locked: Option<String>,
     prunable: Option<String>,
 }
 
 impl WorktreeBuilder {
     fn finish(self) -> anyhow::Result<Worktree> {
-        Ok(Worktree {
-            path: self.path,
-            id: self
-                .id
+        Ok(Worktree::new(
+            self.path,
+            self.id
                 .ok_or_else(|| anyhow::anyhow!("Git worktree output omitted its HEAD commit ID"))?,
-            branch: self.branch,
-            detached: self.detached,
-            bare: self.bare,
-            locked: self.locked,
-            prunable: self.prunable,
-        })
+            self.kind.ok_or_else(|| {
+                anyhow::anyhow!("Git worktree output omitted its checkout or bare state")
+            })?,
+            self.locked,
+            self.prunable,
+        ))
+    }
+
+    fn set_kind(&mut self, kind: WorktreeKind) -> anyhow::Result<()> {
+        if self.kind.replace(kind).is_some() {
+            anyhow::bail!("Git worktree output reported conflicting checkout states");
+        }
+        Ok(())
     }
 }
 
@@ -66,11 +78,9 @@ pub(super) fn parse_worktrees(raw: &str) -> anyhow::Result<Vec<Worktree>> {
             }
         } else if let Some(path) = line.strip_prefix("worktree ") {
             if let Some(worktree) = current.replace(WorktreeBuilder {
-                path: path.to_string(),
+                path: RepositoryRoot::try_new(path.into())?,
                 id: None,
-                branch: None,
-                detached: false,
-                bare: false,
+                kind: None,
                 locked: None,
                 prunable: None,
             }) {
@@ -80,16 +90,14 @@ pub(super) fn parse_worktrees(raw: &str) -> anyhow::Result<Vec<Worktree>> {
             if let Some(head) = line.strip_prefix("HEAD ") {
                 worktree.id = Some(head.try_into()?);
             } else if let Some(branch) = line.strip_prefix("branch ") {
-                worktree.branch = Some(
-                    branch
-                        .strip_prefix("refs/heads/")
-                        .unwrap_or(branch)
-                        .to_string(),
-                );
+                let branch = branch.strip_prefix("refs/heads/").unwrap_or(branch);
+                worktree.set_kind(WorktreeKind::Checkout(WorktreeCheckout::Branch(
+                    BranchName::try_new(branch.to_owned())?,
+                )))?;
             } else if line == "detached" {
-                worktree.detached = true;
+                worktree.set_kind(WorktreeKind::Checkout(WorktreeCheckout::Detached))?;
             } else if line == "bare" {
-                worktree.bare = true;
+                worktree.set_kind(WorktreeKind::Bare)?;
             } else if let Some(reason) = line.strip_prefix("locked") {
                 worktree.locked = Some(reason.trim_start().to_string());
             } else if let Some(reason) = line.strip_prefix("prunable") {
@@ -103,76 +111,98 @@ pub(super) fn parse_worktrees(raw: &str) -> anyhow::Result<Vec<Worktree>> {
     Ok(worktrees)
 }
 
-pub(super) fn parse_local_tags(output: &str) -> Result<BTreeMap<String, Tag>, CommitIdError> {
+pub(super) fn parse_local_tags(output: &str) -> anyhow::Result<BTreeMap<TagName, Tag>> {
     output
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| {
+        .map(|line| {
             let mut fields = line.splitn(4, '\t');
-            let object = fields.next()?.to_string();
-            let peeled_commit = fields.next()?.to_string();
-            let name = fields.next()?.to_string();
+            let object = GitObjectId::try_new(fields.next().unwrap_or_default().to_owned())?;
+            let peeled_commit = fields.next().unwrap_or_default().to_owned();
+            let name = TagName::try_new(fields.next().unwrap_or_default().to_owned())?;
             let message_and_date = fields.next().unwrap_or_default();
-            let (message, created_at) = message_and_date
-                .rsplit_once('\t')
-                .map_or((message_and_date, None), |(message, date)| {
-                    (message, date.parse().ok())
-                });
+            let (message, created_at) = match message_and_date.rsplit_once('\t') {
+                Some((message, "")) => (message, None),
+                Some((message, raw)) => {
+                    let seconds = raw
+                        .parse::<i64>()
+                        .context("Git tag has an invalid creation epoch")?;
+                    let timestamp = MachineTimestamp::from_unix_seconds(seconds)
+                        .context("Git tag creation epoch is out of range")?;
+                    (message, Some(timestamp))
+                }
+                None => (message_and_date, None),
+            };
             let annotated = !peeled_commit.is_empty();
             let commit = if annotated {
                 peeled_commit
             } else {
-                object.clone()
+                object.to_string()
             };
-            Some(commit.try_into().map(|commit: CommitId| {
-                let tag = if annotated {
-                    Tag::annotated(
-                        name.clone(),
-                        object,
-                        commit,
-                        created_at,
-                        Some(message.trim().to_string()).filter(|message| !message.is_empty()),
-                    )
-                } else {
-                    Tag::lightweight(name.clone(), commit, created_at)
-                };
-                (name, tag)
-            }))
+            let commit: CommitId = commit.try_into()?;
+            let tag = if annotated {
+                Tag::annotated(
+                    name.clone(),
+                    object,
+                    commit,
+                    created_at,
+                    Some(message.trim().to_string()).filter(|message| !message.is_empty()),
+                )
+            } else {
+                Tag::lightweight(name.clone(), commit, created_at)
+            };
+            Ok((name, tag))
         })
         .collect()
 }
 
-pub(super) fn parse_remote_tags(output: &str) -> BTreeMap<String, String> {
+pub(super) fn parse_remote_tags(output: &str) -> anyhow::Result<BTreeMap<TagName, GitObjectId>> {
     output
         .lines()
         .filter_map(|line| {
             let (object, reference) = line.split_once('\t')?;
             let name = reference.strip_prefix("refs/tags/")?;
-            (!name.ends_with("^{}")).then(|| (name.to_string(), object.to_string()))
+            (!name.ends_with("^{}")).then_some((name, object))
+        })
+        .map(|(name, object)| {
+            Ok((
+                TagName::try_new(name.to_owned())?,
+                GitObjectId::try_new(object.to_owned())?,
+            ))
         })
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::diffs::CommitIdError;
-
     use super::{parse_local_tags, parse_working_tree};
 
     #[test]
     fn porcelain_status_becomes_a_semantic_working_tree() {
-        let tree = parse_working_tree("M  staged\n M changed\nMM both\n?? new\n");
+        let tree = parse_working_tree("M  staged\n M changed\nMM both\n?? new\n")
+            .expect("valid repository-relative status paths");
 
         assert_eq!(tree.files.len(), 4);
-        assert_eq!(tree.staged, 2);
-        assert_eq!(tree.unprepared, 3);
+        assert_eq!(tree.staged.value(), 2);
+        assert_eq!(tree.unprepared.value(), 3);
+    }
+
+    #[test]
+    fn porcelain_status_rejects_parent_traversal() {
+        assert!(parse_working_tree("M  ../outside\n").is_err());
     }
 
     #[test]
     fn local_tags_reject_an_invalid_resolved_commit_id() {
-        assert_eq!(
-            parse_local_tags("invalid\t\tv1.0.0\t\t100"),
-            Err(CommitIdError)
-        );
+        assert!(parse_local_tags("invalid\t\tv1.0.0\t\t100").is_err());
+    }
+
+    #[test]
+    fn local_tags_reject_a_malformed_creation_epoch() {
+        let error =
+            parse_local_tags("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\t\tv1.0.0\t\tnot-an-epoch")
+                .expect_err("malformed Git epoch must fail at the decode boundary");
+
+        assert!(error.to_string().contains("invalid creation epoch"));
     }
 }

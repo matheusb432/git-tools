@@ -1,24 +1,29 @@
 use similar::{ChangeTag, TextDiff};
 
+use crate::CharacterOffset;
+
 /// A half-open character range within a changed line body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CharacterSpan {
-    start: usize,
-    end: usize,
+    start: CharacterOffset,
+    end: CharacterOffset,
 }
 
 impl CharacterSpan {
     pub(crate) const fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
+        Self {
+            start: CharacterOffset::new(start),
+            end: CharacterOffset::new(end),
+        }
     }
 
     /// Returns the first character index covered by the span.
-    pub const fn start(&self) -> usize {
+    pub const fn start(&self) -> CharacterOffset {
         self.start
     }
 
     /// Returns the exclusive character index after the span.
-    pub const fn end(&self) -> usize {
+    pub const fn end(&self) -> CharacterOffset {
         self.end
     }
 }
@@ -64,7 +69,7 @@ pub(crate) fn changed_spans(old: &str, new: &str) -> ChangedLineSpans {
 
 fn push_span(spans: &mut Vec<CharacterSpan>, start: usize, end: usize) {
     match spans.last_mut() {
-        Some(last) if last.end == start => last.end = end,
+        Some(last) if last.end.into_inner() == start => last.end = CharacterOffset::new(end),
         _ => spans.push(CharacterSpan::new(start, end)),
     }
 }

@@ -70,6 +70,9 @@ fn decode_page(
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
+    use gtl_models::viewer::{ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId};
     use gtl_wire::viewer::{
         ViewerDiffCursor, ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout,
         ViewerRenderOptions, ViewerViewIdentity,
@@ -77,12 +80,12 @@ mod tests {
 
     use super::*;
 
-    fn request() -> LoadViewerDiffLines {
-        LoadViewerDiffLines {
+    fn request() -> Result<LoadViewerDiffLines, Box<dyn Error>> {
+        Ok(LoadViewerDiffLines {
             identity: ViewerViewIdentity {
-                tab_id: 1,
-                range_generation: 2,
-                selection_generation: 3,
+                tab_id: ViewerTabId::try_new(1)?,
+                range_generation: ViewerRangeGeneration::new(2),
+                selection_generation: ViewerSelectionGeneration::new(3),
                 render_options: ViewerRenderOptions {
                     layout: ViewerDiffLayout::Unified,
                     density: ViewerDiffDensity::Compact,
@@ -90,12 +93,12 @@ mod tests {
             },
             file: ViewerDiffFileId::for_index(4),
             cursor: ViewerDiffCursor::new(5),
-        }
+        })
     }
 
     #[test]
-    fn decoder_rejects_a_page_bound_to_another_request() -> Result<(), serde_json::Error> {
-        let request = request();
+    fn decoder_rejects_a_page_bound_to_another_request() -> Result<(), Box<dyn Error>> {
+        let request = request()?;
         let mut page = ViewerDiffLines {
             identity: request.identity,
             file: request.file.clone(),
@@ -117,10 +120,11 @@ mod tests {
     }
 
     #[test]
-    fn decoder_rejects_corrupt_json() {
+    fn decoder_rejects_corrupt_json() -> Result<(), Box<dyn Error>> {
         assert_eq!(
-            decode_page(b"not JSON", &request()),
+            decode_page(b"not JSON", &request()?),
             Err(ArtifactDiffSourceError::InvalidPayload)
         );
+        Ok(())
     }
 }

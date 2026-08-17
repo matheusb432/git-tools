@@ -2,6 +2,7 @@ mod actions;
 mod rows;
 
 use dioxus::prelude::*;
+use gtl_models::{diffs::DiffLineCount, paths::RepositoryRelativePath};
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
 use self::{actions::DiffFileActions, rows::DiffFileBody};
@@ -18,7 +19,7 @@ pub(super) fn DiffFileCard(
     folded: Option<bool>,
     copy_context_enabled: bool,
     is_flashing: bool,
-    onopen: Option<EventHandler<String>>,
+    onopen: Option<EventHandler<RepositoryRelativePath>>,
     onretry: EventHandler<()>,
     file_index: usize,
 ) -> Element {
@@ -29,7 +30,7 @@ pub(super) fn DiffFileCard(
         }
     }));
     let anchor_id = file.summary.anchor_id.clone();
-    let path = file.summary.path.clone();
+    let path = file.summary.path.to_string_lossy().into_owned();
 
     rsx! {
         details {
@@ -64,7 +65,7 @@ fn DiffFileHeader(
     file: ClientDiffFile,
     mut open: Signal<bool>,
     copy_context_enabled: bool,
-    onopen: Option<EventHandler<String>>,
+    onopen: Option<EventHandler<RepositoryRelativePath>>,
 ) -> Element {
     let background_classes = file_header_background(file.summary.status);
     let file_summary = file.summary.clone();
@@ -77,7 +78,7 @@ fn DiffFileHeader(
                 open.toggle();
             },
             DiffFileCaret {}
-            DiffFilePath { path: file_summary.path.clone() }
+            DiffFilePath { path: file_summary.path.to_string_lossy().into_owned() }
             DiffFileStatusBadge { status: file_summary.status }
             DiffFileActions { file, copy_context_enabled, onopen }
             DiffLineStats { added: file_summary.added, removed: file_summary.removed }
@@ -115,12 +116,12 @@ fn DiffFilePath(path: String) -> Element {
 }
 
 #[component]
-fn DiffLineStats(added: u32, removed: u32) -> Element {
+fn DiffLineStats(added: DiffLineCount, removed: DiffLineCount) -> Element {
     rsx! {
         span { class: "flex-none text-sm",
-            DiffLineChangeText { kind: DiffLineChangeKind::Added, count: u64::from(added) }
+            DiffLineChangeText { kind: DiffLineChangeKind::Added, count: added.value() }
             " "
-            DiffLineChangeText { kind: DiffLineChangeKind::Removed, count: u64::from(removed) }
+            DiffLineChangeText { kind: DiffLineChangeKind::Removed, count: removed.value() }
         }
     }
 }

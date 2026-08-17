@@ -75,9 +75,11 @@ mod tests {
 
     use super::*;
 
-    fn batch(id: &str) -> OpenRecipes {
+    fn batch(sequence: u64) -> OpenRecipes {
         OpenRecipes {
-            batch_id: id.into(),
+            batch_id: format!("00000000-0000-0000-0000-{sequence:012x}")
+                .parse()
+                .expect("fixture batch ID is valid"),
             kind: RecipeBatchKind::Snapshot,
             recipes: Vec::new(),
         }
@@ -86,10 +88,10 @@ mod tests {
     #[test]
     fn drain_atomically_takes_every_batch_in_fifo_order() {
         let pending = PendingRecipes::default();
-        pending.push(batch("first")).expect("push");
-        pending.push(batch("second")).expect("push");
+        pending.push(batch(1)).expect("push");
+        pending.push(batch(2)).expect("push");
 
-        assert_eq!(pending.drain(), vec![batch("first"), batch("second")]);
+        assert_eq!(pending.drain(), vec![batch(1), batch(2)]);
         assert!(pending.drain().is_empty());
     }
 
@@ -102,12 +104,12 @@ mod tests {
     #[test]
     fn prepend_places_failed_work_ahead_of_concurrent_enqueues() {
         let pending = PendingRecipes::default();
-        pending.push(batch("drained")).expect("push");
+        pending.push(batch(1)).expect("push");
         let drained = pending.try_drain().expect("drain");
-        pending.push(batch("concurrent")).expect("concurrent push");
+        pending.push(batch(2)).expect("concurrent push");
         pending.prepend(drained).expect("requeue");
 
-        assert_eq!(pending.drain(), vec![batch("drained"), batch("concurrent")]);
+        assert_eq!(pending.drain(), vec![batch(1), batch(2)]);
     }
 
     #[test]
@@ -118,13 +120,10 @@ mod tests {
             panic!("poison queue");
         });
 
-        assert_eq!(
-            pending.push(batch("push")),
-            Err(PendingRecipesError::Poisoned)
-        );
+        assert_eq!(pending.push(batch(1)), Err(PendingRecipesError::Poisoned));
         assert_eq!(pending.try_drain(), Err(PendingRecipesError::Poisoned));
         assert_eq!(
-            pending.prepend(vec![batch("prepend")]),
+            pending.prepend(vec![batch(2)]),
             Err(PendingRecipesError::Poisoned)
         );
     }
@@ -132,7 +131,7 @@ mod tests {
     #[test]
     fn second_consumer_waits_for_failed_remainder_before_newer_producer_work() {
         let pending = Arc::new(PendingRecipes::default());
-        pending.push(batch("older")).expect("older push");
+        pending.push(batch(1)).expect("older push");
         let entered = Arc::new(Barrier::new(2));
         let release = Arc::new(Barrier::new(2));
         let first = {
@@ -149,7 +148,7 @@ mod tests {
             })
         };
         entered.wait();
-        pending.push(batch("newer")).expect("producer remains live");
+        pending.push(batch(2)).expect("producer remains live");
         let second = {
             let pending = Arc::clone(&pending);
             std::thread::spawn(move || {
@@ -170,7 +169,7 @@ mod tests {
                 .join()
                 .expect("second joins")
                 .expect("second consumer"),
-            vec!["older", "newer"]
+            vec![batch(1).batch_id, batch(2).batch_id]
         );
     }
 }

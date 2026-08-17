@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use gtl_models::git::{GitHead, GitRevision};
 use gtl_wire::viewer::{ViewerActiveView, ViewerAppliedExclusions};
 
 use crate::shared::ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant};
@@ -61,14 +62,12 @@ fn RepositoryIdentity(repository_name: String, title: String) -> Element {
 }
 
 #[component]
-fn BranchRange(branch: String, upstream: String) -> Element {
+fn BranchRange(branch: GitHead, upstream: GitRevision) -> Element {
     rsx! {
         div { class: "flex min-w-0 items-center gap-1.5 text-ink-2 tablet:order-3 tablet:w-full",
             span { class: "truncate text-acc", "{branch}" }
-            if !upstream.is_empty() {
-                span { class: "text-ink-3", "\u{2192}" }
-                span { class: "truncate text-ink-3", "{upstream}" }
-            }
+            span { class: "text-ink-3", "\u{2192}" }
+            span { class: "truncate text-ink-3", "{upstream}" }
         }
     }
 }
@@ -132,7 +131,7 @@ fn exclusion_label(exclusions: &ViewerAppliedExclusions) -> String {
     let extension_label = if exclusions.extensions.is_empty() {
         "configured".to_owned()
     } else {
-        exclusions.extensions.join(", ")
+        exclusions.extensions.extensions().join(", ")
     };
     let file_label = super::file_label(hidden_count);
     format!("{hidden_count} {file_label} hidden · {extension_label}")
@@ -142,7 +141,7 @@ fn exclusion_tooltip(exclusions: &ViewerAppliedExclusions) -> String {
     let mut tooltip = String::from("Hidden by git-tools config [diff.exclude]:");
     for path in &exclusions.hidden_paths {
         tooltip.push('\n');
-        tooltip.push_str(path);
+        tooltip.push_str(path.to_string_lossy().as_ref());
     }
     tooltip
 }

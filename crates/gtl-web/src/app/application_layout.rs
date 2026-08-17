@@ -1,4 +1,5 @@
 use dioxus::{core::spawn_forever, prelude::*};
+use gtl_models::viewer::{ViewerShellRevision, ViewerTabId};
 use gtl_wire::viewer::{
     SetViewerPreference, ViewerFeedback, ViewerShell, ViewerTabRequest, ViewerTheme,
 };
@@ -18,13 +19,28 @@ pub(crate) enum ViewerShellLoad {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct ViewerShellOrder {
-    request_generation: u64,
-    revision_watermark: Option<u64>,
+    request_generation: ViewerShellRequestGeneration,
+    revision_watermark: Option<ViewerShellRevision>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ViewerRenderCommandTicket {
-    generation: u64,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ViewerShellRequestGeneration(u64);
+
+impl ViewerShellRequestGeneration {
+    #[must_use]
+    const fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ViewerRenderCommandTicket(u64);
+
+impl ViewerRenderCommandTicket {
+    #[must_use]
+    const fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,7 +67,7 @@ enum ViewerRenderCommandCompletion {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ViewerRenderCommandScheduler {
-    generation: u64,
+    generation: ViewerRenderCommandTicket,
     active: Option<ViewerRenderCommandTicket>,
     pending: Option<ViewerRenderCommand>,
 }
@@ -81,10 +97,8 @@ impl ViewerRenderCommandScheduler {
     }
 
     fn next_ticket(&mut self) -> ViewerRenderCommandTicket {
-        self.generation = self.generation.wrapping_add(1);
-        ViewerRenderCommandTicket {
-            generation: self.generation,
-        }
+        self.generation = self.generation.next();
+        self.generation
     }
 
     const fn is_pending(self) -> bool {
@@ -93,44 +107,48 @@ impl ViewerRenderCommandScheduler {
 }
 
 impl ViewerShellOrder {
-    fn start_request(self) -> (Self, u64) {
+    fn start_request(self) -> (Self, ViewerShellRequestGeneration) {
         let order = self.advance_request_generation();
         (order, order.request_generation)
     }
 
     fn advance_request_generation(mut self) -> Self {
-        self.request_generation = self.request_generation.wrapping_add(1);
+        self.request_generation = self.request_generation.next();
         self
     }
 
-    fn observe_event(self, revision: u64) -> Self {
+    fn observe_event(self, revision: ViewerShellRevision) -> Self {
         self.observe_revision(revision)
     }
 
-    fn accept_command_response(self, revision: u64) -> Option<Self> {
+    fn accept_command_response(self, revision: ViewerShellRevision) -> Option<Self> {
         if self.revision_is_stale(revision) {
             return None;
         }
         Some(self.observe_revision(revision).advance_request_generation())
     }
 
-    fn accept_query_response(self, request_generation: u64, revision: u64) -> Option<Self> {
+    fn accept_query_response(
+        self,
+        request_generation: ViewerShellRequestGeneration,
+        revision: ViewerShellRevision,
+    ) -> Option<Self> {
         if !self.request_is_current(request_generation) || self.revision_is_stale(revision) {
             return None;
         }
         Some(self.observe_revision(revision))
     }
 
-    const fn request_is_current(self, request_generation: u64) -> bool {
+    fn request_is_current(self, request_generation: ViewerShellRequestGeneration) -> bool {
         self.request_generation == request_generation
     }
 
-    fn revision_is_stale(self, revision: u64) -> bool {
+    fn revision_is_stale(self, revision: ViewerShellRevision) -> bool {
         self.revision_watermark
             .is_some_and(|watermark| revision < watermark)
     }
 
-    fn observe_revision(mut self, revision: u64) -> Self {
+    fn observe_revision(mut self, revision: ViewerShellRevision) -> Self {
         self.revision_watermark = Some(
             self.revision_watermark
                 .map_or(revision, |watermark| watermark.max(revision)),
@@ -177,7 +195,7 @@ impl ViewerContext {
         self.schedule_render_command(ViewerRenderCommand::SetPreference(preference));
     }
 
-    pub(crate) fn refresh_tab(self, tab_id: u64) {
+    pub(crate) fn refresh_tab(self, tab_id: ViewerTabId) {
         self.schedule_render_command(ViewerRenderCommand::RefreshTab(ViewerTabRequest { tab_id }));
     }
 
@@ -269,7 +287,7 @@ impl ViewerContext {
         });
     }
 
-    fn invalidate(mut self, revision: u64) {
+    fn invalidate(mut self, revision: ViewerShellRevision) {
         let order = (self.shell_order)().observe_event(revision);
         self.shell_order.set(order);
         let is_current = matches!(
@@ -289,7 +307,7 @@ pub(crate) fn ApplicationLayout() -> Element {
     let reconnect_generation = use_signal(|| 0_u64);
     let render_command_scheduler = use_signal(ViewerRenderCommandScheduler::default);
     let render_command_error = use_signal(|| None::<ClientApiError>);
-    let state_change_revision = use_signal(|| None::<u64>);
+    let state_change_revision = use_signal(|| None::<ViewerShellRevision>);
     let context = ViewerContext {
         shell,
         shell_order,
@@ -371,6 +389,7 @@ fn ViewerFeedbackNotice(feedback: ViewerFeedback) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::viewer::ViewerShellRevision;
     use gtl_wire::viewer::{
         SetViewerPreference, ViewerDiffDensity, ViewerDiffLayout, ViewerTabRequest,
     };
@@ -379,12 +398,17 @@ mod tests {
         ViewerRenderCommand, ViewerRenderCommandCompletion, ViewerRenderCommandScheduler,
         ViewerRenderCommandSubmission, ViewerRenderCommandTicket, ViewerShellOrder,
     };
+    use crate::test_support::{TestResult, viewer_tab_id};
+
+    fn revision(value: u64) -> ViewerShellRevision {
+        ViewerShellRevision::new(value)
+    }
 
     #[test]
     fn render_commands_run_the_latest_rapid_preference_after_the_active_preference() {
         let mut scheduler = ViewerRenderCommandScheduler::default();
-        let layout_ticket = ViewerRenderCommandTicket { generation: 1 };
-        let density_ticket = ViewerRenderCommandTicket { generation: 2 };
+        let layout_ticket = ViewerRenderCommandTicket(1);
+        let density_ticket = ViewerRenderCommandTicket(2);
         let layout = ViewerRenderCommand::SetPreference(SetViewerPreference::Layout(
             ViewerDiffLayout::Split,
         ));
@@ -416,18 +440,22 @@ mod tests {
     }
 
     #[test]
-    fn refresh_commands_coalesce_to_the_latest_tab_after_the_active_preference() {
+    fn refresh_commands_coalesce_to_the_latest_tab_after_the_active_preference() -> TestResult {
         let mut scheduler = ViewerRenderCommandScheduler::default();
-        let layout_ticket = ViewerRenderCommandTicket { generation: 1 };
-        let refresh_ticket = ViewerRenderCommandTicket { generation: 2 };
+        let layout_ticket = ViewerRenderCommandTicket(1);
+        let refresh_ticket = ViewerRenderCommandTicket(2);
         let layout = ViewerRenderCommand::SetPreference(SetViewerPreference::Layout(
             ViewerDiffLayout::Unified,
         ));
         let density = ViewerRenderCommand::SetPreference(SetViewerPreference::Density(
             ViewerDiffDensity::Compact,
         ));
-        let first_refresh = ViewerRenderCommand::RefreshTab(ViewerTabRequest { tab_id: 7 });
-        let latest_refresh = ViewerRenderCommand::RefreshTab(ViewerTabRequest { tab_id: 11 });
+        let first_refresh = ViewerRenderCommand::RefreshTab(ViewerTabRequest {
+            tab_id: viewer_tab_id(7)?,
+        });
+        let latest_refresh = ViewerRenderCommand::RefreshTab(ViewerTabRequest {
+            tab_id: viewer_tab_id(11)?,
+        });
 
         assert_eq!(
             scheduler.submit(layout),
@@ -462,6 +490,7 @@ mod tests {
             ViewerRenderCommandCompletion::Finished
         );
         assert!(!scheduler.is_pending());
+        Ok(())
     }
 
     #[test]
@@ -469,23 +498,23 @@ mod tests {
         let (order, initial_request_generation) = ViewerShellOrder::default().start_request();
         let order_initial = ViewerShellOrder {
             request_generation: initial_request_generation,
-            revision_watermark: Some(7),
+            revision_watermark: Some(revision(7)),
         };
         assert_eq!(
-            order.accept_query_response(initial_request_generation, 7),
+            order.accept_query_response(initial_request_generation, revision(7)),
             Some(order_initial)
         );
         let order = order_initial;
-        let (order, event_request_generation) = order.observe_event(8).start_request();
+        let (order, event_request_generation) = order.observe_event(revision(8)).start_request();
 
-        assert!(order.accept_command_response(7).is_none());
+        assert!(order.accept_command_response(revision(7)).is_none());
         assert_eq!(order.request_generation, event_request_generation);
 
         assert_eq!(
-            order.accept_query_response(event_request_generation, 8),
+            order.accept_query_response(event_request_generation, revision(8)),
             Some(ViewerShellOrder {
                 request_generation: event_request_generation,
-                revision_watermark: Some(8),
+                revision_watermark: Some(revision(8)),
             })
         );
     }
@@ -493,20 +522,23 @@ mod tests {
     #[test]
     fn command_at_event_revision_supersedes_the_event_refresh() {
         let (order, event_request_generation) = ViewerShellOrder::default()
-            .observe_event(12)
+            .observe_event(revision(12))
             .start_request();
 
         let order_command = ViewerShellOrder {
-            request_generation: event_request_generation.wrapping_add(1),
-            revision_watermark: Some(12),
+            request_generation: event_request_generation.next(),
+            revision_watermark: Some(revision(12)),
         };
-        assert_eq!(order.accept_command_response(12), Some(order_command));
+        assert_eq!(
+            order.accept_command_response(revision(12)),
+            Some(order_command)
+        );
         let order = order_command;
 
         assert_ne!(order.request_generation, event_request_generation);
         assert!(
             order
-                .accept_query_response(event_request_generation, 12)
+                .accept_query_response(event_request_generation, revision(12))
                 .is_none()
         );
     }
@@ -514,11 +546,11 @@ mod tests {
     #[test]
     fn out_of_order_events_keep_the_highest_revision_watermark() {
         let order = ViewerShellOrder::default()
-            .observe_event(15)
-            .observe_event(13);
+            .observe_event(revision(15))
+            .observe_event(revision(13));
 
-        assert_eq!(order.revision_watermark, Some(15));
-        assert!(order.accept_command_response(14).is_none());
+        assert_eq!(order.revision_watermark, Some(revision(15)));
+        assert!(order.accept_command_response(revision(14)).is_none());
     }
 
     #[test]
@@ -526,16 +558,16 @@ mod tests {
         let (order, request_generation) = ViewerShellOrder::default().start_request();
         let order_accepted = ViewerShellOrder {
             request_generation,
-            revision_watermark: Some(21),
+            revision_watermark: Some(revision(21)),
         };
         assert_eq!(
-            order.accept_query_response(request_generation, 21),
+            order.accept_query_response(request_generation, revision(21)),
             Some(order_accepted)
         );
         let order = order_accepted;
 
-        assert!(order.accept_command_response(20).is_none());
+        assert!(order.accept_command_response(revision(20)).is_none());
         assert_eq!(order.request_generation, request_generation);
-        assert_eq!(order.revision_watermark, Some(21));
+        assert_eq!(order.revision_watermark, Some(revision(21)));
     }
 }

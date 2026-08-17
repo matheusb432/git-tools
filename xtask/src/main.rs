@@ -1,18 +1,9 @@
-//! `xtask` — this repo's embedded dev/release automation harness.
-//!
-//! Invoked as `cargo run -p xtask -- <verb>` from the justfile; never installed (it is a
-//! workspace member built on demand). Direct quality-tool invocations stay in the justfile while
-//! typed and nontrivial automation remains here. Add verbs under `verbs/` and wire the new arm
-//! into `cli::Command` plus the dispatch below.
-
 use anyhow::Result;
 use clap::Parser;
 
 mod cli;
 mod process;
-mod project;
 mod task;
-mod verb;
 mod verbs;
 
 fn main() {
@@ -22,7 +13,6 @@ fn main() {
     }
 }
 
-/// Dispatch one parsed verb to its focused workflow module.
 fn run(command: cli::Command) -> Result<()> {
     match command {
         cli::Command::Setup => verbs::setup::run(),
@@ -32,15 +22,15 @@ fn run(command: cli::Command) -> Result<()> {
             force,
         } => verbs::install::run_uninstall(remove_config, force),
         cli::Command::Test(arguments) => verbs::test::run(&arguments),
-        cli::Command::DesktopE2eWorker { verbose } => verbs::desktop_e2e::run_worker(verbose),
+        cli::Command::DesktopE2eWorker { verbose: _ } => verbs::desktop_e2e::run(),
         cli::Command::E2eRuntimeWorker {
             executable,
             arguments,
         } => verbs::desktop_e2e::run_runtime(&executable, &arguments),
         cli::Command::Build { target } => verbs::build::run(target),
-        cli::Command::WebBuild => verbs::dioxus_web::run(),
+        cli::Command::WebBuild => verbs::dioxus_web::build_release(),
         cli::Command::WebServe { arguments } => verbs::dioxus_web::serve(&arguments),
-        cli::Command::WebStyles => verbs::dioxus_web::run_styles(),
+        cli::Command::WebStyles => verbs::dioxus_web::build_styles(),
         cli::Command::Bench(arguments) => verbs::bench::run(&arguments),
         cli::Command::CheckDioxusFormat => verbs::format::check_dioxus(),
         cli::Command::PreCommit => verbs::pre_commit::run(),

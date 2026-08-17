@@ -1,3 +1,5 @@
+use gtl_models::git::GitDiffSpec;
+
 use super::view::{Cmd, Foot};
 
 const TITLE_DIFF: &str = "diff";
@@ -23,7 +25,8 @@ pub(super) struct RangeView {
 }
 
 impl RangeView {
-    pub(super) fn new(range: &str, presentation: RangePresentation) -> Self {
+    pub(super) fn new(spec: &GitDiffSpec, presentation: RangePresentation) -> Self {
+        let range = spec.to_string();
         let (title, commits_label) = match presentation {
             RangePresentation::Unpushed => (TITLE_DIFF, LABEL_UNPUSHED_COMMITS.to_string()),
             RangePresentation::WorkingTree => (TITLE_DIFF, format!("# commits since {range}")),
@@ -35,7 +38,7 @@ impl RangeView {
             title: title.to_string(),
             cmd: Cmd {
                 lead: GIT_DIFF_LEAD.to_string(),
-                range: range.to_string(),
+                range: range.clone(),
                 trail: String::new(),
             },
             commits_label,

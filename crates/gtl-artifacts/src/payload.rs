@@ -6,6 +6,7 @@ use gtl_application::{
         project_theme,
     },
 };
+use gtl_models::viewer::{ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId};
 use gtl_wire::viewer::{
     LoadViewerDiffLines, ViewerArtifactManifest, ViewerArtifactPage, ViewerArtifactPageId,
     ViewerCommitSelection, ViewerDiffCursor, ViewerViewIdentity,
@@ -20,12 +21,9 @@ pub(crate) fn project_payload(
     title: &str,
     views: &[View],
     options: RenderOptions,
-    theme: Option<&str>,
+    theme: Option<Theme>,
 ) -> Result<ArtifactPayload> {
-    let theme = theme
-        .unwrap_or("dark")
-        .parse::<Theme>()
-        .context("parse artifact theme")?;
+    let theme = theme.unwrap_or(Theme::Dark);
     let render_options = project_render_options(options);
     let mut active_views = Vec::with_capacity(views.len());
     let mut pages = Vec::new();
@@ -35,10 +33,11 @@ pub(crate) fn project_payload(
             .ok()
             .and_then(|value| value.checked_add(1))
             .context("artifact has too many views")?;
+        let tab_id = ViewerTabId::try_new(tab_id).context("artifact view id must be positive")?;
         let identity = ViewerViewIdentity {
             tab_id,
-            range_generation: 1,
-            selection_generation: 0,
+            range_generation: ViewerRangeGeneration::new(1),
+            selection_generation: ViewerSelectionGeneration::default(),
             render_options,
         };
         let active = project_diff_view(view, view, identity, ViewerCommitSelection::None);
@@ -62,7 +61,7 @@ fn project_pages(
     pages: &mut Vec<ViewerArtifactPage>,
 ) -> Result<()> {
     for file in &active.files {
-        let mut cursor = ViewerDiffCursor::START;
+        let mut cursor = ViewerDiffCursor::default();
         loop {
             let request = LoadViewerDiffLines {
                 identity: active.identity,
@@ -73,7 +72,7 @@ fn project_pages(
                 anyhow!(
                     "project artifact page for {} at {}: {error:?}",
                     file.id.as_str(),
-                    cursor.position()
+                    cursor.into_inner()
                 )
             })?;
             let next = page.next;
@@ -83,7 +82,7 @@ fn project_pages(
                 break;
             };
             ensure!(
-                next.position() > cursor.position(),
+                next.into_inner() > cursor.into_inner(),
                 "artifact page cursor did not advance"
             );
             cursor = next;
@@ -106,13 +105,13 @@ mod tests {
             "artifact",
             &[sample_view()],
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
-            Some("graphite"),
+            Some(Theme::Graphite),
         )
         .expect("project artifact payload");
         let active = &payload.manifest.views[0];
 
         assert_eq!(payload.manifest.theme, ViewerTheme::Graphite);
-        assert_eq!(active.identity.tab_id, 1);
+        assert_eq!(u64::from(active.identity.tab_id), 1);
         assert_eq!(
             active.identity.render_options.layout,
             ViewerDiffLayout::Split

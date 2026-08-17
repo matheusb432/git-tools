@@ -3,9 +3,13 @@
 //! user-facing message out as [`Note`]s. Mirrors `render_diff`'s shape; the
 //! cli's `gtl merge-diff` calls this in-process.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use gtl_models::diffs::{DiffKind, PinnedRange};
+use gtl_models::{
+    artifacts::ArtifactDiffIdentity,
+    diffs::{DiffKind, PinnedRange},
+    git::GitRevision,
+};
 use serde::{Deserialize, Serialize};
 
 pub use crate::diffs::compute_merge_diff::DEFAULT_BASE;
@@ -15,7 +19,10 @@ use crate::{
         exclusions,
         range_view::TITLE_MERGE_DIFF,
     },
-    ports::{ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, UserSettingsStore},
+    ports::{
+        ArtifactMeta, ArtifactStore, Clock, GitClient, HtmlRenderer, PlacedArtifact,
+        UserSettingsStore,
+    },
     shared::notes::Note,
 };
 
@@ -25,14 +32,13 @@ use crate::{
 pub struct RenderMergeDiff {
     pub cwd: PathBuf,
     #[serde(default)]
-    pub base: Option<String>,
+    pub base: Option<GitRevision>,
 }
 
 /// The stored artifact plus every message the render wanted surfaced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderMergeDiffOk {
-    pub artifact: PathBuf,
-    pub reused: bool,
+    pub placement: PlacedArtifact,
     pub notes: Vec<Note>,
 }
 
@@ -56,38 +62,42 @@ pub fn execute(
     clock: &impl Clock,
 ) -> Result<RenderMergeDiffOk, RenderMergeDiffError> {
     let RenderMergeDiff { cwd, base } = req;
+    let repo_root = source.top_level(&cwd)?;
     let computed = compute_merge_diff::execute(
         ComputeMergeDiff {
-            cwd,
+            repo_root,
             base,
             pinned: None,
         },
         app_settings,
         source,
     )?;
-    let store_root = super::artifacts::root(Path::new(&computed.top));
+    let store_root = super::artifacts::root(computed.top.as_ref());
     let view = computed.view;
     let commit_count = view.commits.len();
     let file_count = view.files.len();
-    let html = renderer.build_html(&view, computed.render_options, computed.theme.as_deref())?;
+    let html = renderer.build_html(&view, computed.render_options, computed.theme)?;
     let commit_range = source
-        .resolve_commit_id(Path::new(&computed.top), &computed.base)
+        .resolve_commit_id(&computed.top, &computed.base)
         .ok()
         .zip(
             source
-                .resolve_commit_id(Path::new(&computed.top), "HEAD")
+                .resolve_commit_id(&computed.top, &GitRevision::head())
                 .ok(),
         )
         .map(|(base, head)| PinnedRange { base, head });
 
     let meta = ArtifactMeta {
-        repo_root: PathBuf::from(&computed.top),
+        repo_root: computed.top.clone(),
         repo_name: view.repo_name.clone(),
-        kind: DiffKind::from_diff_range(&computed.diff_range),
-        commit_range,
-        range_label: computed.diff_range.clone(),
-        head_committed_at: source.committed_at(Path::new(&computed.top), "HEAD"),
-        generated_at: clock.now_iso(),
+        identity: ArtifactDiffIdentity::from_parts(
+            DiffKind::from_diff_range(computed.diff_range.as_arg()),
+            commit_range,
+        )
+        .map_err(anyhow::Error::from)?,
+        range_label: computed.diff_range.to_string(),
+        head_committed_at: source.committed_at(&computed.top, &GitRevision::head()),
+        generated_at: clock.now().map_err(anyhow::Error::from)?,
         title: TITLE_MERGE_DIFF.to_string(),
         render_options: computed.render_options,
         theme: computed.theme,
@@ -103,10 +113,9 @@ pub fn execute(
         computed.base,
         plural(file_count),
     )));
-    notes.push(Note::info(format!("wrote {}", placed.path.display())));
+    notes.push(Note::info(format!("wrote {}", placed.path().display())));
     Ok(RenderMergeDiffOk {
-        artifact: placed.path,
-        reused: placed.reused,
+        placement: placed,
         notes,
     })
 }
@@ -125,11 +134,14 @@ mod tests {
         viewer::{RenderOptions, Theme},
     };
 
-    use super::{RenderMergeDiff, RenderMergeDiffError, execute};
+    use super::{RenderMergeDiff, RenderMergeDiffError};
     use crate::{
-        diffs::compute_merge_diff::{self, ComputeMergeDiff},
+        diffs::{
+            compute_merge_diff::{self, ComputeMergeDiff},
+            render_merge_diff,
+        },
         shared::notes::Note,
-        testing::{
+        utils::{
             FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
@@ -138,7 +150,7 @@ mod tests {
     fn req(source_top: &str, base: Option<&str>) -> RenderMergeDiff {
         RenderMergeDiff {
             cwd: PathBuf::from(source_top),
-            base: base.map(str::to_string),
+            base: base.map(crate::utils::git_revision),
         }
     }
 
@@ -155,7 +167,7 @@ mod tests {
         let store = InMemoryArtifactStore::default();
         let computed = compute_merge_diff::execute(
             ComputeMergeDiff {
-                cwd: PathBuf::from("/repo"),
+                repo_root: crate::utils::repository_root("/repo"),
                 base: None,
                 pinned: None,
             },
@@ -164,21 +176,21 @@ mod tests {
         )
         .expect("compute succeeds");
 
-        let response = execute(
+        let response = render_merge_diff::execute(
             req("/repo", None),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
         assert_eq!(
-            response.artifact,
+            response.placement.path().as_path(),
             PathBuf::from("/repo/.artifacts/gtl/artifact.html")
         );
-        assert!(!response.reused);
+        assert!(!response.placement.is_reused());
         assert_eq!(
             response.notes,
             vec![
@@ -190,9 +202,9 @@ mod tests {
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.title, "merge-diff");
-        assert_eq!(artifact.meta.repo_name, "repo");
-        assert_eq!(artifact.meta.repo_root, PathBuf::from(computed.top));
-        assert_eq!(artifact.meta.range_label, computed.diff_range);
+        assert_eq!(artifact.meta.repo_name, crate::utils::project_name("repo"));
+        assert_eq!(artifact.meta.repo_root, computed.top);
+        assert_eq!(artifact.meta.range_label, computed.diff_range.to_string());
         assert_eq!(artifact.meta.render_options, computed.render_options);
         assert_eq!(artifact.meta.theme, computed.theme);
         assert_eq!(
@@ -216,10 +228,10 @@ mod tests {
             Some(Theme::Noir),
             RenderOptions::DEFAULT,
             true,
-            DiffExclusions::new([("repo".to_string(), vec!["md"])], None),
+            DiffExclusions::new([(crate::utils::project_name("repo"), vec!["md"])], None),
         ));
 
-        execute(
+        render_merge_diff::execute(
             RenderMergeDiff {
                 cwd: PathBuf::from("/repo"),
                 base: None,
@@ -228,19 +240,19 @@ mod tests {
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
-        assert_eq!(artifact.meta.excluded_extensions, vec!["md"]);
+        assert_eq!(artifact.meta.excluded_extensions.extensions(), ["md"]);
         assert!(artifact.html.contains("noir"));
     }
 
     #[test]
-    fn blank_base_falls_back_to_default() {
+    fn absent_base_falls_back_to_default() {
         let source = FakeGitClient {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
@@ -251,13 +263,13 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
 
-        let response = execute(
-            req("/repo", Some("   ")),
+        let response = render_merge_diff::execute(
+            req("/repo", None),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
@@ -277,13 +289,13 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
 
-        let error = execute(
+        let error = render_merge_diff::execute(
             req("/repo", Some("nope")),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect_err("unknown base errors");
 

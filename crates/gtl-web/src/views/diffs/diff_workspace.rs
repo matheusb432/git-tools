@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_models::diffs::CommitId;
+use gtl_models::{diffs::CommitId, paths::RepositoryRelativePath};
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::ViewerActiveView;
 #[cfg(feature = "artifact")]
@@ -225,7 +225,7 @@ fn DiffWorkspaceDocument(
     mobile_navigation: Option<Element>,
     onselect_commit: Option<EventHandler<CommitId>>,
     onclear_commit: Option<EventHandler<()>>,
-    onopen: Option<EventHandler<String>>,
+    onopen: Option<EventHandler<RepositoryRelativePath>>,
 ) -> Element {
     let footer = view.footer.clone();
 

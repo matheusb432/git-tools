@@ -2,8 +2,9 @@
 
 use std::{path::Path, process::Command};
 
-use gtl_application::recipes::build_subrepos::{self, BuildSubrepoRecipes};
-use gtl_infra::{git_client::HybridGitClient, repo_discovery::WalkdirRepoDiscovery};
+use gtl_application::repositories::build_recipes::{self, BuildRepositoryRecipes};
+use gtl_infra::git_client::HybridGitClient;
+use gtl_models::repository::traversal::RepositoryTraversalScope;
 use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
 fn git(repository: &Path, arguments: &[&str]) -> String {
@@ -60,25 +61,24 @@ fn init_repo_with_unpushed_commit(repository: &Path) -> (String, String) {
 }
 
 #[test]
-fn real_git_subrepo_build_pins_each_repository_independently() {
+fn real_git_repository_build_pins_each_repository_independently() {
     let temporary = tempfile::tempdir().unwrap();
     let api = temporary.path().join("api");
     let (api_base_sha, api_head_sha) = init_repo_with_unpushed_commit(&api);
     let web = temporary.path().join("web");
     init_repo(&web);
 
-    let recipes = build_subrepos::execute(
-        BuildSubrepoRecipes {
+    let recipes = build_recipes::execute(
+        BuildRepositoryRecipes {
             root: temporary.path().into(),
             operation: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None },
             },
-            include_worktrees: false,
+            scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
         },
-        &WalkdirRepoDiscovery,
         &HybridGitClient,
     )
-    .expect("subrepo recipes build through real Git");
+    .expect("repository recipes build through real Git");
     let json = serde_json::to_value(recipes).unwrap();
 
     assert_eq!(json.as_array().unwrap().len(), 2);

@@ -4,11 +4,12 @@
 //! former `cli::commands::store_artifact` / `range_fast_path` byte-for-byte, so
 //! artifacts placed before and after the extraction dedup against each other.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use gtl_application::ports::{
     ArtifactMeta, ArtifactRangeKey, ArtifactStore, HistoryRecord, PlacedArtifact,
 };
+use gtl_models::{artifacts::ArtifactByteSize, paths::RepositoryRoot};
 
 /// The default store adapter: places artifacts into and looks them up out of the
 /// on-disk content-addressed store.
@@ -22,50 +23,39 @@ impl ArtifactStore for StoreArtifacts {
         meta: &ArtifactMeta,
         html: &str,
     ) -> anyhow::Result<PlacedArtifact> {
-        let canonical =
-            std::fs::canonicalize(&meta.repo_root).unwrap_or_else(|_| meta.repo_root.clone());
-        let root_commit = crate::git_capture::root_commit(&meta.repo_root);
+        let canonical = std::fs::canonicalize(&meta.repo_root)
+            .unwrap_or_else(|_| meta.repo_root.as_ref().to_path_buf());
+        let root_commit = crate::git_capture::root_commit(meta.repo_root.as_ref());
         let repo_id = crate::store::repo_id(root_commit.as_ref(), &canonical);
-        let (base_sha, head_sha) = meta.commit_range.as_ref().map_or_else(
-            || (String::new(), String::new()),
-            |range| (range.base.to_string(), range.head.to_string()),
-        );
-        let sidecar = crate::store::Sidecar {
+        let byte_size = u64::try_from(html.len()).map_err(anyhow::Error::from)?;
+        let metadata = crate::store::ArtifactMetadata {
             repo_id: repo_id.clone(),
             repo_name: meta.repo_name.clone(),
-            repo_root: meta.repo_root.to_string_lossy().into_owned(),
-            kind: meta.kind,
-            base_sha,
-            head_sha,
+            repo_root: meta.repo_root.clone(),
+            identity: meta.identity.clone(),
             range_label: meta.range_label.clone(),
             head_committed_at: meta.head_committed_at.clone(),
             generated_at: meta.generated_at.clone(),
             title: meta.title.clone(),
-            byte_size: html.len() as u64,
-            layout: meta.render_options.layout().to_string(),
-            density: meta.render_options.density().to_string(),
-            theme: meta.theme.clone(),
-            theme_recorded: true,
+            byte_size: ArtifactByteSize::new(byte_size),
+            render_options: meta.render_options,
+            theme: crate::store::ArtifactThemeMetadata::Recorded(meta.theme),
             renderer_version: crate::store::RENDERER_VERSION,
             excluded_extensions: meta.excluded_extensions.clone(),
         };
-        let placed = crate::store::place(store_root, &repo_id, html, &sidecar)?;
-        Ok(PlacedArtifact {
-            path: placed.path,
-            reused: placed.reused,
-        })
+        crate::store::place(store_root, &repo_id, html, &metadata)
     }
 
     fn lookup_by_range(
         &self,
         store_root: &Path,
-        repo_root: &Path,
+        repo_root: &RepositoryRoot,
         key: &ArtifactRangeKey,
-    ) -> anyhow::Result<Option<PathBuf>> {
+    ) -> anyhow::Result<Option<gtl_models::paths::AbsoluteFilePath>> {
         let canonical =
-            std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
+            std::fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.as_ref().to_path_buf());
         let repo_id = crate::store::repo_id(
-            crate::git_capture::root_commit(repo_root).as_ref(),
+            crate::git_capture::root_commit(repo_root.as_ref()).as_ref(),
             &canonical,
         );
         Ok(crate::store::lookup_by_range(store_root, &repo_id, key))
@@ -75,16 +65,16 @@ impl ArtifactStore for StoreArtifacts {
         let sidecars = crate::store::list_history_with_hash(store_root);
         Ok(sidecars
             .into_iter()
-            .map(|(content_hash, sidecar)| HistoryRecord {
-                repo_id: sidecar.repo_id,
-                repo_name: sidecar.repo_name,
-                title: sidecar.title,
-                range_label: sidecar.range_label,
-                head_committed_at: sidecar.head_committed_at,
-                generated_at: sidecar.generated_at,
+            .map(|(content_hash, metadata)| HistoryRecord {
+                repo_id: metadata.repo_id,
+                repo_name: metadata.repo_name,
+                title: metadata.title,
+                range_label: metadata.range_label,
+                head_committed_at: metadata.head_committed_at,
+                generated_at: metadata.generated_at,
                 content_hash,
-                kind: sidecar.kind,
-                byte_size: sidecar.byte_size,
+                kind: metadata.identity.kind(),
+                byte_size: metadata.byte_size,
             })
             .collect())
     }
@@ -93,8 +83,10 @@ impl ArtifactStore for StoreArtifacts {
 #[cfg(test)]
 mod tests {
     use gtl_models::{
-        diffs::DiffKind,
-        viewer::{DiffDensity, DiffLayout, RenderOptions},
+        artifacts::{ArtifactDiffIdentity, RepositoryStoreId},
+        diffs::{DiffKind, ExcludedExtensions},
+        timestamps::MachineTimestamp,
+        viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
     };
 
     use super::*;
@@ -104,24 +96,31 @@ mod tests {
     fn place_persists_render_options_from_artifact_metadata() {
         let dir = tempfile::tempdir().unwrap();
         let meta = ArtifactMeta {
-            repo_root: dir.path().to_path_buf(),
-            repo_name: "git-tools".into(),
-            kind: DiffKind::TwoDot,
-            commit_range: Some(pinned_range("a", "b")),
+            repo_root: RepositoryRoot::try_new(dir.path().to_path_buf()).unwrap(),
+            repo_name: "git-tools".try_into().unwrap(),
+            identity: ArtifactDiffIdentity::from_parts(
+                DiffKind::TwoDot,
+                Some(pinned_range("a", "b")),
+            )
+            .expect("range artifact identity"),
             range_label: "main..HEAD".into(),
-            head_committed_at: "2026-07-03T00:00:00Z".into(),
-            generated_at: "2026-07-03T00:01:00Z".into(),
+            head_committed_at: Some(
+                MachineTimestamp::try_from("2026-07-03T00:00:00Z")
+                    .expect("fixture commit timestamp is valid"),
+            ),
+            generated_at: MachineTimestamp::try_from("2026-07-03T00:01:00Z")
+                .expect("fixture generation timestamp is valid"),
             title: "diff".into(),
             render_options: RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
-            theme: Some("dark".into()),
-            excluded_extensions: Vec::new(),
+            theme: Some(Theme::Dark),
+            excluded_extensions: ExcludedExtensions::default(),
         };
 
         let placed = StoreArtifacts
             .place(dir.path(), &meta, "<html></html>")
             .unwrap();
         let sidecar: Sidecar = serde_json::from_str(
-            &std::fs::read_to_string(placed.path.with_extension("json")).unwrap(),
+            &std::fs::read_to_string(placed.path().with_extension("json")).unwrap(),
         )
         .unwrap();
 
@@ -132,13 +131,15 @@ mod tests {
     #[test]
     fn list_history_reads_back_placed_sidecars() {
         let dir = tempfile::tempdir().unwrap();
+        let repo_id = RepositoryStoreId::try_new("0123456789abcdef".to_owned())
+            .expect("valid fixture repository store ID");
         let sidecar = Sidecar {
-            repo_id: "repo123".into(),
+            repo_id: repo_id.to_string(),
             repo_name: "git-tools".into(),
             repo_root: "/r".into(),
             kind: DiffKind::TwoDot,
-            base_sha: "aaa".into(),
-            head_sha: "bbb".into(),
+            base_sha: "a".repeat(40),
+            head_sha: "b".repeat(40),
             range_label: "main..HEAD".into(),
             head_committed_at: "2026-07-03T00:00:00Z".into(),
             generated_at: "2026-07-03T00:01:00Z".into(),
@@ -151,16 +152,17 @@ mod tests {
             theme_recorded: true,
             renderer_version: crate::store::RENDERER_VERSION,
         };
-        crate::store::place(dir.path(), "repo123", "<html></html>", &sidecar).unwrap();
+        let metadata = sidecar.try_into_metadata().expect("valid fixture sidecar");
+        crate::store::place(dir.path(), &repo_id, "<html></html>", &metadata).unwrap();
         let expected_hash = crate::store::content_hash("<html></html>");
 
         let entries = StoreArtifacts.list_history(dir.path()).unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].content_hash, expected_hash);
-        assert_eq!(entries[0].repo_id, "repo123");
-        assert_eq!(entries[0].repo_name, "git-tools");
+        assert_eq!(entries[0].repo_id, repo_id);
+        assert_eq!(entries[0].repo_name.as_str(), "git-tools");
         assert_eq!(entries[0].kind, DiffKind::TwoDot);
-        assert_eq!(entries[0].byte_size, 42);
+        assert_eq!(entries[0].byte_size, ArtifactByteSize::new(42));
     }
 }

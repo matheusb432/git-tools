@@ -2,9 +2,14 @@
 //! stored artifact (or an "empty, skipped" outcome), carrying every user-facing
 //! message out as [`Note`]s. The CLI and daemon call [`execute`] directly.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use gtl_models::diffs::{DiffKind, PinnedRange};
+use gtl_models::{
+    artifacts::{ArtifactCommitRange, ArtifactDiffIdentity, ArtifactRangeKind},
+    diffs::{DiffKind, PinnedRange},
+    git::{GitDiffSpec, GitRevision},
+    paths::RepositoryRoot,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -13,9 +18,9 @@ use crate::{
     },
     ports::{
         ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, GitClient, HtmlRenderer,
-        UserSettingsLoadError, UserSettingsStore,
+        PlacedArtifact, UserSettingsLoadError, UserSettingsStore,
     },
-    shared::{notes::Note, repository_name::from_path},
+    shared::notes::Note,
 };
 
 /// Render a diff artifact for `target`, resolving the repository from `cwd`.
@@ -37,8 +42,8 @@ pub struct RenderDiffOk {
 /// What a single render produced: a stored artifact, or a deliberately-skipped empty range.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RenderDiffOutcome {
-    /// An artifact landed at `artifact`; `reused` when an identical one already existed.
-    Rendered { artifact: PathBuf, reused: bool },
+    /// An artifact was created or reused by the store.
+    Rendered(PlacedArtifact),
     /// The range was empty (no commits or changes); nothing was rendered.
     Empty,
 }
@@ -58,10 +63,9 @@ pub enum RenderDiffError {
 // ! worktree (Hash) mode. It follows compute target resolution without assembling a view.
 fn resolved_range(
     source: &impl GitClient,
-    top: &str,
+    top: &RepositoryRoot,
     target: &DiffTarget,
-) -> Option<(DiffKind, PinnedRange)> {
-    let repo_path = Path::new(top);
+) -> Option<ArtifactCommitRange> {
     let (kind, range) = match target {
         DiffTarget::Range {
             pinned: Some(range),
@@ -73,16 +77,26 @@ fn resolved_range(
         }
         | DiffTarget::Unpushed {
             pinned: Some(range),
-        } => return Some((DiffKind::TwoDot, range.clone())),
+        } => {
+            return Some(ArtifactCommitRange {
+                kind: ArtifactRangeKind::TwoDot,
+                commits: range.clone(),
+            });
+        }
         DiffTarget::Merge {
             pinned: Some(range),
             ..
-        } => return Some((DiffKind::ThreeDot, range.clone())),
+        } => {
+            return Some(ArtifactCommitRange {
+                kind: ArtifactRangeKind::ThreeDot,
+                commits: range.clone(),
+            });
+        }
         DiffTarget::Range {
             range,
             pinned: None,
         } => {
-            let diff_range = DiffRanges::exact(range).diff;
+            let diff_range = DiffRanges::exact(range.clone()).diff;
             (DiffKind::TwoDot, diff_range)
         }
         DiffTarget::Last {
@@ -90,7 +104,7 @@ fn resolved_range(
             pinned: None,
         } => (
             DiffKind::TwoDot,
-            DiffRanges::exact(format!("HEAD~{count}..HEAD")).diff,
+            DiffRanges::exact(gtl_models::git::GitRange::head_commits(*count)).diff,
         ),
         DiffTarget::Merge { base, pinned: None } => {
             (DiffKind::ThreeDot, DiffRanges::merge(base).diff)
@@ -98,21 +112,20 @@ fn resolved_range(
         DiffTarget::Unpushed { pinned: None } => {
             // No upstream means the compute core falls back to Hash (worktree) mode; not fast-path
             // eligible, and the fallback warning is emitted there (once), not here.
-            let crate::ports::GitEffect::Applied(upstream) = source.upstream(repo_path).ok()?
-            else {
+            let crate::ports::GitEffect::Applied(upstream) = source.upstream(top).ok()? else {
                 return None;
             };
+            let upstream = GitRevision::from(&upstream);
             (DiffKind::TwoDot, DiffRanges::unpushed(&upstream).diff)
         }
         DiffTarget::Base(_) => return None,
     };
-    let base = source
-        .resolve_commit_id(repo_path, range_base(&range))
-        .ok()?;
-    let head = source
-        .resolve_commit_id(repo_path, range.rsplit("..").next()?)
-        .ok()?;
-    Some((kind, PinnedRange { base, head }))
+    let base = source.resolve_commit_id(top, &range_base(&range)?).ok()?;
+    let head = source.resolve_commit_id(top, &range_head(&range)?).ok()?;
+    Some(ArtifactCommitRange {
+        kind: ArtifactRangeKind::try_from(kind).ok()?,
+        commits: PinnedRange { base, head },
+    })
 }
 
 /// Renders a diff through the diff ports.
@@ -130,27 +143,26 @@ pub fn execute(
     let mut notes = Vec::new();
     let settings = app_settings.load()?;
     let render_options = settings.viewer_render_options();
-    let theme = settings.theme().map(|theme| theme.to_string());
+    let theme = settings.theme();
     let top = source.top_level(&cwd)?;
-    let store_root = super::artifacts::root(Path::new(&top));
+    let store_root = super::artifacts::root(top.as_ref());
     let excluded = settings
         .diff_exclusions()
-        .for_project_or_default(&from_path(&top));
+        .for_project_or_default(&top.project_name());
 
     // ! Fast-path: pure commit ranges are fully determined by resolved commit IDs plus
     // ! the active rendering settings, so a prior identical artifact can be
     // ! reused without the expensive assemble — never across a config change.
     if name.is_none()
-        && let Some((kind, commit_range)) = resolved_range(source, &top, &target)
+        && let Some(range) = resolved_range(source, &top, &target)
         && let Some(hit) = store.lookup_by_range(
             &store_root,
-            Path::new(&top),
+            &top,
             &ArtifactRangeKey {
-                kind,
-                commit_range,
+                range,
                 render_options,
-                theme: theme.clone(),
-                excluded_extensions: excluded.extensions().to_vec(),
+                theme,
+                excluded_extensions: excluded.clone(),
             },
         )?
     {
@@ -159,15 +171,12 @@ pub fn execute(
             hit.display()
         )));
         return Ok(RenderDiffOk {
-            outcome: RenderDiffOutcome::Rendered {
-                artifact: hit,
-                reused: true,
-            },
+            outcome: RenderDiffOutcome::Rendered(PlacedArtifact::Reused { path: hit }),
             notes,
         });
     }
 
-    let commit_range = resolved_range(source, &top, &target).map(|(_, range)| range);
+    let commit_range = resolved_range(source, &top, &target).map(|range| range.commits);
     let computed = diff_computation::build(source, &top, &target, settings.diff_exclusions())?;
     let mut view = computed.view;
     let summary = computed.summary;
@@ -185,21 +194,23 @@ pub fn execute(
         });
     }
     let file_count = view.files.len();
-    let html = renderer.build_html(&view, render_options, theme.as_deref())?;
+    let html = renderer.build_html(&view, render_options, theme)?;
 
-    let repo_path = Path::new(&top);
     let meta = ArtifactMeta {
-        repo_root: PathBuf::from(&top),
+        repo_root: top.clone(),
         repo_name: view.repo_name.clone(),
-        kind: DiffKind::from_diff_range(&view.cmd.range),
-        commit_range,
+        identity: ArtifactDiffIdentity::from_parts(
+            DiffKind::from_diff_range(&view.cmd.range),
+            commit_range,
+        )
+        .map_err(anyhow::Error::from)?,
         range_label: view.cmd.range.clone(),
-        head_committed_at: source.committed_at(repo_path, "HEAD"),
-        generated_at: clock.now_iso(),
+        head_committed_at: source.committed_at(&top, &GitRevision::head()),
+        generated_at: clock.now().map_err(anyhow::Error::from)?,
         title: view.title.clone(),
         render_options,
         theme,
-        excluded_extensions: excluded.extensions().to_vec(),
+        excluded_extensions: excluded.clone(),
     };
     let placed = store.place(&store_root, &meta, &html)?;
 
@@ -207,23 +218,27 @@ pub fn execute(
         "diff-artifact: {summary}, {}",
         legacy_count_label(file_count, "file")
     )));
-    notes.push(Note::info(format!("wrote {}", placed.path.display())));
+    notes.push(Note::info(format!("wrote {}", placed.path().display())));
     Ok(RenderDiffOk {
-        outcome: RenderDiffOutcome::Rendered {
-            artifact: placed.path,
-            reused: placed.reused,
-        },
+        outcome: RenderDiffOutcome::Rendered(placed),
         notes,
     })
 }
 
 // ! base = text before `..`/`...`; for worktree mode (no `..`) the whole string is the base.
-fn range_base(range: &str) -> &str {
-    range
+fn range_base(spec: &GitDiffSpec) -> Option<GitRevision> {
+    let base = spec
+        .as_arg()
         .split("..")
         .next()
-        .unwrap_or(range)
-        .trim_end_matches('.')
+        .unwrap_or(spec.as_arg())
+        .trim_end_matches('.');
+    GitRevision::try_new(base.to_owned()).ok()
+}
+
+fn range_head(spec: &GitDiffSpec) -> Option<GitRevision> {
+    let head = spec.as_arg().rsplit("..").next()?;
+    GitRevision::try_new(head.to_owned()).ok()
 }
 
 fn legacy_count_label(count: usize, noun: &str) -> String {
@@ -235,17 +250,18 @@ mod tests {
     use std::path::PathBuf;
 
     use gtl_models::{
-        diffs::{DiffExclusions, DiffKind},
+        artifacts::{ArtifactCommitRange, ArtifactRangeKind},
+        diffs::{DiffExclusions, ExcludedExtensions},
         settings::UserSettings,
         viewer::{RenderOptions, Theme},
     };
 
-    use super::{RenderDiff, RenderDiffError, RenderDiffOutcome, execute};
+    use super::{RenderDiff, RenderDiffError, RenderDiffOutcome};
     use crate::{
-        diffs::{DiffTarget, DiffTargetRequest},
+        diffs::{DiffTarget, DiffTargetRequest, render_diff},
         ports::ArtifactRangeKey,
         shared::notes::Note,
-        testing::{
+        utils::{
             FakeGitClient, FixedClock, FixedUserSettingsStore, InMemoryArtifactStore, StubRenderer,
             diffs::{DIFF_SINGLE_FILE, commit},
         },
@@ -265,11 +281,13 @@ mod tests {
 
     fn range_key(base_id: &str, head_id: &str) -> ArtifactRangeKey {
         ArtifactRangeKey {
-            kind: DiffKind::TwoDot,
-            commit_range: crate::testing::pinned_range(base_id, head_id),
+            range: ArtifactCommitRange {
+                kind: ArtifactRangeKind::TwoDot,
+                commits: crate::utils::pinned_range(base_id, head_id),
+            },
             render_options: RenderOptions::DEFAULT,
             theme: None,
-            excluded_extensions: Vec::new(),
+            excluded_extensions: ExcludedExtensions::default(),
         }
     }
 
@@ -281,33 +299,35 @@ mod tests {
             upstream: Some("origin/main".into()),
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
-            committed_at: "2026-07-02".into(),
+            committed_at: Some(
+                gtl_models::timestamps::MachineTimestamp::try_from("2026-07-02T00:00:00Z")
+                    .expect("fixture commit timestamp is valid"),
+            ),
             ..Default::default()
         };
         let store = InMemoryArtifactStore::default();
 
-        let response = execute(
+        let response = render_diff::execute(
             req("/repo", &DiffTarget::Unpushed { pinned: None }),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
         assert_eq!(
             response.outcome,
-            RenderDiffOutcome::Rendered {
-                artifact: PathBuf::from("/repo/.artifacts/gtl/artifact.html"),
-                reused: false,
-            }
+            RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Created {
+                path: crate::utils::absolute_file_path("/repo/.artifacts/gtl/artifact.html"),
+            })
         );
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(artifact.meta.title, "diff");
-        assert_eq!(artifact.meta.repo_name, "repo");
+        assert_eq!(artifact.meta.repo_name, crate::utils::project_name("repo"));
         assert_eq!(
             response.notes,
             vec![
@@ -332,14 +352,17 @@ mod tests {
             Some(Theme::Noir),
             DiffExclusions::new(
                 [
-                    ("repo".to_string(), vec!["md".to_string()]),
-                    ("defaults".to_string(), vec!["txt".to_string()]),
+                    (crate::utils::project_name("repo"), vec!["md".to_string()]),
+                    (
+                        crate::utils::project_name("defaults"),
+                        vec!["txt".to_string()],
+                    ),
                 ],
                 None,
             ),
         ));
 
-        execute(
+        render_diff::execute(
             RenderDiff {
                 cwd: PathBuf::from("/repo"),
                 target: DiffTargetRequest::Unpushed,
@@ -349,14 +372,14 @@ mod tests {
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
-        assert_eq!(artifact.meta.excluded_extensions, vec!["md"]);
+        assert_eq!(artifact.meta.excluded_extensions.extensions(), ["md"]);
         assert!(artifact.html.contains("noir"));
     }
 
@@ -372,13 +395,13 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
 
-        let response = execute(
+        let response = render_diff::execute(
             req("/repo", &DiffTarget::Unpushed { pinned: None }),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
@@ -397,8 +420,8 @@ mod tests {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             commit_ids: [
-                ("a".to_string(), crate::testing::commit_id_fixture("id-a")),
-                ("b".to_string(), crate::testing::commit_id_fixture("id-b")),
+                ("a".to_string(), crate::utils::commit_id_fixture("id-a")),
+                ("b".to_string(), crate::utils::commit_id_fixture("id-b")),
             ]
             .into_iter()
             .collect(),
@@ -408,11 +431,11 @@ mod tests {
         let store = InMemoryArtifactStore::default();
         store.range_hit_insert(range_key("id-a", "id-b"), "/store/existing.html");
 
-        let response = execute(
+        let response = render_diff::execute(
             req(
                 "/repo",
                 &DiffTarget::Range {
-                    range: "a..b".into(),
+                    range: crate::utils::git_range("a..b"),
                     pinned: None,
                 },
             ),
@@ -420,16 +443,15 @@ mod tests {
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
         assert_eq!(
             response.outcome,
-            RenderDiffOutcome::Rendered {
-                artifact: PathBuf::from("/store/existing.html"),
-                reused: true,
-            }
+            RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Reused {
+                path: crate::utils::absolute_file_path("/store/existing.html"),
+            })
         );
         assert_eq!(
             response.notes,
@@ -445,8 +467,8 @@ mod tests {
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
             commit_ids: [
-                ("a".to_string(), crate::testing::commit_id_fixture("id-a")),
-                ("b".to_string(), crate::testing::commit_id_fixture("id-b")),
+                ("a".to_string(), crate::utils::commit_id_fixture("id-a")),
+                ("b".to_string(), crate::utils::commit_id_fixture("id-b")),
             ]
             .into_iter()
             .collect(),
@@ -462,34 +484,37 @@ mod tests {
         let request = req(
             "/repo",
             &DiffTarget::Range {
-                range: "a..b".into(),
+                range: crate::utils::git_range("a..b"),
                 pinned: None,
             },
         );
         let app_settings = FixedUserSettingsStore::new(settings(
             None,
-            DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None),
+            DiffExclusions::new(
+                [(crate::utils::project_name("repo"), vec!["md".to_string()])],
+                None,
+            ),
         ));
-        let response = execute(
+        let response = render_diff::execute(
             request,
             &app_settings,
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
         assert!(matches!(
             response.outcome,
-            RenderDiffOutcome::Rendered { reused: false, .. }
+            RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Created { .. })
         ));
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
             .expect("artifact persisted");
         assert_eq!(
-            artifact.meta.excluded_extensions,
-            vec!["md".to_string()],
+            artifact.meta.excluded_extensions.extensions(),
+            ["md"],
             "the active set must be recorded for future range lookups"
         );
     }
@@ -502,8 +527,8 @@ mod tests {
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
             commit_ids: [
-                ("a".to_string(), crate::testing::commit_id_fixture("id-a")),
-                ("b".to_string(), crate::testing::commit_id_fixture("id-b")),
+                ("a".to_string(), crate::utils::commit_id_fixture("id-a")),
+                ("b".to_string(), crate::utils::commit_id_fixture("id-b")),
             ]
             .into_iter()
             .collect(),
@@ -513,17 +538,17 @@ mod tests {
         let store = InMemoryArtifactStore::default();
         store.range_hit_insert(
             ArtifactRangeKey {
-                theme: Some("dark".into()),
+                theme: Some(Theme::Dark),
                 ..range_key("id-a", "id-b")
             },
             "/store/dark.html",
         );
 
-        let response = execute(
+        let response = render_diff::execute(
             req(
                 "/repo",
                 &DiffTarget::Range {
-                    range: "a..b".into(),
+                    range: crate::utils::git_range("a..b"),
                     pinned: None,
                 },
             ),
@@ -531,13 +556,13 @@ mod tests {
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
         assert!(matches!(
             response.outcome,
-            RenderDiffOutcome::Rendered { reused: false, .. }
+            RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Created { .. })
         ));
     }
 
@@ -547,8 +572,8 @@ mod tests {
             top_level: Some("/repo".into()),
             branch: "feature".into(),
             commit_ids: [
-                ("a".to_string(), crate::testing::commit_id_fixture("id-a")),
-                ("b".to_string(), crate::testing::commit_id_fixture("id-b")),
+                ("a".to_string(), crate::utils::commit_id_fixture("id-a")),
+                ("b".to_string(), crate::utils::commit_id_fixture("id-b")),
             ]
             .into_iter()
             .collect(),
@@ -558,7 +583,7 @@ mod tests {
         let store = InMemoryArtifactStore::default();
         store.range_hit_insert(
             ArtifactRangeKey {
-                excluded_extensions: vec!["md".into()],
+                excluded_extensions: ExcludedExtensions::new(["md"]),
                 ..range_key("id-a", "id-b")
             },
             "/store/filtered.html",
@@ -567,30 +592,32 @@ mod tests {
         let request = req(
             "/repo",
             &DiffTarget::Range {
-                range: "a..b".into(),
+                range: crate::utils::git_range("a..b"),
                 pinned: None,
             },
         );
         let app_settings = FixedUserSettingsStore::new(settings(
             None,
-            DiffExclusions::new([("repo".to_string(), vec!["md".to_string()])], None),
+            DiffExclusions::new(
+                [(crate::utils::project_name("repo"), vec!["md".to_string()])],
+                None,
+            ),
         ));
-        let response = execute(
+        let response = render_diff::execute(
             request,
             &app_settings,
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
         assert_eq!(
             response.outcome,
-            RenderDiffOutcome::Rendered {
-                artifact: PathBuf::from("/store/filtered.html"),
-                reused: true,
-            }
+            RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Reused {
+                path: crate::utils::absolute_file_path("/store/filtered.html"),
+            })
         );
     }
 
@@ -602,8 +629,8 @@ mod tests {
             commits: vec![commit("abc1234")],
             diff_output: DIFF_SINGLE_FILE.into(),
             commit_ids: [
-                ("a".to_string(), crate::testing::commit_id_fixture("id-a")),
-                ("b".to_string(), crate::testing::commit_id_fixture("id-b")),
+                ("a".to_string(), crate::utils::commit_id_fixture("id-a")),
+                ("b".to_string(), crate::utils::commit_id_fixture("id-b")),
             ]
             .into_iter()
             .collect(),
@@ -617,24 +644,24 @@ mod tests {
         let mut request = req(
             "/repo",
             &DiffTarget::Range {
-                range: "a..b".into(),
+                range: crate::utils::git_range("a..b"),
                 pinned: None,
             },
         );
         request.name = Some("custom".into());
-        let response = execute(
+        let response = render_diff::execute(
             request,
             &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
         assert!(matches!(
             response.outcome,
-            RenderDiffOutcome::Rendered { reused: false, .. }
+            RenderDiffOutcome::Rendered(crate::ports::PlacedArtifact::Created { .. })
         ));
         let artifact = store
             .artifact(&PathBuf::from("/repo/.artifacts/gtl/artifact.html"))
@@ -655,20 +682,17 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
 
-        let response = execute(
+        let response = render_diff::execute(
             req("/repo", &DiffTarget::Unpushed { pinned: None }),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect("render succeeds");
 
-        assert!(matches!(
-            response.outcome,
-            RenderDiffOutcome::Rendered { .. }
-        ));
+        assert!(matches!(response.outcome, RenderDiffOutcome::Rendered(_)));
         assert_eq!(
             response.notes,
             vec![
@@ -689,13 +713,16 @@ mod tests {
         };
         let store = InMemoryArtifactStore::default();
 
-        let error = execute(
-            req("/repo", &DiffTarget::Base("nope".into())),
+        let error = render_diff::execute(
+            req(
+                "/repo",
+                &DiffTarget::Base(crate::utils::git_revision("nope")),
+            ),
             &FixedUserSettingsStore::default(),
             &source,
             &store,
             &StubRenderer,
-            &FixedClock("2026-07-02T00:00:00Z".into()),
+            &FixedClock::from_raw("2026-07-02T00:00:00Z"),
         )
         .expect_err("unknown base errors");
 

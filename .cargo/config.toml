@@ -1,3 +1,9 @@
+[profile.dev]
+incremental = true
+
+[profile.test]
+incremental = true
+
 # Statically link the MSVC C runtime (VCRUNTIME140*, UCRT) INTO the Windows
 # shippables so each release exe is a true single file: copy it to a clean Win11
 # machine and it runs, with no Visual C++ Redistributable to install first. Without

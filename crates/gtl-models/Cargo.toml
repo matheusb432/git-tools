@@ -9,6 +9,14 @@ nutype = { workspace = true, features = ["serde"] }
 serde.workspace = true
 strum.workspace = true
 thiserror.workspace = true
+uuid = { workspace = true, features = ["serde"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+jiff = { workspace = true, features = ["std"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+jiff.workspace = true
+uuid = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 serde_json.workspace = true

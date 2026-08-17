@@ -4,14 +4,22 @@ use std::{path::Path, process::Command};
 
 use gtl_application::{
     ports::GitClient as _,
-    repository_sync::{
+    repositories::{
         CommitProgress,
         apply_commit::{self, ApplyCommit},
         plan_commit::CommitTarget,
     },
 };
 use gtl_infra::git_client::HybridGitClient;
-use gtl_models::repository::PendingChanges;
+use gtl_models::{
+    git::{BranchName, GitRevision},
+    paths::{ProjectName, RepositoryRoot},
+    repository::PendingChanges,
+};
+
+fn repository_root(path: &Path) -> RepositoryRoot {
+    RepositoryRoot::try_new(path.to_path_buf()).expect("fixture repository root is absolute")
+}
 
 fn git(repo_path: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -64,9 +72,9 @@ fn real_git_apply_commit_ignores_post_commit_stderr() {
     let applied = apply_commit::execute(
         ApplyCommit {
             target: CommitTarget {
-                name: "apply".into(),
-                top: apply_repo.path().into(),
-                branch: "main".into(),
+                name: ProjectName::try_from("apply").unwrap(),
+                top: repository_root(apply_repo.path()),
+                branch: BranchName::try_new("main").expect("fixture branch is non-empty"),
                 pending: PendingChanges::default(),
             },
             message: "apply change".into(),
@@ -79,8 +87,8 @@ fn real_git_apply_commit_ignores_post_commit_stderr() {
         progress => panic!("expected a created commit, got {progress:?}"),
     };
     assert_eq!(
-        apply_identity.as_ref().map(ToString::to_string),
-        Some(git(apply_repo.path(), &["rev-parse", "HEAD"]))
+        apply_identity.as_ref(),
+        git(apply_repo.path(), &["rev-parse", "HEAD"])
     );
 }
 
@@ -90,8 +98,10 @@ fn real_git_resolves_an_annotated_tag_to_its_commit_id() {
     init_dirty_repo(repo.path());
     git(repo.path(), &["tag", "-am", "release", "v1.0.0"]);
 
+    let revision = GitRevision::try_new("v1.0.0").expect("fixture revision is non-empty");
+    let repo_root = repository_root(repo.path());
     let id = HybridGitClient
-        .resolve_commit_id(repo.path(), "v1.0.0")
+        .resolve_commit_id(&repo_root, &revision)
         .expect("annotated tag resolves to its commit");
 
     assert_eq!(id.as_ref(), git(repo.path(), &["rev-parse", "HEAD"]));

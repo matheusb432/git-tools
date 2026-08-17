@@ -1,12 +1,14 @@
 #![cfg(test)]
 
 use gtl_application::diffs::{FileDiff, FileStatus};
+use gtl_models::{diffs::DiffLineCount, paths::RepositoryRelativePath};
 
 fn file(path: &str) -> FileDiff {
     FileDiff {
-        path: path.to_string(),
-        added: 0,
-        removed: 0,
+        path: RepositoryRelativePath::try_new(path.into())
+            .expect("fixture repository-relative path"),
+        added: DiffLineCount::default(),
+        removed: DiffLineCount::default(),
         lines: Vec::new(),
         full_lines: None,
     }

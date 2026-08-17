@@ -1,6 +1,7 @@
 mod file;
 
 use dioxus::prelude::*;
+use gtl_models::paths::RepositoryRelativePath;
 use gtl_wire::viewer::{ViewerActiveView, ViewerViewIdentity};
 
 use self::file::DiffFileCard;
@@ -16,7 +17,7 @@ pub(crate) fn ClientDiffDocument(
     folded: Option<bool>,
     copy_context_enabled: bool,
     flashing_file: Option<String>,
-    onopen: Option<EventHandler<String>>,
+    onopen: Option<EventHandler<RepositoryRelativePath>>,
 ) -> Element {
     let mut reload = use_signal(|| 0_u64);
     let workspace = use_client_diff_workspace(source, view.identity, &view.files, reload());
@@ -65,7 +66,7 @@ fn DiffDocumentBody(
     copy_context_enabled: bool,
     flashing_file: Option<String>,
     is_loading: bool,
-    onopen: Option<EventHandler<String>>,
+    onopen: Option<EventHandler<RepositoryRelativePath>>,
     onretry: EventHandler<()>,
 ) -> Element {
     let layout = identity.render_options.layout;
@@ -73,8 +74,8 @@ fn DiffDocumentBody(
     let view_identity = format!(
         "{}:{}:{}:{}:{}",
         identity.tab_id,
-        identity.range_generation,
-        identity.selection_generation,
+        identity.range_generation.value(),
+        identity.selection_generation.value(),
         layout.as_str(),
         density.as_str(),
     );

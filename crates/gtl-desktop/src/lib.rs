@@ -1,6 +1,6 @@
 //! gtl-viewer: the Tauri desktop diff viewer.
 #[cfg(feature = "benchmark-support")]
-pub use session::{CacheDisposition, CachedView, WeightedViewCache};
+pub use session::{CacheDisposition, CachedView, ViewCacheWeight, WeightedViewCache};
 mod bridge;
 mod live_view_restoration;
 mod pending_recipes;
@@ -27,7 +27,8 @@ use tauri::{
     tray::TrayIconBuilder,
 };
 
-const DEFAULT_VIEW_CACHE_WEIGHT: usize = 128 * 1024 * 1024;
+const DEFAULT_VIEW_CACHE_WEIGHT: session::ViewCacheWeight =
+    session::ViewCacheWeight::new(128 * 1024 * 1024);
 const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
 const MAIN_WINDOW_SIZE: (f64, f64) = (1200.0, 800.0);
 const MAIN_WINDOW_MIN_SIZE: (f64, f64) = (390.0, 480.0);
@@ -311,9 +312,11 @@ mod tests {
         }
     }
 
-    fn recipe_batch(id: &str) -> gtl_wire::recipes::OpenRecipes {
+    fn recipe_batch(sequence: u64) -> gtl_wire::recipes::OpenRecipes {
         gtl_wire::recipes::OpenRecipes {
-            batch_id: id.into(),
+            batch_id: format!("00000000-0000-0000-0000-{sequence:012x}")
+                .parse()
+                .expect("fixture batch ID is valid"),
             kind: gtl_wire::recipes::RecipeBatchKind::Snapshot,
             recipes: Vec::new(),
         }
@@ -321,8 +324,8 @@ mod tests {
 
     #[test]
     fn recipe_argv_decodes_all_valid_batches_and_ignores_malformed_tokens() {
-        let first = recipe_batch("first");
-        let second = recipe_batch("second");
+        let first = recipe_batch(1);
+        let second = recipe_batch(2);
         let argv = vec![
             "gtl-viewer".into(),
             gtl_wire::recipes::encode_token(&first).expect("first batch encodes"),
@@ -336,7 +339,7 @@ mod tests {
 
     #[test]
     fn single_instance_argv_without_an_executable_decodes_the_first_batch() {
-        let batch = recipe_batch("warm");
+        let batch = recipe_batch(3);
 
         assert_eq!(
             recipes_from_argv(&[gtl_wire::recipes::encode_token(&batch).expect("batch encodes")]),
@@ -361,7 +364,7 @@ mod tests {
 
     #[test]
     fn production_view_cache_respects_the_low_memory_budget() {
-        assert_eq!(DEFAULT_VIEW_CACHE_WEIGHT, 128 * 1024 * 1024);
+        assert_eq!(DEFAULT_VIEW_CACHE_WEIGHT.bytes(), 128 * 1024 * 1024);
     }
 
     #[test]

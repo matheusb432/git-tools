@@ -1,18 +1,66 @@
-use std::sync::Arc;
+use std::{iter::Sum, ops::Add, path::Path, sync::Arc};
 
 use gtl_application::{
     diffs::{FileDiff, View},
     viewer::ViewerTabId,
 };
-use gtl_models::diffs::Commit;
+use gtl_models::{
+    diffs::Commit,
+    git::{GitHead, GitRevision},
+};
 use lru::LruCache;
+
+/// Estimated retained bytes used to bound the semantic viewer cache.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ViewCacheWeight(usize);
+
+impl ViewCacheWeight {
+    pub const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    #[cfg(any(test, feature = "benchmark-support"))]
+    pub const fn bytes(self) -> usize {
+        self.0
+    }
+
+    #[must_use]
+    const fn saturating_add(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+
+    #[must_use]
+    const fn saturating_sub(self, other: Self) -> Self {
+        Self(self.0.saturating_sub(other.0))
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    const fn saturating_mul(self, multiplier: usize) -> Self {
+        Self(self.0.saturating_mul(multiplier))
+    }
+}
+
+impl Add for ViewCacheWeight {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        self.saturating_add(other)
+    }
+}
+
+impl Sum for ViewCacheWeight {
+    fn sum<I: Iterator<Item = Self>>(weights: I) -> Self {
+        weights.fold(Self::default(), Self::saturating_add)
+    }
+}
 
 /// A computed semantic view retained independently from rendered responses.
 #[derive(Debug, Clone)]
 pub struct CachedView {
     pub(crate) view: Arc<View>,
     pub(crate) selected: Option<Arc<View>>,
-    weight: usize,
+    weight: ViewCacheWeight,
 }
 
 impl CachedView {
@@ -37,7 +85,7 @@ impl CachedView {
         Self::new(Arc::clone(&self.view))
     }
 
-    pub const fn weight(&self) -> usize {
+    pub const fn weight(&self) -> ViewCacheWeight {
         self.weight
     }
 }
@@ -52,16 +100,16 @@ pub enum CacheDisposition {
 /// LRU storage bounded by the estimated bytes of semantic views.
 pub struct WeightedViewCache {
     entries: LruCache<ViewerTabId, CachedView>,
-    max_weight: usize,
-    weight: usize,
+    max_weight: ViewCacheWeight,
+    weight: ViewCacheWeight,
 }
 
 impl WeightedViewCache {
-    pub fn new(max_weight: usize) -> Self {
+    pub fn new(max_weight: ViewCacheWeight) -> Self {
         Self {
             entries: LruCache::unbounded(),
             max_weight,
-            weight: 0,
+            weight: ViewCacheWeight::default(),
         }
     }
 
@@ -71,7 +119,7 @@ impl WeightedViewCache {
             return CacheDisposition::Oversize;
         }
 
-        self.weight += value.weight();
+        self.weight = self.weight.saturating_add(value.weight());
         self.entries.put(id, value);
         self.evict_to_bound();
         CacheDisposition::Cached
@@ -83,73 +131,102 @@ impl WeightedViewCache {
 
     pub fn remove(&mut self, id: ViewerTabId) -> Option<()> {
         let removed = self.entries.pop(&id)?;
-        self.weight -= removed.weight();
+        self.weight = self.weight.saturating_sub(removed.weight());
         Some(())
     }
 
     #[cfg(test)]
-    pub(crate) const fn weight(&self) -> usize {
+    pub(crate) const fn weight(&self) -> ViewCacheWeight {
         self.weight
     }
 
     fn evict_to_bound(&mut self) {
         while self.weight > self.max_weight {
             let Some((_, evicted)) = self.entries.pop_lru() else {
-                self.weight = 0;
+                self.weight = ViewCacheWeight::default();
                 break;
             };
-            self.weight -= evicted.weight();
+            self.weight = self.weight.saturating_sub(evicted.weight());
         }
     }
 }
 
-fn view_weight(view: &View) -> usize {
-    string_weight(&view.repo_name)
-        + string_weight(&view.repo_root)
-        + string_weight(&view.branch)
-        + string_weight(&view.upstream)
-        + view.commits.iter().map(commit_weight).sum::<usize>()
-        + view.files.iter().map(file_weight).sum::<usize>()
+fn view_weight(view: &View) -> ViewCacheWeight {
+    ViewCacheWeight::new(view.repo_name.as_str().len())
+        + path_weight(view.repo_root.as_ref())
+        + head_weight(&view.branch)
+        + revision_weight(&view.upstream)
+        + view
+            .commits
+            .iter()
+            .map(commit_weight)
+            .sum::<ViewCacheWeight>()
+        + view.files.iter().map(file_weight).sum::<ViewCacheWeight>()
         + string_weight(&view.title)
         + string_weight(&view.cmd.lead)
         + string_weight(&view.cmd.range)
         + string_weight(&view.cmd.trail)
         + string_weight(&view.commits_label)
         + string_weight(&view.foot.cmd)
-        + view.exclusions.as_ref().map_or(0, |applied| {
-            applied
-                .extensions
-                .iter()
-                .chain(&applied.hidden_paths)
-                .map(string_weight)
-                .sum()
-        })
+        + view
+            .exclusions
+            .as_ref()
+            .map_or(ViewCacheWeight::default(), |applied| {
+                applied
+                    .extensions
+                    .extensions()
+                    .iter()
+                    .map(string_weight)
+                    .sum::<ViewCacheWeight>()
+                    + applied
+                        .hidden_paths
+                        .iter()
+                        .map(|path| path_weight(path.as_path()))
+                        .sum()
+            })
 }
 
-fn commit_weight(commit: &Commit) -> usize {
-    commit.id.as_ref().len()
+fn commit_weight(commit: &Commit) -> ViewCacheWeight {
+    ViewCacheWeight::new(commit.id.as_ref().len())
         + string_weight(&commit.subject)
         + string_weight(&commit.body)
-        + string_weight(&commit.date)
-        + string_weight(&commit.iso)
+        + ViewCacheWeight::new(commit.committed_at.as_ref().len())
         + commit
             .parents
             .iter()
-            .map(|parent| parent.as_ref().len())
-            .sum::<usize>()
+            .map(|parent| ViewCacheWeight::new(parent.as_ref().len()))
+            .sum::<ViewCacheWeight>()
 }
 
-fn file_weight(file: &FileDiff) -> usize {
-    string_weight(&file.path)
-        + file.lines.iter().map(string_weight).sum::<usize>()
+fn file_weight(file: &FileDiff) -> ViewCacheWeight {
+    path_weight(file.path.as_path())
+        + file
+            .lines
+            .iter()
+            .map(string_weight)
+            .sum::<ViewCacheWeight>()
         + file
             .full_lines
             .as_ref()
-            .map_or(0, |lines| lines.iter().map(string_weight).sum())
+            .map_or(ViewCacheWeight::default(), |lines| {
+                lines.iter().map(string_weight).sum()
+            })
 }
 
-fn string_weight(value: &String) -> usize {
-    value.capacity()
+fn string_weight(value: &String) -> ViewCacheWeight {
+    ViewCacheWeight::new(value.capacity())
+}
+
+fn path_weight(value: &Path) -> ViewCacheWeight {
+    ViewCacheWeight::new(value.as_os_str().len())
+}
+
+fn head_weight(head: &GitHead) -> ViewCacheWeight {
+    ViewCacheWeight::new(head.branch().map_or(0, |branch| branch.capacity()))
+}
+
+fn revision_weight(revision: &GitRevision) -> ViewCacheWeight {
+    ViewCacheWeight::new(revision.capacity())
 }
 
 #[cfg(test)]
@@ -160,8 +237,12 @@ mod tests {
         diffs::{Cmd, Foot, View},
         viewer::ViewerTabId,
     };
+    use gtl_models::diffs::DiffLineCount;
 
     use super::*;
+    use crate::testing::{
+        git_head, git_revision, project_name, repository_relative_path, repository_root,
+    };
 
     fn id(value: u64) -> ViewerTabId {
         ViewerTabId::try_new(value).expect("positive id")
@@ -170,10 +251,10 @@ mod tests {
     fn cached(title: &str) -> CachedView {
         CachedView::new(Arc::new(View {
             exclusions: None,
-            repo_name: String::new(),
-            repo_root: String::new(),
-            branch: String::new(),
-            upstream: String::new(),
+            repo_name: project_name("repo"),
+            repo_root: repository_root("/repo"),
+            branch: GitHead::Detached,
+            upstream: GitRevision::head(),
             commits: Vec::new(),
             files: Vec::new(),
             title: title.into(),
@@ -191,19 +272,20 @@ mod tests {
     fn cache_evicts_least_recent_tabs_before_crossing_weight_limit() {
         let first = cached("123456");
         let entry_weight = first.weight();
-        let mut cache = WeightedViewCache::new(entry_weight + 1);
+        let bound = entry_weight.saturating_add(ViewCacheWeight::new(1));
+        let mut cache = WeightedViewCache::new(bound);
         cache.insert(id(1), first);
         cache.insert(id(2), cached("abcdef"));
 
         assert!(cache.get(id(1)).is_none());
         assert!(cache.get(id(2)).is_some());
-        assert!(cache.weight() <= entry_weight + 1);
+        assert!(cache.weight() <= bound);
     }
 
     #[test]
     fn recently_read_entry_survives_the_next_eviction() {
         let entry_weight = cached("123456").weight();
-        let mut cache = WeightedViewCache::new(entry_weight * 2);
+        let mut cache = WeightedViewCache::new(entry_weight.saturating_mul(2));
         cache.insert(id(1), cached("123456"));
         cache.insert(id(2), cached("abcdef"));
         assert!(cache.get(id(1)).is_some());
@@ -217,7 +299,8 @@ mod tests {
     #[test]
     fn an_oversize_view_is_returned_but_not_cached() {
         let value = cached("oversize");
-        let mut cache = WeightedViewCache::new(value.weight() - 1);
+        let mut cache =
+            WeightedViewCache::new(value.weight().saturating_sub(ViewCacheWeight::new(1)));
 
         assert_eq!(cache.insert(id(1), value), CacheDisposition::Oversize);
         assert!(cache.get(id(1)).is_none());
@@ -235,7 +318,7 @@ mod tests {
             CacheDisposition::Oversize
         );
         assert!(cache.get(id(1)).is_none());
-        assert_eq!(cache.weight(), 0);
+        assert_eq!(cache.weight(), ViewCacheWeight::default());
     }
 
     #[test]
@@ -246,15 +329,15 @@ mod tests {
             .collect::<Vec<_>>();
         let view = Arc::new(View {
             exclusions: None,
-            repo_name: "benchmark".into(),
-            repo_root: "/fixtures/benchmark".into(),
-            branch: "main".into(),
-            upstream: "origin/main".into(),
+            repo_name: project_name("benchmark"),
+            repo_root: repository_root("/fixtures/benchmark"),
+            branch: git_head("main"),
+            upstream: git_revision("origin/main"),
             commits: vec![],
             files: vec![FileDiff {
-                path: "src/large.rs".into(),
-                added: 0,
-                removed: 0,
+                path: repository_relative_path("src/large.rs"),
+                added: DiffLineCount::default(),
+                removed: DiffLineCount::default(),
                 full_lines: Some(lines.clone()),
                 lines,
             }],

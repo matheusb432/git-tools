@@ -17,10 +17,11 @@ Development runs on Ubuntu 24.04. Windows 11 is a release target, not a developm
 ```sh
 git clone git@github.com:OWNER/git-tools.git
 cd git-tools
-sh xtask/bootstrap.sh
+mise trust
+mise bootstrap --yes
 ```
 
-Bootstrap installs mise when needed. Mise then converges the declared Ubuntu packages, pinned tools, Rust toolchains, and zsh activation before it builds and installs the CLI and viewer. Run `just doctor` for a read-only report of missing declared state.
+Mise converges the declared Ubuntu packages, pinned tools, Rust toolchains, and zsh activation before it builds and installs the CLI and viewer. Run `just doctor` for a read-only report of missing declared state.
 
 Refresh an existing installation with:
 

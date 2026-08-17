@@ -1,12 +1,13 @@
-use std::path::PathBuf;
-
 use gtl_application::{
     diffs::open_diff_file_in_configured_editor::{
         self, OpenDiffFileInConfiguredEditor, OpenDiffFileInConfiguredEditorError,
     },
-    live_views,
+    live_views::remove_live_view,
 };
-use gtl_models::viewer::{ViewerTabId, ViewerTabState};
+use gtl_models::{
+    settings::SettingKeyValue,
+    viewer::{DiffDensity, DiffLayout, ViewerTabState},
+};
 use gtl_wire::viewer::{
     OpenViewerDiffFile, SelectViewerCommit, SetViewerPreference, ViewerApiError, ViewerFeedback,
     ViewerResource, ViewerShell, ViewerTabRequest,
@@ -25,7 +26,7 @@ pub(super) fn activate_tab(
     app: &ViewerApp,
     request: ViewerTabRequest,
 ) -> Result<ViewerShell, ViewerApiError> {
-    let tab_id = tab_id(request.tab_id)?;
+    let tab_id = request.tab_id;
     let mut session = app
         .session
         .lock()
@@ -43,7 +44,7 @@ pub(super) fn close_tab(
     app: &ViewerApp,
     request: ViewerTabRequest,
 ) -> Result<ViewerShell, ViewerApiError> {
-    let tab_id = tab_id(request.tab_id)?;
+    let tab_id = request.tab_id;
     let outcome = app
         .session
         .lock()
@@ -62,7 +63,7 @@ pub(super) fn refresh_tab(
     app: &ViewerApp,
     request: ViewerTabRequest,
 ) -> Result<ViewerShell, ViewerApiError> {
-    let tab_id = tab_id(request.tab_id)?;
+    let tab_id = request.tab_id;
     let exists = app
         .session
         .lock()
@@ -80,7 +81,7 @@ pub(super) fn delete_live_tab(
     app: &ViewerApp,
     request: ViewerTabRequest,
 ) -> Result<ViewerShell, ViewerApiError> {
-    let tab_id = tab_id(request.tab_id)?;
+    let tab_id = request.tab_id;
     let (source, was_active) = {
         let session = app
             .session
@@ -97,10 +98,9 @@ pub(super) fn delete_live_tab(
         let connection = app.app_state.connection_lock().map_err(|error| {
             internal("failed to lock saved live views", format_args!("{error:#}"))
         })?;
-        live_views::remove::execute(
-            live_views::remove::RemoveLiveView {
-                source_kind: source.kind().into(),
-                source_value: source.value(),
+        remove_live_view::execute(
+            remove_live_view::RemoveLiveView {
+                source: source.clone(),
             },
             &connection,
         )
@@ -124,11 +124,7 @@ pub(super) fn select_commit(
     app: &ViewerApp,
     request: SelectViewerCommit,
 ) -> Result<ViewerShell, ViewerApiError> {
-    let SelectViewerCommit {
-        tab_id: raw_tab_id,
-        id,
-    } = request;
-    let tab_id = tab_id(raw_tab_id)?;
+    let SelectViewerCommit { tab_id, id } = request;
     app.select_commit(tab_id, &id)
         .map_err(map_select_commit_error)?;
     shell::load(app, None)
@@ -138,7 +134,7 @@ pub(super) fn clear_commit_selection(
     app: &ViewerApp,
     request: ViewerTabRequest,
 ) -> Result<ViewerShell, ViewerApiError> {
-    let tab_id = tab_id(request.tab_id)?;
+    let tab_id = request.tab_id;
     let cleared = app
         .session
         .lock()
@@ -154,8 +150,7 @@ pub(super) fn set_preference(
     app: &ViewerApp,
     request: SetViewerPreference,
 ) -> Result<ViewerShell, ViewerApiError> {
-    let (key, value_new) = preference_pair(request);
-    settings::set_root_key(app, key.into(), value_new)?;
+    settings::set_root_key(app, preference_mutation(request))?;
     shell::load(app, None)
 }
 
@@ -163,7 +158,7 @@ pub(super) fn open_diff_file(
     app: &ViewerApp,
     request: OpenViewerDiffFile,
 ) -> Result<(), ViewerApiError> {
-    if request.path.is_empty() || request.path.len() > DIFF_FILE_PATH_BYTES_MAX {
+    if request.path.as_path().as_os_str().len() > DIFF_FILE_PATH_BYTES_MAX {
         return Err(ViewerApiError::InvalidRequest);
     }
     let options = diff::validated_current_options(app, request.identity)?;
@@ -182,19 +177,10 @@ pub(super) fn open_diff_file(
     };
     diff::validate_current_request(app, request.identity, options)?;
     let command = OpenDiffFileInConfiguredEditor {
-        diff_file_path: PathBuf::from(request.path),
+        diff_file_path: request.path,
     };
-    open_diff_file_in_configured_editor::execute(
-        command,
-        &view,
-        &app.file_system,
-        &app.configured_editor,
-    )
-    .map_err(map_open_diff_file_error)
-}
-
-fn tab_id(raw: u64) -> Result<ViewerTabId, ViewerApiError> {
-    ViewerTabId::try_new(raw).map_err(|_| ViewerApiError::InvalidRequest)
+    open_diff_file_in_configured_editor::execute(command, &view, &app.file_system, &app.text_editor)
+        .map_err(map_open_diff_file_error)
 }
 
 fn refresh_pending_active_tab(app: &ViewerApp) -> Result<(), ViewerApiError> {
@@ -216,25 +202,17 @@ fn refresh_pending_active_tab(app: &ViewerApp) -> Result<(), ViewerApiError> {
     Ok(())
 }
 
-fn preference_pair(preference: SetViewerPreference) -> (&'static str, String) {
+fn preference_mutation(preference: SetViewerPreference) -> SettingKeyValue {
     match preference {
-        SetViewerPreference::Layout(layout) => (
-            "layout",
-            match layout {
-                gtl_wire::viewer::ViewerDiffLayout::Unified => "unified",
-                gtl_wire::viewer::ViewerDiffLayout::Split => "split",
-            }
-            .into(),
-        ),
-        SetViewerPreference::Density(density) => (
-            "density",
-            match density {
-                gtl_wire::viewer::ViewerDiffDensity::Compact => "compact",
-                gtl_wire::viewer::ViewerDiffDensity::Full => "full",
-            }
-            .into(),
-        ),
-        SetViewerPreference::Theme(theme) => ("theme", shell::from_theme(theme).to_string()),
+        SetViewerPreference::Layout(layout) => SettingKeyValue::Layout(match layout {
+            gtl_wire::viewer::ViewerDiffLayout::Unified => DiffLayout::Unified,
+            gtl_wire::viewer::ViewerDiffLayout::Split => DiffLayout::Split,
+        }),
+        SetViewerPreference::Density(density) => SettingKeyValue::Density(match density {
+            gtl_wire::viewer::ViewerDiffDensity::Compact => DiffDensity::Compact,
+            gtl_wire::viewer::ViewerDiffDensity::Full => DiffDensity::Full,
+        }),
+        SetViewerPreference::Theme(theme) => SettingKeyValue::Theme(shell::from_theme(theme)),
     }
 }
 
@@ -268,7 +246,6 @@ fn map_open_diff_file_error(error: OpenDiffFileInConfiguredEditorError) -> Viewe
     match error {
         OpenDiffFileInConfiguredEditorError::FileNotInCurrentDiff
         | OpenDiffFileInConfiguredEditorError::DiffFileDeleted
-        | OpenDiffFileInConfiguredEditorError::DiffFilePathInvalid
         | OpenDiffFileInConfiguredEditorError::DiffFileUnavailable
         | OpenDiffFileInConfiguredEditorError::DiffFileOutsideRepository => {
             not_found(ViewerResource::DiffFile)
@@ -276,7 +253,7 @@ fn map_open_diff_file_error(error: OpenDiffFileInConfiguredEditorError) -> Viewe
         OpenDiffFileInConfiguredEditorError::FileSystem(_)
         | OpenDiffFileInConfiguredEditorError::ConfiguredEditorDiscovery(_)
         | OpenDiffFileInConfiguredEditorError::ConfiguredEditorCommand(_)
-        | OpenDiffFileInConfiguredEditorError::ConfiguredEditorLaunch(_) => unavailable(
+        | OpenDiffFileInConfiguredEditorError::ConfiguredEditorOpen(_) => unavailable(
             ViewerResource::DiffFile,
             "failed to open diff file in the configured editor",
             error,
@@ -291,14 +268,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn preferences_map_only_to_supported_root_setting_keys() {
+    fn preferences_map_to_typed_setting_mutations() {
         assert_eq!(
-            preference_pair(SetViewerPreference::Layout(ViewerDiffLayout::Split)),
-            ("layout", "split".into())
+            preference_mutation(SetViewerPreference::Layout(ViewerDiffLayout::Split)),
+            SettingKeyValue::Layout(DiffLayout::Split)
         );
         assert_eq!(
-            preference_pair(SetViewerPreference::Theme(ViewerTheme::Glacier)),
-            ("theme", "glacier".into())
+            preference_mutation(SetViewerPreference::Theme(ViewerTheme::Glacier)),
+            SettingKeyValue::Theme(gtl_models::viewer::Theme::Glacier)
         );
     }
 

@@ -54,25 +54,26 @@ pub(crate) fn semantic_text_spans(
     for (character_index, (byte_index, _)) in text.char_indices().enumerate() {
         while syntax_tokens
             .get(syntax_index)
-            .is_some_and(|token| token.end() <= character_index)
+            .is_some_and(|token| token.end().into_inner() <= character_index)
         {
             syntax_index += 1;
         }
         while intraline_spans
             .get(intraline_index)
-            .is_some_and(|span| span.end() <= character_index)
+            .is_some_and(|span| span.end().into_inner() <= character_index)
         {
             intraline_index += 1;
         }
 
         let syntax_class = syntax_tokens.get(syntax_index).and_then(|token| {
-            (character_index >= token.start() && character_index < token.end())
-                .then(|| token.class())
+            (character_index >= token.start().into_inner()
+                && character_index < token.end().into_inner())
+            .then(|| token.class())
         });
-        let change = if intraline_spans
-            .get(intraline_index)
-            .is_some_and(|span| character_index >= span.start() && character_index < span.end())
-        {
+        let change = if intraline_spans.get(intraline_index).is_some_and(|span| {
+            character_index >= span.start().into_inner()
+                && character_index < span.end().into_inner()
+        }) {
             SemanticTextChange::Changed
         } else {
             SemanticTextChange::Unchanged

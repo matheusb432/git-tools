@@ -2,7 +2,10 @@ use std::fmt::Write as _;
 
 use anyhow::{Context as _, Result, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use gtl_application::{diffs::View, viewer::RenderOptions};
+use gtl_application::{
+    diffs::View,
+    viewer::{RenderOptions, Theme},
+};
 use gtl_parser::select_bundled_syntax_pack;
 use gtl_wire::viewer::{
     VIEWER_ARTIFACT_MANIFEST_ID, VIEWER_ARTIFACT_RUNTIME_ID, VIEWER_ARTIFACT_SYNTAX_ID,
@@ -44,7 +47,7 @@ fn content_security_policy(runtime: &str, stylesheet: &str) -> String {
 }
 
 /// Builds one self-contained, client-rendered diff artifact.
-pub fn build_html(view: &View, options: RenderOptions, theme: Option<&str>) -> Result<String> {
+pub fn build_html(view: &View, options: RenderOptions, theme: Option<Theme>) -> Result<String> {
     let count = view.commits.len();
     let suffix = if count == 1 { "" } else { "s" };
     let title = format!(
@@ -59,7 +62,7 @@ pub fn build_tabbed_html(
     title: &str,
     views: &[View],
     options: RenderOptions,
-    theme: Option<&str>,
+    theme: Option<Theme>,
 ) -> Result<String> {
     build_document(title, views, options, theme)
 }
@@ -68,17 +71,17 @@ fn build_document(
     title: &str,
     views: &[View],
     options: RenderOptions,
-    theme: Option<&str>,
+    theme: Option<Theme>,
 ) -> Result<String> {
     let payload = project_payload(title, views, options, theme)?;
     let runtime = assets::inline_runtime()?;
-    let syntax_pack = select_bundled_syntax_pack(
-        views
-            .iter()
-            .flat_map(|view| view.files.iter())
-            .map(|file| file.path.as_str()),
-    )
-    .context("select artifact syntax grammars")?;
+    let syntax_paths = views
+        .iter()
+        .flat_map(|view| view.files.iter())
+        .map(|file| file.path.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let syntax_pack = select_bundled_syntax_pack(syntax_paths.iter().map(String::as_str))
+        .context("select artifact syntax grammars")?;
     let runtime_asset = PackedAsset::binary(VIEWER_ARTIFACT_RUNTIME_ID, assets::wasm())?;
     let syntax_asset = PackedAsset::binary(VIEWER_ARTIFACT_SYNTAX_ID, syntax_pack.as_bytes())?;
     let manifest_asset = PackedAsset::json(VIEWER_ARTIFACT_MANIFEST_ID, &payload.manifest)?;
@@ -139,6 +142,7 @@ fn write_asset_node(html: &mut String, asset: &PackedAsset) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use gtl_application::diffs::FileDiff;
+    use gtl_models::diffs::DiffLineCount;
     use gtl_wire::viewer::{ViewerArtifactManifest, ViewerArtifactPage};
 
     use super::*;
@@ -176,7 +180,7 @@ mod tests {
 
     #[test]
     fn document_contains_only_inert_data_and_inline_client_assets() {
-        let html = build_html(&sample_view(), RenderOptions::DEFAULT, Some("dark"))
+        let html = build_html(&sample_view(), RenderOptions::DEFAULT, Some(Theme::Dark))
             .expect("build client-rendered artifact");
         let manifest: ViewerArtifactManifest = decode_payload(&html, VIEWER_ARTIFACT_MANIFEST_ID);
         let active = &manifest.views[0];
@@ -184,7 +188,7 @@ mod tests {
             &gtl_wire::viewer::LoadViewerDiffLines {
                 identity: active.identity,
                 file: active.files[0].id.clone(),
-                cursor: gtl_wire::viewer::ViewerDiffCursor::START,
+                cursor: gtl_wire::viewer::ViewerDiffCursor::default(),
             },
         );
         let page: ViewerArtifactPage = decode_payload(&html, first_page_id.as_str());
@@ -255,7 +259,7 @@ mod tests {
             &gtl_wire::viewer::LoadViewerDiffLines {
                 identity: manifest.views[0].identity,
                 file: manifest.views[0].files[0].id.clone(),
-                cursor: gtl_wire::viewer::ViewerDiffCursor::START,
+                cursor: gtl_wire::viewer::ViewerDiffCursor::default(),
             },
         );
         let page: ViewerArtifactPage = decode_payload(&html, page_id.as_str());
@@ -272,10 +276,10 @@ mod tests {
     #[test]
     fn tiny_artifact_has_a_deterministic_sub_2_5_mb_size_floor() {
         let view = tiny_size_view();
-        let first =
-            build_html(&view, RenderOptions::DEFAULT, Some("dark")).expect("build tiny artifact");
-        let second =
-            build_html(&view, RenderOptions::DEFAULT, Some("dark")).expect("rebuild tiny artifact");
+        let first = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark))
+            .expect("build tiny artifact");
+        let second = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark))
+            .expect("rebuild tiny artifact");
         let evidence = size_evidence(std::slice::from_ref(&view), &first);
 
         eprintln!("tiny artifact size evidence: {evidence:?}");
@@ -299,7 +303,7 @@ mod tests {
     #[test]
     fn independently_compressed_large_fixture_stays_below_3_mb() {
         let view = large_size_view();
-        let html = build_html(&view, RenderOptions::DEFAULT, Some("dark"))
+        let html = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark))
             .expect("build representative large artifact");
         let evidence = size_evidence(std::slice::from_ref(&view), &html);
 
@@ -340,7 +344,7 @@ mod tests {
                 &gtl_wire::viewer::LoadViewerDiffLines {
                     identity: active.identity,
                     file: active.files[0].id.clone(),
-                    cursor: gtl_wire::viewer::ViewerDiffCursor::START,
+                    cursor: gtl_wire::viewer::ViewerDiffCursor::default(),
                 },
             );
             let page: ViewerArtifactPage = decode_payload(&html, id.as_str());
@@ -356,8 +360,8 @@ mod tests {
                 "+pub fn compact_fixture_{index}() -> usize {{ {index} * 17 }}"
             ));
         }
-        view.files[0].added = 11;
-        view.files[0].removed = 0;
+        view.files[0].added = DiffLineCount::new(11);
+        view.files[0].removed = DiffLineCount::default();
         view.files[0].lines.clone_from(&lines);
         view.files[0].full_lines = Some(lines);
         view
@@ -374,9 +378,12 @@ mod tests {
                     )
                 }));
                 FileDiff {
-                    path: format!("src/generated_{file_index}.rs"),
-                    added: 100,
-                    removed: 0,
+                    path: gtl_models::paths::RepositoryRelativePath::try_new(
+                        format!("src/generated_{file_index}.rs").into(),
+                    )
+                    .unwrap(),
+                    added: DiffLineCount::new(100),
+                    removed: DiffLineCount::default(),
                     full_lines: Some(lines.clone()),
                     lines,
                 }
@@ -386,8 +393,13 @@ mod tests {
     }
 
     fn size_evidence(views: &[View], html: &str) -> ArtifactSizeEvidence {
-        let payload = project_payload("size fixture", views, RenderOptions::DEFAULT, Some("dark"))
-            .expect("project size fixture payload");
+        let payload = project_payload(
+            "size fixture",
+            views,
+            RenderOptions::DEFAULT,
+            Some(Theme::Dark),
+        )
+        .expect("project size fixture payload");
         let mut payload_bytes = measure_asset(html, VIEWER_ARTIFACT_MANIFEST_ID);
         for page in &payload.pages {
             payload_bytes += measure_asset(html, page.id.as_str());

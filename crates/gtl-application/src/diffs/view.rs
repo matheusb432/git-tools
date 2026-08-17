@@ -1,4 +1,8 @@
-use gtl_models::diffs::{AppliedExclusions, Commit};
+use gtl_models::{
+    diffs::{AppliedExclusions, Commit},
+    git::{GitHead, GitRevision},
+    paths::{ProjectName, RepositoryRoot},
+};
 
 use super::file::FileDiff;
 
@@ -19,12 +23,10 @@ pub struct Foot {
 /// The complete diff view consumed by renderers and viewer projections.
 #[derive(Debug, Clone, PartialEq)]
 pub struct View {
-    pub repo_name: String,
-    /// Absolute path to the repo root (git top-level), used to compose copy-able
-    /// absolute file paths in the artifact. POSIX-joined with `path` at render time.
-    pub repo_root: String,
-    pub branch: String,
-    pub upstream: String,
+    pub repo_name: ProjectName,
+    pub repo_root: RepositoryRoot,
+    pub branch: GitHead,
+    pub upstream: GitRevision,
     pub commits: Vec<Commit>,
     pub files: Vec<FileDiff>,
     pub title: String,
@@ -36,7 +38,6 @@ pub struct View {
     pub exclusions: Option<AppliedExclusions>,
 }
 
-// TODO: improve type design of this entire module
 impl View {
     /// Returns whether the view contains at least one commit or changed file.
     ///
@@ -54,8 +55,8 @@ pub(in crate::diffs) fn sort_files_tree_order(files: &mut [FileDiff]) {
     use std::cmp::Ordering;
 
     files.sort_by(|a, b| {
-        let a_components: Vec<&str> = a.path.split('/').collect();
-        let b_components: Vec<&str> = b.path.split('/').collect();
+        let a_components: Vec<_> = a.path.components().collect();
+        let b_components: Vec<_> = b.path.components().collect();
 
         for i in 0..a_components.len().min(b_components.len()) {
             if a_components[i] == b_components[i] {
@@ -67,7 +68,7 @@ pub(in crate::diffs) fn sort_files_tree_order(files: &mut [FileDiff]) {
             return match (a_is_dir, b_is_dir) {
                 (true, false) => Ordering::Less,
                 (false, true) => Ordering::Greater,
-                _ => a_components[i].cmp(b_components[i]),
+                _ => a_components[i].cmp(&b_components[i]),
             };
         }
         // ? one path is a prefix of the other: shorter (shallower) comes first
@@ -77,14 +78,20 @@ pub(in crate::diffs) fn sort_files_tree_order(files: &mut [FileDiff]) {
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::{diffs::DiffLineCount, paths::RepositoryRelativePath};
+
     use super::*;
-    use crate::testing::diffs::{commit, view};
+    use crate::utils::diffs::{commit, view};
+
+    fn repository_relative_path(path: &str) -> RepositoryRelativePath {
+        RepositoryRelativePath::try_new(path.into()).expect("repository-relative path")
+    }
 
     fn file() -> FileDiff {
         FileDiff {
-            path: "f.txt".into(),
-            added: 1,
-            removed: 0,
+            path: repository_relative_path("f.txt"),
+            added: DiffLineCount::new(1),
+            removed: DiffLineCount::default(),
             lines: Vec::new(),
             full_lines: None,
         }
@@ -107,37 +114,37 @@ mod tests {
     fn file_tree_order_places_directories_before_files_at_each_level() {
         let mut files = vec![
             FileDiff {
-                path: "src/render.rs".into(),
-                added: 0,
-                removed: 0,
+                path: repository_relative_path("src/render.rs"),
+                added: DiffLineCount::default(),
+                removed: DiffLineCount::default(),
                 lines: Vec::new(),
                 full_lines: None,
             },
             FileDiff {
-                path: "docs/adr/0001-render-stack.md".into(),
-                added: 0,
-                removed: 0,
+                path: repository_relative_path("docs/adr/0001-render-stack.md"),
+                added: DiffLineCount::default(),
+                removed: DiffLineCount::default(),
                 lines: Vec::new(),
                 full_lines: None,
             },
             FileDiff {
-                path: "src/assets/preview.css".into(),
-                added: 0,
-                removed: 0,
+                path: repository_relative_path("src/assets/preview.css"),
+                added: DiffLineCount::default(),
+                removed: DiffLineCount::default(),
                 lines: Vec::new(),
                 full_lines: None,
             },
             FileDiff {
-                path: "src/model.rs".into(),
-                added: 0,
-                removed: 0,
+                path: repository_relative_path("src/model.rs"),
+                added: DiffLineCount::default(),
+                removed: DiffLineCount::default(),
                 lines: Vec::new(),
                 full_lines: None,
             },
             FileDiff {
-                path: "src/assets/components.js".into(),
-                added: 0,
-                removed: 0,
+                path: repository_relative_path("src/assets/components.js"),
+                added: DiffLineCount::default(),
+                removed: DiffLineCount::default(),
                 lines: Vec::new(),
                 full_lines: None,
             },
@@ -148,14 +155,14 @@ mod tests {
         assert_eq!(
             files
                 .iter()
-                .map(|file| file.path.as_str())
+                .map(|file| file.path.to_string_lossy().into_owned())
                 .collect::<Vec<_>>(),
             [
-                "docs/adr/0001-render-stack.md",
-                "src/assets/components.js",
-                "src/assets/preview.css",
-                "src/model.rs",
-                "src/render.rs",
+                "docs/adr/0001-render-stack.md".to_owned(),
+                "src/assets/components.js".to_owned(),
+                "src/assets/preview.css".to_owned(),
+                "src/model.rs".to_owned(),
+                "src/render.rs".to_owned(),
             ]
         );
     }

@@ -19,10 +19,15 @@
 //! accepts the legacy `PascalCase` source and `kebab-case` operation tags so
 //! argv tokens remain readable across the migration.
 
-use std::{num::NonZeroU32, path::PathBuf};
+use std::num::NonZeroU32;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-pub use gtl_models::diffs::PinnedRange;
+use gtl_models::paths::{ProjectName, RepositoryRoot};
+pub use gtl_models::{
+    diffs::PinnedRange,
+    git::{GitRange, GitRevision},
+    recipes::RecipeBatchId,
+};
 use serde::{Deserialize, Serialize};
 
 /// The identity of the repository a recipe renders from.
@@ -33,7 +38,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum RecipeSource {
     #[serde(alias = "LocalRepo")]
-    LocalRepo(PathBuf),
+    LocalRepo(RepositoryRoot),
 }
 
 /// A hand-maintained serde mirror of `gtl_application::diffs::DiffTarget`; the mapping onto the
@@ -46,14 +51,14 @@ pub enum RecipeTarget {
         pinned: Option<PinnedRange>,
     },
     Base {
-        rev: String,
+        rev: GitRevision,
     },
     Range {
-        range: String,
+        range: GitRange,
         pinned: Option<PinnedRange>,
     },
     Merge {
-        base: String,
+        base: GitRevision,
         pinned: Option<PinnedRange>,
     },
     Last {
@@ -72,7 +77,7 @@ pub enum RecipeOp {
     },
     #[serde(alias = "merge-diff")]
     MergeDiff {
-        base: Option<String>,
+        base: Option<GitRevision>,
         pinned: Option<PinnedRange>,
     },
 }
@@ -84,12 +89,12 @@ pub struct Recipe {
     pub source: RecipeSource,
     pub op: RecipeOp,
     /// An optional human-readable label for the opened viewer tab.
-    pub name: Option<String>,
+    pub name: Option<ProjectName>,
 }
 
 impl Recipe {
     /// The repo directory the compute slices resolve from.
-    pub fn cwd(&self) -> PathBuf {
+    pub fn cwd(&self) -> RepositoryRoot {
         match &self.source {
             RecipeSource::LocalRepo(path) => path.clone(),
         }
@@ -147,7 +152,7 @@ where
 /// the single-instance viewer as one argv token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenRecipes {
-    pub batch_id: String,
+    pub batch_id: RecipeBatchId,
     /// The viewer behavior shared by every recipe in this batch.
     #[serde(default, skip_serializing_if = "is_default")]
     pub kind: RecipeBatchKind,
@@ -186,9 +191,31 @@ mod tests {
     use super::*;
     use crate::testing::pinned_range;
 
+    fn root(path: &str) -> RepositoryRoot {
+        RepositoryRoot::try_new(path.into()).expect("fixture repository root is absolute")
+    }
+
+    fn project_name(name: &str) -> ProjectName {
+        ProjectName::try_new(name.to_owned()).expect("fixture project name is non-empty")
+    }
+
+    const BATCH_ID: &str = "0198a859-7c4e-7e5f-9e63-ec7bb768d841";
+
+    fn batch_id() -> RecipeBatchId {
+        BATCH_ID.parse().expect("fixture batch ID is valid")
+    }
+
+    fn revision(raw: &str) -> GitRevision {
+        GitRevision::try_new(raw.to_owned()).expect("fixture Git revision is non-empty")
+    }
+
+    fn range(raw: &str) -> GitRange {
+        GitRange::try_new(raw.to_owned()).expect("fixture Git range is non-empty")
+    }
+
     fn diff_recipe() -> Recipe {
         Recipe {
-            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            source: RecipeSource::LocalRepo(root("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None },
             },
@@ -198,7 +225,7 @@ mod tests {
 
     fn sample_batch() -> OpenRecipes {
         OpenRecipes {
-            batch_id: "batch-1".into(),
+            batch_id: batch_id(),
             kind: RecipeBatchKind::Snapshot,
             recipes: vec![diff_recipe()],
         }
@@ -216,7 +243,7 @@ mod tests {
     #[test]
     fn canonical_merge_operation_tag_is_snake_case() {
         let recipe = Recipe {
-            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            source: RecipeSource::LocalRepo(root("/repos/gt")),
             op: RecipeOp::MergeDiff {
                 base: None,
                 pinned: None,
@@ -234,7 +261,7 @@ mod tests {
         let source: RecipeSource =
             serde_json::from_str(r#"{"kind":"LocalRepo","value":"/repos/gt"}"#)
                 .expect("legacy source tag remains readable");
-        assert_eq!(source, RecipeSource::LocalRepo("/repos/gt".into()));
+        assert_eq!(source, RecipeSource::LocalRepo(root("/repos/gt")));
 
         for (json, expected) in [
             (
@@ -243,19 +270,21 @@ mod tests {
             ),
             (
                 r#"{"target":"base","rev":"HEAD"}"#,
-                RecipeTarget::Base { rev: "HEAD".into() },
+                RecipeTarget::Base {
+                    rev: revision("HEAD"),
+                },
             ),
             (
                 r#"{"target":"range","range":"a..b"}"#,
                 RecipeTarget::Range {
-                    range: "a..b".into(),
+                    range: range("a..b"),
                     pinned: None,
                 },
             ),
             (
                 r#"{"target":"merge","base":"main"}"#,
                 RecipeTarget::Merge {
-                    base: "main".into(),
+                    base: revision("main"),
                     pinned: None,
                 },
             ),
@@ -307,7 +336,7 @@ mod tests {
         for recipe in [
             diff_recipe(),
             Recipe {
-                source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+                source: RecipeSource::LocalRepo(root("/repos/gt")),
                 op: RecipeOp::MergeDiff {
                     base: None,
                     pinned: None,
@@ -339,7 +368,7 @@ mod tests {
             ),
         ] {
             let recipe = Recipe {
-                source: RecipeSource::LocalRepo("/repos/gt".into()),
+                source: RecipeSource::LocalRepo(root("/repos/gt")),
                 op,
                 name: None,
             };
@@ -364,7 +393,7 @@ mod tests {
 
     #[test]
     fn old_batch_token_without_kind_decodes_as_snapshot() {
-        let old_json = r#"{"batch_id":"old","recipes":[]}"#;
+        let old_json = r#"{"batch_id":"0198a859-7c4e-7e5f-9e63-ec7bb768d841","recipes":[]}"#;
         let token = format!(
             "{RECIPE_TOKEN_PREFIX}{}",
             URL_SAFE_NO_PAD.encode(old_json.as_bytes())
@@ -410,7 +439,7 @@ mod tests {
     #[test]
     fn pinned_unpushed_recipe_json_shape_is_pinned() {
         let recipe = Recipe {
-            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            source: RecipeSource::LocalRepo(root("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
                     pinned: Some(pinned_range(
@@ -441,13 +470,13 @@ mod tests {
             },
             RecipeOp::Diff {
                 target: RecipeTarget::Range {
-                    range: "x..y".into(),
+                    range: range("x..y"),
                     pinned: pin.clone(),
                 },
             },
             RecipeOp::Diff {
                 target: RecipeTarget::Merge {
-                    base: "main".into(),
+                    base: revision("main"),
                     pinned: pin.clone(),
                 },
             },
@@ -458,15 +487,15 @@ mod tests {
                 },
             },
             RecipeOp::MergeDiff {
-                base: Some("main".into()),
+                base: Some(revision("main")),
                 pinned: pin.clone(),
             },
         ];
         for op in cases {
             let recipe = Recipe {
-                source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+                source: RecipeSource::LocalRepo(root("/repos/gt")),
                 op,
-                name: Some("n".into()),
+                name: Some(project_name("n")),
             };
             let stripped = recipe.unpinned();
             assert!(!serde_json::to_string(&stripped).unwrap().contains("pinned"));
@@ -479,7 +508,7 @@ mod tests {
     #[test]
     fn unpinned_projection_of_two_different_pins_is_equal() {
         let recipe_with = |head: &str| Recipe {
-            source: RecipeSource::LocalRepo(PathBuf::from("/repos/gt")),
+            source: RecipeSource::LocalRepo(root("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
                     pinned: Some(pinned_range("a".repeat(40), head.repeat(40))),

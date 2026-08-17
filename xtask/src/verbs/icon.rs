@@ -9,11 +9,6 @@ use tiny_skia::{
     SpreadMode, Stroke, Transform,
 };
 
-use crate::{
-    process::{self, Status},
-    verb::Verb,
-};
-
 type Rgb = (u8, u8, u8);
 /// A rectangle as `(left, top, right, bottom)`.
 type Rect = (f32, f32, f32, f32);
@@ -49,7 +44,6 @@ pub fn run() -> Result<()> {
     write_ico(&img, &ico_path)?;
     println!("wrote {} (.ico multi-res)", ico_path.display());
 
-    process::result(Verb::GEN_ICON, Status::Pass);
     Ok(())
 }
 

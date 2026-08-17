@@ -1,14 +1,10 @@
 //! Selective checks over content staged in the Git index.
 
-use std::{fs, path::Path};
+use std::{env, path::Path};
 
 use anyhow::{Context, Result};
 
-use crate::{
-    process::{self, Status},
-    task,
-    verb::Verb,
-};
+use crate::{process, task::Step};
 
 mod checks;
 mod snapshot;
@@ -16,25 +12,24 @@ mod snapshot;
 use checks::CheckPaths;
 
 pub(crate) fn run() -> Result<()> {
-    process::run("staged-whitespace", "git", &["diff", "--cached", "--check"])?;
+    process::run_step(&Step::new(
+        "staged-whitespace",
+        "git",
+        ["diff", "--cached", "--check"],
+    ))?;
     let Some(snapshot) = snapshot::StagedSnapshot::create()? else {
-        process::result(Verb::PRE_COMMIT, Status::Pass);
         return Ok(());
     };
 
     let checks = CheckPaths::classify(snapshot.paths());
     let mut steps = Vec::new();
     if !checks.rust.is_empty() {
-        let toolchain_nightly = fs::read_to_string(snapshot.directory().join(".rustfmt-nightly"))
-            .context("reading staged .rustfmt-nightly")?;
+        let rustfmt = env::var("RUSTFMT").context("RUSTFMT is not configured")?;
         steps.push(
             crate::task::Step::new(
                 "rustfmt",
-                "rustup",
+                rustfmt,
                 [
-                    "run".to_string(),
-                    toolchain_nightly.trim().to_string(),
-                    "rustfmt".to_string(),
                     "--check".to_string(),
                     "--unstable-features".to_string(),
                     "--skip-children".to_string(),
@@ -59,14 +54,15 @@ pub(crate) fn run() -> Result<()> {
         );
     }
     if !checks.markdown.is_empty() {
-        steps.push(crate::verbs::format::markdown::check_step_for_files(
-            checks.markdown,
-            snapshot.directory(),
-        ));
+        steps.push(
+            Step::new("rumdl", "rumdl", ["fmt", "--check"])
+                .with_arguments(checks.markdown.iter().map(|path| path_text(path)))
+                .with_current_directory(snapshot.directory()),
+        );
     }
-    task::run_all(&steps)?;
-
-    process::result(Verb::PRE_COMMIT, Status::Pass);
+    for step in &steps {
+        process::run_step(step)?;
+    }
     Ok(())
 }
 

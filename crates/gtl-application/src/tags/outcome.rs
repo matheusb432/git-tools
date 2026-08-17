@@ -1,3 +1,7 @@
+use std::collections::BTreeSet;
+
+use gtl_models::git::{GitRefName, TagName};
+
 /// Reports whether a remote tag push was not started, completed, or became indeterminate.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum TagRemotePushProgress {
@@ -5,61 +9,44 @@ pub enum TagRemotePushProgress {
     #[default]
     NotStarted,
     /// Git confirmed the listed refs were pushed.
-    Completed { pushed_refs: Vec<String> },
+    Completed { pushed_refs: BTreeSet<GitRefName> },
     /// Git was started for the listed refs but did not confirm the final remote state.
-    Indeterminate { attempted_refs: Vec<String> },
+    Indeterminate {
+        attempted_refs: BTreeSet<GitRefName>,
+    },
 }
 
 /// Reports refs created and published before an outcome or error was reached.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TagOperationProgress {
-    pub created_refs: Vec<String>,
+    pub created_refs: BTreeSet<GitRefName>,
     pub remote_push: TagRemotePushProgress,
 }
 
 impl TagOperationProgress {
-    pub(super) fn created(name: impl Into<String>) -> Self {
-        let name = name.into();
+    pub(super) fn created(name: &TagName) -> Self {
         Self {
-            created_refs: vec![local_ref(&name)],
+            created_refs: [GitRefName::for_tag(name)].into_iter().collect(),
             ..Self::default()
         }
     }
 
-    pub(super) fn record_created(&mut self, name: impl Into<String>) {
-        push_unique(&mut self.created_refs, local_ref(&name.into()));
+    pub(super) fn record_created(&mut self, name: &TagName) {
+        self.created_refs.insert(GitRefName::for_tag(name));
     }
 
-    pub(super) fn record_push_attempt(&mut self, names: &[String]) {
+    pub(super) fn record_push_attempt(&mut self, names: &[TagName]) {
         self.remote_push = TagRemotePushProgress::Indeterminate {
-            attempted_refs: names.iter().map(|name| local_ref(name)).collect(),
-        };
-    }
-
-    pub(super) fn record_push_completed(&mut self, names: &[String]) {
-        self.remote_push = TagRemotePushProgress::Completed {
-            pushed_refs: names.iter().map(|name| local_ref(name)).collect(),
+            attempted_refs: names.iter().map(GitRefName::for_tag).collect(),
         };
     }
 
     pub(super) fn merge(&mut self, prior: Self) {
-        for name in prior.created_refs {
-            push_unique(&mut self.created_refs, name);
-        }
+        self.created_refs.extend(prior.created_refs);
         if self.remote_push == TagRemotePushProgress::NotStarted {
             self.remote_push = prior.remote_push;
         }
     }
-}
-
-fn push_unique(values: &mut Vec<String>, value: String) {
-    if !values.contains(&value) {
-        values.push(value);
-    }
-}
-
-fn local_ref(name: &str) -> String {
-    format!("refs/tags/{name}")
 }
 
 /// Classifies a tag creation or publication attempt.
@@ -75,90 +62,207 @@ pub enum TagActionStatus {
     Failed,
 }
 
-/// Reports a closed tag action status and its exact user-facing detail.
+/// A locally created tag action with refs that are not yet published.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TagActionOutcome {
-    /// The closed action classification used for output and exit mapping.
-    pub status: TagActionStatus,
-    /// The exact user-facing detail preserved from the tag workflow.
-    pub detail: String,
-    /// The refs changed before this closed outcome was reached.
-    pub progress: TagOperationProgress,
+pub struct CreatedTagAction {
+    detail: String,
+    progress: TagOperationProgress,
+}
+
+/// A tag action that required no remote mutation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoopTagAction {
+    detail: String,
+    progress: TagOperationProgress,
+}
+
+/// A tag action whose requested refs were confirmed at the remote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushedTagAction {
+    detail: String,
+    progress: TagOperationProgress,
+}
+
+/// A rejected tag action with any effects completed before the failure.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FailedTagAction {
+    detail: String,
+    progress: TagOperationProgress,
+}
+
+/// Reports one closed tag action without permitting status/progress mismatches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TagActionOutcome {
+    /// Local refs were created and no remote push was requested.
+    Created(CreatedTagAction),
+    /// The requested refs already had the desired remote state.
+    Noop(NoopTagAction),
+    /// The requested refs were confirmed at the remote.
+    Pushed(PushedTagAction),
+    /// Validation or Git rejected the operation after the recorded progress.
+    Failed(FailedTagAction),
 }
 
 impl TagActionOutcome {
-    pub(super) fn new(status: TagActionStatus, detail: impl Into<String>) -> Self {
-        Self {
-            status,
+    pub(super) fn created(detail: impl Into<String>, name: &TagName) -> Self {
+        Self::Created(CreatedTagAction {
             detail: detail.into(),
-            progress: TagOperationProgress::default(),
-        }
+            progress: TagOperationProgress::created(name),
+        })
     }
 
-    pub(super) fn with_progress(mut self, progress: TagOperationProgress) -> Self {
-        self.progress = progress;
-        self
+    pub(super) fn noop(detail: impl Into<String>, created_refs: BTreeSet<GitRefName>) -> Self {
+        Self::Noop(NoopTagAction {
+            detail: detail.into(),
+            progress: TagOperationProgress {
+                created_refs,
+                remote_push: TagRemotePushProgress::NotStarted,
+            },
+        })
+    }
+
+    pub(super) fn pushed(
+        detail: impl Into<String>,
+        created_refs: BTreeSet<GitRefName>,
+        pushed_refs: BTreeSet<GitRefName>,
+    ) -> Self {
+        Self::Pushed(PushedTagAction {
+            detail: detail.into(),
+            progress: TagOperationProgress {
+                created_refs,
+                remote_push: TagRemotePushProgress::Completed { pushed_refs },
+            },
+        })
     }
 
     pub(super) fn failed(detail: impl Into<String>) -> Self {
-        Self::new(TagActionStatus::Failed, detail)
+        Self::failed_with_progress(detail, TagOperationProgress::default())
+    }
+
+    pub(super) fn failed_with_progress(
+        detail: impl Into<String>,
+        progress: TagOperationProgress,
+    ) -> Self {
+        Self::Failed(FailedTagAction {
+            detail: detail.into(),
+            progress,
+        })
+    }
+
+    /// Derives the presentation classification from the closed outcome.
+    pub const fn status(&self) -> TagActionStatus {
+        match self {
+            Self::Created(_) => TagActionStatus::Created,
+            Self::Noop(_) => TagActionStatus::Noop,
+            Self::Pushed(_) => TagActionStatus::Pushed,
+            Self::Failed(_) => TagActionStatus::Failed,
+        }
+    }
+
+    /// Reports whether the action ended in a closed failure.
+    pub const fn is_failed(&self) -> bool {
+        matches!(self, Self::Failed(_))
+    }
+
+    /// Returns the exact user-facing workflow detail.
+    pub fn detail(&self) -> &str {
+        match self {
+            Self::Created(outcome) => &outcome.detail,
+            Self::Noop(outcome) => &outcome.detail,
+            Self::Pushed(outcome) => &outcome.detail,
+            Self::Failed(outcome) => &outcome.detail,
+        }
+    }
+
+    /// Returns effects completed before the outcome was reached.
+    pub const fn progress(&self) -> &TagOperationProgress {
+        match self {
+            Self::Created(outcome) => &outcome.progress,
+            Self::Noop(outcome) => &outcome.progress,
+            Self::Pushed(outcome) => &outcome.progress,
+            Self::Failed(outcome) => &outcome.progress,
+        }
+    }
+
+    pub(super) fn with_created_ref(mut self, name: &TagName) -> Self {
+        if let Self::Created(outcome) = &mut self {
+            outcome.detail = format!("{}\ncreated tag {name}", outcome.detail);
+            outcome.progress.record_created(name);
+        }
+        self
     }
 
     pub(super) fn with_created_detail(self, created_detail: String) -> Self {
-        let progress = self.progress;
-        match self.status {
-            TagActionStatus::Pushed => Self::new(
-                TagActionStatus::Pushed,
-                format!("{created_detail}\n{}", self.detail),
-            )
-            .with_progress(progress),
-            TagActionStatus::Noop => {
-                Self::new(TagActionStatus::Noop, created_detail).with_progress(progress)
+        match self {
+            Self::Pushed(mut outcome) => {
+                outcome.detail = format!("{created_detail}\n{}", outcome.detail);
+                Self::Pushed(outcome)
             }
-            TagActionStatus::Created | TagActionStatus::Failed => Self {
-                status: self.status,
-                detail: self.detail,
-                progress,
-            },
+            Self::Noop(mut outcome) => {
+                outcome.detail = created_detail;
+                Self::Noop(outcome)
+            }
+            outcome @ (Self::Created(_) | Self::Failed(_)) => outcome,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
+    use gtl_models::git::GitRefName;
+
     use super::{TagActionOutcome, TagActionStatus, TagOperationProgress};
+    use crate::utils::tag_name;
 
     #[test]
     fn pushed_outcome_appends_to_the_multi_line_creation_detail() {
         assert_eq!(
-            TagActionOutcome {
-                status: TagActionStatus::Pushed,
-                detail: "pushed 2 tags: v1.0.0, stable".into(),
-                progress: TagOperationProgress::default(),
-            }
+            TagActionOutcome::pushed(
+                "pushed 2 tags: v1.0.0, stable",
+                BTreeSet::default(),
+                [
+                    GitRefName::for_tag(&tag_name("v1.0.0")),
+                    GitRefName::for_tag(&tag_name("stable")),
+                ]
+                .into_iter()
+                .collect(),
+            )
             .with_created_detail("created tag v1.0.0\ncreated tag stable".into()),
-            TagActionOutcome {
-                status: TagActionStatus::Pushed,
-                detail: "created tag v1.0.0\ncreated tag stable\npushed 2 tags: v1.0.0, stable"
-                    .into(),
-                progress: TagOperationProgress::default(),
-            }
+            TagActionOutcome::pushed(
+                "created tag v1.0.0\ncreated tag stable\npushed 2 tags: v1.0.0, stable",
+                BTreeSet::default(),
+                [
+                    GitRefName::for_tag(&tag_name("v1.0.0")),
+                    GitRefName::for_tag(&tag_name("stable")),
+                ]
+                .into_iter()
+                .collect(),
+            )
         );
     }
 
     #[test]
     fn failed_push_keeps_the_push_failure_detail() {
-        let failure = TagActionOutcome {
-            status: TagActionStatus::Failed,
-            detail: "git push tags failed (exit 1)".into(),
-            progress: TagOperationProgress::default(),
-        };
+        let failure = TagActionOutcome::failed("git push tags failed (exit 1)");
 
         assert_eq!(
             failure
                 .clone()
                 .with_created_detail("created tag v1.0.0".into()),
             failure
+        );
+    }
+
+    #[test]
+    fn status_and_progress_are_derived_from_the_closed_variant() {
+        let created = TagActionOutcome::created("created tag v1.0.0", &tag_name("v1.0.0"));
+
+        assert_eq!(created.status(), TagActionStatus::Created);
+        assert_eq!(
+            created.progress(),
+            &TagOperationProgress::created(&tag_name("v1.0.0"))
         );
     }
 }

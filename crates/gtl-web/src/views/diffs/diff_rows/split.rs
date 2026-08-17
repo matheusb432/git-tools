@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use dioxus::prelude::*;
-use gtl_parser::{SemanticTextSpan, SplitDiffCell, SplitDiffRow, diff_line_body};
+use gtl_parser::{
+    CharacterCount, SemanticTextSpan, SourceLineNumber, SplitDiffCell, SplitDiffRow, diff_line_body,
+};
 
 use super::{
     HeaderTone,
@@ -107,10 +109,10 @@ fn SplitRowShell(children: Element) -> Element {
 #[component]
 fn SplitContextCell(
     side: SplitSide,
-    line_number: u32,
+    line_number: SourceLineNumber,
     text: String,
     semantic_spans: Vec<SemanticTextSpan>,
-    long_line_character_count: Option<usize>,
+    long_line_character_count: Option<CharacterCount>,
 ) -> Element {
     rsx! {
         SplitGutter { side, number: Some(line_number) }
@@ -149,7 +151,7 @@ fn SplitCell(cell: Option<SplitDiffCell>, side: SplitSide) -> Element {
 }
 
 #[component]
-fn SplitGutter(side: SplitSide, number: Option<u32>) -> Element {
+fn SplitGutter(side: SplitSide, number: Option<SourceLineNumber>) -> Element {
     let line_number = number.map(|value| value.to_string());
     let side_classes = match side {
         SplitSide::Old => "",
@@ -169,7 +171,7 @@ fn SplitCodeCell(
     presentation: SplitCellPresentation,
     text: String,
     semantic_spans: Vec<SemanticTextSpan>,
-    long_line_character_count: Option<usize>,
+    long_line_character_count: Option<CharacterCount>,
 ) -> Element {
     let marker = text.chars().next();
     let body = diff_line_body(&text).to_owned();
@@ -210,7 +212,7 @@ fn SplitCodeContent(
     long_text: String,
     semantic_spans: Vec<SemanticTextSpan>,
     changed_text_tone: ChangedTextTone,
-    long_line_character_count: Option<usize>,
+    long_line_character_count: Option<CharacterCount>,
 ) -> Element {
     if let Some(character_count) = long_line_character_count {
         return rsx! {
@@ -241,5 +243,34 @@ fn SplitPad(side: SplitSide) -> Element {
     rsx! {
         SplitGutter { side, number: None }
         code { class: "{SPLIT_CODE_CELL_CLASSES}", class: "{side_classes}" }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gtl_parser::{CharacterCount, DiffParser, ParseOptions};
+
+    use super::*;
+
+    #[test]
+    fn renders_typed_line_numbers_long_lines_and_an_absent_split_cell() {
+        let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3))).parse(&[
+            "@@ -9999,2 +10000 @@".to_owned(),
+            "-abcd".to_owned(),
+            "-tail".to_owned(),
+            "+abce".to_owned(),
+        ]);
+        let html = dioxus_ssr::render_element(rsx! {
+            SplitDiffRowBatch { rows: Arc::new(parsed.split_rows()) }
+        });
+        let absent_gutter = dioxus_ssr::render_element(rsx! {
+            SplitGutter { side: SplitSide::New, number: None }
+        });
+
+        assert!(html.contains(">9999</span>"));
+        assert!(html.contains(">10000</span>"));
+        assert_eq!(html.matches("4 chars").count(), 3);
+        assert!(html.contains("bg-sunk tablet:border-t tablet:border-line"));
+        assert!(absent_gutter.ends_with("></span>"));
     }
 }

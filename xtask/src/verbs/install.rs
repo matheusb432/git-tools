@@ -1,16 +1,3 @@
-//! `xtask install` / `xtask uninstall` — place or remove the prebuilt git-tools CLI (+ the
-//! `gtl` alias + the resident `gtl-daemon`) and the gtl-viewer desktop binary on PATH. Migrates
-//! `scripts/install.sh`: the build is owned by the justfile (`just cli build` / `just desktop
-//! build`); these verbs only copy the already-built artifacts. Idempotent; the destructive
-//! config removal refuses non-interactively unless `--force`. `gtl-daemon` may be running
-//! during `just update` — placed via the same atomic replace as the viewer, so the swap never
-//! fails with "Text file busy"; the client's exe-identity handshake restarts it on the next
-//! CLI invocation.
-//!
-//! Pure placement helpers (byte-compare, atomic replace, the installed|updated|unchanged
-//! contract) are unit-tested with `tempfile`; the thin glue that resolves repo root / bindir
-//! and prints the report is covered by the arg-surface tests.
-
 use std::{
     env, fmt, fs, io,
     path::{Path, PathBuf},
@@ -22,20 +9,14 @@ use crate::cli::InstallTarget;
 
 mod linux_desktop;
 
-// --- placement contract ----------------------------------------------------
-
-/// What placing one file did: was it new, changed, or already current? The lowercased
-/// `Display` is the `installed|updated|unchanged` string the `ShellSpec` suite asserted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action {
+enum Action {
     Installed,
     Updated,
     Unchanged,
 }
 
 impl Action {
-    /// Combine two placements into the louder one: updated > installed > unchanged. Mirrors the
-    /// shell's combined reporting when a binary and its alias land in one call.
     fn louder(self, other: Action) -> Action {
         use Action::{Installed, Unchanged, Updated};
         match (self, other) {
@@ -56,24 +37,19 @@ impl fmt::Display for Action {
     }
 }
 
-/// Outcome of an uninstall sweep.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Removal {
+enum Removal {
     Removed,
     Nothing,
 }
 
-/// Outcome of the guarded config delete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfigRemoval {
+enum ConfigRemoval {
     Removed,
     Kept,
     Absent,
 }
 
-// --- pure placement helpers (unit-tested) ----------------------------------
-
-/// The host's executable suffix: `.exe` under Windows, empty elsewhere — no `uname` branch.
 fn exe_suffix() -> &'static str {
     env::consts::EXE_SUFFIX
 }
@@ -121,7 +97,6 @@ fn atomic_replace(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Copy `src` over `dst` only when the bytes differ. Echoes the action taken.
 fn copy_if_changed(src: &Path, dst: &Path) -> io::Result<Action> {
     if dst.exists() {
         if fs::read(src)? == fs::read(dst)? {
@@ -134,39 +109,19 @@ fn copy_if_changed(src: &Path, dst: &Path) -> io::Result<Action> {
     Ok(Action::Installed)
 }
 
-/// Install CLI exe `src` plus the `gtl` alias into `bindir`. Echoes the combined action
-/// (updated > installed > unchanged), mirroring the retired `install_cli_binary`.
-pub fn install_cli_binary(src: &Path, bindir: &Path) -> io::Result<Action> {
+fn install_cli_binary(src: &Path, bindir: &Path) -> io::Result<Action> {
     fs::create_dir_all(bindir)?;
     let primary = copy_if_changed(src, &bindir.join(file_name(src)))?;
     let alias = copy_if_changed(src, &bindir.join(cli_alias_name()))?;
     Ok(primary.louder(alias))
 }
 
-/// Install exe `src` into `bindir` via atomic replace, so a warm running process (the tray
-/// viewer or the resident daemon) can be updated in place without "Text file busy". Shared by
-/// `install_viewer_binary` and `install_daemon_binary`, which differ only in which binary they
-/// place. Echoes the action.
 fn install_binary_atomic(src: &Path, bindir: &Path) -> io::Result<Action> {
     fs::create_dir_all(bindir)?;
     copy_if_changed(src, &bindir.join(file_name(src)))
 }
 
-/// Install the desktop viewer exe `src` into `bindir` via atomic replace, so a warm tray viewer
-/// can be updated in place. Echoes the action.
-pub fn install_viewer_binary(src: &Path, bindir: &Path) -> io::Result<Action> {
-    install_binary_atomic(src, bindir)
-}
-
-/// Install the `gtl-daemon` exe `src` into `bindir` via atomic replace, so a resident daemon can
-/// be updated while running — the client's exe-identity handshake restarts it on the next CLI
-/// invocation. Echoes the action.
-pub fn install_daemon_binary(src: &Path, bindir: &Path) -> io::Result<Action> {
-    install_binary_atomic(src, bindir)
-}
-
-/// Remove the CLI binary + `gtl` alias from `bindir`.
-pub fn uninstall_cli_binary(bindir: &Path) -> io::Result<Removal> {
+fn uninstall_cli_binary(bindir: &Path) -> io::Result<Removal> {
     let mut removed = false;
     for name in [cli_bin_name(), cli_alias_name()] {
         let path = bindir.join(name);
@@ -185,7 +140,7 @@ pub fn uninstall_cli_binary(bindir: &Path) -> io::Result<Removal> {
 /// Delete config file `path`, guarded. Proceeds when `force`, or when `confirm()` returns true;
 /// otherwise keeps the file. The interactivity is injected as a closure so the decision is
 /// host-testable without a real TTY.
-pub fn remove_cli_config(
+fn remove_cli_config(
     path: &Path,
     force: bool,
     confirm: &dyn Fn() -> bool,
@@ -199,8 +154,6 @@ pub fn remove_cli_config(
     fs::remove_file(path)?;
     Ok(ConfigRemoval::Removed)
 }
-
-// --- thin glue (resolve paths, print the report) ---------------------------
 
 /// Target bindir: `GIT_TOOLS_BINDIR` override, else `$HOME/.local/bin`. Shared with `setup`
 /// (which ensures this dir is on PATH).
@@ -255,7 +208,7 @@ fn install_cli(repo_path: &Path, bindir: &Path) -> Result<()> {
             daemon_src.display()
         );
     }
-    let daemon_act = install_daemon_binary(&daemon_src, bindir)?;
+    let daemon_act = install_binary_atomic(&daemon_src, bindir)?;
     println!(
         "gtl-daemon {daemon_act} -> {}",
         bindir.join(daemon_bin_name()).display()
@@ -270,7 +223,7 @@ fn install_viewer(repo_path: &Path, bindir: &Path) -> Result<()> {
         .join(viewer_bin_name());
     if src.is_file() {
         let dst = bindir.join(viewer_bin_name());
-        let act = install_viewer_binary(&src, bindir)?;
+        let act = install_binary_atomic(&src, bindir)?;
         println!("gtl-viewer {act} -> {}", dst.display());
         if let Some(path) = linux_desktop::install(repo_path, &dst)? {
             println!("gtl-viewer desktop entry -> {}", path.display());
@@ -336,21 +289,10 @@ fn confirm_config_delete(path: &Path) -> bool {
 mod tests {
     use super::*;
 
-    /// A temp bindir + a `git-tools` source file holding `bytes`. Both `TempDir` guards are
-    /// returned so they auto-clean on drop; `src` is the source path, `bindir` the target dir.
     fn fixture(bytes: &[u8]) -> (tempfile::TempDir, tempfile::TempDir, PathBuf, PathBuf) {
-        fixture_named("git-tools", bytes)
-    }
-
-    /// Like `fixture`, but the source file is named `name` — lets a test prove the *right*
-    /// file name lands in `bindir` (e.g. the daemon binary), not just that bytes copy correctly.
-    fn fixture_named(
-        name: &str,
-        bytes: &[u8],
-    ) -> (tempfile::TempDir, tempfile::TempDir, PathBuf, PathBuf) {
         let bindir = tempfile::tempdir().unwrap();
         let srcdir = tempfile::tempdir().unwrap();
-        let src = srcdir.path().join(name);
+        let src = srcdir.path().join("git-tools");
         fs::write(&src, bytes).unwrap();
         let bindir_path = bindir.path().to_path_buf();
         (bindir, srcdir, src, bindir_path)
@@ -387,44 +329,27 @@ mod tests {
     }
 
     #[test]
-    fn install_viewer_binary_places_and_updates() {
+    fn install_binary_atomic_places_and_updates() {
         let (_bin, _srcdir, src, bindir) = fixture(b"v1");
         assert_eq!(
-            install_viewer_binary(&src, &bindir).unwrap(),
+            install_binary_atomic(&src, &bindir).unwrap(),
             Action::Installed
         );
         assert!(bindir.join("git-tools").exists());
         fs::write(&src, b"v2").unwrap();
         assert_eq!(
-            install_viewer_binary(&src, &bindir).unwrap(),
+            install_binary_atomic(&src, &bindir).unwrap(),
             Action::Updated
         );
         assert_eq!(fs::read(bindir.join("git-tools")).unwrap(), b"v2");
     }
 
     #[test]
-    fn install_daemon_binary_places_the_daemon_exe_name() {
-        let (_bin, _srcdir, src, bindir) = fixture_named(&daemon_bin_name(), b"v1");
-        assert_eq!(
-            install_daemon_binary(&src, &bindir).unwrap(),
-            Action::Installed
-        );
-        assert!(bindir.join(daemon_bin_name()).exists());
-        assert!(!bindir.join("git-tools").exists());
-        fs::write(&src, b"v2").unwrap();
-        assert_eq!(
-            install_daemon_binary(&src, &bindir).unwrap(),
-            Action::Updated
-        );
-        assert_eq!(fs::read(bindir.join(daemon_bin_name())).unwrap(), b"v2");
-    }
-
-    #[test]
     fn atomic_replace_leaves_no_temp_files() {
         let (_bin, _srcdir, src, bindir) = fixture(b"v1");
-        install_viewer_binary(&src, &bindir).unwrap();
+        install_binary_atomic(&src, &bindir).unwrap();
         fs::write(&src, b"v2").unwrap();
-        install_viewer_binary(&src, &bindir).unwrap();
+        install_binary_atomic(&src, &bindir).unwrap();
         let leftovers: Vec<_> = fs::read_dir(&bindir)
             .unwrap()
             .flatten()

@@ -1,8 +1,9 @@
-use std::path::Path;
+use gtl_models::{
+    diffs::AppliedExclusions,
+    git::{GitDiffSpec, GitRevision},
+    paths::RepositoryRoot,
+};
 
-use gtl_models::diffs::AppliedExclusions;
-
-use super::DEFAULT_BASE;
 use crate::{
     diffs::{
         PinnedRange, View,
@@ -11,42 +12,37 @@ use crate::{
         range_view::{RangePresentation, RangeView},
     },
     ports::GitClient,
-    shared::repository_name::from_path,
 };
 
 pub(super) struct MergeViewBuild {
     pub(super) view: View,
-    pub(super) top: String,
-    pub(super) base: String,
-    pub(super) diff_range: String,
+    pub(super) top: RepositoryRoot,
+    pub(super) base: GitRevision,
+    pub(super) diff_range: GitDiffSpec,
 }
 
 pub(super) fn build(
     source: &impl GitClient,
-    cwd: &Path,
-    base: Option<&str>,
+    top: &RepositoryRoot,
+    base: Option<&GitRevision>,
     pinned: Option<&PinnedRange>,
     exclusions: &gtl_models::diffs::DiffExclusions,
 ) -> anyhow::Result<MergeViewBuild> {
-    let top = source.top_level(cwd)?;
-    let branch = source.current_branch(Path::new(&top))?;
-    let repo_name = from_path(&top);
+    let branch = source.current_branch(top)?;
+    let repo_name = top.project_name();
     let excluded = exclusions.for_project_or_default(&repo_name);
-    let base = base
-        .map(str::trim)
-        .filter(|base| !base.is_empty())
-        .unwrap_or(DEFAULT_BASE);
+    let base = base.cloned().unwrap_or_else(GitRevision::main);
 
     let (io_ranges, view_ranges) = pinned.map_or_else(
         || -> anyhow::Result<_> {
-            source.verify_commit(Path::new(&top), base)?;
-            let symbolic = DiffRanges::merge(base);
+            source.verify_commit(top, &base)?;
+            let symbolic = DiffRanges::merge(&base);
             Ok((symbolic.clone(), symbolic))
         },
         |pin| {
             Ok((
-                DiffRanges::exact(pin.git_range()),
-                DiffRanges::exact(pin.display_range()),
+                DiffRanges::exact(pin.to_git_range()),
+                DiffRanges::exact(pin.to_display_range()),
             ))
         },
     )?;
@@ -55,19 +51,13 @@ pub(super) fn build(
         commits,
         files,
         hidden_paths,
-    } = assemble(
-        source,
-        Path::new(&top),
-        &io_ranges.diff,
-        &io_ranges.log,
-        excluded,
-    )?;
+    } = assemble(source, top, &io_ranges.diff, &io_ranges.log, excluded)?;
 
     let view = View {
         repo_name,
         repo_root: top.clone(),
         branch,
-        upstream: base.to_string(),
+        upstream: base.clone(),
         title: range_view.title,
         cmd: range_view.cmd,
         commits_label: range_view.commits_label,
@@ -78,8 +68,8 @@ pub(super) fn build(
     };
     Ok(MergeViewBuild {
         view,
-        top,
-        base: base.to_string(),
+        top: top.clone(),
+        base,
         diff_range: io_ranges.diff,
     })
 }

@@ -1,7 +1,7 @@
 use std::{
     fs::OpenOptions,
     path::{Path, PathBuf},
-    process::{Child, ExitStatus, Stdio},
+    process::{Child, ExitStatus, Output, Stdio},
     time::{Duration, Instant},
 };
 
@@ -74,6 +74,57 @@ fn daemon_pid_from(store_root: &Path) -> Result<u32> {
     u32::try_from(pid).context("pid fits u32")
 }
 
+fn run_daemon_command(store_root: &Path, command: &str) -> Result<Output> {
+    std::process::Command::new(env!("CARGO_BIN_EXE_git-tools"))
+        .args(["daemon", command])
+        .env("GIT_TOOLS_DATA_DIR", store_root)
+        .output()
+        .with_context(|| format!("run daemon {command}"))
+}
+
+#[test]
+fn invalid_discovery_records_are_treated_as_not_running() -> Result<()> {
+    let store = tempfile::tempdir().context("temporary daemon store")?;
+
+    for record in [
+        r#"{"port":0,"pid":99}"#,
+        r#"{"port":4321,"pid":0}"#,
+        "not JSON",
+    ] {
+        std::fs::write(store.path().join("daemon.json"), record)
+            .context("write invalid discovery record")?;
+
+        let output = run_daemon_command(store.path(), "status")?;
+
+        assert!(output.status.success(), "record: {record}");
+        assert_eq!(
+            output.stdout, b"gtl-daemon not running\n",
+            "record: {record}"
+        );
+        assert!(output.stderr.is_empty(), "record: {record}");
+    }
+    Ok(())
+}
+
+#[test]
+fn stale_discovery_record_without_an_owner_is_not_running() -> Result<()> {
+    let store = tempfile::tempdir().context("temporary daemon store")?;
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").context("bind stale port")?;
+    let port = listener.local_addr().context("stale port address")?.port();
+    std::fs::write(
+        store.path().join("daemon.json"),
+        format!(r#"{{"port":{port},"pid":99}}"#),
+    )
+    .context("write stale discovery record")?;
+
+    let output = run_daemon_command(store.path(), "status")?;
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"gtl-daemon not running\n");
+    assert!(output.stderr.is_empty());
+    Ok(())
+}
+
 #[test]
 fn unhealthy_lock_owner_blocks_restart_without_being_killed() -> Result<()> {
     let store = tempfile::tempdir().context("temporary daemon store")?;
@@ -89,11 +140,7 @@ fn unhealthy_lock_owner_blocks_restart_without_being_killed() -> Result<()> {
     )
     .context("write unhealthy discovery document")?;
 
-    let status_output = std::process::Command::new(env!("CARGO_BIN_EXE_git-tools"))
-        .args(["daemon", "status"])
-        .env("GIT_TOOLS_DATA_DIR", store.path())
-        .output()
-        .context("status with unhealthy lock owner")?;
+    let status_output = run_daemon_command(store.path(), "status")?;
     assert_eq!(status_output.status.code(), Some(1));
     assert!(
         String::from_utf8_lossy(&status_output.stderr)
@@ -107,11 +154,7 @@ fn unhealthy_lock_owner_blocks_restart_without_being_killed() -> Result<()> {
     );
 
     let started_at = Instant::now();
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_git-tools"))
-        .args(["daemon", "restart"])
-        .env("GIT_TOOLS_DATA_DIR", store.path())
-        .output()
-        .context("restart with unhealthy lock owner")?;
+    let output = run_daemon_command(store.path(), "restart")?;
 
     assert_eq!(output.status.code(), Some(1));
     assert!(

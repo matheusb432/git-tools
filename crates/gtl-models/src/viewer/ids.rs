@@ -15,7 +15,19 @@ use nutype::nutype;
 /// ```
 #[nutype(
     validate(greater_or_equal = 1),
-    derive(Debug, Clone, Copy, PartialEq, Eq, Hash, TryFrom, Into, Display)
+    derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Hash,
+        TryFrom,
+        Into,
+        Display,
+        Serialize,
+        Deserialize
+    )
 )]
 pub struct ViewerTabId(u64);
 
@@ -34,9 +46,122 @@ pub struct ViewerTabId(u64);
 /// ```
 #[nutype(
     validate(greater_or_equal = 1),
-    derive(Debug, Clone, Copy, PartialEq, Eq, Hash, TryFrom, Into, Display)
+    derive(
+        Debug,
+        Clone,
+        Copy,
+        PartialEq,
+        Eq,
+        Hash,
+        TryFrom,
+        Into,
+        Display,
+        Serialize,
+        Deserialize
+    )
 )]
 pub struct RenderHistoryId(i64);
+
+/// Orders full-range computations for one viewer tab.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct ViewerRangeGeneration(u64);
+
+impl ViewerRangeGeneration {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self::new(self.0.wrapping_add(1))
+    }
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
+
+/// Orders commit-selection computations independently from full-range computations.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct ViewerSelectionGeneration(u64);
+
+impl ViewerSelectionGeneration {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self::new(self.0.wrapping_add(1))
+    }
+
+    #[must_use]
+    pub const fn previous(self) -> Self {
+        Self::new(self.0.wrapping_sub(1))
+    }
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
+
+/// Orders authoritative viewer-shell snapshots and change notifications.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
+#[serde(transparent)]
+pub struct ViewerShellRevision(u64);
+
+impl ViewerShellRevision {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self::new(self.0.wrapping_add(1))
+    }
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
 
 #[cfg(test)]
 mod tests {

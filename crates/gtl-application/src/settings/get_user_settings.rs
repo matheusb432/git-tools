@@ -34,10 +34,11 @@ mod tests {
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
     };
 
-    use super::{GetUserSettings, GetUserSettingsError, execute};
+    use super::{GetUserSettings, GetUserSettingsError};
     use crate::{
         ports::UserSettingsLoadError,
-        testing::{FixedUserSettingsStore, SequenceUserSettingsStore},
+        settings::get_user_settings,
+        utils::{FixedUserSettingsStore, SequenceUserSettingsStore},
     };
 
     #[test]
@@ -48,15 +49,16 @@ mod tests {
             false,
             DiffExclusions::new(
                 [
-                    ("defaults".into(), vec!["md"]),
-                    ("git-tools".into(), vec!["js"]),
+                    (crate::utils::project_name("defaults"), vec!["md"]),
+                    (crate::utils::project_name("git-tools"), vec!["js"]),
                 ],
                 None,
             ),
         );
         let store = FixedUserSettingsStore::new(settings.clone());
 
-        let response = execute(GetUserSettings, &store).expect("settings query succeeds");
+        let response =
+            get_user_settings::execute(GetUserSettings, &store).expect("settings query succeeds");
 
         assert_eq!(response.settings, settings);
     }
@@ -65,7 +67,8 @@ mod tests {
     fn query_preserves_a_typed_settings_load_failure() {
         let store = SequenceUserSettingsStore::new([]);
 
-        let error = execute(GetUserSettings, &store).expect_err("empty sequence fails");
+        let error =
+            get_user_settings::execute(GetUserSettings, &store).expect_err("empty sequence fails");
 
         assert!(matches!(
             error,

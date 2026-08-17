@@ -1,14 +1,16 @@
 //! Recipe batch identity and managed-repository selection.
 
-use gtl_application::diffs::DiffTarget;
-use gtl_models::{discovery::DiscoveredRepo, managed::ManagedRepo};
+use gtl_application::{diffs::DiffTarget, projects::select_unpushed_repositories};
+use gtl_models::{
+    projects::ProjectRepository, recipes::RecipeBatchId, repository::traversal::RepositoryTarget,
+};
 use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
 use crate::commands::managed;
 
 /// Mints a fresh batch identifier for recipes opened together.
-pub(crate) fn new_batch_id() -> String {
-    uuid::Uuid::new_v4().to_string()
+pub(crate) fn new_batch_id() -> RecipeBatchId {
+    RecipeBatchId::generate()
 }
 
 pub(crate) fn diff_operation(target: &DiffTarget) -> RecipeOp {
@@ -35,14 +37,14 @@ pub(crate) fn diff_operation(target: &DiffTarget) -> RecipeOp {
 }
 
 /// Loads sample_project's active projects and selects repositories with unpushed commits.
-pub(crate) fn selected_managed_repos() -> anyhow::Result<Vec<DiscoveredRepo>> {
+pub(crate) fn selected_managed_repos() -> anyhow::Result<Vec<RepositoryTarget>> {
     let repos = managed::load_projects()?;
     select_managed_repos(repos)
 }
 
-fn select_managed_repos(repos: Vec<ManagedRepo>) -> anyhow::Result<Vec<DiscoveredRepo>> {
-    Ok(gtl_application::managed::select_unpushed::execute(
-        gtl_application::managed::select_unpushed::SelectUnpushed { repos },
+fn select_managed_repos(repos: Vec<ProjectRepository>) -> anyhow::Result<Vec<RepositoryTarget>> {
+    Ok(select_unpushed_repositories::execute(
+        select_unpushed_repositories::SelectUnpushedRepositories { repos },
         &gtl_infra::git_client::HybridGitClient,
     )?)
 }
@@ -55,7 +57,7 @@ mod tests {
     use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
     use super::{diff_operation, new_batch_id};
-    use crate::testing::pinned_range;
+    use crate::testing::{git_range, git_revision, pinned_range};
 
     #[test]
     fn new_batch_id_yields_distinct_uuids() {
@@ -77,26 +79,28 @@ mod tests {
                 },
             ),
             (
-                DiffTarget::Base("main".into()),
-                RecipeTarget::Base { rev: "main".into() },
+                DiffTarget::Base(git_revision("main")),
+                RecipeTarget::Base {
+                    rev: git_revision("main"),
+                },
             ),
             (
                 DiffTarget::Range {
-                    range: "main..HEAD".into(),
+                    range: git_range("main..HEAD"),
                     pinned: Some(pin.clone()),
                 },
                 RecipeTarget::Range {
-                    range: "main..HEAD".into(),
+                    range: git_range("main..HEAD"),
                     pinned: Some(wire_pin.clone()),
                 },
             ),
             (
                 DiffTarget::Merge {
-                    base: "release".into(),
+                    base: git_revision("release"),
                     pinned: Some(pin.clone()),
                 },
                 RecipeTarget::Merge {
-                    base: "release".into(),
+                    base: git_revision("release"),
                     pinned: Some(wire_pin.clone()),
                 },
             ),

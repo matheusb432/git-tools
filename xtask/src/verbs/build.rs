@@ -1,11 +1,11 @@
 //! Release build orchestration for the independent CLI and desktop artifacts.
 
-use std::{ffi::OsStr, path::Path};
+use std::path::Path;
 
 use anyhow::{Result, anyhow};
 
-use super::{desktop_release, dioxus_web};
-use crate::{cli::BuildTarget, process, project, task::Step};
+use super::{desktop_release, dioxus_web, lock_web_assets, repository_root};
+use crate::{cli::BuildTarget, process, task::Step};
 
 const VIEWER_BUILD_ARGS: &[&str] = &[
     "build",
@@ -18,8 +18,8 @@ const VIEWER_BUILD_ARGS: &[&str] = &[
 
 /// Build the selected release artifact set. Every selected artifact is mandatory.
 pub fn run(target: BuildTarget) -> Result<()> {
-    let root = project::repository_root();
-    let _lock = project::lock_web_assets(&root)?;
+    let root = repository_root();
+    let _lock = lock_web_assets(&root)?;
     for stage in build_stages(target) {
         match stage {
             BuildStage::ArtifactAssets => dioxus_web::build_artifact_assets_unlocked(&root)?,
@@ -44,13 +44,11 @@ fn build_cli(root: &Path) -> Result<()> {
 
 fn build_viewer(root: &Path) -> Result<()> {
     if std::env::consts::OS == "linux" {
-        process::run_captured_with_env(
+        process::run_step(&Step::new(
             "viewer-webkit-headers",
-            None,
-            OsStr::new("pkg-config"),
-            &["--exists", "webkit2gtk-4.1"],
-            &[],
-        )
+            "pkg-config",
+            ["--exists", "webkit2gtk-4.1"],
+        ))
         .map_err(|error| {
             anyhow!(
                 "webkit2gtk-4.1 development headers are required for `just desktop build`: {error:#}"

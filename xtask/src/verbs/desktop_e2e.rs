@@ -16,11 +16,7 @@ use anyhow::{Context, Result, bail};
 use command_group::{CommandGroup, GroupChild};
 
 use super::{build, status_notifier::StatusNotifierWatcher};
-use crate::{
-    cli::BuildTarget,
-    process::{self, Status},
-    verb::Verb,
-};
+use crate::cli::BuildTarget;
 
 mod playwright;
 mod stable_runner;
@@ -409,16 +405,7 @@ impl Drop for DaemonCleanupGuard {
 
 /// Build and run the platform desktop E2E workflow.
 pub fn run() -> Result<()> {
-    let result = workflow();
-    match &result {
-        Ok(()) => process::result(Verb::DESKTOP_E2E, Status::Pass),
-        Err(_) => process::result_fail_step(Verb::DESKTOP_E2E, "workflow"),
-    }
-    result
-}
-
-pub(crate) fn run_worker(_verbose: bool) -> Result<()> {
-    run()
+    workflow()
 }
 
 pub(crate) fn run_runtime(executable: &Path, arguments: &[OsString]) -> Result<()> {

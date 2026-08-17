@@ -1,8 +1,10 @@
 //! Computes the standalone patch introduced by one commit already present in a viewer range.
 
-use std::path::{Path, PathBuf};
-
-use gtl_models::diffs::{AppliedExclusions, Commit, CommitIdAbbreviation};
+use gtl_models::{
+    diffs::{AppliedExclusions, Commit, CommitIdAbbreviation},
+    git::{GitDiffSpec, GitRange, GitRevision},
+    paths::RepositoryRoot,
+};
 
 use crate::{
     diffs::{
@@ -11,7 +13,6 @@ use crate::{
         view::sort_files_tree_order,
     },
     ports::{GitClient, UserSettingsLoadError, UserSettingsStore},
-    shared::repository_name::from_path,
 };
 
 const EMPTY_TREE_ID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -19,7 +20,7 @@ const EMPTY_TREE_ABBREVIATED_ID: &str = "4b825dc642";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputeCommitPatch {
-    pub repo_root: PathBuf,
+    pub repo_root: RepositoryRoot,
     pub commit: Commit,
 }
 
@@ -38,38 +39,38 @@ pub fn execute(
     source: &impl GitClient,
 ) -> Result<View, ComputeCommitPatchError> {
     let repo_path = request.repo_root;
-    let top = repo_path.to_string_lossy();
-    let repo_name = from_path(top.as_ref());
+    let repo_name = repo_path.project_name();
     let settings = settings.load()?;
     let excluded = settings
         .diff_exclusions()
         .for_project_or_default(&repo_name);
     let commit = request.commit;
     let abbreviation = CommitIdAbbreviation::TenCharacters;
-    let (base, base_abbreviated) = commit.parents.first().map_or_else(
-        || (EMPTY_TREE_ID, EMPTY_TREE_ABBREVIATED_ID.to_owned()),
-        |parent| (parent.as_ref(), parent.abbreviated(abbreviation)),
-    );
-    let diff_range = format!("{base}..{}", commit.id);
-    let log_range = format!("{}^!", commit.id);
+    let (base, base_abbreviated) = match commit.parents.first() {
+        Some(parent) => (
+            GitRevision::from(parent),
+            GitRevision::abbreviated_commit(parent, abbreviation),
+        ),
+        None => (
+            GitRevision::try_new(EMPTY_TREE_ID).map_err(anyhow::Error::from)?,
+            GitRevision::try_new(EMPTY_TREE_ABBREVIATED_ID).map_err(anyhow::Error::from)?,
+        ),
+    };
+    let diff_range = GitRange::two_dot(&base, &GitRevision::from(&commit.id));
+    let diff_spec = GitDiffSpec::Range(diff_range);
+    let log_range = GitRange::single_commit(&commit.id);
     let DiffData {
         commits,
         mut files,
         hidden_paths,
-    } = assemble(
-        source,
-        Path::new(&repo_path),
-        &diff_range,
-        &log_range,
-        excluded,
-    )?;
+    } = assemble(source, &repo_path, &diff_spec, &log_range, excluded)?;
     sort_files_tree_order(&mut files);
 
     let abbreviated_id = commit.id.abbreviated(abbreviation);
     Ok(View {
         repo_name,
-        repo_root: top.into_owned(),
-        branch: source.current_branch(Path::new(&repo_path))?,
+        repo_root: repo_path.clone(),
+        branch: source.current_branch(&repo_path)?,
         upstream: base_abbreviated.clone(),
         title: format!("commit {abbreviated_id}"),
         cmd: Cmd {
@@ -90,9 +91,12 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::{
-        FakeGitClient, FixedUserSettingsStore,
-        diffs::{DIFF_SINGLE_FILE, commit_with},
+    use crate::{
+        diffs::compute_commit_patch,
+        utils::{
+            FakeGitClient, FixedUserSettingsStore,
+            diffs::{DIFF_SINGLE_FILE, commit_with},
+        },
     };
 
     const COMMIT_ID: &str = "1111111111222222222233333333334444444444";
@@ -108,9 +112,9 @@ mod tests {
             ..Default::default()
         };
 
-        let view = execute(
+        let view = compute_commit_patch::execute(
             ComputeCommitPatch {
-                repo_root: "/repo".into(),
+                repo_root: crate::utils::repository_root("/repo"),
                 commit,
             },
             &FixedUserSettingsStore::default(),
@@ -122,8 +126,8 @@ mod tests {
         assert_eq!(view.cmd.range, "aaaaaaaaaa..1111111111");
         assert_eq!(view.commits, source.commits);
         assert_eq!(view.files.len(), 1);
-        assert_eq!(view.files[0].added, 2);
-        assert_eq!(view.files[0].removed, 1);
+        assert_eq!(view.files[0].added.value(), 2);
+        assert_eq!(view.files[0].removed.value(), 1);
     }
 
     #[test]
@@ -136,9 +140,9 @@ mod tests {
             ..Default::default()
         };
 
-        let view = execute(
+        let view = compute_commit_patch::execute(
             ComputeCommitPatch {
-                repo_root: "/repo".into(),
+                repo_root: crate::utils::repository_root("/repo"),
                 commit,
             },
             &FixedUserSettingsStore::default(),
@@ -146,7 +150,7 @@ mod tests {
         )
         .expect("root patch computes");
 
-        assert_eq!(view.upstream, "4b825dc642");
+        assert_eq!(view.upstream.as_ref(), "4b825dc642");
         assert_eq!(view.cmd.range, "4b825dc642..1111111111");
     }
 }

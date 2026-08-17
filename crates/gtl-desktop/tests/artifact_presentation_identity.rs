@@ -1,7 +1,5 @@
 #![cfg(test)]
 
-use std::path::Path;
-
 use gtl_application::{
     diffs::{Cmd, FileDiff, Foot, View},
     ports::{ArtifactMeta, ArtifactRangeKey, ArtifactStore, HtmlRenderer},
@@ -9,9 +7,16 @@ use gtl_application::{
 use gtl_artifacts::ArtifactRenderer;
 use gtl_infra::artifact_store::StoreArtifacts;
 use gtl_models::{
-    diffs::{DiffKind, PinnedRange},
+    artifacts::{ArtifactCommitRange, ArtifactDiffIdentity, ArtifactRangeKind},
+    diffs::{DiffKind, DiffLineCount, ExcludedExtensions, PinnedRange},
+    git::{BranchName, GitHead, GitRevision},
+    paths::{ProjectName, RepositoryRelativePath, RepositoryRoot},
     viewer::{DiffDensity, DiffLayout, RenderOptions},
 };
+
+fn repository_root(path: &std::path::Path) -> RepositoryRoot {
+    RepositoryRoot::try_new(path.to_path_buf()).expect("fixture repository root is absolute")
+}
 
 fn pinned_range() -> PinnedRange {
     PinnedRange {
@@ -24,17 +29,19 @@ fn pinned_range() -> PinnedRange {
     }
 }
 
-fn view(repo_root: &Path) -> View {
+fn view(repo_root: &RepositoryRoot) -> View {
     View {
-        repo_name: "git-tools".into(),
-        repo_root: repo_root.to_string_lossy().into_owned(),
-        branch: "feature".into(),
-        upstream: "origin/main".into(),
+        repo_name: ProjectName::try_from("git-tools").unwrap(),
+        repo_root: repo_root.clone(),
+        branch: GitHead::Branch(
+            BranchName::try_new("feature").expect("fixture branch name is non-empty"),
+        ),
+        upstream: GitRevision::try_new("origin/main").expect("fixture Git revision is non-empty"),
         commits: Vec::new(),
         files: vec![FileDiff {
-            path: "src/lib.rs".into(),
-            added: 1,
-            removed: 1,
+            path: RepositoryRelativePath::try_new("src/lib.rs".into()).unwrap(),
+            added: DiffLineCount::new(1),
+            removed: DiffLineCount::new(1),
             lines: vec!["@@ -1 +1 @@".into(), "-old".into(), "+new".into()],
             full_lines: Some(vec![
                 "@@ -1,2 +1,2 @@".into(),
@@ -57,37 +64,44 @@ fn view(repo_root: &Path) -> View {
     }
 }
 
-fn artifact_meta(repo_root: &Path, render_options: RenderOptions) -> ArtifactMeta {
+fn artifact_meta(repo_root: &RepositoryRoot, render_options: RenderOptions) -> ArtifactMeta {
     ArtifactMeta {
-        repo_root: repo_root.to_path_buf(),
-        repo_name: "git-tools".into(),
-        kind: DiffKind::TwoDot,
-        commit_range: Some(pinned_range()),
+        repo_root: repo_root.clone(),
+        repo_name: ProjectName::try_from("git-tools").unwrap(),
+        identity: ArtifactDiffIdentity::from_parts(DiffKind::TwoDot, Some(pinned_range()))
+            .expect("range artifact identity"),
         range_label: "aaaa..bbbb".into(),
-        head_committed_at: "2026-07-21T00:00:00Z".into(),
-        generated_at: "2026-07-21T00:01:00Z".into(),
+        head_committed_at: Some(
+            gtl_models::timestamps::MachineTimestamp::try_from("2026-07-21T00:00:00Z")
+                .expect("fixture commit timestamp is valid"),
+        ),
+        generated_at: gtl_models::timestamps::MachineTimestamp::try_from("2026-07-21T00:01:00Z")
+            .expect("fixture generation timestamp is valid"),
         title: "diff".into(),
         render_options,
         theme: None,
-        excluded_extensions: Vec::new(),
+        excluded_extensions: ExcludedExtensions::default(),
     }
 }
 
 fn artifact_range_key(render_options: RenderOptions) -> ArtifactRangeKey {
     ArtifactRangeKey {
-        kind: DiffKind::TwoDot,
-        commit_range: pinned_range(),
+        range: ArtifactCommitRange {
+            kind: ArtifactRangeKind::TwoDot,
+            commits: pinned_range(),
+        },
         render_options,
         theme: None,
-        excluded_extensions: Vec::new(),
+        excluded_extensions: ExcludedExtensions::default(),
     }
 }
 
 #[test]
 fn presentation_options_have_distinct_artifact_identities() {
     let repo = tempfile::tempdir().unwrap();
+    let repo_root = repository_root(repo.path());
     let store_root = tempfile::tempdir().unwrap();
-    let view = view(repo.path());
+    let view = view(&repo_root);
     let options_default = RenderOptions::DEFAULT;
     let options_split_full = RenderOptions::new(DiffLayout::Split, DiffDensity::Full);
     let html_default = ArtifactRenderer
@@ -102,37 +116,37 @@ fn presentation_options_have_distinct_artifact_identities() {
     let artifact_default = StoreArtifacts
         .place(
             store_root.path(),
-            &artifact_meta(repo.path(), options_default),
+            &artifact_meta(&repo_root, options_default),
             &html_default,
         )
         .unwrap();
     let artifact_split_full = StoreArtifacts
         .place(
             store_root.path(),
-            &artifact_meta(repo.path(), options_split_full),
+            &artifact_meta(&repo_root, options_split_full),
             &html_split_full,
         )
         .unwrap();
 
-    assert_ne!(artifact_default.path, artifact_split_full.path);
+    assert_ne!(artifact_default.path(), artifact_split_full.path());
     assert_eq!(
         StoreArtifacts
             .lookup_by_range(
                 store_root.path(),
-                repo.path(),
+                &repo_root,
                 &artifact_range_key(options_default),
             )
             .unwrap(),
-        Some(artifact_default.path),
+        Some(artifact_default.path().clone()),
     );
     assert_eq!(
         StoreArtifacts
             .lookup_by_range(
                 store_root.path(),
-                repo.path(),
+                &repo_root,
                 &artifact_range_key(options_split_full),
             )
             .unwrap(),
-        Some(artifact_split_full.path),
+        Some(artifact_split_full.path().clone()),
     );
 }

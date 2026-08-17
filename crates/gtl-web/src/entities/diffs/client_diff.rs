@@ -1,9 +1,12 @@
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use dioxus::prelude::*;
 #[cfg(feature = "desktop")]
 use gtl_parser::bundled_syntax_catalog;
-use gtl_parser::{DiffParser, DiffRow, SplitDiffRow, SplitDiffStream, SyntaxCatalog};
+use gtl_parser::{
+    DiffParser, DiffRow, LineNumberDigitWidth, SourceLineNumber, SplitDiffRow, SplitDiffStream,
+    SyntaxCatalog,
+};
 use gtl_wire::viewer::{
     LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffCursor, ViewerDiffLayout,
     ViewerDiffLines, ViewerFileSummary, ViewerViewIdentity,
@@ -16,6 +19,17 @@ mod source;
 pub(crate) use source::ClientDiffSource;
 
 const CLIENT_LINE_BATCH_SIZE: usize = 64;
+
+/// Orders asynchronous page-loading requests independently from viewer identity generations.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct ClientDiffRequestTicket(u64);
+
+impl ClientDiffRequestTicket {
+    #[must_use]
+    const fn next(self) -> Self {
+        Self(self.0.wrapping_add(1))
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClientDiffRows {
@@ -79,7 +93,7 @@ pub(crate) enum ClientDiffFileState {
 pub(crate) struct ClientDiffFile {
     pub(crate) summary: ViewerFileSummary,
     pub(crate) rows: ClientDiffRows,
-    pub(crate) line_number_digits: u32,
+    pub(crate) line_number_digits: LineNumberDigitWidth,
     pub(crate) state: ClientDiffFileState,
 }
 
@@ -88,7 +102,7 @@ impl ClientDiffFile {
         Self {
             summary,
             rows: ClientDiffRows::new(layout),
-            line_number_digits: 1,
+            line_number_digits: LineNumberDigitWidth::default(),
             state: ClientDiffFileState::Loading,
         }
     }
@@ -111,7 +125,7 @@ impl ClientDiffFile {
         format!(
             "{} * {}{}\n{code}",
             comment_leader(&self.summary.path),
-            self.summary.path,
+            self.summary.path.display(),
             line_range
                 .map(|range| format!(", lines: {range}"))
                 .unwrap_or_default(),
@@ -122,12 +136,12 @@ impl ClientDiffFile {
 #[derive(Debug, Default, PartialEq, Eq)]
 struct CopiedRows {
     lines: Vec<String>,
-    first_line: Option<u32>,
-    last_line: Option<u32>,
+    first_line: Option<SourceLineNumber>,
+    last_line: Option<SourceLineNumber>,
 }
 
 impl CopiedRows {
-    fn push(&mut self, line: String, line_number: Option<u32>) {
+    fn push(&mut self, line: String, line_number: Option<SourceLineNumber>) {
         self.lines.push(line);
         if let Some(line_number) = line_number {
             self.first_line.get_or_insert(line_number);
@@ -183,8 +197,9 @@ fn copied_split_rows<'rows>(rows: impl Iterator<Item = &'rows SplitDiffRow>) -> 
     copied
 }
 
-fn comment_leader(path: &str) -> &'static str {
-    let extension = Path::new(path)
+fn comment_leader(path: &gtl_models::paths::RepositoryRelativePath) -> &'static str {
+    let extension = path
+        .as_path()
         .extension()
         .and_then(|extension| extension.to_str());
     match extension {
@@ -226,15 +241,16 @@ pub(crate) fn use_client_diff_workspace(
     let files = files.to_owned();
     let initial_files = files.clone();
     let mut workspace = use_signal(move || ClientDiffWorkspace::loading(identity, initial_files));
-    let mut generation = use_signal(|| 0_u64);
+    let mut generation = use_signal(ClientDiffRequestTicket::default);
 
     use_effect(use_reactive(
         (&source, &identity, &files, &reload),
         move |(source, identity, files, _reload)| {
             let request_generation = {
                 let mut current = generation.write();
-                *current += 1;
-                *current
+                let next = current.next();
+                *current = next;
+                next
             };
             workspace.set(ClientDiffWorkspace::loading(identity, files.clone()));
 
@@ -258,8 +274,8 @@ pub(crate) fn use_client_diff_workspace(
 #[derive(Clone, Copy)]
 struct ClientDiffLoad {
     workspace: Signal<ClientDiffWorkspace>,
-    generation: Signal<u64>,
-    request_generation: u64,
+    generation: Signal<ClientDiffRequestTicket>,
+    request_generation: ClientDiffRequestTicket,
     source: ClientDiffSource,
     identity: ViewerViewIdentity,
 }
@@ -289,11 +305,14 @@ impl ClientDiffLoad {
         file: &ViewerFileSummary,
         syntax_catalog: Option<&SyntaxCatalog>,
     ) {
-        let syntax = syntax_catalog.and_then(|catalog| catalog.syntax_for_path(&file.path));
+        let syntax = syntax_catalog.and_then(|catalog| {
+            let path = file.path.to_string_lossy();
+            catalog.syntax_for_path(path.as_ref())
+        });
         let mut parser = DiffParser::new().with_syntax(syntax).stream();
         let mut split = (self.identity.render_options.layout == ViewerDiffLayout::Split)
             .then(SplitDiffStream::new);
-        let mut cursor = ViewerDiffCursor::START;
+        let mut cursor = ViewerDiffCursor::default();
 
         loop {
             if !self.is_current() {
@@ -354,8 +373,8 @@ impl ClientDiffLoad {
 
 async fn load_workspace(
     workspace: Signal<ClientDiffWorkspace>,
-    generation: Signal<u64>,
-    request_generation: u64,
+    generation: Signal<ClientDiffRequestTicket>,
+    request_generation: ClientDiffRequestTicket,
     source: ClientDiffSource,
     identity: ViewerViewIdentity,
     files: Vec<ViewerFileSummary>,
@@ -406,11 +425,11 @@ fn validate_page(
     let line_count = u32::try_from(page.lines.len()).map_err(|_| ())?;
     let expected_next = request
         .cursor
-        .position()
+        .into_inner()
         .checked_add(line_count)
         .ok_or(())?;
     if let Some(next) = page.next
-        && (page.lines.is_empty() || next.position() != expected_next)
+        && (page.lines.is_empty() || next.into_inner() != expected_next)
     {
         return Err(());
     }
@@ -423,30 +442,34 @@ async fn yield_to_browser() {
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::viewer::{ViewerRangeGeneration, ViewerSelectionGeneration};
     use gtl_wire::viewer::{
         VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffDensity, ViewerDiffFileId, ViewerRenderOptions,
     };
 
     use super::*;
+    use crate::test_support::{
+        TestResult, absolute_file_path, repository_relative_path, viewer_tab_id,
+    };
 
-    fn identity() -> ViewerViewIdentity {
-        ViewerViewIdentity {
-            tab_id: 7,
-            range_generation: 11,
-            selection_generation: 13,
+    fn identity() -> TestResult<ViewerViewIdentity> {
+        Ok(ViewerViewIdentity {
+            tab_id: viewer_tab_id(7)?,
+            range_generation: ViewerRangeGeneration::new(11),
+            selection_generation: ViewerSelectionGeneration::new(13),
             render_options: ViewerRenderOptions {
                 layout: ViewerDiffLayout::Unified,
                 density: ViewerDiffDensity::Compact,
             },
-        }
+        })
     }
 
-    fn request(cursor: u32) -> LoadViewerDiffLines {
-        LoadViewerDiffLines {
-            identity: identity(),
+    fn request(cursor: u32) -> TestResult<LoadViewerDiffLines> {
+        Ok(LoadViewerDiffLines {
+            identity: identity()?,
             file: ViewerDiffFileId::for_index(2),
             cursor: ViewerDiffCursor::new(cursor),
-        }
+        })
     }
 
     fn page(
@@ -464,19 +487,20 @@ mod tests {
     }
 
     #[test]
-    fn accepts_a_bounded_progressing_page() {
-        let request = request(4);
+    fn accepts_a_bounded_progressing_page() -> TestResult {
+        let request = request(4)?;
         let page = page(&request, vec!["a".into(), "b".into()], Some(6));
 
         assert_eq!(
             validate_page(&request, &page),
             Ok(Some(ViewerDiffCursor::new(6)))
         );
+        Ok(())
     }
 
     #[test]
-    fn accepts_one_oversized_line_so_the_stream_can_progress() {
-        let request = request(0);
+    fn accepts_one_oversized_line_so_the_stream_can_progress() -> TestResult {
+        let request = request(0)?;
         let page = page(
             &request,
             vec!["x".repeat(VIEWER_DIFF_LINES_PAGE_MAX_BYTES + 1)],
@@ -484,13 +508,14 @@ mod tests {
         );
 
         assert_eq!(validate_page(&request, &page), Ok(None));
+        Ok(())
     }
 
     #[test]
-    fn rejects_identity_file_cursor_and_progress_mismatches() {
-        let request = request(4);
+    fn rejects_identity_file_cursor_and_progress_mismatches() -> TestResult {
+        let request = request(4)?;
         let mut wrong_identity = page(&request, vec!["a".into()], Some(5));
-        wrong_identity.identity.tab_id += 1;
+        wrong_identity.identity.tab_id = viewer_tab_id(8)?;
         let mut wrong_file = page(&request, vec!["a".into()], Some(5));
         wrong_file.file = ViewerDiffFileId::for_index(9);
         let mut wrong_cursor = page(&request, vec!["a".into()], Some(5));
@@ -507,11 +532,12 @@ mod tests {
         ] {
             assert_eq!(validate_page(&request, &invalid), Err(()));
         }
+        Ok(())
     }
 
     #[test]
-    fn rejects_multi_line_pages_over_the_transport_cap() {
-        let request = request(0);
+    fn rejects_multi_line_pages_over_the_transport_cap() -> TestResult {
+        let request = request(0)?;
         let page = page(
             &request,
             vec!["x".repeat(VIEWER_DIFF_LINES_PAGE_MAX_BYTES), "y".to_owned()],
@@ -519,17 +545,18 @@ mod tests {
         );
 
         assert_eq!(validate_page(&request, &page), Err(()));
+        Ok(())
     }
 
     #[test]
-    fn copied_rows_keep_new_side_source_and_context() {
+    fn copied_rows_keep_new_side_source_and_context() -> TestResult {
         let summary = ViewerFileSummary {
             id: ViewerDiffFileId::for_index(0),
-            path: "src/example.rs".into(),
-            absolute_path: "/repo/src/example.rs".into(),
+            path: repository_relative_path("src/example.rs")?,
+            absolute_path: absolute_file_path("/repo/src/example.rs")?,
             anchor_id: "file-src-example-rs".into(),
-            added: 1,
-            removed: 1,
+            added: gtl_models::diffs::DiffLineCount::new(1),
+            removed: gtl_models::diffs::DiffLineCount::new(1),
             status: gtl_wire::viewer::ViewerFileStatus::Modified,
             can_open_in_editor: true,
             initially_expanded: true,
@@ -543,7 +570,7 @@ mod tests {
         let file = ClientDiffFile {
             summary,
             rows: ClientDiffRows::Unified(vec![Arc::new(parsed.into_rows())]),
-            line_number_digits: 1,
+            line_number_digits: LineNumberDigitWidth::default(),
             state: ClientDiffFileState::Complete,
         };
 
@@ -552,11 +579,16 @@ mod tests {
             file.copy_code(true),
             "// * src/example.rs, lines: 7..8\nkeep\nnew"
         );
+        Ok(())
     }
 
     #[test]
-    fn shell_copy_context_uses_hash_comment_syntax() {
-        assert_eq!(comment_leader("script.SH"), "#");
-        assert_eq!(comment_leader("src/lib.rs"), "//");
+    fn shell_copy_context_uses_hash_comment_syntax() -> TestResult {
+        assert_eq!(comment_leader(&repository_relative_path("script.SH")?), "#");
+        assert_eq!(
+            comment_leader(&repository_relative_path("src/lib.rs")?),
+            "//"
+        );
+        Ok(())
     }
 }

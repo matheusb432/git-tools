@@ -1,6 +1,8 @@
-use std::path::Path;
-
-use gtl_models::diffs::{Commit, ExcludedExtensions};
+use gtl_models::{
+    diffs::{Commit, DiffLineCount, ExcludedExtensions},
+    git::{GitDiffSpec, GitRange},
+    paths::{RepositoryRelativePath, RepositoryRoot},
+};
 use gtl_parser::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 
 use crate::{
@@ -8,9 +10,9 @@ use crate::{
     ports::{GitClient, GitDiffFormat, GitDiffRequest},
 };
 
-fn parse_diff(raw: &str) -> Vec<FileDiff> {
+fn parse_diff(raw: &str) -> anyhow::Result<Vec<FileDiff>> {
     if raw.trim().is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
     let mut files = Vec::new();
@@ -26,9 +28,9 @@ fn parse_diff(raw: &str) -> Vec<FileDiff> {
             }
             line_classifier = UnifiedDiffLineClassifier::default();
             cur = Some(FileDiff {
-                path: path.to_string(),
-                added: 0,
-                removed: 0,
+                path: RepositoryRelativePath::try_new(path.into())?,
+                added: DiffLineCount::default(),
+                removed: DiffLineCount::default(),
                 lines: Vec::new(),
                 full_lines: None,
             });
@@ -41,8 +43,8 @@ fn parse_diff(raw: &str) -> Vec<FileDiff> {
 
         file.lines.push(line.to_string());
         match line_classifier.classify(line) {
-            UnifiedDiffLineKind::Added => file.added += 1,
-            UnifiedDiffLineKind::Removed => file.removed += 1,
+            UnifiedDiffLineKind::Added => file.added.increment(),
+            UnifiedDiffLineKind::Removed => file.removed.increment(),
             UnifiedDiffLineKind::Meta
             | UnifiedDiffLineKind::Hunk { .. }
             | UnifiedDiffLineKind::Context => {}
@@ -53,14 +55,15 @@ fn parse_diff(raw: &str) -> Vec<FileDiff> {
         files.push(file);
     }
 
-    files
+    Ok(files)
 }
 
 fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
-    let mut full_by_path: std::collections::HashMap<String, Vec<String>> = full_files
-        .into_iter()
-        .map(|file| (file.path, file.lines))
-        .collect();
+    let mut full_by_path: std::collections::HashMap<RepositoryRelativePath, Vec<String>> =
+        full_files
+            .into_iter()
+            .map(|file| (file.path, file.lines))
+            .collect();
 
     for file in files {
         if file.status() != FileStatus::Modified {
@@ -81,7 +84,7 @@ fn attach_full_context(files: &mut [FileDiff], full_files: Vec<FileDiff>) {
 pub(super) struct DiffData {
     pub commits: Vec<Commit>,
     pub files: Vec<FileDiff>,
-    pub hidden_paths: Vec<String>,
+    pub hidden_paths: Vec<RepositoryRelativePath>,
 }
 
 /// The shared diff generator: log + diff + exclusion filtering + full context.
@@ -93,23 +96,23 @@ pub(super) struct DiffData {
 /// never parses or counts — an excluded file's line diffs.
 pub(super) fn assemble(
     source: &impl GitClient,
-    repo_path: &Path,
-    diff_range: &str,
-    log_range: &str,
+    repo_path: &RepositoryRoot,
+    diff_spec: &GitDiffSpec,
+    log_range: &GitRange,
     excluded: &ExcludedExtensions,
 ) -> anyhow::Result<DiffData> {
     let commits = source.log_commits(repo_path, log_range)?;
 
-    let hidden_paths = hidden_paths(source, repo_path, diff_range, excluded)?;
+    let hidden_paths = hidden_paths(source, repo_path, diff_spec, excluded)?;
     let content_request = GitDiffRequest {
-        range: diff_range.to_string(),
+        spec: diff_spec.clone(),
         format: GitDiffFormat::Unified,
         excluded_paths: hidden_paths.clone(),
     };
     // ? partition again after parsing: a source that ignores the exclude
     // ? pathspecs (the scripted test fake) must still never leak hidden files.
     let (mut files, _) = filter_excluded_files(
-        parse_diff(&source.diff(repo_path, &content_request)?),
+        parse_diff(&source.diff(repo_path, &content_request)?)?,
         excluded,
     );
     let full_context_request = GitDiffRequest {
@@ -118,7 +121,7 @@ pub(super) fn assemble(
     };
     attach_full_context(
         &mut files,
-        parse_diff(&source.diff(repo_path, &full_context_request)?),
+        parse_diff(&source.diff(repo_path, &full_context_request)?)?,
     );
     Ok(DiffData {
         commits,
@@ -130,7 +133,7 @@ pub(super) fn assemble(
 fn filter_excluded_files(
     files: Vec<FileDiff>,
     excluded: &ExcludedExtensions,
-) -> (Vec<FileDiff>, Vec<String>) {
+) -> (Vec<FileDiff>, Vec<RepositoryRelativePath>) {
     if excluded.is_empty() {
         return (files, Vec::new());
     }
@@ -145,10 +148,10 @@ fn filter_excluded_files(
 /// nothing is excluded.
 fn hidden_paths(
     source: &impl GitClient,
-    repo_path: &Path,
-    range: &str,
+    repo_path: &RepositoryRoot,
+    spec: &GitDiffSpec,
     excluded: &ExcludedExtensions,
-) -> anyhow::Result<Vec<String>> {
+) -> anyhow::Result<Vec<RepositoryRelativePath>> {
     if excluded.is_empty() {
         return Ok(Vec::new());
     }
@@ -156,15 +159,18 @@ fn hidden_paths(
         .diff(
             repo_path,
             &GitDiffRequest {
-                range: range.to_string(),
+                spec: spec.clone(),
                 format: GitDiffFormat::NamesOnly,
                 excluded_paths: Vec::new(),
             },
         )?
         .lines()
         .map(str::trim)
-        .filter(|path| !path.is_empty() && excluded.matches(path))
-        .map(String::from)
+        .filter(|path| !path.is_empty())
+        .map(|path| RepositoryRelativePath::try_new(path.into()).map_err(anyhow::Error::from))
+        .collect::<anyhow::Result<Vec<_>>>()?
+        .into_iter()
+        .filter(|path| excluded.matches(path))
         .collect())
 }
 
@@ -191,24 +197,24 @@ index 000..333\n\
 
     #[test]
     fn parse_diff_splits_two_file_diff_and_counts_body_changes() {
-        let files = parse_diff(SAMPLE);
+        let files = parse_diff(SAMPLE).expect("valid diff paths");
 
         assert_eq!(files.len(), 2);
-        assert_eq!(files[0].path, "f.txt");
-        assert_eq!(files[0].added, 2);
-        assert_eq!(files[0].removed, 1);
-        assert_eq!(files[1].path, "g.txt");
-        assert_eq!(files[1].added, 1);
-        assert_eq!(files[1].removed, 0);
+        assert_eq!(files[0].path.to_string_lossy(), "f.txt");
+        assert_eq!(files[0].added, DiffLineCount::new(2));
+        assert_eq!(files[0].removed, DiffLineCount::new(1));
+        assert_eq!(files[1].path.to_string_lossy(), "g.txt");
+        assert_eq!(files[1].added, DiffLineCount::new(1));
+        assert_eq!(files[1].removed, DiffLineCount::default());
     }
 
     #[test]
     fn parse_diff_does_not_count_file_headers_as_changes() {
-        let files = parse_diff("diff --git a/a b/a\n--- a/a\n+++ b/a\n");
+        let files = parse_diff("diff --git a/a b/a\n--- a/a\n+++ b/a\n").expect("valid diff path");
 
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].added, 0);
-        assert_eq!(files[0].removed, 0);
+        assert_eq!(files[0].added, DiffLineCount::default());
+        assert_eq!(files[0].removed, DiffLineCount::default());
     }
 
     #[test]
@@ -223,22 +229,23 @@ index 111..222 100644\n\
 +-- new heading\n\
 +++ literal\n\
  keep\n",
-        );
+        )
+        .expect("valid diff path");
 
         assert_eq!(files.len(), 1);
-        assert_eq!(files[0].removed, 1);
-        assert_eq!(files[0].added, 2);
+        assert_eq!(files[0].removed, DiffLineCount::new(1));
+        assert_eq!(files[0].added, DiffLineCount::new(2));
     }
 
     #[test]
     fn parse_diff_returns_empty_for_blank_input() {
-        assert!(parse_diff("").is_empty());
-        assert!(parse_diff("   \n\t").is_empty());
+        assert!(parse_diff("").unwrap().is_empty());
+        assert!(parse_diff("   \n\t").unwrap().is_empty());
     }
 
     #[test]
     fn attach_full_context_only_sets_modified_files_with_extra_context() {
-        let mut files = parse_diff(SAMPLE);
+        let mut files = parse_diff(SAMPLE).expect("valid diff paths");
         let full = parse_diff(
             "diff --git a/f.txt b/f.txt\n\
 index 111..222 100644\n\
@@ -258,7 +265,8 @@ index 000..333\n\
 +++ b/g.txt\n\
 @@ -0,0 +1 @@\n\
 +brand new\n",
-        );
+        )
+        .expect("valid diff paths");
 
         attach_full_context(&mut files, full);
 
@@ -269,5 +277,10 @@ index 000..333\n\
                 .is_some_and(|lines| { lines.iter().any(|line| line == "middle") })
         );
         assert!(files[1].full_lines.is_none());
+    }
+
+    #[test]
+    fn parse_diff_rejects_parent_traversing_file_headers() {
+        assert!(parse_diff("diff --git a/../secret b/../secret\n").is_err());
     }
 }

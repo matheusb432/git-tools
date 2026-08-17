@@ -41,7 +41,7 @@ pub fn execute(
         RecipeOp::Diff { target } => {
             compute_diff::execute(
                 ComputeDiff {
-                    cwd,
+                    repo_root: cwd,
                     target: diff_target(target),
                 },
                 user_settings,
@@ -51,7 +51,11 @@ pub fn execute(
         }
         RecipeOp::MergeDiff { base, pinned } => {
             compute_merge_diff::execute(
-                ComputeMergeDiff { cwd, base, pinned },
+                ComputeMergeDiff {
+                    repo_root: cwd,
+                    base,
+                    pinned,
+                },
                 user_settings,
                 source,
             )?
@@ -77,7 +81,10 @@ mod tests {
     use std::num::NonZeroU32;
 
     use super::*;
-    use crate::testing::{FakeGitClient, FixedUserSettingsStore, viewer::recipe};
+    use crate::{
+        utils::{FakeGitClient, FixedUserSettingsStore, viewer::recipe},
+        viewer::compute_recipe,
+    };
 
     fn source() -> FakeGitClient {
         FakeGitClient {
@@ -96,7 +103,7 @@ mod tests {
     }
 
     fn pin() -> recipes::PinnedRange {
-        crate::testing::pinned_range(
+        crate::utils::pinned_range(
             "aaaaaaaaaabbbbbbbbbbccccccccccdddddddddd",
             "1111111111222222222233333333334444444444",
         )
@@ -106,7 +113,7 @@ mod tests {
     fn unpushed_diff_recipe_computes_a_view() {
         let source = source();
 
-        let response = execute(
+        let response = compute_recipe::execute(
             ComputeRecipe {
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Unpushed { pinned: None },
@@ -117,23 +124,25 @@ mod tests {
         )
         .expect("recipe computes");
 
-        assert_eq!(response.view.repo_name, "project");
-        assert_eq!(response.view.branch, "feature");
-        assert_eq!(response.view.upstream, "main");
+        assert_eq!(response.view.repo_name.as_str(), "project");
+        assert_eq!(response.view.branch.to_string(), "feature");
+        assert_eq!(response.view.upstream.as_ref(), "main");
     }
 
     #[test]
     fn diff_recipe_targets_preserve_their_ranges() {
         let cases = [
             (
-                RecipeTarget::Base { rev: "v1".into() },
+                RecipeTarget::Base {
+                    rev: crate::utils::git_revision("v1"),
+                },
                 "diff",
                 "7631763176",
                 "7631763176",
             ),
             (
                 RecipeTarget::Range {
-                    range: "v1..v2".into(),
+                    range: crate::utils::git_range("v1..v2"),
                     pinned: None,
                 },
                 "diff",
@@ -142,7 +151,7 @@ mod tests {
             ),
             (
                 RecipeTarget::Merge {
-                    base: "release".into(),
+                    base: crate::utils::git_revision("release"),
                     pinned: None,
                 },
                 "merge-diff",
@@ -162,7 +171,7 @@ mod tests {
         let source = source();
 
         for (target, title, range, upstream) in cases {
-            let response = execute(
+            let response = compute_recipe::execute(
                 ComputeRecipe {
                     recipe: recipe(RecipeOp::Diff { target }),
                 },
@@ -173,7 +182,7 @@ mod tests {
 
             assert_eq!(response.view.title, title);
             assert_eq!(response.view.cmd.range, range);
-            assert_eq!(response.view.upstream, upstream);
+            assert_eq!(response.view.upstream.as_ref(), upstream);
         }
     }
 
@@ -185,11 +194,11 @@ mod tests {
             ..Default::default()
         };
 
-        let response = execute(
+        let response = compute_recipe::execute(
             ComputeRecipe {
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Range {
-                        range: "symbolic..range".into(),
+                        range: crate::utils::git_range("symbolic..range"),
                         pinned: Some(pin()),
                     },
                 }),
@@ -209,10 +218,10 @@ mod tests {
             branch: "feature".into(),
             ..Default::default()
         };
-        let response = execute(
+        let response = compute_recipe::execute(
             ComputeRecipe {
                 recipe: recipe(RecipeOp::MergeDiff {
-                    base: Some("release".into()),
+                    base: Some(crate::utils::git_revision("release")),
                     pinned: Some(pin()),
                 }),
             },
@@ -232,11 +241,11 @@ mod tests {
             ..Default::default()
         };
 
-        let diff = execute(
+        let diff = compute_recipe::execute(
             ComputeRecipe {
                 recipe: recipe(RecipeOp::Diff {
                     target: RecipeTarget::Base {
-                        rev: "unknown".into(),
+                        rev: crate::utils::git_revision("unknown"),
                     },
                 }),
             },
@@ -244,10 +253,10 @@ mod tests {
             &source,
         )
         .expect_err("unknown diff base fails");
-        let merge = execute(
+        let merge = compute_recipe::execute(
             ComputeRecipe {
                 recipe: recipe(RecipeOp::MergeDiff {
-                    base: Some("unknown".into()),
+                    base: Some(crate::utils::git_revision("unknown")),
                     pinned: None,
                 }),
             },

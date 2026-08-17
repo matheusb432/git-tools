@@ -8,74 +8,63 @@ use std::{
 };
 
 use anyhow::Context;
-use gtl_application::ports::ArtifactRangeKey;
+use gtl_application::ports::{ArtifactRangeKey, PlacedArtifact};
+use gtl_models::{
+    artifacts::{ArtifactContentHash, RepositoryStoreId},
+    paths::AbsoluteFilePath,
+};
 
 use crate::store::{
     id::content_hash,
-    meta::{DiffKind, RENDERER_VERSION, Sidecar},
+    meta::{ArtifactMetadata, ArtifactThemeMetadata, RENDERER_VERSION, Sidecar},
 };
 
-/// Result of placing an artifact: where it landed and whether it already existed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Placed {
-    pub path: PathBuf,
-    pub reused: bool,
-}
-
 struct StoredArtifact {
-    content_hash: String,
+    content_hash: ArtifactContentHash,
     html_path: PathBuf,
-    sidecar: Sidecar,
+    metadata: ArtifactMetadata,
 }
 
 /// Write `html` and its sidecar directly under the store root.
 /// Idempotent: if the artifact already exists, nothing is written.
 pub fn place(
     store_root: &Path,
-    repo_id: &str,
+    repo_id: &RepositoryStoreId,
     html: &str,
-    sidecar: &Sidecar,
-) -> anyhow::Result<Placed> {
+    metadata: &ArtifactMetadata,
+) -> anyhow::Result<PlacedArtifact> {
     ensure_gitignore(store_root)?;
     let hash = content_hash(html);
-    if let Some((html_path, json_path)) = existing_pair(store_root, repo_id, &hash) {
-        let stored = fs::read_to_string(&json_path)
-            .ok()
-            .and_then(|json| serde_json::from_str::<Sidecar>(&json).ok());
-        let needs_upgrade = stored.is_none_or(|stored| {
-            !stored.theme_recorded || stored.renderer_version != RENDERER_VERSION
-        });
+    if let Some((html_path, json_path, stored)) = existing_pair(store_root, repo_id, &hash) {
+        let needs_upgrade = matches!(stored.theme, ArtifactThemeMetadata::Unrecorded)
+            || stored.renderer_version != RENDERER_VERSION;
         if needs_upgrade {
             atomic_write(
                 &json_path,
-                serde_json::to_string_pretty(sidecar)?.as_bytes(),
+                serde_json::to_string_pretty(&Sidecar::from_metadata(metadata))?.as_bytes(),
             )?;
         }
-        return Ok(Placed {
-            path: html_path,
-            reused: true,
+        return Ok(PlacedArtifact::Reused {
+            path: AbsoluteFilePath::try_new(html_path)
+                .context("stored artifact path is not absolute")?,
         });
     }
-    let stem = format!(
-        "{}-{hash}",
-        filename_datetime(sidecar.generated_at.as_str())
-    );
+    let stem = format!("{}-{hash}", filename_datetime(&metadata.generated_at));
     let html_path = store_root.join(format!("{stem}.html"));
     let json_path = store_root.join(format!("{stem}.json"));
     atomic_write(&html_path, html.as_bytes())?;
     atomic_write(
         &json_path,
-        serde_json::to_string_pretty(sidecar)?.as_bytes(),
+        serde_json::to_string_pretty(&Sidecar::from_metadata(metadata))?.as_bytes(),
     )?;
-    Ok(Placed {
-        path: html_path,
-        reused: false,
+    Ok(PlacedArtifact::Created {
+        path: AbsoluteFilePath::try_new(html_path).context("artifact path is not absolute")?,
     })
 }
 
-fn filename_datetime(generated_at: &str) -> String {
+fn filename_datetime(generated_at: &gtl_models::timestamps::MachineTimestamp) -> String {
     let datetime: String = generated_at
-        .trim()
+        .as_ref()
         .chars()
         .map(|character| match character {
             '0'..='9' | 'A'..='Z' | 'a'..='z' | '-' => character,
@@ -91,10 +80,10 @@ fn filename_datetime(generated_at: &str) -> String {
 
 fn existing_pair(
     store_root: &Path,
-    repo_id: &str,
-    content_hash: &str,
-) -> Option<(PathBuf, PathBuf)> {
-    let mut candidates: Vec<(PathBuf, PathBuf)> = fs::read_dir(store_root)
+    repo_id: &RepositoryStoreId,
+    content_hash: &ArtifactContentHash,
+) -> Option<(PathBuf, PathBuf, ArtifactMetadata)> {
+    let mut candidates: Vec<(PathBuf, PathBuf, ArtifactMetadata)> = fs::read_dir(store_root)
         .ok()?
         .flatten()
         .map(|entry| entry.path())
@@ -102,22 +91,23 @@ fn existing_pair(
             path.extension()
                 .is_some_and(|extension| extension == "html")
         })
-        .filter(|path| {
-            path.file_stem()
-                .and_then(|stem| stem.to_str())
-                .and_then(content_hash_from_stem)
-                .is_some_and(|candidate| candidate == content_hash)
-        })
         .filter_map(|html_path| {
+            let candidate = html_path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .and_then(content_hash_from_stem)?;
+            if &candidate != content_hash {
+                return None;
+            }
             let json_path = html_path.with_extension("json");
             if !json_path.exists() {
                 return None;
             }
-            let matches_repo = fs::read_to_string(&json_path)
+            let metadata = fs::read_to_string(&json_path)
                 .ok()
                 .and_then(|json| serde_json::from_str::<Sidecar>(&json).ok())
-                .is_none_or(|stored| stored.repo_id == repo_id);
-            matches_repo.then_some((html_path, json_path))
+                .and_then(|sidecar| sidecar.try_into_metadata().ok())?;
+            (metadata.repo_id == *repo_id).then_some((html_path, json_path, metadata))
         })
         .collect();
     candidates.sort_by(|left, right| left.0.cmp(&right.0));
@@ -158,31 +148,22 @@ fn atomic_write(final_path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
 }
 
 /// Find an existing artifact for a pure commit range rendered under the same
-/// layout, density, theme, and exclusion set. Returns `None` for `WorkTree`
-/// (never range-addressable) or on a miss. Scans the flat store's sidecars.
+/// layout, density, theme, and exclusion set. Returns `None` on a miss and
+/// scans the flat store's validated sidecar projections.
 pub fn lookup_by_range(
     store_root: &Path,
-    repo_id: &str,
+    repo_id: &RepositoryStoreId,
     key: &ArtifactRangeKey,
-) -> Option<PathBuf> {
-    if key.kind == DiffKind::WorkTree {
-        return None;
-    }
-    let layout = key.render_options.layout().to_string();
-    let density = key.render_options.density().to_string();
+) -> Option<AbsoluteFilePath> {
     for artifact in read_sidecars_paired(store_root) {
-        if artifact.sidecar.repo_id == repo_id
-            && artifact.sidecar.kind == key.kind
-            && artifact.sidecar.base_sha == key.commit_range.base.as_ref()
-            && artifact.sidecar.head_sha == key.commit_range.head.as_ref()
-            && artifact.sidecar.layout == layout
-            && artifact.sidecar.density == density
-            && artifact.sidecar.theme_recorded
-            && artifact.sidecar.renderer_version == RENDERER_VERSION
-            && artifact.sidecar.theme == key.theme
-            && artifact.sidecar.excluded_extensions == key.excluded_extensions
+        if artifact.metadata.repo_id == *repo_id
+            && artifact.metadata.identity.matches_commit_range(&key.range)
+            && artifact.metadata.render_options == key.render_options
+            && artifact.metadata.theme == ArtifactThemeMetadata::Recorded(key.theme)
+            && artifact.metadata.renderer_version == RENDERER_VERSION
+            && artifact.metadata.excluded_extensions == key.excluded_extensions
         {
-            return Some(artifact.html_path);
+            return AbsoluteFilePath::try_new(artifact.html_path).ok();
         }
     }
     None
@@ -190,10 +171,10 @@ pub fn lookup_by_range(
 
 /// All sidecars across all repos, for the viewer's history.
 /// Each entry pairs the sidecar with its content hash.
-pub fn list_history_with_hash(store_root: &Path) -> Vec<(String, Sidecar)> {
+pub fn list_history_with_hash(store_root: &Path) -> Vec<(ArtifactContentHash, ArtifactMetadata)> {
     read_sidecars_paired(store_root)
         .into_iter()
-        .map(|artifact| (artifact.content_hash, artifact.sidecar))
+        .map(|artifact| (artifact.content_hash, artifact.metadata))
         .collect()
 }
 
@@ -218,45 +199,75 @@ fn read_sidecars_paired(store_root: &Path) -> Vec<StoredArtifact> {
             let Ok(text) = fs::read_to_string(&path) else {
                 continue;
             };
-            if let Ok(sidecar) = serde_json::from_str::<Sidecar>(&text) {
-                out.push(StoredArtifact {
-                    content_hash: content_hash.to_string(),
-                    html_path,
-                    sidecar,
-                });
-            }
+            let Ok(sidecar) = serde_json::from_str::<Sidecar>(&text) else {
+                continue;
+            };
+            let Ok(metadata) = sidecar.try_into_metadata() else {
+                continue;
+            };
+            out.push(StoredArtifact {
+                content_hash,
+                html_path,
+                metadata,
+            });
         }
     }
     out
 }
 
-fn content_hash_from_stem(stem: &str) -> Option<&str> {
+fn content_hash_from_stem(stem: &str) -> Option<ArtifactContentHash> {
     let (_, content_hash) = stem.rsplit_once('-')?;
-    (content_hash.len() == 16
-        && content_hash
-            .chars()
-            .all(|character| character.is_ascii_hexdigit()))
-    .then_some(content_hash)
+    ArtifactContentHash::try_new(content_hash.to_owned()).ok()
 }
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::viewer::{DiffDensity, DiffLayout, RenderOptions};
+    use gtl_models::{
+        artifacts::{ArtifactCommitRange, ArtifactRangeKind},
+        diffs::{DiffKind, ExcludedExtensions},
+        viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
+    };
 
     use super::*;
     use crate::testing::pinned_range;
 
+    fn repository_id(label: &str) -> RepositoryStoreId {
+        crate::store::repo_id(None, Path::new(label))
+    }
+
+    fn place(
+        store_root: &Path,
+        repository_label: &str,
+        html: &str,
+        sidecar: &Sidecar,
+    ) -> anyhow::Result<PlacedArtifact> {
+        super::place(
+            store_root,
+            &repository_id(repository_label),
+            html,
+            &sidecar.clone().try_into_metadata()?,
+        )
+    }
+
+    fn lookup_by_range(
+        store_root: &Path,
+        repository_label: &str,
+        key: &ArtifactRangeKey,
+    ) -> Option<AbsoluteFilePath> {
+        super::lookup_by_range(store_root, &repository_id(repository_label), key)
+    }
+
     fn sidecar(kind: DiffKind, base: &str, head: &str) -> Sidecar {
         Sidecar {
-            repo_id: "repo0000".into(),
+            repo_id: repository_id("repo0000").to_string(),
             repo_name: "r".into(),
             repo_root: "/r".into(),
             kind,
             base_sha: commit_id_text(base),
             head_sha: commit_id_text(head),
             range_label: "x".into(),
-            head_committed_at: "t".into(),
-            generated_at: "t".into(),
+            head_committed_at: "2026-07-03T00:00:00Z".into(),
+            generated_at: "2026-07-03T00:01:00Z".into(),
             title: "diff".into(),
             byte_size: 0,
             layout: RenderOptions::DEFAULT.layout().to_string(),
@@ -270,11 +281,13 @@ mod tests {
 
     fn range_key(kind: DiffKind, base_sha: &str, head_sha: &str) -> ArtifactRangeKey {
         ArtifactRangeKey {
-            kind,
-            commit_range: pinned_range(base_sha, head_sha),
+            range: ArtifactCommitRange {
+                kind: ArtifactRangeKind::try_from(kind).expect("fixture kind is range-addressable"),
+                commits: pinned_range(base_sha, head_sha),
+            },
             render_options: RenderOptions::DEFAULT,
             theme: None,
-            excluded_extensions: Vec::new(),
+            excluded_extensions: ExcludedExtensions::default(),
         }
     }
 
@@ -328,20 +341,20 @@ mod tests {
 
         let first = place(tmp.path(), "repo0000", html, &sc).unwrap();
 
-        assert!(!first.reused);
+        assert!(!first.is_reused());
         assert_eq!(
-            first.path,
+            first.path().as_path(),
             tmp.path()
                 .join(format!("2026-07-28T12-34-56Z-{}.html", content_hash(html)))
         );
-        assert!(first.path.with_extension("json").exists());
+        assert!(first.path().with_extension("json").exists());
         assert!(!tmp.path().join("diffs").exists());
 
         sc.generated_at = "2026-07-28T13:00:00Z".into();
         let second = place(tmp.path(), "repo0000", html, &sc).unwrap();
 
-        assert!(second.reused);
-        assert_eq!(first.path, second.path);
+        assert!(second.is_reused());
+        assert_eq!(first.path(), second.path());
     }
 
     #[test]
@@ -356,10 +369,10 @@ mod tests {
 
         let second = place(tmp.path(), "repo0000", "<html>x</html>", &current).unwrap();
 
-        assert!(second.reused);
-        assert_eq!(second.path, first.path);
+        assert!(second.is_reused());
+        assert_eq!(second.path(), first.path());
         let stored: Sidecar =
-            serde_json::from_str(&fs::read_to_string(first.path.with_extension("json")).unwrap())
+            serde_json::from_str(&fs::read_to_string(first.path().with_extension("json")).unwrap())
                 .unwrap();
         assert_eq!(stored.theme, Some("dark".to_string()));
         assert!(stored.theme_recorded);
@@ -375,10 +388,10 @@ mod tests {
 
         let second = place(tmp.path(), "repo0000", "<html>x</html>", &current).unwrap();
 
-        assert!(second.reused);
-        assert_eq!(second.path, first.path);
+        assert!(second.is_reused());
+        assert_eq!(second.path(), first.path());
         let stored: Sidecar =
-            serde_json::from_str(&fs::read_to_string(first.path.with_extension("json")).unwrap())
+            serde_json::from_str(&fs::read_to_string(first.path().with_extension("json")).unwrap())
                 .unwrap();
         assert_eq!(stored.renderer_version, RENDERER_VERSION);
     }
@@ -388,16 +401,60 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let sc = sidecar(DiffKind::TwoDot, "a", "b");
         let first = place(tmp.path(), "repo0000", "<html>repair</html>", &sc).unwrap();
-        assert!(!first.reused);
+        assert!(!first.is_reused());
         // Delete only the sidecar, leaving the .html behind.
-        let json_path = first.path.with_extension("json");
+        let json_path = first.path().with_extension("json");
         fs::remove_file(&json_path).unwrap();
-        assert!(first.path.exists());
+        assert!(first.path().exists());
         assert!(!json_path.exists());
         // A subsequent place must rewrite both files, not report reused.
         let repaired = place(tmp.path(), "repo0000", "<html>repair</html>", &sc).unwrap();
-        assert!(!repaired.reused, "should rewrite when sidecar is absent");
+        assert!(
+            !repaired.is_reused(),
+            "should rewrite when sidecar is absent"
+        );
         assert!(json_path.exists(), "sidecar must be recreated");
+    }
+
+    #[test]
+    fn malformed_sidecar_is_not_reused_as_if_it_matched_every_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = sidecar(DiffKind::TwoDot, "a", "b");
+        let first = place(tmp.path(), "repo0000", "<html>repair</html>", &sidecar).unwrap();
+        fs::write(first.path().with_extension("json"), "{not valid json").unwrap();
+
+        let repaired = place(tmp.path(), "repo0000", "<html>repair</html>", &sidecar).unwrap();
+
+        assert!(!repaired.is_reused());
+        let stored = fs::read_to_string(repaired.path().with_extension("json")).unwrap();
+        assert!(serde_json::from_str::<Sidecar>(&stored).is_ok());
+    }
+
+    #[test]
+    fn sidecar_with_malformed_timestamp_is_neither_listed_nor_reused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = sidecar(DiffKind::TwoDot, "a", "b");
+        let first = place(tmp.path(), "repo0000", "<html>repair</html>", &sidecar).unwrap();
+        let mut malformed = sidecar.clone();
+        malformed.generated_at = "2026-07-03T00:01:00".into();
+        fs::write(
+            first.path().with_extension("json"),
+            serde_json::to_string(&malformed).unwrap(),
+        )
+        .unwrap();
+
+        assert!(list_history_with_hash(tmp.path()).is_empty());
+        assert!(
+            lookup_by_range(
+                tmp.path(),
+                "repo0000",
+                &range_key(DiffKind::TwoDot, "a", "b"),
+            )
+            .is_none()
+        );
+
+        let repaired = place(tmp.path(), "repo0000", "<html>repair</html>", &sidecar).unwrap();
+        assert!(!repaired.is_reused());
     }
 
     #[test]
@@ -423,7 +480,7 @@ mod tests {
     fn lookup_by_range_uses_sidecar_repo_identity() {
         let tmp = tempfile::tempdir().unwrap();
         let mut sc = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
-        sc.repo_id = "repoBBBB".into();
+        sc.repo_id = repository_id("repoBBBB").to_string();
         place(tmp.path(), "repoBBBB", "<html>x</html>", &sc).unwrap();
 
         assert!(
@@ -451,7 +508,7 @@ mod tests {
         let sc = sidecar(DiffKind::TwoDot, "aaaa", "bbbb");
         place(tmp.path(), "repo0000", "<html>unfiltered</html>", &sc).unwrap();
         let filtered_key = ArtifactRangeKey {
-            excluded_extensions: vec!["md".into()],
+            excluded_extensions: ExcludedExtensions::new(["md"]),
             ..range_key(DiffKind::TwoDot, "aaaa", "bbbb")
         };
         let filtered = lookup_by_range(tmp.path(), "repo0000", &filtered_key);
@@ -468,7 +525,7 @@ mod tests {
         )
         .unwrap();
         let matching_key = ArtifactRangeKey {
-            excluded_extensions: vec!["md".into()],
+            excluded_extensions: ExcludedExtensions::new(["md"]),
             ..range_key(DiffKind::TwoDot, "cccc", "dddd")
         };
         assert!(lookup_by_range(tmp.path(), "repo0000", &matching_key).is_some());
@@ -495,14 +552,14 @@ mod tests {
 
         let dark_key = ArtifactRangeKey {
             render_options: RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
-            theme: Some("dark".into()),
-            excluded_extensions: vec!["md".into()],
+            theme: Some(Theme::Dark),
+            excluded_extensions: ExcludedExtensions::new(["md"]),
             ..range_key(DiffKind::TwoDot, "aaaa", "bbbb")
         };
 
         assert!(lookup_by_range(tmp.path(), "repo0000", &dark_key).is_some());
         let light_key = ArtifactRangeKey {
-            theme: Some("light".into()),
+            theme: Some(Theme::Light),
             ..dark_key
         };
         assert!(lookup_by_range(tmp.path(), "repo0000", &light_key).is_none());
@@ -590,14 +647,6 @@ mod tests {
             &range_key(DiffKind::TwoDot, "aaaa", "bbbb"),
         );
         assert!(hit.is_some(), "current renderer artifact must hit");
-    }
-
-    #[test]
-    fn worktree_is_never_range_addressable() {
-        let tmp = tempfile::tempdir().unwrap();
-        assert!(
-            lookup_by_range(tmp.path(), "r", &range_key(DiffKind::WorkTree, "a", "b"),).is_none()
-        );
     }
 
     #[test]

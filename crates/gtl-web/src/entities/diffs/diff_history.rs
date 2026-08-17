@@ -14,8 +14,9 @@ pub(crate) struct HistoryNavigation {
 pub(crate) fn history_navigation(page: &ViewerHistoryPage) -> HistoryNavigation {
     let first_entry = page.entries.first();
     let last_entry = page.entries.last();
-    let previous_page = page.page_number.checked_sub(1);
-    let next_page = page.page_number.checked_add(1);
+    let history_page = page.position.page();
+    let previous_page = history_page.and_then(gtl_models::viewer::HistoryPage::previous);
+    let next_page = history_page.and_then(gtl_models::viewer::HistoryPage::next);
 
     HistoryNavigation {
         first: page.has_newer.then_some(ViewerHistoryCursor::Newest),
@@ -41,30 +42,34 @@ pub(crate) fn history_navigation(page: &ViewerHistoryPage) -> HistoryNavigation 
 
 #[cfg(test)]
 mod tests {
+    use gtl_models::viewer::{HistoryPagePosition, HistoryRenderCount};
     use gtl_wire::viewer::{
         ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage, ViewerRecipeKind,
     };
 
     use super::history_navigation;
+    use crate::test_support::{
+        TestResult, history_page, history_page_number, machine_timestamp, project_name,
+        render_history_id,
+    };
 
-    fn entry(id: i64) -> ViewerHistoryEntry {
-        ViewerHistoryEntry {
-            id,
+    fn entry(id: i64) -> TestResult<ViewerHistoryEntry> {
+        Ok(ViewerHistoryEntry {
+            id: render_history_id(id)?,
             title: format!("Render {id}"),
-            repository_name: "git-tools".into(),
+            repository_name: project_name("git-tools")?,
             kind: ViewerRecipeKind::Diff,
             range_label: "main..HEAD".into(),
-            rendered_at: "2026-08-09T00:00:00Z".into(),
-        }
+            rendered_at: machine_timestamp("2026-08-09T00:00:00Z")?,
+        })
     }
 
     #[test]
-    fn navigation_uses_page_edge_ids_for_all_four_directions() {
+    fn navigation_uses_page_edge_ids_for_all_four_directions() -> TestResult {
         let page = ViewerHistoryPage {
-            entries: vec![entry(90), entry(81)],
-            total_count: 42,
-            page_number: 3,
-            page_count: 5,
+            entries: vec![entry(90)?, entry(81)?],
+            total_count: HistoryRenderCount::new(42),
+            position: HistoryPagePosition::Page(history_page(3, 5)?),
             has_newer: true,
             has_older: true,
         };
@@ -75,17 +80,18 @@ mod tests {
         assert_eq!(
             navigation.previous,
             Some(ViewerHistoryCursor::NewerThan {
-                render_id: 90,
-                page: 2,
+                render_id: render_history_id(90)?,
+                page: history_page_number(2)?,
             })
         );
         assert_eq!(
             navigation.next,
             Some(ViewerHistoryCursor::OlderThan {
-                render_id: 81,
-                page: 4,
+                render_id: render_history_id(81)?,
+                page: history_page_number(4)?,
             })
         );
         assert_eq!(navigation.last, Some(ViewerHistoryCursor::Oldest));
+        Ok(())
     }
 }

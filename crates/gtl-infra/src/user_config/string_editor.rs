@@ -628,7 +628,9 @@ mod tests {
             attempt_sender_theme
                 .send("theme")
                 .expect("send theme attempt");
-            let result = store_theme.set_string("theme", "light");
+            let result = store_theme.set_value(gtl_models::settings::SettingKeyValue::Theme(
+                gtl_models::viewer::Theme::Light,
+            ));
             result_sender_theme
                 .send(("theme", result))
                 .expect("send theme result");
@@ -641,7 +643,9 @@ mod tests {
             attempt_sender_layout
                 .send("layout")
                 .expect("send layout attempt");
-            let result = store_layout.set_string("layout", "split");
+            let result = store_layout.set_value(gtl_models::settings::SettingKeyValue::Layout(
+                gtl_models::viewer::DiffLayout::Split,
+            ));
             result_sender_layout
                 .send(("layout", result))
                 .expect("send layout result");

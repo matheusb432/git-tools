@@ -5,21 +5,18 @@
 
 mod artifact_store;
 mod clock;
-mod configured_editor_client;
 mod diff_viewer_client;
 mod file_system_client;
 mod git_client;
 mod html_renderer;
 mod project_client;
-mod push_ledger;
-mod repo_discovery;
+mod text_editor_client;
 mod user_settings_store;
 
 pub use artifact_store::{
     ArtifactMeta, ArtifactRangeKey, ArtifactStore, HistoryRecord, PlacedArtifact,
 };
 pub use clock::Clock;
-pub use configured_editor_client::ConfiguredEditorClient;
 pub use diff_viewer_client::{
     DiffRenderOutcome, DiffRenderRequest, DiffRenderResponse, DiffViewerClient,
 };
@@ -32,6 +29,5 @@ pub use git_client::{
 };
 pub use html_renderer::HtmlRenderer;
 pub use project_client::{ProjectClient, ProjectClientError};
-pub use push_ledger::{LedgerEntry, PushLedger};
-pub use repo_discovery::RepoDiscovery;
+pub use text_editor_client::TextEditorClient;
 pub use user_settings_store::{UserSettingsEditError, UserSettingsLoadError, UserSettingsStore};

@@ -1,14 +1,14 @@
+use gtl_models::{live_views::LiveSource, paths::ProjectName, timestamps::MachineTimestamp};
 #[cfg(test)]
 use rusqlite::Connection;
 
 /// One saved live view, keyed by its source identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveViewRecord {
-    pub source_kind: String,
-    pub source_value: String,
-    pub display_name: String,
-    pub created_at: String,
-    pub last_opened_at: Option<String>,
+    pub source: LiveSource,
+    pub display_name: ProjectName,
+    pub created_at: MachineTimestamp,
+    pub last_opened_at: Option<MachineTimestamp>,
 }
 
 #[cfg(test)]

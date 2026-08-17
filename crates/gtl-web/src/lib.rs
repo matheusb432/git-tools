@@ -8,6 +8,8 @@ mod artifact_asset;
 mod entities;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod shared;
+#[cfg(test)]
+mod test_support;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod views;
 

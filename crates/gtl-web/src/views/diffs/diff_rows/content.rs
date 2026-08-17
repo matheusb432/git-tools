@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use gtl_parser::{SemanticTextChange, SemanticTextSpan, SyntaxTokenClass};
+use gtl_parser::{CharacterCount, SemanticTextChange, SemanticTextSpan, SyntaxTokenClass};
 
 use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
 
@@ -15,7 +15,7 @@ pub(super) fn CodeCellContent(
     text: String,
     semantic_spans: Vec<SemanticTextSpan>,
     changed_text_tone: ChangedTextTone,
-    long_line_character_count: Option<usize>,
+    long_line_character_count: Option<CharacterCount>,
 ) -> Element {
     if let Some(character_count) = long_line_character_count {
         return rsx! {
@@ -29,7 +29,7 @@ pub(super) fn CodeCellContent(
 }
 
 #[component]
-pub(super) fn LongLine(text: String, character_count: usize) -> Element {
+pub(super) fn LongLine(text: String, character_count: CharacterCount) -> Element {
     let mut expanded = use_signal(|| false);
     rsx! {
         span { class: "flex items-baseline gap-2",
@@ -55,7 +55,11 @@ fn LongLineText(text: String, expanded: bool) -> Element {
 }
 
 #[component]
-fn LongLineControl(character_count: usize, expanded: bool, on_toggle: EventHandler<()>) -> Element {
+fn LongLineControl(
+    character_count: CharacterCount,
+    expanded: bool,
+    on_toggle: EventHandler<()>,
+) -> Element {
     rsx! {
         Button {
             class: "flex-none select-none [font:inherit]",

@@ -62,8 +62,17 @@ mod tests {
     use super::UserSettings;
     use crate::{
         diffs::DiffExclusions,
+        paths::{ProjectName, RepositoryRelativePath},
         viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
     };
+
+    fn project(value: &str) -> ProjectName {
+        ProjectName::try_new(value.to_owned()).expect("project name")
+    }
+
+    fn path(value: &str) -> RepositoryRelativePath {
+        RepositoryRelativePath::try_new(value.into()).expect("repository-relative path")
+    }
 
     #[test]
     fn accessors_expose_the_complete_immutable_snapshot() {
@@ -71,7 +80,7 @@ mod tests {
             Some(Theme::Hearth),
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             false,
-            DiffExclusions::new([("git-tools".to_owned(), vec!["md", "lock"])], None),
+            DiffExclusions::new([(project("git-tools"), vec!["md", "lock"])], None),
         );
 
         assert_eq!(settings.theme(), Some(Theme::Hearth));
@@ -83,14 +92,14 @@ mod tests {
         assert!(
             settings
                 .diff_exclusions()
-                .for_project_or_default("git-tools")
-                .matches("README.md")
+                .for_project_or_default(&project("git-tools"))
+                .matches(&path("README.md"))
         );
         assert!(
             !settings
                 .diff_exclusions()
-                .for_project_or_default("git-tools")
-                .matches("src/main.rs")
+                .for_project_or_default(&project("git-tools"))
+                .matches(&path("src/main.rs"))
         );
     }
 

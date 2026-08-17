@@ -21,9 +21,11 @@ semver.workspace = true
 shlex.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt"] }
+walkdir.workspace = true
 
 [dev-dependencies]
 strum.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 
 [lints]

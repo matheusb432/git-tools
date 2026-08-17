@@ -1,16 +1,18 @@
+use crate::SourceLineNumber;
+
 /// The structural role of one line in a Git unified diff.
 ///
 /// # Examples
 ///
 /// ```
-/// use gtl_parser::{UnifiedDiffLineClassifier, UnifiedDiffLineKind};
+/// use gtl_parser::{SourceLineNumber, UnifiedDiffLineClassifier, UnifiedDiffLineKind};
 ///
 /// let mut classifier = UnifiedDiffLineClassifier::default();
 /// assert_eq!(
 ///     classifier.classify("@@ -1 +1 @@"),
 ///     UnifiedDiffLineKind::Hunk {
-///         line_number_old: 1,
-///         line_number_new: 1,
+///         line_number_old: SourceLineNumber::new(1),
+///         line_number_new: SourceLineNumber::new(1),
 ///     }
 /// );
 /// ```
@@ -20,8 +22,8 @@ pub enum UnifiedDiffLineKind {
     Meta,
     /// A valid hunk header and its absolute old and new starting line numbers.
     Hunk {
-        line_number_old: u32,
-        line_number_new: u32,
+        line_number_old: SourceLineNumber,
+        line_number_new: SourceLineNumber,
     },
     /// A line present on both sides of the diff.
     Context,
@@ -90,14 +92,14 @@ fn is_file_metadata(raw: &str) -> bool {
         || raw.starts_with("Binary ")
 }
 
-fn hunk_line_numbers(raw: &str) -> Option<(u32, u32)> {
+fn hunk_line_numbers(raw: &str) -> Option<(SourceLineNumber, SourceLineNumber)> {
     let rest = raw.strip_prefix("@@ -")?;
     let (range_old, rest) = rest.split_once(" +")?;
     let (range_new, _) = rest.split_once(" @@")?;
     Some((parse_range_start(range_old)?, parse_range_start(range_new)?))
 }
 
-fn parse_range_start(raw: &str) -> Option<u32> {
+fn parse_range_start(raw: &str) -> Option<SourceLineNumber> {
     let (start, length) = match raw.split_once(',') {
         Some((start, length)) => (start, Some(length)),
         None => (raw, None),
@@ -112,7 +114,7 @@ fn parse_range_start(raw: &str) -> Option<u32> {
         return None;
     }
 
-    start.parse().ok()
+    start.parse::<u32>().ok().map(SourceLineNumber::new)
 }
 
 #[cfg(test)]

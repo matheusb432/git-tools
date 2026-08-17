@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
 use dioxus_primitives::{dioxus_attributes::attributes, merge_attributes};
-use gtl_models::diffs::{CommitId, CommitIdAbbreviation};
+use gtl_models::{
+    diffs::{CommitId, CommitIdAbbreviation},
+    timestamps::MachineTimestamp,
+};
 use gtl_wire::viewer::{ViewerActiveView, ViewerCommitSelection, ViewerCommitSummary};
 use lucide_dioxus::CircleDot;
 
@@ -172,9 +175,7 @@ fn CommitCardContent(commit: ViewerCommitSummary, selected: bool) -> Element {
             if commit.is_merge {
                 Badge { variant: BadgeVariant::Neutral, "merge" }
             }
-            if !commit.date.is_empty() {
-                CommitDate { date: commit.date.clone(), iso: commit.iso.clone() }
-            }
+            CommitDate { committed_at: commit.committed_at }
         }
         CommitSubject { subject: commit.subject }
     }
@@ -218,7 +219,9 @@ fn CommitIdButton(id: CommitId) -> Element {
 }
 
 #[component]
-fn CommitDate(date: String, iso: String) -> Element {
+fn CommitDate(committed_at: MachineTimestamp) -> Element {
+    let date = committed_at.display_minute();
+    let iso = committed_at.to_string();
     rsx! {
         time {
             class: "ml-auto truncate text-ink-3 text-xs tabular-nums",

@@ -1,6 +1,13 @@
-use gtl_application::tags::{ListTagsOk, TagGroup};
+use gtl_application::tags::{
+    ListTagsOk, TagGroup,
+    add_and_push_tag::{self, AddAndPushTag},
+    add_tag::{self, AddTag},
+    label_tag::{self, LabelTag},
+};
 use gtl_models::{
     diffs::CommitIdAbbreviation,
+    git::TagName,
+    paths::RepositoryRoot,
     tags::{Tag, TagState},
 };
 
@@ -23,11 +30,8 @@ pub fn run(command: Option<TagCommand>, commits: bool, state: bool) -> crate::Ex
 
 fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crate::ExitCode {
     use gtl_application::tags::{
-        add::{self, AddTag},
-        add_and_push::{self, AddAndPushTag},
-        label::{self, LabelTag},
-        list::{self, ListTags},
-        push::{self, PushTags},
+        list_tags::{self, ListTags},
+        push_tags::{self, PushTags},
     };
 
     let repo_path = match super::canonical_working_directory() {
@@ -38,45 +42,30 @@ fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crat
         }
     };
     let git = gtl_infra::git_client::HybridGitClient;
+    let repo_path = match gtl_application::ports::GitClient::top_level(&git, &repo_path) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("tag: {error:#}");
+            return crate::ExitCode::Internal;
+        }
+    };
     match command {
-        Some(TagCommand::Add { tag, message }) => finish_tag_action(add::execute(
-            AddTag {
-                repo_path,
-                tag,
-                message,
-            },
-            &git,
-        )),
+        Some(TagCommand::Add { tag, message }) => run_add(repo_path, tag, message, git),
         Some(TagCommand::Push {
             tag: Some(tag),
             message: Some(message),
             label,
-        }) => finish_tag_action(add_and_push::execute(
-            AddAndPushTag {
-                repo_path,
-                tag,
-                message,
-                label,
-            },
-            &git,
-        )),
+        }) => run_add_and_push(repo_path, tag, message, label, git),
         Some(TagCommand::Push {
             tag: Some(tag),
             message: None,
             label: Some(label),
-        }) => finish_tag_action(label::execute(
-            LabelTag {
-                repo_path,
-                tag,
-                label,
-            },
-            &git,
-        )),
+        }) => run_label(repo_path, tag, label, git),
         Some(TagCommand::Push {
             tag: None,
             message: None,
             label: None,
-        }) => finish_tag_action(push::execute(PushTags { repo_path }, &git)),
+        }) => finish_tag_action(push_tags::execute(PushTags { repo_path }, &git)),
         Some(TagCommand::Push { tag: None, .. }) => {
             eprintln!("tag: tag push --label requires a <tag> to label");
             crate::ExitCode::Usage
@@ -86,7 +75,7 @@ fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crat
             crate::ExitCode::Usage
         }
         Some(TagCommand::Ls) | None => finish_tag_list(
-            list::execute(
+            list_tags::execute(
                 ListTags {
                     repo_path,
                     include_state: state,
@@ -102,6 +91,87 @@ fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crat
             dry,
             yes,
         }) => bump::run(level, message, push, dry, yes),
+    }
+}
+
+fn run_add(
+    repo_path: RepositoryRoot,
+    tag: String,
+    message: String,
+    git: gtl_infra::git_client::HybridGitClient,
+) -> crate::ExitCode {
+    let Some(tag) = parse_tag_name(tag) else {
+        return crate::ExitCode::Usage;
+    };
+    finish_tag_action(add_tag::execute(
+        AddTag {
+            repo_path,
+            tag,
+            message,
+        },
+        &git,
+    ))
+}
+
+fn run_add_and_push(
+    repo_path: RepositoryRoot,
+    tag: String,
+    message: String,
+    label: Option<String>,
+    git: gtl_infra::git_client::HybridGitClient,
+) -> crate::ExitCode {
+    let Some(tag) = parse_tag_name(tag) else {
+        return crate::ExitCode::Usage;
+    };
+    let label = match label {
+        Some(label) => {
+            let Some(label) = parse_tag_name(label) else {
+                return crate::ExitCode::Usage;
+            };
+            Some(label)
+        }
+        None => None,
+    };
+    finish_tag_action(add_and_push_tag::execute(
+        AddAndPushTag {
+            repo_path,
+            tag,
+            message,
+            label,
+        },
+        &git,
+    ))
+}
+
+fn run_label(
+    repo_path: RepositoryRoot,
+    tag: String,
+    label: String,
+    git: gtl_infra::git_client::HybridGitClient,
+) -> crate::ExitCode {
+    let Some(tag) = parse_tag_name(tag) else {
+        return crate::ExitCode::Usage;
+    };
+    let Some(label) = parse_tag_name(label) else {
+        return crate::ExitCode::Usage;
+    };
+    finish_tag_action(label_tag::execute(
+        LabelTag {
+            repo_path,
+            tag,
+            label,
+        },
+        &git,
+    ))
+}
+
+fn parse_tag_name(raw: String) -> Option<TagName> {
+    match TagName::try_new(raw) {
+        Ok(tag) => Some(tag),
+        Err(error) => {
+            eprintln!("tag: invalid tag name: {error}");
+            None
+        }
     }
 }
 
@@ -215,15 +285,15 @@ where
 fn render_tag_action(outcome: &gtl_application::tags::TagActionOutcome) -> crate::ExitCode {
     use gtl_application::tags::TagActionStatus;
 
-    match outcome.status {
+    match outcome.status() {
         TagActionStatus::Created | TagActionStatus::Noop | TagActionStatus::Pushed => {
-            if !outcome.detail.is_empty() {
-                println!("{}", outcome.detail);
+            if !outcome.detail().is_empty() {
+                println!("{}", outcome.detail());
             }
             crate::ExitCode::Ok
         }
         TagActionStatus::Failed => {
-            eprintln!("tag: {}", outcome.detail);
+            eprintln!("tag: {}", outcome.detail());
             crate::ExitCode::Internal
         }
     }
@@ -235,20 +305,30 @@ mod tests {
     use gtl_models::tags::{Tag, TagState};
 
     use super::render_list;
-    use crate::testing::commit_id;
+    use crate::testing::{commit_id, git_object_id, tag_name};
 
     fn annotated(name: &str, commit_prefix: &str, message: &str) -> Tag {
         Tag::annotated(
-            name.into(),
-            format!("{name}-object"),
+            tag_name(name),
+            git_object_id("f"),
             commit_id(commit_prefix),
-            Some(100),
+            Some(
+                gtl_models::timestamps::MachineTimestamp::from_unix_seconds(100)
+                    .expect("fixture tag timestamp is in range"),
+            ),
             Some(message.into()),
         )
     }
 
     fn lightweight(name: &str, commit_prefix: &str) -> Tag {
-        Tag::lightweight(name.into(), commit_id(commit_prefix), Some(110))
+        Tag::lightweight(
+            tag_name(name),
+            commit_id(commit_prefix),
+            Some(
+                gtl_models::timestamps::MachineTimestamp::from_unix_seconds(110)
+                    .expect("fixture tag timestamp is in range"),
+            ),
+        )
     }
 
     #[test]

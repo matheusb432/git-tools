@@ -1,12 +1,12 @@
-use std::path::PathBuf;
-
 use gtl_wire::recipes::OpenRecipes;
 
+use super::PlacedArtifact;
 use crate::{
     diffs::{
-        render_diff::RenderDiff, render_diff_all::RenderDiffAll,
-        render_diff_subrepos::RenderDiffSubrepos, render_merge_diff::RenderMergeDiff,
+        render_diff::RenderDiff, render_diff_subrepos::RenderDiffSubrepos,
+        render_merge_diff::RenderMergeDiff,
     },
+    projects::render_project_diff::RenderProjectDiff,
     shared::notes::Note,
 };
 
@@ -15,12 +15,12 @@ pub enum DiffRenderRequest {
     Diff(RenderDiff),
     MergeDiff(RenderMergeDiff),
     Subrepos(RenderDiffSubrepos),
-    ManagedAll(RenderDiffAll),
+    Projects(RenderProjectDiff),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiffRenderOutcome {
-    Rendered(PathBuf),
+    Rendered(PlacedArtifact),
     Empty,
 }
 

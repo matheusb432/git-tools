@@ -1,32 +1,34 @@
 //! Stable identities for the store: a repo id and an artifact content hash.
-use std::{fmt::Write as _, path::Path};
+use std::path::Path;
 
-use gtl_models::diffs::CommitId;
+use gtl_models::{
+    artifacts::{ArtifactContentHash, RepositoryStoreId},
+    diffs::CommitId,
+};
 use sha2::{Digest, Sha256};
 
-/// First 16 hex chars of the SHA-256 of `input`.
-fn short_sha256(input: &str) -> String {
+/// First eight bytes of the SHA-256 of `input`.
+fn short_sha256(input: &str) -> [u8; 8] {
     let digest = Sha256::digest(input.as_bytes());
-    let mut out = String::with_capacity(16);
-    for byte in &digest[..8] {
-        let _ = write!(out, "{byte:02x}");
-    }
-    out
+    let mut prefix = [0; 8];
+    prefix.copy_from_slice(&digest[..8]);
+    prefix
 }
 
 /// A stable id for a repo. Prefers the root commit (stable across
 /// clone/move/rename); falls back to hashing the canonical path for a repo with
 /// no commits. Always 16 hex chars.
-pub fn repo_id(root_commit: Option<&CommitId>, canonical_path: &Path) -> String {
-    match root_commit {
+pub fn repo_id(root_commit: Option<&CommitId>, canonical_path: &Path) -> RepositoryStoreId {
+    let prefix = match root_commit {
         Some(id) => short_sha256(id.as_ref()),
         _ => short_sha256(&canonical_path.to_string_lossy()),
-    }
+    };
+    RepositoryStoreId::from_digest_prefix(prefix)
 }
 
 /// Content address of a rendered artifact: 16 hex chars over the exact HTML.
-pub fn content_hash(html: &str) -> String {
-    short_sha256(html)
+pub fn content_hash(html: &str) -> ArtifactContentHash {
+    ArtifactContentHash::from_digest_prefix(short_sha256(html))
 }
 
 #[cfg(test)]
@@ -46,7 +48,7 @@ mod tests {
             content_hash("<html>a</html>"),
             content_hash("<html>b</html>")
         );
-        assert_eq!(content_hash("x").len(), 16);
+        assert_eq!(content_hash("x").as_ref().len(), 16);
     }
 
     #[test]
@@ -60,6 +62,9 @@ mod tests {
 
     #[test]
     fn repo_id_falls_back_to_path_when_no_root_commit() {
-        assert_eq!(repo_id(None, &PathBuf::from("/tmp/repo")).len(), 16);
+        assert_eq!(
+            repo_id(None, &PathBuf::from("/tmp/repo")).as_ref().len(),
+            16
+        );
     }
 }

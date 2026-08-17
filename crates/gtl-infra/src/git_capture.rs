@@ -1,8 +1,12 @@
 use std::path::Path;
 
-use anyhow::anyhow;
+use anyhow::{Context as _, anyhow};
 use gtl_application::ports::{GitDiffFormat, GitDiffRequest};
-use gtl_models::diffs::{Commit, CommitId, CommitIdError};
+use gtl_models::{
+    diffs::{Commit, CommitId},
+    git::{GitRange, GitRevision},
+    timestamps::MachineTimestamp,
+};
 
 pub(crate) fn run_git(repo_path: impl AsRef<Path>, args: &[&str]) -> anyhow::Result<String> {
     let output = crate::git_process::run(repo_path.as_ref(), args)?;
@@ -17,17 +21,19 @@ pub(crate) fn run_git(repo_path: impl AsRef<Path>, args: &[&str]) -> anyhow::Res
     Ok(output.stdout)
 }
 
-pub(crate) fn log_commits(repo_path: impl AsRef<Path>, range: &str) -> anyhow::Result<Vec<Commit>> {
+pub(crate) fn log_commits(
+    repo_path: impl AsRef<Path>,
+    range: &GitRange,
+) -> anyhow::Result<Vec<Commit>> {
     let raw = run_git(
         repo_path,
         &[
             "log",
-            "--date=format:%Y-%m-%d %H:%M",
-            "--format=%H%x1f%s%x1f%b%x1f%ad%x1f%aI%x1f%P%x1e",
-            range,
+            "--format=%H%x1f%s%x1f%b%x1f%aI%x1f%P%x1e",
+            range.as_ref(),
         ],
     )?;
-    parse_commit_log(&raw).map_err(Into::into)
+    parse_commit_log(&raw)
 }
 
 pub(crate) fn diff(
@@ -40,14 +46,14 @@ pub(crate) fn diff(
         GitDiffFormat::Unified => {}
         GitDiffFormat::FullContext => args.push("--unified=2147483647".to_string()),
     }
-    args.push(request.range.clone());
+    args.push(request.spec.to_string());
     if !request.excluded_paths.is_empty() {
         args.push("--".to_string());
         args.extend(
             request
                 .excluded_paths
                 .iter()
-                .map(|path| format!(":(exclude,literal){path}")),
+                .map(|path| format!(":(exclude,literal){}", path.display())),
         );
     }
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
@@ -68,40 +74,55 @@ pub(crate) fn root_commit(repo_path: impl AsRef<Path>) -> Option<CommitId> {
 /// The validated merge base of `a` and `b`.
 pub(crate) fn merge_base(
     repo_path: impl AsRef<Path>,
-    a: &str,
-    b: &str,
+    a: &GitRevision,
+    b: &GitRevision,
 ) -> anyhow::Result<CommitId> {
-    run_git(repo_path, &["merge-base", a, b])?
+    run_git(repo_path, &["merge-base", a.as_ref(), b.as_ref()])?
         .trim()
         .try_into()
         .map_err(Into::into)
 }
 
-/// The committer date of `rev` as a strict ISO-8601 string (empty on failure).
-pub(crate) fn committed_at(repo_path: impl AsRef<Path>, rev: &str) -> String {
-    run_git(repo_path, &["show", "-s", "--format=%cI", rev])
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default()
+/// The committer timestamp of `rev`, or `None` when Git or decoding fails.
+pub(crate) fn committed_at(
+    repo_path: impl AsRef<Path>,
+    rev: &GitRevision,
+) -> Option<MachineTimestamp> {
+    run_git(repo_path, &["show", "-s", "--format=%cI", rev.as_ref()])
+        .ok()
+        .and_then(|raw| MachineTimestamp::try_from(raw.trim()).ok())
 }
 
-pub(crate) fn parse_commit_log(raw: &str) -> Result<Vec<Commit>, CommitIdError> {
+pub(crate) fn parse_commit_log(raw: &str) -> anyhow::Result<Vec<Commit>> {
     raw.split('\x1e')
         .map(str::trim)
         .filter(|record| !record.is_empty())
         .map(|record| {
             let mut fields = record.split('\x1f');
+            let id = fields
+                .next()
+                .context("Git log entry is missing a commit ID")?;
+            let subject = fields
+                .next()
+                .context("Git log entry is missing a subject")?;
+            let body = fields.next().context("Git log entry is missing a body")?;
+            let committed_at = fields
+                .next()
+                .context("Git log entry is missing an author timestamp")?;
+            let parents = fields.next().context("Git log entry is missing parents")?;
             Ok(Commit {
-                id: fields.next().unwrap_or_default().try_into()?,
-                subject: fields.next().unwrap_or("").to_string(),
-                body: fields.next().unwrap_or("").to_string(),
-                date: fields.next().unwrap_or("").to_string(),
-                iso: fields.next().unwrap_or("").to_string(),
-                parents: fields
-                    .next()
-                    .unwrap_or("")
+                id: id
+                    .try_into()
+                    .context("Git log entry has an invalid commit ID")?,
+                subject: subject.to_owned(),
+                body: body.to_owned(),
+                committed_at: MachineTimestamp::try_from(committed_at)
+                    .context("Git log entry has an invalid author timestamp")?,
+                parents: parents
                     .split_whitespace()
                     .map(TryInto::try_into)
-                    .collect::<Result<Vec<_>, _>>()?,
+                    .collect::<Result<Vec<_>, _>>()
+                    .context("Git log entry has an invalid parent commit ID")?,
             })
         })
         .collect()
@@ -119,8 +140,8 @@ mod tests {
     #[test]
     fn parse_commit_log_retains_full_commit_identities() {
         let raw = concat!(
-            "1111111111111111111111111111111111111111\x1fadd renderer\x1fbody text\nmore body\x1f2026-06-08 13:45\x1f2026-06-08T13:45:00-03:00\x1e",
-            "2222222222222222222222222222222222222222\x1ffix parser\x1f\x1f2026-06-09 09:10\x1f2026-06-09T09:10:00-03:00\x1e",
+            "1111111111111111111111111111111111111111\x1fadd renderer\x1fbody text\nmore body\x1f2026-06-08T13:45:00-03:00\x1f\x1e",
+            "2222222222222222222222222222222222222222\x1ffix parser\x1f\x1f2026-06-09T09:10:00-03:00\x1f\x1e",
         );
 
         let commits = parse_commit_log(raw).expect("valid commit log");
@@ -129,35 +150,33 @@ mod tests {
         assert_eq!(commits[0].id.to_string(), COMMIT_ID_ONE);
         assert_eq!(commits[0].subject, "add renderer");
         assert_eq!(commits[0].body, "body text\nmore body");
-        assert_eq!(commits[0].date, "2026-06-08 13:45");
-        assert_eq!(commits[0].iso, "2026-06-08T13:45:00-03:00");
+        assert_eq!(commits[0].committed_at.display_minute(), "2026-06-08 13:45");
+        assert_eq!(
+            commits[0].committed_at.as_ref(),
+            "2026-06-08T13:45:00-03:00"
+        );
         assert_eq!(commits[1].id.to_string(), COMMIT_ID_TWO);
         assert_eq!(commits[1].subject, "fix parser");
         assert_eq!(commits[1].body, "");
     }
 
     #[test]
-    fn parse_commit_log_trims_blank_records_and_defaults_missing_fields() {
-        let commits = parse_commit_log(concat!(
+    fn parse_commit_log_rejects_missing_machine_timestamp() {
+        let error = parse_commit_log(concat!(
             " \n\x1e",
             "3333333333333333333333333333333333333333\x1fsubject only\x1e"
         ))
-        .expect("valid commit log");
+        .expect_err("incomplete Git output must fail at the decode boundary");
 
-        assert_eq!(commits.len(), 1);
-        assert_eq!(commits[0].id.to_string(), COMMIT_ID_THREE);
-        assert_eq!(commits[0].subject, "subject only");
-        assert_eq!(commits[0].body, "");
-        assert_eq!(commits[0].date, "");
-        assert_eq!(commits[0].iso, "");
+        assert!(error.to_string().contains("missing a body"));
     }
 
     #[test]
     fn parse_commit_log_reads_parents_and_flags_merge() {
-        // record fields: sha · subject · body · date · iso · parents(space-sep)
+        // Record fields: SHA, subject, body, ISO timestamp, parents (space-separated).
         let raw = concat!(
-            "1111111111111111111111111111111111111111\x1fMerge branch 'sub'\x1f\x1f2026-06-08 13:45\x1f2026-06-08T13:45:00-03:00\x1f3333333333333333333333333333333333333333 4444444444444444444444444444444444444444\x1e",
-            "2222222222222222222222222222222222222222\x1ffeat: x\x1f\x1f2026-06-09 09:10\x1f2026-06-09T09:10:00-03:00\x1f3333333333333333333333333333333333333333\x1e",
+            "1111111111111111111111111111111111111111\x1fMerge branch 'sub'\x1f\x1f2026-06-08T13:45:00-03:00\x1f3333333333333333333333333333333333333333 4444444444444444444444444444444444444444\x1e",
+            "2222222222222222222222222222222222222222\x1ffeat: x\x1f\x1f2026-06-09T09:10:00-03:00\x1f3333333333333333333333333333333333333333\x1e",
         );
 
         let commits = parse_commit_log(raw).expect("valid commit log");
@@ -177,10 +196,21 @@ mod tests {
 
     #[test]
     fn parse_commit_log_rejects_invalid_git_output_identity() {
-        assert_eq!(
-            parse_commit_log("not-a-commit-id\x1fsubject\x1e"),
-            Err(CommitIdError)
-        );
+        let error =
+            parse_commit_log("not-a-commit-id\x1fsubject\x1f\x1f2026-06-08T13:45:00-03:00\x1f\x1e")
+                .expect_err("invalid commit identity must fail at the decode boundary");
+
+        assert!(error.to_string().contains("invalid commit ID"));
+    }
+
+    #[test]
+    fn parse_commit_log_rejects_timezone_less_timestamp() {
+        let error = parse_commit_log(
+            "1111111111111111111111111111111111111111\x1fsubject\x1f\x1f2026-06-08T13:45:00\x1f\x1e",
+        )
+        .expect_err("timezone-less Git timestamp must fail at the decode boundary");
+
+        assert!(error.to_string().contains("invalid author timestamp"));
     }
 
     #[test]

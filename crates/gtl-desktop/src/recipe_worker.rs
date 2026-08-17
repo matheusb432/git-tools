@@ -227,19 +227,22 @@ fn worker_loop(
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, sync::mpsc::RecvTimeoutError};
+    use std::sync::mpsc::RecvTimeoutError;
 
     use gtl_application::viewer::{ViewerTabId, ViewerTabKind};
+    use gtl_models::viewer::ViewerRangeGeneration;
     use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource};
 
     use super::*;
-    use crate::{recipes::ReservedRecipeComputation, session::ComputeTicket};
+    use crate::{
+        recipes::ReservedRecipeComputation, session::ComputeTicket, testing::repository_root,
+    };
 
     fn queued(tab_id: u64, generation: u64, active: bool) -> QueuedComputation {
         QueuedComputation {
             request: ViewerComputation::Recipe(ReservedRecipeComputation {
                 recipe: Recipe {
-                    source: RecipeSource::LocalRepo(PathBuf::from("/repo")),
+                    source: RecipeSource::LocalRepo(repository_root("/repo")),
                     op: RecipeOp::MergeDiff {
                         base: None,
                         pinned: None,
@@ -249,7 +252,7 @@ mod tests {
                 kind: ViewerTabKind::Snapshot,
                 ticket: ComputeTicket {
                     tab_id: ViewerTabId::try_new(tab_id).expect("positive tab id"),
-                    generation,
+                    generation: ViewerRangeGeneration::new(generation),
                 },
             }),
             active,
@@ -291,7 +294,7 @@ mod tests {
         );
         assert!(matches!(
             replacement.request,
-            ViewerComputation::Recipe(request) if request.ticket.generation == 2
+            ViewerComputation::Recipe(request) if request.ticket.generation.value() == 2
         ));
         assert_eq!(queue.computations.len(), 1);
     }

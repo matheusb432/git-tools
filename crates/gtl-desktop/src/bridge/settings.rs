@@ -1,8 +1,8 @@
 use gtl_application::settings::{
     get_user_settings::{self, GetUserSettings},
-    set_key::{self, SetSettingKey},
+    set_setting_key::{self, SetSettingKey},
 };
-use gtl_models::settings::UserSettings;
+use gtl_models::settings::{SettingKeyValue, UserSettings};
 use gtl_wire::viewer::{
     ViewerApiError, ViewerDiffExclusions, ViewerProjectDiffExclusions, ViewerResource,
     ViewerUserSettings,
@@ -40,14 +40,13 @@ pub(super) fn load(app: &ViewerApp) -> Result<UserSettings, ViewerApiError> {
 
 pub(super) fn set_root_key(
     app: &ViewerApp,
-    key: String,
-    value_new: String,
+    mutation: SettingKeyValue,
 ) -> Result<(), ViewerApiError> {
     let mut store = app
         .user_settings
         .lock()
         .map_err(|error| internal("failed to lock user settings", error))?;
-    set_key::execute(SetSettingKey { key, value_new }, &mut *store)
+    set_setting_key::execute(SetSettingKey { mutation }, &mut *store)
         .map(|_| ())
         .map_err(|error| internal("failed to persist viewer preference", error))
 }
@@ -76,12 +75,12 @@ fn to_user_settings(
         ),
         push_confirmation_required: settings.push_confirmation_required(),
         diff_exclusions: ViewerDiffExclusions {
-            default_extensions: exclusions.default_exclusions().extensions().to_vec(),
+            default_extensions: exclusions.default_exclusions().clone(),
             projects: exclusions
                 .project_exclusions()
                 .map(|(project_name, extensions)| ViewerProjectDiffExclusions {
                     project_name: project_name.to_owned(),
-                    extensions: extensions.extensions().to_vec(),
+                    extensions: extensions.clone(),
                 })
                 .collect(),
         },
@@ -97,6 +96,7 @@ mod tests {
     };
 
     use super::to_user_settings;
+    use crate::testing::project_name;
 
     #[test]
     fn readonly_settings_preserve_defaults_projects_and_effective_theme() {
@@ -106,8 +106,8 @@ mod tests {
             false,
             DiffExclusions::new(
                 [
-                    ("defaults".into(), vec!["md"]),
-                    ("git-tools".into(), vec!["lock", "js"]),
+                    (project_name("defaults"), vec!["md"]),
+                    (project_name("git-tools"), vec!["lock", "js"]),
                 ],
                 None,
             ),
@@ -121,10 +121,13 @@ mod tests {
         );
         assert_eq!(mapped.configured_theme, Some(mapped.effective_theme));
         assert!(!mapped.push_confirmation_required);
-        assert_eq!(mapped.diff_exclusions.default_extensions, ["md"]);
+        assert_eq!(
+            mapped.diff_exclusions.default_extensions.extensions(),
+            ["md"]
+        );
         assert_eq!(mapped.diff_exclusions.projects.len(), 1);
         assert_eq!(
-            mapped.diff_exclusions.projects[0].extensions,
+            mapped.diff_exclusions.projects[0].extensions.extensions(),
             ["js", "lock"]
         );
     }

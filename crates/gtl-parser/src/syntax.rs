@@ -530,8 +530,8 @@ fn push_token(
         return;
     }
     match tokens.last_mut() {
-        Some(last) if last.end() == start && last.class() == class => {
-            *last = SyntaxToken::new(last.start(), end, class);
+        Some(last) if last.end().into_inner() == start && last.class() == class => {
+            *last = SyntaxToken::new(last.start().into_inner(), end, class);
         }
         _ => tokens.push(SyntaxToken::new(start, end, class)),
     }
@@ -566,6 +566,7 @@ const SCOPE_PREFIXES: [(&str, SyntaxTokenClass); 23] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CharacterOffset;
 
     fn required_syntax(path: &str) -> SyntaxDefinition {
         bundled_syntax_catalog()
@@ -576,7 +577,9 @@ mod tests {
 
     fn keyword_token_overlaps(tokens: &[SyntaxToken], start: usize, end: usize) -> bool {
         tokens.iter().any(|token| {
-            token.class() == SyntaxTokenClass::Keyword && token.start() < end && start < token.end()
+            token.class() == SyntaxTokenClass::Keyword
+                && token.start().into_inner() < end
+                && start < token.end().into_inner()
         })
     }
 
@@ -668,7 +671,10 @@ mod tests {
             .iter()
             .find(|token| token.class() == SyntaxTokenClass::String)
             .expect("string token should be present");
-        assert_eq!((string.start(), string.end()), (11, 14));
+        assert_eq!(
+            (string.start(), string.end()),
+            (CharacterOffset::new(11), CharacterOffset::new(14))
+        );
     }
 
     #[test]
@@ -678,10 +684,14 @@ mod tests {
             .expect("fixture should tokenize");
 
         assert!(tokens.iter().any(|token| {
-            token.class() == SyntaxTokenClass::String && token.start() == 8 && token.end() == 12
+            token.class() == SyntaxTokenClass::String
+                && token.start() == CharacterOffset::new(8)
+                && token.end() == CharacterOffset::new(12)
         }));
         assert!(tokens.iter().any(|token| {
-            token.class() == SyntaxTokenClass::Comment && token.start() == 14 && token.end() == 21
+            token.class() == SyntaxTokenClass::Comment
+                && token.start() == CharacterOffset::new(14)
+                && token.end() == CharacterOffset::new(21)
         }));
     }
 

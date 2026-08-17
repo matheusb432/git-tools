@@ -3,19 +3,21 @@ use gtl_application::{
         present_diff::{DiffRecipeIntent, PresentDiff},
         render_diff::RenderDiff,
     },
-    ports::DiffRenderRequest,
+    ports::{DiffRenderRequest, GitClient as _},
 };
+use gtl_models::paths::{AbsoluteFilePath, ProjectName};
 
-use crate::{cli::DiffTarget, recipe, viewer};
+use crate::{cli::DiffTarget, recipe};
 
 pub enum DiffOutcome {
-    Rendered(std::path::PathBuf),
+    Rendered(AbsoluteFilePath),
     Empty,
     Forwarded,
 }
 
 pub fn run(target: &DiffTarget, name: Option<&str>, raw: bool) -> anyhow::Result<DiffOutcome> {
     let cwd = std::env::current_dir()?;
+    let repo_root = gtl_infra::git_client::HybridGitClient.top_level(&cwd)?;
     super::present(PresentDiff {
         render: DiffRenderRequest::Diff(RenderDiff {
             cwd: cwd.clone(),
@@ -24,12 +26,10 @@ pub fn run(target: &DiffTarget, name: Option<&str>, raw: bool) -> anyhow::Result
         }),
         batch_id: crate::recipe::new_batch_id(),
         recipes: vec![DiffRecipeIntent {
-            repo_path: cwd,
+            repo_root,
             operation: recipe::diff_operation(target),
-            name: name.map(str::to_string),
+            name: name.map(ProjectName::try_from).transpose()?,
         }],
-        raw,
-        has_display: viewer::has_display(),
-        effects_enabled: !viewer::no_open_requested(),
+        mode: super::presentation_mode(raw),
     })
 }

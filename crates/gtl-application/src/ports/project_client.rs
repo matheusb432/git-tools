@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use gtl_models::managed::ManagedRepo;
+use gtl_models::projects::ProjectRepository;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProjectClientError {
@@ -21,5 +21,5 @@ pub enum ProjectClientError {
 pub trait ProjectClient: Clone + Send + Sync + 'static {
     fn list_projects(
         &self,
-    ) -> impl Future<Output = Result<Vec<ManagedRepo>, ProjectClientError>> + Send;
+    ) -> impl Future<Output = Result<Vec<ProjectRepository>, ProjectClientError>> + Send;
 }
