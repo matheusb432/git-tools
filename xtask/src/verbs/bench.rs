@@ -240,4 +240,31 @@ mod tests {
             "benchmark case raw-artifact belongs to viewer-render"
         );
     }
+
+    #[test]
+    fn benchmark_step_selects_the_parser_syntax_target_and_case() {
+        let step = benchmark_step(
+            Benchmark::ParserSyntax,
+            BenchmarkSelection::Standard {
+                case: Some(BenchmarkCase::ParserSyntaxRust45k),
+                sample_size: None,
+            },
+            &[],
+        )
+        .expect("Rust syntax case belongs to parser-syntax benchmark");
+
+        assert_eq!(
+            argument_strings(&step),
+            [
+                "bench",
+                "-p",
+                "gtl-benchmarks",
+                "--bench",
+                "parser_syntax",
+                "--",
+                "parser-syntax/rust-45k",
+                "--exact"
+            ]
+        );
+    }
 }

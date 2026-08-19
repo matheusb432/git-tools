@@ -16,7 +16,7 @@ use crate::shared::{
 };
 
 #[component]
-pub(super) fn CommitsPanel(
+pub fn CommitsPanel(
     view: ViewerActiveView,
     onselect: Option<EventHandler<CommitId>>,
     onclear: Option<EventHandler<()>>,
@@ -31,6 +31,7 @@ pub(super) fn CommitsPanel(
         &view.commit_selection,
         ViewerCommitSelection::Pending { .. }
     );
+    let onselect = onselect.filter(|_| commit_selection_enabled(view.commits.len()));
 
     rsx! {
         ScrollArea { class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
@@ -137,8 +138,6 @@ fn CommitCard(
         }),
     ]);
 
-    // TODO: remove if `onselect` does not meaningfully change view state. if it's null, just keep
-    // the button disabled.
     if let Some(onselect) = onselect {
         let id = commit.id.clone();
         return rsx! {
@@ -244,5 +243,21 @@ const fn commit_card_tone_classes(selected: bool) -> &'static str {
         "border-acc bg-acc-soft"
     } else {
         "border-line-2 bg-transparent hover:border-l-acc-line hover:bg-surface-2 active:bg-acc-soft"
+    }
+}
+
+const fn commit_selection_enabled(commit_count: usize) -> bool {
+    commit_count > 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::commit_selection_enabled;
+
+    #[test]
+    fn commit_selection_requires_multiple_commits() {
+        assert!(!commit_selection_enabled(0));
+        assert!(!commit_selection_enabled(1));
+        assert!(commit_selection_enabled(2));
     }
 }

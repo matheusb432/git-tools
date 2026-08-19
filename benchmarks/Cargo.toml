@@ -16,6 +16,10 @@ harness = false
 name = "viewer_render"
 harness = false
 
+[[bench]]
+name = "parser_syntax"
+harness = false
+
 [dependencies]
 clap.workspace = true
 
@@ -28,6 +32,7 @@ gtl-wire.workspace = true
 gtl-desktop = { workspace = true, features = ["benchmark-support"] }
 gtl-infra.workspace = true
 gtl-artifacts.workspace = true
+gtl-parser = { workspace = true, features = ["bundled-syntaxes"] }
 tempfile.workspace = true
 
 [lints]

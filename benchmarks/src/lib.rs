@@ -26,13 +26,15 @@ const VIEWER_RENDER_FAST_CASES: &[BenchmarkCase] = &[
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Benchmark {
     AppStateRecordRender,
+    ParserSyntax,
     ViewCache,
     ViewerRender,
 }
 
 impl Benchmark {
-    const ALL: [Self; 3] = [
+    const ALL: [Self; 4] = [
         Self::AppStateRecordRender,
+        Self::ParserSyntax,
         Self::ViewCache,
         Self::ViewerRender,
     ];
@@ -40,6 +42,7 @@ impl Benchmark {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AppStateRecordRender => "app-state-record-render",
+            Self::ParserSyntax => "parser-syntax",
             Self::ViewCache => "view-cache",
             Self::ViewerRender => "viewer-render",
         }
@@ -48,6 +51,7 @@ impl Benchmark {
     pub const fn cargo_target(self) -> &'static str {
         match self {
             Self::AppStateRecordRender => "app_state_record_render",
+            Self::ParserSyntax => "parser_syntax",
             Self::ViewCache => "view_cache",
             Self::ViewerRender => "viewer_render",
         }
@@ -55,7 +59,7 @@ impl Benchmark {
 
     pub const fn sample_size(self) -> usize {
         match self {
-            Self::ViewerRender => 10,
+            Self::ParserSyntax | Self::ViewerRender => 10,
             Self::AppStateRecordRender | Self::ViewCache => 100,
         }
     }
@@ -63,7 +67,7 @@ impl Benchmark {
     pub const fn fast_cases(self) -> &'static [BenchmarkCase] {
         match self {
             Self::ViewerRender => VIEWER_RENDER_FAST_CASES,
-            Self::AppStateRecordRender | Self::ViewCache => &[],
+            Self::AppStateRecordRender | Self::ParserSyntax | Self::ViewCache => &[],
         }
     }
 }
@@ -87,6 +91,7 @@ impl ValueEnum for Benchmark {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BenchmarkCase {
     AppStateRecordRender,
+    ParserSyntaxRust45k,
     ViewCacheViewWeight45k,
     ViewCacheViewReplace45k,
     ViewerRenderRawArtifact,
@@ -94,8 +99,9 @@ pub enum BenchmarkCase {
 }
 
 impl BenchmarkCase {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::AppStateRecordRender,
+        Self::ParserSyntaxRust45k,
         Self::ViewCacheViewWeight45k,
         Self::ViewCacheViewReplace45k,
         Self::ViewerRenderRawArtifact,
@@ -105,6 +111,7 @@ impl BenchmarkCase {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AppStateRecordRender => "app-state-record-render",
+            Self::ParserSyntaxRust45k => "parser-syntax/rust-45k",
             Self::ViewCacheViewWeight45k => "view-cache/view-weight/45k",
             Self::ViewCacheViewReplace45k => "view-cache/view-replace/45k",
             Self::ViewerRenderRawArtifact => "raw-artifact",
@@ -115,6 +122,7 @@ impl BenchmarkCase {
     pub const fn benchmark(self) -> Benchmark {
         match self {
             Self::AppStateRecordRender => Benchmark::AppStateRecordRender,
+            Self::ParserSyntaxRust45k => Benchmark::ParserSyntax,
             Self::ViewCacheViewWeight45k | Self::ViewCacheViewReplace45k => Benchmark::ViewCache,
             Self::ViewerRenderRawArtifact | Self::ViewerRenderRawArtifactSplitFull => {
                 Benchmark::ViewerRender

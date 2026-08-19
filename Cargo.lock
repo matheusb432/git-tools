@@ -3485,6 +3485,7 @@ dependencies = [
  "gtl-desktop",
  "gtl-infra",
  "gtl-models",
+ "gtl-parser",
  "gtl-wire",
  "tempfile",
 ]

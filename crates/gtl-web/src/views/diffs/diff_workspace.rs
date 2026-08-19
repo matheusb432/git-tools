@@ -20,7 +20,7 @@ use crate::shared::{
 };
 use crate::{entities::diffs::ClientDiffSource, views::diffs::ClientDiffDocument};
 
-mod commits_panel;
+pub(crate) mod commits_panel;
 #[cfg(feature = "desktop")]
 mod desktop;
 #[cfg(feature = "desktop")]

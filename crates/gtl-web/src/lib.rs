@@ -13,6 +13,9 @@ mod test_support;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod views;
 
+#[cfg(any(feature = "artifact", feature = "desktop"))]
+pub use views::diffs::diff_workspace::commits_panel::{CommitsPanel, CommitsPanelProps};
+
 #[cfg(feature = "desktop")]
 pub fn launch_desktop() {
     dioxus::launch(app::App);

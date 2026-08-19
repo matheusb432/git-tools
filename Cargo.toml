@@ -48,9 +48,7 @@ gtl-infra = { path = "crates/gtl-infra" }
 gtl-web-contracts = { path = "crates/gtl-web-contracts" }
 
 anyhow = "1"
-sample_project-client = { path = "../.sample_project-workspace/crates/sample_project-client", features = [
-  "cli",
-] }
+sample_project-client = { version = "0.1.0", features = ["cli"] }
 assert_cmd = "2"
 axum = "0.8"
 base64 = "0.22.1"

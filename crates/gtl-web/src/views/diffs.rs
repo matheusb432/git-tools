@@ -2,7 +2,7 @@ mod client_diff_document;
 #[cfg(feature = "desktop")]
 mod diff_history;
 mod diff_rows;
-mod diff_workspace;
+pub(crate) mod diff_workspace;
 mod file_status_badge;
 mod line_changes;
 
