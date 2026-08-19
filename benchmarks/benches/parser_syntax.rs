@@ -1,8 +1,8 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use gtl_benchmarks::{Benchmark, BenchmarkCase, require};
-use gtl_parser::{DiffParser, bundled_syntax_catalog};
+use gtl_benchmarks::{Benchmark, BenchmarkCase};
+use gtl_parser::{DiffParser, SyntaxLanguage};
 
 const SOURCE_LINE_COUNT: usize = 45_000;
 const HUNK_SOURCE_LINE_COUNT: usize = 90;
@@ -10,12 +10,7 @@ const REPLACEMENT_INTERVAL: usize = 9;
 
 fn rust_syntax(criterion: &mut Criterion) {
     let lines = rust_diff_fixture();
-    let catalog = require(bundled_syntax_catalog(), "loading bundled syntax grammars");
-    let Some(syntax) = catalog.syntax_for_path("src/benchmark.rs") else {
-        eprintln!("benchmark setup failed while resolving the Rust syntax grammar");
-        std::process::exit(1);
-    };
-    let parser = DiffParser::new().with_syntax(Some(syntax));
+    let parser = DiffParser::new().with_syntax(Some(SyntaxLanguage::Rust));
     let parsed = parser.parse(&lines);
     let syntax_token_count = parsed
         .rows()

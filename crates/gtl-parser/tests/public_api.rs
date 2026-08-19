@@ -99,22 +99,39 @@ fn downstream_consumer_can_stream_parser_and_split_batches() {
     ));
 }
 
-#[cfg(feature = "bundled-syntaxes")]
+#[cfg(feature = "syntax")]
 #[test]
-fn downstream_consumer_can_attach_bundled_semantic_tokens() {
-    use gtl_parser::{SemanticTextChange, SyntaxTokenClass, bundled_syntax_catalog};
+fn downstream_consumer_can_select_a_language_and_attach_semantic_tokens() {
+    use gtl_parser::{SemanticTextChange, SyntaxLanguage, SyntaxTokenClass};
 
-    let syntax = bundled_syntax_catalog()
-        .expect("bundled syntax catalog should load")
-        .syntax_for_path("file.rs");
     let parsed = DiffParser::new()
-        .with_syntax(syntax)
+        .with_syntax(Some(SyntaxLanguage::Rust))
         .parse(&lines(&["@@ -0,0 +1 @@", "+let value = 1;"]));
 
     assert!(parsed.rows()[1].semantic_spans().iter().any(|span| {
         span.text(parsed.rows()[1].body()) == "1"
-            && span.syntax_class() == Some(SyntaxTokenClass::Number)
+            && span.syntax_class() == Some(SyntaxTokenClass::Constant)
             && span.change() == SemanticTextChange::Unchanged
     }));
     assert!(parsed.syntax_diagnostics().is_empty());
+}
+
+#[cfg(feature = "syntax")]
+#[test]
+fn downstream_consumer_can_resolve_every_supported_extension() {
+    use gtl_parser::SyntaxLanguage;
+
+    for (path, expected) in [
+        ("source.JS", SyntaxLanguage::JavaScript),
+        ("source.TS", SyntaxLanguage::TypeScript),
+        ("source.PY", SyntaxLanguage::Python),
+        ("source.RS", SyntaxLanguage::Rust),
+        ("source.MD", SyntaxLanguage::Markdown),
+        ("source.HTML", SyntaxLanguage::Html),
+        ("source.YML", SyntaxLanguage::Yaml),
+        ("source.YAML", SyntaxLanguage::Yaml),
+    ] {
+        assert_eq!(SyntaxLanguage::from_path(path), Some(expected));
+    }
+    assert_eq!(SyntaxLanguage::from_path("source.unknown"), None);
 }

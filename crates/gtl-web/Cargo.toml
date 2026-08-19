@@ -59,7 +59,7 @@ desktop = [
   "dioxus/router",
   "dep:js-sys",
   "dep:serde-wasm-bindgen",
-  "gtl-parser/bundled-syntaxes",
+  "gtl-parser/syntax",
 ]
 web = ["dioxus/web"]
 

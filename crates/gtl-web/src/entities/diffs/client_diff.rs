@@ -1,11 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
 use dioxus::prelude::*;
-#[cfg(feature = "desktop")]
-use gtl_parser::bundled_syntax_catalog;
 use gtl_parser::{
     DiffParser, DiffRow, LineNumberDigitWidth, SourceLineNumber, SplitDiffRow, SplitDiffStream,
-    SyntaxCatalog,
+    SyntaxLanguage,
 };
 use gtl_wire::viewer::{
     LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffCursor, ViewerDiffLayout,
@@ -47,21 +45,29 @@ impl ClientDiffRows {
     }
 
     fn append_unified(&mut self, rows: Vec<DiffRow>) {
-        if rows.is_empty() {
-            return;
-        }
         if let Self::Unified(batches) = self {
-            batches.push(Arc::new(rows));
+            append_bounded_batches(batches, rows);
         }
     }
 
     fn append_split(&mut self, rows: Vec<SplitDiffRow>) {
-        if rows.is_empty() {
+        if let Self::Split(batches) = self {
+            append_bounded_batches(batches, rows);
+        }
+    }
+}
+
+fn append_bounded_batches<Row>(batches: &mut Vec<Arc<Vec<Row>>>, rows: Vec<Row>) {
+    let mut rows = rows.into_iter();
+    loop {
+        let batch = rows
+            .by_ref()
+            .take(CLIENT_LINE_BATCH_SIZE)
+            .collect::<Vec<_>>();
+        if batch.is_empty() {
             return;
         }
-        if let Self::Split(batches) = self {
-            batches.push(Arc::new(rows));
-        }
+        batches.push(Arc::new(batch));
     }
 }
 
@@ -299,16 +305,9 @@ impl ClientDiffLoad {
         }
     }
 
-    async fn load_file(
-        self,
-        file_index: usize,
-        file: &ViewerFileSummary,
-        syntax_catalog: Option<&SyntaxCatalog>,
-    ) {
-        let syntax = syntax_catalog.and_then(|catalog| {
-            let path = file.path.to_string_lossy();
-            catalog.syntax_for_path(path.as_ref())
-        });
+    async fn load_file(self, file_index: usize, file: &ViewerFileSummary) {
+        let path = file.path.to_string_lossy();
+        let syntax = SyntaxLanguage::from_path(path.as_ref());
         let mut parser = DiffParser::new().with_syntax(syntax).stream();
         let mut split = (self.identity.render_options.layout == ViewerDiffLayout::Split)
             .then(SplitDiffStream::new);
@@ -357,13 +356,25 @@ impl ClientDiffLoad {
             }
 
             let Some(next) = next else {
-                let trailing_rows = split.map(SplitDiffStream::finish);
-                self.update_file(file_index, |file| {
-                    if let Some(rows) = trailing_rows {
-                        file.rows.append_split(rows);
+                let parsed = parser.finish();
+                let line_number_digits = parsed.line_number_digits();
+                let rows = parsed.into_rows();
+                match split {
+                    Some(mut split) => {
+                        let mut trailing_rows = split.push(rows);
+                        trailing_rows.extend(split.finish());
+                        self.update_file(file_index, |file| {
+                            file.line_number_digits = line_number_digits;
+                            file.rows.append_split(trailing_rows);
+                            file.state = ClientDiffFileState::Complete;
+                        });
                     }
-                    file.state = ClientDiffFileState::Complete;
-                });
+                    None => self.update_file(file_index, |file| {
+                        file.line_number_digits = line_number_digits;
+                        file.rows.append_unified(rows);
+                        file.state = ClientDiffFileState::Complete;
+                    }),
+                }
                 return;
             };
             cursor = next;
@@ -379,12 +390,6 @@ async fn load_workspace(
     identity: ViewerViewIdentity,
     files: Vec<ViewerFileSummary>,
 ) {
-    let syntax_catalog = match source {
-        #[cfg(feature = "desktop")]
-        ClientDiffSource::Desktop => bundled_syntax_catalog().ok(),
-        #[cfg(feature = "artifact")]
-        ClientDiffSource::Artifact => crate::artifact::syntax_catalog(),
-    };
     let load = ClientDiffLoad {
         workspace,
         generation,
@@ -397,8 +402,7 @@ async fn load_workspace(
         if !load.is_current() {
             return;
         }
-        load.load_file(file_index, &file, syntax_catalog.as_ref())
-            .await;
+        load.load_file(file_index, &file).await;
     }
 }
 
@@ -590,5 +594,33 @@ mod tests {
             "//"
         );
         Ok(())
+    }
+
+    #[test]
+    fn parser_output_is_rebatched_to_the_render_limit() {
+        let mut source = vec!["@@ -1,128 +1,128 @@".to_owned()];
+        source.extend((0..128).map(|index| format!(" let value_{index} = {index};")));
+        let parsed = DiffParser::new().parse(&source);
+        let split_rows = parsed.split_rows();
+
+        let mut unified = ClientDiffRows::Unified(Vec::new());
+        unified.append_unified(parsed.into_rows());
+        let unified_lengths = match unified {
+            ClientDiffRows::Unified(unified) => {
+                unified.iter().map(|batch| batch.len()).collect::<Vec<_>>()
+            }
+            ClientDiffRows::Split(_) => Vec::new(),
+        };
+        assert_eq!(unified_lengths, vec![64, 64, 1]);
+
+        let mut split = ClientDiffRows::Split(Vec::new());
+        split.append_split(split_rows);
+        let split_lengths = match split {
+            ClientDiffRows::Split(split) => {
+                split.iter().map(|batch| batch.len()).collect::<Vec<_>>()
+            }
+            ClientDiffRows::Unified(_) => Vec::new(),
+        };
+        assert_eq!(split_lengths, vec![64, 64, 1]);
     }
 }

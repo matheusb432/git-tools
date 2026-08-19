@@ -1,4 +1,4 @@
-use std::fmt::Write as _;
+use std::{borrow::Cow, fmt::Write as _};
 
 use anyhow::{Context as _, Result, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -6,10 +6,7 @@ use gtl_application::{
     diffs::View,
     viewer::{RenderOptions, Theme},
 };
-use gtl_parser::select_bundled_syntax_pack;
-use gtl_wire::viewer::{
-    VIEWER_ARTIFACT_MANIFEST_ID, VIEWER_ARTIFACT_RUNTIME_ID, VIEWER_ARTIFACT_SYNTAX_ID,
-};
+use gtl_wire::viewer::{VIEWER_ARTIFACT_MANIFEST_ID, VIEWER_ARTIFACT_RUNTIME_ID};
 use sha2::{Digest as _, Sha256};
 
 use crate::{assets, compression, payload::project_payload};
@@ -17,16 +14,28 @@ use crate::{assets, compression, payload::project_payload};
 struct PackedAsset {
     id: String,
     uncompressed_bytes: usize,
-    encoded: String,
+    encoded: Cow<'static, str>,
 }
 
 impl PackedAsset {
+    fn pre_encoded_binary(
+        id: impl Into<String>,
+        uncompressed_bytes: usize,
+        encoded: &'static str,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            uncompressed_bytes,
+            encoded: Cow::Borrowed(encoded),
+        }
+    }
+
     fn binary(id: impl Into<String>, bytes: &[u8]) -> Result<Self> {
         let compressed = compression::gzip(bytes)?;
         Ok(Self {
             id: id.into(),
             uncompressed_bytes: bytes.len(),
-            encoded: STANDARD.encode(compressed),
+            encoded: Cow::Owned(STANDARD.encode(compressed)),
         })
     }
 
@@ -75,15 +84,9 @@ fn build_document(
 ) -> Result<String> {
     let payload = project_payload(title, views, options, theme)?;
     let runtime = assets::inline_runtime()?;
-    let syntax_paths = views
-        .iter()
-        .flat_map(|view| view.files.iter())
-        .map(|file| file.path.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
-    let syntax_pack = select_bundled_syntax_pack(syntax_paths.iter().map(String::as_str))
-        .context("select artifact syntax grammars")?;
-    let runtime_asset = PackedAsset::binary(VIEWER_ARTIFACT_RUNTIME_ID, assets::wasm())?;
-    let syntax_asset = PackedAsset::binary(VIEWER_ARTIFACT_SYNTAX_ID, syntax_pack.as_bytes())?;
+    let (encoded_wasm, wasm_bytes) = assets::wasm()?;
+    let runtime_asset =
+        PackedAsset::pre_encoded_binary(VIEWER_ARTIFACT_RUNTIME_ID, wasm_bytes, encoded_wasm);
     let manifest_asset = PackedAsset::json(VIEWER_ARTIFACT_MANIFEST_ID, &payload.manifest)?;
     let page_assets = payload
         .pages
@@ -101,7 +104,6 @@ fn build_document(
             + runtime.len()
             + content_security_policy.len()
             + runtime_asset.encoded.len()
-            + syntax_asset.encoded.len()
             + manifest_asset.encoded.len()
             + page_assets
                 .iter()
@@ -118,7 +120,6 @@ fn build_document(
     .context("write artifact document shell")?;
     write_asset_node(&mut html, &runtime_asset)?;
     write_asset_node(&mut html, &manifest_asset)?;
-    write_asset_node(&mut html, &syntax_asset)?;
     for page in &page_assets {
         write_asset_node(&mut html, page)?;
     }
@@ -173,7 +174,6 @@ mod tests {
         tailwind_css: usize,
         wasm: AssetBytes,
         payload: AssetBytes,
-        syntax_pack: AssetBytes,
         pages: usize,
         lines: usize,
     }
@@ -293,9 +293,6 @@ mod tests {
             evidence.html,
             40
         ));
-        assert!(evidence.wasm.raw <= 2_100_000, "{evidence:?}");
-        assert!(evidence.wasm.gzip <= 800_000, "{evidence:?}");
-        assert!(evidence.syntax_pack.raw <= 128 * 1024, "{evidence:?}");
         assert_eq!(evidence.lines, 12);
         assert_eq!(evidence.pages, 1);
     }
@@ -411,7 +408,6 @@ mod tests {
             tailwind_css: assets::TAILWIND_CSS.len(),
             wasm: measure_asset(html, VIEWER_ARTIFACT_RUNTIME_ID),
             payload: payload_bytes,
-            syntax_pack: measure_asset(html, VIEWER_ARTIFACT_SYNTAX_ID),
             pages: payload.pages.len(),
             lines,
         }

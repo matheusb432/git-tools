@@ -21,6 +21,7 @@ pub(crate) mod setup;
 pub(crate) mod ship;
 pub(crate) mod status_notifier;
 pub(crate) mod test;
+pub(crate) mod wasm_c;
 
 #[derive(Clone, Copy)]
 pub(crate) struct Verb(&'static str);
@@ -30,6 +31,7 @@ impl Verb {
     pub(crate) const BUILD: Self = Self("build");
     pub(crate) const CHECK_DIOXUS_FORMAT: Self = Self("check-dioxus-format");
     pub(crate) const CHECK_STRUCTURE: Self = Self("check-structure");
+    pub(crate) const CHECK_PARSER_WASM: Self = Self("check-parser-wasm");
     pub(crate) const DRIFT_CHECK: Self = Self("drift-check");
     pub(crate) const PRE_COMMIT: Self = Self("pre-commit");
     pub(crate) const GEN_ICON: Self = Self("gen-icon");

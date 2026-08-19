@@ -1,17 +1,21 @@
 use crate::{
-    CharacterCount, LineNumberDigitWidth, SemanticTextSpan, SourceLineNumber, SyntaxToken,
-    UnifiedDiffLineClassifier, UnifiedDiffLineKind, semantic::semantic_text_spans,
+    CharacterCount, LineNumberDigitWidth, SemanticTextSpan, SourceLineNumber, SyntaxHunkByteLimit,
+    SyntaxToken, UnifiedDiffLineClassifier, UnifiedDiffLineKind, semantic::semantic_text_spans,
 };
 #[cfg(feature = "syntax")]
-use crate::{SyntaxDefinition, highlight::DiffSyntaxHighlighter};
+use crate::{SyntaxLanguage, highlight::DiffSyntaxHighlighter};
 
 /// Default source-line character limit for syntax and intraline parsing.
 pub const DEFAULT_MAX_LINE_CHARACTERS: CharacterCount = CharacterCount::new(2000);
+
+/// Default source-byte limit for each side of a syntax-highlighted diff hunk.
+pub const DEFAULT_MAX_SYNTAX_HUNK_BYTES: SyntaxHunkByteLimit = SyntaxHunkByteLimit::new(256 * 1024);
 
 /// Configuration for unified-diff parsing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParseOptions {
     max_line_characters: CharacterCount,
+    max_syntax_hunk_bytes: SyntaxHunkByteLimit,
 }
 
 impl ParseOptions {
@@ -22,12 +26,28 @@ impl ParseOptions {
     pub const fn new(max_line_characters: CharacterCount) -> Self {
         Self {
             max_line_characters,
+            max_syntax_hunk_bytes: DEFAULT_MAX_SYNTAX_HUNK_BYTES,
         }
     }
 
     /// Returns the source-line character limit.
     pub const fn max_line_characters(self) -> CharacterCount {
         self.max_line_characters
+    }
+
+    /// Sets the source-byte limit for each side of a syntax-highlighted hunk.
+    #[must_use]
+    pub const fn with_max_syntax_hunk_bytes(
+        mut self,
+        max_syntax_hunk_bytes: SyntaxHunkByteLimit,
+    ) -> Self {
+        self.max_syntax_hunk_bytes = max_syntax_hunk_bytes;
+        self
+    }
+
+    /// Returns the source-byte limit for each side of a syntax-highlighted hunk.
+    pub const fn max_syntax_hunk_bytes(self) -> SyntaxHunkByteLimit {
+        self.max_syntax_hunk_bytes
     }
 }
 
@@ -116,8 +136,9 @@ pub enum DiffSide {
 
 /// A recoverable syntax-tokenization failure.
 ///
-/// The parser retains the diff row and disables syntax parsing for the affected
-/// side. Consumers may surface or record these diagnostics at their own boundary.
+/// The parser retains every diff row. An oversized hunk skips syntax until the
+/// next hunk, while an engine failure disables syntax for the rest of the file.
+/// Consumers may surface or record these diagnostics at their own boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxDiagnostic {
     side: DiffSide,
@@ -222,7 +243,7 @@ impl ParsedDiffBatch {
 pub struct DiffParser {
     options: ParseOptions,
     #[cfg(feature = "syntax")]
-    syntax: Option<SyntaxDefinition>,
+    syntax: Option<SyntaxLanguage>,
 }
 
 impl DiffParser {
@@ -243,7 +264,7 @@ impl DiffParser {
     /// Selects an optional syntax grammar for semantic tokenization.
     #[cfg(feature = "syntax")]
     #[must_use]
-    pub fn with_syntax(mut self, syntax: Option<SyntaxDefinition>) -> Self {
+    pub const fn with_syntax(mut self, syntax: Option<SyntaxLanguage>) -> Self {
         self.syntax = syntax;
         self
     }
@@ -256,7 +277,9 @@ impl DiffParser {
             line_numbers: LineNumberState::default(),
             line_number_max: SourceLineNumber::default(),
             #[cfg(feature = "syntax")]
-            syntax: self.syntax.as_ref().map(DiffSyntaxHighlighter::new),
+            syntax: self.syntax.map(|language| {
+                DiffSyntaxHighlighter::new(language, self.options.max_syntax_hunk_bytes)
+            }),
         }
     }
 
@@ -264,11 +287,17 @@ impl DiffParser {
     pub fn parse(&self, lines: &[String]) -> ParsedDiff {
         let mut stream = self.stream();
         let batch = stream.push(lines);
+        let finished = stream.finish();
+        let line_number_digits = finished.line_number_digits();
+        let (mut rows, mut syntax_diagnostics) = batch.into_parts();
+        let (finished_rows, finished_diagnostics) = finished.into_parts();
+        rows.extend(finished_rows);
+        syntax_diagnostics.extend(finished_diagnostics);
         ParsedDiff {
-            rows: batch.rows,
-            line_number_digits: batch.line_number_digits,
+            rows,
+            line_number_digits,
             options: self.options,
-            syntax_diagnostics: batch.syntax_diagnostics,
+            syntax_diagnostics,
         }
     }
 }
@@ -286,11 +315,7 @@ pub struct DiffParserStream {
 impl DiffParserStream {
     /// Parses the next source-ordered batch of raw diff lines.
     pub fn push(&mut self, lines: &[String]) -> ParsedDiffBatch {
-        #[allow(
-            unused_mut,
-            reason = "syntax-enabled builds attach tokens after row derivation"
-        )]
-        let mut rows = derive_rows(
+        let rows = derive_rows(
             lines,
             self.options,
             &mut self.line_classifier,
@@ -298,12 +323,16 @@ impl DiffParserStream {
         );
         self.line_number_max = self.line_number_max.max(line_number_max(&rows));
 
-        #[allow(unused_mut)]
-        let mut syntax_diagnostics = Vec::new();
         #[cfg(feature = "syntax")]
-        if let Some(syntax) = &mut self.syntax {
-            syntax_diagnostics = syntax.attach(&mut rows);
-        }
+        let (rows, syntax_diagnostics) = match self.syntax.as_mut() {
+            Some(syntax) => {
+                let output = syntax.push(rows);
+                (output.rows, output.diagnostics)
+            }
+            None => (rows, Vec::new()),
+        };
+        #[cfg(not(feature = "syntax"))]
+        let syntax_diagnostics = Vec::new();
 
         ParsedDiffBatch {
             rows,
@@ -320,6 +349,27 @@ impl DiffParserStream {
     /// Returns the options used by this stream.
     pub const fn options(&self) -> ParseOptions {
         self.options
+    }
+
+    /// Consumes the stream and emits its final buffered syntax hunk.
+    pub fn finish(self) -> ParsedDiffBatch {
+        let line_number_digits = self.line_number_digits();
+        #[cfg(feature = "syntax")]
+        let (rows, syntax_diagnostics) = self.syntax.map_or_else(
+            || (Vec::new(), Vec::new()),
+            |syntax| {
+                let output = syntax.finish();
+                (output.rows, output.diagnostics)
+            },
+        );
+        #[cfg(not(feature = "syntax"))]
+        let (rows, syntax_diagnostics) = (Vec::new(), Vec::new());
+
+        ParsedDiffBatch {
+            rows,
+            line_number_digits,
+            syntax_diagnostics,
+        }
     }
 }
 

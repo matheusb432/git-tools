@@ -7,16 +7,30 @@ publish.workspace = true
 
 [features]
 default = []
-syntax = ["dep:syntect", "dep:thiserror"]
-bundled-syntaxes = ["syntax", "dep:bincode", "dep:serde"]
+syntax = [
+  "dep:tree-sitter",
+  "dep:tree-sitter-highlight",
+  "dep:tree-sitter-html",
+  "dep:tree-sitter-javascript",
+  "dep:tree-sitter-md",
+  "dep:tree-sitter-python",
+  "dep:tree-sitter-rust",
+  "dep:tree-sitter-typescript",
+  "dep:tree-sitter-yaml",
+]
 
 [dependencies]
-bincode = { version = "1.3.3", optional = true }
 nutype.workspace = true
-serde = { workspace = true, optional = true }
 similar.workspace = true
-syntect = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
+tree-sitter = { workspace = true, optional = true }
+tree-sitter-highlight = { workspace = true, optional = true }
+tree-sitter-html = { workspace = true, optional = true }
+tree-sitter-javascript = { workspace = true, optional = true }
+tree-sitter-md = { workspace = true, optional = true }
+tree-sitter-python = { workspace = true, optional = true }
+tree-sitter-rust = { workspace = true, optional = true }
+tree-sitter-typescript = { workspace = true, optional = true }
+tree-sitter-yaml = { workspace = true, optional = true }
 
 [lints]
 workspace = true

@@ -96,11 +96,6 @@ shlex = "2.0.1"
 sha2 = "0.11.0"
 similar = { version = "3.1.1", default-features = false, features = ["text"] }
 strum = { version = "0.28.0", default-features = false, features = ["derive"] }
-syntect = { version = "5.3.0", default-features = false, features = [
-  "parsing",
-  "regex-fancy",
-  "dump-load",
-] }
 tauri = "2"
 tauri-build = "2"
 tauri-plugin-single-instance = "2"
@@ -116,6 +111,15 @@ toml_edit = "0.25.12"
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tree-sitter = "0.26.12"
+tree-sitter-highlight = "0.26.12"
+tree-sitter-html = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-md = "0.5.3"
+tree-sitter-python = "0.25.0"
+tree-sitter-rust = "0.24.2"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-yaml = "0.7.2"
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2.5.0"
 x11-dl = "2.21.0"

@@ -7,6 +7,7 @@ mod task;
 mod verbs;
 
 fn main() {
+    verbs::wasm_c::exit_if_adapter();
     if let Err(e) = run(cli::Cli::parse().command) {
         eprintln!("Error: {e:#}");
         std::process::exit(1);
@@ -39,6 +40,7 @@ fn run(command: cli::Command) -> Result<()> {
             verbs::check_structure::run(None);
             Ok(())
         }
+        cli::Command::CheckParserWasm => verbs::wasm_c::check_parser(&verbs::repository_root()),
         cli::Command::GenIcon => verbs::icon::run(),
         cli::Command::Ship { smoke, force } => verbs::ship::run(smoke, force),
     }

@@ -3,13 +3,11 @@ use wasm_bindgen::{JsCast as _, JsValue, prelude::wasm_bindgen};
 use wasm_bindgen_futures::JsFuture;
 
 pub(crate) const MANIFEST_MAX_BYTES: usize = 16 * 1024 * 1024;
-pub(crate) const SYNTAX_PACK_MAX_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const PAGE_MAX_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ArtifactAssetKind {
     Manifest,
-    SyntaxCatalog,
     DiffPage,
 }
 
@@ -34,9 +32,6 @@ impl ArtifactAssetError {
                 ArtifactAssetKind::Manifest => {
                     "This artifact does not contain its compressed diff manifest."
                 }
-                ArtifactAssetKind::SyntaxCatalog => {
-                    "This artifact does not contain its compressed syntax catalog."
-                }
                 ArtifactAssetKind::DiffPage => {
                     "This artifact does not contain the requested compressed diff page."
                 }
@@ -48,9 +43,6 @@ impl ArtifactAssetError {
             | Self::InvalidResult => match kind {
                 ArtifactAssetKind::Manifest => {
                     "This artifact contains a corrupt compressed diff manifest."
-                }
-                ArtifactAssetKind::SyntaxCatalog => {
-                    "This artifact contains a corrupt compressed syntax catalog."
                 }
                 ArtifactAssetKind::DiffPage => {
                     "This artifact contains a corrupt compressed diff page."

@@ -19,6 +19,13 @@ pub struct SourceLineNumber(u32);
 )]
 pub struct CharacterCount(usize);
 
+/// A byte limit for reconstructed source on one side of a diff hunk.
+#[nutype(
+    const_fn,
+    derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)
+)]
+pub struct SyntaxHunkByteLimit(usize);
+
 /// A character offset measured in Unicode scalar values from the start of source text.
 #[nutype(
     const_fn,
@@ -71,6 +78,7 @@ mod tests {
     fn coordinate_roles_preserve_numeric_values() {
         assert_eq!(SourceLineNumber::new(42).into_inner(), 42);
         assert_eq!(CharacterCount::new(2_001).into_inner(), 2_001);
+        assert_eq!(SyntaxHunkByteLimit::new(262_144).into_inner(), 262_144);
         assert_eq!(CharacterOffset::new(17).into_inner(), 17);
     }
 

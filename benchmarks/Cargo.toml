@@ -32,7 +32,7 @@ gtl-wire.workspace = true
 gtl-desktop = { workspace = true, features = ["benchmark-support"] }
 gtl-infra.workspace = true
 gtl-artifacts.workspace = true
-gtl-parser = { workspace = true, features = ["bundled-syntaxes"] }
+gtl-parser = { workspace = true, features = ["syntax"] }
 tempfile.workspace = true
 
 [lints]

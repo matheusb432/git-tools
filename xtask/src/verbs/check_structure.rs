@@ -186,7 +186,7 @@ mod tests {
     fn parser_policy_accepts_external_dependencies() {
         let workspace_packages = BTreeSet::from(["gtl-parser".to_string()]);
 
-        for dependency in ["similar", "syntect", "thiserror"] {
+        for dependency in ["similar", "tree-sitter", "tree-sitter-highlight"] {
             assert!(!dependency_is_forbidden(
                 parser_policy(),
                 dependency,

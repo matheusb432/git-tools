@@ -96,6 +96,9 @@ pub enum Command {
     /// Reject forbidden outward Cargo dependency edges.
     #[command(name = Verb::CHECK_STRUCTURE.as_str())]
     CheckStructure,
+    /// Compile every parser feature for the browser target with the managed C toolchain.
+    #[command(name = Verb::CHECK_PARSER_WASM.as_str(), hide = true)]
+    CheckParserWasm,
     /// Render the gtl-viewer icon assets (`crates/gtl-desktop/icons/icon.{png,ico}`) from code.
     #[command(name = Verb::GEN_ICON.as_str())]
     GenIcon,

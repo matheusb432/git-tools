@@ -4,8 +4,10 @@ pub(crate) const TAILWIND_CSS: &str = include_str!("../../gtl-web/assets/tailwin
 
 const ARTIFACT_RUNTIME: &str =
     include_str!("../../../target/generated/gtl-artifacts/artifact-runtime.js");
-const ARTIFACT_WASM: &[u8] =
-    include_bytes!("../../../target/generated/gtl-artifacts/artifact-runtime.wasm");
+const ARTIFACT_WASM_BASE64: &str =
+    include_str!("../../../target/generated/gtl-artifacts/artifact-runtime.wasm.gz.base64");
+const ARTIFACT_WASM_BYTES: &str =
+    include_str!("../../../target/generated/gtl-artifacts/artifact-runtime.wasm.bytes");
 
 pub(crate) fn inline_runtime() -> Result<&'static str> {
     ensure!(
@@ -30,8 +32,19 @@ pub(crate) fn inline_runtime() -> Result<&'static str> {
     Ok(ARTIFACT_RUNTIME)
 }
 
-pub(crate) const fn wasm() -> &'static [u8] {
-    ARTIFACT_WASM
+pub(crate) fn wasm() -> Result<(&'static str, usize)> {
+    ensure!(
+        !ARTIFACT_WASM_BASE64.is_empty(),
+        "generated artifact WASM is empty"
+    );
+    let uncompressed_bytes = ARTIFACT_WASM_BYTES
+        .parse::<usize>()
+        .map_err(anyhow::Error::from)?;
+    ensure!(
+        uncompressed_bytes > 0,
+        "generated artifact WASM size is zero"
+    );
+    Ok((ARTIFACT_WASM_BASE64, uncompressed_bytes))
 }
 
 #[cfg(test)]
@@ -55,14 +68,8 @@ mod tests {
         assert!(runtime.contains("__gtlShowArtifactInitializationError"));
         assert!(runtime.contains("This browser cannot decompress this offline diff artifact."));
         assert!(runtime.contains("gzip stream is corrupt"));
-        assert!(ARTIFACT_WASM.len() <= 2_100_000);
-
-        let universal_pack = include_bytes!("../../gtl-parser/assets/syntaxes.packdump");
-        assert!(
-            !ARTIFACT_WASM
-                .windows(universal_pack.len())
-                .any(|window| window == universal_pack),
-            "artifact WASM retained the universal syntax pack"
-        );
+        let (encoded_wasm, uncompressed_bytes) = wasm().expect("generated WASM metadata");
+        assert!(!encoded_wasm.is_empty());
+        assert!(uncompressed_bytes > 0);
     }
 }

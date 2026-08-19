@@ -12,8 +12,10 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(unix)]
 use command_group::{Signal, UnixChildExt};
+use flate2::{Compression, GzBuilder};
 use sha2::{Digest, Sha256};
 
 use super::{cargo_target_directory, lock_web_assets, repository_root};
@@ -249,7 +251,7 @@ pub(crate) fn serve(arguments: &[String]) -> Result<()> {
         &watch_arguments(TAILWIND_ARGUMENTS),
         &root,
     )?;
-    let step = development_serve_step(&root, arguments);
+    let step = super::wasm_c::configure_step(&root, development_serve_step(&root, arguments))?;
     run_development_server(&step, &root)
 }
 
@@ -454,15 +456,14 @@ pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
     build_artifact_assets_unlocked(root)?;
     let target = cargo_target_directory(root)?;
     clean_desktop_release_outputs(root, &target)?;
-    process::run_step(
-        &Step::new(
-            "dioxus-web-release",
-            "dx",
-            DESKTOP_BUNDLE_ARGUMENTS.iter().copied(),
-        )
-        .with_environment("RUSTC_WRAPPER", "")
-        .with_current_directory(root),
-    )?;
+    let step = Step::new(
+        "dioxus-web-release",
+        "dx",
+        DESKTOP_BUNDLE_ARGUMENTS.iter().copied(),
+    )
+    .with_environment("RUSTC_WRAPPER", "")
+    .with_current_directory(root);
+    process::run_step(&super::wasm_c::configure_step(root, step)?)?;
     let inputs_after = release_input_fingerprint(root)?;
     ensure!(
         inputs_after == inputs_before,
@@ -528,15 +529,14 @@ pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {
 fn build_artifact_runtime_unlocked(root: &Path, target: &Path) -> Result<()> {
     verify_artifact_release_profile(root)?;
     clean_artifact_release_output(target)?;
-    process::run_step(
-        &Step::new(
-            "dioxus-artifact-release",
-            "dx",
-            ARTIFACT_BUILD_ARGUMENTS.iter().copied(),
-        )
-        .with_environment("RUSTC_WRAPPER", "")
-        .with_current_directory(root),
-    )?;
+    let step = Step::new(
+        "dioxus-artifact-release",
+        "dx",
+        ARTIFACT_BUILD_ARGUMENTS.iter().copied(),
+    )
+    .with_environment("RUSTC_WRAPPER", "")
+    .with_current_directory(root);
+    process::run_step(&super::wasm_c::configure_step(root, step)?)?;
 
     let asset_directory = target
         .join(ARTIFACT_INTERNAL_RELEASE_DIRECTORY)
@@ -563,6 +563,7 @@ fn build_artifact_runtime_unlocked(root: &Path, target: &Path) -> Result<()> {
 }
 
 fn replace_artifact_runtime_cache(root: &Path, runtime: &str, wasm: &[u8]) -> Result<()> {
+    let packed_wasm = pack_artifact_wasm(wasm)?;
     let output_directory = root.join(ARTIFACT_RUNTIME_CACHE_DIRECTORY);
     let output_parent = output_directory
         .parent()
@@ -578,8 +579,18 @@ fn replace_artifact_runtime_cache(root: &Path, runtime: &str, wasm: &[u8]) -> Re
         runtime,
     )
     .context("write staged artifact runtime JavaScript")?;
-    fs::write(staging_directory.path().join("artifact-runtime.wasm"), wasm)
-        .context("write staged artifact runtime WASM")?;
+    fs::write(
+        staging_directory
+            .path()
+            .join("artifact-runtime.wasm.gz.base64"),
+        packed_wasm.encoded,
+    )
+    .context("write staged compressed artifact runtime WASM")?;
+    fs::write(
+        staging_directory.path().join("artifact-runtime.wasm.bytes"),
+        packed_wasm.uncompressed_bytes.to_string(),
+    )
+    .context("write staged artifact runtime WASM size")?;
 
     if output_directory.exists() {
         fs::remove_dir_all(&output_directory)
@@ -587,6 +598,28 @@ fn replace_artifact_runtime_cache(root: &Path, runtime: &str, wasm: &[u8]) -> Re
     }
     fs::rename(staging_directory.keep(), &output_directory)
         .with_context(|| format!("publish {}", output_directory.display()))
+}
+
+struct PackedArtifactWasm {
+    uncompressed_bytes: usize,
+    encoded: String,
+}
+
+fn pack_artifact_wasm(wasm: &[u8]) -> Result<PackedArtifactWasm> {
+    let mut encoder = GzBuilder::new()
+        .mtime(0)
+        .operating_system(255)
+        .write(Vec::new(), Compression::best());
+    encoder
+        .write_all(wasm)
+        .context("compress artifact runtime WASM")?;
+    let compressed = encoder
+        .finish()
+        .context("finish artifact runtime WASM compression")?;
+    Ok(PackedArtifactWasm {
+        uncompressed_bytes: wasm.len(),
+        encoded: STANDARD.encode(compressed),
+    })
 }
 
 fn find_generated_asset(files: &[PathBuf], prefix: &str, extension: &str) -> Result<PathBuf> {
@@ -1187,6 +1220,24 @@ mod tests {
                 .windows(2)
                 .any(|pair| pair == ["--features", "artifact"])
         );
+    }
+
+    #[test]
+    fn artifact_wasm_pack_is_deterministic_and_round_trips() {
+        let wasm = b"deterministic artifact runtime";
+        let first = pack_artifact_wasm(wasm).expect("pack artifact WASM");
+        let second = pack_artifact_wasm(wasm).expect("pack artifact WASM again");
+        let compressed = STANDARD
+            .decode(&first.encoded)
+            .expect("decode packed artifact WASM");
+        let mut decoded = Vec::new();
+        flate2::read::GzDecoder::new(compressed.as_slice())
+            .read_to_end(&mut decoded)
+            .expect("decompress packed artifact WASM");
+
+        assert_eq!(first.uncompressed_bytes, wasm.len());
+        assert_eq!(first.encoded, second.encoded);
+        assert_eq!(decoded, wasm);
     }
 
     #[test]

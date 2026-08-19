@@ -1,15 +1,8 @@
-use std::cell::RefCell;
-
 use dioxus::prelude::*;
-use gtl_parser::SyntaxCatalog;
-use gtl_wire::viewer::{
-    VIEWER_ARTIFACT_MANIFEST_ID, VIEWER_ARTIFACT_SYNTAX_ID, ViewerArtifactManifest,
-};
+use gtl_wire::viewer::{VIEWER_ARTIFACT_MANIFEST_ID, ViewerArtifactManifest};
 
 use crate::{
-    artifact_asset::{
-        self, ArtifactAssetError, ArtifactAssetKind, MANIFEST_MAX_BYTES, SYNTAX_PACK_MAX_BYTES,
-    },
+    artifact_asset::{self, ArtifactAssetError, ArtifactAssetKind, MANIFEST_MAX_BYTES},
     entities::diffs::theme_value,
     shared::{
         browser,
@@ -18,16 +11,10 @@ use crate::{
     views::diffs::ArtifactDiffWorkspace,
 };
 
-thread_local! {
-    static ARTIFACT_SYNTAX_CATALOG: RefCell<Option<SyntaxCatalog>> = const { RefCell::new(None) };
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArtifactStartupError {
     ManifestAsset(ArtifactAssetError),
     InvalidManifest,
-    SyntaxAsset(ArtifactAssetError),
-    InvalidSyntaxCatalog,
 }
 
 impl ArtifactStartupError {
@@ -35,8 +22,6 @@ impl ArtifactStartupError {
         match self {
             Self::ManifestAsset(error) => error.message(ArtifactAssetKind::Manifest),
             Self::InvalidManifest => "This artifact contains an invalid diff manifest.",
-            Self::SyntaxAsset(error) => error.message(ArtifactAssetKind::SyntaxCatalog),
-            Self::InvalidSyntaxCatalog => "This artifact contains an invalid syntax catalog.",
         }
     }
 }
@@ -119,17 +104,5 @@ async fn load_startup() -> Result<ViewerArtifactManifest, ArtifactStartupError> 
     let manifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|_| ArtifactStartupError::InvalidManifest)?;
     artifact_asset::remove(VIEWER_ARTIFACT_MANIFEST_ID);
-
-    let syntax_bytes = artifact_asset::load(VIEWER_ARTIFACT_SYNTAX_ID, SYNTAX_PACK_MAX_BYTES)
-        .await
-        .map_err(ArtifactStartupError::SyntaxAsset)?;
-    let syntax_catalog = SyntaxCatalog::from_uncompressed_pack(&syntax_bytes)
-        .map_err(|_| ArtifactStartupError::InvalidSyntaxCatalog)?;
-    artifact_asset::remove(VIEWER_ARTIFACT_SYNTAX_ID);
-    ARTIFACT_SYNTAX_CATALOG.with(|catalog| catalog.replace(Some(syntax_catalog)));
     Ok(manifest)
-}
-
-pub(crate) fn syntax_catalog() -> Option<SyntaxCatalog> {
-    ARTIFACT_SYNTAX_CATALOG.with(|catalog| catalog.borrow().clone())
 }

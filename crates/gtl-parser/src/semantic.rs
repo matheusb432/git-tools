@@ -109,18 +109,20 @@ pub(crate) fn semantic_text_spans(
 
 #[cfg(test)]
 mod tests {
-    use crate::{DiffParser, SplitDiffRow, bundled_syntax_catalog};
+    #[cfg(feature = "syntax")]
+    use crate::SyntaxLanguage;
+    use crate::{DiffParser, SplitDiffRow};
 
+    #[cfg(feature = "syntax")]
     #[test]
     fn parser_owned_spans_flatten_syntax_and_intraline_boundaries() {
-        let syntax = bundled_syntax_catalog()
-            .expect("bundled syntax catalog")
-            .syntax_for_path("sample.rs");
-        let parsed = DiffParser::new().with_syntax(syntax).parse(&[
-            "@@ -1 +1 @@".to_owned(),
-            "-let value = 1;".to_owned(),
-            "+let value = 2;".to_owned(),
-        ]);
+        let parsed = DiffParser::new()
+            .with_syntax(Some(SyntaxLanguage::Rust))
+            .parse(&[
+                "@@ -1 +1 @@".to_owned(),
+                "-let value = 1;".to_owned(),
+                "+let value = 2;".to_owned(),
+            ]);
         let SplitDiffRow::Pair { old: Some(old), .. } = &parsed.split_rows()[1] else {
             panic!("expected a paired changed row");
         };
@@ -138,16 +140,10 @@ mod tests {
                     Some(crate::SyntaxTokenClass::Keyword),
                     super::SemanticTextChange::Unchanged,
                 ),
-                (" value ", None, super::SemanticTextChange::Unchanged),
-                (
-                    "=",
-                    Some(crate::SyntaxTokenClass::Operator),
-                    super::SemanticTextChange::Unchanged,
-                ),
-                (" ", None, super::SemanticTextChange::Unchanged),
+                (" value = ", None, super::SemanticTextChange::Unchanged),
                 (
                     "1",
-                    Some(crate::SyntaxTokenClass::Number),
+                    Some(crate::SyntaxTokenClass::Constant),
                     super::SemanticTextChange::Changed,
                 ),
                 (";", None, super::SemanticTextChange::Unchanged),

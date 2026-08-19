@@ -92,7 +92,7 @@ fmt-check *args:
 lint:
     cargo run --quiet -p xtask -- check-structure
     cargo check --locked -p gtl-parser --no-default-features --target wasm32-unknown-unknown
-    cargo check --locked -p gtl-parser --all-features --all-targets --target wasm32-unknown-unknown
+    cargo run --quiet -p xtask -- check-parser-wasm
     cargo clippy --workspace --all-targets
 
 # Complete read-only quality gate: formatting, lint, and configured ast-grep rules.
@@ -117,9 +117,10 @@ doctor:
     @mise ls --local --missing --locked --no-header
 
 # Cross-build all three Win11 exes; runs `just test --all` first unless -f/--force. --smoke selects a debug linkage build; use `--smoke --force` for the fast smoke path.
-[group('windows')]
-ship *args:
-    cargo run --quiet -p xtask -- ship {{ args }}
+# // uncomment to test VM
+# [group('windows')]
+# ship *args:
+#     cargo run --quiet -p xtask -- ship {{ args }}
 
 # Configure this clone, build, and install git-tools.
 [group('setup')]
