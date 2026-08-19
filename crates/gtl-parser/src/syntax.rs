@@ -1,4 +1,4 @@
-use std::{path::Path, sync::LazyLock};
+use std::{cell::RefCell, path::Path, sync::OnceLock};
 
 use tree_sitter::Language;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
@@ -68,13 +68,23 @@ impl SideHighlighter {
             return Ok(Vec::new());
         }
 
-        let configurations = syntax_configurations()?;
-        let configuration = configurations.for_language(language);
+        let configurations = syntax_configurations();
+        let configuration = configurations.for_language(language)?;
+        let injection_error = RefCell::new(None);
         let events = self
             .highlighter
-            .highlight(configuration, source.as_bytes(), None, |injection| {
-                configurations.for_injection(injection)
-            })
+            .highlight(
+                configuration,
+                source.as_bytes(),
+                None,
+                |injection| match configurations.for_injection(injection) {
+                    Ok(configuration) => configuration,
+                    Err(error) => {
+                        injection_error.borrow_mut().get_or_insert(error);
+                        None
+                    }
+                },
+            )
             .map_err(|error| error.to_string())?;
         let mut classes = Vec::new();
         let mut tokens = Vec::new();
@@ -103,6 +113,9 @@ impl SideHighlighter {
         if !classes.is_empty() {
             return Err("highlight event stream ended with open captures".to_owned());
         }
+        if let Some(error) = injection_error.into_inner() {
+            return Err(error);
+        }
         Ok(tokens)
     }
 }
@@ -123,111 +136,148 @@ fn push_byte_token(
 }
 
 struct SyntaxConfigurations {
-    javascript: HighlightConfiguration,
-    typescript: HighlightConfiguration,
-    python: HighlightConfiguration,
-    rust: HighlightConfiguration,
-    markdown: HighlightConfiguration,
-    markdown_inline: HighlightConfiguration,
-    html: HighlightConfiguration,
-    yaml: HighlightConfiguration,
+    javascript: OnceLock<Result<HighlightConfiguration, String>>,
+    typescript: OnceLock<Result<HighlightConfiguration, String>>,
+    python: OnceLock<Result<HighlightConfiguration, String>>,
+    rust: OnceLock<Result<HighlightConfiguration, String>>,
+    markdown: OnceLock<Result<HighlightConfiguration, String>>,
+    markdown_inline: OnceLock<Result<HighlightConfiguration, String>>,
+    html: OnceLock<Result<HighlightConfiguration, String>>,
+    yaml: OnceLock<Result<HighlightConfiguration, String>>,
 }
 
 impl SyntaxConfigurations {
-    fn new() -> Result<Self, String> {
-        Ok(Self {
-            javascript: configuration(
-                tree_sitter_javascript::LANGUAGE.into(),
-                "javascript",
-                tree_sitter_javascript::HIGHLIGHT_QUERY,
-                tree_sitter_javascript::INJECTIONS_QUERY,
-                tree_sitter_javascript::LOCALS_QUERY,
-            )?,
-            typescript: configuration(
-                tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-                "typescript",
-                tree_sitter_typescript::HIGHLIGHTS_QUERY,
-                "",
-                tree_sitter_typescript::LOCALS_QUERY,
-            )?,
-            python: configuration(
-                tree_sitter_python::LANGUAGE.into(),
-                "python",
-                tree_sitter_python::HIGHLIGHTS_QUERY,
-                "",
-                "",
-            )?,
-            rust: configuration(
-                tree_sitter_rust::LANGUAGE.into(),
-                "rust",
-                tree_sitter_rust::HIGHLIGHTS_QUERY,
-                tree_sitter_rust::INJECTIONS_QUERY,
-                "",
-            )?,
-            markdown: configuration(
-                tree_sitter_md::LANGUAGE.into(),
-                "markdown",
-                tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
-                tree_sitter_md::INJECTION_QUERY_BLOCK,
-                "",
-            )?,
-            markdown_inline: configuration(
-                tree_sitter_md::INLINE_LANGUAGE.into(),
-                "markdown_inline",
-                tree_sitter_md::HIGHLIGHT_QUERY_INLINE,
-                tree_sitter_md::INJECTION_QUERY_INLINE,
-                "",
-            )?,
-            html: configuration(
-                tree_sitter_html::LANGUAGE.into(),
-                "html",
-                tree_sitter_html::HIGHLIGHTS_QUERY,
-                tree_sitter_html::INJECTIONS_QUERY,
-                "",
-            )?,
-            yaml: configuration(
-                tree_sitter_yaml::LANGUAGE.into(),
-                "yaml",
-                tree_sitter_yaml::HIGHLIGHTS_QUERY,
-                "",
-                "",
-            )?,
-        })
-    }
-
-    const fn for_language(&self, language: SyntaxLanguage) -> &HighlightConfiguration {
-        match language {
-            SyntaxLanguage::JavaScript => &self.javascript,
-            SyntaxLanguage::TypeScript => &self.typescript,
-            SyntaxLanguage::Python => &self.python,
-            SyntaxLanguage::Rust => &self.rust,
-            SyntaxLanguage::Markdown => &self.markdown,
-            SyntaxLanguage::Html => &self.html,
-            SyntaxLanguage::Yaml => &self.yaml,
+    const fn new() -> Self {
+        Self {
+            javascript: OnceLock::new(),
+            typescript: OnceLock::new(),
+            python: OnceLock::new(),
+            rust: OnceLock::new(),
+            markdown: OnceLock::new(),
+            markdown_inline: OnceLock::new(),
+            html: OnceLock::new(),
+            yaml: OnceLock::new(),
         }
     }
 
-    fn for_injection(&self, name: &str) -> Option<&HighlightConfiguration> {
+    fn for_language(&self, language: SyntaxLanguage) -> Result<&HighlightConfiguration, String> {
+        let configuration = match language {
+            SyntaxLanguage::JavaScript => self.javascript.get_or_init(javascript_configuration),
+            SyntaxLanguage::TypeScript => self.typescript.get_or_init(typescript_configuration),
+            SyntaxLanguage::Python => self.python.get_or_init(python_configuration),
+            SyntaxLanguage::Rust => self.rust.get_or_init(rust_configuration),
+            SyntaxLanguage::Markdown => self.markdown.get_or_init(markdown_configuration),
+            SyntaxLanguage::Html => self.html.get_or_init(html_configuration),
+            SyntaxLanguage::Yaml => self.yaml.get_or_init(yaml_configuration),
+        };
+        configuration.as_ref().map_err(Clone::clone)
+    }
+
+    fn for_injection(&self, name: &str) -> Result<Option<&HighlightConfiguration>, String> {
         if name.eq_ignore_ascii_case("javascript") || name.eq_ignore_ascii_case("js") {
-            Some(&self.javascript)
+            self.for_language(SyntaxLanguage::JavaScript).map(Some)
         } else if name.eq_ignore_ascii_case("typescript") || name.eq_ignore_ascii_case("ts") {
-            Some(&self.typescript)
+            self.for_language(SyntaxLanguage::TypeScript).map(Some)
         } else if name.eq_ignore_ascii_case("python") || name.eq_ignore_ascii_case("py") {
-            Some(&self.python)
+            self.for_language(SyntaxLanguage::Python).map(Some)
         } else if name.eq_ignore_ascii_case("rust") || name.eq_ignore_ascii_case("rs") {
-            Some(&self.rust)
+            self.for_language(SyntaxLanguage::Rust).map(Some)
         } else if name.eq_ignore_ascii_case("markdown") || name.eq_ignore_ascii_case("md") {
-            Some(&self.markdown)
+            self.for_language(SyntaxLanguage::Markdown).map(Some)
         } else if name.eq_ignore_ascii_case("markdown_inline") {
-            Some(&self.markdown_inline)
+            self.markdown_inline
+                .get_or_init(markdown_inline_configuration)
+                .as_ref()
+                .map(Some)
+                .map_err(Clone::clone)
         } else if name.eq_ignore_ascii_case("html") {
-            Some(&self.html)
+            self.for_language(SyntaxLanguage::Html).map(Some)
         } else if name.eq_ignore_ascii_case("yaml") || name.eq_ignore_ascii_case("yml") {
-            Some(&self.yaml)
+            self.for_language(SyntaxLanguage::Yaml).map(Some)
         } else {
-            None
+            Ok(None)
         }
     }
+}
+
+fn javascript_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_javascript::LANGUAGE.into(),
+        "javascript",
+        tree_sitter_javascript::HIGHLIGHT_QUERY,
+        tree_sitter_javascript::INJECTIONS_QUERY,
+        tree_sitter_javascript::LOCALS_QUERY,
+    )
+}
+
+fn typescript_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        "typescript",
+        tree_sitter_typescript::HIGHLIGHTS_QUERY,
+        "",
+        tree_sitter_typescript::LOCALS_QUERY,
+    )
+}
+
+fn python_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_python::LANGUAGE.into(),
+        "python",
+        tree_sitter_python::HIGHLIGHTS_QUERY,
+        "",
+        "",
+    )
+}
+
+fn rust_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_rust::LANGUAGE.into(),
+        "rust",
+        tree_sitter_rust::HIGHLIGHTS_QUERY,
+        tree_sitter_rust::INJECTIONS_QUERY,
+        "",
+    )
+}
+
+fn markdown_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_md::LANGUAGE.into(),
+        "markdown",
+        tree_sitter_md::HIGHLIGHT_QUERY_BLOCK,
+        tree_sitter_md::INJECTION_QUERY_BLOCK,
+        "",
+    )
+}
+
+fn markdown_inline_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_md::INLINE_LANGUAGE.into(),
+        "markdown_inline",
+        tree_sitter_md::HIGHLIGHT_QUERY_INLINE,
+        tree_sitter_md::INJECTION_QUERY_INLINE,
+        "",
+    )
+}
+
+fn html_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_html::LANGUAGE.into(),
+        "html",
+        tree_sitter_html::HIGHLIGHTS_QUERY,
+        tree_sitter_html::INJECTIONS_QUERY,
+        "",
+    )
+}
+
+fn yaml_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_yaml::LANGUAGE.into(),
+        "yaml",
+        tree_sitter_yaml::HIGHLIGHTS_QUERY,
+        "",
+        "",
+    )
 }
 
 fn configuration(
@@ -250,10 +300,9 @@ fn configuration(
     Ok(configuration)
 }
 
-fn syntax_configurations() -> Result<&'static SyntaxConfigurations, String> {
-    static CONFIGURATIONS: LazyLock<Result<SyntaxConfigurations, String>> =
-        LazyLock::new(SyntaxConfigurations::new);
-    CONFIGURATIONS.as_ref().map_err(Clone::clone)
+fn syntax_configurations() -> &'static SyntaxConfigurations {
+    static CONFIGURATIONS: SyntaxConfigurations = SyntaxConfigurations::new();
+    &CONFIGURATIONS
 }
 
 const HIGHLIGHT_CLASSES: [(&str, SyntaxTokenClass); 25] = [
@@ -327,5 +376,43 @@ mod tests {
                 .expect("upstream query should highlight the fixture");
             assert!(!tokens.is_empty(), "no tokens for {language:?}");
         }
+    }
+
+    #[test]
+    fn configuration_cache_initializes_only_the_requested_language() {
+        let configurations = SyntaxConfigurations::new();
+
+        assert!(configurations.rust.get().is_none());
+        configurations
+            .for_language(SyntaxLanguage::Rust)
+            .expect("Rust highlight query should compile");
+
+        assert!(configurations.rust.get().is_some());
+        assert!(configurations.javascript.get().is_none());
+        assert!(configurations.typescript.get().is_none());
+        assert!(configurations.python.get().is_none());
+        assert!(configurations.markdown.get().is_none());
+        assert!(configurations.markdown_inline.get().is_none());
+        assert!(configurations.html.get().is_none());
+        assert!(configurations.yaml.get().is_none());
+    }
+
+    #[test]
+    fn markdown_inline_configuration_waits_for_an_injection() {
+        let configurations = SyntaxConfigurations::new();
+
+        configurations
+            .for_language(SyntaxLanguage::Markdown)
+            .expect("Markdown highlight query should compile");
+        assert!(configurations.markdown.get().is_some());
+        assert!(configurations.markdown_inline.get().is_none());
+
+        assert!(
+            configurations
+                .for_injection("markdown_inline")
+                .expect("Markdown inline highlight query should compile")
+                .is_some()
+        );
+        assert!(configurations.markdown_inline.get().is_some());
     }
 }
