@@ -8,6 +8,7 @@ use anyhow::{Context, Result, bail};
 use crate::cli::InstallTarget;
 
 mod linux_desktop;
+mod linux_server;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Action {
@@ -213,6 +214,9 @@ fn install_cli(repo_path: &Path, bindir: &Path) -> Result<()> {
         "gtl-server {server_action} -> {}",
         bindir.join(server_bin_name()).display()
     );
+    if let Some(path) = linux_server::install(&bindir.join(server_bin_name()))? {
+        println!("gtl-server user service -> {}", path.display());
+    }
     Ok(())
 }
 
@@ -237,6 +241,9 @@ fn install_viewer(repo_path: &Path, bindir: &Path) -> Result<()> {
 /// Remove the installed binaries; optionally delete the repo-local config files.
 pub fn run_uninstall(remove_config: bool, force: bool) -> Result<()> {
     let bindir = bindir()?;
+    if let Some(path) = linux_server::uninstall()? {
+        println!("removed {}", path.display());
+    }
     match uninstall_cli_binary(&bindir)? {
         Removal::Removed => println!("removed {}", bindir.join(cli_bin_name()).display()),
         Removal::Nothing => println!(
