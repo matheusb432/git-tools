@@ -1,12 +1,15 @@
 use gtl_application::{
-    ports::UserSettingsStore as _,
-    settings::set_setting_key::{self, SetSettingKey},
+    ports::UserSettingsEditError,
+    settings::{
+        get_user_settings::{self, GetUserSettings, GetUserSettingsError},
+        set_setting_key::{self, SetSettingKey, SetSettingKeyError},
+    },
 };
 use gtl_models::{settings::SettingKeyValue, viewer::Theme};
 use gtl_wire::v1::{self, settings_service_server::SettingsService};
 use tonic::{Request, Response, Status};
 
-use super::{run_blocking, unexpected};
+use super::{run_blocking, unexpected, user_settings_load_error};
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -27,11 +30,13 @@ impl SettingsService for SettingsApi {
         _request: Request<v1::Empty>,
     ) -> Result<Response<v1::GetSettingsResponse>, Status> {
         let store = self.state.user_settings.clone();
-        let settings = run_blocking(move || store.load())
+        let result = run_blocking(move || get_user_settings::execute(GetUserSettings, &store))
             .await?
-            .map_err(|error| unexpected(error, "load user settings"))?;
+            .map_err(|error| match error {
+                GetUserSettingsError::Settings(error) => user_settings_load_error(error),
+            })?;
         Ok(Response::new(v1::GetSettingsResponse {
-            push_confirmation_required: settings.push_confirmation_required(),
+            push_confirmation_required: result.settings.push_confirmation_required(),
         }))
     }
 
@@ -54,12 +59,33 @@ impl SettingsService for SettingsApi {
             )
         })
         .await?
-        .map_err(|error| unexpected(error, "set diff artifact theme"))?;
+        .map_err(setting_edit_error)?;
 
         Ok(Response::new(v1::SetThemeResponse {
             theme: wire_theme(theme) as i32,
             configuration_path: path.to_string_lossy().into_owned(),
         }))
+    }
+}
+
+fn setting_edit_error(error: SetSettingKeyError) -> Status {
+    match error {
+        SetSettingKeyError::InvalidValueShape { .. }
+        | SetSettingKeyError::Settings(
+            UserSettingsEditError::InvalidValueShape
+            | UserSettingsEditError::InvalidConfiguration { .. },
+        ) => {
+            tracing::warn!(error = ?error, "user settings cannot be edited");
+            Status::failed_precondition("user settings are invalid")
+        }
+        SetSettingKeyError::Settings(
+            UserSettingsEditError::LockTimeout { .. }
+            | UserSettingsEditError::ConcurrentModification { .. },
+        ) => {
+            tracing::warn!(error = ?error, "user settings edit was aborted");
+            Status::aborted("user settings edit conflicted with another writer")
+        }
+        error => unexpected(error, "set diff artifact theme"),
     }
 }
 
@@ -87,5 +113,40 @@ fn wire_theme(theme: Theme) -> v1::ViewerTheme {
         Theme::Glacier => v1::ViewerTheme::Glacier,
         Theme::Noir => v1::ViewerTheme::Noir,
         Theme::Graphite => v1::ViewerTheme::Graphite,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_invalid_loaded_settings_to_failed_precondition() {
+        let status = user_settings_load_error(
+            gtl_application::ports::UserSettingsLoadError::InvalidConfiguration {
+                path: "/tmp/config.toml".into(),
+                reason: "bad theme".into(),
+            },
+        );
+
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+    }
+
+    #[test]
+    fn maps_settings_state_and_concurrency_failures_deliberately() {
+        let invalid = setting_edit_error(SetSettingKeyError::Settings(
+            UserSettingsEditError::InvalidConfiguration {
+                path: "/tmp/config.toml".into(),
+                reason: "bad theme".into(),
+            },
+        ));
+        assert_eq!(invalid.code(), tonic::Code::FailedPrecondition);
+
+        let concurrent = setting_edit_error(SetSettingKeyError::Settings(
+            UserSettingsEditError::ConcurrentModification {
+                path: "/tmp/config.toml".into(),
+            },
+        ));
+        assert_eq!(concurrent.code(), tonic::Code::Aborted);
     }
 }

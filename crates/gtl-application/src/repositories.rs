@@ -14,6 +14,8 @@ pub mod change_branch;
 mod commit_progress;
 pub mod find_repositories;
 pub mod find_repository_roots;
+pub mod get_recursive_repository_statuses;
+pub mod get_repository_status;
 pub mod get_repository_statuses;
 pub mod plan_commit;
 pub mod plan_prune;

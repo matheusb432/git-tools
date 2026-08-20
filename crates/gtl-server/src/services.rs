@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 pub(crate) use diff::DiffApi;
 use gtl_application::{
-    ports::{PlacedArtifact, ProjectClientError},
+    ports::{PlacedArtifact, ProjectClientError, UserSettingsLoadError},
     shared::notes,
 };
 use gtl_models::paths::RepositoryRoot;
@@ -77,6 +77,16 @@ pub(crate) fn project_client_error(error: &ProjectClientError) -> Status {
             tracing::error!(error = ?error, "project catalogue returned invalid data");
             Status::data_loss("project catalogue returned invalid data")
         }
+    }
+}
+
+pub(crate) fn user_settings_load_error(error: UserSettingsLoadError) -> Status {
+    match error {
+        UserSettingsLoadError::InvalidConfiguration { .. } => {
+            tracing::warn!(error = ?error, "user settings are invalid");
+            Status::failed_precondition("user settings are invalid")
+        }
+        error => unexpected(error, "load user settings"),
     }
 }
 

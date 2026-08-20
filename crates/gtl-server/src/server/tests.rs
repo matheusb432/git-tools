@@ -2,7 +2,9 @@ use std::{error::Error, time::Duration};
 
 use gtl_local_auth::CapabilityToken;
 use gtl_wire::v1::{
-    DiffTarget, Empty, RenderDiffRequest, diff_service_client::DiffServiceClient, diff_target,
+    DiffTarget, Empty, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
+    RenderDiffRequest, diff_service_client::DiffServiceClient, diff_target,
+    repository_service_client::RepositoryServiceClient,
 };
 use prost::Message as _;
 use prost_types::FileDescriptorProto;
@@ -32,7 +34,7 @@ type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 const TEST_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(250);
 
 struct TestServer {
-    _directory: tempfile::TempDir,
+    directory: tempfile::TempDir,
     channel: Channel,
     authorization: TestAuthorization,
     shutdown: oneshot::Sender<()>,
@@ -65,7 +67,7 @@ impl TestServer {
             .await?;
 
         Ok(Self {
-            _directory: directory,
+            directory,
             channel,
             authorization,
             shutdown,
@@ -133,6 +135,32 @@ async fn validates_application_requests_through_the_generated_client() -> TestRe
         .expect_err("relative working directory must fail");
 
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    server.stop().await
+}
+
+#[tokio::test]
+async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
+    let server = TestServer::start().await?;
+    let mut client = RepositoryServiceClient::with_interceptor(
+        server.channel.clone(),
+        server.authorization.clone(),
+    );
+    let root = server.directory.path().to_string_lossy().into_owned();
+
+    let error = client
+        .get_status(GetRepositoryStatusRequest {
+            repository_path: root.clone(),
+        })
+        .await
+        .expect_err("a plain directory is not a repository");
+    assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+
+    let error = client
+        .get_recursive_statuses(GetRecursiveRepositoryStatusesRequest { root })
+        .await
+        .expect_err("an empty traversal has no repositories");
+    assert_eq!(error.code(), tonic::Code::NotFound);
+
     server.stop().await
 }
 

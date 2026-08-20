@@ -1,16 +1,19 @@
 use gtl_application::{
     diffs::{
         DiffTarget, DiffTargetRequest, RepoRef,
+        compute_merge_diff::ComputeMergeDiffError,
         render_diff::{self, RenderDiff, RenderDiffError, RenderDiffOk, RenderDiffOutcome},
         render_diff_subrepos::{
             self, RenderDiffSubrepos, RenderDiffSubreposError, RenderDiffSubreposOk,
             RenderDiffSubreposOutcome,
         },
-        render_merge_diff::{self, RenderMergeDiff},
+        render_merge_diff::{self, RenderMergeDiff, RenderMergeDiffError},
     },
     projects::{
         build_recipes::BuildProjectRecipes,
-        render_project_diff::{self, RenderProjectDiff, RenderProjectDiffOk},
+        render_project_diff::{
+            self, RenderProjectDiff, RenderProjectDiffError, RenderProjectDiffOk,
+        },
         select_unpushed_repositories::{self, SelectUnpushedRepositories},
     },
     recipes::build_recipe::{self, BuildRecipe},
@@ -31,7 +34,7 @@ use tonic::{Request, Response, Status};
 
 use super::{
     application_notes, artifact, project_client_error, repository_root, required, run_blocking,
-    unexpected,
+    unexpected, user_settings_load_error,
 };
 use crate::state::AppState;
 
@@ -180,7 +183,7 @@ impl DiffService for DiffApi {
             )
         })
         .await?
-        .map_err(|error| unexpected(error, "render merge diff"))?;
+        .map_err(render_merge_error)?;
 
         Ok(Response::new(rendered_response(
             &result.placement,
@@ -251,7 +254,7 @@ impl DiffService for DiffApi {
                 &state.clock,
             )
             .map(Some)
-            .map_err(|error| unexpected(error, "render project diff"))
+            .map_err(render_project_error)
         })
         .await??;
 
@@ -428,7 +431,7 @@ fn pinned_range(range: &PinnedRange) -> v1::PinnedRange {
 fn render_error(error: RenderDiffError) -> Status {
     match error {
         RenderDiffError::InvalidTarget(error) => Status::invalid_argument(error.to_string()),
-        RenderDiffError::Settings(error) => unexpected(error, "load diff settings"),
+        RenderDiffError::Settings(error) => user_settings_load_error(error),
         RenderDiffError::Unexpected(error) => unexpected(error, "render diff"),
     }
 }
@@ -438,10 +441,26 @@ fn render_subrepositories_error(error: RenderDiffSubreposError) -> Status {
         RenderDiffSubreposError::InvalidTarget(error) => {
             Status::invalid_argument(error.to_string())
         }
-        RenderDiffSubreposError::Settings(error) => unexpected(error, "load diff settings"),
+        RenderDiffSubreposError::Settings(error) => user_settings_load_error(error),
         RenderDiffSubreposError::Unexpected(error) => {
             unexpected(error, "render subrepositories diff")
         }
+    }
+}
+
+fn render_merge_error(error: RenderMergeDiffError) -> Status {
+    match error {
+        RenderMergeDiffError::Compute(ComputeMergeDiffError::Settings(error)) => {
+            user_settings_load_error(error)
+        }
+        error => unexpected(error, "render merge diff"),
+    }
+}
+
+fn render_project_error(error: RenderProjectDiffError) -> Status {
+    match error {
+        RenderProjectDiffError::Settings(error) => user_settings_load_error(error),
+        error @ RenderProjectDiffError::Unexpected(_) => unexpected(error, "render project diff"),
     }
 }
 

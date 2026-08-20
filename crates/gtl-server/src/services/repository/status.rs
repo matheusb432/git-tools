@@ -1,11 +1,13 @@
-use anyhow::Context as _;
-use gtl_application::{
-    repositories::{find_repositories, get_repository_statuses, resolve_repository_root},
-    shared::repository_name,
+use gtl_application::repositories::{
+    get_recursive_repository_statuses::{
+        self, GetRecursiveRepositoryStatuses, GetRecursiveRepositoryStatusesError,
+    },
+    get_repository_status::{self, GetRepositoryStatus},
+    resolve_repository_root::ResolveRepositoryRootError,
 };
 use gtl_models::repository::{
     status::{RepositoryStatus, StatusChanges, StatusHead, StatusResult, StatusUpstream},
-    traversal::{RepositoryTarget, RepositoryTraversalScope},
+    traversal::RepositoryTraversalScope,
 };
 use gtl_wire::v1;
 use tonic::{Response, Status};
@@ -17,54 +19,49 @@ pub(super) async fn get(
     state: AppState,
     request: v1::GetRepositoryStatusRequest,
 ) -> Result<Response<v1::RepositoryStatusesResponse>, Status> {
-    let repository_path = absolute_path(request.repository_path, "repository_path")?;
-    let results = run_blocking(move || {
-        let root = resolve_repository_root::execute(
-            resolve_repository_root::ResolveRepositoryRoot {
-                repo_path: repository_path,
-            },
-            &state.git,
-        )?;
-        Ok::<_, anyhow::Error>(get_repository_statuses::execute(
-            get_repository_statuses::GetRepositoryStatuses {
-                repos: vec![RepositoryTarget {
-                    label: repository_name::from_root(&root),
-                    path: root,
-                }],
-            },
-            &state.git,
-        ))
-    })
-    .await?
-    .map_err(|error| unexpected(error, "get repository status"))?;
+    let request = GetRepositoryStatus {
+        repo_path: absolute_path(request.repository_path, "repository_path")?,
+    };
+    let result = run_blocking(move || get_repository_status::execute(request, &state.git))
+        .await?
+        .map_err(repository_status_error)?;
 
-    Ok(Response::new(statuses_response(&results)))
+    Ok(Response::new(statuses_response(std::slice::from_ref(
+        &result,
+    ))))
 }
 
 pub(super) async fn get_recursive(
     state: AppState,
     request: v1::GetRecursiveRepositoryStatusesRequest,
 ) -> Result<Response<v1::RepositoryStatusesResponse>, Status> {
-    let root = absolute_path(request.root, "root")?;
-    let results = run_blocking(move || {
-        let root = std::fs::canonicalize(&root)
-            .with_context(|| format!("resolving repository traversal root {}", root.display()))?;
-        let repos = find_repositories::execute(find_repositories::FindRepositories {
-            root: root.clone(),
-            scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
-        })?;
-        if repos.is_empty() {
-            anyhow::bail!("no git repos found under {}", root.display());
-        }
-        Ok::<_, anyhow::Error>(get_repository_statuses::execute(
-            get_repository_statuses::GetRepositoryStatuses { repos },
-            &state.git,
-        ))
-    })
-    .await?
-    .map_err(|error| unexpected(error, "get recursive repository statuses"))?;
+    let request = GetRecursiveRepositoryStatuses {
+        root: absolute_path(request.root, "root")?,
+        scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
+    };
+    let results =
+        run_blocking(move || get_recursive_repository_statuses::execute(request, &state.git))
+            .await?
+            .map_err(recursive_repository_statuses_error)?;
 
     Ok(Response::new(statuses_response(&results)))
+}
+
+fn repository_status_error(error: ResolveRepositoryRootError) -> Status {
+    match error {
+        ResolveRepositoryRootError::Rejected { detail, .. } => Status::failed_precondition(detail),
+        error => unexpected(error, "get repository status"),
+    }
+}
+
+fn recursive_repository_statuses_error(error: GetRecursiveRepositoryStatusesError) -> Status {
+    match error {
+        GetRecursiveRepositoryStatusesError::NoRepositories { root } => Status::not_found(format!(
+            "no git repositories found under {}",
+            root.display()
+        )),
+        error => unexpected(error, "get recursive repository statuses"),
+    }
 }
 
 pub(crate) fn statuses_response(results: &[StatusResult]) -> v1::RepositoryStatusesResponse {

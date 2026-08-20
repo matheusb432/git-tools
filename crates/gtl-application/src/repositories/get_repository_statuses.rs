@@ -26,10 +26,10 @@ pub struct GetRepositoryStatuses {
 #[cqrsy::query]
 pub fn execute(query: GetRepositoryStatuses, git: &impl GitClient) -> Vec<StatusResult> {
     let GetRepositoryStatuses { repos } = query;
-    repos.iter().map(|repo| status_one(git, repo)).collect()
+    repos.iter().map(|repo| get_one(repo, git)).collect()
 }
 
-fn status_one(git: &impl GitClient, repo: &RepositoryTarget) -> StatusResult {
+pub(crate) fn get_one(repo: &RepositoryTarget, git: &impl GitClient) -> StatusResult {
     if !git.repo_present(&repo.path) {
         return StatusResult::absent(repo.label.clone());
     }

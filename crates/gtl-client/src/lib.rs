@@ -13,7 +13,7 @@ use gtl_wire::v1::{
 use tonic::{
     Request, Status,
     metadata::{Ascii, MetadataValue},
-    service::Interceptor,
+    service::{Interceptor, interceptor::InterceptedService},
     transport::{Channel, Endpoint},
 };
 use tonic_health::pb::{HealthCheckRequest, health_client::HealthClient};
@@ -24,6 +24,8 @@ const OPERATION_TIMEOUT: Duration = Duration::from_mins(30);
 const MAX_REQUEST_MESSAGE_SIZE: usize = 64 * 1024;
 const MAX_RESPONSE_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
 const AUTHORIZATION_METADATA_KEY: &str = "authorization";
+
+type AuthenticatedChannel = InterceptedService<Channel, RequestPolicy>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
@@ -48,7 +50,7 @@ pub enum ClientError {
 #[derive(Debug, Clone)]
 pub struct GtlClient {
     channel: Channel,
-    authorization: Authorization,
+    request_policy: RequestPolicy,
     endpoint: ServerEndpoint,
 }
 
@@ -79,10 +81,8 @@ impl GtlClient {
         &self,
         request: v1::RenderDiffRequest,
     ) -> Result<v1::RenderDiffResponse, ClientError> {
-        DiffServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .render(timed_request(request))
+        self.diff_client()
+            .render(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -92,10 +92,8 @@ impl GtlClient {
         &self,
         request: v1::PrepareDiffRequest,
     ) -> Result<v1::PrepareDiffResponse, ClientError> {
-        DiffServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .prepare(timed_request(request))
+        self.diff_client()
+            .prepare(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -105,10 +103,8 @@ impl GtlClient {
         &self,
         request: v1::PrepareMergeDiffRequest,
     ) -> Result<v1::PrepareDiffResponse, ClientError> {
-        DiffServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .prepare_merge(timed_request(request))
+        self.diff_client()
+            .prepare_merge(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -118,10 +114,8 @@ impl GtlClient {
         &self,
         request: v1::PrepareSubrepositoriesDiffRequest,
     ) -> Result<v1::PrepareDiffResponse, ClientError> {
-        DiffServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .prepare_subrepositories(timed_request(request))
+        self.diff_client()
+            .prepare_subrepositories(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -131,10 +125,8 @@ impl GtlClient {
         &self,
         request: v1::PrepareProjectsDiffRequest,
     ) -> Result<v1::PrepareDiffResponse, ClientError> {
-        DiffServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .prepare_projects(timed_request(request))
+        self.diff_client()
+            .prepare_projects(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -144,10 +136,8 @@ impl GtlClient {
         &self,
         request: v1::RenderMergeDiffRequest,
     ) -> Result<v1::RenderDiffResponse, ClientError> {
-        DiffServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .render_merge(timed_request(request))
+        self.diff_client()
+            .render_merge(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -157,10 +147,8 @@ impl GtlClient {
         &self,
         request: v1::RenderSubrepositoriesDiffRequest,
     ) -> Result<v1::RenderDiffResponse, ClientError> {
-        DiffServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .render_subrepositories(timed_request(request))
+        self.diff_client()
+            .render_subrepositories(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -170,10 +158,8 @@ impl GtlClient {
         &self,
         request: v1::RenderProjectsDiffRequest,
     ) -> Result<v1::RenderDiffResponse, ClientError> {
-        DiffServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .render_projects(timed_request(request))
+        self.diff_client()
+            .render_projects(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -183,10 +169,8 @@ impl GtlClient {
         &self,
         request: v1::SyncProjectsRequest,
     ) -> Result<v1::SyncProjectsResponse, ClientError> {
-        ProjectServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .push_repositories(timed_request(request))
+        self.project_client()
+            .push_repositories(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -196,10 +180,8 @@ impl GtlClient {
         &self,
         request: v1::SyncProjectsRequest,
     ) -> Result<v1::SyncProjectsResponse, ClientError> {
-        ProjectServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .pull_repositories(timed_request(request))
+        self.project_client()
+            .pull_repositories(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -209,10 +191,8 @@ impl GtlClient {
         &self,
         request: v1::CommitProjectRepositoriesRequest,
     ) -> Result<v1::CommitProjectRepositoriesResponse, ClientError> {
-        ProjectServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .commit_repositories(timed_request(request))
+        self.project_client()
+            .commit_repositories(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -222,10 +202,8 @@ impl GtlClient {
         &self,
         request: v1::PruneProjectBranchesRequest,
     ) -> Result<v1::PruneProjectBranchesResponse, ClientError> {
-        ProjectServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .prune_branches(timed_request(request))
+        self.project_client()
+            .prune_branches(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -234,10 +212,8 @@ impl GtlClient {
     pub async fn get_project_repository_statuses(
         &self,
     ) -> Result<v1::RepositoryStatusesResponse, ClientError> {
-        ProjectServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .get_statuses(timed_request(v1::Empty {}))
+        self.project_client()
+            .get_statuses(v1::Empty {})
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -247,10 +223,8 @@ impl GtlClient {
         &self,
         request: v1::PlanRepositoryPushRequest,
     ) -> Result<v1::PlanRepositoryPushResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .plan_push(timed_request(request))
+        self.repository_client()
+            .plan_push(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -260,10 +234,8 @@ impl GtlClient {
         &self,
         request: v1::ExecuteRepositoryPushRequest,
     ) -> Result<v1::ExecuteRepositoryPushResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .execute_push(timed_request(request))
+        self.repository_client()
+            .execute_push(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -273,10 +245,8 @@ impl GtlClient {
         &self,
         request: v1::PlanRepositoryCommitRequest,
     ) -> Result<v1::PlanRepositoryCommitResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .plan_commit(timed_request(request))
+        self.repository_client()
+            .plan_commit(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -286,10 +256,8 @@ impl GtlClient {
         &self,
         request: v1::ExecuteRepositoryCommitRequest,
     ) -> Result<v1::ExecuteRepositoryCommitResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .execute_commit(timed_request(request))
+        self.repository_client()
+            .execute_commit(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -299,10 +267,8 @@ impl GtlClient {
         &self,
         request: v1::PlanRecursivePushRequest,
     ) -> Result<v1::PlanRecursivePushResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .plan_recursive_push(timed_request(request))
+        self.repository_client()
+            .plan_recursive_push(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -312,10 +278,8 @@ impl GtlClient {
         &self,
         request: v1::ExecuteRecursivePushRequest,
     ) -> Result<v1::ExecuteRecursivePushResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .execute_recursive_push(timed_request(request))
+        self.repository_client()
+            .execute_recursive_push(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -325,10 +289,8 @@ impl GtlClient {
         &self,
         request: v1::ChangeRepositoryBranchRequest,
     ) -> Result<v1::ChangeRepositoryBranchResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .change_branch(timed_request(request))
+        self.repository_client()
+            .change_branch(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -338,10 +300,8 @@ impl GtlClient {
         &self,
         request: v1::PlanRepositoryPruneRequest,
     ) -> Result<v1::PlanRepositoryPruneResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .plan_prune(timed_request(request))
+        self.repository_client()
+            .plan_prune(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -351,10 +311,8 @@ impl GtlClient {
         &self,
         request: v1::ExecuteRepositoryPruneRequest,
     ) -> Result<v1::ExecuteRepositoryPruneResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .execute_prune(timed_request(request))
+        self.repository_client()
+            .execute_prune(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -364,10 +322,8 @@ impl GtlClient {
         &self,
         request: v1::GetRepositoryStatusRequest,
     ) -> Result<v1::RepositoryStatusesResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .get_status(timed_request(request))
+        self.repository_client()
+            .get_status(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -377,20 +333,16 @@ impl GtlClient {
         &self,
         request: v1::GetRecursiveRepositoryStatusesRequest,
     ) -> Result<v1::RepositoryStatusesResponse, ClientError> {
-        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .get_recursive_statuses(timed_request(request))
+        self.repository_client()
+            .get_recursive_statuses(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
     pub async fn get_settings(&self) -> Result<v1::GetSettingsResponse, ClientError> {
-        SettingsServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .get_settings(timed_request(v1::Empty {}))
+        self.settings_client()
+            .get_settings(v1::Empty {})
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -400,10 +352,8 @@ impl GtlClient {
         &self,
         request: v1::SetThemeRequest,
     ) -> Result<v1::SetThemeResponse, ClientError> {
-        SettingsServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .set_theme(timed_request(request))
+        self.settings_client()
+            .set_theme(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -413,10 +363,8 @@ impl GtlClient {
         &self,
         request: v1::GetWorktreeBaseRequest,
     ) -> Result<v1::GetWorktreeBaseResponse, ClientError> {
-        WorktreeServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .get_base(timed_request(request))
+        self.worktree_client()
+            .get_base(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -426,10 +374,8 @@ impl GtlClient {
         &self,
         request: v1::ListWorktreesRequest,
     ) -> Result<v1::ListWorktreesResponse, ClientError> {
-        WorktreeServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .list(timed_request(request))
+        self.worktree_client()
+            .list(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -439,10 +385,8 @@ impl GtlClient {
         &self,
         request: v1::SaveLiveViewRequest,
     ) -> Result<v1::SaveLiveViewResponse, ClientError> {
-        LiveViewServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .save(timed_request(request))
+        self.live_view_client()
+            .save(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -451,10 +395,8 @@ impl GtlClient {
     pub async fn save_project_live_views(
         &self,
     ) -> Result<v1::SaveProjectLiveViewsResponse, ClientError> {
-        LiveViewServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .save_projects(timed_request(v1::Empty {}))
+        self.live_view_client()
+            .save_projects(v1::Empty {})
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -464,10 +406,8 @@ impl GtlClient {
         &self,
         request: v1::PlanTagBumpRequest,
     ) -> Result<v1::PlanTagBumpResponse, ClientError> {
-        TagServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .plan_bump(timed_request(request))
+        self.tag_client()
+            .plan_bump(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -477,10 +417,8 @@ impl GtlClient {
         &self,
         request: v1::ExecuteTagBumpRequest,
     ) -> Result<v1::ExecuteTagBumpResponse, ClientError> {
-        TagServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .execute_bump(timed_request(request))
+        self.tag_client()
+            .execute_bump(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -490,10 +428,8 @@ impl GtlClient {
         &self,
         request: v1::ListTagsRequest,
     ) -> Result<v1::ListTagsResponse, ClientError> {
-        TagServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .list(timed_request(request))
+        self.tag_client()
+            .list(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -503,10 +439,8 @@ impl GtlClient {
         &self,
         request: v1::AddTagRequest,
     ) -> Result<v1::TagActionResponse, ClientError> {
-        TagServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .add(timed_request(request))
+        self.tag_client()
+            .add(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -516,10 +450,8 @@ impl GtlClient {
         &self,
         request: v1::PushTagsRequest,
     ) -> Result<v1::TagActionResponse, ClientError> {
-        TagServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .push(timed_request(request))
+        self.tag_client()
+            .push(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -529,10 +461,8 @@ impl GtlClient {
         &self,
         request: v1::AddAndPushTagRequest,
     ) -> Result<v1::TagActionResponse, ClientError> {
-        TagServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .add_and_push(timed_request(request))
+        self.tag_client()
+            .add_and_push(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -542,10 +472,8 @@ impl GtlClient {
         &self,
         request: v1::LabelTagRequest,
     ) -> Result<v1::TagActionResponse, ClientError> {
-        TagServiceClient::with_interceptor(self.channel.clone(), self.authorization.clone())
-            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
-            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
-            .label(timed_request(request))
+        self.tag_client()
+            .label(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -554,6 +482,54 @@ impl GtlClient {
     #[must_use]
     pub const fn endpoint(&self) -> &ServerEndpoint {
         &self.endpoint
+    }
+
+    fn diff_client(&self) -> DiffServiceClient<AuthenticatedChannel> {
+        DiffServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
+    }
+
+    fn live_view_client(&self) -> LiveViewServiceClient<AuthenticatedChannel> {
+        LiveViewServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
+    }
+
+    fn project_client(&self) -> ProjectServiceClient<AuthenticatedChannel> {
+        ProjectServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
+    }
+
+    fn repository_client(&self) -> RepositoryServiceClient<AuthenticatedChannel> {
+        RepositoryServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
+    }
+
+    fn settings_client(&self) -> SettingsServiceClient<AuthenticatedChannel> {
+        SettingsServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
+    }
+
+    fn tag_client(&self) -> TagServiceClient<AuthenticatedChannel> {
+        TagServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
+    }
+
+    fn worktree_client(&self) -> WorktreeServiceClient<AuthenticatedChannel> {
+        WorktreeServiceClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
+    }
+
+    fn health_client(&self) -> HealthClient<AuthenticatedChannel> {
+        HealthClient::with_interceptor(self.channel.clone(), self.request_policy.clone())
+            .max_encoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+            .max_decoding_message_size(MAX_RESPONSE_MESSAGE_SIZE)
     }
 
     async fn connect_endpoint(
@@ -568,17 +544,16 @@ impl GtlClient {
             .connect()
             .await
             .map_err(ConnectError::Transport)?;
-        let authorization = Authorization::try_new(token)?;
+        let request_policy = RequestPolicy::try_new(token)?;
         Ok(Self {
             channel,
-            authorization,
+            request_policy,
             endpoint: endpoint.clone(),
         })
     }
 
     async fn check_health_inner(&self) -> Result<(), Status> {
-        let mut client =
-            HealthClient::with_interceptor(self.channel.clone(), self.authorization.clone());
+        let mut client = self.health_client();
         let mut request = Request::new(HealthCheckRequest {
             service: String::new(),
         });
@@ -591,24 +566,18 @@ impl GtlClient {
     }
 }
 
-fn timed_request<T>(message: T) -> Request<T> {
-    let mut request = Request::new(message);
-    request.set_timeout(OPERATION_TIMEOUT);
-    request
-}
-
 #[derive(Clone)]
-struct Authorization {
+struct RequestPolicy {
     value: MetadataValue<Ascii>,
 }
 
-impl std::fmt::Debug for Authorization {
+impl std::fmt::Debug for RequestPolicy {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("Authorization(REDACTED)")
+        formatter.write_str("RequestPolicy(REDACTED)")
     }
 }
 
-impl Authorization {
+impl RequestPolicy {
     fn try_new(token: &CapabilityToken) -> Result<Self, ConnectError> {
         let value = format!("Bearer {}", token.expose_secret())
             .parse()
@@ -617,11 +586,14 @@ impl Authorization {
     }
 }
 
-impl Interceptor for Authorization {
+impl Interceptor for RequestPolicy {
     fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
         request
             .metadata_mut()
             .insert(AUTHORIZATION_METADATA_KEY, self.value.clone());
+        if request.metadata().get("grpc-timeout").is_none() {
+            request.set_timeout(OPERATION_TIMEOUT);
+        }
         Ok(request)
     }
 }
@@ -649,6 +621,42 @@ mod tests {
     use super::*;
 
     type TestResult<T = ()> = Result<T, Box<dyn Error>>;
+
+    #[test]
+    fn request_policy_adds_authentication_and_a_default_deadline() -> TestResult {
+        let capability = CapabilityToken::generate()?;
+        let mut policy = RequestPolicy::try_new(&capability)?;
+        let request = policy.call(Request::new(()))?;
+
+        let candidate = request
+            .metadata()
+            .get(AUTHORIZATION_METADATA_KEY)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .ok_or("request policy omitted bearer authentication")?;
+        assert!(capability.authenticates(candidate));
+
+        let mut expected = Request::new(());
+        expected.set_timeout(OPERATION_TIMEOUT);
+        assert_eq!(
+            request.metadata().get("grpc-timeout"),
+            expected.metadata().get("grpc-timeout")
+        );
+
+        let mut health_request = Request::new(());
+        health_request.set_timeout(HEALTH_TIMEOUT);
+        let expected_health_timeout = health_request
+            .metadata()
+            .get("grpc-timeout")
+            .cloned()
+            .ok_or("health request omitted its explicit deadline")?;
+        let health_request = policy.call(health_request)?;
+        assert_eq!(
+            health_request.metadata().get("grpc-timeout"),
+            Some(&expected_health_timeout)
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn connects_through_private_discovery_and_authentication() -> TestResult {
