@@ -11,6 +11,7 @@ use std::path::PathBuf;
 pub(crate) use diff::DiffApi;
 use gtl_application::{
     ports::{PlacedArtifact, ProjectClientError, UserSettingsLoadError},
+    repositories::resolve_repository_root::ResolveRepositoryRootError,
     shared::notes,
 };
 use gtl_models::paths::RepositoryRoot;
@@ -87,6 +88,13 @@ pub(crate) fn user_settings_load_error(error: UserSettingsLoadError) -> Status {
             Status::failed_precondition("user settings are invalid")
         }
         error => unexpected(error, "load user settings"),
+    }
+}
+
+pub(crate) fn repository_resolution_error(error: ResolveRepositoryRootError) -> Status {
+    match error {
+        ResolveRepositoryRootError::Rejected { detail, .. } => Status::failed_precondition(detail),
+        error => unexpected(error, "resolve repository"),
     }
 }
 

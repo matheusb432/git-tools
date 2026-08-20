@@ -145,8 +145,11 @@ fn revert(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::utils::{ScriptedGitClient, branch_name};
+    use super::{ChangeBranch, ChangeBranchAction, ChangeBranchOk};
+    use crate::{
+        repositories::change_branch,
+        utils::{ScriptedGitClient, branch_name},
+    };
 
     fn command(action: ChangeBranchAction) -> ChangeBranch {
         ChangeBranch {
@@ -165,7 +168,7 @@ mod tests {
             ScriptedGitClient::applied(""),
         ]);
 
-        let result = execute(command(ChangeBranchAction::Switch), &git)
+        let result = change_branch::execute(command(ChangeBranchAction::Switch), &git)
             .expect("ready switch should be applied");
 
         assert_eq!(
@@ -187,7 +190,7 @@ mod tests {
             ScriptedGitClient::applied("0\n"),
         ]);
 
-        let result = execute(command(ChangeBranchAction::Rebase), &git)
+        let result = change_branch::execute(command(ChangeBranchAction::Rebase), &git)
             .expect("up-to-date rebase should be a closed outcome");
 
         assert_eq!(
@@ -210,7 +213,7 @@ mod tests {
             ScriptedGitClient::applied(""),
         ]);
 
-        let result = execute(command(ChangeBranchAction::Revert), &git)
+        let result = change_branch::execute(command(ChangeBranchAction::Revert), &git)
             .expect("ready recovery should be applied");
 
         assert!(matches!(result, ChangeBranchOk::Reverted { .. }));

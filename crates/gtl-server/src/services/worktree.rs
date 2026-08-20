@@ -1,15 +1,12 @@
-use gtl_application::{
-    repositories::resolve_repository_root,
-    worktrees::{
-        get_worktree_base::{self, GetWorktreeBase, GetWorktreeBaseOk},
-        list_worktrees::{self, ListWorktrees, ListWorktreesOk},
-    },
+use gtl_application::worktrees::{
+    get_worktree_base::{self, GetWorktreeBase, GetWorktreeBaseError, GetWorktreeBaseOk},
+    list_worktrees::{self, ListWorktrees, ListWorktreesError, ListWorktreesOk},
 };
 use gtl_models::worktrees::{Worktree, WorktreeCheckout, WorktreeKind};
 use gtl_wire::v1::{self, worktree_service_server::WorktreeService};
 use tonic::{Request, Response, Status};
 
-use super::{absolute_path, run_blocking, unexpected};
+use super::{absolute_path, repository_resolution_error, run_blocking, unexpected};
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -32,15 +29,10 @@ impl WorktreeService for WorktreeApi {
         let repo_path = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
         let result = run_blocking(move || {
-            let repo_path = resolve_repository_root::execute(
-                resolve_repository_root::ResolveRepositoryRoot { repo_path },
-                &state.git,
-            )?;
             get_worktree_base::execute(GetWorktreeBase { repo_path }, &state.git)
-                .map_err(anyhow::Error::from)
         })
         .await?
-        .map_err(|error| unexpected(error, "get primary worktree"))?;
+        .map_err(get_base_error)?;
         let outcome = match result {
             GetWorktreeBaseOk::Found { path } => {
                 v1::get_worktree_base_response::Outcome::Found(v1::WorktreePath {
@@ -62,16 +54,10 @@ impl WorktreeService for WorktreeApi {
     ) -> Result<Response<v1::ListWorktreesResponse>, Status> {
         let repo_path = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
-        let result = run_blocking(move || {
-            let repo_path = resolve_repository_root::execute(
-                resolve_repository_root::ResolveRepositoryRoot { repo_path },
-                &state.git,
-            )?;
-            list_worktrees::execute(ListWorktrees { repo_path }, &state.git)
-                .map_err(anyhow::Error::from)
-        })
-        .await?
-        .map_err(|error| unexpected(error, "list worktrees"))?;
+        let result =
+            run_blocking(move || list_worktrees::execute(ListWorktrees { repo_path }, &state.git))
+                .await?
+                .map_err(list_error)?;
         let outcome = match result {
             ListWorktreesOk::Listed { worktrees } => {
                 v1::list_worktrees_response::Outcome::Listed(v1::WorktreeList {
@@ -85,6 +71,20 @@ impl WorktreeService for WorktreeApi {
         Ok(Response::new(v1::ListWorktreesResponse {
             outcome: Some(outcome),
         }))
+    }
+}
+
+fn get_base_error(error: GetWorktreeBaseError) -> Status {
+    match error {
+        GetWorktreeBaseError::Resolve(error) => repository_resolution_error(error),
+        error => unexpected(error, "get primary worktree"),
+    }
+}
+
+fn list_error(error: ListWorktreesError) -> Status {
+    match error {
+        ListWorktreesError::Resolve(error) => repository_resolution_error(error),
+        error => unexpected(error, "list worktrees"),
     }
 }
 

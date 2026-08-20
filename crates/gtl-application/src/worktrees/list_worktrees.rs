@@ -1,13 +1,18 @@
 //! Lists repository worktrees as structured values.
 
-use gtl_models::{paths::RepositoryRoot, worktrees::Worktree};
+use std::path::PathBuf;
 
-use crate::ports::{GitClient, GitEffect};
+use gtl_models::worktrees::Worktree;
+
+use crate::{
+    ports::{GitClient, GitEffect},
+    repositories::resolve_repository_root,
+};
 
 /// Requests every worktree registered for one repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListWorktrees {
-    pub repo_path: RepositoryRoot,
+    pub repo_path: PathBuf,
 }
 
 /// Reports either structured worktrees or the Git failure that prevented listing.
@@ -23,6 +28,9 @@ pub enum ListWorktreesOk {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ListWorktreesError {
+    /// The supplied path could not be resolved to a repository root.
+    #[error(transparent)]
+    Resolve(#[from] resolve_repository_root::ResolveRepositoryRootError),
     /// Git could not be started or its output could not be collected.
     #[error("{0}")]
     Unexpected(#[source] anyhow::Error),
@@ -38,7 +46,12 @@ pub fn execute(
     query: ListWorktrees,
     git: &impl GitClient,
 ) -> Result<ListWorktreesOk, ListWorktreesError> {
-    let ListWorktrees { repo_path } = query;
+    let repo_path = resolve_repository_root::execute(
+        resolve_repository_root::ResolveRepositoryRoot {
+            repo_path: query.repo_path,
+        },
+        git,
+    )?;
     let worktrees = git
         .worktrees(&repo_path)
         .map_err(ListWorktreesError::Unexpected)?;
@@ -66,14 +79,17 @@ mod tests {
 
     #[test]
     fn list_parses_branch_detached_locked_and_prunable_values() {
-        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied(concat!(
-            "worktree /repo\nHEAD 123456789abcdef\nbranch refs/heads/main\n\n",
-            "worktree /linked\nHEAD abcdef123456789\ndetached\nlocked maintenance\nprunable gone\n\n",
-        ))]);
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repo\n"),
+            ScriptedGitClient::applied(concat!(
+                "worktree /repo\nHEAD 123456789abcdef\nbranch refs/heads/main\n\n",
+                "worktree /linked\nHEAD abcdef123456789\ndetached\nlocked maintenance\nprunable gone\n\n",
+            )),
+        ]);
 
         let result = list_worktrees::execute(
             ListWorktrees {
-                repo_path: crate::utils::repository_root("/repo"),
+                repo_path: "/repo/nested".into(),
             },
             &git,
         )
@@ -97,12 +113,15 @@ mod tests {
 
     #[test]
     fn rejected_listing_preserves_the_adapter_diagnostic() {
-        let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: not a repo")]);
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repo\n"),
+            ScriptedGitClient::rejected("fatal: not a repo"),
+        ]);
 
         assert_eq!(
             list_worktrees::execute(
                 ListWorktrees {
-                    repo_path: crate::utils::repository_root("/repo"),
+                    repo_path: "/repo".into(),
                 },
                 &git,
             )
@@ -115,12 +134,15 @@ mod tests {
 
     #[test]
     fn empty_porcelain_output_remains_the_exact_closed_failure() {
-        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
+        let git = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("/repo\n"),
+            ScriptedGitClient::applied(""),
+        ]);
 
         assert_eq!(
             list_worktrees::execute(
                 ListWorktrees {
-                    repo_path: crate::utils::repository_root("/repo"),
+                    repo_path: "/repo".into(),
                 },
                 &git,
             )
@@ -133,13 +155,14 @@ mod tests {
 
     #[test]
     fn transport_failure_remains_an_error_with_its_source() {
-        let git = ScriptedGitClient::with_results(vec![Err(anyhow::anyhow!(
-            "git transport unavailable"
-        ))]);
+        let git = ScriptedGitClient::with_results(vec![
+            Ok(ScriptedGitClient::applied("/repo\n")),
+            Err(anyhow::anyhow!("git transport unavailable")),
+        ]);
 
         let error = list_worktrees::execute(
             ListWorktrees {
-                repo_path: crate::utils::repository_root("/repo"),
+                repo_path: "/repo".into(),
             },
             &git,
         )

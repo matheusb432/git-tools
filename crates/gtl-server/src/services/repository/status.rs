@@ -3,7 +3,6 @@ use gtl_application::repositories::{
         self, GetRecursiveRepositoryStatuses, GetRecursiveRepositoryStatusesError,
     },
     get_repository_status::{self, GetRepositoryStatus},
-    resolve_repository_root::ResolveRepositoryRootError,
 };
 use gtl_models::repository::{
     status::{RepositoryStatus, StatusChanges, StatusHead, StatusResult, StatusUpstream},
@@ -12,7 +11,7 @@ use gtl_models::repository::{
 use gtl_wire::v1;
 use tonic::{Response, Status};
 
-use super::super::{absolute_path, run_blocking, unexpected};
+use super::super::{absolute_path, repository_resolution_error, run_blocking, unexpected};
 use crate::state::AppState;
 
 pub(super) async fn get(
@@ -24,7 +23,7 @@ pub(super) async fn get(
     };
     let result = run_blocking(move || get_repository_status::execute(request, &state.git))
         .await?
-        .map_err(repository_status_error)?;
+        .map_err(repository_resolution_error)?;
 
     Ok(Response::new(statuses_response(std::slice::from_ref(
         &result,
@@ -45,13 +44,6 @@ pub(super) async fn get_recursive(
             .map_err(recursive_repository_statuses_error)?;
 
     Ok(Response::new(statuses_response(&results)))
-}
-
-fn repository_status_error(error: ResolveRepositoryRootError) -> Status {
-    match error {
-        ResolveRepositoryRootError::Rejected { detail, .. } => Status::failed_precondition(detail),
-        error => unexpected(error, "get repository status"),
-    }
 }
 
 fn recursive_repository_statuses_error(error: GetRecursiveRepositoryStatusesError) -> Status {

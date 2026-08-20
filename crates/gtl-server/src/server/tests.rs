@@ -3,8 +3,9 @@ use std::{error::Error, time::Duration};
 use gtl_local_auth::CapabilityToken;
 use gtl_wire::v1::{
     DiffTarget, Empty, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
-    RenderDiffRequest, diff_service_client::DiffServiceClient, diff_target,
+    GetWorktreeBaseRequest, RenderDiffRequest, diff_service_client::DiffServiceClient, diff_target,
     repository_service_client::RepositoryServiceClient,
+    worktree_service_client::WorktreeServiceClient,
 };
 use prost::Message as _;
 use prost_types::FileDescriptorProto;
@@ -160,6 +161,18 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
         .await
         .expect_err("an empty traversal has no repositories");
     assert_eq!(error.code(), tonic::Code::NotFound);
+
+    let mut worktree_client = WorktreeServiceClient::with_interceptor(
+        server.channel.clone(),
+        server.authorization.clone(),
+    );
+    let error = worktree_client
+        .get_base(GetWorktreeBaseRequest {
+            repository_path: server.directory.path().to_string_lossy().into_owned(),
+        })
+        .await
+        .expect_err("worktree lookup requires a repository");
+    assert_eq!(error.code(), tonic::Code::FailedPrecondition);
 
     server.stop().await
 }
