@@ -12,7 +12,7 @@ use gtl_models::{
 use gtl_wire::v1;
 use tonic::{Response, Status};
 
-use super::super::{absolute_path, repository_root, required, task_join, unexpected};
+use super::super::{absolute_path, repository_root, required, run_blocking, unexpected};
 use crate::state::AppState;
 
 pub(super) async fn plan_push(
@@ -22,9 +22,8 @@ pub(super) async fn plan_push(
     let request = PlanPush {
         repo_path: absolute_path(request.repository_path, "repository_path")?,
     };
-    let result = tokio::task::spawn_blocking(move || plan_push::execute(request, &state.git))
-        .await
-        .map_err(|error| task_join(&error))?
+    let result = run_blocking(move || plan_push::execute(request, &state.git))
+        .await?
         .map_err(|error| unexpected(error, "plan repository push"))?;
     let outcome = match result {
         PlanPushOk::Ready(target) => {
@@ -57,12 +56,9 @@ pub(super) async fn execute_push(
             return Err(Status::invalid_argument("mode is invalid"));
         }
     };
-    let result = tokio::task::spawn_blocking(move || {
-        apply_push::execute(ApplyPush { target, mode }, &state.git)
-    })
-    .await
-    .map_err(|error| task_join(&error))?
-    .map_err(|error| unexpected(error, "execute repository push"))?;
+    let result = run_blocking(move || apply_push::execute(ApplyPush { target, mode }, &state.git))
+        .await?
+        .map_err(|error| unexpected(error, "execute repository push"))?;
     let (status, detail) = match result {
         ApplyPushOk::Noop { detail } => (v1::RepositoryPushStatus::NoOp, detail),
         ApplyPushOk::Completed { detail, .. } => (v1::RepositoryPushStatus::Completed, detail),
@@ -82,9 +78,8 @@ pub(super) async fn plan_commit(
     let request = PlanCommit {
         repo_path: absolute_path(request.repository_path, "repository_path")?,
     };
-    let result = tokio::task::spawn_blocking(move || plan_commit::execute(request, &state.git))
-        .await
-        .map_err(|error| task_join(&error))?
+    let result = run_blocking(move || plan_commit::execute(request, &state.git))
+        .await?
         .map_err(|error| unexpected(error, "plan repository commit"))?;
     let outcome = match result {
         PlanCommitOk::Ready(target) => {
@@ -107,7 +102,7 @@ pub(super) async fn execute_commit(
         return Err(Status::invalid_argument("message must not be empty"));
     }
     let target = application_commit_target(required(request.target, "target")?)?;
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_blocking(move || {
         apply_commit::execute(
             ApplyCommit {
                 target,
@@ -116,8 +111,7 @@ pub(super) async fn execute_commit(
             &state.git,
         )
     })
-    .await
-    .map_err(|error| task_join(&error))?
+    .await?
     .map_err(|error| unexpected(error, "execute repository commit"))?;
     let status = match result.status {
         CommitStatus::Committed => v1::RepositoryCommitStatus::Committed,

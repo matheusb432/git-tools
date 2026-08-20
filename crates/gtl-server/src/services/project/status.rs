@@ -3,7 +3,7 @@ use gtl_models::repository::traversal::RepositoryTarget;
 use gtl_wire::v1;
 use tonic::{Response, Status};
 
-use super::super::{project_client_error, task_join};
+use super::super::{project_client_error, run_blocking};
 use crate::{services::repository::status::statuses_response, state::AppState};
 
 pub(super) async fn get(
@@ -20,14 +20,13 @@ pub(super) async fn get(
             path: repo.path,
         })
         .collect();
-    let results = tokio::task::spawn_blocking(move || {
+    let results = run_blocking(move || {
         get_repository_statuses::execute(
             get_repository_statuses::GetRepositoryStatuses { repos },
             &state.git,
         )
     })
-    .await
-    .map_err(|error| task_join(&error))?;
+    .await?;
 
     Ok(Response::new(statuses_response(&results)))
 }

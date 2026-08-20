@@ -10,6 +10,7 @@ pub mod apply_revert;
 pub mod apply_switch;
 mod branch_recovery;
 pub mod build_recipes;
+pub mod change_branch;
 mod commit_progress;
 pub mod find_repositories;
 pub mod find_repository_roots;

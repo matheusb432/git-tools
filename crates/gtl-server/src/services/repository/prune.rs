@@ -6,7 +6,7 @@ use gtl_models::{diffs::CommitId, git::BranchName};
 use gtl_wire::v1;
 use tonic::{Response, Status};
 
-use super::super::{absolute_path, repository_root, required, task_join, unexpected};
+use super::super::{absolute_path, repository_root, required, run_blocking, unexpected};
 use crate::state::AppState;
 
 const MAX_BRANCHES_PER_REQUEST: usize = 512;
@@ -20,9 +20,8 @@ pub(super) async fn plan(
         onto: BranchName::try_new(request.onto_branch)
             .map_err(|_| Status::invalid_argument("onto_branch must not be empty"))?,
     };
-    let result = tokio::task::spawn_blocking(move || plan_prune::execute(request, &state.git))
-        .await
-        .map_err(|error| task_join(&error))?
+    let result = run_blocking(move || plan_prune::execute(request, &state.git))
+        .await?
         .map_err(|error| unexpected(error, "plan repository branch prune"))?;
     let outcome = match result {
         PlanPruneOk::Ready { top, branches, .. } => {
@@ -61,9 +60,7 @@ pub(super) async fn execute(
             .map(application_branch)
             .collect::<Result<Vec<_>, _>>()?,
     };
-    let result = tokio::task::spawn_blocking(move || apply_prune::execute(command, &state.git))
-        .await
-        .map_err(|error| task_join(&error))?;
+    let result = run_blocking(move || apply_prune::execute(command, &state.git)).await?;
     Ok(Response::new(match result {
         Ok(result) => applied_response(result, None),
         Err(error) => aborted_response(error)?,

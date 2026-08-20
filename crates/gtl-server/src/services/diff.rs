@@ -30,7 +30,7 @@ use gtl_wire::{
 use tonic::{Request, Response, Status};
 
 use super::{
-    application_notes, artifact, project_client_error, repository_root, required, task_join,
+    application_notes, artifact, project_client_error, repository_root, required, run_blocking,
     unexpected,
 };
 use crate::state::AppState;
@@ -66,11 +66,9 @@ impl DiffService for DiffApi {
                 .map_err(|_| Status::invalid_argument("name must not be empty"))?,
         };
         let state = self.state.clone();
-        let recipe =
-            tokio::task::spawn_blocking(move || build_recipe::execute(request, &state.git))
-                .await
-                .map_err(|error| task_join(&error))?
-                .map_err(|error| unexpected(error, "prepare diff recipe"))?;
+        let recipe = run_blocking(move || build_recipe::execute(request, &state.git))
+            .await?
+            .map_err(|error| unexpected(error, "prepare diff recipe"))?;
 
         Ok(Response::new(prepared_response(vec![recipe])))
     }
@@ -87,11 +85,9 @@ impl DiffService for DiffApi {
             name: None,
         };
         let state = self.state.clone();
-        let recipe =
-            tokio::task::spawn_blocking(move || build_recipe::execute(request, &state.git))
-                .await
-                .map_err(|error| task_join(&error))?
-                .map_err(|error| unexpected(error, "prepare merge diff recipe"))?;
+        let recipe = run_blocking(move || build_recipe::execute(request, &state.git))
+            .await?
+            .map_err(|error| unexpected(error, "prepare merge diff recipe"))?;
 
         Ok(Response::new(prepared_response(vec![recipe])))
     }
@@ -112,11 +108,9 @@ impl DiffService for DiffApi {
             scope: traversal_scope(request.include_linked_worktrees),
         };
         let state = self.state.clone();
-        let recipes =
-            tokio::task::spawn_blocking(move || build_recipes::execute(request, &state.git))
-                .await
-                .map_err(|error| task_join(&error))?
-                .map_err(|error| unexpected(error, "prepare subrepositories diff recipes"))?;
+        let recipes = run_blocking(move || build_recipes::execute(request, &state.git))
+            .await?
+            .map_err(|error| unexpected(error, "prepare subrepositories diff recipes"))?;
 
         Ok(Response::new(prepared_response(recipes)))
     }
@@ -140,11 +134,9 @@ impl DiffService for DiffApi {
             },
         };
         let state = self.state.clone();
-        let recipes =
-            tokio::task::spawn_blocking(move || build_recipes::execute(request, &state.git))
-                .await
-                .map_err(|error| task_join(&error))?
-                .map_err(|error| unexpected(error, "prepare project diff recipes"))?;
+        let recipes = run_blocking(move || build_recipes::execute(request, &state.git))
+            .await?
+            .map_err(|error| unexpected(error, "prepare project diff recipes"))?;
 
         Ok(Response::new(prepared_response(recipes)))
     }
@@ -155,7 +147,7 @@ impl DiffService for DiffApi {
     ) -> Result<Response<v1::RenderDiffResponse>, Status> {
         let request = to_render_request(request.into_inner())?;
         let state = self.state.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = run_blocking(move || {
             render_diff::execute(
                 request,
                 &state.user_settings,
@@ -165,8 +157,7 @@ impl DiffService for DiffApi {
                 &state.clock,
             )
         })
-        .await
-        .map_err(|error| task_join(&error))?
+        .await?
         .map_err(render_error)?;
 
         Ok(Response::new(render_response(result)))
@@ -178,7 +169,7 @@ impl DiffService for DiffApi {
     ) -> Result<Response<v1::RenderDiffResponse>, Status> {
         let request = to_render_merge_request(request.into_inner())?;
         let state = self.state.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = run_blocking(move || {
             render_merge_diff::execute(
                 request,
                 &state.user_settings,
@@ -188,8 +179,7 @@ impl DiffService for DiffApi {
                 &state.clock,
             )
         })
-        .await
-        .map_err(|error| task_join(&error))?
+        .await?
         .map_err(|error| unexpected(error, "render merge diff"))?;
 
         Ok(Response::new(rendered_response(
@@ -204,7 +194,7 @@ impl DiffService for DiffApi {
     ) -> Result<Response<v1::RenderDiffResponse>, Status> {
         let request = request.into_inner();
         let state = self.state.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = run_blocking(move || {
             let request = to_render_subrepositories_request(request, &state.git)?;
             render_diff_subrepos::execute(
                 request,
@@ -216,8 +206,7 @@ impl DiffService for DiffApi {
             )
             .map_err(render_subrepositories_error)
         })
-        .await
-        .map_err(|error| task_join(&error))??;
+        .await??;
 
         Ok(Response::new(render_subrepositories_response(result)))
     }
@@ -234,7 +223,7 @@ impl DiffService for DiffApi {
             .await
             .map_err(|error| project_client_error(&error))?;
         let state = self.state.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = run_blocking(move || {
             let repos = select_unpushed_repositories::execute(
                 SelectUnpushedRepositories { repos },
                 &state.git,
@@ -264,8 +253,7 @@ impl DiffService for DiffApi {
             .map(Some)
             .map_err(|error| unexpected(error, "render project diff"))
         })
-        .await
-        .map_err(|error| task_join(&error))??;
+        .await??;
 
         Ok(Response::new(
             result.map_or_else(empty_response, |result| render_project_response(&result)),

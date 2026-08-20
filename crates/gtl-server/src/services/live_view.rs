@@ -12,7 +12,7 @@ use gtl_models::live_views::LiveSource;
 use gtl_wire::v1::{self, live_view_service_server::LiveViewService};
 use tonic::{Request, Response, Status};
 
-use super::{application_notes, project_client_error, task_join, unexpected};
+use super::{application_notes, project_client_error, run_blocking, unexpected};
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -36,15 +36,14 @@ impl LiveViewService for LiveViewApi {
             path: super::absolute_path(request.into_inner().path, "path")?,
         };
         let state = self.state.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = run_blocking(move || {
             let mut connection = state
                 .database
                 .connection_lock()
                 .map_err(SaveLiveViewError::from)?;
             save_live_view::execute(request, &state.git, &mut connection, &state.clock)
         })
-        .await
-        .map_err(|error| task_join(&error))?
+        .await?
         .map_err(|error| unexpected(error, "save live view"))?;
 
         Ok(Response::new(save_response(result)))
@@ -61,7 +60,7 @@ impl LiveViewService for LiveViewApi {
             .await
             .map_err(|error| project_client_error(&error))?;
         let state = self.state.clone();
-        let results = tokio::task::spawn_blocking(move || {
+        let results = run_blocking(move || {
             let selected = select_unpushed_repositories::execute(
                 SelectUnpushedRepositories { repos },
                 &state.git,
@@ -88,8 +87,7 @@ impl LiveViewService for LiveViewApi {
                 })
                 .collect::<Result<Vec<_>, Status>>()
         })
-        .await
-        .map_err(|error| task_join(&error))??;
+        .await??;
 
         Ok(Response::new(v1::SaveProjectLiveViewsResponse { results }))
     }

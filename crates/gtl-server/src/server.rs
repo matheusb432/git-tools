@@ -25,6 +25,7 @@ use crate::{
 };
 
 const MAX_CONCURRENT_REQUESTS_PER_CONNECTION: usize = 16;
+const MAX_REQUEST_DURATION: Duration = Duration::from_mins(30);
 const MAX_REQUEST_MESSAGE_SIZE: usize = 64 * 1024;
 const MAX_RESPONSE_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
 
@@ -116,20 +117,21 @@ pub(crate) async fn serve(
     let (shutdown_started_sender, shutdown_started_receiver) = tokio::sync::oneshot::channel();
     let shutdown = async move {
         shutdown.await;
-        health_reporter
-            .set_service_status("", tonic_health::ServingStatus::NotServing)
-            .await;
         for service_name in application_service_names {
             health_reporter
                 .set_service_status(service_name, tonic_health::ServingStatus::NotServing)
                 .await;
         }
+        health_reporter
+            .set_service_status("", tonic_health::ServingStatus::NotServing)
+            .await;
         let _ = shutdown_started_sender.send(());
     };
 
     let grpc_server = Server::builder()
         .concurrency_limit_per_connection(MAX_CONCURRENT_REQUESTS_PER_CONNECTION)
         .load_shed(true)
+        .timeout(MAX_REQUEST_DURATION)
         .layer(InterceptorLayer::new(Authentication { capability }))
         .add_service(health_server)
         .add_service(reflection_server)

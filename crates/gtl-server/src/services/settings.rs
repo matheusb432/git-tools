@@ -6,7 +6,7 @@ use gtl_models::{settings::SettingKeyValue, viewer::Theme};
 use gtl_wire::v1::{self, settings_service_server::SettingsService};
 use tonic::{Request, Response, Status};
 
-use super::{task_join, unexpected};
+use super::{run_blocking, unexpected};
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -27,9 +27,8 @@ impl SettingsService for SettingsApi {
         _request: Request<v1::Empty>,
     ) -> Result<Response<v1::GetSettingsResponse>, Status> {
         let store = self.state.user_settings.clone();
-        let settings = tokio::task::spawn_blocking(move || store.load())
-            .await
-            .map_err(|error| task_join(&error))?
+        let settings = run_blocking(move || store.load())
+            .await?
             .map_err(|error| unexpected(error, "load user settings"))?;
         Ok(Response::new(v1::GetSettingsResponse {
             push_confirmation_required: settings.push_confirmation_required(),
@@ -46,7 +45,7 @@ impl SettingsService for SettingsApi {
             .path()
             .ok_or_else(|| Status::failed_precondition("user configuration path is unavailable"))?
             .to_path_buf();
-        tokio::task::spawn_blocking(move || {
+        run_blocking(move || {
             set_setting_key::execute(
                 SetSettingKey {
                     mutation: SettingKeyValue::Theme(theme),
@@ -54,8 +53,7 @@ impl SettingsService for SettingsApi {
                 &mut store,
             )
         })
-        .await
-        .map_err(|error| task_join(&error))?
+        .await?
         .map_err(|error| unexpected(error, "set diff artifact theme"))?;
 
         Ok(Response::new(v1::SetThemeResponse {

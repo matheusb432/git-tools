@@ -80,9 +80,18 @@ pub(crate) fn project_client_error(error: &ProjectClientError) -> Status {
     }
 }
 
-pub(crate) fn task_join(error: &tokio::task::JoinError) -> Status {
-    tracing::error!(error = ?error, "gRPC blocking task failed");
-    Status::internal("server operation failed")
+pub(crate) async fn run_blocking<T>(
+    operation: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, Status>
+where
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = ?error, "gRPC blocking task failed");
+            Status::internal("server operation failed")
+        })
 }
 
 pub(crate) fn unexpected(error: impl std::fmt::Debug, operation: &'static str) -> Status {

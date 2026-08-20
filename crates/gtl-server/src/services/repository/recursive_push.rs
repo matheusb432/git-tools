@@ -10,7 +10,7 @@ use gtl_models::{
 use gtl_wire::v1;
 use tonic::{Response, Status};
 
-use super::super::{absolute_path, repository_root, required, task_join, unexpected};
+use super::super::{absolute_path, repository_root, required, run_blocking, unexpected};
 use crate::state::AppState;
 
 const MAX_REPOSITORIES_PER_REQUEST: usize = 512;
@@ -22,11 +22,9 @@ pub(super) async fn plan(
     let request = PlanRecursivePush {
         root: absolute_path(request.root, "root")?,
     };
-    let result =
-        tokio::task::spawn_blocking(move || plan_recursive_push::execute(request, &state.git))
-            .await
-            .map_err(|error| task_join(&error))?
-            .map_err(|error| unexpected(error, "plan recursive repository push"))?;
+    let result = run_blocking(move || plan_recursive_push::execute(request, &state.git))
+        .await?
+        .map_err(|error| unexpected(error, "plan recursive repository push"))?;
     let outcome = match result {
         SubreposPlan::Ready(targets) => {
             v1::plan_recursive_push_response::Outcome::Ready(v1::RecursivePushPlan {
@@ -56,11 +54,10 @@ pub(super) async fn execute(
         .into_iter()
         .map(application_target)
         .collect::<Result<Vec<_>, _>>()?;
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_blocking(move || {
         apply_recursive_push::execute(ApplyRecursivePush { targets }, &state.git)
     })
-    .await
-    .map_err(|error| task_join(&error))?;
+    .await?;
     let status = match result.status {
         gtl_models::repository::recursive_push::Status::Ok => v1::RecursivePushStatus::Ok,
         gtl_models::repository::recursive_push::Status::Partial => v1::RecursivePushStatus::Partial,

@@ -72,6 +72,14 @@ impl TestServer {
             task,
         })
     }
+
+    async fn stop(self) -> TestResult {
+        self.shutdown
+            .send(())
+            .map_err(|()| "test server stopped before shutdown")?;
+        self.task.await??;
+        Ok(())
+    }
 }
 
 #[derive(Clone)]
@@ -104,12 +112,7 @@ async fn serves_authenticated_health_and_reflection() -> TestResult {
     assert_reflection_describes_gtl_contract(server.channel.clone(), server.authorization.clone())
         .await?;
 
-    server
-        .shutdown
-        .send(())
-        .map_err(|()| "test server stopped before shutdown")?;
-    server.task.await??;
-    Ok(())
+    server.stop().await
 }
 
 #[tokio::test]
@@ -130,12 +133,7 @@ async fn validates_application_requests_through_the_generated_client() -> TestRe
         .expect_err("relative working directory must fail");
 
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
-    server
-        .shutdown
-        .send(())
-        .map_err(|()| "test server stopped before shutdown")?;
-    server.task.await??;
-    Ok(())
+    server.stop().await
 }
 
 #[tokio::test]
@@ -150,30 +148,28 @@ async fn rejects_requests_without_the_capability() -> TestResult {
         .expect_err("unauthenticated request must fail");
     assert_eq!(error.code(), tonic::Code::Unauthenticated);
 
-    server
-        .shutdown
-        .send(())
-        .map_err(|()| "test server stopped before shutdown")?;
-    server.task.await??;
-    Ok(())
+    server.stop().await
 }
 
 #[tokio::test]
 async fn shutdown_reports_not_serving_and_stops_with_an_open_health_watch() -> TestResult {
     let server = TestServer::start().await?;
     let mut server_health =
-        HealthClient::with_interceptor(server.channel.clone(), server.authorization.clone())
-            .watch(HealthCheckRequest {
-                service: String::new(),
-            })
-            .await?
-            .into_inner();
+        health_watch(server.channel.clone(), server.authorization.clone(), "").await?;
+    let mut diff_health = health_watch(
+        server.channel.clone(),
+        server.authorization.clone(),
+        "gtl.v1.DiffService",
+    )
+    .await?;
 
     assert_health_update(&mut server_health, ServingStatus::Serving).await?;
+    assert_health_update(&mut diff_health, ServingStatus::Serving).await?;
     server
         .shutdown
         .send(())
         .map_err(|()| "test server stopped before shutdown")?;
+    assert_health_update(&mut diff_health, ServingStatus::NotServing).await?;
     assert_health_update(&mut server_health, ServingStatus::NotServing).await?;
 
     let server_result = tokio::time::timeout(Duration::from_secs(1), server.task)
@@ -181,6 +177,19 @@ async fn shutdown_reports_not_serving_and_stops_with_an_open_health_watch() -> T
         .map_err(|_| "test server exceeded its shutdown grace period")?;
     server_result??;
     Ok(())
+}
+
+async fn health_watch(
+    channel: Channel,
+    authorization: TestAuthorization,
+    service: &str,
+) -> TestResult<tonic::Streaming<tonic_health::pb::HealthCheckResponse>> {
+    Ok(HealthClient::with_interceptor(channel, authorization)
+        .watch(HealthCheckRequest {
+            service: service.to_owned(),
+        })
+        .await?
+        .into_inner())
 }
 
 async fn assert_health_serving(channel: Channel, authorization: TestAuthorization) -> TestResult {

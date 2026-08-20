@@ -9,7 +9,7 @@ use gtl_models::git::{BranchName, GitEffectMode};
 use gtl_wire::v1;
 use tonic::{Response, Status};
 
-use super::super::{project_client_error, task_join};
+use super::super::{project_client_error, run_blocking};
 use crate::state::AppState;
 
 pub(super) async fn execute(
@@ -28,11 +28,10 @@ pub(super) async fn execute(
     } else {
         GitEffectMode::Apply
     };
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_blocking(move || {
         prune_branches::execute(PruneBranches { repos, onto, mode }, &state.git)
     })
-    .await
-    .map_err(|error| task_join(&error))?;
+    .await?;
 
     Ok(Response::new(prune_response(result)))
 }

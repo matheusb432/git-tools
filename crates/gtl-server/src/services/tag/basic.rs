@@ -18,7 +18,7 @@ use gtl_models::{
 use gtl_wire::v1;
 use tonic::{Response, Status};
 
-use super::super::{absolute_path, task_join, unexpected};
+use super::super::{absolute_path, run_blocking, unexpected};
 use crate::state::AppState;
 
 pub(super) async fn list(
@@ -26,7 +26,7 @@ pub(super) async fn list(
     request: v1::ListTagsRequest,
 ) -> Result<Response<v1::ListTagsResponse>, Status> {
     let repo_path = absolute_path(request.repository_path, "repository_path")?;
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_blocking(move || {
         let repo_path = resolve_root(repo_path, &state)?;
         list_tags::execute(
             ListTags {
@@ -37,8 +37,7 @@ pub(super) async fn list(
         )
         .map_err(anyhow::Error::from)
     })
-    .await
-    .map_err(|error| task_join(&error))?
+    .await?
     .map_err(|error| unexpected(error, "list repository tags"))?;
     let outcome = match result {
         ListTagsOk::Listed { groups } => v1::list_tags_response::Outcome::Listed(v1::TagGroups {
@@ -59,7 +58,7 @@ pub(super) async fn add(
 ) -> Result<Response<v1::TagActionResponse>, Status> {
     let repo_path = absolute_path(request.repository_path, "repository_path")?;
     let tag = tag_name(request.tag, "tag")?;
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_blocking(move || {
         let repo_path = resolve_root(repo_path, &state)?;
         Ok::<_, anyhow::Error>(
             match add_tag::execute(
@@ -75,8 +74,7 @@ pub(super) async fn add(
             },
         )
     })
-    .await
-    .map_err(|error| task_join(&error))?
+    .await?
     .map_err(|error| unexpected(error, "add repository tag"))?;
     Ok(Response::new(result))
 }
@@ -86,7 +84,7 @@ pub(super) async fn push(
     request: v1::PushTagsRequest,
 ) -> Result<Response<v1::TagActionResponse>, Status> {
     let repo_path = absolute_path(request.repository_path, "repository_path")?;
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_blocking(move || {
         let repo_path = resolve_root(repo_path, &state)?;
         Ok::<_, anyhow::Error>(
             match push_tags::execute(PushTags { repo_path }, &state.git) {
@@ -95,8 +93,7 @@ pub(super) async fn push(
             },
         )
     })
-    .await
-    .map_err(|error| task_join(&error))?
+    .await?
     .map_err(|error| unexpected(error, "push repository tags"))?;
     Ok(Response::new(result))
 }
@@ -111,7 +108,7 @@ pub(super) async fn add_and_push(
         .label
         .map(|label| tag_name(label, "label"))
         .transpose()?;
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_blocking(move || {
         let repo_path = resolve_root(repo_path, &state)?;
         Ok::<_, anyhow::Error>(
             match add_and_push_tag::execute(
@@ -128,8 +125,7 @@ pub(super) async fn add_and_push(
             },
         )
     })
-    .await
-    .map_err(|error| task_join(&error))?
+    .await?
     .map_err(|error| unexpected(error, "add and push repository tag"))?;
     Ok(Response::new(result))
 }
@@ -141,7 +137,7 @@ pub(super) async fn label(
     let repo_path = absolute_path(request.repository_path, "repository_path")?;
     let tag = tag_name(request.tag, "tag")?;
     let label = tag_name(request.label, "label")?;
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_blocking(move || {
         let repo_path = resolve_root(repo_path, &state)?;
         Ok::<_, anyhow::Error>(
             match label_tag::execute(
@@ -157,8 +153,7 @@ pub(super) async fn label(
             },
         )
     })
-    .await
-    .map_err(|error| task_join(&error))?
+    .await?
     .map_err(|error| unexpected(error, "label repository tag"))?;
     Ok(Response::new(result))
 }

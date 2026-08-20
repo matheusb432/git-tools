@@ -9,7 +9,7 @@ use gtl_models::worktrees::{Worktree, WorktreeCheckout, WorktreeKind};
 use gtl_wire::v1::{self, worktree_service_server::WorktreeService};
 use tonic::{Request, Response, Status};
 
-use super::{absolute_path, task_join, unexpected};
+use super::{absolute_path, run_blocking, unexpected};
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -31,7 +31,7 @@ impl WorktreeService for WorktreeApi {
     ) -> Result<Response<v1::GetWorktreeBaseResponse>, Status> {
         let repo_path = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = run_blocking(move || {
             let repo_path = resolve_repository_root::execute(
                 resolve_repository_root::ResolveRepositoryRoot { repo_path },
                 &state.git,
@@ -39,8 +39,7 @@ impl WorktreeService for WorktreeApi {
             get_worktree_base::execute(GetWorktreeBase { repo_path }, &state.git)
                 .map_err(anyhow::Error::from)
         })
-        .await
-        .map_err(|error| task_join(&error))?
+        .await?
         .map_err(|error| unexpected(error, "get primary worktree"))?;
         let outcome = match result {
             GetWorktreeBaseOk::Found { path } => {
@@ -63,7 +62,7 @@ impl WorktreeService for WorktreeApi {
     ) -> Result<Response<v1::ListWorktreesResponse>, Status> {
         let repo_path = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let result = run_blocking(move || {
             let repo_path = resolve_repository_root::execute(
                 resolve_repository_root::ResolveRepositoryRoot { repo_path },
                 &state.git,
@@ -71,8 +70,7 @@ impl WorktreeService for WorktreeApi {
             list_worktrees::execute(ListWorktrees { repo_path }, &state.git)
                 .map_err(anyhow::Error::from)
         })
-        .await
-        .map_err(|error| task_join(&error))?
+        .await?
         .map_err(|error| unexpected(error, "list worktrees"))?;
         let outcome = match result {
             ListWorktreesOk::Listed { worktrees } => {

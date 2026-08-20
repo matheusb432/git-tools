@@ -10,7 +10,7 @@ use gtl_models::repository::{
 use gtl_wire::v1;
 use tonic::{Response, Status};
 
-use super::super::{absolute_path, task_join, unexpected};
+use super::super::{absolute_path, run_blocking, unexpected};
 use crate::state::AppState;
 
 pub(super) async fn get(
@@ -18,7 +18,7 @@ pub(super) async fn get(
     request: v1::GetRepositoryStatusRequest,
 ) -> Result<Response<v1::RepositoryStatusesResponse>, Status> {
     let repository_path = absolute_path(request.repository_path, "repository_path")?;
-    let results = tokio::task::spawn_blocking(move || {
+    let results = run_blocking(move || {
         let root = resolve_repository_root::execute(
             resolve_repository_root::ResolveRepositoryRoot {
                 repo_path: repository_path,
@@ -35,8 +35,7 @@ pub(super) async fn get(
             &state.git,
         ))
     })
-    .await
-    .map_err(|error| task_join(&error))?
+    .await?
     .map_err(|error| unexpected(error, "get repository status"))?;
 
     Ok(Response::new(statuses_response(&results)))
@@ -47,7 +46,7 @@ pub(super) async fn get_recursive(
     request: v1::GetRecursiveRepositoryStatusesRequest,
 ) -> Result<Response<v1::RepositoryStatusesResponse>, Status> {
     let root = absolute_path(request.root, "root")?;
-    let results = tokio::task::spawn_blocking(move || {
+    let results = run_blocking(move || {
         let root = std::fs::canonicalize(&root)
             .with_context(|| format!("resolving repository traversal root {}", root.display()))?;
         let repos = find_repositories::execute(find_repositories::FindRepositories {
@@ -62,8 +61,7 @@ pub(super) async fn get_recursive(
             &state.git,
         ))
     })
-    .await
-    .map_err(|error| task_join(&error))?
+    .await?
     .map_err(|error| unexpected(error, "get recursive repository statuses"))?;
 
     Ok(Response::new(statuses_response(&results)))

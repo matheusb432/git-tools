@@ -5,7 +5,7 @@ use gtl_application::projects::commit_repositories::{
 use gtl_wire::v1;
 use tonic::{Response, Status};
 
-use super::super::{project_client_error, task_join};
+use super::super::{project_client_error, run_blocking};
 use crate::state::AppState;
 
 pub(super) async fn execute(
@@ -24,11 +24,10 @@ pub(super) async fn execute(
             message: request.message,
         }
     };
-    let result = tokio::task::spawn_blocking(move || {
+    let result = run_blocking(move || {
         commit_repositories::execute(CommitRepositories { repos, mode }, &state.git)
     })
-    .await
-    .map_err(|error| task_join(&error))?;
+    .await?;
 
     Ok(Response::new(commit_response(result)))
 }

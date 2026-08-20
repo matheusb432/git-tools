@@ -10,7 +10,7 @@ use gtl_models::{
 use gtl_wire::v1::{self, tag_service_server::TagService};
 use tonic::{Request, Response, Status};
 
-use super::{repository_root, required, task_join, unexpected};
+use super::{repository_root, required, run_blocking, unexpected};
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -32,11 +32,9 @@ impl TagService for TagApi {
     ) -> Result<Response<v1::PlanTagBumpResponse>, Status> {
         let request = plan_request(request.into_inner())?;
         let state = self.state.clone();
-        let result =
-            tokio::task::spawn_blocking(move || dry_run_tag_bump::execute(request, &state.git))
-                .await
-                .map_err(|error| task_join(&error))?
-                .map_err(|error| unexpected(error, "plan tag bump"))?;
+        let result = run_blocking(move || dry_run_tag_bump::execute(request, &state.git))
+            .await?
+            .map_err(|error| unexpected(error, "plan tag bump"))?;
 
         Ok(Response::new(plan_response(result)))
     }
@@ -50,9 +48,8 @@ impl TagService for TagApi {
             preview: tag_bump_preview(preview)?,
         };
         let state = self.state.clone();
-        let result = tokio::task::spawn_blocking(move || bump_tag::execute(request, &state.git))
-            .await
-            .map_err(|error| task_join(&error))?
+        let result = run_blocking(move || bump_tag::execute(request, &state.git))
+            .await?
             .map_err(|error| unexpected(error, "execute tag bump"))?;
 
         Ok(Response::new(execute_response(result)))
