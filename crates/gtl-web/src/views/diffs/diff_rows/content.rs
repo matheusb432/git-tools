@@ -3,6 +3,10 @@ use gtl_parser::{CharacterCount, SemanticTextChange, SemanticTextSpan, SyntaxTok
 
 use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
 
+const LONG_LINE_TEXT_CLASSES: &str = "min-w-0 flex-1 whitespace-pre [scrollbar-color:var(--acc)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[linear-gradient(125deg,var(--acc),var(--acc-2))] [&::-webkit-scrollbar-thumb:hover]:bg-[linear-gradient(125deg,var(--acc-2),var(--acc))]";
+const LONG_LINE_COLLAPSED_CLASSES: &str = "overflow-hidden text-ellipsis";
+const LONG_LINE_EXPANDED_CLASSES: &str = "overflow-x-auto text-clip";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChangedTextTone {
     None,
@@ -16,27 +20,59 @@ pub(super) fn CodeCellContent(
     semantic_spans: Vec<SemanticTextSpan>,
     changed_text_tone: ChangedTextTone,
     long_line_character_count: Option<CharacterCount>,
+    artifact_enhancement: bool,
+    copy_text: bool,
 ) -> Element {
     if let Some(character_count) = long_line_character_count {
         return rsx! {
-            LongLine { text, character_count }
+            LongLine {
+                text,
+                marker: None,
+                character_count,
+                artifact_enhancement,
+                copy_text,
+            }
         };
     }
 
     rsx! {
-        SemanticText { text, semantic_spans, changed_text_tone }
+        SemanticText {
+            text,
+            semantic_spans,
+            changed_text_tone,
+            copy_text,
+        }
     }
 }
 
 #[component]
-pub(super) fn LongLine(text: String, character_count: CharacterCount) -> Element {
+pub(super) fn LongLine(
+    text: String,
+    marker: Option<char>,
+    character_count: CharacterCount,
+    artifact_enhancement: bool,
+    copy_text: bool,
+) -> Element {
     let mut expanded = use_signal(|| false);
+    let is_expanded = expanded();
+    let artifact_long_line = artifact_enhancement.then_some("");
+    let artifact_expanded = artifact_enhancement.then(|| is_expanded.to_string());
     rsx! {
-        span { class: "flex items-baseline gap-2",
-            LongLineText { text, expanded: expanded() }
+        span {
+            class: "flex items-baseline gap-2",
+            "data-gtl-long-line": artifact_long_line,
+            "data-gtl-expanded": artifact_expanded,
+            LongLineText {
+                text,
+                marker,
+                expanded: is_expanded,
+                artifact_enhancement,
+                copy_text,
+            }
             LongLineControl {
                 character_count,
-                expanded: expanded(),
+                expanded: is_expanded,
+                artifact_enhancement,
                 on_toggle: move |()| expanded.toggle(),
             }
         }
@@ -44,12 +80,35 @@ pub(super) fn LongLine(text: String, character_count: CharacterCount) -> Element
 }
 
 #[component]
-fn LongLineText(text: String, expanded: bool) -> Element {
+fn LongLineText(
+    text: String,
+    marker: Option<char>,
+    expanded: bool,
+    artifact_enhancement: bool,
+    copy_text: bool,
+) -> Element {
+    let marker = marker.map(|value| value.to_string());
+    let artifact_long_line_text = artifact_enhancement.then_some("");
+    let artifact_expanded_classes = artifact_enhancement.then_some(LONG_LINE_EXPANDED_CLASSES);
+    let artifact_collapsed_classes = artifact_enhancement.then_some(LONG_LINE_COLLAPSED_CLASSES);
+    let overflow_classes = if expanded {
+        LONG_LINE_EXPANDED_CLASSES
+    } else {
+        LONG_LINE_COLLAPSED_CLASSES
+    };
     rsx! {
         span {
-            class: "min-w-0 flex-1 whitespace-pre [scrollbar-color:var(--acc)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[linear-gradient(125deg,var(--acc),var(--acc-2))] [&::-webkit-scrollbar-thumb:hover]:bg-[linear-gradient(125deg,var(--acc-2),var(--acc))]",
-            class: if expanded { "overflow-x-auto text-clip" } else { "overflow-hidden text-ellipsis" },
-            "{text}"
+            class: "{LONG_LINE_TEXT_CLASSES}",
+            class: "{overflow_classes}",
+            "data-gtl-long-line-text": artifact_long_line_text,
+            "data-gtl-expanded-classes": artifact_expanded_classes,
+            "data-gtl-collapsed-classes": artifact_collapsed_classes,
+            {marker}
+            if copy_text {
+                span { "data-gtl-copy-text": "", "{text}" }
+            } else {
+                "{text}"
+            }
         }
     }
 }
@@ -58,14 +117,17 @@ fn LongLineText(text: String, expanded: bool) -> Element {
 fn LongLineControl(
     character_count: CharacterCount,
     expanded: bool,
+    artifact_enhancement: bool,
     on_toggle: EventHandler<()>,
 ) -> Element {
+    let artifact_action = artifact_enhancement.then_some("toggle-long-line");
     rsx! {
         Button {
             class: "flex-none select-none [font:inherit]",
             size: ButtonSize::Inline,
             variant: ButtonVariant::Secondary,
             aria_expanded: expanded.to_string(),
+            "data-gtl-action": artifact_action,
             onclick: move |_| on_toggle.call(()),
             "\u{22ef} {character_count} chars"
         }
@@ -77,6 +139,7 @@ pub(super) fn SemanticText(
     text: String,
     semantic_spans: Vec<SemanticTextSpan>,
     changed_text_tone: ChangedTextTone,
+    copy_text: bool,
 ) -> Element {
     let spans = semantic_spans
         .into_iter()
@@ -88,7 +151,14 @@ pub(super) fn SemanticText(
             )
         })
         .collect::<Vec<_>>();
-    rsx! {
+    if copy_text && spans.is_empty() {
+        return rsx! {
+            span { "data-gtl-copy-text": "" }
+            "\u{00a0}"
+        };
+    }
+
+    let content = rsx! {
         if spans.is_empty() {
             "\u{00a0}"
         } else {
@@ -101,6 +171,13 @@ pub(super) fn SemanticText(
                 }
             }
         }
+    };
+    if copy_text {
+        rsx! {
+            span { "data-gtl-copy-text": "", {content} }
+        }
+    } else {
+        content
     }
 }
 
@@ -153,5 +230,25 @@ pub(super) fn non_breaking_if_empty(text: &str) -> String {
         "\u{00a0}".to_owned()
     } else {
         text.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_text_keeps_an_empty_source_line_distinct_from_its_visual_placeholder() {
+        let html = dioxus_ssr::render_element(rsx! {
+            SemanticText {
+                text: String::new(),
+                semantic_spans: Vec::new(),
+                changed_text_tone: ChangedTextTone::None,
+                copy_text: true,
+            }
+        });
+
+        assert!(html.contains(r#"<span data-gtl-copy-text=""></span>"#));
+        assert!(html.contains('\u{00a0}'));
     }
 }

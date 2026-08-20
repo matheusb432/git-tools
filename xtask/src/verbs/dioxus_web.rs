@@ -12,10 +12,8 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(unix)]
 use command_group::{Signal, UnixChildExt};
-use flate2::{Compression, GzBuilder};
 use sha2::{Digest, Sha256};
 
 use super::{cargo_target_directory, lock_web_assets, repository_root};
@@ -26,127 +24,6 @@ const PUBLIC_DIRECTORY: &str = "crates/gtl-web/dist/public";
 const SOURCE_FINGERPRINT_PATH: &str = "crates/gtl-web/dist/.source-fingerprint";
 const BUNDLE_FINGERPRINT_PATH: &str = "crates/gtl-web/dist/.bundle-fingerprint";
 const DESKTOP_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-web/release/web";
-const ARTIFACT_PROFILE: &str = "artifact-web-release";
-const ARTIFACT_INTERNAL_RELEASE_DIRECTORY: &str = "dx/gtl-artifact/release/web";
-const ARTIFACT_RUNTIME_CACHE_DIRECTORY: &str = "target/generated/gtl-artifacts";
-const ARTIFACT_RUNTIME_ASSET_ID: &str = "gtl-artifact-runtime";
-const ARTIFACT_RUNTIME_MAX_BYTES: usize = 16 * 1024 * 1024;
-const ARTIFACT_ASSET_LOADER: &str = r#"
-function gtlArtifactAssetError(code, id, cause) {
-    const error = new Error(`${code}: ${id}`);
-    error.name = "GtlArtifactAssetError";
-    error.code = code;
-    error.assetId = id;
-    if (cause !== undefined) error.cause = cause;
-    return error;
-}
-
-function gtlDecodeBase64(encoded, id) {
-    if (encoded.length === 0 || encoded.length % 4 !== 0 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
-        throw gtlArtifactAssetError("INVALID_BASE64", id);
-    }
-    const chunks = [];
-    for (let offset = 0; offset < encoded.length; offset += 32768) {
-        let decoded;
-        try {
-            decoded = atob(encoded.slice(offset, offset + 32768));
-        } catch (cause) {
-            throw gtlArtifactAssetError("INVALID_BASE64", id, cause);
-        }
-        const bytes = new Uint8Array(decoded.length);
-        for (let index = 0; index < decoded.length; index += 1) bytes[index] = decoded.charCodeAt(index);
-        chunks.push(bytes);
-    }
-    return chunks;
-}
-
-globalThis.__gtlLoadCompressedAsset = async function (id, maxBytes, removeAfterRead = false) {
-    if (typeof globalThis.DecompressionStream !== "function") {
-        throw gtlArtifactAssetError("UNAVAILABLE", id);
-    }
-    const node = document.getElementById(id);
-    if (node === null) throw gtlArtifactAssetError("MISSING", id);
-    if (node.dataset.encoding !== "base64" || node.dataset.compression !== "gzip") {
-        throw gtlArtifactAssetError("INVALID_METADATA", id);
-    }
-    const expectedText = node.dataset.uncompressedBytes;
-    if (expectedText === undefined || !/^(?:0|[1-9][0-9]*)$/.test(expectedText)) {
-        throw gtlArtifactAssetError("INVALID_METADATA", id);
-    }
-    const expectedBytes = Number(expectedText);
-    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || !Number.isSafeInteger(expectedBytes)) {
-        throw gtlArtifactAssetError("INVALID_METADATA", id);
-    }
-    if (expectedBytes > maxBytes) throw gtlArtifactAssetError("TOO_LARGE", id);
-    const encoded = (node.textContent ?? "").trim();
-    const encodedLimit = Math.ceil((maxBytes + 65536) / 3) * 4;
-    if (encoded.length > encodedLimit) throw gtlArtifactAssetError("TOO_LARGE", id);
-    const compressedChunks = gtlDecodeBase64(encoded, id);
-    let reader;
-    try {
-        reader = new Blob(compressedChunks)
-            .stream()
-            .pipeThrough(new DecompressionStream("gzip"))
-            .getReader();
-    } catch (cause) {
-        throw gtlArtifactAssetError("INVALID_GZIP", id, cause);
-    }
-    const outputChunks = [];
-    let outputBytes = 0;
-    try {
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            outputBytes += value.byteLength;
-            if (outputBytes > maxBytes || outputBytes > expectedBytes) {
-                await reader.cancel();
-                throw gtlArtifactAssetError("TOO_LARGE", id);
-            }
-            outputChunks.push(value);
-        }
-    } catch (cause) {
-        if (cause?.name === "GtlArtifactAssetError") throw cause;
-        throw gtlArtifactAssetError("INVALID_GZIP", id, cause);
-    } finally {
-        reader.releaseLock();
-    }
-    if (outputBytes !== expectedBytes) throw gtlArtifactAssetError("INVALID_GZIP", id);
-    const output = new Uint8Array(outputBytes);
-    let offset = 0;
-    for (const chunk of outputChunks) {
-        output.set(chunk, offset);
-        offset += chunk.byteLength;
-    }
-    if (removeAfterRead) node.remove();
-    return output;
-};
-
-globalThis.__gtlShowArtifactInitializationError = function (error) {
-    let target = document.getElementById("main");
-    if (target === null) {
-        target = document.createElement("main");
-        document.body.append(target);
-    }
-    const messages = {
-        UNAVAILABLE: "This browser cannot decompress this offline diff artifact.",
-        MISSING: "This diff artifact is missing its compressed runtime.",
-        INVALID_METADATA: "The embedded artifact runtime has invalid size metadata.",
-        INVALID_BASE64: "The embedded artifact runtime is not valid base64.",
-        INVALID_GZIP: "The embedded artifact runtime gzip stream is corrupt.",
-        TOO_LARGE: "The embedded artifact runtime exceeds its declared size limit.",
-    };
-    target.replaceChildren();
-    target.className = "grid h-screen place-content-center bg-bg px-5 text-center text-ink";
-    target.setAttribute("role", "alert");
-    const heading = document.createElement("h1");
-    heading.className = "font-semibold";
-    heading.textContent = "Unable to open diff artifact";
-    const detail = document.createElement("p");
-    detail.className = "mt-1 text-ink-2";
-    detail.textContent = messages[error?.code] ?? "The embedded artifact runtime is corrupt or incompatible.";
-    target.append(heading, detail);
-};
-"#;
 const SOURCE_FILES: &[&str] = &[
     "Cargo.lock",
     "Cargo.toml",
@@ -201,24 +78,6 @@ const DESKTOP_BUNDLE_ARGUMENTS: &[&str] = &[
     "--release",
     "--package",
     "gtl-web",
-    "--locked",
-];
-const ARTIFACT_BUILD_ARGUMENTS: &[&str] = &[
-    "build",
-    "--web",
-    "--profile",
-    ARTIFACT_PROFILE,
-    "--package",
-    "gtl-web",
-    "--bin",
-    "gtl-artifact",
-    "--no-default-features",
-    "--features",
-    "artifact",
-    "--inject-loading-scripts",
-    "false",
-    "--debug-symbols",
-    "false",
     "--locked",
 ];
 const SERVE_ARGUMENTS: &[&str] = &[
@@ -453,7 +312,7 @@ pub(crate) fn build_release() -> Result<()> {
 
 pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
     let inputs_before = release_input_fingerprint(root)?;
-    build_artifact_assets_unlocked(root)?;
+    build_artifact_styles_unlocked(root)?;
     let target = cargo_target_directory(root)?;
     clean_desktop_release_outputs(root, &target)?;
     let step = Step::new(
@@ -477,14 +336,12 @@ pub(crate) fn build_release_unlocked(root: &Path) -> Result<()> {
     verify_staged_bundle(root)
 }
 
-pub(crate) fn build_artifact_assets_unlocked(root: &Path) -> Result<()> {
+pub(crate) fn build_artifact_styles_unlocked(root: &Path) -> Result<()> {
     let inputs_before = release_input_fingerprint(root)?;
     build_styles_unlocked(root)?;
-    let target = cargo_target_directory(root)?;
-    build_artifact_runtime_unlocked(root, &target)?;
     ensure!(
         release_input_fingerprint(root)? == inputs_before,
-        "offline artifact inputs changed during asset generation; retry the build"
+        "static artifact inputs changed during stylesheet generation; retry the build"
     );
     Ok(())
 }
@@ -526,228 +383,6 @@ pub(crate) fn verify_staged_bundle(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn build_artifact_runtime_unlocked(root: &Path, target: &Path) -> Result<()> {
-    verify_artifact_release_profile(root)?;
-    clean_artifact_release_output(target)?;
-    let step = Step::new(
-        "dioxus-artifact-release",
-        "dx",
-        ARTIFACT_BUILD_ARGUMENTS.iter().copied(),
-    )
-    .with_environment("RUSTC_WRAPPER", "")
-    .with_current_directory(root);
-    process::run_step(&super::wasm_c::configure_step(root, step)?)?;
-
-    let asset_directory = target
-        .join(ARTIFACT_INTERNAL_RELEASE_DIRECTORY)
-        .join("public/assets");
-    let files = collect_tree_files(&asset_directory)?;
-    let script = find_generated_asset(&files, "gtl-artifact-dxh", "js")?;
-    let wasm = find_generated_asset(&files, "gtl-artifact_bg-dxh", "wasm")?;
-    let wasm_name = wasm
-        .file_name()
-        .and_then(|name| name.to_str())
-        .context("generated artifact WASM file name is not UTF-8")?;
-    let source = fs::read_to_string(&script)
-        .with_context(|| format!("read generated artifact runtime {}", script.display()))?;
-    let runtime = embed_artifact_wasm_loader(&source, wasm_name)?;
-    let wasm_bytes = fs::read(&wasm)
-        .with_context(|| format!("read generated artifact WASM {}", wasm.display()))?;
-    ensure!(!wasm_bytes.is_empty(), "generated artifact WASM is empty");
-    ensure!(
-        u64::try_from(wasm_bytes.len()).unwrap_or(u64::MAX) <= BUNDLE_FILE_BYTES_MAX,
-        "generated artifact WASM exceeds {BUNDLE_FILE_BYTES_MAX} bytes"
-    );
-
-    replace_artifact_runtime_cache(root, &runtime, &wasm_bytes)
-}
-
-fn replace_artifact_runtime_cache(root: &Path, runtime: &str, wasm: &[u8]) -> Result<()> {
-    let packed_wasm = pack_artifact_wasm(wasm)?;
-    let output_directory = root.join(ARTIFACT_RUNTIME_CACHE_DIRECTORY);
-    let output_parent = output_directory
-        .parent()
-        .context("artifact runtime cache has no parent")?;
-    fs::create_dir_all(output_parent)
-        .with_context(|| format!("create {}", output_parent.display()))?;
-    let staging_directory = tempfile::Builder::new()
-        .prefix(".gtl-artifacts-")
-        .tempdir_in(output_parent)
-        .with_context(|| format!("stage artifact runtime in {}", output_parent.display()))?;
-    fs::write(
-        staging_directory.path().join("artifact-runtime.js"),
-        runtime,
-    )
-    .context("write staged artifact runtime JavaScript")?;
-    fs::write(
-        staging_directory
-            .path()
-            .join("artifact-runtime.wasm.gz.base64"),
-        packed_wasm.encoded,
-    )
-    .context("write staged compressed artifact runtime WASM")?;
-    fs::write(
-        staging_directory.path().join("artifact-runtime.wasm.bytes"),
-        packed_wasm.uncompressed_bytes.to_string(),
-    )
-    .context("write staged artifact runtime WASM size")?;
-
-    if output_directory.exists() {
-        fs::remove_dir_all(&output_directory)
-            .with_context(|| format!("replace {}", output_directory.display()))?;
-    }
-    fs::rename(staging_directory.keep(), &output_directory)
-        .with_context(|| format!("publish {}", output_directory.display()))
-}
-
-struct PackedArtifactWasm {
-    uncompressed_bytes: usize,
-    encoded: String,
-}
-
-fn pack_artifact_wasm(wasm: &[u8]) -> Result<PackedArtifactWasm> {
-    let mut encoder = GzBuilder::new()
-        .mtime(0)
-        .operating_system(255)
-        .write(Vec::new(), Compression::best());
-    encoder
-        .write_all(wasm)
-        .context("compress artifact runtime WASM")?;
-    let compressed = encoder
-        .finish()
-        .context("finish artifact runtime WASM compression")?;
-    Ok(PackedArtifactWasm {
-        uncompressed_bytes: wasm.len(),
-        encoded: STANDARD.encode(compressed),
-    })
-}
-
-fn find_generated_asset(files: &[PathBuf], prefix: &str, extension: &str) -> Result<PathBuf> {
-    let matches = files
-        .iter()
-        .filter(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(prefix))
-                && path
-                    .extension()
-                    .is_some_and(|candidate| candidate == extension)
-        })
-        .collect::<Vec<_>>();
-    ensure!(
-        matches.len() == 1,
-        "Dioxus artifact build requires exactly one {prefix}*.{extension} asset"
-    );
-    Ok(matches[0].clone())
-}
-
-fn embed_artifact_wasm_loader(source: &str, wasm_name: &str) -> Result<String> {
-    let generated_path = format!("\"/./assets/{wasm_name}\"");
-    ensure!(
-        source.matches(&generated_path).count() == 1,
-        "generated artifact runtime must reference its hashed WASM path exactly once"
-    );
-    ensure!(
-        !source.contains("function gtlArtifactAssetError")
-            && !source.contains("__gtlShowArtifactInitializationError"),
-        "generated artifact runtime already contains the offline asset loader"
-    );
-    ensure!(
-        !source.to_ascii_lowercase().contains("</script"),
-        "generated artifact runtime cannot be embedded safely in HTML"
-    );
-    ensure!(
-        !source.contains("import("),
-        "generated artifact runtime contains an external dynamic import"
-    );
-
-    let runtime = source.replacen(
-        &generated_path,
-        &format!(
-            "globalThis.__gtlLoadCompressedAsset(\"{ARTIFACT_RUNTIME_ASSET_ID}\",{ARTIFACT_RUNTIME_MAX_BYTES},true)"
-        ),
-        1,
-    );
-    let (body, exports) = runtime
-        .rsplit_once(";export{")
-        .context("generated artifact runtime has no final export block")?;
-    let runtime = format!(
-        "{ARTIFACT_ASSET_LOADER}\n{body}.catch(globalThis.__gtlShowArtifactInitializationError);export{{{exports}"
-    );
-    ensure!(
-        runtime
-            .matches(&format!(
-                "globalThis.__gtlLoadCompressedAsset(\"{ARTIFACT_RUNTIME_ASSET_ID}\""
-            ))
-            .count()
-            == 1,
-        "embedded artifact runtime must load exactly one compressed WASM asset"
-    );
-    ensure!(
-        !runtime.contains("/./assets/"),
-        "embedded artifact runtime retained a sibling asset path"
-    );
-    Ok(runtime)
-}
-
-fn verify_artifact_release_profile(root: &Path) -> Result<()> {
-    let manifest_path = root.join("Cargo.toml");
-    let manifest = fs::read_to_string(&manifest_path)
-        .with_context(|| format!("read {}", manifest_path.display()))?;
-    verify_artifact_release_profile_text(&manifest)
-}
-
-fn verify_artifact_release_profile_text(manifest: &str) -> Result<()> {
-    let document = manifest
-        .parse::<toml_edit::DocumentMut>()
-        .context("parse workspace Cargo.toml")?;
-    let profile = document
-        .get("profile")
-        .and_then(toml_edit::Item::as_table_like)
-        .and_then(|profiles| profiles.get(ARTIFACT_PROFILE))
-        .and_then(toml_edit::Item::as_table_like)
-        .context("workspace Cargo.toml is missing the artifact web release profile")?;
-    ensure!(
-        profile.get("inherits").and_then(toml_edit::Item::as_str) == Some("release"),
-        "artifact web release profile must inherit release"
-    );
-    ensure!(
-        profile.get("opt-level").and_then(toml_edit::Item::as_str) == Some("s"),
-        "artifact web release profile must use opt-level s"
-    );
-    ensure!(
-        profile.get("lto").and_then(toml_edit::Item::as_str) == Some("fat"),
-        "artifact web release profile must use fat LTO"
-    );
-    ensure!(
-        profile
-            .get("codegen-units")
-            .and_then(toml_edit::Item::as_integer)
-            == Some(1),
-        "artifact web release profile must use one codegen unit"
-    );
-    ensure!(
-        profile.get("panic").and_then(toml_edit::Item::as_str) == Some("abort"),
-        "artifact web release profile must abort on panic"
-    );
-    ensure!(
-        profile
-            .get("incremental")
-            .and_then(toml_edit::Item::as_bool)
-            == Some(false),
-        "artifact web release profile must disable incremental compilation"
-    );
-    ensure!(
-        profile.get("debug").and_then(toml_edit::Item::as_bool) == Some(false),
-        "artifact web release profile must disable debug symbols"
-    );
-    ensure!(
-        profile.get("strip").and_then(toml_edit::Item::as_str) == Some("symbols"),
-        "artifact web release profile must strip symbols"
-    );
-    Ok(())
-}
-
 fn clean_desktop_release_outputs(root: &Path, target: &Path) -> Result<()> {
     let dist = root.join(DIST_DIRECTORY);
     let web_crate = root.join("crates/gtl-web");
@@ -764,19 +399,6 @@ fn clean_desktop_release_outputs(root: &Path, target: &Path) -> Result<()> {
     ensure!(
         internal.starts_with(&internal_owner) && internal != internal_owner,
         "Dioxus internal release path must remain inside its package release directory"
-    );
-    if internal.exists() {
-        fs::remove_dir_all(&internal).with_context(|| format!("remove {}", internal.display()))?;
-    }
-    Ok(())
-}
-
-fn clean_artifact_release_output(target: &Path) -> Result<()> {
-    let internal = target.join(ARTIFACT_INTERNAL_RELEASE_DIRECTORY);
-    let internal_owner = target.join("dx/gtl-artifact/release");
-    ensure!(
-        internal.starts_with(&internal_owner) && internal != internal_owner,
-        "Dioxus artifact path must remain inside its package release directory"
     );
     if internal.exists() {
         fs::remove_dir_all(&internal).with_context(|| format!("remove {}", internal.display()))?;
@@ -1159,29 +781,24 @@ mod tests {
     }
 
     #[test]
-    fn release_output_cleanup_is_bounded_to_each_dioxus_application() {
+    fn release_output_cleanup_is_bounded_to_the_desktop_dioxus_application() {
         let root = tempfile::tempdir().expect("temporary repository");
         let target = root.path().join("target");
         let staged = root.path().join(PUBLIC_DIRECTORY).join("old.js");
         let desktop_internal = target
             .join(DESKTOP_INTERNAL_RELEASE_DIRECTORY)
             .join("public/assets/old.js");
-        let artifact_internal = target
-            .join(ARTIFACT_INTERNAL_RELEASE_DIRECTORY)
-            .join("public/assets/old.js");
         let neighbor = target.join("dx/other-package/keep");
-        for path in [&staged, &desktop_internal, &artifact_internal, &neighbor] {
+        for path in [&staged, &desktop_internal, &neighbor] {
             fs::create_dir_all(path.parent().expect("old asset parent"))
                 .expect("old asset parent is writable");
             fs::write(path, "old").expect("old asset is writable");
         }
 
         clean_desktop_release_outputs(root.path(), &target).expect("desktop outputs clean");
-        clean_artifact_release_output(&target).expect("artifact outputs clean");
 
         assert!(!root.path().join(DIST_DIRECTORY).exists());
         assert!(!target.join(DESKTOP_INTERNAL_RELEASE_DIRECTORY).exists());
-        assert!(!target.join(ARTIFACT_INTERNAL_RELEASE_DIRECTORY).exists());
         assert!(
             neighbor.exists(),
             "unrelated target output must be preserved"
@@ -1203,41 +820,6 @@ mod tests {
         );
         assert_eq!(TAILWIND_ARGUMENTS[3], "@tailwindcss/cli");
         assert!(TAILWIND_ARGUMENTS.contains(&"crates/gtl-web/assets/tailwind.css"));
-        assert!(ARTIFACT_BUILD_ARGUMENTS.ends_with(&["--locked"]));
-        assert!(
-            ARTIFACT_BUILD_ARGUMENTS
-                .windows(2)
-                .any(|pair| pair == ["--profile", ARTIFACT_PROFILE])
-        );
-        assert!(!ARTIFACT_BUILD_ARGUMENTS.contains(&"--release"));
-        assert!(
-            ARTIFACT_BUILD_ARGUMENTS
-                .windows(2)
-                .any(|pair| pair == ["--bin", "gtl-artifact"])
-        );
-        assert!(
-            ARTIFACT_BUILD_ARGUMENTS
-                .windows(2)
-                .any(|pair| pair == ["--features", "artifact"])
-        );
-    }
-
-    #[test]
-    fn artifact_wasm_pack_is_deterministic_and_round_trips() {
-        let wasm = b"deterministic artifact runtime";
-        let first = pack_artifact_wasm(wasm).expect("pack artifact WASM");
-        let second = pack_artifact_wasm(wasm).expect("pack artifact WASM again");
-        let compressed = STANDARD
-            .decode(&first.encoded)
-            .expect("decode packed artifact WASM");
-        let mut decoded = Vec::new();
-        flate2::read::GzDecoder::new(compressed.as_slice())
-            .read_to_end(&mut decoded)
-            .expect("decompress packed artifact WASM");
-
-        assert_eq!(first.uncompressed_bytes, wasm.len());
-        assert_eq!(first.encoded, second.encoded);
-        assert_eq!(decoded, wasm);
     }
 
     #[test]
@@ -1253,64 +835,6 @@ mod tests {
             SERVE_ARGUMENTS
                 .windows(2)
                 .any(|pair| pair == ["--hot-reload", "true"])
-        );
-    }
-
-    #[test]
-    fn artifact_runtime_loads_only_the_compressed_wasm_node() {
-        let source = r#"const fallback="gtl-artifact_bg.wasm";start({module_or_path:"/./assets/gtl-artifact_bg-dxh123.wasm"});"#;
-
-        let source = format!("{source}export{{start}}");
-        let runtime = embed_artifact_wasm_loader(&source, "gtl-artifact_bg-dxh123.wasm")
-            .expect("hashed artifact path is replaceable");
-
-        assert!(runtime.contains("module_or_path:globalThis.__gtlLoadCompressedAsset"));
-        assert!(runtime.contains("new DecompressionStream(\"gzip\")"));
-        assert!(runtime.contains(".catch(globalThis.__gtlShowArtifactInitializationError)"));
-        assert!(runtime.contains("fallback=\"gtl-artifact_bg.wasm\""));
-        assert!(!runtime.contains("/./assets/"));
-        assert!(!runtime.contains("data:application/wasm"));
-    }
-
-    #[test]
-    fn artifact_runtime_rejects_ambiguous_or_unsafe_scripts() {
-        let path = "\"/./assets/gtl-artifact_bg-dxh123.wasm\"";
-        let ambiguous = format!("start({path});again({path});export{{start}}");
-        assert!(
-            embed_artifact_wasm_loader(&ambiguous, "gtl-artifact_bg-dxh123.wasm")
-                .expect_err("ambiguous WASM paths must fail")
-                .to_string()
-                .contains("exactly once")
-        );
-        assert!(
-            embed_artifact_wasm_loader(
-                &format!("start({path});</script>;export{{start}}"),
-                "gtl-artifact_bg-dxh123.wasm"
-            )
-            .expect_err("an inline script terminator must fail")
-            .to_string()
-            .contains("safely")
-        );
-    }
-
-    #[test]
-    fn artifact_release_profile_keeps_every_size_setting_owned() {
-        verify_artifact_release_profile_text(include_str!("../../../Cargo.toml"))
-            .expect("workspace artifact profile is complete");
-
-        let incomplete = r#"
-[profile.release]
-strip = "symbols"
-
-[profile.artifact-web-release]
-inherits = "release"
-opt-level = "s"
-"#;
-        assert!(
-            verify_artifact_release_profile_text(incomplete)
-                .expect_err("an incomplete profile must fail")
-                .to_string()
-                .contains("fat LTO")
         );
     }
 

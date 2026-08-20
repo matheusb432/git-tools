@@ -1,15 +1,17 @@
 mod file;
 
 use dioxus::prelude::*;
-use gtl_models::paths::RepositoryRelativePath;
+use gtl_models::{paths::RepositoryRelativePath, viewer::ViewerTabId};
 use gtl_wire::viewer::{ViewerActiveView, ViewerViewIdentity};
 
 use self::file::DiffFileCard;
-use crate::{
-    entities::diffs::{ClientDiffFile, ClientDiffSource, use_client_diff_workspace},
-    shared::ui::EmptyNotice,
-};
+#[cfg(feature = "artifact")]
+use crate::entities::diffs::ClientDiffWorkspace;
+#[cfg(feature = "desktop")]
+use crate::entities::diffs::{ClientDiffSource, use_client_diff_workspace};
+use crate::{entities::diffs::ClientDiffFile, shared::ui::EmptyNotice};
 
+#[cfg(feature = "desktop")]
 #[component]
 pub(crate) fn ClientDiffDocument(
     source: ClientDiffSource,
@@ -41,6 +43,33 @@ pub(crate) fn ClientDiffDocument(
                 is_loading,
                 onopen,
                 onretry: move |()| reload += 1,
+                artifact_tab_id: None,
+            }
+        }
+    }
+}
+
+#[cfg(feature = "artifact")]
+#[component]
+pub(crate) fn StaticDiffDocument(
+    view: ViewerActiveView,
+    workspace: ClientDiffWorkspace,
+) -> Element {
+    rsx! {
+        section {
+            class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
+            aria_label: "Rendered diff",
+            DiffDocumentBody {
+                title: view.title,
+                files: workspace.files,
+                identity: workspace.identity,
+                folded: None,
+                copy_context_enabled: true,
+                flashing_file: None,
+                is_loading: false,
+                onopen: None,
+                onretry: move |()| {},
+                artifact_tab_id: Some(workspace.identity.tab_id),
             }
         }
     }
@@ -68,6 +97,7 @@ fn DiffDocumentBody(
     is_loading: bool,
     onopen: Option<EventHandler<RepositoryRelativePath>>,
     onretry: EventHandler<()>,
+    artifact_tab_id: Option<ViewerTabId>,
 ) -> Element {
     let layout = identity.render_options.layout;
     let density = identity.render_options.density;
@@ -110,6 +140,7 @@ fn DiffDocumentBody(
                             onopen,
                             onretry,
                             file_index: index,
+                            artifact_tab_id,
                         }
                     }
                 }

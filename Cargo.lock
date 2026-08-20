@@ -3447,9 +3447,8 @@ dependencies = [
  "flate2",
  "gtl-application",
  "gtl-models",
+ "gtl-web",
  "gtl-wire",
- "serde",
- "serde_json",
  "sha2 0.11.0",
 ]
 
@@ -3633,6 +3632,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "thiserror 2.0.19",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -9017,19 +9017,16 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "cargo_metadata 0.23.1",
  "clap",
  "clap-cargo",
  "command-group",
- "flate2",
  "gtl-benchmarks",
  "ico",
  "image",
  "sha2 0.11.0",
  "tempfile",
  "tiny-skia",
- "toml_edit 0.25.12+spec-1.1.0",
  "sample_project",
  "zbus",
 ]

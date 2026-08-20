@@ -45,6 +45,7 @@ gtl-artifacts = { path = "crates/gtl-artifacts" }
 gtl-models = { path = "crates/gtl-models" }
 gtl-parser = { path = "crates/gtl-parser", default-features = false }
 gtl-infra = { path = "crates/gtl-infra" }
+gtl-web = { path = "crates/gtl-web", default-features = false }
 gtl-web-contracts = { path = "crates/gtl-web-contracts" }
 
 anyhow = "1"
@@ -133,16 +134,6 @@ debug = false
 debug = false
 
 [profile.release]
-strip = "symbols"
-
-[profile.artifact-web-release]
-inherits = "release"
-opt-level = "s"
-lto = "fat"
-codegen-units = 1
-panic = "abort"
-incremental = false
-debug = false
 strip = "symbols"
 
 [profile.profiling]

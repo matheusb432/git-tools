@@ -202,12 +202,15 @@ fn CommitIdButton(id: CommitId) -> Element {
     }
 
     let abbreviated_id = id.abbreviated(CommitIdAbbreviation::TenCharacters);
+    let copy_value = id.as_ref().to_owned();
 
     rsx! {
         Button {
             size: ButtonSize::Inline,
             variant: ButtonVariant::Secondary,
             title: "Copy commit ID",
+            "data-gtl-action": "copy-commit",
+            "data-gtl-copy-value": copy_value,
             onclick: move |e: Event<MouseData>| {
                 e.stop_propagation();
                 copy_commit_id(id.clone());

@@ -2,8 +2,6 @@
 mod app;
 #[cfg(feature = "artifact")]
 mod artifact;
-#[cfg(feature = "artifact")]
-mod artifact_asset;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod entities;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
@@ -13,15 +11,15 @@ mod test_support;
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 mod views;
 
+#[cfg(feature = "artifact")]
+pub use artifact::{
+    StaticArtifactFileSource, StaticArtifactView, StaticArtifactViewError,
+    render_static_artifact_body, static_artifact_enhancement_script,
+};
 #[cfg(any(feature = "artifact", feature = "desktop"))]
 pub use views::diffs::diff_workspace::commits_panel::{CommitsPanel, CommitsPanelProps};
 
 #[cfg(feature = "desktop")]
 pub fn launch_desktop() {
     dioxus::launch(app::App);
-}
-
-#[cfg(feature = "artifact")]
-pub fn launch_artifact() {
-    dioxus::launch(artifact::ArtifactApp);
 }

@@ -6,7 +6,10 @@ pub(crate) mod diff_workspace;
 mod file_status_badge;
 mod line_changes;
 
+#[cfg(feature = "desktop")]
 pub(crate) use client_diff_document::ClientDiffDocument;
+#[cfg(feature = "artifact")]
+pub(crate) use client_diff_document::StaticDiffDocument;
 #[cfg(feature = "desktop")]
 pub(crate) use diff_history::DiffHistoryView;
 pub(crate) use diff_rows::{SplitDiffRowBatch, UnifiedDiffRowBatch};

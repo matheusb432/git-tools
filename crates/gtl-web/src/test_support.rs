@@ -1,9 +1,11 @@
 use std::error::Error;
 
+#[cfg(feature = "desktop")]
+use gtl_models::viewer::{HistoryPage, HistoryPageCount, HistoryPageNumber, RenderHistoryId};
 use gtl_models::{
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
     timestamps::MachineTimestamp,
-    viewer::{HistoryPage, HistoryPageCount, HistoryPageNumber, RenderHistoryId, ViewerTabId},
+    viewer::ViewerTabId,
 };
 
 pub(crate) type TestResult<T = ()> = Result<T, Box<dyn Error>>;
@@ -12,14 +14,17 @@ pub(crate) fn viewer_tab_id(value: u64) -> TestResult<ViewerTabId> {
     Ok(ViewerTabId::try_new(value)?)
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) fn render_history_id(value: i64) -> TestResult<RenderHistoryId> {
     Ok(RenderHistoryId::try_new(value)?)
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) fn history_page_number(value: u32) -> TestResult<HistoryPageNumber> {
     Ok(HistoryPageNumber::try_new(value)?)
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) fn history_page(number: u32, count: u32) -> TestResult<HistoryPage> {
     Ok(HistoryPage::new(
         history_page_number(number)?,

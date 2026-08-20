@@ -17,8 +17,6 @@ use crate::recipes::Recipe;
 
 pub const VIEWER_STATE_CHANGED_EVENT: &str = "viewer-state-changed";
 pub const VIEWER_DIFF_LINES_PAGE_MAX_BYTES: usize = 256 * 1024;
-pub const VIEWER_ARTIFACT_RUNTIME_ID: &str = "gtl-artifact-runtime";
-pub const VIEWER_ARTIFACT_MANIFEST_ID: &str = "gtl-artifact-manifest";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -412,52 +410,6 @@ pub struct ViewerDiffLines {
     pub next: Option<ViewerDiffCursor>,
 }
 
-/// Opaque address of one embedded raw-line page in an offline artifact.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ViewerArtifactPageId(String);
-
-impl AsRef<str> for ViewerArtifactPageId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl ViewerArtifactPageId {
-    /// Derives the page address from every identity-bound request dimension.
-    pub fn for_request(request: &LoadViewerDiffLines) -> Self {
-        let layout = request.identity.render_options.layout.as_str();
-        let density = request.identity.render_options.density.as_str();
-        Self(format!(
-            "gtl-artifact-page-{}-{}-{}-{layout}-{density}-{}-{}",
-            request.identity.tab_id,
-            request.identity.range_generation.value(),
-            request.identity.selection_generation.value(),
-            request.file.as_str(),
-            request.cursor.into_inner(),
-        ))
-    }
-
-    /// Returns the opaque artifact-local address.
-    pub fn as_str(&self) -> &str {
-        self.as_ref()
-    }
-}
-
-/// One independently decodable raw-line page embedded in an offline artifact.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ViewerArtifactPage {
-    pub id: ViewerArtifactPageId,
-    pub page: ViewerDiffLines,
-}
-
-/// Metadata required to start the client-rendered offline artifact.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ViewerArtifactManifest {
-    pub title: String,
-    pub theme: ViewerTheme,
-    pub views: Vec<ViewerActiveView>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "cursor", rename_all = "snake_case")]
 pub enum ViewerHistoryCursor {
@@ -605,41 +557,4 @@ pub enum ViewerApiError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerStateChanged {
     pub revision: ViewerShellRevision,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn request() -> LoadViewerDiffLines {
-        LoadViewerDiffLines {
-            identity: ViewerViewIdentity {
-                tab_id: ViewerTabId::try_new(3).expect("positive tab ID"),
-                range_generation: ViewerRangeGeneration::new(5),
-                selection_generation: ViewerSelectionGeneration::new(7),
-                render_options: ViewerRenderOptions {
-                    layout: ViewerDiffLayout::Unified,
-                    density: ViewerDiffDensity::Compact,
-                },
-            },
-            file: ViewerDiffFileId::for_index(11),
-            cursor: ViewerDiffCursor::new(13),
-        }
-    }
-
-    #[test]
-    fn artifact_page_ids_bind_every_request_identity_dimension() {
-        let request = request();
-        let expected = ViewerArtifactPageId::for_request(&request);
-        let mut changed_cursor = request.clone();
-        changed_cursor.cursor = ViewerDiffCursor::new(14);
-        let mut changed_file = request.clone();
-        changed_file.file = ViewerDiffFileId::for_index(12);
-        let mut changed_layout = request.clone();
-        changed_layout.identity.render_options.layout = ViewerDiffLayout::Split;
-
-        assert_ne!(expected, ViewerArtifactPageId::for_request(&changed_cursor));
-        assert_ne!(expected, ViewerArtifactPageId::for_request(&changed_file));
-        assert_ne!(expected, ViewerArtifactPageId::for_request(&changed_layout));
-    }
 }

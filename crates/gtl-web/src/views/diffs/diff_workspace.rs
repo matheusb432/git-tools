@@ -1,7 +1,11 @@
 use dioxus::prelude::*;
-use gtl_models::{diffs::CommitId, paths::RepositoryRelativePath};
+use gtl_models::diffs::CommitId;
+#[cfg(feature = "artifact")]
+use gtl_models::viewer::ViewerTabId;
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::ViewerActiveView;
+#[cfg(feature = "artifact")]
+use gtl_wire::viewer::ViewerDiffFileId;
 #[cfg(feature = "artifact")]
 use lucide_dioxus::{History, Menu, SlidersHorizontal};
 
@@ -11,14 +15,12 @@ use self::{
     commits_panel::CommitsPanel, files_panel::FilesPanel, keybar::Keybar, titlebar::ViewTitlebar,
 };
 #[cfg(feature = "artifact")]
-use crate::shared::{
-    browser,
-    ui::{
-        Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant, CountBadge, CountBadgeSize,
-        Popover,
-    },
+use crate::shared::ui::{
+    Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant, CountBadge, CountBadgeSize,
+    Popover,
 };
-use crate::{entities::diffs::ClientDiffSource, views::diffs::ClientDiffDocument};
+#[cfg(feature = "artifact")]
+use crate::{entities::diffs::ClientDiffWorkspace, views::diffs::StaticDiffDocument};
 
 pub(crate) mod commits_panel;
 #[cfg(feature = "desktop")]
@@ -41,107 +43,143 @@ enum ArtifactMobilePanel {
 }
 
 #[cfg(feature = "artifact")]
-#[component]
-pub(crate) fn ArtifactDiffWorkspace(view: ViewerActiveView) -> Element {
-    let mut mobile_panel = use_signal(|| None::<ArtifactMobilePanel>);
-    let mut file_filter = use_signal(String::new);
-    let mut files_folded = use_signal(|| None::<bool>);
-    let mut copy_context_enabled = use_signal(|| true);
-    let mut flashing_file = use_signal(|| None::<String>);
-    let tab_id = view.identity.tab_id;
-    let files_trigger = format!("artifact-files-trigger-{tab_id}");
-    let commits_trigger = format!("artifact-commits-trigger-{tab_id}");
-    let view_trigger = format!("artifact-view-trigger-{tab_id}");
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ArtifactViewMarkup {
+    tab_id: ViewerTabId,
+}
 
-    let onnavigate = move |anchor_id: String| {
-        mobile_panel.set(None);
-        browser::scroll_to_file(&anchor_id);
-        flashing_file.set(Some(anchor_id.clone()));
-        spawn(async move {
-            dioxus_sdk_time::sleep(std::time::Duration::from_millis(1_200)).await;
-            if flashing_file().as_deref() == Some(anchor_id.as_str()) {
-                flashing_file.set(None);
-            }
-        });
-    };
+#[cfg(feature = "artifact")]
+impl ArtifactViewMarkup {
+    fn new(tab_id: ViewerTabId) -> Self {
+        Self { tab_id }
+    }
+
+    fn view_id(self) -> String {
+        self.tab_id.to_string()
+    }
+
+    fn target_prefix(self) -> String {
+        format!("artifact-view-{}", self.tab_id)
+    }
+
+    fn control_id(self, control: &str) -> String {
+        format!("{}-{control}", self.target_prefix())
+    }
+
+    fn file_target_id(self, file_id: &ViewerDiffFileId) -> String {
+        format!("{}-{}", self.target_prefix(), file_id.as_str())
+    }
+}
+
+#[cfg(feature = "artifact")]
+#[component]
+pub(crate) fn ArtifactDiffWorkspace(
+    mut view: ViewerActiveView,
+    mut workspace: ClientDiffWorkspace,
+) -> Element {
+    let markup = ArtifactViewMarkup::new(view.identity.tab_id);
+    for file in &mut view.files {
+        file.anchor_id = markup.file_target_id(&file.id);
+    }
+    for file in &mut workspace.files {
+        file.summary.anchor_id = markup.file_target_id(&file.summary.id);
+    }
+
+    let files_trigger = markup.control_id("files-trigger");
+    let files_dialog = markup.control_id("files-dialog");
+    let commits_trigger = markup.control_id("commits-trigger");
+    let commits_dialog = markup.control_id("commits-dialog");
+    let view_trigger = markup.control_id("view-trigger");
+    let view_dialog = markup.control_id("view-dialog");
     let mobile_navigation = rsx! {
         ArtifactNavigationButton {
             id: files_trigger.clone(),
+            dialog_id: files_dialog.clone(),
             label: "Files",
             aria_label: "Changed files",
             panel: ArtifactMobilePanel::Files,
             count: view.files.len(),
             enabled: !view.files.is_empty(),
-            onclick: move |_| mobile_panel.set(Some(ArtifactMobilePanel::Files)),
+            onclick: move |_| {},
         }
         ArtifactNavigationButton {
             id: commits_trigger.clone(),
+            dialog_id: commits_dialog.clone(),
             label: "History",
             panel: ArtifactMobilePanel::Commits,
             count: view.commits.len(),
             enabled: !view.commits.is_empty(),
-            onclick: move |_| mobile_panel.set(Some(ArtifactMobilePanel::Commits)),
+            onclick: move |_| {},
         }
         ArtifactNavigationButton {
             id: view_trigger.clone(),
+            dialog_id: view_dialog.clone(),
             label: "View",
             aria_label: "View settings",
             panel: ArtifactMobilePanel::View,
             enabled: true,
-            onclick: move |_| mobile_panel.set(Some(ArtifactMobilePanel::View)),
+            onclick: move |_| {},
         }
+    };
+    let diff_document = rsx! {
+        StaticDiffDocument { view: view.clone(), workspace }
     };
 
     rsx! {
         section { class: "h-full min-h-0 overflow-hidden",
             DiffWorkspaceDocument {
-                source: ClientDiffSource::Artifact,
                 view: view.clone(),
-                files_folded: files_folded(),
-                copy_context_enabled: copy_context_enabled(),
-                file_filter: file_filter(),
-                flashing_file: flashing_file(),
-                onfold: move |folded| files_folded.set(Some(folded)),
-                oncontext: move |enabled| copy_context_enabled.set(enabled),
-                onfilter: move |value| file_filter.set(value),
-                onnavigate,
+                diff_document,
+                files_folded: None,
+                copy_context_enabled: true,
+                file_filter: String::new(),
+                onfold: move |_| {},
+                oncontext: move |_| {},
+                onfilter: move |_| {},
+                onnavigate: move |_| {},
                 mobile_navigation,
+                artifact_view_id: Some(markup.view_id()),
             }
         }
 
         Popover {
-            id: format!("artifact-files-panel-{tab_id}"),
+            id: files_dialog,
             trigger_id: files_trigger,
-            open: mobile_panel() == Some(ArtifactMobilePanel::Files),
+            open: false,
             title: "Changed files",
-            onclose: move |()| mobile_panel.set(None),
+            onclose: move |()| {},
+            artifact_view_id: Some(markup.view_id()),
             FilesPanel {
                 view: view.clone(),
-                filter: file_filter(),
-                onfilter: move |value| file_filter.set(value),
-                onnavigate,
+                filter: String::new(),
+                onfilter: move |_| {},
+                onnavigate: move |_| {},
+                artifact_view_id: Some(markup.view_id()),
             }
         }
         Popover {
-            id: format!("artifact-commits-panel-{tab_id}"),
+            id: commits_dialog,
             trigger_id: commits_trigger,
-            open: mobile_panel() == Some(ArtifactMobilePanel::Commits),
+            open: false,
             title: "Commits",
-            onclose: move |()| mobile_panel.set(None),
+            onclose: move |()| {},
+            artifact_view_id: Some(markup.view_id()),
             CommitsPanel { view: view.clone() }
         }
         Popover {
-            id: format!("artifact-view-panel-{tab_id}"),
+            id: view_dialog,
             trigger_id: view_trigger,
-            open: mobile_panel() == Some(ArtifactMobilePanel::View),
+            open: false,
             title: "View settings",
-            onclose: move |()| mobile_panel.set(None),
+            onclose: move |()| {},
+            artifact_view_id: Some(markup.view_id()),
             ViewActions {
                 layout: ViewActionsLayout::Panel,
-                files_folded: files_folded().unwrap_or(false),
-                copy_context_enabled: copy_context_enabled(),
-                onfold: move |folded| files_folded.set(Some(folded)),
-                oncontext: move |enabled| copy_context_enabled.set(enabled),
+                files_folded: false,
+                copy_context_enabled: true,
+                onfold: move |_| {},
+                oncontext: move |_| {},
+                artifact_view_id: Some(markup.view_id()),
             }
         }
     }
@@ -151,6 +189,7 @@ pub(crate) fn ArtifactDiffWorkspace(view: ViewerActiveView) -> Element {
 #[component]
 fn ArtifactNavigationButton(
     id: String,
+    dialog_id: String,
     label: String,
     aria_label: Option<String>,
     panel: ArtifactMobilePanel,
@@ -168,6 +207,10 @@ fn ArtifactNavigationButton(
             variant: ButtonVariant::Ghost,
             state: if enabled { ButtonState::Enabled } else { ButtonState::Disabled },
             aria_label: aria_label_display,
+            aria_controls: dialog_id,
+            aria_expanded: "false",
+            aria_haspopup: "dialog",
+            "data-gtl-action": "open-dialog",
             onclick,
             ArtifactNavigationIcon { panel }
             ArtifactNavigationLabel { label }
@@ -212,12 +255,11 @@ fn ArtifactNavigationLabel(label: String) -> Element {
 
 #[component]
 fn DiffWorkspaceDocument(
-    source: ClientDiffSource,
     view: ViewerActiveView,
+    diff_document: Element,
     files_folded: Option<bool>,
     copy_context_enabled: bool,
     file_filter: String,
-    flashing_file: Option<String>,
     onfold: EventHandler<bool>,
     oncontext: EventHandler<bool>,
     onfilter: EventHandler<String>,
@@ -225,12 +267,24 @@ fn DiffWorkspaceDocument(
     mobile_navigation: Option<Element>,
     onselect_commit: Option<EventHandler<CommitId>>,
     onclear_commit: Option<EventHandler<()>>,
-    onopen: Option<EventHandler<RepositoryRelativePath>>,
+    artifact_view_id: Option<String>,
 ) -> Element {
     let footer = view.footer.clone();
+    let artifact_workspace = artifact_view_id.as_ref().map(|_| "");
+    let artifact_files_folded = artifact_view_id
+        .as_ref()
+        .map(|_| files_folded.unwrap_or(false).to_string());
+    let artifact_copy_context = artifact_view_id
+        .as_ref()
+        .map(|_| copy_context_enabled.to_string());
 
     rsx! {
-        div { class: "grid h-full min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden workspace:grid-cols-[220px_minmax(0,1fr)_210px] expanded:grid-cols-[262px_minmax(0,1fr)_252px] wide-screen:grid-cols-[320px_minmax(0,1fr)_304px]",
+        div {
+            class: "grid h-full min-h-0 grid-cols-[0_minmax(0,1fr)_0] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden workspace:grid-cols-[220px_minmax(0,1fr)_210px] expanded:grid-cols-[262px_minmax(0,1fr)_252px] wide-screen:grid-cols-[320px_minmax(0,1fr)_304px]",
+            "data-gtl-workspace": artifact_workspace,
+            "data-gtl-view": artifact_view_id.clone(),
+            "data-gtl-files-folded": artifact_files_folded,
+            "data-gtl-copy-context": artifact_copy_context,
             ViewTitlebar {
                 view: view.clone(),
                 files_folded: files_folded.unwrap_or(false),
@@ -238,6 +292,7 @@ fn DiffWorkspaceDocument(
                 mobile_navigation,
                 onfold,
                 oncontext,
+                artifact_view_id: artifact_view_id.clone(),
             }
             aside {
                 class: "col-start-1 row-start-2 hidden min-h-0 overflow-hidden border-r border-line bg-surface workspace:block",
@@ -249,16 +304,10 @@ fn DiffWorkspaceDocument(
                     test_id: Some(test_ids::CHANGED_FILES_PANEL.value().to_owned()),
                     onfilter,
                     onnavigate,
+                    artifact_view_id: artifact_view_id.clone(),
                 }
             }
-            ClientDiffDocument {
-                source,
-                view: view.clone(),
-                folded: files_folded,
-                copy_context_enabled,
-                flashing_file,
-                onopen,
-            }
+            {diff_document}
             aside {
                 class: "col-start-3 row-start-2 hidden min-h-0 overflow-hidden border-l border-line bg-surface workspace:block",
                 aria_label: "Commits",
@@ -288,4 +337,137 @@ const fn file_label(count: usize) -> &'static str {
 
 const fn commit_label(count: usize) -> &'static str {
     if count == 1 { "commit" } else { "commits" }
+}
+
+#[cfg(all(test, feature = "artifact"))]
+mod artifact_tests {
+    use dioxus::prelude::*;
+    use gtl_models::{
+        diffs::{CommitId, DiffLineCount},
+        git::{BranchName, GitHead, GitRevision},
+        viewer::{ViewerRangeGeneration, ViewerSelectionGeneration},
+    };
+    use gtl_wire::viewer::{
+        ViewerActiveView, ViewerCommandLine, ViewerCommitSelection, ViewerCommitSummary,
+        ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, ViewerFileStatus, ViewerFileSummary,
+        ViewerFooter, ViewerRenderOptions, ViewerViewIdentity,
+    };
+
+    use super::{ArtifactDiffWorkspace, ArtifactViewMarkup};
+    use crate::{
+        entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
+        test_support::{
+            TestResult, absolute_file_path, machine_timestamp, project_name,
+            repository_relative_path, viewer_tab_id,
+        },
+    };
+
+    fn artifact_view(tab_id: u64) -> TestResult<(ViewerActiveView, ClientDiffWorkspace)> {
+        let identity = ViewerViewIdentity {
+            tab_id: viewer_tab_id(tab_id)?,
+            range_generation: ViewerRangeGeneration::new(3),
+            selection_generation: ViewerSelectionGeneration::new(5),
+            render_options: ViewerRenderOptions {
+                layout: ViewerDiffLayout::Unified,
+                density: ViewerDiffDensity::Compact,
+            },
+        };
+        let file = ViewerFileSummary {
+            id: ViewerDiffFileId::for_index(0),
+            path: repository_relative_path("src/<unsafe>.rs")?,
+            absolute_path: absolute_file_path("/repo/src/<unsafe>.rs")?,
+            anchor_id: "file-0".to_owned(),
+            added: DiffLineCount::new(1),
+            removed: DiffLineCount::new(1),
+            status: ViewerFileStatus::Modified,
+            can_open_in_editor: true,
+            initially_expanded: true,
+        };
+        let workspace = static_diff_workspace(identity, vec![(file.clone(), Vec::new())]);
+        let view = ViewerActiveView {
+            identity,
+            title: "diff".to_owned(),
+            repository_name: project_name(&format!("repo-{tab_id}"))?,
+            branch: GitHead::Branch(BranchName::main()),
+            upstream: GitRevision::main(),
+            command: ViewerCommandLine {
+                lead: "git diff ".to_owned(),
+                range: "HEAD~1..HEAD".to_owned(),
+                trail: String::new(),
+            },
+            files: vec![file],
+            commits_label: "1 commit".to_owned(),
+            commits: vec![ViewerCommitSummary {
+                id: CommitId::try_from("0123456789abcdef0123456789abcdef01234567")?,
+                subject: "static render".to_owned(),
+                body: String::new(),
+                committed_at: machine_timestamp("2026-08-19T10:00:00Z")?,
+                is_merge: false,
+            }],
+            commit_selection: ViewerCommitSelection::None,
+            footer: ViewerFooter {
+                command: "gtl diff".to_owned(),
+            },
+            exclusions: None,
+        };
+        Ok((view, workspace))
+    }
+
+    #[test]
+    fn artifact_workspace_renders_scoped_enhancement_contract() -> TestResult {
+        let (view, workspace) = artifact_view(7)?;
+        let html = dioxus_ssr::render_element(rsx! {
+            ArtifactDiffWorkspace { view, workspace }
+        });
+
+        assert!(html.contains(r#"data-gtl-workspace="""#));
+        assert!(html.contains(r#"data-gtl-view="7""#));
+        assert!(html.contains(r#"data-gtl-files-folded="false""#));
+        assert!(html.contains(r#"data-gtl-copy-context="true""#));
+        assert_eq!(html.matches(r#"data-gtl-action="filter-files""#).count(), 2);
+        assert_eq!(html.matches(r#"data-gtl-action="toggle-files""#).count(), 2);
+        assert_eq!(
+            html.matches(r#"data-gtl-action="toggle-copy-context""#)
+                .count(),
+            2
+        );
+        assert_eq!(html.matches("data-gtl-selected-classes=").count(), 2);
+        assert_eq!(html.matches("data-gtl-unselected-classes=").count(), 2);
+        assert_eq!(html.matches(r#"data-gtl-file-tree="""#).count(), 2);
+        assert_eq!(html.matches(r#"data-gtl-file-directory="""#).count(), 2);
+        assert_eq!(html.matches(r#"data-gtl-file-leaf="""#).count(), 2);
+        assert_eq!(html.matches(r#"data-gtl-files-empty="""#).count(), 2);
+        assert_eq!(
+            html.matches(r#"data-file-target="artifact-view-7-file-0""#)
+                .count(),
+            2
+        );
+        assert!(html.contains(r#"id="artifact-view-7-file-0""#));
+        assert!(html.contains(r#"id="artifact-view-7-files-trigger""#));
+        assert!(html.contains(r#"aria-controls="artifact-view-7-files-dialog""#));
+        assert!(html.contains(r#"id="artifact-view-7-files-dialog""#));
+        assert!(html.contains(r#"data-gtl-dialog-trigger="artifact-view-7-files-trigger""#,));
+        assert!(html.contains(r#"data-gtl-action="close-dialog""#));
+        assert!(html.contains(r#"data-gtl-action="copy-commit""#));
+        assert!(
+            html.contains(r#"data-gtl-copy-value="0123456789abcdef0123456789abcdef01234567""#,)
+        );
+        assert!(!html.contains(r#"id="src/<unsafe>.rs""#));
+        Ok(())
+    }
+
+    #[test]
+    fn artifact_targets_are_prefixed_by_typed_tab_ids() -> TestResult {
+        let first = ArtifactViewMarkup::new(viewer_tab_id(1)?);
+        let second = ArtifactViewMarkup::new(viewer_tab_id(2)?);
+        let file = ViewerDiffFileId::for_index(0);
+
+        assert_ne!(
+            first.control_id("files-dialog"),
+            second.control_id("files-dialog")
+        );
+        assert_ne!(first.file_target_id(&file), second.file_target_id(&file));
+        assert_eq!(first.file_target_id(&file), "artifact-view-1-file-0");
+        Ok(())
+    }
 }

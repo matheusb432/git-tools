@@ -18,6 +18,7 @@ pub(super) fn ViewTitlebar(
     mobile_navigation: Option<Element>,
     onfold: EventHandler<bool>,
     oncontext: EventHandler<bool>,
+    artifact_view_id: Option<String>,
 ) -> Element {
     rsx! {
         header { class: "col-span-3 row-start-1 flex min-w-0 items-center gap-4 border-b border-line bg-surface px-5 py-3 tablet:flex-wrap tablet:gap-2.5 tablet:px-3 tablet:py-2.5 mobile:gap-1.5 mobile:px-2 mobile:py-2",
@@ -39,6 +40,7 @@ pub(super) fn ViewTitlebar(
                 copy_context_enabled,
                 onfold,
                 oncontext,
+                artifact_view_id,
             }
         }
     }
@@ -91,6 +93,7 @@ pub(super) fn ViewActions(
     copy_context_enabled: bool,
     onfold: EventHandler<bool>,
     oncontext: EventHandler<bool>,
+    artifact_view_id: Option<String>,
 ) -> Element {
     let container_classes = match layout {
         ViewActionsLayout::Panel => "grid grid-cols-2 gap-2",
@@ -100,6 +103,12 @@ pub(super) fn ViewActions(
         ViewActionsLayout::Panel => ButtonSize::Medium,
         ViewActionsLayout::Toolbar => ButtonSize::Small,
     };
+    let artifact_selected_classes = artifact_view_id
+        .as_ref()
+        .map(|_| ButtonVariant::Pressed.classes());
+    let artifact_unselected_classes = artifact_view_id
+        .as_ref()
+        .map(|_| ButtonVariant::Outline.classes());
 
     rsx! {
         div { class: "{container_classes}",
@@ -107,6 +116,7 @@ pub(super) fn ViewActions(
                 size: button_size,
                 variant: ButtonVariant::Outline,
                 title: "Collapse or expand all files",
+                "data-gtl-action": artifact_view_id.as_ref().map(|_| "toggle-files"),
                 onclick: move |_| onfold.call(!files_folded),
                 if files_folded {
                     "Expand all"
@@ -119,6 +129,9 @@ pub(super) fn ViewActions(
                 variant: if copy_context_enabled { ButtonVariant::Pressed } else { ButtonVariant::Outline },
                 aria_pressed: copy_context_enabled.to_string(),
                 title: "Prepend a commented path and line range when copying code",
+                "data-gtl-action": artifact_view_id.as_ref().map(|_| "toggle-copy-context"),
+                "data-gtl-selected-classes": artifact_selected_classes,
+                "data-gtl-unselected-classes": artifact_unselected_classes,
                 onclick: move |_| oncontext.call(!copy_context_enabled),
                 "+ context"
             }

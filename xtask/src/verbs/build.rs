@@ -1,4 +1,4 @@
-//! Release build orchestration for the independent CLI and desktop artifacts.
+//! Release build orchestration for the CLI, static artifact styles, and desktop viewer.
 
 use std::path::Path;
 
@@ -22,7 +22,7 @@ pub fn run(target: BuildTarget) -> Result<()> {
     let _lock = lock_web_assets(&root)?;
     for stage in build_stages(target) {
         match stage {
-            BuildStage::ArtifactAssets => dioxus_web::build_artifact_assets_unlocked(&root)?,
+            BuildStage::ArtifactStyles => dioxus_web::build_artifact_styles_unlocked(&root)?,
             BuildStage::DioxusWeb => dioxus_web::build_release_unlocked(&root)?,
             BuildStage::Cli => build_cli(&root)?,
             BuildStage::Viewer => build_viewer(&root)?,
@@ -60,7 +60,7 @@ fn build_viewer(root: &Path) -> Result<()> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BuildStage {
-    ArtifactAssets,
+    ArtifactStyles,
     DioxusWeb,
     Cli,
     Viewer,
@@ -68,7 +68,7 @@ enum BuildStage {
 
 fn build_stages(target: BuildTarget) -> &'static [BuildStage] {
     match target {
-        BuildTarget::Cli => &[BuildStage::ArtifactAssets, BuildStage::Cli],
+        BuildTarget::Cli => &[BuildStage::ArtifactStyles, BuildStage::Cli],
         BuildTarget::Viewer => &[BuildStage::DioxusWeb, BuildStage::Viewer],
         BuildTarget::Both => &[BuildStage::DioxusWeb, BuildStage::Cli, BuildStage::Viewer],
     }
@@ -97,7 +97,7 @@ mod tests {
     fn viewer_build_stages_dioxus_transaction_before_cargo() {
         assert_eq!(
             build_stages(BuildTarget::Cli),
-            [BuildStage::ArtifactAssets, BuildStage::Cli]
+            [BuildStage::ArtifactStyles, BuildStage::Cli]
         );
         assert_eq!(
             build_stages(BuildTarget::Viewer),

@@ -1,28 +1,38 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
+#[cfg(feature = "desktop")]
+use std::time::Duration;
 
+#[cfg(feature = "desktop")]
 use dioxus::prelude::*;
 use gtl_parser::{
     DiffParser, DiffParserStream, DiffRow, LineNumberDigitWidth, SourceLineNumber, SplitDiffRow,
     SplitDiffStream, SyntaxLanguage,
 };
+#[cfg(feature = "desktop")]
 use gtl_wire::viewer::{
-    LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffCursor, ViewerDiffLayout,
-    ViewerDiffLines, ViewerFileSummary, ViewerViewIdentity,
+    LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffCursor, ViewerDiffLines,
 };
+use gtl_wire::viewer::{ViewerDiffLayout, ViewerFileSummary, ViewerViewIdentity};
 
+#[cfg(feature = "desktop")]
 use self::source::ClientDiffSourceError;
+#[cfg(feature = "desktop")]
 use crate::shared::browser::{self, DetailsVisibility};
 
+#[cfg(feature = "desktop")]
 mod source;
 
+#[cfg(feature = "desktop")]
 pub(crate) use source::ClientDiffSource;
 
 const CLIENT_LINE_BATCH_SIZE: usize = 64;
 
 /// Orders asynchronous page-loading requests independently from viewer identity generations.
+#[cfg(feature = "desktop")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ClientDiffRequestTicket(u64);
 
+#[cfg(feature = "desktop")]
 impl ClientDiffRequestTicket {
     #[must_use]
     const fn next(self) -> Self {
@@ -80,12 +90,14 @@ fn append_bounded_batches<Row>(batches: &mut Vec<Arc<Vec<Row>>>, rows: Vec<Row>)
     }
 }
 
+#[cfg(feature = "desktop")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientDiffFileError {
     Source(ClientDiffSourceError),
     InvalidPage,
 }
 
+#[cfg(feature = "desktop")]
 impl ClientDiffFileError {
     pub(crate) fn message(self) -> &'static str {
         match self {
@@ -99,8 +111,10 @@ impl ClientDiffFileError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClientDiffFileState {
+    #[cfg(feature = "desktop")]
     Loading,
     Complete,
+    #[cfg(feature = "desktop")]
     Error(ClientDiffFileError),
 }
 
@@ -113,6 +127,7 @@ pub(crate) struct ClientDiffFile {
 }
 
 impl ClientDiffFile {
+    #[cfg(feature = "desktop")]
     fn loading(summary: ViewerFileSummary, layout: ViewerDiffLayout) -> Self {
         Self {
             summary,
@@ -230,6 +245,7 @@ pub(crate) struct ClientDiffWorkspace {
 }
 
 impl ClientDiffWorkspace {
+    #[cfg(feature = "desktop")]
     fn loading(identity: ViewerViewIdentity, files: Vec<ViewerFileSummary>) -> Self {
         Self {
             identity,
@@ -240,6 +256,7 @@ impl ClientDiffWorkspace {
         }
     }
 
+    #[cfg(feature = "desktop")]
     pub(crate) fn is_loading(&self) -> bool {
         self.files
             .iter()
@@ -247,7 +264,43 @@ impl ClientDiffWorkspace {
     }
 }
 
+#[cfg(feature = "artifact")]
+pub(crate) fn static_diff_workspace(
+    identity: ViewerViewIdentity,
+    files: Vec<(ViewerFileSummary, Vec<String>)>,
+) -> ClientDiffWorkspace {
+    let files = files
+        .into_iter()
+        .map(|(summary, lines)| static_diff_file(summary, &lines, identity.render_options.layout))
+        .collect();
+    ClientDiffWorkspace { identity, files }
+}
+
+#[cfg(feature = "artifact")]
+fn static_diff_file(
+    summary: ViewerFileSummary,
+    lines: &[String],
+    layout: ViewerDiffLayout,
+) -> ClientDiffFile {
+    let path = summary.path.to_string_lossy();
+    let syntax = SyntaxLanguage::from_path(path.as_ref());
+    let mut parser = ClientDiffParser::new(layout, syntax);
+    let mut rows = ClientDiffRows::new(layout);
+    for lines in lines.chunks(CLIENT_LINE_BATCH_SIZE) {
+        rows.append(parser.push(lines).rows);
+    }
+    let parsed = parser.finish();
+    rows.append(parsed.rows);
+    ClientDiffFile {
+        summary,
+        rows,
+        line_number_digits: parsed.line_number_digits,
+        state: ClientDiffFileState::Complete,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg(feature = "desktop")]
 enum ClientDiffSyntaxPriority {
     Visible,
     Expanded,
@@ -255,11 +308,13 @@ enum ClientDiffSyntaxPriority {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(feature = "desktop")]
 struct ClientDiffSyntaxWork {
     file_index: usize,
     language: SyntaxLanguage,
 }
 
+#[cfg(feature = "desktop")]
 fn syntax_highlight_work(
     files: &[ViewerFileSummary],
     priority: impl Fn(&ViewerFileSummary) -> ClientDiffSyntaxPriority,
@@ -284,6 +339,7 @@ fn syntax_highlight_work(
     work.into_iter().map(|(_, work)| work).collect()
 }
 
+#[cfg(feature = "desktop")]
 fn current_syntax_priority(file: &ViewerFileSummary) -> ClientDiffSyntaxPriority {
     match browser::details_visibility(&file.anchor_id) {
         Some(DetailsVisibility::Visible) => ClientDiffSyntaxPriority::Visible,
@@ -293,6 +349,7 @@ fn current_syntax_priority(file: &ViewerFileSummary) -> ClientDiffSyntaxPriority
     }
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) fn use_client_diff_workspace(
     source: ClientDiffSource,
     identity: ViewerViewIdentity,
@@ -390,6 +447,7 @@ impl ClientDiffParser {
 }
 
 #[derive(Clone, Copy)]
+#[cfg(feature = "desktop")]
 struct ClientDiffLoad {
     workspace: Signal<ClientDiffWorkspace>,
     generation: Signal<ClientDiffRequestTicket>,
@@ -398,6 +456,7 @@ struct ClientDiffLoad {
     identity: ViewerViewIdentity,
 }
 
+#[cfg(feature = "desktop")]
 impl ClientDiffLoad {
     fn is_current(self) -> bool {
         *self.generation.peek() == self.request_generation
@@ -535,6 +594,7 @@ impl ClientDiffLoad {
     }
 }
 
+#[cfg(feature = "desktop")]
 async fn load_workspace(
     workspace: Signal<ClientDiffWorkspace>,
     generation: Signal<ClientDiffRequestTicket>,
@@ -575,6 +635,7 @@ async fn load_workspace(
     }
 }
 
+#[cfg(feature = "desktop")]
 fn validate_page(
     request: &LoadViewerDiffLines,
     page: &ViewerDiffLines,
@@ -609,11 +670,12 @@ fn validate_page(
     Ok(page.next)
 }
 
+#[cfg(feature = "desktop")]
 async fn yield_to_browser() {
     dioxus_sdk_time::sleep(Duration::ZERO).await;
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "desktop"))]
 mod tests {
     use gtl_models::viewer::{ViewerRangeGeneration, ViewerSelectionGeneration};
     use gtl_wire::viewer::{

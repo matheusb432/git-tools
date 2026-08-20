@@ -73,6 +73,7 @@ pub(super) fn FilesPanel(
     test_id: Option<String>,
     onfilter: EventHandler<String>,
     onnavigate: EventHandler<String>,
+    artifact_view_id: Option<String>,
 ) -> Element {
     let filter_normalized = filter.to_lowercase();
     let files = view
@@ -88,28 +89,48 @@ pub(super) fn FilesPanel(
         .collect::<Vec<_>>();
     let totals = WorkspaceLineTotals::from_files(&view.files);
     let tree = WorkspaceFileTree::from_files(&files);
+    let artifact_file_panel = artifact_view_id.as_ref().map(|_| "");
 
     rsx! {
         ScrollArea {
             class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
             "data-testid": test_id,
-            FilesFilter { filter, onfilter }
+            "data-gtl-file-panel": artifact_file_panel,
+            FilesFilter {
+                filter,
+                onfilter,
+                artifact_view_id: artifact_view_id.clone(),
+            }
             FilesPanelHeading {
                 commits_label: view.commits_label.clone(),
                 file_count: view.files.len(),
             }
             FilesPanelSummary { commit_count: view.commits.len(), totals }
-            if files.is_empty() {
+            if artifact_view_id.is_some() {
+                WorkspaceFileTreeView {
+                    tree,
+                    onnavigate,
+                    artifact_view_id: artifact_view_id.clone(),
+                }
+                EmptyNotice { hidden: !files.is_empty(), "data-gtl-files-empty": "",
+                    "no files match this filter"
+                }
+            } else if files.is_empty() {
                 EmptyNotice { "no files match this filter" }
             } else {
-                WorkspaceFileTreeView { tree, onnavigate }
+                WorkspaceFileTreeView { tree, onnavigate, artifact_view_id }
             }
         }
     }
 }
 
 #[component]
-fn FilesFilter(filter: String, onfilter: EventHandler<String>) -> Element {
+fn FilesFilter(
+    filter: String,
+    onfilter: EventHandler<String>,
+    artifact_view_id: Option<String>,
+) -> Element {
+    let artifact_action = artifact_view_id.as_ref().map(|_| "filter-files");
     rsx! {
         div { class: "relative mb-3",
             TextInput {
@@ -118,6 +139,7 @@ fn FilesFilter(filter: String, onfilter: EventHandler<String>) -> Element {
                 class: "h-9 py-2",
                 value: filter,
                 placeholder: "Filter files\u{2026}  /",
+                "data-gtl-action": artifact_action,
                 oninput: move |event: FormEvent| onfilter.call(event.value()),
             }
         }
@@ -163,15 +185,29 @@ fn CommitCountBadge(count: usize) -> Element {
 fn WorkspaceFileTreeView(
     tree: WorkspaceFileTree,
     onnavigate: EventHandler<String>,
+    artifact_view_id: Option<String>,
     #[props(default)] nested: bool,
 ) -> Element {
+    let artifact_tree = (!nested && artifact_view_id.is_some()).then_some("");
     rsx! {
-        ul { class: if nested { "m-0 list-none p-0 pl-2.5" } else { "m-0 list-none p-0" },
+        ul {
+            class: if nested { "m-0 list-none p-0 pl-2.5" } else { "m-0 list-none p-0" },
+            "data-gtl-file-tree": artifact_tree,
             for (directory_name, directory) in tree.directories {
-                WorkspaceDirectoryItem { directory_name, directory, onnavigate }
+                WorkspaceDirectoryItem {
+                    directory_name,
+                    directory,
+                    onnavigate,
+                    artifact_view_id: artifact_view_id.clone(),
+                }
             }
             for (file_name, file) in tree.files {
-                WorkspaceFileItem { file_name, file, onnavigate }
+                WorkspaceFileItem {
+                    file_name,
+                    file,
+                    onnavigate,
+                    artifact_view_id: artifact_view_id.clone(),
+                }
             }
         }
     }
@@ -182,15 +218,22 @@ fn WorkspaceDirectoryItem(
     directory_name: String,
     directory: WorkspaceFileTree,
     onnavigate: EventHandler<String>,
+    artifact_view_id: Option<String>,
 ) -> Element {
+    let artifact_directory = artifact_view_id.as_ref().map(|_| "");
     rsx! {
-        li { class: "min-w-0",
+        li { class: "min-w-0", "data-gtl-file-directory": artifact_directory,
             details { class: "group", open: true,
                 summary { class: "flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-snug text-ink-3 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden",
                     WorkspaceDirectoryCaret {}
                     WorkspaceTreeLabel { label: directory_name }
                 }
-                WorkspaceFileTreeView { tree: directory, onnavigate, nested: true }
+                WorkspaceFileTreeView {
+                    tree: directory,
+                    onnavigate,
+                    artifact_view_id,
+                    nested: true,
+                }
             }
         }
     }
@@ -212,9 +255,13 @@ fn WorkspaceFileItem(
     file_name: String,
     file: ViewerFileSummary,
     onnavigate: EventHandler<String>,
+    artifact_view_id: Option<String>,
 ) -> Element {
     let anchor_id = file.anchor_id.clone();
+    let filter_key = file.path.to_string_lossy().to_lowercase();
     let tone_classes = file_item_tone_classes(file.status);
+    let artifact_file = artifact_view_id.as_ref().map(|_| "");
+    let artifact_action = artifact_view_id.as_ref().map(|_| "navigate-file");
     let item_attributes = merge_attributes(vec![
         attributes!(div {
             class: "gap-1.5 px-1.5 py-0.5 text-left leading-snug text-ink-2 hover:text-ink",
@@ -225,13 +272,17 @@ fn WorkspaceFileItem(
     ]);
 
     rsx! {
-        li { class: "min-w-0",
+        li {
+            class: "min-w-0",
+            "data-gtl-file-leaf": artifact_file,
+            "data-gtl-filter-key": artifact_view_id.as_ref().map(|_| filter_key.clone()),
             Button {
                 layout: ButtonLayout::FullWidthStart,
                 size: ButtonSize::Content,
                 variant: ButtonVariant::Bare,
                 attributes: item_attributes,
                 "data-file-target": anchor_id.clone(),
+                "data-gtl-action": artifact_action,
                 title: file.path.to_string_lossy().into_owned(),
                 onclick: move |_| onnavigate.call(anchor_id.clone()),
                 DiffFileStatusBadge {

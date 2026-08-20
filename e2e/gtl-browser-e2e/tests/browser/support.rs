@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::{Context as _, Result, bail, ensure};
 use command_group::{CommandGroup, GroupChild};
-use playwright_rs::protocol::{AriaRole, ClickOptions, GetByRoleOptions, Locator, Page};
+use playwright_rs::protocol::{AriaRole, ClickOptions, GetByRoleOptions, Locator, Page, Viewport};
 
 use crate::harness::{
     browser::{self, OPERATION_TIMEOUT, Session, operation},
@@ -26,6 +26,7 @@ pub struct Spec {
 
 pub struct RawArtifactFixture {
     repository: tempfile::TempDir,
+    config: tempfile::NamedTempFile,
 }
 
 impl Spec {
@@ -39,13 +40,13 @@ impl Spec {
     pub async fn finish(self, outcome: Result<()>) -> Result<()> {
         let outcome = attach_secondary_error(
             outcome,
-            self.session.verify_network_guard(),
-            "browser network guard",
+            self.session.verify_artifact_audit().await,
+            "browser artifact audit",
         );
         let evidence_result = self.recording.finish(outcome.is_ok()).await;
         let cleanup_result = self.session.finish().await;
         let outcome = attach_evidence(outcome, evidence_result);
-        attach_secondary_error(outcome, cleanup_result, "browser cleanup")
+        attach_secondary_error(outcome, cleanup_result, "browser session finalization")
     }
 }
 
@@ -91,6 +92,8 @@ pub async fn repository_with_raw_changes() -> Result<RawArtifactFixture> {
         "fn beta_1() {}\nfn beta_2() {}\nfn beta_3() {}\nfn beta_4() {}\nfn beta_5() {}\nfn beta_6() {}\nfn beta_7() {}\nfn beta_8() {}\nfn beta_9() {}\n",
     )
     .context("write beta base fixture")?;
+    std::fs::write(repository.path().join("large.txt"), "base\n")
+        .context("write large-file base fixture")?;
     git(repository.path(), &["add", "."]).await?;
     git(repository.path(), &["commit", "-q", "-m", "base"]).await?;
     git(repository.path(), &["switch", "-q", "-c", "feature"]).await?;
@@ -104,22 +107,38 @@ pub async fn repository_with_raw_changes() -> Result<RawArtifactFixture> {
         "fn beta_1() {}\nfn beta_2() {}\nfn beta_3() {}\nfn beta_4() {}\nfn beta_5() { println!(\"beta-marker\"); }\nfn beta_6() {}\nfn beta_7() {}\nfn beta_8() {}\nfn beta_9() {}\n",
     )
     .context("write beta change fixture")?;
+    std::fs::write(
+        repository.path().join("large.txt"),
+        format!("large-marker-{}\n", "x".repeat(250_000)),
+    )
+    .context("write giant raw artifact fixture")?;
     git(repository.path(), &["add", "."]).await?;
     git(
         repository.path(),
         &["commit", "-q", "-m", "artifact change"],
     )
     .await?;
-    Ok(RawArtifactFixture { repository })
+    let config = tempfile::NamedTempFile::new().context("create raw artifact config")?;
+    Ok(RawArtifactFixture { repository, config })
 }
 
-pub async fn render_raw_diff(fixture: &RawArtifactFixture) -> Result<String> {
+pub async fn render_raw_diff(
+    fixture: &RawArtifactFixture,
+    layout: &str,
+    density: &str,
+) -> Result<String> {
     let cli_binary = env::var_os("GTL_E2E_CLI_BINARY")
         .map(PathBuf::from)
         .context("GTL_E2E_CLI_BINARY is required for browser E2E")?;
     let mut command = Command::new(&cli_binary);
+    std::fs::write(
+        fixture.config.path(),
+        format!("layout = {layout:?}\ndensity = {density:?}\n"),
+    )
+    .context("write raw artifact presentation config")?;
     command
         .args(["diff", "--raw"])
+        .env("GIT_TOOLS_CONFIG", fixture.config.path())
         .current_dir(fixture.repository.path());
     let output = command_output(command, "git-tools diff --raw").await?;
     ensure_success(&output, "git-tools diff --raw")?;
@@ -134,6 +153,18 @@ pub async fn render_raw_diff(fixture: &RawArtifactFixture) -> Result<String> {
         [] => bail!("git-tools diff --raw printed no file:// artifact URL"),
         _ => bail!("git-tools diff --raw printed multiple file:// artifact URLs"),
     }
+}
+
+pub async fn set_mobile_viewport(page: &Page) -> Result<()> {
+    operation("set mobile Chromium viewport", async {
+        page.set_viewport_size(Viewport {
+            width: 390,
+            height: 844,
+        })
+        .await
+        .context("set mobile Chromium viewport")
+    })
+    .await
 }
 
 #[must_use]
@@ -154,19 +185,6 @@ pub async fn click(locator: &Locator, label: &str) -> Result<()> {
             )
             .await
             .with_context(|| label.to_owned())
-    })
-    .await
-}
-
-pub async fn goto(page: &Page, url: &str) -> Result<()> {
-    operation("navigate to offline artifact", async {
-        page.goto(
-            url,
-            playwright_rs::protocol::GotoOptions::new().timeout(OPERATION_TIMEOUT),
-        )
-        .await
-        .context("navigate to offline artifact")
-        .map(|_| ())
     })
     .await
 }

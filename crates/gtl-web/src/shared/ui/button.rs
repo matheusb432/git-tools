@@ -32,6 +32,7 @@ pub(crate) enum ButtonVariant {
     Primary,
     Secondary,
     Pressed,
+    #[cfg(feature = "desktop")]
     Destructive,
     Success,
     Failure,
@@ -41,7 +42,7 @@ pub(crate) enum ButtonVariant {
 }
 
 impl ButtonVariant {
-    const fn classes(self) -> &'static str {
+    pub(crate) const fn classes(self) -> &'static str {
         match self {
             Self::Primary => {
                 "border border-acc bg-acc text-bg hover:bg-acc-2 active:border-acc-2 active:bg-acc-2"
@@ -52,6 +53,7 @@ impl ButtonVariant {
             Self::Pressed => {
                 "border border-acc-line bg-acc-soft text-ink hover:border-acc active:border-acc active:bg-acc active:text-bg"
             }
+            #[cfg(feature = "desktop")]
             Self::Destructive => {
                 "border border-del-line bg-del-bg text-del hover:border-del hover:bg-del hover:text-bg active:border-del active:bg-del active:text-bg"
             }

@@ -8,12 +8,13 @@ use serde::Serialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 #[cfg(feature = "desktop")]
-use web_sys::HtmlElement;
-use web_sys::{HtmlDetailsElement, HtmlDocument, HtmlTextAreaElement};
+use web_sys::{HtmlDetailsElement, HtmlElement};
+use web_sys::{HtmlDocument, HtmlTextAreaElement};
 
 #[cfg(feature = "desktop")]
 use super::bridge::ClientApiError;
 
+#[cfg(feature = "desktop")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DetailsVisibility {
     Visible,
@@ -21,6 +22,7 @@ pub(crate) enum DetailsVisibility {
     Collapsed,
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) fn apply_theme(theme: &'static str) {
     let Some(root) = document().and_then(|document| document.document_element()) else {
         return;
@@ -53,6 +55,7 @@ pub(crate) fn hide_popover(id: &str) {
     let _ = element.hide_popover();
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) fn scroll_to_file(id: &str) {
     let Some(details) = document()
         .and_then(|document| document.get_element_by_id(id))
@@ -64,6 +67,7 @@ pub(crate) fn scroll_to_file(id: &str) {
     details.scroll_into_view_with_bool(true);
 }
 
+#[cfg(feature = "desktop")]
 pub(crate) fn details_visibility(id: &str) -> Option<DetailsVisibility> {
     let window = web_sys::window()?;
     let details = window

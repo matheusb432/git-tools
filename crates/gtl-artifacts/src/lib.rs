@@ -1,7 +1,6 @@
-//! Deterministic packing for self-contained, client-rendered diff artifacts.
+//! Native build-time rendering for self-contained static diff artifacts.
 
 mod assets;
-mod compression;
 mod document;
 mod payload;
 
@@ -38,13 +37,11 @@ impl gtl_application::ports::HtmlRenderer for ArtifactRenderer {
 
 #[cfg(test)]
 mod tests {
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
     use gtl_application::diffs::{Cmd, FileDiff, Foot, View};
     use gtl_models::{
         diffs::DiffLineCount,
         git::{BranchName, GitHead, GitRevision},
     };
-    use serde::de::DeserializeOwned;
 
     pub(crate) fn sample_view() -> View {
         View {
@@ -59,10 +56,10 @@ mod tests {
                     .unwrap(),
                 added: DiffLineCount::new(1),
                 removed: DiffLineCount::new(1),
-                lines: vec!["@@ -1 +1 @@".to_owned(), "+client-rendered".to_owned()],
+                lines: vec!["@@ -1 +1 @@".to_owned(), "+static_rendered".to_owned()],
                 full_lines: Some(vec![
                     "@@ -1 +1 @@".to_owned(),
-                    "+client-rendered".to_owned(),
+                    "+static_rendered".to_owned(),
                     " context".to_owned(),
                 ]),
             }],
@@ -79,26 +76,9 @@ mod tests {
         }
     }
 
-    pub(crate) fn decode_payload<T: DeserializeOwned>(html: &str, id: &str) -> T {
-        let prefix = format!("<script id=\"{id}\" type=\"application/octet-stream\"");
-        let encoded = html
-            .split_once(&prefix)
-            .and_then(|(_, tail)| tail.split_once('>'))
-            .and_then(|(_, tail)| tail.split_once("</script>"))
-            .map(|(encoded, _)| encoded)
-            .expect("artifact payload node");
-        let compressed = STANDARD.decode(encoded).expect("base64 artifact payload");
-        let bytes = crate::compression::gunzip(&compressed).expect("gzip artifact payload");
-        serde_json::from_slice(&bytes).expect("JSON artifact payload")
-    }
-
     pub(crate) fn has_disallowed_external_url(html: &str) -> bool {
-        let without_tailwind_attribution = html.replace("https://tailwindcss.com", "");
-        without_tailwind_attribution
-            .match_indices("://")
-            .any(|(separator, _)| {
-                without_tailwind_attribution[..separator].ends_with("http")
-                    || without_tailwind_attribution[..separator].ends_with("https")
-            })
+        [" src=", " href=", " srcset=", " action=", "url("]
+            .iter()
+            .any(|reference| html.contains(reference))
     }
 }

@@ -6,16 +6,17 @@ mod diff_history;
 
 #[cfg(feature = "desktop")]
 pub(crate) use api::DiffViewerApi;
-pub(crate) use client_diff::{
-    ClientDiffFile, ClientDiffFileState, ClientDiffRows, ClientDiffSource,
-    use_client_diff_workspace,
-};
+pub(crate) use client_diff::{ClientDiffFile, ClientDiffFileState, ClientDiffRows};
+#[cfg(feature = "desktop")]
+pub(crate) use client_diff::{ClientDiffSource, use_client_diff_workspace};
+#[cfg(feature = "artifact")]
+pub(crate) use client_diff::{ClientDiffWorkspace, static_diff_workspace};
 #[cfg(feature = "desktop")]
 pub(crate) use diff_history::{DiffHistoryApi, history_navigation};
-use gtl_wire::viewer::ViewerTheme;
 #[cfg(feature = "desktop")]
-use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind};
+use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind, ViewerTheme};
 
+#[cfg(feature = "desktop")]
 pub(crate) const fn theme_value(theme: ViewerTheme) -> &'static str {
     theme.as_str()
 }

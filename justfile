@@ -22,7 +22,7 @@ help: _preflight
 up:
     just desktop up
 
-# Build both the CLI engine (+ offline artifact runtime) and the desktop viewer.
+# Build both the CLI engine (+ static artifact stylesheet) and the desktop viewer.
 [group('build')]
 build:
     cargo run --quiet -p xtask -- build

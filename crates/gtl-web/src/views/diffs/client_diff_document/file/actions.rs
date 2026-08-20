@@ -17,10 +17,15 @@ pub(super) fn DiffFileActions(
     file: ClientDiffFile,
     copy_context_enabled: bool,
     onopen: Option<EventHandler<RepositoryRelativePath>>,
+    artifact_enhancement: bool,
 ) -> Element {
     rsx! {
         span { class: "flex flex-none items-center gap-2 mobile:hidden",
-            DiffCopyActions { file: file.clone(), copy_context_enabled }
+            DiffCopyActions {
+                file: file.clone(),
+                copy_context_enabled,
+                artifact_enhancement,
+            }
             if let Some(onopen) = onopen.filter(|_| file.summary.can_open_in_editor) {
                 OpenInTextEditorAction { path: file.summary.path, onopen }
             }
@@ -29,18 +34,28 @@ pub(super) fn DiffFileActions(
 }
 
 #[component]
-fn DiffCopyActions(file: ClientDiffFile, copy_context_enabled: bool) -> Element {
+fn DiffCopyActions(
+    file: ClientDiffFile,
+    copy_context_enabled: bool,
+    artifact_enhancement: bool,
+) -> Element {
     rsx! {
         span { class: "flex flex-none gap-2 print:hidden!",
             DiffCopyAction {
-                label: "path",
+                kind: DiffCopyKind::Path,
                 payload: file.summary.path.to_string_lossy().into_owned(),
+                artifact_enhancement,
             }
             DiffCopyAction {
-                label: "abs",
+                kind: DiffCopyKind::Absolute,
                 payload: file.summary.absolute_path.as_path().to_string_lossy().into_owned(),
+                artifact_enhancement,
             }
-            DiffCodeCopyAction { file, include_context: copy_context_enabled }
+            DiffCodeCopyAction {
+                file,
+                include_context: copy_context_enabled,
+                artifact_enhancement,
+            }
         }
     }
 }
@@ -52,13 +67,39 @@ enum CopyState {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiffCopyKind {
+    Path,
+    Absolute,
+    Code,
+}
+
+impl DiffCopyKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Path => "path",
+            Self::Absolute => "abs",
+            Self::Code => "code",
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Path => "path",
+            Self::Absolute => "absolute",
+            Self::Code => "code",
+        }
+    }
+}
+
 #[component]
-fn DiffCopyAction(label: &'static str, payload: String) -> Element {
+fn DiffCopyAction(kind: DiffCopyKind, payload: String, artifact_enhancement: bool) -> Element {
     let state = use_signal(|| CopyState::Idle);
     rsx! {
         CopyButton {
-            label,
+            kind,
             state: state(),
+            artifact_enhancement,
             onclick: move |event: MouseEvent| {
                 event.prevent_default();
                 event.stop_propagation();
@@ -72,12 +113,17 @@ fn DiffCopyAction(label: &'static str, payload: String) -> Element {
 }
 
 #[component]
-fn DiffCodeCopyAction(file: ClientDiffFile, include_context: bool) -> Element {
+fn DiffCodeCopyAction(
+    file: ClientDiffFile,
+    include_context: bool,
+    artifact_enhancement: bool,
+) -> Element {
     let state = use_signal(|| CopyState::Idle);
     rsx! {
         CopyButton {
-            label: "code",
+            kind: DiffCopyKind::Code,
             state: state(),
+            artifact_enhancement,
             onclick: move |event: MouseEvent| {
                 event.prevent_default();
                 event.stop_propagation();
@@ -92,7 +138,13 @@ fn DiffCodeCopyAction(file: ClientDiffFile, include_context: bool) -> Element {
 
 // TODO: restyle. looks a bit ugly
 #[component]
-fn CopyButton(label: &'static str, state: CopyState, onclick: EventHandler<MouseEvent>) -> Element {
+fn CopyButton(
+    kind: DiffCopyKind,
+    state: CopyState,
+    artifact_enhancement: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
+    let label = kind.label();
     let display = match state {
         CopyState::Idle => label,
         CopyState::Copied => "copied",
@@ -103,8 +155,23 @@ fn CopyButton(label: &'static str, state: CopyState, onclick: EventHandler<Mouse
         CopyState::Copied => ButtonVariant::Success,
         CopyState::Failed => ButtonVariant::Failure,
     };
+    let artifact_copy = artifact_enhancement.then_some(kind.as_str());
+    let artifact_idle_label = artifact_enhancement.then_some(label);
+    let artifact_idle_classes = artifact_enhancement.then_some(ButtonVariant::Secondary.classes());
+    let artifact_success_classes = artifact_enhancement.then_some(ButtonVariant::Success.classes());
+    let artifact_failure_classes = artifact_enhancement.then_some(ButtonVariant::Failure.classes());
     rsx! {
-        Button { size: ButtonSize::Small, variant, onclick, "{display}" }
+        Button {
+            size: ButtonSize::Small,
+            variant,
+            onclick,
+            "data-gtl-copy": artifact_copy,
+            "data-gtl-idle-label": artifact_idle_label,
+            "data-gtl-idle-classes": artifact_idle_classes,
+            "data-gtl-success-classes": artifact_success_classes,
+            "data-gtl-failure-classes": artifact_failure_classes,
+            "{display}"
+        }
     }
 }
 

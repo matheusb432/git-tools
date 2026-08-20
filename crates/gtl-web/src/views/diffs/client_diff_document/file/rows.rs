@@ -2,9 +2,10 @@ use dioxus::prelude::*;
 use gtl_parser::LineNumberDigitWidth;
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
+#[cfg(feature = "desktop")]
+use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
 use crate::{
     entities::diffs::{ClientDiffFile, ClientDiffFileState, ClientDiffRows},
-    shared::ui::{Button, ButtonSize, ButtonVariant},
     views::diffs::{SplitDiffRowBatch, UnifiedDiffRowBatch},
 };
 
@@ -15,6 +16,7 @@ pub(super) fn DiffFileBody(
     density: ViewerDiffDensity,
     file_index: usize,
     onretry: EventHandler<()>,
+    artifact_file_id: Option<String>,
 ) -> Element {
     rsx! {
         div { class: "overflow-hidden rounded-b-panel",
@@ -24,6 +26,7 @@ pub(super) fn DiffFileBody(
                 density,
                 file_index,
                 onretry,
+                artifact_file_id,
             }
         }
     }
@@ -36,14 +39,17 @@ fn DiffFileRows(
     density: ViewerDiffDensity,
     file_index: usize,
     onretry: EventHandler<()>,
+    artifact_file_id: Option<String>,
 ) -> Element {
     let density_label = density.as_str();
     let layout_label = layout.as_str();
     let style = unified_line_number_width_style(layout, file.line_number_digits);
+    let artifact_enhancement = artifact_file_id.is_some();
+    let row_container_id = diff_rows_id(file_index, artifact_file_id.as_deref());
 
     rsx! {
         div {
-            id: "viewer-diff-{file_index}",
+            id: row_container_id,
             class: "overflow-x-hidden text-sm leading-5",
             style,
             aria_label: "{layout_label} {density_label} diff rows",
@@ -52,18 +58,25 @@ fn DiffFileRows(
             match &file.rows {
                 ClientDiffRows::Unified(batches) => rsx! {
                     for (batch_index, batch) in batches.iter().enumerate() {
-                        UnifiedDiffRowBatch { key: "{batch_index}", rows: batch.clone() }
+                        UnifiedDiffRowBatch { key: "{batch_index}", rows: batch.clone(), artifact_enhancement }
                     }
                 },
                 ClientDiffRows::Split(batches) => rsx! {
                     for (batch_index, batch) in batches.iter().enumerate() {
-                        SplitDiffRowBatch { key: "{batch_index}", rows: batch.clone() }
+                        SplitDiffRowBatch { key: "{batch_index}", rows: batch.clone(), artifact_enhancement }
                     }
                 },
             }
             DiffFileLoadState { state: file.state, onretry }
         }
     }
+}
+
+fn diff_rows_id(file_index: usize, artifact_file_id: Option<&str>) -> String {
+    artifact_file_id.map_or_else(
+        || format!("viewer-diff-{file_index}"),
+        |file_id| format!("{file_id}-rows"),
+    )
 }
 
 fn unified_line_number_width_style(
@@ -77,10 +90,12 @@ fn unified_line_number_width_style(
 #[component]
 fn DiffFileLoadState(state: ClientDiffFileState, onretry: EventHandler<()>) -> Element {
     match state {
+        #[cfg(feature = "desktop")]
         ClientDiffFileState::Loading => rsx! {
             DiffFileLoading {}
         },
         ClientDiffFileState::Complete => rsx! {},
+        #[cfg(feature = "desktop")]
         ClientDiffFileState::Error(error) => {
             rsx! {
                 DiffFileLoadError { message: error.message(), onretry }
@@ -89,6 +104,7 @@ fn DiffFileLoadState(state: ClientDiffFileState, onretry: EventHandler<()>) -> E
     }
 }
 
+#[cfg(feature = "desktop")]
 #[component]
 fn DiffFileLoading() -> Element {
     rsx! {
@@ -96,6 +112,7 @@ fn DiffFileLoading() -> Element {
     }
 }
 
+#[cfg(feature = "desktop")]
 #[component]
 fn DiffFileLoadError(message: &'static str, onretry: EventHandler<()>) -> Element {
     rsx! {
@@ -135,6 +152,15 @@ mod tests {
         assert_eq!(
             unified_line_number_width_style(ViewerDiffLayout::Split, width),
             None
+        );
+    }
+
+    #[test]
+    fn artifact_row_container_uses_the_qualified_file_identity() {
+        assert_eq!(diff_rows_id(3, None), "viewer-diff-3");
+        assert_eq!(
+            diff_rows_id(3, Some("artifact-view-7-file-0")),
+            "artifact-view-7-file-0-rows"
         );
     }
 }

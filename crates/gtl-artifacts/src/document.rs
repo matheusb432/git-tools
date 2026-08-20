@@ -1,4 +1,4 @@
-use std::{borrow::Cow, fmt::Write as _};
+use std::fmt::Write as _;
 
 use anyhow::{Context as _, Result, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
@@ -6,56 +6,22 @@ use gtl_application::{
     diffs::View,
     viewer::{RenderOptions, Theme},
 };
-use gtl_wire::viewer::{VIEWER_ARTIFACT_MANIFEST_ID, VIEWER_ARTIFACT_RUNTIME_ID};
+use gtl_web::{
+    StaticArtifactView, render_static_artifact_body, static_artifact_enhancement_script,
+};
 use sha2::{Digest as _, Sha256};
 
-use crate::{assets, compression, payload::project_payload};
+use crate::{assets, payload::project_payload};
 
-struct PackedAsset {
-    id: String,
-    uncompressed_bytes: usize,
-    encoded: Cow<'static, str>,
-}
-
-impl PackedAsset {
-    fn pre_encoded_binary(
-        id: impl Into<String>,
-        uncompressed_bytes: usize,
-        encoded: &'static str,
-    ) -> Self {
-        Self {
-            id: id.into(),
-            uncompressed_bytes,
-            encoded: Cow::Borrowed(encoded),
-        }
-    }
-
-    fn binary(id: impl Into<String>, bytes: &[u8]) -> Result<Self> {
-        let compressed = compression::gzip(bytes)?;
-        Ok(Self {
-            id: id.into(),
-            uncompressed_bytes: bytes.len(),
-            encoded: Cow::Owned(STANDARD.encode(compressed)),
-        })
-    }
-
-    fn json(id: impl Into<String>, payload: &(impl serde::Serialize + ?Sized)) -> Result<Self> {
-        let bytes = serde_json::to_vec(payload).context("serialize artifact payload")?;
-        Self::binary(id, &bytes)
-    }
-}
-
-fn content_security_policy(runtime: &str, stylesheet: &str) -> String {
-    let runtime_sha256 = STANDARD.encode(Sha256::digest(runtime.as_bytes()));
+fn content_security_policy(script: &str, stylesheet: &str) -> String {
+    let script_sha256 = STANDARD.encode(Sha256::digest(script.as_bytes()));
     let stylesheet_sha256 = STANDARD.encode(Sha256::digest(stylesheet.as_bytes()));
-    // Dioxus Web 0.7.10 requires string evaluation, and diff rows set one CSS custom property
-    // inline. Every script and stylesheet element still requires its exact generated hash.
     format!(
-        "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; script-src 'sha256-{runtime_sha256}' 'unsafe-eval' 'wasm-unsafe-eval'; script-src-attr 'none'; style-src 'sha256-{stylesheet_sha256}'; style-src-attr 'unsafe-inline'; worker-src 'none'"
+        "default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; script-src 'sha256-{script_sha256}'; script-src-attr 'none'; style-src 'sha256-{stylesheet_sha256}'; style-src-attr 'unsafe-inline'; worker-src 'none'"
     )
 }
 
-/// Builds one self-contained, client-rendered diff artifact.
+/// Builds one self-contained static diff artifact.
 pub fn build_html(view: &View, options: RenderOptions, theme: Option<Theme>) -> Result<String> {
     let count = view.commits.len();
     let suffix = if count == 1 { "" } else { "s" };
@@ -66,7 +32,7 @@ pub fn build_html(view: &View, options: RenderOptions, theme: Option<Theme>) -> 
     build_document(&title, std::slice::from_ref(view), options, theme)
 }
 
-/// Builds one self-contained artifact with a client-rendered tab per diff view.
+/// Builds one self-contained static artifact with a tab per diff view.
 pub fn build_tabbed_html(
     title: &str,
     views: &[View],
@@ -82,271 +48,270 @@ fn build_document(
     options: RenderOptions,
     theme: Option<Theme>,
 ) -> Result<String> {
-    let payload = project_payload(title, views, options, theme)?;
-    let runtime = assets::inline_runtime()?;
-    let (encoded_wasm, wasm_bytes) = assets::wasm()?;
-    let runtime_asset =
-        PackedAsset::pre_encoded_binary(VIEWER_ARTIFACT_RUNTIME_ID, wasm_bytes, encoded_wasm);
-    let manifest_asset = PackedAsset::json(VIEWER_ARTIFACT_MANIFEST_ID, &payload.manifest)?;
-    let page_assets = payload
-        .pages
-        .iter()
-        .map(|page| PackedAsset::json(page.id.as_str(), page))
-        .collect::<Result<Vec<_>>>()?;
+    let payload = project_payload(views, options, theme)?;
+    let static_views = payload
+        .views
+        .into_iter()
+        .map(|projected| StaticArtifactView::try_new(projected.view, projected.sources))
+        .collect::<Result<Vec<_>, _>>()
+        .context("construct static artifact views")?;
+    let body = render_static_artifact_body(static_views);
+    let script = static_artifact_enhancement_script();
     ensure!(
-        !assets::TAILWIND_CSS.contains("</style"),
+        !assets::TAILWIND_CSS
+            .to_ascii_lowercase()
+            .contains("</style"),
         "generated Tailwind CSS cannot be embedded safely"
     );
-    let content_security_policy = content_security_policy(runtime, assets::TAILWIND_CSS);
+    ensure!(
+        !script.to_ascii_lowercase().contains("</script"),
+        "artifact enhancement script cannot be embedded safely"
+    );
+    let content_security_policy = content_security_policy(script, assets::TAILWIND_CSS);
 
     let mut html = String::with_capacity(
-        assets::TAILWIND_CSS.len()
-            + runtime.len()
+        body.len()
+            + assets::TAILWIND_CSS.len()
+            + script.len()
             + content_security_policy.len()
-            + runtime_asset.encoded.len()
-            + manifest_asset.encoded.len()
-            + page_assets
-                .iter()
-                .map(|asset| asset.encoded.len())
-                .sum::<usize>(),
+            + title.len()
+            + 512,
     );
     write!(
         html,
-        "<!doctype html><html lang=\"en\" data-theme=\"{}\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"{}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark light\"><meta name=\"darkreader-lock\"><title>git-tools diff</title><style>{}</style></head><body><div id=\"main\"></div>",
-        payload.manifest.theme.as_str(),
+        "<!doctype html><html lang=\"en\" data-theme=\"{}\"><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"{}\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"dark light\"><meta name=\"darkreader-lock\"><title>",
+        payload.theme.as_str(),
         content_security_policy,
-        assets::TAILWIND_CSS,
     )
-    .context("write artifact document shell")?;
-    write_asset_node(&mut html, &runtime_asset)?;
-    write_asset_node(&mut html, &manifest_asset)?;
-    for page in &page_assets {
-        write_asset_node(&mut html, page)?;
-    }
+    .context("write artifact document head")?;
+    write_escaped_text(&mut html, title).context("write artifact title")?;
     write!(
         html,
-        "<script type=\"module\">{runtime}</script></body></html>"
+        "</title><style>{}</style></head><body>{body}<script>{script}</script></body></html>",
+        assets::TAILWIND_CSS,
     )
-    .context("write artifact runtime")?;
+    .context("write static artifact document")?;
     Ok(html)
 }
 
-fn write_asset_node(html: &mut String, asset: &PackedAsset) -> Result<()> {
-    write!(
-        html,
-        "<script id=\"{}\" type=\"application/octet-stream\" data-encoding=\"base64\" data-compression=\"gzip\" data-uncompressed-bytes=\"{}\">{}</script>",
-        asset.id, asset.uncompressed_bytes, asset.encoded,
-    )
-    .context("write compressed artifact asset")
+fn write_escaped_text(output: &mut String, value: &str) -> std::fmt::Result {
+    for character in value.chars() {
+        match character {
+            '&' => output.write_str("&amp;")?,
+            '<' => output.write_str("&lt;")?,
+            '>' => output.write_str("&gt;")?,
+            _ => output.write_char(character)?,
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use gtl_application::diffs::FileDiff;
+    use std::{collections::HashSet, io::Write as _};
+
+    use flate2::{Compression, GzBuilder};
+    use gtl_application::{
+        diffs::FileDiff,
+        viewer::{DiffDensity, DiffLayout},
+    };
     use gtl_models::diffs::DiffLineCount;
-    use gtl_wire::viewer::{ViewerArtifactManifest, ViewerArtifactPage};
 
     use super::*;
-    use crate::tests::{decode_payload, has_disallowed_external_url, sample_view};
-
-    const TINY_BASELINE_BYTES: usize = 4_320_408;
-    const LARGE_BASELINE_BYTES: usize = 5_801_973;
-
-    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-    struct AssetBytes {
-        raw: usize,
-        gzip: usize,
-        base64: usize,
-    }
-
-    impl std::ops::AddAssign for AssetBytes {
-        fn add_assign(&mut self, other: Self) {
-            self.raw += other.raw;
-            self.gzip += other.gzip;
-            self.base64 += other.base64;
-        }
-    }
+    use crate::tests::{has_disallowed_external_url, sample_view};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     struct ArtifactSizeEvidence {
         html: usize,
-        runtime_javascript: usize,
+        gzip: usize,
         tailwind_css: usize,
-        wasm: AssetBytes,
-        payload: AssetBytes,
-        pages: usize,
-        lines: usize,
+        enhancement_javascript: usize,
+        files: usize,
+        rows: usize,
     }
 
     #[test]
-    fn document_contains_only_inert_data_and_inline_client_assets() {
+    fn document_contains_complete_static_markup() {
         let html = build_html(&sample_view(), RenderOptions::DEFAULT, Some(Theme::Dark))
-            .expect("build client-rendered artifact");
-        let manifest: ViewerArtifactManifest = decode_payload(&html, VIEWER_ARTIFACT_MANIFEST_ID);
-        let active = &manifest.views[0];
-        let first_page_id = gtl_wire::viewer::ViewerArtifactPageId::for_request(
-            &gtl_wire::viewer::LoadViewerDiffLines {
-                identity: active.identity,
-                file: active.files[0].id.clone(),
-                cursor: gtl_wire::viewer::ViewerDiffCursor::default(),
-            },
-        );
-        let page: ViewerArtifactPage = decode_payload(&html, first_page_id.as_str());
-        let policy = html
-            .split_once("<meta http-equiv=\"Content-Security-Policy\" content=\"")
-            .and_then(|(_, tail)| tail.split_once("\">"))
-            .map(|(policy, _)| policy)
-            .expect("artifact content security policy");
+            .expect("build static artifact");
+        let policy =
+            content_security_policy(static_artifact_enhancement_script(), assets::TAILWIND_CSS);
 
         assert!(html.starts_with("<!doctype html>"));
-        assert!(
-            html.find("Content-Security-Policy") < html.find("<style>"),
-            "content security policy must precede active content"
-        );
-        for directive in [
-            "default-src 'none'",
-            "base-uri 'none'",
-            "connect-src 'none'",
-            "form-action 'none'",
-            "frame-src 'none'",
-            "object-src 'none'",
-            "script-src 'sha256-",
-            "script-src-attr 'none'",
-            "style-src 'sha256-",
-            "style-src-attr 'unsafe-inline'",
-            "worker-src 'none'",
+        assert!(html.contains("<title>api — diff · 0 commits</title>"));
+        assert!(html.contains("static_rendered"));
+        assert!(html.contains("data-gtl-diff-file"));
+        assert!(html.contains("data-gtl-diff-row"));
+        assert_eq!(html.matches("<style>").count(), 1);
+        assert_eq!(html.matches("<script>").count(), 1);
+        assert_eq!(html.matches("</script>").count(), 1);
+        assert!(html.contains(&format!("content=\"{policy}\"")));
+        for retired in [
+            "application/octet-stream",
+            "data-compression",
+            "gtl-artifact-manifest",
+            "gtl-artifact-page-",
+            "gtl-artifact-runtime",
+            "WebAssembly",
+            "DecompressionStream",
+            ".wasm",
+            "unsafe-eval",
+            "wasm-unsafe-eval",
+            "type=\"module\"",
+            "<!--node-id",
+            "data-dioxus",
+            " onclick=",
+            " oninput=",
+            " onkeydown=",
         ] {
-            assert!(
-                policy.contains(directive),
-                "missing CSP directive: {directive}"
-            );
+            assert!(!html.contains(retired), "retained retired asset: {retired}");
         }
-        let runtime_sha256 = STANDARD.encode(Sha256::digest(
-            assets::inline_runtime()
-                .expect("generated runtime")
-                .as_bytes(),
-        ));
-        let stylesheet_sha256 = STANDARD.encode(Sha256::digest(assets::TAILWIND_CSS.as_bytes()));
-        assert!(policy.contains(&format!("script-src 'sha256-{runtime_sha256}'")));
-        assert!(policy.contains("'unsafe-eval' 'wasm-unsafe-eval'"));
-        assert!(policy.contains(&format!("style-src 'sha256-{stylesheet_sha256}'")));
-        assert!(html.contains("<style>"));
-        assert_eq!(html.matches("<script type=\"module\">").count(), 1);
-        assert_eq!(
-            html.matches(&format!("id=\"{VIEWER_ARTIFACT_RUNTIME_ID}\""))
-                .count(),
-            1
-        );
-        assert!(html.contains("data-compression=\"gzip\""));
-        assert!(!html.contains("data:application/wasm"));
-        assert!(!html.contains("+client-rendered"));
         assert!(!has_disallowed_external_url(&html));
-        assert_eq!(manifest.title, "api — diff · 0 commits");
-        assert_eq!(page.page.lines[1], "+client-rendered");
     }
 
     #[test]
-    fn user_content_with_script_terminators_remains_encoded() {
+    fn user_content_is_literal_and_escaped() {
         let mut view = sample_view();
+        view.title = "diff </title><script>title_attack()</script>".to_owned();
+        view.files[0].path = gtl_models::paths::RepositoryRelativePath::try_new(
+            "src/<script>path_attack()</script>.rs".into(),
+        )
+        .expect("dangerous-looking path remains a valid relative path");
+        view.files[0].lines[0] = "@@ -1 +1,2 @@".to_owned();
         view.files[0]
             .lines
-            .push("+</script><script>alert('unsafe')</script>".to_owned());
+            .push("+<img src=x onerror=line_attack()></script>".to_owned());
         view.files[0].full_lines = Some(view.files[0].lines.clone());
 
-        let html = build_html(&view, RenderOptions::DEFAULT, None).expect("build safe artifact");
-        let manifest: ViewerArtifactManifest = decode_payload(&html, VIEWER_ARTIFACT_MANIFEST_ID);
-        let page_id = gtl_wire::viewer::ViewerArtifactPageId::for_request(
-            &gtl_wire::viewer::LoadViewerDiffLines {
-                identity: manifest.views[0].identity,
-                file: manifest.views[0].files[0].id.clone(),
-                cursor: gtl_wire::viewer::ViewerDiffCursor::default(),
-            },
-        );
-        let page: ViewerArtifactPage = decode_payload(&html, page_id.as_str());
+        let html = build_tabbed_html(
+            "artifact </title><script>head_attack()</script>",
+            &[view],
+            RenderOptions::DEFAULT,
+            None,
+        )
+        .expect("build escaped static artifact");
 
-        assert!(!html.contains("alert('unsafe')"));
+        assert_eq!(html.matches("<script>").count(), 1);
+        assert!(!html.contains("<script>head_attack()"));
+        assert!(!html.contains("<script>title_attack()"));
+        assert!(!html.contains("<script>path_attack()"));
+        assert!(!html.contains("<img src=x"));
+        assert!(html.contains("&lt;/title&gt;&lt;script&gt;head_attack()&lt;/script&gt;"));
+        assert!(html.contains("path_attack()"));
+        assert!(html.contains("line_attack"));
+    }
+
+    #[test]
+    fn static_document_preserves_typed_rendering() {
+        let mut view = sample_view();
+        let long_body = "x".repeat(2_001);
+        view.files[0].lines = vec![
+            "@@ -1,2 +1,3 @@".to_owned(),
+            "-pub fn old() {}".to_owned(),
+            "+pub fn current() -> usize { 42 }".to_owned(),
+            format!("+{long_body}"),
+        ];
+        view.files[0].full_lines = Some(view.files[0].lines.clone());
+
+        let unified = build_html(
+            &view,
+            RenderOptions::new(DiffLayout::Unified, DiffDensity::Compact),
+            None,
+        )
+        .expect("build unified artifact");
+        let split = build_html(
+            &view,
+            RenderOptions::new(DiffLayout::Split, DiffDensity::Compact),
+            None,
+        )
+        .expect("build split artifact");
+
+        assert!(unified.contains("data-layout=\"unified\""));
+        assert!(unified.contains("text-[var(--sy-kw)]"));
+        assert!(unified.contains("⋯ 2001 chars"));
+        assert!(split.contains("data-layout=\"split\""));
+        assert!(split.contains("grid-cols-[44px_minmax(0,1fr)_44px_minmax(0,1fr)]"));
+        assert!(split.contains("current"));
+        assert!(split.contains(">2</span>"));
+    }
+
+    #[test]
+    fn tabbed_document_contains_every_view() {
+        let first = sample_view();
+        let mut second = sample_view();
+        second.repo_name = gtl_models::paths::ProjectName::try_from("worker").unwrap();
+        second.files[0].lines[1] = "+second-view-marker".to_owned();
+        second.files[0].full_lines = Some(second.files[0].lines.clone());
+
+        let html = build_tabbed_html(
+            "subrepo diff",
+            &[first, second],
+            RenderOptions::DEFAULT,
+            None,
+        )
+        .expect("build tabbed static artifact");
+
+        assert_eq!(html.matches("role=\"tab\"").count(), 2);
+        assert_eq!(html.matches("role=\"tabpanel\"").count(), 2);
+        assert_eq!(html.matches("data-gtl-artifact-panel").count(), 2);
+        assert!(html.contains("api"));
+        assert!(html.contains("worker"));
+        assert!(html.contains("static_rendered"));
+        assert!(html.contains("second-view-marker"));
+        let panel_start_tags = html
+            .split("<section")
+            .skip(1)
+            .filter_map(|tail| tail.split_once('>').map(|(start_tag, _)| start_tag))
+            .filter(|start_tag| start_tag.contains("role=\"tabpanel\""))
+            .collect::<Vec<_>>();
+        assert_eq!(panel_start_tags.len(), 2);
+        assert!(!panel_start_tags[0].contains(" hidden=true"));
+        assert!(panel_start_tags[1].contains(" hidden=true"));
+        let ids = attribute_values(&html, " id=\"");
+        let mut seen = HashSet::new();
+        let duplicate_ids = ids
+            .iter()
+            .copied()
+            .filter(|id| !seen.insert(*id))
+            .collect::<Vec<_>>();
         assert!(
-            page.page
-                .lines
-                .iter()
-                .any(|line| line.contains("alert('unsafe')"))
+            duplicate_ids.is_empty(),
+            "static tab panels must not contain duplicate IDs: {duplicate_ids:?}"
         );
     }
 
     #[test]
-    fn tiny_artifact_has_a_deterministic_sub_2_5_mb_size_floor() {
+    fn tiny_artifact_is_deterministic_and_records_size_evidence() {
         let view = tiny_size_view();
         let first = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark))
             .expect("build tiny artifact");
         let second = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark))
             .expect("rebuild tiny artifact");
-        let evidence = size_evidence(std::slice::from_ref(&view), &first);
+        let evidence = size_evidence(&first);
 
-        eprintln!("tiny artifact size evidence: {evidence:?}");
+        eprintln!("tiny static artifact size evidence: {evidence:?}");
         assert_eq!(
             first, second,
             "identical inputs must produce identical HTML"
         );
-        assert!(evidence.html <= 2_500_000, "{evidence:?}");
-        assert!(is_reduced_by_at_least(
-            TINY_BASELINE_BYTES,
-            evidence.html,
-            40
-        ));
-        assert_eq!(evidence.lines, 12);
-        assert_eq!(evidence.pages, 1);
+        assert_eq!(evidence.files, 1);
+        assert_eq!(evidence.rows, 12);
+        assert!(evidence.html <= 110_000, "{evidence:?}");
+        assert!(evidence.gzip <= 20_000, "{evidence:?}");
     }
 
     #[test]
-    fn independently_compressed_large_fixture_stays_below_3_mb() {
+    fn representative_large_artifact_records_complete_document_size() {
         let view = large_size_view();
         let html = build_html(&view, RenderOptions::DEFAULT, Some(Theme::Dark))
             .expect("build representative large artifact");
-        let evidence = size_evidence(std::slice::from_ref(&view), &html);
+        let evidence = size_evidence(&html);
 
-        eprintln!("large artifact size evidence: {evidence:?}");
-        assert!(evidence.lines > 20_000, "{evidence:?}");
-        assert!(evidence.pages > 200, "{evidence:?}");
-        assert!(evidence.html <= 3_000_000, "{evidence:?}");
-        assert!(is_reduced_by_at_least(
-            LARGE_BASELINE_BYTES,
-            evidence.html,
-            45
-        ));
-        assert_eq!(
-            html.matches("id=\"gtl-artifact-page-").count(),
-            evidence.pages
-        );
-    }
-
-    #[test]
-    fn tabbed_document_assigns_distinct_view_and_page_addresses() {
-        let view = sample_view();
-        let html = build_tabbed_html(
-            "subrepo diff",
-            &[view.clone(), view],
-            RenderOptions::DEFAULT,
-            None,
-        )
-        .expect("build tabbed client-rendered artifact");
-        let manifest: ViewerArtifactManifest = decode_payload(&html, VIEWER_ARTIFACT_MANIFEST_ID);
-
-        assert_eq!(manifest.views.len(), 2);
-        assert_ne!(
-            manifest.views[0].identity.tab_id,
-            manifest.views[1].identity.tab_id
-        );
-        for active in &manifest.views {
-            let id = gtl_wire::viewer::ViewerArtifactPageId::for_request(
-                &gtl_wire::viewer::LoadViewerDiffLines {
-                    identity: active.identity,
-                    file: active.files[0].id.clone(),
-                    cursor: gtl_wire::viewer::ViewerDiffCursor::default(),
-                },
-            );
-            let page: ViewerArtifactPage = decode_payload(&html, id.as_str());
-            assert_eq!(page.page.identity, active.identity);
-        }
+        eprintln!("large static artifact size evidence: {evidence:?}");
+        assert_eq!(evidence.files, 205, "{evidence:?}");
+        assert_eq!(evidence.rows, 20_705, "{evidence:?}");
+        assert!(evidence.html <= 30_000_000, "{evidence:?}");
+        assert!(evidence.gzip <= 750_000, "{evidence:?}");
     }
 
     fn tiny_size_view() -> View {
@@ -389,58 +354,28 @@ mod tests {
         view
     }
 
-    fn size_evidence(views: &[View], html: &str) -> ArtifactSizeEvidence {
-        let payload = project_payload(
-            "size fixture",
-            views,
-            RenderOptions::DEFAULT,
-            Some(Theme::Dark),
-        )
-        .expect("project size fixture payload");
-        let mut payload_bytes = measure_asset(html, VIEWER_ARTIFACT_MANIFEST_ID);
-        for page in &payload.pages {
-            payload_bytes += measure_asset(html, page.id.as_str());
-        }
-        let lines = payload.pages.iter().map(|page| page.page.lines.len()).sum();
+    fn size_evidence(html: &str) -> ArtifactSizeEvidence {
+        let mut encoder = GzBuilder::new()
+            .mtime(0)
+            .write(Vec::new(), Compression::best());
+        encoder
+            .write_all(html.as_bytes())
+            .expect("gzip static artifact");
+        let gzip = encoder.finish().expect("finish static artifact gzip").len();
         ArtifactSizeEvidence {
             html: html.len(),
-            runtime_javascript: assets::inline_runtime().expect("generated runtime").len(),
+            gzip,
             tailwind_css: assets::TAILWIND_CSS.len(),
-            wasm: measure_asset(html, VIEWER_ARTIFACT_RUNTIME_ID),
-            payload: payload_bytes,
-            pages: payload.pages.len(),
-            lines,
+            enhancement_javascript: static_artifact_enhancement_script().len(),
+            files: html.matches("data-gtl-diff-file=\"\"").count(),
+            rows: html.matches("data-gtl-diff-row=\"\"").count(),
         }
     }
 
-    fn measure_asset(html: &str, id: &str) -> AssetBytes {
-        let marker = format!("id=\"{id}\"");
-        let (_, tail) = html.split_once(&marker).expect("artifact asset address");
-        let (attributes, tail) = tail.split_once('>').expect("artifact asset opening tag");
-        let (encoded, _) = tail
-            .split_once("</script>")
-            .expect("artifact asset closing tag");
-        let raw_marker = "data-uncompressed-bytes=\"";
-        let raw = attributes
-            .split_once(raw_marker)
-            .and_then(|(_, tail)| tail.split_once('"'))
-            .and_then(|(value, _)| value.parse::<usize>().ok())
-            .expect("artifact uncompressed byte count");
-        let gzip = STANDARD.decode(encoded).expect("artifact base64 bytes");
-        let decoded = compression::gunzip(&gzip).expect("artifact gzip bytes");
-
-        assert_eq!(decoded.len(), raw, "decoded byte metadata for {id}");
-        AssetBytes {
-            raw,
-            gzip: gzip.len(),
-            base64: encoded.len(),
-        }
-    }
-
-    fn is_reduced_by_at_least(baseline: usize, current: usize, percentage: usize) -> bool {
-        baseline
-            .saturating_sub(current)
-            .checked_mul(100)
-            .is_some_and(|reduction| reduction >= baseline.saturating_mul(percentage))
+    fn attribute_values<'html>(html: &'html str, prefix: &str) -> Vec<&'html str> {
+        html.split(prefix)
+            .skip(1)
+            .filter_map(|tail| tail.split_once('"').map(|(value, _)| value))
+            .collect()
     }
 }

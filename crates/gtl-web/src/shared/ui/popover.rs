@@ -13,6 +13,7 @@ pub(crate) fn Popover(
     open: bool,
     title: String,
     onclose: EventHandler<()>,
+    artifact_view_id: Option<String>,
     children: Element,
 ) -> Element {
     let mut was_open = use_signal(|| false);
@@ -30,6 +31,9 @@ pub(crate) fn Popover(
         },
     ));
     let title_id = format!("{id}-title");
+    let artifact_dialog = artifact_view_id.as_ref().map(|_| "");
+    let artifact_close_action = artifact_view_id.as_ref().map(|_| "close-dialog");
+    let artifact_trigger_id = artifact_view_id.as_ref().map(|_| trigger_id.clone());
 
     rsx! {
         dialog {
@@ -37,6 +41,8 @@ pub(crate) fn Popover(
             class: "m-auto h-[min(42rem,calc(100vh-2rem))] w-[min(34rem,calc(100vw-2rem))] rounded-panel border border-line-2 bg-surface p-0 text-ink shadow-none backdrop:bg-bg/80",
             aria_modal: "true",
             aria_labelledby: title_id.clone(),
+            "data-gtl-dialog": artifact_dialog,
+            "data-gtl-dialog-trigger": artifact_trigger_id,
             onkeydown: move |event| {
                 if event.key() == Key::Escape {
                     event.prevent_default();
@@ -52,6 +58,7 @@ pub(crate) fn Popover(
                         aria_label: "Close {title}",
                         title: "Close",
                         "data-dialog-initial-focus": "true",
+                        "data-gtl-action": artifact_close_action,
                         onclick: move |_| onclose.call(()),
                         span { aria_hidden: "true",
                             X { size: 15 }

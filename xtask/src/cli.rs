@@ -74,7 +74,7 @@ pub enum Command {
         #[arg(long, value_enum, default_value_t = BuildTarget::Both)]
         target: BuildTarget,
     },
-    /// Build the offline artifact runtime and stage the release Dioxus Web bundle.
+    /// Generate the static artifact stylesheet and stage the release Dioxus Web bundle.
     #[command(name = Verb::WEB_BUILD.as_str())]
     WebBuild,
     /// Serve the Dioxus shell with repository-owned asset watchers.

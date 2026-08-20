@@ -26,6 +26,7 @@ use crate::{
             FloatingNoticeState, Popover, Skeleton,
         },
     },
+    views::diffs::ClientDiffDocument,
 };
 
 #[component]
@@ -299,19 +300,26 @@ fn ReadyWorkspace(
             }
 
             DiffWorkspaceDocument {
-                source: ClientDiffSource::Desktop,
                 view: view.clone(),
+                diff_document: rsx! {
+                    ClientDiffDocument {
+                        source: ClientDiffSource::Desktop,
+                        view: view.clone(),
+                        folded: files_folded(),
+                        copy_context_enabled: copy_context_enabled(),
+                        flashing_file: flashing_file(),
+                        onopen,
+                    }
+                },
                 files_folded: files_folded(),
                 copy_context_enabled: copy_context_enabled(),
                 file_filter: file_filter(),
-                flashing_file: flashing_file(),
                 onfold: move |folded| files_folded.set(Some(folded)),
                 oncontext: move |enabled| copy_context_enabled.set(enabled),
                 onfilter: move |value| file_filter.set(value),
                 onnavigate,
                 onselect_commit,
                 onclear_commit,
-                onopen,
             }
         }
 
