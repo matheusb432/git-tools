@@ -14,6 +14,13 @@ use web_sys::{HtmlDetailsElement, HtmlDocument, HtmlTextAreaElement};
 #[cfg(feature = "desktop")]
 use super::bridge::ClientApiError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DetailsVisibility {
+    Visible,
+    Expanded,
+    Collapsed,
+}
+
 pub(crate) fn apply_theme(theme: &'static str) {
     let Some(root) = document().and_then(|document| document.document_element()) else {
         return;
@@ -55,6 +62,26 @@ pub(crate) fn scroll_to_file(id: &str) {
     };
     details.set_open(true);
     details.scroll_into_view_with_bool(true);
+}
+
+pub(crate) fn details_visibility(id: &str) -> Option<DetailsVisibility> {
+    let window = web_sys::window()?;
+    let details = window
+        .document()?
+        .get_element_by_id(id)?
+        .dyn_into::<HtmlDetailsElement>()
+        .ok()?;
+    if !details.open() {
+        return Some(DetailsVisibility::Collapsed);
+    }
+
+    let viewport_height = window.inner_height().ok()?.as_f64()?;
+    let bounds = details.get_bounding_client_rect();
+    if bounds.bottom() > 0.0 && bounds.top() < viewport_height {
+        Some(DetailsVisibility::Visible)
+    } else {
+        Some(DetailsVisibility::Expanded)
+    }
 }
 
 pub(crate) async fn copy_text(text: &str) -> bool {
