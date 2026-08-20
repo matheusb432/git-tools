@@ -420,8 +420,6 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
- "hyper",
- "hyper-util",
  "itoa",
  "matchit",
  "memchr",
@@ -434,11 +432,9 @@ dependencies = [
  "serde_path_to_error",
  "serde_urlencoded",
  "sync_wrapper",
- "tokio",
  "tower",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -457,7 +453,6 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -3500,12 +3495,12 @@ dependencies = [
  "assert_cmd",
  "clap",
  "clap-cargo",
- "gtl-application",
- "gtl-infra",
+ "gtl-client",
  "gtl-models",
+ "gtl-server",
  "gtl-wire",
+ "libc",
  "predicates",
- "reqwest 0.13.4",
  "serde",
  "serde_json",
  "strum",
@@ -3526,29 +3521,6 @@ dependencies = [
  "tokio",
  "tonic",
  "tonic-health",
-]
-
-[[package]]
-name = "gtl-daemon"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "gtl-application",
- "gtl-artifacts",
- "gtl-infra",
- "gtl-models",
- "gtl-wire",
- "http-body-util",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.19",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -3662,7 +3634,11 @@ name = "gtl-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "gtl-application",
+ "gtl-artifacts",
+ "gtl-infra",
  "gtl-local-auth",
+ "gtl-models",
  "gtl-wire",
  "prost",
  "prost-types",
@@ -6161,7 +6137,6 @@ checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -7983,7 +7958,6 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
- "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",

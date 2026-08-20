@@ -4,6 +4,10 @@
 use std::num::NonZeroU32;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use gtl_models::{
+    diffs::PinnedRange,
+    git::{GitRange, GitRevision},
+};
 
 fn non_empty_name(value: &str) -> Result<String, String> {
     let name = value.trim();
@@ -81,26 +85,22 @@ pub enum Command {
     Ls(LsArgs),
     /// Delete local branches whose commits are already merged into main.
     Prune(PruneArgs),
-    /// Control the resident gtl-daemon.
-    Daemon(DaemonArgs),
+    /// Inspect the resident gtl-server.
+    Server(ServerArgs),
 }
 
-/// Arguments for `daemon`.
+/// Arguments for `server`.
 #[derive(Debug, Args)]
-pub struct DaemonArgs {
+pub struct ServerArgs {
     #[command(subcommand)]
-    pub command: DaemonCommand,
+    pub command: ServerCommand,
 }
 
-/// Nested commands under `daemon`.
+/// Nested commands under `server`.
 #[derive(Debug, Subcommand)]
-pub enum DaemonCommand {
-    /// Report whether the daemon is running (port, pid, version).
+pub enum ServerCommand {
+    /// Check the authenticated gRPC health endpoint.
     Status,
-    /// Stop any healthy daemon and start a fresh process.
-    Restart,
-    /// Ask the daemon to exit.
-    Stop,
 }
 
 /// Arguments for the root `diff` command and its nested subcommands.
@@ -447,7 +447,35 @@ pub struct ManagedArgs {
     pub json: bool,
 }
 
-pub use gtl_application::diffs::DiffTarget;
+/// A validated diff selection owned by the CLI presentation boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffTarget {
+    Unpushed {
+        pinned: Option<PinnedRange>,
+    },
+    Base(GitRevision),
+    Range {
+        range: GitRange,
+        pinned: Option<PinnedRange>,
+    },
+    Merge {
+        base: GitRevision,
+        pinned: Option<PinnedRange>,
+    },
+    Last {
+        count: NonZeroU32,
+        pinned: Option<PinnedRange>,
+    },
+}
+
+/// A positional diff target could not form a semantic Git revision or range.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DiffTargetParseError {
+    #[error("Git revision must not be empty")]
+    EmptyRevision,
+    #[error("Git range must not be empty")]
+    EmptyRange,
+}
 
 #[cfg(test)]
 mod tests {

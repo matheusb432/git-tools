@@ -12,7 +12,7 @@ struct EdgePolicy {
     reason: &'static str,
 }
 
-const EDGE_POLICIES: [EdgePolicy; 6] = [
+const EDGE_POLICIES: [EdgePolicy; 7] = [
     EdgePolicy {
         from: "gtl-models",
         label: "gtl-models stays pure",
@@ -24,7 +24,6 @@ const EDGE_POLICIES: [EdgePolicy; 6] = [
             "gtl-artifacts",
             "gtl-cli",
             "gtl-client",
-            "gtl-daemon",
             "gtl-desktop",
             "gtl-local-auth",
             "gtl-server",
@@ -47,7 +46,6 @@ const EDGE_POLICIES: [EdgePolicy; 6] = [
             "gtl-artifacts",
             "gtl-cli",
             "gtl-client",
-            "gtl-daemon",
             "gtl-desktop",
             "gtl-local-auth",
             "gtl-server",
@@ -71,7 +69,6 @@ const EDGE_POLICIES: [EdgePolicy; 6] = [
             "gtl-artifacts",
             "gtl-cli",
             "gtl-client",
-            "gtl-daemon",
             "gtl-desktop",
             "gtl-local-auth",
             "gtl-server",
@@ -93,7 +90,6 @@ const EDGE_POLICIES: [EdgePolicy; 6] = [
             "gtl-artifacts",
             "gtl-cli",
             "gtl-client",
-            "gtl-daemon",
             "gtl-desktop",
             "gtl-infra",
             "gtl-models",
@@ -110,7 +106,6 @@ const EDGE_POLICIES: [EdgePolicy; 6] = [
             "gtl-application",
             "gtl-artifacts",
             "gtl-cli",
-            "gtl-daemon",
             "gtl-desktop",
             "gtl-infra",
             "gtl-models",
@@ -118,6 +113,13 @@ const EDGE_POLICIES: [EdgePolicy; 6] = [
         ],
         forbid_workspace_packages: false,
         reason: "the shared client may depend on wire and local bootstrap contracts, not application behavior or process roots",
+    },
+    EdgePolicy {
+        from: "gtl-cli",
+        label: "gtl-cli stays a transport adapter",
+        forbidden: &["gtl-application", "gtl-infra"],
+        forbid_workspace_packages: false,
+        reason: "the CLI must call gtl-server through gtl-client instead of executing application or infrastructure behavior",
     },
     EdgePolicy {
         from: "gtl-parser",
@@ -290,5 +292,28 @@ mod tests {
             "gtl-application",
             &BTreeSet::new()
         ));
+    }
+
+    #[test]
+    fn cli_policy_rejects_application_and_infrastructure_dependencies() {
+        let cli_policy = EDGE_POLICIES
+            .iter()
+            .find(|policy| policy.from == "gtl-cli")
+            .expect("CLI policy should exist");
+
+        for dependency in ["gtl-client", "gtl-models", "gtl-wire"] {
+            assert!(!dependency_is_forbidden(
+                cli_policy,
+                dependency,
+                &BTreeSet::new()
+            ));
+        }
+        for dependency in ["gtl-application", "gtl-infra"] {
+            assert!(dependency_is_forbidden(
+                cli_policy,
+                dependency,
+                &BTreeSet::new()
+            ));
+        }
     }
 }

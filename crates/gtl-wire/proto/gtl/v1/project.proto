@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+import "gtl/v1/common.proto";
+import "gtl/v1/repository.proto";
+
+service ProjectService {
+  rpc PushRepositories(SyncProjectsRequest) returns (SyncProjectsResponse);
+  rpc PullRepositories(SyncProjectsRequest) returns (SyncProjectsResponse);
+  rpc CommitRepositories(CommitProjectRepositoriesRequest) returns (CommitProjectRepositoriesResponse);
+  rpc PruneBranches(PruneProjectBranchesRequest) returns (PruneProjectBranchesResponse);
+  rpc GetStatuses(Empty) returns (RepositoryStatusesResponse);
+}
+
+message SyncProjectsRequest {
+  bool dry_run = 1;
+}
+
+enum RepositorySyncStatus {
+  REPOSITORY_SYNC_STATUS_UNSPECIFIED = 0;
+  REPOSITORY_SYNC_STATUS_SKIP = 1;
+  REPOSITORY_SYNC_STATUS_UP_TO_DATE = 2;
+  REPOSITORY_SYNC_STATUS_PUSHED = 3;
+  REPOSITORY_SYNC_STATUS_WOULD_PUSH = 4;
+  REPOSITORY_SYNC_STATUS_PULLED = 5;
+  REPOSITORY_SYNC_STATUS_WOULD_PULL = 6;
+  REPOSITORY_SYNC_STATUS_WARNING = 7;
+  REPOSITORY_SYNC_STATUS_FAILED = 8;
+}
+
+message RepositorySyncResult {
+  string project_name = 1;
+  optional string branch = 2;
+  RepositorySyncStatus status = 3;
+  string detail = 4;
+}
+
+enum ProjectSyncExit {
+  PROJECT_SYNC_EXIT_UNSPECIFIED = 0;
+  PROJECT_SYNC_EXIT_CLEAN = 1;
+  PROJECT_SYNC_EXIT_WARNING = 2;
+  PROJECT_SYNC_EXIT_FAILED = 3;
+}
+
+message SyncProjectsResponse {
+  repeated RepositorySyncResult results = 1;
+  ProjectSyncExit exit = 2;
+}
+
+message CommitProjectRepositoriesRequest {
+  bool dry_run = 1;
+  optional string message = 2;
+}
+
+enum ProjectCommitAction {
+  PROJECT_COMMIT_ACTION_UNSPECIFIED = 0;
+  PROJECT_COMMIT_ACTION_ABSENT = 1;
+  PROJECT_COMMIT_ACTION_CLEAN = 2;
+  PROJECT_COMMIT_ACTION_WOULD_COMMIT = 3;
+  PROJECT_COMMIT_ACTION_SKIPPED = 4;
+  PROJECT_COMMIT_ACTION_COMMITTED = 5;
+  PROJECT_COMMIT_ACTION_FAILED = 6;
+}
+
+message CommitFile {
+  string status = 1;
+  string path = 2;
+}
+
+message ProjectCommitResult {
+  string project_name = 1;
+  bool present = 2;
+  bool dirty = 3;
+  repeated CommitFile files = 4;
+  ProjectCommitAction action = 5;
+  string detail = 6;
+}
+
+enum ProjectCommitExit {
+  PROJECT_COMMIT_EXIT_UNSPECIFIED = 0;
+  PROJECT_COMMIT_EXIT_CLEAN = 1;
+  PROJECT_COMMIT_EXIT_WARNING = 2;
+  PROJECT_COMMIT_EXIT_FAILED = 3;
+}
+
+message CommitProjectRepositoriesResponse {
+  repeated ProjectCommitResult results = 1;
+  ProjectCommitExit exit = 2;
+  optional string failure_detail = 3;
+}
+
+message PruneProjectBranchesRequest {
+  string onto_branch = 1;
+  bool dry_run = 2;
+}
+
+enum ProjectPruneAction {
+  PROJECT_PRUNE_ACTION_UNSPECIFIED = 0;
+  PROJECT_PRUNE_ACTION_ABSENT = 1;
+  PROJECT_PRUNE_ACTION_REFUSED = 2;
+  PROJECT_PRUNE_ACTION_NOTHING = 3;
+  PROJECT_PRUNE_ACTION_WOULD_DELETE = 4;
+  PROJECT_PRUNE_ACTION_APPLIED = 5;
+}
+
+message ProjectPruneResult {
+  string project_name = 1;
+  ProjectPruneAction action = 2;
+  repeated PruneBranch deleted = 3;
+  repeated PruneFailure failures = 4;
+  string detail = 5;
+}
+
+enum ProjectPruneExit {
+  PROJECT_PRUNE_EXIT_UNSPECIFIED = 0;
+  PROJECT_PRUNE_EXIT_CLEAN = 1;
+  PROJECT_PRUNE_EXIT_WARNING = 2;
+}
+
+message PruneProjectBranchesResponse {
+  repeated ProjectPruneResult results = 1;
+  ProjectPruneExit exit = 2;
+  optional string failure_detail = 3;
+}

@@ -1,17 +1,13 @@
-use gtl_application::tags::{
-    ListTagsOk, TagGroup,
-    add_and_push_tag::{self, AddAndPushTag},
-    add_tag::{self, AddTag},
-    label_tag::{self, LabelTag},
-};
+use anyhow::Context as _;
 use gtl_models::{
-    diffs::CommitIdAbbreviation,
-    git::TagName,
-    paths::RepositoryRoot,
+    diffs::{CommitId, CommitIdAbbreviation},
+    git::{GitObjectId, TagName},
     tags::{Tag, TagState},
+    timestamps::MachineTimestamp,
 };
+use gtl_wire::v1;
 
-use crate::cli::TagCommand;
+use crate::{cli::TagCommand, server_client::ServerClient};
 
 pub mod bump;
 
@@ -29,11 +25,6 @@ pub fn run(command: Option<TagCommand>, commits: bool, state: bool) -> crate::Ex
 }
 
 fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crate::ExitCode {
-    use gtl_application::tags::{
-        list_tags::{self, ListTags},
-        push_tags::{self, PushTags},
-    };
-
     let repo_path = match super::canonical_working_directory() {
         Ok(path) => path,
         Err(error) => {
@@ -41,31 +32,31 @@ fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crat
             return crate::ExitCode::Internal;
         }
     };
-    let git = gtl_infra::git_client::HybridGitClient;
-    let repo_path = match gtl_application::ports::GitClient::top_level(&git, &repo_path) {
-        Ok(path) => path,
+    let client = match ServerClient::connect() {
+        Ok(client) => client,
         Err(error) => {
             eprintln!("tag: {error:#}");
             return crate::ExitCode::Internal;
         }
     };
+    let repository_path = repo_path.to_string_lossy().into_owned();
     match command {
-        Some(TagCommand::Add { tag, message }) => run_add(repo_path, tag, message, git),
+        Some(TagCommand::Add { tag, message }) => run_add(&client, &repository_path, tag, message),
         Some(TagCommand::Push {
             tag: Some(tag),
             message: Some(message),
             label,
-        }) => run_add_and_push(repo_path, tag, message, label, git),
+        }) => run_add_and_push(&client, &repository_path, tag, message, label),
         Some(TagCommand::Push {
             tag: Some(tag),
             message: None,
             label: Some(label),
-        }) => run_label(repo_path, tag, label, git),
+        }) => run_label(&client, &repository_path, tag, label),
         Some(TagCommand::Push {
             tag: None,
             message: None,
             label: None,
-        }) => finish_tag_action(push_tags::execute(PushTags { repo_path }, &git)),
+        }) => finish_tag_action(client.push_tags(v1::PushTagsRequest { repository_path })),
         Some(TagCommand::Push { tag: None, .. }) => {
             eprintln!("tag: tag push --label requires a <tag> to label");
             crate::ExitCode::Usage
@@ -75,13 +66,10 @@ fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crat
             crate::ExitCode::Usage
         }
         Some(TagCommand::Ls) | None => finish_tag_list(
-            list_tags::execute(
-                ListTags {
-                    repo_path,
-                    include_state: state,
-                },
-                &git,
-            ),
+            client.list_tags(v1::ListTagsRequest {
+                repository_path,
+                include_state: state,
+            }),
             commits,
         ),
         Some(TagCommand::Bump {
@@ -95,30 +83,27 @@ fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crat
 }
 
 fn run_add(
-    repo_path: RepositoryRoot,
+    client: &ServerClient,
+    repository_path: &str,
     tag: String,
     message: String,
-    git: gtl_infra::git_client::HybridGitClient,
 ) -> crate::ExitCode {
     let Some(tag) = parse_tag_name(tag) else {
         return crate::ExitCode::Usage;
     };
-    finish_tag_action(add_tag::execute(
-        AddTag {
-            repo_path,
-            tag,
-            message,
-        },
-        &git,
-    ))
+    finish_tag_action(client.add_tag(v1::AddTagRequest {
+        repository_path: repository_path.into(),
+        tag: tag.to_string(),
+        message,
+    }))
 }
 
 fn run_add_and_push(
-    repo_path: RepositoryRoot,
+    client: &ServerClient,
+    repository_path: &str,
     tag: String,
     message: String,
     label: Option<String>,
-    git: gtl_infra::git_client::HybridGitClient,
 ) -> crate::ExitCode {
     let Some(tag) = parse_tag_name(tag) else {
         return crate::ExitCode::Usage;
@@ -132,22 +117,19 @@ fn run_add_and_push(
         }
         None => None,
     };
-    finish_tag_action(add_and_push_tag::execute(
-        AddAndPushTag {
-            repo_path,
-            tag,
-            message,
-            label,
-        },
-        &git,
-    ))
+    finish_tag_action(client.add_and_push_tag(v1::AddAndPushTagRequest {
+        repository_path: repository_path.into(),
+        tag: tag.to_string(),
+        message,
+        label: label.map(|label| label.to_string()),
+    }))
 }
 
 fn run_label(
-    repo_path: RepositoryRoot,
+    client: &ServerClient,
+    repository_path: &str,
     tag: String,
     label: String,
-    git: gtl_infra::git_client::HybridGitClient,
 ) -> crate::ExitCode {
     let Some(tag) = parse_tag_name(tag) else {
         return crate::ExitCode::Usage;
@@ -155,14 +137,11 @@ fn run_label(
     let Some(label) = parse_tag_name(label) else {
         return crate::ExitCode::Usage;
     };
-    finish_tag_action(label_tag::execute(
-        LabelTag {
-            repo_path,
-            tag,
-            label,
-        },
-        &git,
-    ))
+    finish_tag_action(client.label_tag(v1::LabelTagRequest {
+        repository_path: repository_path.into(),
+        tag: tag.to_string(),
+        label: label.to_string(),
+    }))
 }
 
 fn parse_tag_name(raw: String) -> Option<TagName> {
@@ -173,6 +152,20 @@ fn parse_tag_name(raw: String) -> Option<TagName> {
             None
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TagGroup {
+    Single(Tag),
+    Canonical { canonical: Tag, labels: Vec<Tag> },
+    MoreThanOneTagHasMessage(Vec<Tag>),
+    AllLabels(Vec<Tag>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListTagsOk {
+    Listed { groups: Vec<TagGroup> },
+    Failed { detail: String },
 }
 
 pub fn render_list(list: &ListTagsOk, commits: bool) -> String {
@@ -244,56 +237,143 @@ fn render_message(tag: &Tag) -> String {
         .map_or_else(String::new, |message| format!("  {message}"))
 }
 
-fn finish_tag_list<E>(result: Result<ListTagsOk, E>, commits: bool) -> crate::ExitCode
-where
-    E: std::fmt::Display,
-{
+fn finish_tag_list(result: anyhow::Result<v1::ListTagsResponse>, commits: bool) -> crate::ExitCode {
     match result {
-        Ok(list @ ListTagsOk::Listed { .. }) => {
-            let detail = render_list(&list, commits);
-            if !detail.is_empty() {
-                println!("{detail}");
+        Ok(response) => match list_from_grpc(response) {
+            Ok(list @ ListTagsOk::Listed { .. }) => {
+                let detail = render_list(&list, commits);
+                if !detail.is_empty() {
+                    println!("{detail}");
+                }
+                crate::ExitCode::Ok
             }
-            crate::ExitCode::Ok
-        }
-        Ok(ListTagsOk::Failed { detail }) => {
-            eprintln!("tag: {detail}");
-            crate::ExitCode::Internal
-        }
+            Ok(ListTagsOk::Failed { detail }) => {
+                eprintln!("tag: {detail}");
+                crate::ExitCode::Internal
+            }
+            Err(error) => {
+                eprintln!("tag: {error:#}");
+                crate::ExitCode::Internal
+            }
+        },
         Err(error) => {
-            eprintln!("tag: {error}");
+            eprintln!("tag: {error:#}");
             crate::ExitCode::Internal
         }
     }
 }
 
-fn finish_tag_action<E>(
-    result: Result<gtl_application::tags::TagActionOutcome, E>,
-) -> crate::ExitCode
-where
-    E: std::fmt::Display,
-{
+fn list_from_grpc(response: v1::ListTagsResponse) -> anyhow::Result<ListTagsOk> {
+    match response
+        .outcome
+        .context("gtl-server omitted the tag-list outcome")?
+    {
+        v1::list_tags_response::Outcome::Failed(failed) => Ok(ListTagsOk::Failed {
+            detail: failed.detail,
+        }),
+        v1::list_tags_response::Outcome::Listed(listed) => Ok(ListTagsOk::Listed {
+            groups: listed
+                .groups
+                .into_iter()
+                .map(tag_group_from_grpc)
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        }),
+    }
+}
+
+fn tag_group_from_grpc(group: v1::TagGroup) -> anyhow::Result<TagGroup> {
+    match group
+        .kind
+        .context("gtl-server omitted the tag-group kind")?
+    {
+        v1::tag_group::Kind::Single(tag) => Ok(TagGroup::Single(tag_from_grpc(tag)?)),
+        v1::tag_group::Kind::Canonical(group) => Ok(TagGroup::Canonical {
+            canonical: tag_from_grpc(
+                group
+                    .canonical
+                    .context("gtl-server omitted the canonical tag")?,
+            )?,
+            labels: group
+                .labels
+                .into_iter()
+                .map(tag_from_grpc)
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        }),
+        v1::tag_group::Kind::MultipleAnnotated(tags) => Ok(TagGroup::MoreThanOneTagHasMessage(
+            tags.tags
+                .into_iter()
+                .map(tag_from_grpc)
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        )),
+        v1::tag_group::Kind::AllLabels(tags) => Ok(TagGroup::AllLabels(
+            tags.tags
+                .into_iter()
+                .map(tag_from_grpc)
+                .collect::<anyhow::Result<Vec<_>>>()?,
+        )),
+    }
+}
+
+fn tag_from_grpc(tag: v1::Tag) -> anyhow::Result<Tag> {
+    let state =
+        v1::TagState::try_from(tag.state).context("gtl-server returned an invalid tag state")?;
+    let name = TagName::try_new(tag.name).context("gtl-server returned an empty tag name")?;
+    let commit = CommitId::try_from(tag.commit_id)
+        .context("gtl-server returned an invalid tag commit ID")?;
+    let created_at = tag
+        .created_at
+        .map(|created_at| created_at.parse::<MachineTimestamp>())
+        .transpose()
+        .context("gtl-server returned an invalid tag timestamp")?;
+    let mut tag = if tag.annotated {
+        Tag::annotated(
+            name,
+            GitObjectId::try_new(tag.object_id)
+                .context("gtl-server returned an invalid tag object ID")?,
+            commit,
+            created_at,
+            tag.message,
+        )
+    } else {
+        Tag::lightweight(name, commit, created_at)
+    };
+    match state {
+        v1::TagState::NotQueried => {}
+        v1::TagState::Local => tag.set_state(TagState::Local),
+        v1::TagState::Remote => tag.set_state(TagState::Remote),
+        v1::TagState::Unspecified => {
+            anyhow::bail!("gtl-server returned an unspecified tag state")
+        }
+    }
+    Ok(tag)
+}
+
+fn finish_tag_action(result: anyhow::Result<v1::TagActionResponse>) -> crate::ExitCode {
     match result {
         Ok(outcome) => render_tag_action(&outcome),
         Err(error) => {
-            eprintln!("tag: {error}");
+            eprintln!("tag: {error:#}");
             crate::ExitCode::Internal
         }
     }
 }
 
-fn render_tag_action(outcome: &gtl_application::tags::TagActionOutcome) -> crate::ExitCode {
-    use gtl_application::tags::TagActionStatus;
-
-    match outcome.status() {
-        TagActionStatus::Created | TagActionStatus::Noop | TagActionStatus::Pushed => {
-            if !outcome.detail().is_empty() {
-                println!("{}", outcome.detail());
+fn render_tag_action(outcome: &v1::TagActionResponse) -> crate::ExitCode {
+    match v1::TagActionStatus::try_from(outcome.status) {
+        Ok(
+            v1::TagActionStatus::Created | v1::TagActionStatus::NoOp | v1::TagActionStatus::Pushed,
+        ) => {
+            if !outcome.detail.is_empty() {
+                println!("{}", outcome.detail);
             }
             crate::ExitCode::Ok
         }
-        TagActionStatus::Failed => {
-            eprintln!("tag: {}", outcome.detail());
+        Ok(v1::TagActionStatus::Failed | v1::TagActionStatus::Aborted) => {
+            eprintln!("tag: {}", outcome.detail);
+            crate::ExitCode::Internal
+        }
+        Ok(v1::TagActionStatus::Unspecified) | Err(_) => {
+            eprintln!("tag: gtl-server returned an invalid tag action status");
             crate::ExitCode::Internal
         }
     }
@@ -301,10 +381,9 @@ fn render_tag_action(outcome: &gtl_application::tags::TagActionOutcome) -> crate
 
 #[cfg(test)]
 mod tests {
-    use gtl_application::tags::{ListTagsOk, TagGroup};
     use gtl_models::tags::{Tag, TagState};
 
-    use super::render_list;
+    use super::{ListTagsOk, TagGroup, render_list};
     use crate::testing::{commit_id, git_object_id, tag_name};
 
     fn annotated(name: &str, commit_prefix: &str, message: &str) -> Tag {

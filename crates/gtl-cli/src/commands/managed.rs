@@ -1,22 +1,18 @@
 //! Fanning git operations out across every active project listed by sample_project: `push --all`,
 //! `pull --all`, `commit --all`, `status --all`,
 //! and `prune --all`. Each concern lives in its own submodule; this facade owns the shared
-//! request/response seam (`ProjectRepository`, `ManagedOptions`, `ManagedRun`, `ManagedExit`) and
+//! request/response seam (`ManagedOptions`, `ManagedRun`, `ManagedExit`) and
 //! re-exports each submodule's entry points under the historical `managed::` path.
 
 mod commit;
-mod project_catalog;
 mod prune_all;
 mod push_pull;
 mod push_summary;
 mod status;
 
 pub use commit::{CommitFile, CommitResult, run_commit_all};
-/// The managed project shape shared with the application slices.
-pub use gtl_models::projects::ProjectRepository;
-pub use project_catalog::load_projects;
 pub use prune_all::{PruneRepoResult, PrunedBranch, run_prune_all};
-pub use push_pull::{PushPullResult, run_pull_all, run_push_all};
+pub use push_pull::{PushPullResult, RepoSyncStatus, run_pull_all, run_push_all};
 pub(crate) use push_summary::{PushOutcome, PushSummary};
 pub use status::{StatusResult, run_status, run_status_current, run_status_recursive};
 

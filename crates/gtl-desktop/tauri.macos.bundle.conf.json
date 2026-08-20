@@ -3,7 +3,7 @@
   "bundle": {
     "active": true,
     "targets": ["app"],
-    "externalBin": ["binaries/git-tools", "binaries/gtl-daemon"],
+    "externalBin": ["binaries/git-tools", "binaries/gtl-server"],
     "macOS": {
       "signingIdentity": "-"
     }

@@ -1,8 +1,6 @@
 use gtl_models::{
-    diffs::{CommitId, PinnedRange},
-    git::{
-        BranchName, CommitCount, GitObjectId, GitRange, GitRevision, RemoteName, RemoteUrl, TagName,
-    },
+    diffs::CommitId,
+    git::{BranchName, CommitCount, GitObjectId, RemoteName, RemoteUrl, TagName},
     paths::{ProjectName, RepositoryRelativePath, RepositoryRoot},
     repository::PathCount,
 };
@@ -35,14 +33,6 @@ pub(crate) fn remote_url(raw: &str) -> RemoteUrl {
     RemoteUrl::try_new(raw.to_owned()).expect("fixture remote URL is non-empty")
 }
 
-pub(crate) fn git_revision(raw: &str) -> GitRevision {
-    GitRevision::try_new(raw.to_owned()).expect("fixture Git revision is non-empty")
-}
-
-pub(crate) fn git_range(raw: &str) -> GitRange {
-    GitRange::try_new(raw.to_owned()).expect("fixture Git range is non-empty")
-}
-
 pub(crate) fn commit_id(seed: &str) -> CommitId {
     seed.chars()
         .cycle()
@@ -62,11 +52,4 @@ pub(crate) const fn path_count(value: u64) -> PathCount {
 
 pub(crate) const fn commit_count(value: u64) -> CommitCount {
     CommitCount::new(value)
-}
-
-pub(crate) fn pinned_range(base: &str, head: &str) -> PinnedRange {
-    PinnedRange {
-        base: commit_id(base),
-        head: commit_id(head),
-    }
 }

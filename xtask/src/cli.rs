@@ -20,7 +20,7 @@ pub enum Command {
     /// Build and install both artifacts, and ensure `~/.local/bin` is on PATH.
     #[command(name = Verb::SETUP.as_str())]
     Setup,
-    /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias + `gtl-daemon`) and/or the
+    /// Place the prebuilt CLI engine (`git-tools` + `gtl` alias + `gtl-server`) and/or the
     /// desktop viewer on PATH. Builds are owned by the justfile; this only copies the
     /// already-built artifacts.
     #[command(name = Verb::INSTALL.as_str())]
@@ -29,7 +29,7 @@ pub enum Command {
         #[arg(long, value_enum, default_value_t = InstallTarget::Both)]
         target: InstallTarget,
     },
-    /// Remove the installed CLI binary + `gtl` alias + `gtl-daemon` and the desktop viewer from
+    /// Remove the installed CLI binary + `gtl` alias + `gtl-server` and the desktop viewer from
     /// PATH.
     #[command(name = Verb::UNINSTALL.as_str())]
     Uninstall {
@@ -102,7 +102,7 @@ pub enum Command {
     /// Render the gtl-viewer icon assets (`crates/gtl-desktop/icons/icon.{png,ico}`) from code.
     #[command(name = Verb::GEN_ICON.as_str())]
     GenIcon,
-    /// Cross-build the Win11 shippables (CLI + viewer + gtl-daemon) from this Linux host via
+    /// Cross-build the Win11 shippables (CLI + viewer + gtl-server) from this Linux host via
     /// cargo-xwin. `--smoke` is a fast debug-profile linkage check; the default is the release
     /// ship + verify.
     #[command(name = Verb::SHIP.as_str())]

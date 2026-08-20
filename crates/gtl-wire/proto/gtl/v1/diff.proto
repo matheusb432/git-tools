@@ -1,0 +1,147 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+import "gtl/v1/common.proto";
+
+service DiffService {
+  rpc Prepare(PrepareDiffRequest) returns (PrepareDiffResponse);
+  rpc PrepareMerge(PrepareMergeDiffRequest) returns (PrepareDiffResponse);
+  rpc PrepareSubrepositories(PrepareSubrepositoriesDiffRequest) returns (PrepareDiffResponse);
+  rpc PrepareProjects(PrepareProjectsDiffRequest) returns (PrepareDiffResponse);
+  rpc Render(RenderDiffRequest) returns (RenderDiffResponse);
+  rpc RenderMerge(RenderMergeDiffRequest) returns (RenderDiffResponse);
+  rpc RenderSubrepositories(RenderSubrepositoriesDiffRequest) returns (RenderDiffResponse);
+  rpc RenderProjects(RenderProjectsDiffRequest) returns (RenderDiffResponse);
+}
+
+message DiffTarget {
+  oneof selection {
+    Empty unpushed = 1;
+    string base_revision = 2;
+    string revision_range = 3;
+    string merge_base = 4;
+    uint32 last_commit_count = 5;
+  }
+}
+
+message RenderDiffRequest {
+  string working_directory = 1;
+  DiffTarget target = 2;
+  optional string name = 3;
+}
+
+message RenderMergeDiffRequest {
+  string working_directory = 1;
+  optional string base_revision = 2;
+}
+
+message PrepareDiffRequest {
+  string working_directory = 1;
+  DiffTarget target = 2;
+  optional string name = 3;
+}
+
+message PrepareMergeDiffRequest {
+  string working_directory = 1;
+  optional string base_revision = 2;
+}
+
+message PrepareSubrepositoriesDiffRequest {
+  string root = 1;
+  DiffTarget target = 2;
+  bool include_linked_worktrees = 3;
+}
+
+message PrepareProjectsDiffRequest {}
+
+enum RecipeBatchKind {
+  RECIPE_BATCH_KIND_UNSPECIFIED = 0;
+  RECIPE_BATCH_KIND_SNAPSHOT = 1;
+  RECIPE_BATCH_KIND_LIVE = 2;
+}
+
+message PinnedRange {
+  string base_commit_id = 1;
+  string head_commit_id = 2;
+}
+
+message UnpushedRecipeTarget {
+  optional PinnedRange pinned = 1;
+}
+
+message BaseRecipeTarget {
+  string revision = 1;
+}
+
+message RangeRecipeTarget {
+  string range = 1;
+  optional PinnedRange pinned = 2;
+}
+
+message MergeRecipeTarget {
+  string base_revision = 1;
+  optional PinnedRange pinned = 2;
+}
+
+message LastRecipeTarget {
+  uint32 commit_count = 1;
+  optional PinnedRange pinned = 2;
+}
+
+message RecipeTarget {
+  oneof selection {
+    UnpushedRecipeTarget unpushed = 1;
+    BaseRecipeTarget base = 2;
+    RangeRecipeTarget range = 3;
+    MergeRecipeTarget merge = 4;
+    LastRecipeTarget last = 5;
+  }
+}
+
+message DiffRecipe {
+  RecipeTarget target = 1;
+}
+
+message MergeDiffRecipe {
+  optional string base_revision = 1;
+  optional PinnedRange pinned = 2;
+}
+
+message Recipe {
+  string repository_root = 1;
+  oneof operation {
+    DiffRecipe diff = 2;
+    MergeDiffRecipe merge_diff = 3;
+  }
+  optional string name = 4;
+}
+
+message RecipeBatch {
+  string batch_id = 1;
+  RecipeBatchKind kind = 2;
+  repeated Recipe recipes = 3;
+}
+
+message PrepareDiffResponse {
+  RecipeBatch batch = 1;
+}
+
+message RenderSubrepositoriesDiffRequest {
+  string root = 1;
+  DiffTarget target = 2;
+  bool include_linked_worktrees = 3;
+}
+
+message RenderProjectsDiffRequest {
+  string root = 1;
+}
+
+message RenderDiffResponse {
+  repeated Note notes = 1;
+
+  oneof outcome {
+    Artifact rendered = 2;
+    Empty empty = 3;
+  }
+}

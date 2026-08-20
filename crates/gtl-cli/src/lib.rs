@@ -2,35 +2,31 @@
 
 use std::path::{Path, PathBuf};
 
-use gtl_application::{
-    diffs::{DiffTargetRequest, DiffTargetRequestError},
-    ports::UserSettingsStore,
-    projects::plan_push::{self, PlanPush, PlanPushOk},
-};
-use gtl_infra::git_client::HybridGitClient;
-use gtl_models::git::{BranchName, GitEffectMode};
+use gtl_models::git::BranchName;
+use gtl_wire::v1;
 
 use crate::{
     cli::{
-        Cli, ColorChoice, Command, CommitArgs, DaemonArgs, DaemonCommand, DiffArgs, DiffSub,
-        DiffTarget, DiffTargetArgs, ManagedArgs, ManagedReadArgs, MergeArgs, PruneArgs, PushArgs,
-        StatusArgs, SwitchArgs, Theme, WorktreeCommand,
+        Cli, ColorChoice, Command, CommitArgs, DiffArgs, DiffSub, DiffTarget, DiffTargetArgs,
+        DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs, PruneArgs, PushArgs,
+        ServerArgs, ServerCommand, StatusArgs, SwitchArgs, Theme, WorktreeCommand,
     },
     commands::managed::{
         ManagedExit, ManagedOptions, ManagedOutput, ManagedRun, PushOutcome, PushSummary,
     },
     confirm::{Confirmation, DefaultAnswer, RealConfirm},
+    server_client::ServerClient,
 };
 
 pub mod cli;
-pub mod client;
 pub mod commands;
 pub mod preprocess;
-pub(crate) mod recipe;
 pub mod viewer;
 
 mod confirm;
+mod detached_process;
 mod diff_viewer_client;
+mod server_client;
 #[cfg(test)]
 mod testing;
 
@@ -84,16 +80,13 @@ fn dispatch(command: Command) -> ExitCode {
             message: None,
             yes,
             ..
-        }) => {
-            let settings = gtl_infra::user_config::TomlSettingsStore::from_environment();
-            match settings.load() {
-                Ok(settings) => run_push_current(yes, settings.push_confirmation_required()),
-                Err(error) => {
-                    eprintln!("error: {error:#}");
-                    ExitCode::Internal
-                }
+        }) => match ServerClient::connect().and_then(|client| client.get_settings()) {
+            Ok(settings) => run_push_current(yes, settings.push_confirmation_required),
+            Err(error) => {
+                eprintln!("error: {error:#}");
+                ExitCode::Internal
             }
-        }
+        },
         Command::Push(PushArgs {
             all: false,
             recursive: true,
@@ -115,7 +108,7 @@ fn dispatch(command: Command) -> ExitCode {
             let args = args.into();
             managed_exit(&run_status(&args))
         }
-        Command::Daemon(DaemonArgs { command }) => run_daemon_ctl(&command),
+        Command::Server(ServerArgs { command }) => run_server_ctl(&command),
     }
 }
 
@@ -186,19 +179,14 @@ fn run_commit(args: CommitArgs) -> ExitCode {
     }
 }
 
-/// Dispatch resident daemon lifecycle commands.
-fn run_daemon_ctl(command: &DaemonCommand) -> ExitCode {
-    use crate::commands::daemon_ctl;
-
+fn run_server_ctl(command: &ServerCommand) -> ExitCode {
     let result = match command {
-        DaemonCommand::Status => daemon_ctl::status(),
-        DaemonCommand::Restart => daemon_ctl::restart(),
-        DaemonCommand::Stop => daemon_ctl::stop(),
+        ServerCommand::Status => crate::commands::server_ctl::status(),
     };
     match result {
         Ok(()) => ExitCode::Ok,
         Err(error) => {
-            eprintln!("gtl-daemon: {error:#}");
+            eprintln!("gtl-server: {error:#}");
             ExitCode::Internal
         }
     }
@@ -206,28 +194,25 @@ fn run_daemon_ctl(command: &DaemonCommand) -> ExitCode {
 
 /// Persist the diff-artifact theme to the user config and exit (no rendering).
 fn run_set_theme(theme: Theme) -> ExitCode {
-    use gtl_application::settings::set_setting_key;
-
-    let mut store = gtl_infra::user_config::TomlSettingsStore::from_environment();
-    let Some(path) = store.path().map(Path::to_path_buf) else {
-        eprintln!(
-            "error: could not resolve a config path (no GIT_TOOLS_CONFIG, XDG_CONFIG_HOME, or HOME)"
-        );
-        return ExitCode::Internal;
+    let value_new = gtl_models::viewer::Theme::from(theme).to_string();
+    let theme = match theme {
+        Theme::Dark => v1::ViewerTheme::Dark,
+        Theme::Light => v1::ViewerTheme::Light,
+        Theme::Hearth => v1::ViewerTheme::Hearth,
+        Theme::Mirage => v1::ViewerTheme::Mirage,
+        Theme::Glacier => v1::ViewerTheme::Glacier,
+        Theme::Noir => v1::ViewerTheme::Noir,
+        Theme::Graphite => v1::ViewerTheme::Graphite,
     };
-    let theme = gtl_models::viewer::Theme::from(theme);
-    let value_new = theme.to_string();
-
-    match set_setting_key::execute(
-        set_setting_key::SetSettingKey {
-            mutation: gtl_models::settings::SettingKeyValue::Theme(theme),
-        },
-        &mut store,
-    ) {
-        Ok(_) => {
+    match ServerClient::connect().and_then(|client| {
+        client.set_theme(v1::SetThemeRequest {
+            theme: theme as i32,
+        })
+    }) {
+        Ok(response) => {
             println!(
                 "diff-artifact theme set to \"{value_new}\" in {}",
-                path.display()
+                response.configuration_path
             );
             ExitCode::Ok
         }
@@ -239,14 +224,8 @@ fn run_set_theme(theme: Theme) -> ExitCode {
 }
 
 fn run_worktree(command: &WorktreeCommand) -> ExitCode {
-    use gtl_application::worktrees::{
-        get_worktree_base::{self, GetWorktreeBase, GetWorktreeBaseOk},
-        list_worktrees::{self, ListWorktrees, ListWorktreesOk},
-    };
-
     use crate::commands::worktree;
 
-    let git = HybridGitClient;
     let repo_path = match commands::canonical_working_directory() {
         Ok(path) => path,
         Err(error) => {
@@ -254,47 +233,74 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
             return ExitCode::Internal;
         }
     };
-    let repo_path = match gtl_application::ports::GitClient::top_level(&git, &repo_path) {
-        Ok(path) => path,
+    let client = match ServerClient::connect() {
+        Ok(client) => client,
         Err(error) => {
             eprintln!("worktree: {error:#}");
             return ExitCode::Internal;
         }
     };
+    let repository_path = repo_path.to_string_lossy().into_owned();
     match command {
         WorktreeCommand::Base => {
-            match get_worktree_base::execute(GetWorktreeBase { repo_path }, &git) {
-                Ok(GetWorktreeBaseOk::Found { path }) => {
-                    println!("{path}");
-                    ExitCode::Ok
-                }
-                Ok(GetWorktreeBaseOk::Failed { detail }) => {
-                    eprintln!("worktree: {detail}");
-                    ExitCode::Internal
-                }
+            match client.get_worktree_base(v1::GetWorktreeBaseRequest { repository_path }) {
+                Ok(response) => match response.outcome {
+                    Some(v1::get_worktree_base_response::Outcome::Found(found)) => {
+                        println!("{}", found.path);
+                        ExitCode::Ok
+                    }
+                    Some(v1::get_worktree_base_response::Outcome::Failed(failed)) => {
+                        eprintln!("worktree: {}", failed.detail);
+                        ExitCode::Internal
+                    }
+                    None => {
+                        eprintln!("worktree: gtl-server returned no worktree-base outcome");
+                        ExitCode::Internal
+                    }
+                },
                 Err(error) => {
-                    eprintln!("worktree: {error}");
+                    eprintln!("worktree: {error:#}");
                     ExitCode::Internal
                 }
             }
         }
-        WorktreeCommand::Ls => match list_worktrees::execute(ListWorktrees { repo_path }, &git) {
-            Ok(ListWorktreesOk::Listed { worktrees }) => {
-                let detail = worktree::render_list(&worktrees);
-                if !detail.is_empty() {
-                    println!("{detail}");
+        WorktreeCommand::Ls => {
+            match client.list_worktrees(v1::ListWorktreesRequest { repository_path }) {
+                Ok(response) => match response.outcome {
+                    Some(v1::list_worktrees_response::Outcome::Listed(listed)) => {
+                        let worktrees = match listed
+                            .worktrees
+                            .into_iter()
+                            .map(worktree::from_grpc)
+                            .collect::<anyhow::Result<Vec<_>>>()
+                        {
+                            Ok(worktrees) => worktrees,
+                            Err(error) => {
+                                eprintln!("worktree: {error:#}");
+                                return ExitCode::Internal;
+                            }
+                        };
+                        let detail = worktree::render_list(&worktrees);
+                        if !detail.is_empty() {
+                            println!("{detail}");
+                        }
+                        ExitCode::Ok
+                    }
+                    Some(v1::list_worktrees_response::Outcome::Failed(failed)) => {
+                        eprintln!("worktree: {}", failed.detail);
+                        ExitCode::Internal
+                    }
+                    None => {
+                        eprintln!("worktree: gtl-server returned no worktree-list outcome");
+                        ExitCode::Internal
+                    }
+                },
+                Err(error) => {
+                    eprintln!("worktree: {error:#}");
+                    ExitCode::Internal
                 }
-                ExitCode::Ok
             }
-            Ok(ListWorktreesOk::Failed { detail }) => {
-                eprintln!("worktree: {detail}");
-                ExitCode::Internal
-            }
-            Err(error) => {
-                eprintln!("worktree: {error}");
-                ExitCode::Internal
-            }
-        },
+        }
     }
 }
 
@@ -307,7 +313,7 @@ enum DiffInvocation {
     ManagedAll,
 }
 
-fn diff_invocation(args: DiffTargetArgs) -> Result<DiffInvocation, DiffTargetRequestError> {
+fn diff_invocation(args: DiffTargetArgs) -> Result<DiffInvocation, DiffTargetParseError> {
     if args.scope.all {
         return Ok(DiffInvocation::ManagedAll);
     }
@@ -319,12 +325,16 @@ fn diff_invocation(args: DiffTargetArgs) -> Result<DiffInvocation, DiffTargetReq
     })
 }
 
-fn diff_target(args: DiffTargetArgs) -> Result<DiffTarget, DiffTargetRequestError> {
+fn diff_target(args: DiffTargetArgs) -> Result<DiffTarget, DiffTargetParseError> {
     // ? `-l N` wins via clap conflict guard; `target` is None whenever `last` is Some.
     if args.unpushed {
         Ok(DiffTarget::Unpushed { pinned: None })
     } else if let Some(base) = args.merge {
-        DiffTarget::try_from(DiffTargetRequest::Merge { base })
+        Ok(DiffTarget::Merge {
+            base: gtl_models::git::GitRevision::try_new(base)
+                .map_err(|_| DiffTargetParseError::EmptyRevision)?,
+            pinned: None,
+        })
     } else {
         match args.last {
             Some(count) => Ok(DiffTarget::Last {
@@ -334,10 +344,15 @@ fn diff_target(args: DiffTargetArgs) -> Result<DiffTarget, DiffTargetRequestErro
             None => match args.target {
                 None => Ok(DiffTarget::Unpushed { pinned: None }),
                 Some(value) if value.trim().is_empty() => Ok(DiffTarget::Unpushed { pinned: None }),
-                Some(range) if range.contains("..") => {
-                    DiffTarget::try_from(DiffTargetRequest::Range { range })
-                }
-                Some(rev) => DiffTarget::try_from(DiffTargetRequest::Base { rev }),
+                Some(range) if range.contains("..") => Ok(DiffTarget::Range {
+                    range: gtl_models::git::GitRange::try_new(range)
+                        .map_err(|_| DiffTargetParseError::EmptyRange)?,
+                    pinned: None,
+                }),
+                Some(rev) => Ok(DiffTarget::Base(
+                    gtl_models::git::GitRevision::try_new(rev)
+                        .map_err(|_| DiffTargetParseError::EmptyRevision)?,
+                )),
             },
         }
     }
@@ -350,30 +365,21 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
         ..
     } = args;
     let interactive = confirm::stdin_is_terminal();
-    let mode = if dry {
-        GitEffectMode::DryRun
-    } else {
-        GitEffectMode::Apply
-    };
-    let mode = match plan_push::execute(PlanPush { message, mode }) {
-        PlanPushOk::PushOnly { mode } => mode,
-        PlanPushOk::CommitThenPush { message, mode } => {
-            let run = commands::managed::run_commit_all(&ManagedOptions {
-                dry: mode.is_dry_run(),
-                output: ManagedOutput::from_flags(json, false),
-                message_for_all: Some(message),
-                interactive,
-            });
-            let exit = managed_exit(&run);
-            if exit != ExitCode::Ok {
-                return exit;
-            }
-            mode
+    if let Some(message) = message {
+        let run = commands::managed::run_commit_all(&ManagedOptions {
+            dry,
+            output: ManagedOutput::from_flags(json, false),
+            message_for_all: Some(message),
+            interactive,
+        });
+        let exit = managed_exit(&run);
+        if exit != ExitCode::Ok {
+            return exit;
         }
-    };
+    }
 
     managed_exit(&commands::managed::run_push_all(&ManagedOptions {
-        dry: mode.is_dry_run(),
+        dry,
         output: ManagedOutput::from_flags(json, false),
         message_for_all: None,
         interactive,
@@ -383,8 +389,6 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
 /// Orchestrates `push "<message>"`: plan read-only, show the confirmation block, gate on
 /// `--yes`/TTY, then stage, commit, and push.
 fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
-    use gtl_application::repositories::{apply_push, plan_push};
-
     use crate::commands::sync;
 
     if message.trim().is_empty() {
@@ -392,22 +396,10 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
         return ExitCode::Usage;
     }
 
-    let git = HybridGitClient;
-    let repo_path = match commands::canonical_working_directory() {
-        Ok(path) => path,
+    let (client, target) = match plan_current_push() {
+        Ok(planned) => planned,
         Err(error) => {
             eprintln!("push: {error:#}");
-            return ExitCode::Internal;
-        }
-    };
-    let target = match plan_push::execute(plan_push::PlanPush { repo_path }, &git) {
-        Ok(plan_push::PlanPushOk::Refused(detail)) => {
-            eprintln!("push: {detail}");
-            return ExitCode::Internal;
-        }
-        Ok(plan_push::PlanPushOk::Ready(target)) => target,
-        Err(error) => {
-            eprintln!("push: {error}");
             return ExitCode::Internal;
         }
     };
@@ -430,57 +422,28 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
         Confirmation::Proceed => {}
     }
 
-    let result = match apply_push::execute(
-        apply_push::ApplyPush {
-            target,
-            mode: apply_push::PushMode::CommitChanges {
-                message: message.into(),
-            },
-        },
-        &git,
-    ) {
+    let result = match client.execute_repository_push(v1::ExecuteRepositoryPushRequest {
+        target: Some(sync::push_target_to_grpc(&target)),
+        mode: v1::RepositoryPushMode::CommitChanges as i32,
+        message: Some(message.into()),
+    }) {
         Ok(result) => result,
-        Err(error) => {
-            eprintln!("push: {error}");
-            return ExitCode::Internal;
-        }
-    };
-    match result {
-        apply_push::ApplyPushOk::Completed { detail, .. }
-        | apply_push::ApplyPushOk::Noop { detail } => {
-            println!("push: {detail}");
-            ExitCode::Ok
-        }
-        apply_push::ApplyPushOk::Failed { detail, .. }
-        | apply_push::ApplyPushOk::Refused { detail } => {
-            eprintln!("push: {detail}");
-            ExitCode::Internal
-        }
-    }
-}
-
-/// Orchestrates current-repo `push` for existing commits only.
-fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
-    use gtl_application::repositories::{apply_push, plan_push};
-
-    use crate::commands::sync;
-
-    let git = HybridGitClient;
-    let repo_path = match commands::canonical_working_directory() {
-        Ok(path) => path,
         Err(error) => {
             eprintln!("push: {error:#}");
             return ExitCode::Internal;
         }
     };
-    let target = match plan_push::execute(plan_push::PlanPush { repo_path }, &git) {
-        Ok(plan_push::PlanPushOk::Refused(detail)) => {
-            eprintln!("push: {detail}");
-            return ExitCode::Internal;
-        }
-        Ok(plan_push::PlanPushOk::Ready(target)) => target,
+    finish_push_response(&result)
+}
+
+/// Orchestrates current-repo `push` for existing commits only.
+fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
+    use crate::commands::sync;
+
+    let (client, target) = match plan_current_push() {
+        Ok(planned) => planned,
         Err(error) => {
-            eprintln!("push: {error}");
+            eprintln!("push: {error:#}");
             return ExitCode::Internal;
         }
     };
@@ -510,29 +473,53 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
         Confirmation::Proceed => {}
     }
 
-    let result = match apply_push::execute(
-        apply_push::ApplyPush {
-            target,
-            mode: apply_push::PushMode::ExistingOnly,
-        },
-        &git,
-    ) {
+    let result = match client.execute_repository_push(v1::ExecuteRepositoryPushRequest {
+        target: Some(sync::push_target_to_grpc(&target)),
+        mode: v1::RepositoryPushMode::ExistingCommits as i32,
+        message: None,
+    }) {
         Ok(result) => result,
         Err(error) => {
-            eprintln!("push: {error}");
+            eprintln!("push: {error:#}");
             return ExitCode::Internal;
         }
     };
+    finish_push_response(&result)
+}
 
-    match result {
-        apply_push::ApplyPushOk::Completed { detail, .. }
-        | apply_push::ApplyPushOk::Noop { detail } => {
-            println!("push: {detail}");
+fn plan_current_push() -> anyhow::Result<(ServerClient, commands::sync::PushTarget)> {
+    let repository_path = commands::canonical_working_directory()?
+        .to_string_lossy()
+        .into_owned();
+    let client = ServerClient::connect()?;
+    let response =
+        client.plan_repository_push(v1::PlanRepositoryPushRequest { repository_path })?;
+    let target = match response
+        .outcome
+        .ok_or_else(|| anyhow::anyhow!("gtl-server returned no push plan outcome"))?
+    {
+        v1::plan_repository_push_response::Outcome::Ready(target) => {
+            commands::sync::push_target_from_grpc(target)?
+        }
+        v1::plan_repository_push_response::Outcome::Refused(refusal) => {
+            anyhow::bail!(refusal.detail)
+        }
+    };
+    Ok((client, target))
+}
+
+fn finish_push_response(response: &v1::ExecuteRepositoryPushResponse) -> ExitCode {
+    match v1::RepositoryPushStatus::try_from(response.status) {
+        Ok(v1::RepositoryPushStatus::NoOp | v1::RepositoryPushStatus::Completed) => {
+            println!("push: {}", response.detail);
             ExitCode::Ok
         }
-        apply_push::ApplyPushOk::Failed { detail, .. }
-        | apply_push::ApplyPushOk::Refused { detail } => {
-            eprintln!("push: {detail}");
+        Ok(v1::RepositoryPushStatus::Refused | v1::RepositoryPushStatus::Failed) => {
+            eprintln!("push: {}", response.detail);
+            ExitCode::Internal
+        }
+        Ok(v1::RepositoryPushStatus::Unspecified) | Err(_) => {
+            eprintln!("push: gtl-server returned an invalid push status");
             ExitCode::Internal
         }
     }
@@ -541,8 +528,6 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
 /// Orchestrates current-repo `commit`: review, gate, then stage all changes and create one commit
 /// without pushing.
 fn run_commit_current(message: &str, yes: bool) -> ExitCode {
-    use gtl_application::repositories::{apply_commit, plan_commit};
-
     use crate::commands::sync;
 
     if message.trim().is_empty() {
@@ -550,7 +535,6 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
         return ExitCode::Usage;
     }
 
-    let git = HybridGitClient;
     let repo_path = match commands::canonical_working_directory() {
         Ok(path) => path,
         Err(error) => {
@@ -558,14 +542,38 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
             return ExitCode::Internal;
         }
     };
-    let target = match plan_commit::execute(plan_commit::PlanCommit { repo_path }, &git) {
-        Ok(plan_commit::PlanCommitOk::Refused(detail)) => {
-            eprintln!("commit: {detail}");
+    let client = match ServerClient::connect() {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("commit: {error:#}");
             return ExitCode::Internal;
         }
-        Ok(plan_commit::PlanCommitOk::Ready(target)) => target,
+    };
+    let response = match client.plan_repository_commit(v1::PlanRepositoryCommitRequest {
+        repository_path: repo_path.to_string_lossy().into_owned(),
+    }) {
+        Ok(response) => response,
         Err(error) => {
-            eprintln!("commit: {error}");
+            eprintln!("commit: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+    let target = match response.outcome {
+        Some(v1::plan_repository_commit_response::Outcome::Refused(refusal)) => {
+            eprintln!("commit: {}", refusal.detail);
+            return ExitCode::Internal;
+        }
+        Some(v1::plan_repository_commit_response::Outcome::Ready(target)) => {
+            match sync::commit_target_from_grpc(target) {
+                Ok(target) => target,
+                Err(error) => {
+                    eprintln!("commit: {error:#}");
+                    return ExitCode::Internal;
+                }
+            }
+        }
+        None => {
+            eprintln!("commit: gtl-server returned no commit plan outcome");
             return ExitCode::Internal;
         }
     };
@@ -588,26 +596,27 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
         Confirmation::Proceed => {}
     }
 
-    let result = match apply_commit::execute(
-        apply_commit::ApplyCommit {
-            target,
-            message: message.into(),
-        },
-        &git,
-    ) {
+    let result = match client.execute_repository_commit(v1::ExecuteRepositoryCommitRequest {
+        target: Some(sync::commit_target_to_grpc(&target)),
+        message: message.into(),
+    }) {
         Ok(result) => result,
         Err(error) => {
-            eprintln!("commit: {error}");
+            eprintln!("commit: {error:#}");
             return ExitCode::Internal;
         }
     };
-    match result.status {
-        apply_commit::CommitStatus::Committed | apply_commit::CommitStatus::Noop => {
+    match v1::RepositoryCommitStatus::try_from(result.status) {
+        Ok(v1::RepositoryCommitStatus::Committed | v1::RepositoryCommitStatus::NoOp) => {
             println!("commit: {}", result.detail);
             ExitCode::Ok
         }
-        apply_commit::CommitStatus::Failed => {
+        Ok(v1::RepositoryCommitStatus::Failed) => {
             eprintln!("commit: {}", result.detail);
+            ExitCode::Internal
+        }
+        Ok(v1::RepositoryCommitStatus::Unspecified) | Err(_) => {
+            eprintln!("commit: gtl-server returned an invalid commit status");
             ExitCode::Internal
         }
     }
@@ -620,12 +629,10 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
 /// interactive prompt is the only side effect kept out of the
 /// repository operations.
 fn run_push_subrepos(yes: bool) -> ExitCode {
-    use gtl_application::repositories::{apply_recursive_push, plan_recursive_push};
-    use gtl_models::repository::recursive_push::SubreposPlan;
+    use crate::commands::push_subrepos::{
+        confirmation, result_from_grpc, targets_from_grpc, targets_to_grpc,
+    };
 
-    use crate::commands::push_subrepos::confirmation;
-
-    let git = HybridGitClient;
     let root = match commands::canonical_working_directory() {
         Ok(root) => root,
         Err(error) => {
@@ -634,17 +641,38 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
         }
     };
 
-    let targets = match plan_recursive_push::execute(
-        plan_recursive_push::PlanRecursivePush { root: root.clone() },
-        &git,
-    ) {
-        Ok(SubreposPlan::Ready(targets)) => targets,
-        Ok(SubreposPlan::Refused(detail)) => {
-            eprintln!("push -r: {detail}");
-            return ExitCode::Internal;
-        }
+    let client = match ServerClient::connect() {
+        Ok(client) => client,
         Err(error) => {
             eprintln!("push -r: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+    let plan = match client.plan_recursive_push(v1::PlanRecursivePushRequest {
+        root: root.to_string_lossy().into_owned(),
+    }) {
+        Ok(plan) => plan,
+        Err(error) => {
+            eprintln!("push -r: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+    let targets = match plan.outcome {
+        Some(v1::plan_recursive_push_response::Outcome::Ready(plan)) => {
+            match targets_from_grpc(plan.targets) {
+                Ok(targets) => targets,
+                Err(error) => {
+                    eprintln!("push -r: {error:#}");
+                    return ExitCode::Internal;
+                }
+            }
+        }
+        Some(v1::plan_recursive_push_response::Outcome::Refused(refusal)) => {
+            eprintln!("push -r: {}", refusal.detail);
+            return ExitCode::Internal;
+        }
+        None => {
+            eprintln!("push -r: gtl-server returned no recursive-push plan outcome");
             return ExitCode::Internal;
         }
     };
@@ -667,8 +695,21 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
         Confirmation::Proceed => {}
     }
 
-    let result =
-        apply_recursive_push::execute(apply_recursive_push::ApplyRecursivePush { targets }, &git);
+    let result = match client.execute_recursive_push(v1::ExecuteRecursivePushRequest {
+        targets: targets_to_grpc(&targets),
+    }) {
+        Ok(response) => match result_from_grpc(response) {
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!("push -r: {error:#}");
+                return ExitCode::Internal;
+            }
+        },
+        Err(error) => {
+            eprintln!("push -r: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
     let detail = format_push_subrepos_result(&result);
     match result.status {
         gtl_models::repository::recursive_push::Status::Ok => {
@@ -720,126 +761,67 @@ fn run_switch(args: &SwitchArgs) -> ExitCode {
         Ok(path) => path,
         Err(code) => return code,
     };
-    run_switch_with_path(args, repo_path)
+    run_switch_with_path(args, &repo_path)
 }
 
-fn run_switch_with_path(args: &SwitchArgs, repo_path: PathBuf) -> ExitCode {
-    use gtl_application::repositories::{
-        apply_rebase::{self, ApplyRebase},
-        apply_revert::{self, ApplyRevert},
-        apply_switch::{self, ApplySwitch, SwitchStatus},
-        plan_rebase::{self, PlanRebase, PlanRebaseOk},
-        plan_revert::{self, PlanRevert, PlanRevertOk},
-        plan_switch::{self, PlanSwitch, PlanSwitchOk},
-    };
-
-    let git = HybridGitClient;
+fn run_switch_with_path(args: &SwitchArgs, repo_path: &Path) -> ExitCode {
     let onto = match parse_branch_name("switch", args.onto.as_deref().unwrap_or("main")) {
         Ok(onto) => onto,
         Err(code) => return code,
     };
-
-    if args.revert {
-        return match plan_revert::execute(
-            PlanRevert {
-                repo_path: repo_path.clone(),
-                onto: onto.clone(),
-            },
-            &git,
-        ) {
-            Ok(PlanRevertOk::Refused(detail)) => {
-                eprintln!("switch: {detail}");
-                ExitCode::Internal
-            }
-            Ok(PlanRevertOk::Ready(target)) => {
-                let result = match apply_revert::execute(ApplyRevert { target }, &git) {
-                    Ok(result) => result,
-                    Err(error) => return finish_switch_error(&error),
-                };
-                finish_switch(match &result {
-                    apply_revert::ApplyRevertOk::Reverted { detail } => Ok(detail),
-                    apply_revert::ApplyRevertOk::Failed { detail, .. } => Err(detail),
-                })
-            }
-            Err(error) => finish_switch_error(&error),
-        };
-    }
-
-    if args.rebase {
-        let target = match plan_rebase::execute(
-            PlanRebase {
-                repo_path: repo_path.clone(),
-                onto: onto.clone(),
-            },
-            &git,
-        ) {
-            Ok(PlanRebaseOk::Refused(detail)) => {
-                eprintln!("switch: {detail}");
-                return ExitCode::Internal;
-            }
-            Ok(PlanRebaseOk::Noop(detail)) => {
-                println!("{detail}");
-                return ExitCode::Ok;
-            }
-            Ok(PlanRebaseOk::Ready(target)) => target,
-            Err(error) => return finish_switch_error(&error),
-        };
-        let result = match apply_rebase::execute(ApplyRebase { target }, &git) {
-            Ok(result) => result,
-            Err(error) => return finish_switch_error(&error),
-        };
-        let fast_forwarded = matches!(result, apply_rebase::ApplyRebaseOk::FastForwarded { .. });
-        let code = finish_switch(match &result {
-            apply_rebase::ApplyRebaseOk::FastForwarded { detail, .. } => Ok(detail),
-            apply_rebase::ApplyRebaseOk::Failed { detail, .. } => Err(detail),
-        });
-        if fast_forwarded && args.diff {
-            return diff_exit(commands::diff::run(
-                &DiffTarget::Unpushed { pinned: None },
-                None,
-                false,
-            ));
+    let action = if args.revert {
+        v1::RepositoryBranchAction::Revert
+    } else if args.rebase {
+        v1::RepositoryBranchAction::Rebase
+    } else {
+        v1::RepositoryBranchAction::Switch
+    };
+    let client = match ServerClient::connect() {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("switch: {error:#}");
+            return ExitCode::Internal;
         }
-        return code;
-    }
-
-    match plan_switch::execute(PlanSwitch { repo_path, onto }, &git) {
-        Ok(PlanSwitchOk::Refused(detail)) => {
-            eprintln!("switch: {detail}");
+    };
+    let result = match client.change_repository_branch(v1::ChangeRepositoryBranchRequest {
+        repository_path: repo_path.to_string_lossy().into_owned(),
+        onto_branch: onto.to_string(),
+        action: action as i32,
+    }) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("switch: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+    match v1::RepositoryBranchStatus::try_from(result.status) {
+        Ok(v1::RepositoryBranchStatus::FastForwarded) => {
+            println!("{}", result.detail);
+            if args.diff {
+                diff_exit(commands::diff::run(
+                    &DiffTarget::Unpushed { pinned: None },
+                    None,
+                    false,
+                ))
+            } else {
+                ExitCode::Ok
+            }
+        }
+        Ok(
+            v1::RepositoryBranchStatus::Switched
+            | v1::RepositoryBranchStatus::AlreadyThere
+            | v1::RepositoryBranchStatus::Reverted
+            | v1::RepositoryBranchStatus::NoOp,
+        ) => {
+            println!("{}", result.detail);
+            ExitCode::Ok
+        }
+        Ok(v1::RepositoryBranchStatus::Refused | v1::RepositoryBranchStatus::Failed) => {
+            eprintln!("switch: {}", result.detail);
             ExitCode::Internal
         }
-        Ok(PlanSwitchOk::AlreadyThere(onto)) => {
-            println!("already on '{onto}'");
-            ExitCode::Ok
-        }
-        Ok(PlanSwitchOk::Ready(target)) => {
-            let result = match apply_switch::execute(ApplySwitch { target }, &git) {
-                Ok(result) => result,
-                Err(error) => return finish_switch_error(&error),
-            };
-            finish_switch(match result.status {
-                SwitchStatus::Switched => Ok(&result.detail),
-                SwitchStatus::Failed => Err(&result.detail),
-            })
-        }
-        Err(error) => finish_switch_error(&error),
-    }
-}
-
-fn finish_switch_error(error: &impl std::fmt::Display) -> ExitCode {
-    eprintln!("switch: {error}");
-    ExitCode::Internal
-}
-
-/// Print an applied `switch` result and map its status to an exit code.
-fn finish_switch(result: Result<&str, &str>) -> ExitCode {
-    match result {
-        Ok(detail) => {
-            println!("{detail}");
-            ExitCode::Ok
-        }
-        Err(detail) => {
-            eprintln!("switch: {detail}");
+        Ok(v1::RepositoryBranchStatus::Unspecified) | Err(_) => {
+            eprintln!("switch: gtl-server returned an invalid branch-change status");
             ExitCode::Internal
         }
     }
@@ -856,13 +838,6 @@ fn parse_branch_name(command: &str, raw: &str) -> Result<BranchName, ExitCode> {
 /// single-repo path plans read-only, shows the will-delete block, gates on `-y`/TTY like
 /// `push "<message>"`, then deletes. All git work is local; refusals → stderr, logs → stdout.
 fn run_prune(args: &PruneArgs) -> ExitCode {
-    use gtl_application::repositories::{
-        apply_prune::{self, ApplyPrune, ApplyPruneError, PruneStatus},
-        plan_prune::{self, PlanPrune, PlanPruneOk},
-    };
-
-    use crate::commands::prune;
-
     let onto = match parse_branch_name("prune", args.onto.as_deref().unwrap_or("main")) {
         Ok(onto) => onto,
         Err(code) => return code,
@@ -878,7 +853,6 @@ fn run_prune(args: &PruneArgs) -> ExitCode {
         return managed_exit(&commands::managed::run_prune_all(&onto, &options));
     }
 
-    let git = HybridGitClient;
     let repo_path = match commands::canonical_working_directory() {
         Ok(path) => path,
         Err(error) => {
@@ -886,30 +860,54 @@ fn run_prune(args: &PruneArgs) -> ExitCode {
             return ExitCode::Internal;
         }
     };
+    run_prune_current(args, &onto, &repo_path)
+}
 
-    let (top, branches) = match plan_prune::execute(
-        PlanPrune {
-            repo_path,
-            onto: onto.clone(),
-        },
-        &git,
-    ) {
-        Ok(PlanPruneOk::Refused(detail)) => {
-            eprintln!("prune: {detail}");
+fn run_prune_current(args: &PruneArgs, onto: &BranchName, repo_path: &Path) -> ExitCode {
+    use crate::commands::prune;
+
+    let client = match ServerClient::connect() {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("prune: {error:#}");
             return ExitCode::Internal;
         }
-        Ok(PlanPruneOk::Nothing(detail)) => {
-            println!("{detail}");
+    };
+    let response = match client.plan_repository_prune(v1::PlanRepositoryPruneRequest {
+        repository_path: repo_path.to_string_lossy().into_owned(),
+        onto_branch: onto.to_string(),
+    }) {
+        Ok(response) => response,
+        Err(error) => {
+            eprintln!("prune: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+    let plan = match response.outcome {
+        Some(v1::plan_repository_prune_response::Outcome::Refused(refusal)) => {
+            eprintln!("prune: {}", refusal.detail);
+            return ExitCode::Internal;
+        }
+        Some(v1::plan_repository_prune_response::Outcome::Nothing(nothing)) => {
+            println!("{}", nothing.detail);
             return ExitCode::Ok;
         }
-        Ok(PlanPruneOk::Ready { top, branches, .. }) => (top, branches),
+        Some(v1::plan_repository_prune_response::Outcome::Ready(plan)) => plan,
+        None => {
+            eprintln!("prune: gtl-server returned no prune plan outcome");
+            return ExitCode::Internal;
+        }
+    };
+    let repository_root = plan.repository_root.clone();
+    let branches = match prune::plan_from_grpc(plan) {
+        Ok(branches) => branches,
         Err(error) => {
             eprintln!("prune: {error:#}");
             return ExitCode::Internal;
         }
     };
 
-    println!("{}", prune::confirmation(&onto, &branches));
+    println!("{}", prune::confirmation(onto, &branches));
 
     match confirm::request(&RealConfirm, args.yes, "Proceed?", DefaultAnswer::Yes) {
         Confirmation::RefuseNonInteractive => {
@@ -927,29 +925,43 @@ fn run_prune(args: &PruneArgs) -> ExitCode {
         Confirmation::Proceed => {}
     }
 
-    match apply_prune::execute(ApplyPrune { top, branches }, &git) {
-        Ok(result) => {
-            let detail = prune::render_result(&result);
-            match result.status {
-                PruneStatus::Ok => {
-                    println!("{detail}");
-                    ExitCode::Ok
-                }
-                PruneStatus::Partial | PruneStatus::Fail => {
-                    eprintln!("prune: {detail}");
-                    ExitCode::Internal
-                }
-            }
-        }
+    let response = match client.execute_repository_prune(v1::ExecuteRepositoryPruneRequest {
+        plan: Some(prune::plan_to_grpc(repository_root, &branches)),
+    }) {
+        Ok(response) => response,
         Err(error) => {
-            if let ApplyPruneError::Transport {
-                completed_result: Some(result),
-                ..
-            } = &error
-            {
-                println!("{}", prune::render_result(result));
-            }
             eprintln!("prune: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+    let result = match prune::result_from_grpc(response) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("prune: {error:#}");
+            return ExitCode::Internal;
+        }
+    };
+    let detail = prune::render_result(&result);
+    match result.status {
+        prune::PruneStatus::Ok => {
+            println!("{detail}");
+            ExitCode::Ok
+        }
+        prune::PruneStatus::Partial | prune::PruneStatus::Failed => {
+            eprintln!("prune: {detail}");
+            ExitCode::Internal
+        }
+        prune::PruneStatus::Aborted => {
+            if !result.deleted.is_empty() || !result.failed.is_empty() {
+                println!("{detail}");
+            }
+            eprintln!(
+                "prune: {}",
+                result
+                    .failure_detail
+                    .as_deref()
+                    .unwrap_or("branch prune stopped before completion")
+            );
             ExitCode::Internal
         }
     }

@@ -2,11 +2,26 @@ use std::{future::Future, time::Duration};
 
 use anyhow::Context as _;
 use gtl_local_auth::CapabilityToken;
-use gtl_wire::FILE_DESCRIPTOR_SET;
+use gtl_wire::{
+    FILE_DESCRIPTOR_SET,
+    v1::{
+        diff_service_server::DiffServiceServer, live_view_service_server::LiveViewServiceServer,
+        project_service_server::ProjectServiceServer,
+        repository_service_server::RepositoryServiceServer,
+        settings_service_server::SettingsServiceServer, tag_service_server::TagServiceServer,
+        worktree_service_server::WorktreeServiceServer,
+    },
+};
 use tonic::{
     Request, Status,
+    server::NamedService,
     service::{Interceptor, InterceptorLayer},
     transport::{Server, server::TcpIncoming},
+};
+
+use crate::{
+    services::{DiffApi, LiveViewApi, ProjectApi, RepositoryApi, SettingsApi, TagApi, WorktreeApi},
+    state::AppState,
 };
 
 const MAX_CONCURRENT_REQUESTS_PER_CONNECTION: usize = 16;
@@ -47,12 +62,48 @@ pub(crate) async fn serve(
     shutdown: impl Future<Output = ()> + Send + 'static,
     shutdown_grace_period: Duration,
     capability: CapabilityToken,
+    state: AppState,
 ) -> anyhow::Result<()> {
     let (health_reporter, health_server) = tonic_health::server::health_reporter();
+    let application_service_names = [
+        DiffServiceServer::<DiffApi>::NAME,
+        LiveViewServiceServer::<LiveViewApi>::NAME,
+        ProjectServiceServer::<ProjectApi>::NAME,
+        RepositoryServiceServer::<RepositoryApi>::NAME,
+        SettingsServiceServer::<SettingsApi>::NAME,
+        TagServiceServer::<TagApi>::NAME,
+        WorktreeServiceServer::<WorktreeApi>::NAME,
+    ];
+    for service_name in application_service_names {
+        health_reporter
+            .set_service_status(service_name, tonic_health::ServingStatus::Serving)
+            .await;
+    }
     health_reporter
         .set_service_status("", tonic_health::ServingStatus::Serving)
         .await;
     let health_server = health_server
+        .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
+    let diff_server = DiffServiceServer::new(DiffApi::new(state.clone()))
+        .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
+    let live_view_server = LiveViewServiceServer::new(LiveViewApi::new(state.clone()))
+        .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
+    let project_server = ProjectServiceServer::new(ProjectApi::new(state.clone()))
+        .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
+    let repository_server = RepositoryServiceServer::new(RepositoryApi::new(state.clone()))
+        .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
+    let settings_server = SettingsServiceServer::new(SettingsApi::new(state.clone()))
+        .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
+    let tag_server = TagServiceServer::new(TagApi::new(state.clone()))
+        .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
+        .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
+    let worktree_server = WorktreeServiceServer::new(WorktreeApi::new(state))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
     let reflection_server = tonic_reflection::server::Builder::configure()
@@ -68,6 +119,11 @@ pub(crate) async fn serve(
         health_reporter
             .set_service_status("", tonic_health::ServingStatus::NotServing)
             .await;
+        for service_name in application_service_names {
+            health_reporter
+                .set_service_status(service_name, tonic_health::ServingStatus::NotServing)
+                .await;
+        }
         let _ = shutdown_started_sender.send(());
     };
 
@@ -77,6 +133,13 @@ pub(crate) async fn serve(
         .layer(InterceptorLayer::new(Authentication { capability }))
         .add_service(health_server)
         .add_service(reflection_server)
+        .add_service(diff_server)
+        .add_service(live_view_server)
+        .add_service(project_server)
+        .add_service(repository_server)
+        .add_service(settings_server)
+        .add_service(tag_server)
+        .add_service(worktree_server)
         .serve_with_incoming_shutdown(TcpIncoming::from(listener), shutdown);
     tokio::pin!(grpc_server);
 

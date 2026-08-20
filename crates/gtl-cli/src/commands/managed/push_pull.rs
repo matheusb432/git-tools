@@ -3,24 +3,48 @@
 use std::fmt::Write as _;
 
 use gtl_models::{git::BranchName, paths::ProjectName};
-use gtl_wire::{
-    envelope::{Envelope, NoteLevel, Outcome},
-    projects::{
-        PullAllRequest, PushAllRequest, RepoSyncResultDto, RepoSyncStatusDto, SyncData, SyncExitDto,
-    },
-};
+use gtl_wire::v1;
 use serde::Serialize;
 
 use super::{
     ManagedExit, ManagedOptions, ManagedRun,
     push_summary::{PushOutcome, PushSummary},
 };
-use crate::client::HttpClient;
+use crate::server_client::ServerClient;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SyncOperation {
     Push,
     Pull,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RepoSyncStatus {
+    Skip,
+    UpToDate,
+    Pushed,
+    WouldPush,
+    Pulled,
+    WouldPull,
+    Warn,
+    Fail,
+}
+
+impl std::fmt::Display for RepoSyncStatus {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let token = match self {
+            Self::Skip => "skip",
+            Self::UpToDate => "up-to-date",
+            Self::Pushed => "pushed",
+            Self::WouldPush => "would-push",
+            Self::Pulled => "pulled",
+            Self::WouldPull => "would-pull",
+            Self::Warn => "warn",
+            Self::Fail => "fail",
+        };
+        formatter.pad(token)
+    }
 }
 
 impl SyncOperation {
@@ -48,7 +72,7 @@ enum PushPullFormatError {
     )]
     PullOnlyStatus {
         repo: ProjectName,
-        status: RepoSyncStatusDto,
+        status: RepoSyncStatus,
     },
 }
 
@@ -57,49 +81,45 @@ enum PushPullFormatError {
 pub struct PushPullResult {
     pub name: ProjectName,
     pub branch: Option<BranchName>,
-    pub status: RepoSyncStatusDto,
+    pub status: RepoSyncStatus,
     pub detail: String,
 }
 
-impl From<RepoSyncResultDto> for PushPullResult {
-    fn from(dto: RepoSyncResultDto) -> Self {
-        Self {
-            name: dto.name,
-            branch: dto.branch,
-            status: dto.status,
-            detail: dto.detail,
+fn exit_from_grpc(exit: v1::ProjectSyncExit) -> anyhow::Result<ManagedExit> {
+    match exit {
+        v1::ProjectSyncExit::Clean => Ok(ManagedExit::Clean),
+        v1::ProjectSyncExit::Warning => Ok(ManagedExit::Warn),
+        v1::ProjectSyncExit::Failed => Ok(ManagedExit::Fail),
+        v1::ProjectSyncExit::Unspecified => {
+            anyhow::bail!("gtl-server returned an unspecified project sync exit")
         }
     }
 }
 
-fn exit_from_dto(exit: SyncExitDto) -> ManagedExit {
-    match exit {
-        SyncExitDto::Clean => ManagedExit::Clean,
-        SyncExitDto::Warn => ManagedExit::Warn,
-        SyncExitDto::Fail => ManagedExit::Fail,
-    }
-}
-
 pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
-    let client = match HttpClient::ensure_daemon() {
+    let client = match ServerClient::connect() {
         Ok(client) => client,
         Err(error) => return managed_error(&error),
     };
-    let request = PushAllRequest { dry: options.dry };
-    match client.push_all(&request) {
-        Ok(envelope) => finish(SyncOperation::Push, options, envelope),
+    let request = v1::SyncProjectsRequest {
+        dry_run: options.dry,
+    };
+    match client.push_project_repositories(request) {
+        Ok(response) => finish(SyncOperation::Push, options, response),
         Err(error) => managed_error(&error),
     }
 }
 
 pub fn run_pull_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
-    let client = match HttpClient::ensure_daemon() {
+    let client = match ServerClient::connect() {
         Ok(client) => client,
         Err(error) => return managed_error(&error),
     };
-    let request = PullAllRequest { dry: options.dry };
-    match client.pull_all(&request) {
-        Ok(envelope) => finish(SyncOperation::Pull, options, envelope),
+    let request = v1::SyncProjectsRequest {
+        dry_run: options.dry,
+    };
+    match client.pull_project_repositories(request) {
+        Ok(response) => finish(SyncOperation::Pull, options, response),
         Err(error) => managed_error(&error),
     }
 }
@@ -116,25 +136,24 @@ fn managed_error<T>(error: &anyhow::Error) -> ManagedRun<T> {
 fn finish(
     operation: SyncOperation,
     options: &ManagedOptions,
-    envelope: Envelope<SyncData>,
+    response: v1::SyncProjectsResponse,
 ) -> ManagedRun<PushPullResult> {
-    if envelope.outcome == Outcome::Error {
-        let text = envelope
-            .notes
-            .iter()
-            .rev()
-            .find(|n| n.level == NoteLevel::Error)
-            .map_or_else(
-                || "daemon reported an error".to_string(),
-                |n| n.text.clone(),
-            );
-        return managed_error(&anyhow::anyhow!(text));
-    }
-    let Some(data) = envelope.data else {
-        return managed_error(&anyhow::anyhow!("daemon returned ok without data"));
+    let results = match response
+        .results
+        .into_iter()
+        .map(result_from_grpc)
+        .collect::<anyhow::Result<Vec<_>>>()
+    {
+        Ok(results) => results,
+        Err(error) => return managed_error(&error),
     };
-    let results: Vec<PushPullResult> = data.results.into_iter().map(PushPullResult::from).collect();
-    let exit = exit_from_dto(data.exit);
+    let exit = match v1::ProjectSyncExit::try_from(response.exit)
+        .map_err(|_| anyhow::anyhow!("gtl-server returned an unknown project sync exit"))
+        .and_then(exit_from_grpc)
+    {
+        Ok(exit) => exit,
+        Err(error) => return managed_error(&error),
+    };
     let stdout = match format_push_pull(
         operation,
         options.dry,
@@ -151,6 +170,35 @@ fn finish(
         stdout,
         stderr: String::new(),
     }
+}
+
+fn result_from_grpc(result: v1::RepositorySyncResult) -> anyhow::Result<PushPullResult> {
+    let status = match v1::RepositorySyncStatus::try_from(result.status)
+        .map_err(|_| anyhow::anyhow!("gtl-server returned an unknown repository sync status"))?
+    {
+        v1::RepositorySyncStatus::Unspecified => {
+            anyhow::bail!("gtl-server returned an unspecified repository sync status")
+        }
+        v1::RepositorySyncStatus::Skip => RepoSyncStatus::Skip,
+        v1::RepositorySyncStatus::UpToDate => RepoSyncStatus::UpToDate,
+        v1::RepositorySyncStatus::Pushed => RepoSyncStatus::Pushed,
+        v1::RepositorySyncStatus::WouldPush => RepoSyncStatus::WouldPush,
+        v1::RepositorySyncStatus::Pulled => RepoSyncStatus::Pulled,
+        v1::RepositorySyncStatus::WouldPull => RepoSyncStatus::WouldPull,
+        v1::RepositorySyncStatus::Warning => RepoSyncStatus::Warn,
+        v1::RepositorySyncStatus::Failed => RepoSyncStatus::Fail,
+    };
+    Ok(PushPullResult {
+        name: ProjectName::try_new(result.project_name)
+            .map_err(|_| anyhow::anyhow!("gtl-server returned an empty project name"))?,
+        branch: result
+            .branch
+            .map(BranchName::try_new)
+            .transpose()
+            .map_err(|_| anyhow::anyhow!("gtl-server returned an empty branch name"))?,
+        status,
+        detail: result.detail,
+    })
 }
 
 fn format_push_pull(
@@ -203,11 +251,11 @@ fn format_push_pull(
     } else {
         let fail = results
             .iter()
-            .filter(|result| result.status == RepoSyncStatusDto::Fail)
+            .filter(|result| result.status == RepoSyncStatus::Fail)
             .count();
         let warn = results
             .iter()
-            .filter(|result| result.status == RepoSyncStatusDto::Warn)
+            .filter(|result| result.status == RepoSyncStatus::Warn)
             .count();
         let _ = write!(
             out,
@@ -223,11 +271,11 @@ fn format_push_pull(
 
 fn push_outcome(result: &PushPullResult) -> Result<PushOutcome, PushPullFormatError> {
     match result.status {
-        RepoSyncStatusDto::Pushed | RepoSyncStatusDto::WouldPush => Ok(PushOutcome::Pushed),
-        RepoSyncStatusDto::Skip | RepoSyncStatusDto::UpToDate => Ok(PushOutcome::Skipped),
-        RepoSyncStatusDto::Fail => Ok(PushOutcome::Failed),
-        RepoSyncStatusDto::Warn => Ok(PushOutcome::Warned),
-        RepoSyncStatusDto::Pulled | RepoSyncStatusDto::WouldPull => {
+        RepoSyncStatus::Pushed | RepoSyncStatus::WouldPush => Ok(PushOutcome::Pushed),
+        RepoSyncStatus::Skip | RepoSyncStatus::UpToDate => Ok(PushOutcome::Skipped),
+        RepoSyncStatus::Fail => Ok(PushOutcome::Failed),
+        RepoSyncStatus::Warn => Ok(PushOutcome::Warned),
+        RepoSyncStatus::Pulled | RepoSyncStatus::WouldPull => {
             Err(PushPullFormatError::PullOnlyStatus {
                 repo: result.name.clone(),
                 status: result.status,

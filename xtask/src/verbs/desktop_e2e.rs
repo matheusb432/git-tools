@@ -23,7 +23,6 @@ mod stable_runner;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
-const DOM_DAEMON_STORE_MAX: usize = 64;
 const WINDOW_TITLE_PATTERN: &str = "^git-tools diff viewer$";
 const EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "GTL_E2E_EVIDENCE_OUTPUT_PATH";
 const EVIDENCES_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "TEST_EVIDENCES_OUTPUT_PATH";
@@ -51,6 +50,7 @@ struct Sandbox {
     dom_data: PathBuf,
     browser_data: PathBuf,
     cli_binary: PathBuf,
+    server_binary: PathBuf,
     viewer_binary: PathBuf,
     cargo_runner_config: PathBuf,
     evidence_root: PathBuf,
@@ -90,6 +90,7 @@ impl Sandbox {
             dom_data: root.join("git-tools/dom"),
             browser_data: root.join("git-tools/browser"),
             cli_binary: release_binary("git-tools")?,
+            server_binary: release_binary("gtl-server")?,
             viewer_binary: release_binary("gtl-viewer")?,
             cargo_runner_config: root.join("cargo-runner.toml"),
             evidence_root,
@@ -135,6 +136,7 @@ impl Sandbox {
     }
 
     fn environment(&self, data_root: &Path) -> IsolatedEnv {
+        let settings_path = self.config.join("git-tools.toml");
         let mut pairs = vec![
             ("HOME", self.home.as_os_str()),
             ("XDG_CONFIG_HOME", self.config.as_os_str()),
@@ -148,9 +150,11 @@ impl Sandbox {
             ("LOCALAPPDATA", self.data.as_os_str()),
             ("APPDATA", self.config.as_os_str()),
             ("GIT_TOOLS_DATA_DIR", data_root.as_os_str()),
+            ("GIT_TOOLS_CONFIG", settings_path.as_os_str()),
             ("GTL_E2E_DATA_ROOT", data_root.as_os_str()),
             ("GTL_E2E_FIXTURE_ROOT", self.fixtures.as_os_str()),
             ("GTL_E2E_CLI_BINARY", self.cli_binary.as_os_str()),
+            ("GTL_E2E_SERVER_BINARY", self.server_binary.as_os_str()),
             ("GTL_E2E_VIEWER_BINARY", self.viewer_binary.as_os_str()),
             (
                 EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE,
@@ -305,104 +309,6 @@ impl Drop for ManagedChild {
     }
 }
 
-#[derive(Debug)]
-struct DaemonCleanupGuard {
-    cli: PathBuf,
-    cwd: PathBuf,
-    environments: Vec<(String, IsolatedEnv)>,
-    dom_data: PathBuf,
-    dom_environment: IsolatedEnv,
-    stopped: bool,
-}
-
-impl DaemonCleanupGuard {
-    fn new(sandbox: &Sandbox) -> Result<Self> {
-        let dom_environment = sandbox.environment(&sandbox.dom_data);
-        Ok(Self {
-            cli: release_binary("git-tools")?,
-            cwd: sandbox.root.clone(),
-            environments: vec![
-                ("native".into(), sandbox.environment(&sandbox.native_data)),
-                ("dom".into(), dom_environment.clone()),
-                ("browser".into(), sandbox.environment(&sandbox.browser_data)),
-            ],
-            dom_data: sandbox.dom_data.clone(),
-            dom_environment,
-            stopped: false,
-        })
-    }
-
-    fn stop(&mut self) -> Result<()> {
-        let mut failures = Vec::new();
-        let mut environments = self.environments.clone();
-        match daemon_data_roots(&self.dom_data) {
-            Ok(data_roots) => {
-                for data_root in data_roots {
-                    let mut environment = self.dom_environment.clone();
-                    environment.set("GIT_TOOLS_DATA_DIR", &data_root);
-                    environment.set("GTL_E2E_DATA_ROOT", &data_root);
-                    let name: String = data_root
-                        .file_name()
-                        .map_or_else(|| "dom/spec".into(), |name| name.to_string_lossy().into());
-                    environments.push((format!("dom/{name}"), environment));
-                }
-            }
-            Err(error) => failures.push(format!("DOM store discovery: {error:#}")),
-        }
-        for (name, environment) in &environments {
-            if let Err(error) = command_checked(
-                environment,
-                self.cli.to_string_lossy().as_ref(),
-                &["daemon", "stop"],
-                &self.cwd,
-            ) {
-                failures.push(format!("{name} store: {error:#}"));
-            }
-        }
-        if !failures.is_empty() {
-            bail!(
-                "failed to stop {} isolated daemon(s): {}",
-                failures.len(),
-                failures.join("; ")
-            );
-        }
-        self.stopped = true;
-        Ok(())
-    }
-}
-
-fn daemon_data_roots(dom_data: &Path) -> Result<Vec<PathBuf>> {
-    let mut roots = fs::read_dir(dom_data)
-        .with_context(|| format!("read DOM data root {}", dom_data.display()))?
-        .filter_map(|entry| match entry {
-            Ok(entry) => match entry.file_type() {
-                Ok(file_type) if file_type.is_dir() => Some(Ok(entry.path())),
-                Ok(_) => None,
-                Err(error) => Some(Err(error)),
-            },
-            Err(error) => Some(Err(error)),
-        })
-        .collect::<std::io::Result<Vec<_>>>()?;
-    roots.sort();
-    if roots.len() > DOM_DAEMON_STORE_MAX {
-        bail!(
-            "DOM daemon stores exceed maximum {DOM_DAEMON_STORE_MAX}: found {}",
-            roots.len()
-        );
-    }
-    Ok(roots)
-}
-
-impl Drop for DaemonCleanupGuard {
-    fn drop(&mut self) {
-        if !self.stopped
-            && let Err(error) = self.stop()
-        {
-            eprintln!("desktop-e2e: failed to stop an isolated daemon: {error:#}");
-        }
-    }
-}
-
 /// Build and run the platform desktop E2E workflow.
 pub fn run() -> Result<()> {
     workflow()
@@ -444,7 +350,6 @@ fn workflow() -> Result<()> {
 
     let sandbox = Sandbox::create()?;
     clear_evidence_outcomes(&sandbox.evidence_root, sandbox.success_evidence_requested)?;
-    let mut daemon_cleanup = DaemonCleanupGuard::new(&sandbox)?;
     let result = match std::env::consts::OS {
         "linux" => run_linux(&sandbox),
         "windows" => run_browser_phases(&sandbox, &sandbox.environment(&sandbox.dom_data)),
@@ -452,10 +357,8 @@ fn workflow() -> Result<()> {
             "hermetic desktop E2E is not configured for {unsupported}; Linux and Windows are supported"
         ),
     };
-    let cleanup_result = daemon_cleanup.stop();
     let logs_result = preserve_logs(&sandbox);
     result?;
-    cleanup_result?;
     logs_result
 }
 
@@ -580,6 +483,13 @@ fn start_private_dbus(
 fn run_native_phase(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
     let viewer = release_binary("gtl-viewer")?;
     let cli = release_binary("git-tools")?;
+    let _server = start_server(
+        sandbox,
+        env,
+        &sandbox.native_data,
+        "native gtl-server",
+        "native-server.log",
+    )?;
     let _viewer = ManagedChild::spawn(
         "native viewer",
         viewer.to_string_lossy().as_ref(),
@@ -663,11 +573,37 @@ fn run_dom_phase(
 fn run_browser_phases(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
     let host_environment = HostCargoEnvironment::capture()?;
     run_dom_phase(sandbox, env, &host_environment)?;
-    playwright::run(
+    let browser_environment = sandbox.environment(&sandbox.browser_data);
+    let _server = start_server(
         sandbox,
-        &sandbox.environment(&sandbox.browser_data),
-        &host_environment,
-    )
+        &browser_environment,
+        &sandbox.browser_data,
+        "browser gtl-server",
+        "browser-server.log",
+    )?;
+    playwright::run(sandbox, &browser_environment, &host_environment)
+}
+
+fn start_server(
+    sandbox: &Sandbox,
+    environment: &IsolatedEnv,
+    data_root: &Path,
+    name: &'static str,
+    log_name: &str,
+) -> Result<ManagedChild> {
+    let endpoint = data_root.join("server").join("endpoint.json");
+    let server = ManagedChild::spawn(
+        name,
+        sandbox.server_binary.to_string_lossy().as_ref(),
+        &[],
+        environment,
+        &sandbox.root,
+        &sandbox.logs.join(log_name),
+    )?;
+    retry("gtl-server endpoint publication", READY_TIMEOUT, || {
+        endpoint.is_file()
+    })?;
+    Ok(server)
 }
 
 fn clear_evidence_outcomes(evidence_root: &Path, success_evidence_requested: bool) -> Result<()> {
@@ -865,36 +801,9 @@ mod tests {
     };
 
     use super::{
-        DOM_DAEMON_STORE_MAX, HostCargoEnvironment, IsolatedEnv, cargo_runner_config,
-        clear_evidence_outcomes, daemon_data_roots, runtime_command,
+        HostCargoEnvironment, IsolatedEnv, cargo_runner_config, clear_evidence_outcomes,
+        runtime_command,
     };
-
-    #[test]
-    fn daemon_cleanup_discovers_bounded_direct_dom_stores() {
-        let dom_root = tempfile::tempdir().expect("temporary DOM data root");
-        let one_shot = dom_root.path().join("viewer-one-shot-lifecycle");
-        let live = dom_root.path().join("viewer-live-lifecycle");
-        fs::create_dir_all(one_shot.join("nested")).expect("create one-shot data root");
-        fs::create_dir(&live).expect("create live data root");
-        fs::write(dom_root.path().join("state.db"), b"ignored").expect("write root file");
-
-        let roots = daemon_data_roots(dom_root.path()).expect("discover daemon data roots");
-
-        assert_eq!(roots, vec![live, one_shot]);
-    }
-
-    #[test]
-    fn daemon_cleanup_rejects_unbounded_dom_stores() {
-        let dom_root = tempfile::tempdir().expect("temporary DOM data root");
-        for index in 0..=DOM_DAEMON_STORE_MAX {
-            fs::create_dir(dom_root.path().join(format!("suite-{index:02}")))
-                .expect("create DOM data root");
-        }
-
-        let error = daemon_data_roots(dom_root.path()).unwrap_err();
-
-        assert!(error.to_string().contains("maximum"));
-    }
 
     #[test]
     fn plain_run_clears_failures_and_preserves_success_evidence() {

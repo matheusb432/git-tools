@@ -26,7 +26,7 @@ pub struct Spec {
 
 pub struct RawArtifactFixture {
     repository: tempfile::TempDir,
-    config: tempfile::NamedTempFile,
+    config: PathBuf,
 }
 
 impl Spec {
@@ -118,7 +118,9 @@ pub async fn repository_with_raw_changes() -> Result<RawArtifactFixture> {
         &["commit", "-q", "-m", "artifact change"],
     )
     .await?;
-    let config = tempfile::NamedTempFile::new().context("create raw artifact config")?;
+    let config = env::var_os("GIT_TOOLS_CONFIG")
+        .map(PathBuf::from)
+        .context("GIT_TOOLS_CONFIG is required for browser E2E")?;
     Ok(RawArtifactFixture { repository, config })
 }
 
@@ -132,13 +134,12 @@ pub async fn render_raw_diff(
         .context("GTL_E2E_CLI_BINARY is required for browser E2E")?;
     let mut command = Command::new(&cli_binary);
     std::fs::write(
-        fixture.config.path(),
+        &fixture.config,
         format!("layout = {layout:?}\ndensity = {density:?}\n"),
     )
     .context("write raw artifact presentation config")?;
     command
         .args(["diff", "--raw"])
-        .env("GIT_TOOLS_CONFIG", fixture.config.path())
         .current_dir(fixture.repository.path());
     let output = command_output(command, "git-tools diff --raw").await?;
     ensure_success(&output, "git-tools diff --raw")?;

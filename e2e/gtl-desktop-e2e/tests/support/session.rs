@@ -2,11 +2,11 @@ use std::{
     env, fs,
     net::TcpListener,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     time::Duration,
 };
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use command_group::{CommandGroup, GroupChild};
 #[cfg(unix)]
 use command_group::{Signal, UnixChildExt};
@@ -18,6 +18,7 @@ use super::wait::{self, WEBDRIVER_OPERATION_TIMEOUT};
 
 const START_ATTEMPTS_MAX: usize = 5;
 const START_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(15);
+const SERVER_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECTION_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 const CHILD_EXIT_GRACE_TIMEOUT: Duration = Duration::from_millis(500);
 const CHILD_TERMINATE_TIMEOUT: Duration = Duration::from_millis(500);
@@ -27,6 +28,7 @@ const CLEANUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 pub struct TestSession {
     driver: Option<WebDriver>,
     driver_child: Option<GroupChild>,
+    server_child: Option<GroupChild>,
     data_root: PathBuf,
 }
 
@@ -39,6 +41,7 @@ impl TestSession {
     async fn start_with_data_root(data_root: PathBuf) -> Result<Self> {
         verify_runtime_environment()?;
         let viewer_binary = viewer_binary()?;
+        let mut server_child = start_server(&data_root).await?;
         let mut failure = None;
 
         for attempt in 1..=START_ATTEMPTS_MAX {
@@ -74,6 +77,7 @@ impl TestSession {
                     return Ok(Self {
                         driver: Some(driver),
                         driver_child: Some(driver_child),
+                        server_child: Some(server_child),
                         data_root,
                     });
                 }
@@ -89,12 +93,18 @@ impl TestSession {
                 }
             }
 
-            terminate_child(&mut driver_child)
+            terminate_child("tauri-driver", &mut driver_child)
                 .await
                 .with_context(|| format!("clean up tauri-driver attempt {attempt}"))?;
         }
 
-        Err(failure.unwrap_or_else(|| anyhow!("tauri-driver did not start")))
+        let error = failure.unwrap_or_else(|| anyhow!("tauri-driver did not start"));
+        match terminate_child("gtl-server", &mut server_child).await {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => {
+                Err(error.context(format!("gtl-server cleanup also failed: {cleanup_error:#}")))
+            }
+        }
     }
 
     pub fn driver(&self) -> &WebDriver {
@@ -140,19 +150,33 @@ impl TestSession {
             None => Ok(()),
         };
         let child_result = match self.driver_child.as_mut() {
-            Some(child) => terminate_child(child).await,
+            Some(child) => terminate_child("tauri-driver", child).await,
             None => Ok(()),
         };
         if child_result.is_ok() {
             self.driver_child.take();
         }
 
-        match (driver_result, child_result) {
+        let driver_result = match (driver_result, child_result) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(driver_error), Ok(())) => Err(driver_error),
             (Ok(()), Err(child_error)) => Err(child_error),
             (Err(driver_error), Err(child_error)) => Err(driver_error)
                 .context(format!("tauri-driver cleanup also failed: {child_error:#}")),
+        };
+        let server_result = match self.server_child.as_mut() {
+            Some(child) => terminate_child("gtl-server", child).await,
+            None => Ok(()),
+        };
+        if server_result.is_ok() {
+            self.server_child.take();
+        }
+        match (driver_result, server_result) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(driver_error), Ok(())) => Err(driver_error),
+            (Ok(()), Err(server_error)) => Err(server_error),
+            (Err(driver_error), Err(server_error)) => Err(driver_error)
+                .context(format!("gtl-server cleanup also failed: {server_error:#}")),
         }
     }
 }
@@ -179,6 +203,56 @@ impl Drop for TestSession {
         if let Some(child) = self.driver_child.as_mut() {
             let _ = child.kill();
         }
+        if let Some(child) = self.server_child.as_mut() {
+            let _ = child.kill();
+        }
+    }
+}
+
+async fn start_server(data_root: &Path) -> Result<GroupChild> {
+    let server_binary = required_binary("GTL_E2E_SERVER_BINARY", "gtl-server")?;
+    let endpoint = data_root.join("server").join("endpoint.json");
+    match fs::remove_file(&endpoint) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("remove stale server endpoint {}", endpoint.display()));
+        }
+    }
+    let mut command = Command::new(&server_binary);
+    command
+        .env("GIT_TOOLS_DATA_DIR", data_root)
+        .stdin(Stdio::null());
+    deny_external_proxies(&mut command);
+    let mut child = command.group_spawn().with_context(|| {
+        format!(
+            "spawn gtl-server for desktop E2E from {}",
+            server_binary.display()
+        )
+    })?;
+    let deadline = Instant::now() + SERVER_READY_TIMEOUT;
+    loop {
+        if endpoint.is_file() {
+            return Ok(child);
+        }
+        if let Some(status) = child.try_wait().context("inspect gtl-server launch")? {
+            bail!("gtl-server exited before endpoint publication ({status})");
+        }
+        if Instant::now() >= deadline {
+            let cleanup = terminate_child("gtl-server", &mut child).await;
+            let error = anyhow!(
+                "gtl-server did not publish {} within {SERVER_READY_TIMEOUT:?}",
+                endpoint.display()
+            );
+            return match cleanup {
+                Ok(()) => Err(error),
+                Err(cleanup_error) => {
+                    Err(error.context(format!("gtl-server cleanup also failed: {cleanup_error:#}")))
+                }
+            };
+        }
+        sleep(CONNECTION_RETRY_INTERVAL).await;
     }
 }
 
@@ -229,12 +303,16 @@ fn verify_runtime_environment() -> Result<()> {
 }
 
 fn viewer_binary() -> Result<String> {
-    let path = env::var_os("GTL_E2E_VIEWER_BINARY")
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow!("GTL_E2E_VIEWER_BINARY is required"))?;
+    let path = required_binary("GTL_E2E_VIEWER_BINARY", "viewer")?;
     path.canonicalize()
         .with_context(|| format!("canonicalize viewer binary {}", path.display()))
         .map(|path| path.to_string_lossy().into_owned())
+}
+
+fn required_binary(environment_variable: &str, label: &str) -> Result<PathBuf> {
+    env::var_os(environment_variable)
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow!("{environment_variable} is required for the {label}"))
 }
 
 fn deny_external_proxies(command: &mut Command) {
@@ -279,29 +357,30 @@ fn available_port_pair() -> Result<DriverPorts> {
     })
 }
 
-async fn terminate_child(child: &mut GroupChild) -> Result<()> {
+async fn terminate_child(name: &str, child: &mut GroupChild) -> Result<()> {
     if wait_for_exit(child, CHILD_EXIT_GRACE_TIMEOUT).await? {
         return Ok(());
     }
 
-    if request_driver_group_termination(child).context("terminate tauri-driver process group")?
+    if request_group_termination(child)
+        .with_context(|| format!("terminate {name} process group"))?
         && wait_for_exit(child, CHILD_TERMINATE_TIMEOUT).await?
     {
         return Ok(());
     }
 
-    force_kill_driver_group(child).context("kill tauri-driver process group")?;
+    force_kill_group(child).with_context(|| format!("kill {name} process group"))?;
     if wait_for_exit(child, CLEANUP_TIMEOUT).await? {
         return Ok(());
     }
 
     Err(anyhow!(
-        "tauri-driver process group did not exit within {CLEANUP_TIMEOUT:?} after kill"
+        "{name} process group did not exit within {CLEANUP_TIMEOUT:?} after kill"
     ))
 }
 
 #[cfg(unix)]
-fn request_driver_group_termination(child: &GroupChild) -> std::io::Result<bool> {
+fn request_group_termination(child: &GroupChild) -> std::io::Result<bool> {
     match child.signal(Signal::SIGTERM) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => Ok(false),
@@ -310,11 +389,11 @@ fn request_driver_group_termination(child: &GroupChild) -> std::io::Result<bool>
 }
 
 #[cfg(windows)]
-fn request_driver_group_termination(_: &GroupChild) -> std::io::Result<bool> {
+fn request_group_termination(_: &GroupChild) -> std::io::Result<bool> {
     Ok(false)
 }
 
-fn force_kill_driver_group(child: &mut GroupChild) -> std::io::Result<()> {
+fn force_kill_group(child: &mut GroupChild) -> std::io::Result<()> {
     match child.kill() {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => Ok(()),
@@ -350,7 +429,7 @@ mod tests {
 
     use command_group::CommandGroup;
 
-    use super::{request_driver_group_termination, wait_for_exit};
+    use super::{request_group_termination, wait_for_exit};
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
@@ -371,7 +450,7 @@ mod tests {
             panic!("child pid was not written");
         };
 
-        let termination_requested = request_driver_group_termination(&child);
+        let termination_requested = request_group_termination(&child);
         if !matches!(&termination_requested, Ok(true)) {
             let _ = child.kill();
             let _ = wait_for_exit(&mut child, Duration::from_secs(1)).await;

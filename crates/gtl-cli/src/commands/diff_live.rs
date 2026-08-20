@@ -1,26 +1,36 @@
-//! `gtl diff live`: validate + persist a live view of unpushed work through the
-//! daemon's `POST /live-views/save`, then forward it to the Dioxus viewer shell.
+//! `gtl diff live`: validate and persist a live view of unpushed work through
+//! `gtl-server`, then forward it to the Dioxus viewer shell.
 //! `--path <p>` saves one repo; with no path, every managed repo with unpushed
 //! commits is saved and forwarded as one batch.
 
 use anyhow::Context as _;
+use gtl_models::{
+    live_views::LiveSource,
+    paths::{ProjectName, RepositoryRoot},
+    recipes::RecipeBatchId,
+};
 use gtl_wire::{
-    envelope::Outcome,
-    live_views::{SaveLiveViewData, SaveLiveViewRequest},
     recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget},
+    v1,
 };
 
-use crate::client::HttpClient;
+use crate::server_client::ServerClient;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SavedLiveView {
+    source: LiveSource,
+    display_name: ProjectName,
+}
 
 /// Save + open a live view: `path` targets one repo, `None` fans out over every
 /// managed repo with unpushed commits.
 ///
 /// # Errors
-/// Returns an error when the daemon can't be reached, or (for `--path`) the save
-/// is rejected — the error text is the daemon's own service-composed message,
+/// Returns an error when the server cannot be reached, or (for `--path`) the save
+/// is rejected. The rejection keeps the server's service-composed message,
 /// printed verbatim by the caller's exit path.
 pub fn run(path: Option<String>) -> anyhow::Result<()> {
-    let client = HttpClient::ensure_daemon()?;
+    let client = ServerClient::connect()?;
     match path {
         Some(path) => run_single(&client, &path),
         None => run_managed(&client),
@@ -29,10 +39,10 @@ pub fn run(path: Option<String>) -> anyhow::Result<()> {
 
 /// `--path <p>`: save one live view and forward it alone. A rejected save
 /// propagates as an error and forwards nothing.
-fn run_single(client: &HttpClient, path: &str) -> anyhow::Result<()> {
+fn run_single(client: &ServerClient, path: &str) -> anyhow::Result<()> {
     let data = save_one(client, path)?;
     let batch = OpenRecipes {
-        batch_id: crate::recipe::new_batch_id(),
+        batch_id: RecipeBatchId::generate(),
         kind: RecipeBatchKind::Live,
         recipes: vec![live_recipe(&data)],
     };
@@ -42,20 +52,17 @@ fn run_single(client: &HttpClient, path: &str) -> anyhow::Result<()> {
 
 /// No `--path`: save every managed repo with unpushed commits, forwarding the ones that
 /// saved successfully as one batch.
-fn run_managed(client: &HttpClient) -> anyhow::Result<()> {
-    let tops = crate::recipe::selected_managed_repos()?;
-    if tops.is_empty() {
+fn run_managed(client: &ServerClient) -> anyhow::Result<()> {
+    let response = client.save_project_live_views()?;
+    if response.results.is_empty() {
         println!("diff live: no managed repos with unpushed commits");
         return Ok(());
     }
 
     let mut recipes = Vec::new();
-    for repo_top in tops {
-        let path = repo_top.path.to_string_lossy().into_owned();
-        match save_one(client, &path) {
+    for result in response.results {
+        match saved_from_response(result) {
             Ok(data) => recipes.push(live_recipe(&data)),
-            // One repo's rejection doesn't fail the whole batch; `save_one` withholds
-            // the rejection notes on error, so print the composed message once here.
             Err(err) => eprintln!("diff live: {err:#}"),
         }
     }
@@ -65,7 +72,7 @@ fn run_managed(client: &HttpClient) -> anyhow::Result<()> {
     }
 
     let batch = OpenRecipes {
-        batch_id: crate::recipe::new_batch_id(),
+        batch_id: RecipeBatchId::generate(),
         kind: RecipeBatchKind::Live,
         recipes,
     };
@@ -74,30 +81,61 @@ fn run_managed(client: &HttpClient) -> anyhow::Result<()> {
 }
 
 /// Validate and persist one live-view source. On success, prints
-/// the envelope's wire notes and returns the saved data. A rejection
-/// (`Outcome::Error`) becomes the service-composed error text, printed once by the
-/// caller's exit path, so the notes are deliberately NOT printed here; any other
-/// non-`Ok` outcome is treated the same way (the endpoint never returns `Empty`).
-fn save_one(client: &HttpClient, path: &str) -> anyhow::Result<SaveLiveViewData> {
-    let request = SaveLiveViewRequest {
+/// the response notes and returns the saved data. A rejection becomes the
+/// service-composed error text and is printed once by the caller's exit path.
+fn save_one(client: &ServerClient, path: &str) -> anyhow::Result<SavedLiveView> {
+    let request = v1::SaveLiveViewRequest {
         path: std::path::absolute(path)?.to_string_lossy().into_owned(),
     };
-    let envelope = client.save_live_view(&request)?;
-    match envelope.outcome {
-        // Print the success (Info) notes and surface the data. On rejection we do NOT
-        // print the notes: the caller turns `error_text` (which now falls back to the
-        // rejection's Warn note) into the returned error, printed once by the exit path;
-        // printing here too would double up the message.
-        Outcome::Ok => {
-            super::print_wire_notes(&envelope.notes);
-            envelope.data.context("daemon returned ok without data")
+    saved_from_response(client.save_live_view(request)?)
+}
+
+fn saved_from_response(response: v1::SaveLiveViewResponse) -> anyhow::Result<SavedLiveView> {
+    match response
+        .outcome
+        .context("gtl-server returned no live-view outcome")?
+    {
+        v1::save_live_view_response::Outcome::Saved(saved) => {
+            print_notes(&response.notes)?;
+            match v1::SaveLiveViewDisposition::try_from(saved.disposition) {
+                Ok(
+                    v1::SaveLiveViewDisposition::Created | v1::SaveLiveViewDisposition::Refreshed,
+                ) => {}
+                Ok(v1::SaveLiveViewDisposition::Unspecified) | Err(_) => {
+                    anyhow::bail!("gtl-server returned an invalid live-view disposition")
+                }
+            }
+            let repository_root = RepositoryRoot::try_new(saved.repository_root.into())
+                .context("gtl-server returned a non-absolute live-view repository root")?;
+            let display_name = ProjectName::try_new(saved.display_name)
+                .context("gtl-server returned an empty live-view display name")?;
+            Ok(SavedLiveView {
+                source: LiveSource::local_repo(repository_root),
+                display_name,
+            })
         }
-        _ => Err(anyhow::anyhow!(super::error_text(&envelope.notes))),
+        v1::save_live_view_response::Outcome::Rejected(rejection) => {
+            anyhow::bail!(rejection.detail)
+        }
     }
 }
 
+fn print_notes(notes: &[v1::Note]) -> anyhow::Result<()> {
+    for note in notes {
+        match v1::NoteLevel::try_from(note.level) {
+            Ok(v1::NoteLevel::Info) => println!("{}", note.text),
+            Ok(v1::NoteLevel::Warning) => eprintln!("{}", note.text),
+            Ok(v1::NoteLevel::Error) => anyhow::bail!(note.text.clone()),
+            Ok(v1::NoteLevel::Unspecified) | Err(_) => {
+                anyhow::bail!("gtl-server returned an invalid live-view note level")
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Map a saved live view onto the recipe that renders its unpushed work.
-fn live_recipe(data: &SaveLiveViewData) -> Recipe {
+fn live_recipe(data: &SavedLiveView) -> Recipe {
     let gtl_models::live_views::LiveSource::LocalRepo { path } = &data.source;
     Recipe {
         source: RecipeSource::LocalRepo(path.clone()),
@@ -150,10 +188,9 @@ mod tests {
 
     #[test]
     fn live_recipe_maps_the_typed_source_to_an_unpushed_diff_recipe() {
-        let data = SaveLiveViewData {
-            source: gtl_models::live_views::LiveSource::local_repo(repository_root("/repos/three")),
+        let data = SavedLiveView {
+            source: LiveSource::local_repo(repository_root("/repos/three")),
             display_name: project_name("three"),
-            disposition: gtl_wire::live_views::SaveLiveViewDisposition::Refreshed,
         };
 
         assert_eq!(

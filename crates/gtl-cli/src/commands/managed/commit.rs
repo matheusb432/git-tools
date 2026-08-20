@@ -2,15 +2,60 @@
 
 use std::fmt::Write as _;
 
-pub use gtl_application::projects::commit_repositories::CommitResult;
-use gtl_application::projects::commit_repositories::{
-    self, CommitAction, CommitExit, CommitRepositoriesMode,
-};
-use gtl_infra::git_client::HybridGitClient;
+use anyhow::Context as _;
+use gtl_models::paths::{ProjectName, RepositoryRelativePath};
 pub use gtl_models::repository::working_tree::CommitFile;
+use gtl_wire::v1;
 use serde::Serialize;
 
 use super::{ManagedExit, ManagedOptions, ManagedRun};
+use crate::server_client::ServerClient;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommitAction {
+    Absent,
+    Clean,
+    WouldCommit,
+    Skipped,
+    Committed,
+    Fail,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitResult {
+    name: ProjectName,
+    present: bool,
+    dirty: bool,
+    files: Vec<CommitFile>,
+    action: CommitAction,
+    detail: String,
+}
+
+impl CommitResult {
+    fn name(&self) -> &ProjectName {
+        &self.name
+    }
+
+    const fn is_present(&self) -> bool {
+        self.present
+    }
+
+    const fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    fn files(&self) -> &[CommitFile] {
+        &self.files
+    }
+
+    const fn action(&self) -> CommitAction {
+        self.action
+    }
+
+    fn detail(&self) -> &str {
+        &self.detail
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
@@ -20,7 +65,7 @@ struct CommitResultJson<'a> {
     dirty: bool,
     files: &'a [CommitFile],
     action: &'static str,
-    detail: String,
+    detail: &'a str,
 }
 
 fn action_wire(action: CommitAction) -> &'static str {
@@ -34,104 +79,108 @@ fn action_wire(action: CommitAction) -> &'static str {
     }
 }
 
-const fn managed_exit(exit: CommitExit) -> ManagedExit {
-    match exit {
-        CommitExit::Clean => ManagedExit::Clean,
-        CommitExit::Warn => ManagedExit::Warn,
-        CommitExit::Fail => ManagedExit::Fail,
-    }
-}
-
 pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
     if let Some(message) = &options.message_for_all
         && message.trim().is_empty()
     {
-        return ManagedRun {
-            exit: ManagedExit::Usage,
-            results: Vec::new(),
-            stdout: String::new(),
-            stderr: "commit --all requires a non-empty message".to_string(),
-        };
+        return usage_failure("commit --all requires a non-empty message");
     }
 
     if !options.dry && options.message_for_all.is_none() && !options.interactive {
-        return ManagedRun {
-            exit: ManagedExit::Usage,
-            results: Vec::new(),
-            stdout: String::new(),
-            stderr: "commit --all requires a message unless --dry is used".to_string(),
-        };
+        return usage_failure("commit --all requires a message unless --dry is used");
     }
 
-    match super::project_catalog::load_projects() {
-        Ok(repos) => {
-            let execution = commit_repositories::execute(
-                commit_repositories::CommitRepositories {
-                    repos,
-                    mode: if options.dry {
-                        CommitRepositoriesMode::DryRun
-                    } else {
-                        CommitRepositoriesMode::Apply {
-                            message: options.message_for_all.clone(),
-                        }
-                    },
-                },
-                &HybridGitClient,
-            );
-            project_commit_execution(options.output.is_json(), execution)
-        }
-        Err(error) => ManagedRun {
-            exit: ManagedExit::Fail,
-            results: Vec::new(),
-            stdout: String::new(),
-            stderr: format!("{error:#}"),
-        },
+    let execution = ServerClient::connect().and_then(|client| {
+        client.commit_project_repositories(v1::CommitProjectRepositoriesRequest {
+            dry_run: options.dry,
+            message: options.message_for_all.clone(),
+        })
+    });
+    project_commit_execution(options.output.is_json(), execution)
+}
+
+fn usage_failure(message: &str) -> ManagedRun<CommitResult> {
+    ManagedRun {
+        exit: ManagedExit::Usage,
+        results: Vec::new(),
+        stdout: String::new(),
+        stderr: message.to_owned(),
     }
 }
 
 fn project_commit_execution(
     json: bool,
-    execution: Result<
-        commit_repositories::CommitRepositoriesOk,
-        commit_repositories::CommitRepositoriesError,
-    >,
+    execution: anyhow::Result<v1::CommitProjectRepositoriesResponse>,
 ) -> ManagedRun<CommitResult> {
-    match execution {
-        Ok(result) => {
-            let exit = managed_exit(result.exit);
-            let stdout = format_commit(exit, json, &result.results);
-            ManagedRun {
-                exit,
-                results: result.results,
-                stdout,
-                stderr: String::new(),
-            }
+    let response = match execution {
+        Ok(response) => response,
+        Err(error) => return transport_failure(format!("{error:#}")),
+    };
+    let results = match response
+        .results
+        .into_iter()
+        .map(commit_result_from_grpc)
+        .collect::<anyhow::Result<Vec<_>>>()
+    {
+        Ok(results) => results,
+        Err(error) => return transport_failure(format!("{error:#}")),
+    };
+    let exit = match v1::ProjectCommitExit::try_from(response.exit) {
+        Ok(v1::ProjectCommitExit::Clean) => ManagedExit::Clean,
+        Ok(v1::ProjectCommitExit::Warning) => ManagedExit::Warn,
+        Ok(v1::ProjectCommitExit::Failed) => ManagedExit::Fail,
+        Ok(v1::ProjectCommitExit::Unspecified) | Err(_) => {
+            return transport_failure("gtl-server returned an invalid project commit exit".into());
         }
-        Err(error) => {
-            let stderr = format!("{error:#}");
-            let results = match error {
-                commit_repositories::CommitRepositoriesError::Transport {
-                    mut completed_results,
-                    failed_result,
-                    ..
-                } => {
-                    if let Some(failed_result) = failed_result {
-                        completed_results.push(*failed_result);
-                    }
-                    completed_results
-                }
-                _ => Vec::new(),
-            };
-            let exit = ManagedExit::Fail;
-            let stdout = format_commit(exit, json, &results);
-            ManagedRun {
-                exit,
-                results,
-                stdout,
-                stderr,
-            }
-        }
+    };
+    let stdout = format_commit(exit, json, &results);
+    ManagedRun {
+        exit,
+        results,
+        stdout,
+        stderr: response.failure_detail.unwrap_or_default(),
     }
+}
+
+fn transport_failure(message: String) -> ManagedRun<CommitResult> {
+    ManagedRun {
+        exit: ManagedExit::Fail,
+        results: Vec::new(),
+        stdout: String::new(),
+        stderr: message,
+    }
+}
+
+fn commit_result_from_grpc(result: v1::ProjectCommitResult) -> anyhow::Result<CommitResult> {
+    Ok(CommitResult {
+        name: ProjectName::try_new(result.project_name)
+            .context("gtl-server returned an empty project name")?,
+        present: result.present,
+        dirty: result.dirty,
+        files: result
+            .files
+            .into_iter()
+            .map(|file| {
+                Ok(CommitFile {
+                    status: file.status,
+                    path: RepositoryRelativePath::try_new(file.path.into())
+                        .context("gtl-server returned an invalid changed-file path")?,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?,
+        action: match v1::ProjectCommitAction::try_from(result.action) {
+            Ok(v1::ProjectCommitAction::Absent) => CommitAction::Absent,
+            Ok(v1::ProjectCommitAction::Clean) => CommitAction::Clean,
+            Ok(v1::ProjectCommitAction::WouldCommit) => CommitAction::WouldCommit,
+            Ok(v1::ProjectCommitAction::Skipped) => CommitAction::Skipped,
+            Ok(v1::ProjectCommitAction::Committed) => CommitAction::Committed,
+            Ok(v1::ProjectCommitAction::Failed) => CommitAction::Fail,
+            Ok(v1::ProjectCommitAction::Unspecified) | Err(_) => {
+                anyhow::bail!("gtl-server returned an invalid project commit action")
+            }
+        },
+        detail: result.detail,
+    })
 }
 
 fn format_commit(exit: ManagedExit, json: bool, results: &[CommitResult]) -> String {
@@ -139,12 +188,12 @@ fn format_commit(exit: ManagedExit, json: bool, results: &[CommitResult]) -> Str
         let projected = results
             .iter()
             .map(|result| CommitResultJson {
-                name: result.name(),
+                name: result.name().as_str(),
                 present: result.is_present(),
                 dirty: result.is_dirty(),
                 files: result.files(),
                 action: action_wire(result.action()),
-                detail: result.detail().into_owned(),
+                detail: result.detail(),
             })
             .collect::<Vec<_>>();
         return serde_json::to_string_pretty(&projected).unwrap_or_else(|_| "[]".to_string());
@@ -167,31 +216,25 @@ fn format_commit(exit: ManagedExit, json: bool, results: &[CommitResult]) -> Str
 
 #[cfg(test)]
 mod tests {
-    use gtl_application::projects::commit_repositories::CommitOutcome;
-    use gtl_models::repository::working_tree::ChangedFiles;
-
     use super::*;
-    use crate::testing::{commit_id, project_name, repository_relative_path};
+    use crate::testing::{project_name, repository_relative_path};
 
     fn committed_result() -> CommitResult {
-        CommitResult::new(
-            project_name("api"),
-            CommitOutcome::Committed {
-                files: ChangedFiles::try_new(vec![CommitFile {
-                    status: "M".into(),
-                    path: repository_relative_path("src/lib.rs"),
-                }])
-                .expect("fixture changed files are non-empty"),
-                detail: "[main abc1234] save".into(),
-                id: commit_id("a"),
-            },
-        )
+        CommitResult {
+            name: project_name("api"),
+            present: true,
+            dirty: true,
+            files: vec![CommitFile {
+                status: "M".into(),
+                path: repository_relative_path("src/lib.rs"),
+            }],
+            action: CommitAction::Committed,
+            detail: "[main abc1234] save".into(),
+        }
     }
 
     #[test]
     fn commit_action_wire_tokens_are_byte_stable() {
-        // The `--json` `Action` field and the action-table column emit these tokens;
-        // changing one is a breaking output change, so pin every variant.
         assert_eq!(action_wire(CommitAction::Absent), "absent");
         assert_eq!(action_wire(CommitAction::Clean), "clean");
         assert_eq!(action_wire(CommitAction::WouldCommit), "would-commit");
@@ -201,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_json_projection_is_byte_stable_and_omits_application_metadata() {
+    fn commit_json_projection_is_byte_stable_and_omits_server_metadata() {
         let results = vec![committed_result()];
 
         assert_eq!(
@@ -228,18 +271,28 @@ mod tests {
 
     #[test]
     fn transport_failure_projection_preserves_completed_stdout_and_stderr() {
-        let completed_result = committed_result();
-        let execution = Err(commit_repositories::CommitRepositoriesError::Transport {
-            failed_repo: project_name("web"),
-            completed_results: vec![completed_result.clone()],
-            failed_result: None,
-            source: anyhow::anyhow!("git transport unavailable"),
-        });
+        let response = v1::CommitProjectRepositoriesResponse {
+            results: vec![v1::ProjectCommitResult {
+                project_name: "api".into(),
+                present: true,
+                dirty: true,
+                files: vec![v1::CommitFile {
+                    status: "M".into(),
+                    path: "src/lib.rs".into(),
+                }],
+                action: v1::ProjectCommitAction::Committed as i32,
+                detail: "[main abc1234] save".into(),
+            }],
+            exit: v1::ProjectCommitExit::Failed as i32,
+            failure_detail: Some(
+                "project commit failed for 'web': git transport unavailable".into(),
+            ),
+        };
 
-        let run = project_commit_execution(false, execution);
+        let run = project_commit_execution(false, Ok(response));
 
         assert_eq!(run.exit, ManagedExit::Fail);
-        assert_eq!(run.results, vec![completed_result]);
+        assert_eq!(run.results, vec![committed_result()]);
         assert_eq!(
             run.stdout,
             concat!(

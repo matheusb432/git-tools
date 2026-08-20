@@ -6,6 +6,8 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberI
 
 mod config;
 mod server;
+mod services;
+mod state;
 
 use config::Config;
 
@@ -16,6 +18,7 @@ pub async fn run() -> anyhow::Result<()> {
     let config = Config::from_env()?;
     let local_auth = LocalAuth::from_environment()?;
     let capability = local_auth.load_or_create_server_token()?;
+    let state = state::AppState::open(local_auth.data_root())?;
     let listener = tokio::net::TcpListener::bind(config.bind_address)
         .await
         .with_context(|| format!("binding gtl-server to {}", config.bind_address))?;
@@ -27,7 +30,7 @@ pub async fn run() -> anyhow::Result<()> {
     let shutdown = shutdown_signal()?;
 
     tracing::info!(address = %local_address, "gtl-server ready");
-    server::serve(listener, shutdown, SHUTDOWN_GRACE_PERIOD, capability)
+    server::serve(listener, shutdown, SHUTDOWN_GRACE_PERIOD, capability, state)
         .await
         .context("serving gtl-server")?;
     tracing::info!("gtl-server stopped");

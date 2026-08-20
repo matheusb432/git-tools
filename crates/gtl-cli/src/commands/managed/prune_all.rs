@@ -2,16 +2,16 @@
 
 use std::fmt::Write as _;
 
-use gtl_application::projects::prune_branches::{self, PruneAction, PruneExit};
-use gtl_infra::git_client::HybridGitClient;
-use gtl_models::{
-    diffs::CommitId,
-    git::{BranchName, GitEffectMode},
-    paths::ProjectName,
-};
+use anyhow::Context as _;
+use gtl_models::{diffs::CommitId, git::BranchName, paths::ProjectName};
+use gtl_wire::v1;
 use serde::Serialize;
 
 use super::{ManagedExit, ManagedOptions, ManagedRun};
+use crate::{
+    commands::prune::{PruneFailure, PruneResult, PruneStatus},
+    server_client::ServerClient,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "PascalCase")]
@@ -36,133 +36,145 @@ pub struct PruneRepoResult {
 /// without `-y`) each repo only reports what *would* be deleted; otherwise branches are
 /// deleted. Any non-clean repo (a delete failure or a refusal) maps to [`ManagedExit::Warn`].
 pub fn run_prune_all(onto: &BranchName, options: &ManagedOptions) -> ManagedRun<PruneRepoResult> {
-    match super::project_catalog::load_projects() {
-        Ok(repos) => {
-            let execution = prune_branches::execute(
-                prune_branches::PruneBranches {
-                    repos,
-                    onto: onto.clone(),
-                    mode: if options.dry {
-                        GitEffectMode::DryRun
-                    } else {
-                        GitEffectMode::Apply
-                    },
-                },
-                &HybridGitClient,
-            );
-            project_prune_execution(onto, options.dry, options.output.is_json(), execution)
-        }
-        Err(error) => ManagedRun {
-            exit: ManagedExit::Fail,
-            results: Vec::new(),
-            stdout: String::new(),
-            stderr: format!("{error:#}"),
-        },
-    }
+    let execution = ServerClient::connect().and_then(|client| {
+        client.prune_project_branches(v1::PruneProjectBranchesRequest {
+            onto_branch: onto.to_string(),
+            dry_run: options.dry,
+        })
+    });
+    project_prune_execution(onto, options.dry, options.output.is_json(), execution)
 }
 
 fn project_prune_execution(
     onto: &BranchName,
     dry: bool,
     json: bool,
-    execution: Result<prune_branches::PruneBranchesOk, prune_branches::PruneBranchesError>,
+    execution: anyhow::Result<v1::PruneProjectBranchesResponse>,
 ) -> ManagedRun<PruneRepoResult> {
-    match execution {
-        Ok(execution) => {
-            let exit = match execution.exit {
-                PruneExit::Clean => ManagedExit::Clean,
-                PruneExit::Warn => ManagedExit::Warn,
-            };
-            let results = project_repo_results(execution.results);
-            let stdout = format_prune(onto, dry, json, &results);
-            ManagedRun {
-                exit,
-                results,
-                stdout,
-                stderr: String::new(),
-            }
+    let response = match execution {
+        Ok(response) => response,
+        Err(error) => return prune_failure(format!("{error:#}")),
+    };
+    let results = match response
+        .results
+        .into_iter()
+        .map(project_repo_result)
+        .collect::<anyhow::Result<Vec<_>>>()
+    {
+        Ok(results) => results,
+        Err(error) => return prune_failure(format!("{error:#}")),
+    };
+    let exit = match v1::ProjectPruneExit::try_from(response.exit) {
+        Ok(v1::ProjectPruneExit::Clean) => ManagedExit::Clean,
+        Ok(v1::ProjectPruneExit::Warning) => ManagedExit::Warn,
+        Ok(v1::ProjectPruneExit::Unspecified) | Err(_) => {
+            return prune_failure("gtl-server returned an invalid project prune exit".into());
         }
-        Err(error) => {
-            let stderr = format!("{error:#}");
-            let results = match error {
-                prune_branches::PruneBranchesError::Transport {
-                    mut completed_results,
-                    failed_result,
-                    ..
-                } => {
-                    if let Some(failed_result) = failed_result {
-                        completed_results.push(*failed_result);
-                    }
-                    project_repo_results(completed_results)
-                }
-                _ => Vec::new(),
-            };
-            let stdout = format_prune(onto, dry, json, &results);
-            ManagedRun {
-                exit: ManagedExit::Warn,
-                results,
-                stdout,
-                stderr,
-            }
-        }
+    };
+    let stdout = format_prune(onto, dry, json, &results);
+    ManagedRun {
+        exit,
+        results,
+        stdout,
+        stderr: response.failure_detail.unwrap_or_default(),
     }
 }
 
-fn project_repo_results(results: Vec<prune_branches::PruneRepoResult>) -> Vec<PruneRepoResult> {
-    results
-        .into_iter()
-        .map(|result| project_repo_result(result.name, result.action))
-        .collect()
+fn prune_failure(message: String) -> ManagedRun<PruneRepoResult> {
+    ManagedRun {
+        exit: ManagedExit::Fail,
+        results: Vec::new(),
+        stdout: String::new(),
+        stderr: message,
+    }
 }
 
-fn project_repo_result(name: ProjectName, action: PruneAction) -> PruneRepoResult {
+fn project_repo_result(result: v1::ProjectPruneResult) -> anyhow::Result<PruneRepoResult> {
+    let name = ProjectName::try_new(result.project_name)
+        .context("gtl-server returned an empty project name")?;
+    let action = v1::ProjectPruneAction::try_from(result.action)
+        .context("gtl-server returned an invalid project prune action")?;
+    let deleted = result
+        .deleted
+        .into_iter()
+        .map(pruned_branch)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let failures = result
+        .failures
+        .into_iter()
+        .map(prune_failure_from_grpc)
+        .collect::<anyhow::Result<Vec<_>>>()?;
+
     match action {
-        PruneAction::Absent => PruneRepoResult {
+        v1::ProjectPruneAction::Absent => Ok(PruneRepoResult {
             name,
             present: false,
             deleted: Vec::new(),
             failed: Vec::new(),
             detail: "not present on this machine".into(),
-        },
-        PruneAction::Refused(detail) | PruneAction::Nothing(detail) => PruneRepoResult {
+        }),
+        v1::ProjectPruneAction::Refused | v1::ProjectPruneAction::Nothing => Ok(PruneRepoResult {
             name,
             present: true,
             deleted: Vec::new(),
             failed: Vec::new(),
-            detail,
-        },
-        PruneAction::WouldDelete(branches) => PruneRepoResult {
+            detail: result.detail,
+        }),
+        v1::ProjectPruneAction::WouldDelete => Ok(PruneRepoResult {
             name,
             present: true,
-            detail: format!("would delete {} branch(es)", branches.len()),
-            deleted: branches
-                .into_iter()
-                .map(|branch| PrunedBranch {
-                    name: branch.name,
-                    id: branch.id,
-                })
-                .collect(),
+            detail: format!("would delete {} branch(es)", deleted.len()),
+            deleted,
             failed: Vec::new(),
-        },
-        PruneAction::Applied(result) => PruneRepoResult {
-            name,
-            present: true,
-            deleted: result
-                .deleted
-                .iter()
-                .map(|branch| PrunedBranch {
-                    name: branch.name.clone(),
-                    id: branch.id.clone(),
-                })
-                .collect(),
-            failed: result
-                .failed
-                .iter()
-                .map(|failure| failure.name.clone())
-                .collect(),
-            detail: crate::commands::prune::render_result(&result),
-        },
+        }),
+        v1::ProjectPruneAction::Applied => {
+            let application_result = PruneResult {
+                status: if failures.is_empty() {
+                    PruneStatus::Ok
+                } else if deleted.is_empty() {
+                    PruneStatus::Failed
+                } else {
+                    PruneStatus::Partial
+                },
+                deleted: deleted
+                    .iter()
+                    .map(|branch| crate::commands::prune::PruneBranch {
+                        name: branch.name.clone(),
+                        id: branch.id.clone(),
+                    })
+                    .collect(),
+                failed: failures.clone(),
+                failure_detail: None,
+            };
+            Ok(PruneRepoResult {
+                name,
+                present: true,
+                deleted,
+                failed: failures.into_iter().map(|failure| failure.name).collect(),
+                detail: crate::commands::prune::render_result(&application_result),
+            })
+        }
+        v1::ProjectPruneAction::Unspecified => {
+            anyhow::bail!("gtl-server returned an unspecified project prune action")
+        }
     }
+}
+
+fn pruned_branch(branch: v1::PruneBranch) -> anyhow::Result<PrunedBranch> {
+    Ok(PrunedBranch {
+        name: BranchName::try_new(branch.name)
+            .context("gtl-server returned an empty pruned branch name")?,
+        id: CommitId::try_from(branch.commit_id)
+            .context("gtl-server returned an invalid pruned branch commit ID")?,
+    })
+}
+
+fn prune_failure_from_grpc(failure: v1::PruneFailure) -> anyhow::Result<PruneFailure> {
+    Ok(PruneFailure {
+        name: BranchName::try_new(failure.name)
+            .context("gtl-server returned an empty failed branch name")?,
+        reason: failure.reason,
+    })
 }
 
 fn format_prune(onto: &BranchName, dry: bool, json: bool, results: &[PruneRepoResult]) -> String {
@@ -202,38 +214,30 @@ fn format_prune(onto: &BranchName, dry: bool, json: bool, results: &[PruneRepoRe
 
 #[cfg(test)]
 mod tests {
-    use gtl_application::{
-        projects::prune_branches::{self, PruneAction, PruneBranchesOk, PruneExit},
-        repositories::{
-            apply_prune::{ApplyPruneOk, PruneFailure, PruneStatus},
-            plan_prune::PruneBranch,
-        },
-    };
-
     use super::*;
-    use crate::testing::{branch_name, commit_id, project_name};
+    use crate::testing::{branch_name, commit_id};
 
     #[test]
-    fn application_results_project_to_the_existing_json_shape() {
-        let execution = PruneBranchesOk {
-            exit: PruneExit::Warn,
-            results: vec![prune_branches::PruneRepoResult {
-                name: project_name("api"),
-                action: PruneAction::Applied(ApplyPruneOk {
-                    status: PruneStatus::Partial,
-                    deleted: vec![PruneBranch {
-                        name: branch_name("feature/done"),
-                        id: commit_id("a"),
-                    }],
-                    failed: vec![PruneFailure {
-                        name: branch_name("feature/blocked"),
-                        reason: "branch is checked out".into(),
-                    }],
-                }),
+    fn grpc_results_project_to_the_existing_json_shape() {
+        let response = v1::PruneProjectBranchesResponse {
+            results: vec![v1::ProjectPruneResult {
+                project_name: "api".into(),
+                action: v1::ProjectPruneAction::Applied as i32,
+                deleted: vec![v1::PruneBranch {
+                    name: "feature/done".into(),
+                    commit_id: commit_id("a").to_string(),
+                }],
+                failures: vec![v1::PruneFailure {
+                    name: "feature/blocked".into(),
+                    reason: "branch is checked out".into(),
+                }],
+                detail: String::new(),
             }],
+            exit: v1::ProjectPruneExit::Warning as i32,
+            failure_detail: None,
         };
 
-        let run = project_prune_execution(&branch_name("main"), false, true, Ok(execution));
+        let run = project_prune_execution(&branch_name("main"), false, true, Ok(response));
 
         assert_eq!(run.exit, ManagedExit::Warn);
         assert_eq!(
@@ -261,36 +265,32 @@ mod tests {
 
     #[test]
     fn transport_failure_projection_preserves_completed_stdout_and_stderr() {
-        let completed_result = prune_branches::PruneRepoResult {
-            name: project_name("api"),
-            action: PruneAction::Applied(ApplyPruneOk {
-                status: PruneStatus::Ok,
-                deleted: vec![PruneBranch {
-                    name: branch_name("feature/api"),
-                    id: commit_id("a"),
-                }],
-                failed: Vec::new(),
-            }),
+        let response = v1::PruneProjectBranchesResponse {
+            results: vec!["api", "web"]
+                .into_iter()
+                .enumerate()
+                .map(|(index, name)| v1::ProjectPruneResult {
+                    project_name: name.into(),
+                    action: v1::ProjectPruneAction::Applied as i32,
+                    deleted: vec![v1::PruneBranch {
+                        name: format!("feature/{name}"),
+                        commit_id: if index == 0 {
+                            commit_id("a").to_string()
+                        } else {
+                            commit_id("b").to_string()
+                        },
+                    }],
+                    failures: Vec::new(),
+                    detail: String::new(),
+                })
+                .collect(),
+            exit: v1::ProjectPruneExit::Warning as i32,
+            failure_detail: Some(
+                "project prune failed for 'web': git transport unavailable".into(),
+            ),
         };
-        let failed_result = prune_branches::PruneRepoResult {
-            name: project_name("web"),
-            action: PruneAction::Applied(ApplyPruneOk {
-                status: PruneStatus::Ok,
-                deleted: vec![PruneBranch {
-                    name: branch_name("feature/web"),
-                    id: commit_id("b"),
-                }],
-                failed: Vec::new(),
-            }),
-        };
-        let execution = Err(prune_branches::PruneBranchesError::Transport {
-            failed_repo: project_name("web"),
-            completed_results: vec![completed_result],
-            failed_result: Some(Box::new(failed_result)),
-            source: anyhow::anyhow!("git transport unavailable"),
-        });
 
-        let run = project_prune_execution(&branch_name("main"), false, false, execution);
+        let run = project_prune_execution(&branch_name("main"), false, false, Ok(response));
 
         assert_eq!(run.exit, ManagedExit::Warn);
         assert_eq!(run.results.len(), 2);

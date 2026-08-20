@@ -14,13 +14,12 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow.workspace = true
-gtl-application.workspace = true
 clap.workspace = true
 clap-cargo.workspace = true
+gtl-client.workspace = true
 gtl-wire.workspace = true
 gtl-models.workspace = true
-gtl-infra.workspace = true
-reqwest.workspace = true
+libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -29,6 +28,7 @@ tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
 assert_cmd.workspace = true
+gtl-server.workspace = true
 predicates.workspace = true
 strum.workspace = true
 tempfile.workspace = true

@@ -3,7 +3,6 @@
 pub mod app_state;
 pub mod artifact_store;
 pub mod clock;
-pub mod daemon;
 pub mod data_root;
 pub mod detached_process;
 pub mod file_system;

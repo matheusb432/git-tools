@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+enum NoteLevel {
+  NOTE_LEVEL_UNSPECIFIED = 0;
+  NOTE_LEVEL_INFO = 1;
+  NOTE_LEVEL_WARNING = 2;
+  NOTE_LEVEL_ERROR = 3;
+}
+
+message Note {
+  NoteLevel level = 1;
+  string text = 2;
+}
+
+enum ArtifactPlacement {
+  ARTIFACT_PLACEMENT_UNSPECIFIED = 0;
+  ARTIFACT_PLACEMENT_CREATED = 1;
+  ARTIFACT_PLACEMENT_REUSED = 2;
+}
+
+message Artifact {
+  string path = 1;
+  ArtifactPlacement placement = 2;
+}
+
+message Empty {}

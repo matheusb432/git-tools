@@ -5,6 +5,8 @@ use assert_cmd::Command;
 use predicates::{prelude::PredicateBooleanExt as _, str::contains};
 use tempfile::TempDir;
 
+mod common;
+
 struct PushFixture {
     temporary: TempDir,
     repository: PathBuf,
@@ -103,6 +105,7 @@ impl PushFixture {
 fn push_confirmation_can_be_rejected_then_disabled() -> Result<()> {
     let fixture = PushFixture::new()?;
     let config = fixture.config_path("config.toml");
+    let _server = common::ServerHarness::start(Some(&config))?;
 
     fixture
         .run(&["push"])

@@ -1,0 +1,191 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+import "gtl/v1/common.proto";
+
+service TagService {
+  rpc PlanBump(PlanTagBumpRequest) returns (PlanTagBumpResponse);
+  rpc ExecuteBump(ExecuteTagBumpRequest) returns (ExecuteTagBumpResponse);
+  rpc List(ListTagsRequest) returns (ListTagsResponse);
+  rpc Add(AddTagRequest) returns (TagActionResponse);
+  rpc Push(PushTagsRequest) returns (TagActionResponse);
+  rpc AddAndPush(AddAndPushTagRequest) returns (TagActionResponse);
+  rpc Label(LabelTagRequest) returns (TagActionResponse);
+}
+
+enum TagBumpLevel {
+  TAG_BUMP_LEVEL_UNSPECIFIED = 0;
+  TAG_BUMP_LEVEL_MAJOR = 1;
+  TAG_BUMP_LEVEL_MINOR = 2;
+  TAG_BUMP_LEVEL_PATCH = 3;
+}
+
+message PlanTagBumpRequest {
+  string repository_path = 1;
+  TagBumpLevel level = 2;
+  string message = 3;
+  bool push = 4;
+}
+
+message GitHead {
+  oneof state {
+    string branch = 1;
+    Empty detached = 2;
+  }
+}
+
+message TagBumpPreview {
+  string repository_root = 1;
+  GitHead head = 2;
+  string target_commit_id = 3;
+  TagBumpLevel level = 4;
+  string base_tag = 5;
+  string next_tag = 6;
+  string message = 7;
+  bool push = 8;
+}
+
+message TagBumpRejection {
+  string detail = 1;
+}
+
+message PlanTagBumpResponse {
+  oneof outcome {
+    TagBumpPreview ready = 1;
+    TagBumpRejection rejected = 2;
+  }
+}
+
+message ExecuteTagBumpRequest {
+  TagBumpPreview preview = 1;
+}
+
+enum TagBumpStatus {
+  TAG_BUMP_STATUS_UNSPECIFIED = 0;
+  TAG_BUMP_STATUS_CREATED = 1;
+  TAG_BUMP_STATUS_NO_OP = 2;
+  TAG_BUMP_STATUS_PUSHED = 3;
+  TAG_BUMP_STATUS_FAILED = 4;
+}
+
+message TagBumpResult {
+  string tag = 1;
+  TagBumpStatus status = 2;
+  string detail = 3;
+}
+
+message ExecuteTagBumpResponse {
+  repeated Note notes = 1;
+
+  oneof outcome {
+    TagBumpResult applied = 2;
+    TagBumpRejection rejected = 3;
+  }
+}
+
+message ListTagsRequest {
+  string repository_path = 1;
+  bool include_state = 2;
+}
+
+enum TagState {
+  TAG_STATE_UNSPECIFIED = 0;
+  TAG_STATE_NOT_QUERIED = 1;
+  TAG_STATE_LOCAL = 2;
+  TAG_STATE_REMOTE = 3;
+}
+
+message Tag {
+  string name = 1;
+  string object_id = 2;
+  string commit_id = 3;
+  optional string created_at = 4;
+  bool annotated = 5;
+  optional string message = 6;
+  TagState state = 7;
+}
+
+message CanonicalTagGroup {
+  Tag canonical = 1;
+  repeated Tag labels = 2;
+}
+
+message TagCollection {
+  repeated Tag tags = 1;
+}
+
+message TagGroup {
+  oneof kind {
+    Tag single = 1;
+    CanonicalTagGroup canonical = 2;
+    TagCollection multiple_annotated = 3;
+    TagCollection all_labels = 4;
+  }
+}
+
+message TagGroups {
+  repeated TagGroup groups = 1;
+}
+
+message TagListFailure {
+  string detail = 1;
+}
+
+message ListTagsResponse {
+  oneof outcome {
+    TagGroups listed = 1;
+    TagListFailure failed = 2;
+  }
+}
+
+message AddTagRequest {
+  string repository_path = 1;
+  string tag = 2;
+  string message = 3;
+}
+
+message PushTagsRequest {
+  string repository_path = 1;
+}
+
+message AddAndPushTagRequest {
+  string repository_path = 1;
+  string tag = 2;
+  string message = 3;
+  optional string label = 4;
+}
+
+message LabelTagRequest {
+  string repository_path = 1;
+  string tag = 2;
+  string label = 3;
+}
+
+enum TagActionStatus {
+  TAG_ACTION_STATUS_UNSPECIFIED = 0;
+  TAG_ACTION_STATUS_CREATED = 1;
+  TAG_ACTION_STATUS_NO_OP = 2;
+  TAG_ACTION_STATUS_PUSHED = 3;
+  TAG_ACTION_STATUS_FAILED = 4;
+  TAG_ACTION_STATUS_ABORTED = 5;
+}
+
+enum TagRemotePushProgress {
+  TAG_REMOTE_PUSH_PROGRESS_UNSPECIFIED = 0;
+  TAG_REMOTE_PUSH_PROGRESS_NOT_STARTED = 1;
+  TAG_REMOTE_PUSH_PROGRESS_COMPLETED = 2;
+  TAG_REMOTE_PUSH_PROGRESS_INDETERMINATE = 3;
+}
+
+message TagOperationProgress {
+  repeated string created_refs = 1;
+  TagRemotePushProgress remote_push = 2;
+  repeated string pushed_or_attempted_refs = 3;
+}
+
+message TagActionResponse {
+  TagActionStatus status = 1;
+  string detail = 2;
+  TagOperationProgress progress = 3;
+}

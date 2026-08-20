@@ -69,7 +69,7 @@ fn production_flavor_embeds_the_local_dioxus_bundle() {
 }
 
 #[test]
-fn macos_bundle_contains_the_cli_and_daemon_sidecars() {
+fn macos_bundle_contains_the_cli_and_server_sidecars() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let macos_conf = fs::read_to_string(manifest_dir.join("tauri.macos.bundle.conf.json"))
         .expect("tauri.macos.bundle.conf.json must exist");
@@ -79,7 +79,7 @@ fn macos_bundle_contains_the_cli_and_daemon_sidecars() {
     assert_eq!(macos["bundle"]["targets"], serde_json::json!(["app"]));
     assert_eq!(
         macos["bundle"]["externalBin"],
-        serde_json::json!(["binaries/git-tools", "binaries/gtl-daemon"])
+        serde_json::json!(["binaries/git-tools", "binaries/gtl-server"])
     );
     assert_eq!(macos["bundle"]["macOS"]["signingIdentity"], "-");
 }

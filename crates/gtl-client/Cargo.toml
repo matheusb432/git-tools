@@ -9,7 +9,7 @@ publish.workspace = true
 gtl-local-auth.workspace = true
 gtl-wire.workspace = true
 thiserror.workspace = true
-tonic = { workspace = true, features = ["transport"] }
+tonic = { workspace = true, features = ["router", "transport"] }
 tonic-health.workspace = true
 
 [dev-dependencies]

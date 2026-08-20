@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+import "gtl/v1/common.proto";
+
+service SettingsService {
+  rpc GetSettings(Empty) returns (GetSettingsResponse);
+  rpc SetTheme(SetThemeRequest) returns (SetThemeResponse);
+}
+
+enum ViewerTheme {
+  VIEWER_THEME_UNSPECIFIED = 0;
+  VIEWER_THEME_LIGHT = 1;
+  VIEWER_THEME_DARK = 2;
+  VIEWER_THEME_HEARTH = 3;
+  VIEWER_THEME_MIRAGE = 4;
+  VIEWER_THEME_GLACIER = 5;
+  VIEWER_THEME_NOIR = 6;
+  VIEWER_THEME_GRAPHITE = 7;
+}
+
+message GetSettingsResponse {
+  bool push_confirmation_required = 1;
+}
+
+message SetThemeRequest {
+  ViewerTheme theme = 1;
+}
+
+message SetThemeResponse {
+  ViewerTheme theme = 1;
+  string configuration_path = 2;
+}

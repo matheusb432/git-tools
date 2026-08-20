@@ -1,7 +1,111 @@
 use std::fmt::Write as _;
 
-use gtl_application::repositories::{plan_commit::CommitTarget, plan_push::PushTarget};
-use gtl_models::{git::CommitCount, repository::PendingChanges};
+use anyhow::Context as _;
+use gtl_models::{
+    git::{BranchName, CommitCount, RemoteName, RemoteUrl},
+    paths::{ProjectName, RepositoryRoot},
+    repository::{PathCount, PendingChanges},
+};
+use gtl_wire::v1;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushTarget {
+    pub name: ProjectName,
+    pub top: RepositoryRoot,
+    pub branch: BranchName,
+    pub remote: RemoteName,
+    pub remote_url: Option<RemoteUrl>,
+    pub pending: PendingChanges,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitTarget {
+    pub name: ProjectName,
+    pub top: RepositoryRoot,
+    pub branch: BranchName,
+    pub pending: PendingChanges,
+}
+
+pub(crate) fn push_target_from_grpc(
+    target: v1::RepositoryPushTarget,
+) -> anyhow::Result<PushTarget> {
+    Ok(PushTarget {
+        name: ProjectName::try_new(target.project_name)
+            .context("gtl-server returned an empty push project name")?,
+        top: RepositoryRoot::try_new(target.repository_root.into())
+            .context("gtl-server returned a non-absolute push repository root")?,
+        branch: BranchName::try_new(target.branch)
+            .context("gtl-server returned an empty push branch")?,
+        remote: RemoteName::try_new(target.remote)
+            .context("gtl-server returned an empty push remote")?,
+        remote_url: target
+            .remote_url
+            .map(RemoteUrl::try_new)
+            .transpose()
+            .context("gtl-server returned an empty push remote URL")?,
+        pending: pending_from_grpc(
+            target
+                .pending
+                .context("gtl-server returned no pending push state")?,
+        ),
+    })
+}
+
+pub(crate) fn push_target_to_grpc(target: &PushTarget) -> v1::RepositoryPushTarget {
+    v1::RepositoryPushTarget {
+        project_name: target.name.to_string(),
+        repository_root: target.top.to_string(),
+        branch: target.branch.to_string(),
+        remote: target.remote.to_string(),
+        remote_url: target.remote_url.as_ref().map(ToString::to_string),
+        pending: Some(pending_to_grpc(target.pending)),
+    }
+}
+
+pub(crate) fn commit_target_from_grpc(
+    target: v1::RepositoryCommitTarget,
+) -> anyhow::Result<CommitTarget> {
+    Ok(CommitTarget {
+        name: ProjectName::try_new(target.project_name)
+            .context("gtl-server returned an empty commit project name")?,
+        top: RepositoryRoot::try_new(target.repository_root.into())
+            .context("gtl-server returned a non-absolute commit repository root")?,
+        branch: BranchName::try_new(target.branch)
+            .context("gtl-server returned an empty commit branch")?,
+        pending: pending_from_grpc(
+            target
+                .pending
+                .context("gtl-server returned no pending commit state")?,
+        ),
+    })
+}
+
+pub(crate) fn commit_target_to_grpc(target: &CommitTarget) -> v1::RepositoryCommitTarget {
+    v1::RepositoryCommitTarget {
+        project_name: target.name.to_string(),
+        repository_root: target.top.to_string(),
+        branch: target.branch.to_string(),
+        pending: Some(pending_to_grpc(target.pending)),
+    }
+}
+
+fn pending_from_grpc(pending: v1::PendingChanges) -> PendingChanges {
+    PendingChanges {
+        changed: PathCount::new(pending.changed_paths),
+        staged: PathCount::new(pending.staged_paths),
+        unprepared: PathCount::new(pending.unprepared_paths),
+        ahead: CommitCount::new(pending.commits_ahead),
+    }
+}
+
+fn pending_to_grpc(pending: PendingChanges) -> v1::PendingChanges {
+    v1::PendingChanges {
+        changed_paths: pending.changed.value(),
+        staged_paths: pending.staged.value(),
+        unprepared_paths: pending.unprepared.value(),
+        commits_ahead: pending.ahead.into_inner(),
+    }
+}
 
 fn remote_label(target: &PushTarget) -> String {
     target.remote_url.as_ref().map_or_else(

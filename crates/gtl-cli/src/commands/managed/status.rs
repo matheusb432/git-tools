@@ -1,106 +1,132 @@
-//! Dispatching and formatting the status of managed repos (`status`,
-//! `status --current`, `status --recursive`). Classification lives in the
-//! `gtl_application::repositories::get_repository_statuses` slice; only repo-list resolution and
-//! terminal formatting stay here.
+//! Dispatching and formatting managed, current, and recursive repository status.
 
 use std::path::Path;
 
-use gtl_application::repositories::{
-    find_repositories, get_repository_statuses, resolve_repository_root,
-};
-use gtl_infra::git_client::HybridGitClient;
+use anyhow::Context as _;
 pub use gtl_models::repository::status::StatusResult;
 use gtl_models::{
-    projects::ProjectRepository,
-    repository::traversal::{RepositoryTarget, RepositoryTraversalScope},
+    git::{BranchName, CommitCount, GitRefName},
+    paths::ProjectName,
+    repository::{
+        PathCount,
+        status::{StatusChanges, StatusHead, StatusUpstream},
+    },
 };
+use gtl_wire::v1;
 
 use self::palette::StatusColorPalette;
 use super::{ManagedExit, ManagedOptions, ManagedRun};
+use crate::server_client::ServerClient;
 mod palette;
 
 pub fn run_status(options: &ManagedOptions) -> ManagedRun<StatusResult> {
-    match super::project_catalog::load_projects() {
-        Ok(repos) => status_run(
-            get_repository_statuses::execute(
-                get_repository_statuses::GetRepositoryStatuses {
-                    repos: repos.into_iter().map(project_target).collect(),
-                },
-                &HybridGitClient,
-            ),
-            options,
-        ),
-        Err(error) => status_fail(format!("{error:#}")),
-    }
+    let response =
+        ServerClient::connect().and_then(|client| client.get_project_repository_statuses());
+    status_response(response, options)
 }
 
 /// Status of the single repo that contains `dir` (resolved via `git rev-parse
 /// --show-toplevel`, so it works from any subdirectory). Fails (exit 2) when `dir`
 /// is not inside a git repo.
 pub fn run_status_current(dir: &Path, options: &ManagedOptions) -> ManagedRun<StatusResult> {
-    let top = match resolve_repository_root::execute(
-        resolve_repository_root::ResolveRepositoryRoot {
-            repo_path: dir.to_path_buf(),
-        },
-        &HybridGitClient,
-    ) {
-        Ok(top) => top,
-        Err(error) => return status_fail(format!("status: {error:#}")),
-    };
-    let repo = RepositoryTarget {
-        label: gtl_application::shared::repository_name::from_root(&top),
-        path: top,
-    };
-    status_run(
-        get_repository_statuses::execute(
-            get_repository_statuses::GetRepositoryStatuses { repos: vec![repo] },
-            &HybridGitClient,
-        ),
-        options,
-    )
+    let response = ServerClient::connect().and_then(|client| {
+        client.get_repository_status(v1::GetRepositoryStatusRequest {
+            repository_path: dir.to_string_lossy().into_owned(),
+        })
+    });
+    status_response(response, options)
 }
 
 /// Status of the repo at `root` plus every nested subrepo beneath it. Linked
 /// worktrees (and their subtrees) are skipped — they mirror a repo already
 /// reported elsewhere. Fails (exit 2) when no git repo is found under `root`.
 pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun<StatusResult> {
-    let root = match std::fs::canonicalize(root) {
-        Ok(root) => root,
-        Err(error) => {
-            return status_fail(format!(
-                "status: failed to resolve {}: {error}",
-                root.display()
-            ));
-        }
-    };
-    let discovered = match find_repositories::execute(find_repositories::FindRepositories {
-        root: root.clone(),
-        scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
-    }) {
-        Ok(discovered) => discovered,
-        Err(error) => return status_fail(format!("status: {error:#}")),
-    };
-    if discovered.is_empty() {
-        return status_fail(format!(
-            "status: no git repos found under {}",
-            root.display()
-        ));
-    }
-
-    let repos = discovered;
-    status_run(
-        get_repository_statuses::execute(
-            get_repository_statuses::GetRepositoryStatuses { repos },
-            &HybridGitClient,
-        ),
-        options,
-    )
+    let response = ServerClient::connect().and_then(|client| {
+        client.get_recursive_repository_statuses(v1::GetRecursiveRepositoryStatusesRequest {
+            root: root.to_string_lossy().into_owned(),
+        })
+    });
+    status_response(response, options)
 }
 
-fn project_target(repo: ProjectRepository) -> RepositoryTarget {
-    RepositoryTarget {
-        path: repo.path,
-        label: repo.name,
+fn status_response(
+    response: anyhow::Result<v1::RepositoryStatusesResponse>,
+    options: &ManagedOptions,
+) -> ManagedRun<StatusResult> {
+    match response.and_then(|response| {
+        response
+            .results
+            .into_iter()
+            .map(status_result_from_grpc)
+            .collect()
+    }) {
+        Ok(results) => status_run(results, options),
+        Err(error) => status_fail(format!("status: {error:#}")),
+    }
+}
+
+fn status_result_from_grpc(result: v1::RepositoryStatusResult) -> anyhow::Result<StatusResult> {
+    let name = ProjectName::try_new(result.project_name)
+        .context("gtl-server returned an empty repository status name")?;
+    match result
+        .state
+        .context("gtl-server omitted repository status state")?
+    {
+        v1::repository_status_result::State::Absent(_) => Ok(StatusResult::absent(name)),
+        v1::repository_status_result::State::Present(present) => Ok(StatusResult::present(
+            name,
+            status_head_from_grpc(
+                present
+                    .head
+                    .context("gtl-server omitted repository status head")?,
+            )?,
+            status_changes_from_grpc(
+                present
+                    .changes
+                    .context("gtl-server omitted repository status changes")?,
+            )?,
+        )),
+    }
+}
+
+fn status_head_from_grpc(head: v1::RepositoryStatusHead) -> anyhow::Result<StatusHead> {
+    match head
+        .state
+        .context("gtl-server omitted repository head state")?
+    {
+        v1::repository_status_head::State::Unavailable(_) => Ok(StatusHead::Unavailable),
+        v1::repository_status_head::State::Detached(_) => Ok(StatusHead::Detached),
+        v1::repository_status_head::State::Branch(branch) => Ok(StatusHead::Branch {
+            name: BranchName::try_new(branch.name)
+                .context("gtl-server returned an empty repository branch")?,
+            upstream: match branch
+                .upstream
+                .context("gtl-server omitted repository upstream state")?
+            {
+                v1::repository_status_branch::Upstream::Missing(_) => StatusUpstream::Missing,
+                v1::repository_status_branch::Upstream::Tracking(tracking) => {
+                    StatusUpstream::Tracking {
+                        reference: GitRefName::try_new(tracking.reference)
+                            .context("gtl-server returned an empty upstream reference")?,
+                        ahead: CommitCount::new(tracking.commits_ahead),
+                    }
+                }
+            },
+        }),
+    }
+}
+
+fn status_changes_from_grpc(changes: v1::RepositoryStatusChanges) -> anyhow::Result<StatusChanges> {
+    match changes
+        .state
+        .context("gtl-server omitted repository changes state")?
+    {
+        v1::repository_status_changes::State::Clean(_) => Ok(StatusChanges::Clean),
+        v1::repository_status_changes::State::Changed(counts) => Ok(StatusChanges::from_counts(
+            PathCount::new(counts.tracked_paths),
+            PathCount::new(counts.untracked_paths),
+        )),
+        v1::repository_status_changes::State::Unavailable(_) => Ok(StatusChanges::Unavailable),
     }
 }
 

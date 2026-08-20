@@ -1,0 +1,315 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+service RepositoryService {
+  rpc PlanPush(PlanRepositoryPushRequest) returns (PlanRepositoryPushResponse);
+  rpc ExecutePush(ExecuteRepositoryPushRequest) returns (ExecuteRepositoryPushResponse);
+  rpc PlanCommit(PlanRepositoryCommitRequest) returns (PlanRepositoryCommitResponse);
+  rpc ExecuteCommit(ExecuteRepositoryCommitRequest) returns (ExecuteRepositoryCommitResponse);
+  rpc PlanRecursivePush(PlanRecursivePushRequest) returns (PlanRecursivePushResponse);
+  rpc ExecuteRecursivePush(ExecuteRecursivePushRequest) returns (ExecuteRecursivePushResponse);
+  rpc ChangeBranch(ChangeRepositoryBranchRequest) returns (ChangeRepositoryBranchResponse);
+  rpc PlanPrune(PlanRepositoryPruneRequest) returns (PlanRepositoryPruneResponse);
+  rpc ExecutePrune(ExecuteRepositoryPruneRequest) returns (ExecuteRepositoryPruneResponse);
+  rpc GetStatus(GetRepositoryStatusRequest) returns (RepositoryStatusesResponse);
+  rpc GetRecursiveStatuses(GetRecursiveRepositoryStatusesRequest) returns (RepositoryStatusesResponse);
+}
+
+message OperationDetail {
+  string detail = 1;
+}
+
+message PendingChanges {
+  uint64 changed_paths = 1;
+  uint64 staged_paths = 2;
+  uint64 unprepared_paths = 3;
+  uint64 commits_ahead = 4;
+}
+
+message RepositoryPushTarget {
+  string project_name = 1;
+  string repository_root = 2;
+  string branch = 3;
+  string remote = 4;
+  optional string remote_url = 5;
+  PendingChanges pending = 6;
+}
+
+message PlanRepositoryPushRequest {
+  string repository_path = 1;
+}
+
+message PlanRepositoryPushResponse {
+  oneof outcome {
+    RepositoryPushTarget ready = 1;
+    OperationDetail refused = 2;
+  }
+}
+
+enum RepositoryPushMode {
+  REPOSITORY_PUSH_MODE_UNSPECIFIED = 0;
+  REPOSITORY_PUSH_MODE_EXISTING_COMMITS = 1;
+  REPOSITORY_PUSH_MODE_COMMIT_CHANGES = 2;
+}
+
+message ExecuteRepositoryPushRequest {
+  RepositoryPushTarget target = 1;
+  RepositoryPushMode mode = 2;
+  optional string message = 3;
+}
+
+enum RepositoryPushStatus {
+  REPOSITORY_PUSH_STATUS_UNSPECIFIED = 0;
+  REPOSITORY_PUSH_STATUS_NO_OP = 1;
+  REPOSITORY_PUSH_STATUS_COMPLETED = 2;
+  REPOSITORY_PUSH_STATUS_REFUSED = 3;
+  REPOSITORY_PUSH_STATUS_FAILED = 4;
+}
+
+message ExecuteRepositoryPushResponse {
+  RepositoryPushStatus status = 1;
+  string detail = 2;
+}
+
+message RepositoryCommitTarget {
+  string project_name = 1;
+  string repository_root = 2;
+  string branch = 3;
+  PendingChanges pending = 4;
+}
+
+message PlanRepositoryCommitRequest {
+  string repository_path = 1;
+}
+
+message PlanRepositoryCommitResponse {
+  oneof outcome {
+    RepositoryCommitTarget ready = 1;
+    OperationDetail refused = 2;
+  }
+}
+
+message ExecuteRepositoryCommitRequest {
+  RepositoryCommitTarget target = 1;
+  string message = 2;
+}
+
+enum RepositoryCommitStatus {
+  REPOSITORY_COMMIT_STATUS_UNSPECIFIED = 0;
+  REPOSITORY_COMMIT_STATUS_COMMITTED = 1;
+  REPOSITORY_COMMIT_STATUS_NO_OP = 2;
+  REPOSITORY_COMMIT_STATUS_FAILED = 3;
+}
+
+message ExecuteRepositoryCommitResponse {
+  RepositoryCommitStatus status = 1;
+  string detail = 2;
+}
+
+message PushDestination {
+  string branch = 1;
+  string remote = 2;
+}
+
+message RecursivePushTarget {
+  string repository_root = 1;
+  string label = 2;
+  oneof destination {
+    PushDestination push = 3;
+    PushDestination synced = 4;
+    OperationDetail skip = 5;
+  }
+}
+
+message PlanRecursivePushRequest {
+  string root = 1;
+}
+
+message RecursivePushPlan {
+  repeated RecursivePushTarget targets = 1;
+}
+
+message PlanRecursivePushResponse {
+  oneof outcome {
+    RecursivePushPlan ready = 1;
+    OperationDetail refused = 2;
+  }
+}
+
+message ExecuteRecursivePushRequest {
+  repeated RecursivePushTarget targets = 1;
+}
+
+enum RecursivePushStatus {
+  RECURSIVE_PUSH_STATUS_UNSPECIFIED = 0;
+  RECURSIVE_PUSH_STATUS_OK = 1;
+  RECURSIVE_PUSH_STATUS_PARTIAL = 2;
+  RECURSIVE_PUSH_STATUS_FAILED = 3;
+}
+
+enum RecursivePushRepositoryStatus {
+  RECURSIVE_PUSH_REPOSITORY_STATUS_UNSPECIFIED = 0;
+  RECURSIVE_PUSH_REPOSITORY_STATUS_PUSHED = 1;
+  RECURSIVE_PUSH_REPOSITORY_STATUS_UP_TO_DATE = 2;
+  RECURSIVE_PUSH_REPOSITORY_STATUS_SKIPPED = 3;
+  RECURSIVE_PUSH_REPOSITORY_STATUS_FAILED = 4;
+}
+
+message RecursivePushRepositoryResult {
+  string label = 1;
+  RecursivePushRepositoryStatus status = 2;
+  optional string detail = 3;
+}
+
+message ExecuteRecursivePushResponse {
+  RecursivePushStatus status = 1;
+  repeated RecursivePushRepositoryResult results = 2;
+}
+
+enum RepositoryBranchAction {
+  REPOSITORY_BRANCH_ACTION_UNSPECIFIED = 0;
+  REPOSITORY_BRANCH_ACTION_SWITCH = 1;
+  REPOSITORY_BRANCH_ACTION_REBASE = 2;
+  REPOSITORY_BRANCH_ACTION_REVERT = 3;
+}
+
+message ChangeRepositoryBranchRequest {
+  string repository_path = 1;
+  string onto_branch = 2;
+  RepositoryBranchAction action = 3;
+}
+
+enum RepositoryBranchStatus {
+  REPOSITORY_BRANCH_STATUS_UNSPECIFIED = 0;
+  REPOSITORY_BRANCH_STATUS_SWITCHED = 1;
+  REPOSITORY_BRANCH_STATUS_ALREADY_THERE = 2;
+  REPOSITORY_BRANCH_STATUS_FAST_FORWARDED = 3;
+  REPOSITORY_BRANCH_STATUS_REVERTED = 4;
+  REPOSITORY_BRANCH_STATUS_NO_OP = 5;
+  REPOSITORY_BRANCH_STATUS_REFUSED = 6;
+  REPOSITORY_BRANCH_STATUS_FAILED = 7;
+}
+
+message ChangeRepositoryBranchResponse {
+  RepositoryBranchStatus status = 1;
+  string detail = 2;
+}
+
+message PruneBranch {
+  string name = 1;
+  string commit_id = 2;
+}
+
+message PlanRepositoryPruneRequest {
+  string repository_path = 1;
+  string onto_branch = 2;
+}
+
+message RepositoryPrunePlan {
+  string repository_root = 1;
+  repeated PruneBranch branches = 2;
+}
+
+message PlanRepositoryPruneResponse {
+  oneof outcome {
+    RepositoryPrunePlan ready = 1;
+    OperationDetail nothing = 2;
+    OperationDetail refused = 3;
+  }
+}
+
+message ExecuteRepositoryPruneRequest {
+  RepositoryPrunePlan plan = 1;
+}
+
+enum RepositoryPruneStatus {
+  REPOSITORY_PRUNE_STATUS_UNSPECIFIED = 0;
+  REPOSITORY_PRUNE_STATUS_OK = 1;
+  REPOSITORY_PRUNE_STATUS_PARTIAL = 2;
+  REPOSITORY_PRUNE_STATUS_FAILED = 3;
+  REPOSITORY_PRUNE_STATUS_ABORTED = 4;
+}
+
+message PruneFailure {
+  string name = 1;
+  string reason = 2;
+}
+
+message ExecuteRepositoryPruneResponse {
+  RepositoryPruneStatus status = 1;
+  repeated PruneBranch deleted = 2;
+  repeated PruneFailure failures = 3;
+  optional string failure_detail = 4;
+}
+
+message GetRepositoryStatusRequest {
+  string repository_path = 1;
+}
+
+message GetRecursiveRepositoryStatusesRequest {
+  string root = 1;
+}
+
+message RepositoryAbsentStatus {}
+
+message RepositoryPresentStatus {
+  RepositoryStatusHead head = 1;
+  RepositoryStatusChanges changes = 2;
+}
+
+message RepositoryStatusResult {
+  string project_name = 1;
+  oneof state {
+    RepositoryAbsentStatus absent = 2;
+    RepositoryPresentStatus present = 3;
+  }
+}
+
+message RepositoryStatusHead {
+  oneof state {
+    RepositoryStatusUnavailable unavailable = 1;
+    RepositoryStatusDetached detached = 2;
+    RepositoryStatusBranch branch = 3;
+  }
+}
+
+message RepositoryStatusUnavailable {}
+
+message RepositoryStatusDetached {}
+
+message RepositoryStatusBranch {
+  string name = 1;
+  oneof upstream {
+    RepositoryUpstreamMissing missing = 2;
+    RepositoryUpstreamTracking tracking = 3;
+  }
+}
+
+message RepositoryUpstreamMissing {}
+
+message RepositoryUpstreamTracking {
+  string reference = 1;
+  uint64 commits_ahead = 2;
+}
+
+message RepositoryStatusChanges {
+  oneof state {
+    RepositoryChangesClean clean = 1;
+    RepositoryChangesChanged changed = 2;
+    RepositoryChangesUnavailable unavailable = 3;
+  }
+}
+
+message RepositoryChangesClean {}
+
+message RepositoryChangesChanged {
+  uint64 tracked_paths = 1;
+  uint64 untracked_paths = 2;
+}
+
+message RepositoryChangesUnavailable {}
+
+message RepositoryStatusesResponse {
+  repeated RepositoryStatusResult results = 1;
+}

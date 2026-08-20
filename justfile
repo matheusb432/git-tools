@@ -32,13 +32,13 @@ build:
 install:
     cargo run --quiet -p xtask -- install --target both
 
-# Build + install everything: the CLI engine (git-tools + gtl + gtl-daemon) and the desktop viewer (gtl-viewer).
+# Build + install everything: the CLI engine (git-tools + gtl + gtl-server) and the desktop viewer (gtl-viewer).
 [group('build')]
 update:
     just build
     just install
 
-# Remove the installed CLI, daemon, alias, viewer, desktop entry, and icon; preserve configuration.
+# Remove the installed CLI, server, alias, viewer, desktop entry, and icon; preserve configuration.
 [group('build')]
 uninstall:
     cargo run --quiet -p xtask -- uninstall
@@ -51,7 +51,7 @@ purge:
 
 # Build only if the binary is missing (preflight for run recipes).
 _preflight:
-    test -x "{{ _bin }}" || cargo build --release -p gtl-cli -p gtl-daemon
+    test -x "{{ _bin }}" || cargo build --release -p gtl-cli -p gtl-server
 
 # Run a shared Rust benchmark; --fast selects the concise viewer-render preset.
 [group('performance')]

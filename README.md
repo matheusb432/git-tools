@@ -1,6 +1,6 @@
 # git-tools
 
-`git-tools` is a Rust toolkit for repetitive Git workflows across one repository, nested repositories, or a managed repository set. It installs the `git-tools` command, its `gtl` alias, the resident `gtl-daemon`, and the `gtl-viewer` desktop application.
+`git-tools` is a Rust toolkit for repetitive Git workflows across one repository, nested repositories, or a managed repository set. It installs the `git-tools` command, its `gtl` alias, the resident `gtl-server`, and the `gtl-viewer` desktop application.
 
 ## Core workflows
 

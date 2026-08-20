@@ -66,8 +66,8 @@ fn viewer_bin_name() -> String {
     format!("gtl-viewer{}", exe_suffix())
 }
 
-fn daemon_bin_name() -> String {
-    format!("gtl-daemon{}", exe_suffix())
+fn server_bin_name() -> String {
+    format!("gtl-server{}", exe_suffix())
 }
 
 fn file_name(path: &Path) -> &str {
@@ -198,20 +198,20 @@ fn install_cli(repo_path: &Path, bindir: &Path) -> Result<()> {
     );
     println!("gtl {act} -> {}", bindir.join(cli_alias_name()).display());
 
-    let daemon_src = repo_path
+    let server_src = repo_path
         .join("target")
         .join("release")
-        .join(daemon_bin_name());
-    if !daemon_src.is_file() {
+        .join(server_bin_name());
+    if !server_src.is_file() {
         bail!(
-            "gtl-daemon not built at {} — run `just cli build` first",
-            daemon_src.display()
+            "gtl-server not built at {} — run `just cli build` first",
+            server_src.display()
         );
     }
-    let daemon_act = install_binary_atomic(&daemon_src, bindir)?;
+    let server_action = install_binary_atomic(&server_src, bindir)?;
     println!(
-        "gtl-daemon {daemon_act} -> {}",
-        bindir.join(daemon_bin_name()).display()
+        "gtl-server {server_action} -> {}",
+        bindir.join(server_bin_name()).display()
     );
     Ok(())
 }
@@ -244,10 +244,10 @@ pub fn run_uninstall(remove_config: bool, force: bool) -> Result<()> {
             bindir.join(cli_bin_name()).display()
         ),
     }
-    let daemon = bindir.join(daemon_bin_name());
-    if daemon.exists() {
-        fs::remove_file(&daemon)?;
-        println!("removed {}", daemon.display());
+    let server = bindir.join(server_bin_name());
+    if server.exists() {
+        fs::remove_file(&server)?;
+        println!("removed {}", server.display());
     }
     let viewer = bindir.join(viewer_bin_name());
     if viewer.exists() {

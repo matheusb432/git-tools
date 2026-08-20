@@ -1,7 +1,33 @@
+use anyhow::Context as _;
 use gtl_models::{
-    diffs::CommitIdAbbreviation,
+    diffs::{CommitId, CommitIdAbbreviation},
+    git::BranchName,
+    paths::RepositoryRoot,
     worktrees::{Worktree, WorktreeCheckout, WorktreeKind},
 };
+use gtl_wire::v1;
+
+pub(crate) fn from_grpc(worktree: v1::Worktree) -> anyhow::Result<Worktree> {
+    let kind = match worktree
+        .kind
+        .context("gtl-server omitted the worktree kind")?
+    {
+        v1::worktree::Kind::Branch(branch) => WorktreeKind::Checkout(WorktreeCheckout::Branch(
+            BranchName::try_new(branch).context("gtl-server returned an empty worktree branch")?,
+        )),
+        v1::worktree::Kind::Detached(_) => WorktreeKind::Checkout(WorktreeCheckout::Detached),
+        v1::worktree::Kind::Bare(_) => WorktreeKind::Bare,
+    };
+    Ok(Worktree::new(
+        RepositoryRoot::try_new(worktree.path.into())
+            .context("gtl-server returned a non-absolute worktree path")?,
+        CommitId::try_from(worktree.commit_id)
+            .context("gtl-server returned an invalid worktree commit ID")?,
+        kind,
+        worktree.locked,
+        worktree.prunable,
+    ))
+}
 
 pub(crate) fn render_list(worktrees: &[Worktree]) -> String {
     let rows = worktrees

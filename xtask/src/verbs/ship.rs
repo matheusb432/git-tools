@@ -1,4 +1,4 @@
-//! Cross-build the Windows CLI, daemon, and offline desktop viewer from Linux with cargo-xwin.
+//! Cross-build the Windows CLI, server, and offline desktop viewer from Linux with cargo-xwin.
 
 use std::path::Path;
 
@@ -45,9 +45,9 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
     cli_args.extend_from_slice(profile);
     cli_args.extend_from_slice(&["-p", "gtl-cli", "--target", WIN_TARGET]);
 
-    let mut daemon_args = vec!["xwin", "build"];
-    daemon_args.extend_from_slice(profile);
-    daemon_args.extend_from_slice(&["-p", "gtl-daemon", "--target", WIN_TARGET]);
+    let mut server_args = vec!["xwin", "build"];
+    server_args.extend_from_slice(profile);
+    server_args.extend_from_slice(&["-p", "gtl-server", "--target", WIN_TARGET]);
 
     let viewer_args = viewer_build_arguments(smoke);
     let root = repository_root();
@@ -57,16 +57,16 @@ pub fn run(smoke: bool, force: bool) -> Result<()> {
     )
     .context("cross-build the Windows CLI")?;
     process::run_step(
-        &Step::new("cross-build-daemon", "cargo", daemon_args).with_current_directory(&root),
+        &Step::new("cross-build-server", "cargo", server_args).with_current_directory(&root),
     )
-    .context("cross-build the Windows daemon")?;
+    .context("cross-build the Windows server")?;
     desktop_release::run_cargo("cross-build-viewer", &viewer_args)
         .context("cross-build the Windows Dioxus viewer")?;
 
     if !smoke {
         let target =
             cargo_target_directory(&root).context("resolve Windows release artifact directory")?;
-        for exe in ["git-tools.exe", "gtl-daemon.exe", "gtl-viewer.exe"] {
+        for exe in ["git-tools.exe", "gtl-server.exe", "gtl-viewer.exe"] {
             let path = release_artifact_path(&target, exe);
             let bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
             if bytes == 0 {

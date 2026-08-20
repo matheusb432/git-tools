@@ -1,6 +1,9 @@
 use std::{error::Error, time::Duration};
 
 use gtl_local_auth::CapabilityToken;
+use gtl_wire::v1::{
+    DiffTarget, Empty, RenderDiffRequest, diff_service_client::DiffServiceClient, diff_target,
+};
 use prost::Message as _;
 use prost_types::FileDescriptorProto;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -22,12 +25,14 @@ use tonic_reflection::pb::v1::{
 };
 
 use super::serve;
+use crate::state::AppState;
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
 const TEST_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(250);
 
 struct TestServer {
+    _directory: tempfile::TempDir,
     channel: Channel,
     authorization: TestAuthorization,
     shutdown: oneshot::Sender<()>,
@@ -36,6 +41,8 @@ struct TestServer {
 
 impl TestServer {
     async fn start() -> TestResult<Self> {
+        let directory = tempfile::tempdir()?;
+        let state = AppState::open(directory.path())?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
         let capability = CapabilityToken::generate()?;
@@ -49,6 +56,7 @@ impl TestServer {
                 },
                 TEST_SHUTDOWN_GRACE_PERIOD,
                 capability,
+                state,
             )
             .await
         });
@@ -57,6 +65,7 @@ impl TestServer {
             .await?;
 
         Ok(Self {
+            _directory: directory,
             channel,
             authorization,
             shutdown,
@@ -95,6 +104,32 @@ async fn serves_authenticated_health_and_reflection() -> TestResult {
     assert_reflection_describes_gtl_contract(server.channel.clone(), server.authorization.clone())
         .await?;
 
+    server
+        .shutdown
+        .send(())
+        .map_err(|()| "test server stopped before shutdown")?;
+    server.task.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn validates_application_requests_through_the_generated_client() -> TestResult {
+    let server = TestServer::start().await?;
+    let mut client =
+        DiffServiceClient::with_interceptor(server.channel.clone(), server.authorization.clone());
+
+    let error = client
+        .render(RenderDiffRequest {
+            working_directory: "relative".into(),
+            target: Some(DiffTarget {
+                selection: Some(diff_target::Selection::Unpushed(Empty {})),
+            }),
+            name: None,
+        })
+        .await
+        .expect_err("relative working directory must fail");
+
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
     server
         .shutdown
         .send(())
@@ -149,14 +184,25 @@ async fn shutdown_reports_not_serving_and_stops_with_an_open_health_watch() -> T
 }
 
 async fn assert_health_serving(channel: Channel, authorization: TestAuthorization) -> TestResult {
-    let response = HealthClient::with_interceptor(channel, authorization)
-        .check(HealthCheckRequest {
-            service: String::new(),
-        })
-        .await?
-        .into_inner();
-
-    assert_eq!(response.status, ServingStatus::Serving as i32);
+    let mut client = HealthClient::with_interceptor(channel, authorization);
+    for service in [
+        "",
+        "gtl.v1.DiffService",
+        "gtl.v1.LiveViewService",
+        "gtl.v1.ProjectService",
+        "gtl.v1.RepositoryService",
+        "gtl.v1.SettingsService",
+        "gtl.v1.TagService",
+        "gtl.v1.WorktreeService",
+    ] {
+        let response = client
+            .check(HealthCheckRequest {
+                service: service.to_owned(),
+            })
+            .await?
+            .into_inner();
+        assert_eq!(response.status, ServingStatus::Serving as i32);
+    }
     Ok(())
 }
 
@@ -180,7 +226,7 @@ async fn assert_reflection_describes_gtl_contract(
     let requests = tokio_stream::iter([ServerReflectionRequest {
         host: String::new(),
         message_request: Some(MessageRequest::FileByFilename(
-            "gtl/v1/gtl.proto".to_owned(),
+            "gtl/v1/diff.proto".to_owned(),
         )),
     }]);
     let mut responses = ServerReflectionClient::with_interceptor(channel, authorization)
@@ -197,9 +243,16 @@ async fn assert_reflection_describes_gtl_contract(
         .collect::<Result<Vec<_>, _>>()?;
     let descriptor = descriptors
         .iter()
-        .find(|descriptor| descriptor.name.as_deref() == Some("gtl/v1/gtl.proto"))
+        .find(|descriptor| descriptor.name.as_deref() == Some("gtl/v1/diff.proto"))
         .ok_or("reflection omitted the GTL descriptor")?;
-    assert!(descriptor.service.is_empty());
+    assert_eq!(
+        descriptor
+            .service
+            .iter()
+            .filter_map(|service| service.name.as_deref())
+            .collect::<Vec<_>>(),
+        ["DiffService"]
+    );
     Ok(())
 }
 

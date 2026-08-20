@@ -9,6 +9,8 @@ use assert_cmd::Command;
 use predicates::str::contains;
 use tempfile::TempDir;
 
+mod common;
+
 /// Run a git command in `repo_path`, asserting success.
 fn git(repo_path: &Path, args: &[&str]) -> Result<()> {
     let out = process::Command::new("git")
@@ -87,6 +89,7 @@ fn gtl(repo_path: &Path) -> Command {
 
 #[test]
 fn revert_undoes_a_rebase_and_returns_to_feature() -> Result<()> {
+    let _server = common::ServerHarness::start(None)?;
     let (_tmp, repo_path) = setup()?;
     let main_before = rev(&repo_path, "main")?;
     gtl(&repo_path)

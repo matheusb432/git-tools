@@ -9,6 +9,8 @@ use assert_cmd::Command;
 use predicates::str::contains;
 use tempfile::TempDir;
 
+mod common;
+
 /// Run a git command in `repo_path`, asserting success.
 fn git(repo_path: &Path, args: &[&str]) -> Result<()> {
     let out = process::Command::new("git")
@@ -74,6 +76,7 @@ fn gtl(repo_path: &Path) -> Command {
 
 #[test]
 fn prune_partial_failure_reports_recovery_and_preserves_blocked_branch() -> Result<()> {
+    let _server = common::ServerHarness::start(None)?;
     let (_tmp, repo_path) = setup()?;
     git(&repo_path, &["branch", "feat/blocked"])?;
     let linked_worktree = repo_path.join("linked-worktree");
