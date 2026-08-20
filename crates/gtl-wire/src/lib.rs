@@ -11,5 +11,16 @@ pub mod settings;
 pub mod tags;
 pub mod viewer;
 
+#[allow(
+    clippy::default_trait_access,
+    clippy::doc_markdown,
+    clippy::match_single_binding
+)]
+pub mod v1 {
+    tonic::include_proto!("gtl.v1");
+}
+
+pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("gtl_descriptor");
+
 #[cfg(test)]
 mod testing;

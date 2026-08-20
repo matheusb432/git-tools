@@ -12,7 +12,7 @@ struct EdgePolicy {
     reason: &'static str,
 }
 
-const EDGE_POLICIES: [EdgePolicy; 4] = [
+const EDGE_POLICIES: [EdgePolicy; 6] = [
     EdgePolicy {
         from: "gtl-models",
         label: "gtl-models stays pure",
@@ -23,8 +23,11 @@ const EDGE_POLICIES: [EdgePolicy; 4] = [
             "gtl-infra",
             "gtl-artifacts",
             "gtl-cli",
+            "gtl-client",
             "gtl-daemon",
             "gtl-desktop",
+            "gtl-local-auth",
+            "gtl-server",
             "gtl-browser-e2e",
             "gtl-desktop-e2e",
             "xtask",
@@ -43,8 +46,11 @@ const EDGE_POLICIES: [EdgePolicy; 4] = [
             "gtl-infra",
             "gtl-artifacts",
             "gtl-cli",
+            "gtl-client",
             "gtl-daemon",
             "gtl-desktop",
+            "gtl-local-auth",
+            "gtl-server",
             "gtl-browser-e2e",
             "gtl-desktop-e2e",
             "xtask",
@@ -64,8 +70,11 @@ const EDGE_POLICIES: [EdgePolicy; 4] = [
             "gtl-infra",
             "gtl-artifacts",
             "gtl-cli",
+            "gtl-client",
             "gtl-daemon",
             "gtl-desktop",
+            "gtl-local-auth",
+            "gtl-server",
             "gtl-browser-e2e",
             "gtl-desktop-e2e",
             "xtask",
@@ -75,6 +84,40 @@ const EDGE_POLICIES: [EdgePolicy; 4] = [
         ],
         forbid_workspace_packages: false,
         reason: "wire DTOs may depend on pure model values, not use cases, adapters, frameworks, or process roots",
+    },
+    EdgePolicy {
+        from: "gtl-local-auth",
+        label: "gtl-local-auth stays bootstrap-only",
+        forbidden: &[
+            "gtl-application",
+            "gtl-artifacts",
+            "gtl-cli",
+            "gtl-client",
+            "gtl-daemon",
+            "gtl-desktop",
+            "gtl-infra",
+            "gtl-models",
+            "gtl-server",
+            "gtl-wire",
+        ],
+        forbid_workspace_packages: false,
+        reason: "local authentication and discovery must not depend on domain or process behavior",
+    },
+    EdgePolicy {
+        from: "gtl-client",
+        label: "gtl-client stays transport-only",
+        forbidden: &[
+            "gtl-application",
+            "gtl-artifacts",
+            "gtl-cli",
+            "gtl-daemon",
+            "gtl-desktop",
+            "gtl-infra",
+            "gtl-models",
+            "gtl-server",
+        ],
+        forbid_workspace_packages: false,
+        reason: "the shared client may depend on wire and local bootstrap contracts, not application behavior or process roots",
     },
     EdgePolicy {
         from: "gtl-parser",
@@ -223,6 +266,27 @@ mod tests {
         ));
         assert!(dependency_is_forbidden(
             wire_policy,
+            "gtl-application",
+            &BTreeSet::new()
+        ));
+    }
+
+    #[test]
+    fn client_policy_accepts_bootstrap_and_wire_dependencies() {
+        let client_policy = EDGE_POLICIES
+            .iter()
+            .find(|policy| policy.from == "gtl-client")
+            .expect("client policy should exist");
+
+        for dependency in ["gtl-local-auth", "gtl-wire", "tonic"] {
+            assert!(!dependency_is_forbidden(
+                client_policy,
+                dependency,
+                &BTreeSet::new()
+            ));
+        }
+        assert!(dependency_is_forbidden(
+            client_policy,
             "gtl-application",
             &BTreeSet::new()
         ));

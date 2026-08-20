@@ -16,8 +16,6 @@ use gtl_wire::viewer::{ViewerDiffLayout, ViewerFileSummary, ViewerViewIdentity};
 
 #[cfg(feature = "desktop")]
 use self::source::ClientDiffSourceError;
-#[cfg(feature = "desktop")]
-use crate::shared::browser::{self, DetailsVisibility};
 
 #[cfg(feature = "desktop")]
 mod source;
@@ -282,9 +280,7 @@ fn static_diff_file(
     lines: &[String],
     layout: ViewerDiffLayout,
 ) -> ClientDiffFile {
-    let path = summary.path.to_string_lossy();
-    let syntax = SyntaxLanguage::from_path(path.as_ref());
-    let mut parser = ClientDiffParser::new(layout, syntax);
+    let mut parser = ClientDiffParser::new(layout, &summary.path);
     let mut rows = ClientDiffRows::new(layout);
     for lines in lines.chunks(CLIENT_LINE_BATCH_SIZE) {
         rows.append(parser.push(lines).rows);
@@ -296,56 +292,6 @@ fn static_diff_file(
         rows,
         line_number_digits: parsed.line_number_digits,
         state: ClientDiffFileState::Complete,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[cfg(feature = "desktop")]
-enum ClientDiffSyntaxPriority {
-    Visible,
-    Expanded,
-    Background,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg(feature = "desktop")]
-struct ClientDiffSyntaxWork {
-    file_index: usize,
-    language: SyntaxLanguage,
-}
-
-#[cfg(feature = "desktop")]
-fn syntax_highlight_work(
-    files: &[ViewerFileSummary],
-    priority: impl Fn(&ViewerFileSummary) -> ClientDiffSyntaxPriority,
-) -> Vec<ClientDiffSyntaxWork> {
-    let mut work = files
-        .iter()
-        .enumerate()
-        .filter_map(|(file_index, file)| {
-            let path = file.path.to_string_lossy();
-            SyntaxLanguage::from_path(path.as_ref()).map(|language| {
-                (
-                    priority(file),
-                    ClientDiffSyntaxWork {
-                        file_index,
-                        language,
-                    },
-                )
-            })
-        })
-        .collect::<Vec<_>>();
-    work.sort_by_key(|(priority, work)| (*priority, work.file_index));
-    work.into_iter().map(|(_, work)| work).collect()
-}
-
-#[cfg(feature = "desktop")]
-fn current_syntax_priority(file: &ViewerFileSummary) -> ClientDiffSyntaxPriority {
-    match browser::details_visibility(&file.anchor_id) {
-        Some(DetailsVisibility::Visible) => ClientDiffSyntaxPriority::Visible,
-        Some(DetailsVisibility::Expanded) => ClientDiffSyntaxPriority::Expanded,
-        None if file.initially_expanded => ClientDiffSyntaxPriority::Expanded,
-        Some(DetailsVisibility::Collapsed) | None => ClientDiffSyntaxPriority::Background,
     }
 }
 
@@ -401,7 +347,12 @@ struct ClientDiffParser {
 }
 
 impl ClientDiffParser {
-    fn new(layout: ViewerDiffLayout, syntax: Option<SyntaxLanguage>) -> Self {
+    fn new(
+        layout: ViewerDiffLayout,
+        file_path: &gtl_models::paths::RepositoryRelativePath,
+    ) -> Self {
+        let path = file_path.to_string_lossy();
+        let syntax = SyntaxLanguage::from_path(path.as_ref());
         Self {
             parser: DiffParser::new().with_syntax(syntax).stream(),
             split: (layout == ViewerDiffLayout::Split).then(SplitDiffStream::new),
@@ -476,15 +427,6 @@ impl ClientDiffLoad {
         }
     }
 
-    fn file_is_complete(self, file_index: usize) -> bool {
-        let current = self.workspace.peek();
-        current.identity == self.identity
-            && current
-                .files
-                .get(file_index)
-                .is_some_and(|file| file.state == ClientDiffFileState::Complete)
-    }
-
     async fn load_page(
         self,
         file: &ViewerFileSummary,
@@ -504,8 +446,8 @@ impl ClientDiffLoad {
         Ok((page, next))
     }
 
-    async fn load_file_rows(self, file_index: usize, file: &ViewerFileSummary) {
-        let mut parser = ClientDiffParser::new(self.identity.render_options.layout, None);
+    async fn load_file(self, file_index: usize, file: &ViewerFileSummary) {
+        let mut parser = ClientDiffParser::new(self.identity.render_options.layout, &file.path);
         let mut cursor = ViewerDiffCursor::default();
 
         loop {
@@ -546,52 +488,6 @@ impl ClientDiffLoad {
             cursor = next;
         }
     }
-
-    async fn highlight_file(
-        self,
-        file_index: usize,
-        file: &ViewerFileSummary,
-        language: SyntaxLanguage,
-    ) {
-        if !self.file_is_complete(file_index) {
-            return;
-        }
-        let mut parser = ClientDiffParser::new(self.identity.render_options.layout, Some(language));
-        let mut highlighted_rows = ClientDiffRows::new(self.identity.render_options.layout);
-        let mut cursor = ViewerDiffCursor::default();
-
-        loop {
-            if !self.is_current() {
-                return;
-            }
-            let Ok((page, next)) = self.load_page(file, cursor).await else {
-                return;
-            };
-
-            for lines in page.lines.chunks(CLIENT_LINE_BATCH_SIZE) {
-                let parsed = parser.push(lines);
-                highlighted_rows.append(parsed.rows);
-                yield_to_browser().await;
-                if !self.is_current() {
-                    return;
-                }
-            }
-
-            let Some(next) = next else {
-                let parsed = parser.finish();
-                let line_number_digits = parsed.line_number_digits;
-                highlighted_rows.append(parsed.rows);
-                self.update_file(file_index, |file| {
-                    if file.state == ClientDiffFileState::Complete {
-                        file.line_number_digits = line_number_digits;
-                        file.rows = highlighted_rows;
-                    }
-                });
-                return;
-            };
-            cursor = next;
-        }
-    }
 }
 
 #[cfg(feature = "desktop")]
@@ -611,27 +507,11 @@ async fn load_workspace(
         identity,
     };
 
-    for (file_index, file) in files.iter().enumerate() {
+    for (file_index, file) in files.into_iter().enumerate() {
         if !load.is_current() {
             return;
         }
-        load.load_file_rows(file_index, file).await;
-    }
-
-    if !load.is_current() {
-        return;
-    }
-    yield_to_browser().await;
-
-    for work in syntax_highlight_work(&files, current_syntax_priority) {
-        if !load.is_current() {
-            return;
-        }
-        let Some(file) = files.get(work.file_index) else {
-            continue;
-        };
-        load.highlight_file(work.file_index, file, work.language)
-            .await;
+        load.load_file(file_index, &file).await;
     }
 }
 
@@ -864,41 +744,25 @@ mod tests {
     }
 
     #[test]
-    fn syntax_work_prioritizes_visible_then_expanded_files() -> TestResult {
-        let files = vec![
-            file_summary(0, "src/expanded.rs", true)?,
-            file_summary(1, "notes.txt", true)?,
-            file_summary(2, "src/background.py", false)?,
-            file_summary(3, "src/visible.ts", true)?,
-            file_summary(4, "src/background.js", false)?,
+    fn file_parser_highlights_supported_syntax_in_one_pass() -> TestResult {
+        let file = file_summary(0, "src/example.rs", true)?;
+        let source = vec![
+            "@@ -1 +1 @@".to_owned(),
+            "-let old_value = 1;".to_owned(),
+            "+let new_value = 2;".to_owned(),
         ];
+        let mut parser = ClientDiffParser::new(ViewerDiffLayout::Unified, &file.path);
+        let mut rows = parser.push(&source).rows;
+        rows.append(parser.finish().rows);
 
-        let work = syntax_highlight_work(&files, |file| match file.id.as_str() {
-            "file-3" => ClientDiffSyntaxPriority::Visible,
-            "file-0" => ClientDiffSyntaxPriority::Expanded,
-            _ => ClientDiffSyntaxPriority::Background,
-        });
-
-        assert_eq!(
-            work,
-            vec![
-                ClientDiffSyntaxWork {
-                    file_index: 3,
-                    language: SyntaxLanguage::TypeScript,
-                },
-                ClientDiffSyntaxWork {
-                    file_index: 0,
-                    language: SyntaxLanguage::Rust,
-                },
-                ClientDiffSyntaxWork {
-                    file_index: 2,
-                    language: SyntaxLanguage::Python,
-                },
-                ClientDiffSyntaxWork {
-                    file_index: 4,
-                    language: SyntaxLanguage::JavaScript,
-                },
-            ]
+        let ClientDiffRows::Unified(batches) = rows else {
+            return Err("unified parsing produced split rows".into());
+        };
+        assert!(
+            batches
+                .iter()
+                .flat_map(|batch| batch.iter())
+                .any(|row| !row.syntax_tokens().is_empty())
         );
         Ok(())
     }

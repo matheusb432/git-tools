@@ -4,8 +4,11 @@ members = [
   "benchmarks",
   "crates/gtl-application",
   "crates/gtl-cli",
+  "crates/gtl-client",
+  "crates/gtl-local-auth",
   "crates/gtl-wire",
   "crates/gtl-daemon",
+  "crates/gtl-server",
   "crates/gtl-desktop",
   "crates/gtl-models",
   "crates/gtl-infra",
@@ -22,8 +25,11 @@ members = [
 default-members = [
   "crates/gtl-application",
   "crates/gtl-cli",
+  "crates/gtl-client",
+  "crates/gtl-local-auth",
   "crates/gtl-wire",
   "crates/gtl-daemon",
+  "crates/gtl-server",
   "crates/gtl-models",
   "crates/gtl-infra",
   "crates/gtl-parser",
@@ -39,11 +45,14 @@ publish = false
 [workspace.dependencies]
 gtl-application = { path = "crates/gtl-application" }
 gtl-benchmarks = { path = "benchmarks" }
+gtl-client = { path = "crates/gtl-client" }
+gtl-local-auth = { path = "crates/gtl-local-auth" }
 gtl-wire = { path = "crates/gtl-wire" }
 gtl-desktop = { path = "crates/gtl-desktop" }
 gtl-artifacts = { path = "crates/gtl-artifacts" }
 gtl-models = { path = "crates/gtl-models" }
 gtl-parser = { path = "crates/gtl-parser", default-features = false }
+gtl-server = { path = "crates/gtl-server" }
 gtl-infra = { path = "crates/gtl-infra" }
 gtl-web = { path = "crates/gtl-web", default-features = false }
 gtl-web-contracts = { path = "crates/gtl-web-contracts" }
@@ -63,6 +72,7 @@ cqrsy = { git = "ssh://git@github.com/matheusb432/cqrsy.git", rev = "544e92d53a7
 criterion = "0.8.2"
 directories = "6.0.0"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+getrandom = "0.4.3"
 flate2 = { version = "1.1.9", default-features = false, features = [
   "rust_backend",
 ] }
@@ -77,6 +87,8 @@ libc = "0.2.186"
 natord = "1.0.9"
 nutype = "0.7.0"
 parking_lot = "0.12.5"
+prost = "0.14.4"
+prost-types = "0.14.4"
 playwright-rs = "=0.15.0"
 predicates = "3"
 raw-window-handle = "0.6"
@@ -89,6 +101,7 @@ rusqlite = { version = "0.40", default-features = false, features = [
   "cache",
 ] }
 rusqlite_migration = "2.6"
+secrecy = "0.10.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 serde_with = { version = "3", default-features = false, features = ["macros"] }
@@ -97,6 +110,7 @@ shlex = "2.0.1"
 sha2 = "0.11.0"
 similar = { version = "3.1.1", default-features = false, features = ["text"] }
 strum = { version = "0.28.0", default-features = false, features = ["derive"] }
+subtle = { version = "2.6.1", default-features = false }
 tauri = "2"
 tauri-build = "2"
 tauri-plugin-single-instance = "2"
@@ -107,9 +121,15 @@ thirtyfour = { version = "=0.37.4", default-features = false, features = [
 thiserror = "2.0.18"
 tiny-skia = "0.12"
 tokio = "1"
+tokio-stream = "0.1.18"
 toml = "1.1.2"
 toml_edit = "0.25.12"
 tower = { version = "0.5", features = ["util"] }
+tonic = { version = "0.14.6", default-features = false, features = ["codegen"] }
+tonic-health = "0.14.6"
+tonic-prost = "0.14.6"
+tonic-prost-build = "0.14.6"
+tonic-reflection = "0.14.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tree-sitter = "0.26.12"

@@ -1,0 +1,26 @@
+[package]
+name = "gtl-client"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+gtl-local-auth.workspace = true
+gtl-wire.workspace = true
+thiserror.workspace = true
+tonic = { workspace = true, features = ["transport"] }
+tonic-health.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = [
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+
+[lints]
+workspace = true
