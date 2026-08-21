@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use command_group::{CommandGroup, GroupChild};
 
 use super::{build, status_notifier::StatusNotifierWatcher};
@@ -27,6 +27,24 @@ const WINDOW_TITLE_PATTERN: &str = "^git-tools diff viewer$";
 const EVIDENCE_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "GTL_E2E_EVIDENCE_OUTPUT_PATH";
 const EVIDENCES_OUTPUT_PATH_ENVIRONMENT_VARIABLE: &str = "TEST_EVIDENCES_OUTPUT_PATH";
 const EVIDENCE_OUTPUT_PATH_DEFAULT: &str = ".artifacts/e2e";
+const CAPTURED_COMMAND_BYTES_MAX: usize = 8 * 1024;
+const DOM_PHASE_OUTPUT_BYTES_MAX: usize = 8 * 1024 * 1024;
+const SCROLL_BENCHMARK_ENVIRONMENT_VARIABLE_NAMES: &[&str] = &[
+    "GTL_DESKTOP_SCROLL_RUNNER",
+    "GTL_DESKTOP_SCROLL_REPORT_PATH",
+    "GTL_DESKTOP_SCROLL_LAUNCHES",
+    "GTL_DESKTOP_SCROLL_SOURCE_COMMIT",
+    "GTL_DESKTOP_SCROLL_INVOCATION",
+    "GTL_DESKTOP_SCROLL_CPU_QUOTA_PERCENT",
+    "GTL_DESKTOP_SCROLL_MEMORY_MAX_BYTES",
+    "GTL_DESKTOP_SCROLL_MEMORY_SWAP_MAX_BYTES",
+    "GTL_DESKTOP_SCROLL_TASKS_MAX",
+    "GTL_DESKTOP_SCROLL_PROCESS_NICENESS",
+    "GTL_DESKTOP_SCROLL_CARGO_JOBS_MAX",
+    "GTL_DESKTOP_SCROLL_RAYON_THREADS_MAX",
+    "GTL_DESKTOP_SCROLL_WALL_TIME_MINUTES",
+    "GTL_DESKTOP_SCROLL_TERMINATION_GRACE_SECONDS",
+];
 const HOST_ENVIRONMENT_VARIABLE_NAMES: &[&str] =
     &["PATH", "SystemRoot", "WINDIR", "PATHEXT", "COMSPEC"];
 #[cfg(not(windows))]
@@ -314,6 +332,30 @@ pub fn run() -> Result<()> {
     workflow()
 }
 
+pub(crate) fn run_scroll_benchmark() -> Result<()> {
+    if std::env::consts::OS != "linux" {
+        bail!("the production desktop scroll benchmark requires Linux WebKit");
+    }
+    build::run(BuildTarget::Cli)?;
+    build::run(BuildTarget::Viewer)?;
+
+    let sandbox = Sandbox::create()?;
+    clear_evidence_outcomes(&sandbox.evidence_root, sandbox.success_evidence_requested)?;
+    let environment = scroll_benchmark_environment(&sandbox)?;
+    let result = run_linux_session(&sandbox, environment, |environment| {
+        let host_environment = HostCargoEnvironment::capture()?;
+        run_dom_phase(
+            &sandbox,
+            environment,
+            &host_environment,
+            DomJourney::DesktopScrollBenchmark,
+        )
+    });
+    let logs_result = preserve_logs(&sandbox);
+    result?;
+    logs_result
+}
+
 pub(crate) fn run_runtime(executable: &Path, arguments: &[OsString]) -> Result<()> {
     let mut command = runtime_command(executable, arguments);
     let status = command
@@ -363,13 +405,31 @@ fn workflow() -> Result<()> {
 }
 
 fn run_linux(sandbox: &Sandbox) -> Result<()> {
+    run_linux_session(
+        sandbox,
+        sandbox.environment(&sandbox.native_data),
+        |environment| {
+            run_native_phase(sandbox, environment).and_then(|()| {
+                let mut dom_environment = environment.clone();
+                dom_environment.set("GIT_TOOLS_DATA_DIR", sandbox.dom_data.as_os_str());
+                dom_environment.set("GTL_E2E_DATA_ROOT", sandbox.dom_data.as_os_str());
+                run_browser_phases(sandbox, &dom_environment)
+            })
+        },
+    )
+}
+
+fn run_linux_session<T>(
+    sandbox: &Sandbox,
+    mut environment: IsolatedEnv,
+    operation: impl FnOnce(&IsolatedEnv) -> Result<T>,
+) -> Result<T> {
     let display = available_display(90..190)
         .context("no free isolated X display number in the 90..190 range")?;
     let display_value = format!(":{display}");
     fs::write(sandbox.root.join("display"), &display_value)?;
-    let mut env = sandbox.environment(&sandbox.native_data);
-    env.set("DISPLAY", &display_value);
-    env.set("NO_AT_BRIDGE", "1");
+    environment.set("DISPLAY", &display_value);
+    environment.set("NO_AT_BRIDGE", "1");
 
     let _xvfb = ManagedChild::spawn(
         "Xvfb",
@@ -383,32 +443,32 @@ fn run_linux(sandbox: &Sandbox) -> Result<()> {
             "tcp",
             "-noreset",
         ],
-        &env,
+        &environment,
         &sandbox.root,
         &sandbox.logs.join("xvfb.log"),
     )?;
     retry("Xvfb readiness", READY_TIMEOUT, || {
         command_success(
-            &env,
+            &environment,
             "xdpyinfo",
             &["-display", &display_value],
             &sandbox.root,
         )
     })?;
 
-    let (_dbus, _tray_watcher) = start_private_dbus(sandbox, &mut env)?;
+    let (_dbus, _tray_watcher) = start_private_dbus(sandbox, &mut environment)?;
 
     let _openbox = ManagedChild::spawn(
         "Openbox",
         "openbox",
         &["--sm-disable"],
-        &env,
+        &environment,
         &sandbox.root,
         &sandbox.logs.join("openbox.log"),
     )?;
     retry("Openbox readiness", READY_TIMEOUT, || {
         output(
-            &env,
+            &environment,
             "xprop",
             &["-root", "_NET_SUPPORTING_WM_CHECK"],
             &sandbox.root,
@@ -429,22 +489,17 @@ fn run_linux(sandbox: &Sandbox) -> Result<()> {
             "--skip-taskbar",
             "--no-shrink",
         ],
-        &env,
+        &environment,
         &sandbox.root,
         &sandbox.logs.join("stalonetray.log"),
     )?;
     retry("stalonetray readiness", READY_TIMEOUT, || {
-        find_window(&env, "^stalonetray$").is_ok()
+        find_window(&environment, "^stalonetray$").is_ok()
     })?;
 
-    let result = run_native_phase(sandbox, &env).and_then(|()| {
-        let mut dom_env = env.clone();
-        dom_env.set("GIT_TOOLS_DATA_DIR", sandbox.dom_data.as_os_str());
-        dom_env.set("GTL_E2E_DATA_ROOT", sandbox.dom_data.as_os_str());
-        run_browser_phases(sandbox, &dom_env)
-    });
+    let result = operation(&environment);
     if result.is_err() {
-        capture_diagnostics(sandbox, &env);
+        capture_diagnostics(sandbox, &environment);
     }
     result
 }
@@ -537,29 +592,23 @@ fn run_dom_phase(
     sandbox: &Sandbox,
     env: &IsolatedEnv,
     host_environment: &HostCargoEnvironment,
+    journey: DomJourney,
 ) -> Result<()> {
-    let log = sandbox.logs.join("thirtyfour.log");
-    let arguments = [
-        "test",
-        "-p",
-        "gtl-desktop-e2e",
-        "--features",
-        "e2e",
-        "--test",
-        "viewer",
-        "--",
-        "--test-threads",
-        "1",
-    ];
+    let log = sandbox.logs.join(journey.log_name());
     let mut command = Command::new("cargo");
     command
         .arg("--config")
         .arg(&sandbox.cargo_runner_config)
-        .args(arguments)
+        .args(journey.arguments())
         .current_dir(".");
     seed_hostile_git_environment(&mut command, &sandbox.root);
     env.apply_cargo(&mut command, host_environment);
     let result = command.output().context("run Thirtyfour viewer E2E")?;
+    ensure_captured_output_bound(
+        &result,
+        DOM_PHASE_OUTPUT_BYTES_MAX,
+        "viewer Thirtyfour DOM phase",
+    )?;
     let mut bytes = result.stdout;
     bytes.extend_from_slice(&result.stderr);
     fs::write(&log, &bytes)?;
@@ -572,7 +621,7 @@ fn run_dom_phase(
 
 fn run_browser_phases(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
     let host_environment = HostCargoEnvironment::capture()?;
-    run_dom_phase(sandbox, env, &host_environment)?;
+    run_dom_phase(sandbox, env, &host_environment, DomJourney::Regression)?;
     let browser_environment = sandbox.environment(&sandbox.browser_data);
     let _server = start_server(
         sandbox,
@@ -582,6 +631,119 @@ fn run_browser_phases(sandbox: &Sandbox, env: &IsolatedEnv) -> Result<()> {
         "browser-server.log",
     )?;
     playwright::run(sandbox, &browser_environment, &host_environment)
+}
+
+fn scroll_benchmark_environment(sandbox: &Sandbox) -> Result<IsolatedEnv> {
+    let mut environment = sandbox.environment(&sandbox.dom_data);
+    for name in SCROLL_BENCHMARK_ENVIRONMENT_VARIABLE_NAMES {
+        let value = env::var_os(name)
+            .with_context(|| format!("{name} is required by the desktop scroll worker"))?;
+        environment.set(name, value);
+    }
+    for (name, program, arguments) in [
+        (
+            "GTL_DESKTOP_SCROLL_RUSTC_VERSION",
+            "rustc",
+            &["--version"][..],
+        ),
+        (
+            "GTL_DESKTOP_SCROLL_CARGO_VERSION",
+            "cargo",
+            &["--version"][..],
+        ),
+        ("GTL_DESKTOP_SCROLL_GIT_VERSION", "git", &["--version"][..]),
+        (
+            "GTL_DESKTOP_SCROLL_TAURI_DRIVER_VERSION",
+            "tauri-driver",
+            &["--version"][..],
+        ),
+        (
+            "GTL_DESKTOP_SCROLL_WEBKITGTK_VERSION",
+            "pkg-config",
+            &["--modversion", "webkit2gtk-4.1"][..],
+        ),
+    ] {
+        environment.set(name, captured_command_line(program, arguments)?);
+    }
+    Ok(environment)
+}
+
+fn captured_command_line(program: &str, arguments: &[&str]) -> Result<String> {
+    let output = Command::new(program)
+        .args(arguments)
+        .output()
+        .with_context(|| format!("capture {program} {}", arguments.join(" ")))?;
+    ensure_captured_output_bound(&output, CAPTURED_COMMAND_BYTES_MAX, program)?;
+    if !output.status.success() {
+        bail!(
+            "{program} {} failed (exit {}): {}{}",
+            arguments.join(" "),
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let value = String::from_utf8(output.stdout)
+        .with_context(|| format!("decode {program} version output"))?;
+    let value = value.trim();
+    ensure!(!value.is_empty(), "{program} returned an empty version");
+    Ok(value.to_owned())
+}
+
+fn ensure_captured_output_bound(output: &Output, maximum: usize, label: &str) -> Result<()> {
+    ensure!(
+        output.stdout.len() <= maximum && output.stderr.len() <= maximum,
+        "{label} output exceeded {maximum} bytes per stream"
+    );
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+enum DomJourney {
+    Regression,
+    DesktopScrollBenchmark,
+}
+
+impl DomJourney {
+    const fn arguments(self) -> &'static [&'static str] {
+        match self {
+            Self::Regression => &[
+                "test",
+                "-p",
+                "gtl-desktop-e2e",
+                "--features",
+                "e2e",
+                "--test",
+                "viewer",
+                "--",
+                "--test-threads",
+                "1",
+            ],
+            Self::DesktopScrollBenchmark => &[
+                "test",
+                "-p",
+                "gtl-desktop-e2e",
+                "--features",
+                "e2e",
+                "--test",
+                "viewer",
+                "--",
+                "desktop_scroll_baseline::production_viewer_scrolls_realistic_files_and_commits",
+                "--exact",
+                "--ignored",
+                "--nocapture",
+                "--test-threads",
+                "1",
+            ],
+        }
+    }
+
+    const fn log_name(self) -> &'static str {
+        match self {
+            Self::Regression => "thirtyfour.log",
+            Self::DesktopScrollBenchmark => "desktop-scroll-benchmark.log",
+        }
+    }
 }
 
 fn start_server(

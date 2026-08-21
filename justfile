@@ -58,6 +58,16 @@ _preflight:
 bench *args:
     cargo run --quiet -p xtask -- bench {{ args }}
 
+# Regenerate and verify the immutable desktop viewer scroll fixture under bounded resources.
+[group('performance')]
+desktop-scroll-fixture:
+    cargo run --quiet -p xtask -- desktop-scroll-fixture
+
+# Measure both production desktop side panels against the committed scroll fixture.
+[group('performance')]
+desktop-scroll-benchmark *args:
+    cargo run --quiet -p xtask -- desktop-scroll-benchmark {{ args }}
+
 # Run tests, or use `just test coverage`; coverage defaults to quiet and forwards cargo-llvm-cov arguments.
 [group('quality')]
 test *args:

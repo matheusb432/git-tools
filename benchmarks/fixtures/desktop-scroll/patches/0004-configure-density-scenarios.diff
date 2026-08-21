@@ -1,0 +1,508 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Desktop Scroll Fixture <desktop-scroll@example.invalid>
+Date: Mon, 5 Jan 2026 12:00:00 +0000
+Subject: [PATCH] viewer: configure compact and full-context density scenarios
+
+Use one reconstructed history for both production density choices.
+
+diff --git a/Cargo.lock b/Cargo.lock
+new file mode 100644
+index 0000000000000000000000000000000000000000..f26b47bafa0770f2b92cab70442a5e5f226e9aec
+--- /dev/null
++++ b/Cargo.lock
+@@ -0,0 +1,55 @@
++# deterministic lock row 0001 revision 04
++# deterministic lock row 0002 revision 04
++# deterministic lock row 0003 revision 04
++# deterministic lock row 0004 revision 04
++# deterministic lock row 0005 revision 04
++# deterministic lock row 0006 revision 04
++# deterministic lock row 0007 revision 04
++# deterministic lock row 0008 revision 04
++# deterministic lock row 0009 revision 04
++# deterministic lock row 0010 revision 04
++# deterministic lock row 0011 revision 04
++# deterministic lock row 0012 revision 04
++# deterministic lock row 0013 revision 04
++# deterministic lock row 0014 revision 04
++# deterministic lock row 0015 revision 04
++# deterministic lock row 0016 revision 04
++# deterministic lock row 0017 revision 04
++# deterministic lock row 0018 revision 04
++# deterministic lock row 0019 revision 04
++# deterministic lock row 0020 revision 04
++# deterministic lock row 0021 revision 04
++# deterministic lock row 0022 revision 04
++# deterministic lock row 0023 revision 04
++# deterministic lock row 0024 revision 04
++# deterministic lock row 0025 revision 04
++# deterministic lock row 0026 revision 04
++# deterministic lock row 0027 revision 04
++# deterministic lock row 0028 revision 04
++# deterministic lock row 0029 revision 04
++# deterministic lock row 0030 revision 04
++# deterministic lock row 0031 revision 04
++# deterministic lock row 0032 revision 04
++# deterministic lock row 0033 revision 04
++# deterministic lock row 0034 revision 04
++# deterministic lock row 0035 revision 04
++# deterministic lock row 0036 revision 04
++# deterministic lock row 0037 revision 04
++# deterministic lock row 0038 revision 04
++# deterministic lock row 0039 revision 04
++# deterministic lock row 0040 revision 04
++# deterministic lock row 0041 revision 04
++# deterministic lock row 0042 revision 04
++# deterministic lock row 0043 revision 04
++# deterministic lock row 0044 revision 04
++# deterministic lock row 0045 revision 04
++# deterministic lock row 0046 revision 04
++# deterministic lock row 0047 revision 04
++# deterministic lock row 0048 revision 04
++# deterministic lock row 0049 revision 04
++# deterministic lock row 0050 revision 04
++# deterministic lock row 0051 revision 04
++# deterministic lock row 0052 revision 04
++# deterministic lock row 0053 revision 04
++# deterministic lock row 0054 revision 04
++# deterministic lock row 0055 revision 04
+diff --git a/config/scenarios/compact.yaml b/config/scenarios/compact.yaml
+new file mode 100644
+index 0000000000000000000000000000000000000000..8667dfc030f7aa1b81590df9a122f563d58430c2
+--- /dev/null
++++ b/config/scenarios/compact.yaml
+@@ -0,0 +1,55 @@
++row_0001: fixture-0001-r04
++row_0002: fixture-0002-r04
++row_0003: fixture-0003-r04
++row_0004: fixture-0004-r04
++row_0005: fixture-0005-r04
++row_0006: fixture-0006-r04
++row_0007: fixture-0007-r04
++row_0008: fixture-0008-r04
++row_0009: fixture-0009-r04
++row_0010: fixture-0010-r04
++row_0011: fixture-0011-r04
++row_0012: fixture-0012-r04
++row_0013: fixture-0013-r04
++row_0014: fixture-0014-r04
++row_0015: fixture-0015-r04
++row_0016: fixture-0016-r04
++row_0017: fixture-0017-r04
++row_0018: fixture-0018-r04
++row_0019: fixture-0019-r04
++row_0020: fixture-0020-r04
++row_0021: fixture-0021-r04
++row_0022: fixture-0022-r04
++row_0023: fixture-0023-r04
++row_0024: fixture-0024-r04
++row_0025: fixture-0025-r04
++row_0026: fixture-0026-r04
++row_0027: fixture-0027-r04
++row_0028: fixture-0028-r04
++row_0029: fixture-0029-r04
++row_0030: fixture-0030-r04
++row_0031: fixture-0031-r04
++row_0032: fixture-0032-r04
++row_0033: fixture-0033-r04
++row_0034: fixture-0034-r04
++row_0035: fixture-0035-r04
++row_0036: fixture-0036-r04
++row_0037: fixture-0037-r04
++row_0038: fixture-0038-r04
++row_0039: fixture-0039-r04
++row_0040: fixture-0040-r04
++row_0041: fixture-0041-r04
++row_0042: fixture-0042-r04
++row_0043: fixture-0043-r04
++row_0044: fixture-0044-r04
++row_0045: fixture-0045-r04
++row_0046: fixture-0046-r04
++row_0047: fixture-0047-r04
++row_0048: fixture-0048-r04
++row_0049: fixture-0049-r04
++row_0050: fixture-0050-r04
++row_0051: fixture-0051-r04
++row_0052: fixture-0052-r04
++row_0053: fixture-0053-r04
++row_0054: fixture-0054-r04
++row_0055: fixture-0055-r04
+diff --git a/crates/viewer/src/workspace/obsolete_cache.rs b/crates/viewer/src/workspace/obsolete_cache.rs
+index 2ccab99d5a745fdfb20439fd3bd42fbc9a692229..124af10415cba2d69e1d7a4673d8e11b016e73ed 100644
+--- a/crates/viewer/src/workspace/obsolete_cache.rs
++++ b/crates/viewer/src/workspace/obsolete_cache.rs
+@@ -5,73 +5,73 @@ pub const ROW_0004: &str = "fixture-0004-r00";
+ pub const ROW_0005: &str = "fixture-0005-r00";
+ pub const ROW_0006: &str = "fixture-0006-r00";
+ pub const ROW_0007: &str = "fixture-0007-r00";
+-pub const ROW_0008: &str = "fixture-0008-r00";
+-pub const ROW_0009: &str = "fixture-0009-r00";
++pub const ROW_0008: &str = "fixture-0008-r04";
++pub const ROW_0009: &str = "fixture-0009-r04";
+ pub const ROW_0010: &str = "fixture-0010-r00";
+ pub const ROW_0011: &str = "fixture-0011-r00";
+ pub const ROW_0012: &str = "fixture-0012-r00";
+ pub const ROW_0013: &str = "fixture-0013-r00";
+ pub const ROW_0014: &str = "fixture-0014-r00";
+-pub const ROW_0015: &str = "fixture-0015-r00";
+-pub const ROW_0016: &str = "fixture-0016-r00";
++pub const ROW_0015: &str = "fixture-0015-r04";
++pub const ROW_0016: &str = "fixture-0016-r04";
+ pub const ROW_0017: &str = "fixture-0017-r00";
+ pub const ROW_0018: &str = "fixture-0018-r00";
+ pub const ROW_0019: &str = "fixture-0019-r00";
+ pub const ROW_0020: &str = "fixture-0020-r00";
+ pub const ROW_0021: &str = "fixture-0021-r00";
+-pub const ROW_0022: &str = "fixture-0022-r00";
+-pub const ROW_0023: &str = "fixture-0023-r00";
++pub const ROW_0022: &str = "fixture-0022-r04";
++pub const ROW_0023: &str = "fixture-0023-r04";
+ pub const ROW_0024: &str = "fixture-0024-r00";
+ pub const ROW_0025: &str = "fixture-0025-r00";
+ pub const ROW_0026: &str = "fixture-0026-r00";
+ pub const ROW_0027: &str = "fixture-0027-r00";
+ pub const ROW_0028: &str = "fixture-0028-r00";
+ pub const ROW_0029: &str = "fixture-0029-r00";
+-pub const ROW_0030: &str = "fixture-0030-r00";
+-pub const ROW_0031: &str = "fixture-0031-r00";
++pub const ROW_0030: &str = "fixture-0030-r04";
++pub const ROW_0031: &str = "fixture-0031-r04";
+ pub const ROW_0032: &str = "fixture-0032-r00";
+ pub const ROW_0033: &str = "fixture-0033-r00";
+ pub const ROW_0034: &str = "fixture-0034-r00";
+ pub const ROW_0035: &str = "fixture-0035-r00";
+ pub const ROW_0036: &str = "fixture-0036-r00";
+-pub const ROW_0037: &str = "fixture-0037-r00";
+-pub const ROW_0038: &str = "fixture-0038-r00";
++pub const ROW_0037: &str = "fixture-0037-r04";
++pub const ROW_0038: &str = "fixture-0038-r04";
+ pub const ROW_0039: &str = "fixture-0039-r00";
+ pub const ROW_0040: &str = "fixture-0040-r00";
+ pub const ROW_0041: &str = "fixture-0041-r00";
+ pub const ROW_0042: &str = "fixture-0042-r00";
+ pub const ROW_0043: &str = "fixture-0043-r00";
+-pub const ROW_0044: &str = "fixture-0044-r00";
+-pub const ROW_0045: &str = "fixture-0045-r00";
++pub const ROW_0044: &str = "fixture-0044-r04";
++pub const ROW_0045: &str = "fixture-0045-r04";
+ pub const ROW_0046: &str = "fixture-0046-r00";
+ pub const ROW_0047: &str = "fixture-0047-r00";
+ pub const ROW_0048: &str = "fixture-0048-r00";
+ pub const ROW_0049: &str = "fixture-0049-r00";
+ pub const ROW_0050: &str = "fixture-0050-r00";
+-pub const ROW_0051: &str = "fixture-0051-r00";
+-pub const ROW_0052: &str = "fixture-0052-r00";
++pub const ROW_0051: &str = "fixture-0051-r04";
++pub const ROW_0052: &str = "fixture-0052-r04";
+ pub const ROW_0053: &str = "fixture-0053-r00";
+ pub const ROW_0054: &str = "fixture-0054-r00";
+ pub const ROW_0055: &str = "fixture-0055-r00";
+ pub const ROW_0056: &str = "fixture-0056-r00";
+ pub const ROW_0057: &str = "fixture-0057-r00";
+ pub const ROW_0058: &str = "fixture-0058-r00";
+-pub const ROW_0059: &str = "fixture-0059-r00";
+-pub const ROW_0060: &str = "fixture-0060-r00";
++pub const ROW_0059: &str = "fixture-0059-r04";
++pub const ROW_0060: &str = "fixture-0060-r04";
+ pub const ROW_0061: &str = "fixture-0061-r00";
+ pub const ROW_0062: &str = "fixture-0062-r00";
+ pub const ROW_0063: &str = "fixture-0063-r00";
+ pub const ROW_0064: &str = "fixture-0064-r00";
+ pub const ROW_0065: &str = "fixture-0065-r00";
+-pub const ROW_0066: &str = "fixture-0066-r00";
+-pub const ROW_0067: &str = "fixture-0067-r00";
++pub const ROW_0066: &str = "fixture-0066-r04";
++pub const ROW_0067: &str = "fixture-0067-r04";
+ pub const ROW_0068: &str = "fixture-0068-r00";
+ pub const ROW_0069: &str = "fixture-0069-r00";
+ pub const ROW_0070: &str = "fixture-0070-r00";
+ pub const ROW_0071: &str = "fixture-0071-r00";
+ pub const ROW_0072: &str = "fixture-0072-r00";
+-pub const ROW_0073: &str = "fixture-0073-r00";
+-pub const ROW_0074: &str = "fixture-0074-r00";
++pub const ROW_0073: &str = "fixture-0073-r04";
++pub const ROW_0074: &str = "fixture-0074-r04";
+ pub const ROW_0075: &str = "fixture-0075-r00";
+ pub const ROW_0076: &str = "fixture-0076-r00";
+ pub const ROW_0077: &str = "fixture-0077-r00";
+diff --git a/docs/benchmarks/measurement.md b/docs/benchmarks/measurement.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..c04a0620ad05f689f021c585c51062887fe0a03f
+--- /dev/null
++++ b/docs/benchmarks/measurement.md
+@@ -0,0 +1,55 @@
++- Fixture row 0001, revision 04.
++- Fixture row 0002, revision 04.
++- Fixture row 0003, revision 04.
++- Fixture row 0004, revision 04.
++- Fixture row 0005, revision 04.
++- Fixture row 0006, revision 04.
++- Fixture row 0007, revision 04.
++- Fixture row 0008, revision 04.
++- Fixture row 0009, revision 04.
++- Fixture row 0010, revision 04.
++- Fixture row 0011, revision 04.
++- Fixture row 0012, revision 04.
++- Fixture row 0013, revision 04.
++- Fixture row 0014, revision 04.
++- Fixture row 0015, revision 04.
++- Fixture row 0016, revision 04.
++- Fixture row 0017, revision 04.
++- Fixture row 0018, revision 04.
++- Fixture row 0019, revision 04.
++- Fixture row 0020, revision 04.
++- Fixture row 0021, revision 04.
++- Fixture row 0022, revision 04.
++- Fixture row 0023, revision 04.
++- Fixture row 0024, revision 04.
++- Fixture row 0025, revision 04.
++- Fixture row 0026, revision 04.
++- Fixture row 0027, revision 04.
++- Fixture row 0028, revision 04.
++- Fixture row 0029, revision 04.
++- Fixture row 0030, revision 04.
++- Fixture row 0031, revision 04.
++- Fixture row 0032, revision 04.
++- Fixture row 0033, revision 04.
++- Fixture row 0034, revision 04.
++- Fixture row 0035, revision 04.
++- Fixture row 0036, revision 04.
++- Fixture row 0037, revision 04.
++- Fixture row 0038, revision 04.
++- Fixture row 0039, revision 04.
++- Fixture row 0040, revision 04.
++- Fixture row 0041, revision 04.
++- Fixture row 0042, revision 04.
++- Fixture row 0043, revision 04.
++- Fixture row 0044, revision 04.
++- Fixture row 0045, revision 04.
++- Fixture row 0046, revision 04.
++- Fixture row 0047, revision 04.
++- Fixture row 0048, revision 04.
++- Fixture row 0049, revision 04.
++- Fixture row 0050, revision 04.
++- Fixture row 0051, revision 04.
++- Fixture row 0052, revision 04.
++- Fixture row 0053, revision 04.
++- Fixture row 0054, revision 04.
++- Fixture row 0055, revision 04.
+diff --git a/docs/viewer/changed-files.md b/docs/viewer/changed-files.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..c04a0620ad05f689f021c585c51062887fe0a03f
+--- /dev/null
++++ b/docs/viewer/changed-files.md
+@@ -0,0 +1,55 @@
++- Fixture row 0001, revision 04.
++- Fixture row 0002, revision 04.
++- Fixture row 0003, revision 04.
++- Fixture row 0004, revision 04.
++- Fixture row 0005, revision 04.
++- Fixture row 0006, revision 04.
++- Fixture row 0007, revision 04.
++- Fixture row 0008, revision 04.
++- Fixture row 0009, revision 04.
++- Fixture row 0010, revision 04.
++- Fixture row 0011, revision 04.
++- Fixture row 0012, revision 04.
++- Fixture row 0013, revision 04.
++- Fixture row 0014, revision 04.
++- Fixture row 0015, revision 04.
++- Fixture row 0016, revision 04.
++- Fixture row 0017, revision 04.
++- Fixture row 0018, revision 04.
++- Fixture row 0019, revision 04.
++- Fixture row 0020, revision 04.
++- Fixture row 0021, revision 04.
++- Fixture row 0022, revision 04.
++- Fixture row 0023, revision 04.
++- Fixture row 0024, revision 04.
++- Fixture row 0025, revision 04.
++- Fixture row 0026, revision 04.
++- Fixture row 0027, revision 04.
++- Fixture row 0028, revision 04.
++- Fixture row 0029, revision 04.
++- Fixture row 0030, revision 04.
++- Fixture row 0031, revision 04.
++- Fixture row 0032, revision 04.
++- Fixture row 0033, revision 04.
++- Fixture row 0034, revision 04.
++- Fixture row 0035, revision 04.
++- Fixture row 0036, revision 04.
++- Fixture row 0037, revision 04.
++- Fixture row 0038, revision 04.
++- Fixture row 0039, revision 04.
++- Fixture row 0040, revision 04.
++- Fixture row 0041, revision 04.
++- Fixture row 0042, revision 04.
++- Fixture row 0043, revision 04.
++- Fixture row 0044, revision 04.
++- Fixture row 0045, revision 04.
++- Fixture row 0046, revision 04.
++- Fixture row 0047, revision 04.
++- Fixture row 0048, revision 04.
++- Fixture row 0049, revision 04.
++- Fixture row 0050, revision 04.
++- Fixture row 0051, revision 04.
++- Fixture row 0052, revision 04.
++- Fixture row 0053, revision 04.
++- Fixture row 0054, revision 04.
++- Fixture row 0055, revision 04.
+diff --git a/docs/viewer/commits-panel.md b/docs/viewer/commits-panel.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..c04a0620ad05f689f021c585c51062887fe0a03f
+--- /dev/null
++++ b/docs/viewer/commits-panel.md
+@@ -0,0 +1,55 @@
++- Fixture row 0001, revision 04.
++- Fixture row 0002, revision 04.
++- Fixture row 0003, revision 04.
++- Fixture row 0004, revision 04.
++- Fixture row 0005, revision 04.
++- Fixture row 0006, revision 04.
++- Fixture row 0007, revision 04.
++- Fixture row 0008, revision 04.
++- Fixture row 0009, revision 04.
++- Fixture row 0010, revision 04.
++- Fixture row 0011, revision 04.
++- Fixture row 0012, revision 04.
++- Fixture row 0013, revision 04.
++- Fixture row 0014, revision 04.
++- Fixture row 0015, revision 04.
++- Fixture row 0016, revision 04.
++- Fixture row 0017, revision 04.
++- Fixture row 0018, revision 04.
++- Fixture row 0019, revision 04.
++- Fixture row 0020, revision 04.
++- Fixture row 0021, revision 04.
++- Fixture row 0022, revision 04.
++- Fixture row 0023, revision 04.
++- Fixture row 0024, revision 04.
++- Fixture row 0025, revision 04.
++- Fixture row 0026, revision 04.
++- Fixture row 0027, revision 04.
++- Fixture row 0028, revision 04.
++- Fixture row 0029, revision 04.
++- Fixture row 0030, revision 04.
++- Fixture row 0031, revision 04.
++- Fixture row 0032, revision 04.
++- Fixture row 0033, revision 04.
++- Fixture row 0034, revision 04.
++- Fixture row 0035, revision 04.
++- Fixture row 0036, revision 04.
++- Fixture row 0037, revision 04.
++- Fixture row 0038, revision 04.
++- Fixture row 0039, revision 04.
++- Fixture row 0040, revision 04.
++- Fixture row 0041, revision 04.
++- Fixture row 0042, revision 04.
++- Fixture row 0043, revision 04.
++- Fixture row 0044, revision 04.
++- Fixture row 0045, revision 04.
++- Fixture row 0046, revision 04.
++- Fixture row 0047, revision 04.
++- Fixture row 0048, revision 04.
++- Fixture row 0049, revision 04.
++- Fixture row 0050, revision 04.
++- Fixture row 0051, revision 04.
++- Fixture row 0052, revision 04.
++- Fixture row 0053, revision 04.
++- Fixture row 0054, revision 04.
++- Fixture row 0055, revision 04.
+diff --git a/docs/viewer/retired-renderer.md b/docs/viewer/retired-renderer.md
+index e9c4ba1446a33cb167be69be730eb60d74c02c4f..fa6657b65c6fe8b1ef2bd0e43122fe24a60188df 100644
+--- a/docs/viewer/retired-renderer.md
++++ b/docs/viewer/retired-renderer.md
+@@ -5,73 +5,73 @@
+ - Fixture row 0005, revision 00.
+ - Fixture row 0006, revision 00.
+ - Fixture row 0007, revision 00.
+-- Fixture row 0008, revision 00.
+-- Fixture row 0009, revision 00.
++- Fixture row 0008, revision 04.
++- Fixture row 0009, revision 04.
+ - Fixture row 0010, revision 00.
+ - Fixture row 0011, revision 00.
+ - Fixture row 0012, revision 00.
+ - Fixture row 0013, revision 00.
+ - Fixture row 0014, revision 00.
+-- Fixture row 0015, revision 00.
+-- Fixture row 0016, revision 00.
++- Fixture row 0015, revision 04.
++- Fixture row 0016, revision 04.
+ - Fixture row 0017, revision 00.
+ - Fixture row 0018, revision 00.
+ - Fixture row 0019, revision 00.
+ - Fixture row 0020, revision 00.
+ - Fixture row 0021, revision 00.
+-- Fixture row 0022, revision 00.
+-- Fixture row 0023, revision 00.
++- Fixture row 0022, revision 04.
++- Fixture row 0023, revision 04.
+ - Fixture row 0024, revision 00.
+ - Fixture row 0025, revision 00.
+ - Fixture row 0026, revision 00.
+ - Fixture row 0027, revision 00.
+ - Fixture row 0028, revision 00.
+ - Fixture row 0029, revision 00.
+-- Fixture row 0030, revision 00.
+-- Fixture row 0031, revision 00.
++- Fixture row 0030, revision 04.
++- Fixture row 0031, revision 04.
+ - Fixture row 0032, revision 00.
+ - Fixture row 0033, revision 00.
+ - Fixture row 0034, revision 00.
+ - Fixture row 0035, revision 00.
+ - Fixture row 0036, revision 00.
+-- Fixture row 0037, revision 00.
+-- Fixture row 0038, revision 00.
++- Fixture row 0037, revision 04.
++- Fixture row 0038, revision 04.
+ - Fixture row 0039, revision 00.
+ - Fixture row 0040, revision 00.
+ - Fixture row 0041, revision 00.
+ - Fixture row 0042, revision 00.
+ - Fixture row 0043, revision 00.
+-- Fixture row 0044, revision 00.
+-- Fixture row 0045, revision 00.
++- Fixture row 0044, revision 04.
++- Fixture row 0045, revision 04.
+ - Fixture row 0046, revision 00.
+ - Fixture row 0047, revision 00.
+ - Fixture row 0048, revision 00.
+ - Fixture row 0049, revision 00.
+ - Fixture row 0050, revision 00.
+-- Fixture row 0051, revision 00.
+-- Fixture row 0052, revision 00.
++- Fixture row 0051, revision 04.
++- Fixture row 0052, revision 04.
+ - Fixture row 0053, revision 00.
+ - Fixture row 0054, revision 00.
+ - Fixture row 0055, revision 00.
+ - Fixture row 0056, revision 00.
+ - Fixture row 0057, revision 00.
+ - Fixture row 0058, revision 00.
+-- Fixture row 0059, revision 00.
+-- Fixture row 0060, revision 00.
++- Fixture row 0059, revision 04.
++- Fixture row 0060, revision 04.
+ - Fixture row 0061, revision 00.
+ - Fixture row 0062, revision 00.
+ - Fixture row 0063, revision 00.
+ - Fixture row 0064, revision 00.
+ - Fixture row 0065, revision 00.
+-- Fixture row 0066, revision 00.
+-- Fixture row 0067, revision 00.
++- Fixture row 0066, revision 04.
++- Fixture row 0067, revision 04.
+ - Fixture row 0068, revision 00.
+ - Fixture row 0069, revision 00.
+ - Fixture row 0070, revision 00.
+ - Fixture row 0071, revision 00.
+ - Fixture row 0072, revision 00.
+-- Fixture row 0073, revision 00.
+-- Fixture row 0074, revision 00.
++- Fixture row 0073, revision 04.
++- Fixture row 0074, revision 04.
+ - Fixture row 0075, revision 00.
+ - Fixture row 0076, revision 00.
+ - Fixture row 0077, revision 00.

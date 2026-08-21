@@ -4,6 +4,9 @@
 
 mod support;
 
+#[path = "viewer/desktop_scroll_baseline.rs"]
+mod desktop_scroll_baseline;
+
 #[path = "viewer/live_lifecycle.rs"]
 mod live_lifecycle;
 

@@ -24,6 +24,12 @@ fn run(command: cli::Command) -> Result<()> {
         } => verbs::install::run_uninstall(remove_config, force),
         cli::Command::Test(arguments) => verbs::test::run(&arguments),
         cli::Command::DesktopE2eWorker { verbose: _ } => verbs::desktop_e2e::run(),
+        cli::Command::DesktopScrollFixture => verbs::desktop_scroll::refresh_fixture(),
+        cli::Command::DesktopScrollBenchmark(arguments) => {
+            verbs::desktop_scroll::run_benchmark(&arguments)
+        }
+        cli::Command::DesktopScrollFixtureWorker => verbs::desktop_scroll::run_fixture_worker(),
+        cli::Command::DesktopScrollBenchmarkWorker => verbs::desktop_scroll::run_benchmark_worker(),
         cli::Command::E2eRuntimeWorker {
             executable,
             arguments,

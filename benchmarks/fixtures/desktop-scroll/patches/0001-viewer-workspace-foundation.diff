@@ -1,0 +1,540 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Desktop Scroll Fixture <desktop-scroll@example.invalid>
+Date: Fri, 2 Jan 2026 12:00:00 +0000
+Subject: [PATCH] viewer: add deterministic workspace fixture foundations
+
+Create the first synthetic viewer files and exercise both side rails.
+
+diff --git a/crates/desktop/src/benchmark/mod.rs b/crates/desktop/src/benchmark/mod.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..64ef3cf833bb9fcfc7d5c4123784787c6eca14aa
+--- /dev/null
++++ b/crates/desktop/src/benchmark/mod.rs
+@@ -0,0 +1,55 @@
++pub const ROW_0001: &str = "fixture-0001-r01";
++pub const ROW_0002: &str = "fixture-0002-r01";
++pub const ROW_0003: &str = "fixture-0003-r01";
++pub const ROW_0004: &str = "fixture-0004-r01";
++pub const ROW_0005: &str = "fixture-0005-r01";
++pub const ROW_0006: &str = "fixture-0006-r01";
++pub const ROW_0007: &str = "fixture-0007-r01";
++pub const ROW_0008: &str = "fixture-0008-r01";
++pub const ROW_0009: &str = "fixture-0009-r01";
++pub const ROW_0010: &str = "fixture-0010-r01";
++pub const ROW_0011: &str = "fixture-0011-r01";
++pub const ROW_0012: &str = "fixture-0012-r01";
++pub const ROW_0013: &str = "fixture-0013-r01";
++pub const ROW_0014: &str = "fixture-0014-r01";
++pub const ROW_0015: &str = "fixture-0015-r01";
++pub const ROW_0016: &str = "fixture-0016-r01";
++pub const ROW_0017: &str = "fixture-0017-r01";
++pub const ROW_0018: &str = "fixture-0018-r01";
++pub const ROW_0019: &str = "fixture-0019-r01";
++pub const ROW_0020: &str = "fixture-0020-r01";
++pub const ROW_0021: &str = "fixture-0021-r01";
++pub const ROW_0022: &str = "fixture-0022-r01";
++pub const ROW_0023: &str = "fixture-0023-r01";
++pub const ROW_0024: &str = "fixture-0024-r01";
++pub const ROW_0025: &str = "fixture-0025-r01";
++pub const ROW_0026: &str = "fixture-0026-r01";
++pub const ROW_0027: &str = "fixture-0027-r01";
++pub const ROW_0028: &str = "fixture-0028-r01";
++pub const ROW_0029: &str = "fixture-0029-r01";
++pub const ROW_0030: &str = "fixture-0030-r01";
++pub const ROW_0031: &str = "fixture-0031-r01";
++pub const ROW_0032: &str = "fixture-0032-r01";
++pub const ROW_0033: &str = "fixture-0033-r01";
++pub const ROW_0034: &str = "fixture-0034-r01";
++pub const ROW_0035: &str = "fixture-0035-r01";
++pub const ROW_0036: &str = "fixture-0036-r01";
++pub const ROW_0037: &str = "fixture-0037-r01";
++pub const ROW_0038: &str = "fixture-0038-r01";
++pub const ROW_0039: &str = "fixture-0039-r01";
++pub const ROW_0040: &str = "fixture-0040-r01";
++pub const ROW_0041: &str = "fixture-0041-r01";
++pub const ROW_0042: &str = "fixture-0042-r01";
++pub const ROW_0043: &str = "fixture-0043-r01";
++pub const ROW_0044: &str = "fixture-0044-r01";
++pub const ROW_0045: &str = "fixture-0045-r01";
++pub const ROW_0046: &str = "fixture-0046-r01";
++pub const ROW_0047: &str = "fixture-0047-r01";
++pub const ROW_0048: &str = "fixture-0048-r01";
++pub const ROW_0049: &str = "fixture-0049-r01";
++pub const ROW_0050: &str = "fixture-0050-r01";
++pub const ROW_0051: &str = "fixture-0051-r01";
++pub const ROW_0052: &str = "fixture-0052-r01";
++pub const ROW_0053: &str = "fixture-0053-r01";
++pub const ROW_0054: &str = "fixture-0054-r01";
++pub const ROW_0055: &str = "fixture-0055-r01";
+diff --git a/crates/viewer/src/metrics/distribution.rs b/crates/viewer/src/metrics/distribution.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..64ef3cf833bb9fcfc7d5c4123784787c6eca14aa
+--- /dev/null
++++ b/crates/viewer/src/metrics/distribution.rs
+@@ -0,0 +1,55 @@
++pub const ROW_0001: &str = "fixture-0001-r01";
++pub const ROW_0002: &str = "fixture-0002-r01";
++pub const ROW_0003: &str = "fixture-0003-r01";
++pub const ROW_0004: &str = "fixture-0004-r01";
++pub const ROW_0005: &str = "fixture-0005-r01";
++pub const ROW_0006: &str = "fixture-0006-r01";
++pub const ROW_0007: &str = "fixture-0007-r01";
++pub const ROW_0008: &str = "fixture-0008-r01";
++pub const ROW_0009: &str = "fixture-0009-r01";
++pub const ROW_0010: &str = "fixture-0010-r01";
++pub const ROW_0011: &str = "fixture-0011-r01";
++pub const ROW_0012: &str = "fixture-0012-r01";
++pub const ROW_0013: &str = "fixture-0013-r01";
++pub const ROW_0014: &str = "fixture-0014-r01";
++pub const ROW_0015: &str = "fixture-0015-r01";
++pub const ROW_0016: &str = "fixture-0016-r01";
++pub const ROW_0017: &str = "fixture-0017-r01";
++pub const ROW_0018: &str = "fixture-0018-r01";
++pub const ROW_0019: &str = "fixture-0019-r01";
++pub const ROW_0020: &str = "fixture-0020-r01";
++pub const ROW_0021: &str = "fixture-0021-r01";
++pub const ROW_0022: &str = "fixture-0022-r01";
++pub const ROW_0023: &str = "fixture-0023-r01";
++pub const ROW_0024: &str = "fixture-0024-r01";
++pub const ROW_0025: &str = "fixture-0025-r01";
++pub const ROW_0026: &str = "fixture-0026-r01";
++pub const ROW_0027: &str = "fixture-0027-r01";
++pub const ROW_0028: &str = "fixture-0028-r01";
++pub const ROW_0029: &str = "fixture-0029-r01";
++pub const ROW_0030: &str = "fixture-0030-r01";
++pub const ROW_0031: &str = "fixture-0031-r01";
++pub const ROW_0032: &str = "fixture-0032-r01";
++pub const ROW_0033: &str = "fixture-0033-r01";
++pub const ROW_0034: &str = "fixture-0034-r01";
++pub const ROW_0035: &str = "fixture-0035-r01";
++pub const ROW_0036: &str = "fixture-0036-r01";
++pub const ROW_0037: &str = "fixture-0037-r01";
++pub const ROW_0038: &str = "fixture-0038-r01";
++pub const ROW_0039: &str = "fixture-0039-r01";
++pub const ROW_0040: &str = "fixture-0040-r01";
++pub const ROW_0041: &str = "fixture-0041-r01";
++pub const ROW_0042: &str = "fixture-0042-r01";
++pub const ROW_0043: &str = "fixture-0043-r01";
++pub const ROW_0044: &str = "fixture-0044-r01";
++pub const ROW_0045: &str = "fixture-0045-r01";
++pub const ROW_0046: &str = "fixture-0046-r01";
++pub const ROW_0047: &str = "fixture-0047-r01";
++pub const ROW_0048: &str = "fixture-0048-r01";
++pub const ROW_0049: &str = "fixture-0049-r01";
++pub const ROW_0050: &str = "fixture-0050-r01";
++pub const ROW_0051: &str = "fixture-0051-r01";
++pub const ROW_0052: &str = "fixture-0052-r01";
++pub const ROW_0053: &str = "fixture-0053-r01";
++pub const ROW_0054: &str = "fixture-0054-r01";
++pub const ROW_0055: &str = "fixture-0055-r01";
+diff --git a/crates/viewer/src/metrics/frame_gap.rs b/crates/viewer/src/metrics/frame_gap.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..64ef3cf833bb9fcfc7d5c4123784787c6eca14aa
+--- /dev/null
++++ b/crates/viewer/src/metrics/frame_gap.rs
+@@ -0,0 +1,55 @@
++pub const ROW_0001: &str = "fixture-0001-r01";
++pub const ROW_0002: &str = "fixture-0002-r01";
++pub const ROW_0003: &str = "fixture-0003-r01";
++pub const ROW_0004: &str = "fixture-0004-r01";
++pub const ROW_0005: &str = "fixture-0005-r01";
++pub const ROW_0006: &str = "fixture-0006-r01";
++pub const ROW_0007: &str = "fixture-0007-r01";
++pub const ROW_0008: &str = "fixture-0008-r01";
++pub const ROW_0009: &str = "fixture-0009-r01";
++pub const ROW_0010: &str = "fixture-0010-r01";
++pub const ROW_0011: &str = "fixture-0011-r01";
++pub const ROW_0012: &str = "fixture-0012-r01";
++pub const ROW_0013: &str = "fixture-0013-r01";
++pub const ROW_0014: &str = "fixture-0014-r01";
++pub const ROW_0015: &str = "fixture-0015-r01";
++pub const ROW_0016: &str = "fixture-0016-r01";
++pub const ROW_0017: &str = "fixture-0017-r01";
++pub const ROW_0018: &str = "fixture-0018-r01";
++pub const ROW_0019: &str = "fixture-0019-r01";
++pub const ROW_0020: &str = "fixture-0020-r01";
++pub const ROW_0021: &str = "fixture-0021-r01";
++pub const ROW_0022: &str = "fixture-0022-r01";
++pub const ROW_0023: &str = "fixture-0023-r01";
++pub const ROW_0024: &str = "fixture-0024-r01";
++pub const ROW_0025: &str = "fixture-0025-r01";
++pub const ROW_0026: &str = "fixture-0026-r01";
++pub const ROW_0027: &str = "fixture-0027-r01";
++pub const ROW_0028: &str = "fixture-0028-r01";
++pub const ROW_0029: &str = "fixture-0029-r01";
++pub const ROW_0030: &str = "fixture-0030-r01";
++pub const ROW_0031: &str = "fixture-0031-r01";
++pub const ROW_0032: &str = "fixture-0032-r01";
++pub const ROW_0033: &str = "fixture-0033-r01";
++pub const ROW_0034: &str = "fixture-0034-r01";
++pub const ROW_0035: &str = "fixture-0035-r01";
++pub const ROW_0036: &str = "fixture-0036-r01";
++pub const ROW_0037: &str = "fixture-0037-r01";
++pub const ROW_0038: &str = "fixture-0038-r01";
++pub const ROW_0039: &str = "fixture-0039-r01";
++pub const ROW_0040: &str = "fixture-0040-r01";
++pub const ROW_0041: &str = "fixture-0041-r01";
++pub const ROW_0042: &str = "fixture-0042-r01";
++pub const ROW_0043: &str = "fixture-0043-r01";
++pub const ROW_0044: &str = "fixture-0044-r01";
++pub const ROW_0045: &str = "fixture-0045-r01";
++pub const ROW_0046: &str = "fixture-0046-r01";
++pub const ROW_0047: &str = "fixture-0047-r01";
++pub const ROW_0048: &str = "fixture-0048-r01";
++pub const ROW_0049: &str = "fixture-0049-r01";
++pub const ROW_0050: &str = "fixture-0050-r01";
++pub const ROW_0051: &str = "fixture-0051-r01";
++pub const ROW_0052: &str = "fixture-0052-r01";
++pub const ROW_0053: &str = "fixture-0053-r01";
++pub const ROW_0054: &str = "fixture-0054-r01";
++pub const ROW_0055: &str = "fixture-0055-r01";
+diff --git a/crates/viewer/src/metrics/report.rs b/crates/viewer/src/metrics/report.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..64ef3cf833bb9fcfc7d5c4123784787c6eca14aa
+--- /dev/null
++++ b/crates/viewer/src/metrics/report.rs
+@@ -0,0 +1,55 @@
++pub const ROW_0001: &str = "fixture-0001-r01";
++pub const ROW_0002: &str = "fixture-0002-r01";
++pub const ROW_0003: &str = "fixture-0003-r01";
++pub const ROW_0004: &str = "fixture-0004-r01";
++pub const ROW_0005: &str = "fixture-0005-r01";
++pub const ROW_0006: &str = "fixture-0006-r01";
++pub const ROW_0007: &str = "fixture-0007-r01";
++pub const ROW_0008: &str = "fixture-0008-r01";
++pub const ROW_0009: &str = "fixture-0009-r01";
++pub const ROW_0010: &str = "fixture-0010-r01";
++pub const ROW_0011: &str = "fixture-0011-r01";
++pub const ROW_0012: &str = "fixture-0012-r01";
++pub const ROW_0013: &str = "fixture-0013-r01";
++pub const ROW_0014: &str = "fixture-0014-r01";
++pub const ROW_0015: &str = "fixture-0015-r01";
++pub const ROW_0016: &str = "fixture-0016-r01";
++pub const ROW_0017: &str = "fixture-0017-r01";
++pub const ROW_0018: &str = "fixture-0018-r01";
++pub const ROW_0019: &str = "fixture-0019-r01";
++pub const ROW_0020: &str = "fixture-0020-r01";
++pub const ROW_0021: &str = "fixture-0021-r01";
++pub const ROW_0022: &str = "fixture-0022-r01";
++pub const ROW_0023: &str = "fixture-0023-r01";
++pub const ROW_0024: &str = "fixture-0024-r01";
++pub const ROW_0025: &str = "fixture-0025-r01";
++pub const ROW_0026: &str = "fixture-0026-r01";
++pub const ROW_0027: &str = "fixture-0027-r01";
++pub const ROW_0028: &str = "fixture-0028-r01";
++pub const ROW_0029: &str = "fixture-0029-r01";
++pub const ROW_0030: &str = "fixture-0030-r01";
++pub const ROW_0031: &str = "fixture-0031-r01";
++pub const ROW_0032: &str = "fixture-0032-r01";
++pub const ROW_0033: &str = "fixture-0033-r01";
++pub const ROW_0034: &str = "fixture-0034-r01";
++pub const ROW_0035: &str = "fixture-0035-r01";
++pub const ROW_0036: &str = "fixture-0036-r01";
++pub const ROW_0037: &str = "fixture-0037-r01";
++pub const ROW_0038: &str = "fixture-0038-r01";
++pub const ROW_0039: &str = "fixture-0039-r01";
++pub const ROW_0040: &str = "fixture-0040-r01";
++pub const ROW_0041: &str = "fixture-0041-r01";
++pub const ROW_0042: &str = "fixture-0042-r01";
++pub const ROW_0043: &str = "fixture-0043-r01";
++pub const ROW_0044: &str = "fixture-0044-r01";
++pub const ROW_0045: &str = "fixture-0045-r01";
++pub const ROW_0046: &str = "fixture-0046-r01";
++pub const ROW_0047: &str = "fixture-0047-r01";
++pub const ROW_0048: &str = "fixture-0048-r01";
++pub const ROW_0049: &str = "fixture-0049-r01";
++pub const ROW_0050: &str = "fixture-0050-r01";
++pub const ROW_0051: &str = "fixture-0051-r01";
++pub const ROW_0052: &str = "fixture-0052-r01";
++pub const ROW_0053: &str = "fixture-0053-r01";
++pub const ROW_0054: &str = "fixture-0054-r01";
++pub const ROW_0055: &str = "fixture-0055-r01";
+diff --git a/crates/viewer/src/metrics/scroll_sample.rs b/crates/viewer/src/metrics/scroll_sample.rs
+new file mode 100644
+index 0000000000000000000000000000000000000000..64ef3cf833bb9fcfc7d5c4123784787c6eca14aa
+--- /dev/null
++++ b/crates/viewer/src/metrics/scroll_sample.rs
+@@ -0,0 +1,55 @@
++pub const ROW_0001: &str = "fixture-0001-r01";
++pub const ROW_0002: &str = "fixture-0002-r01";
++pub const ROW_0003: &str = "fixture-0003-r01";
++pub const ROW_0004: &str = "fixture-0004-r01";
++pub const ROW_0005: &str = "fixture-0005-r01";
++pub const ROW_0006: &str = "fixture-0006-r01";
++pub const ROW_0007: &str = "fixture-0007-r01";
++pub const ROW_0008: &str = "fixture-0008-r01";
++pub const ROW_0009: &str = "fixture-0009-r01";
++pub const ROW_0010: &str = "fixture-0010-r01";
++pub const ROW_0011: &str = "fixture-0011-r01";
++pub const ROW_0012: &str = "fixture-0012-r01";
++pub const ROW_0013: &str = "fixture-0013-r01";
++pub const ROW_0014: &str = "fixture-0014-r01";
++pub const ROW_0015: &str = "fixture-0015-r01";
++pub const ROW_0016: &str = "fixture-0016-r01";
++pub const ROW_0017: &str = "fixture-0017-r01";
++pub const ROW_0018: &str = "fixture-0018-r01";
++pub const ROW_0019: &str = "fixture-0019-r01";
++pub const ROW_0020: &str = "fixture-0020-r01";
++pub const ROW_0021: &str = "fixture-0021-r01";
++pub const ROW_0022: &str = "fixture-0022-r01";
++pub const ROW_0023: &str = "fixture-0023-r01";
++pub const ROW_0024: &str = "fixture-0024-r01";
++pub const ROW_0025: &str = "fixture-0025-r01";
++pub const ROW_0026: &str = "fixture-0026-r01";
++pub const ROW_0027: &str = "fixture-0027-r01";
++pub const ROW_0028: &str = "fixture-0028-r01";
++pub const ROW_0029: &str = "fixture-0029-r01";
++pub const ROW_0030: &str = "fixture-0030-r01";
++pub const ROW_0031: &str = "fixture-0031-r01";
++pub const ROW_0032: &str = "fixture-0032-r01";
++pub const ROW_0033: &str = "fixture-0033-r01";
++pub const ROW_0034: &str = "fixture-0034-r01";
++pub const ROW_0035: &str = "fixture-0035-r01";
++pub const ROW_0036: &str = "fixture-0036-r01";
++pub const ROW_0037: &str = "fixture-0037-r01";
++pub const ROW_0038: &str = "fixture-0038-r01";
++pub const ROW_0039: &str = "fixture-0039-r01";
++pub const ROW_0040: &str = "fixture-0040-r01";
++pub const ROW_0041: &str = "fixture-0041-r01";
++pub const ROW_0042: &str = "fixture-0042-r01";
++pub const ROW_0043: &str = "fixture-0043-r01";
++pub const ROW_0044: &str = "fixture-0044-r01";
++pub const ROW_0045: &str = "fixture-0045-r01";
++pub const ROW_0046: &str = "fixture-0046-r01";
++pub const ROW_0047: &str = "fixture-0047-r01";
++pub const ROW_0048: &str = "fixture-0048-r01";
++pub const ROW_0049: &str = "fixture-0049-r01";
++pub const ROW_0050: &str = "fixture-0050-r01";
++pub const ROW_0051: &str = "fixture-0051-r01";
++pub const ROW_0052: &str = "fixture-0052-r01";
++pub const ROW_0053: &str = "fixture-0053-r01";
++pub const ROW_0054: &str = "fixture-0054-r01";
++pub const ROW_0055: &str = "fixture-0055-r01";
+diff --git a/crates/viewer/src/workspace/scroll_state.rs b/crates/viewer/src/workspace/scroll_state.rs
+index 8cab08d18d9e49863cbd9dff1621856319f0ae0c..5f078eff3f8f8f89d7b96f8d7745eb8598f08406 100644
+--- a/crates/viewer/src/workspace/scroll_state.rs
++++ b/crates/viewer/src/workspace/scroll_state.rs
+@@ -61,8 +61,8 @@ pub const ROW_0060: &str = "fixture-0060-r00";
+ pub const ROW_0061: &str = "fixture-0061-r00";
+ pub const ROW_0062: &str = "fixture-0062-r00";
+ pub const ROW_0063: &str = "fixture-0063-r00";
+-pub const ROW_0064: &str = "fixture-0064-r00";
+-pub const ROW_0065: &str = "fixture-0065-r00";
++pub const ROW_0064: &str = "fixture-0064-r01";
++pub const ROW_0065: &str = "fixture-0065-r01";
+ pub const ROW_0066: &str = "fixture-0066-r00";
+ pub const ROW_0067: &str = "fixture-0067-r00";
+ pub const ROW_0068: &str = "fixture-0068-r00";
+@@ -125,8 +125,8 @@ pub const ROW_0124: &str = "fixture-0124-r00";
+ pub const ROW_0125: &str = "fixture-0125-r00";
+ pub const ROW_0126: &str = "fixture-0126-r00";
+ pub const ROW_0127: &str = "fixture-0127-r00";
+-pub const ROW_0128: &str = "fixture-0128-r00";
+-pub const ROW_0129: &str = "fixture-0129-r00";
++pub const ROW_0128: &str = "fixture-0128-r01";
++pub const ROW_0129: &str = "fixture-0129-r01";
+ pub const ROW_0130: &str = "fixture-0130-r00";
+ pub const ROW_0131: &str = "fixture-0131-r00";
+ pub const ROW_0132: &str = "fixture-0132-r00";
+@@ -188,8 +188,8 @@ pub const ROW_0187: &str = "fixture-0187-r00";
+ pub const ROW_0188: &str = "fixture-0188-r00";
+ pub const ROW_0189: &str = "fixture-0189-r00";
+ pub const ROW_0190: &str = "fixture-0190-r00";
+-pub const ROW_0191: &str = "fixture-0191-r00";
+-pub const ROW_0192: &str = "fixture-0192-r00";
++pub const ROW_0191: &str = "fixture-0191-r01";
++pub const ROW_0192: &str = "fixture-0192-r01";
+ pub const ROW_0193: &str = "fixture-0193-r00";
+ pub const ROW_0194: &str = "fixture-0194-r00";
+ pub const ROW_0195: &str = "fixture-0195-r00";
+@@ -252,8 +252,8 @@ pub const ROW_0251: &str = "fixture-0251-r00";
+ pub const ROW_0252: &str = "fixture-0252-r00";
+ pub const ROW_0253: &str = "fixture-0253-r00";
+ pub const ROW_0254: &str = "fixture-0254-r00";
+-pub const ROW_0255: &str = "fixture-0255-r00";
+-pub const ROW_0256: &str = "fixture-0256-r00";
++pub const ROW_0255: &str = "fixture-0255-r01";
++pub const ROW_0256: &str = "fixture-0256-r01";
+ pub const ROW_0257: &str = "fixture-0257-r00";
+ pub const ROW_0258: &str = "fixture-0258-r00";
+ pub const ROW_0259: &str = "fixture-0259-r00";
+@@ -316,8 +316,8 @@ pub const ROW_0315: &str = "fixture-0315-r00";
+ pub const ROW_0316: &str = "fixture-0316-r00";
+ pub const ROW_0317: &str = "fixture-0317-r00";
+ pub const ROW_0318: &str = "fixture-0318-r00";
+-pub const ROW_0319: &str = "fixture-0319-r00";
+-pub const ROW_0320: &str = "fixture-0320-r00";
++pub const ROW_0319: &str = "fixture-0319-r01";
++pub const ROW_0320: &str = "fixture-0320-r01";
+ pub const ROW_0321: &str = "fixture-0321-r00";
+ pub const ROW_0322: &str = "fixture-0322-r00";
+ pub const ROW_0323: &str = "fixture-0323-r00";
+@@ -379,8 +379,8 @@ pub const ROW_0378: &str = "fixture-0378-r00";
+ pub const ROW_0379: &str = "fixture-0379-r00";
+ pub const ROW_0380: &str = "fixture-0380-r00";
+ pub const ROW_0381: &str = "fixture-0381-r00";
+-pub const ROW_0382: &str = "fixture-0382-r00";
+-pub const ROW_0383: &str = "fixture-0383-r00";
++pub const ROW_0382: &str = "fixture-0382-r01";
++pub const ROW_0383: &str = "fixture-0383-r01";
+ pub const ROW_0384: &str = "fixture-0384-r00";
+ pub const ROW_0385: &str = "fixture-0385-r00";
+ pub const ROW_0386: &str = "fixture-0386-r00";
+@@ -443,8 +443,8 @@ pub const ROW_0442: &str = "fixture-0442-r00";
+ pub const ROW_0443: &str = "fixture-0443-r00";
+ pub const ROW_0444: &str = "fixture-0444-r00";
+ pub const ROW_0445: &str = "fixture-0445-r00";
+-pub const ROW_0446: &str = "fixture-0446-r00";
+-pub const ROW_0447: &str = "fixture-0447-r00";
++pub const ROW_0446: &str = "fixture-0446-r01";
++pub const ROW_0447: &str = "fixture-0447-r01";
+ pub const ROW_0448: &str = "fixture-0448-r00";
+ pub const ROW_0449: &str = "fixture-0449-r00";
+ pub const ROW_0450: &str = "fixture-0450-r00";
+@@ -507,8 +507,8 @@ pub const ROW_0506: &str = "fixture-0506-r00";
+ pub const ROW_0507: &str = "fixture-0507-r00";
+ pub const ROW_0508: &str = "fixture-0508-r00";
+ pub const ROW_0509: &str = "fixture-0509-r00";
+-pub const ROW_0510: &str = "fixture-0510-r00";
+-pub const ROW_0511: &str = "fixture-0511-r00";
++pub const ROW_0510: &str = "fixture-0510-r01";
++pub const ROW_0511: &str = "fixture-0511-r01";
+ pub const ROW_0512: &str = "fixture-0512-r00";
+ pub const ROW_0513: &str = "fixture-0513-r00";
+ pub const ROW_0514: &str = "fixture-0514-r00";
+@@ -570,8 +570,8 @@ pub const ROW_0569: &str = "fixture-0569-r00";
+ pub const ROW_0570: &str = "fixture-0570-r00";
+ pub const ROW_0571: &str = "fixture-0571-r00";
+ pub const ROW_0572: &str = "fixture-0572-r00";
+-pub const ROW_0573: &str = "fixture-0573-r00";
+-pub const ROW_0574: &str = "fixture-0574-r00";
++pub const ROW_0573: &str = "fixture-0573-r01";
++pub const ROW_0574: &str = "fixture-0574-r01";
+ pub const ROW_0575: &str = "fixture-0575-r00";
+ pub const ROW_0576: &str = "fixture-0576-r00";
+ pub const ROW_0577: &str = "fixture-0577-r00";
+@@ -634,8 +634,8 @@ pub const ROW_0633: &str = "fixture-0633-r00";
+ pub const ROW_0634: &str = "fixture-0634-r00";
+ pub const ROW_0635: &str = "fixture-0635-r00";
+ pub const ROW_0636: &str = "fixture-0636-r00";
+-pub const ROW_0637: &str = "fixture-0637-r00";
+-pub const ROW_0638: &str = "fixture-0638-r00";
++pub const ROW_0637: &str = "fixture-0637-r01";
++pub const ROW_0638: &str = "fixture-0638-r01";
+ pub const ROW_0639: &str = "fixture-0639-r00";
+ pub const ROW_0640: &str = "fixture-0640-r00";
+ pub const ROW_0641: &str = "fixture-0641-r00";
+diff --git a/docs/viewer/old-scroll-protocol.md b/docs/viewer/old-scroll-protocol.md
+index 90066355a1635eae5a47f2818cf2fade2e23217d..0c7495e983c912ca38b7ddc7113b2f01fba0aed3 100644
+--- a/docs/viewer/old-scroll-protocol.md
++++ b/docs/viewer/old-scroll-protocol.md
+@@ -61,8 +61,8 @@
+ - Fixture row 0061, revision 00.
+ - Fixture row 0062, revision 00.
+ - Fixture row 0063, revision 00.
+-- Fixture row 0064, revision 00.
+-- Fixture row 0065, revision 00.
++- Fixture row 0064, revision 01.
++- Fixture row 0065, revision 01.
+ - Fixture row 0066, revision 00.
+ - Fixture row 0067, revision 00.
+ - Fixture row 0068, revision 00.
+@@ -125,8 +125,8 @@
+ - Fixture row 0125, revision 00.
+ - Fixture row 0126, revision 00.
+ - Fixture row 0127, revision 00.
+-- Fixture row 0128, revision 00.
+-- Fixture row 0129, revision 00.
++- Fixture row 0128, revision 01.
++- Fixture row 0129, revision 01.
+ - Fixture row 0130, revision 00.
+ - Fixture row 0131, revision 00.
+ - Fixture row 0132, revision 00.
+@@ -188,8 +188,8 @@
+ - Fixture row 0188, revision 00.
+ - Fixture row 0189, revision 00.
+ - Fixture row 0190, revision 00.
+-- Fixture row 0191, revision 00.
+-- Fixture row 0192, revision 00.
++- Fixture row 0191, revision 01.
++- Fixture row 0192, revision 01.
+ - Fixture row 0193, revision 00.
+ - Fixture row 0194, revision 00.
+ - Fixture row 0195, revision 00.
+@@ -252,8 +252,8 @@
+ - Fixture row 0252, revision 00.
+ - Fixture row 0253, revision 00.
+ - Fixture row 0254, revision 00.
+-- Fixture row 0255, revision 00.
+-- Fixture row 0256, revision 00.
++- Fixture row 0255, revision 01.
++- Fixture row 0256, revision 01.
+ - Fixture row 0257, revision 00.
+ - Fixture row 0258, revision 00.
+ - Fixture row 0259, revision 00.
+@@ -316,8 +316,8 @@
+ - Fixture row 0316, revision 00.
+ - Fixture row 0317, revision 00.
+ - Fixture row 0318, revision 00.
+-- Fixture row 0319, revision 00.
+-- Fixture row 0320, revision 00.
++- Fixture row 0319, revision 01.
++- Fixture row 0320, revision 01.
+ - Fixture row 0321, revision 00.
+ - Fixture row 0322, revision 00.
+ - Fixture row 0323, revision 00.
+@@ -379,8 +379,8 @@
+ - Fixture row 0379, revision 00.
+ - Fixture row 0380, revision 00.
+ - Fixture row 0381, revision 00.
+-- Fixture row 0382, revision 00.
+-- Fixture row 0383, revision 00.
++- Fixture row 0382, revision 01.
++- Fixture row 0383, revision 01.
+ - Fixture row 0384, revision 00.
+ - Fixture row 0385, revision 00.
+ - Fixture row 0386, revision 00.
+@@ -443,8 +443,8 @@
+ - Fixture row 0443, revision 00.
+ - Fixture row 0444, revision 00.
+ - Fixture row 0445, revision 00.
+-- Fixture row 0446, revision 00.
+-- Fixture row 0447, revision 00.
++- Fixture row 0446, revision 01.
++- Fixture row 0447, revision 01.
+ - Fixture row 0448, revision 00.
+ - Fixture row 0449, revision 00.
+ - Fixture row 0450, revision 00.
+@@ -507,8 +507,8 @@
+ - Fixture row 0507, revision 00.
+ - Fixture row 0508, revision 00.
+ - Fixture row 0509, revision 00.
+-- Fixture row 0510, revision 00.
+-- Fixture row 0511, revision 00.
++- Fixture row 0510, revision 01.
++- Fixture row 0511, revision 01.
+ - Fixture row 0512, revision 00.
+ - Fixture row 0513, revision 00.
+ - Fixture row 0514, revision 00.
+@@ -570,8 +570,8 @@
+ - Fixture row 0570, revision 00.
+ - Fixture row 0571, revision 00.
+ - Fixture row 0572, revision 00.
+-- Fixture row 0573, revision 00.
+-- Fixture row 0574, revision 00.
++- Fixture row 0573, revision 01.
++- Fixture row 0574, revision 01.
+ - Fixture row 0575, revision 00.
+ - Fixture row 0576, revision 00.
+ - Fixture row 0577, revision 00.
+@@ -634,8 +634,8 @@
+ - Fixture row 0634, revision 00.
+ - Fixture row 0635, revision 00.
+ - Fixture row 0636, revision 00.
+-- Fixture row 0637, revision 00.
+-- Fixture row 0638, revision 00.
++- Fixture row 0637, revision 01.
++- Fixture row 0638, revision 01.
+ - Fixture row 0639, revision 00.
+ - Fixture row 0640, revision 00.
+ - Fixture row 0641, revision 00.

@@ -2,6 +2,8 @@
 
 use clap::{ValueEnum, builder::PossibleValue};
 
+pub mod desktop_scroll;
+
 pub const PACKAGE_NAME: &str = "gtl-benchmarks";
 
 /// Returns a benchmark fixture value or terminates the benchmark process with context.

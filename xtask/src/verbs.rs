@@ -11,6 +11,7 @@ pub(crate) mod build;
 pub(crate) mod check_structure;
 pub(crate) mod desktop_e2e;
 pub(crate) mod desktop_release;
+pub(crate) mod desktop_scroll;
 pub(crate) mod dioxus_web;
 pub(crate) mod drift;
 pub(crate) mod format;
@@ -33,6 +34,8 @@ impl Verb {
     pub(crate) const CHECK_STRUCTURE: Self = Self("check-structure");
     pub(crate) const CHECK_PARSER_WASM: Self = Self("check-parser-wasm");
     pub(crate) const DRIFT_CHECK: Self = Self("drift-check");
+    pub(crate) const DESKTOP_SCROLL_BENCHMARK: Self = Self("desktop-scroll-benchmark");
+    pub(crate) const DESKTOP_SCROLL_FIXTURE: Self = Self("desktop-scroll-fixture");
     pub(crate) const PRE_COMMIT: Self = Self("pre-commit");
     pub(crate) const GEN_ICON: Self = Self("gen-icon");
     pub(crate) const INSTALL: Self = Self("install");

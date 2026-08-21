@@ -2,7 +2,10 @@ use std::{ffi::OsString, path::PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::verbs::{Verb, bench::BenchArguments, test::TestArguments};
+use crate::verbs::{
+    Verb, bench::BenchArguments, desktop_scroll::DesktopScrollBenchmarkArguments,
+    test::TestArguments,
+};
 
 #[derive(Parser)]
 #[command(
@@ -58,6 +61,18 @@ pub enum Command {
         #[arg(long)]
         verbose: bool,
     },
+    /// Regenerate and verify the committed deterministic desktop scroll fixture.
+    #[command(name = Verb::DESKTOP_SCROLL_FIXTURE.as_str())]
+    DesktopScrollFixture,
+    /// Measure production desktop scrolling against the committed realistic fixture.
+    #[command(name = Verb::DESKTOP_SCROLL_BENCHMARK.as_str())]
+    DesktopScrollBenchmark(DesktopScrollBenchmarkArguments),
+    /// Regenerate the desktop scroll fixture inside the bounded worker scope.
+    #[command(hide = true)]
+    DesktopScrollFixtureWorker,
+    /// Run the production desktop scroll journey inside the bounded worker scope.
+    #[command(hide = true)]
+    DesktopScrollBenchmarkWorker,
     /// Launch one compiled E2E executable without the host-only Cargo environment.
     #[command(hide = true)]
     E2eRuntimeWorker {

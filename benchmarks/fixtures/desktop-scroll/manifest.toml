@@ -1,0 +1,149 @@
+format_version = 1
+fixture_name = "desktop-scroll-v1"
+repository_name = "desktop-scroll-fixture"
+git_range = "HEAD~10..HEAD"
+
+[identity]
+name = "Desktop Scroll Fixture"
+email = "desktop-scroll@example.invalid"
+
+[base]
+commit_id = "a40cc95d1cdccb2a1b05d41187b801472e0ed7fa"
+subject = "fixture: establish desktop scroll source baseline"
+authored_at = "2026-01-01T12:00:00+00:00"
+source_file_count = 25
+source_bytes = 667500
+tree_sha256 = "ddf963ba7c16a284106fcae81f126e057d0d7a093b50a801aea8364236e8df60"
+
+[workload]
+commit_count = 10
+distinct_file_count = 50
+file_touch_count_total = 70
+patch_series_bytes = 279413
+compact_diff_rows = 4297
+compact_diff_bytes = 180966
+full_context_diff_rows = 17739
+full_context_diff_bytes = 766460
+additions = 1815
+deletions = 680
+head_commit_id = "a2efad3aa02c94f2f78909246c89a7ba91e0348c"
+
+[bounds]
+fixture_input_bytes_max = 2097152
+patch_file_bytes_max = 262144
+
+[file_types]
+html = 2
+javascript = 2
+lockfile = 1
+markdown = 10
+rust = 22
+toml = 8
+typescript = 2
+yaml = 3
+
+[statuses]
+added = 25
+modified = 20
+deleted = 3
+renamed = 2
+
+[[commits]]
+sequence = 1
+patch = "patches/0001-viewer-workspace-foundation.diff"
+patch_sha256 = "c977e1cf1896d1af6ac927fd4ebc21d3a597b75032002c1752170cd58cc13f3e"
+commit_id = "6db07b3051cc655f27a17d8857256101ef318589"
+subject = "viewer: add deterministic workspace fixture foundations"
+body = "Create the first synthetic viewer files and exercise both side rails."
+authored_at = "2026-01-02T12:00:00+00:00"
+file_touch_count = 7
+
+[[commits]]
+sequence = 2
+patch = "patches/0002-parser-language-inputs.diff"
+patch_sha256 = "0f85edfc84210128e7c784a3c458ac193e080b2f7f51fda7fe87d16d85f4ad9e"
+commit_id = "9d0835ac1bfa12e9469d8118dd19f58126a96073"
+subject = "parser: add representative Rust and Markdown fixture inputs"
+body = "Extend the source mix without importing repository or author metadata."
+authored_at = "2026-01-03T12:00:00+00:00"
+file_touch_count = 7
+
+[[commits]]
+sequence = 3
+patch = "patches/0003-desktop-measurement-model.diff"
+patch_sha256 = "4aab38f4aaba8e1938fb675ed8ab94d3d4cf4715bf8e52802f93d5c05ffc38b0"
+commit_id = "cc949498a45749ab9453327942a0a9a5610b149d"
+subject = "desktop: model bounded frame and process measurements"
+body = "Keep measurement setup separate from the requestAnimationFrame interval."
+authored_at = "2026-01-04T12:00:00+00:00"
+file_touch_count = 7
+
+[[commits]]
+sequence = 4
+patch = "patches/0004-configure-density-scenarios.diff"
+patch_sha256 = "4822615a72091f0d5ac37d770d90400e0e74cc056f2ccb7af9f5403512edec04"
+commit_id = "02a63a269a0520e306ccbfa52977ac6fcc3055c9"
+subject = "viewer: configure compact and full-context density scenarios"
+body = "Use one reconstructed history for both production density choices."
+authored_at = "2026-01-05T12:00:00+00:00"
+file_touch_count = 7
+
+[[commits]]
+sequence = 5
+patch = "patches/0005-document-readiness-boundary.diff"
+patch_sha256 = "5586eeeea7371adb6ad2c7bfdcbfa420424438d4450b4373941a6d0639972d58"
+commit_id = "be1ad695f22039a80cd70ddb1260992d5c9ee708"
+subject = "docs: define the desktop viewer readiness boundary"
+body = "Declare the observable state that remains outside timed scrolling."
+authored_at = "2026-01-06T12:00:00+00:00"
+file_touch_count = 7
+
+[[commits]]
+sequence = 6
+patch = "patches/0006-expand-rendering-workload.diff"
+patch_sha256 = "8a2e9050eaf80b1ab47f78212fa15e7512f58c6ab1c1dadfabe9e56bcb020eb2"
+commit_id = "c583be97dce020edffd3a9438d1064873cc51cad"
+subject = "viewer: expand rendering work across production modules"
+body = "Distribute bounded edits through the retained source hierarchy."
+authored_at = "2026-01-07T12:00:00+00:00"
+file_touch_count = 7
+
+[[commits]]
+sequence = 7
+patch = "patches/0007-cover-paging-and-syntax.diff"
+patch_sha256 = "bbcb42ea553e6cb91bd64058ee5ade533a0f86386eff43c8cfd47208a8c23d1d"
+commit_id = "474d3ab5b30feeda712f72cab13338b6ceb5082a"
+subject = "parser: cover paging and syntax work across large files"
+body = "Place separated hunks throughout files retained for full context."
+authored_at = "2026-01-08T12:00:00+00:00"
+file_touch_count = 7
+
+[[commits]]
+sequence = 8
+patch = "patches/0008-rename-scroll-contracts.diff"
+patch_sha256 = "26168842187dae380616b38ee355a0bf57e0f6247afe383eac4211036ea86b94"
+commit_id = "9ebfc8fa6abd492775acfec0290eef016bede222"
+subject = "viewer: rename scroll state to the measured journey contract"
+body = "Retain rename detection while keeping the final sidebar deterministic."
+authored_at = "2026-01-09T12:00:00+00:00"
+file_touch_count = 7
+
+[[commits]]
+sequence = 9
+patch = "patches/0009-remove-retired-rendering-inputs.diff"
+patch_sha256 = "91e7c0bef11ed24a57fa319d4b71b956e2e4cba896be8e40695239b513fbaebd"
+commit_id = "65a7109f7d88af4d91246b71621da5342553d500"
+subject = "viewer: remove retired cache and rendering fixture inputs"
+body = "Exercise deleted paths without adding binary benchmark data."
+authored_at = "2026-01-10T12:00:00+00:00"
+file_touch_count = 7
+
+[[commits]]
+sequence = 10
+patch = "patches/0010-finalize-scroll-reporting.diff"
+patch_sha256 = "6f1cd4378e7a11029652d7ea49d736abce8e1aac58720fa3f35e85b9f5a00101"
+commit_id = "a2efad3aa02c94f2f78909246c89a7ba91e0348c"
+subject = "benchmarks: finalize reviewable desktop scroll reporting"
+body = "Complete the ten-commit range with stable manifest-facing content."
+authored_at = "2026-01-11T12:00:00+00:00"
+file_touch_count = 7

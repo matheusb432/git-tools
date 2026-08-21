@@ -40,15 +40,24 @@ pub async fn wait_for_active_diff(
     .await
 }
 
-pub async fn run_test<F>(name: &'static str, body: F) -> Result<()>
+pub async fn run_test<F>(name: &str, body: F) -> Result<()>
 where
     F: for<'session> FnOnce(
         &'session mut session::TestSession,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'session>>,
 {
+    run_test_with_result(name, body).await
+}
+
+pub async fn run_test_with_result<T, F>(name: &str, body: F) -> Result<T>
+where
+    F: for<'session> FnOnce(
+        &'session mut session::TestSession,
+    ) -> Pin<Box<dyn Future<Output = Result<T>> + Send + 'session>>,
+{
     let mut session = session::TestSession::start(name).await?;
     let body_result = AssertUnwindSafe(body(&mut session)).catch_unwind().await;
-    let passed = matches!(&body_result, Ok(Ok(())));
+    let passed = matches!(&body_result, Ok(Ok(_)));
     let evidence_result = match session.driver_if_active() {
         Some(driver) => evidence::capture(driver, name, passed).await,
         None => Ok(None),
@@ -56,8 +65,9 @@ where
     let cleanup_result = session.finish().await;
 
     match body_result {
-        Ok(Ok(())) => {
-            attach_secondary_error(evidence_result.map(|_| ()), cleanup_result, "test cleanup")
+        Ok(Ok(value)) => {
+            attach_secondary_error(evidence_result.map(|_| ()), cleanup_result, "test cleanup")?;
+            Ok(value)
         }
         Ok(Err(body_error)) => {
             let result = attach_evidence(Err(body_error), evidence_result);
@@ -77,10 +87,10 @@ where
     }
 }
 
-fn attach_evidence(primary: Result<()>, evidence: Result<Option<PathBuf>>) -> Result<()> {
+fn attach_evidence<T>(primary: Result<T>, evidence: Result<Option<PathBuf>>) -> Result<T> {
     match (primary, evidence) {
-        (Ok(()), Ok(_)) => Ok(()),
-        (Ok(()), Err(error)) => Err(error),
+        (Ok(value), Ok(_)) => Ok(value),
+        (Ok(_), Err(error)) => Err(error),
         (Err(primary_error), Ok(Some(path))) => {
             Err(primary_error).context(format!("evidence saved to {}", path.display()))
         }
@@ -91,9 +101,10 @@ fn attach_evidence(primary: Result<()>, evidence: Result<Option<PathBuf>>) -> Re
     }
 }
 
-fn attach_secondary_error(primary: Result<()>, secondary: Result<()>, label: &str) -> Result<()> {
+fn attach_secondary_error<T>(primary: Result<T>, secondary: Result<()>, label: &str) -> Result<T> {
     match (primary, secondary) {
-        (Ok(()), result) => result,
+        (Ok(value), Ok(())) => Ok(value),
+        (Ok(_), Err(secondary_error)) => Err(secondary_error),
         (Err(primary_error), Ok(())) => Err(primary_error),
         (Err(primary_error), Err(secondary_error)) => {
             Err(primary_error).context(format!("{label} also failed: {secondary_error:#}"))
