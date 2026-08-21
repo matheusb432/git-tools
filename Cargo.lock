@@ -1193,6 +1193,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tinytemplate",
+ "tokio",
  "walkdir",
 ]
 
@@ -3467,12 +3468,16 @@ dependencies = [
  "criterion",
  "gtl-application",
  "gtl-artifacts",
+ "gtl-client",
  "gtl-desktop",
  "gtl-infra",
  "gtl-models",
  "gtl-parser",
+ "gtl-server",
  "gtl-wire",
+ "prost",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

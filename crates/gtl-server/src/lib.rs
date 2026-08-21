@@ -5,11 +5,15 @@ use gtl_local_auth::{LocalAuth, ServerEndpoint, ServerInstanceId};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 mod config;
+#[cfg(any(test, feature = "benchmark-support"))]
+mod harness;
 mod server;
 mod services;
 mod state;
 
 use config::Config;
+#[cfg(feature = "benchmark-support")]
+pub use harness::ServerHarness;
 
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(10);
 

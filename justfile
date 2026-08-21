@@ -53,7 +53,7 @@ purge:
 _preflight:
     test -x "{{ _bin }}" || cargo build --release -p gtl-cli -p gtl-server
 
-# Run a shared Rust benchmark; --fast selects the concise viewer-render preset.
+# Run a shared Rust benchmark; select a target with --benchmark and cap local runs with --bounded.
 [group('performance')]
 bench *args:
     cargo run --quiet -p xtask -- bench {{ args }}

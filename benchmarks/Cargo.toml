@@ -20,20 +20,28 @@ harness = false
 name = "parser_syntax"
 harness = false
 
+[[bench]]
+name = "grpc_requests"
+harness = false
+
 [dependencies]
 clap.workspace = true
 
 [dev-dependencies]
-criterion.workspace = true
+criterion = { workspace = true, features = ["async_tokio"] }
 gtl-application.workspace = true
+gtl-client.workspace = true
 gtl-models.workspace = true
 gtl-wire.workspace = true
 # The view-cache target benchmarks the desktop-owned cache without exposing it in production builds.
 gtl-desktop = { workspace = true, features = ["benchmark-support"] }
+gtl-server = { workspace = true, features = ["benchmark-support"] }
 gtl-infra.workspace = true
 gtl-artifacts.workspace = true
 gtl-parser = { workspace = true, features = ["syntax"] }
+prost.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [lints]
 workspace = true

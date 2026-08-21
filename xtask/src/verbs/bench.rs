@@ -10,6 +10,14 @@ const FAST_SAMPLE_SIZE: usize = 100;
 const FAST_WARM_UP_SECONDS: u64 = 5;
 const FAST_MEASUREMENT_SECONDS: u64 = 5;
 const MINIMUM_SAMPLE_SIZE: usize = 10;
+const BOUNDED_CARGO_JOBS: usize = 1;
+const BOUNDED_CPU_QUOTA_PERCENT: usize = 200;
+const BOUNDED_MEMORY_BYTES_MAX: u64 = 4 * 1024 * 1024 * 1024;
+const BOUNDED_NICENESS: usize = 10;
+const BOUNDED_RAYON_THREADS: usize = 2;
+const BOUNDED_TASKS_MAX: usize = 512;
+const BOUNDED_TERMINATION_GRACE_SECONDS: u64 = 10;
+const BOUNDED_WALL_TIME_MINUTES: u64 = 15;
 
 #[derive(Args, Debug)]
 pub(crate) struct BenchArguments {
@@ -28,6 +36,9 @@ pub(crate) struct BenchArguments {
     /// Override the benchmark target's Criterion sample count.
     #[arg(long, value_parser = parse_sample_size, conflicts_with = "fast")]
     sample_size: Option<usize>,
+    /// Run in a Linux user scope capped at two CPUs, 4 GiB of memory, and 15 minutes.
+    #[arg(long)]
+    bounded: bool,
     /// Additional arguments forwarded to Criterion after `--`.
     #[arg(last = true, allow_hyphen_values = true, conflicts_with = "fast")]
     criterion_arguments: Vec<String>,
@@ -71,6 +82,7 @@ pub(crate) fn run(arguments: &BenchArguments) -> Result<()> {
     let step = benchmark_step(
         arguments.benchmark,
         arguments.selection(),
+        arguments.bounded,
         &arguments.criterion_arguments,
     )?;
     process::run_step(&step)
@@ -79,6 +91,7 @@ pub(crate) fn run(arguments: &BenchArguments) -> Result<()> {
 fn benchmark_step(
     benchmark: Benchmark,
     selection: BenchmarkSelection,
+    bounded: bool,
     criterion_arguments: &[String],
 ) -> Result<Step> {
     let mut arguments = vec!["bench".to_owned()];
@@ -133,8 +146,50 @@ fn benchmark_step(
         }
     }
 
-    Ok(Step::new("benchmark", "cargo", arguments)
-        .without_environment(["DISPLAY", "WAYLAND_DISPLAY"]))
+    let mut step = if bounded {
+        if !cfg!(target_os = "linux") {
+            bail!("bounded benchmarks require Linux systemd user scopes");
+        }
+        bounded_benchmark_step(arguments)
+    } else {
+        Step::new("benchmark", "cargo", arguments)
+    };
+    if benchmark == Benchmark::GrpcRequests {
+        step = step
+            .with_environment("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+            .with_environment("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+            .with_environment("GIT_CONFIG_GLOBAL", "/dev/null")
+            .with_environment("GIT_CONFIG_NOSYSTEM", "1")
+            .with_environment("GIT_TERMINAL_PROMPT", "0")
+            .with_environment("LC_ALL", "C")
+            .with_environment("TZ", "UTC");
+    }
+    Ok(step.without_environment(["DISPLAY", "WAYLAND_DISPLAY"]))
+}
+
+fn bounded_benchmark_step(cargo_arguments: Vec<String>) -> Step {
+    let mut arguments = vec![
+        "--user".to_owned(),
+        "--scope".to_owned(),
+        "--quiet".to_owned(),
+        "--collect".to_owned(),
+        format!("--property=CPUQuota={BOUNDED_CPU_QUOTA_PERCENT}%"),
+        format!("--property=MemoryMax={BOUNDED_MEMORY_BYTES_MAX}"),
+        "--property=MemorySwapMax=0".to_owned(),
+        format!("--property=TasksMax={BOUNDED_TASKS_MAX}"),
+        "/usr/bin/nice".to_owned(),
+        "-n".to_owned(),
+        BOUNDED_NICENESS.to_string(),
+        "/usr/bin/timeout".to_owned(),
+        "--signal=TERM".to_owned(),
+        format!("--kill-after={BOUNDED_TERMINATION_GRACE_SECONDS}s"),
+        format!("{BOUNDED_WALL_TIME_MINUTES}m"),
+        "cargo".to_owned(),
+    ];
+    arguments.extend(cargo_arguments);
+    Step::new("bounded benchmark", "/usr/bin/systemd-run", arguments)
+        .with_environment("CARGO_BUILD_JOBS", BOUNDED_CARGO_JOBS.to_string())
+        .with_environment("RAYON_NUM_THREADS", BOUNDED_RAYON_THREADS.to_string())
 }
 
 fn exact_case_filter(cases: &[BenchmarkCase]) -> String {
@@ -162,6 +217,7 @@ mod tests {
                 case: Some(BenchmarkCase::ViewerRenderRawArtifactSplitFull),
                 sample_size: Some(20),
             },
+            false,
             &["--save-baseline".to_owned(), "candidate".to_owned()],
         )
         .expect("viewer case belongs to viewer benchmark");
@@ -191,8 +247,13 @@ mod tests {
 
     #[test]
     fn benchmark_step_uses_the_catalogue_fast_cases() {
-        let step = benchmark_step(Benchmark::ViewerRender, BenchmarkSelection::Fast, &[])
-            .expect("viewer benchmark has a fast preset");
+        let step = benchmark_step(
+            Benchmark::ViewerRender,
+            BenchmarkSelection::Fast,
+            false,
+            &[],
+        )
+        .expect("viewer benchmark has a fast preset");
 
         assert_eq!(
             argument_strings(&step),
@@ -229,6 +290,7 @@ mod tests {
                 case: Some(BenchmarkCase::ViewerRenderRawArtifact),
                 sample_size: None,
             },
+            false,
             &[],
         );
         let Err(error) = result else {
@@ -249,6 +311,7 @@ mod tests {
                 case: Some(BenchmarkCase::ParserSyntaxRust45k),
                 sample_size: None,
             },
+            false,
             &[],
         )
         .expect("Rust syntax case belongs to parser-syntax benchmark");
@@ -264,6 +327,72 @@ mod tests {
                 "--",
                 "parser-syntax/rust-45k",
                 "--exact"
+            ]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn benchmark_step_bounds_the_grpc_request_target_and_isolates_git() {
+        let step = benchmark_step(
+            Benchmark::GrpcRequests,
+            BenchmarkSelection::Standard {
+                case: None,
+                sample_size: None,
+            },
+            true,
+            &["--save-baseline".to_owned(), "grpc-requests-1".to_owned()],
+        )
+        .expect("bounded gRPC benchmark is supported on Linux");
+
+        assert_eq!(step.program(), "/usr/bin/systemd-run");
+        assert_eq!(
+            argument_strings(&step),
+            [
+                "--user",
+                "--scope",
+                "--quiet",
+                "--collect",
+                "--property=CPUQuota=200%",
+                "--property=MemoryMax=4294967296",
+                "--property=MemorySwapMax=0",
+                "--property=TasksMax=512",
+                "/usr/bin/nice",
+                "-n",
+                "10",
+                "/usr/bin/timeout",
+                "--signal=TERM",
+                "--kill-after=10s",
+                "15m",
+                "cargo",
+                "bench",
+                "-p",
+                "gtl-benchmarks",
+                "--bench",
+                "grpc_requests",
+                "--",
+                "--save-baseline",
+                "grpc-requests-1"
+            ]
+        );
+        assert_eq!(
+            step.environment(),
+            [
+                ("CARGO_BUILD_JOBS".to_owned(), "1".to_owned()),
+                ("RAYON_NUM_THREADS".to_owned(), "2".to_owned()),
+                (
+                    "GIT_AUTHOR_DATE".to_owned(),
+                    "2026-01-01T00:00:00Z".to_owned()
+                ),
+                (
+                    "GIT_COMMITTER_DATE".to_owned(),
+                    "2026-01-01T00:00:00Z".to_owned()
+                ),
+                ("GIT_CONFIG_GLOBAL".to_owned(), "/dev/null".to_owned()),
+                ("GIT_CONFIG_NOSYSTEM".to_owned(), "1".to_owned()),
+                ("GIT_TERMINAL_PROMPT".to_owned(), "0".to_owned()),
+                ("LC_ALL".to_owned(), "C".to_owned()),
+                ("TZ".to_owned(), "UTC".to_owned())
             ]
         );
     }

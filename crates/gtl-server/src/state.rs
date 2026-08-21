@@ -21,6 +21,13 @@ pub(crate) struct AppState {
 
 impl AppState {
     pub(crate) fn open(data_root: &Path) -> anyhow::Result<Self> {
+        Self::open_with_settings(data_root, TomlSettingsStore::from_environment())
+    }
+
+    pub(crate) fn open_with_settings(
+        data_root: &Path,
+        user_settings: TomlSettingsStore,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             git: HybridGitClient,
             artifacts: StoreArtifacts,
@@ -29,7 +36,7 @@ impl AppState {
             projects: ProjectRepositoryClient::from_environment(),
             database: SqliteAppState::open(data_root)
                 .with_context(|| format!("opening application state at {}", data_root.display()))?,
-            user_settings: TomlSettingsStore::from_environment(),
+            user_settings,
         })
     }
 }

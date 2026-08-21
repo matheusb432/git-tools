@@ -1,6 +1,5 @@
 use std::{error::Error, time::Duration};
 
-use gtl_local_auth::CapabilityToken;
 use gtl_wire::v1::{
     DiffTarget, Empty, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
     GetWorktreeBaseRequest, RenderDiffRequest, diff_service_client::DiffServiceClient, diff_target,
@@ -9,14 +8,8 @@ use gtl_wire::v1::{
 };
 use prost::Message as _;
 use prost_types::FileDescriptorProto;
-use tokio::{sync::oneshot, task::JoinHandle};
 use tokio_stream::StreamExt as _;
-use tonic::{
-    Request, Status,
-    metadata::{Ascii, MetadataValue},
-    service::Interceptor,
-    transport::Channel,
-};
+use tonic::{Request, transport::Channel};
 use tonic_health::{
     ServingStatus,
     pb::{HealthCheckRequest, health_client::HealthClient},
@@ -27,102 +20,27 @@ use tonic_reflection::pb::v1::{
     server_reflection_response::MessageResponse,
 };
 
-use super::serve;
-use crate::state::AppState;
+use crate::harness::{ServerHarness, ServerHarnessAuthorization};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
-const TEST_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(250);
-
-struct TestServer {
-    directory: tempfile::TempDir,
-    channel: Channel,
-    authorization: TestAuthorization,
-    shutdown: oneshot::Sender<()>,
-    task: JoinHandle<anyhow::Result<()>>,
-}
-
-impl TestServer {
-    async fn start() -> TestResult<Self> {
-        let directory = tempfile::tempdir()?;
-        let state = AppState::open(directory.path())?;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let address = listener.local_addr()?;
-        let capability = CapabilityToken::generate()?;
-        let authorization = TestAuthorization::new(&capability)?;
-        let (shutdown, shutdown_receiver) = oneshot::channel();
-        let task = tokio::spawn(async move {
-            serve(
-                listener,
-                async move {
-                    let _ = shutdown_receiver.await;
-                },
-                TEST_SHUTDOWN_GRACE_PERIOD,
-                capability,
-                state,
-            )
-            .await
-        });
-        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))?
-            .connect()
-            .await?;
-
-        Ok(Self {
-            directory,
-            channel,
-            authorization,
-            shutdown,
-            task,
-        })
-    }
-
-    async fn stop(self) -> TestResult {
-        self.shutdown
-            .send(())
-            .map_err(|()| "test server stopped before shutdown")?;
-        self.task.await??;
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-struct TestAuthorization {
-    value: MetadataValue<Ascii>,
-}
-
-impl TestAuthorization {
-    fn new(capability: &CapabilityToken) -> TestResult<Self> {
-        Ok(Self {
-            value: format!("Bearer {}", capability.expose_secret()).parse()?,
-        })
-    }
-}
-
-impl Interceptor for TestAuthorization {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        request
-            .metadata_mut()
-            .insert("authorization", self.value.clone());
-        Ok(request)
-    }
-}
-
 #[tokio::test]
 async fn serves_authenticated_health_and_reflection() -> TestResult {
-    let server = TestServer::start().await?;
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
 
-    assert_health_serving(server.channel.clone(), server.authorization.clone()).await?;
-    assert_reflection_describes_gtl_contract(server.channel.clone(), server.authorization.clone())
-        .await?;
+    assert_health_serving(server.channel(), server.authorization()).await?;
+    assert_reflection_describes_gtl_contract(server.channel(), server.authorization()).await?;
 
-    server.stop().await
+    server.stop().await?;
+    Ok(())
 }
 
 #[tokio::test]
 async fn validates_application_requests_through_the_generated_client() -> TestResult {
-    let server = TestServer::start().await?;
-    let mut client =
-        DiffServiceClient::with_interceptor(server.channel.clone(), server.authorization.clone());
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut client = DiffServiceClient::with_interceptor(server.channel(), server.authorization());
 
     let error = client
         .render(RenderDiffRequest {
@@ -136,17 +54,17 @@ async fn validates_application_requests_through_the_generated_client() -> TestRe
         .expect_err("relative working directory must fail");
 
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
-    server.stop().await
+    server.stop().await?;
+    Ok(())
 }
 
 #[tokio::test]
 async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
-    let server = TestServer::start().await?;
-    let mut client = RepositoryServiceClient::with_interceptor(
-        server.channel.clone(),
-        server.authorization.clone(),
-    );
-    let root = server.directory.path().to_string_lossy().into_owned();
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let mut client =
+        RepositoryServiceClient::with_interceptor(server.channel(), server.authorization());
+    let root = directory.path().to_string_lossy().into_owned();
 
     let error = client
         .get_status(GetRepositoryStatusRequest {
@@ -162,26 +80,26 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
         .expect_err("an empty traversal has no repositories");
     assert_eq!(error.code(), tonic::Code::NotFound);
 
-    let mut worktree_client = WorktreeServiceClient::with_interceptor(
-        server.channel.clone(),
-        server.authorization.clone(),
-    );
+    let mut worktree_client =
+        WorktreeServiceClient::with_interceptor(server.channel(), server.authorization());
     let error = worktree_client
         .get_base(GetWorktreeBaseRequest {
-            repository_path: server.directory.path().to_string_lossy().into_owned(),
+            repository_path: directory.path().to_string_lossy().into_owned(),
         })
         .await
         .expect_err("worktree lookup requires a repository");
     assert_eq!(error.code(), tonic::Code::FailedPrecondition);
 
-    server.stop().await
+    server.stop().await?;
+    Ok(())
 }
 
 #[tokio::test]
 async fn rejects_requests_without_the_capability() -> TestResult {
-    let server = TestServer::start().await?;
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
 
-    let error = HealthClient::new(server.channel.clone())
+    let error = HealthClient::new(server.channel())
         .check(HealthCheckRequest {
             service: String::new(),
         })
@@ -189,40 +107,38 @@ async fn rejects_requests_without_the_capability() -> TestResult {
         .expect_err("unauthenticated request must fail");
     assert_eq!(error.code(), tonic::Code::Unauthenticated);
 
-    server.stop().await
+    server.stop().await?;
+    Ok(())
 }
 
 #[tokio::test]
 async fn shutdown_reports_not_serving_and_stops_with_an_open_health_watch() -> TestResult {
-    let server = TestServer::start().await?;
-    let mut server_health =
-        health_watch(server.channel.clone(), server.authorization.clone(), "").await?;
+    let directory = tempfile::tempdir()?;
+    let mut server = ServerHarness::start(directory.path(), None).await?;
+    let mut server_health = health_watch(server.channel(), server.authorization(), "").await?;
     let mut diff_health = health_watch(
-        server.channel.clone(),
-        server.authorization.clone(),
+        server.channel(),
+        server.authorization(),
         "gtl.v1.DiffService",
     )
     .await?;
 
     assert_health_update(&mut server_health, ServingStatus::Serving).await?;
     assert_health_update(&mut diff_health, ServingStatus::Serving).await?;
-    server
-        .shutdown
-        .send(())
-        .map_err(|()| "test server stopped before shutdown")?;
+    server.begin_shutdown()?;
     assert_health_update(&mut diff_health, ServingStatus::NotServing).await?;
     assert_health_update(&mut server_health, ServingStatus::NotServing).await?;
 
-    let server_result = tokio::time::timeout(Duration::from_secs(1), server.task)
+    let server_result = tokio::time::timeout(Duration::from_secs(1), server.wait())
         .await
         .map_err(|_| "test server exceeded its shutdown grace period")?;
-    server_result??;
+    server_result?;
     Ok(())
 }
 
 async fn health_watch(
     channel: Channel,
-    authorization: TestAuthorization,
+    authorization: ServerHarnessAuthorization,
     service: &str,
 ) -> TestResult<tonic::Streaming<tonic_health::pb::HealthCheckResponse>> {
     Ok(HealthClient::with_interceptor(channel, authorization)
@@ -233,7 +149,10 @@ async fn health_watch(
         .into_inner())
 }
 
-async fn assert_health_serving(channel: Channel, authorization: TestAuthorization) -> TestResult {
+async fn assert_health_serving(
+    channel: Channel,
+    authorization: ServerHarnessAuthorization,
+) -> TestResult {
     let mut client = HealthClient::with_interceptor(channel, authorization);
     for service in [
         "",
@@ -271,7 +190,7 @@ async fn assert_health_update(
 
 async fn assert_reflection_describes_gtl_contract(
     channel: Channel,
-    authorization: TestAuthorization,
+    authorization: ServerHarnessAuthorization,
 ) -> TestResult {
     let requests = tokio_stream::iter([ServerReflectionRequest {
         host: String::new(),
