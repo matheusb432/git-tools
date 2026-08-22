@@ -313,6 +313,7 @@ fn DiffWorkspaceDocument(
                 aria_label: "Commits",
                 CommitsPanel {
                     view,
+                    test_id: Some(test_ids::COMMITS_PANEL.value().to_owned()),
                     onselect: onselect_commit,
                     onclear: onclear_commit,
                 }

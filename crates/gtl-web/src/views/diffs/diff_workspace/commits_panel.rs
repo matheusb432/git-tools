@@ -18,6 +18,7 @@ use crate::shared::{
 #[component]
 pub fn CommitsPanel(
     view: ViewerActiveView,
+    test_id: Option<String>,
     onselect: Option<EventHandler<CommitId>>,
     onclear: Option<EventHandler<()>>,
 ) -> Element {
@@ -34,7 +35,9 @@ pub fn CommitsPanel(
     let onselect = onselect.filter(|_| commit_selection_enabled(view.commits.len()));
 
     rsx! {
-        ScrollArea { class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
+        ScrollArea {
+            class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
+            "data-testid": test_id,
             CommitsPanelHeader {
                 label: view.commits_label.clone(),
                 selection_active: selected_id.is_some(),

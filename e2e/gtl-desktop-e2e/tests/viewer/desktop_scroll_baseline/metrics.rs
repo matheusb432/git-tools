@@ -2,7 +2,7 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 
 pub const DISTANCE_CSS_PIXELS: u32 = 160;
-pub const STEP_CSS_PIXELS: u32 = 2;
+pub const STEP_CSS_PIXELS: u32 = 8;
 pub const TRAVERSALS: u32 = 10;
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -150,6 +150,15 @@ fn nearest_rank(sorted_values: &[f64], percentile: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixed_protocol_collects_200_frame_gaps() {
+        let protocol = ScrollProtocol::fixed();
+        let frame_gap_count =
+            protocol.distance_css_pixels / protocol.step_css_pixels * protocol.traversals;
+
+        assert_eq!(frame_gap_count, 200);
+    }
 
     #[test]
     fn frame_metrics_preserve_gaps_and_count_slow_frames() {

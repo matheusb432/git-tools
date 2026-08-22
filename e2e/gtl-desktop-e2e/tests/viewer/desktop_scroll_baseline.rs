@@ -11,8 +11,8 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use gtl_benchmarks::desktop_scroll::{self, DesktopScrollManifest};
 use gtl_web_contracts::test_ids;
-use serde::Serialize;
-use thirtyfour::{By, WebDriver, WebElement};
+use serde::{Deserialize, Serialize};
+use thirtyfour::{WebDriver, WebElement};
 
 use crate::support::{self, wait};
 
@@ -28,12 +28,58 @@ use process_memory::ProcessMemorySnapshot;
 use runner_environment::{RunnerEnvironment, SystemConditions};
 
 const ASSERTION_TIMEOUT: Duration = Duration::from_secs(120);
-const SCRIPT_TIMEOUT: Duration = Duration::from_secs(45);
+const SCRIPT_TIMEOUT: Duration = Duration::from_secs(30);
 const WINDOW_WIDTH: u32 = 1_200;
 const WINDOW_HEIGHT: u32 = 700;
 const DIAGNOSTIC_BYTES_MAX: usize = 64 * 1024;
 const BENCHMARK_NAME: &str = "desktop-scroll-production-viewer";
 const VIEW_NAME: &str = "desktop-scroll-baseline";
+
+const READINESS_SCRIPT: &str = r#"
+const isVisible = (element) => {
+    if (element === null) return false;
+    const style = getComputedStyle(element);
+    const rectangle = element.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' &&
+        rectangle.width > 0 && rectangle.height > 0;
+};
+const activeTabs = [...document.querySelectorAll("[role='tab'][aria-selected='true']")];
+const activeTab = activeTabs[0] ?? null;
+const documents = [...document.querySelectorAll('[data-gtl-diff-document]')];
+const diffDocument = documents[0] ?? null;
+const changedFiles = document.querySelector(arguments[0]);
+const commitPanels = [...document.querySelectorAll(arguments[1])];
+const commits = commitPanels.find(isVisible) ?? null;
+
+return {
+    active_tab_count: activeTabs.length,
+    active_tab_title: activeTab?.getAttribute('title') ?? null,
+    visible_active_tab_count: activeTabs.filter(isVisible).length,
+    document_count: documents.length,
+    visible_document_count: documents.filter(isVisible).length,
+    document_aria_busy: diffDocument?.getAttribute('aria-busy') ?? null,
+    document_view_state: diffDocument?.getAttribute('data-view-state') ?? null,
+    document_chunks_complete: diffDocument?.getAttribute('data-chunks-complete') ?? null,
+    document_layout: diffDocument?.getAttribute('data-layout') ?? null,
+    document_density: diffDocument?.getAttribute('data-density') ?? null,
+    diff_file_count: diffDocument?.querySelectorAll('[data-gtl-diff-file]').length ?? 0,
+    changed_files_text: changedFiles?.innerText ?? null,
+    visible_changed_files_count: Number(isVisible(changedFiles)),
+    commit_panel_count: commitPanels.length,
+    visible_commit_panel_count: commitPanels.filter(isVisible).length,
+    commit_count: commits?.querySelectorAll("[data-gtl-action='copy-commit']").length ?? 0,
+};
+"#;
+
+const VISIBLE_ELEMENT_SCRIPT: &str = r"
+const element = [...document.querySelectorAll(arguments[0])].find((candidate) => {
+    const style = getComputedStyle(candidate);
+    const rectangle = candidate.getBoundingClientRect();
+    return style.display !== 'none' && style.visibility !== 'hidden' &&
+        rectangle.width > 0 && rectangle.height > 0;
+});
+return element ?? null;
+";
 
 const SCROLL_SCRIPT: &str = r"
 const element = arguments[0];
@@ -144,6 +190,7 @@ struct BenchmarkProtocol {
     expected_layout: &'static str,
     expected_density: &'static str,
     readiness: &'static str,
+    script_timeout_seconds: u64,
     scroll: ScrollProtocol,
 }
 
@@ -165,6 +212,50 @@ struct WindowRectangle {
     y: i64,
     width: i64,
     height: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ReadinessSnapshot {
+    active_tab_count: usize,
+    active_tab_title: Option<String>,
+    visible_active_tab_count: usize,
+    document_count: usize,
+    visible_document_count: usize,
+    document_aria_busy: Option<String>,
+    document_view_state: Option<String>,
+    document_chunks_complete: Option<String>,
+    document_layout: Option<String>,
+    document_density: Option<String>,
+    diff_file_count: usize,
+    changed_files_text: Option<String>,
+    visible_changed_files_count: usize,
+    commit_panel_count: usize,
+    visible_commit_panel_count: usize,
+    commit_count: usize,
+}
+
+impl ReadinessSnapshot {
+    fn is_ready(&self) -> bool {
+        self.active_tab_count == 1
+            && self.active_tab_title.as_deref() == Some(VIEW_NAME)
+            && self.visible_active_tab_count == 1
+            && self.document_count == 1
+            && self.visible_document_count == 1
+            && self.document_aria_busy.as_deref() == Some("false")
+            && self.document_view_state.as_deref() == Some("complete")
+            && self.document_chunks_complete.as_deref() == Some("true")
+            && self.document_layout.as_deref() == Some("unified")
+            && self.document_density.as_deref() == Some("compact")
+            && self.diff_file_count == desktop_scroll::DISTINCT_FILE_COUNT
+            && self.visible_changed_files_count == 1
+            && self
+                .changed_files_text
+                .as_deref()
+                .is_some_and(changed_files_summary_is_ready)
+            && self.commit_panel_count >= 1
+            && self.visible_commit_panel_count == 1
+            && self.commit_count == desktop_scroll::COMMIT_COUNT
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -216,6 +307,7 @@ async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
             expected_layout: "unified",
             expected_density: "compact",
             readiness: "active production view with 10 commits, 50 file summaries, and all 50 retained diff-file cards complete",
+            script_timeout_seconds: SCRIPT_TIMEOUT.as_secs(),
             scroll: ScrollProtocol::fixed(),
         },
         resource_bounds: inputs.bounds,
@@ -285,16 +377,20 @@ async fn measure_launch(
         .await
         .context("read fixed desktop benchmark window")?;
     let readiness_memory = process_memory::snapshot(session.data_root())?;
-    let changed_files_element =
-        support::selectors::by_test_id(driver, test_ids::CHANGED_FILES_PANEL)
-            .await
-            .context("locate changed-files scroll panel")?;
+    let changed_files_element = visible_element(
+        driver,
+        test_ids::CHANGED_FILES_PANEL.selector(),
+        "changed-files scroll panel",
+    )
+    .await?;
     let changed_files = scroll_panel(driver, &changed_files_element, "changed-files").await?;
     let memory_after_changed_files = process_memory::snapshot(session.data_root())?;
-    let commits_element = driver
-        .find(By::Css("aside[aria-label='Commits'] > div"))
-        .await
-        .context("locate commits scroll panel")?;
+    let commits_element = visible_element(
+        driver,
+        test_ids::COMMITS_PANEL.selector(),
+        "commits scroll panel",
+    )
+    .await?;
     let commits = scroll_panel(driver, &commits_element, "commits").await?;
     let memory_after_commits = process_memory::snapshot(session.data_root())?;
 
@@ -352,71 +448,71 @@ fn forward_fixture(repository: &Path, data_root: &Path) -> Result<()> {
 }
 
 async fn wait_for_ready_view(driver: &WebDriver) -> Result<()> {
-    wait::until(
+    let readiness = wait::until(
         "complete 10-commit, 50-file production desktop view",
         ASSERTION_TIMEOUT,
         || async {
-            let active_tabs = driver
-                .find_all(By::Css("[role='tab'][aria-selected='true']"))
-                .await?;
-            let Some(active_tab) = active_tabs.into_iter().next() else {
-                return Ok(None);
-            };
-            if !active_tab.is_displayed().await?
-                || !active_tab
-                    .attr("title")
-                    .await?
-                    .unwrap_or_default()
-                    .contains("desktop-scroll-fixture")
-            {
-                return Ok(None);
-            }
-
-            let documents = driver.find_all(By::Css("[data-gtl-diff-document]")).await?;
-            let Some(document) = documents.into_iter().next() else {
-                return Ok(None);
-            };
-            if !document.is_displayed().await?
-                || document.attr("aria-busy").await?.as_deref() != Some("false")
-                || document.attr("data-view-state").await?.as_deref() != Some("complete")
-                || document.attr("data-chunks-complete").await?.as_deref() != Some("true")
-                || document.attr("data-layout").await?.as_deref() != Some("unified")
-                || document.attr("data-density").await?.as_deref() != Some("compact")
-            {
-                return Ok(None);
-            }
-            if document
-                .find_all(By::Css("[data-gtl-diff-file]"))
-                .await?
-                .len()
-                != desktop_scroll::DISTINCT_FILE_COUNT
-            {
-                return Ok(None);
-            }
-
-            let changed_files =
-                support::selectors::by_test_id(driver, test_ids::CHANGED_FILES_PANEL).await?;
-            let changed_files_text = changed_files.text().await?;
-            if !changed_files.is_displayed().await?
-                || !changed_files_text.contains("# 50 files")
-                || !changed_files_text.contains("10 commits")
-            {
-                return Ok(None);
-            }
-            let commits = driver.find(By::Css("aside[aria-label='Commits']")).await?;
-            if !commits.is_displayed().await?
-                || commits
-                    .find_all(By::Css("[data-gtl-action='copy-commit']"))
-                    .await?
-                    .len()
-                    != desktop_scroll::COMMIT_COUNT
-            {
-                return Ok(None);
-            }
-            Ok(Some(()))
+            let snapshot = readiness_snapshot(driver).await?;
+            Ok(snapshot.is_ready().then_some(()))
         },
     )
-    .await
+    .await;
+    if let Err(error) = readiness {
+        let diagnostic = readiness_diagnostic(driver)
+            .await
+            .unwrap_or_else(|diagnostic_error| format!("unavailable: {diagnostic_error:#}"));
+        return Err(error).context(format!("last readiness observation: {diagnostic}"));
+    }
+    Ok(())
+}
+
+async fn readiness_snapshot(driver: &WebDriver) -> Result<ReadinessSnapshot> {
+    let result = driver
+        .execute(
+            READINESS_SCRIPT,
+            vec![
+                serde_json::Value::String(test_ids::CHANGED_FILES_PANEL.selector().to_owned()),
+                serde_json::Value::String(test_ids::COMMITS_PANEL.selector().to_owned()),
+            ],
+        )
+        .await
+        .context("observe desktop scroll readiness")?;
+    result
+        .convert()
+        .context("decode desktop scroll readiness observation")
+}
+
+async fn readiness_diagnostic(driver: &WebDriver) -> Result<String> {
+    let snapshot = readiness_snapshot(driver).await?;
+    serde_json::to_string(&snapshot).context("encode desktop scroll readiness diagnostic")
+}
+
+async fn visible_element(
+    driver: &WebDriver,
+    selector: &'static str,
+    label: &str,
+) -> Result<WebElement> {
+    let result = driver
+        .execute(
+            VISIBLE_ELEMENT_SCRIPT,
+            vec![serde_json::Value::String(selector.to_owned())],
+        )
+        .await
+        .with_context(|| format!("locate visible {label}"))?;
+    ensure!(!result.json().is_null(), "visible {label} is missing");
+    result
+        .element()
+        .with_context(|| format!("decode visible {label}"))
+}
+
+fn changed_files_summary_is_ready(text: &str) -> bool {
+    let normalized = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+    normalized.contains(&format!("# {} files", desktop_scroll::DISTINCT_FILE_COUNT))
+        && normalized.contains(&format!("{} commits", desktop_scroll::COMMIT_COUNT))
 }
 
 async fn scroll_panel(
@@ -484,4 +580,33 @@ fn bounded_diagnostic(bytes: &[u8]) -> String {
         ""
     };
     format!("{}{suffix}", String::from_utf8_lossy(&bytes[..end]))
+}
+
+#[test]
+fn readiness_normalizes_rendered_changed_files_summary() {
+    assert!(changed_files_summary_is_ready("# 50 FILES\n10\ncommits"));
+}
+
+#[test]
+fn readiness_accepts_complete_production_dom_snapshot() {
+    let snapshot = ReadinessSnapshot {
+        active_tab_count: 1,
+        active_tab_title: Some(VIEW_NAME.to_owned()),
+        visible_active_tab_count: 1,
+        document_count: 1,
+        visible_document_count: 1,
+        document_aria_busy: Some("false".to_owned()),
+        document_view_state: Some("complete".to_owned()),
+        document_chunks_complete: Some("true".to_owned()),
+        document_layout: Some("unified".to_owned()),
+        document_density: Some("compact".to_owned()),
+        diff_file_count: desktop_scroll::DISTINCT_FILE_COUNT,
+        changed_files_text: Some("# 50 FILES\n10\ncommits".to_owned()),
+        visible_changed_files_count: 1,
+        commit_panel_count: 1,
+        visible_commit_panel_count: 1,
+        commit_count: desktop_scroll::COMMIT_COUNT,
+    };
+
+    assert!(snapshot.is_ready());
 }

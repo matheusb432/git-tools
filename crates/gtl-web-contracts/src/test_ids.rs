@@ -30,6 +30,7 @@ macro_rules! define_test_id {
 }
 
 define_test_id!(CHANGED_FILES_PANEL, "changed-files-panel");
+define_test_id!(COMMITS_PANEL, "commits-panel");
 define_test_id!(HISTORY_ENTRY_OPEN, "history-entry-open");
 define_test_id!(LIVE_VIEW_REFRESH, "live-view-refresh");
 define_test_id!(VIEWER_HISTORY_OPEN, "viewer-history-open");

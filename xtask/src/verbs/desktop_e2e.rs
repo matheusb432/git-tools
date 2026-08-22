@@ -654,8 +654,8 @@ fn scroll_benchmark_environment(sandbox: &Sandbox) -> Result<IsolatedEnv> {
         ("GTL_DESKTOP_SCROLL_GIT_VERSION", "git", &["--version"][..]),
         (
             "GTL_DESKTOP_SCROLL_TAURI_DRIVER_VERSION",
-            "tauri-driver",
-            &["--version"][..],
+            "mise",
+            &["current", "cargo:tauri-driver"][..],
         ),
         (
             "GTL_DESKTOP_SCROLL_WEBKITGTK_VERSION",
