@@ -65,7 +65,7 @@ clap = { version = "4", features = ["derive"] }
 clap-cargo = "0.18.3"
 command-group = "5.0.1"
 console = { version = "0.16.4", default-features = false, features = ["std"] }
-cqrsy = { git = "ssh://git@github.com/matheusb432/cqrsy.git", rev = "544e92d53a7b54cb1209d9e2eeb25ac29ea88064" }
+cqrsy = "0.10.2"
 criterion = "0.8.2"
 directories = "6.0.0"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
@@ -88,6 +88,7 @@ prost-types = "0.14.4"
 playwright-rs = "=0.15.0"
 predicates = "3"
 raw-window-handle = "0.6"
+rolling-file = "0.2.0"
 rusqlite = { version = "0.40", default-features = false, features = [
   "bundled",
   "cache",
@@ -121,7 +122,11 @@ tonic-health = "0.14.6"
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
 tonic-reflection = "0.14.6"
+tower-http = { version = "0.7.0", default-features = false, features = [
+  "trace",
+] }
 tracing = "0.1"
+tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tree-sitter = "0.26.12"
 tree-sitter-highlight = "0.26.12"
@@ -137,6 +142,9 @@ walkdir = "2.5.0"
 x11-dl = "2.21.0"
 zbus = "5.16.0"
 sample_project = { version = "0.10", features = ["json"] }
+
+[patch.crates-io]
+sample_project-client = { path = "../.sample_project-workspace/crates/sample_project-client" }
 
 [profile.dev.package."*"]
 debug = false

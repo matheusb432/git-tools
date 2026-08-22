@@ -2,11 +2,11 @@ use std::{future::Future, time::Duration};
 
 use anyhow::Context as _;
 use gtl_local_auth::{LocalAuth, ServerEndpoint, ServerInstanceId};
-use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
 mod config;
 #[cfg(any(test, feature = "benchmark-support"))]
 mod harness;
+mod observability;
 mod server;
 mod services;
 mod state;
@@ -18,7 +18,7 @@ pub use harness::ServerHarness;
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(10);
 
 pub async fn run() -> anyhow::Result<()> {
-    initialize_tracing()?;
+    let _observability_guard = observability::initialize()?;
     let config = Config::from_env()?;
     let local_auth = LocalAuth::from_environment()?;
     let capability = local_auth.load_or_create_server_token()?;
@@ -39,19 +39,6 @@ pub async fn run() -> anyhow::Result<()> {
         .context("serving gtl-server")?;
     tracing::info!("gtl-server stopped");
     Ok(())
-}
-
-fn initialize_tracing() -> anyhow::Result<()> {
-    let filter = if std::env::var_os("RUST_LOG").is_some() {
-        EnvFilter::try_from_default_env().context("parsing RUST_LOG")?
-    } else {
-        EnvFilter::new("info")
-    };
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .try_init()
-        .context("initializing tracing")
 }
 
 #[cfg(unix)]

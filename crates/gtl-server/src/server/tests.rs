@@ -8,6 +8,7 @@ use gtl_wire::v1::{
 };
 use prost::Message as _;
 use prost_types::FileDescriptorProto;
+use serde_json::Value;
 use tokio_stream::StreamExt as _;
 use tonic::{Request, transport::Channel};
 use tonic_health::{
@@ -20,9 +21,17 @@ use tonic_reflection::pb::v1::{
     server_reflection_response::MessageResponse,
 };
 
-use crate::harness::{ServerHarness, ServerHarnessAuthorization};
+use crate::{
+    harness::{ServerHarness, ServerHarnessAuthorization},
+    observability::{build_test_dispatch, read_json_records},
+};
 
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
+
+const PRIVATE_METADATA_VALUE: &str = "gtl-observability-private-metadata";
+const DIFF_RENDER_URI: &str = "/gtl.v1.DiffService/Render";
+const HEALTH_CHECK_URI: &str = "/grpc.health.v1.Health/Check";
+const REFLECTION_URI: &str = "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo";
 
 #[tokio::test]
 async fn serves_authenticated_health_and_reflection() -> TestResult {
@@ -43,13 +52,7 @@ async fn validates_application_requests_through_the_generated_client() -> TestRe
     let mut client = DiffServiceClient::with_interceptor(server.channel(), server.authorization());
 
     let error = client
-        .render(RenderDiffRequest {
-            working_directory: "relative".into(),
-            target: Some(DiffTarget {
-                selection: Some(diff_target::Selection::Unpushed(Empty {})),
-            }),
-            name: None,
-        })
+        .render(relative_working_directory_diff_request())
         .await
         .expect_err("relative working directory must fail");
 
@@ -133,6 +136,65 @@ async fn shutdown_reports_not_serving_and_stops_with_an_open_health_watch() -> T
         .await
         .map_err(|_| "test server exceeded its shutdown grace period")?;
     server_result?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn writes_transport_traces_without_private_metadata() -> TestResult {
+    let trace_directory = tempfile::tempdir()?;
+    let log_directory = trace_directory.path().join("logs");
+    let (dispatch, observability_guard) = build_test_dispatch(log_directory.clone())?;
+    let default_dispatch_guard = tracing::dispatcher::set_default(&dispatch);
+    let data_directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(data_directory.path(), None).await?;
+
+    let mut diff = DiffServiceClient::with_interceptor(server.channel(), server.authorization());
+    let mut request = Request::new(relative_working_directory_diff_request());
+    request
+        .metadata_mut()
+        .insert("x-gtl-private-test", PRIVATE_METADATA_VALUE.parse()?);
+    let error = diff
+        .render(request)
+        .await
+        .expect_err("relative working directory must fail");
+    assert_eq!(error.code(), tonic::Code::InvalidArgument);
+
+    HealthClient::with_interceptor(server.channel(), server.authorization())
+        .check(HealthCheckRequest {
+            service: "gtl.v1.DiffService".to_owned(),
+        })
+        .await?;
+    request_reflection(server.channel(), server.authorization()).await?;
+    server.stop().await?;
+    drop(default_dispatch_guard);
+    drop(dispatch);
+    drop(observability_guard);
+
+    let records = read_json_records(&log_directory)?;
+    for uri in [DIFF_RENDER_URI, HEALTH_CHECK_URI, REFLECTION_URI] {
+        assert!(
+            records.iter().any(|record| record_has_uri(record, uri)),
+            "durable traces omitted {uri}"
+        );
+    }
+    for uri in [HEALTH_CHECK_URI, REFLECTION_URI] {
+        assert!(
+            records.iter().any(|record| record_is_success(record, uri)),
+            "durable traces omitted successful status and latency for {uri}"
+        );
+    }
+    assert!(records.iter().any(|record| {
+        record_has_uri(record, DIFF_RENDER_URI)
+            && record["fields"]["classification"]
+                .as_str()
+                .is_some_and(|classification| classification.contains("InvalidArgument"))
+            && record["fields"].get("latency").is_some()
+    }));
+    assert!(
+        records
+            .iter()
+            .all(|record| !record.to_string().contains(PRIVATE_METADATA_VALUE))
+    );
     Ok(())
 }
 
@@ -223,6 +285,52 @@ async fn assert_reflection_describes_gtl_contract(
         ["DiffService"]
     );
     Ok(())
+}
+
+async fn request_reflection(
+    channel: Channel,
+    authorization: ServerHarnessAuthorization,
+) -> TestResult {
+    let requests = tokio_stream::iter([ServerReflectionRequest {
+        host: String::new(),
+        message_request: Some(MessageRequest::ListServices(String::new())),
+    }]);
+    let mut responses = ServerReflectionClient::with_interceptor(channel, authorization)
+        .server_reflection_info(Request::new(requests))
+        .await?
+        .into_inner();
+    while responses.message().await?.is_some() {}
+    Ok(())
+}
+
+fn record_has_uri(record: &Value, uri: &str) -> bool {
+    span_has_uri(&record["span"], uri)
+        || record["spans"]
+            .as_array()
+            .is_some_and(|spans| spans.iter().any(|span| span_has_uri(span, uri)))
+}
+
+fn span_has_uri(span: &Value, uri: &str) -> bool {
+    span["uri"]
+        .as_str()
+        .is_some_and(|recorded_uri| recorded_uri.ends_with(uri))
+}
+
+fn record_is_success(record: &Value, uri: &str) -> bool {
+    let fields = &record["fields"];
+    record_has_uri(record, uri)
+        && fields["status"] == 0
+        && (fields.get("latency").is_some() || fields.get("stream_duration").is_some())
+}
+
+fn relative_working_directory_diff_request() -> RenderDiffRequest {
+    RenderDiffRequest {
+        working_directory: "relative".into(),
+        target: Some(DiffTarget {
+            selection: Some(diff_target::Selection::Unpushed(Empty {})),
+        }),
+        name: None,
+    }
 }
 
 async fn next_reflection_response(

@@ -18,6 +18,13 @@ use tonic::{
     service::{Interceptor, InterceptorLayer},
     transport::{Server, server::TcpIncoming},
 };
+use tower_http::{
+    LatencyUnit,
+    trace::{
+        DefaultMakeSpan, DefaultOnBodyChunk, DefaultOnEos, DefaultOnFailure, DefaultOnResponse,
+        GrpcMakeClassifier, TraceLayer,
+    },
+};
 
 use crate::{
     services::{DiffApi, LiveViewApi, ProjectApi, RepositoryApi, SettingsApi, TagApi, WorktreeApi},
@@ -31,6 +38,16 @@ const MAX_RESPONSE_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
 
 const AUTHORIZATION_METADATA_KEY: &str = "authorization";
 const AUTHORIZATION_SCHEME: &str = "Bearer ";
+
+type GrpcTraceLayer = TraceLayer<
+    GrpcMakeClassifier,
+    DefaultMakeSpan,
+    (),
+    DefaultOnResponse,
+    DefaultOnBodyChunk,
+    DefaultOnEos,
+    DefaultOnFailure,
+>;
 
 #[derive(Clone)]
 struct Authentication {
@@ -127,8 +144,8 @@ pub(crate) async fn serve(
             .await;
         let _ = shutdown_started_sender.send(());
     };
-
     let grpc_server = Server::builder()
+        .layer(grpc_trace_layer())
         .concurrency_limit_per_connection(MAX_CONCURRENT_REQUESTS_PER_CONNECTION)
         .load_shed(true)
         .timeout(MAX_REQUEST_DURATION)
@@ -160,6 +177,32 @@ pub(crate) async fn serve(
     };
 
     result.context("gRPC server failure")
+}
+
+fn grpc_trace_layer() -> GrpcTraceLayer {
+    TraceLayer::new_for_grpc()
+        .make_span_with(
+            DefaultMakeSpan::new()
+                .level(tracing::Level::INFO)
+                .include_headers(false),
+        )
+        .on_request(())
+        .on_response(
+            DefaultOnResponse::new()
+                .level(tracing::Level::INFO)
+                .latency_unit(LatencyUnit::Micros)
+                .include_headers(false),
+        )
+        .on_eos(
+            DefaultOnEos::new()
+                .level(tracing::Level::INFO)
+                .latency_unit(LatencyUnit::Micros),
+        )
+        .on_failure(
+            DefaultOnFailure::new()
+                .level(tracing::Level::WARN)
+                .latency_unit(LatencyUnit::Micros),
+        )
 }
 
 #[cfg(test)]
