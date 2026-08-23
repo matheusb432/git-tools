@@ -2,18 +2,21 @@ syntax = "proto3";
 
 package gtl.v1;
 
-import "gtl/v1/common.proto";
 import "gtl/v1/repository.proto";
 
 service ProjectService {
-  rpc PushRepositories(SyncProjectsRequest) returns (SyncProjectsResponse);
-  rpc PullRepositories(SyncProjectsRequest) returns (SyncProjectsResponse);
-  rpc CommitRepositories(CommitProjectRepositoriesRequest) returns (CommitProjectRepositoriesResponse);
-  rpc PruneBranches(PruneProjectBranchesRequest) returns (PruneProjectBranchesResponse);
-  rpc GetStatuses(Empty) returns (RepositoryStatusesResponse);
+  rpc PushProjectRepositories(PushProjectRepositoriesRequest) returns (PushProjectRepositoriesResponse);
+  rpc PullProjectRepositories(PullProjectRepositoriesRequest) returns (PullProjectRepositoriesResponse);
+  rpc CommitProjectRepositories(CommitProjectRepositoriesRequest) returns (CommitProjectRepositoriesResponse);
+  rpc PruneProjectBranches(PruneProjectBranchesRequest) returns (PruneProjectBranchesResponse);
+  rpc GetProjectRepositoryStatuses(GetProjectRepositoryStatusesRequest) returns (GetProjectRepositoryStatusesResponse);
 }
 
-message SyncProjectsRequest {
+message PushProjectRepositoriesRequest {
+  bool dry_run = 1;
+}
+
+message PullProjectRepositoriesRequest {
   bool dry_run = 1;
 }
 
@@ -43,7 +46,12 @@ enum ProjectSyncExit {
   PROJECT_SYNC_EXIT_FAILED = 3;
 }
 
-message SyncProjectsResponse {
+message PushProjectRepositoriesResponse {
+  repeated RepositorySyncResult results = 1;
+  ProjectSyncExit exit = 2;
+}
+
+message PullProjectRepositoriesResponse {
   repeated RepositorySyncResult results = 1;
   ProjectSyncExit exit = 2;
 }
@@ -122,4 +130,10 @@ message PruneProjectBranchesResponse {
   repeated ProjectPruneResult results = 1;
   ProjectPruneExit exit = 2;
   optional string failure_detail = 3;
+}
+
+message GetProjectRepositoryStatusesRequest {}
+
+message GetProjectRepositoryStatusesResponse {
+  repeated RepositoryStatusResult results = 1;
 }

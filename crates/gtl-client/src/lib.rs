@@ -41,10 +41,34 @@ pub enum ConnectError {
     Health(#[source] Status),
 }
 
+impl ConnectError {
+    /// Returns the gRPC status when the server rejected its health check.
+    #[must_use]
+    pub const fn status(&self) -> Option<&Status> {
+        match self {
+            Self::Health(status) => Some(status),
+            Self::LocalBootstrap(_)
+            | Self::InvalidEndpoint(_)
+            | Self::AuthorizationMetadata(_)
+            | Self::Transport(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
-    #[error("gtl-server request failed: {0}")]
+    #[error("{}", .0.message())]
     Rpc(#[from] Status),
+}
+
+impl ClientError {
+    /// Returns the gRPC status received for the failed request.
+    #[must_use]
+    pub const fn status(&self) -> &Status {
+        match self {
+            Self::Rpc(status) => status,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -82,7 +106,7 @@ impl GtlClient {
         request: v1::RenderDiffRequest,
     ) -> Result<v1::RenderDiffResponse, ClientError> {
         self.diff_client()
-            .render(request)
+            .render_diff(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -93,7 +117,7 @@ impl GtlClient {
         request: v1::PrepareDiffRequest,
     ) -> Result<v1::PrepareDiffResponse, ClientError> {
         self.diff_client()
-            .prepare(request)
+            .prepare_diff(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -102,31 +126,31 @@ impl GtlClient {
     pub async fn prepare_merge_diff(
         &self,
         request: v1::PrepareMergeDiffRequest,
-    ) -> Result<v1::PrepareDiffResponse, ClientError> {
+    ) -> Result<v1::PrepareMergeDiffResponse, ClientError> {
         self.diff_client()
-            .prepare_merge(request)
+            .prepare_merge_diff(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn prepare_subrepositories_diff(
+    pub async fn prepare_subrepository_diffs(
         &self,
-        request: v1::PrepareSubrepositoriesDiffRequest,
-    ) -> Result<v1::PrepareDiffResponse, ClientError> {
+        request: v1::PrepareSubrepositoryDiffsRequest,
+    ) -> Result<v1::PrepareSubrepositoryDiffsResponse, ClientError> {
         self.diff_client()
-            .prepare_subrepositories(request)
+            .prepare_subrepository_diffs(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn prepare_projects_diff(
+    pub async fn prepare_project_repository_diffs(
         &self,
-        request: v1::PrepareProjectsDiffRequest,
-    ) -> Result<v1::PrepareDiffResponse, ClientError> {
+        request: v1::PrepareProjectRepositoryDiffsRequest,
+    ) -> Result<v1::PrepareProjectRepositoryDiffsResponse, ClientError> {
         self.diff_client()
-            .prepare_projects(request)
+            .prepare_project_repository_diffs(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -135,31 +159,31 @@ impl GtlClient {
     pub async fn render_merge_diff(
         &self,
         request: v1::RenderMergeDiffRequest,
-    ) -> Result<v1::RenderDiffResponse, ClientError> {
+    ) -> Result<v1::RenderMergeDiffResponse, ClientError> {
         self.diff_client()
-            .render_merge(request)
+            .render_merge_diff(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn render_subrepositories_diff(
+    pub async fn render_subrepository_diffs(
         &self,
-        request: v1::RenderSubrepositoriesDiffRequest,
-    ) -> Result<v1::RenderDiffResponse, ClientError> {
+        request: v1::RenderSubrepositoryDiffsRequest,
+    ) -> Result<v1::RenderSubrepositoryDiffsResponse, ClientError> {
         self.diff_client()
-            .render_subrepositories(request)
+            .render_subrepository_diffs(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn render_projects_diff(
+    pub async fn render_project_repository_diffs(
         &self,
-        request: v1::RenderProjectsDiffRequest,
-    ) -> Result<v1::RenderDiffResponse, ClientError> {
+        request: v1::RenderProjectRepositoryDiffsRequest,
+    ) -> Result<v1::RenderProjectRepositoryDiffsResponse, ClientError> {
         self.diff_client()
-            .render_projects(request)
+            .render_project_repository_diffs(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -167,10 +191,10 @@ impl GtlClient {
 
     pub async fn push_project_repositories(
         &self,
-        request: v1::SyncProjectsRequest,
-    ) -> Result<v1::SyncProjectsResponse, ClientError> {
+        request: v1::PushProjectRepositoriesRequest,
+    ) -> Result<v1::PushProjectRepositoriesResponse, ClientError> {
         self.project_client()
-            .push_repositories(request)
+            .push_project_repositories(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -178,10 +202,10 @@ impl GtlClient {
 
     pub async fn pull_project_repositories(
         &self,
-        request: v1::SyncProjectsRequest,
-    ) -> Result<v1::SyncProjectsResponse, ClientError> {
+        request: v1::PullProjectRepositoriesRequest,
+    ) -> Result<v1::PullProjectRepositoriesResponse, ClientError> {
         self.project_client()
-            .pull_repositories(request)
+            .pull_project_repositories(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -192,7 +216,7 @@ impl GtlClient {
         request: v1::CommitProjectRepositoriesRequest,
     ) -> Result<v1::CommitProjectRepositoriesResponse, ClientError> {
         self.project_client()
-            .commit_repositories(request)
+            .commit_project_repositories(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -203,7 +227,7 @@ impl GtlClient {
         request: v1::PruneProjectBranchesRequest,
     ) -> Result<v1::PruneProjectBranchesResponse, ClientError> {
         self.project_client()
-            .prune_branches(request)
+            .prune_project_branches(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -211,9 +235,9 @@ impl GtlClient {
 
     pub async fn get_project_repository_statuses(
         &self,
-    ) -> Result<v1::RepositoryStatusesResponse, ClientError> {
+    ) -> Result<v1::GetProjectRepositoryStatusesResponse, ClientError> {
         self.project_client()
-            .get_statuses(v1::Empty {})
+            .get_project_repository_statuses(v1::GetProjectRepositoryStatusesRequest {})
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -224,7 +248,7 @@ impl GtlClient {
         request: v1::PlanRepositoryPushRequest,
     ) -> Result<v1::PlanRepositoryPushResponse, ClientError> {
         self.repository_client()
-            .plan_push(request)
+            .plan_repository_push(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -235,7 +259,7 @@ impl GtlClient {
         request: v1::ExecuteRepositoryPushRequest,
     ) -> Result<v1::ExecuteRepositoryPushResponse, ClientError> {
         self.repository_client()
-            .execute_push(request)
+            .execute_repository_push(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -246,7 +270,7 @@ impl GtlClient {
         request: v1::PlanRepositoryCommitRequest,
     ) -> Result<v1::PlanRepositoryCommitResponse, ClientError> {
         self.repository_client()
-            .plan_commit(request)
+            .plan_repository_commit(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -257,29 +281,29 @@ impl GtlClient {
         request: v1::ExecuteRepositoryCommitRequest,
     ) -> Result<v1::ExecuteRepositoryCommitResponse, ClientError> {
         self.repository_client()
-            .execute_commit(request)
+            .execute_repository_commit(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn plan_recursive_push(
+    pub async fn plan_recursive_repository_push(
         &self,
-        request: v1::PlanRecursivePushRequest,
-    ) -> Result<v1::PlanRecursivePushResponse, ClientError> {
+        request: v1::PlanRecursiveRepositoryPushRequest,
+    ) -> Result<v1::PlanRecursiveRepositoryPushResponse, ClientError> {
         self.repository_client()
-            .plan_recursive_push(request)
+            .plan_recursive_repository_push(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn execute_recursive_push(
+    pub async fn execute_recursive_repository_push(
         &self,
-        request: v1::ExecuteRecursivePushRequest,
-    ) -> Result<v1::ExecuteRecursivePushResponse, ClientError> {
+        request: v1::ExecuteRecursiveRepositoryPushRequest,
+    ) -> Result<v1::ExecuteRecursiveRepositoryPushResponse, ClientError> {
         self.repository_client()
-            .execute_recursive_push(request)
+            .execute_recursive_repository_push(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -290,7 +314,7 @@ impl GtlClient {
         request: v1::ChangeRepositoryBranchRequest,
     ) -> Result<v1::ChangeRepositoryBranchResponse, ClientError> {
         self.repository_client()
-            .change_branch(request)
+            .change_repository_branch(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -301,7 +325,7 @@ impl GtlClient {
         request: v1::PlanRepositoryPruneRequest,
     ) -> Result<v1::PlanRepositoryPruneResponse, ClientError> {
         self.repository_client()
-            .plan_prune(request)
+            .plan_repository_prune(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -312,7 +336,7 @@ impl GtlClient {
         request: v1::ExecuteRepositoryPruneRequest,
     ) -> Result<v1::ExecuteRepositoryPruneResponse, ClientError> {
         self.repository_client()
-            .execute_prune(request)
+            .execute_repository_prune(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -321,9 +345,9 @@ impl GtlClient {
     pub async fn get_repository_status(
         &self,
         request: v1::GetRepositoryStatusRequest,
-    ) -> Result<v1::RepositoryStatusesResponse, ClientError> {
+    ) -> Result<v1::GetRepositoryStatusResponse, ClientError> {
         self.repository_client()
-            .get_status(request)
+            .get_repository_status(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -332,28 +356,30 @@ impl GtlClient {
     pub async fn get_recursive_repository_statuses(
         &self,
         request: v1::GetRecursiveRepositoryStatusesRequest,
-    ) -> Result<v1::RepositoryStatusesResponse, ClientError> {
+    ) -> Result<v1::GetRecursiveRepositoryStatusesResponse, ClientError> {
         self.repository_client()
-            .get_recursive_statuses(request)
+            .get_recursive_repository_statuses(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn get_settings(&self) -> Result<v1::GetSettingsResponse, ClientError> {
-        self.settings_client()
-            .get_settings(v1::Empty {})
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
-    pub async fn set_theme(
+    pub async fn get_push_confirmation_requirement(
         &self,
-        request: v1::SetThemeRequest,
-    ) -> Result<v1::SetThemeResponse, ClientError> {
+    ) -> Result<v1::GetPushConfirmationRequirementResponse, ClientError> {
         self.settings_client()
-            .set_theme(request)
+            .get_push_confirmation_requirement(v1::GetPushConfirmationRequirementRequest {})
+            .await
+            .map(tonic::Response::into_inner)
+            .map_err(ClientError::from)
+    }
+
+    pub async fn set_viewer_theme(
+        &self,
+        request: v1::SetViewerThemeRequest,
+    ) -> Result<v1::SetViewerThemeResponse, ClientError> {
+        self.settings_client()
+            .set_viewer_theme(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -364,7 +390,7 @@ impl GtlClient {
         request: v1::GetWorktreeBaseRequest,
     ) -> Result<v1::GetWorktreeBaseResponse, ClientError> {
         self.worktree_client()
-            .get_base(request)
+            .get_worktree_base(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -375,7 +401,7 @@ impl GtlClient {
         request: v1::ListWorktreesRequest,
     ) -> Result<v1::ListWorktreesResponse, ClientError> {
         self.worktree_client()
-            .list(request)
+            .list_worktrees(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -386,7 +412,7 @@ impl GtlClient {
         request: v1::SaveLiveViewRequest,
     ) -> Result<v1::SaveLiveViewResponse, ClientError> {
         self.live_view_client()
-            .save(request)
+            .save_live_view(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -396,7 +422,7 @@ impl GtlClient {
         &self,
     ) -> Result<v1::SaveProjectLiveViewsResponse, ClientError> {
         self.live_view_client()
-            .save_projects(v1::Empty {})
+            .save_project_live_views(v1::SaveProjectLiveViewsRequest {})
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -407,7 +433,7 @@ impl GtlClient {
         request: v1::PlanTagBumpRequest,
     ) -> Result<v1::PlanTagBumpResponse, ClientError> {
         self.tag_client()
-            .plan_bump(request)
+            .plan_tag_bump(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -418,7 +444,7 @@ impl GtlClient {
         request: v1::ExecuteTagBumpRequest,
     ) -> Result<v1::ExecuteTagBumpResponse, ClientError> {
         self.tag_client()
-            .execute_bump(request)
+            .execute_tag_bump(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -429,7 +455,7 @@ impl GtlClient {
         request: v1::ListTagsRequest,
     ) -> Result<v1::ListTagsResponse, ClientError> {
         self.tag_client()
-            .list(request)
+            .list_tags(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -438,9 +464,9 @@ impl GtlClient {
     pub async fn add_tag(
         &self,
         request: v1::AddTagRequest,
-    ) -> Result<v1::TagActionResponse, ClientError> {
+    ) -> Result<v1::AddTagResponse, ClientError> {
         self.tag_client()
-            .add(request)
+            .add_tag(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -449,9 +475,9 @@ impl GtlClient {
     pub async fn push_tags(
         &self,
         request: v1::PushTagsRequest,
-    ) -> Result<v1::TagActionResponse, ClientError> {
+    ) -> Result<v1::PushTagsResponse, ClientError> {
         self.tag_client()
-            .push(request)
+            .push_tags(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -460,9 +486,9 @@ impl GtlClient {
     pub async fn add_and_push_tag(
         &self,
         request: v1::AddAndPushTagRequest,
-    ) -> Result<v1::TagActionResponse, ClientError> {
+    ) -> Result<v1::AddAndPushTagResponse, ClientError> {
         self.tag_client()
-            .add_and_push(request)
+            .add_and_push_tag(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -471,9 +497,9 @@ impl GtlClient {
     pub async fn label_tag(
         &self,
         request: v1::LabelTagRequest,
-    ) -> Result<v1::TagActionResponse, ClientError> {
+    ) -> Result<v1::LabelTagResponse, ClientError> {
         self.tag_client()
-            .label(request)
+            .label_tag(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -605,9 +631,12 @@ mod tests {
     use gtl_local_auth::{ServerEndpoint, ServerInstanceId};
     use gtl_wire::v1::{
         DiffTarget, Empty, PrepareDiffRequest, PrepareDiffResponse, PrepareMergeDiffRequest,
-        PrepareProjectsDiffRequest, PrepareSubrepositoriesDiffRequest, RenderDiffRequest,
-        RenderDiffResponse, RenderMergeDiffRequest, RenderProjectsDiffRequest,
-        RenderSubrepositoriesDiffRequest,
+        PrepareMergeDiffResponse, PrepareProjectRepositoryDiffsRequest,
+        PrepareProjectRepositoryDiffsResponse, PrepareSubrepositoryDiffsRequest,
+        PrepareSubrepositoryDiffsResponse, RenderDiffRequest, RenderDiffResponse,
+        RenderMergeDiffRequest, RenderMergeDiffResponse, RenderProjectRepositoryDiffsRequest,
+        RenderProjectRepositoryDiffsResponse, RenderSubrepositoryDiffsRequest,
+        RenderSubrepositoryDiffsResponse,
         diff_service_server::{DiffService, DiffServiceServer},
         diff_target, render_diff_response,
     };
@@ -621,6 +650,24 @@ mod tests {
     use super::*;
 
     type TestResult<T = ()> = Result<T, Box<dyn Error>>;
+
+    #[test]
+    fn rpc_error_displays_the_public_message_and_retains_the_status_source() -> TestResult {
+        let error = ClientError::from(Status::unavailable(
+            "project catalogue is temporarily unavailable",
+        ));
+
+        assert_eq!(
+            error.to_string(),
+            "project catalogue is temporarily unavailable"
+        );
+        let status = error
+            .source()
+            .and_then(|source| source.downcast_ref::<Status>())
+            .ok_or("RPC error omitted its Tonic status source")?;
+        assert_eq!(status.code(), tonic::Code::Unavailable);
+        Ok(())
+    }
 
     #[test]
     fn request_policy_adds_authentication_and_a_default_deadline() -> TestResult {
@@ -714,60 +761,66 @@ mod tests {
 
     #[tonic::async_trait]
     impl DiffService for TestDiff {
-        async fn prepare(
+        async fn prepare_diff(
             &self,
             _request: Request<PrepareDiffRequest>,
         ) -> Result<Response<PrepareDiffResponse>, Status> {
             Ok(Response::new(PrepareDiffResponse { batch: None }))
         }
 
-        async fn prepare_merge(
+        async fn prepare_merge_diff(
             &self,
             _request: Request<PrepareMergeDiffRequest>,
-        ) -> Result<Response<PrepareDiffResponse>, Status> {
-            Ok(Response::new(PrepareDiffResponse { batch: None }))
+        ) -> Result<Response<PrepareMergeDiffResponse>, Status> {
+            Ok(Response::new(PrepareMergeDiffResponse { batch: None }))
         }
 
-        async fn prepare_subrepositories(
+        async fn prepare_subrepository_diffs(
             &self,
-            _request: Request<PrepareSubrepositoriesDiffRequest>,
-        ) -> Result<Response<PrepareDiffResponse>, Status> {
-            Ok(Response::new(PrepareDiffResponse { batch: None }))
+            _request: Request<PrepareSubrepositoryDiffsRequest>,
+        ) -> Result<Response<PrepareSubrepositoryDiffsResponse>, Status> {
+            Ok(Response::new(PrepareSubrepositoryDiffsResponse {
+                batch: None,
+            }))
         }
 
-        async fn prepare_projects(
+        async fn prepare_project_repository_diffs(
             &self,
-            _request: Request<PrepareProjectsDiffRequest>,
-        ) -> Result<Response<PrepareDiffResponse>, Status> {
-            Ok(Response::new(PrepareDiffResponse { batch: None }))
+            _request: Request<PrepareProjectRepositoryDiffsRequest>,
+        ) -> Result<Response<PrepareProjectRepositoryDiffsResponse>, Status> {
+            Ok(Response::new(PrepareProjectRepositoryDiffsResponse {
+                batch: None,
+            }))
         }
 
-        async fn render(
+        async fn render_diff(
             &self,
             _request: Request<RenderDiffRequest>,
         ) -> Result<Response<RenderDiffResponse>, Status> {
             Ok(Response::new(empty_diff_response()))
         }
 
-        async fn render_merge(
+        async fn render_merge_diff(
             &self,
             _request: Request<RenderMergeDiffRequest>,
-        ) -> Result<Response<RenderDiffResponse>, Status> {
-            Ok(Response::new(empty_diff_response()))
+        ) -> Result<Response<RenderMergeDiffResponse>, Status> {
+            Ok(Response::new(RenderMergeDiffResponse::default()))
         }
 
-        async fn render_subrepositories(
+        async fn render_subrepository_diffs(
             &self,
-            _request: Request<RenderSubrepositoriesDiffRequest>,
-        ) -> Result<Response<RenderDiffResponse>, Status> {
-            Ok(Response::new(empty_diff_response()))
+            _request: Request<RenderSubrepositoryDiffsRequest>,
+        ) -> Result<Response<RenderSubrepositoryDiffsResponse>, Status> {
+            Ok(Response::new(RenderSubrepositoryDiffsResponse::default()))
         }
 
-        async fn render_projects(
+        async fn render_project_repository_diffs(
             &self,
-            _request: Request<RenderProjectsDiffRequest>,
-        ) -> Result<Response<RenderDiffResponse>, Status> {
-            Ok(Response::new(empty_diff_response()))
+            _request: Request<RenderProjectRepositoryDiffsRequest>,
+        ) -> Result<Response<RenderProjectRepositoryDiffsResponse>, Status> {
+            Ok(Response::new(
+                RenderProjectRepositoryDiffsResponse::default(),
+            ))
         }
     }
 

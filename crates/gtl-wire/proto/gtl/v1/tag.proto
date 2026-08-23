@@ -5,13 +5,13 @@ package gtl.v1;
 import "gtl/v1/common.proto";
 
 service TagService {
-  rpc PlanBump(PlanTagBumpRequest) returns (PlanTagBumpResponse);
-  rpc ExecuteBump(ExecuteTagBumpRequest) returns (ExecuteTagBumpResponse);
-  rpc List(ListTagsRequest) returns (ListTagsResponse);
-  rpc Add(AddTagRequest) returns (TagActionResponse);
-  rpc Push(PushTagsRequest) returns (TagActionResponse);
-  rpc AddAndPush(AddAndPushTagRequest) returns (TagActionResponse);
-  rpc Label(LabelTagRequest) returns (TagActionResponse);
+  rpc PlanTagBump(PlanTagBumpRequest) returns (PlanTagBumpResponse);
+  rpc ExecuteTagBump(ExecuteTagBumpRequest) returns (ExecuteTagBumpResponse);
+  rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+  rpc AddTag(AddTagRequest) returns (AddTagResponse);
+  rpc PushTags(PushTagsRequest) returns (PushTagsResponse);
+  rpc AddAndPushTag(AddAndPushTagRequest) returns (AddAndPushTagResponse);
+  rpc LabelTag(LabelTagRequest) returns (LabelTagResponse);
 }
 
 enum TagBumpLevel {
@@ -184,7 +184,25 @@ message TagOperationProgress {
   repeated string pushed_or_attempted_refs = 3;
 }
 
-message TagActionResponse {
+message AddTagResponse {
+  TagActionStatus status = 1;
+  string detail = 2;
+  TagOperationProgress progress = 3;
+}
+
+message PushTagsResponse {
+  TagActionStatus status = 1;
+  string detail = 2;
+  TagOperationProgress progress = 3;
+}
+
+message AddAndPushTagResponse {
+  TagActionStatus status = 1;
+  string detail = 2;
+  TagOperationProgress progress = 3;
+}
+
+message LabelTagResponse {
   TagActionStatus status = 1;
   string detail = 2;
   TagOperationProgress progress = 3;

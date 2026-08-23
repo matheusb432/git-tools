@@ -5,8 +5,8 @@ package gtl.v1;
 import "gtl/v1/common.proto";
 
 service WorktreeService {
-  rpc GetBase(GetWorktreeBaseRequest) returns (GetWorktreeBaseResponse);
-  rpc List(ListWorktreesRequest) returns (ListWorktreesResponse);
+  rpc GetWorktreeBase(GetWorktreeBaseRequest) returns (GetWorktreeBaseResponse);
+  rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
 }
 
 message GetWorktreeBaseRequest {

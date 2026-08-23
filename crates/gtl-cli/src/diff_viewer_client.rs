@@ -14,7 +14,23 @@ use gtl_wire::{
 
 use crate::commands::diff::DiffOutcome;
 
-pub(crate) fn forward_prepared(response: v1::PrepareDiffResponse) -> anyhow::Result<DiffOutcome> {
+pub(crate) struct PreparedRecipeBatch {
+    batch: Option<v1::RecipeBatch>,
+}
+
+pub(crate) struct RenderedDiffResult {
+    notes: Vec<v1::Note>,
+    outcome: Option<RenderedDiffOutcome>,
+}
+
+enum RenderedDiffOutcome {
+    Rendered(v1::Artifact),
+    Empty,
+}
+
+pub(crate) fn forward_prepared(
+    response: impl Into<PreparedRecipeBatch>,
+) -> anyhow::Result<DiffOutcome> {
     let batch = open_recipes(response)?;
     if batch.recipes.is_empty() {
         return Ok(DiffOutcome::Empty);
@@ -24,18 +40,22 @@ pub(crate) fn forward_prepared(response: v1::PrepareDiffResponse) -> anyhow::Res
 }
 
 pub(crate) fn finish_render(
-    response: v1::RenderDiffResponse,
+    response: impl Into<RenderedDiffResult>,
     viewer_error: Option<&anyhow::Error>,
 ) -> anyhow::Result<DiffOutcome> {
+    let response = response.into();
     if let Some(error) = viewer_error {
-        eprintln!("diff: viewer unavailable ({error:#}); rendering an artifact instead");
+        eprintln!(
+            "diff: viewer unavailable ({}); rendering an artifact instead",
+            crate::error_text(error)
+        );
     }
     print_notes(&response.notes)?;
     match response
         .outcome
         .context("gtl-server returned no diff outcome")?
     {
-        v1::render_diff_response::Outcome::Rendered(artifact) => {
+        RenderedDiffOutcome::Rendered(artifact) => {
             let path = AbsoluteFilePath::try_new(PathBuf::from(artifact.path))
                 .context("gtl-server returned a non-absolute artifact path")?;
             match v1::ArtifactPlacement::try_from(artifact.placement) {
@@ -47,7 +67,7 @@ pub(crate) fn finish_render(
             println!("{}", crate::commands::file_url(path.as_path()));
             Ok(DiffOutcome::Rendered(path))
         }
-        v1::render_diff_response::Outcome::Empty(_) => Ok(DiffOutcome::Empty),
+        RenderedDiffOutcome::Empty => Ok(DiffOutcome::Empty),
     }
 }
 
@@ -60,7 +80,8 @@ fn forward(batch: &OpenRecipes) -> anyhow::Result<()> {
         .context("failed to spawn gtl-viewer to forward the recipe batch")
 }
 
-fn open_recipes(response: v1::PrepareDiffResponse) -> anyhow::Result<OpenRecipes> {
+fn open_recipes(response: impl Into<PreparedRecipeBatch>) -> anyhow::Result<OpenRecipes> {
+    let response = response.into();
     let batch = response
         .batch
         .context("gtl-server returned no prepared recipe batch")?;
@@ -82,6 +103,98 @@ fn open_recipes(response: v1::PrepareDiffResponse) -> anyhow::Result<OpenRecipes
             .map(open_recipe)
             .collect::<anyhow::Result<Vec<_>>>()?,
     })
+}
+
+impl From<v1::PrepareDiffResponse> for PreparedRecipeBatch {
+    fn from(response: v1::PrepareDiffResponse) -> Self {
+        Self {
+            batch: response.batch,
+        }
+    }
+}
+
+impl From<v1::PrepareMergeDiffResponse> for PreparedRecipeBatch {
+    fn from(response: v1::PrepareMergeDiffResponse) -> Self {
+        Self {
+            batch: response.batch,
+        }
+    }
+}
+
+impl From<v1::PrepareSubrepositoryDiffsResponse> for PreparedRecipeBatch {
+    fn from(response: v1::PrepareSubrepositoryDiffsResponse) -> Self {
+        Self {
+            batch: response.batch,
+        }
+    }
+}
+
+impl From<v1::PrepareProjectRepositoryDiffsResponse> for PreparedRecipeBatch {
+    fn from(response: v1::PrepareProjectRepositoryDiffsResponse) -> Self {
+        Self {
+            batch: response.batch,
+        }
+    }
+}
+
+impl From<v1::RenderDiffResponse> for RenderedDiffResult {
+    fn from(response: v1::RenderDiffResponse) -> Self {
+        Self {
+            notes: response.notes,
+            outcome: response.outcome.map(|outcome| match outcome {
+                v1::render_diff_response::Outcome::Rendered(artifact) => {
+                    RenderedDiffOutcome::Rendered(artifact)
+                }
+                v1::render_diff_response::Outcome::Empty(_) => RenderedDiffOutcome::Empty,
+            }),
+        }
+    }
+}
+
+impl From<v1::RenderMergeDiffResponse> for RenderedDiffResult {
+    fn from(response: v1::RenderMergeDiffResponse) -> Self {
+        Self {
+            notes: response.notes,
+            outcome: response.outcome.map(|outcome| match outcome {
+                v1::render_merge_diff_response::Outcome::Rendered(artifact) => {
+                    RenderedDiffOutcome::Rendered(artifact)
+                }
+                v1::render_merge_diff_response::Outcome::Empty(_) => RenderedDiffOutcome::Empty,
+            }),
+        }
+    }
+}
+
+impl From<v1::RenderSubrepositoryDiffsResponse> for RenderedDiffResult {
+    fn from(response: v1::RenderSubrepositoryDiffsResponse) -> Self {
+        Self {
+            notes: response.notes,
+            outcome: response.outcome.map(|outcome| match outcome {
+                v1::render_subrepository_diffs_response::Outcome::Rendered(artifact) => {
+                    RenderedDiffOutcome::Rendered(artifact)
+                }
+                v1::render_subrepository_diffs_response::Outcome::Empty(_) => {
+                    RenderedDiffOutcome::Empty
+                }
+            }),
+        }
+    }
+}
+
+impl From<v1::RenderProjectRepositoryDiffsResponse> for RenderedDiffResult {
+    fn from(response: v1::RenderProjectRepositoryDiffsResponse) -> Self {
+        Self {
+            notes: response.notes,
+            outcome: response.outcome.map(|outcome| match outcome {
+                v1::render_project_repository_diffs_response::Outcome::Rendered(artifact) => {
+                    RenderedDiffOutcome::Rendered(artifact)
+                }
+                v1::render_project_repository_diffs_response::Outcome::Empty(_) => {
+                    RenderedDiffOutcome::Empty
+                }
+            }),
+        }
+    }
 }
 
 fn open_recipe(recipe: v1::Recipe) -> anyhow::Result<Recipe> {

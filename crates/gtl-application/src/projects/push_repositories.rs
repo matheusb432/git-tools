@@ -189,6 +189,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        ports::ProjectCatalogueUnavailableError,
         projects::push_repositories,
         utils::{FakeProjectClient, FixedClock, ProjectGitScript, SyncOutput},
     };
@@ -393,7 +394,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_project_client_failure_propagates_as_an_error() {
+    async fn a_project_client_failure_propagates_as_an_error() -> anyhow::Result<()> {
         let error = push_repositories::execute(
             req(),
             &ProjectGitScript::default().git_client(),
@@ -405,6 +406,13 @@ mod tests {
         )
         .await
         .expect_err("project client error propagates");
-        assert!(format!("{error:#}").contains("boom"));
+        let PushRepositoriesError::ProjectClient(ProjectClientError::Unavailable(
+            ProjectCatalogueUnavailableError::Dependency(source),
+        )) = error
+        else {
+            anyhow::bail!("project client failure changed shape");
+        };
+        assert_eq!(source.root_cause().to_string(), "boom");
+        Ok(())
     }
 }

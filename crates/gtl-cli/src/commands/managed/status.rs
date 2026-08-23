@@ -49,11 +49,15 @@ pub fn run_status_recursive(root: &Path, options: &ManagedOptions) -> ManagedRun
     status_response(response, options)
 }
 
-fn status_response(
-    response: anyhow::Result<v1::RepositoryStatusesResponse>,
+fn status_response<Response>(
+    response: anyhow::Result<Response>,
     options: &ManagedOptions,
-) -> ManagedRun<StatusResult> {
+) -> ManagedRun<StatusResult>
+where
+    Response: Into<RepositoryStatuses>,
+{
     match response.and_then(|response| {
+        let response: RepositoryStatuses = response.into();
         response
             .results
             .into_iter()
@@ -61,7 +65,35 @@ fn status_response(
             .collect()
     }) {
         Ok(results) => status_run(results, options),
-        Err(error) => status_fail(format!("status: {error:#}")),
+        Err(error) => status_fail(format!("status: {}", crate::error_text(&error))),
+    }
+}
+
+struct RepositoryStatuses {
+    results: Vec<v1::RepositoryStatusResult>,
+}
+
+impl From<v1::GetProjectRepositoryStatusesResponse> for RepositoryStatuses {
+    fn from(response: v1::GetProjectRepositoryStatusesResponse) -> Self {
+        Self {
+            results: response.results,
+        }
+    }
+}
+
+impl From<v1::GetRepositoryStatusResponse> for RepositoryStatuses {
+    fn from(response: v1::GetRepositoryStatusResponse) -> Self {
+        Self {
+            results: response.results,
+        }
+    }
+}
+
+impl From<v1::GetRecursiveRepositoryStatusesResponse> for RepositoryStatuses {
+    fn from(response: v1::GetRecursiveRepositoryStatusesResponse) -> Self {
+        Self {
+            results: response.results,
+        }
     }
 }
 
@@ -142,7 +174,7 @@ fn status_run(results: Vec<StatusResult>, options: &ManagedOptions) -> ManagedRu
             stdout,
             stderr: String::new(),
         },
-        Err(error) => status_fail(format!("status: {error:#}")),
+        Err(error) => status_fail(format!("status: {}", crate::error_text(&error))),
     }
 }
 

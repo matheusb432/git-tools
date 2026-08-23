@@ -5,14 +5,14 @@ package gtl.v1;
 import "gtl/v1/common.proto";
 
 service DiffService {
-  rpc Prepare(PrepareDiffRequest) returns (PrepareDiffResponse);
-  rpc PrepareMerge(PrepareMergeDiffRequest) returns (PrepareDiffResponse);
-  rpc PrepareSubrepositories(PrepareSubrepositoriesDiffRequest) returns (PrepareDiffResponse);
-  rpc PrepareProjects(PrepareProjectsDiffRequest) returns (PrepareDiffResponse);
-  rpc Render(RenderDiffRequest) returns (RenderDiffResponse);
-  rpc RenderMerge(RenderMergeDiffRequest) returns (RenderDiffResponse);
-  rpc RenderSubrepositories(RenderSubrepositoriesDiffRequest) returns (RenderDiffResponse);
-  rpc RenderProjects(RenderProjectsDiffRequest) returns (RenderDiffResponse);
+  rpc PrepareDiff(PrepareDiffRequest) returns (PrepareDiffResponse);
+  rpc PrepareMergeDiff(PrepareMergeDiffRequest) returns (PrepareMergeDiffResponse);
+  rpc PrepareSubrepositoryDiffs(PrepareSubrepositoryDiffsRequest) returns (PrepareSubrepositoryDiffsResponse);
+  rpc PrepareProjectRepositoryDiffs(PrepareProjectRepositoryDiffsRequest) returns (PrepareProjectRepositoryDiffsResponse);
+  rpc RenderDiff(RenderDiffRequest) returns (RenderDiffResponse);
+  rpc RenderMergeDiff(RenderMergeDiffRequest) returns (RenderMergeDiffResponse);
+  rpc RenderSubrepositoryDiffs(RenderSubrepositoryDiffsRequest) returns (RenderSubrepositoryDiffsResponse);
+  rpc RenderProjectRepositoryDiffs(RenderProjectRepositoryDiffsRequest) returns (RenderProjectRepositoryDiffsResponse);
 }
 
 message DiffTarget {
@@ -47,13 +47,13 @@ message PrepareMergeDiffRequest {
   optional string base_revision = 2;
 }
 
-message PrepareSubrepositoriesDiffRequest {
+message PrepareSubrepositoryDiffsRequest {
   string root = 1;
   DiffTarget target = 2;
   bool include_linked_worktrees = 3;
 }
 
-message PrepareProjectsDiffRequest {}
+message PrepareProjectRepositoryDiffsRequest {}
 
 enum RecipeBatchKind {
   RECIPE_BATCH_KIND_UNSPECIFIED = 0;
@@ -127,17 +127,56 @@ message PrepareDiffResponse {
   RecipeBatch batch = 1;
 }
 
-message RenderSubrepositoriesDiffRequest {
+message PrepareMergeDiffResponse {
+  RecipeBatch batch = 1;
+}
+
+message PrepareSubrepositoryDiffsResponse {
+  RecipeBatch batch = 1;
+}
+
+message PrepareProjectRepositoryDiffsResponse {
+  RecipeBatch batch = 1;
+}
+
+message RenderSubrepositoryDiffsRequest {
   string root = 1;
   DiffTarget target = 2;
   bool include_linked_worktrees = 3;
 }
 
-message RenderProjectsDiffRequest {
+message RenderProjectRepositoryDiffsRequest {
   string root = 1;
 }
 
 message RenderDiffResponse {
+  repeated Note notes = 1;
+
+  oneof outcome {
+    Artifact rendered = 2;
+    Empty empty = 3;
+  }
+}
+
+message RenderMergeDiffResponse {
+  repeated Note notes = 1;
+
+  oneof outcome {
+    Artifact rendered = 2;
+    Empty empty = 3;
+  }
+}
+
+message RenderSubrepositoryDiffsResponse {
+  repeated Note notes = 1;
+
+  oneof outcome {
+    Artifact rendered = 2;
+    Empty empty = 3;
+  }
+}
+
+message RenderProjectRepositoryDiffsResponse {
   repeated Note notes = 1;
 
   oneof outcome {

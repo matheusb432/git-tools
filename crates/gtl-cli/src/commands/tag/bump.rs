@@ -13,7 +13,7 @@ pub fn run(level: TagBumpLevel, message: String, push: bool, dry: bool, yes: boo
     let (client, preview) = match prepare_bump(level, message, push) {
         Ok(prepared) => prepared,
         Err(error) => {
-            eprintln!("tag bump: {error:#}");
+            eprintln!("tag bump: {}", crate::error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -21,7 +21,7 @@ pub fn run(level: TagBumpLevel, message: String, push: bool, dry: bool, yes: boo
     let rendered_preview = match render_preview(&preview) {
         Ok(rendered) => rendered,
         Err(error) => {
-            eprintln!("tag bump: {error:#}");
+            eprintln!("tag bump: {}", crate::error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -56,12 +56,12 @@ pub fn run(level: TagBumpLevel, message: String, push: bool, dry: bool, yes: boo
     }) {
         Ok(response) => response,
         Err(error) => {
-            eprintln!("tag bump: {error:#}");
+            eprintln!("tag bump: {}", crate::error_text(&error));
             return ExitCode::Internal;
         }
     };
     if let Err(error) = print_notes(&bumped.notes) {
-        eprintln!("tag bump: {error:#}");
+        eprintln!("tag bump: {}", crate::error_text(&error));
         return ExitCode::Internal;
     }
     match bumped.outcome {

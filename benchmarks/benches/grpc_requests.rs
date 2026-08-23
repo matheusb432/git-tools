@@ -43,7 +43,7 @@ fn grpc_requests(criterion: &mut Criterion) {
         (server, client)
     });
 
-    benchmark_get_settings(criterion, &runtime, &client);
+    benchmark_get_push_confirmation_requirement(criterion, &runtime, &client);
     benchmark_get_repository_status(criterion, &runtime, &client, &repository.path);
     benchmark_prepare_diff(criterion, &runtime, &client, &repository.path);
 
@@ -52,31 +52,34 @@ fn grpc_requests(criterion: &mut Criterion) {
     });
 }
 
-fn benchmark_get_settings(
+fn benchmark_get_push_confirmation_requirement(
     criterion: &mut Criterion,
     runtime: &tokio::runtime::Runtime,
     client: &GtlClient,
 ) {
     let response = runtime.block_on(async {
         require(
-            client.get_settings().await,
-            "warming the get-settings request",
+            client.get_push_confirmation_requirement().await,
+            "warming the get-push-confirmation-requirement request",
         )
     });
     assert!(response.push_confirmation_required);
     report_output_size(
-        BenchmarkCase::GrpcRequestsGetSettings,
+        BenchmarkCase::GrpcRequestsGetPushConfirmationRequirement,
         response.encoded_len(),
     );
 
-    criterion.bench_function(BenchmarkCase::GrpcRequestsGetSettings.as_str(), |bencher| {
-        bencher.to_async(runtime).iter(|| async {
-            black_box(require(
-                client.get_settings().await,
-                "executing the get-settings request",
-            ));
-        });
-    });
+    criterion.bench_function(
+        BenchmarkCase::GrpcRequestsGetPushConfirmationRequirement.as_str(),
+        |bencher| {
+            bencher.to_async(runtime).iter(|| async {
+                black_box(require(
+                    client.get_push_confirmation_requirement().await,
+                    "executing the get-push-confirmation-requirement request",
+                ));
+            });
+        },
+    );
 }
 
 fn benchmark_get_repository_status(

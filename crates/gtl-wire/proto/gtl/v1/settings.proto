@@ -2,12 +2,12 @@ syntax = "proto3";
 
 package gtl.v1;
 
-import "gtl/v1/common.proto";
-
 service SettingsService {
-  rpc GetSettings(Empty) returns (GetSettingsResponse);
-  rpc SetTheme(SetThemeRequest) returns (SetThemeResponse);
+  rpc GetPushConfirmationRequirement(GetPushConfirmationRequirementRequest) returns (GetPushConfirmationRequirementResponse);
+  rpc SetViewerTheme(SetViewerThemeRequest) returns (SetViewerThemeResponse);
 }
+
+message GetPushConfirmationRequirementRequest {}
 
 enum ViewerTheme {
   VIEWER_THEME_UNSPECIFIED = 0;
@@ -20,15 +20,15 @@ enum ViewerTheme {
   VIEWER_THEME_GRAPHITE = 7;
 }
 
-message GetSettingsResponse {
+message GetPushConfirmationRequirementResponse {
   bool push_confirmation_required = 1;
 }
 
-message SetThemeRequest {
+message SetViewerThemeRequest {
   ViewerTheme theme = 1;
 }
 
-message SetThemeResponse {
+message SetViewerThemeResponse {
   ViewerTheme theme = 1;
   string configuration_path = 2;
 }

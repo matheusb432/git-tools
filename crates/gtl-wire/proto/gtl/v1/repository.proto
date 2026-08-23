@@ -3,17 +3,17 @@ syntax = "proto3";
 package gtl.v1;
 
 service RepositoryService {
-  rpc PlanPush(PlanRepositoryPushRequest) returns (PlanRepositoryPushResponse);
-  rpc ExecutePush(ExecuteRepositoryPushRequest) returns (ExecuteRepositoryPushResponse);
-  rpc PlanCommit(PlanRepositoryCommitRequest) returns (PlanRepositoryCommitResponse);
-  rpc ExecuteCommit(ExecuteRepositoryCommitRequest) returns (ExecuteRepositoryCommitResponse);
-  rpc PlanRecursivePush(PlanRecursivePushRequest) returns (PlanRecursivePushResponse);
-  rpc ExecuteRecursivePush(ExecuteRecursivePushRequest) returns (ExecuteRecursivePushResponse);
-  rpc ChangeBranch(ChangeRepositoryBranchRequest) returns (ChangeRepositoryBranchResponse);
-  rpc PlanPrune(PlanRepositoryPruneRequest) returns (PlanRepositoryPruneResponse);
-  rpc ExecutePrune(ExecuteRepositoryPruneRequest) returns (ExecuteRepositoryPruneResponse);
-  rpc GetStatus(GetRepositoryStatusRequest) returns (RepositoryStatusesResponse);
-  rpc GetRecursiveStatuses(GetRecursiveRepositoryStatusesRequest) returns (RepositoryStatusesResponse);
+  rpc PlanRepositoryPush(PlanRepositoryPushRequest) returns (PlanRepositoryPushResponse);
+  rpc ExecuteRepositoryPush(ExecuteRepositoryPushRequest) returns (ExecuteRepositoryPushResponse);
+  rpc PlanRepositoryCommit(PlanRepositoryCommitRequest) returns (PlanRepositoryCommitResponse);
+  rpc ExecuteRepositoryCommit(ExecuteRepositoryCommitRequest) returns (ExecuteRepositoryCommitResponse);
+  rpc PlanRecursiveRepositoryPush(PlanRecursiveRepositoryPushRequest) returns (PlanRecursiveRepositoryPushResponse);
+  rpc ExecuteRecursiveRepositoryPush(ExecuteRecursiveRepositoryPushRequest) returns (ExecuteRecursiveRepositoryPushResponse);
+  rpc ChangeRepositoryBranch(ChangeRepositoryBranchRequest) returns (ChangeRepositoryBranchResponse);
+  rpc PlanRepositoryPrune(PlanRepositoryPruneRequest) returns (PlanRepositoryPruneResponse);
+  rpc ExecuteRepositoryPrune(ExecuteRepositoryPruneRequest) returns (ExecuteRepositoryPruneResponse);
+  rpc GetRepositoryStatus(GetRepositoryStatusRequest) returns (GetRepositoryStatusResponse);
+  rpc GetRecursiveRepositoryStatuses(GetRecursiveRepositoryStatusesRequest) returns (GetRecursiveRepositoryStatusesResponse);
 }
 
 message OperationDetail {
@@ -122,7 +122,7 @@ message RecursivePushTarget {
   }
 }
 
-message PlanRecursivePushRequest {
+message PlanRecursiveRepositoryPushRequest {
   string root = 1;
 }
 
@@ -130,14 +130,14 @@ message RecursivePushPlan {
   repeated RecursivePushTarget targets = 1;
 }
 
-message PlanRecursivePushResponse {
+message PlanRecursiveRepositoryPushResponse {
   oneof outcome {
     RecursivePushPlan ready = 1;
     OperationDetail refused = 2;
   }
 }
 
-message ExecuteRecursivePushRequest {
+message ExecuteRecursiveRepositoryPushRequest {
   repeated RecursivePushTarget targets = 1;
 }
 
@@ -162,7 +162,7 @@ message RecursivePushRepositoryResult {
   optional string detail = 3;
 }
 
-message ExecuteRecursivePushResponse {
+message ExecuteRecursiveRepositoryPushResponse {
   RecursivePushStatus status = 1;
   repeated RecursivePushRepositoryResult results = 2;
 }
@@ -310,6 +310,10 @@ message RepositoryChangesChanged {
 
 message RepositoryChangesUnavailable {}
 
-message RepositoryStatusesResponse {
+message GetRepositoryStatusResponse {
+  repeated RepositoryStatusResult results = 1;
+}
+
+message GetRecursiveRepositoryStatusesResponse {
   repeated RepositoryStatusResult results = 1;
 }

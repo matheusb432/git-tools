@@ -22,6 +22,7 @@ just = "1.56.0"
 taplo = "0.10.0"
 rumdl = "0.2.41"
 ast-grep = "0.44.1"
+buf = "1.72.0"
 protoc = "35.1"
 "cargo-binstall" = "1.21.1"
 "cargo:dioxus-cli" = { version = "0.7.10", depends = [

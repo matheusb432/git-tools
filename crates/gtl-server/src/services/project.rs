@@ -27,10 +27,10 @@ impl ProjectApi {
 
 #[tonic::async_trait]
 impl ProjectService for ProjectApi {
-    async fn push_repositories(
+    async fn push_project_repositories(
         &self,
-        request: Request<v1::SyncProjectsRequest>,
-    ) -> Result<Response<v1::SyncProjectsResponse>, Status> {
+        request: Request<v1::PushProjectRepositoriesRequest>,
+    ) -> Result<Response<v1::PushProjectRepositoriesResponse>, Status> {
         let state = self.state.clone();
         let result = push_repositories::execute(
             PushRepositories {
@@ -43,13 +43,15 @@ impl ProjectService for ProjectApi {
         .await
         .map_err(push_error)?;
 
-        Ok(Response::new(sync_response(result.results, result.exit)))
+        Ok(Response::new(
+            sync_response(result.results, result.exit).into(),
+        ))
     }
 
-    async fn pull_repositories(
+    async fn pull_project_repositories(
         &self,
-        request: Request<v1::SyncProjectsRequest>,
-    ) -> Result<Response<v1::SyncProjectsResponse>, Status> {
+        request: Request<v1::PullProjectRepositoriesRequest>,
+    ) -> Result<Response<v1::PullProjectRepositoriesResponse>, Status> {
         let state = self.state.clone();
         let result = pull_repositories::execute(
             PullRepositories {
@@ -61,27 +63,29 @@ impl ProjectService for ProjectApi {
         .await
         .map_err(pull_error)?;
 
-        Ok(Response::new(sync_response(result.results, result.exit)))
+        Ok(Response::new(
+            sync_response(result.results, result.exit).into(),
+        ))
     }
 
-    async fn commit_repositories(
+    async fn commit_project_repositories(
         &self,
         request: Request<v1::CommitProjectRepositoriesRequest>,
     ) -> Result<Response<v1::CommitProjectRepositoriesResponse>, Status> {
         commit::execute(self.state.clone(), request.into_inner()).await
     }
 
-    async fn prune_branches(
+    async fn prune_project_branches(
         &self,
         request: Request<v1::PruneProjectBranchesRequest>,
     ) -> Result<Response<v1::PruneProjectBranchesResponse>, Status> {
         prune::execute(self.state.clone(), request.into_inner()).await
     }
 
-    async fn get_statuses(
+    async fn get_project_repository_statuses(
         &self,
-        _request: Request<v1::Empty>,
-    ) -> Result<Response<v1::RepositoryStatusesResponse>, Status> {
+        _request: Request<v1::GetProjectRepositoryStatusesRequest>,
+    ) -> Result<Response<v1::GetProjectRepositoryStatusesResponse>, Status> {
         status::get(self.state.clone()).await
     }
 }
@@ -108,14 +112,37 @@ fn pull_error(error: PullRepositoriesError) -> Status {
     }
 }
 
-fn sync_response(results: Vec<RepoSyncResult>, exit: SyncExit) -> v1::SyncProjectsResponse {
-    v1::SyncProjectsResponse {
+struct ProjectRepositorySyncSummary {
+    results: Vec<v1::RepositorySyncResult>,
+    exit: i32,
+}
+
+fn sync_response(results: Vec<RepoSyncResult>, exit: SyncExit) -> ProjectRepositorySyncSummary {
+    ProjectRepositorySyncSummary {
         results: results.into_iter().map(sync_result).collect(),
         exit: match exit {
             SyncExit::Clean => v1::ProjectSyncExit::Clean,
             SyncExit::Warn => v1::ProjectSyncExit::Warning,
             SyncExit::Fail => v1::ProjectSyncExit::Failed,
         } as i32,
+    }
+}
+
+impl From<ProjectRepositorySyncSummary> for v1::PushProjectRepositoriesResponse {
+    fn from(response: ProjectRepositorySyncSummary) -> Self {
+        Self {
+            results: response.results,
+            exit: response.exit,
+        }
+    }
+}
+
+impl From<ProjectRepositorySyncSummary> for v1::PullProjectRepositoriesResponse {
+    fn from(response: ProjectRepositorySyncSummary) -> Self {
+        Self {
+            results: response.results,
+            exit: response.exit,
+        }
     }
 }
 
@@ -145,7 +172,7 @@ mod tests {
 
     #[test]
     fn sync_projection_preserves_the_closed_status_and_exit() {
-        let response = sync_response(
+        let response = v1::PushProjectRepositoriesResponse::from(sync_response(
             vec![RepoSyncResult {
                 name: ProjectName::try_new("git-tools").unwrap(),
                 branch: Some(BranchName::try_new("main").unwrap()),
@@ -153,7 +180,7 @@ mod tests {
                 detail: "ahead by 2".into(),
             }],
             SyncExit::Warn,
-        );
+        ));
 
         assert_eq!(response.exit(), v1::ProjectSyncExit::Warning);
         assert_eq!(

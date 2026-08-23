@@ -4,11 +4,11 @@ use gtl_wire::v1;
 use tonic::{Response, Status};
 
 use super::super::{project_client_error, run_blocking};
-use crate::{services::repository::status::statuses_response, state::AppState};
+use crate::{services::repository::status::status_results, state::AppState};
 
 pub(super) async fn get(
     state: AppState,
-) -> Result<Response<v1::RepositoryStatusesResponse>, Status> {
+) -> Result<Response<v1::GetProjectRepositoryStatusesResponse>, Status> {
     let repos = state
         .projects
         .list_projects()
@@ -28,5 +28,7 @@ pub(super) async fn get(
     })
     .await?;
 
-    Ok(Response::new(statuses_response(&results)))
+    Ok(Response::new(v1::GetProjectRepositoryStatusesResponse {
+        results: status_results(&results),
+    }))
 }

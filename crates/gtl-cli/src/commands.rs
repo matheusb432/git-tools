@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use gtl_wire::v1;
 
 use crate::{commands::diff::DiffOutcome, server_client::ServerClient};
 
@@ -51,11 +50,15 @@ pub(crate) fn file_url(path: &Path) -> String {
     }
 }
 
-pub(crate) fn present(
+pub(crate) fn present<PrepareOperationResponse, RenderOperationResponse>(
     raw: bool,
-    prepare: impl FnOnce(&ServerClient) -> anyhow::Result<v1::PrepareDiffResponse>,
-    render: impl FnOnce(&ServerClient) -> anyhow::Result<v1::RenderDiffResponse>,
-) -> anyhow::Result<DiffOutcome> {
+    prepare: impl FnOnce(&ServerClient) -> anyhow::Result<PrepareOperationResponse>,
+    render: impl FnOnce(&ServerClient) -> anyhow::Result<RenderOperationResponse>,
+) -> anyhow::Result<DiffOutcome>
+where
+    PrepareOperationResponse: Into<crate::diff_viewer_client::PreparedRecipeBatch>,
+    RenderOperationResponse: Into<crate::diff_viewer_client::RenderedDiffResult>,
+{
     let client = ServerClient::connect()?;
     if artifact_only(raw) {
         return crate::diff_viewer_client::finish_render(render(&client)?, None);

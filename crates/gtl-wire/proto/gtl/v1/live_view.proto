@@ -5,8 +5,8 @@ package gtl.v1;
 import "gtl/v1/common.proto";
 
 service LiveViewService {
-  rpc Save(SaveLiveViewRequest) returns (SaveLiveViewResponse);
-  rpc SaveProjects(Empty) returns (SaveProjectLiveViewsResponse);
+  rpc SaveLiveView(SaveLiveViewRequest) returns (SaveLiveViewResponse);
+  rpc SaveProjectLiveViews(SaveProjectLiveViewsRequest) returns (SaveProjectLiveViewsResponse);
 }
 
 message SaveLiveViewRequest {
@@ -44,6 +44,8 @@ message SaveLiveViewResponse {
     SaveLiveViewRejection rejected = 3;
   }
 }
+
+message SaveProjectLiveViewsRequest {}
 
 message SaveProjectLiveViewsResponse {
   repeated SaveLiveViewResponse results = 1;

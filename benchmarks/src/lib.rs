@@ -100,7 +100,7 @@ impl ValueEnum for Benchmark {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BenchmarkCase {
     AppStateRecordRender,
-    GrpcRequestsGetSettings,
+    GrpcRequestsGetPushConfirmationRequirement,
     GrpcRequestsGetRepositoryStatus,
     GrpcRequestsPrepareDiffUnpushed,
     ParserSyntaxRust45k,
@@ -113,7 +113,7 @@ pub enum BenchmarkCase {
 impl BenchmarkCase {
     const ALL: [Self; 9] = [
         Self::AppStateRecordRender,
-        Self::GrpcRequestsGetSettings,
+        Self::GrpcRequestsGetPushConfirmationRequirement,
         Self::GrpcRequestsGetRepositoryStatus,
         Self::GrpcRequestsPrepareDiffUnpushed,
         Self::ParserSyntaxRust45k,
@@ -126,7 +126,9 @@ impl BenchmarkCase {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AppStateRecordRender => "app-state-record-render",
-            Self::GrpcRequestsGetSettings => "grpc-requests/get-settings",
+            Self::GrpcRequestsGetPushConfirmationRequirement => {
+                "grpc-requests/get-push-confirmation-requirement"
+            }
             Self::GrpcRequestsGetRepositoryStatus => "grpc-requests/get-repository-status",
             Self::GrpcRequestsPrepareDiffUnpushed => "grpc-requests/prepare-diff-unpushed",
             Self::ParserSyntaxRust45k => "parser-syntax/rust-45k",
@@ -140,7 +142,7 @@ impl BenchmarkCase {
     pub const fn benchmark(self) -> Benchmark {
         match self {
             Self::AppStateRecordRender => Benchmark::AppStateRecordRender,
-            Self::GrpcRequestsGetSettings
+            Self::GrpcRequestsGetPushConfirmationRequirement
             | Self::GrpcRequestsGetRepositoryStatus
             | Self::GrpcRequestsPrepareDiffUnpushed => Benchmark::GrpcRequests,
             Self::ParserSyntaxRust45k => Benchmark::ParserSyntax,

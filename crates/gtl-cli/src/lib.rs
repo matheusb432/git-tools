@@ -80,10 +80,12 @@ fn dispatch(command: Command) -> ExitCode {
             message: None,
             yes,
             ..
-        }) => match ServerClient::connect().and_then(|client| client.get_settings()) {
+        }) => match ServerClient::connect()
+            .and_then(|client| client.get_push_confirmation_requirement())
+        {
             Ok(settings) => run_push_current(yes, settings.push_confirmation_required),
             Err(error) => {
-                eprintln!("error: {error:#}");
+                eprintln!("error: {}", error_text(&error));
                 ExitCode::Internal
             }
         },
@@ -186,7 +188,7 @@ fn run_server_ctl(command: &ServerCommand) -> ExitCode {
     match result {
         Ok(()) => ExitCode::Ok,
         Err(error) => {
-            eprintln!("gtl-server: {error:#}");
+            eprintln!("gtl-server: {}", error_text(&error));
             ExitCode::Internal
         }
     }
@@ -205,7 +207,7 @@ fn run_set_theme(theme: Theme) -> ExitCode {
         Theme::Graphite => v1::ViewerTheme::Graphite,
     };
     match ServerClient::connect().and_then(|client| {
-        client.set_theme(v1::SetThemeRequest {
+        client.set_viewer_theme(v1::SetViewerThemeRequest {
             theme: theme as i32,
         })
     }) {
@@ -217,7 +219,7 @@ fn run_set_theme(theme: Theme) -> ExitCode {
             ExitCode::Ok
         }
         Err(error) => {
-            eprintln!("error: {error:#}");
+            eprintln!("error: {}", error_text(&error));
             ExitCode::Internal
         }
     }
@@ -229,14 +231,14 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
     let repo_path = match commands::canonical_working_directory() {
         Ok(path) => path,
         Err(error) => {
-            eprintln!("worktree: {error:#}");
+            eprintln!("worktree: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
     let client = match ServerClient::connect() {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("worktree: {error:#}");
+            eprintln!("worktree: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -259,7 +261,7 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
                     }
                 },
                 Err(error) => {
-                    eprintln!("worktree: {error:#}");
+                    eprintln!("worktree: {}", error_text(&error));
                     ExitCode::Internal
                 }
             }
@@ -276,7 +278,7 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
                         {
                             Ok(worktrees) => worktrees,
                             Err(error) => {
-                                eprintln!("worktree: {error:#}");
+                                eprintln!("worktree: {}", error_text(&error));
                                 return ExitCode::Internal;
                             }
                         };
@@ -296,7 +298,7 @@ fn run_worktree(command: &WorktreeCommand) -> ExitCode {
                     }
                 },
                 Err(error) => {
-                    eprintln!("worktree: {error:#}");
+                    eprintln!("worktree: {}", error_text(&error));
                     ExitCode::Internal
                 }
             }
@@ -399,7 +401,7 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
     let (client, target) = match plan_current_push() {
         Ok(planned) => planned,
         Err(error) => {
-            eprintln!("push: {error:#}");
+            eprintln!("push: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -429,7 +431,7 @@ fn run_push_with_message(message: &str, yes: bool) -> ExitCode {
     }) {
         Ok(result) => result,
         Err(error) => {
-            eprintln!("push: {error:#}");
+            eprintln!("push: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -443,7 +445,7 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
     let (client, target) = match plan_current_push() {
         Ok(planned) => planned,
         Err(error) => {
-            eprintln!("push: {error:#}");
+            eprintln!("push: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -480,7 +482,7 @@ fn run_push_current(yes: bool, confirm: bool) -> ExitCode {
     }) {
         Ok(result) => result,
         Err(error) => {
-            eprintln!("push: {error:#}");
+            eprintln!("push: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -538,14 +540,14 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
     let repo_path = match commands::canonical_working_directory() {
         Ok(path) => path,
         Err(error) => {
-            eprintln!("commit: {error:#}");
+            eprintln!("commit: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
     let client = match ServerClient::connect() {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("commit: {error:#}");
+            eprintln!("commit: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -554,7 +556,7 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
     }) {
         Ok(response) => response,
         Err(error) => {
-            eprintln!("commit: {error:#}");
+            eprintln!("commit: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -567,7 +569,7 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
             match sync::commit_target_from_grpc(target) {
                 Ok(target) => target,
                 Err(error) => {
-                    eprintln!("commit: {error:#}");
+                    eprintln!("commit: {}", error_text(&error));
                     return ExitCode::Internal;
                 }
             }
@@ -602,7 +604,7 @@ fn run_commit_current(message: &str, yes: bool) -> ExitCode {
     }) {
         Ok(result) => result,
         Err(error) => {
-            eprintln!("commit: {error:#}");
+            eprintln!("commit: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -636,7 +638,7 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
     let root = match commands::canonical_working_directory() {
         Ok(root) => root,
         Err(error) => {
-            eprintln!("push -r: {error:#}");
+            eprintln!("push -r: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -644,30 +646,30 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
     let client = match ServerClient::connect() {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("push -r: {error:#}");
+            eprintln!("push -r: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
-    let plan = match client.plan_recursive_push(v1::PlanRecursivePushRequest {
+    let plan = match client.plan_recursive_repository_push(v1::PlanRecursiveRepositoryPushRequest {
         root: root.to_string_lossy().into_owned(),
     }) {
         Ok(plan) => plan,
         Err(error) => {
-            eprintln!("push -r: {error:#}");
+            eprintln!("push -r: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
     let targets = match plan.outcome {
-        Some(v1::plan_recursive_push_response::Outcome::Ready(plan)) => {
+        Some(v1::plan_recursive_repository_push_response::Outcome::Ready(plan)) => {
             match targets_from_grpc(plan.targets) {
                 Ok(targets) => targets,
                 Err(error) => {
-                    eprintln!("push -r: {error:#}");
+                    eprintln!("push -r: {}", error_text(&error));
                     return ExitCode::Internal;
                 }
             }
         }
-        Some(v1::plan_recursive_push_response::Outcome::Refused(refusal)) => {
+        Some(v1::plan_recursive_repository_push_response::Outcome::Refused(refusal)) => {
             eprintln!("push -r: {}", refusal.detail);
             return ExitCode::Internal;
         }
@@ -695,21 +697,22 @@ fn run_push_subrepos(yes: bool) -> ExitCode {
         Confirmation::Proceed => {}
     }
 
-    let result = match client.execute_recursive_push(v1::ExecuteRecursivePushRequest {
-        targets: targets_to_grpc(&targets),
-    }) {
-        Ok(response) => match result_from_grpc(response) {
-            Ok(result) => result,
+    let result =
+        match client.execute_recursive_repository_push(v1::ExecuteRecursiveRepositoryPushRequest {
+            targets: targets_to_grpc(&targets),
+        }) {
+            Ok(response) => match result_from_grpc(response) {
+                Ok(result) => result,
+                Err(error) => {
+                    eprintln!("push -r: {}", error_text(&error));
+                    return ExitCode::Internal;
+                }
+            },
             Err(error) => {
-                eprintln!("push -r: {error:#}");
+                eprintln!("push -r: {}", error_text(&error));
                 return ExitCode::Internal;
             }
-        },
-        Err(error) => {
-            eprintln!("push -r: {error:#}");
-            return ExitCode::Internal;
-        }
-    };
+        };
     let detail = format_push_subrepos_result(&result);
     match result.status {
         gtl_models::repository::recursive_push::Status::Ok => {
@@ -779,7 +782,7 @@ fn run_switch_with_path(args: &SwitchArgs, repo_path: &Path) -> ExitCode {
     let client = match ServerClient::connect() {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("switch: {error:#}");
+            eprintln!("switch: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -790,7 +793,7 @@ fn run_switch_with_path(args: &SwitchArgs, repo_path: &Path) -> ExitCode {
     }) {
         Ok(result) => result,
         Err(error) => {
-            eprintln!("switch: {error:#}");
+            eprintln!("switch: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -856,7 +859,7 @@ fn run_prune(args: &PruneArgs) -> ExitCode {
     let repo_path = match commands::canonical_working_directory() {
         Ok(path) => path,
         Err(error) => {
-            eprintln!("prune: {error:#}");
+            eprintln!("prune: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -869,7 +872,7 @@ fn run_prune_current(args: &PruneArgs, onto: &BranchName, repo_path: &Path) -> E
     let client = match ServerClient::connect() {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("prune: {error:#}");
+            eprintln!("prune: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -879,7 +882,7 @@ fn run_prune_current(args: &PruneArgs, onto: &BranchName, repo_path: &Path) -> E
     }) {
         Ok(response) => response,
         Err(error) => {
-            eprintln!("prune: {error:#}");
+            eprintln!("prune: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -902,7 +905,7 @@ fn run_prune_current(args: &PruneArgs, onto: &BranchName, repo_path: &Path) -> E
     let branches = match prune::plan_from_grpc(plan) {
         Ok(branches) => branches,
         Err(error) => {
-            eprintln!("prune: {error:#}");
+            eprintln!("prune: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -930,14 +933,14 @@ fn run_prune_current(args: &PruneArgs, onto: &BranchName, repo_path: &Path) -> E
     }) {
         Ok(response) => response,
         Err(error) => {
-            eprintln!("prune: {error:#}");
+            eprintln!("prune: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
     let result = match prune::result_from_grpc(response) {
         Ok(result) => result,
         Err(error) => {
-            eprintln!("prune: {error:#}");
+            eprintln!("prune: {}", error_text(&error));
             return ExitCode::Internal;
         }
     };
@@ -993,13 +996,13 @@ fn status_path_error(error: &anyhow::Error) -> ManagedRun<commands::managed::Sta
         exit: ManagedExit::Fail,
         results: Vec::new(),
         stdout: String::new(),
-        stderr: format!("status: {error:#}"),
+        stderr: format!("status: {}", error_text(error)),
     }
 }
 
 fn canonical_working_directory_or_exit(command: &str) -> Result<PathBuf, ExitCode> {
     commands::canonical_working_directory().map_err(|error| {
-        eprintln!("{command}: {error:#}");
+        eprintln!("{command}: {}", error_text(&error));
         ExitCode::Internal
     })
 }
@@ -1048,6 +1051,21 @@ fn stdout_is_terminal() -> bool {
     std::io::IsTerminal::is_terminal(&std::io::stdout())
 }
 
+pub(crate) fn error_text(error: &anyhow::Error) -> String {
+    for source in error.chain() {
+        if let Some(error) = source.downcast_ref::<gtl_client::ClientError>() {
+            return error.status().message().to_owned();
+        }
+        if let Some(status) = source
+            .downcast_ref::<gtl_client::ConnectError>()
+            .and_then(gtl_client::ConnectError::status)
+        {
+            return status.message().to_owned();
+        }
+    }
+    format!("{error:#}")
+}
+
 /// Map a [`commands::diff::DiffOutcome`] result to an [`ExitCode`]: either `Ok` variant
 /// (an artifact was rendered, or a clean empty-range no-op) is a success. Shared by every
 /// render path that produces a `DiffOutcome` — `diff`, `diff -r`, `diff --all`,
@@ -1056,14 +1074,10 @@ fn diff_exit(result: anyhow::Result<commands::diff::DiffOutcome>) -> ExitCode {
     match result {
         Ok(_) => ExitCode::Ok,
         Err(error) => {
-            eprintln!("{}", html_error_text(&error));
+            eprintln!("{}", error_text(&error));
             ExitCode::Internal
         }
     }
-}
-
-fn html_error_text(error: &anyhow::Error) -> String {
-    format!("{error:#}")
 }
 
 /// Map a `diff live` result to an [`ExitCode`]: success (a save, or a clean
@@ -1073,7 +1087,7 @@ fn diff_live_exit(result: anyhow::Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::Ok,
         Err(error) => {
-            eprintln!("{}", html_error_text(&error));
+            eprintln!("{}", error_text(&error));
             ExitCode::Internal
         }
     }
@@ -1165,12 +1179,9 @@ mod tests {
     }
 
     #[test]
-    fn html_errors_print_without_cli_prefix() {
+    fn diff_errors_print_without_cli_prefix() {
         let error = anyhow::anyhow!("fatal: bad ref\nnot a commit: nope");
 
-        assert_eq!(
-            html_error_text(&error),
-            "fatal: bad ref\nnot a commit: nope"
-        );
+        assert_eq!(error_text(&error), "fatal: bad ref\nnot a commit: nope");
     }
 }

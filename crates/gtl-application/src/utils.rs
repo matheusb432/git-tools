@@ -10,6 +10,7 @@ mod worktrees;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    future::Future,
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
@@ -75,8 +76,9 @@ pub fn absolute_file_path(path: &str) -> AbsoluteFilePath {
 use crate::ports::{
     ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, CommitLogEntry, GitClient,
     GitCommitReceipt, GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState,
-    GitWorkingTree, HistoryRecord, HtmlRenderer, MergedBranch, PlacedArtifact, ProjectClient,
-    ProjectClientError, UserSettingsEditError, UserSettingsLoadError, UserSettingsStore,
+    GitWorkingTree, HistoryRecord, HtmlRenderer, MergedBranch, PlacedArtifact,
+    ProjectCatalogueUnavailableError, ProjectClient, ProjectClientError, UserSettingsEditError,
+    UserSettingsLoadError, UserSettingsStore,
 };
 
 fn try_commit_id_fixture(raw: &str) -> Result<CommitId, CommitIdError> {
@@ -883,14 +885,18 @@ pub struct FakeProjectClient {
 }
 
 impl ProjectClient for FakeProjectClient {
-    async fn list_projects(&self) -> Result<Vec<ProjectRepository>, ProjectClientError> {
-        if let Some(message) = &self.error {
-            return Err(ProjectClientError::Unavailable {
-                message: message.clone(),
-                source: Box::new(std::io::Error::other(message.clone())),
-            });
-        }
-        Ok(self.repos.clone())
+    fn list_projects(
+        &self,
+    ) -> impl Future<Output = Result<Vec<ProjectRepository>, ProjectClientError>> + Send {
+        let result =
+            match &self.error {
+                Some(message) => Err(ProjectCatalogueUnavailableError::Dependency(
+                    anyhow::Error::new(std::io::Error::other(message.clone())),
+                )
+                .into()),
+                None => Ok(self.repos.clone()),
+            };
+        std::future::ready(result)
     }
 }
 

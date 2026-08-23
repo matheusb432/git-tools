@@ -63,7 +63,7 @@ fn run_managed(client: &ServerClient) -> anyhow::Result<()> {
     for result in response.results {
         match saved_from_response(result) {
             Ok(data) => recipes.push(live_recipe(&data)),
-            Err(err) => eprintln!("diff live: {err:#}"),
+            Err(err) => eprintln!("diff live: {}", crate::error_text(&err)),
         }
     }
 
@@ -163,7 +163,8 @@ fn forward_or_degrade(batch: &OpenRecipes) {
 /// (no I/O) so tests can assert on its exact text without capturing stderr.
 fn live_degrade_note(err: &anyhow::Error) -> String {
     format!(
-        "diff live: viewer unavailable ({err:#}); the live view is saved and will open when the viewer is available."
+        "diff live: viewer unavailable ({}); the live view is saved and will open when the viewer is available.",
+        crate::error_text(err)
     )
 }
 

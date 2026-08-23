@@ -25,25 +25,25 @@ impl SettingsApi {
 
 #[tonic::async_trait]
 impl SettingsService for SettingsApi {
-    async fn get_settings(
+    async fn get_push_confirmation_requirement(
         &self,
-        _request: Request<v1::Empty>,
-    ) -> Result<Response<v1::GetSettingsResponse>, Status> {
+        _request: Request<v1::GetPushConfirmationRequirementRequest>,
+    ) -> Result<Response<v1::GetPushConfirmationRequirementResponse>, Status> {
         let store = self.state.user_settings.clone();
         let result = run_blocking(move || get_user_settings::execute(GetUserSettings, &store))
             .await?
             .map_err(|error| match error {
                 GetUserSettingsError::Settings(error) => user_settings_load_error(error),
             })?;
-        Ok(Response::new(v1::GetSettingsResponse {
+        Ok(Response::new(v1::GetPushConfirmationRequirementResponse {
             push_confirmation_required: result.settings.push_confirmation_required(),
         }))
     }
 
-    async fn set_theme(
+    async fn set_viewer_theme(
         &self,
-        request: Request<v1::SetThemeRequest>,
-    ) -> Result<Response<v1::SetThemeResponse>, Status> {
+        request: Request<v1::SetViewerThemeRequest>,
+    ) -> Result<Response<v1::SetViewerThemeResponse>, Status> {
         let theme = theme(request.into_inner().theme)?;
         let mut store = self.state.user_settings.clone();
         let path = store
@@ -61,7 +61,7 @@ impl SettingsService for SettingsApi {
         .await?
         .map_err(setting_edit_error)?;
 
-        Ok(Response::new(v1::SetThemeResponse {
+        Ok(Response::new(v1::SetViewerThemeResponse {
             theme: wire_theme(theme) as i32,
             configuration_path: path.to_string_lossy().into_owned(),
         }))

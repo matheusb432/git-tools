@@ -26,7 +26,7 @@ impl TagApi {
 
 #[tonic::async_trait]
 impl TagService for TagApi {
-    async fn plan_bump(
+    async fn plan_tag_bump(
         &self,
         request: Request<v1::PlanTagBumpRequest>,
     ) -> Result<Response<v1::PlanTagBumpResponse>, Status> {
@@ -39,7 +39,7 @@ impl TagService for TagApi {
         Ok(Response::new(plan_response(result)))
     }
 
-    async fn execute_bump(
+    async fn execute_tag_bump(
         &self,
         request: Request<v1::ExecuteTagBumpRequest>,
     ) -> Result<Response<v1::ExecuteTagBumpResponse>, Status> {
@@ -55,38 +55,38 @@ impl TagService for TagApi {
         Ok(Response::new(execute_response(result)))
     }
 
-    async fn list(
+    async fn list_tags(
         &self,
         request: Request<v1::ListTagsRequest>,
     ) -> Result<Response<v1::ListTagsResponse>, Status> {
         basic::list(self.state.clone(), request.into_inner()).await
     }
 
-    async fn add(
+    async fn add_tag(
         &self,
         request: Request<v1::AddTagRequest>,
-    ) -> Result<Response<v1::TagActionResponse>, Status> {
+    ) -> Result<Response<v1::AddTagResponse>, Status> {
         basic::add(self.state.clone(), request.into_inner()).await
     }
 
-    async fn push(
+    async fn push_tags(
         &self,
         request: Request<v1::PushTagsRequest>,
-    ) -> Result<Response<v1::TagActionResponse>, Status> {
+    ) -> Result<Response<v1::PushTagsResponse>, Status> {
         basic::push(self.state.clone(), request.into_inner()).await
     }
 
-    async fn add_and_push(
+    async fn add_and_push_tag(
         &self,
         request: Request<v1::AddAndPushTagRequest>,
-    ) -> Result<Response<v1::TagActionResponse>, Status> {
+    ) -> Result<Response<v1::AddAndPushTagResponse>, Status> {
         basic::add_and_push(self.state.clone(), request.into_inner()).await
     }
 
-    async fn label(
+    async fn label_tag(
         &self,
         request: Request<v1::LabelTagRequest>,
-    ) -> Result<Response<v1::TagActionResponse>, Status> {
+    ) -> Result<Response<v1::LabelTagResponse>, Status> {
         basic::label(self.state.clone(), request.into_inner()).await
     }
 }

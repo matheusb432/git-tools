@@ -9,6 +9,7 @@ use gtl_wire::v1::{
 use prost::Message as _;
 use prost_types::FileDescriptorProto;
 use serde_json::Value;
+use serial_test::serial;
 use tokio_stream::StreamExt as _;
 use tonic::{Request, transport::Channel};
 use tonic_health::{
@@ -29,11 +30,12 @@ use crate::{
 type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
 const PRIVATE_METADATA_VALUE: &str = "gtl-observability-private-metadata";
-const DIFF_RENDER_URI: &str = "/gtl.v1.DiffService/Render";
+const DIFF_RENDER_URI: &str = "/gtl.v1.DiffService/RenderDiff";
 const HEALTH_CHECK_URI: &str = "/grpc.health.v1.Health/Check";
 const REFLECTION_URI: &str = "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo";
 
 #[tokio::test]
+#[serial(server_tracing)]
 async fn serves_authenticated_health_and_reflection() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
@@ -46,13 +48,14 @@ async fn serves_authenticated_health_and_reflection() -> TestResult {
 }
 
 #[tokio::test]
+#[serial(server_tracing)]
 async fn validates_application_requests_through_the_generated_client() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
     let mut client = DiffServiceClient::with_interceptor(server.channel(), server.authorization());
 
     let error = client
-        .render(relative_working_directory_diff_request())
+        .render_diff(relative_working_directory_diff_request())
         .await
         .expect_err("relative working directory must fail");
 
@@ -62,6 +65,7 @@ async fn validates_application_requests_through_the_generated_client() -> TestRe
 }
 
 #[tokio::test]
+#[serial(server_tracing)]
 async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
@@ -70,7 +74,7 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
     let root = directory.path().to_string_lossy().into_owned();
 
     let error = client
-        .get_status(GetRepositoryStatusRequest {
+        .get_repository_status(GetRepositoryStatusRequest {
             repository_path: root.clone(),
         })
         .await
@@ -78,7 +82,7 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
     assert_eq!(error.code(), tonic::Code::FailedPrecondition);
 
     let error = client
-        .get_recursive_statuses(GetRecursiveRepositoryStatusesRequest { root })
+        .get_recursive_repository_statuses(GetRecursiveRepositoryStatusesRequest { root })
         .await
         .expect_err("an empty traversal has no repositories");
     assert_eq!(error.code(), tonic::Code::NotFound);
@@ -86,7 +90,7 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
     let mut worktree_client =
         WorktreeServiceClient::with_interceptor(server.channel(), server.authorization());
     let error = worktree_client
-        .get_base(GetWorktreeBaseRequest {
+        .get_worktree_base(GetWorktreeBaseRequest {
             repository_path: directory.path().to_string_lossy().into_owned(),
         })
         .await
@@ -98,6 +102,7 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
 }
 
 #[tokio::test]
+#[serial(server_tracing)]
 async fn rejects_requests_without_the_capability() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
@@ -115,6 +120,7 @@ async fn rejects_requests_without_the_capability() -> TestResult {
 }
 
 #[tokio::test]
+#[serial(server_tracing)]
 async fn shutdown_reports_not_serving_and_stops_with_an_open_health_watch() -> TestResult {
     let directory = tempfile::tempdir()?;
     let mut server = ServerHarness::start(directory.path(), None).await?;
@@ -140,6 +146,7 @@ async fn shutdown_reports_not_serving_and_stops_with_an_open_health_watch() -> T
 }
 
 #[tokio::test]
+#[serial(server_tracing)]
 async fn writes_transport_traces_without_private_metadata() -> TestResult {
     let trace_directory = tempfile::tempdir()?;
     let log_directory = trace_directory.path().join("logs");
@@ -154,7 +161,7 @@ async fn writes_transport_traces_without_private_metadata() -> TestResult {
         .metadata_mut()
         .insert("x-gtl-private-test", PRIVATE_METADATA_VALUE.parse()?);
     let error = diff
-        .render(request)
+        .render_diff(request)
         .await
         .expect_err("relative working directory must fail");
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
@@ -185,9 +192,7 @@ async fn writes_transport_traces_without_private_metadata() -> TestResult {
     }
     assert!(records.iter().any(|record| {
         record_has_uri(record, DIFF_RENDER_URI)
-            && record["fields"]["classification"]
-                .as_str()
-                .is_some_and(|classification| classification.contains("InvalidArgument"))
+            && record["fields"]["status"] == i64::from(tonic::Code::InvalidArgument as i32)
             && record["fields"].get("latency").is_some()
     }));
     assert!(

@@ -16,20 +16,20 @@ pub fn run_scan(
     let target = last.map_or_else(unpushed_target, |count| v1::DiffTarget {
         selection: Some(v1::diff_target::Selection::LastCommitCount(count.get())),
     });
-    let prepare = v1::PrepareSubrepositoriesDiffRequest {
+    let prepare = v1::PrepareSubrepositoryDiffsRequest {
         root: root.clone(),
         target: Some(target.clone()),
         include_linked_worktrees: include_worktrees,
     };
-    let render = v1::RenderSubrepositoriesDiffRequest {
+    let render = v1::RenderSubrepositoryDiffsRequest {
         root,
         target: Some(target),
         include_linked_worktrees: include_worktrees,
     };
     super::present(
         raw,
-        |client| client.prepare_subrepositories_diff(prepare),
-        |client| client.render_subrepositories_diff(render),
+        |client| client.prepare_subrepository_diffs(prepare),
+        |client| client.render_subrepository_diffs(render),
     )
 }
 
@@ -39,8 +39,12 @@ pub fn run_managed_all(root: impl AsRef<Path>, raw: bool) -> anyhow::Result<Diff
         .into_owned();
     super::present(
         raw,
-        |client| client.prepare_projects_diff(v1::PrepareProjectsDiffRequest {}),
-        |client| client.render_projects_diff(v1::RenderProjectsDiffRequest { root }),
+        |client| {
+            client.prepare_project_repository_diffs(v1::PrepareProjectRepositoryDiffsRequest {})
+        },
+        |client| {
+            client.render_project_repository_diffs(v1::RenderProjectRepositoryDiffsRequest { root })
+        },
     )
 }
 

@@ -55,7 +55,7 @@ pub(super) async fn list(
 pub(super) async fn add(
     state: AppState,
     request: v1::AddTagRequest,
-) -> Result<Response<v1::TagActionResponse>, Status> {
+) -> Result<Response<v1::AddTagResponse>, Status> {
     let repo_path = absolute_path(request.repository_path, "repository_path")?;
     let tag = tag_name(request.tag, "tag")?;
     let result = run_blocking(move || {
@@ -76,13 +76,13 @@ pub(super) async fn add(
     })
     .await?
     .map_err(|error| unexpected(error, "add repository tag"))?;
-    Ok(Response::new(result))
+    Ok(Response::new(result.into()))
 }
 
 pub(super) async fn push(
     state: AppState,
     request: v1::PushTagsRequest,
-) -> Result<Response<v1::TagActionResponse>, Status> {
+) -> Result<Response<v1::PushTagsResponse>, Status> {
     let repo_path = absolute_path(request.repository_path, "repository_path")?;
     let result = run_blocking(move || {
         let repo_path = resolve_root(repo_path, &state)?;
@@ -95,13 +95,13 @@ pub(super) async fn push(
     })
     .await?
     .map_err(|error| unexpected(error, "push repository tags"))?;
-    Ok(Response::new(result))
+    Ok(Response::new(result.into()))
 }
 
 pub(super) async fn add_and_push(
     state: AppState,
     request: v1::AddAndPushTagRequest,
-) -> Result<Response<v1::TagActionResponse>, Status> {
+) -> Result<Response<v1::AddAndPushTagResponse>, Status> {
     let repo_path = absolute_path(request.repository_path, "repository_path")?;
     let tag = tag_name(request.tag, "tag")?;
     let label = request
@@ -127,13 +127,13 @@ pub(super) async fn add_and_push(
     })
     .await?
     .map_err(|error| unexpected(error, "add and push repository tag"))?;
-    Ok(Response::new(result))
+    Ok(Response::new(result.into()))
 }
 
 pub(super) async fn label(
     state: AppState,
     request: v1::LabelTagRequest,
-) -> Result<Response<v1::TagActionResponse>, Status> {
+) -> Result<Response<v1::LabelTagResponse>, Status> {
     let repo_path = absolute_path(request.repository_path, "repository_path")?;
     let tag = tag_name(request.tag, "tag")?;
     let label = tag_name(request.label, "label")?;
@@ -155,7 +155,7 @@ pub(super) async fn label(
     })
     .await?
     .map_err(|error| unexpected(error, "label repository tag"))?;
-    Ok(Response::new(result))
+    Ok(Response::new(result.into()))
 }
 
 fn resolve_root(repo_path: std::path::PathBuf, state: &AppState) -> anyhow::Result<RepositoryRoot> {
@@ -208,8 +208,14 @@ fn wire_tag(tag: &Tag) -> v1::Tag {
     }
 }
 
-fn action_response(outcome: &TagActionOutcome) -> v1::TagActionResponse {
-    v1::TagActionResponse {
+struct TagActionResult {
+    status: i32,
+    detail: String,
+    progress: Option<v1::TagOperationProgress>,
+}
+
+fn action_response(outcome: &TagActionOutcome) -> TagActionResult {
+    TagActionResult {
         status: match outcome.status() {
             TagActionStatus::Created => v1::TagActionStatus::Created,
             TagActionStatus::Noop => v1::TagActionStatus::NoOp,
@@ -221,15 +227,15 @@ fn action_response(outcome: &TagActionOutcome) -> v1::TagActionResponse {
     }
 }
 
-fn aborted(detail: String, progress: &TagOperationProgress) -> v1::TagActionResponse {
-    v1::TagActionResponse {
+fn aborted(detail: String, progress: &TagOperationProgress) -> TagActionResult {
+    TagActionResult {
         status: v1::TagActionStatus::Aborted as i32,
         detail,
         progress: Some(wire_progress(progress)),
     }
 }
 
-fn add_aborted(error: AddTagError) -> v1::TagActionResponse {
+fn add_aborted(error: AddTagError) -> TagActionResult {
     let detail = error.to_string();
     match error {
         AddTagError::Unexpected { progress, .. } => aborted(detail, &progress),
@@ -237,7 +243,7 @@ fn add_aborted(error: AddTagError) -> v1::TagActionResponse {
     }
 }
 
-fn push_aborted(error: PushTagsError) -> v1::TagActionResponse {
+fn push_aborted(error: PushTagsError) -> TagActionResult {
     let detail = error.to_string();
     match error {
         PushTagsError::Unexpected { progress, .. } => aborted(detail, &progress),
@@ -245,7 +251,7 @@ fn push_aborted(error: PushTagsError) -> v1::TagActionResponse {
     }
 }
 
-fn add_and_push_aborted(error: AddAndPushTagError) -> v1::TagActionResponse {
+fn add_and_push_aborted(error: AddAndPushTagError) -> TagActionResult {
     let detail = error.to_string();
     match error {
         AddAndPushTagError::Unexpected { progress, .. } => aborted(detail, &progress),
@@ -253,7 +259,7 @@ fn add_and_push_aborted(error: AddAndPushTagError) -> v1::TagActionResponse {
     }
 }
 
-fn label_aborted(error: LabelTagError) -> v1::TagActionResponse {
+fn label_aborted(error: LabelTagError) -> TagActionResult {
     let detail = error.to_string();
     match error {
         LabelTagError::Unexpected { progress, .. } => aborted(detail, &progress),
@@ -281,5 +287,45 @@ fn wire_progress(progress: &TagOperationProgress) -> v1::TagOperationProgress {
             .collect(),
         remote_push: remote_push as i32,
         pushed_or_attempted_refs,
+    }
+}
+
+impl From<TagActionResult> for v1::AddTagResponse {
+    fn from(response: TagActionResult) -> Self {
+        Self {
+            status: response.status,
+            detail: response.detail,
+            progress: response.progress,
+        }
+    }
+}
+
+impl From<TagActionResult> for v1::PushTagsResponse {
+    fn from(response: TagActionResult) -> Self {
+        Self {
+            status: response.status,
+            detail: response.detail,
+            progress: response.progress,
+        }
+    }
+}
+
+impl From<TagActionResult> for v1::AddAndPushTagResponse {
+    fn from(response: TagActionResult) -> Self {
+        Self {
+            status: response.status,
+            detail: response.detail,
+            progress: response.progress,
+        }
+    }
+}
+
+impl From<TagActionResult> for v1::LabelTagResponse {
+    fn from(response: TagActionResult) -> Self {
+        Self {
+            status: response.status,
+            detail: response.detail,
+            progress: response.progress,
+        }
     }
 }

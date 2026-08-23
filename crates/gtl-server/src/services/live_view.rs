@@ -28,7 +28,7 @@ impl LiveViewApi {
 
 #[tonic::async_trait]
 impl LiveViewService for LiveViewApi {
-    async fn save(
+    async fn save_live_view(
         &self,
         request: Request<v1::SaveLiveViewRequest>,
     ) -> Result<Response<v1::SaveLiveViewResponse>, Status> {
@@ -49,9 +49,9 @@ impl LiveViewService for LiveViewApi {
         Ok(Response::new(save_response(result)))
     }
 
-    async fn save_projects(
+    async fn save_project_live_views(
         &self,
-        _request: Request<v1::Empty>,
+        _request: Request<v1::SaveProjectLiveViewsRequest>,
     ) -> Result<Response<v1::SaveProjectLiveViewsResponse>, Status> {
         let repos = self
             .state

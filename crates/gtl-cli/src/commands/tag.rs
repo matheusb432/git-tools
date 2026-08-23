@@ -28,14 +28,14 @@ fn run_non_bump(command: Option<TagCommand>, commits: bool, state: bool) -> crat
     let repo_path = match super::canonical_working_directory() {
         Ok(path) => path,
         Err(error) => {
-            eprintln!("tag: {error:#}");
+            eprintln!("tag: {}", crate::error_text(&error));
             return crate::ExitCode::Internal;
         }
     };
     let client = match ServerClient::connect() {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("tag: {error:#}");
+            eprintln!("tag: {}", crate::error_text(&error));
             return crate::ExitCode::Internal;
         }
     };
@@ -252,12 +252,12 @@ fn finish_tag_list(result: anyhow::Result<v1::ListTagsResponse>, commits: bool) 
                 crate::ExitCode::Internal
             }
             Err(error) => {
-                eprintln!("tag: {error:#}");
+                eprintln!("tag: {}", crate::error_text(&error));
                 crate::ExitCode::Internal
             }
         },
         Err(error) => {
-            eprintln!("tag: {error:#}");
+            eprintln!("tag: {}", crate::error_text(&error));
             crate::ExitCode::Internal
         }
     }
@@ -348,17 +348,25 @@ fn tag_from_grpc(tag: v1::Tag) -> anyhow::Result<Tag> {
     Ok(tag)
 }
 
-fn finish_tag_action(result: anyhow::Result<v1::TagActionResponse>) -> crate::ExitCode {
+struct TagActionResult {
+    status: i32,
+    detail: String,
+}
+
+fn finish_tag_action<Response>(result: anyhow::Result<Response>) -> crate::ExitCode
+where
+    Response: Into<TagActionResult>,
+{
     match result {
-        Ok(outcome) => render_tag_action(&outcome),
+        Ok(outcome) => render_tag_action(&outcome.into()),
         Err(error) => {
-            eprintln!("tag: {error:#}");
+            eprintln!("tag: {}", crate::error_text(&error));
             crate::ExitCode::Internal
         }
     }
 }
 
-fn render_tag_action(outcome: &v1::TagActionResponse) -> crate::ExitCode {
+fn render_tag_action(outcome: &TagActionResult) -> crate::ExitCode {
     match v1::TagActionStatus::try_from(outcome.status) {
         Ok(
             v1::TagActionStatus::Created | v1::TagActionStatus::NoOp | v1::TagActionStatus::Pushed,
@@ -375,6 +383,42 @@ fn render_tag_action(outcome: &v1::TagActionResponse) -> crate::ExitCode {
         Ok(v1::TagActionStatus::Unspecified) | Err(_) => {
             eprintln!("tag: gtl-server returned an invalid tag action status");
             crate::ExitCode::Internal
+        }
+    }
+}
+
+impl From<v1::AddTagResponse> for TagActionResult {
+    fn from(response: v1::AddTagResponse) -> Self {
+        Self {
+            status: response.status,
+            detail: response.detail,
+        }
+    }
+}
+
+impl From<v1::PushTagsResponse> for TagActionResult {
+    fn from(response: v1::PushTagsResponse) -> Self {
+        Self {
+            status: response.status,
+            detail: response.detail,
+        }
+    }
+}
+
+impl From<v1::AddAndPushTagResponse> for TagActionResult {
+    fn from(response: v1::AddAndPushTagResponse) -> Self {
+        Self {
+            status: response.status,
+            detail: response.detail,
+        }
+    }
+}
+
+impl From<v1::LabelTagResponse> for TagActionResult {
+    fn from(response: v1::LabelTagResponse) -> Self {
+        Self {
+            status: response.status,
+            detail: response.detail,
         }
     }
 }

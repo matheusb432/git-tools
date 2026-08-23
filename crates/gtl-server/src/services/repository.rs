@@ -22,80 +22,80 @@ impl RepositoryApi {
 
 #[tonic::async_trait]
 impl RepositoryService for RepositoryApi {
-    async fn plan_push(
+    async fn plan_repository_push(
         &self,
         request: Request<v1::PlanRepositoryPushRequest>,
     ) -> Result<Response<v1::PlanRepositoryPushResponse>, Status> {
         push::plan_push(self.state.clone(), request.into_inner()).await
     }
 
-    async fn execute_push(
+    async fn execute_repository_push(
         &self,
         request: Request<v1::ExecuteRepositoryPushRequest>,
     ) -> Result<Response<v1::ExecuteRepositoryPushResponse>, Status> {
         push::execute_push(self.state.clone(), request.into_inner()).await
     }
 
-    async fn plan_commit(
+    async fn plan_repository_commit(
         &self,
         request: Request<v1::PlanRepositoryCommitRequest>,
     ) -> Result<Response<v1::PlanRepositoryCommitResponse>, Status> {
         push::plan_commit(self.state.clone(), request.into_inner()).await
     }
 
-    async fn execute_commit(
+    async fn execute_repository_commit(
         &self,
         request: Request<v1::ExecuteRepositoryCommitRequest>,
     ) -> Result<Response<v1::ExecuteRepositoryCommitResponse>, Status> {
         push::execute_commit(self.state.clone(), request.into_inner()).await
     }
 
-    async fn plan_recursive_push(
+    async fn plan_recursive_repository_push(
         &self,
-        request: Request<v1::PlanRecursivePushRequest>,
-    ) -> Result<Response<v1::PlanRecursivePushResponse>, Status> {
+        request: Request<v1::PlanRecursiveRepositoryPushRequest>,
+    ) -> Result<Response<v1::PlanRecursiveRepositoryPushResponse>, Status> {
         recursive_push::plan(self.state.clone(), request.into_inner()).await
     }
 
-    async fn execute_recursive_push(
+    async fn execute_recursive_repository_push(
         &self,
-        request: Request<v1::ExecuteRecursivePushRequest>,
-    ) -> Result<Response<v1::ExecuteRecursivePushResponse>, Status> {
+        request: Request<v1::ExecuteRecursiveRepositoryPushRequest>,
+    ) -> Result<Response<v1::ExecuteRecursiveRepositoryPushResponse>, Status> {
         recursive_push::execute(self.state.clone(), request.into_inner()).await
     }
 
-    async fn change_branch(
+    async fn change_repository_branch(
         &self,
         request: Request<v1::ChangeRepositoryBranchRequest>,
     ) -> Result<Response<v1::ChangeRepositoryBranchResponse>, Status> {
         branch::change(self.state.clone(), request.into_inner()).await
     }
 
-    async fn plan_prune(
+    async fn plan_repository_prune(
         &self,
         request: Request<v1::PlanRepositoryPruneRequest>,
     ) -> Result<Response<v1::PlanRepositoryPruneResponse>, Status> {
         prune::plan(self.state.clone(), request.into_inner()).await
     }
 
-    async fn execute_prune(
+    async fn execute_repository_prune(
         &self,
         request: Request<v1::ExecuteRepositoryPruneRequest>,
     ) -> Result<Response<v1::ExecuteRepositoryPruneResponse>, Status> {
         prune::execute(self.state.clone(), request.into_inner()).await
     }
 
-    async fn get_status(
+    async fn get_repository_status(
         &self,
         request: Request<v1::GetRepositoryStatusRequest>,
-    ) -> Result<Response<v1::RepositoryStatusesResponse>, Status> {
+    ) -> Result<Response<v1::GetRepositoryStatusResponse>, Status> {
         status::get(self.state.clone(), request.into_inner()).await
     }
 
-    async fn get_recursive_statuses(
+    async fn get_recursive_repository_statuses(
         &self,
         request: Request<v1::GetRecursiveRepositoryStatusesRequest>,
-    ) -> Result<Response<v1::RepositoryStatusesResponse>, Status> {
+    ) -> Result<Response<v1::GetRecursiveRepositoryStatusesResponse>, Status> {
         status::get_recursive(self.state.clone(), request.into_inner()).await
     }
 }

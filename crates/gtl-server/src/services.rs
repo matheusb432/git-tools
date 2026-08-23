@@ -21,7 +21,7 @@ pub(crate) use project::ProjectApi;
 pub(crate) use repository::RepositoryApi;
 pub(crate) use settings::SettingsApi;
 pub(crate) use tag::TagApi;
-use tonic::Status;
+use tonic::{Code, Status};
 pub(crate) use worktree::WorktreeApi;
 
 pub(crate) fn application_notes(notes: &[notes::Note]) -> Vec<v1::Note> {
@@ -70,15 +70,22 @@ pub(crate) fn required<T>(value: Option<T>, field: &'static str) -> Result<T, St
 
 pub(crate) fn project_client_error(error: &ProjectClientError) -> Status {
     match error {
-        ProjectClientError::Unavailable { .. } => {
-            tracing::warn!(error = ?error, "project catalogue is unavailable");
-            Status::unavailable("project catalogue is unavailable")
+        ProjectClientError::InvalidConfiguration(_) => {
+            project_client_warning(error, Code::FailedPrecondition)
         }
-        ProjectClientError::InvalidData { .. } => {
-            tracing::error!(error = ?error, "project catalogue returned invalid data");
-            Status::data_loss("project catalogue returned invalid data")
-        }
+        ProjectClientError::Unavailable(_) => project_client_warning(error, Code::Unavailable),
+        ProjectClientError::InvalidData(_) => project_client_failure(error, Code::DataLoss),
     }
+}
+
+fn project_client_warning(error: &ProjectClientError, code: Code) -> Status {
+    tracing::warn!(error = ?error, grpc_code = ?code, "project catalogue request failed");
+    Status::new(code, error.to_string())
+}
+
+fn project_client_failure(error: &ProjectClientError, code: Code) -> Status {
+    tracing::error!(error = ?error, grpc_code = ?code, "project catalogue request failed");
+    Status::new(code, error.to_string())
 }
 
 pub(crate) fn user_settings_load_error(error: UserSettingsLoadError) -> Status {
@@ -115,4 +122,57 @@ where
 pub(crate) fn unexpected(error: impl std::fmt::Debug, operation: &'static str) -> Status {
     tracing::error!(error = ?error, operation, "gRPC application operation failed");
     Status::internal(format!("{operation} failed"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use gtl_application::ports::{
+        ProjectCatalogueConfigurationError, ProjectCatalogueDataError,
+        ProjectCatalogueUnavailableError, ProjectClientError,
+    };
+    use tonic::Code;
+
+    use super::project_client_error;
+
+    #[test]
+    fn maps_project_catalogue_failures_by_caller_relevant_semantics() {
+        let cases: [(ProjectClientError, Code, &str); 3] =
+            [
+                (
+                    ProjectCatalogueConfigurationError::Dependency(anyhow::Error::new(
+                        io::Error::new(io::ErrorKind::NotFound, "private missing dependency"),
+                    ))
+                    .into(),
+                    Code::FailedPrecondition,
+                    "project catalogue dependency is not configured",
+                ),
+                (
+                    ProjectCatalogueUnavailableError::Dependency(anyhow::Error::new(
+                        io::Error::new(io::ErrorKind::TimedOut, "private timeout"),
+                    ))
+                    .into(),
+                    Code::Unavailable,
+                    "project catalogue is temporarily unavailable",
+                ),
+                (
+                    ProjectCatalogueDataError::Dependency(anyhow::Error::new(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "private record contents",
+                    )))
+                    .into(),
+                    Code::DataLoss,
+                    "project catalogue returned invalid data",
+                ),
+            ];
+
+        for (error, code, message) in cases {
+            let status = project_client_error(&error);
+
+            assert_eq!(status.code(), code);
+            assert_eq!(status.message(), message);
+            assert!(!status.message().contains("private"));
+        }
+    }
 }

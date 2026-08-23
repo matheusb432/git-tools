@@ -22,7 +22,7 @@ impl WorktreeApi {
 
 #[tonic::async_trait]
 impl WorktreeService for WorktreeApi {
-    async fn get_base(
+    async fn get_worktree_base(
         &self,
         request: Request<v1::GetWorktreeBaseRequest>,
     ) -> Result<Response<v1::GetWorktreeBaseResponse>, Status> {
@@ -48,7 +48,7 @@ impl WorktreeService for WorktreeApi {
         }))
     }
 
-    async fn list(
+    async fn list_worktrees(
         &self,
         request: Request<v1::ListWorktreesRequest>,
     ) -> Result<Response<v1::ListWorktreesResponse>, Status> {

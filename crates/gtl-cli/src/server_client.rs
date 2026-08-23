@@ -44,61 +44,61 @@ impl ServerClient {
     pub(crate) fn prepare_merge_diff(
         &self,
         request: v1::PrepareMergeDiffRequest,
-    ) -> anyhow::Result<v1::PrepareDiffResponse> {
+    ) -> anyhow::Result<v1::PrepareMergeDiffResponse> {
         Ok(self
             .runtime
             .block_on(self.client.prepare_merge_diff(request))?)
     }
 
-    pub(crate) fn prepare_subrepositories_diff(
+    pub(crate) fn prepare_subrepository_diffs(
         &self,
-        request: v1::PrepareSubrepositoriesDiffRequest,
-    ) -> anyhow::Result<v1::PrepareDiffResponse> {
+        request: v1::PrepareSubrepositoryDiffsRequest,
+    ) -> anyhow::Result<v1::PrepareSubrepositoryDiffsResponse> {
         Ok(self
             .runtime
-            .block_on(self.client.prepare_subrepositories_diff(request))?)
+            .block_on(self.client.prepare_subrepository_diffs(request))?)
     }
 
-    pub(crate) fn prepare_projects_diff(
+    pub(crate) fn prepare_project_repository_diffs(
         &self,
-        request: v1::PrepareProjectsDiffRequest,
-    ) -> anyhow::Result<v1::PrepareDiffResponse> {
+        request: v1::PrepareProjectRepositoryDiffsRequest,
+    ) -> anyhow::Result<v1::PrepareProjectRepositoryDiffsResponse> {
         Ok(self
             .runtime
-            .block_on(self.client.prepare_projects_diff(request))?)
+            .block_on(self.client.prepare_project_repository_diffs(request))?)
     }
 
     pub(crate) fn render_merge_diff(
         &self,
         request: v1::RenderMergeDiffRequest,
-    ) -> anyhow::Result<v1::RenderDiffResponse> {
+    ) -> anyhow::Result<v1::RenderMergeDiffResponse> {
         Ok(self
             .runtime
             .block_on(self.client.render_merge_diff(request))?)
     }
 
-    pub(crate) fn render_subrepositories_diff(
+    pub(crate) fn render_subrepository_diffs(
         &self,
-        request: v1::RenderSubrepositoriesDiffRequest,
-    ) -> anyhow::Result<v1::RenderDiffResponse> {
+        request: v1::RenderSubrepositoryDiffsRequest,
+    ) -> anyhow::Result<v1::RenderSubrepositoryDiffsResponse> {
         Ok(self
             .runtime
-            .block_on(self.client.render_subrepositories_diff(request))?)
+            .block_on(self.client.render_subrepository_diffs(request))?)
     }
 
-    pub(crate) fn render_projects_diff(
+    pub(crate) fn render_project_repository_diffs(
         &self,
-        request: v1::RenderProjectsDiffRequest,
-    ) -> anyhow::Result<v1::RenderDiffResponse> {
+        request: v1::RenderProjectRepositoryDiffsRequest,
+    ) -> anyhow::Result<v1::RenderProjectRepositoryDiffsResponse> {
         Ok(self
             .runtime
-            .block_on(self.client.render_projects_diff(request))?)
+            .block_on(self.client.render_project_repository_diffs(request))?)
     }
 
     pub(crate) fn push_project_repositories(
         &self,
-        request: v1::SyncProjectsRequest,
-    ) -> anyhow::Result<v1::SyncProjectsResponse> {
+        request: v1::PushProjectRepositoriesRequest,
+    ) -> anyhow::Result<v1::PushProjectRepositoriesResponse> {
         Ok(self
             .runtime
             .block_on(self.client.push_project_repositories(request))?)
@@ -106,8 +106,8 @@ impl ServerClient {
 
     pub(crate) fn pull_project_repositories(
         &self,
-        request: v1::SyncProjectsRequest,
-    ) -> anyhow::Result<v1::SyncProjectsResponse> {
+        request: v1::PullProjectRepositoriesRequest,
+    ) -> anyhow::Result<v1::PullProjectRepositoriesResponse> {
         Ok(self
             .runtime
             .block_on(self.client.pull_project_repositories(request))?)
@@ -133,7 +133,7 @@ impl ServerClient {
 
     pub(crate) fn get_project_repository_statuses(
         &self,
-    ) -> anyhow::Result<v1::RepositoryStatusesResponse> {
+    ) -> anyhow::Result<v1::GetProjectRepositoryStatusesResponse> {
         Ok(self
             .runtime
             .block_on(self.client.get_project_repository_statuses())?)
@@ -175,22 +175,22 @@ impl ServerClient {
             .block_on(self.client.execute_repository_commit(request))?)
     }
 
-    pub(crate) fn plan_recursive_push(
+    pub(crate) fn plan_recursive_repository_push(
         &self,
-        request: v1::PlanRecursivePushRequest,
-    ) -> anyhow::Result<v1::PlanRecursivePushResponse> {
+        request: v1::PlanRecursiveRepositoryPushRequest,
+    ) -> anyhow::Result<v1::PlanRecursiveRepositoryPushResponse> {
         Ok(self
             .runtime
-            .block_on(self.client.plan_recursive_push(request))?)
+            .block_on(self.client.plan_recursive_repository_push(request))?)
     }
 
-    pub(crate) fn execute_recursive_push(
+    pub(crate) fn execute_recursive_repository_push(
         &self,
-        request: v1::ExecuteRecursivePushRequest,
-    ) -> anyhow::Result<v1::ExecuteRecursivePushResponse> {
+        request: v1::ExecuteRecursiveRepositoryPushRequest,
+    ) -> anyhow::Result<v1::ExecuteRecursiveRepositoryPushResponse> {
         Ok(self
             .runtime
-            .block_on(self.client.execute_recursive_push(request))?)
+            .block_on(self.client.execute_recursive_repository_push(request))?)
     }
 
     pub(crate) fn change_repository_branch(
@@ -223,7 +223,7 @@ impl ServerClient {
     pub(crate) fn get_repository_status(
         &self,
         request: v1::GetRepositoryStatusRequest,
-    ) -> anyhow::Result<v1::RepositoryStatusesResponse> {
+    ) -> anyhow::Result<v1::GetRepositoryStatusResponse> {
         Ok(self
             .runtime
             .block_on(self.client.get_repository_status(request))?)
@@ -232,21 +232,27 @@ impl ServerClient {
     pub(crate) fn get_recursive_repository_statuses(
         &self,
         request: v1::GetRecursiveRepositoryStatusesRequest,
-    ) -> anyhow::Result<v1::RepositoryStatusesResponse> {
+    ) -> anyhow::Result<v1::GetRecursiveRepositoryStatusesResponse> {
         Ok(self
             .runtime
             .block_on(self.client.get_recursive_repository_statuses(request))?)
     }
 
-    pub(crate) fn get_settings(&self) -> anyhow::Result<v1::GetSettingsResponse> {
-        Ok(self.runtime.block_on(self.client.get_settings())?)
+    pub(crate) fn get_push_confirmation_requirement(
+        &self,
+    ) -> anyhow::Result<v1::GetPushConfirmationRequirementResponse> {
+        Ok(self
+            .runtime
+            .block_on(self.client.get_push_confirmation_requirement())?)
     }
 
-    pub(crate) fn set_theme(
+    pub(crate) fn set_viewer_theme(
         &self,
-        request: v1::SetThemeRequest,
-    ) -> anyhow::Result<v1::SetThemeResponse> {
-        Ok(self.runtime.block_on(self.client.set_theme(request))?)
+        request: v1::SetViewerThemeRequest,
+    ) -> anyhow::Result<v1::SetViewerThemeResponse> {
+        Ok(self
+            .runtime
+            .block_on(self.client.set_viewer_theme(request))?)
     }
 
     pub(crate) fn get_worktree_base(
@@ -303,24 +309,21 @@ impl ServerClient {
         Ok(self.runtime.block_on(self.client.list_tags(request))?)
     }
 
-    pub(crate) fn add_tag(
-        &self,
-        request: v1::AddTagRequest,
-    ) -> anyhow::Result<v1::TagActionResponse> {
+    pub(crate) fn add_tag(&self, request: v1::AddTagRequest) -> anyhow::Result<v1::AddTagResponse> {
         Ok(self.runtime.block_on(self.client.add_tag(request))?)
     }
 
     pub(crate) fn push_tags(
         &self,
         request: v1::PushTagsRequest,
-    ) -> anyhow::Result<v1::TagActionResponse> {
+    ) -> anyhow::Result<v1::PushTagsResponse> {
         Ok(self.runtime.block_on(self.client.push_tags(request))?)
     }
 
     pub(crate) fn add_and_push_tag(
         &self,
         request: v1::AddAndPushTagRequest,
-    ) -> anyhow::Result<v1::TagActionResponse> {
+    ) -> anyhow::Result<v1::AddAndPushTagResponse> {
         Ok(self
             .runtime
             .block_on(self.client.add_and_push_tag(request))?)
@@ -329,7 +332,7 @@ impl ServerClient {
     pub(crate) fn label_tag(
         &self,
         request: v1::LabelTagRequest,
-    ) -> anyhow::Result<v1::TagActionResponse> {
+    ) -> anyhow::Result<v1::LabelTagResponse> {
         Ok(self.runtime.block_on(self.client.label_tag(request))?)
     }
 }

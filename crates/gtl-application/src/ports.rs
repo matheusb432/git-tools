@@ -28,6 +28,9 @@ pub use git_client::{
     GitPushReceipt, GitRepositoryState, GitWorkingTree, MergedBranch,
 };
 pub use html_renderer::HtmlRenderer;
-pub use project_client::{ProjectClient, ProjectClientError};
+pub use project_client::{
+    ProjectCatalogueConfigurationError, ProjectCatalogueDataError,
+    ProjectCatalogueUnavailableError, ProjectClient, ProjectClientError,
+};
 pub use text_editor_client::TextEditorClient;
 pub use user_settings_store::{UserSettingsEditError, UserSettingsLoadError, UserSettingsStore};

@@ -53,7 +53,7 @@ fn project_prune_execution(
 ) -> ManagedRun<PruneRepoResult> {
     let response = match execution {
         Ok(response) => response,
-        Err(error) => return prune_failure(format!("{error:#}")),
+        Err(error) => return prune_failure(crate::error_text(&error)),
     };
     let results = match response
         .results
@@ -62,7 +62,7 @@ fn project_prune_execution(
         .collect::<anyhow::Result<Vec<_>>>()
     {
         Ok(results) => results,
-        Err(error) => return prune_failure(format!("{error:#}")),
+        Err(error) => return prune_failure(crate::error_text(&error)),
     };
     let exit = match v1::ProjectPruneExit::try_from(response.exit) {
         Ok(v1::ProjectPruneExit::Clean) => ManagedExit::Clean,

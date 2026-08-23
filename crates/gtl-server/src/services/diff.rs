@@ -51,7 +51,7 @@ impl DiffApi {
 
 #[tonic::async_trait]
 impl DiffService for DiffApi {
-    async fn prepare(
+    async fn prepare_diff(
         &self,
         request: Request<v1::PrepareDiffRequest>,
     ) -> Result<Response<v1::PrepareDiffResponse>, Status> {
@@ -73,13 +73,15 @@ impl DiffService for DiffApi {
             .await?
             .map_err(|error| unexpected(error, "prepare diff recipe"))?;
 
-        Ok(Response::new(prepared_response(vec![recipe])))
+        Ok(Response::new(v1::PrepareDiffResponse {
+            batch: Some(prepared_batch(vec![recipe])),
+        }))
     }
 
-    async fn prepare_merge(
+    async fn prepare_merge_diff(
         &self,
         request: Request<v1::PrepareMergeDiffRequest>,
-    ) -> Result<Response<v1::PrepareDiffResponse>, Status> {
+    ) -> Result<Response<v1::PrepareMergeDiffResponse>, Status> {
         let request = request.into_inner();
         let base = optional_revision(request.base_revision, "base_revision")?;
         let request = BuildRecipe {
@@ -92,13 +94,15 @@ impl DiffService for DiffApi {
             .await?
             .map_err(|error| unexpected(error, "prepare merge diff recipe"))?;
 
-        Ok(Response::new(prepared_response(vec![recipe])))
+        Ok(Response::new(v1::PrepareMergeDiffResponse {
+            batch: Some(prepared_batch(vec![recipe])),
+        }))
     }
 
-    async fn prepare_subrepositories(
+    async fn prepare_subrepository_diffs(
         &self,
-        request: Request<v1::PrepareSubrepositoriesDiffRequest>,
-    ) -> Result<Response<v1::PrepareDiffResponse>, Status> {
+        request: Request<v1::PrepareSubrepositoryDiffsRequest>,
+    ) -> Result<Response<v1::PrepareSubrepositoryDiffsResponse>, Status> {
         use gtl_application::repositories::build_recipes;
 
         let request = request.into_inner();
@@ -115,13 +119,15 @@ impl DiffService for DiffApi {
             .await?
             .map_err(|error| unexpected(error, "prepare subrepositories diff recipes"))?;
 
-        Ok(Response::new(prepared_response(recipes)))
+        Ok(Response::new(v1::PrepareSubrepositoryDiffsResponse {
+            batch: Some(prepared_batch(recipes)),
+        }))
     }
 
-    async fn prepare_projects(
+    async fn prepare_project_repository_diffs(
         &self,
-        _request: Request<v1::PrepareProjectsDiffRequest>,
-    ) -> Result<Response<v1::PrepareDiffResponse>, Status> {
+        _request: Request<v1::PrepareProjectRepositoryDiffsRequest>,
+    ) -> Result<Response<v1::PrepareProjectRepositoryDiffsResponse>, Status> {
         use gtl_application::projects::build_recipes;
 
         let repos = self
@@ -141,10 +147,12 @@ impl DiffService for DiffApi {
             .await?
             .map_err(|error| unexpected(error, "prepare project diff recipes"))?;
 
-        Ok(Response::new(prepared_response(recipes)))
+        Ok(Response::new(v1::PrepareProjectRepositoryDiffsResponse {
+            batch: Some(prepared_batch(recipes)),
+        }))
     }
 
-    async fn render(
+    async fn render_diff(
         &self,
         request: Request<v1::RenderDiffRequest>,
     ) -> Result<Response<v1::RenderDiffResponse>, Status> {
@@ -166,10 +174,10 @@ impl DiffService for DiffApi {
         Ok(Response::new(render_response(result)))
     }
 
-    async fn render_merge(
+    async fn render_merge_diff(
         &self,
         request: Request<v1::RenderMergeDiffRequest>,
-    ) -> Result<Response<v1::RenderDiffResponse>, Status> {
+    ) -> Result<Response<v1::RenderMergeDiffResponse>, Status> {
         let request = to_render_merge_request(request.into_inner())?;
         let state = self.state.clone();
         let result = run_blocking(move || {
@@ -185,16 +193,16 @@ impl DiffService for DiffApi {
         .await?
         .map_err(render_merge_error)?;
 
-        Ok(Response::new(rendered_response(
+        Ok(Response::new(render_merge_response(
             &result.placement,
             &result.notes,
         )))
     }
 
-    async fn render_subrepositories(
+    async fn render_subrepository_diffs(
         &self,
-        request: Request<v1::RenderSubrepositoriesDiffRequest>,
-    ) -> Result<Response<v1::RenderDiffResponse>, Status> {
+        request: Request<v1::RenderSubrepositoryDiffsRequest>,
+    ) -> Result<Response<v1::RenderSubrepositoryDiffsResponse>, Status> {
         let request = request.into_inner();
         let state = self.state.clone();
         let result = run_blocking(move || {
@@ -214,10 +222,10 @@ impl DiffService for DiffApi {
         Ok(Response::new(render_subrepositories_response(result)))
     }
 
-    async fn render_projects(
+    async fn render_project_repository_diffs(
         &self,
-        request: Request<v1::RenderProjectsDiffRequest>,
-    ) -> Result<Response<v1::RenderDiffResponse>, Status> {
+        request: Request<v1::RenderProjectRepositoryDiffsRequest>,
+    ) -> Result<Response<v1::RenderProjectRepositoryDiffsResponse>, Status> {
         let root = repository_root(request.into_inner().root, "root")?;
         let repos = self
             .state
@@ -259,7 +267,9 @@ impl DiffService for DiffApi {
         .await??;
 
         Ok(Response::new(
-            result.map_or_else(empty_response, |result| render_project_response(&result)),
+            result.map_or_else(empty_projects_response, |result| {
+                render_project_response(&result)
+            }),
         ))
     }
 }
@@ -280,7 +290,7 @@ fn to_render_merge_request(request: v1::RenderMergeDiffRequest) -> Result<Render
 }
 
 fn to_render_subrepositories_request(
-    request: v1::RenderSubrepositoriesDiffRequest,
+    request: v1::RenderSubrepositoryDiffsRequest,
     git: &impl gtl_application::ports::GitClient,
 ) -> Result<RenderDiffSubrepos, Status> {
     let root = repository_root(request.root, "root")?;
@@ -357,13 +367,11 @@ const fn traversal_scope(include_linked_worktrees: bool) -> RepositoryTraversalS
     }
 }
 
-fn prepared_response(recipes: Vec<Recipe>) -> v1::PrepareDiffResponse {
-    v1::PrepareDiffResponse {
-        batch: Some(v1::RecipeBatch {
-            batch_id: RecipeBatchId::generate().to_string(),
-            kind: v1::RecipeBatchKind::Snapshot as i32,
-            recipes: recipes.into_iter().map(recipe).collect(),
-        }),
+fn prepared_batch(recipes: Vec<Recipe>) -> v1::RecipeBatch {
+    v1::RecipeBatch {
+        batch_id: RecipeBatchId::generate().to_string(),
+        kind: v1::RecipeBatchKind::Snapshot as i32,
+        recipes: recipes.into_iter().map(recipe).collect(),
     }
 }
 
@@ -464,13 +472,13 @@ fn render_project_error(error: RenderProjectDiffError) -> Status {
     }
 }
 
-fn rendered_response(
+fn render_merge_response(
     placement: &gtl_application::ports::PlacedArtifact,
     notes: &[gtl_application::shared::notes::Note],
-) -> v1::RenderDiffResponse {
-    v1::RenderDiffResponse {
+) -> v1::RenderMergeDiffResponse {
+    v1::RenderMergeDiffResponse {
         notes: application_notes(notes),
-        outcome: Some(v1::render_diff_response::Outcome::Rendered(artifact(
+        outcome: Some(v1::render_merge_diff_response::Outcome::Rendered(artifact(
             placement,
         ))),
     }
@@ -478,7 +486,12 @@ fn rendered_response(
 
 fn render_response(result: RenderDiffOk) -> v1::RenderDiffResponse {
     match result.outcome {
-        RenderDiffOutcome::Rendered(placement) => rendered_response(&placement, &result.notes),
+        RenderDiffOutcome::Rendered(placement) => v1::RenderDiffResponse {
+            notes: application_notes(&result.notes),
+            outcome: Some(v1::render_diff_response::Outcome::Rendered(artifact(
+                &placement,
+            ))),
+        },
         RenderDiffOutcome::Empty => v1::RenderDiffResponse {
             notes: application_notes(&result.notes),
             outcome: Some(v1::render_diff_response::Outcome::Empty(v1::Empty {})),
@@ -486,27 +499,43 @@ fn render_response(result: RenderDiffOk) -> v1::RenderDiffResponse {
     }
 }
 
-fn empty_response() -> v1::RenderDiffResponse {
-    v1::RenderDiffResponse {
+fn empty_projects_response() -> v1::RenderProjectRepositoryDiffsResponse {
+    v1::RenderProjectRepositoryDiffsResponse {
         notes: Vec::new(),
-        outcome: Some(v1::render_diff_response::Outcome::Empty(v1::Empty {})),
+        outcome: Some(v1::render_project_repository_diffs_response::Outcome::Empty(v1::Empty {})),
     }
 }
 
-fn render_subrepositories_response(result: RenderDiffSubreposOk) -> v1::RenderDiffResponse {
+fn render_subrepositories_response(
+    result: RenderDiffSubreposOk,
+) -> v1::RenderSubrepositoryDiffsResponse {
     match result.outcome {
-        RenderDiffSubreposOutcome::Rendered(placement) => {
-            rendered_response(&placement, &result.notes)
-        }
-        RenderDiffSubreposOutcome::Empty => v1::RenderDiffResponse {
+        RenderDiffSubreposOutcome::Rendered(placement) => v1::RenderSubrepositoryDiffsResponse {
             notes: application_notes(&result.notes),
-            outcome: Some(v1::render_diff_response::Outcome::Empty(v1::Empty {})),
+            outcome: Some(v1::render_subrepository_diffs_response::Outcome::Rendered(
+                artifact(&placement),
+            )),
+        },
+        RenderDiffSubreposOutcome::Empty => v1::RenderSubrepositoryDiffsResponse {
+            notes: application_notes(&result.notes),
+            outcome: Some(v1::render_subrepository_diffs_response::Outcome::Empty(
+                v1::Empty {},
+            )),
         },
     }
 }
 
-fn render_project_response(result: &RenderProjectDiffOk) -> v1::RenderDiffResponse {
-    rendered_response(&result.placement, &result.notes)
+fn render_project_response(
+    result: &RenderProjectDiffOk,
+) -> v1::RenderProjectRepositoryDiffsResponse {
+    v1::RenderProjectRepositoryDiffsResponse {
+        notes: application_notes(&result.notes),
+        outcome: Some(
+            v1::render_project_repository_diffs_response::Outcome::Rendered(artifact(
+                &result.placement,
+            )),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -524,7 +553,7 @@ mod tests {
 
     #[test]
     fn prepared_batch_uses_typed_recipe_fields() {
-        let response = prepared_response(vec![Recipe {
+        let batch = prepared_batch(vec![Recipe {
             source: RecipeSource::LocalRepo(repository_root("/repo".into(), "fixture").unwrap()),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed { pinned: None },
@@ -532,7 +561,6 @@ mod tests {
             name: Some(ProjectName::try_new("repo").unwrap()),
         }]);
 
-        let batch = response.batch.expect("prepared response has a batch");
         assert_eq!(batch.kind(), v1::RecipeBatchKind::Snapshot);
         assert_eq!(batch.recipes[0].repository_root, "/repo");
         assert!(matches!(

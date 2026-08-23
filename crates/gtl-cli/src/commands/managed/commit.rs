@@ -114,7 +114,7 @@ fn project_commit_execution(
 ) -> ManagedRun<CommitResult> {
     let response = match execution {
         Ok(response) => response,
-        Err(error) => return transport_failure(format!("{error:#}")),
+        Err(error) => return transport_failure(crate::error_text(&error)),
     };
     let results = match response
         .results
@@ -123,7 +123,7 @@ fn project_commit_execution(
         .collect::<anyhow::Result<Vec<_>>>()
     {
         Ok(results) => results,
-        Err(error) => return transport_failure(format!("{error:#}")),
+        Err(error) => return transport_failure(crate::error_text(&error)),
     };
     let exit = match v1::ProjectCommitExit::try_from(response.exit) {
         Ok(v1::ProjectCommitExit::Clean) => ManagedExit::Clean,

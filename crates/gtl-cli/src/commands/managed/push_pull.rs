@@ -101,7 +101,7 @@ pub fn run_push_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
         Ok(client) => client,
         Err(error) => return managed_error(&error),
     };
-    let request = v1::SyncProjectsRequest {
+    let request = v1::PushProjectRepositoriesRequest {
         dry_run: options.dry,
     };
     match client.push_project_repositories(request) {
@@ -115,7 +115,7 @@ pub fn run_pull_all(options: &ManagedOptions) -> ManagedRun<PushPullResult> {
         Ok(client) => client,
         Err(error) => return managed_error(&error),
     };
-    let request = v1::SyncProjectsRequest {
+    let request = v1::PullProjectRepositoriesRequest {
         dry_run: options.dry,
     };
     match client.pull_project_repositories(request) {
@@ -129,15 +129,16 @@ fn managed_error<T>(error: &anyhow::Error) -> ManagedRun<T> {
         exit: ManagedExit::Fail,
         results: Vec::new(),
         stdout: String::new(),
-        stderr: format!("{error:#}"),
+        stderr: crate::error_text(error),
     }
 }
 
 fn finish(
     operation: SyncOperation,
     options: &ManagedOptions,
-    response: v1::SyncProjectsResponse,
+    response: impl Into<ProjectRepositorySyncSummary>,
 ) -> ManagedRun<PushPullResult> {
+    let response = response.into();
     let results = match response
         .results
         .into_iter()
@@ -169,6 +170,29 @@ fn finish(
         results,
         stdout,
         stderr: String::new(),
+    }
+}
+
+struct ProjectRepositorySyncSummary {
+    results: Vec<v1::RepositorySyncResult>,
+    exit: i32,
+}
+
+impl From<v1::PushProjectRepositoriesResponse> for ProjectRepositorySyncSummary {
+    fn from(response: v1::PushProjectRepositoriesResponse) -> Self {
+        Self {
+            results: response.results,
+            exit: response.exit,
+        }
+    }
+}
+
+impl From<v1::PullProjectRepositoriesResponse> for ProjectRepositorySyncSummary {
+    fn from(response: v1::PullProjectRepositoriesResponse) -> Self {
+        Self {
+            results: response.results,
+            exit: response.exit,
+        }
     }
 }
 

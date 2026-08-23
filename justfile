@@ -100,6 +100,7 @@ fmt-check *args:
 # Run architecture policy, dependency checks, and workspace Clippy.
 [group('quality')]
 lint:
+    buf lint
     cargo run --quiet -p xtask -- check-structure
     cargo check --locked -p gtl-parser --no-default-features --target wasm32-unknown-unknown
     cargo run --quiet -p xtask -- check-parser-wasm

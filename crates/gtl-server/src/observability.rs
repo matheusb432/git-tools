@@ -257,6 +257,7 @@ mod tests {
         time::Duration,
     };
 
+    use serial_test::serial;
     use tracing_subscriber::EnvFilter;
 
     use super::{
@@ -295,6 +296,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(server_tracing)]
     fn flushes_inspectable_nested_json_records_when_the_guard_drops() -> TestResult {
         let directory = tempfile::tempdir()?;
         let settings = test_settings(directory.path().join("logs"), 1024 * 1024, 2, 64);
@@ -340,6 +342,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(server_tracing)]
     fn rotates_complete_json_records_with_bounded_history() -> TestResult {
         let directory = tempfile::tempdir()?;
         let settings = test_settings(directory.path().join("logs"), 512, 2, 256);

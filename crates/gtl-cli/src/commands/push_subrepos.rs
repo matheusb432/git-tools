@@ -23,7 +23,7 @@ pub(crate) fn targets_to_grpc(targets: &[RepoTarget]) -> Vec<v1::RecursivePushTa
 }
 
 pub(crate) fn result_from_grpc(
-    response: v1::ExecuteRecursivePushResponse,
+    response: v1::ExecuteRecursiveRepositoryPushResponse,
 ) -> anyhow::Result<PushAllResult> {
     let status = match v1::RecursivePushStatus::try_from(response.status) {
         Ok(v1::RecursivePushStatus::Ok) => Status::Ok,

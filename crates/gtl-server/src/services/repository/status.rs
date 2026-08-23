@@ -17,7 +17,7 @@ use crate::state::AppState;
 pub(super) async fn get(
     state: AppState,
     request: v1::GetRepositoryStatusRequest,
-) -> Result<Response<v1::RepositoryStatusesResponse>, Status> {
+) -> Result<Response<v1::GetRepositoryStatusResponse>, Status> {
     let request = GetRepositoryStatus {
         repo_path: absolute_path(request.repository_path, "repository_path")?,
     };
@@ -25,15 +25,15 @@ pub(super) async fn get(
         .await?
         .map_err(repository_resolution_error)?;
 
-    Ok(Response::new(statuses_response(std::slice::from_ref(
-        &result,
-    ))))
+    Ok(Response::new(v1::GetRepositoryStatusResponse {
+        results: status_results(std::slice::from_ref(&result)),
+    }))
 }
 
 pub(super) async fn get_recursive(
     state: AppState,
     request: v1::GetRecursiveRepositoryStatusesRequest,
-) -> Result<Response<v1::RepositoryStatusesResponse>, Status> {
+) -> Result<Response<v1::GetRecursiveRepositoryStatusesResponse>, Status> {
     let request = GetRecursiveRepositoryStatuses {
         root: absolute_path(request.root, "root")?,
         scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
@@ -43,7 +43,9 @@ pub(super) async fn get_recursive(
             .await?
             .map_err(recursive_repository_statuses_error)?;
 
-    Ok(Response::new(statuses_response(&results)))
+    Ok(Response::new(v1::GetRecursiveRepositoryStatusesResponse {
+        results: status_results(&results),
+    }))
 }
 
 fn recursive_repository_statuses_error(error: GetRecursiveRepositoryStatusesError) -> Status {
@@ -56,10 +58,8 @@ fn recursive_repository_statuses_error(error: GetRecursiveRepositoryStatusesErro
     }
 }
 
-pub(crate) fn statuses_response(results: &[StatusResult]) -> v1::RepositoryStatusesResponse {
-    v1::RepositoryStatusesResponse {
-        results: results.iter().map(status_result).collect(),
-    }
+pub(crate) fn status_results(results: &[StatusResult]) -> Vec<v1::RepositoryStatusResult> {
+    results.iter().map(status_result).collect()
 }
 
 fn status_result(result: &StatusResult) -> v1::RepositoryStatusResult {

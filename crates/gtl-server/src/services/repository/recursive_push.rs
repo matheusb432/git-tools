@@ -17,8 +17,8 @@ const MAX_REPOSITORIES_PER_REQUEST: usize = 512;
 
 pub(super) async fn plan(
     state: AppState,
-    request: v1::PlanRecursivePushRequest,
-) -> Result<Response<v1::PlanRecursivePushResponse>, Status> {
+    request: v1::PlanRecursiveRepositoryPushRequest,
+) -> Result<Response<v1::PlanRecursiveRepositoryPushResponse>, Status> {
     let request = PlanRecursivePush {
         root: absolute_path(request.root, "root")?,
     };
@@ -27,23 +27,25 @@ pub(super) async fn plan(
         .map_err(|error| unexpected(error, "plan recursive repository push"))?;
     let outcome = match result {
         SubreposPlan::Ready(targets) => {
-            v1::plan_recursive_push_response::Outcome::Ready(v1::RecursivePushPlan {
+            v1::plan_recursive_repository_push_response::Outcome::Ready(v1::RecursivePushPlan {
                 targets: targets.into_iter().map(wire_target).collect(),
             })
         }
         SubreposPlan::Refused(detail) => {
-            v1::plan_recursive_push_response::Outcome::Refused(v1::OperationDetail { detail })
+            v1::plan_recursive_repository_push_response::Outcome::Refused(v1::OperationDetail {
+                detail,
+            })
         }
     };
-    Ok(Response::new(v1::PlanRecursivePushResponse {
+    Ok(Response::new(v1::PlanRecursiveRepositoryPushResponse {
         outcome: Some(outcome),
     }))
 }
 
 pub(super) async fn execute(
     state: AppState,
-    request: v1::ExecuteRecursivePushRequest,
-) -> Result<Response<v1::ExecuteRecursivePushResponse>, Status> {
+    request: v1::ExecuteRecursiveRepositoryPushRequest,
+) -> Result<Response<v1::ExecuteRecursiveRepositoryPushResponse>, Status> {
     if request.targets.len() > MAX_REPOSITORIES_PER_REQUEST {
         return Err(Status::resource_exhausted(format!(
             "targets cannot contain more than {MAX_REPOSITORIES_PER_REQUEST} entries"
@@ -84,7 +86,7 @@ pub(super) async fn execute(
             }
         })
         .collect();
-    Ok(Response::new(v1::ExecuteRecursivePushResponse {
+    Ok(Response::new(v1::ExecuteRecursiveRepositoryPushResponse {
         status: status as i32,
         results,
     }))
