@@ -229,6 +229,7 @@ mod tests {
             RenderOptions::DEFAULT,
             true,
             DiffExclusions::new([(crate::utils::project_name("repo"), vec!["md"])], None),
+            gtl_models::settings::PushAllExclusions::default(),
         ));
 
         render_merge_diff::execute(

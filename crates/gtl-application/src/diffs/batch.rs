@@ -106,7 +106,13 @@ mod tests {
     }
 
     fn settings(exclusions: DiffExclusions) -> UserSettings {
-        UserSettings::new(None, RenderOptions::DEFAULT, true, exclusions)
+        UserSettings::new(
+            None,
+            RenderOptions::DEFAULT,
+            true,
+            exclusions,
+            gtl_models::settings::PushAllExclusions::default(),
+        )
     }
 
     #[test]

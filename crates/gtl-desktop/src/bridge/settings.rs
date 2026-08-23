@@ -105,12 +105,10 @@ mod tests {
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             false,
             DiffExclusions::new(
-                [
-                    (project_name("defaults"), vec!["md"]),
-                    (project_name("git-tools"), vec!["lock", "js"]),
-                ],
-                None,
+                [(project_name("git-tools"), vec!["lock", "js"])],
+                Some(vec!["md"]),
             ),
+            gtl_models::settings::PushAllExclusions::default(),
         );
 
         let mapped = to_user_settings(&settings, Some("/config/git-tools.toml".into()));

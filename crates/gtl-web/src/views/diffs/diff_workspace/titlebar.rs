@@ -151,7 +151,7 @@ fn exclusion_label(exclusions: &ViewerAppliedExclusions) -> String {
 }
 
 fn exclusion_tooltip(exclusions: &ViewerAppliedExclusions) -> String {
-    let mut tooltip = String::from("Hidden by git-tools config [diff.exclude]:");
+    let mut tooltip = String::from("Hidden by git-tools config diff.exclude:");
     for path in &exclusions.hidden_paths {
         tooltip.push('\n');
         tooltip.push_str(path.to_string_lossy().as_ref());

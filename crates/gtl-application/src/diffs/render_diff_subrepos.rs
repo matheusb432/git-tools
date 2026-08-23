@@ -261,6 +261,7 @@ diff --git a/notes.md b/notes.md\n\
             RenderOptions::DEFAULT,
             true,
             DiffExclusions::new([(crate::utils::project_name("repo-a"), vec!["md"])], None),
+            gtl_models::settings::PushAllExclusions::default(),
         ));
         let store = InMemoryArtifactStore::default();
 

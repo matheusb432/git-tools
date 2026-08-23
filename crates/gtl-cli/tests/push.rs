@@ -1,4 +1,9 @@
-use std::{path::PathBuf, process};
+use std::{
+    env,
+    os::unix::fs::PermissionsExt as _,
+    path::{Path, PathBuf},
+    process,
+};
 
 use anyhow::{Context as _, Result, ensure};
 use assert_cmd::Command;
@@ -94,6 +99,31 @@ impl PushFixture {
         self.temporary.path().join(name)
     }
 
+    fn configure_managed_projects(&self) -> Result<()> {
+        let bin = self.temporary.path().join("bin");
+        std::fs::create_dir_all(&bin).context("create fixture binary directory")?;
+        let sample_project = bin.join("sample_project");
+        std::fs::write(
+            &sample_project,
+            r#"#!/bin/sh
+printf '%s' '[{"id":"REP","title":"repo","mux_session_name":"rep","source":{"kind":"directory","value":"~/repo"},"git_remote":null,"is_paused":false,"affiliation":"personal","color":null,"groups":[]}]'
+"#,
+        )
+        .context("write fixture sample_project executable")?;
+        std::fs::set_permissions(&sample_project, std::fs::Permissions::from_mode(0o755))
+            .context("make fixture sample_project executable")?;
+
+        let current_path = env::var_os("PATH").context("PATH is configured")?;
+        let path = env::join_paths(std::iter::once(bin).chain(env::split_paths(&current_path)))
+            .context("compose fixture PATH")?;
+        // This integration-test binary has one test, so no other test can observe these values.
+        unsafe {
+            env::set_var("HOME", self.temporary.path());
+            env::set_var("PATH", path);
+        }
+        Ok(())
+    }
+
     fn commits_unpushed_count(&self) -> Result<usize> {
         self.git(&["rev-list", "--count", "@{u}..HEAD"])?
             .parse()
@@ -101,9 +131,22 @@ impl PushFixture {
     }
 }
 
+fn managed_report(fixture: &PushFixture, config: &Path) -> Result<serde_json::Value> {
+    let output = fixture
+        .run(&["push", "--all", "--dry", "--json"])
+        .env("GIT_TOOLS_CONFIG", config)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    serde_json::from_slice(&output).context("parse managed push report")
+}
+
 #[test]
-fn push_confirmation_can_be_rejected_then_disabled() -> Result<()> {
+fn push_modes_apply_exclusions_only_to_push_all() -> Result<()> {
     let fixture = PushFixture::new()?;
+    fixture.configure_managed_projects()?;
     let config = fixture.config_path("config.toml");
     let _server = common::ServerHarness::start(Some(&config))?;
 
@@ -116,15 +159,58 @@ fn push_confirmation_can_be_rejected_then_disabled() -> Result<()> {
         .stderr(contains("pass --yes"));
     assert_eq!(fixture.commits_unpushed_count()?, 1);
 
-    std::fs::write(&config, "[push]\nconfirm = false\n").context("write fixture config")?;
+    let report = managed_report(&fixture, &config)?;
+    assert_eq!(report["Selected"][0]["Name"], "repo");
+    assert_eq!(report["Selected"][0]["Status"], "would-push");
+    assert_eq!(report["Excluded"], serde_json::json!([]));
+
+    std::fs::write(
+        &config,
+        r#"
+[[projects]]
+name = "unknown"
+excluded_from_push_all = true
+"#,
+    )
+    .context("write unknown exclusion config")?;
+    let report = managed_report(&fixture, &config)?;
+    assert_eq!(report["Selected"][0]["Name"], "repo");
+    assert_eq!(report["Excluded"], serde_json::json!([]));
+
+    std::fs::write(
+        &config,
+        r#"
+[push]
+confirm = false
+
+[[projects]]
+name = "repo"
+excluded_from_push_all = true
+"#,
+    )
+    .context("write fixture config")?;
+    let report = managed_report(&fixture, &config)?;
+    assert_eq!(report["Selected"], serde_json::json!([]));
+    assert_eq!(report["Excluded"], serde_json::json!(["repo"]));
+    assert_eq!(fixture.commits_unpushed_count()?, 1);
+
     fixture
         .run(&["p"])
-        .env("GIT_TOOLS_CONFIG", config)
+        .env("GIT_TOOLS_CONFIG", &config)
         .assert()
         .success()
         .stdout(contains("review before pushing").not())
         .stdout(contains("push: pushed 1 commit(s)"))
         .stderr(contains("pass --yes").not());
     assert_eq!(fixture.commits_unpushed_count()?, 0);
+
+    let recursive = PushFixture::new()?;
+    recursive
+        .run(&["push", "--recursive", "--yes"])
+        .env("GIT_TOOLS_CONFIG", config)
+        .assert()
+        .success()
+        .stdout(contains("1 repos: 1 pushed"));
+    assert_eq!(recursive.commits_unpushed_count()?, 0);
     Ok(())
 }

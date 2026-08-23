@@ -2,7 +2,9 @@ use std::{error::Error, time::Duration};
 
 use gtl_wire::v1::{
     DiffTarget, Empty, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
-    GetWorktreeBaseRequest, RenderDiffRequest, diff_service_client::DiffServiceClient, diff_target,
+    GetWorktreeBaseRequest, PushProjectRepositoriesRequest, RenderDiffRequest,
+    diff_service_client::DiffServiceClient, diff_target,
+    project_service_client::ProjectServiceClient,
     repository_service_client::RepositoryServiceClient,
     worktree_service_client::WorktreeServiceClient,
 };
@@ -60,6 +62,27 @@ async fn validates_application_requests_through_the_generated_client() -> TestRe
         .expect_err("relative working directory must fail");
 
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+#[serial(server_tracing)]
+async fn rejects_map_based_diff_settings_before_managed_push_dependencies() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let settings_path = directory.path().join("config.toml");
+    std::fs::write(&settings_path, "[diff.exclude]\ndefaults = [\"md\"]\n")?;
+    let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
+    let mut client =
+        ProjectServiceClient::with_interceptor(server.channel(), server.authorization());
+
+    let error = client
+        .push_project_repositories(PushProjectRepositoriesRequest { dry_run: true })
+        .await
+        .expect_err("unsupported settings shape must fail");
+
+    assert_eq!(error.code(), tonic::Code::FailedPrecondition);
+    assert_eq!(error.message(), "user settings are invalid");
     server.stop().await?;
     Ok(())
 }

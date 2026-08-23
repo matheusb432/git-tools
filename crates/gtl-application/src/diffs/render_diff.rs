@@ -276,7 +276,13 @@ mod tests {
     }
 
     fn settings(theme: Option<Theme>, exclusions: DiffExclusions) -> UserSettings {
-        UserSettings::new(theme, RenderOptions::DEFAULT, true, exclusions)
+        UserSettings::new(
+            theme,
+            RenderOptions::DEFAULT,
+            true,
+            exclusions,
+            gtl_models::settings::PushAllExclusions::default(),
+        )
     }
 
     fn range_key(base_id: &str, head_id: &str) -> ArtifactRangeKey {
@@ -351,14 +357,8 @@ mod tests {
         let app_settings = FixedUserSettingsStore::new(settings(
             Some(Theme::Noir),
             DiffExclusions::new(
-                [
-                    (crate::utils::project_name("repo"), vec!["md".to_string()]),
-                    (
-                        crate::utils::project_name("defaults"),
-                        vec!["txt".to_string()],
-                    ),
-                ],
-                None,
+                [(crate::utils::project_name("repo"), vec!["md".to_string()])],
+                Some(vec!["txt".to_string()]),
             ),
         ));
 

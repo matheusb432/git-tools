@@ -368,7 +368,7 @@ fn run_push_managed(args: PushArgs) -> ExitCode {
     } = args;
     let interactive = confirm::stdin_is_terminal();
     if let Some(message) = message {
-        let run = commands::managed::run_commit_all(&ManagedOptions {
+        let run = commands::managed::run_commit_for_push_all(&ManagedOptions {
             dry,
             output: ManagedOutput::from_flags(json, false),
             message_for_all: Some(message),
@@ -739,6 +739,7 @@ fn format_push_subrepos_result(
             RepoOutcome::Failed(_) => PushOutcome::Failed,
         }),
         false,
+        0,
     );
     let exit_code = match result.status {
         Status::Ok => 0,

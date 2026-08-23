@@ -85,6 +85,13 @@ pub struct PushPullResult {
     pub detail: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "PascalCase")]
+struct PushAllReport<'a> {
+    selected: &'a [PushPullResult],
+    excluded: &'a [ProjectName],
+}
+
 fn exit_from_grpc(exit: v1::ProjectSyncExit) -> anyhow::Result<ManagedExit> {
     match exit {
         v1::ProjectSyncExit::Clean => Ok(ManagedExit::Clean),
@@ -148,6 +155,16 @@ fn finish(
         Ok(results) => results,
         Err(error) => return managed_error(&error),
     };
+    let Ok(excluded) = response
+        .excluded_project_names
+        .into_iter()
+        .map(ProjectName::try_new)
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return managed_error(&anyhow::anyhow!(
+            "gtl-server returned an empty excluded project name"
+        ));
+    };
     let exit = match v1::ProjectSyncExit::try_from(response.exit)
         .map_err(|_| anyhow::anyhow!("gtl-server returned an unknown project sync exit"))
         .and_then(exit_from_grpc)
@@ -160,6 +177,7 @@ fn finish(
         options.dry,
         options.output.is_json(),
         &results,
+        &excluded,
         exit,
     ) {
         Ok(stdout) => stdout,
@@ -175,13 +193,15 @@ fn finish(
 
 struct ProjectRepositorySyncSummary {
     results: Vec<v1::RepositorySyncResult>,
+    excluded_project_names: Vec<String>,
     exit: i32,
 }
 
 impl From<v1::PushProjectRepositoriesResponse> for ProjectRepositorySyncSummary {
     fn from(response: v1::PushProjectRepositoriesResponse) -> Self {
         Self {
-            results: response.results,
+            results: response.selected,
+            excluded_project_names: response.excluded_project_names,
             exit: response.exit,
         }
     }
@@ -191,6 +211,7 @@ impl From<v1::PullProjectRepositoriesResponse> for ProjectRepositorySyncSummary 
     fn from(response: v1::PullProjectRepositoriesResponse) -> Self {
         Self {
             results: response.results,
+            excluded_project_names: Vec::new(),
             exit: response.exit,
         }
     }
@@ -230,6 +251,7 @@ fn format_push_pull(
     dry: bool,
     json: bool,
     results: &[PushPullResult],
+    excluded: &[ProjectName],
     exit: ManagedExit,
 ) -> Result<String, PushPullFormatError> {
     let push_outcomes = match operation {
@@ -243,7 +265,14 @@ fn format_push_pull(
     };
 
     if json {
-        return serde_json::to_string_pretty(results).map_err(PushPullFormatError::SerializeJson);
+        return match operation {
+            SyncOperation::Push => serde_json::to_string_pretty(&PushAllReport {
+                selected: results,
+                excluded,
+            }),
+            SyncOperation::Pull => serde_json::to_string_pretty(results),
+        }
+        .map_err(PushPullFormatError::SerializeJson);
     }
 
     let mut out = String::new();
@@ -254,6 +283,9 @@ fn format_push_pull(
             operation.label().to_string()
         };
         let _ = writeln!(out, "{verb} {} {}", operation.arrow(), result.name);
+    }
+    for project in excluded {
+        let _ = writeln!(out, "exclude -> {project}");
     }
     out.push('\n');
     let _ = writeln!(
@@ -270,7 +302,7 @@ fn format_push_pull(
         );
     }
     if let Some(outcomes) = push_outcomes {
-        let summary = PushSummary::from_outcomes(outcomes, dry);
+        let summary = PushSummary::from_outcomes(outcomes, dry, excluded.len());
         let _ = write!(out, "\n{}", summary.render(exit.code()));
     } else {
         let fail = results
@@ -305,5 +337,88 @@ fn push_outcome(result: &PushPullResult) -> Result<PushOutcome, PushPullFormatEr
                 status: result.status,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn project(name: &str) -> ProjectName {
+        ProjectName::try_new(name).expect("project name")
+    }
+
+    fn selected(status: RepoSyncStatus) -> PushPullResult {
+        PushPullResult {
+            name: project("git-tools"),
+            branch: Some(BranchName::try_new("main").expect("branch name")),
+            status,
+            detail: "ahead by 1".into(),
+        }
+    }
+
+    #[test]
+    fn dry_push_text_reports_selected_and_excluded_repositories() {
+        let output = format_push_pull(
+            SyncOperation::Push,
+            true,
+            false,
+            &[selected(RepoSyncStatus::WouldPush)],
+            &[project("sample_project")],
+            ManagedExit::Clean,
+        )
+        .expect("push output formats");
+
+        assert!(output.contains("dry push -> git-tools"));
+        assert!(output.contains("exclude -> sample_project"));
+        assert!(output.contains("git-tools                      main               would-push"));
+        assert!(output.contains("exit 0  -  2 repos: 1 would push, 0 skipped, 1 excluded"));
+    }
+
+    #[test]
+    fn push_json_separates_selected_results_from_excluded_names() {
+        let output = format_push_pull(
+            SyncOperation::Push,
+            false,
+            true,
+            &[selected(RepoSyncStatus::Pushed)],
+            &[project("sample_project")],
+            ManagedExit::Clean,
+        )
+        .expect("push output formats");
+
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&output).expect("valid JSON"),
+            json!({
+                "Selected": [{
+                    "Name": "git-tools",
+                    "Branch": "main",
+                    "Status": "pushed",
+                    "Detail": "ahead by 1"
+                }],
+                "Excluded": ["sample_project"]
+            })
+        );
+    }
+
+    #[test]
+    fn pull_json_keeps_the_existing_result_array() {
+        let output = format_push_pull(
+            SyncOperation::Pull,
+            false,
+            true,
+            &[selected(RepoSyncStatus::Pulled)],
+            &[],
+            ManagedExit::Clean,
+        )
+        .expect("pull output formats");
+
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&output)
+                .expect("valid JSON")
+                .is_array()
+        );
     }
 }

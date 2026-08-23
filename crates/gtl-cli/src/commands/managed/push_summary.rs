@@ -17,6 +17,7 @@ pub(crate) struct PushSummary {
     skipped: usize,
     failed: usize,
     warned: usize,
+    excluded: usize,
     dry: bool,
 }
 
@@ -24,13 +25,15 @@ impl PushSummary {
     pub(crate) fn from_outcomes(
         outcomes: impl IntoIterator<Item = PushOutcome>,
         dry: bool,
+        excluded: usize,
     ) -> Self {
         let mut summary = Self {
-            total: 0,
+            total: excluded,
             pushed: 0,
             skipped: 0,
             failed: 0,
             warned: 0,
+            excluded,
             dry,
         };
         for outcome in outcomes {
@@ -57,6 +60,9 @@ impl PushSummary {
         if self.warned > 0 {
             let _ = write!(output, ", {} warn", self.warned);
         }
+        if self.excluded > 0 {
+            let _ = write!(output, ", {} excluded", self.excluded);
+        }
         output
     }
 }
@@ -74,6 +80,7 @@ mod tests {
                 PushOutcome::Skipped,
             ],
             false,
+            0,
         );
         assert_eq!(summary.pushed, 2);
         assert_eq!(summary.failed, 0);
@@ -90,6 +97,7 @@ mod tests {
                 PushOutcome::Warned,
             ],
             false,
+            0,
         );
         assert_eq!(
             summary.render(1),
@@ -99,7 +107,7 @@ mod tests {
 
     #[test]
     fn failed_only_summary_omits_zero_warn_count() {
-        let summary = PushSummary::from_outcomes([PushOutcome::Failed], false);
+        let summary = PushSummary::from_outcomes([PushOutcome::Failed], false, 0);
         assert_eq!(summary.failed, 1);
         assert_eq!(
             summary.render(1),
@@ -110,7 +118,7 @@ mod tests {
 
     #[test]
     fn warned_only_summary_omits_zero_fail_count() {
-        let summary = PushSummary::from_outcomes([PushOutcome::Warned], false);
+        let summary = PushSummary::from_outcomes([PushOutcome::Warned], false, 0);
         assert_eq!(
             summary.render(1),
             "exit 1  -  1 repos: 0 pushed, 0 skipped, 1 warn"
@@ -120,10 +128,20 @@ mod tests {
 
     #[test]
     fn dry_summary_uses_would_push_and_keeps_zero_pushed_visible() {
-        let summary = PushSummary::from_outcomes([PushOutcome::Skipped], true);
+        let summary = PushSummary::from_outcomes([PushOutcome::Skipped], true, 0);
         assert_eq!(
             summary.render(0),
             "exit 0  -  1 repos: 0 would push, 1 skipped"
+        );
+    }
+
+    #[test]
+    fn excluded_repositories_extend_the_total_and_append_a_distinct_count() {
+        let summary = PushSummary::from_outcomes([PushOutcome::Pushed], true, 2);
+
+        assert_eq!(
+            summary.render(0),
+            "exit 0  -  3 repos: 1 would push, 0 skipped, 2 excluded"
         );
     }
 }

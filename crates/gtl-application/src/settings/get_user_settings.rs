@@ -48,12 +48,10 @@ mod tests {
             RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
             false,
             DiffExclusions::new(
-                [
-                    (crate::utils::project_name("defaults"), vec!["md"]),
-                    (crate::utils::project_name("git-tools"), vec!["js"]),
-                ],
-                None,
+                [(crate::utils::project_name("git-tools"), vec!["js"])],
+                Some(vec!["md"]),
             ),
+            gtl_models::settings::PushAllExclusions::default(),
         );
         let store = FixedUserSettingsStore::new(settings.clone());
 

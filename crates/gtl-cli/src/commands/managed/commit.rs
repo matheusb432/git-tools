@@ -80,6 +80,17 @@ fn action_wire(action: CommitAction) -> &'static str {
 }
 
 pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
+    run_commit_all_with_scope(options, false)
+}
+
+pub fn run_commit_for_push_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
+    run_commit_all_with_scope(options, true)
+}
+
+fn run_commit_all_with_scope(
+    options: &ManagedOptions,
+    use_push_all_exclusions: bool,
+) -> ManagedRun<CommitResult> {
     if let Some(message) = &options.message_for_all
         && message.trim().is_empty()
     {
@@ -91,12 +102,20 @@ pub fn run_commit_all(options: &ManagedOptions) -> ManagedRun<CommitResult> {
     }
 
     let execution = ServerClient::connect().and_then(|client| {
-        client.commit_project_repositories(v1::CommitProjectRepositoriesRequest {
-            dry_run: options.dry,
-            message: options.message_for_all.clone(),
-        })
+        client.commit_project_repositories(commit_request(options, use_push_all_exclusions))
     });
     project_commit_execution(options.output.is_json(), execution)
+}
+
+fn commit_request(
+    options: &ManagedOptions,
+    use_push_all_exclusions: bool,
+) -> v1::CommitProjectRepositoriesRequest {
+    v1::CommitProjectRepositoriesRequest {
+        dry_run: options.dry,
+        message: options.message_for_all.clone(),
+        use_push_all_exclusions,
+    }
 }
 
 fn usage_failure(message: &str) -> ManagedRun<CommitResult> {
@@ -241,6 +260,19 @@ mod tests {
         assert_eq!(action_wire(CommitAction::Skipped), "skipped");
         assert_eq!(action_wire(CommitAction::Committed), "committed");
         assert_eq!(action_wire(CommitAction::Fail), "fail");
+    }
+
+    #[test]
+    fn push_all_commit_request_enables_push_exclusions_only_for_that_scope() {
+        let options = ManagedOptions {
+            dry: true,
+            output: super::super::ManagedOutput::Json,
+            message_for_all: Some("save".into()),
+            interactive: false,
+        };
+
+        assert!(!commit_request(&options, false).use_push_all_exclusions);
+        assert!(commit_request(&options, true).use_push_all_exclusions);
     }
 
     #[test]

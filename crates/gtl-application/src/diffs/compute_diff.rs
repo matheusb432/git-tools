@@ -282,7 +282,13 @@ index 333..444 100644\n\
     }
 
     fn settings(exclusions: DiffExclusions) -> UserSettings {
-        UserSettings::new(None, RenderOptions::DEFAULT, true, exclusions)
+        UserSettings::new(
+            None,
+            RenderOptions::DEFAULT,
+            true,
+            exclusions,
+            gtl_models::settings::PushAllExclusions::default(),
+        )
     }
 
     #[test]
@@ -323,7 +329,7 @@ index 333..444 100644\n\
         );
         assert!(
             response.notes.contains(&Note::info(
-                "diff-artifact: 1 file(s) hidden by config [diff.exclude] (md)"
+                "diff-artifact: 1 file(s) hidden by config diff.exclude (md)"
             )),
             "exclusion note missing: {:?}",
             response.notes

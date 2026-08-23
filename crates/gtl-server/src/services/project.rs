@@ -1,9 +1,10 @@
 use gtl_application::{
+    ports::UserSettingsStore as _,
     projects::{
         RepoSyncResult, SyncExit, SyncStatus,
         commit_repositories::{
             self, CommitAction, CommitExit, CommitRepositories, CommitRepositoriesError,
-            CommitRepositoriesMode, CommitRepositoriesOk, CommitResult,
+            CommitRepositoriesMode, CommitRepositoriesOk, CommitRepositoriesScope, CommitResult,
         },
         prune_branches::{
             self, PruneAction, PruneBranches, PruneBranchesError, PruneBranchesOk, PruneExit,
@@ -16,12 +17,16 @@ use gtl_application::{
 };
 use gtl_models::{
     git::{BranchName, GitEffectMode},
+    paths::ProjectName,
     repository::traversal::RepositoryTarget,
 };
 use gtl_wire::v1::{self, project_service_server::ProjectService};
 use tonic::{Request, Response, Status};
 
-use super::{project_client_error, repository::status_results, run_blocking, unexpected};
+use super::{
+    project_client_error, repository::status_results, run_blocking, unexpected,
+    user_settings_load_error,
+};
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -49,13 +54,16 @@ impl ProjectService for ProjectApi {
             &state.git,
             &state.projects,
             &state.clock,
+            &state.user_settings,
         )
         .await
         .map_err(push_error)?;
 
-        Ok(Response::new(
-            sync_response(result.results, result.exit).into(),
-        ))
+        Ok(Response::new(push_response(
+            result.selected,
+            result.excluded,
+            result.exit,
+        )))
     }
 
     async fn pull_project_repositories(
@@ -84,6 +92,18 @@ impl ProjectService for ProjectApi {
     ) -> Result<Response<v1::CommitProjectRepositoriesResponse>, Status> {
         let request = request.into_inner();
         let state = self.state.clone();
+        let scope = if request.use_push_all_exclusions {
+            CommitRepositoriesScope::PushAll {
+                exclusions: state
+                    .user_settings
+                    .load()
+                    .map_err(user_settings_load_error)?
+                    .push_all_exclusions()
+                    .clone(),
+            }
+        } else {
+            CommitRepositoriesScope::All
+        };
         let repos = state
             .projects
             .list_projects()
@@ -97,7 +117,7 @@ impl ProjectService for ProjectApi {
             }
         };
         let result = run_blocking(move || {
-            commit_repositories::execute(CommitRepositories { repos, mode }, &state.git)
+            commit_repositories::execute(CommitRepositories { repos, mode, scope }, &state.git)
         })
         .await?;
 
@@ -167,6 +187,7 @@ const fn effect_mode(dry_run: bool) -> GitEffectMode {
 fn push_error(error: PushRepositoriesError) -> Status {
     match error {
         PushRepositoriesError::ProjectClient(error) => project_client_error(&error),
+        PushRepositoriesError::Settings(error) => user_settings_load_error(error),
         PushRepositoriesError::Unexpected(error) => unexpected(error, "push project repositories"),
     }
 }
@@ -186,21 +207,28 @@ struct ProjectRepositorySyncSummary {
 fn sync_response(results: Vec<RepoSyncResult>, exit: SyncExit) -> ProjectRepositorySyncSummary {
     ProjectRepositorySyncSummary {
         results: results.into_iter().map(sync_result).collect(),
-        exit: match exit {
-            SyncExit::Clean => v1::ProjectSyncExit::Clean,
-            SyncExit::Warn => v1::ProjectSyncExit::Warning,
-            SyncExit::Fail => v1::ProjectSyncExit::Failed,
-        } as i32,
+        exit: sync_exit(exit),
     }
 }
 
-impl From<ProjectRepositorySyncSummary> for v1::PushProjectRepositoriesResponse {
-    fn from(response: ProjectRepositorySyncSummary) -> Self {
-        Self {
-            results: response.results,
-            exit: response.exit,
-        }
+fn push_response(
+    selected: Vec<RepoSyncResult>,
+    excluded: Vec<ProjectName>,
+    exit: SyncExit,
+) -> v1::PushProjectRepositoriesResponse {
+    v1::PushProjectRepositoriesResponse {
+        selected: selected.into_iter().map(sync_result).collect(),
+        exit: sync_exit(exit),
+        excluded_project_names: excluded.into_iter().map(|name| name.to_string()).collect(),
     }
+}
+
+fn sync_exit(exit: SyncExit) -> i32 {
+    (match exit {
+        SyncExit::Clean => v1::ProjectSyncExit::Clean,
+        SyncExit::Warn => v1::ProjectSyncExit::Warning,
+        SyncExit::Fail => v1::ProjectSyncExit::Failed,
+    }) as i32
 }
 
 impl From<ProjectRepositorySyncSummary> for v1::PullProjectRepositoriesResponse {
@@ -389,27 +417,42 @@ fn prune_failure(failure: PruneFailure) -> v1::PruneFailure {
 #[cfg(test)]
 mod tests {
     use gtl_application::projects::commit_repositories::CommitOutcome;
-    use gtl_models::{git::BranchName, paths::ProjectName};
+    use gtl_models::git::BranchName;
 
     use super::*;
 
     #[test]
     fn sync_projection_preserves_the_closed_status_and_exit() {
-        let response = v1::PushProjectRepositoriesResponse::from(sync_response(
+        let response = push_response(
             vec![RepoSyncResult {
                 name: ProjectName::try_new("git-tools").unwrap(),
                 branch: Some(BranchName::try_new("main").unwrap()),
                 status: SyncStatus::WouldPush,
                 detail: "ahead by 2".into(),
             }],
+            vec![ProjectName::try_new("sample_project").unwrap()],
             SyncExit::Warn,
-        ));
+        );
 
         assert_eq!(response.exit(), v1::ProjectSyncExit::Warning);
         assert_eq!(
-            response.results[0].status(),
+            response.selected[0].status(),
             v1::RepositorySyncStatus::WouldPush
         );
+        assert_eq!(response.excluded_project_names, ["sample_project"]);
+    }
+
+    #[test]
+    fn invalid_push_settings_map_to_failed_precondition() {
+        let status = push_error(PushRepositoriesError::Settings(
+            gtl_application::ports::UserSettingsLoadError::InvalidConfiguration {
+                path: "/tmp/config.toml".into(),
+                reason: "bad project settings".into(),
+            },
+        ));
+
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+        assert_eq!(status.message(), "user settings are invalid");
     }
 
     #[test]

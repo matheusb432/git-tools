@@ -21,7 +21,7 @@ use gtl_models::{
     diffs::DiffExclusions,
     git::GitRange,
     paths::{ProjectName, RepositoryRelativePath, RepositoryRoot},
-    settings::UserSettings,
+    settings::{PushAllExclusions, UserSettings},
     viewer::RenderOptions,
 };
 
@@ -67,15 +67,10 @@ fn assemble_excludes_extensions_at_the_git_level() {
         RenderOptions::DEFAULT,
         true,
         DiffExclusions::new(
-            [
-                (ProjectName::try_new(project).unwrap(), vec!["md"]),
-                (
-                    ProjectName::try_from(DiffExclusions::DEFAULT_KEY).unwrap(),
-                    vec!["txt"],
-                ),
-            ],
-            None,
+            [(ProjectName::try_new(project).unwrap(), vec!["md"])],
+            Some(vec!["txt"]),
         ),
+        PushAllExclusions::default(),
     );
     let response = compute_diff::execute(
         ComputeDiff {

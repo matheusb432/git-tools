@@ -155,7 +155,8 @@ pub struct PushArgs {
     /// Commit message. When present, changes are staged and committed before pushing.
     #[arg(allow_hyphen_values = true, conflicts_with = "recursive")]
     pub message: Option<String>,
-    /// Operate on every active project listed by sample_project.
+    /// Operate on active sample_project projects except config entries with
+    /// `excluded_from_push_all = true`.
     #[arg(long, conflicts_with = "recursive")]
     pub all: bool,
     /// Operate on the current repo plus nested subrepos under the current directory.
@@ -442,7 +443,8 @@ pub struct ManagedArgs {
     /// Preview actions without performing them.
     #[arg(long, requires = "all")]
     pub dry: bool,
-    /// Emit machine-readable JSON instead of human text.
+    /// Emit machine-readable JSON instead of human text. Managed push reports
+    /// separate `Selected` results and `Excluded` project names.
     #[arg(long, requires = "all")]
     pub json: bool,
 }
@@ -555,6 +557,21 @@ mod tests {
     #[test]
     fn parse_args_push_recursive_rejects_message() {
         assert!(Cli::parse_args(&["push".into(), "-r".into(), "save work".into()]).is_err());
+    }
+
+    #[test]
+    fn push_help_documents_config_exclusions_and_json_groups() {
+        use clap::CommandFactory as _;
+
+        let mut command = Cli::command();
+        let push = command
+            .find_subcommand_mut("push")
+            .expect("push subcommand exists");
+        let help = push.render_long_help().to_string();
+
+        assert!(help.contains("excluded_from_push_all = true"));
+        assert!(help.contains("Selected"));
+        assert!(help.contains("Excluded"));
     }
 
     #[test]

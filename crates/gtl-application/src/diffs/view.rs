@@ -33,7 +33,7 @@ pub struct View {
     pub cmd: Cmd,
     pub commits_label: String,
     pub foot: Foot,
-    /// `Some` when the config's `[diff.exclude]` filter hid files from this
+    /// `Some` when the config's `diff.exclude` filter hid files from this
     /// view — every surface must show it so hidden files never read as missing.
     pub exclusions: Option<AppliedExclusions>,
 }

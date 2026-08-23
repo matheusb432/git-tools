@@ -7,6 +7,7 @@ use gtl_models::{
     paths::ProjectName,
     projects::ProjectRepository,
     repository::working_tree::{ChangedFiles, CommitFile, DirtyState},
+    settings::PushAllExclusions,
 };
 
 use crate::{
@@ -19,6 +20,14 @@ use crate::{
 pub struct CommitRepositories {
     pub repos: Vec<ProjectRepository>,
     pub mode: CommitRepositoriesMode,
+    pub scope: CommitRepositoriesScope,
+}
+
+/// Selects standalone commit fan-out or the repository set eligible for `push --all`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommitRepositoriesScope {
+    All,
+    PushAll { exclusions: PushAllExclusions },
 }
 
 /// Selects previewing or applying project commits without admitting a dry run plus message.
@@ -224,7 +233,13 @@ pub fn execute(
     command: CommitRepositories,
     git: &impl GitClient,
 ) -> Result<CommitRepositoriesOk, CommitRepositoriesError> {
-    let CommitRepositories { repos, mode } = command;
+    let CommitRepositories { repos, mode, scope } = command;
+    let repos = match scope {
+        CommitRepositoriesScope::All => repos,
+        CommitRepositoriesScope::PushAll { exclusions } => {
+            super::select_push_all_repositories(repos, &exclusions).selected
+        }
+    };
     let mut results = Vec::with_capacity(repos.len());
     for repo in &repos {
         match commit_one(git, repo, &mode) {
@@ -377,11 +392,12 @@ mod tests {
     use gtl_models::{
         projects::ProjectRepository,
         repository::working_tree::{ChangedFiles, CommitFile},
+        settings::PushAllExclusions,
     };
 
     use super::{
         CommitAction, CommitExit, CommitFailureProgress, CommitOutcome, CommitRepositories,
-        CommitRepositoriesError, CommitRepositoriesMode, CommitResult,
+        CommitRepositoriesError, CommitRepositoriesMode, CommitRepositoriesScope, CommitResult,
     };
     use crate::{projects::commit_repositories, utils::ScriptedGitClient};
 
@@ -407,7 +423,30 @@ mod tests {
                     message: message.map(str::to_string),
                 }
             },
+            scope: CommitRepositoriesScope::All,
         }
+    }
+
+    #[test]
+    fn push_all_scope_excludes_repositories_before_git_inspection() {
+        let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
+        let result = commit_repositories::execute(
+            CommitRepositories {
+                repos: vec![repo("excluded"), repo("selected")],
+                mode: CommitRepositoriesMode::Apply {
+                    message: Some("save".into()),
+                },
+                scope: CommitRepositoriesScope::PushAll {
+                    exclusions: PushAllExclusions::new([crate::utils::project_name("excluded")]),
+                },
+            },
+            &git,
+        )
+        .expect("selected repository commit succeeds");
+
+        assert_eq!(result.results.len(), 1);
+        assert_eq!(result.results[0].name().as_str(), "selected");
+        assert_eq!(result.results[0].action(), CommitAction::Clean);
     }
 
     fn changed_files(status: &str, path: &str) -> ChangedFiles {

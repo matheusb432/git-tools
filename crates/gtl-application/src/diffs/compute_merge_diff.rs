@@ -173,6 +173,7 @@ index 333..444 100644\n\
             RenderOptions::DEFAULT,
             true,
             DiffExclusions::new([(project_name("repo"), vec!["md"])], None),
+            gtl_models::settings::PushAllExclusions::default(),
         ));
 
         let response = compute_merge_diff::execute(

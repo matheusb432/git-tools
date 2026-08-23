@@ -124,7 +124,13 @@ mod tests {
     };
 
     fn settings(theme: Theme, exclusions: DiffExclusions) -> UserSettings {
-        UserSettings::new(Some(theme), RenderOptions::DEFAULT, true, exclusions)
+        UserSettings::new(
+            Some(theme),
+            RenderOptions::DEFAULT,
+            true,
+            exclusions,
+            gtl_models::settings::PushAllExclusions::default(),
+        )
     }
 
     fn req(repos: Vec<RepoRef>) -> RenderProjectDiff {

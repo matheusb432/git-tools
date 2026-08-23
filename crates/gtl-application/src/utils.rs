@@ -28,7 +28,7 @@ use gtl_models::{
     },
     paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath, RepositoryRoot},
     projects::ProjectRepository,
-    settings::UserSettings,
+    settings::{PushAllExclusions, UserSettings},
     timestamps::MachineTimestamp,
     viewer::{RenderOptions, Theme},
 };
@@ -227,6 +227,7 @@ pub fn default_user_settings() -> UserSettings {
         RenderOptions::DEFAULT,
         true,
         DiffExclusions::default(),
+        PushAllExclusions::default(),
     )
 }
 

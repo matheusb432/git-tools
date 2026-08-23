@@ -1,10 +1,10 @@
 //! Per-project diff exclusions by file extension.
 //!
-//! Configured centrally (the user config's `[diff.exclude]` table, keyed by
-//! repo directory name), so a project never needs a config file in its own
-//! working tree. The view carries an [`AppliedExclusions`] summary whenever
-//! files were hidden, so every surface can show the filter instead of
-//! silently dropping files.
+//! Configured centrally through the user config's default `diff.exclude` list
+//! and named `[[projects]]` overrides, so a project never needs a config file
+//! in its own working tree. The view carries an [`AppliedExclusions`] summary
+//! whenever files were hidden, so every surface can show the filter instead
+//! of silently dropping files.
 
 use std::{collections::BTreeMap, path::Path};
 
@@ -110,33 +110,20 @@ pub struct DiffExclusions {
 }
 
 impl DiffExclusions {
-    pub const DEFAULT_KEY: &'static str = "defaults";
-
-    /// Builds the map from raw `(project, extensions)` pairs, normalizing each
-    /// set and dropping projects whose set normalizes to empty.
-    pub fn new<I, S>(config_keys: I, default_key: Option<&'static str>) -> Self
+    /// Builds project overrides and a default extension set from raw values.
+    pub fn new<I, S>(project_exclusions: I, default_exclusions: Option<Vec<S>>) -> Self
     where
         I: IntoIterator<Item = (ProjectName, Vec<S>)>,
         S: AsRef<str>,
     {
-        let default_key_effective = default_key.unwrap_or(Self::DEFAULT_KEY).to_string();
-        let mut default_exclusions: Option<ExcludedExtensions> = None;
-
         Self {
-            projects: config_keys
+            projects: project_exclusions
                 .into_iter()
-                .filter_map(|(project, raw)| {
-                    // TODO: study cleaner way to do this
-                    if project.as_str() == default_key_effective {
-                        default_exclusions = Some(ExcludedExtensions::new(raw));
-                        None
-                    } else {
-                        Some((project, ExcludedExtensions::new(raw)))
-                    }
-                })
-                .filter(|(_, extensions)| !extensions.is_empty())
+                .map(|(project, raw)| (project, ExcludedExtensions::new(raw)))
                 .collect(),
-            default_exclusions: default_exclusions.unwrap_or_default(),
+            default_exclusions: default_exclusions
+                .map(ExcludedExtensions::new)
+                .unwrap_or_default(),
         }
     }
 
@@ -163,9 +150,10 @@ impl DiffExclusions {
         self.projects.iter()
     }
 
-    /// Whether no project has exclusions.
+    /// Whether neither the default nor any project override excludes an extension.
     pub fn is_empty(&self) -> bool {
-        self.projects.is_empty()
+        self.default_exclusions.is_empty()
+            && self.projects.values().all(ExcludedExtensions::is_empty)
     }
 }
 
@@ -247,13 +235,13 @@ mod tests {
     }
 
     #[test]
-    fn from_projects_drops_projects_that_normalize_to_empty() {
+    fn from_projects_retains_an_explicit_empty_override() {
         let exclusions = DiffExclusions::new(
             [
                 (project("kept"), vec!["md"]),
                 (project("dropped"), vec!["", " . "]),
             ],
-            None,
+            Some(vec!["txt"]),
         );
         assert!(
             exclusions
@@ -265,18 +253,17 @@ mod tests {
                 .for_project_or_default(&project("dropped"))
                 .is_empty()
         );
+        assert!(exclusions.for_project(&project("dropped")).is_some());
     }
 
     #[test]
-    fn from_projects_with_default_key_separates_default_from_projects() {
-        let default_key = DiffExclusions::DEFAULT_KEY;
+    fn from_projects_keeps_default_exclusions_separate() {
         let exclusions = DiffExclusions::new(
             [
                 (project("proj1"), vec!["md"]),
-                (project(default_key), vec!["ts", "py"]),
                 (project("proj2"), vec!["ts"]),
             ],
-            Some(default_key),
+            Some(vec!["ts", "py"]),
         );
         assert!(
             exclusions
@@ -288,7 +275,6 @@ mod tests {
                 .for_project_or_default(&project("proj2"))
                 .matches(&path("a.ts"))
         );
-        assert!(exclusions.for_project(&project(default_key)).is_none());
         assert!(exclusions.for_project(&project("proj3")).is_none());
         assert!(
             exclusions
@@ -311,10 +297,9 @@ mod tests {
         let exclusions = DiffExclusions::new(
             [
                 (project("zeta"), vec!["rs"]),
-                (project(DiffExclusions::DEFAULT_KEY), vec!["md"]),
                 (project("alpha"), vec!["toml"]),
             ],
-            None,
+            Some(vec!["md"]),
         );
 
         assert_eq!(exclusions.default_exclusions().extensions(), ["md"]);

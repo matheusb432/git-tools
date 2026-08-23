@@ -1,7 +1,5 @@
 //! Serde values for the human-edited user-settings document.
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
 /// A serde value retained until infrastructure validates its TOML meaning.
@@ -21,6 +19,8 @@ pub struct UserSettingsDocument {
     pub push: Option<PushSettingsDocument>,
     #[serde(default)]
     pub diff: Option<DiffSettingsDocument>,
+    #[serde(default)]
+    pub projects: Vec<ProjectSettingsDocument>,
 }
 
 /// The `[push]` section of the user-settings file.
@@ -36,14 +36,28 @@ pub struct PushSettingsDocument {
 #[serde(deny_unknown_fields)]
 pub struct DiffSettingsDocument {
     #[serde(default)]
-    pub exclude: Option<BTreeMap<String, RawSettingValue>>,
+    pub exclude: Option<RawSettingValue>,
+}
+
+/// One entry in the `[[projects]]` settings array.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectSettingsDocument {
+    #[serde(default)]
+    pub name: Option<RawSettingValue>,
+    #[serde(default)]
+    pub excluded_from_push_all: Option<RawSettingValue>,
+    #[serde(default)]
+    pub diff: Option<DiffSettingsDocument>,
 }
 
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
-    use super::{DiffSettingsDocument, PushSettingsDocument, UserSettingsDocument};
+    use super::{
+        DiffSettingsDocument, ProjectSettingsDocument, PushSettingsDocument, UserSettingsDocument,
+    };
 
     #[test]
     fn document_serializes_the_settings_sections_and_raw_values() {
@@ -55,15 +69,15 @@ mod tests {
                 confirm: Some(json!(false)),
             }),
             diff: Some(DiffSettingsDocument {
-                exclude: Some(
-                    [
-                        ("defaults".to_owned(), json!(["md", "lock"])),
-                        ("git-tools".to_owned(), json!(["js"])),
-                    ]
-                    .into_iter()
-                    .collect(),
-                ),
+                exclude: Some(json!(["md", "lock"])),
             }),
+            projects: vec![ProjectSettingsDocument {
+                name: Some(json!("git-tools")),
+                excluded_from_push_all: Some(json!(true)),
+                diff: Some(DiffSettingsDocument {
+                    exclude: Some(json!(["js"])),
+                }),
+            }],
         };
 
         assert_eq!(
@@ -73,10 +87,12 @@ mod tests {
                 "layout": "split",
                 "density": "full",
                 "push": { "confirm": false },
-                "diff": { "exclude": {
-                    "defaults": ["md", "lock"],
-                    "git-tools": ["js"]
-                }}
+                "diff": { "exclude": ["md", "lock"] },
+                "projects": [{
+                    "name": "git-tools",
+                    "excluded_from_push_all": true,
+                    "diff": { "exclude": ["js"] }
+                }]
             })
         );
     }
@@ -88,7 +104,12 @@ mod tests {
             "layout": ["split"],
             "density": "diagonal",
             "push": { "confirm": "yes" },
-            "diff": { "exclude": { "git-tools": ["md", 3] } }
+            "diff": { "exclude": ["md", 3] },
+            "projects": [{
+                "name": 7,
+                "excluded_from_push_all": "yes",
+                "diff": { "exclude": ["rs", 3] }
+            }]
         }))
         .expect("raw settings document deserializes");
 
@@ -100,12 +121,13 @@ mod tests {
             Some(json!("yes"))
         );
         assert_eq!(
-            document
-                .diff
-                .expect("diff section is present")
-                .exclude
-                .expect("exclude table is present")["git-tools"],
-            json!(["md", 3])
+            document.diff.expect("diff section is present").exclude,
+            Some(json!(["md", 3]))
+        );
+        assert_eq!(document.projects[0].name, Some(json!(7)));
+        assert_eq!(
+            document.projects[0].excluded_from_push_all,
+            Some(json!("yes"))
         );
     }
 
@@ -119,6 +141,7 @@ mod tests {
         assert_eq!(document.density, None);
         assert_eq!(document.push, None);
         assert_eq!(document.diff, None);
+        assert!(document.projects.is_empty());
     }
 
     #[test]
@@ -129,5 +152,19 @@ mod tests {
         .expect_err("unknown setting must be rejected");
 
         assert!(error.to_string().contains("unknown field `confrm`"));
+    }
+
+    #[test]
+    fn unknown_project_settings_are_rejected_instead_of_silently_ignored() {
+        let error = serde_json::from_value::<UserSettingsDocument>(json!({
+            "projects": [{ "name": "git-tools", "exclude_from_push_all": true }]
+        }))
+        .expect_err("unknown project setting must be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("unknown field `exclude_from_push_all`")
+        );
     }
 }

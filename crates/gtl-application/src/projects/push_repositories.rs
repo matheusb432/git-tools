@@ -1,14 +1,18 @@
-//! The `push_all` vertical slice: fan a `git push` out across every project repo,
-//! preserving the retired `push_pull.rs::push_one`'s exact status/detail semantics.
+//! The `push_all` vertical slice: select eligible active projects, then fan out
+//! `git push` while preserving the retired `push_pull.rs::push_one` status and detail semantics.
 
 use futures_util::{StreamExt as _, stream};
 use gtl_models::{
     git::{CommitCount, GitEffectMode, GitRange, RemoteName},
+    paths::ProjectName,
     projects::{ProjectRepository, push_ledger::PushLedger},
 };
 
 use crate::{
-    ports::{Clock, GitClient, GitEffect, ProjectClient, ProjectClientError},
+    ports::{
+        Clock, GitClient, GitEffect, ProjectClient, ProjectClientError, UserSettingsLoadError,
+        UserSettingsStore,
+    },
     projects::remote_sync::{self, Preflight, RepoSyncResult, SyncExit, SyncStatus},
 };
 
@@ -21,7 +25,8 @@ pub struct PushRepositories {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PushRepositoriesOk {
-    pub results: Vec<RepoSyncResult>,
+    pub selected: Vec<RepoSyncResult>,
+    pub excluded: Vec<ProjectName>,
     pub exit: SyncExit,
     pub ledger: PushLedger,
 }
@@ -31,20 +36,27 @@ pub enum PushRepositoriesError {
     #[error(transparent)]
     ProjectClient(#[from] ProjectClientError),
     #[error(transparent)]
+    Settings(#[from] UserSettingsLoadError),
+    #[error(transparent)]
     Unexpected(#[from] anyhow::Error),
 }
 
-/// Pushes every project repository through the Git capability.
+/// Pushes every selected project repository through the Git capability.
 #[cqrsy::command]
 pub async fn execute(
     req: PushRepositories,
     git: &impl GitClient,
     projects: &impl ProjectClient,
     clock: &impl Clock,
+    user_settings: &impl UserSettingsStore,
 ) -> Result<PushRepositoriesOk, PushRepositoriesError> {
-    let repos = projects.list_projects().await?;
+    let settings = user_settings.load()?;
+    let selection = super::select_push_all_repositories(
+        projects.list_projects().await?,
+        settings.push_all_exclusions(),
+    );
     let mode = req.mode;
-    let tasks = stream::iter(repos.into_iter().enumerate())
+    let tasks = stream::iter(selection.selected.into_iter().enumerate())
         .map(|(index, repo)| {
             let git = git.clone();
             async move {
@@ -61,17 +73,18 @@ pub async fn execute(
         .await;
     let mut completed = tasks.into_iter().collect::<anyhow::Result<Vec<_>>>()?;
     completed.sort_by_key(|(index, _, _)| *index);
-    let mut results = Vec::with_capacity(completed.len());
+    let mut selected = Vec::with_capacity(completed.len());
     let mut ledger = PushLedger::default();
     for (_, repo_name, outcome) in completed {
         if let Some(ahead) = outcome.ledger_ahead {
             ledger.record(repo_name, ahead, clock.now().map_err(anyhow::Error::from)?);
         }
-        results.push(outcome.result);
+        selected.push(outcome.result);
     }
-    let exit = remote_sync::classify_exit(&results);
+    let exit = remote_sync::classify_exit(&selected);
     Ok(PushRepositoriesOk {
-        results,
+        selected,
+        excluded: selection.excluded,
         exit,
         ledger,
     })
@@ -185,13 +198,21 @@ fn last_non_empty_line(output: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use gtl_models::projects::{ProjectRepository, push_ledger::PushLedgerEntry};
+    use gtl_models::{
+        diffs::DiffExclusions,
+        projects::{ProjectRepository, push_ledger::PushLedgerEntry},
+        settings::{PushAllExclusions, UserSettings},
+        viewer::RenderOptions,
+    };
 
     use super::*;
     use crate::{
         ports::ProjectCatalogueUnavailableError,
         projects::push_repositories,
-        utils::{FakeProjectClient, FixedClock, ProjectGitScript, SyncOutput},
+        utils::{
+            FakeProjectClient, FixedClock, FixedUserSettingsStore, ProjectGitScript,
+            SequenceUserSettingsStore, SyncOutput,
+        },
     };
 
     fn repo(name: &str) -> ProjectRepository {
@@ -207,6 +228,15 @@ mod tests {
         repos: Vec<ProjectRepository>,
         request: PushRepositories,
     ) -> Result<PushRepositoriesOk, PushRepositoriesError> {
+        execute_with_settings(remote, repos, request, FixedUserSettingsStore::default()).await
+    }
+
+    async fn execute_with_settings(
+        remote: ProjectGitScript,
+        repos: Vec<ProjectRepository>,
+        request: PushRepositories,
+        settings: FixedUserSettingsStore,
+    ) -> Result<PushRepositoriesOk, PushRepositoriesError> {
         let projects = FakeProjectClient { repos, error: None };
         let git = remote.git_client();
         push_repositories::execute(
@@ -214,8 +244,23 @@ mod tests {
             &git,
             &projects,
             &FixedClock::from_raw("2026-07-03T00:00:00Z"),
+            &settings,
         )
         .await
+    }
+
+    fn settings_excluding(projects: &[&str]) -> FixedUserSettingsStore {
+        FixedUserSettingsStore::new(UserSettings::new(
+            None,
+            RenderOptions::DEFAULT,
+            true,
+            DiffExclusions::default(),
+            PushAllExclusions::new(
+                projects
+                    .iter()
+                    .map(|project| crate::utils::project_name(project)),
+            ),
+        ))
     }
 
     fn req() -> PushRepositories {
@@ -241,9 +286,9 @@ mod tests {
         .await
         .expect("push succeeds");
 
-        assert_eq!(response.results.len(), 1);
-        assert_eq!(response.results[0].status, SyncStatus::UpToDate);
-        assert_eq!(response.results[0].detail, "up to date (already synced)");
+        assert_eq!(response.selected.len(), 1);
+        assert_eq!(response.selected[0].status, SyncStatus::UpToDate);
+        assert_eq!(response.selected[0].detail, "up to date (already synced)");
         assert_eq!(response.exit, SyncExit::Clean);
         assert_eq!(
             response.ledger.entries(),
@@ -279,8 +324,8 @@ mod tests {
         .await
         .expect("push succeeds");
 
-        assert_eq!(response.results[0].status, SyncStatus::Pushed);
-        assert_eq!(response.results[0].detail, "abc..def  main -> main");
+        assert_eq!(response.selected[0].status, SyncStatus::Pushed);
+        assert_eq!(response.selected[0].detail, "abc..def  main -> main");
         assert_eq!(response.exit, SyncExit::Clean);
         assert_eq!(
             response.ledger.entries(),
@@ -315,7 +360,7 @@ mod tests {
             .await
             .expect("push succeeds");
 
-        assert_eq!(response.results[0].status, SyncStatus::WouldPush);
+        assert_eq!(response.selected[0].status, SyncStatus::WouldPush);
     }
 
     #[tokio::test]
@@ -339,9 +384,9 @@ mod tests {
         .await
         .expect("push succeeds");
 
-        assert_eq!(response.results[0].status, SyncStatus::Fail);
+        assert_eq!(response.selected[0].status, SyncStatus::Fail);
         assert_eq!(
-            response.results[0].detail,
+            response.selected[0].detail,
             "! [rejected]  main -> main (fetch first)"
         );
         assert_eq!(response.exit, SyncExit::Fail);
@@ -361,9 +406,9 @@ mod tests {
         .await
         .expect("push succeeds");
 
-        assert_eq!(response.results[0].status, SyncStatus::Warn);
+        assert_eq!(response.selected[0].status, SyncStatus::Warn);
         assert_eq!(
-            response.results[0].detail,
+            response.selected[0].detail,
             "detached HEAD - nothing to push"
         );
         assert_eq!(response.exit, SyncExit::Warn);
@@ -382,15 +427,119 @@ mod tests {
         .await
         .expect("push succeeds");
 
-        assert_eq!(response.results.len(), 3);
+        assert_eq!(response.selected.len(), 3);
+        assert!(response.excluded.is_empty());
         assert_eq!(
             response
-                .results
+                .selected
                 .iter()
                 .map(|r| r.name.as_str())
                 .collect::<Vec<_>>(),
             vec!["a", "b", "c"]
         );
+    }
+
+    #[tokio::test]
+    async fn exclusions_partition_repositories_before_dry_run_git_operations() {
+        let mut request = req();
+        request.mode = GitEffectMode::DryRun;
+        let response = execute_with_settings(
+            ProjectGitScript {
+                present: true,
+                branch: "main".into(),
+                has_remote: true,
+                upstream: Some("origin/main".into()),
+                rev_list_count: 1,
+                push_result: SyncOutput {
+                    success: true,
+                    combined: "would push".into(),
+                },
+                ..Default::default()
+            },
+            vec![repo("excluded"), repo("selected")],
+            request,
+            settings_excluding(&["excluded"]),
+        )
+        .await
+        .expect("push succeeds");
+
+        assert_eq!(
+            response
+                .selected
+                .iter()
+                .map(|result| result.name.as_str())
+                .collect::<Vec<_>>(),
+            ["selected"]
+        );
+        assert_eq!(response.selected[0].status, SyncStatus::WouldPush);
+        assert_eq!(
+            response
+                .excluded
+                .iter()
+                .map(AsRef::as_ref)
+                .collect::<Vec<_>>(),
+            ["excluded"]
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_and_differently_cased_exclusion_names_are_inert() {
+        let response = execute_with_settings(
+            ProjectGitScript {
+                present: false,
+                ..Default::default()
+            },
+            vec![repo("selected")],
+            req(),
+            settings_excluding(&["Selected", "not-active"]),
+        )
+        .await
+        .expect("push succeeds");
+
+        assert_eq!(response.selected.len(), 1);
+        assert!(response.excluded.is_empty());
+    }
+
+    #[tokio::test]
+    async fn all_excluded_repositories_return_a_clean_result_without_selected_work() {
+        let response = execute_with_settings(
+            ProjectGitScript::default(),
+            vec![repo("a"), repo("b")],
+            req(),
+            settings_excluding(&["a", "b"]),
+        )
+        .await
+        .expect("push succeeds");
+
+        assert!(response.selected.is_empty());
+        assert_eq!(
+            response
+                .excluded
+                .iter()
+                .map(AsRef::as_ref)
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert_eq!(response.exit, SyncExit::Clean);
+        assert!(response.ledger.entries().is_empty());
+    }
+
+    #[tokio::test]
+    async fn settings_load_failure_preserves_its_typed_category() {
+        let error = push_repositories::execute(
+            req(),
+            &ProjectGitScript::default().git_client(),
+            &FakeProjectClient::default(),
+            &FixedClock::from_raw("2026-07-03T00:00:00Z"),
+            &SequenceUserSettingsStore::new([]),
+        )
+        .await
+        .expect_err("settings failure propagates");
+
+        assert!(matches!(
+            error,
+            PushRepositoriesError::Settings(UserSettingsLoadError::InvalidConfiguration { .. })
+        ));
     }
 
     #[tokio::test]
@@ -403,6 +552,7 @@ mod tests {
                 error: Some("boom".into()),
             },
             &FixedClock::from_raw("2026-07-03T00:00:00Z"),
+            &FixedUserSettingsStore::default(),
         )
         .await
         .expect_err("project client error propagates");

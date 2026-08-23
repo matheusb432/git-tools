@@ -12,10 +12,10 @@ use gtl_application::ports::{UserSettingsEditError, UserSettingsLoadError, UserS
 use gtl_models::{
     diffs::DiffExclusions,
     paths::ProjectName,
-    settings::UserSettings,
+    settings::{PushAllExclusions, UserSettings},
     viewer::{DiffDensity, DiffLayout, RenderOptions, Theme},
 };
-use gtl_wire::settings::{RawSettingValue, UserSettingsDocument};
+use gtl_wire::settings::{ProjectSettingsDocument, RawSettingValue, UserSettingsDocument};
 
 fn default_settings() -> UserSettings {
     UserSettings::new(
@@ -23,6 +23,7 @@ fn default_settings() -> UserSettings {
         RenderOptions::DEFAULT,
         UserSettings::PUSH_CONFIRMATION_REQUIRED_DEFAULT,
         DiffExclusions::default(),
+        PushAllExclusions::default(),
     )
 }
 
@@ -48,38 +49,82 @@ fn optional_string(
         .transpose()
 }
 
-fn exclusions(
+fn optional_bool(
     path: &Path,
-    values: Option<BTreeMap<String, RawSettingValue>>,
-) -> Result<DiffExclusions, UserSettingsLoadError> {
-    let mut resolved = BTreeMap::new();
-    for (project, value) in values.unwrap_or_default() {
-        let RawSettingValue::Array(values) = value else {
+    field: &str,
+    value: Option<RawSettingValue>,
+) -> Result<Option<bool>, UserSettingsLoadError> {
+    value
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or_else(|| invalid_configuration(path, format!("`{field}` must be a boolean")))
+        })
+        .transpose()
+}
+
+fn excluded_extensions(
+    path: &Path,
+    field: &str,
+    value: Option<RawSettingValue>,
+) -> Result<Option<Vec<String>>, UserSettingsLoadError> {
+    value
+        .map(|value| {
+            let RawSettingValue::Array(values) = value else {
+                return Err(invalid_configuration(
+                    path,
+                    format!("`{field}` must be an array of strings"),
+                ));
+            };
+            values
+                .into_iter()
+                .map(|value| {
+                    value.as_str().map(str::to_owned).ok_or_else(|| {
+                        invalid_configuration(path, format!("`{field}` must contain only strings"))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+}
+
+fn project_settings(
+    path: &Path,
+    projects: Vec<ProjectSettingsDocument>,
+) -> Result<(BTreeMap<ProjectName, Vec<String>>, PushAllExclusions), UserSettingsLoadError> {
+    let mut diff_exclusions = BTreeMap::new();
+    let mut push_all_exclusions = Vec::new();
+    let mut project_names = std::collections::BTreeSet::new();
+
+    for (index, project) in projects.into_iter().enumerate() {
+        let name_field = format!("projects[{index}].name");
+        let name = optional_string(path, &name_field, project.name)?
+            .ok_or_else(|| invalid_configuration(path, format!("`{name_field}` is required")))?;
+        let name = ProjectName::try_new(name).map_err(|error| {
+            invalid_configuration(path, format!("`{name_field}` is invalid: {error}"))
+        })?;
+        if !project_names.insert(name.clone()) {
             return Err(invalid_configuration(
                 path,
-                format!("`diff.exclude.{project}` must be an array of strings"),
+                format!("`projects` contains duplicate project name `{name}`"),
             ));
-        };
-        let extensions = values
-            .into_iter()
-            .map(|value| {
-                value.as_str().map(str::to_owned).ok_or_else(|| {
-                    invalid_configuration(
-                        path,
-                        format!("`diff.exclude.{project}` must contain only strings"),
-                    )
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let project_name = ProjectName::try_new(project.clone()).map_err(|error| {
-            invalid_configuration(
-                path,
-                format!("`diff.exclude.{project}` has an invalid project name: {error}"),
-            )
-        })?;
-        resolved.insert(project_name, extensions);
+        }
+
+        let diff_field = format!("projects[{index}].diff.exclude");
+        if let Some(exclusions) = excluded_extensions(
+            path,
+            &diff_field,
+            project.diff.and_then(|diff| diff.exclude),
+        )? {
+            diff_exclusions.insert(name.clone(), exclusions);
+        }
+        let push_field = format!("projects[{index}].excluded_from_push_all");
+        if optional_bool(path, &push_field, project.excluded_from_push_all)?.unwrap_or(false) {
+            push_all_exclusions.push(name);
+        }
     }
-    Ok(DiffExclusions::new(resolved, None))
+
+    Ok((diff_exclusions, PushAllExclusions::new(push_all_exclusions)))
 }
 
 fn parse_settings(path: &Path, raw: &str) -> Result<UserSettings, UserSettingsLoadError> {
@@ -108,23 +153,27 @@ fn parse_settings(path: &Path, raw: &str) -> Result<UserSettings, UserSettingsLo
         })
         .transpose()?
         .unwrap_or(DiffDensity::Compact);
-    let push_confirmation_required = document
-        .push
-        .and_then(|push| push.confirm)
-        .map(|value| {
-            value
-                .as_bool()
-                .ok_or_else(|| invalid_configuration(path, "`push.confirm` must be a boolean"))
-        })
-        .transpose()?
-        .unwrap_or(UserSettings::PUSH_CONFIRMATION_REQUIRED_DEFAULT);
-    let diff_exclusions = exclusions(path, document.diff.and_then(|diff| diff.exclude))?;
+    let push_confirmation_required = optional_bool(
+        path,
+        "push.confirm",
+        document.push.and_then(|push| push.confirm),
+    )?
+    .unwrap_or(UserSettings::PUSH_CONFIRMATION_REQUIRED_DEFAULT);
+    let diff_exclusions_default = excluded_extensions(
+        path,
+        "diff.exclude",
+        document.diff.and_then(|diff| diff.exclude),
+    )?;
+    let (diff_exclusions_projects, push_all_exclusions) =
+        project_settings(path, document.projects)?;
+    let diff_exclusions = DiffExclusions::new(diff_exclusions_projects, diff_exclusions_default);
 
     Ok(UserSettings::new(
         theme,
         RenderOptions::new(layout, density),
         push_confirmation_required,
         diff_exclusions,
+        push_all_exclusions,
     ))
 }
 
@@ -302,6 +351,10 @@ mod tests {
             "layout = \"diagonal\"\n",
             "[push]\nconfirm = \"yes\"\n",
             "[push]\nconfrm = false\n",
+            "[diff]\nexclude = \"md\"\n",
+            "[[projects]]\nexcluded_from_push_all = true\n",
+            "[[projects]]\nname = \"repo\"\nexcluded_from_push_all = \"yes\"\n",
+            "[[projects]]\nname = \"repo\"\ndiff = { exclude = \"md\" }\n",
         ] {
             std::fs::write(file.path(), raw).expect("write invalid config");
             assert!(matches!(
@@ -309,6 +362,90 @@ mod tests {
                 Err(UserSettingsLoadError::InvalidConfiguration { .. })
             ));
         }
+    }
+
+    #[test]
+    fn strict_project_settings_map_defaults_overrides_and_push_exclusions() {
+        let settings = parse_settings(
+            Path::new("config.toml"),
+            r#"
+[diff]
+exclude = ["md", "lock"]
+
+[[projects]]
+name = "git-tools"
+excluded_from_push_all = true
+diff = { exclude = ["js"] }
+
+[[projects]]
+name = "sample_project"
+diff = { exclude = [] }
+"#,
+        )
+        .expect("project settings are valid");
+        let git_tools = ProjectName::try_from("git-tools").expect("project name");
+        let sample_project = ProjectName::try_from("sample_project").expect("project name");
+        let unconfigured = ProjectName::try_from("unconfigured").expect("project name");
+
+        assert!(settings.push_all_exclusions().contains(&git_tools));
+        assert!(!settings.push_all_exclusions().contains(&sample_project));
+        assert_eq!(
+            settings
+                .diff_exclusions()
+                .for_project_or_default(&git_tools)
+                .extensions(),
+            ["js"]
+        );
+        assert!(
+            settings
+                .diff_exclusions()
+                .for_project_or_default(&sample_project)
+                .is_empty()
+        );
+        assert_eq!(
+            settings
+                .diff_exclusions()
+                .for_project_or_default(&unconfigured)
+                .extensions(),
+            ["lock", "md"]
+        );
+    }
+
+    #[test]
+    fn duplicate_project_settings_are_invalid() {
+        let error = parse_settings(
+            Path::new("config.toml"),
+            r#"
+[[projects]]
+name = "git-tools"
+
+[[projects]]
+name = "git-tools"
+excluded_from_push_all = true
+"#,
+        )
+        .expect_err("duplicate project names are invalid");
+
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate project name `git-tools`")
+        );
+    }
+
+    #[test]
+    fn map_based_diff_exclusions_are_invalid() {
+        let error = parse_settings(
+            Path::new("config.toml"),
+            "[diff.exclude]\ndefaults = [\"md\"]\ngit-tools = [\"js\"]\n",
+        )
+        .expect_err("map-based diff exclusions are unsupported");
+
+        assert!(
+            error
+                .to_string()
+                .contains("`diff.exclude` must be an array of strings")
+        );
     }
 
     #[test]
@@ -334,12 +471,12 @@ mod tests {
         assert_eq!(settings.theme(), Some(Theme::Dark));
         assert_eq!(settings.viewer_render_options(), RenderOptions::DEFAULT);
         assert!(settings.push_confirmation_required());
+        let git_tools = ProjectName::try_from("git-tools").expect("valid fixture project name");
+        assert!(settings.push_all_exclusions().contains(&git_tools));
         assert!(
             settings
                 .diff_exclusions()
-                .for_project_or_default(
-                    &ProjectName::try_from("git-tools").expect("valid fixture project name"),
-                )
+                .for_project_or_default(&git_tools)
                 .matches(
                     &RepositoryRelativePath::try_new("frontend.js".into())
                         .expect("valid fixture repository-relative path"),

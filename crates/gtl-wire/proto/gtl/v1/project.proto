@@ -47,8 +47,9 @@ enum ProjectSyncExit {
 }
 
 message PushProjectRepositoriesResponse {
-  repeated RepositorySyncResult results = 1;
+  repeated RepositorySyncResult selected = 1;
   ProjectSyncExit exit = 2;
+  repeated string excluded_project_names = 3;
 }
 
 message PullProjectRepositoriesResponse {
@@ -59,6 +60,7 @@ message PullProjectRepositoriesResponse {
 message CommitProjectRepositoriesRequest {
   bool dry_run = 1;
   optional string message = 2;
+  bool use_push_all_exclusions = 3;
 }
 
 enum ProjectCommitAction {
