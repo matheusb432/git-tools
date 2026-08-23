@@ -6,16 +6,9 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, ensure};
-use serde::Serialize;
+use gtl_benchmarks::desktop_scroll::DesktopScrollProcessMemory;
 
 const PROCESS_COUNT_MAX: usize = 32_768;
-
-#[derive(Debug, Serialize)]
-pub struct ProcessMemorySnapshot {
-    pub attribution: &'static str,
-    pub process_count: usize,
-    pub rss_bytes: u64,
-}
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessIdentity {
@@ -23,7 +16,7 @@ struct ProcessIdentity {
     parent_process_id: u32,
 }
 
-pub fn snapshot(data_root: &Path) -> Result<ProcessMemorySnapshot> {
+pub fn snapshot(data_root: &Path) -> Result<DesktopScrollProcessMemory> {
     let viewer = required_path("GTL_E2E_VIEWER_BINARY")?
         .canonicalize()
         .context("canonicalize release viewer for RSS attribution")?;
@@ -61,8 +54,10 @@ pub fn snapshot(data_root: &Path) -> Result<ProcessMemorySnapshot> {
         "RSS attribution found no live viewer processes"
     );
 
-    Ok(ProcessMemorySnapshot {
-        attribution: "canonical release viewer executable with the isolated data root, plus descendants",
+    Ok(DesktopScrollProcessMemory {
+        attribution:
+            "canonical release viewer executable with the isolated data root, plus descendants"
+                .to_owned(),
         process_count: measured_process_count,
         rss_bytes,
     })

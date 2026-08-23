@@ -6,7 +6,6 @@ use std::{
 use anyhow::{Context, Result};
 use cargo_metadata::MetadataCommand;
 
-pub(crate) mod bench;
 pub(crate) mod build;
 pub(crate) mod check_structure;
 pub(crate) mod desktop_e2e;
@@ -28,7 +27,6 @@ pub(crate) mod wasm_c;
 pub(crate) struct Verb(&'static str);
 
 impl Verb {
-    pub(crate) const BENCH: Self = Self("bench");
     pub(crate) const BUILD: Self = Self("build");
     pub(crate) const CHECK_DIOXUS_FORMAT: Self = Self("check-dioxus-format");
     pub(crate) const CHECK_STRUCTURE: Self = Self("check-structure");

@@ -5,8 +5,10 @@ use gtl_application::{
     history::record_render::{self, RecordRender},
     ports::Clock,
 };
-use gtl_benchmarks::{Benchmark, BenchmarkCase, require};
+use gtl_benchmarks::require;
 use gtl_infra::app_state::SqliteAppState;
+
+const BENCHMARK_NAME: &str = "app-state-record-render";
 
 #[derive(Clone)]
 struct BenchmarkClock(gtl_models::timestamps::MachineTimestamp);
@@ -51,7 +53,7 @@ fn record_render(criterion: &mut Criterion) {
         gtl_models::timestamps::MachineTimestamp::try_from("2026-07-19T00:00:00Z"),
         "parsing the benchmark timestamp",
     ));
-    criterion.bench_function(BenchmarkCase::AppStateRecordRender.as_str(), |bencher| {
+    criterion.bench_function(BENCHMARK_NAME, |bencher| {
         bencher.iter_batched(
             request,
             |request| {
@@ -66,9 +68,5 @@ fn record_render(criterion: &mut Criterion) {
     });
 }
 
-criterion_group! {
-    name = benches;
-    config = Criterion::default().sample_size(Benchmark::AppStateRecordRender.sample_size());
-    targets = record_render
-}
+criterion_group!(benches, record_render);
 criterion_main!(benches);

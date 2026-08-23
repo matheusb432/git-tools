@@ -1,10 +1,11 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use gtl_benchmarks::{Benchmark, BenchmarkCase};
 use gtl_parser::{DiffParser, SyntaxLanguage};
 
+const BENCHMARK_NAME: &str = "parser-syntax/rust-45k";
 const SOURCE_LINE_COUNT: usize = 45_000;
+const SAMPLE_SIZE: usize = 10;
 const HUNK_SOURCE_LINE_COUNT: usize = 90;
 const REPLACEMENT_INTERVAL: usize = 9;
 
@@ -19,12 +20,12 @@ fn rust_syntax(criterion: &mut Criterion) {
         .sum::<usize>();
     eprintln!(
         "{} source_lines_per_side={SOURCE_LINE_COUNT} diff_rows={} output_rows={} syntax_tokens={syntax_token_count}",
-        BenchmarkCase::ParserSyntaxRust45k,
+        BENCHMARK_NAME,
         lines.len(),
         parsed.rows().len(),
     );
 
-    criterion.bench_function(BenchmarkCase::ParserSyntaxRust45k.as_str(), |bencher| {
+    criterion.bench_function(BENCHMARK_NAME, |bencher| {
         bencher.iter(|| black_box(&parser).parse(black_box(&lines)));
     });
 }
@@ -72,7 +73,7 @@ fn rust_source_line(source_index: usize, replacement: bool) -> String {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(Benchmark::ParserSyntax.sample_size());
+    config = Criterion::default().sample_size(SAMPLE_SIZE);
     targets = rust_syntax
 }
 criterion_main!(benches);

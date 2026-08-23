@@ -1,7 +1,7 @@
 use std::{hint::black_box, path::Path, process::Command};
 
-use criterion::{Criterion, criterion_group, criterion_main};
-use gtl_benchmarks::{Benchmark, BenchmarkCase, require};
+use criterion::{Criterion, criterion_group};
+use gtl_benchmarks::require;
 use gtl_client::GtlClient;
 use gtl_server::ServerHarness;
 use gtl_wire::v1::{
@@ -10,6 +10,11 @@ use gtl_wire::v1::{
 use prost::Message as _;
 
 const TOKIO_WORKER_THREADS: usize = 2;
+const GIT_ISOLATION_MARKER: &str = "GTL_GRPC_BENCHMARK_GIT_ISOLATED";
+const GET_PUSH_CONFIRMATION_REQUIREMENT_BENCHMARK_NAME: &str =
+    "grpc-requests/get-push-confirmation-requirement";
+const GET_REPOSITORY_STATUS_BENCHMARK_NAME: &str = "grpc-requests/get-repository-status";
+const PREPARE_DIFF_UNPUSHED_BENCHMARK_NAME: &str = "grpc-requests/prepare-diff-unpushed";
 
 struct RepositoryFixture {
     _directory: tempfile::TempDir,
@@ -65,12 +70,12 @@ fn benchmark_get_push_confirmation_requirement(
     });
     assert!(response.push_confirmation_required);
     report_output_size(
-        BenchmarkCase::GrpcRequestsGetPushConfirmationRequirement,
+        GET_PUSH_CONFIRMATION_REQUIREMENT_BENCHMARK_NAME,
         response.encoded_len(),
     );
 
     criterion.bench_function(
-        BenchmarkCase::GrpcRequestsGetPushConfirmationRequirement.as_str(),
+        GET_PUSH_CONFIRMATION_REQUIREMENT_BENCHMARK_NAME,
         |bencher| {
             bencher.to_async(runtime).iter(|| async {
                 black_box(require(
@@ -98,22 +103,16 @@ fn benchmark_get_repository_status(
         )
     });
     assert_eq!(response.results.len(), 1);
-    report_output_size(
-        BenchmarkCase::GrpcRequestsGetRepositoryStatus,
-        response.encoded_len(),
-    );
+    report_output_size(GET_REPOSITORY_STATUS_BENCHMARK_NAME, response.encoded_len());
 
-    criterion.bench_function(
-        BenchmarkCase::GrpcRequestsGetRepositoryStatus.as_str(),
-        |bencher| {
-            bencher.to_async(runtime).iter(|| async {
-                black_box(require(
-                    client.get_repository_status(request.clone()).await,
-                    "executing the get-repository-status request",
-                ));
-            });
-        },
-    );
+    criterion.bench_function(GET_REPOSITORY_STATUS_BENCHMARK_NAME, |bencher| {
+        bencher.to_async(runtime).iter(|| async {
+            black_box(require(
+                client.get_repository_status(request.clone()).await,
+                "executing the get-repository-status request",
+            ));
+        });
+    });
 }
 
 fn benchmark_prepare_diff(
@@ -139,26 +138,20 @@ fn benchmark_prepare_diff(
         response.batch.as_ref().map(|batch| batch.recipes.len()),
         Some(1)
     );
-    report_output_size(
-        BenchmarkCase::GrpcRequestsPrepareDiffUnpushed,
-        response.encoded_len(),
-    );
+    report_output_size(PREPARE_DIFF_UNPUSHED_BENCHMARK_NAME, response.encoded_len());
 
-    criterion.bench_function(
-        BenchmarkCase::GrpcRequestsPrepareDiffUnpushed.as_str(),
-        |bencher| {
-            bencher.to_async(runtime).iter(|| async {
-                black_box(require(
-                    client.prepare_diff(request.clone()).await,
-                    "executing the prepare-diff request",
-                ));
-            });
-        },
-    );
+    criterion.bench_function(PREPARE_DIFF_UNPUSHED_BENCHMARK_NAME, |bencher| {
+        bencher.to_async(runtime).iter(|| async {
+            black_box(require(
+                client.prepare_diff(request.clone()).await,
+                "executing the prepare-diff request",
+            ));
+        });
+    });
 }
 
-fn report_output_size(case: BenchmarkCase, output_bytes: usize) {
-    eprintln!("{case} output_bytes={output_bytes}");
+fn report_output_size(benchmark_name: &str, output_bytes: usize) {
+    eprintln!("{benchmark_name} output_bytes={output_bytes}");
 }
 
 fn repository_fixture() -> RepositoryFixture {
@@ -226,7 +219,33 @@ fn git(repository: &Path, arguments: &[&str]) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(Benchmark::GrpcRequests.sample_size());
+    config = Criterion::default();
     targets = grpc_requests
 }
-criterion_main!(benches);
+
+fn main() {
+    if std::env::var_os(GIT_ISOLATION_MARKER).is_some() {
+        benches();
+        return;
+    }
+
+    let executable = require(
+        std::env::current_exe(),
+        "resolving the gRPC benchmark executable",
+    );
+    let status = require(
+        Command::new(executable)
+            .args(std::env::args_os().skip(1))
+            .env(GIT_ISOLATION_MARKER, "1")
+            .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+            .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("LC_ALL", "C")
+            .env("TZ", "UTC")
+            .status(),
+        "starting the Git-isolated gRPC benchmark process",
+    );
+    std::process::exit(status.code().unwrap_or(1));
+}

@@ -31,9 +31,6 @@ fn step_command(step: &Step) -> Command {
     command
         .args(step.arguments())
         .envs(step.environment().iter().map(|(key, value)| (key, value)));
-    for name in step.removed_environment() {
-        command.env_remove(name);
-    }
     if let Some(directory) = step.current_directory() {
         command.current_dir(directory);
     }

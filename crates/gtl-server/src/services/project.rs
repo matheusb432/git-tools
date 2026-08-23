@@ -1,17 +1,27 @@
-mod commit;
-mod prune;
-mod status;
-
-use gtl_application::projects::{
-    RepoSyncResult, SyncExit, SyncStatus,
-    pull_repositories::{self, PullRepositories, PullRepositoriesError},
-    push_repositories::{self, PushRepositories, PushRepositoriesError},
+use gtl_application::{
+    projects::{
+        RepoSyncResult, SyncExit, SyncStatus,
+        commit_repositories::{
+            self, CommitAction, CommitExit, CommitRepositories, CommitRepositoriesError,
+            CommitRepositoriesMode, CommitRepositoriesOk, CommitResult,
+        },
+        prune_branches::{
+            self, PruneAction, PruneBranches, PruneBranchesError, PruneBranchesOk, PruneExit,
+            PruneRepoResult,
+        },
+        pull_repositories::{self, PullRepositories, PullRepositoriesError},
+        push_repositories::{self, PushRepositories, PushRepositoriesError},
+    },
+    repositories::{apply_prune::PruneFailure, get_repository_statuses, plan_prune::PruneBranch},
 };
-use gtl_models::git::GitEffectMode;
+use gtl_models::{
+    git::{BranchName, GitEffectMode},
+    repository::traversal::RepositoryTarget,
+};
 use gtl_wire::v1::{self, project_service_server::ProjectService};
 use tonic::{Request, Response, Status};
 
-use super::{project_client_error, unexpected};
+use super::{project_client_error, repository::status_results, run_blocking, unexpected};
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -72,21 +82,77 @@ impl ProjectService for ProjectApi {
         &self,
         request: Request<v1::CommitProjectRepositoriesRequest>,
     ) -> Result<Response<v1::CommitProjectRepositoriesResponse>, Status> {
-        commit::execute(self.state.clone(), request.into_inner()).await
+        let request = request.into_inner();
+        let state = self.state.clone();
+        let repos = state
+            .projects
+            .list_projects()
+            .await
+            .map_err(|error| project_client_error(&error))?;
+        let mode = if request.dry_run {
+            CommitRepositoriesMode::DryRun
+        } else {
+            CommitRepositoriesMode::Apply {
+                message: request.message,
+            }
+        };
+        let result = run_blocking(move || {
+            commit_repositories::execute(CommitRepositories { repos, mode }, &state.git)
+        })
+        .await?;
+
+        Ok(Response::new(commit_response(result)))
     }
 
     async fn prune_project_branches(
         &self,
         request: Request<v1::PruneProjectBranchesRequest>,
     ) -> Result<Response<v1::PruneProjectBranchesResponse>, Status> {
-        prune::execute(self.state.clone(), request.into_inner()).await
+        let request = request.into_inner();
+        let onto = BranchName::try_new(request.onto_branch)
+            .map_err(|_| Status::invalid_argument("onto_branch must not be empty"))?;
+        let state = self.state.clone();
+        let repos = state
+            .projects
+            .list_projects()
+            .await
+            .map_err(|error| project_client_error(&error))?;
+        let mode = effect_mode(request.dry_run);
+        let result = run_blocking(move || {
+            prune_branches::execute(PruneBranches { repos, onto, mode }, &state.git)
+        })
+        .await?;
+
+        Ok(Response::new(prune_response(result)))
     }
 
     async fn get_project_repository_statuses(
         &self,
         _request: Request<v1::GetProjectRepositoryStatusesRequest>,
     ) -> Result<Response<v1::GetProjectRepositoryStatusesResponse>, Status> {
-        status::get(self.state.clone()).await
+        let state = self.state.clone();
+        let repos = state
+            .projects
+            .list_projects()
+            .await
+            .map_err(|error| project_client_error(&error))?
+            .into_iter()
+            .map(|repo| RepositoryTarget {
+                label: repo.name,
+                path: repo.path,
+            })
+            .collect();
+        let results = run_blocking(move || {
+            get_repository_statuses::execute(
+                get_repository_statuses::GetRepositoryStatuses { repos },
+                &state.git,
+            )
+        })
+        .await?;
+
+        Ok(Response::new(v1::GetProjectRepositoryStatusesResponse {
+            results: status_results(&results),
+        }))
     }
 }
 
@@ -164,8 +230,165 @@ fn sync_result(result: RepoSyncResult) -> v1::RepositorySyncResult {
     }
 }
 
+fn commit_response(
+    result: Result<CommitRepositoriesOk, CommitRepositoriesError>,
+) -> v1::CommitProjectRepositoriesResponse {
+    match result {
+        Ok(result) => v1::CommitProjectRepositoriesResponse {
+            results: result.results.iter().map(commit_result).collect(),
+            exit: match result.exit {
+                CommitExit::Clean => v1::ProjectCommitExit::Clean,
+                CommitExit::Warn => v1::ProjectCommitExit::Warning,
+                CommitExit::Fail => v1::ProjectCommitExit::Failed,
+            } as i32,
+            failure_detail: None,
+        },
+        Err(error) => {
+            let failure_detail = error.to_string();
+            tracing::error!(error = ?error, "project commit stopped before completion");
+            let completed_results = match error {
+                CommitRepositoriesError::Transport {
+                    mut completed_results,
+                    failed_result,
+                    ..
+                } => {
+                    if let Some(failed_result) = failed_result {
+                        completed_results.push(*failed_result);
+                    }
+                    completed_results
+                }
+                _ => Vec::new(),
+            };
+            v1::CommitProjectRepositoriesResponse {
+                results: completed_results.iter().map(commit_result).collect(),
+                exit: v1::ProjectCommitExit::Failed as i32,
+                failure_detail: Some(failure_detail),
+            }
+        }
+    }
+}
+
+fn commit_result(result: &CommitResult) -> v1::ProjectCommitResult {
+    v1::ProjectCommitResult {
+        project_name: result.name().to_string(),
+        present: result.is_present(),
+        dirty: result.is_dirty(),
+        files: result
+            .files()
+            .iter()
+            .map(|file| v1::CommitFile {
+                status: file.status.clone(),
+                path: file.path.as_ref().to_string_lossy().into_owned(),
+            })
+            .collect(),
+        action: match result.action() {
+            CommitAction::Absent => v1::ProjectCommitAction::Absent,
+            CommitAction::Clean => v1::ProjectCommitAction::Clean,
+            CommitAction::WouldCommit => v1::ProjectCommitAction::WouldCommit,
+            CommitAction::Skipped => v1::ProjectCommitAction::Skipped,
+            CommitAction::Committed => v1::ProjectCommitAction::Committed,
+            CommitAction::Fail => v1::ProjectCommitAction::Failed,
+        } as i32,
+        detail: result.detail().into_owned(),
+    }
+}
+
+fn prune_response(
+    result: Result<PruneBranchesOk, PruneBranchesError>,
+) -> v1::PruneProjectBranchesResponse {
+    match result {
+        Ok(result) => v1::PruneProjectBranchesResponse {
+            results: result.results.into_iter().map(prune_result).collect(),
+            exit: match result.exit {
+                PruneExit::Clean => v1::ProjectPruneExit::Clean,
+                PruneExit::Warn => v1::ProjectPruneExit::Warning,
+            } as i32,
+            failure_detail: None,
+        },
+        Err(error) => {
+            let failure_detail = error.to_string();
+            tracing::error!(error = ?error, "project prune stopped before completion");
+            let completed_results = match error {
+                PruneBranchesError::Transport {
+                    mut completed_results,
+                    failed_result,
+                    ..
+                } => {
+                    if let Some(failed_result) = failed_result {
+                        completed_results.push(*failed_result);
+                    }
+                    completed_results
+                }
+                _ => Vec::new(),
+            };
+            v1::PruneProjectBranchesResponse {
+                results: completed_results.into_iter().map(prune_result).collect(),
+                exit: v1::ProjectPruneExit::Warning as i32,
+                failure_detail: Some(failure_detail),
+            }
+        }
+    }
+}
+
+fn prune_result(result: PruneRepoResult) -> v1::ProjectPruneResult {
+    let (action, deleted, failures, detail) = match result.action {
+        PruneAction::Absent => (
+            v1::ProjectPruneAction::Absent,
+            Vec::new(),
+            Vec::new(),
+            String::new(),
+        ),
+        PruneAction::Refused(detail) => (
+            v1::ProjectPruneAction::Refused,
+            Vec::new(),
+            Vec::new(),
+            detail,
+        ),
+        PruneAction::Nothing(detail) => (
+            v1::ProjectPruneAction::Nothing,
+            Vec::new(),
+            Vec::new(),
+            detail,
+        ),
+        PruneAction::WouldDelete(branches) => (
+            v1::ProjectPruneAction::WouldDelete,
+            branches.iter().map(prune_branch).collect(),
+            Vec::new(),
+            String::new(),
+        ),
+        PruneAction::Applied(applied) => (
+            v1::ProjectPruneAction::Applied,
+            applied.deleted.iter().map(prune_branch).collect(),
+            applied.failed.into_iter().map(prune_failure).collect(),
+            String::new(),
+        ),
+    };
+    v1::ProjectPruneResult {
+        project_name: result.name.to_string(),
+        action: action as i32,
+        deleted,
+        failures,
+        detail,
+    }
+}
+
+fn prune_branch(branch: &PruneBranch) -> v1::PruneBranch {
+    v1::PruneBranch {
+        name: branch.name.to_string(),
+        commit_id: branch.id.to_string(),
+    }
+}
+
+fn prune_failure(failure: PruneFailure) -> v1::PruneFailure {
+    v1::PruneFailure {
+        name: failure.name.to_string(),
+        reason: failure.reason,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use gtl_application::projects::commit_repositories::CommitOutcome;
     use gtl_models::{git::BranchName, paths::ProjectName};
 
     use super::*;
@@ -187,5 +410,17 @@ mod tests {
             response.results[0].status(),
             v1::RepositorySyncStatus::WouldPush
         );
+    }
+
+    #[test]
+    fn commit_projection_preserves_closed_result_facts() {
+        let result = CommitResult::new(ProjectName::try_new("api").unwrap(), CommitOutcome::Clean);
+        let projected = commit_result(&result);
+
+        assert_eq!(projected.project_name, "api");
+        assert!(projected.present);
+        assert!(!projected.dirty);
+        assert_eq!(projected.action(), v1::ProjectCommitAction::Clean);
+        assert_eq!(projected.detail, "nothing to commit");
     }
 }

@@ -38,7 +38,6 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::WebBuild => verbs::dioxus_web::build_release(),
         cli::Command::WebServe { arguments } => verbs::dioxus_web::serve(&arguments),
         cli::Command::WebStyles => verbs::dioxus_web::build_styles(),
-        cli::Command::Bench(arguments) => verbs::bench::run(&arguments),
         cli::Command::CheckDioxusFormat => verbs::format::check_dioxus(),
         cli::Command::PreCommit => verbs::pre_commit::run(),
         cli::Command::DriftCheck => verbs::drift::run(),

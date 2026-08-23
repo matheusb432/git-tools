@@ -1,26 +1,6 @@
 use anyhow::{Context, Result, ensure};
-use serde::{Deserialize, Serialize};
-
-pub const DISTANCE_CSS_PIXELS: u32 = 160;
-pub const STEP_CSS_PIXELS: u32 = 8;
-pub const TRAVERSALS: u32 = 10;
-
-#[derive(Clone, Copy, Debug, Serialize)]
-pub struct ScrollProtocol {
-    pub distance_css_pixels: u32,
-    pub step_css_pixels: u32,
-    pub traversals: u32,
-}
-
-impl ScrollProtocol {
-    pub const fn fixed() -> Self {
-        Self {
-            distance_css_pixels: DISTANCE_CSS_PIXELS,
-            step_css_pixels: STEP_CSS_PIXELS,
-            traversals: TRAVERSALS,
-        }
-    }
-}
+use gtl_benchmarks::desktop_scroll::{ScrollProtocol, ScrollSample};
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct BrowserScrollSample {
@@ -38,30 +18,6 @@ pub struct BrowserScrollSample {
     pub inner_width_css_pixels: u32,
     #[serde(default)]
     pub inner_height_css_pixels: u32,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ScrollSample {
-    pub panel: String,
-    pub distance_css_pixels: u32,
-    pub step_css_pixels: u32,
-    pub traversals: u32,
-    pub total_distance_css_pixels: u64,
-    pub scroll_height_css_pixels: u64,
-    pub client_height_css_pixels: u64,
-    pub final_scroll_top_css_pixels: f64,
-    pub inner_width_css_pixels: u32,
-    pub inner_height_css_pixels: u32,
-    pub frame_count: usize,
-    pub frame_gap_count: usize,
-    pub total_duration_ms: f64,
-    pub mean_frame_gap_ms: f64,
-    pub p50_frame_gap_ms: f64,
-    pub p95_frame_gap_ms: f64,
-    pub p99_frame_gap_ms: f64,
-    pub maximum_frame_gap_ms: f64,
-    pub frames_exceeding_33_ms: usize,
-    pub frame_gaps_ms: Vec<f64>,
 }
 
 pub fn summarize(

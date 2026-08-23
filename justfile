@@ -53,20 +53,25 @@ purge:
 _preflight:
     test -x "{{ _bin }}" || cargo build --release -p gtl-cli -p gtl-server
 
-# Run a shared Rust benchmark; select a target with --benchmark and cap local runs with --bounded.
+# Compare Criterion benchmarks against the local baseline. Use --update to replace it.
+[arg("benchmark", help="Benchmark target or all", pattern="all|app-state-record-render|grpc-requests|parser-syntax|view-cache|viewer-render")]
+[arg("case", help="Exact Criterion benchmark case")]
+[arg("update", long="update", value="--save-baseline local", help="Compare and replace the local baseline")]
+[arg("quick", long="quick", value="--quick", help="Stop once Criterion reaches statistical significance")]
 [group('performance')]
-bench *args:
-    cargo run --quiet -p xtask -- bench {{ args }}
+bench benchmark="all" case="" update="--baseline local" quick="":
+    CRITERION_HOME="{{ justfile_directory() }}/.artifacts/benchmarks/criterion" cargo bench --locked -p gtl-benchmarks {{ if benchmark == "all" { "--benches" } else { "--bench " + replace(benchmark, "-", "_") } }} -- {{ if case == "" { "" } else { quote(case) + " --exact" } }} {{ update }} {{ quick }}
 
 # Regenerate and verify the immutable desktop viewer scroll fixture under bounded resources.
 [group('performance')]
-desktop-scroll-fixture:
+bench-scroll-fixture-update:
     cargo run --quiet -p xtask -- desktop-scroll-fixture
 
-# Measure both production desktop side panels against the committed scroll fixture.
+# Compare production desktop scrolling against the local baseline. Use --update to replace it.
+[arg("update", long="update", value="--update", help="Compare and replace the local baseline")]
 [group('performance')]
-desktop-scroll-benchmark *args:
-    cargo run --quiet -p xtask -- desktop-scroll-benchmark {{ args }}
+bench-scroll update="":
+    cargo run --quiet -p xtask -- desktop-scroll-benchmark {{ update }}
 
 # Run tests, or use `just test coverage`; coverage defaults to quiet and forwards cargo-llvm-cov arguments.
 [group('quality')]

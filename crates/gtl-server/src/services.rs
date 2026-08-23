@@ -119,9 +119,12 @@ where
         })
 }
 
-pub(crate) fn unexpected(error: impl std::fmt::Debug, operation: &'static str) -> Status {
+pub(crate) fn unexpected(
+    error: impl std::fmt::Debug + std::fmt::Display,
+    operation: &'static str,
+) -> Status {
     tracing::error!(error = ?error, operation, "gRPC application operation failed");
-    Status::internal(format!("{operation} failed"))
+    Status::internal(error.to_string())
 }
 
 #[cfg(test)]
@@ -134,7 +137,7 @@ mod tests {
     };
     use tonic::Code;
 
-    use super::project_client_error;
+    use super::{project_client_error, unexpected};
 
     #[test]
     fn maps_project_catalogue_failures_by_caller_relevant_semantics() {
@@ -174,5 +177,19 @@ mod tests {
             assert_eq!(status.message(), message);
             assert!(!status.message().contains("private"));
         }
+    }
+
+    #[test]
+    fn unexpected_application_failure_preserves_its_display_message() {
+        let status = unexpected(
+            anyhow::anyhow!("read working tree: repository-relative path must be normalized"),
+            "plan repository push",
+        );
+
+        assert_eq!(status.code(), Code::Internal);
+        assert_eq!(
+            status.message(),
+            "read working tree: repository-relative path must be normalized"
+        );
     }
 }

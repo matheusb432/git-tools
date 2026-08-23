@@ -9,7 +9,11 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
-use gtl_benchmarks::desktop_scroll::{self, DesktopScrollManifest};
+use gtl_benchmarks::desktop_scroll::{
+    self, DesktopScrollBenchmarkProtocol, DesktopScrollLaunch, DesktopScrollReport,
+    DesktopScrollResourceBounds, DesktopScrollSource, DesktopScrollSystemConditions,
+    DesktopScrollWindow, ScrollProtocol, ScrollSample,
+};
 use gtl_web_contracts::test_ids;
 use serde::{Deserialize, Serialize};
 use thirtyfour::{WebDriver, WebElement};
@@ -23,16 +27,13 @@ mod process_memory;
 #[path = "desktop_scroll_baseline/runner_environment.rs"]
 mod runner_environment;
 
-use metrics::{BrowserScrollSample, ScrollProtocol, ScrollSample};
-use process_memory::ProcessMemorySnapshot;
-use runner_environment::{RunnerEnvironment, SystemConditions};
+use metrics::BrowserScrollSample;
 
 const ASSERTION_TIMEOUT: Duration = Duration::from_secs(120);
 const SCRIPT_TIMEOUT: Duration = Duration::from_secs(30);
 const WINDOW_WIDTH: u32 = 1_200;
 const WINDOW_HEIGHT: u32 = 700;
 const DIAGNOSTIC_BYTES_MAX: usize = 64 * 1024;
-const BENCHMARK_NAME: &str = "desktop-scroll-production-viewer";
 const VIEW_NAME: &str = "desktop-scroll-baseline";
 
 const READINESS_SCRIPT: &str = r#"
@@ -147,71 +148,7 @@ struct BenchmarkInputs {
     launches: usize,
     source_commit: String,
     invocation: String,
-    bounds: ResourceBounds,
-}
-
-#[derive(Debug, Serialize)]
-struct ResourceBounds {
-    cpu_quota_percent: usize,
-    memory_max_bytes: u64,
-    memory_swap_max_bytes: u64,
-    tasks_max: usize,
-    process_niceness: usize,
-    cargo_jobs_max: usize,
-    rayon_threads_max: usize,
-    wall_time_minutes: u64,
-    termination_grace_seconds: u64,
-}
-
-#[derive(Debug, Serialize)]
-struct BenchmarkReport {
-    format_version: u32,
-    benchmark: &'static str,
-    source: SourceEvidence,
-    fixture_manifest: DesktopScrollManifest,
-    protocol: BenchmarkProtocol,
-    resource_bounds: ResourceBounds,
-    runner: RunnerEnvironment,
-    launches: Vec<LaunchReport>,
-}
-
-#[derive(Debug, Serialize)]
-struct SourceEvidence {
-    commit: String,
-    invocation: String,
-    profile: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-struct BenchmarkProtocol {
-    independent_launches: usize,
-    outer_window_width_pixels: u32,
-    outer_window_height_pixels: u32,
-    expected_layout: &'static str,
-    expected_density: &'static str,
-    readiness: &'static str,
-    script_timeout_seconds: u64,
-    scroll: ScrollProtocol,
-}
-
-#[derive(Debug, Serialize)]
-struct LaunchReport {
-    launch: usize,
-    conditions_before_launch: SystemConditions,
-    outer_window: WindowRectangle,
-    readiness_memory: ProcessMemorySnapshot,
-    changed_files: ScrollSample,
-    memory_after_changed_files: ProcessMemorySnapshot,
-    commits: ScrollSample,
-    memory_after_commits: ProcessMemorySnapshot,
-}
-
-#[derive(Debug, Serialize)]
-struct WindowRectangle {
-    x: i64,
-    y: i64,
-    width: i64,
-    height: i64,
+    bounds: DesktopScrollResourceBounds,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -259,7 +196,7 @@ impl ReadinessSnapshot {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "run through `just desktop-scroll-benchmark` under the bounded release supervisor"]
+#[ignore = "run through `just bench-scroll` under the bounded release supervisor"]
 async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
     let inputs = BenchmarkInputs::from_environment()?;
     let fixture_evidence = desktop_scroll::verify_fixture(&desktop_scroll::fixture_root())
@@ -291,22 +228,22 @@ async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
     }
 
     let report_path = inputs.output.clone();
-    let report = BenchmarkReport {
-        format_version: 1,
-        benchmark: BENCHMARK_NAME,
-        source: SourceEvidence {
+    let report = DesktopScrollReport {
+        format_version: desktop_scroll::REPORT_FORMAT_VERSION,
+        benchmark: desktop_scroll::BENCHMARK_NAME.to_owned(),
+        source: DesktopScrollSource {
             commit: inputs.source_commit,
             invocation: inputs.invocation,
-            profile: "release",
+            profile: "release".to_owned(),
         },
         fixture_manifest: fixture_evidence.manifest,
-        protocol: BenchmarkProtocol {
+        protocol: DesktopScrollBenchmarkProtocol {
             independent_launches: inputs.launches,
             outer_window_width_pixels: WINDOW_WIDTH,
             outer_window_height_pixels: WINDOW_HEIGHT,
-            expected_layout: "unified",
-            expected_density: "compact",
-            readiness: "active production view with 10 commits, 50 file summaries, and all 50 retained diff-file cards complete",
+            expected_layout: "unified".to_owned(),
+            expected_density: "compact".to_owned(),
+            readiness: "active production view with 10 commits, 50 file summaries, and all 50 retained diff-file cards complete".to_owned(),
             script_timeout_seconds: SCRIPT_TIMEOUT.as_secs(),
             scroll: ScrollProtocol::fixed(),
         },
@@ -335,7 +272,7 @@ impl BenchmarkInputs {
                 "GTL_DESKTOP_SCROLL_SOURCE_COMMIT",
             )?,
             invocation: runner_environment::required_environment("GTL_DESKTOP_SCROLL_INVOCATION")?,
-            bounds: ResourceBounds {
+            bounds: DesktopScrollResourceBounds {
                 cpu_quota_percent: parse_environment("GTL_DESKTOP_SCROLL_CPU_QUOTA_PERCENT")?,
                 memory_max_bytes: parse_environment("GTL_DESKTOP_SCROLL_MEMORY_MAX_BYTES")?,
                 memory_swap_max_bytes: parse_environment(
@@ -357,8 +294,8 @@ impl BenchmarkInputs {
 async fn measure_launch(
     session: &mut support::session::TestSession,
     launch: usize,
-    conditions_before_launch: SystemConditions,
-) -> Result<LaunchReport> {
+    conditions_before_launch: DesktopScrollSystemConditions,
+) -> Result<DesktopScrollLaunch> {
     let repository = hydrate_repository(launch)?;
     let driver = session.driver();
     driver
@@ -400,10 +337,10 @@ async fn measure_launch(
         "browser viewport changed between timed panel journeys"
     );
 
-    Ok(LaunchReport {
+    Ok(DesktopScrollLaunch {
         launch,
         conditions_before_launch,
-        outer_window: WindowRectangle {
+        outer_window: DesktopScrollWindow {
             x: window.x,
             y: window.y,
             width: window.width,
@@ -538,7 +475,7 @@ async fn scroll_panel(
     metrics::summarize(panel, protocol, &raw)
 }
 
-fn write_report(path: &Path, report: &BenchmarkReport) -> Result<()> {
+fn write_report(path: &Path, report: &DesktopScrollReport) -> Result<()> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())

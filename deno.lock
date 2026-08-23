@@ -2,7 +2,8 @@
   "version": "5",
   "specifiers": {
     "npm:@tailwindcss/cli@4.3.3": "4.3.3",
-    "npm:tailwindcss@4.3.3": "4.3.3"
+    "npm:tailwindcss@4.3.3": "4.3.3",
+    "npm:yaml@2.8.1": "2.8.1"
   },
   "npm": {
     "@jridgewell/gen-mapping@0.3.13": {
@@ -381,6 +382,10 @@
       "dependencies": [
         "is-number"
       ]
+    },
+    "yaml@2.8.1": {
+      "integrity": "sha512-lcYcMxX2PO9XMGvAJkJ3OsNMw+/7FKes7/hgerGUYWIoWu5j/+YQqcZr5JnPZWzOsEBgMbSbiSTn/dv/69Mkpw==",
+      "bin": true
     }
   },
   "workspace": {

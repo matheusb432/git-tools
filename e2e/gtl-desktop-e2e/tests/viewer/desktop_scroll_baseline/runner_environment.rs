@@ -6,38 +6,11 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use serde::Serialize;
+use gtl_benchmarks::desktop_scroll::{DesktopScrollRunner, DesktopScrollSystemConditions};
 
 const SYSTEM_FILE_BYTES_MAX: u64 = 256 * 1024;
 
-#[derive(Debug, Serialize)]
-pub struct RunnerEnvironment {
-    pub runner: String,
-    pub operating_system: String,
-    pub kernel_release: String,
-    pub architecture: &'static str,
-    pub cpu_model: String,
-    pub logical_cpu_count: usize,
-    pub rustc_version: String,
-    pub cargo_version: String,
-    pub git_version: String,
-    pub tauri_driver_version: String,
-    pub webkitgtk_version: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SystemConditions {
-    pub recorded_at_unix_milliseconds: u64,
-    pub load_average_1_minute: f64,
-    pub load_average_5_minutes: f64,
-    pub load_average_15_minutes: f64,
-    pub memory_available_bytes: u64,
-    pub cpu_governors: Vec<String>,
-    pub energy_performance_preferences: Vec<String>,
-    pub external_power_online: Option<bool>,
-}
-
-pub fn describe() -> Result<RunnerEnvironment> {
+pub fn describe() -> Result<DesktopScrollRunner> {
     let cpu_information = read_bounded(Path::new("/proc/cpuinfo"))?;
     let cpu_model = cpu_information
         .lines()
@@ -52,13 +25,12 @@ pub fn describe() -> Result<RunnerEnvironment> {
         .count();
     let operating_system = parse_os_release(&read_bounded(Path::new("/etc/os-release"))?)?;
 
-    Ok(RunnerEnvironment {
-        runner: required_environment("GTL_DESKTOP_SCROLL_RUNNER")?,
+    Ok(DesktopScrollRunner {
         operating_system,
         kernel_release: read_bounded(Path::new("/proc/sys/kernel/osrelease"))?
             .trim()
             .to_owned(),
-        architecture: env::consts::ARCH,
+        architecture: env::consts::ARCH.to_owned(),
         cpu_model,
         logical_cpu_count,
         rustc_version: required_environment("GTL_DESKTOP_SCROLL_RUSTC_VERSION")?,
@@ -69,7 +41,7 @@ pub fn describe() -> Result<RunnerEnvironment> {
     })
 }
 
-pub fn capture_conditions() -> Result<SystemConditions> {
+pub fn capture_conditions() -> Result<DesktopScrollSystemConditions> {
     let load_average = read_bounded(Path::new("/proc/loadavg"))?;
     let mut fields = load_average.split_whitespace();
     let load_averages = [
@@ -93,7 +65,7 @@ pub fn capture_conditions() -> Result<SystemConditions> {
         .try_into()
         .context("benchmark timestamp exceeds u64 milliseconds")?;
 
-    Ok(SystemConditions {
+    Ok(DesktopScrollSystemConditions {
         recorded_at_unix_milliseconds,
         load_average_1_minute: load_averages[0],
         load_average_5_minutes: load_averages[1],

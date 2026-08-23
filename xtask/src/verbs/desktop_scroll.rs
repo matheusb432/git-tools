@@ -1,13 +1,18 @@
 //! Bounded fixture and production-desktop measurement automation for realistic scrolling.
 
 use std::{
-    path::{Path, PathBuf},
+    fs::{self, File},
+    io::Read as _,
+    path::Path,
     process::Command,
 };
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
-use gtl_benchmarks::desktop_scroll;
+use gtl_benchmarks::desktop_scroll::{
+    self, DesktopScrollComparison, DesktopScrollReport, MetricDelta, PanelComparison,
+    compare_reports,
+};
 
 use super::{desktop_e2e, repository_root};
 use crate::{process, task::Step};
@@ -16,7 +21,10 @@ const MEMORY_SWAP_BYTES_MAX: u64 = 0;
 const CARGO_JOBS_MAX: usize = 1;
 const RAYON_THREADS_MAX: usize = 2;
 const GIT_OUTPUT_BYTES_MAX: usize = 64 * 1024;
-const BENCHMARK_REPORT_DEFAULT: &str = ".artifacts/benchmarks/desktop-scroll.json";
+const BENCHMARK_LAUNCHES: usize = 3;
+const BENCHMARK_BASELINE_RELATIVE_PATH: &str = ".artifacts/benchmarks/desktop-scroll/baseline.json";
+const BENCHMARK_CURRENT_RELATIVE_PATH: &str = ".artifacts/benchmarks/desktop-scroll/current.json";
+const BENCHMARK_REPORT_BYTES_MAX: u64 = 16 * 1024 * 1024;
 
 const FIXTURE_BOUNDS: WorkerBounds = WorkerBounds {
     cpu_quota_percent: 200,
@@ -48,15 +56,9 @@ struct WorkerBounds {
 
 #[derive(Args, Debug)]
 pub(crate) struct DesktopScrollBenchmarkArguments {
-    /// Stable public identifier for this machine configuration; never use a hostname.
-    #[arg(long, value_parser = parse_runner)]
-    pub(crate) runner: String,
-    /// Raw JSON evidence destination. The committed baseline report is reviewed separately.
-    #[arg(long, default_value = BENCHMARK_REPORT_DEFAULT)]
-    pub(crate) output: PathBuf,
-    /// Independent release viewer launches to measure.
-    #[arg(long, default_value_t = 3, value_parser = parse_launches)]
-    pub(crate) launches: usize,
+    /// Compare the current result, then replace the local baseline after a successful run.
+    #[arg(long)]
+    pub(crate) update: bool,
 }
 
 pub(crate) fn refresh_fixture() -> Result<()> {
@@ -81,6 +83,9 @@ pub(crate) fn run_fixture_worker() -> Result<()> {
 pub(crate) fn run_benchmark(arguments: &DesktopScrollBenchmarkArguments) -> Result<()> {
     require_linux_systemd("desktop scroll benchmark")?;
     let root = repository_root();
+    let baseline_path = root.join(BENCHMARK_BASELINE_RELATIVE_PATH);
+    let current_path = root.join(BENCHMARK_CURRENT_RELATIVE_PATH);
+    let baseline = load_baseline(&baseline_path, arguments.update)?;
     ensure_clean_repository(&root)?;
     let executable =
         std::env::current_exe().context("resolve xtask desktop benchmark worker executable")?;
@@ -89,23 +94,36 @@ pub(crate) fn run_benchmark(arguments: &DesktopScrollBenchmarkArguments) -> Resu
         source_commit.len() == 40 && source_commit.bytes().all(|byte| byte.is_ascii_hexdigit()),
         "Git returned an invalid source commit: {source_commit}"
     );
-    let output = absolute_path(&root, &arguments.output);
-    let invocation = format!(
-        "just desktop-scroll-benchmark --runner {} --output {} --launches {}",
-        arguments.runner,
-        arguments.output.display(),
-        arguments.launches
-    );
+    let invocation = if arguments.update {
+        "just bench-scroll --update"
+    } else {
+        "just bench-scroll"
+    };
     process::run_step(&bounded_benchmark_worker_step(
         &executable,
         &BenchmarkWorkerInputs {
-            runner: &arguments.runner,
-            output: &output,
-            launches: arguments.launches,
+            output: &current_path,
+            launches: BENCHMARK_LAUNCHES,
             source_commit: &source_commit,
-            invocation: &invocation,
+            invocation,
         },
-    ))
+    ))?;
+
+    let current = read_report(&current_path)?;
+    if let Some(baseline) = baseline {
+        match compare_reports(&baseline, &current) {
+            Ok(comparison) => print_comparison(&comparison),
+            Err(error) if arguments.update => {
+                eprintln!("existing desktop scroll baseline is not comparable: {error}");
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    if arguments.update {
+        replace_report_atomically(&current_path, &baseline_path)?;
+        println!("desktop scroll baseline: {}", baseline_path.display());
+    }
+    Ok(())
 }
 
 pub(crate) fn run_benchmark_worker() -> Result<()> {
@@ -113,7 +131,6 @@ pub(crate) fn run_benchmark_worker() -> Result<()> {
 }
 
 struct BenchmarkWorkerInputs<'a> {
-    runner: &'a str,
     output: &'a Path,
     launches: usize,
     source_commit: &'a str,
@@ -138,7 +155,6 @@ fn bounded_benchmark_worker_step(executable: &Path, inputs: &BenchmarkWorkerInpu
         bounds,
     )
     .with_environment("CARGO_TERM_QUIET", "true")
-    .with_environment("GTL_DESKTOP_SCROLL_RUNNER", inputs.runner)
     .with_environment(
         "GTL_DESKTOP_SCROLL_REPORT_PATH",
         inputs.output.to_string_lossy(),
@@ -256,37 +272,124 @@ fn git_output(root: &Path, arguments: &[&str]) -> Result<String> {
         .map(|value| value.trim().to_owned())
 }
 
-fn absolute_path(root: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        root.join(path)
-    }
-}
-
-fn parse_runner(value: &str) -> Result<String, String> {
-    if value.is_empty()
-        || value.len() > 64
-        || !value
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
-    {
-        return Err(
-            "runner must contain 1 through 64 lowercase ASCII letters, digits, or hyphens"
-                .to_owned(),
+fn load_baseline(path: &Path, update: bool) -> Result<Option<DesktopScrollReport>> {
+    if !path.is_file() {
+        ensure!(
+            update,
+            "desktop scroll baseline is missing at {}; run `just bench-scroll --update` first",
+            path.display()
         );
+        return Ok(None);
     }
-    Ok(value.to_owned())
+    match read_report(path) {
+        Ok(report) => Ok(Some(report)),
+        Err(error) if update => {
+            eprintln!(
+                "existing desktop scroll baseline cannot be read and will be replaced: {error:#}"
+            );
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
 }
 
-fn parse_launches(value: &str) -> Result<usize, String> {
-    let launches = value
-        .parse::<usize>()
-        .map_err(|error| format!("launch count is not an integer: {error}"))?;
-    if !(3..=10).contains(&launches) {
-        return Err("launch count must be between 3 and 10".to_owned());
+fn read_report(path: &Path) -> Result<DesktopScrollReport> {
+    let metadata = fs::metadata(path)
+        .with_context(|| format!("read desktop scroll report metadata {}", path.display()))?;
+    ensure!(
+        metadata.is_file(),
+        "desktop scroll report is not a file: {}",
+        path.display()
+    );
+    ensure!(
+        metadata.len() <= BENCHMARK_REPORT_BYTES_MAX,
+        "desktop scroll report {} exceeds {BENCHMARK_REPORT_BYTES_MAX} bytes",
+        path.display()
+    );
+    let file = File::open(path)
+        .with_context(|| format!("open desktop scroll report {}", path.display()))?;
+    serde_json::from_reader(std::io::BufReader::new(file))
+        .with_context(|| format!("decode desktop scroll report {}", path.display()))
+}
+
+fn replace_report_atomically(source: &Path, destination: &Path) -> Result<()> {
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .context("desktop scroll baseline path has no parent")?;
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "create desktop scroll baseline directory {}",
+            parent.display()
+        )
+    })?;
+    let mut source_file = File::open(source)
+        .with_context(|| format!("open current desktop scroll report {}", source.display()))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).with_context(|| {
+        format!(
+            "create temporary desktop scroll baseline in {}",
+            parent.display()
+        )
+    })?;
+    let copied_bytes = std::io::copy(
+        &mut source_file.by_ref().take(BENCHMARK_REPORT_BYTES_MAX + 1),
+        &mut temporary,
+    )
+    .context("copy current desktop scroll report into temporary baseline")?;
+    ensure!(
+        copied_bytes <= BENCHMARK_REPORT_BYTES_MAX,
+        "current desktop scroll report exceeds {BENCHMARK_REPORT_BYTES_MAX} bytes"
+    );
+    temporary
+        .as_file()
+        .sync_all()
+        .context("sync temporary desktop scroll baseline")?;
+    temporary
+        .persist(destination)
+        .map_err(|error| error.error)
+        .with_context(|| format!("publish desktop scroll baseline {}", destination.display()))?;
+    Ok(())
+}
+
+fn print_comparison(comparison: &DesktopScrollComparison) {
+    println!("desktop scroll comparison (current vs baseline)");
+    println!(
+        "{:<34} {:>14} {:>14} {:>10}",
+        "metric", "baseline", "current", "change"
+    );
+    print_panel("changed files", comparison.changed_files);
+    print_panel("commits", comparison.commits);
+    print_metric("peak RSS", comparison.peak_rss_bytes, |value| {
+        format!("{:.1} MiB", value / 1024.0 / 1024.0)
+    });
+}
+
+fn print_panel(name: &str, comparison: PanelComparison) {
+    for (metric, delta) in [
+        ("p50 frame gap", comparison.frame_gap_ms.p50),
+        ("p95 frame gap", comparison.frame_gap_ms.p95),
+        ("p99 frame gap", comparison.frame_gap_ms.p99),
+    ] {
+        print_metric(&format!("{name} {metric}"), delta, |value| {
+            format!("{value:.2} ms")
+        });
     }
-    Ok(launches)
+    print_metric(
+        &format!("{name} frames over 33 ms"),
+        comparison.frames_exceeding_33_ms,
+        |value| format!("{value:.0}"),
+    );
+}
+
+fn print_metric(label: &str, delta: MetricDelta, format_value: impl Fn(f64) -> String) {
+    let change = delta
+        .relative_change_percent
+        .map_or_else(|| "n/a".to_owned(), |percent| format!("{percent:+.2}%"));
+    println!(
+        "{label:<34} {:>14} {:>14} {change:>10}",
+        format_value(delta.baseline),
+        format_value(delta.current)
+    );
 }
 
 #[cfg(test)]
@@ -336,11 +439,10 @@ mod tests {
         let step = bounded_benchmark_worker_step(
             Path::new("/repo/target/debug/xtask"),
             &BenchmarkWorkerInputs {
-                runner: "example-runner",
                 output: Path::new("/repo/.artifacts/scroll.json"),
                 launches: 3,
                 source_commit: "0123456789012345678901234567890123456789",
-                invocation: "just desktop-scroll-benchmark --runner example-runner",
+                invocation: "just bench-scroll",
             },
         );
 
@@ -381,12 +483,32 @@ mod tests {
     }
 
     #[test]
-    fn benchmark_argument_bounds_reject_hostnames_and_short_runs() {
-        assert!(parse_runner("benchmark-host").is_ok());
-        assert!(parse_runner("devbox.example.invalid").is_err());
-        assert!(parse_runner("Runner").is_err());
-        assert!(parse_launches("3").is_ok());
-        assert!(parse_launches("2").is_err());
-        assert!(parse_launches("11").is_err());
+    fn baseline_replacement_is_atomic_and_exact() {
+        let directory = tempfile::tempdir().expect("temporary report directory");
+        let source = directory.path().join("current.json");
+        let destination = directory.path().join("baseline.json");
+        fs::write(&source, b"current report\n").expect("write current report");
+        fs::write(&destination, b"old report\n").expect("write old baseline");
+
+        replace_report_atomically(&source, &destination).expect("replace baseline");
+
+        assert_eq!(
+            fs::read(&destination).expect("read replaced baseline"),
+            b"current report\n"
+        );
+    }
+
+    #[test]
+    fn comparison_requires_an_existing_baseline_before_measurement() {
+        let directory = tempfile::tempdir().expect("temporary report directory");
+        let baseline = directory.path().join("baseline.json");
+
+        let error = load_baseline(&baseline, false).expect_err("comparison needs a baseline");
+
+        assert!(
+            error
+                .to_string()
+                .contains("run `just bench-scroll --update` first")
+        );
     }
 }

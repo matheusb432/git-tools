@@ -2,7 +2,6 @@ use std::{cell::OnceCell, hint::black_box};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use gtl_application::viewer::{DiffDensity, DiffLayout, RenderOptions};
-use gtl_benchmarks::{Benchmark, BenchmarkCase};
 
 #[path = "viewer_render/fixture.rs"]
 mod fixture;
@@ -11,22 +10,21 @@ mod view_fixture;
 
 use fixture::ViewerRenderBenchmark;
 
+const RAW_ARTIFACT_BENCHMARK_NAME: &str = "raw-artifact";
+const RAW_ARTIFACT_SPLIT_FULL_BENCHMARK_NAME: &str = "raw-artifact-split-full";
+const SAMPLE_SIZE: usize = 10;
+
 fn render_viewer_boundaries(c: &mut Criterion) {
+    benchmark_raw_artifact(c, RAW_ARTIFACT_BENCHMARK_NAME, RenderOptions::DEFAULT);
     benchmark_raw_artifact(
         c,
-        BenchmarkCase::ViewerRenderRawArtifact,
-        RenderOptions::DEFAULT,
-    );
-    benchmark_raw_artifact(
-        c,
-        BenchmarkCase::ViewerRenderRawArtifactSplitFull,
+        RAW_ARTIFACT_SPLIT_FULL_BENCHMARK_NAME,
         RenderOptions::new(DiffLayout::Split, DiffDensity::Full),
     );
 }
 
-fn benchmark_raw_artifact(c: &mut Criterion, case: BenchmarkCase, options: RenderOptions) {
+fn benchmark_raw_artifact(c: &mut Criterion, label: &'static str, options: RenderOptions) {
     let fixture = OnceCell::new();
-    let label = case.as_str();
     c.bench_function(label, move |b| {
         let fixture = fixture.get_or_init(|| {
             let fixture = ViewerRenderBenchmark::fixture_45k();
@@ -42,7 +40,7 @@ fn benchmark_raw_artifact(c: &mut Criterion, case: BenchmarkCase, options: Rende
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(Benchmark::ViewerRender.sample_size());
+    config = Criterion::default().sample_size(SAMPLE_SIZE);
     targets = render_viewer_boundaries
 }
 criterion_main!(benches);

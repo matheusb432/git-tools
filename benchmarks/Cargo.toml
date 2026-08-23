@@ -4,6 +4,9 @@ version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
 
+[lib]
+bench = false
+
 [[bench]]
 name = "app_state_record_render"
 harness = false
@@ -25,7 +28,6 @@ name = "grpc_requests"
 harness = false
 
 [dependencies]
-clap.workspace = true
 serde.workspace = true
 sha2.workspace = true
 tempfile.workspace = true

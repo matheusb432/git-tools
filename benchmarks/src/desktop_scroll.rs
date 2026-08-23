@@ -9,9 +9,22 @@ use std::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+mod comparison;
 mod generate;
+mod report;
 mod repository;
 mod verify;
+
+pub use comparison::{
+    DesktopScrollComparison, DesktopScrollComparisonError, DesktopScrollPanel,
+    DesktopScrollReportRole, FrameGapComparison, MetricDelta, PanelComparison, compare_reports,
+};
+pub use report::{
+    BENCHMARK_NAME, DesktopScrollBenchmarkProtocol, DesktopScrollLaunch,
+    DesktopScrollProcessMemory, DesktopScrollReport, DesktopScrollResourceBounds,
+    DesktopScrollRunner, DesktopScrollSource, DesktopScrollSystemConditions, DesktopScrollWindow,
+    REPORT_FORMAT_VERSION, ScrollProtocol, ScrollSample,
+};
 
 pub const FIXTURE_RELATIVE_PATH: &str = "benchmarks/fixtures/desktop-scroll";
 pub const GIT_RANGE: &str = "HEAD~10..HEAD";

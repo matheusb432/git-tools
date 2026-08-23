@@ -20,7 +20,6 @@ members = [
   "xtask",
 ]
 # Desktop and Criterion targets need webkit2gtk headers, so their packages are not default members.
-# xtask still uses the lightweight benchmark catalogue.
 default-members = [
   "crates/gtl-application",
   "crates/gtl-cli",

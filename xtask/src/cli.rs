@@ -2,10 +2,7 @@ use std::{ffi::OsString, path::PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::verbs::{
-    Verb, bench::BenchArguments, desktop_scroll::DesktopScrollBenchmarkArguments,
-    test::TestArguments,
-};
+use crate::verbs::{Verb, desktop_scroll::DesktopScrollBenchmarkArguments, test::TestArguments};
 
 #[derive(Parser)]
 #[command(
@@ -102,9 +99,6 @@ pub enum Command {
     /// Generate the tracked shared Tailwind stylesheet.
     #[command(name = Verb::WEB_STYLES.as_str())]
     WebStyles,
-    /// Run a shared Rust benchmark without host display variables.
-    #[command(name = Verb::BENCH.as_str())]
-    Bench(BenchArguments),
     /// Rebuild web assets and fail if the tracked stylesheet drifts from its sources.
     #[command(name = Verb::DRIFT_CHECK.as_str())]
     DriftCheck,

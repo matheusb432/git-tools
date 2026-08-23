@@ -3468,7 +3468,6 @@ dependencies = [
 name = "gtl-benchmarks"
 version = "0.1.0"
 dependencies = [
- "clap",
  "criterion",
  "gtl-application",
  "gtl-artifacts",
@@ -9415,6 +9414,7 @@ dependencies = [
  "gtl-benchmarks",
  "ico",
  "image",
+ "serde_json",
  "sha2 0.11.0",
  "tempfile",
  "tiny-skia",
