@@ -12,10 +12,12 @@ pub mod viewer;
     clippy::too_many_lines,
     clippy::trivially_copy_pass_by_ref
 )]
+#[cfg(feature = "grpc")]
 pub mod v1 {
     tonic::include_proto!("gtl.v1");
 }
 
+#[cfg(feature = "grpc")]
 pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("gtl_descriptor");
 
 #[cfg(test)]

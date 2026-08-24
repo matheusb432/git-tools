@@ -244,6 +244,7 @@ async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
             expected_layout: "unified".to_owned(),
             expected_density: "compact".to_owned(),
             readiness: "active production view with 10 commits, 50 file summaries, and all 50 retained diff-file cards complete".to_owned(),
+            memory_attribution: process_memory::ATTRIBUTION.to_owned(),
             script_timeout_seconds: SCRIPT_TIMEOUT.as_secs(),
             scroll: ScrollProtocol::fixed(),
         },

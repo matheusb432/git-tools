@@ -7,7 +7,7 @@ publish.workspace = true
 
 [dependencies]
 gtl-local-auth.workspace = true
-gtl-wire.workspace = true
+gtl-wire = { workspace = true, features = ["grpc"] }
 thiserror.workspace = true
 tonic = { workspace = true, features = ["router", "transport"] }
 tonic-health.workspace = true

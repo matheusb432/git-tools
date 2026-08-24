@@ -17,7 +17,7 @@ anyhow.workspace = true
 clap.workspace = true
 clap-cargo.workspace = true
 gtl-client.workspace = true
-gtl-wire.workspace = true
+gtl-wire = { workspace = true, features = ["grpc"] }
 gtl-models.workspace = true
 libc.workspace = true
 serde.workspace = true

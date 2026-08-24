@@ -44,7 +44,7 @@ gtl-application = { path = "crates/gtl-application" }
 gtl-benchmarks = { path = "benchmarks" }
 gtl-client = { path = "crates/gtl-client" }
 gtl-local-auth = { path = "crates/gtl-local-auth" }
-gtl-wire = { path = "crates/gtl-wire" }
+gtl-wire = { path = "crates/gtl-wire", default-features = false }
 gtl-desktop = { path = "crates/gtl-desktop" }
 gtl-artifacts = { path = "crates/gtl-artifacts" }
 gtl-models = { path = "crates/gtl-models" }
@@ -55,7 +55,7 @@ gtl-web = { path = "crates/gtl-web", default-features = false }
 gtl-web-contracts = { path = "crates/gtl-web-contracts" }
 
 anyhow = "1"
-sample_project-client = { version = "0.1.0", features = ["cli"] }
+sample_project-client = { version = "0.2.0", features = ["grpc"] }
 assert_cmd = "2"
 base64 = "0.22.1"
 cargo_metadata = "0.23.1"

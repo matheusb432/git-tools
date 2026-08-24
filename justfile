@@ -107,6 +107,7 @@ fmt-check *args:
 lint:
     buf lint
     cargo run --quiet -p xtask -- check-structure
+    cargo check --locked -p gtl-application --all-targets --all-features
     cargo check --locked -p gtl-parser --no-default-features --target wasm32-unknown-unknown
     cargo run --quiet -p xtask -- check-parser-wasm
     cargo clippy --workspace --all-targets

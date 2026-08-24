@@ -39,7 +39,7 @@ criterion = { workspace = true, features = ["async_tokio"] }
 gtl-application.workspace = true
 gtl-client.workspace = true
 gtl-models.workspace = true
-gtl-wire.workspace = true
+gtl-wire = { workspace = true, features = ["grpc"] }
 # The view-cache target benchmarks the desktop-owned cache without exposing it in production builds.
 gtl-desktop = { workspace = true, features = ["benchmark-support"] }
 gtl-server = { workspace = true, features = ["benchmark-support"] }

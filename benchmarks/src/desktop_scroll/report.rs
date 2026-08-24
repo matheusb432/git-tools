@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::DesktopScrollManifest;
 
-pub const REPORT_FORMAT_VERSION: u32 = 2;
+pub const REPORT_FORMAT_VERSION: u32 = 3;
 pub const BENCHMARK_NAME: &str = "desktop-scroll-production-viewer";
 const DISTANCE_CSS_PIXELS: u32 = 160;
 const STEP_CSS_PIXELS: u32 = 8;
@@ -48,6 +48,7 @@ pub struct DesktopScrollBenchmarkProtocol {
     pub expected_layout: String,
     pub expected_density: String,
     pub readiness: String,
+    pub memory_attribution: String,
     pub script_timeout_seconds: u64,
     pub scroll: ScrollProtocol,
 }

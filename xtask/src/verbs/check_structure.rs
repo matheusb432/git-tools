@@ -186,12 +186,25 @@ fn collect_violations(root: &Path) -> Result<Vec<String>, cargo_metadata::Error>
                     policy.label, policy.from, dependency.name, policy.reason
                 ));
             }
+            if policy.from == "gtl-application"
+                && dependency.name == "gtl-wire"
+                && dependency_enables_grpc(dependency.uses_default_features, &dependency.features)
+            {
+                violations.push(
+                    "[gtl-application omits generated transport] gtl-application -> gtl-wire/grpc: application code may use hand-written wire contracts but not generated protobuf or Tonic types"
+                        .to_owned(),
+                );
+            }
         }
     }
 
     violations.sort();
     violations.dedup();
     Ok(violations)
+}
+
+fn dependency_enables_grpc(uses_default_features: bool, features: &[String]) -> bool {
+    uses_default_features || features.iter().any(|feature| feature == "grpc")
 }
 
 fn dependency_is_forbidden(
@@ -315,5 +328,12 @@ mod tests {
                 &BTreeSet::new()
             ));
         }
+    }
+
+    #[test]
+    fn application_wire_dependency_must_omit_grpc_and_default_features() {
+        assert!(!dependency_enables_grpc(false, &[]));
+        assert!(dependency_enables_grpc(true, &[]));
+        assert!(dependency_enables_grpc(false, &["grpc".to_owned()]));
     }
 }

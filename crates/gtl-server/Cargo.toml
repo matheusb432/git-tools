@@ -13,7 +13,7 @@ gtl-artifacts.workspace = true
 gtl-infra.workspace = true
 gtl-local-auth.workspace = true
 gtl-models.workspace = true
-gtl-wire.workspace = true
+gtl-wire = { workspace = true, features = ["grpc"] }
 rolling-file.workspace = true
 tokio = { workspace = true, features = [
   "macros",

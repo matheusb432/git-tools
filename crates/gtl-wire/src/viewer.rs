@@ -17,6 +17,13 @@ use crate::recipes::Recipe;
 
 pub const VIEWER_STATE_CHANGED_EVENT: &str = "viewer-state-changed";
 pub const VIEWER_DIFF_LINES_PAGE_MAX_BYTES: usize = 256 * 1024;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 1;
+pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
+pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
+pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;
+pub const VIEWER_ROW_BATCH_MAX_ROWS: usize = 64;
+pub const VIEWER_ROW_BATCH_MAX_ENCODED_BYTES: usize = 256 * 1024;
+pub const VIEWER_ROW_MAX_ENCODED_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

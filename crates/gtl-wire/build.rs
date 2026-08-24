@@ -1,3 +1,4 @@
+#[cfg(feature = "grpc")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
         "proto/gtl/v1/common.proto",
@@ -7,10 +8,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "proto/gtl/v1/repository.proto",
         "proto/gtl/v1/settings.proto",
         "proto/gtl/v1/tag.proto",
+        "proto/gtl/v1/viewer.proto",
         "proto/gtl/v1/worktree.proto",
     ];
     tonic_prost_build::configure()
         .build_transport(false)
+        .boxed(".gtl.v1.ViewerActiveState.state.ready")
         .file_descriptor_set_path(std::env::var("OUT_DIR")? + "/gtl_descriptor.bin")
         .compile_protos(&protos, &["proto"])?;
 
@@ -19,3 +22,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
+
+#[cfg(not(feature = "grpc"))]
+fn main() {}

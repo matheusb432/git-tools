@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use sample_project_client::{
     ProjectClient as _,
-    project::{Project, cli::SampleCliClient},
+    project::{Project, grpc::SampleGrpcClient},
 };
 use directories::BaseDirs;
 use gtl_application::ports::{
@@ -19,16 +19,14 @@ use gtl_models::{
 
 #[derive(Clone, Debug)]
 pub struct ProjectRepositoryClient {
-    client: SampleCliClient,
     home: Option<PathBuf>,
 }
 
 impl ProjectRepositoryClient {
-    /// Uses the `sample_project` executable from `PATH` and the platform home directory.
+    /// Uses sample_project's local authenticated endpoint and the platform home directory.
     #[must_use]
     pub fn from_environment() -> Self {
         Self {
-            client: SampleCliClient::default(),
             home: BaseDirs::new().map(|directories| directories.home_dir().to_path_buf()),
         }
     }
@@ -39,8 +37,10 @@ impl ProjectRepositoryClient {
     /// Returns an error when sample_project is misconfigured or unavailable, its project data is invalid, or
     /// the local home directory cannot be resolved.
     pub async fn list_projects(&self) -> Result<Vec<ProjectRepository>, ProjectClientError> {
-        let projects = self
-            .client
+        let client = SampleGrpcClient::connect_local()
+            .await
+            .map_err(project_client_error_from_shared)?;
+        let projects = client
             .list_projects()
             .await
             .map_err(project_client_error_from_shared)?;

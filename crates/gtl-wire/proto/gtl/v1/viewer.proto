@@ -1,0 +1,490 @@
+syntax = "proto3";
+
+package gtl.v1;
+
+import "gtl/v1/common.proto";
+import "gtl/v1/settings.proto";
+
+service ViewerService {
+  rpc GetViewerShell(GetViewerShellRequest) returns (GetViewerShellResponse);
+  rpc WatchViewer(WatchViewerRequest) returns (stream WatchViewerResponse);
+  rpc StreamViewerRows(StreamViewerRowsRequest) returns (stream StreamViewerRowsResponse);
+  rpc ActivateViewerTab(ActivateViewerTabRequest) returns (ActivateViewerTabResponse);
+  rpc CloseViewerTab(CloseViewerTabRequest) returns (CloseViewerTabResponse);
+  rpc RefreshViewerTab(RefreshViewerTabRequest) returns (RefreshViewerTabResponse);
+  rpc DeleteLiveViewerTab(DeleteLiveViewerTabRequest) returns (DeleteLiveViewerTabResponse);
+  rpc SelectViewerCommit(SelectViewerCommitRequest) returns (SelectViewerCommitResponse);
+  rpc ClearViewerCommitSelection(ClearViewerCommitSelectionRequest) returns (ClearViewerCommitSelectionResponse);
+  rpc SetViewerPreference(SetViewerPreferenceRequest) returns (SetViewerPreferenceResponse);
+  rpc ListViewerCommits(ListViewerCommitsRequest) returns (ListViewerCommitsResponse);
+  rpc ListViewerHistory(ListViewerHistoryRequest) returns (ListViewerHistoryResponse);
+  rpc OpenViewerHistory(OpenViewerHistoryRequest) returns (OpenViewerHistoryResponse);
+  rpc GetViewerHistoryCopy(GetViewerHistoryCopyRequest) returns (GetViewerHistoryCopyResponse);
+  rpc GetViewerSettings(GetViewerSettingsRequest) returns (GetViewerSettingsResponse);
+  rpc OpenViewerDiffFile(OpenViewerDiffFileRequest) returns (OpenViewerDiffFileResponse);
+}
+
+message GetViewerShellRequest {}
+
+message WatchViewerRequest {}
+
+message WatchViewerResponse {
+  uint64 version = 1;
+}
+
+enum ViewerDiffLayout {
+  VIEWER_DIFF_LAYOUT_UNSPECIFIED = 0;
+  VIEWER_DIFF_LAYOUT_UNIFIED = 1;
+  VIEWER_DIFF_LAYOUT_SPLIT = 2;
+}
+
+enum ViewerDiffDensity {
+  VIEWER_DIFF_DENSITY_UNSPECIFIED = 0;
+  VIEWER_DIFF_DENSITY_COMPACT = 1;
+  VIEWER_DIFF_DENSITY_FULL = 2;
+}
+
+message ViewerRenderOptions {
+  ViewerDiffLayout layout = 1;
+  ViewerDiffDensity density = 2;
+}
+
+message ViewerViewIdentity {
+  uint64 tab_id = 1;
+  uint64 range_generation = 2;
+  uint64 selection_generation = 3;
+  ViewerRenderOptions render_options = 4;
+}
+
+enum ViewerTabKind {
+  VIEWER_TAB_KIND_UNSPECIFIED = 0;
+  VIEWER_TAB_KIND_SNAPSHOT = 1;
+  VIEWER_TAB_KIND_LIVE = 2;
+}
+
+enum ViewerTabState {
+  VIEWER_TAB_STATE_UNSPECIFIED = 0;
+  VIEWER_TAB_STATE_PENDING = 1;
+  VIEWER_TAB_STATE_READY = 2;
+  VIEWER_TAB_STATE_BROKEN = 3;
+  VIEWER_TAB_STATE_ERROR = 4;
+}
+
+message ViewerTab {
+  uint64 id = 1;
+  string label = 2;
+  ViewerTabKind kind = 3;
+  ViewerTabState state = 4;
+}
+
+enum ViewerFileStatus {
+  VIEWER_FILE_STATUS_UNSPECIFIED = 0;
+  VIEWER_FILE_STATUS_ADDED = 1;
+  VIEWER_FILE_STATUS_DELETED = 2;
+  VIEWER_FILE_STATUS_RENAMED = 3;
+  VIEWER_FILE_STATUS_MODIFIED = 4;
+}
+
+message ViewerFileSummary {
+  reserved 3;
+
+  string id = 1;
+  string path = 2;
+  string anchor_id = 4;
+  uint32 added = 5;
+  uint32 removed = 6;
+  ViewerFileStatus status = 7;
+  bool can_open_in_editor = 8;
+  bool initially_expanded = 9;
+}
+
+message ViewerCommandLine {
+  string lead = 1;
+  string range = 2;
+  string trail = 3;
+}
+
+message ViewerFooter {
+  string command = 1;
+}
+
+message ViewerAppliedExclusions {
+  repeated string extensions = 1;
+  repeated string hidden_paths = 2;
+}
+
+enum ViewerFailureCode {
+  VIEWER_FAILURE_CODE_UNSPECIFIED = 0;
+  VIEWER_FAILURE_CODE_REPOSITORY_DIRECTORY_NOT_FOUND = 1;
+  VIEWER_FAILURE_CODE_REPOSITORY_DIRECTORY_NOT_GIT_REPOSITORY = 2;
+  VIEWER_FAILURE_CODE_SOURCE_UNAVAILABLE = 3;
+  VIEWER_FAILURE_CODE_RENDER_FAILED = 4;
+}
+
+enum ViewerCommitSelectionState {
+  VIEWER_COMMIT_SELECTION_STATE_UNSPECIFIED = 0;
+  VIEWER_COMMIT_SELECTION_STATE_NONE = 1;
+  VIEWER_COMMIT_SELECTION_STATE_PENDING = 2;
+  VIEWER_COMMIT_SELECTION_STATE_READY = 3;
+  VIEWER_COMMIT_SELECTION_STATE_ERROR = 4;
+}
+
+message ViewerCommitSelection {
+  ViewerCommitSelectionState state = 1;
+  optional string commit_id = 2;
+  optional string message = 3;
+}
+
+message ViewerActiveView {
+  ViewerViewIdentity identity = 1;
+  string title = 2;
+  string repository_name = 3;
+  string branch = 4;
+  string upstream = 5;
+  ViewerCommandLine command = 6;
+  repeated ViewerFileSummary files = 7;
+  string commits_label = 8;
+  uint32 commit_count = 9;
+  ViewerCommitSelection commit_selection = 10;
+  ViewerFooter footer = 11;
+  optional ViewerAppliedExclusions exclusions = 12;
+}
+
+message ViewerPendingState {
+  uint64 tab_id = 1;
+}
+
+message ViewerFailureState {
+  uint64 tab_id = 1;
+  ViewerFailureCode code = 2;
+  string message = 3;
+}
+
+message ViewerReadyState {
+  ViewerActiveView view = 1;
+}
+
+message ViewerActiveState {
+  oneof state {
+    Empty empty = 1;
+    ViewerPendingState pending = 2;
+    ViewerFailureState broken = 3;
+    ViewerFailureState error = 4;
+    ViewerReadyState ready = 5;
+  }
+}
+
+message ViewerPreferences {
+  ViewerTheme theme = 1;
+  ViewerRenderOptions render_options = 2;
+}
+
+enum ViewerFeedbackKind {
+  VIEWER_FEEDBACK_KIND_UNSPECIFIED = 0;
+  VIEWER_FEEDBACK_KIND_TAB_CLOSED = 1;
+  VIEWER_FEEDBACK_KIND_LIVE_VIEW_DELETED = 2;
+  VIEWER_FEEDBACK_KIND_SNAPSHOT_RECIPES_SKIPPED = 3;
+}
+
+message ViewerFeedback {
+  ViewerFeedbackKind kind = 1;
+  repeated string labels = 2;
+}
+
+message ViewerShell {
+  uint64 version = 1;
+  repeated ViewerTab tabs = 2;
+  ViewerActiveState active = 3;
+  ViewerPreferences preferences = 4;
+  optional ViewerFeedback feedback = 5;
+}
+
+message GetViewerShellResponse {
+  ViewerShell shell = 1;
+}
+
+message ActivateViewerTabRequest {
+  uint64 tab_id = 1;
+}
+
+message ActivateViewerTabResponse {
+  ViewerShell shell = 1;
+}
+
+message CloseViewerTabRequest {
+  uint64 tab_id = 1;
+}
+
+message CloseViewerTabResponse {
+  ViewerShell shell = 1;
+}
+
+message RefreshViewerTabRequest {
+  uint64 tab_id = 1;
+}
+
+message RefreshViewerTabResponse {
+  ViewerShell shell = 1;
+}
+
+message DeleteLiveViewerTabRequest {
+  uint64 tab_id = 1;
+}
+
+message DeleteLiveViewerTabResponse {
+  ViewerShell shell = 1;
+}
+
+message SelectViewerCommitRequest {
+  uint64 tab_id = 1;
+  string commit_id = 2;
+}
+
+message SelectViewerCommitResponse {
+  ViewerShell shell = 1;
+}
+
+message ClearViewerCommitSelectionRequest {
+  uint64 tab_id = 1;
+}
+
+message ClearViewerCommitSelectionResponse {
+  ViewerShell shell = 1;
+}
+
+message SetViewerPreferenceRequest {
+  oneof preference {
+    ViewerDiffLayout layout = 1;
+    ViewerDiffDensity density = 2;
+    ViewerTheme theme = 3;
+  }
+}
+
+message SetViewerPreferenceResponse {
+  ViewerShell shell = 1;
+}
+
+message ListViewerCommitsRequest {
+  ViewerViewIdentity identity = 1;
+  optional uint32 cursor = 2;
+}
+
+message ViewerCommitSummary {
+  string id = 1;
+  string subject = 2;
+  string body = 3;
+  string committed_at = 4;
+  bool is_merge = 5;
+  bool body_omitted = 6;
+}
+
+message ListViewerCommitsResponse {
+  ViewerViewIdentity identity = 1;
+  repeated ViewerCommitSummary commits = 2;
+  optional uint32 next_cursor = 3;
+}
+
+message StreamViewerRowsRequest {
+  ViewerViewIdentity identity = 1;
+  optional string file_id = 2;
+}
+
+enum ViewerSyntaxClass {
+  VIEWER_SYNTAX_CLASS_UNSPECIFIED = 0;
+  VIEWER_SYNTAX_CLASS_KEYWORD = 1;
+  VIEWER_SYNTAX_CLASS_STRING = 2;
+  VIEWER_SYNTAX_CLASS_COMMENT = 3;
+  VIEWER_SYNTAX_CLASS_TYPE = 4;
+  VIEWER_SYNTAX_CLASS_FUNCTION = 5;
+  VIEWER_SYNTAX_CLASS_NUMBER = 6;
+  VIEWER_SYNTAX_CLASS_CONSTANT = 7;
+  VIEWER_SYNTAX_CLASS_OPERATOR = 8;
+  VIEWER_SYNTAX_CLASS_TAG = 9;
+  VIEWER_SYNTAX_CLASS_VARIABLE = 10;
+}
+
+message ViewerCodeSpan {
+  uint32 byte_start = 1;
+  uint32 byte_end = 2;
+  ViewerSyntaxClass syntax_class = 3;
+  bool changed = 4;
+}
+
+message ViewerCodeLine {
+  string text = 1;
+  repeated ViewerCodeSpan spans = 2;
+  optional uint32 long_line_character_count = 3;
+}
+
+message ViewerUnifiedSourceRow {
+  optional uint32 old_line_number = 1;
+  optional uint32 new_line_number = 2;
+  ViewerCodeLine code = 3;
+}
+
+message ViewerUnifiedRow {
+  oneof row {
+    string meta = 1;
+    string hunk = 2;
+    ViewerUnifiedSourceRow context = 3;
+    ViewerUnifiedSourceRow added = 4;
+    ViewerUnifiedSourceRow removed = 5;
+  }
+}
+
+message ViewerSplitCell {
+  uint32 line_number = 1;
+  ViewerCodeLine code = 2;
+}
+
+message ViewerSplitContextRow {
+  uint32 old_line_number = 1;
+  uint32 new_line_number = 2;
+  ViewerCodeLine code = 3;
+}
+
+message ViewerSplitPairRow {
+  optional ViewerSplitCell old = 1;
+  optional ViewerSplitCell new = 2;
+}
+
+message ViewerSplitRow {
+  oneof row {
+    string meta = 1;
+    string hunk = 2;
+    ViewerSplitContextRow context = 3;
+    ViewerSplitPairRow pair = 4;
+  }
+}
+
+message ViewerFileStarted {
+  string file_id = 1;
+}
+
+message ViewerUnifiedRows {
+  string file_id = 1;
+  repeated ViewerUnifiedRow rows = 2;
+}
+
+message ViewerSplitRows {
+  string file_id = 1;
+  repeated ViewerSplitRow rows = 2;
+}
+
+message ViewerFileFinished {
+  string file_id = 1;
+  uint32 line_number_digits = 2;
+}
+
+enum ViewerFileFailureCode {
+  VIEWER_FILE_FAILURE_CODE_UNSPECIFIED = 0;
+  VIEWER_FILE_FAILURE_CODE_SOURCE_UNAVAILABLE = 1;
+  VIEWER_FILE_FAILURE_CODE_PARSE_FAILED = 2;
+  VIEWER_FILE_FAILURE_CODE_ROW_TOO_LARGE = 3;
+}
+
+message ViewerFileFailed {
+  string file_id = 1;
+  ViewerFileFailureCode code = 2;
+  string message = 3;
+  bool retryable = 4;
+}
+
+message StreamViewerRowsResponse {
+  ViewerViewIdentity identity = 1;
+  uint64 sequence = 2;
+
+  oneof event {
+    ViewerFileStarted file_started = 3;
+    ViewerUnifiedRows unified_rows = 4;
+    ViewerSplitRows split_rows = 5;
+    ViewerFileFinished file_finished = 6;
+    ViewerFileFailed file_failed = 7;
+  }
+}
+
+message ListViewerHistoryRequest {
+  oneof cursor {
+    Empty newest = 1;
+    ViewerHistoryPosition older_than = 2;
+    ViewerHistoryPosition newer_than = 3;
+    Empty oldest = 4;
+  }
+}
+
+message ViewerHistoryPosition {
+  uint64 render_id = 1;
+  uint32 page = 2;
+}
+
+enum ViewerRecipeKind {
+  VIEWER_RECIPE_KIND_UNSPECIFIED = 0;
+  VIEWER_RECIPE_KIND_DIFF = 1;
+  VIEWER_RECIPE_KIND_MERGE_DIFF = 2;
+}
+
+message ViewerHistoryEntry {
+  uint64 id = 1;
+  string title = 2;
+  string repository_name = 3;
+  ViewerRecipeKind kind = 4;
+  string range_label = 5;
+  string rendered_at = 6;
+}
+
+message ViewerHistoryPagePosition {
+  uint32 number = 1;
+  uint32 count = 2;
+}
+
+message ListViewerHistoryResponse {
+  repeated ViewerHistoryEntry entries = 1;
+  uint64 total_count = 2;
+  optional ViewerHistoryPagePosition position = 3;
+  bool has_newer = 4;
+  bool has_older = 5;
+}
+
+message OpenViewerHistoryRequest {
+  uint64 render_id = 1;
+}
+
+message OpenViewerHistoryResponse {
+  ViewerShell shell = 1;
+}
+
+message GetViewerHistoryCopyRequest {
+  uint64 render_id = 1;
+}
+
+message GetViewerHistoryCopyResponse {
+  string json = 1;
+}
+
+message GetViewerSettingsRequest {}
+
+message ViewerProjectDiffExclusions {
+  string project_name = 1;
+  repeated string extensions = 2;
+}
+
+message ViewerDiffExclusions {
+  repeated string default_extensions = 1;
+  repeated ViewerProjectDiffExclusions projects = 2;
+}
+
+message GetViewerSettingsResponse {
+  optional string configuration_path = 1;
+  optional ViewerTheme configured_theme = 2;
+  ViewerTheme effective_theme = 3;
+  ViewerRenderOptions render_options = 4;
+  bool push_confirmation_required = 5;
+  ViewerDiffExclusions diff_exclusions = 6;
+}
+
+message OpenViewerDiffFileRequest {
+  ViewerViewIdentity identity = 1;
+  string file_id = 2;
+}
+
+message OpenViewerDiffFileResponse {}

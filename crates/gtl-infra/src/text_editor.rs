@@ -40,6 +40,10 @@ mod tests {
 
     use super::GitTextEditorClient;
 
+    const EDITOR_TEST_REPOSITORY: &str = "GTL_EDITOR_TEST_REPOSITORY";
+    const EDITOR_TEST_HELPER: &str =
+        "text_editor::tests::reads_repository_local_text_editor_command_in_subprocess";
+
     #[test]
     fn reads_the_repository_local_text_editor_command() {
         let temporary = tempfile::tempdir().expect("temporary repository");
@@ -64,10 +68,33 @@ mod tests {
                 .success()
         );
 
+        let output = Command::new(std::env::current_exe().expect("current test executable"))
+            .args([EDITOR_TEST_HELPER, "--exact", "--ignored", "--nocapture"])
+            .env(EDITOR_TEST_REPOSITORY, temporary.path())
+            .env_remove("GIT_EDITOR")
+            .env_remove("VISUAL")
+            .env_remove("EDITOR")
+            .output()
+            .expect("editor test helper starts");
+        assert!(
+            output.status.success(),
+            "editor test helper failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    #[test]
+    #[ignore = "subprocess helper with isolated editor environment"]
+    fn reads_repository_local_text_editor_command_in_subprocess() {
+        let Some(repository) = std::env::var_os(EDITOR_TEST_REPOSITORY) else {
+            return;
+        };
+
         assert_eq!(
             GitTextEditorClient
                 .read_command(
-                    &gtl_models::paths::RepositoryRoot::try_new(temporary.path().to_path_buf(),)
+                    &gtl_models::paths::RepositoryRoot::try_new(repository.into())
                         .expect("temporary directory path is absolute"),
                 )
                 .expect("configured editor"),

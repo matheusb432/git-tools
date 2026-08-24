@@ -146,6 +146,11 @@ pub enum DesktopScrollComparisonError {
         launch: usize,
         panel: DesktopScrollPanel,
     },
+    #[error("{report} desktop scroll launch {launch} process memory uses another attribution")]
+    MemoryAttributionMismatch {
+        report: DesktopScrollReportRole,
+        launch: usize,
+    },
     #[error("desktop scroll reports use different fixtures")]
     IncompatibleFixture,
     #[error("desktop scroll reports use different protocols")]
@@ -266,6 +271,20 @@ fn validate_report(
                 report: report_role,
                 expected: expected_launch,
                 actual: launch.launch,
+            });
+        }
+        let memory_snapshots = [
+            &launch.readiness_memory,
+            &launch.memory_after_changed_files,
+            &launch.memory_after_commits,
+        ];
+        if memory_snapshots
+            .iter()
+            .any(|memory| memory.attribution != report.protocol.memory_attribution)
+        {
+            return Err(DesktopScrollComparisonError::MemoryAttributionMismatch {
+                report: report_role,
+                launch: launch.launch,
             });
         }
         validate_sample(
@@ -528,6 +547,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn mismatched_memory_attribution_is_rejected() {
+        let baseline = standard_report();
+        let mut current = standard_report();
+        current.launches[0].memory_after_commits.attribution = "viewer process tree".to_owned();
+
+        assert_eq!(
+            compare_reports(&baseline, &current),
+            Err(DesktopScrollComparisonError::MemoryAttributionMismatch {
+                report: DesktopScrollReportRole::Current,
+                launch: 1,
+            })
+        );
+    }
+
     fn standard_report() -> DesktopScrollReport {
         report(
             [vec![16.0], vec![16.0], vec![16.0]],
@@ -583,6 +617,7 @@ mod tests {
                 expected_layout: "unified".to_owned(),
                 expected_density: "compact".to_owned(),
                 readiness: "complete production view".to_owned(),
+                memory_attribution: "server and viewer process trees".to_owned(),
                 script_timeout_seconds: 30,
                 scroll: ScrollProtocol {
                     distance_css_pixels: 160,
@@ -632,7 +667,7 @@ mod tests {
 
     fn memory(rss_bytes: u64) -> DesktopScrollProcessMemory {
         DesktopScrollProcessMemory {
-            attribution: "viewer process tree".to_owned(),
+            attribution: "server and viewer process trees".to_owned(),
             process_count: 1,
             rss_bytes,
         }

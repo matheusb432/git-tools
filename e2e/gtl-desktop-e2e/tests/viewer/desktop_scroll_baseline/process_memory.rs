@@ -9,6 +9,8 @@ use anyhow::{Context, Result, anyhow, ensure};
 use gtl_benchmarks::desktop_scroll::DesktopScrollProcessMemory;
 
 const PROCESS_COUNT_MAX: usize = 32_768;
+pub(super) const ATTRIBUTION: &str =
+    "canonical release server and viewer executables with the isolated data root, plus descendants";
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessIdentity {
@@ -20,10 +22,13 @@ pub fn snapshot(data_root: &Path) -> Result<DesktopScrollProcessMemory> {
     let viewer = required_path("GTL_E2E_VIEWER_BINARY")?
         .canonicalize()
         .context("canonicalize release viewer for RSS attribution")?;
+    let server = required_path("GTL_E2E_SERVER_BINARY")?
+        .canonicalize()
+        .context("canonicalize release server for RSS attribution")?;
     let identities = process_identities()?;
     let viewer_roots = identities
         .values()
-        .filter(|identity| process_matches_viewer(**identity, &viewer, data_root))
+        .filter(|identity| process_matches_executable(**identity, &viewer, data_root))
         .map(|identity| identity.process_id)
         .collect::<Vec<_>>();
     ensure!(
@@ -32,9 +37,20 @@ pub fn snapshot(data_root: &Path) -> Result<DesktopScrollProcessMemory> {
         data_root.display(),
         viewer_roots.len()
     );
+    let server_roots = identities
+        .values()
+        .filter(|identity| process_matches_executable(**identity, &server, data_root))
+        .map(|identity| identity.process_id)
+        .collect::<Vec<_>>();
+    ensure!(
+        server_roots.len() == 1,
+        "RSS attribution expected one server for data root {}, found {}",
+        data_root.display(),
+        server_roots.len()
+    );
 
-    let viewer_root = viewer_roots[0];
-    let attributed_ids = descendant_processes(viewer_root, &identities);
+    let roots = [server_roots[0], viewer_roots[0]];
+    let attributed_ids = descendant_processes(&roots, &identities);
     let mut rss_bytes = 0_u64;
     let mut measured_process_count = 0_usize;
     for process_id in attributed_ids {
@@ -42,22 +58,20 @@ pub fn snapshot(data_root: &Path) -> Result<DesktopScrollProcessMemory> {
             Ok(bytes) => {
                 rss_bytes = rss_bytes
                     .checked_add(bytes)
-                    .context("sum attributed viewer RSS")?;
+                    .context("sum attributed application RSS")?;
                 measured_process_count += 1;
             }
-            Err(error) if process_id != viewer_root && process_disappeared(&error) => {}
+            Err(error) if !roots.contains(&process_id) && process_disappeared(&error) => {}
             Err(error) => return Err(error),
         }
     }
     ensure!(
-        measured_process_count > 0,
-        "RSS attribution found no live viewer processes"
+        measured_process_count >= roots.len(),
+        "RSS attribution lost a required application process"
     );
 
     Ok(DesktopScrollProcessMemory {
-        attribution:
-            "canonical release viewer executable with the isolated data root, plus descendants"
-                .to_owned(),
+        attribution: ATTRIBUTION.to_owned(),
         process_count: measured_process_count,
         rss_bytes,
     })
@@ -111,12 +125,16 @@ fn process_identities() -> Result<BTreeMap<u32, ProcessIdentity>> {
     Ok(identities)
 }
 
-fn process_matches_viewer(identity: ProcessIdentity, viewer: &Path, data_root: &Path) -> bool {
+fn process_matches_executable(
+    identity: ProcessIdentity,
+    executable: &Path,
+    data_root: &Path,
+) -> bool {
     let process_root = PathBuf::from(format!("/proc/{}", identity.process_id));
-    let Ok(executable) = fs::read_link(process_root.join("exe")) else {
+    let Ok(process_executable) = fs::read_link(process_root.join("exe")) else {
         return false;
     };
-    if executable != viewer {
+    if process_executable != executable {
         return false;
     }
     let Ok(environment) = fs::read(process_root.join("environ")) else {
@@ -130,10 +148,10 @@ fn process_matches_viewer(identity: ProcessIdentity, viewer: &Path, data_root: &
 }
 
 fn descendant_processes(
-    viewer_root: u32,
+    roots: &[u32],
     identities: &BTreeMap<u32, ProcessIdentity>,
 ) -> BTreeSet<u32> {
-    let mut attributed = BTreeSet::from([viewer_root]);
+    let mut attributed = roots.iter().copied().collect::<BTreeSet<_>>();
     loop {
         let count_before = attributed.len();
         for identity in identities.values() {
@@ -177,7 +195,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn descendant_inventory_follows_only_the_viewer_tree() {
+    fn descendant_inventory_unites_application_trees_without_double_counting() {
         let identities = BTreeMap::from([
             (
                 10,
@@ -204,11 +222,21 @@ mod tests {
                 20,
                 ProcessIdentity {
                     process_id: 20,
+                    parent_process_id: 10,
+                },
+            ),
+            (
+                30,
+                ProcessIdentity {
+                    process_id: 30,
                     parent_process_id: 1,
                 },
             ),
         ]);
 
-        assert_eq!(descendant_processes(10, &identities), [10, 11, 12].into());
+        assert_eq!(
+            descendant_processes(&[10, 20], &identities),
+            [10, 11, 12, 20].into()
+        );
     }
 }
