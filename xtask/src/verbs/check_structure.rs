@@ -12,7 +12,7 @@ struct EdgePolicy {
     reason: &'static str,
 }
 
-const EDGE_POLICIES: [EdgePolicy; 7] = [
+const EDGE_POLICIES: [EdgePolicy; 10] = [
     EdgePolicy {
         from: "gtl-models",
         label: "gtl-models stays pure",
@@ -26,13 +26,19 @@ const EDGE_POLICIES: [EdgePolicy; 7] = [
             "gtl-client",
             "gtl-desktop",
             "gtl-local-auth",
+            "gtl-parser",
             "gtl-server",
             "gtl-browser-e2e",
             "gtl-desktop-e2e",
             "xtask",
             "axum",
+            "prost",
             "reqwest",
             "sqlx",
+            "tonic",
+            "tonic-health",
+            "tonic-prost",
+            "tonic-web",
         ],
         forbid_workspace_packages: false,
         reason: "models concepts must not depend on use cases, adapters, frameworks, or process roots",
@@ -53,8 +59,13 @@ const EDGE_POLICIES: [EdgePolicy; 7] = [
             "gtl-desktop-e2e",
             "xtask",
             "axum",
+            "prost",
             "reqwest",
             "sqlx",
+            "tonic",
+            "tonic-health",
+            "tonic-prost",
+            "tonic-web",
         ],
         forbid_workspace_packages: false,
         reason: "use cases may depend on models and wire contracts, not adapters or process roots",
@@ -108,11 +119,52 @@ const EDGE_POLICIES: [EdgePolicy; 7] = [
             "gtl-cli",
             "gtl-desktop",
             "gtl-infra",
-            "gtl-models",
             "gtl-server",
         ],
         forbid_workspace_packages: false,
         reason: "the shared client may depend on wire and local bootstrap contracts, not application behavior or process roots",
+    },
+    EdgePolicy {
+        from: "gtl-web",
+        label: "gtl-web stays a presentation client",
+        forbidden: &[
+            "gtl-application",
+            "gtl-desktop",
+            "gtl-infra",
+            "gtl-local-auth",
+            "gtl-parser",
+            "gtl-server",
+            "prost",
+            "tonic",
+            "tonic-prost",
+            "tonic-web",
+            "tonic-web-wasm-client",
+        ],
+        forbid_workspace_packages: false,
+        reason: "the WebView consumes typed gtl-client operations and must not own application, infrastructure, or protobuf transport behavior",
+    },
+    EdgePolicy {
+        from: "gtl-server",
+        label: "gtl-server delegates viewer projection",
+        forbidden: &["gtl-parser"],
+        forbid_workspace_packages: false,
+        reason: "the process root must ask gtl-application to project diff rows instead of owning parser behavior",
+    },
+    EdgePolicy {
+        from: "gtl-desktop",
+        label: "gtl-desktop stays a bootstrap shell",
+        forbidden: &[
+            "gtl-application",
+            "gtl-artifacts",
+            "gtl-client",
+            "gtl-infra",
+            "gtl-models",
+            "gtl-parser",
+            "gtl-server",
+            "gtl-wire",
+        ],
+        forbid_workspace_packages: false,
+        reason: "the Tauri process may bootstrap and manage its window but must not execute viewer behavior",
     },
     EdgePolicy {
         from: "gtl-cli",
@@ -293,7 +345,7 @@ mod tests {
             .find(|policy| policy.from == "gtl-client")
             .expect("client policy should exist");
 
-        for dependency in ["gtl-local-auth", "gtl-wire", "tonic"] {
+        for dependency in ["gtl-local-auth", "gtl-models", "gtl-wire", "tonic"] {
             assert!(!dependency_is_forbidden(
                 client_policy,
                 dependency,
@@ -335,5 +387,77 @@ mod tests {
         assert!(!dependency_enables_grpc(false, &[]));
         assert!(dependency_enables_grpc(true, &[]));
         assert!(dependency_enables_grpc(false, &["grpc".to_owned()]));
+    }
+
+    #[test]
+    fn web_policy_rejects_direct_grpc_dependencies() {
+        let web_policy = EDGE_POLICIES
+            .iter()
+            .find(|policy| policy.from == "gtl-web")
+            .expect("web policy should exist");
+
+        for dependency in [
+            "tonic",
+            "tonic-web-wasm-client",
+            "gtl-application",
+            "gtl-parser",
+        ] {
+            assert!(dependency_is_forbidden(
+                web_policy,
+                dependency,
+                &BTreeSet::new()
+            ));
+        }
+        for dependency in ["gtl-client", "gtl-models", "gtl-wire"] {
+            assert!(!dependency_is_forbidden(
+                web_policy,
+                dependency,
+                &BTreeSet::new()
+            ));
+        }
+    }
+
+    #[test]
+    fn server_policy_rejects_direct_parser_dependencies() {
+        let server_policy = EDGE_POLICIES
+            .iter()
+            .find(|policy| policy.from == "gtl-server")
+            .expect("server policy should exist");
+
+        assert!(dependency_is_forbidden(
+            server_policy,
+            "gtl-parser",
+            &BTreeSet::new()
+        ));
+        for dependency in ["gtl-application", "gtl-infra", "gtl-wire"] {
+            assert!(!dependency_is_forbidden(
+                server_policy,
+                dependency,
+                &BTreeSet::new()
+            ));
+        }
+    }
+
+    #[test]
+    fn desktop_policy_accepts_only_shell_dependencies() {
+        let desktop_policy = EDGE_POLICIES
+            .iter()
+            .find(|policy| policy.from == "gtl-desktop")
+            .expect("desktop policy should exist");
+
+        for dependency in ["gtl-application", "gtl-infra", "gtl-wire"] {
+            assert!(dependency_is_forbidden(
+                desktop_policy,
+                dependency,
+                &BTreeSet::new()
+            ));
+        }
+        for dependency in ["gtl-local-auth", "tauri", "serde_json"] {
+            assert!(!dependency_is_forbidden(
+                desktop_policy,
+                dependency,
+                &BTreeSet::new()
+            ));
+        }
     }
 }

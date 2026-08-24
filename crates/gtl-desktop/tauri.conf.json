@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "dev.gittools.viewer",
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "security": {
       "csp": null
     }

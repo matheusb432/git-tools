@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use gtl_models::paths::ProjectName;
-use gtl_wire::recipes::{Recipe, RecipeOp, RecipeTarget};
 
 use super::{ViewerTabKind, recipe_label};
-use crate::diffs::View;
+use crate::{
+    diffs::View,
+    recipes::{Recipe, RecipeOp, RecipeTarget},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompleteRecipeComputation {
@@ -69,10 +71,9 @@ fn merge_label(repo: &ProjectName, view: &View) -> String {
 mod tests {
     use std::num::NonZeroU32;
 
-    use gtl_wire::recipes::{RecipeOp, RecipeTarget};
-
     use super::*;
     use crate::{
+        recipes::{RecipeOp, RecipeTarget},
         utils::{
             diffs::commit,
             viewer::{empty_view, recipe},

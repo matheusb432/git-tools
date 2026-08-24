@@ -52,7 +52,7 @@ fn build_document(
     let static_views = payload
         .views
         .into_iter()
-        .map(|projected| StaticArtifactView::try_new(projected.view, projected.sources))
+        .map(|projected| StaticArtifactView::try_new(projected.view, projected.rows))
         .collect::<Result<Vec<_>, _>>()
         .context("construct static artifact views")?;
     let body = render_static_artifact_body(static_views);

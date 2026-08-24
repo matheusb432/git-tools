@@ -1,7 +1,6 @@
 //! Finds every Git repository under a root (via [`find_repositories`]) and resolves
 //! each to its canonical top-level path through
-//! the [`GitClient`](crate::ports::GitClient) port — the unit the `diff -r` wire
-//! paths hand to the daemon.
+//! the [`GitClient`](crate::ports::GitClient) port for recursive server requests.
 
 use std::path::PathBuf;
 

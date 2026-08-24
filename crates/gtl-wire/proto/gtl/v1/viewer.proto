@@ -86,10 +86,9 @@ enum ViewerFileStatus {
 }
 
 message ViewerFileSummary {
-  reserved 3;
-
   string id = 1;
   string path = 2;
+  string absolute_path = 3;
   string anchor_id = 4;
   uint32 added = 5;
   uint32 removed = 6;

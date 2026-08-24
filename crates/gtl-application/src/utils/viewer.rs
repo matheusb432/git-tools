@@ -1,6 +1,7 @@
-use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource};
-
-use crate::diffs::View;
+use crate::{
+    diffs::View,
+    recipes::{Recipe, RecipeOp, RecipeSource},
+};
 
 pub(crate) fn recipe(op: RecipeOp) -> Recipe {
     Recipe {

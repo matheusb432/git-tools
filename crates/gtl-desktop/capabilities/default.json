@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Window and tray permissions for the offline Dioxus viewer. No fs/shell.",
+  "description": "Window and tray permissions for the server-backed Dioxus viewer. The only custom command loads viewer connection data; no fs or shell access is granted.",
   "windows": ["main"],
   "permissions": [
     "core:default",

@@ -1,7 +1,6 @@
 //! Process-boundary values that are not application operation requests.
 //! Application requests are serialized directly by their presentation layer.
 
-pub mod recipes;
 pub mod settings;
 pub mod viewer;
 
@@ -19,6 +18,3 @@ pub mod v1 {
 
 #[cfg(feature = "grpc")]
 pub const FILE_DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("gtl_descriptor");
-
-#[cfg(test)]
-mod testing;

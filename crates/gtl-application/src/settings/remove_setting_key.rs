@@ -1,42 +1,16 @@
 use gtl_models::settings::SettingKey;
 use thiserror::Error;
 
-use crate::ports::{UserSettingsEditError, UserSettingsStore};
+use super::{UserSettingChange, setting_changes_viewer_rows};
+use crate::{
+    ports::{UserSettingsEditError, UserSettingsStore},
+    viewer::{ViewerState, ViewerStateError},
+};
 
 /// Requests removal of one supported root-string setting.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct RemoveSettingKey {
     pub key: SettingKey,
-}
-
-/// Describes the completed removal and its previous value.
-///
-/// # Examples
-///
-/// ```no_run
-/// use gtl_application::{
-///     ports::UserSettingsStore,
-///     settings::remove_setting_key::{self, RemoveSettingKey, RemoveSettingKeyError},
-/// };
-/// use gtl_models::settings::SettingKey;
-///
-/// fn previous_layout(
-///     store: &mut impl UserSettingsStore,
-/// ) -> Result<Option<String>, RemoveSettingKeyError> {
-///     Ok(remove_setting_key::execute(
-///         RemoveSettingKey {
-///             key: SettingKey::Layout,
-///         },
-///         store,
-///     )?
-///     .value_old)
-/// }
-/// ```
-#[derive(Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub struct RemoveSettingKeyOk {
-    pub key: SettingKey,
-    pub value_old: Option<String>,
 }
 
 /// Reports a rejected or failed setting removal.
@@ -47,41 +21,24 @@ pub enum RemoveSettingKeyError {
     InvalidValueShape { key: SettingKey },
     #[error(transparent)]
     Settings(#[from] UserSettingsEditError),
+    #[error(transparent)]
+    ViewerState(#[from] ViewerStateError),
 }
 
 /// Removes one supported scalar user setting so its default applies.
 ///
 /// # Errors
 ///
-/// Returns [`RemoveSettingKeyError`] without changing the target document when
-/// validation or the store transaction fails.
-///
-/// # Examples
-///
-/// ```no_run
-/// use gtl_application::{
-///     ports::UserSettingsStore,
-///     settings::remove_setting_key::{self, RemoveSettingKey, RemoveSettingKeyError},
-/// };
-/// use gtl_models::settings::SettingKey;
-///
-/// fn remove_density(store: &mut impl UserSettingsStore) -> Result<(), RemoveSettingKeyError> {
-///     remove_setting_key::execute(
-///         RemoveSettingKey {
-///             key: SettingKey::Density,
-///         },
-///         store,
-///     )?;
-///     Ok(())
-/// }
-/// ```
+/// Validation and persistence failures leave the settings document unchanged. A viewer-state
+/// failure can be returned after the setting was removed.
 #[cqrsy::command]
 pub fn execute(
     command: RemoveSettingKey,
     settings_store: &mut impl UserSettingsStore,
-) -> Result<RemoveSettingKeyOk, RemoveSettingKeyError> {
+    viewer_state: &ViewerState,
+) -> Result<UserSettingChange, RemoveSettingKeyError> {
     let RemoveSettingKey { key } = command;
-    let value_old = settings_store
+    let outcome = settings_store
         .remove_key(key)
         .map_err(|error| match error {
             UserSettingsEditError::InvalidValueShape => {
@@ -89,6 +46,64 @@ pub fn execute(
             }
             error => RemoveSettingKeyError::Settings(error),
         })?;
+    if outcome.changed() {
+        viewer_state.mark_shell_changed()?;
+    }
 
-    Ok(RemoveSettingKeyOk { key, value_old })
+    Ok(UserSettingChange {
+        viewer_rows_changed: outcome.changed() && setting_changes_viewer_rows(key),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use gtl_models::{settings::SettingKey, viewer::ViewerVersion};
+
+    use super::RemoveSettingKey;
+    use crate::{
+        ports::UserSettingsEditOutcome,
+        settings::{remove_setting_key, test_support::FixedUserSettingsEditStore},
+        viewer::ViewerState,
+    };
+
+    fn execute_with_outcome(
+        key: SettingKey,
+        outcome: UserSettingsEditOutcome,
+    ) -> (crate::settings::UserSettingChange, ViewerVersion) {
+        let mut store = FixedUserSettingsEditStore::new(outcome);
+        let viewer = ViewerState::new();
+        let response = remove_setting_key::execute(RemoveSettingKey { key }, &mut store, &viewer)
+            .expect("setting removal succeeds");
+        let version = viewer.version().expect("viewer version remains available");
+        (response, version)
+    }
+
+    #[test]
+    fn successful_removals_publish_only_actual_viewer_changes() {
+        for (key, outcome, viewer_rows_changed, version) in [
+            (
+                SettingKey::Theme,
+                UserSettingsEditOutcome::Changed,
+                false,
+                ViewerVersion::new(1),
+            ),
+            (
+                SettingKey::Layout,
+                UserSettingsEditOutcome::Changed,
+                true,
+                ViewerVersion::new(1),
+            ),
+            (
+                SettingKey::Density,
+                UserSettingsEditOutcome::Unchanged,
+                false,
+                ViewerVersion::default(),
+            ),
+        ] {
+            let (response, actual_version) = execute_with_outcome(key, outcome);
+
+            assert_eq!(response.viewer_rows_changed, viewer_rows_changed);
+            assert_eq!(actual_version, version);
+        }
+    }
 }

@@ -1,10 +1,9 @@
 //! The `history/record_render` vertical slice: record one render in the app history log.
 
 use gtl_models::{paths::ProjectName, timestamps::MachineTimestamp};
-use gtl_wire::recipes::Recipe;
 use rusqlite::{Connection, params};
 
-use crate::{history::persistence::RecipeColumns, ports::Clock};
+use crate::{history::persistence::RecipeColumns, ports::Clock, recipes::Recipe};
 
 const RECENT_RENDERS_CAP: usize = 500;
 
@@ -108,13 +107,12 @@ fn record_render(
 
 #[cfg(test)]
 mod tests {
-    use gtl_wire::recipes::{RecipeOp, RecipeSource, RecipeTarget};
-
     use super::*;
     use crate::{
         history::{
             RecentRenderRecord, list_recent_render_page, persistence::store_test, record_render,
         },
+        recipes::{RecipeOp, RecipeSource, RecipeTarget},
         utils::FixedClock,
     };
 

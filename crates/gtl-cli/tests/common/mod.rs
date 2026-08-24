@@ -7,12 +7,19 @@ pub struct ServerHarness {
 }
 
 impl ServerHarness {
-    pub fn start(settings_path: Option<&Path>) -> Result<Self> {
+    pub fn start(
+        settings_path: Option<&Path>,
+        project_catalogue_data_root: Option<&Path>,
+    ) -> Result<Self> {
         let data_root = tempfile::tempdir().context("create gtl-server data root")?;
+        let isolated_project_catalogue = data_root.path().join("sample_project");
+        let project_catalogue_data_root =
+            project_catalogue_data_root.unwrap_or(&isolated_project_catalogue);
         // Each integration-test file is a separate process with one server test, so these
         // process-wide variables are established before either the server thread or CLI child.
         unsafe {
             std::env::set_var("GIT_TOOLS_DATA_DIR", data_root.path());
+            std::env::set_var("sample_project_DATA_DIR", project_catalogue_data_root);
             if let Some(settings_path) = settings_path {
                 std::env::set_var("GIT_TOOLS_CONFIG", settings_path);
             } else {

@@ -1,27 +1,12 @@
-//! Recipe wire values describe *how to produce* a view -
-//! source identity + operation — never view data. Crosses the Tauri IPC
-//! boundary as JSON; the app-history log persists it relationally through
-//! `gtl_application::history`.
+//! Recipe values describe how to produce a view: source identity plus operation, never view data.
+//! The application persists recipes through its history and live-view operations.
 //! `Recipe::unpinned()` equality is the snapshot-tab dedupe identity (pins
 //! differ across runs of the same repo + operation); live recipes are always
 //! unpinned, so full `Recipe` equality still governs their identity.
-//!
-//! This module is app-agnostic: it holds pure serde DTOs and their codec. [`RecipeTarget`] mirrors
-//! `gtl_application::diffs::DiffTarget`'s shape. Process roots map application targets into the
-//! wire type, and the application viewer maps them back before computing a diff.
-//!
-//! This module also hosts the argv-token codec Phase 5 uses to hand a batch of
-//! recipes from the CLI to the single-instance viewer: [`OpenRecipes`] is a
-//! named batch, [`encode_token`]/[`decode_token`] round-trip it through a
-//! `gtl-recipe://`-prefixed, base64url-encoded argv string.
-//!
-//! Every enum serializes its wire tag in `snake_case`. Deserialization also
-//! accepts the legacy `PascalCase` source and `kebab-case` operation tags so
-//! argv tokens remain readable across the migration.
+//! Every enum serializes its persisted and copied JSON tag in `snake_case`.
 
 use std::num::NonZeroU32;
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use gtl_models::paths::{ProjectName, RepositoryRoot};
 pub use gtl_models::{
     diffs::PinnedRange,
@@ -37,7 +22,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
 pub enum RecipeSource {
-    #[serde(alias = "LocalRepo")]
     LocalRepo(RepositoryRoot),
 }
 
@@ -75,7 +59,6 @@ pub enum RecipeOp {
     Diff {
         target: RecipeTarget,
     },
-    #[serde(alias = "merge-diff")]
     MergeDiff {
         base: Option<GitRevision>,
         pinned: Option<PinnedRange>,
@@ -130,9 +113,8 @@ impl Recipe {
     }
 }
 
-/// Identifies how every recipe in an [`OpenRecipes`] batch behaves in the viewer.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// Identifies how every recipe in a [`RecipeBatch`] behaves in the viewer.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum RecipeBatchKind {
     /// Opens immutable snapshot tabs.
     #[default]
@@ -141,55 +123,19 @@ pub enum RecipeBatchKind {
     Live,
 }
 
-fn is_default<Value>(value: &Value) -> bool
-where
-    Value: Default + PartialEq,
-{
-    value == &Value::default()
-}
-
-/// A homogeneous batch of recipes to open together — the unit the CLI hands to
-/// the single-instance viewer as one argv token.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct OpenRecipes {
+/// A homogeneous batch of recipes submitted to the viewer together.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecipeBatch {
     pub batch_id: RecipeBatchId,
     /// The viewer behavior shared by every recipe in this batch.
-    #[serde(default, skip_serializing_if = "is_default")]
     pub kind: RecipeBatchKind,
     pub recipes: Vec<Recipe>,
-}
-
-/// The argv-token prefix that marks a `gtl-viewer` command-line argument as an
-/// encoded [`OpenRecipes`] batch rather than a plain file path.
-pub const RECIPE_TOKEN_PREFIX: &str = "gtl-recipe://";
-
-/// Encodes a recipe batch into one JSON and base64url argv token.
-///
-/// # Errors
-///
-/// Returns the JSON serialization error when the batch cannot be encoded.
-pub fn encode_token(batch: &OpenRecipes) -> Result<String, serde_json::Error> {
-    let json = serde_json::to_vec(batch)?;
-    Ok(format!(
-        "{RECIPE_TOKEN_PREFIX}{}",
-        URL_SAFE_NO_PAD.encode(json)
-    ))
-}
-
-/// Decode an argv token produced by [`encode_token`] back into an
-/// [`OpenRecipes`] batch. Returns `None` on any mismatch — missing prefix,
-/// invalid base64url, or invalid JSON — and never panics, since the token
-/// arrives as untrusted argv input.
-pub fn decode_token(token: &str) -> Option<OpenRecipes> {
-    let encoded = token.strip_prefix(RECIPE_TOKEN_PREFIX)?;
-    let bytes = URL_SAFE_NO_PAD.decode(encoded).ok()?;
-    serde_json::from_slice(&bytes).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::pinned_range;
+    use crate::utils::pinned_range;
 
     fn root(path: &str) -> RepositoryRoot {
         RepositoryRoot::try_new(path.into()).expect("fixture repository root is absolute")
@@ -197,12 +143,6 @@ mod tests {
 
     fn project_name(name: &str) -> ProjectName {
         ProjectName::try_new(name.to_owned()).expect("fixture project name is non-empty")
-    }
-
-    const BATCH_ID: &str = "0198a859-7c4e-7e5f-9e63-ec7bb768d841";
-
-    fn batch_id() -> RecipeBatchId {
-        BATCH_ID.parse().expect("fixture batch ID is valid")
     }
 
     fn revision(raw: &str) -> GitRevision {
@@ -220,14 +160,6 @@ mod tests {
                 target: RecipeTarget::Unpushed { pinned: None },
             },
             name: None,
-        }
-    }
-
-    fn sample_batch() -> OpenRecipes {
-        OpenRecipes {
-            batch_id: batch_id(),
-            kind: RecipeBatchKind::Snapshot,
-            recipes: vec![diff_recipe()],
         }
     }
 
@@ -254,81 +186,6 @@ mod tests {
         let json = serde_json::to_value(recipe).expect("recipe serializes");
 
         assert_eq!(json["op"]["op"], "merge_diff");
-    }
-
-    #[test]
-    fn every_legacy_recipe_enum_tag_still_deserializes() {
-        let source: RecipeSource =
-            serde_json::from_str(r#"{"kind":"LocalRepo","value":"/repos/gt"}"#)
-                .expect("legacy source tag remains readable");
-        assert_eq!(source, RecipeSource::LocalRepo(root("/repos/gt")));
-
-        for (json, expected) in [
-            (
-                r#"{"target":"unpushed"}"#,
-                RecipeTarget::Unpushed { pinned: None },
-            ),
-            (
-                r#"{"target":"base","rev":"HEAD"}"#,
-                RecipeTarget::Base {
-                    rev: revision("HEAD"),
-                },
-            ),
-            (
-                r#"{"target":"range","range":"a..b"}"#,
-                RecipeTarget::Range {
-                    range: range("a..b"),
-                    pinned: None,
-                },
-            ),
-            (
-                r#"{"target":"merge","base":"main"}"#,
-                RecipeTarget::Merge {
-                    base: revision("main"),
-                    pinned: None,
-                },
-            ),
-            (
-                r#"{"target":"last","count":2}"#,
-                RecipeTarget::Last {
-                    count: NonZeroU32::new(2).unwrap(),
-                    pinned: None,
-                },
-            ),
-        ] {
-            let target: RecipeTarget =
-                serde_json::from_str(json).expect("legacy target tag remains readable");
-            assert_eq!(target, expected);
-        }
-
-        for (json, expected) in [
-            (
-                r#"{"op":"diff","target":{"target":"unpushed"}}"#,
-                RecipeOp::Diff {
-                    target: RecipeTarget::Unpushed { pinned: None },
-                },
-            ),
-            (
-                r#"{"op":"merge-diff","base":null}"#,
-                RecipeOp::MergeDiff {
-                    base: None,
-                    pinned: None,
-                },
-            ),
-        ] {
-            let op: RecipeOp =
-                serde_json::from_str(json).expect("legacy operation tag remains readable");
-            assert_eq!(op, expected);
-        }
-
-        for (json, expected) in [
-            (r#""snapshot""#, RecipeBatchKind::Snapshot),
-            (r#""live""#, RecipeBatchKind::Live),
-        ] {
-            let kind: RecipeBatchKind =
-                serde_json::from_str(json).expect("legacy batch tag remains readable");
-            assert_eq!(kind, expected);
-        }
     }
 
     #[test]
@@ -379,61 +236,8 @@ mod tests {
 
     #[test]
     fn unknown_source_kind_is_rejected_at_deserialization() {
-        let json = r#"{"source":{"kind":"GithubRepo","value":"o/r"},"op":{"op":"merge-diff","base":null}}"#;
+        let json = r#"{"source":{"kind":"github_repo","value":"o/r"},"op":{"op":"merge_diff","base":null}}"#;
         assert!(serde_json::from_str::<Recipe>(json).is_err());
-    }
-
-    #[test]
-    fn token_round_trips_through_encode_and_decode() {
-        let batch = sample_batch();
-        let token = encode_token(&batch).expect("sample batch encodes");
-        assert!(token.starts_with(RECIPE_TOKEN_PREFIX));
-        assert_eq!(decode_token(&token), Some(batch));
-    }
-
-    #[test]
-    fn old_batch_token_without_kind_decodes_as_snapshot() {
-        let old_json = r#"{"batch_id":"0198a859-7c4e-7e5f-9e63-ec7bb768d841","recipes":[]}"#;
-        let token = format!(
-            "{RECIPE_TOKEN_PREFIX}{}",
-            URL_SAFE_NO_PAD.encode(old_json.as_bytes())
-        );
-
-        let batch = decode_token(&token).expect("old token remains readable");
-
-        assert_eq!(batch.kind, RecipeBatchKind::Snapshot);
-        assert_eq!(serde_json::to_string(&batch).unwrap(), old_json);
-    }
-
-    #[test]
-    fn live_batch_kind_round_trips_through_the_token() {
-        let mut batch = sample_batch();
-        batch.kind = RecipeBatchKind::Live;
-
-        let token = encode_token(&batch).expect("live batch encodes");
-        let decoded = decode_token(&token).expect("live token decodes");
-
-        assert_eq!(decoded, batch);
-        assert_eq!(decoded.kind, RecipeBatchKind::Live);
-    }
-
-    #[test]
-    fn decode_rejects_wrong_prefix() {
-        assert_eq!(decode_token("diff://x/y"), None);
-    }
-
-    #[test]
-    fn decode_rejects_invalid_base64_after_prefix() {
-        assert_eq!(decode_token("gtl-recipe://!!!"), None);
-    }
-
-    #[test]
-    fn decode_rejects_valid_base64_that_is_not_json() {
-        let garbage = URL_SAFE_NO_PAD.encode(b"not json");
-        assert_eq!(
-            decode_token(&format!("{RECIPE_TOKEN_PREFIX}{garbage}")),
-            None
-        );
     }
 
     #[test]
@@ -461,7 +265,7 @@ mod tests {
 
     #[test]
     fn unpinned_projection_strips_every_pin() {
-        let pin = Some(pinned_range("a".repeat(40), "b".repeat(40)));
+        let pin = Some(pinned_range(&"a".repeat(40), &"b".repeat(40)));
         let cases = vec![
             RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
@@ -511,7 +315,7 @@ mod tests {
             source: RecipeSource::LocalRepo(root("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
-                    pinned: Some(pinned_range("a".repeat(40), head.repeat(40))),
+                    pinned: Some(pinned_range(&"a".repeat(40), &head.repeat(40))),
                 },
             },
             name: None,

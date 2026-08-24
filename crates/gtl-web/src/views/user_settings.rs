@@ -5,14 +5,11 @@ use gtl_wire::viewer::ViewerUserSettings;
 use lucide_dioxus::{FileCog, Settings};
 
 use crate::{
-    entities::{
-        diffs::{density_label, layout_label, theme_label},
-        user_settings::UserSettingsApi,
-    },
+    entities::diffs::{density_label, layout_label, theme_label, viewer_server},
     shared::{
-        bridge::ClientApiError,
         browser,
         ui::{Button, ButtonVariant, ScrollArea, Skeleton},
+        viewer_client::ViewerClientError,
     },
     views::user_settings::ui::DiffExtensionExclusions,
 };
@@ -21,7 +18,7 @@ use crate::{
 enum SettingsLoad {
     Loading,
     Ready(ViewerUserSettings),
-    Error(ClientApiError),
+    Error(ViewerClientError),
 }
 
 #[component]
@@ -36,7 +33,7 @@ pub(crate) fn UserSettingsView() -> Element {
         let request_generation = reload();
         settings.set(SettingsLoad::Loading);
         spawn(async move {
-            let result = UserSettingsApi::get_settings().await;
+            let result = viewer_server::get_settings().await;
             if reload() != request_generation {
                 return;
             }

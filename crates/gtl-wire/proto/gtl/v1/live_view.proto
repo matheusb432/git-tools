@@ -3,14 +3,16 @@ syntax = "proto3";
 package gtl.v1;
 
 import "gtl/v1/common.proto";
+import "gtl/v1/diff.proto";
 
 service LiveViewService {
-  rpc SaveLiveView(SaveLiveViewRequest) returns (SaveLiveViewResponse);
-  rpc SaveProjectLiveViews(SaveProjectLiveViewsRequest) returns (SaveProjectLiveViewsResponse);
+  rpc SaveAndPresentLiveView(SaveAndPresentLiveViewRequest) returns (SaveAndPresentLiveViewResponse);
+  rpc SaveAndPresentProjectLiveViews(SaveAndPresentProjectLiveViewsRequest) returns (SaveAndPresentProjectLiveViewsResponse);
 }
 
-message SaveLiveViewRequest {
+message SaveAndPresentLiveViewRequest {
   string path = 1;
+  bool open_viewer = 2;
 }
 
 enum SaveLiveViewDisposition {
@@ -45,8 +47,16 @@ message SaveLiveViewResponse {
   }
 }
 
-message SaveProjectLiveViewsRequest {}
+message SaveAndPresentLiveViewResponse {
+  SaveLiveViewResponse result = 1;
+  optional DiffPresentation presentation = 2;
+}
 
-message SaveProjectLiveViewsResponse {
+message SaveAndPresentProjectLiveViewsRequest {
+  bool open_viewer = 1;
+}
+
+message SaveAndPresentProjectLiveViewsResponse {
   repeated SaveLiveViewResponse results = 1;
+  optional DiffPresentation presentation = 2;
 }

@@ -1,7 +1,9 @@
 use gtl_models::paths::ProjectName;
-use gtl_wire::recipes::{Recipe, RecipeOp, RecipeTarget};
 
-use crate::diffs::render_merge_diff::DEFAULT_BASE;
+use crate::{
+    diffs::render_merge_diff::DEFAULT_BASE,
+    recipes::{Recipe, RecipeOp, RecipeTarget},
+};
 
 pub(super) fn initial(recipe: &Recipe) -> String {
     if let Some(name) = &recipe.name {

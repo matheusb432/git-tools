@@ -85,7 +85,7 @@ impl TryFrom<DiffTargetRequest> for DiffTarget {
 }
 
 impl From<&DiffTarget> for DiffTargetRequest {
-    /// Preserve the symbolic selection for execution by the daemon. Immutable
+    /// Preserve the symbolic selection for execution by the server. Immutable
     /// pins belong to stored recipes and are intentionally not part of this request.
     fn from(target: &DiffTarget) -> Self {
         match target {

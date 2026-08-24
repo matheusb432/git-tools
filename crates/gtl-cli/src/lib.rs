@@ -24,7 +24,6 @@ pub mod preprocess;
 pub mod viewer;
 
 mod confirm;
-mod detached_process;
 mod diff_viewer_client;
 mod server_client;
 #[cfg(test)]
@@ -1083,7 +1082,7 @@ fn diff_exit(result: anyhow::Result<commands::diff::DiffOutcome>) -> ExitCode {
 
 /// Map a `diff live` result to an [`ExitCode`]: success (a save, or a clean
 /// no-managed-repos-unpushed no-op) is `Ok`; a validation rejection or transport
-/// failure prints the daemon's own message and exits `Internal`.
+/// failure prints the server's own message and exits `Internal`.
 fn diff_live_exit(result: anyhow::Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::Ok,

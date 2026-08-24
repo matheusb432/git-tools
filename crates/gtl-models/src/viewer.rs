@@ -6,8 +6,7 @@ mod pagination;
 mod tabs;
 
 pub use ids::{
-    RenderHistoryId, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerShellRevision,
-    ViewerTabId,
+    RenderHistoryId, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId, ViewerVersion,
 };
 pub use options::{DiffDensity, DiffLayout, ParseRenderOptionError, RenderOptions, Theme};
 pub use pagination::{

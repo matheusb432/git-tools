@@ -34,38 +34,38 @@ impl ServerClient {
         Ok(self.runtime.block_on(self.client.render_diff(request))?)
     }
 
-    pub(crate) fn prepare_diff(
+    pub(crate) fn present_diff(
         &self,
-        request: v1::PrepareDiffRequest,
-    ) -> anyhow::Result<v1::PrepareDiffResponse> {
-        Ok(self.runtime.block_on(self.client.prepare_diff(request))?)
+        request: v1::PresentDiffRequest,
+    ) -> anyhow::Result<v1::PresentDiffResponse> {
+        Ok(self.runtime.block_on(self.client.present_diff(request))?)
     }
 
-    pub(crate) fn prepare_merge_diff(
+    pub(crate) fn present_merge_diff(
         &self,
-        request: v1::PrepareMergeDiffRequest,
-    ) -> anyhow::Result<v1::PrepareMergeDiffResponse> {
+        request: v1::PresentMergeDiffRequest,
+    ) -> anyhow::Result<v1::PresentMergeDiffResponse> {
         Ok(self
             .runtime
-            .block_on(self.client.prepare_merge_diff(request))?)
+            .block_on(self.client.present_merge_diff(request))?)
     }
 
-    pub(crate) fn prepare_subrepository_diffs(
+    pub(crate) fn present_subrepository_diffs(
         &self,
-        request: v1::PrepareSubrepositoryDiffsRequest,
-    ) -> anyhow::Result<v1::PrepareSubrepositoryDiffsResponse> {
+        request: v1::PresentSubrepositoryDiffsRequest,
+    ) -> anyhow::Result<v1::PresentSubrepositoryDiffsResponse> {
         Ok(self
             .runtime
-            .block_on(self.client.prepare_subrepository_diffs(request))?)
+            .block_on(self.client.present_subrepository_diffs(request))?)
     }
 
-    pub(crate) fn prepare_project_repository_diffs(
+    pub(crate) fn present_project_repository_diffs(
         &self,
-        request: v1::PrepareProjectRepositoryDiffsRequest,
-    ) -> anyhow::Result<v1::PrepareProjectRepositoryDiffsResponse> {
+        request: v1::PresentProjectRepositoryDiffsRequest,
+    ) -> anyhow::Result<v1::PresentProjectRepositoryDiffsResponse> {
         Ok(self
             .runtime
-            .block_on(self.client.prepare_project_repository_diffs(request))?)
+            .block_on(self.client.present_project_repository_diffs(request))?)
     }
 
     pub(crate) fn render_merge_diff(
@@ -271,19 +271,22 @@ impl ServerClient {
         Ok(self.runtime.block_on(self.client.list_worktrees(request))?)
     }
 
-    pub(crate) fn save_live_view(
+    pub(crate) fn save_and_present_live_view(
         &self,
-        request: v1::SaveLiveViewRequest,
-    ) -> anyhow::Result<v1::SaveLiveViewResponse> {
-        Ok(self.runtime.block_on(self.client.save_live_view(request))?)
-    }
-
-    pub(crate) fn save_project_live_views(
-        &self,
-    ) -> anyhow::Result<v1::SaveProjectLiveViewsResponse> {
+        request: v1::SaveAndPresentLiveViewRequest,
+    ) -> anyhow::Result<v1::SaveAndPresentLiveViewResponse> {
         Ok(self
             .runtime
-            .block_on(self.client.save_project_live_views())?)
+            .block_on(self.client.save_and_present_live_view(request))?)
+    }
+
+    pub(crate) fn save_and_present_project_live_views(
+        &self,
+        request: v1::SaveAndPresentProjectLiveViewsRequest,
+    ) -> anyhow::Result<v1::SaveAndPresentProjectLiveViewsResponse> {
+        Ok(self
+            .runtime
+            .block_on(self.client.save_and_present_project_live_views(request))?)
     }
 
     pub(crate) fn plan_tag_bump(

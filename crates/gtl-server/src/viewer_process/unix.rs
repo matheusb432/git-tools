@@ -1,19 +1,17 @@
 use std::{
-    os::unix::process::CommandExt,
+    os::unix::process::CommandExt as _,
     path::Path,
     process::{Command, Stdio},
 };
 
-pub(super) fn spawn(program: &Path, arguments: &[&str]) -> std::io::Result<()> {
+pub(super) fn spawn(program: &Path) -> std::io::Result<()> {
     let mut command = Command::new(program);
     command
-        .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    // SAFETY: the closure runs after fork and calls only async-signal-safe libc
-    // functions. The grandchild returns to Command's exec path; the intermediate
-    // exits immediately so this process can reap it.
+    // SAFETY: this runs after fork and only calls async-signal-safe libc functions.
+    // The intermediate child exits so the long-running viewer is not owned by the server.
     unsafe {
         command.pre_exec(|| {
             if libc::setsid() == -1 {

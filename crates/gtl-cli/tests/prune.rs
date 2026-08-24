@@ -76,7 +76,7 @@ fn gtl(repo_path: &Path) -> Command {
 
 #[test]
 fn prune_partial_failure_reports_recovery_and_preserves_blocked_branch() -> Result<()> {
-    let _server = common::ServerHarness::start(None)?;
+    let _server = common::ServerHarness::start(None, None)?;
     let (_tmp, repo_path) = setup()?;
     git(&repo_path, &["branch", "feat/blocked"])?;
     let linked_worktree = repo_path.join("linked-worktree");

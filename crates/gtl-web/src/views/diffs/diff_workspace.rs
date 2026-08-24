@@ -107,8 +107,8 @@ pub(crate) fn ArtifactDiffWorkspace(
             dialog_id: commits_dialog.clone(),
             label: "History",
             panel: ArtifactMobilePanel::Commits,
-            count: view.commits.len(),
-            enabled: !view.commits.is_empty(),
+            count: view.commit_count,
+            enabled: view.commit_count > 0,
             onclick: move |_| {},
         }
         ArtifactNavigationButton {
@@ -267,6 +267,10 @@ fn DiffWorkspaceDocument(
     mobile_navigation: Option<Element>,
     onselect_commit: Option<EventHandler<CommitId>>,
     onclear_commit: Option<EventHandler<()>>,
+    #[props(default)] commits_loading: bool,
+    commits_error: Option<String>,
+    #[props(default)] commits_has_more: bool,
+    onload_commits: Option<EventHandler<()>>,
     artifact_view_id: Option<String>,
 ) -> Element {
     let footer = view.footer.clone();
@@ -316,6 +320,10 @@ fn DiffWorkspaceDocument(
                     test_id: Some(test_ids::COMMITS_PANEL.value().to_owned()),
                     onselect: onselect_commit,
                     onclear: onclear_commit,
+                    loading: commits_loading,
+                    load_error: commits_error,
+                    has_more: commits_has_more,
+                    onloadmore: onload_commits,
                 }
             }
             Keybar { footer }
@@ -350,8 +358,8 @@ mod artifact_tests {
     };
     use gtl_wire::viewer::{
         ViewerActiveView, ViewerCommandLine, ViewerCommitSelection, ViewerCommitSummary,
-        ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, ViewerFileStatus, ViewerFileSummary,
-        ViewerFooter, ViewerRenderOptions, ViewerViewIdentity,
+        ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, ViewerFileRows, ViewerFileStatus,
+        ViewerFileSummary, ViewerFooter, ViewerRenderOptions, ViewerRows, ViewerViewIdentity,
     };
 
     use super::{ArtifactDiffWorkspace, ArtifactViewMarkup};
@@ -384,7 +392,16 @@ mod artifact_tests {
             can_open_in_editor: true,
             initially_expanded: true,
         };
-        let workspace = static_diff_workspace(identity, vec![(file.clone(), Vec::new())]);
+        let workspace = static_diff_workspace(
+            identity,
+            vec![(
+                file.clone(),
+                ViewerFileRows {
+                    rows: ViewerRows::Unified(Vec::new()),
+                    line_number_digits: 1,
+                },
+            )],
+        );
         let view = ViewerActiveView {
             identity,
             title: "diff".to_owned(),
@@ -398,6 +415,7 @@ mod artifact_tests {
             },
             files: vec![file],
             commits_label: "1 commit".to_owned(),
+            commit_count: 1,
             commits: vec![ViewerCommitSummary {
                 id: CommitId::try_from("0123456789abcdef0123456789abcdef01234567")?,
                 subject: "static render".to_owned(),

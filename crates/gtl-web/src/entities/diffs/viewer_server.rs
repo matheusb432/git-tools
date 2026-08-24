@@ -1,0 +1,130 @@
+use gtl_wire::viewer::{
+    GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
+    OpenViewerHistory, SelectViewerCommit, SetViewerPreference, StreamViewerRows, ViewerCommitPage,
+    ViewerHistoryCopyPayload, ViewerHistoryPage, ViewerShell, ViewerStateChanged, ViewerTabRequest,
+    ViewerUserSettings,
+};
+
+use crate::shared::viewer_client::ViewerClientError;
+#[cfg(target_arch = "wasm32")]
+use crate::shared::viewer_client::connect_viewer;
+
+macro_rules! viewer_request {
+    ($name:ident, $request:ty, $response:ty, $method:ident) => {
+        #[cfg(target_arch = "wasm32")]
+        pub(crate) async fn $name(request: $request) -> Result<$response, ViewerClientError> {
+            let mut viewer = connect_viewer().await?;
+            viewer.client.$method(request).await
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        pub(crate) fn $name(
+            _request: $request,
+        ) -> impl std::future::Future<Output = Result<$response, ViewerClientError>> {
+            std::future::ready(Err(ViewerClientError::Unavailable))
+        }
+    };
+}
+
+macro_rules! viewer_query {
+    ($name:ident, $response:ty, $method:ident) => {
+        #[cfg(target_arch = "wasm32")]
+        pub(crate) async fn $name() -> Result<$response, ViewerClientError> {
+            let mut viewer = connect_viewer().await?;
+            viewer.client.$method().await
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        pub(crate) fn $name()
+        -> impl std::future::Future<Output = Result<$response, ViewerClientError>> {
+            std::future::ready(Err(ViewerClientError::Unavailable))
+        }
+    };
+}
+
+viewer_query!(get_shell, ViewerShell, get_shell);
+viewer_request!(
+    stream_rows,
+    StreamViewerRows,
+    gtl_client::ViewerRowStream,
+    stream_rows
+);
+viewer_request!(
+    list_commits,
+    ListViewerCommits,
+    ViewerCommitPage,
+    list_commits
+);
+viewer_request!(
+    list_history,
+    ListViewerHistory,
+    ViewerHistoryPage,
+    list_history
+);
+viewer_request!(open_history, OpenViewerHistory, ViewerShell, open_history);
+viewer_request!(
+    get_history_copy,
+    GetViewerHistoryCopy,
+    ViewerHistoryCopyPayload,
+    get_history_copy
+);
+viewer_request!(activate_tab, ViewerTabRequest, ViewerShell, activate_tab);
+viewer_request!(close_tab, ViewerTabRequest, ViewerShell, close_tab);
+viewer_request!(refresh_tab, ViewerTabRequest, ViewerShell, refresh_tab);
+viewer_request!(
+    delete_live_tab,
+    ViewerTabRequest,
+    ViewerShell,
+    delete_live_tab
+);
+viewer_request!(
+    select_commit,
+    SelectViewerCommit,
+    ViewerShell,
+    select_commit
+);
+viewer_request!(
+    clear_commit_selection,
+    ViewerTabRequest,
+    ViewerShell,
+    clear_commit_selection
+);
+viewer_request!(
+    set_preference,
+    SetViewerPreference,
+    ViewerShell,
+    set_preference
+);
+viewer_request!(open_diff_file, OpenViewerDiffFile, (), open_diff_file);
+viewer_query!(get_settings, ViewerUserSettings, get_settings);
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) async fn listen_for_state_changes<Ready, Handler>(
+    on_ready: Ready,
+    on_event: Handler,
+) -> Result<(), ViewerClientError>
+where
+    Ready: Fn(String) + 'static,
+    Handler: Fn(ViewerStateChanged) + 'static,
+{
+    let mut viewer = connect_viewer().await?;
+    let server_instance_id = viewer.server_instance_id;
+    let mut stream = viewer.client.watch().await?;
+    on_ready(server_instance_id);
+    while let Some(event) = stream.message().await? {
+        on_event(event);
+    }
+    Err(ViewerClientError::Unavailable)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn listen_for_state_changes<Ready, Handler>(
+    _on_ready: Ready,
+    _on_event: Handler,
+) -> impl std::future::Future<Output = Result<(), ViewerClientError>>
+where
+    Ready: Fn(String) + 'static,
+    Handler: Fn(ViewerStateChanged) + 'static,
+{
+    std::future::ready(Err(ViewerClientError::Unavailable))
+}

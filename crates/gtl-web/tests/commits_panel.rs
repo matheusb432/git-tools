@@ -15,6 +15,10 @@ fn single_commit_panel_is_read_only_but_keeps_copy_action() -> TestResult {
         test_id: Some(test_ids::COMMITS_PANEL.value().to_owned()),
         onselect: Some(EventHandler::<CommitId>::new(|_| {})),
         onclear: None,
+        loading: false,
+        load_error: None,
+        has_more: false,
+        onloadmore: None,
     });
     let mut panel = VirtualDom::new_with_props(CommitsPanel, props);
     panel.rebuild_in_place();

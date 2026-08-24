@@ -20,7 +20,7 @@ pub fn run(
         .transpose()
         .map_err(|_| anyhow::anyhow!("merge base must not be empty"))?
         .map(|base| base.to_string());
-    let prepare = v1::PrepareMergeDiffRequest {
+    let present = v1::PresentMergeDiffRequest {
         working_directory: working_directory.clone(),
         base_revision: base_revision.clone(),
     };
@@ -30,7 +30,7 @@ pub fn run(
     };
     super::present(
         raw,
-        |client| client.prepare_merge_diff(prepare),
+        |client| client.present_merge_diff(present),
         |client| client.render_merge_diff(render),
     )
 }

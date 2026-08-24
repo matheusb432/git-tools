@@ -1,4 +1,4 @@
-//! TOML-backed user settings shared by the CLI, daemon, and desktop process roots.
+//! TOML-backed user settings used by the server process root.
 
 mod string_editor;
 
@@ -8,7 +8,9 @@ use std::{
 };
 
 use anyhow::Context;
-use gtl_application::ports::{UserSettingsEditError, UserSettingsLoadError, UserSettingsStore};
+use gtl_application::ports::{
+    UserSettingsEditError, UserSettingsEditOutcome, UserSettingsLoadError, UserSettingsStore,
+};
 use gtl_models::{
     diffs::DiffExclusions,
     paths::ProjectName,
@@ -248,7 +250,7 @@ impl UserSettingsStore for TomlSettingsStore {
     fn set_value(
         &mut self,
         mutation: gtl_models::settings::SettingKeyValue,
-    ) -> Result<Option<String>, UserSettingsEditError> {
+    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
         let key = mutation.key();
         let value_new = mutation.value();
         string_editor::edit(
@@ -256,19 +258,19 @@ impl UserSettingsStore for TomlSettingsStore {
             key.as_str(),
             string_editor::StringEdit::Set(&value_new),
         )
-        .map(|outcome| outcome.value_old)
+        .map(Into::into)
     }
 
     fn remove_key(
         &mut self,
         key: gtl_models::settings::SettingKey,
-    ) -> Result<Option<String>, UserSettingsEditError> {
+    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError> {
         string_editor::edit(
             self.required_path()?,
             key.as_str(),
             string_editor::StringEdit::Remove,
         )
-        .map(|outcome| outcome.value_old)
+        .map(Into::into)
     }
 }
 
@@ -514,18 +516,20 @@ excluded_from_push_all = true
     }
 
     #[test]
-    fn set_and_remove_operations_return_previous_values_and_affect_load() {
+    fn set_and_remove_operations_affect_load_and_notify_the_viewer() {
         let directory = tempfile::tempdir().expect("temp directory");
         let path = directory.path().join("config.toml");
         std::fs::write(&path, "# settings\ntheme = \"dark\"\nlayout = \"split\"\n")
             .expect("seed config");
         let mut store = TomlSettingsStore::new(Some(path.clone()));
+        let viewer = gtl_application::viewer::ViewerState::new();
 
         let set = set_setting_key::execute(
             set_setting_key::SetSettingKey {
                 mutation: gtl_models::settings::SettingKeyValue::Theme(Theme::Light),
             },
             &mut store,
+            &viewer,
         )
         .expect("set theme");
         let removed = remove_setting_key::execute(
@@ -533,11 +537,16 @@ excluded_from_push_all = true
                 key: gtl_models::settings::SettingKey::Layout,
             },
             &mut store,
+            &viewer,
         )
         .expect("remove layout");
 
-        assert_eq!(set.value_old.as_deref(), Some("dark"));
-        assert_eq!(removed.value_old.as_deref(), Some("split"));
+        assert!(!set.viewer_rows_changed);
+        assert!(removed.viewer_rows_changed);
+        assert_eq!(
+            viewer.version().expect("viewer version remains available"),
+            gtl_models::viewer::ViewerVersion::new(2)
+        );
         assert_eq!(
             store.load().expect("updated settings").theme(),
             Some(Theme::Light)
@@ -563,12 +572,14 @@ excluded_from_push_all = true
         let raw = b"layout = [\"split\"]\n";
         std::fs::write(&path, raw).expect("seed config");
         let mut store = TomlSettingsStore::new(Some(path.clone()));
+        let viewer = gtl_application::viewer::ViewerState::new();
 
         let error = remove_setting_key::execute(
             remove_setting_key::RemoveSettingKey {
                 key: gtl_models::settings::SettingKey::Layout,
             },
             &mut store,
+            &viewer,
         )
         .expect_err("non-string layout is rejected");
 
@@ -587,12 +598,14 @@ excluded_from_push_all = true
         let raw = b"theme = {{{\n";
         std::fs::write(&path, raw).expect("seed config");
         let mut store = TomlSettingsStore::new(Some(path.clone()));
+        let viewer = gtl_application::viewer::ViewerState::new();
 
         let error = set_setting_key::execute(
             set_setting_key::SetSettingKey {
                 mutation: gtl_models::settings::SettingKeyValue::Theme(Theme::Light),
             },
             &mut store,
+            &viewer,
         )
         .expect_err("malformed TOML is rejected");
         assert!(matches!(

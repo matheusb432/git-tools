@@ -1,9 +1,14 @@
 use std::{hint::black_box, sync::Arc};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use gtl_application::{diffs::View, viewer::ViewerTabId};
+use gtl_application::{
+    diffs::View,
+    viewer::{
+        ViewerTabId,
+        session::{CacheDisposition, CachedView, WeightedViewCache},
+    },
+};
 use gtl_benchmarks::require;
-use gtl_desktop::{CacheDisposition, CachedView, WeightedViewCache};
 
 #[path = "fixtures/view.rs"]
 mod view_fixture;

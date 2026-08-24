@@ -1,11 +1,17 @@
-use std::{error::Error, time::Duration};
+use std::{
+    error::Error,
+    io::{Read as _, Write as _},
+    time::Duration,
+};
 
 use gtl_wire::v1::{
     DiffTarget, Empty, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
-    GetWorktreeBaseRequest, PushProjectRepositoriesRequest, RenderDiffRequest,
+    GetViewerShellRequest, GetWorktreeBaseRequest, PushProjectRepositoriesRequest,
+    RenderDiffRequest, SetViewerThemeRequest, ViewerTheme, WatchViewerRequest,
     diff_service_client::DiffServiceClient, diff_target,
     project_service_client::ProjectServiceClient,
     repository_service_client::RepositoryServiceClient,
+    settings_service_client::SettingsServiceClient, viewer_service_client::ViewerServiceClient,
     worktree_service_client::WorktreeServiceClient,
 };
 use prost::Message as _;
@@ -143,6 +149,90 @@ async fn rejects_requests_without_the_capability() -> TestResult {
 }
 
 #[tokio::test]
+async fn viewer_service_accepts_only_the_browser_capability() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+
+    let error = ViewerServiceClient::with_interceptor(server.channel(), server.authorization())
+        .get_viewer_shell(GetViewerShellRequest {})
+        .await
+        .expect_err("the native client capability must not authorize the viewer service");
+    assert_eq!(error.code(), tonic::Code::Unauthenticated);
+
+    ViewerServiceClient::with_interceptor(server.channel(), server.viewer_authorization())
+        .get_viewer_shell(GetViewerShellRequest {})
+        .await?;
+
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let settings_path = directory.path().join("config.toml");
+    let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
+    let mut viewer =
+        ViewerServiceClient::with_interceptor(server.channel(), server.viewer_authorization());
+    let mut viewer_updates = viewer
+        .watch_viewer(WatchViewerRequest {})
+        .await?
+        .into_inner();
+    let initial_version = viewer_updates
+        .next()
+        .await
+        .ok_or("viewer watch ended before its initial version")??
+        .version;
+    let mut settings =
+        SettingsServiceClient::with_interceptor(server.channel(), server.authorization());
+
+    settings
+        .set_viewer_theme(SetViewerThemeRequest {
+            theme: ViewerTheme::Light as i32,
+        })
+        .await?;
+
+    let changed_version = tokio::time::timeout(Duration::from_secs(1), viewer_updates.next())
+        .await
+        .map_err(|_| "viewer was not notified about the theme change")?
+        .ok_or("viewer watch ended before the theme change")??
+        .version;
+    assert!(changed_version > initial_version);
+
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn viewer_cors_accepts_only_the_packaged_and_development_origins() -> TestResult {
+    let directory = tempfile::tempdir()?;
+    let server = ServerHarness::start(directory.path(), None).await?;
+    let address = server.address();
+
+    for origin in [
+        "http://tauri.localhost",
+        "tauri://localhost",
+        "http://127.0.0.1:8080",
+    ] {
+        let response = send_http1_request(address, cors_preflight(address, origin)).await?;
+        assert!(response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.1 204"));
+        let response = response.to_ascii_lowercase();
+        assert!(response.contains(&format!("access-control-allow-origin: {origin}")));
+        assert!(response.contains("access-control-allow-methods: post"));
+        assert!(response.contains("authorization"));
+        assert!(response.contains("x-grpc-web"));
+    }
+
+    let rejected = send_http1_request(address, cors_preflight(address, "https://example.invalid"))
+        .await?
+        .to_ascii_lowercase();
+    assert!(!rejected.contains("access-control-allow-origin"));
+
+    server.stop().await?;
+    Ok(())
+}
+
+#[tokio::test]
 #[serial(server_tracing)]
 async fn shutdown_reports_not_serving_and_stops_with_an_open_health_watch() -> TestResult {
     let directory = tempfile::tempdir()?;
@@ -252,6 +342,7 @@ async fn assert_health_serving(
         "gtl.v1.RepositoryService",
         "gtl.v1.SettingsService",
         "gtl.v1.TagService",
+        "gtl.v1.ViewerService",
         "gtl.v1.WorktreeService",
     ] {
         let response = client
@@ -263,6 +354,26 @@ async fn assert_health_serving(
         assert_eq!(response.status, ServingStatus::Serving as i32);
     }
     Ok(())
+}
+
+fn cors_preflight(address: std::net::SocketAddr, origin: &str) -> String {
+    format!(
+        "OPTIONS /gtl.v1.ViewerService/GetViewerShell HTTP/1.1\r\nHost: {address}\r\nOrigin: {origin}\r\nAccess-Control-Request-Method: POST\r\nAccess-Control-Request-Headers: authorization,x-grpc-web\r\nConnection: close\r\n\r\n"
+    )
+}
+
+async fn send_http1_request(address: std::net::SocketAddr, request: String) -> TestResult<String> {
+    Ok(
+        tokio::task::spawn_blocking(move || -> std::io::Result<String> {
+            let mut connection = std::net::TcpStream::connect(address)?;
+            connection.set_read_timeout(Some(Duration::from_secs(2)))?;
+            connection.write_all(request.as_bytes())?;
+            let mut response = String::new();
+            connection.read_to_string(&mut response)?;
+            Ok(response)
+        })
+        .await??,
+    )
 }
 
 async fn assert_health_update(

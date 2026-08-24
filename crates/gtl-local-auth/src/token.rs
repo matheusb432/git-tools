@@ -30,7 +30,7 @@ impl CapabilityToken {
             .into()
     }
 
-    fn parse(contents: &[u8]) -> Option<Self> {
+    pub(crate) fn parse(contents: &[u8]) -> Option<Self> {
         let encoded = std::str::from_utf8(contents).ok()?;
         let decoded = URL_SAFE_NO_PAD.decode(encoded).ok()?;
         if decoded.len() != CAPABILITY_BYTE_LENGTH || URL_SAFE_NO_PAD.encode(decoded) != encoded {

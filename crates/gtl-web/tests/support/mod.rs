@@ -46,6 +46,7 @@ pub fn viewer_active_view(commits: Vec<ViewerCommitSummary>) -> TestResult<Viewe
         },
         files: Vec::new(),
         commits_label: "1 commit".to_owned(),
+        commit_count: commits.len(),
         commits,
         commit_selection: ViewerCommitSelection::None,
         footer: ViewerFooter {

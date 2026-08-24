@@ -66,4 +66,8 @@ pub enum LocalAuthError {
     MalformedEndpoint { path: PathBuf },
     #[error("local server endpoint must use a bound loopback address")]
     InvalidEndpoint,
+    #[error("gtl-server has not published viewer access at {}", path.display())]
+    ViewerBootstrapNotPublished { path: PathBuf },
+    #[error("local viewer bootstrap is malformed: {}", path.display())]
+    MalformedViewerBootstrap { path: PathBuf },
 }

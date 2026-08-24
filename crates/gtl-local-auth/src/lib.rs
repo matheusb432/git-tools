@@ -4,6 +4,7 @@ mod endpoint;
 mod error;
 mod private_directory;
 mod token;
+mod viewer_bootstrap;
 
 use std::path::{Path, PathBuf};
 
@@ -11,6 +12,7 @@ use directories::ProjectDirs;
 pub use endpoint::{PublishedEndpoint, ServerEndpoint, ServerInstanceId};
 pub use error::LocalAuthError;
 pub use token::CapabilityToken;
+pub use viewer_bootstrap::{PublishedViewerBootstrap, ViewerBootstrap};
 
 const DATA_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "GIT_TOOLS_DATA_DIR";
 const SERVER_DIRECTORY_NAME: &str = "server";
@@ -64,6 +66,27 @@ impl LocalAuth {
     /// Loads the currently published server endpoint.
     pub fn load_endpoint(&self) -> Result<ServerEndpoint, LocalAuthError> {
         endpoint::load(&self.server_directory()?)
+    }
+
+    /// Publishes the instance-scoped credential used only by the desktop `WebView`.
+    pub fn publish_viewer_bootstrap(
+        &self,
+        bootstrap: &ViewerBootstrap,
+    ) -> Result<PublishedViewerBootstrap, LocalAuthError> {
+        viewer_bootstrap::publish(self.server_directory()?, bootstrap)
+    }
+
+    /// Loads the active server address and viewer-only browser credential.
+    pub fn load_viewer_bootstrap(&self) -> Result<ViewerBootstrap, LocalAuthError> {
+        let directory = self.server_directory()?;
+        let bootstrap = viewer_bootstrap::load(&directory)?;
+        let endpoint = endpoint::load(&directory)?;
+        if bootstrap.endpoint() != &endpoint {
+            return Err(LocalAuthError::MalformedViewerBootstrap {
+                path: directory.path(viewer_bootstrap::VIEWER_BOOTSTRAP_FILE_NAME),
+            });
+        }
+        Ok(bootstrap)
     }
 
     #[must_use]
@@ -151,14 +174,33 @@ mod tests {
             ServerInstanceId::generate(),
         )
         .expect("loopback endpoint");
-        let _published = auth.publish_endpoint(endpoint).expect("publish endpoint");
+        let _published = auth
+            .publish_endpoint(endpoint.clone())
+            .expect("publish endpoint");
         let server_directory = auth.data_root().join(SERVER_DIRECTORY_NAME);
 
         assert_eq!(
             std::fs::metadata(&server_directory).unwrap().mode() & 0o777,
             0o700
         );
-        for name in [token::CAPABILITY_FILE_NAME, endpoint::ENDPOINT_FILE_NAME] {
+        let viewer_capability = CapabilityToken::generate().expect("viewer token");
+        let viewer_bootstrap = ViewerBootstrap::new(endpoint.clone(), viewer_capability.clone(), 1);
+        let _published_viewer = auth
+            .publish_viewer_bootstrap(&viewer_bootstrap)
+            .expect("publish viewer bootstrap");
+        let loaded_viewer = auth.load_viewer_bootstrap().expect("load viewer bootstrap");
+        assert_eq!(loaded_viewer.endpoint(), &endpoint);
+        assert_eq!(loaded_viewer.protocol_version(), 1);
+        assert!(
+            loaded_viewer
+                .capability()
+                .authenticates(viewer_capability.expose_secret())
+        );
+        for name in [
+            token::CAPABILITY_FILE_NAME,
+            endpoint::ENDPOINT_FILE_NAME,
+            viewer_bootstrap::VIEWER_BOOTSTRAP_FILE_NAME,
+        ] {
             assert_eq!(
                 std::fs::metadata(server_directory.join(name))
                     .unwrap()

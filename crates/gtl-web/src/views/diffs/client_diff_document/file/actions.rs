@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use gtl_models::paths::RepositoryRelativePath;
+use gtl_wire::viewer::ViewerDiffFileId;
 use lucide_dioxus::ExternalLink;
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
 pub(super) fn DiffFileActions(
     file: ClientDiffFile,
     copy_context_enabled: bool,
-    onopen: Option<EventHandler<RepositoryRelativePath>>,
+    onopen: Option<EventHandler<ViewerDiffFileId>>,
     artifact_enhancement: bool,
 ) -> Element {
     rsx! {
@@ -27,7 +27,7 @@ pub(super) fn DiffFileActions(
                 artifact_enhancement,
             }
             if let Some(onopen) = onopen.filter(|_| file.summary.can_open_in_editor) {
-                OpenInTextEditorAction { path: file.summary.path, onopen }
+                OpenInTextEditorAction { file_id: file.summary.id, onopen }
             }
         }
     }
@@ -187,8 +187,8 @@ async fn update_copy_state(mut state: Signal<CopyState>, payload: &str) {
 
 #[component]
 fn OpenInTextEditorAction(
-    path: RepositoryRelativePath,
-    onopen: EventHandler<RepositoryRelativePath>,
+    file_id: ViewerDiffFileId,
+    onopen: EventHandler<ViewerDiffFileId>,
 ) -> Element {
     rsx! {
         // TODO: make it use icon button primitive (create it)
@@ -201,7 +201,7 @@ fn OpenInTextEditorAction(
             onclick: move |event: MouseEvent| {
                 event.prevent_default();
                 event.stop_propagation();
-                onopen.call(path.clone());
+                onopen.call(file_id.clone());
             },
             OpenInTextEditorIcon {}
         }

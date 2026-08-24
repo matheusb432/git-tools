@@ -105,7 +105,7 @@ pub(super) fn FilesPanel(
                 commits_label: view.commits_label.clone(),
                 file_count: view.files.len(),
             }
-            FilesPanelSummary { commit_count: view.commits.len(), totals }
+            FilesPanelSummary { commit_count: view.commit_count, totals }
             if artifact_view_id.is_some() {
                 WorkspaceFileTreeView {
                     tree,

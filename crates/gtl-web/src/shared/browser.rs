@@ -3,16 +3,11 @@ use std::time::Duration;
 
 #[cfg(feature = "desktop")]
 use dioxus::prelude::spawn;
-#[cfg(feature = "desktop")]
-use serde::Serialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 #[cfg(feature = "desktop")]
 use web_sys::{HtmlDetailsElement, HtmlElement};
 use web_sys::{HtmlDocument, HtmlTextAreaElement};
-
-#[cfg(feature = "desktop")]
-use super::bridge::ClientApiError;
 
 #[cfg(feature = "desktop")]
 pub(crate) fn apply_theme(theme: &'static str) {
@@ -68,15 +63,6 @@ pub(crate) async fn copy_text(text: &str) -> bool {
         return true;
     }
     exec_copy(text)
-}
-
-#[cfg(feature = "desktop")]
-pub(crate) async fn copy_json(value: &impl Serialize) -> Result<(), ClientApiError> {
-    let text = serde_json::to_string_pretty(value).map_err(|_| ClientApiError::Unavailable)?;
-    copy_text(&text)
-        .await
-        .then_some(())
-        .ok_or(ClientApiError::Unavailable)
 }
 
 fn exec_copy(text: &str) -> bool {

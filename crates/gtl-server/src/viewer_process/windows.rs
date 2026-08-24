@@ -1,5 +1,5 @@
 use std::{
-    os::windows::process::CommandExt,
+    os::windows::process::CommandExt as _,
     path::Path,
     process::{Command, Stdio},
 };
@@ -7,9 +7,8 @@ use std::{
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-pub(super) fn spawn(program: &Path, arguments: &[&str]) -> std::io::Result<()> {
+pub(super) fn spawn(program: &Path) -> std::io::Result<()> {
     Command::new(program)
-        .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

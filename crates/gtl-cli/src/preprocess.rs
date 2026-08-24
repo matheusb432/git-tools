@@ -5,7 +5,7 @@
 
 /// Rewrites a legacy leading `merge-diff` token onto `diff merge`, dropping a
 /// `--monorepo <value>` pair from the rewritten
-/// tail (the daemon already ignores `monorepo`; the grouped forms dropped the
+/// tail (the server already ignores `monorepo`; the grouped forms dropped the
 /// field entirely). Any other argv passes through untouched.
 pub fn normalize(argv: Vec<String>) -> Vec<String> {
     match argv.first().map(String::as_str) {

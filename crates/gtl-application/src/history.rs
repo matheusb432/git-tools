@@ -1,5 +1,6 @@
 //! The history feature: the desktop viewer's history-panel query.
 
+pub mod copy_render;
 pub mod get_recent_render;
 pub mod list_history;
 pub mod list_recent_render_page;

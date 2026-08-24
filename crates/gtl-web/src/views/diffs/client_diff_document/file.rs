@@ -19,8 +19,9 @@ pub(super) fn DiffFileCard(
     folded: Option<bool>,
     copy_context_enabled: bool,
     is_flashing: bool,
-    onopen: Option<EventHandler<RepositoryRelativePath>>,
+    onopen: Option<EventHandler<ViewerDiffFileId>>,
     onretry: EventHandler<()>,
+    retry_allowed: bool,
     file_index: usize,
     artifact_tab_id: Option<ViewerTabId>,
 ) -> Element {
@@ -83,6 +84,7 @@ pub(super) fn DiffFileCard(
                 density,
                 file_index,
                 onretry,
+                retry_allowed,
                 artifact_file_id: artifact_file_id.clone(),
             }
         }
@@ -96,7 +98,7 @@ fn DiffFileHeader(
     file: ClientDiffFile,
     mut open: Signal<bool>,
     copy_context_enabled: bool,
-    onopen: Option<EventHandler<RepositoryRelativePath>>,
+    onopen: Option<EventHandler<ViewerDiffFileId>>,
     artifact_enhancement: bool,
 ) -> Element {
     let background_classes = file_header_background(file.summary.status);
@@ -183,22 +185,21 @@ mod tests {
     use std::sync::Arc;
 
     use gtl_models::diffs::DiffLineCount;
-    use gtl_parser::DiffParser;
     use gtl_wire::viewer::{
         ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, ViewerFileStatus, ViewerFileSummary,
+        ViewerUnifiedRow,
     };
 
     use super::*;
     use crate::{
         entities::diffs::{ClientDiffFileState, ClientDiffRows},
-        test_support::{TestResult, absolute_file_path, repository_relative_path, viewer_tab_id},
+        test_support::{
+            TestResult, absolute_file_path, repository_relative_path, unified_source_row,
+            viewer_tab_id,
+        },
     };
 
     fn test_file() -> TestResult<ClientDiffFile> {
-        let parsed =
-            DiffParser::new().parse(&["@@ -1 +1 @@".to_owned(), "+echo static".to_owned()]);
-        let line_number_digits = parsed.line_number_digits();
-
         Ok(ClientDiffFile {
             summary: ViewerFileSummary {
                 id: ViewerDiffFileId::for_index(0),
@@ -211,8 +212,11 @@ mod tests {
                 can_open_in_editor: true,
                 initially_expanded: false,
             },
-            rows: ClientDiffRows::Unified(vec![Arc::new(parsed.into_rows())]),
-            line_number_digits,
+            rows: ClientDiffRows::Unified(vec![Arc::new(vec![
+                ViewerUnifiedRow::Hunk("@@ -1 +1 @@".to_owned()),
+                ViewerUnifiedRow::Added(unified_source_row("echo static", None, Some(1), None)),
+            ])]),
+            line_number_digits: 1,
             state: ClientDiffFileState::Complete,
         })
     }
@@ -231,6 +235,7 @@ mod tests {
             is_flashing: false,
             onopen: None,
             onretry: EventHandler::new(|()| {}),
+            retry_allowed: false,
             file_index: 3,
             artifact_tab_id,
         });

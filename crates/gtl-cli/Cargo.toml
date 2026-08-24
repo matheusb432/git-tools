@@ -27,11 +27,17 @@ toml.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
+sample_project-client.workspace = true
+sample_project-local-auth.workspace = true
+sample_project-wire.workspace = true
 assert_cmd.workspace = true
 gtl-server.workspace = true
 predicates.workspace = true
 strum.workspace = true
 tempfile.workspace = true
+tokio-stream.workspace = true
+tonic = { workspace = true, features = ["router", "transport"] }
+tonic-health.workspace = true
 
 [lints]
 workspace = true

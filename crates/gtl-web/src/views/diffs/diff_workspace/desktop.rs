@@ -17,14 +17,14 @@ use super::{
 };
 use crate::{
     app::application_layout::{ViewerContext, ViewerShellLoad},
-    entities::diffs::{ClientDiffSource, DiffViewerApi},
+    entities::diffs::{use_viewer_commit_pages, viewer_server},
     shared::{
-        bridge::ClientApiError,
         browser,
         ui::{
             AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, FloatingNotice,
             FloatingNoticeState, Popover, Skeleton,
         },
+        viewer_client::ViewerClientError,
     },
     views::diffs::ClientDiffDocument,
 };
@@ -179,12 +179,12 @@ fn WorkspaceFailure(title: String, message: String) -> Element {
 
 #[component]
 fn ReadyWorkspace(
-    view: ViewerActiveView,
+    mut view: ViewerActiveView,
     preferences: ViewerPreferences,
     is_live: bool,
 ) -> Element {
     let viewer = use_context::<ViewerContext>();
-    let mut action_error = use_signal(|| None::<ClientApiError>);
+    let mut action_error = use_signal(|| None::<ViewerClientError>);
     let mut delete_open = use_signal(|| false);
     let mut delete_pending = use_signal(|| false);
     let mut delete_trigger_id = use_signal(|| "delete-live-view-desktop".to_owned());
@@ -195,6 +195,15 @@ fn ReadyWorkspace(
     let mut flashing_file = use_signal(|| None::<String>);
     let tab_id = view.identity.tab_id;
     let identity = view.identity;
+    let commit_pages = use_viewer_commit_pages(identity, view.commit_count);
+    let loaded_commit_pages = commit_pages.read();
+    view.commits.clone_from(&loaded_commit_pages.commits);
+    let commits_loading = loaded_commit_pages.is_loading();
+    let commits_error = loaded_commit_pages
+        .error()
+        .map(|error| error.message().to_owned());
+    let commits_has_more = loaded_commit_pages.has_more();
+    let onload_commits = use_callback(move |()| commit_pages.load_next(identity));
 
     let onpreference = move |preference: SetViewerPreference| {
         action_error.set(None);
@@ -209,7 +218,7 @@ fn ReadyWorkspace(
     let onclear_commit = use_callback(move |()| {
         action_error.set(None);
         spawn(async move {
-            match DiffViewerApi::clear_commit_selection(ViewerTabRequest { tab_id }).await {
+            match viewer_server::clear_commit_selection(ViewerTabRequest { tab_id }).await {
                 Ok(shell) => viewer.replace_shell(shell),
                 Err(error) => action_error.set(Some(error)),
             }
@@ -222,7 +231,7 @@ fn ReadyWorkspace(
             CommitSelectionAction::FetchCommit(request) => {
                 action_error.set(None);
                 spawn(async move {
-                    match DiffViewerApi::select_commit(request).await {
+                    match viewer_server::select_commit(request).await {
                         Ok(shell) => viewer.replace_shell(shell),
                         Err(error) => action_error.set(Some(error)),
                     }
@@ -243,11 +252,11 @@ fn ReadyWorkspace(
             }
         });
     };
-    let onopen = move |path: gtl_models::paths::RepositoryRelativePath| {
+    let onopen = move |file: gtl_wire::viewer::ViewerDiffFileId| {
         action_error.set(None);
         spawn(async move {
             if let Err(error) =
-                DiffViewerApi::open_diff_file(OpenViewerDiffFile { identity, path }).await
+                viewer_server::open_diff_file(OpenViewerDiffFile { identity, file }).await
             {
                 action_error.set(Some(error));
             }
@@ -303,7 +312,6 @@ fn ReadyWorkspace(
                 view: view.clone(),
                 diff_document: rsx! {
                     ClientDiffDocument {
-                        source: ClientDiffSource::Desktop,
                         view: view.clone(),
                         folded: files_folded(),
                         copy_context_enabled: copy_context_enabled(),
@@ -320,6 +328,10 @@ fn ReadyWorkspace(
                 onnavigate,
                 onselect_commit,
                 onclear_commit,
+                commits_loading,
+                commits_error: commits_error.clone(),
+                commits_has_more,
+                onload_commits,
             }
         }
 
@@ -380,6 +392,10 @@ fn ReadyWorkspace(
                 view: view.clone(),
                 onselect: onselect_commit,
                 onclear: onclear_commit,
+                loading: commits_loading,
+                load_error: commits_error,
+                has_more: commits_has_more,
+                onloadmore: onload_commits,
             }
         }
         AlertDialog {
@@ -403,7 +419,7 @@ fn ReadyWorkspace(
                 delete_pending.set(true);
                 action_error.set(None);
                 spawn(async move {
-                    match DiffViewerApi::delete_live_tab(ViewerTabRequest { tab_id }).await {
+                    match viewer_server::delete_live_tab(ViewerTabRequest { tab_id }).await {
                         Ok(shell) => {
                             delete_open.set(false);
                             viewer.replace_shell(shell);

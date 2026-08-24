@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use dioxus::prelude::*;
-use gtl_parser::{CharacterCount, DiffRow, DiffRowKind, SemanticTextSpan, SourceLineNumber};
 
 use super::{
     HeaderTone,
     content::{ChangedTextTone, CodeCellContent, non_breaking_if_empty},
 };
+use crate::entities::diffs::{ViewerCodeLine, ViewerUnifiedRow, ViewerUnifiedSourceRow};
 
 const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-sm text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
 const UNIFIED_GUTTER_CLASSES: &str = "col-start-1 row-start-1 select-none whitespace-nowrap px-0 text-center text-sm [font-variant-numeric:tabular-nums]";
@@ -28,7 +28,10 @@ enum UnifiedGutterTone {
 }
 
 #[component]
-pub(crate) fn UnifiedDiffRowBatch(rows: Arc<Vec<DiffRow>>, artifact_enhancement: bool) -> Element {
+pub(crate) fn UnifiedDiffRowBatch(
+    rows: Arc<Vec<ViewerUnifiedRow>>,
+    artifact_enhancement: bool,
+) -> Element {
     rsx! {
         for (index, row) in rows.iter().cloned().enumerate() {
             UnifiedDiffRow { key: "{index}", row, artifact_enhancement }
@@ -37,35 +40,29 @@ pub(crate) fn UnifiedDiffRowBatch(rows: Arc<Vec<DiffRow>>, artifact_enhancement:
 }
 
 #[component]
-fn UnifiedDiffRow(row: DiffRow, artifact_enhancement: bool) -> Element {
-    match row.kind() {
-        DiffRowKind::Meta => rsx! {
-            UnifiedHeaderRow {
-                tone: HeaderTone::Meta,
-                text: non_breaking_if_empty(row.text()),
-            }
+fn UnifiedDiffRow(row: ViewerUnifiedRow, artifact_enhancement: bool) -> Element {
+    match row {
+        ViewerUnifiedRow::Meta(text) => rsx! {
+            UnifiedHeaderRow { tone: HeaderTone::Meta, text: non_breaking_if_empty(&text) }
         },
-        DiffRowKind::Hunk => rsx! {
-            UnifiedHeaderRow {
-                tone: HeaderTone::Hunk,
-                text: non_breaking_if_empty(row.text()),
-            }
+        ViewerUnifiedRow::Hunk(text) => rsx! {
+            UnifiedHeaderRow { tone: HeaderTone::Hunk, text: non_breaking_if_empty(&text) }
         },
-        DiffRowKind::Context => rsx! {
+        ViewerUnifiedRow::Context(row) => rsx! {
             UnifiedSourceRow {
                 row,
                 tone: UnifiedSourceTone::Context,
                 artifact_enhancement,
             }
         },
-        DiffRowKind::Added => rsx! {
+        ViewerUnifiedRow::Added(row) => rsx! {
             UnifiedSourceRow {
                 row,
                 tone: UnifiedSourceTone::Added,
                 artifact_enhancement,
             }
         },
-        DiffRowKind::Removed => rsx! {
+        ViewerUnifiedRow::Removed(row) => rsx! {
             UnifiedSourceRow {
                 row,
                 tone: UnifiedSourceTone::Removed,
@@ -87,26 +84,28 @@ fn UnifiedHeaderRow(tone: HeaderTone, text: String) -> Element {
 }
 
 #[component]
-fn UnifiedSourceRow(row: DiffRow, tone: UnifiedSourceTone, artifact_enhancement: bool) -> Element {
+fn UnifiedSourceRow(
+    row: ViewerUnifiedSourceRow,
+    tone: UnifiedSourceTone,
+    artifact_enhancement: bool,
+) -> Element {
     let (old_gutter_tone, new_gutter_tone) = match tone {
         UnifiedSourceTone::Context => (UnifiedGutterTone::Hidden, UnifiedGutterTone::Neutral),
         UnifiedSourceTone::Added => (UnifiedGutterTone::Hidden, UnifiedGutterTone::Added),
         UnifiedSourceTone::Removed => (UnifiedGutterTone::Removed, UnifiedGutterTone::Hidden),
     };
     let copy_line_number = if artifact_enhancement && tone != UnifiedSourceTone::Removed {
-        row.new_line_number()
+        row.new_line_number
     } else {
         None
     };
 
     rsx! {
         UnifiedSourceRowShell { tone, copy_line_number,
-            UnifiedGutter { number: row.old_line_number(), tone: old_gutter_tone }
-            UnifiedGutter { number: row.new_line_number(), tone: new_gutter_tone }
+            UnifiedGutter { number: row.old_line_number, tone: old_gutter_tone }
+            UnifiedGutter { number: row.new_line_number, tone: new_gutter_tone }
             UnifiedCodeCell {
-                text: row.body().to_owned(),
-                semantic_spans: row.semantic_spans().to_vec(),
-                long_line_character_count: row.long_line_character_count(),
+                code: row.code,
                 artifact_enhancement,
                 copy_text: copy_line_number.is_some(),
             }
@@ -133,7 +132,7 @@ fn UnifiedHeaderRowShell(tone: HeaderTone, children: Element) -> Element {
 #[component]
 fn UnifiedSourceRowShell(
     tone: UnifiedSourceTone,
-    copy_line_number: Option<SourceLineNumber>,
+    copy_line_number: Option<u32>,
     children: Element,
 ) -> Element {
     let tone_classes = match tone {
@@ -156,7 +155,7 @@ fn UnifiedSourceRowShell(
 }
 
 #[component]
-fn UnifiedGutter(number: Option<SourceLineNumber>, tone: UnifiedGutterTone) -> Element {
+fn UnifiedGutter(number: Option<u32>, tone: UnifiedGutterTone) -> Element {
     let line_number = number.map(|value| value.to_string());
     let gutter_classes = match tone {
         UnifiedGutterTone::Hidden => "hidden",
@@ -191,20 +190,14 @@ fn UnifiedHeaderCode(tone: HeaderTone, text: String) -> Element {
 }
 
 #[component]
-fn UnifiedCodeCell(
-    text: String,
-    semantic_spans: Vec<SemanticTextSpan>,
-    long_line_character_count: Option<CharacterCount>,
-    artifact_enhancement: bool,
-    copy_text: bool,
-) -> Element {
+fn UnifiedCodeCell(code: ViewerCodeLine, artifact_enhancement: bool, copy_text: bool) -> Element {
     rsx! {
         code { class: "col-start-2 row-start-1 min-w-0 border-0 bg-transparent py-0 pr-1 pl-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] print:text-[#111]",
             CodeCellContent {
-                text,
-                semantic_spans,
+                text: code.text,
+                semantic_spans: code.spans,
                 changed_text_tone: ChangedTextTone::None,
-                long_line_character_count,
+                long_line_character_count: code.long_line_character_count,
                 artifact_enhancement,
                 copy_text,
             }
@@ -214,22 +207,18 @@ fn UnifiedCodeCell(
 
 #[cfg(test)]
 mod tests {
-    use gtl_parser::{CharacterCount, DiffParser, ParseOptions};
-
     use super::*;
+    use crate::test_support::unified_source_row;
 
     #[test]
     fn renders_typed_line_numbers_absent_gutters_and_long_line_counts() {
-        let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3))).parse(&[
-            "@@ -9999 +10000 @@".to_owned(),
-            "-abcd".to_owned(),
-            "+abce".to_owned(),
-        ]);
+        let rows = vec![
+            ViewerUnifiedRow::Hunk("@@ -9999 +10000 @@".to_owned()),
+            ViewerUnifiedRow::Removed(unified_source_row("abcd", Some(9999), None, Some(4))),
+            ViewerUnifiedRow::Added(unified_source_row("abce", None, Some(10000), Some(4))),
+        ];
         let html = dioxus_ssr::render_element(rsx! {
-            UnifiedDiffRowBatch {
-                rows: Arc::new(parsed.into_rows()),
-                artifact_enhancement: false,
-            }
+            UnifiedDiffRowBatch { rows: Arc::new(rows), artifact_enhancement: false }
         });
 
         assert!(html.contains(">9999</span>"));
@@ -240,18 +229,15 @@ mod tests {
 
     #[test]
     fn artifact_rows_designate_copyable_new_source_without_markers() {
-        let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3))).parse(&[
-            "@@ -1,2 +10,3 @@".to_owned(),
-            " keep".to_owned(),
-            "-oldx".to_owned(),
-            "+newx".to_owned(),
-            "+abcdefgh".to_owned(),
-        ]);
+        let rows = vec![
+            ViewerUnifiedRow::Hunk("@@ -1,2 +10,3 @@".to_owned()),
+            ViewerUnifiedRow::Context(unified_source_row("keep", Some(1), Some(10), Some(4))),
+            ViewerUnifiedRow::Removed(unified_source_row("oldx", Some(2), None, Some(4))),
+            ViewerUnifiedRow::Added(unified_source_row("newx", None, Some(11), Some(4))),
+            ViewerUnifiedRow::Added(unified_source_row("abcdefgh", None, Some(12), Some(8))),
+        ];
         let html = dioxus_ssr::render_element(rsx! {
-            UnifiedDiffRowBatch {
-                rows: Arc::new(parsed.into_rows()),
-                artifact_enhancement: true,
-            }
+            UnifiedDiffRowBatch { rows: Arc::new(rows), artifact_enhancement: true }
         });
 
         assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 3);

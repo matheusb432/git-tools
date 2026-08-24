@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::Context as _;
-use gtl_application::ports::UserSettingsEditError;
+use gtl_application::ports::{UserSettingsEditError, UserSettingsEditOutcome};
 use toml_edit::{DocumentMut, Item, Value};
 
 const USER_SETTINGS_LOCK_WAIT_MAX: Duration = Duration::from_secs(5);
@@ -24,6 +24,16 @@ pub(super) enum StringEdit<'value> {
 pub(super) struct StringEditOutcome {
     pub(super) value_old: Option<String>,
     pub(super) document_changed: bool,
+}
+
+impl From<StringEditOutcome> for UserSettingsEditOutcome {
+    fn from(outcome: StringEditOutcome) -> Self {
+        if outcome.document_changed {
+            Self::Changed
+        } else {
+            Self::Unchanged
+        }
+    }
 }
 
 fn lock_path(settings_path: &Path) -> PathBuf {
@@ -679,7 +689,11 @@ mod tests {
 
         let mut tags = Vec::with_capacity(2);
         for (tag, result) in [result_first, result_second] {
-            assert_eq!(result.expect("set string"), None, "{tag} previous value");
+            assert_eq!(
+                result.expect("set string"),
+                gtl_application::ports::UserSettingsEditOutcome::Changed,
+                "{tag} document change"
+            );
             tags.push(tag);
         }
         tags.sort_unstable();

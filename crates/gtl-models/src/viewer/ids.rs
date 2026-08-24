@@ -146,16 +146,22 @@ impl ViewerSelectionGeneration {
     serde::Deserialize,
 )]
 #[serde(transparent)]
-pub struct ViewerShellRevision(u64);
+pub struct ViewerVersion(u64);
 
-impl ViewerShellRevision {
+impl ViewerVersion {
     pub const fn new(value: u64) -> Self {
         Self(value)
     }
 
     #[must_use]
+    #[allow(clippy::expect_used)]
+    /// Returns the next process-local shell version.
+    ///
+    /// # Panics
+    ///
+    /// Panics after version `u64::MAX`; the server never wraps a viewer version.
     pub const fn next(self) -> Self {
-        Self::new(self.0.wrapping_add(1))
+        Self::new(self.0.checked_add(1).expect("viewer version exhausted u64"))
     }
 
     pub const fn value(self) -> u64 {
@@ -165,7 +171,7 @@ impl ViewerShellRevision {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{RenderHistoryId, ViewerTabId};
+    use super::super::{RenderHistoryId, ViewerTabId, ViewerVersion};
 
     #[test]
     fn zero_is_not_a_viewer_tab_id() {
@@ -181,5 +187,11 @@ mod tests {
             i64::from(RenderHistoryId::try_new(11).expect("positive id")),
             11
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "viewer version exhausted u64")]
+    fn viewer_version_does_not_wrap() {
+        let _ = ViewerVersion::new(u64::MAX).next();
     }
 }

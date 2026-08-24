@@ -12,15 +12,15 @@ use super::{
     application_router::Route,
 };
 use crate::{
-    entities::diffs::{DiffViewerApi, theme_from_value, theme_label, theme_value},
+    entities::diffs::{theme_from_value, theme_label, theme_value, viewer_server},
     shared::{
-        bridge::ClientApiError,
         browser,
         ui::{
             Button, ButtonSize, ButtonVariant, CountBadge, FloatingNotice, FloatingNoticeState,
             IconDropdown, MENU_ACTION_HOST_CLASSES, MenuActionContent, ScrollArea,
             ScrollAreaVariant,
         },
+        viewer_client::ViewerClientError,
     },
 };
 
@@ -30,7 +30,7 @@ const VIEWER_MENU_ID: &str = "viewer-menu";
 pub(crate) fn ApplicationNavigation() -> Element {
     let viewer = use_context::<ViewerContext>();
     let navigator = use_navigator();
-    let mut action_error = use_signal(|| None::<ClientApiError>);
+    let mut action_error = use_signal(|| None::<ViewerClientError>);
     let shell = match viewer.read() {
         ViewerShellLoad::Ready(shell) => Some(shell),
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => None,
@@ -81,7 +81,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             return;
                                         }
                                         spawn(async move {
-                                            match DiffViewerApi::activate_tab(ViewerTabRequest { tab_id }).await {
+                                            match viewer_server::activate_tab(ViewerTabRequest { tab_id }).await {
                                                 Ok(shell) => {
                                                     viewer.replace_shell(shell);
                                                     navigator.push(Route::Workspace {});
@@ -103,7 +103,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                             let ids = key_tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
                                             if let Some(target) = tab_focus_target(&ids, tab_id, movement) {
                                                 spawn(async move {
-                                                    match DiffViewerApi::activate_tab(ViewerTabRequest {
+                                                    match viewer_server::activate_tab(ViewerTabRequest {
                                                             tab_id: target,
                                                         })
                                                         .await
@@ -140,7 +140,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                     onclick: move |_| {
                                         action_error.set(None);
                                         spawn(async move {
-                                            match DiffViewerApi::close_tab(ViewerTabRequest { tab_id }).await {
+                                            match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
                                                 Ok(shell) => {
                                                     viewer.replace_shell(shell);
                                                     if let Some(focus_id) = focus_tab_id {

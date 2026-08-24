@@ -1,6 +1,6 @@
 //! The `render_diff` vertical slice: resolve a [`DiffTarget`] into a rendered,
 //! stored artifact (or an "empty, skipped" outcome), carrying every user-facing
-//! message out as [`Note`]s. The CLI and daemon call [`execute`] directly.
+//! message out as [`Note`]s. The server calls [`execute`] for raw requests.
 
 use std::path::PathBuf;
 

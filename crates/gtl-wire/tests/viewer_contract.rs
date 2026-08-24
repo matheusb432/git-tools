@@ -1,18 +1,15 @@
 use gtl_models::{
     diffs::{CommitId, ExcludedExtensions},
     git::{BranchName, GitHead, GitRevision},
-    paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath, RepositoryRoot},
+    paths::{AbsoluteFilePath, ProjectName, RepositoryRelativePath},
     timestamps::MachineTimestamp,
     viewer::{
         HistoryPage, HistoryPageCount, HistoryPageNumber, HistoryPagePosition, HistoryRenderCount,
-        RenderHistoryId, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerShellRevision,
-        ViewerTabId,
+        RenderHistoryId, ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId,
+        ViewerVersion,
     },
 };
-use gtl_wire::{
-    recipes::{Recipe, RecipeOp, RecipeSource},
-    viewer::*,
-};
+use gtl_wire::viewer::*;
 use serde_json::json;
 
 const COMMIT_ID: &str = "abcdef0123456789abcdef0123456789abcdef01";
@@ -53,10 +50,6 @@ fn head(value: &str) -> TestResult<GitHead> {
     Ok(GitHead::Branch(BranchName::try_new(value.to_owned())?))
 }
 
-fn root(value: &str) -> TestResult<RepositoryRoot> {
-    Ok(RepositoryRoot::try_new(value.into())?)
-}
-
 fn project_name(value: &str) -> TestResult<ProjectName> {
     Ok(ProjectName::try_new(value.to_owned())?)
 }
@@ -81,17 +74,6 @@ fn identity() -> TestResult<ViewerViewIdentity> {
     })
 }
 
-fn recipe() -> TestResult<Recipe> {
-    Ok(Recipe {
-        source: RecipeSource::LocalRepo(root("/repos/git-tools")?),
-        op: RecipeOp::MergeDiff {
-            base: Some(revision("main")?),
-            pinned: None,
-        },
-        name: Some(project_name("release")?),
-    })
-}
-
 #[test]
 fn closed_value_tokens_keep_their_wire_contracts() {
     let values = [
@@ -101,10 +83,6 @@ fn closed_value_tokens_keep_their_wire_contracts() {
         serde_json::to_value(ViewerTabKind::Snapshot).expect("tab kind serializes"),
         serde_json::to_value(ViewerFileStatus::Renamed).expect("file status serializes"),
         serde_json::to_value(ViewerRecipeKind::MergeDiff).expect("recipe kind serializes"),
-        serde_json::to_value(ViewerHistoryCopyKind::MergeDiff)
-            .expect("history copy kind serializes"),
-        serde_json::to_value(ViewerResource::DiffLines).expect("resource serializes"),
-        serde_json::to_value(ViewerResource::HistoryEntry).expect("resource serializes"),
     ];
 
     assert_eq!(
@@ -116,9 +94,6 @@ fn closed_value_tokens_keep_their_wire_contracts() {
             json!("snapshot"),
             json!("renamed"),
             json!("merge_diff"),
-            json!("merge-diff"),
-            json!("diff_lines"),
-            json!("history_entry"),
         ]
     );
 }
@@ -196,14 +171,6 @@ fn tagged_enums_pin_each_wire_discriminator() -> TestResult {
         .expect("feedback serializes"),
         json!({"kind": "snapshot_recipes_skipped", "labels": ["api"]})
     );
-    assert_eq!(
-        serde_json::to_value(ViewerApiError::NotFound {
-            resource: ViewerResource::DiffFile,
-        })
-        .expect("API error serializes"),
-        json!({"kind": "not_found", "resource": "diff_file"})
-    );
-
     Ok(())
 }
 
@@ -220,7 +187,7 @@ fn history_cursor_rejects_zero_during_wire_deserialization() {
 fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
     let identity = identity()?;
     let shell = ViewerShell {
-        revision: ViewerShellRevision::new(23),
+        version: ViewerVersion::new(23),
         tabs: vec![ViewerTab {
             id: tab_id(7)?,
             label: "git-tools".into(),
@@ -251,6 +218,7 @@ fn ready_shell_contains_semantic_metadata_without_diff_rows() -> TestResult {
                     initially_expanded: true,
                 }],
                 commits_label: "1 commit".into(),
+                commit_count: 1,
                 commits: vec![ViewerCommitSummary {
                     id: commit_id()?,
                     subject: "feat: add shell".into(),
@@ -357,55 +325,6 @@ fn commit_selection_compares_complete_typed_identities() -> TestResult {
 }
 
 #[test]
-fn raw_diff_line_pages_pin_opaque_addressing_and_identity_echoes() -> TestResult {
-    let file = ViewerDiffFileId::for_index(3);
-    let cursor = ViewerDiffCursor::new(8);
-    let identity = identity()?;
-    let request = LoadViewerDiffLines {
-        identity,
-        file: file.clone(),
-        cursor,
-    };
-    let page = ViewerDiffLines {
-        identity,
-        file,
-        cursor,
-        lines: vec!["@@ -1 +1 @@".into(), "+client rendered".into()],
-        next: Some(ViewerDiffCursor::new(10)),
-    };
-
-    assert_eq!(
-        serde_json::to_value(&request).expect("line request serializes"),
-        json!({
-            "identity": {
-                "tab_id": 7,
-                "range_generation": 11,
-                "selection_generation": 13,
-                "render_options": {"layout": "split", "density": "full"}
-            },
-            "file": "file-3",
-            "cursor": 8
-        })
-    );
-    assert_eq!(
-        serde_json::from_value::<LoadViewerDiffLines>(
-            serde_json::to_value(&request).expect("line request serializes")
-        )
-        .expect("line request deserializes"),
-        request
-    );
-    let value = serde_json::to_value(&page).expect("line page serializes");
-    assert_eq!(value["file"], "file-3");
-    assert_eq!(value["cursor"], 8);
-    assert_eq!(value["next"], 10);
-    assert_eq!(
-        serde_json::from_value::<ViewerDiffLines>(value).expect("line page deserializes"),
-        page
-    );
-    Ok(())
-}
-
-#[test]
 fn diff_history_and_settings_shapes_round_trip() -> TestResult {
     let history = ViewerHistoryPage {
         entries: vec![ViewerHistoryEntry {
@@ -461,32 +380,20 @@ fn diff_history_and_settings_shapes_round_trip() -> TestResult {
 }
 
 #[test]
-fn explicit_history_copy_payload_keeps_the_established_recipe_json_shape() -> TestResult {
+fn history_copy_payload_carries_server_formatted_json() -> TestResult {
+    let json = r#"{
+  "id": 31,
+  "title": "Release diff",
+  "repo_name": "git-tools",
+  "kind": "merge-diff"
+}"#;
     let payload = ViewerHistoryCopyPayload {
-        id: render_id(31)?,
-        title: "Release diff".into(),
-        repo_name: project_name("git-tools")?,
-        kind: ViewerHistoryCopyKind::MergeDiff,
-        range_label: "main...release".into(),
-        rendered_at: MachineTimestamp::try_from("2026-08-09T10:00:00Z")?,
-        recipe: recipe()?,
+        json: json.to_owned(),
     };
 
     assert_eq!(
         serde_json::to_value(payload).expect("history copy payload serializes"),
-        json!({
-            "id": 31,
-            "title": "Release diff",
-            "repo_name": "git-tools",
-            "kind": "merge-diff",
-            "range_label": "main...release",
-            "rendered_at": "2026-08-09T10:00:00Z",
-            "recipe": {
-                "source": {"kind": "local_repo", "value": "/repos/git-tools"},
-                "op": {"op": "merge_diff", "base": "main"},
-                "name": "release"
-            }
-        })
+        json!({"json": json})
     );
     assert_eq!(
         serde_json::to_value(GetViewerHistoryCopy {

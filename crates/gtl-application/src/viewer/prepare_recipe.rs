@@ -2,8 +2,6 @@
 
 use std::sync::Arc;
 
-use gtl_wire::recipes::Recipe;
-
 use super::{
     ViewerTabKind, ViewerTabState,
     complete_recipe_computation::{self, CompleteRecipeComputation, CompleteRecipeComputationOk},
@@ -14,6 +12,7 @@ use crate::{
     diffs::View,
     history::record_render::RecordRender,
     ports::{GitClient, UserSettingsStore},
+    recipes::Recipe,
 };
 
 /// Requests one complete viewer recipe preparation.
@@ -101,11 +100,10 @@ pub fn execute(
 
 #[cfg(test)]
 mod tests {
-    use gtl_wire::recipes::{RecipeOp, RecipeTarget};
-
     use super::*;
     use crate::{
         ports::GitRepositoryState,
+        recipes::{RecipeOp, RecipeTarget},
         utils::{FakeGitClient, FixedUserSettingsStore, viewer::recipe},
         viewer::prepare_recipe,
     };

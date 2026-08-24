@@ -13,7 +13,7 @@ pub fn run(target: &DiffTarget, name: Option<&str>, raw: bool) -> anyhow::Result
     let working_directory = super::canonical_working_directory()?
         .to_string_lossy()
         .into_owned();
-    let prepare = v1::PrepareDiffRequest {
+    let present = v1::PresentDiffRequest {
         working_directory: working_directory.clone(),
         target: Some(grpc_target(target)),
         name: name.map(str::to_string),
@@ -25,7 +25,7 @@ pub fn run(target: &DiffTarget, name: Option<&str>, raw: bool) -> anyhow::Result
     };
     super::present(
         raw,
-        |client| client.prepare_diff(prepare),
+        |client| client.present_diff(present),
         |client| client.render_diff(render),
     )
 }

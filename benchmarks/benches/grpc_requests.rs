@@ -1,24 +1,67 @@
-use std::{hint::black_box, path::Path, process::Command};
+use std::{
+    fmt::Write as _,
+    hint::black_box,
+    path::{Path, PathBuf},
+    process::Command,
+    time::Duration,
+};
 
 use criterion::{Criterion, criterion_group};
+use gtl_application::recipes::{
+    Recipe, RecipeBatch, RecipeBatchKind, RecipeOp, RecipeSource, RecipeTarget,
+};
 use gtl_benchmarks::require;
 use gtl_client::GtlClient;
+use gtl_local_auth::LocalAuth;
+use gtl_models::{paths::RepositoryRoot, recipes::RecipeBatchId};
 use gtl_server::ServerHarness;
-use gtl_wire::v1::{
-    DiffTarget, Empty, GetRepositoryStatusRequest, PrepareDiffRequest, diff_target,
+use gtl_wire::{
+    v1::{
+        self, DiffTarget, Empty, GetRepositoryStatusRequest, GetViewerShellRequest,
+        PresentDiffRequest, StreamViewerRowsRequest, diff_target,
+        viewer_service_client::ViewerServiceClient,
+    },
+    viewer::VIEWER_ROW_MAX_ENCODED_BYTES,
 };
 use prost::Message as _;
+use tonic::{
+    Request, Status,
+    metadata::{Ascii, MetadataValue},
+    service::{Interceptor, interceptor::InterceptedService},
+    transport::Channel,
+};
 
 const TOKIO_WORKER_THREADS: usize = 2;
 const GIT_ISOLATION_MARKER: &str = "GTL_GRPC_BENCHMARK_GIT_ISOLATED";
+const DISABLE_VIEWER_LAUNCH_MARKER: &str = "GTL_BENCHMARK_DISABLE_VIEWER_LAUNCH";
 const GET_PUSH_CONFIRMATION_REQUIREMENT_BENCHMARK_NAME: &str =
     "grpc-requests/get-push-confirmation-requirement";
 const GET_REPOSITORY_STATUS_BENCHMARK_NAME: &str = "grpc-requests/get-repository-status";
-const PREPARE_DIFF_UNPUSHED_BENCHMARK_NAME: &str = "grpc-requests/prepare-diff-unpushed";
+const PRESENT_DIFF_UNPUSHED_BENCHMARK_NAME: &str = "grpc-requests/present-diff-unpushed";
+const GET_VIEWER_SHELL_BENCHMARK_NAME: &str = "grpc-requests/get-viewer-shell";
+const STREAM_VIEWER_ROWS_BENCHMARK_NAME: &str = "grpc-requests/stream-viewer-rows/2k-rust";
+const VIEWER_READY_ATTEMPTS: usize = 500;
+const VIEWER_READY_RETRY_DELAY: Duration = Duration::from_millis(10);
+
+type BenchmarkViewerClient = ViewerServiceClient<InterceptedService<Channel, ViewerAuthorization>>;
 
 struct RepositoryFixture {
     _directory: tempfile::TempDir,
     path: String,
+}
+
+#[derive(Clone)]
+struct ViewerAuthorization {
+    value: MetadataValue<Ascii>,
+}
+
+impl Interceptor for ViewerAuthorization {
+    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
+        request
+            .metadata_mut()
+            .insert("authorization", self.value.clone());
+        Ok(request)
+    }
 }
 
 fn grpc_requests(criterion: &mut Criterion) {
@@ -29,6 +72,7 @@ fn grpc_requests(criterion: &mut Criterion) {
         "writing the benchmark settings",
     );
     let repository = repository_fixture();
+    let viewer_repository = viewer_repository_fixture();
     let runtime = require(
         tokio::runtime::Builder::new_multi_thread()
             .worker_threads(TOKIO_WORKER_THREADS)
@@ -36,7 +80,7 @@ fn grpc_requests(criterion: &mut Criterion) {
             .build(),
         "building the benchmark Tokio runtime",
     );
-    let (server, client) = runtime.block_on(async {
+    let (server, client, viewer_client) = runtime.block_on(async {
         let server = require(
             ServerHarness::start(data_root.path(), Some(settings_path)).await,
             "starting the benchmark gRPC server",
@@ -45,12 +89,23 @@ fn grpc_requests(criterion: &mut Criterion) {
             GtlClient::connect(server.auth()).await,
             "connecting the benchmark gRPC client",
         );
-        (server, client)
+        let viewer_client = connect_viewer_client(server.auth()).await;
+        (server, client, viewer_client)
     });
 
     benchmark_get_push_confirmation_requirement(criterion, &runtime, &client);
     benchmark_get_repository_status(criterion, &runtime, &client, &repository.path);
-    benchmark_prepare_diff(criterion, &runtime, &client, &repository.path);
+    benchmark_present_diff(criterion, &runtime, &client, &repository.path);
+
+    let identity = runtime.block_on(async {
+        require(
+            server.open_viewer_recipe_batch(viewer_recipe_batch(&viewer_repository.path)),
+            "opening the benchmark viewer recipe",
+        );
+        wait_for_ready_view(&viewer_client).await
+    });
+    benchmark_get_viewer_shell(criterion, &runtime, &viewer_client);
+    benchmark_stream_viewer_rows(criterion, &runtime, &viewer_client, identity);
 
     runtime.block_on(async {
         require(server.stop().await, "stopping the benchmark gRPC server");
@@ -115,13 +170,13 @@ fn benchmark_get_repository_status(
     });
 }
 
-fn benchmark_prepare_diff(
+fn benchmark_present_diff(
     criterion: &mut Criterion,
     runtime: &tokio::runtime::Runtime,
     client: &GtlClient,
     repository_path: &str,
 ) {
-    let request = PrepareDiffRequest {
+    let request = PresentDiffRequest {
         working_directory: repository_path.to_owned(),
         target: Some(DiffTarget {
             selection: Some(diff_target::Selection::Unpushed(Empty {})),
@@ -130,24 +185,169 @@ fn benchmark_prepare_diff(
     };
     let response = runtime.block_on(async {
         require(
-            client.prepare_diff(request.clone()).await,
-            "warming the prepare-diff request",
+            client.present_diff(request.clone()).await,
+            "warming the present-diff request",
         )
     });
-    assert_eq!(
-        response.batch.as_ref().map(|batch| batch.recipes.len()),
-        Some(1)
-    );
-    report_output_size(PREPARE_DIFF_UNPUSHED_BENCHMARK_NAME, response.encoded_len());
+    assert!(response.presentation.is_some());
+    report_output_size(PRESENT_DIFF_UNPUSHED_BENCHMARK_NAME, response.encoded_len());
 
-    criterion.bench_function(PREPARE_DIFF_UNPUSHED_BENCHMARK_NAME, |bencher| {
+    criterion.bench_function(PRESENT_DIFF_UNPUSHED_BENCHMARK_NAME, |bencher| {
         bencher.to_async(runtime).iter(|| async {
             black_box(require(
-                client.prepare_diff(request.clone()).await,
-                "executing the prepare-diff request",
+                client.present_diff(request.clone()).await,
+                "executing the present-diff request",
             ));
         });
     });
+}
+
+fn benchmark_get_viewer_shell(
+    criterion: &mut Criterion,
+    runtime: &tokio::runtime::Runtime,
+    client: &BenchmarkViewerClient,
+) {
+    let response = runtime.block_on(async {
+        let mut client = client.clone();
+        require(
+            client.get_viewer_shell(GetViewerShellRequest {}).await,
+            "warming the get-viewer-shell request",
+        )
+        .into_inner()
+    });
+    assert!(response.shell.is_some());
+    report_output_size(GET_VIEWER_SHELL_BENCHMARK_NAME, response.encoded_len());
+
+    criterion.bench_function(GET_VIEWER_SHELL_BENCHMARK_NAME, |bencher| {
+        bencher.to_async(runtime).iter(|| {
+            let mut client = client.clone();
+            async move {
+                black_box(require(
+                    client.get_viewer_shell(GetViewerShellRequest {}).await,
+                    "executing the get-viewer-shell request",
+                ));
+            }
+        });
+    });
+}
+
+fn benchmark_stream_viewer_rows(
+    criterion: &mut Criterion,
+    runtime: &tokio::runtime::Runtime,
+    client: &BenchmarkViewerClient,
+    identity: v1::ViewerViewIdentity,
+) {
+    let request = StreamViewerRowsRequest {
+        identity: Some(identity),
+        file_id: None,
+    };
+    let (message_count, output_bytes) = runtime.block_on(consume_viewer_rows(
+        client.clone(),
+        request.clone(),
+        "warming the stream-viewer-rows request",
+    ));
+    assert!(message_count > 2);
+    report_output_size(STREAM_VIEWER_ROWS_BENCHMARK_NAME, output_bytes);
+
+    criterion.bench_function(STREAM_VIEWER_ROWS_BENCHMARK_NAME, |bencher| {
+        bencher.to_async(runtime).iter(|| {
+            consume_viewer_rows(
+                client.clone(),
+                request.clone(),
+                "executing the stream-viewer-rows request",
+            )
+        });
+    });
+}
+
+async fn consume_viewer_rows(
+    mut client: BenchmarkViewerClient,
+    request: StreamViewerRowsRequest,
+    context: &'static str,
+) -> (usize, usize) {
+    let mut stream = require(client.stream_viewer_rows(request).await, context).into_inner();
+    let mut message_count = 0_usize;
+    let mut output_bytes = 0_usize;
+    loop {
+        let Some(message) = require(stream.message().await, context) else {
+            break;
+        };
+        message_count += 1;
+        output_bytes += message.encoded_len();
+    }
+    black_box((message_count, output_bytes))
+}
+
+async fn connect_viewer_client(auth: &LocalAuth) -> BenchmarkViewerClient {
+    let bootstrap = require(
+        auth.load_viewer_bootstrap(),
+        "loading the benchmark viewer connection",
+    );
+    let endpoint = require(
+        tonic::transport::Endpoint::from_shared(format!(
+            "http://{}",
+            bootstrap.endpoint().address()
+        )),
+        "building the benchmark viewer endpoint",
+    );
+    let channel = require(
+        endpoint.connect().await,
+        "connecting the benchmark viewer client",
+    );
+    let authorization = ViewerAuthorization {
+        value: require(
+            format!("Bearer {}", bootstrap.capability().expose_secret()).parse(),
+            "encoding the benchmark viewer capability",
+        ),
+    };
+    ViewerServiceClient::with_interceptor(channel, authorization)
+        .max_decoding_message_size(VIEWER_ROW_MAX_ENCODED_BYTES + 64 * 1024)
+}
+
+async fn wait_for_ready_view(client: &BenchmarkViewerClient) -> v1::ViewerViewIdentity {
+    for _ in 0..VIEWER_READY_ATTEMPTS {
+        let mut client = client.clone();
+        let response = require(
+            client.get_viewer_shell(GetViewerShellRequest {}).await,
+            "waiting for the benchmark viewer recipe",
+        )
+        .into_inner();
+        let identity = response
+            .shell
+            .and_then(|shell| shell.active)
+            .and_then(|active| active.state)
+            .and_then(|state| match state {
+                v1::viewer_active_state::State::Ready(ready) => ready.view,
+                v1::viewer_active_state::State::Empty(_)
+                | v1::viewer_active_state::State::Pending(_)
+                | v1::viewer_active_state::State::Broken(_)
+                | v1::viewer_active_state::State::Error(_) => None,
+            })
+            .and_then(|view| view.identity);
+        if let Some(identity) = identity {
+            return identity;
+        }
+        tokio::time::sleep(VIEWER_READY_RETRY_DELAY).await;
+    }
+    eprintln!("benchmark setup failed while waiting for the viewer recipe");
+    std::process::exit(1);
+}
+
+fn viewer_recipe_batch(repository_path: &str) -> RecipeBatch {
+    RecipeBatch {
+        batch_id: RecipeBatchId::generate(),
+        kind: RecipeBatchKind::Snapshot,
+        recipes: vec![Recipe {
+            source: RecipeSource::LocalRepo(require(
+                RepositoryRoot::try_new(PathBuf::from(repository_path)),
+                "creating the benchmark viewer repository root",
+            )),
+            op: RecipeOp::Diff {
+                target: RecipeTarget::Unpushed { pinned: None },
+            },
+            name: None,
+        }],
+    }
 }
 
 fn report_output_size(benchmark_name: &str, output_bytes: usize) {
@@ -155,6 +355,24 @@ fn report_output_size(benchmark_name: &str, output_bytes: usize) {
 }
 
 fn repository_fixture() -> RepositoryFixture {
+    repository_fixture_with_change("unpushed.txt", "unpushed commit\n")
+}
+
+fn viewer_repository_fixture() -> RepositoryFixture {
+    let mut source = String::new();
+    for line in 0..2_000 {
+        require(
+            writeln!(
+                source,
+                "pub fn benchmark_line_{line}() -> usize {{ {line} }}"
+            ),
+            "building the benchmark viewer source",
+        );
+    }
+    repository_fixture_with_change("src/benchmark.rs", &source)
+}
+
+fn repository_fixture_with_change(relative_path: &str, contents: &str) -> RepositoryFixture {
     let directory = require(
         tempfile::tempdir(),
         "creating the benchmark repository fixture",
@@ -186,11 +404,18 @@ fn repository_fixture() -> RepositoryFixture {
     git(&repository, &["remote", "add", "origin", &origin_path]);
     git(&repository, &["push", "-q", "-u", "origin", "main"]);
 
+    let changed_file = repository.join(relative_path);
+    if let Some(parent) = changed_file.parent() {
+        require(
+            std::fs::create_dir_all(parent),
+            "creating the benchmark change directory",
+        );
+    }
     require(
-        std::fs::write(repository.join("unpushed.txt"), "unpushed commit\n"),
+        std::fs::write(&changed_file, contents),
         "writing the benchmark repository unpushed file",
     );
-    git(&repository, &["add", "unpushed.txt"]);
+    git(&repository, &["add", relative_path]);
     git(&repository, &["commit", "-qm", "benchmark unpushed"]);
 
     RepositoryFixture {
@@ -237,6 +462,7 @@ fn main() {
         Command::new(executable)
             .args(std::env::args_os().skip(1))
             .env(GIT_ISOLATION_MARKER, "1")
+            .env(DISABLE_VIEWER_LAUNCH_MARKER, "1")
             .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
             .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")

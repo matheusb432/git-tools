@@ -1,10 +1,17 @@
-use std::path::Path;
+use std::{
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use anyhow::Context as _;
 use gtl_artifacts::ArtifactRenderer;
 use gtl_infra::{
     app_state::SqliteAppState, artifact_store::StoreArtifacts, clock::SystemClock,
-    git_client::HybridGitClient, project_repository_client::ProjectRepositoryClient,
+    file_system::LocalFileSystemClient, git_client::HybridGitClient,
+    project_repository_client::ProjectRepositoryClient, text_editor::GitTextEditorClient,
     user_config::TomlSettingsStore,
 };
 
@@ -17,6 +24,10 @@ pub(crate) struct AppState {
     pub(crate) projects: ProjectRepositoryClient,
     pub(crate) database: SqliteAppState,
     pub(crate) user_settings: TomlSettingsStore,
+    pub(crate) file_system: LocalFileSystemClient,
+    pub(crate) text_editor: GitTextEditorClient,
+    pub(crate) viewer: gtl_application::viewer::ViewerState,
+    pub(crate) viewer_row_streams: ViewerRowStreams,
 }
 
 impl AppState {
@@ -37,6 +48,68 @@ impl AppState {
             database: SqliteAppState::open(data_root)
                 .with_context(|| format!("opening application state at {}", data_root.display()))?,
             user_settings,
+            file_system: LocalFileSystemClient,
+            text_editor: GitTextEditorClient,
+            viewer: gtl_application::viewer::ViewerState::new(),
+            viewer_row_streams: ViewerRowStreams::default(),
         })
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ViewerRowStreams {
+    version: Arc<AtomicU64>,
+}
+
+impl ViewerRowStreams {
+    pub(crate) fn start_stream(&self) -> Result<u64, ViewerRowStreamVersionExhausted> {
+        let previous = self
+            .version
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |version| {
+                version.checked_add(1)
+            })
+            .map_err(|_| ViewerRowStreamVersionExhausted)?;
+        previous
+            .checked_add(1)
+            .ok_or(ViewerRowStreamVersionExhausted)
+    }
+
+    pub(crate) fn is_current(&self, stream: u64) -> bool {
+        self.version.load(Ordering::Acquire) == stream
+    }
+
+    pub(crate) fn cancel_current_stream(&self) -> Result<(), ViewerRowStreamVersionExhausted> {
+        self.start_stream().map(|_| ())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("viewer row stream version is exhausted")]
+pub(crate) struct ViewerRowStreamVersionExhausted;
+
+#[cfg(test)]
+mod tests {
+    use super::ViewerRowStreams;
+
+    #[test]
+    fn starting_a_row_stream_replaces_the_previous_stream() {
+        let streams = ViewerRowStreams::default();
+        let first = streams.start_stream().expect("start first row stream");
+        let second = streams.start_stream().expect("start second row stream");
+
+        assert!(!streams.is_current(first));
+        assert!(streams.is_current(second));
+    }
+
+    #[test]
+    fn settings_change_cancels_the_current_row_stream() {
+        let streams = ViewerRowStreams::default();
+        let stream = streams.start_stream().expect("start row stream");
+
+        streams
+            .cancel_current_stream()
+            .expect("cancel current row stream");
+
+        assert!(!streams.is_current(stream));
     }
 }

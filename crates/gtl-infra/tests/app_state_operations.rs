@@ -14,20 +14,22 @@ use gtl_application::{
         record_render::{self, RecordRender, RecordRenderError},
     },
     live_views::{
+        delete_live_viewer_tab::{self, DeleteLiveViewerTab},
         list_live_views::{self, ListLiveViews},
-        remove_live_view::{self, RemoveLiveView},
         save_live_view::{self, SaveLiveView, SaveLiveViewOutcome},
     },
     ports::{Clock, GitRepositoryState},
+    recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
     utils::FakeGitClient,
+    viewer::{ViewerState, work},
 };
 use gtl_infra::app_state::SqliteAppState;
 use gtl_models::{
-    live_views::LiveSource,
     paths::{ProjectName, RepositoryRoot},
+    recipes::RecipeBatchId,
     timestamps::MachineTimestamp,
+    viewer::ViewerTabKind,
 };
-use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 use rusqlite::Connection;
 
 const CONCURRENT_SAVE_BUSY_RETRY_COUNT_MAX: i32 = 4_000;
@@ -151,17 +153,22 @@ fn public_operations_use_the_migrated_schema() {
         "alpha · unpushed"
     );
 
-    let removed = {
+    let viewer = ViewerState::new();
+    let tab_id = work::reserve_open(
+        &viewer,
+        unpushed_diff_recipe(),
+        RecipeBatchId::generate(),
+        ViewerTabKind::Live,
+    )
+    .expect("open live viewer tab")
+    .ticket()
+    .tab_id;
+    let refresh = {
         let connection = state.connection_lock().expect("lock state connection");
-        remove_live_view::execute(
-            RemoveLiveView {
-                source: LiveSource::local_repo(repository_root(top_level)),
-            },
-            &connection,
-        )
-        .expect("remove live view")
+        delete_live_viewer_tab::execute(DeleteLiveViewerTab { tab_id }, &connection, &viewer)
+            .expect("delete live viewer tab")
     };
-    assert_eq!(removed, remove_live_view::RemoveLiveViewOk::Removed);
+    assert!(refresh.is_none());
     assert!(list_live_views(&state).is_empty());
 }
 

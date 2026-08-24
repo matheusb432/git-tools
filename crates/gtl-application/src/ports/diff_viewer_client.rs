@@ -1,5 +1,3 @@
-use gtl_wire::recipes::OpenRecipes;
-
 use super::PlacedArtifact;
 use crate::{
     diffs::{
@@ -7,6 +5,7 @@ use crate::{
         render_merge_diff::RenderMergeDiff,
     },
     projects::render_project_diff::RenderProjectDiff,
+    recipes::RecipeBatch,
     shared::notes::Note,
 };
 
@@ -31,7 +30,7 @@ pub struct DiffRenderResponse {
 }
 
 pub trait DiffViewerClient: Clone + Send + Sync + 'static {
-    fn forward(&self, batch: &OpenRecipes) -> anyhow::Result<()>;
+    fn forward(&self, batch: &RecipeBatch) -> anyhow::Result<()>;
 
     fn render(&self, request: &DiffRenderRequest) -> anyhow::Result<DiffRenderResponse>;
 }

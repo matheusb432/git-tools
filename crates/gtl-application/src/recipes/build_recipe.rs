@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 
 use gtl_models::paths::ProjectName;
-use gtl_wire::recipes::{Recipe, RecipeOp};
 
 use crate::{
     ports::GitClient,
+    recipes::{Recipe, RecipeOp},
     repositories::resolve_repository_root::{self, ResolveRepositoryRoot},
 };
 

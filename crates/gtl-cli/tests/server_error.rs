@@ -10,13 +10,13 @@ fn server_request_failure_is_rendered_once_at_the_command_boundary() -> Result<(
     unsafe {
         std::env::set_var("PATH", empty_path.path());
     }
-    let _server = common::ServerHarness::start(None)?;
+    let _server = common::ServerHarness::start(None, None)?;
 
     Command::new(env!("CARGO_BIN_EXE_git-tools"))
         .args(["status", "--all"])
         .assert()
         .code(2)
         .stdout("")
-        .stderr("status: project catalogue dependency is not configured\n");
+        .stderr("status: project catalogue is temporarily unavailable\n");
     Ok(())
 }

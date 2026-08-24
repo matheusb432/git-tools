@@ -1,30 +1,29 @@
 mod file;
 
 use dioxus::prelude::*;
-use gtl_models::{paths::RepositoryRelativePath, viewer::ViewerTabId};
-use gtl_wire::viewer::{ViewerActiveView, ViewerViewIdentity};
+use gtl_models::viewer::ViewerTabId;
+use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerViewIdentity};
 
 use self::file::DiffFileCard;
 #[cfg(feature = "artifact")]
 use crate::entities::diffs::ClientDiffWorkspace;
 #[cfg(feature = "desktop")]
-use crate::entities::diffs::{ClientDiffSource, use_client_diff_workspace};
+use crate::entities::diffs::use_client_diff_workspace;
 use crate::{entities::diffs::ClientDiffFile, shared::ui::EmptyNotice};
 
 #[cfg(feature = "desktop")]
 #[component]
 pub(crate) fn ClientDiffDocument(
-    source: ClientDiffSource,
     view: ViewerActiveView,
     folded: Option<bool>,
     copy_context_enabled: bool,
     flashing_file: Option<String>,
-    onopen: Option<EventHandler<RepositoryRelativePath>>,
+    onopen: Option<EventHandler<ViewerDiffFileId>>,
 ) -> Element {
-    let mut reload = use_signal(|| 0_u64);
-    let workspace = use_client_diff_workspace(source, view.identity, &view.files, reload());
-    let current = workspace();
+    let workspace = use_client_diff_workspace(view.identity, &view.files);
+    let current = workspace.read();
     let is_loading = current.is_loading();
+    let retry_allowed = !workspace.row_stream_active();
 
     rsx! {
         section {
@@ -41,8 +40,9 @@ pub(crate) fn ClientDiffDocument(
                 copy_context_enabled,
                 flashing_file,
                 is_loading,
+                retry_allowed,
                 onopen,
-                onretry: move |()| reload += 1,
+                onretry: move |file_id| workspace.retry_file(file_id),
                 artifact_tab_id: None,
             }
         }
@@ -67,8 +67,9 @@ pub(crate) fn StaticDiffDocument(
                 copy_context_enabled: true,
                 flashing_file: None,
                 is_loading: false,
+                retry_allowed: false,
                 onopen: None,
-                onretry: move |()| {},
+                onretry: move |_file_id| {},
                 artifact_tab_id: Some(workspace.identity.tab_id),
             }
         }
@@ -95,8 +96,9 @@ fn DiffDocumentBody(
     copy_context_enabled: bool,
     flashing_file: Option<String>,
     is_loading: bool,
-    onopen: Option<EventHandler<RepositoryRelativePath>>,
-    onretry: EventHandler<()>,
+    retry_allowed: bool,
+    onopen: Option<EventHandler<ViewerDiffFileId>>,
+    onretry: EventHandler<ViewerDiffFileId>,
     artifact_tab_id: Option<ViewerTabId>,
 ) -> Element {
     let layout = identity.render_options.layout;
@@ -126,6 +128,7 @@ fn DiffDocumentBody(
             }
             for (index, file) in files.into_iter().enumerate() {
                 {
+                    let file_id = file.summary.id.clone();
                     let is_flashing = flashing_file.as_deref()
                         == Some(file.summary.anchor_id.as_str());
                     rsx! {
@@ -138,7 +141,8 @@ fn DiffDocumentBody(
                             copy_context_enabled,
                             is_flashing,
                             onopen,
-                            onretry,
+                            onretry: move |()| onretry.call(file_id.clone()),
+                            retry_allowed,
                             file_index: index,
                             artifact_tab_id,
                         }

@@ -218,7 +218,7 @@ pub(crate) fn open_app_db(data_root: &Path) -> anyhow::Result<Connection> {
     // ! the migration) must respect it from the start.
     conn.busy_timeout(Duration::from_secs(5))?;
 
-    // ! Fresh-file race: daemon and viewer can both open a brand-new gtl.db
+    // ! Fresh-file race: two server starts can both open a brand-new gtl.db
     // ! and both attempt the WAL switch and migrations concurrently. SQLite
     // ! does not run the busy_timeout retry loop for the journal_mode=WAL
     // ! transition on a fresh file, so the loser can get an immediate
@@ -570,7 +570,7 @@ mod tests {
         assert_eq!(user_version, 5);
     }
 
-    /// Two processes (daemon + viewer) can open a fresh db concurrently; both
+    /// Two processes can open a fresh database concurrently; both
     /// must succeed. Deterministically hitting the migration race is not
     /// possible from a test, but this pins the contract the retry guard serves.
     #[test]

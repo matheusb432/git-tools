@@ -2,7 +2,7 @@
 //! directory (found / missing / not a repo) through the same [`GitClient`]
 //! capability `save` validates against, without persisting anything. This gives the
 //! app-render path (`open_recipe`/restoring a live view) the same typed
-//! `DirNotFound`/`DirNotGitRepo` rejection the daemon's `save_live_view`
+//! `DirNotFound`/`DirNotGitRepo` rejection that `save_live_view`
 //! already surfaces.
 
 use gtl_models::live_views::LiveSource;

@@ -1,7 +1,5 @@
 #[cfg(test)]
-use gtl_wire::recipes;
-use gtl_wire::recipes::{Recipe, RecipeOp, RecipeTarget};
-
+use crate::recipes;
 use crate::{
     diffs::{
         DiffTarget, View,
@@ -9,6 +7,7 @@ use crate::{
         compute_merge_diff::{self, ComputeMergeDiff},
     },
     ports::{GitClient, UserSettingsStore},
+    recipes::{Recipe, RecipeOp, RecipeTarget},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

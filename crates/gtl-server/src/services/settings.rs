@@ -50,16 +50,18 @@ impl SettingsService for SettingsApi {
             .path()
             .ok_or_else(|| Status::failed_precondition("user configuration path is unavailable"))?
             .to_path_buf();
+        let viewer = self.state.viewer.clone();
         run_blocking(move || {
             set_setting_key::execute(
                 SetSettingKey {
                     mutation: SettingKeyValue::Theme(theme),
                 },
                 &mut store,
+                &viewer,
             )
         })
         .await?
-        .map_err(setting_edit_error)?;
+        .map_err(set_setting_key_error)?;
 
         Ok(Response::new(v1::SetViewerThemeResponse {
             theme: wire_theme(theme) as i32,
@@ -68,7 +70,7 @@ impl SettingsService for SettingsApi {
     }
 }
 
-fn setting_edit_error(error: SetSettingKeyError) -> Status {
+pub(super) fn set_setting_key_error(error: SetSettingKeyError) -> Status {
     match error {
         SetSettingKeyError::InvalidValueShape { .. }
         | SetSettingKeyError::Settings(
@@ -85,7 +87,7 @@ fn setting_edit_error(error: SetSettingKeyError) -> Status {
             tracing::warn!(error = ?error, "user settings edit was aborted");
             Status::aborted("user settings edit conflicted with another writer")
         }
-        error => unexpected(error, "set diff artifact theme"),
+        error => unexpected(error, "set user setting"),
     }
 }
 
@@ -134,7 +136,7 @@ mod tests {
 
     #[test]
     fn maps_settings_state_and_concurrency_failures_deliberately() {
-        let invalid = setting_edit_error(SetSettingKeyError::Settings(
+        let invalid = set_setting_key_error(SetSettingKeyError::Settings(
             UserSettingsEditError::InvalidConfiguration {
                 path: "/tmp/config.toml".into(),
                 reason: "bad theme".into(),
@@ -142,7 +144,7 @@ mod tests {
         ));
         assert_eq!(invalid.code(), tonic::Code::FailedPrecondition);
 
-        let concurrent = setting_edit_error(SetSettingKeyError::Settings(
+        let concurrent = set_setting_key_error(SetSettingKeyError::Settings(
             UserSettingsEditError::ConcurrentModification {
                 path: "/tmp/config.toml".into(),
             },

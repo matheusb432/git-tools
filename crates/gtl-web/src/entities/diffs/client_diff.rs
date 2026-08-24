@@ -1,27 +1,20 @@
-use std::sync::Arc;
 #[cfg(feature = "desktop")]
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 #[cfg(feature = "desktop")]
 use dioxus::prelude::*;
-use gtl_parser::{
-    DiffParser, DiffParserStream, DiffRow, LineNumberDigitWidth, SourceLineNumber, SplitDiffRow,
-    SplitDiffStream, SyntaxLanguage,
-};
 #[cfg(feature = "desktop")]
-use gtl_wire::viewer::{
-    LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffCursor, ViewerDiffLines,
-};
+use gtl_wire::viewer::{StreamViewerRows, ViewerDiffFileId};
 use gtl_wire::viewer::{ViewerDiffLayout, ViewerFileSummary, ViewerViewIdentity};
+#[cfg(feature = "artifact")]
+use gtl_wire::viewer::{ViewerFileRows, ViewerRows};
 
 #[cfg(feature = "desktop")]
-use self::source::ClientDiffSourceError;
-
+use super::ViewerRowEvent;
+use super::{ViewerSplitRow, ViewerUnifiedRow};
 #[cfg(feature = "desktop")]
-mod source;
-
-#[cfg(feature = "desktop")]
-pub(crate) use source::ClientDiffSource;
+use crate::shared::{retry_delay::RetryDelay, viewer_client::ViewerClientError};
 
 const CLIENT_LINE_BATCH_SIZE: usize = 64;
 
@@ -40,9 +33,8 @@ impl ClientDiffRequestTicket {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClientDiffRows {
-    // TODO: refactor. vec<arc<vec<_>>> , i mean. $_$
-    Unified(Vec<Arc<Vec<DiffRow>>>),
-    Split(Vec<Arc<Vec<SplitDiffRow>>>),
+    Unified(Vec<Arc<Vec<ViewerUnifiedRow>>>),
+    Split(Vec<Arc<Vec<ViewerSplitRow>>>),
 }
 
 impl ClientDiffRows {
@@ -53,23 +45,15 @@ impl ClientDiffRows {
         }
     }
 
-    fn append_unified(&mut self, rows: Vec<DiffRow>) {
+    fn append_unified(&mut self, rows: Vec<ViewerUnifiedRow>) {
         if let Self::Unified(batches) = self {
             append_bounded_batches(batches, rows);
         }
     }
 
-    fn append_split(&mut self, rows: Vec<SplitDiffRow>) {
+    fn append_split(&mut self, rows: Vec<ViewerSplitRow>) {
         if let Self::Split(batches) = self {
             append_bounded_batches(batches, rows);
-        }
-    }
-
-    fn append(&mut self, rows: Self) {
-        match (self, rows) {
-            (Self::Unified(current), Self::Unified(mut next)) => current.append(&mut next),
-            (Self::Split(current), Self::Split(mut next)) => current.append(&mut next),
-            (Self::Unified(_), Self::Split(_)) | (Self::Split(_), Self::Unified(_)) => {}
         }
     }
 }
@@ -89,25 +73,41 @@ fn append_bounded_batches<Row>(batches: &mut Vec<Arc<Vec<Row>>>, rows: Vec<Row>)
 }
 
 #[cfg(feature = "desktop")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClientDiffFileError {
-    Source(ClientDiffSourceError),
-    InvalidPage,
+    Transport(ViewerClientError),
+    InvalidResponse,
+    Server { message: String, retryable: bool },
 }
 
 #[cfg(feature = "desktop")]
 impl ClientDiffFileError {
-    pub(crate) fn message(self) -> &'static str {
+    pub(crate) fn message(&self) -> &str {
         match self {
-            Self::Source(error) => error.message(),
-            Self::InvalidPage => {
-                "The diff source returned an invalid page. Retry this view to load it again."
+            Self::Transport(ViewerClientError::Unavailable) => {
+                "The diff row stream disconnected. Retrying automatically."
             }
+            Self::Transport(error) => error.message(),
+            Self::InvalidResponse => {
+                "The server returned invalid diff rows. Retry this view to load it again."
+            }
+            Self::Server { message, .. } => message,
         }
+    }
+
+    pub(crate) const fn retryable(&self) -> bool {
+        match self {
+            Self::Transport(_) | Self::InvalidResponse => true,
+            Self::Server { retryable, .. } => *retryable,
+        }
+    }
+
+    const fn retries_automatically(&self) -> bool {
+        matches!(self, Self::Transport(ViewerClientError::Unavailable))
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ClientDiffFileState {
     #[cfg(feature = "desktop")]
     Loading,
@@ -120,7 +120,7 @@ pub(crate) enum ClientDiffFileState {
 pub(crate) struct ClientDiffFile {
     pub(crate) summary: ViewerFileSummary,
     pub(crate) rows: ClientDiffRows,
-    pub(crate) line_number_digits: LineNumberDigitWidth,
+    pub(crate) line_number_digits: u32,
     pub(crate) state: ClientDiffFileState,
 }
 
@@ -130,7 +130,7 @@ impl ClientDiffFile {
         Self {
             summary,
             rows: ClientDiffRows::new(layout),
-            line_number_digits: LineNumberDigitWidth::default(),
+            line_number_digits: 1,
             state: ClientDiffFileState::Loading,
         }
     }
@@ -164,12 +164,12 @@ impl ClientDiffFile {
 #[derive(Debug, Default, PartialEq, Eq)]
 struct CopiedRows {
     lines: Vec<String>,
-    first_line: Option<SourceLineNumber>,
-    last_line: Option<SourceLineNumber>,
+    first_line: Option<u32>,
+    last_line: Option<u32>,
 }
 
 impl CopiedRows {
-    fn push(&mut self, line: String, line_number: Option<SourceLineNumber>) {
+    fn push(&mut self, line: String, line_number: Option<u32>) {
         self.lines.push(line);
         if let Some(line_number) = line_number {
             self.first_line.get_or_insert(line_number);
@@ -186,40 +186,31 @@ impl CopiedRows {
     }
 }
 
-fn copied_unified_rows<'rows>(rows: impl Iterator<Item = &'rows DiffRow>) -> CopiedRows {
+fn copied_unified_rows<'rows>(rows: impl Iterator<Item = &'rows ViewerUnifiedRow>) -> CopiedRows {
     let mut copied = CopiedRows::default();
     for row in rows {
-        if matches!(
-            row.kind(),
-            gtl_parser::DiffRowKind::Added | gtl_parser::DiffRowKind::Context
-        ) {
-            copied.push(row.body().to_owned(), row.new_line_number());
+        if let ViewerUnifiedRow::Added(row) | ViewerUnifiedRow::Context(row) = row {
+            copied.push(row.code.text.clone(), row.new_line_number);
         }
     }
     copied
 }
 
-fn copied_split_rows<'rows>(rows: impl Iterator<Item = &'rows SplitDiffRow>) -> CopiedRows {
+fn copied_split_rows<'rows>(rows: impl Iterator<Item = &'rows ViewerSplitRow>) -> CopiedRows {
     let mut copied = CopiedRows::default();
     for row in rows {
         match row {
-            SplitDiffRow::Context {
+            ViewerSplitRow::Context {
                 new_line_number,
-                text,
+                code,
                 ..
-            } => copied.push(
-                gtl_parser::diff_line_body(text).to_owned(),
-                Some(*new_line_number),
-            ),
-            SplitDiffRow::Pair {
+            } => copied.push(code.text.clone(), Some(*new_line_number)),
+            ViewerSplitRow::Pair {
                 new: Some(cell), ..
-            } => copied.push(
-                gtl_parser::diff_line_body(cell.text()).to_owned(),
-                Some(cell.line_number()),
-            ),
-            SplitDiffRow::Meta { .. }
-            | SplitDiffRow::Hunk { .. }
-            | SplitDiffRow::Pair { new: None, .. } => {}
+            } => copied.push(cell.code.text.clone(), Some(cell.line_number)),
+            ViewerSplitRow::Meta(_)
+            | ViewerSplitRow::Hunk(_)
+            | ViewerSplitRow::Pair { new: None, .. } => {}
         }
     }
     copied
@@ -265,11 +256,11 @@ impl ClientDiffWorkspace {
 #[cfg(feature = "artifact")]
 pub(crate) fn static_diff_workspace(
     identity: ViewerViewIdentity,
-    files: Vec<(ViewerFileSummary, Vec<String>)>,
+    files: Vec<(ViewerFileSummary, ViewerFileRows)>,
 ) -> ClientDiffWorkspace {
     let files = files
         .into_iter()
-        .map(|(summary, lines)| static_diff_file(summary, &lines, identity.render_options.layout))
+        .map(|(summary, rows)| static_diff_file(summary, rows, identity.render_options.layout))
         .collect();
     ClientDiffWorkspace { identity, files }
 }
@@ -277,314 +268,508 @@ pub(crate) fn static_diff_workspace(
 #[cfg(feature = "artifact")]
 fn static_diff_file(
     summary: ViewerFileSummary,
-    lines: &[String],
+    rows: ViewerFileRows,
     layout: ViewerDiffLayout,
 ) -> ClientDiffFile {
-    let mut parser = ClientDiffParser::new(layout, &summary.path);
-    let mut rows = ClientDiffRows::new(layout);
-    for lines in lines.chunks(CLIENT_LINE_BATCH_SIZE) {
-        rows.append(parser.push(lines).rows);
+    let line_number_digits = rows.line_number_digits;
+    let mut projected = ClientDiffRows::new(layout);
+    match rows.rows {
+        ViewerRows::Unified(rows) => projected.append_unified(rows),
+        ViewerRows::Split(rows) => projected.append_split(rows),
     }
-    let parsed = parser.finish();
-    rows.append(parsed.rows);
     ClientDiffFile {
         summary,
-        rows,
-        line_number_digits: parsed.line_number_digits,
+        rows: projected,
+        line_number_digits,
         state: ClientDiffFileState::Complete,
     }
 }
 
 #[cfg(feature = "desktop")]
+#[derive(Debug, Default)]
+struct ClientDiffAttempts {
+    next: ClientDiffRequestTicket,
+    active: HashMap<ViewerDiffFileId, ClientDiffRequestTicket>,
+}
+
+#[cfg(feature = "desktop")]
+impl ClientDiffAttempts {
+    fn begin(&mut self, file: ViewerDiffFileId) -> ClientDiffRequestTicket {
+        self.next = self.next.next();
+        self.active.insert(file, self.next);
+        self.next
+    }
+
+    fn is_current(&self, file: &ViewerDiffFileId, ticket: ClientDiffRequestTicket) -> bool {
+        self.active.get(file) == Some(&ticket)
+    }
+
+    fn finish(&mut self, file: &ViewerDiffFileId, ticket: ClientDiffRequestTicket) {
+        if self.is_current(file, ticket) {
+            self.active.remove(file);
+        }
+    }
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Copy)]
+struct ClientDiffSession {
+    workspace: Signal<ClientDiffWorkspace>,
+    generation: Signal<ClientDiffRequestTicket>,
+    request_generation: ClientDiffRequestTicket,
+    attempts: Signal<ClientDiffAttempts>,
+    row_stream_active: Signal<bool>,
+    identity: ViewerViewIdentity,
+}
+
+#[cfg(feature = "desktop")]
+impl ClientDiffSession {
+    fn is_current(self) -> bool {
+        *self.generation.peek() == self.request_generation
+            && self.workspace.peek().identity == self.identity
+    }
+
+    fn begin_files(self, file_ids: Vec<ViewerDiffFileId>) -> Option<ClientDiffLoad> {
+        if !self.is_current() {
+            return None;
+        }
+
+        let mut selected = Vec::new();
+        {
+            let mut workspace = self.workspace;
+            let mut current = workspace.write();
+            for file_id in file_ids {
+                let Some(file) = current
+                    .files
+                    .iter_mut()
+                    .find(|file| file.summary.id == file_id)
+                else {
+                    continue;
+                };
+                if file.state == ClientDiffFileState::Complete {
+                    continue;
+                }
+                file.rows = ClientDiffRows::new(self.identity.render_options.layout);
+                file.line_number_digits = 1;
+                file.state = ClientDiffFileState::Loading;
+                selected.push(file_id);
+            }
+        }
+        if selected.is_empty() {
+            return None;
+        }
+
+        let tickets = {
+            let mut attempts = self.attempts;
+            let mut attempts = attempts.write();
+            selected
+                .into_iter()
+                .map(|file| {
+                    let ticket = attempts.begin(file.clone());
+                    (file, ticket)
+                })
+                .collect()
+        };
+        Some(ClientDiffLoad {
+            session: self,
+            tickets: Arc::new(tickets),
+        })
+    }
+
+    fn files_waiting_for_connection(
+        self,
+        only_file: Option<&ViewerDiffFileId>,
+    ) -> Vec<ViewerDiffFileId> {
+        if !self.is_current() {
+            return Vec::new();
+        }
+        self.workspace
+            .peek()
+            .files
+            .iter()
+            .filter(|file| {
+                only_file.is_none_or(|file_id| &file.summary.id == file_id)
+                    && matches!(
+                        &file.state,
+                        ClientDiffFileState::Error(error) if error.retries_automatically()
+                    )
+            })
+            .map(|file| file.summary.id.clone())
+            .collect()
+    }
+
+    fn start_row_stream(mut self) -> bool {
+        if !self.is_current() || *self.row_stream_active.peek() {
+            return false;
+        }
+        self.row_stream_active.set(true);
+        true
+    }
+
+    fn finish_row_stream(mut self) {
+        if self.is_current() {
+            self.row_stream_active.set(false);
+        }
+    }
+}
+
+#[cfg(feature = "desktop")]
+#[derive(Clone, Copy)]
+pub(crate) struct ClientDiffWorkspaceController {
+    session: ClientDiffSession,
+}
+
+#[cfg(feature = "desktop")]
+impl ClientDiffWorkspaceController {
+    pub(crate) fn read(self) -> ClientDiffWorkspace {
+        (self.session.workspace)()
+    }
+
+    pub(crate) fn row_stream_active(self) -> bool {
+        (self.session.row_stream_active)()
+    }
+
+    pub(crate) fn retry_file(self, file_id: ViewerDiffFileId) {
+        if self.row_stream_active() {
+            return;
+        }
+        let retryable = self
+            .session
+            .workspace
+            .peek()
+            .files
+            .iter()
+            .find(|file| file.summary.id == file_id)
+            .is_some_and(|file| {
+                matches!(&file.state, ClientDiffFileState::Error(error) if error.retryable())
+            });
+        if !retryable {
+            return;
+        }
+        spawn(load_rows_with_retry(
+            self.session,
+            Some(file_id.clone()),
+            vec![file_id],
+        ));
+    }
+}
+
+#[cfg(feature = "desktop")]
 pub(crate) fn use_client_diff_workspace(
-    source: ClientDiffSource,
     identity: ViewerViewIdentity,
     files: &[ViewerFileSummary],
-    reload: u64,
-) -> Signal<ClientDiffWorkspace> {
+) -> ClientDiffWorkspaceController {
     let files = files.to_owned();
     let initial_files = files.clone();
     let mut workspace = use_signal(move || ClientDiffWorkspace::loading(identity, initial_files));
     let mut generation = use_signal(ClientDiffRequestTicket::default);
+    let mut attempts = use_signal(ClientDiffAttempts::default);
+    let mut row_stream_active = use_signal(|| false);
+    let request_generation = generation();
+    let controller = ClientDiffWorkspaceController {
+        session: ClientDiffSession {
+            workspace,
+            generation,
+            request_generation,
+            attempts,
+            row_stream_active,
+            identity,
+        },
+    };
 
     use_effect(use_reactive(
-        (&source, &identity, &files, &reload),
-        move |(source, identity, files, _reload)| {
+        (&identity, &files),
+        move |(identity, files)| {
             let request_generation = {
                 let mut current = generation.write();
                 let next = current.next();
                 *current = next;
                 next
             };
+            attempts.set(ClientDiffAttempts::default());
+            row_stream_active.set(false);
             workspace.set(ClientDiffWorkspace::loading(identity, files.clone()));
-
-            spawn(async move {
-                load_workspace(
-                    workspace,
-                    generation,
-                    request_generation,
-                    source,
-                    identity,
-                    files,
-                )
-                .await;
-            });
+            let session = ClientDiffSession {
+                workspace,
+                generation,
+                request_generation,
+                attempts,
+                row_stream_active,
+                identity,
+            };
+            let file_ids = files.into_iter().map(|file| file.id).collect();
+            spawn(load_rows_with_retry(session, None, file_ids));
         },
     ));
 
-    workspace
+    controller
 }
 
-struct ClientDiffParsedBatch {
-    rows: ClientDiffRows,
-    line_number_digits: LineNumberDigitWidth,
-}
-
-struct ClientDiffParser {
-    parser: DiffParserStream,
-    split: Option<SplitDiffStream>,
-    layout: ViewerDiffLayout,
-}
-
-impl ClientDiffParser {
-    fn new(
-        layout: ViewerDiffLayout,
-        file_path: &gtl_models::paths::RepositoryRelativePath,
-    ) -> Self {
-        let path = file_path.to_string_lossy();
-        let syntax = SyntaxLanguage::from_path(path.as_ref());
-        Self {
-            parser: DiffParser::new().with_syntax(syntax).stream(),
-            split: (layout == ViewerDiffLayout::Split).then(SplitDiffStream::new),
-            layout,
-        }
-    }
-
-    fn push(&mut self, lines: &[String]) -> ClientDiffParsedBatch {
-        let parsed = self.parser.push(lines);
-        let line_number_digits = parsed.line_number_digits();
-        let rows = self.present(parsed.into_rows());
-        ClientDiffParsedBatch {
-            rows,
-            line_number_digits,
-        }
-    }
-
-    fn finish(mut self) -> ClientDiffParsedBatch {
-        let parsed = self.parser.finish();
-        let line_number_digits = parsed.line_number_digits();
-        let mut rows = ClientDiffRows::new(self.layout);
-        match &mut self.split {
-            Some(split) => rows.append_split(split.push(parsed.into_rows())),
-            None => rows.append_unified(parsed.into_rows()),
-        }
-        if let Some(split) = self.split {
-            rows.append_split(split.finish());
-        }
-        ClientDiffParsedBatch {
-            rows,
-            line_number_digits,
-        }
-    }
-
-    fn present(&mut self, rows: Vec<DiffRow>) -> ClientDiffRows {
-        let mut presented = ClientDiffRows::new(self.layout);
-        match &mut self.split {
-            Some(split) => presented.append_split(split.push(rows)),
-            None => presented.append_unified(rows),
-        }
-        presented
-    }
-}
-
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 #[cfg(feature = "desktop")]
 struct ClientDiffLoad {
-    workspace: Signal<ClientDiffWorkspace>,
-    generation: Signal<ClientDiffRequestTicket>,
-    request_generation: ClientDiffRequestTicket,
-    source: ClientDiffSource,
-    identity: ViewerViewIdentity,
+    session: ClientDiffSession,
+    tickets: Arc<HashMap<ViewerDiffFileId, ClientDiffRequestTicket>>,
 }
 
 #[cfg(feature = "desktop")]
 impl ClientDiffLoad {
-    fn is_current(self) -> bool {
-        *self.generation.peek() == self.request_generation
+    fn is_current(&self) -> bool {
+        self.session.is_current()
     }
 
-    fn update_file(self, file_index: usize, update: impl FnOnce(&mut ClientDiffFile)) {
-        if !self.is_current() {
-            return;
-        }
-        let mut workspace = self.workspace;
-        let mut current = workspace.write();
-        if current.identity != self.identity {
-            return;
-        }
-        if let Some(file) = current.files.get_mut(file_index) {
-            update(file);
-        }
+    fn has_active_files(&self) -> bool {
+        self.is_current()
+            && self
+                .tickets
+                .iter()
+                .any(|(file, ticket)| self.session.attempts.peek().is_current(file, *ticket))
     }
 
-    async fn load_page(
-        self,
-        file: &ViewerFileSummary,
-        cursor: ViewerDiffCursor,
-    ) -> Result<(ViewerDiffLines, Option<ViewerDiffCursor>), ClientDiffFileError> {
-        let request = LoadViewerDiffLines {
-            identity: self.identity,
-            file: file.id.clone(),
-            cursor,
+    fn update_file(
+        &self,
+        file_id: &ViewerDiffFileId,
+        update: impl FnOnce(&mut ClientDiffFile),
+    ) -> bool {
+        let Some(ticket) = self.tickets.get(file_id).copied() else {
+            return false;
         };
-        let page = self
-            .source
-            .load_diff_lines(request.clone())
-            .await
-            .map_err(ClientDiffFileError::Source)?;
-        let next = validate_page(&request, &page).map_err(|()| ClientDiffFileError::InvalidPage)?;
-        Ok((page, next))
+        if !self.is_current() || !self.session.attempts.peek().is_current(file_id, ticket) {
+            return false;
+        }
+        let mut workspace = self.session.workspace;
+        let mut current = workspace.write();
+        let Some(file) = current
+            .files
+            .iter_mut()
+            .find(|file| &file.summary.id == file_id)
+        else {
+            return false;
+        };
+        update(file);
+        true
     }
 
-    async fn load_file(self, file_index: usize, file: &ViewerFileSummary) {
-        let mut parser = ClientDiffParser::new(self.identity.render_options.layout, &file.path);
-        let mut cursor = ViewerDiffCursor::default();
+    fn finish_file(&self, file_id: &ViewerDiffFileId) {
+        let Some(ticket) = self.tickets.get(file_id).copied() else {
+            return;
+        };
+        let mut attempts = self.session.attempts;
+        attempts.write().finish(file_id, ticket);
+    }
 
-        loop {
-            if !self.is_current() {
-                return;
+    fn fail_active(&self, error: &ClientDiffFileError) {
+        for (file_id, ticket) in self.tickets.iter() {
+            if !self.session.attempts.peek().is_current(file_id, *ticket) {
+                continue;
             }
-            let (page, next) = match self.load_page(file, cursor).await {
-                Ok(loaded) => loaded,
-                Err(error) => {
-                    self.update_file(file_index, |file| {
-                        file.state = ClientDiffFileState::Error(error);
-                    });
-                    return;
-                }
-            };
-
-            for lines in page.lines.chunks(CLIENT_LINE_BATCH_SIZE) {
-                let parsed = parser.push(lines);
-                self.update_file(file_index, |file| {
-                    file.line_number_digits = parsed.line_number_digits;
-                    file.rows.append(parsed.rows);
-                });
-                yield_to_browser().await;
-                if !self.is_current() {
-                    return;
-                }
+            if self.update_file(file_id, |file| {
+                file.state = ClientDiffFileState::Error(error.clone());
+            }) {
+                self.finish_file(file_id);
             }
+        }
+    }
 
-            let Some(next) = next else {
-                let parsed = parser.finish();
-                self.update_file(file_index, |file| {
-                    file.line_number_digits = parsed.line_number_digits;
-                    file.rows.append(parsed.rows);
+    fn accept_event(&self, event: ViewerRowEvent) -> bool {
+        match event {
+            ViewerRowEvent::FileStarted { file } => self.update_file(&file, |file| {
+                file.rows = ClientDiffRows::new(self.session.identity.render_options.layout);
+                file.line_number_digits = 1;
+                file.state = ClientDiffFileState::Loading;
+            }),
+            ViewerRowEvent::UnifiedRows { file, rows } => self.update_file(&file, |file| {
+                file.rows.append_unified(rows);
+            }),
+            ViewerRowEvent::SplitRows { file, rows } => self.update_file(&file, |file| {
+                file.rows.append_split(rows);
+            }),
+            ViewerRowEvent::FileFinished {
+                file,
+                line_number_digits,
+            } => {
+                let accepted = self.update_file(&file, |file| {
+                    file.line_number_digits = line_number_digits.max(1);
                     file.state = ClientDiffFileState::Complete;
                 });
-                return;
-            };
-            cursor = next;
+                if accepted {
+                    self.finish_file(&file);
+                }
+                accepted
+            }
+            ViewerRowEvent::FileFailed {
+                file,
+                code: _,
+                message,
+                retryable,
+            } => {
+                let accepted = self.update_file(&file, |file| {
+                    file.state = ClientDiffFileState::Error(ClientDiffFileError::Server {
+                        message,
+                        retryable,
+                    });
+                });
+                if accepted {
+                    self.finish_file(&file);
+                }
+                accepted
+            }
         }
     }
 }
 
 #[cfg(feature = "desktop")]
-async fn load_workspace(
-    workspace: Signal<ClientDiffWorkspace>,
-    generation: Signal<ClientDiffRequestTicket>,
-    request_generation: ClientDiffRequestTicket,
-    source: ClientDiffSource,
-    identity: ViewerViewIdentity,
-    files: Vec<ViewerFileSummary>,
-) {
-    let load = ClientDiffLoad {
-        workspace,
-        generation,
-        request_generation,
-        source,
-        identity,
-    };
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ClientDiffStreamResult {
+    retry_connection: bool,
+    received_rows: bool,
+}
 
-    for (file_index, file) in files.into_iter().enumerate() {
-        if !load.is_current() {
+#[cfg(feature = "desktop")]
+async fn load_rows_with_retry(
+    session: ClientDiffSession,
+    only_file: Option<ViewerDiffFileId>,
+    file_ids: Vec<ViewerDiffFileId>,
+) {
+    if !session.start_row_stream() {
+        return;
+    }
+    load_rows_from_server(session, only_file, file_ids).await;
+    session.finish_row_stream();
+}
+
+#[cfg(feature = "desktop")]
+async fn load_rows_from_server(
+    session: ClientDiffSession,
+    only_file: Option<ViewerDiffFileId>,
+    mut file_ids: Vec<ViewerDiffFileId>,
+) {
+    let mut retry_delay = RetryDelay::default();
+    loop {
+        let Some(load) = session.begin_files(file_ids) else {
+            return;
+        };
+        let result = read_row_stream(&load, only_file.clone()).await;
+        if !result.retry_connection {
             return;
         }
-        load.load_file(file_index, &file).await;
+        if result.received_rows {
+            retry_delay.reset();
+        }
+        dioxus_sdk_time::sleep(retry_delay.take_and_advance()).await;
+        file_ids = session.files_waiting_for_connection(only_file.as_ref());
+        if file_ids.is_empty() {
+            return;
+        }
     }
 }
 
 #[cfg(feature = "desktop")]
-fn validate_page(
-    request: &LoadViewerDiffLines,
-    page: &ViewerDiffLines,
-) -> Result<Option<ViewerDiffCursor>, ()> {
-    if page.identity != request.identity
-        || page.file != request.file
-        || page.cursor != request.cursor
+async fn read_row_stream(
+    load: &ClientDiffLoad,
+    only_file: Option<ViewerDiffFileId>,
+) -> ClientDiffStreamResult {
+    let mut stream = match super::viewer_server::stream_rows(StreamViewerRows {
+        identity: load.session.identity,
+        file: only_file,
+    })
+    .await
     {
-        return Err(());
+        Ok(stream) => stream,
+        Err(error) => {
+            let retry_connection = error == ViewerClientError::Unavailable;
+            load.fail_active(&ClientDiffFileError::Transport(error));
+            return ClientDiffStreamResult {
+                retry_connection,
+                received_rows: false,
+            };
+        }
+    };
+    let mut expected_sequence = 0_u64;
+    let mut received_rows = false;
+    loop {
+        if !load.is_current() {
+            return ClientDiffStreamResult {
+                retry_connection: false,
+                received_rows,
+            };
+        }
+        let response = match stream.message().await {
+            Ok(Some(response)) => response,
+            Ok(None) if !load.has_active_files() => {
+                return ClientDiffStreamResult {
+                    retry_connection: false,
+                    received_rows,
+                };
+            }
+            Ok(None) => {
+                load.fail_active(&ClientDiffFileError::Transport(
+                    ViewerClientError::Unavailable,
+                ));
+                return ClientDiffStreamResult {
+                    retry_connection: true,
+                    received_rows,
+                };
+            }
+            Err(error) => {
+                let retry_connection = error == ViewerClientError::Unavailable;
+                load.fail_active(&ClientDiffFileError::Transport(error));
+                return ClientDiffStreamResult {
+                    retry_connection,
+                    received_rows,
+                };
+            }
+        };
+        if response.identity != load.session.identity || response.sequence != expected_sequence {
+            load.fail_active(&ClientDiffFileError::InvalidResponse);
+            return ClientDiffStreamResult {
+                retry_connection: false,
+                received_rows,
+            };
+        }
+        received_rows |= load.accept_event(response.event);
+        let Some(next) = expected_sequence.checked_add(1) else {
+            load.fail_active(&ClientDiffFileError::InvalidResponse);
+            return ClientDiffStreamResult {
+                retry_connection: false,
+                received_rows,
+            };
+        };
+        expected_sequence = next;
     }
-
-    let byte_count = page
-        .lines
-        .iter()
-        .try_fold(0_usize, |total, line| total.checked_add(line.len()))
-        .ok_or(())?;
-    if byte_count > VIEWER_DIFF_LINES_PAGE_MAX_BYTES && page.lines.len() != 1 {
-        return Err(());
-    }
-
-    let line_count = u32::try_from(page.lines.len()).map_err(|_| ())?;
-    let expected_next = request
-        .cursor
-        .into_inner()
-        .checked_add(line_count)
-        .ok_or(())?;
-    if let Some(next) = page.next
-        && (page.lines.is_empty() || next.into_inner() != expected_next)
-    {
-        return Err(());
-    }
-    Ok(page.next)
-}
-
-#[cfg(feature = "desktop")]
-async fn yield_to_browser() {
-    dioxus_sdk_time::sleep(Duration::ZERO).await;
 }
 
 #[cfg(all(test, feature = "desktop"))]
 mod tests {
-    use gtl_models::viewer::{ViewerRangeGeneration, ViewerSelectionGeneration};
     use gtl_wire::viewer::{
-        VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerDiffDensity, ViewerDiffFileId, ViewerRenderOptions,
+        ViewerCodeLine, ViewerCodeSpan, ViewerDiffFileId, ViewerSplitRow, ViewerUnifiedSourceRow,
     };
 
     use super::*;
-    use crate::test_support::{
-        TestResult, absolute_file_path, repository_relative_path, viewer_tab_id,
-    };
+    use crate::test_support::{TestResult, absolute_file_path, repository_relative_path};
 
-    fn identity() -> TestResult<ViewerViewIdentity> {
-        Ok(ViewerViewIdentity {
-            tab_id: viewer_tab_id(7)?,
-            range_generation: ViewerRangeGeneration::new(11),
-            selection_generation: ViewerSelectionGeneration::new(13),
-            render_options: ViewerRenderOptions {
-                layout: ViewerDiffLayout::Unified,
-                density: ViewerDiffDensity::Compact,
-            },
-        })
+    #[test]
+    fn unavailable_row_streams_retry_automatically_but_invalid_rows_do_not() {
+        assert!(
+            ClientDiffFileError::Transport(ViewerClientError::Unavailable).retries_automatically()
+        );
+        assert!(!ClientDiffFileError::InvalidResponse.retries_automatically());
+        assert!(
+            !ClientDiffFileError::Transport(ViewerClientError::InvalidRequest)
+                .retries_automatically()
+        );
     }
 
-    fn request(cursor: u32) -> TestResult<LoadViewerDiffLines> {
-        Ok(LoadViewerDiffLines {
-            identity: identity()?,
-            file: ViewerDiffFileId::for_index(2),
-            cursor: ViewerDiffCursor::new(cursor),
-        })
+    #[test]
+    fn finishing_an_old_file_attempt_does_not_cancel_its_replacement() {
+        let file = ViewerDiffFileId::for_index(3);
+        let mut attempts = ClientDiffAttempts::default();
+        let old = attempts.begin(file.clone());
+        let current = attempts.begin(file.clone());
+
+        attempts.finish(&file, old);
+
+        assert!(attempts.is_current(&file, current));
     }
 
     fn file_summary(
@@ -605,95 +790,17 @@ mod tests {
         })
     }
 
-    fn page(
-        request: &LoadViewerDiffLines,
-        lines: Vec<String>,
-        next: Option<u32>,
-    ) -> ViewerDiffLines {
-        ViewerDiffLines {
-            identity: request.identity,
-            file: request.file.clone(),
-            cursor: request.cursor,
-            lines,
-            next: next.map(ViewerDiffCursor::new),
-        }
-    }
-
-    #[test]
-    fn accepts_a_bounded_progressing_page() -> TestResult {
-        let request = request(4)?;
-        let page = page(&request, vec!["a".into(), "b".into()], Some(6));
-
-        assert_eq!(
-            validate_page(&request, &page),
-            Ok(Some(ViewerDiffCursor::new(6)))
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn accepts_one_oversized_line_so_the_stream_can_progress() -> TestResult {
-        let request = request(0)?;
-        let page = page(
-            &request,
-            vec!["x".repeat(VIEWER_DIFF_LINES_PAGE_MAX_BYTES + 1)],
-            None,
-        );
-
-        assert_eq!(validate_page(&request, &page), Ok(None));
-        Ok(())
-    }
-
-    #[test]
-    fn rejects_identity_file_cursor_and_progress_mismatches() -> TestResult {
-        let request = request(4)?;
-        let mut wrong_identity = page(&request, vec!["a".into()], Some(5));
-        wrong_identity.identity.tab_id = viewer_tab_id(8)?;
-        let mut wrong_file = page(&request, vec!["a".into()], Some(5));
-        wrong_file.file = ViewerDiffFileId::for_index(9);
-        let mut wrong_cursor = page(&request, vec!["a".into()], Some(5));
-        wrong_cursor.cursor = ViewerDiffCursor::new(3);
-        let wrong_next = page(&request, vec!["a".into()], Some(6));
-        let empty_progress = page(&request, Vec::new(), Some(5));
-
-        for invalid in [
-            wrong_identity,
-            wrong_file,
-            wrong_cursor,
-            wrong_next,
-            empty_progress,
-        ] {
-            assert_eq!(validate_page(&request, &invalid), Err(()));
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn rejects_multi_line_pages_over_the_transport_cap() -> TestResult {
-        let request = request(0)?;
-        let page = page(
-            &request,
-            vec!["x".repeat(VIEWER_DIFF_LINES_PAGE_MAX_BYTES), "y".to_owned()],
-            None,
-        );
-
-        assert_eq!(validate_page(&request, &page), Err(()));
-        Ok(())
-    }
-
     #[test]
     fn copied_rows_keep_new_side_source_and_context() -> TestResult {
         let summary = file_summary(0, "src/example.rs", true)?;
-        let parsed = DiffParser::new().parse(&[
-            "@@ -3,2 +7,2 @@".into(),
-            " keep".into(),
-            "-old".into(),
-            "+new".into(),
-        ]);
         let file = ClientDiffFile {
             summary,
-            rows: ClientDiffRows::Unified(vec![Arc::new(parsed.into_rows())]),
-            line_number_digits: LineNumberDigitWidth::default(),
+            rows: ClientDiffRows::Unified(vec![Arc::new(vec![
+                ViewerUnifiedRow::Context(source_row("keep", Some(3), Some(7))),
+                ViewerUnifiedRow::Removed(source_row("old", Some(4), None)),
+                ViewerUnifiedRow::Added(source_row("new", None, Some(8))),
+            ])]),
+            line_number_digits: 1,
             state: ClientDiffFileState::Complete,
         };
 
@@ -716,14 +823,13 @@ mod tests {
     }
 
     #[test]
-    fn parser_output_is_rebatched_to_the_render_limit() {
-        let mut source = vec!["@@ -1,128 +1,128 @@".to_owned()];
-        source.extend((0..128).map(|index| format!(" let value_{index} = {index};")));
-        let parsed = DiffParser::new().parse(&source);
-        let split_rows = parsed.split_rows();
-
+    fn received_rows_are_rebatched_to_the_render_limit() {
         let mut unified = ClientDiffRows::Unified(Vec::new());
-        unified.append_unified(parsed.into_rows());
+        unified.append_unified(
+            (0..129)
+                .map(|index| ViewerUnifiedRow::Meta(index.to_string()))
+                .collect(),
+        );
         let unified_lengths = match unified {
             ClientDiffRows::Unified(unified) => {
                 unified.iter().map(|batch| batch.len()).collect::<Vec<_>>()
@@ -733,7 +839,11 @@ mod tests {
         assert_eq!(unified_lengths, vec![64, 64, 1]);
 
         let mut split = ClientDiffRows::Split(Vec::new());
-        split.append_split(split_rows);
+        split.append_split(
+            (0..129)
+                .map(|index| ViewerSplitRow::Meta(index.to_string()))
+                .collect(),
+        );
         let split_lengths = match split {
             ClientDiffRows::Split(split) => {
                 split.iter().map(|batch| batch.len()).collect::<Vec<_>>()
@@ -743,27 +853,23 @@ mod tests {
         assert_eq!(split_lengths, vec![64, 64, 1]);
     }
 
-    #[test]
-    fn file_parser_highlights_supported_syntax_in_one_pass() -> TestResult {
-        let file = file_summary(0, "src/example.rs", true)?;
-        let source = vec![
-            "@@ -1 +1 @@".to_owned(),
-            "-let old_value = 1;".to_owned(),
-            "+let new_value = 2;".to_owned(),
-        ];
-        let mut parser = ClientDiffParser::new(ViewerDiffLayout::Unified, &file.path);
-        let mut rows = parser.push(&source).rows;
-        rows.append(parser.finish().rows);
-
-        let ClientDiffRows::Unified(batches) = rows else {
-            return Err("unified parsing produced split rows".into());
-        };
-        assert!(
-            batches
-                .iter()
-                .flat_map(|batch| batch.iter())
-                .any(|row| !row.syntax_tokens().is_empty())
-        );
-        Ok(())
+    fn source_row(
+        text: &str,
+        old_line_number: Option<u32>,
+        new_line_number: Option<u32>,
+    ) -> ViewerUnifiedSourceRow {
+        ViewerUnifiedSourceRow {
+            old_line_number,
+            new_line_number,
+            code: ViewerCodeLine {
+                text: text.to_owned(),
+                spans: vec![ViewerCodeSpan {
+                    text: text.to_owned(),
+                    syntax_class: None,
+                    changed: false,
+                }],
+                long_line_character_count: None,
+            },
+        }
     }
 }

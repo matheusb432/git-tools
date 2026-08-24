@@ -1,6 +1,3 @@
-mod api;
-
-pub(crate) use api::DiffHistoryApi;
 use gtl_wire::viewer::{ViewerHistoryCursor, ViewerHistoryPage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

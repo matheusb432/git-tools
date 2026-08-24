@@ -89,7 +89,7 @@ fn gtl(repo_path: &Path) -> Command {
 
 #[test]
 fn revert_undoes_a_rebase_and_returns_to_feature() -> Result<()> {
-    let _server = common::ServerHarness::start(None)?;
+    let _server = common::ServerHarness::start(None, None)?;
     let (_tmp, repo_path) = setup()?;
     let main_before = rev(&repo_path, "main")?;
     gtl(&repo_path)

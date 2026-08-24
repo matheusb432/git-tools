@@ -1,9 +1,12 @@
 //! Builds snapshot recipes for project repositories with unpushed commits.
 
 use gtl_models::projects::ProjectRepository;
-use gtl_wire::recipes::{Recipe, RecipeOp};
 
-use crate::{ports::GitClient, projects::select_unpushed_repositories};
+use crate::{
+    ports::GitClient,
+    projects::select_unpushed_repositories,
+    recipes::{Recipe, RecipeOp},
+};
 
 /// Requests recipes for ahead repositories from an already-resolved project catalogue.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,10 +54,13 @@ pub fn execute(
 #[cfg(test)]
 mod tests {
     use gtl_models::projects::ProjectRepository;
-    use gtl_wire::recipes::{RecipeOp, RecipeSource, RecipeTarget};
 
     use super::BuildProjectRecipes;
-    use crate::{projects::build_recipes, utils::ScriptedGitClient};
+    use crate::{
+        projects::build_recipes,
+        recipes::{RecipeOp, RecipeSource, RecipeTarget},
+        utils::ScriptedGitClient,
+    };
 
     fn repo(name: &str) -> ProjectRepository {
         ProjectRepository {

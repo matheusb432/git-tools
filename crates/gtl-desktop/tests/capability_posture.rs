@@ -1,6 +1,6 @@
 #![cfg(test)]
 
-//! Security posture tripwire for the offline Dioxus viewer.
+//! Security posture checks for the server-backed Dioxus viewer.
 use std::{fs, path::Path};
 
 #[test]
@@ -33,6 +33,7 @@ fn development_flavor_uses_the_dioxus_server_with_an_independent_identity() {
         serde_json::from_str(&development_conf).expect("valid JSON");
 
     assert_eq!(release["identifier"], "dev.gittools.viewer");
+    assert_eq!(release["app"]["withGlobalTauri"], false);
     assert_eq!(development["identifier"], "dev.gittools.viewer.dev");
     assert_ne!(development["identifier"], release["identifier"]);
     assert_eq!(development["build"]["devUrl"], "http://127.0.0.1:8080");
@@ -85,7 +86,7 @@ fn macos_bundle_contains_the_cli_and_server_sidecars() {
 }
 
 #[test]
-fn production_flavor_has_a_local_only_wasm_and_ipc_csp() {
+fn production_flavor_allows_wasm_and_the_loopback_viewer_server() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let production_conf = fs::read_to_string(manifest_dir.join("tauri.production.conf.json"))
         .expect("tauri.production.conf.json must exist");
@@ -100,7 +101,7 @@ fn production_flavor_has_a_local_only_wasm_and_ipc_csp() {
         [
             "default-src 'self'",
             "base-uri 'self'",
-            "connect-src 'self' ipc: http://ipc.localhost",
+            "connect-src 'self' http://127.0.0.1:* http://[::1]:*",
             "font-src 'self' data:",
             "form-action 'none'",
             "frame-src 'none'",

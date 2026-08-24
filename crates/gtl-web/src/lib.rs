@@ -13,7 +13,7 @@ mod views;
 
 #[cfg(feature = "artifact")]
 pub use artifact::{
-    StaticArtifactFileSource, StaticArtifactView, StaticArtifactViewError,
+    StaticArtifactFileRows, StaticArtifactView, StaticArtifactViewError,
     render_static_artifact_body, static_artifact_enhancement_script,
 };
 #[cfg(any(feature = "artifact", feature = "desktop"))]

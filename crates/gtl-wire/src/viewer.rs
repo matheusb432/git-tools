@@ -7,16 +7,12 @@ use gtl_models::{
     timestamps::MachineTimestamp,
     viewer::{
         HistoryPageNumber, HistoryPagePosition, HistoryRenderCount, RenderHistoryId,
-        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerShellRevision, ViewerTabId,
+        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId, ViewerVersion,
     },
 };
 use nutype::nutype;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-use crate::recipes::Recipe;
-
-pub const VIEWER_STATE_CHANGED_EVENT: &str = "viewer-state-changed";
-pub const VIEWER_DIFF_LINES_PAGE_MAX_BYTES: usize = 256 * 1024;
 pub const VIEWER_PROTOCOL_VERSION: u32 = 1;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
@@ -137,6 +133,17 @@ pub enum ViewerFileStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ViewerDiffFileId(String);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ViewerDiffFileIdError;
+
+impl std::fmt::Display for ViewerDiffFileIdError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("viewer diff file ID must not be empty")
+    }
+}
+
+impl std::error::Error for ViewerDiffFileIdError {}
+
 impl AsRef<str> for ViewerDiffFileId {
     fn as_ref(&self) -> &str {
         &self.0
@@ -152,6 +159,18 @@ impl ViewerDiffFileId {
     /// Returns the opaque wire value.
     pub fn as_str(&self) -> &str {
         self.as_ref()
+    }
+}
+
+impl TryFrom<String> for ViewerDiffFileId {
+    type Error = ViewerDiffFileIdError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err(ViewerDiffFileIdError)
+        } else {
+            Ok(Self(value))
+        }
     }
 }
 
@@ -175,6 +194,37 @@ pub struct ViewerCommitSummary {
     pub body: String,
     pub committed_at: MachineTimestamp,
     pub is_merge: bool,
+}
+
+/// Position of the next commit in one identity-bound commit list.
+#[nutype(
+    const_fn,
+    default = 0,
+    derive(
+        Debug,
+        Clone,
+        Copy,
+        Default,
+        PartialEq,
+        Eq,
+        Hash,
+        Serialize,
+        Deserialize
+    )
+)]
+pub struct ViewerCommitCursor(u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListViewerCommits {
+    pub identity: ViewerViewIdentity,
+    pub cursor: Option<ViewerCommitCursor>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerCommitPage {
+    pub identity: ViewerViewIdentity,
+    pub commits: Vec<ViewerCommitSummary>,
+    pub next_cursor: Option<ViewerCommitCursor>,
 }
 
 #[derive(Serialize)]
@@ -298,6 +348,8 @@ pub struct ViewerActiveView {
     pub command: ViewerCommandLine,
     pub files: Vec<ViewerFileSummary>,
     pub commits_label: String,
+    #[serde(default)]
+    pub commit_count: usize,
     pub commits: Vec<ViewerCommitSummary>,
     pub commit_selection: ViewerCommitSelection,
     pub footer: ViewerFooter,
@@ -376,45 +428,11 @@ pub enum ViewerFeedback {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerShell {
-    pub revision: ViewerShellRevision,
+    pub version: ViewerVersion,
     pub tabs: Vec<ViewerTab>,
     pub active: ViewerActiveState,
     pub preferences: ViewerPreferences,
     pub feedback: Option<ViewerFeedback>,
-}
-
-/// Source-line position within one identity-bound diff file.
-#[nutype(
-    const_fn,
-    default = 0,
-    derive(
-        Debug,
-        Clone,
-        Copy,
-        Default,
-        PartialEq,
-        Eq,
-        Hash,
-        Serialize,
-        Deserialize
-    )
-)]
-pub struct ViewerDiffCursor(u32);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LoadViewerDiffLines {
-    pub identity: ViewerViewIdentity,
-    pub file: ViewerDiffFileId,
-    pub cursor: ViewerDiffCursor,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ViewerDiffLines {
-    pub identity: ViewerViewIdentity,
-    pub file: ViewerDiffFileId,
-    pub cursor: ViewerDiffCursor,
-    pub lines: Vec<String>,
-    pub next: Option<ViewerDiffCursor>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -444,13 +462,6 @@ pub enum ViewerRecipeKind {
     MergeDiff,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ViewerHistoryCopyKind {
-    Diff,
-    MergeDiff,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerHistoryEntry {
     pub id: RenderHistoryId,
@@ -463,13 +474,7 @@ pub struct ViewerHistoryEntry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerHistoryCopyPayload {
-    pub id: RenderHistoryId,
-    pub title: String,
-    pub repo_name: ProjectName,
-    pub kind: ViewerHistoryCopyKind,
-    pub range_label: String,
-    pub rendered_at: MachineTimestamp,
-    pub recipe: Recipe,
+    pub json: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -527,7 +532,129 @@ pub struct GetViewerHistoryCopy {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenViewerDiffFile {
     pub identity: ViewerViewIdentity,
-    pub path: RepositoryRelativePath,
+    pub file: ViewerDiffFileId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewerSyntaxClass {
+    Keyword,
+    String,
+    Comment,
+    Type,
+    Function,
+    Number,
+    Constant,
+    Operator,
+    Tag,
+    Variable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerCodeSpan {
+    pub text: String,
+    pub syntax_class: Option<ViewerSyntaxClass>,
+    pub changed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerCodeLine {
+    pub text: String,
+    pub spans: Vec<ViewerCodeSpan>,
+    pub long_line_character_count: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerUnifiedSourceRow {
+    pub old_line_number: Option<u32>,
+    pub new_line_number: Option<u32>,
+    pub code: ViewerCodeLine,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewerUnifiedRow {
+    Meta(String),
+    Hunk(String),
+    Context(ViewerUnifiedSourceRow),
+    Added(ViewerUnifiedSourceRow),
+    Removed(ViewerUnifiedSourceRow),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerSplitCell {
+    pub line_number: u32,
+    pub code: ViewerCodeLine,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewerSplitRow {
+    Meta(String),
+    Hunk(String),
+    Context {
+        old_line_number: u32,
+        new_line_number: u32,
+        code: ViewerCodeLine,
+    },
+    Pair {
+        old: Option<ViewerSplitCell>,
+        new: Option<ViewerSplitCell>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewerRows {
+    Unified(Vec<ViewerUnifiedRow>),
+    Split(Vec<ViewerSplitRow>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerFileRows {
+    pub rows: ViewerRows,
+    pub line_number_digits: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewerFileFailureCode {
+    SourceUnavailable,
+    ParseFailed,
+    RowTooLarge,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewerRowEvent {
+    FileStarted {
+        file: ViewerDiffFileId,
+    },
+    UnifiedRows {
+        file: ViewerDiffFileId,
+        rows: Vec<ViewerUnifiedRow>,
+    },
+    SplitRows {
+        file: ViewerDiffFileId,
+        rows: Vec<ViewerSplitRow>,
+    },
+    FileFinished {
+        file: ViewerDiffFileId,
+        line_number_digits: u32,
+    },
+    FileFailed {
+        file: ViewerDiffFileId,
+        code: ViewerFileFailureCode,
+        message: String,
+        retryable: bool,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ViewerRowStreamItem {
+    pub identity: ViewerViewIdentity,
+    pub sequence: u64,
+    pub event: ViewerRowEvent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StreamViewerRows {
+    pub identity: ViewerViewIdentity,
+    pub file: Option<ViewerDiffFileId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -539,29 +666,6 @@ pub enum SetViewerPreference {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ViewerResource {
-    Shell,
-    Tab,
-    LiveView,
-    Commit,
-    DiffLines,
-    HistoryEntry,
-    Settings,
-    DiffFile,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ViewerApiError {
-    InvalidRequest,
-    NotFound { resource: ViewerResource },
-    Conflict,
-    Unavailable { resource: ViewerResource },
-    Internal,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerStateChanged {
-    pub revision: ViewerShellRevision,
+    pub version: ViewerVersion,
 }

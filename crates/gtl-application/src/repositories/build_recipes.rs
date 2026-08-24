@@ -3,9 +3,12 @@
 use std::path::PathBuf;
 
 use gtl_models::repository::traversal::RepositoryTraversalScope;
-use gtl_wire::recipes::{Recipe, RecipeOp};
 
-use crate::{ports::GitClient, repositories::find_repository_roots};
+use crate::{
+    ports::GitClient,
+    recipes::{Recipe, RecipeOp},
+    repositories::find_repository_roots,
+};
 
 /// Requests recipes for every repository discovered under a root.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,10 +62,10 @@ mod tests {
     use std::num::NonZeroU32;
 
     use gtl_models::repository::traversal::RepositoryTraversalScope;
-    use gtl_wire::recipes::{RecipeOp, RecipeSource, RecipeTarget};
 
     use super::BuildRepositoryRecipes;
     use crate::{
+        recipes::{RecipeOp, RecipeSource, RecipeTarget},
         repositories::build_recipes,
         utils::{self, ScriptedGitClient},
     };
@@ -110,7 +113,7 @@ mod tests {
         );
         assert_eq!(
             recipes[0],
-            gtl_wire::recipes::Recipe {
+            crate::recipes::Recipe {
                 source: RecipeSource::LocalRepo(crate::utils::repository_root("/real/api")),
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Last {

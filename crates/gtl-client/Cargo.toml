@@ -6,11 +6,18 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-gtl-local-auth.workspace = true
+gtl-models.workspace = true
 gtl-wire = { workspace = true, features = ["grpc"] }
 thiserror.workspace = true
+tonic.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+gtl-local-auth.workspace = true
 tonic = { workspace = true, features = ["router", "transport"] }
 tonic-health.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tonic-web-wasm-client = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -24,3 +31,6 @@ tokio = { workspace = true, features = [
 
 [lints]
 workspace = true
+
+[features]
+viewer-web = ["dep:tonic-web-wasm-client"]

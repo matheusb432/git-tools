@@ -39,17 +39,33 @@ pub enum UserSettingsEditError {
     Unexpected(#[from] anyhow::Error),
 }
 
+/// Whether a user-settings edit changed the persisted document.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum UserSettingsEditOutcome {
+    Changed,
+    Unchanged,
+}
+
+impl UserSettingsEditOutcome {
+    pub(crate) const fn changed(self) -> bool {
+        matches!(self, Self::Changed)
+    }
+}
+
 /// Loads validated settings snapshots and performs serialized strict edits.
 pub trait UserSettingsStore: Clone + Send + Sync + 'static {
     /// Loads the latest complete settings snapshot.
     fn load(&self) -> Result<UserSettings, UserSettingsLoadError>;
 
-    /// Applies one typed scalar mutation and returns its previous value.
+    /// Applies one typed scalar mutation and reports its persistent effect.
     fn set_value(
         &mut self,
         mutation: SettingKeyValue,
-    ) -> Result<Option<String>, UserSettingsEditError>;
+    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError>;
 
-    /// Removes one supported scalar setting and returns its previous value.
-    fn remove_key(&mut self, key: SettingKey) -> Result<Option<String>, UserSettingsEditError>;
+    /// Removes one supported scalar setting and reports its persistent effect.
+    fn remove_key(
+        &mut self,
+        key: SettingKey,
+    ) -> Result<UserSettingsEditOutcome, UserSettingsEditError>;
 }

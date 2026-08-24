@@ -164,6 +164,23 @@ fn git_head_fixture(raw: &str) -> anyhow::Result<GitHead> {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn git_head(raw: &str) -> GitHead {
+    git_head_fixture(raw).expect("fixture Git head is valid")
+}
+
+#[cfg(test)]
+pub(crate) fn commit(id: &str, subject: impl Into<String>) -> Commit {
+    Commit {
+        id: commit_id_fixture(id),
+        subject: subject.into(),
+        body: String::new(),
+        committed_at: MachineTimestamp::try_from("2026-01-01T00:00:00Z")
+            .expect("fixture commit timestamp is valid"),
+        parents: Vec::new(),
+    }
+}
+
 fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -245,14 +262,14 @@ impl UserSettingsStore for FixedUserSettingsStore {
     fn set_value(
         &mut self,
         _mutation: gtl_models::settings::SettingKeyValue,
-    ) -> Result<Option<String>, UserSettingsEditError> {
+    ) -> Result<crate::ports::UserSettingsEditOutcome, UserSettingsEditError> {
         Err(anyhow::anyhow!("fixed user settings cannot be edited").into())
     }
 
     fn remove_key(
         &mut self,
         _key: gtl_models::settings::SettingKey,
-    ) -> Result<Option<String>, UserSettingsEditError> {
+    ) -> Result<crate::ports::UserSettingsEditOutcome, UserSettingsEditError> {
         Err(anyhow::anyhow!("fixed user settings cannot be edited").into())
     }
 }
@@ -285,14 +302,14 @@ impl UserSettingsStore for SequenceUserSettingsStore {
     fn set_value(
         &mut self,
         _mutation: gtl_models::settings::SettingKeyValue,
-    ) -> Result<Option<String>, UserSettingsEditError> {
+    ) -> Result<crate::ports::UserSettingsEditOutcome, UserSettingsEditError> {
         Err(anyhow::anyhow!("sequence user settings cannot be edited").into())
     }
 
     fn remove_key(
         &mut self,
         _key: gtl_models::settings::SettingKey,
-    ) -> Result<Option<String>, UserSettingsEditError> {
+    ) -> Result<crate::ports::UserSettingsEditOutcome, UserSettingsEditError> {
         Err(anyhow::anyhow!("sequence user settings cannot be edited").into())
     }
 }

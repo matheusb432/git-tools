@@ -11,7 +11,7 @@ fn diff_set_theme_updates_the_user_settings_document() -> Result<()> {
     let config_parent = config.parent().context("config parent")?;
     std::fs::create_dir_all(config_parent).context("create config parent")?;
     std::fs::write(&config, "layout = \"split\"\n").context("seed config")?;
-    let _server = common::ServerHarness::start(Some(&config))?;
+    let _server = common::ServerHarness::start(Some(&config), None)?;
 
     Command::new(env!("CARGO_BIN_EXE_git-tools"))
         .args(["diff", "--set-theme", "hearth"])

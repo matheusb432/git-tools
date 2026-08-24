@@ -1,17 +1,14 @@
-use anyhow::{Context as _, Result, anyhow, ensure};
+use anyhow::{Context as _, Result};
 use gtl_application::{
     diffs::View,
     viewer::{
-        RenderOptions, Theme, project_diff_lines, project_diff_view, project_render_options,
-        project_theme,
+        RenderOptions, Theme, project_diff_view, project_render_options, project_theme,
+        rows::parse_viewer_diff_file, viewer_diff_file_source,
     },
 };
 use gtl_models::viewer::{ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId};
-use gtl_web::StaticArtifactFileSource;
-use gtl_wire::viewer::{
-    LoadViewerDiffLines, ViewerActiveView, ViewerCommitSelection, ViewerDiffCursor, ViewerTheme,
-    ViewerViewIdentity,
-};
+use gtl_web::StaticArtifactFileRows;
+use gtl_wire::viewer::{ViewerActiveView, ViewerCommitSelection, ViewerTheme, ViewerViewIdentity};
 
 pub(crate) struct ArtifactPayload {
     pub(crate) theme: ViewerTheme,
@@ -20,7 +17,7 @@ pub(crate) struct ArtifactPayload {
 
 pub(crate) struct ProjectedArtifactView {
     pub(crate) view: ViewerActiveView,
-    pub(crate) sources: Vec<StaticArtifactFileSource>,
+    pub(crate) rows: Vec<StaticArtifactFileRows>,
 }
 
 pub(crate) fn project_payload(
@@ -45,11 +42,8 @@ pub(crate) fn project_payload(
             render_options,
         };
         let active = project_diff_view(view, view, identity, ViewerCommitSelection::None);
-        let sources = project_sources(view, &active)?;
-        projected_views.push(ProjectedArtifactView {
-            view: active,
-            sources,
-        });
+        let rows = project_rows(view, &active)?;
+        projected_views.push(ProjectedArtifactView { view: active, rows });
     }
 
     Ok(ArtifactPayload {
@@ -58,48 +52,22 @@ pub(crate) fn project_payload(
     })
 }
 
-fn project_sources(
-    view: &View,
-    active: &ViewerActiveView,
-) -> Result<Vec<StaticArtifactFileSource>> {
+fn project_rows(view: &View, active: &ViewerActiveView) -> Result<Vec<StaticArtifactFileRows>> {
     active
         .files
         .iter()
         .map(|file| {
-            let mut cursor = ViewerDiffCursor::default();
-            let mut lines = Vec::new();
-            loop {
-                let request = LoadViewerDiffLines {
-                    identity: active.identity,
-                    file: file.id.clone(),
-                    cursor,
-                };
-                let page = project_diff_lines(view, &request).map_err(|error| {
-                    anyhow!(
-                        "project artifact source for {} at {}: {error:?}",
-                        file.id.as_str(),
-                        cursor.into_inner()
-                    )
-                })?;
-                ensure!(
-                    page.identity == request.identity
-                        && page.file == request.file
-                        && page.cursor == request.cursor,
-                    "projected artifact source changed identity"
-                );
-                lines.extend(page.lines);
-                let Some(next) = page.next else {
-                    break;
-                };
-                ensure!(
-                    next.into_inner() > cursor.into_inner(),
-                    "artifact source cursor did not advance"
-                );
-                cursor = next;
-            }
-            Ok(StaticArtifactFileSource {
+            let source =
+                viewer_diff_file_source(view, &file.id, active.identity.render_options.density)
+                    .with_context(|| format!("project artifact source for {}", file.id.as_str()))?;
+            let parsed = parse_viewer_diff_file(
+                source.path,
+                source.lines,
+                active.identity.render_options.layout,
+            );
+            Ok(StaticArtifactFileRows {
                 file: file.id.clone(),
-                lines,
+                rows: parsed.file,
             })
         })
         .collect()
@@ -133,16 +101,16 @@ mod tests {
             projected.view.identity.render_options.density,
             ViewerDiffDensity::Full
         );
-        assert_eq!(projected.sources.len(), projected.view.files.len());
-        assert_eq!(projected.sources[0].file, projected.view.files[0].id);
-        assert_eq!(
-            projected.sources[0].lines,
-            ["@@ -1 +1 @@", "+static_rendered", " context"]
-        );
+        assert_eq!(projected.rows.len(), projected.view.files.len());
+        assert_eq!(projected.rows[0].file, projected.view.files[0].id);
+        assert!(matches!(
+            &projected.rows[0].rows.rows,
+            gtl_wire::viewer::ViewerRows::Split(rows) if !rows.is_empty()
+        ));
     }
 
     #[test]
-    fn payload_gathers_every_bounded_page_before_static_rendering() {
+    fn payload_parses_every_source_line_before_static_rendering() {
         let mut view = sample_view();
         let lines = (0..300)
             .map(|index| format!("+{index:03}-{}", "x".repeat(1_000)))
@@ -153,6 +121,9 @@ mod tests {
         let payload = project_payload(&[view], RenderOptions::DEFAULT, None)
             .expect("project multi-page artifact source");
 
-        assert_eq!(payload.views[0].sources[0].lines, lines);
+        assert!(matches!(
+            &payload.views[0].rows[0].rows.rows,
+            gtl_wire::viewer::ViewerRows::Unified(rows) if rows.len() == lines.len()
+        ));
     }
 }

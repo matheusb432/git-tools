@@ -1,8 +1,13 @@
 //! Authenticated local gRPC client for `gtl-server`.
 
+mod viewer;
+
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
+#[cfg(not(target_arch = "wasm32"))]
 use gtl_local_auth::{CapabilityToken, LocalAuth, LocalAuthError, ServerEndpoint};
+#[cfg(not(target_arch = "wasm32"))]
 use gtl_wire::v1::{
     self, diff_service_client::DiffServiceClient, live_view_service_client::LiveViewServiceClient,
     project_service_client::ProjectServiceClient,
@@ -10,23 +15,36 @@ use gtl_wire::v1::{
     settings_service_client::SettingsServiceClient, tag_service_client::TagServiceClient,
     worktree_service_client::WorktreeServiceClient,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use tonic::{
     Request, Status,
     metadata::{Ascii, MetadataValue},
     service::{Interceptor, interceptor::InterceptedService},
     transport::{Channel, Endpoint},
 };
+#[cfg(not(target_arch = "wasm32"))]
 use tonic_health::pb::{HealthCheckRequest, health_client::HealthClient};
+#[cfg(all(target_arch = "wasm32", feature = "viewer-web"))]
+pub use viewer::ViewerClient;
+pub use viewer::{ViewerClientError, ViewerRowStream, ViewerVersionStream};
 
+#[cfg(not(target_arch = "wasm32"))]
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+#[cfg(not(target_arch = "wasm32"))]
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(not(target_arch = "wasm32"))]
 const OPERATION_TIMEOUT: Duration = Duration::from_mins(30);
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_REQUEST_MESSAGE_SIZE: usize = 64 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_RESPONSE_MESSAGE_SIZE: usize = 4 * 1024 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
 const AUTHORIZATION_METADATA_KEY: &str = "authorization";
 
+#[cfg(not(target_arch = "wasm32"))]
 type AuthenticatedChannel = InterceptedService<Channel, RequestPolicy>;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, thiserror::Error)]
 pub enum ConnectError {
     #[error(transparent)]
@@ -41,6 +59,7 @@ pub enum ConnectError {
     Health(#[source] Status),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ConnectError {
     /// Returns the gRPC status when the server rejected its health check.
     #[must_use]
@@ -55,12 +74,14 @@ impl ConnectError {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     #[error("{}", .0.message())]
     Rpc(#[from] Status),
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl ClientError {
     /// Returns the gRPC status received for the failed request.
     #[must_use]
@@ -71,6 +92,7 @@ impl ClientError {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
 pub struct GtlClient {
     channel: Channel,
@@ -78,6 +100,7 @@ pub struct GtlClient {
     endpoint: ServerEndpoint,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl GtlClient {
     /// Discovers and authenticates the OS-managed local server.
     pub async fn connect_local() -> Result<Self, ConnectError> {
@@ -112,45 +135,45 @@ impl GtlClient {
             .map_err(ClientError::from)
     }
 
-    pub async fn prepare_diff(
+    pub async fn present_diff(
         &self,
-        request: v1::PrepareDiffRequest,
-    ) -> Result<v1::PrepareDiffResponse, ClientError> {
+        request: v1::PresentDiffRequest,
+    ) -> Result<v1::PresentDiffResponse, ClientError> {
         self.diff_client()
-            .prepare_diff(request)
+            .present_diff(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn prepare_merge_diff(
+    pub async fn present_merge_diff(
         &self,
-        request: v1::PrepareMergeDiffRequest,
-    ) -> Result<v1::PrepareMergeDiffResponse, ClientError> {
+        request: v1::PresentMergeDiffRequest,
+    ) -> Result<v1::PresentMergeDiffResponse, ClientError> {
         self.diff_client()
-            .prepare_merge_diff(request)
+            .present_merge_diff(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn prepare_subrepository_diffs(
+    pub async fn present_subrepository_diffs(
         &self,
-        request: v1::PrepareSubrepositoryDiffsRequest,
-    ) -> Result<v1::PrepareSubrepositoryDiffsResponse, ClientError> {
+        request: v1::PresentSubrepositoryDiffsRequest,
+    ) -> Result<v1::PresentSubrepositoryDiffsResponse, ClientError> {
         self.diff_client()
-            .prepare_subrepository_diffs(request)
+            .present_subrepository_diffs(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn prepare_project_repository_diffs(
+    pub async fn present_project_repository_diffs(
         &self,
-        request: v1::PrepareProjectRepositoryDiffsRequest,
-    ) -> Result<v1::PrepareProjectRepositoryDiffsResponse, ClientError> {
+        request: v1::PresentProjectRepositoryDiffsRequest,
+    ) -> Result<v1::PresentProjectRepositoryDiffsResponse, ClientError> {
         self.diff_client()
-            .prepare_project_repository_diffs(request)
+            .present_project_repository_diffs(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -407,22 +430,23 @@ impl GtlClient {
             .map_err(ClientError::from)
     }
 
-    pub async fn save_live_view(
+    pub async fn save_and_present_live_view(
         &self,
-        request: v1::SaveLiveViewRequest,
-    ) -> Result<v1::SaveLiveViewResponse, ClientError> {
+        request: v1::SaveAndPresentLiveViewRequest,
+    ) -> Result<v1::SaveAndPresentLiveViewResponse, ClientError> {
         self.live_view_client()
-            .save_live_view(request)
+            .save_and_present_live_view(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
     }
 
-    pub async fn save_project_live_views(
+    pub async fn save_and_present_project_live_views(
         &self,
-    ) -> Result<v1::SaveProjectLiveViewsResponse, ClientError> {
+        request: v1::SaveAndPresentProjectLiveViewsRequest,
+    ) -> Result<v1::SaveAndPresentProjectLiveViewsResponse, ClientError> {
         self.live_view_client()
-            .save_project_live_views(v1::SaveProjectLiveViewsRequest {})
+            .save_and_present_project_live_views(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
@@ -592,17 +616,20 @@ impl GtlClient {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 struct RequestPolicy {
     value: MetadataValue<Ascii>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl std::fmt::Debug for RequestPolicy {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("RequestPolicy(REDACTED)")
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl RequestPolicy {
     fn try_new(token: &CapabilityToken) -> Result<Self, ConnectError> {
         let value = format!("Bearer {}", token.expose_secret())
@@ -612,6 +639,7 @@ impl RequestPolicy {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Interceptor for RequestPolicy {
     fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
         request
@@ -624,16 +652,16 @@ impl Interceptor for RequestPolicy {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use std::{error::Error, time::Duration};
 
     use gtl_local_auth::{ServerEndpoint, ServerInstanceId};
     use gtl_wire::v1::{
-        DiffTarget, Empty, PrepareDiffRequest, PrepareDiffResponse, PrepareMergeDiffRequest,
-        PrepareMergeDiffResponse, PrepareProjectRepositoryDiffsRequest,
-        PrepareProjectRepositoryDiffsResponse, PrepareSubrepositoryDiffsRequest,
-        PrepareSubrepositoryDiffsResponse, RenderDiffRequest, RenderDiffResponse,
+        DiffTarget, Empty, PresentDiffRequest, PresentDiffResponse, PresentMergeDiffRequest,
+        PresentMergeDiffResponse, PresentProjectRepositoryDiffsRequest,
+        PresentProjectRepositoryDiffsResponse, PresentSubrepositoryDiffsRequest,
+        PresentSubrepositoryDiffsResponse, RenderDiffRequest, RenderDiffResponse,
         RenderMergeDiffRequest, RenderMergeDiffResponse, RenderProjectRepositoryDiffsRequest,
         RenderProjectRepositoryDiffsResponse, RenderSubrepositoryDiffsRequest,
         RenderSubrepositoryDiffsResponse,
@@ -761,36 +789,34 @@ mod tests {
 
     #[tonic::async_trait]
     impl DiffService for TestDiff {
-        async fn prepare_diff(
+        async fn present_diff(
             &self,
-            _request: Request<PrepareDiffRequest>,
-        ) -> Result<Response<PrepareDiffResponse>, Status> {
-            Ok(Response::new(PrepareDiffResponse { batch: None }))
+            _request: Request<PresentDiffRequest>,
+        ) -> Result<Response<PresentDiffResponse>, Status> {
+            Ok(Response::new(PresentDiffResponse::default()))
         }
 
-        async fn prepare_merge_diff(
+        async fn present_merge_diff(
             &self,
-            _request: Request<PrepareMergeDiffRequest>,
-        ) -> Result<Response<PrepareMergeDiffResponse>, Status> {
-            Ok(Response::new(PrepareMergeDiffResponse { batch: None }))
+            _request: Request<PresentMergeDiffRequest>,
+        ) -> Result<Response<PresentMergeDiffResponse>, Status> {
+            Ok(Response::new(PresentMergeDiffResponse::default()))
         }
 
-        async fn prepare_subrepository_diffs(
+        async fn present_subrepository_diffs(
             &self,
-            _request: Request<PrepareSubrepositoryDiffsRequest>,
-        ) -> Result<Response<PrepareSubrepositoryDiffsResponse>, Status> {
-            Ok(Response::new(PrepareSubrepositoryDiffsResponse {
-                batch: None,
-            }))
+            _request: Request<PresentSubrepositoryDiffsRequest>,
+        ) -> Result<Response<PresentSubrepositoryDiffsResponse>, Status> {
+            Ok(Response::new(PresentSubrepositoryDiffsResponse::default()))
         }
 
-        async fn prepare_project_repository_diffs(
+        async fn present_project_repository_diffs(
             &self,
-            _request: Request<PrepareProjectRepositoryDiffsRequest>,
-        ) -> Result<Response<PrepareProjectRepositoryDiffsResponse>, Status> {
-            Ok(Response::new(PrepareProjectRepositoryDiffsResponse {
-                batch: None,
-            }))
+            _request: Request<PresentProjectRepositoryDiffsRequest>,
+        ) -> Result<Response<PresentProjectRepositoryDiffsResponse>, Status> {
+            Ok(Response::new(
+                PresentProjectRepositoryDiffsResponse::default(),
+            ))
         }
 
         async fn render_diff(

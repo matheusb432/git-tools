@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dioxus::prelude::*;
-use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId};
+use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerFileRows};
 
 use crate::{
     entities::diffs::{ClientDiffWorkspace, static_diff_workspace},
@@ -20,26 +20,23 @@ pub struct StaticArtifactView {
 impl StaticArtifactView {
     pub fn try_new(
         view: ViewerActiveView,
-        sources: Vec<StaticArtifactFileSource>,
+        files: Vec<StaticArtifactFileRows>,
     ) -> Result<Self, StaticArtifactViewError> {
         let expected = view
             .files
             .iter()
             .map(|file| file.id.clone())
             .collect::<HashSet<_>>();
-        let mut source_lines = HashMap::with_capacity(sources.len());
-        for source in sources {
-            if !expected.contains(&source.file) {
-                return Err(StaticArtifactViewError::UnknownFileSource {
-                    file: source.file.as_str().to_owned(),
+        let mut file_rows = HashMap::with_capacity(files.len());
+        for file in files {
+            if !expected.contains(&file.file) {
+                return Err(StaticArtifactViewError::UnknownFileRows {
+                    file: file.file.as_str().to_owned(),
                 });
             }
-            if source_lines
-                .insert(source.file.clone(), source.lines)
-                .is_some()
-            {
-                return Err(StaticArtifactViewError::DuplicateFileSource {
-                    file: source.file.as_str().to_owned(),
+            if file_rows.insert(file.file.clone(), file.rows).is_some() {
+                return Err(StaticArtifactViewError::DuplicateFileRows {
+                    file: file.file.as_str().to_owned(),
                 });
             }
         }
@@ -48,12 +45,12 @@ impl StaticArtifactView {
             .iter()
             .cloned()
             .map(|summary| {
-                let lines = source_lines.remove(&summary.id).ok_or_else(|| {
-                    StaticArtifactViewError::MissingFileSource {
+                let rows = file_rows.remove(&summary.id).ok_or_else(|| {
+                    StaticArtifactViewError::MissingFileRows {
                         file: summary.id.as_str().to_owned(),
                     }
                 })?;
-                Ok((summary, lines))
+                Ok((summary, rows))
             })
             .collect::<Result<Vec<_>, StaticArtifactViewError>>()?;
         let workspace = static_diff_workspace(view.identity, files);
@@ -62,19 +59,19 @@ impl StaticArtifactView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StaticArtifactFileSource {
+pub struct StaticArtifactFileRows {
     pub file: ViewerDiffFileId,
-    pub lines: Vec<String>,
+    pub rows: ViewerFileRows,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum StaticArtifactViewError {
-    #[error("artifact source contains unknown diff file {file}")]
-    UnknownFileSource { file: String },
-    #[error("artifact source contains diff file {file} more than once")]
-    DuplicateFileSource { file: String },
-    #[error("artifact source is missing diff file {file}")]
-    MissingFileSource { file: String },
+    #[error("artifact rows contain unknown diff file {file}")]
+    UnknownFileRows { file: String },
+    #[error("artifact rows contain diff file {file} more than once")]
+    DuplicateFileRows { file: String },
+    #[error("artifact rows are missing diff file {file}")]
+    MissingFileRows { file: String },
 }
 
 #[must_use]
@@ -172,8 +169,9 @@ mod tests {
         viewer::{ViewerRangeGeneration, ViewerSelectionGeneration},
     };
     use gtl_wire::viewer::{
-        ViewerActiveView, ViewerCommandLine, ViewerCommitSelection, ViewerDiffDensity,
-        ViewerDiffLayout, ViewerFileStatus, ViewerFileSummary, ViewerFooter, ViewerRenderOptions,
+        ViewerActiveView, ViewerCodeLine, ViewerCodeSpan, ViewerCommandLine, ViewerCommitSelection,
+        ViewerDiffDensity, ViewerDiffLayout, ViewerFileRows, ViewerFileStatus, ViewerFileSummary,
+        ViewerFooter, ViewerRenderOptions, ViewerRows, ViewerUnifiedRow, ViewerUnifiedSourceRow,
         ViewerViewIdentity,
     };
 
@@ -212,20 +210,20 @@ mod tests {
     }
 
     #[test]
-    fn static_view_matches_sources_by_typed_file_id() -> crate::test_support::TestResult {
+    fn static_view_matches_rows_by_typed_file_id() -> crate::test_support::TestResult {
         let view = test_view(2)?;
         let first = view.files[0].id.clone();
         let second = view.files[1].id.clone();
         let artifact = StaticArtifactView::try_new(
             view,
             vec![
-                StaticArtifactFileSource {
+                StaticArtifactFileRows {
                     file: second,
-                    lines: vec!["@@ -0,0 +1 @@".to_owned(), "+second-marker".to_owned()],
+                    rows: file_rows("second-marker"),
                 },
-                StaticArtifactFileSource {
+                StaticArtifactFileRows {
                     file: first,
-                    lines: vec!["@@ -0,0 +1 @@".to_owned(), "+first-marker".to_owned()],
+                    rows: file_rows("first-marker"),
                 },
             ],
         )?;
@@ -242,19 +240,18 @@ mod tests {
     }
 
     #[test]
-    fn static_view_rejects_unknown_duplicate_and_missing_sources() -> crate::test_support::TestResult
-    {
+    fn static_view_rejects_unknown_duplicate_and_missing_rows() -> crate::test_support::TestResult {
         let empty = test_view(0)?;
         let orphan = ViewerDiffFileId::for_index(0);
         assert_eq!(
             StaticArtifactView::try_new(
                 empty,
-                vec![StaticArtifactFileSource {
+                vec![StaticArtifactFileRows {
                     file: orphan.clone(),
-                    lines: vec!["+orphan".to_owned()],
+                    rows: file_rows("orphan"),
                 }],
             ),
-            Err(StaticArtifactViewError::UnknownFileSource {
+            Err(StaticArtifactViewError::UnknownFileRows {
                 file: orphan.as_str().to_owned(),
             })
         );
@@ -265,27 +262,46 @@ mod tests {
             StaticArtifactView::try_new(
                 one_file.clone(),
                 vec![
-                    StaticArtifactFileSource {
+                    StaticArtifactFileRows {
                         file: file.clone(),
-                        lines: Vec::new(),
+                        rows: file_rows("first"),
                     },
-                    StaticArtifactFileSource {
+                    StaticArtifactFileRows {
                         file: file.clone(),
-                        lines: Vec::new(),
+                        rows: file_rows("second"),
                     },
                 ],
             ),
-            Err(StaticArtifactViewError::DuplicateFileSource {
+            Err(StaticArtifactViewError::DuplicateFileRows {
                 file: file.as_str().to_owned(),
             })
         );
         assert_eq!(
             StaticArtifactView::try_new(one_file, Vec::new()),
-            Err(StaticArtifactViewError::MissingFileSource {
+            Err(StaticArtifactViewError::MissingFileRows {
                 file: file.as_str().to_owned(),
             })
         );
         Ok(())
+    }
+
+    fn file_rows(text: &str) -> ViewerFileRows {
+        ViewerFileRows {
+            rows: ViewerRows::Unified(vec![ViewerUnifiedRow::Added(ViewerUnifiedSourceRow {
+                old_line_number: None,
+                new_line_number: Some(1),
+                code: ViewerCodeLine {
+                    text: text.to_owned(),
+                    spans: vec![ViewerCodeSpan {
+                        text: text.to_owned(),
+                        syntax_class: None,
+                        changed: false,
+                    }],
+                    long_line_character_count: None,
+                },
+            })]),
+            line_number_digits: 1,
+        }
     }
 
     fn test_view(file_count: usize) -> crate::test_support::TestResult<ViewerActiveView> {
@@ -325,6 +341,7 @@ mod tests {
             },
             files,
             commits_label: "0 commits".to_owned(),
+            commit_count: 0,
             commits: Vec::new(),
             commit_selection: ViewerCommitSelection::None,
             footer: ViewerFooter {

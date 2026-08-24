@@ -1,10 +1,8 @@
 use gtl_models::paths::RepositoryRelativePath;
 use gtl_wire::viewer::{
-    LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerActiveView, ViewerApiError,
-    ViewerAppliedExclusions, ViewerCommandLine, ViewerCommitSelection, ViewerCommitSummary,
-    ViewerDiffCursor, ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLines, ViewerFileStatus,
-    ViewerFileSummary, ViewerFooter, ViewerRenderOptions, ViewerResource, ViewerTheme,
-    ViewerViewIdentity,
+    ViewerActiveView, ViewerAppliedExclusions, ViewerCommandLine, ViewerCommitSelection,
+    ViewerCommitSummary, ViewerDiffDensity, ViewerDiffFileId, ViewerFileStatus, ViewerFileSummary,
+    ViewerFooter, ViewerRenderOptions, ViewerTheme, ViewerViewIdentity,
 };
 
 use crate::{
@@ -13,6 +11,12 @@ use crate::{
 };
 
 const GIANT_FILE_CHARACTERS: usize = 250_000;
+
+/// Borrowed source selected for one identity-bound viewer file.
+pub struct ViewerDiffFileSource<'view> {
+    pub path: &'view RepositoryRelativePath,
+    pub lines: &'view [String],
+}
 
 /// Projects validated application rendering options into the shared client contract.
 #[must_use]
@@ -91,6 +95,7 @@ pub fn project_diff_view(
             .map(|(index, file)| project_file(view, identity, index, file))
             .collect(),
         commits_label: range_view.commits_label.clone(),
+        commit_count: range_view.commits.len(),
         commits: range_view
             .commits
             .iter()
@@ -116,48 +121,17 @@ pub fn project_diff_view(
     }
 }
 
-/// Projects one identity-bound, byte-bounded page of raw diff lines.
-///
-/// One oversized line is returned by itself so every valid cursor can advance.
-pub fn project_diff_lines(
-    view: &View,
-    request: &LoadViewerDiffLines,
-) -> Result<ViewerDiffLines, ViewerApiError> {
-    let file = file_by_id(view, &request.file).ok_or(ViewerApiError::NotFound {
-        resource: ViewerResource::DiffFile,
-    })?;
-    let lines = selected_lines(file, request.identity.render_options.density);
-    let start =
-        usize::try_from(request.cursor.into_inner()).map_err(|_| ViewerApiError::InvalidRequest)?;
-    if start > lines.len() {
-        return Err(ViewerApiError::InvalidRequest);
-    }
-
-    let mut page = Vec::new();
-    let mut bytes = 0_usize;
-    for line in &lines[start..] {
-        let crosses_bound =
-            !page.is_empty() && bytes.saturating_add(line.len()) > VIEWER_DIFF_LINES_PAGE_MAX_BYTES;
-        if crosses_bound {
-            break;
-        }
-        bytes = bytes.saturating_add(line.len());
-        page.push(line.clone());
-    }
-
-    let end = start
-        .checked_add(page.len())
-        .ok_or(ViewerApiError::InvalidRequest)?;
-    let next = (end < lines.len())
-        .then(|| u32::try_from(end).map(ViewerDiffCursor::new))
-        .transpose()
-        .map_err(|_| ViewerApiError::InvalidRequest)?;
-    Ok(ViewerDiffLines {
-        identity: request.identity,
-        file: request.file.clone(),
-        cursor: request.cursor,
-        lines: page,
-        next,
+/// Resolves one opaque file ID and applies the requested compact/full source choice.
+#[must_use]
+pub fn viewer_diff_file_source<'view>(
+    view: &'view View,
+    id: &ViewerDiffFileId,
+    density: ViewerDiffDensity,
+) -> Option<ViewerDiffFileSource<'view>> {
+    let file = file_by_id(view, id)?;
+    Some(ViewerDiffFileSource {
+        path: &file.path,
+        lines: selected_lines(file, density),
     })
 }
 
@@ -214,15 +188,11 @@ mod tests {
         viewer::{ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId},
     };
     use gtl_wire::viewer::{
-        LoadViewerDiffLines, VIEWER_DIFF_LINES_PAGE_MAX_BYTES, ViewerApiError,
-        ViewerCommitSelection, ViewerDiffCursor, ViewerDiffDensity, ViewerDiffFileId,
-        ViewerDiffLayout, ViewerRenderOptions, ViewerResource, ViewerTheme, ViewerViewIdentity,
+        ViewerCommitSelection, ViewerDiffDensity, ViewerDiffLayout, ViewerRenderOptions,
+        ViewerTheme, ViewerViewIdentity,
     };
 
-    use super::{
-        diff_file_anchor_id, project_diff_lines, project_diff_view, project_render_options,
-        project_theme,
-    };
+    use super::{diff_file_anchor_id, project_diff_view, project_render_options, project_theme};
     use crate::{
         diffs::{Cmd, FileDiff, View},
         utils,
@@ -340,70 +310,5 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["Cargo.lock"]
         );
-    }
-
-    #[test]
-    fn line_pages_select_density_and_bound_progress_by_decoded_bytes() {
-        let mut view = view();
-        view.files[0].lines = vec![
-            "x".repeat(VIEWER_DIFF_LINES_PAGE_MAX_BYTES),
-            "compact-tail".into(),
-        ];
-        let compact_request = LoadViewerDiffLines {
-            identity: identity(ViewerDiffDensity::Compact),
-            file: ViewerDiffFileId::for_index(0),
-            cursor: ViewerDiffCursor::default(),
-        };
-
-        let first = project_diff_lines(&view, &compact_request).expect("first compact page");
-        assert_eq!(first.lines.len(), 1);
-        assert_eq!(first.next, Some(ViewerDiffCursor::new(1)));
-
-        let tail = project_diff_lines(
-            &view,
-            &LoadViewerDiffLines {
-                cursor: first.next.expect("compact continuation"),
-                ..compact_request
-            },
-        )
-        .expect("compact tail page");
-        assert_eq!(tail.lines, ["compact-tail"]);
-        assert_eq!(tail.next, None);
-
-        let full = project_diff_lines(
-            &view,
-            &LoadViewerDiffLines {
-                identity: identity(ViewerDiffDensity::Full),
-                file: ViewerDiffFileId::for_index(0),
-                cursor: ViewerDiffCursor::default(),
-            },
-        )
-        .expect("full page");
-        assert_eq!(full.lines, ["new file mode 100644", "+full"]);
-
-        let unknown = project_diff_lines(
-            &view,
-            &LoadViewerDiffLines {
-                identity: identity(ViewerDiffDensity::Compact),
-                file: ViewerDiffFileId::for_index(99),
-                cursor: ViewerDiffCursor::default(),
-            },
-        );
-        assert_eq!(
-            unknown,
-            Err(ViewerApiError::NotFound {
-                resource: ViewerResource::DiffFile,
-            })
-        );
-
-        let out_of_range = project_diff_lines(
-            &view,
-            &LoadViewerDiffLines {
-                identity: identity(ViewerDiffDensity::Compact),
-                file: ViewerDiffFileId::for_index(0),
-                cursor: ViewerDiffCursor::new(3),
-            },
-        );
-        assert_eq!(out_of_range, Err(ViewerApiError::InvalidRequest));
     }
 }

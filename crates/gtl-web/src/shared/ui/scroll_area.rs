@@ -27,6 +27,7 @@ impl ScrollAreaVariant {
 pub(crate) fn ScrollArea(
     #[props(default)] variant: ScrollAreaVariant,
     #[props(extends = GlobalAttributes)] attributes: Vec<Attribute>,
+    onscroll: Option<EventHandler<ScrollEvent>>,
     children: Element,
 ) -> Element {
     let base = attributes!(div {
@@ -35,7 +36,15 @@ pub(crate) fn ScrollArea(
     let attributes = merge_attributes(vec![attributes, base]);
 
     rsx! {
-        div { ..attributes,{children} }
+        div {
+            onscroll: move |event| {
+                if let Some(onscroll) = onscroll {
+                    onscroll.call(event);
+                }
+            },
+            ..attributes,
+            {children}
+        }
     }
 }
 

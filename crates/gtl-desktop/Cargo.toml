@@ -17,12 +17,9 @@ tauri-build.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-gtl-application.workspace = true
-gtl-wire.workspace = true
-gtl-models.workspace = true
-gtl-infra.workspace = true
-lru.workspace = true
+gtl-local-auth.workspace = true
 raw-window-handle.workspace = true
+serde.workspace = true
 tauri = { workspace = true, features = ["tray-icon"] }
 tauri-plugin-single-instance.workspace = true
 
@@ -30,7 +27,6 @@ tauri-plugin-single-instance.workspace = true
 x11-dl.workspace = true
 
 [features]
-benchmark-support = []
 # Production/standalone builds must enable this so tauri's build.rs sets
 # cfg(dev)=false and the exe serves the embedded frontend via the tauri custom
 # protocol instead of devUrl. `just build`/install pass it explicitly (we do not
@@ -38,9 +34,7 @@ benchmark-support = []
 custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
-gtl-artifacts.workspace = true
 serde_json.workspace = true
-tempfile.workspace = true
 toml.workspace = true
 
 [lints.clippy]

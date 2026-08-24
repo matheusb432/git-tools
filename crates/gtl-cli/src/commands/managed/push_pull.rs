@@ -1,4 +1,4 @@
-//! Fanning `push`/`pull` out across every managed repo via the daemon.
+//! Fanning `push`/`pull` out across every managed repo via `gtl-server`.
 
 use std::fmt::Write as _;
 

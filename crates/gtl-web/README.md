@@ -4,15 +4,15 @@
 presentation used by native raw-artifact rendering. It owns the workspace, diff history, read-only
 user settings, application navigation, transient desktop state, and static artifact SSR contract.
 
-The desktop backend remains authoritative for durable tabs, history, settings, Git decisions, and
-raw diff lines. Shared Rust DTOs define focused Tauri commands and queries. The desktop hook loads
-bounded line pages, retains parser state, and renders immutable row batches. Native artifact builds
-drain the same typed paging contract, parse complete sources, and SSR the same row components before
-writing HTML.
+`gtl-server` remains authoritative for durable tabs, history, settings, Git decisions, cached views,
+and diff parsing. The WebView obtains current connection data from one Tauri command, then calls
+typed `gtl-client` operations directly over gRPC-Web. It stores received rows only as temporary
+display state. Native artifact builds ask `gtl-application` to parse complete files and SSR the same
+row components before writing HTML.
 
 ## Runtime and development
 
-Release builds contain only local application assets and require no runtime network. The typed
+Release builds contain only local application assets and connect only to the local `gtl-server`. The typed
 xtask owns stylesheet generation, the Dioxus Web bundle, Tauri embedding, drift checks, and the
 development server. Use the repository's `just --list` output for current entry points.
 

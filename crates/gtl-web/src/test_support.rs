@@ -7,6 +7,7 @@ use gtl_models::{
     timestamps::MachineTimestamp,
     viewer::ViewerTabId,
 };
+use gtl_wire::viewer::{ViewerCodeLine, ViewerCodeSpan, ViewerUnifiedSourceRow};
 
 pub(crate) type TestResult<T = ()> = Result<T, Box<dyn Error>>;
 
@@ -48,4 +49,29 @@ pub(crate) fn absolute_file_path(
 
 pub(crate) fn machine_timestamp(value: &str) -> TestResult<MachineTimestamp> {
     Ok(MachineTimestamp::try_from(value)?)
+}
+
+pub(crate) fn code_line(text: &str, long_line_character_count: Option<usize>) -> ViewerCodeLine {
+    ViewerCodeLine {
+        text: text.to_owned(),
+        spans: vec![ViewerCodeSpan {
+            text: text.to_owned(),
+            syntax_class: None,
+            changed: false,
+        }],
+        long_line_character_count,
+    }
+}
+
+pub(crate) fn unified_source_row(
+    text: &str,
+    old_line_number: Option<u32>,
+    new_line_number: Option<u32>,
+    long_line_character_count: Option<usize>,
+) -> ViewerUnifiedSourceRow {
+    ViewerUnifiedSourceRow {
+        old_line_number,
+        new_line_number,
+        code: code_line(text, long_line_character_count),
+    }
 }

@@ -43,6 +43,14 @@ async fn user_refreshes_toggles_commit_and_restores_a_saved_live_diff() -> Resul
             wait_for_commit_card_selection(session.driver(), "live view v2", false).await?;
 
             session
+                .restart_server()
+                .await
+                .context("restart gtl-server while the viewer remains open")?;
+            support::wait_for_active_diff(session.driver(), "live-view", "alpha-v2")
+                .await
+                .context("reconnect the open viewer to the replacement server")?;
+
+            session
                 .restart()
                 .await
                 .context("restart saved live viewer")?;

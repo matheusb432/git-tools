@@ -1,14 +1,12 @@
 use std::sync::Arc;
 
 use dioxus::prelude::*;
-use gtl_parser::{
-    CharacterCount, SemanticTextSpan, SourceLineNumber, SplitDiffCell, SplitDiffRow, diff_line_body,
-};
 
 use super::{
     HeaderTone,
     content::{ChangedTextTone, LongLine, SemanticText, non_breaking_if_empty},
 };
+use crate::entities::diffs::{ViewerCodeLine, ViewerSplitCell, ViewerSplitRow};
 
 const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-sm text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
 const SPLIT_CODE_CELL_CLASSES: &str = "min-w-0 border-0 px-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
@@ -29,7 +27,7 @@ enum SplitCellPresentation {
 
 #[component]
 pub(crate) fn SplitDiffRowBatch(
-    rows: Arc<Vec<SplitDiffRow>>,
+    rows: Arc<Vec<ViewerSplitRow>>,
     artifact_enhancement: bool,
 ) -> Element {
     rsx! {
@@ -40,46 +38,39 @@ pub(crate) fn SplitDiffRowBatch(
 }
 
 #[component]
-fn SplitDiffRowView(row: SplitDiffRow, artifact_enhancement: bool) -> Element {
+fn SplitDiffRowView(row: ViewerSplitRow, artifact_enhancement: bool) -> Element {
     match row {
-        SplitDiffRow::Meta { text } => rsx! {
+        ViewerSplitRow::Meta(text) => rsx! {
             SplitHeaderRow { tone: HeaderTone::Meta, text: non_breaking_if_empty(&text) }
         },
-        SplitDiffRow::Hunk { text } => rsx! {
+        ViewerSplitRow::Hunk(text) => rsx! {
             SplitHeaderRow { tone: HeaderTone::Hunk, text }
         },
-        SplitDiffRow::Context {
+        ViewerSplitRow::Context {
             old_line_number,
             new_line_number,
-            text,
-            syntax_tokens: _,
-            semantic_spans,
-            long_line_character_count,
+            code,
         } => rsx! {
             SplitRowShell { copy_line_number: artifact_enhancement.then_some(new_line_number),
                 SplitContextCell {
                     side: SplitSide::Old,
                     line_number: old_line_number,
-                    text: text.clone(),
-                    semantic_spans: semantic_spans.clone(),
-                    long_line_character_count,
+                    code: code.clone(),
                     artifact_enhancement,
                     copy_text: false,
                 }
                 SplitContextCell {
                     side: SplitSide::New,
                     line_number: new_line_number,
-                    text,
-                    semantic_spans,
-                    long_line_character_count,
+                    code,
                     artifact_enhancement,
                     copy_text: artifact_enhancement,
                 }
             }
         },
-        SplitDiffRow::Pair { old, new } => {
+        ViewerSplitRow::Pair { old, new } => {
             let copy_line_number = if artifact_enhancement {
-                new.as_ref().map(SplitDiffCell::line_number)
+                new.as_ref().map(|cell| cell.line_number)
             } else {
                 None
             };
@@ -120,7 +111,7 @@ fn SplitHeaderRow(tone: HeaderTone, text: String) -> Element {
 }
 
 #[component]
-fn SplitRowShell(copy_line_number: Option<SourceLineNumber>, children: Element) -> Element {
+fn SplitRowShell(copy_line_number: Option<u32>, children: Element) -> Element {
     let copy_line = copy_line_number.map(|_| "");
     let new_line_number = copy_line_number.map(|number| number.to_string());
     rsx! {
@@ -137,10 +128,8 @@ fn SplitRowShell(copy_line_number: Option<SourceLineNumber>, children: Element) 
 #[component]
 fn SplitContextCell(
     side: SplitSide,
-    line_number: SourceLineNumber,
-    text: String,
-    semantic_spans: Vec<SemanticTextSpan>,
-    long_line_character_count: Option<CharacterCount>,
+    line_number: u32,
+    code: ViewerCodeLine,
     artifact_enhancement: bool,
     copy_text: bool,
 ) -> Element {
@@ -151,9 +140,7 @@ fn SplitContextCell(
                 SplitSide::Old => SplitCellPresentation::OldContext,
                 SplitSide::New => SplitCellPresentation::NewContext,
             },
-            text,
-            semantic_spans,
-            long_line_character_count,
+            code,
             artifact_enhancement,
             copy_text,
         }
@@ -162,7 +149,7 @@ fn SplitContextCell(
 
 #[component]
 fn SplitCell(
-    cell: Option<SplitDiffCell>,
+    cell: Option<ViewerSplitCell>,
     side: SplitSide,
     artifact_enhancement: bool,
     copy_text: bool,
@@ -173,12 +160,10 @@ fn SplitCell(
     };
     match cell {
         Some(cell) => rsx! {
-            SplitGutter { side, number: Some(cell.line_number()) }
+            SplitGutter { side, number: Some(cell.line_number) }
             SplitCodeCell {
                 presentation,
-                text: cell.text().to_owned(),
-                semantic_spans: cell.semantic_spans().to_vec(),
-                long_line_character_count: cell.long_line_character_count(),
+                code: cell.code,
                 artifact_enhancement,
                 copy_text,
             }
@@ -190,7 +175,7 @@ fn SplitCell(
 }
 
 #[component]
-fn SplitGutter(side: SplitSide, number: Option<SourceLineNumber>) -> Element {
+fn SplitGutter(side: SplitSide, number: Option<u32>) -> Element {
     let line_number = number.map(|value| value.to_string());
     let side_classes = match side {
         SplitSide::Old => "",
@@ -208,14 +193,15 @@ fn SplitGutter(side: SplitSide, number: Option<SourceLineNumber>) -> Element {
 #[component]
 fn SplitCodeCell(
     presentation: SplitCellPresentation,
-    text: String,
-    semantic_spans: Vec<SemanticTextSpan>,
-    long_line_character_count: Option<CharacterCount>,
+    code: ViewerCodeLine,
     artifact_enhancement: bool,
     copy_text: bool,
 ) -> Element {
-    let marker = text.chars().next();
-    let body = diff_line_body(&text).to_owned();
+    let marker = Some(match presentation {
+        SplitCellPresentation::OldContext | SplitCellPresentation::NewContext => ' ',
+        SplitCellPresentation::Removed => '-',
+        SplitCellPresentation::Added => '+',
+    });
     let changed_text_tone = match presentation {
         SplitCellPresentation::OldContext | SplitCellPresentation::NewContext => {
             ChangedTextTone::None
@@ -236,10 +222,10 @@ fn SplitCodeCell(
             class: "{presentation_classes}",
             SplitCodeContent {
                 marker,
-                body,
-                semantic_spans,
+                body: code.text,
+                semantic_spans: code.spans,
                 changed_text_tone,
-                long_line_character_count,
+                long_line_character_count: code.long_line_character_count,
                 artifact_enhancement,
                 copy_text,
             }
@@ -251,9 +237,9 @@ fn SplitCodeCell(
 fn SplitCodeContent(
     marker: Option<char>,
     body: String,
-    semantic_spans: Vec<SemanticTextSpan>,
+    semantic_spans: Vec<crate::entities::diffs::ViewerCodeSpan>,
     changed_text_tone: ChangedTextTone,
-    long_line_character_count: Option<CharacterCount>,
+    long_line_character_count: Option<usize>,
     artifact_enhancement: bool,
     copy_text: bool,
 ) -> Element {
@@ -302,23 +288,33 @@ fn SplitPad(side: SplitSide) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use gtl_parser::{CharacterCount, DiffParser, ParseOptions};
-
     use super::*;
+    use crate::test_support::code_line;
 
     #[test]
     fn renders_typed_line_numbers_long_lines_and_an_absent_split_cell() {
-        let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3))).parse(&[
-            "@@ -9999,2 +10000 @@".to_owned(),
-            "-abcd".to_owned(),
-            "-tail".to_owned(),
-            "+abce".to_owned(),
-        ]);
+        let rows = vec![
+            ViewerSplitRow::Hunk("@@ -9999,2 +10000 @@".to_owned()),
+            ViewerSplitRow::Pair {
+                old: Some(ViewerSplitCell {
+                    line_number: 9999,
+                    code: code_line("abcd", Some(4)),
+                }),
+                new: Some(ViewerSplitCell {
+                    line_number: 10000,
+                    code: code_line("abce", Some(4)),
+                }),
+            },
+            ViewerSplitRow::Pair {
+                old: Some(ViewerSplitCell {
+                    line_number: 10000,
+                    code: code_line("tail", Some(4)),
+                }),
+                new: None,
+            },
+        ];
         let html = dioxus_ssr::render_element(rsx! {
-            SplitDiffRowBatch {
-                rows: Arc::new(parsed.split_rows()),
-                artifact_enhancement: false,
-            }
+            SplitDiffRowBatch { rows: Arc::new(rows), artifact_enhancement: false }
         });
         let absent_gutter = dioxus_ssr::render_element(rsx! {
             SplitGutter { side: SplitSide::New, number: None }
@@ -333,18 +329,33 @@ mod tests {
 
     #[test]
     fn artifact_rows_copy_only_the_new_side_without_diff_markers() {
-        let parsed = DiffParser::with_options(ParseOptions::new(CharacterCount::new(3))).parse(&[
-            "@@ -1,2 +10,3 @@".to_owned(),
-            " keep".to_owned(),
-            "-oldx".to_owned(),
-            "+newx".to_owned(),
-            "+abcdefgh".to_owned(),
-        ]);
+        let rows = vec![
+            ViewerSplitRow::Hunk("@@ -1,2 +10,3 @@".to_owned()),
+            ViewerSplitRow::Context {
+                old_line_number: 1,
+                new_line_number: 10,
+                code: code_line("keep", Some(4)),
+            },
+            ViewerSplitRow::Pair {
+                old: Some(ViewerSplitCell {
+                    line_number: 2,
+                    code: code_line("oldx", Some(4)),
+                }),
+                new: Some(ViewerSplitCell {
+                    line_number: 11,
+                    code: code_line("newx", Some(4)),
+                }),
+            },
+            ViewerSplitRow::Pair {
+                old: None,
+                new: Some(ViewerSplitCell {
+                    line_number: 12,
+                    code: code_line("abcdefgh", Some(8)),
+                }),
+            },
+        ];
         let html = dioxus_ssr::render_element(rsx! {
-            SplitDiffRowBatch {
-                rows: Arc::new(parsed.split_rows()),
-                artifact_enhancement: true,
-            }
+            SplitDiffRowBatch { rows: Arc::new(rows), artifact_enhancement: true }
         });
 
         assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 3);

@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use gtl_parser::LineNumberDigitWidth;
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 
 #[cfg(feature = "desktop")]
@@ -16,6 +15,7 @@ pub(super) fn DiffFileBody(
     density: ViewerDiffDensity,
     file_index: usize,
     onretry: EventHandler<()>,
+    retry_allowed: bool,
     artifact_file_id: Option<String>,
 ) -> Element {
     rsx! {
@@ -26,6 +26,7 @@ pub(super) fn DiffFileBody(
                 density,
                 file_index,
                 onretry,
+                retry_allowed,
                 artifact_file_id,
             }
         }
@@ -39,6 +40,7 @@ fn DiffFileRows(
     density: ViewerDiffDensity,
     file_index: usize,
     onretry: EventHandler<()>,
+    retry_allowed: bool,
     artifact_file_id: Option<String>,
 ) -> Element {
     let density_label = density.as_str();
@@ -67,7 +69,7 @@ fn DiffFileRows(
                     }
                 },
             }
-            DiffFileLoadState { state: file.state, onretry }
+            DiffFileLoadState { state: file.state, retry_allowed, onretry }
         }
     }
 }
@@ -81,14 +83,18 @@ fn diff_rows_id(file_index: usize, artifact_file_id: Option<&str>) -> String {
 
 fn unified_line_number_width_style(
     layout: ViewerDiffLayout,
-    line_number_digit_width: LineNumberDigitWidth,
+    line_number_digit_width: u32,
 ) -> Option<String> {
     (layout == ViewerDiffLayout::Unified)
         .then(|| format!("--unified-line-number-width:calc({line_number_digit_width}ch + 8px)"))
 }
 
 #[component]
-fn DiffFileLoadState(state: ClientDiffFileState, onretry: EventHandler<()>) -> Element {
+fn DiffFileLoadState(
+    state: ClientDiffFileState,
+    retry_allowed: bool,
+    onretry: EventHandler<()>,
+) -> Element {
     match state {
         #[cfg(feature = "desktop")]
         ClientDiffFileState::Loading => rsx! {
@@ -97,8 +103,10 @@ fn DiffFileLoadState(state: ClientDiffFileState, onretry: EventHandler<()>) -> E
         ClientDiffFileState::Complete => rsx! {},
         #[cfg(feature = "desktop")]
         ClientDiffFileState::Error(error) => {
+            let message = error.message().to_owned();
+            let retryable = error.retryable() && retry_allowed;
             rsx! {
-                DiffFileLoadError { message: error.message(), onretry }
+                DiffFileLoadError { message, retryable, onretry }
             }
         }
     }
@@ -114,20 +122,22 @@ fn DiffFileLoading() -> Element {
 
 #[cfg(feature = "desktop")]
 #[component]
-fn DiffFileLoadError(message: &'static str, onretry: EventHandler<()>) -> Element {
+fn DiffFileLoadError(message: String, retryable: bool, onretry: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "m-2 flex items-center justify-between gap-3 rounded-sm border border-del-line bg-del-bg px-3 py-2 text-del",
             role: "alert",
             span { "{message}" }
-            Button {
-                size: ButtonSize::Small,
-                variant: ButtonVariant::Destructive,
-                onclick: move |event: MouseEvent| {
-                    event.stop_propagation();
-                    onretry.call(());
-                },
-                "Retry"
+            if retryable {
+                Button {
+                    size: ButtonSize::Small,
+                    variant: ButtonVariant::Destructive,
+                    onclick: move |event: MouseEvent| {
+                        event.stop_propagation();
+                        onretry.call(());
+                    },
+                    "Retry"
+                }
             }
         }
     }
@@ -135,22 +145,16 @@ fn DiffFileLoadError(message: &'static str, onretry: EventHandler<()>) -> Elemen
 
 #[cfg(test)]
 mod tests {
-    use gtl_parser::DiffParser;
-
     use super::*;
 
     #[test]
     fn digit_width_sizes_only_the_unified_line_number_gutter() {
-        let width = DiffParser::new()
-            .parse(&["@@ -9999 +10000 @@".to_owned(), " keep".to_owned()])
-            .line_number_digits();
-
         assert_eq!(
-            unified_line_number_width_style(ViewerDiffLayout::Unified, width),
+            unified_line_number_width_style(ViewerDiffLayout::Unified, 5),
             Some("--unified-line-number-width:calc(5ch + 8px)".to_owned())
         );
         assert_eq!(
-            unified_line_number_width_style(ViewerDiffLayout::Split, width),
+            unified_line_number_width_style(ViewerDiffLayout::Split, 5),
             None
         );
     }

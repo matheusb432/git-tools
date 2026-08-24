@@ -1,14 +1,15 @@
 use std::{iter::Sum, ops::Add, path::Path, sync::Arc};
 
-use gtl_application::{
-    diffs::{FileDiff, View},
-    viewer::ViewerTabId,
-};
 use gtl_models::{
     diffs::Commit,
     git::{GitHead, GitRevision},
 };
 use lru::LruCache;
+
+use crate::{
+    diffs::{FileDiff, View},
+    viewer::ViewerTabId,
+};
 
 /// Estimated retained bytes used to bound the semantic viewer cache.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
@@ -19,7 +20,6 @@ impl ViewCacheWeight {
         Self(value)
     }
 
-    #[cfg(any(test, feature = "benchmark-support"))]
     pub const fn bytes(self) -> usize {
         self.0
     }
@@ -58,8 +58,8 @@ impl Sum for ViewCacheWeight {
 /// A computed semantic view retained independently from rendered responses.
 #[derive(Debug, Clone)]
 pub struct CachedView {
-    pub(crate) view: Arc<View>,
-    pub(crate) selected: Option<Arc<View>>,
+    pub view: Arc<View>,
+    pub selected: Option<Arc<View>>,
     weight: ViewCacheWeight,
 }
 
@@ -73,7 +73,8 @@ impl CachedView {
         }
     }
 
-    pub(crate) fn with_selected(&self, selected: Arc<View>) -> Self {
+    #[must_use]
+    pub fn with_selected(&self, selected: Arc<View>) -> Self {
         Self {
             weight: self.weight + view_weight(&selected),
             view: Arc::clone(&self.view),
@@ -81,7 +82,8 @@ impl CachedView {
         }
     }
 
-    pub(crate) fn without_selected(&self) -> Self {
+    #[must_use]
+    pub fn without_selected(&self) -> Self {
         Self::new(Arc::clone(&self.view))
     }
 
@@ -125,7 +127,7 @@ impl WeightedViewCache {
         CacheDisposition::Cached
     }
 
-    pub(crate) fn get(&mut self, id: ViewerTabId) -> Option<&CachedView> {
+    pub fn get(&mut self, id: ViewerTabId) -> Option<&CachedView> {
         self.entries.get(&id)
     }
 
@@ -136,7 +138,7 @@ impl WeightedViewCache {
     }
 
     #[cfg(test)]
-    pub(crate) const fn weight(&self) -> ViewCacheWeight {
+    pub const fn weight(&self) -> ViewCacheWeight {
         self.weight
     }
 
@@ -233,15 +235,13 @@ fn revision_weight(revision: &GitRevision) -> ViewCacheWeight {
 mod tests {
     use std::sync::Arc;
 
-    use gtl_application::{
-        diffs::{Cmd, Foot, View},
-        viewer::ViewerTabId,
-    };
     use gtl_models::diffs::DiffLineCount;
 
     use super::*;
-    use crate::testing::{
-        git_head, git_revision, project_name, repository_relative_path, repository_root,
+    use crate::{
+        diffs::{Cmd, Foot, View},
+        utils::{git_head, git_revision, project_name, repository_relative_path, repository_root},
+        viewer::ViewerTabId,
     };
 
     fn id(value: u64) -> ViewerTabId {
@@ -352,7 +352,7 @@ mod tests {
                 cmd: "git diff origin/main..HEAD".into(),
             },
         });
-        let mut cache = WeightedViewCache::new(crate::DEFAULT_VIEW_CACHE_WEIGHT);
+        let mut cache = WeightedViewCache::new(super::super::DEFAULT_VIEW_CACHE_WEIGHT);
 
         for raw_id in 1..=96 {
             let tab_id = id(raw_id);
@@ -360,7 +360,7 @@ mod tests {
                 cache.insert(tab_id, CachedView::new(Arc::clone(&view))),
                 CacheDisposition::Cached
             );
-            assert!(cache.weight() <= crate::DEFAULT_VIEW_CACHE_WEIGHT);
+            assert!(cache.weight() <= super::super::DEFAULT_VIEW_CACHE_WEIGHT);
 
             if raw_id > 2 {
                 let _ = cache.get(id(raw_id - 2));

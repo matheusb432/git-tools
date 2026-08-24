@@ -1,7 +1,7 @@
 //! The `compute_diff` vertical slice: resolve a [`DiffTarget`] into the
 //! structured [`View`] the native viewer renders — no HTML, no artifact store.
-//! The desktop's in-process mediator dispatches this for recipe tabs; the
-//! daemon's `--raw` path keeps using `render_diff`.
+//! The server viewer runtime dispatches this for recipe tabs; raw artifact
+//! requests keep using `render_diff`.
 
 use gtl_models::paths::RepositoryRoot;
 

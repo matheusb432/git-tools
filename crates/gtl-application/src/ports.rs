@@ -33,4 +33,6 @@ pub use project_client::{
     ProjectCatalogueUnavailableError, ProjectClient, ProjectClientError,
 };
 pub use text_editor_client::TextEditorClient;
-pub use user_settings_store::{UserSettingsEditError, UserSettingsLoadError, UserSettingsStore};
+pub use user_settings_store::{
+    UserSettingsEditError, UserSettingsEditOutcome, UserSettingsLoadError, UserSettingsStore,
+};

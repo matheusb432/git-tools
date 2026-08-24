@@ -1,7 +1,9 @@
 use dioxus::prelude::*;
-use gtl_parser::{CharacterCount, SemanticTextChange, SemanticTextSpan, SyntaxTokenClass};
 
-use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
+use crate::{
+    entities::diffs::{ViewerCodeSpan, ViewerSyntaxClass},
+    shared::ui::{Button, ButtonSize, ButtonVariant},
+};
 
 const LONG_LINE_TEXT_CLASSES: &str = "min-w-0 flex-1 whitespace-pre [scrollbar-color:var(--acc)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[linear-gradient(125deg,var(--acc),var(--acc-2))] [&::-webkit-scrollbar-thumb:hover]:bg-[linear-gradient(125deg,var(--acc-2),var(--acc))]";
 const LONG_LINE_COLLAPSED_CLASSES: &str = "overflow-hidden text-ellipsis";
@@ -17,9 +19,9 @@ pub(super) enum ChangedTextTone {
 #[component]
 pub(super) fn CodeCellContent(
     text: String,
-    semantic_spans: Vec<SemanticTextSpan>,
+    semantic_spans: Vec<ViewerCodeSpan>,
     changed_text_tone: ChangedTextTone,
-    long_line_character_count: Option<CharacterCount>,
+    long_line_character_count: Option<usize>,
     artifact_enhancement: bool,
     copy_text: bool,
 ) -> Element {
@@ -49,7 +51,7 @@ pub(super) fn CodeCellContent(
 pub(super) fn LongLine(
     text: String,
     marker: Option<char>,
-    character_count: CharacterCount,
+    character_count: usize,
     artifact_enhancement: bool,
     copy_text: bool,
 ) -> Element {
@@ -115,7 +117,7 @@ fn LongLineText(
 
 #[component]
 fn LongLineControl(
-    character_count: CharacterCount,
+    character_count: usize,
     expanded: bool,
     artifact_enhancement: bool,
     on_toggle: EventHandler<()>,
@@ -137,19 +139,13 @@ fn LongLineControl(
 #[component]
 pub(super) fn SemanticText(
     text: String,
-    semantic_spans: Vec<SemanticTextSpan>,
+    semantic_spans: Vec<ViewerCodeSpan>,
     changed_text_tone: ChangedTextTone,
     copy_text: bool,
 ) -> Element {
     let spans = semantic_spans
         .into_iter()
-        .map(|span| {
-            (
-                span.text(&text).to_owned(),
-                span.syntax_class(),
-                span.change(),
-            )
-        })
+        .map(|span| (span.text, span.syntax_class, span.changed))
         .collect::<Vec<_>>();
     if copy_text && spans.is_empty() {
         return rsx! {
@@ -162,12 +158,12 @@ pub(super) fn SemanticText(
         if spans.is_empty() {
             "\u{00a0}"
         } else {
-            for (index, (text, syntax_class, change)) in spans.into_iter().enumerate() {
+            for (index, (text, syntax_class, changed)) in spans.into_iter().enumerate() {
                 SemanticSpan {
                     key: "{index}",
                     text,
                     syntax_class,
-                    changed_text_tone: if change == SemanticTextChange::Changed { changed_text_tone } else { ChangedTextTone::None },
+                    changed_text_tone: if changed { changed_text_tone } else { ChangedTextTone::None },
                 }
             }
         }
@@ -184,7 +180,7 @@ pub(super) fn SemanticText(
 #[component]
 fn SemanticSpan(
     text: String,
-    syntax_class: Option<SyntaxTokenClass>,
+    syntax_class: Option<ViewerSyntaxClass>,
     changed_text_tone: ChangedTextTone,
 ) -> Element {
     match changed_text_tone {
@@ -205,19 +201,19 @@ fn SemanticSpan(
 }
 
 #[component]
-fn SyntaxSpan(text: String, syntax_class: Option<SyntaxTokenClass>) -> Element {
+fn SyntaxSpan(text: String, syntax_class: Option<ViewerSyntaxClass>) -> Element {
     let classes = match syntax_class {
         None => "",
-        Some(SyntaxTokenClass::Keyword) => "text-[var(--sy-kw)]",
-        Some(SyntaxTokenClass::String) => "text-[var(--sy-str)]",
-        Some(SyntaxTokenClass::Comment) => "text-[var(--sy-com)]",
-        Some(SyntaxTokenClass::Type) => "text-[var(--sy-typ)]",
-        Some(SyntaxTokenClass::Function) => "text-[var(--sy-fn)]",
-        Some(SyntaxTokenClass::Number) => "text-[var(--sy-num)]",
-        Some(SyntaxTokenClass::Constant) => "text-[var(--sy-con)]",
-        Some(SyntaxTokenClass::Operator) => "text-[var(--sy-op)]",
-        Some(SyntaxTokenClass::Tag) => "text-[var(--sy-tag)]",
-        Some(SyntaxTokenClass::Variable) => "text-[var(--sy-var)]",
+        Some(ViewerSyntaxClass::Keyword) => "text-[var(--sy-kw)]",
+        Some(ViewerSyntaxClass::String) => "text-[var(--sy-str)]",
+        Some(ViewerSyntaxClass::Comment) => "text-[var(--sy-com)]",
+        Some(ViewerSyntaxClass::Type) => "text-[var(--sy-typ)]",
+        Some(ViewerSyntaxClass::Function) => "text-[var(--sy-fn)]",
+        Some(ViewerSyntaxClass::Number) => "text-[var(--sy-num)]",
+        Some(ViewerSyntaxClass::Constant) => "text-[var(--sy-con)]",
+        Some(ViewerSyntaxClass::Operator) => "text-[var(--sy-op)]",
+        Some(ViewerSyntaxClass::Tag) => "text-[var(--sy-tag)]",
+        Some(ViewerSyntaxClass::Variable) => "text-[var(--sy-var)]",
     };
 
     rsx! {

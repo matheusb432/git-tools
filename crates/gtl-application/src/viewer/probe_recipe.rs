@@ -1,10 +1,10 @@
 use gtl_models::live_views::LiveSource;
-use gtl_wire::recipes::{Recipe, RecipeSource};
 
 use super::{ViewerTabKind, ViewerTabState};
 use crate::{
     live_views::probe_source::{self, ProbeOutcome, ProbeSource},
     ports::GitClient,
+    recipes::{Recipe, RecipeSource},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,11 +63,10 @@ pub fn execute(
 
 #[cfg(test)]
 mod tests {
-    use gtl_wire::recipes::RecipeOp;
-
     use super::*;
     use crate::{
         ports::GitRepositoryState,
+        recipes::RecipeOp,
         utils::{FakeGitClient, viewer::recipe},
         viewer::probe_recipe,
     };

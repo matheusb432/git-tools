@@ -5,10 +5,10 @@ package gtl.v1;
 import "gtl/v1/common.proto";
 
 service DiffService {
-  rpc PrepareDiff(PrepareDiffRequest) returns (PrepareDiffResponse);
-  rpc PrepareMergeDiff(PrepareMergeDiffRequest) returns (PrepareMergeDiffResponse);
-  rpc PrepareSubrepositoryDiffs(PrepareSubrepositoryDiffsRequest) returns (PrepareSubrepositoryDiffsResponse);
-  rpc PrepareProjectRepositoryDiffs(PrepareProjectRepositoryDiffsRequest) returns (PrepareProjectRepositoryDiffsResponse);
+  rpc PresentDiff(PresentDiffRequest) returns (PresentDiffResponse);
+  rpc PresentMergeDiff(PresentMergeDiffRequest) returns (PresentMergeDiffResponse);
+  rpc PresentSubrepositoryDiffs(PresentSubrepositoryDiffsRequest) returns (PresentSubrepositoryDiffsResponse);
+  rpc PresentProjectRepositoryDiffs(PresentProjectRepositoryDiffsRequest) returns (PresentProjectRepositoryDiffsResponse);
   rpc RenderDiff(RenderDiffRequest) returns (RenderDiffResponse);
   rpc RenderMergeDiff(RenderMergeDiffRequest) returns (RenderMergeDiffResponse);
   rpc RenderSubrepositoryDiffs(RenderSubrepositoryDiffsRequest) returns (RenderSubrepositoryDiffsResponse);
@@ -36,107 +36,55 @@ message RenderMergeDiffRequest {
   optional string base_revision = 2;
 }
 
-message PrepareDiffRequest {
+message PresentDiffRequest {
   string working_directory = 1;
   DiffTarget target = 2;
   optional string name = 3;
 }
 
-message PrepareMergeDiffRequest {
+message PresentMergeDiffRequest {
   string working_directory = 1;
   optional string base_revision = 2;
 }
 
-message PrepareSubrepositoryDiffsRequest {
+message PresentSubrepositoryDiffsRequest {
   string root = 1;
   DiffTarget target = 2;
   bool include_linked_worktrees = 3;
 }
 
-message PrepareProjectRepositoryDiffsRequest {}
-
-enum RecipeBatchKind {
-  RECIPE_BATCH_KIND_UNSPECIFIED = 0;
-  RECIPE_BATCH_KIND_SNAPSHOT = 1;
-  RECIPE_BATCH_KIND_LIVE = 2;
+message PresentProjectRepositoryDiffsRequest {
+  string root = 1;
 }
 
-message PinnedRange {
-  string base_commit_id = 1;
-  string head_commit_id = 2;
-}
+message ViewerOpened {}
+message ViewerUnavailable {}
 
-message UnpushedRecipeTarget {
-  optional PinnedRange pinned = 1;
-}
+message DiffPresentation {
+  repeated Note notes = 1;
 
-message BaseRecipeTarget {
-  string revision = 1;
-}
-
-message RangeRecipeTarget {
-  string range = 1;
-  optional PinnedRange pinned = 2;
-}
-
-message MergeRecipeTarget {
-  string base_revision = 1;
-  optional PinnedRange pinned = 2;
-}
-
-message LastRecipeTarget {
-  uint32 commit_count = 1;
-  optional PinnedRange pinned = 2;
-}
-
-message RecipeTarget {
-  oneof selection {
-    UnpushedRecipeTarget unpushed = 1;
-    BaseRecipeTarget base = 2;
-    RangeRecipeTarget range = 3;
-    MergeRecipeTarget merge = 4;
-    LastRecipeTarget last = 5;
+  oneof outcome {
+    ViewerOpened viewer_opened = 2;
+    Artifact rendered = 3;
+    Empty empty = 4;
+    ViewerUnavailable viewer_unavailable = 5;
   }
 }
 
-message DiffRecipe {
-  RecipeTarget target = 1;
+message PresentDiffResponse {
+  DiffPresentation presentation = 1;
 }
 
-message MergeDiffRecipe {
-  optional string base_revision = 1;
-  optional PinnedRange pinned = 2;
+message PresentMergeDiffResponse {
+  DiffPresentation presentation = 1;
 }
 
-message Recipe {
-  string repository_root = 1;
-  oneof operation {
-    DiffRecipe diff = 2;
-    MergeDiffRecipe merge_diff = 3;
-  }
-  optional string name = 4;
+message PresentSubrepositoryDiffsResponse {
+  DiffPresentation presentation = 1;
 }
 
-message RecipeBatch {
-  string batch_id = 1;
-  RecipeBatchKind kind = 2;
-  repeated Recipe recipes = 3;
-}
-
-message PrepareDiffResponse {
-  RecipeBatch batch = 1;
-}
-
-message PrepareMergeDiffResponse {
-  RecipeBatch batch = 1;
-}
-
-message PrepareSubrepositoryDiffsResponse {
-  RecipeBatch batch = 1;
-}
-
-message PrepareProjectRepositoryDiffsResponse {
-  RecipeBatch batch = 1;
+message PresentProjectRepositoryDiffsResponse {
+  DiffPresentation presentation = 1;
 }
 
 message RenderSubrepositoryDiffsRequest {

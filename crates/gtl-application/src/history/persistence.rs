@@ -6,9 +6,10 @@
 use std::num::NonZeroU32;
 
 use gtl_models::{paths::ProjectName, timestamps::MachineTimestamp, viewer::RenderHistoryId};
-use gtl_wire::recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
 #[cfg(test)]
 use rusqlite::Connection;
+
+use crate::recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
 /// The `project_sources.kind` value for a repository addressed by directory.
 pub(super) const SOURCE_KIND_DIRECTORY: &str = "directory";

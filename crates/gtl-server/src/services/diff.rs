@@ -16,7 +16,10 @@ use gtl_application::{
         },
         select_unpushed_repositories::{self, SelectUnpushedRepositories},
     },
-    recipes::build_recipe::{self, BuildRecipe},
+    recipes::{
+        Recipe, RecipeBatch, RecipeBatchKind, RecipeOp, RecipeTarget,
+        build_recipe::{self, BuildRecipe},
+    },
     repositories::{
         build_recipes::BuildRepositoryRecipes,
         find_repository_roots::{self, FindRepositoryRoots},
@@ -26,17 +29,14 @@ use gtl_models::{
     git::GitRevision, paths::ProjectName, recipes::RecipeBatchId,
     repository::traversal::RepositoryTraversalScope,
 };
-use gtl_wire::{
-    recipes::{PinnedRange, Recipe, RecipeOp, RecipeSource, RecipeTarget},
-    v1::{self, diff_service_server::DiffService},
-};
+use gtl_wire::v1::{self, diff_service_server::DiffService};
 use tonic::{Request, Response, Status};
 
 use super::{
     application_notes, artifact, project_client_error, repository_root, required, run_blocking,
     unexpected, user_settings_load_error,
 };
-use crate::state::AppState;
+use crate::{state::AppState, viewer_process, viewer_runtime};
 
 #[derive(Clone)]
 pub(crate) struct DiffApi {
@@ -51,11 +51,16 @@ impl DiffApi {
 
 #[tonic::async_trait]
 impl DiffService for DiffApi {
-    async fn prepare_diff(
+    async fn present_diff(
         &self,
-        request: Request<v1::PrepareDiffRequest>,
-    ) -> Result<Response<v1::PrepareDiffResponse>, Status> {
+        request: Request<v1::PresentDiffRequest>,
+    ) -> Result<Response<v1::PresentDiffResponse>, Status> {
         let request = request.into_inner();
+        let render_request = v1::RenderDiffRequest {
+            working_directory: request.working_directory.clone(),
+            target: request.target.clone(),
+            name: request.name.clone(),
+        };
         let operation = RecipeOp::Diff {
             target: viewer_recipe_target(request.target)?,
         };
@@ -71,18 +76,32 @@ impl DiffService for DiffApi {
         let state = self.state.clone();
         let recipe = run_blocking(move || build_recipe::execute(request, &state.git))
             .await?
-            .map_err(|error| unexpected(error, "prepare diff recipe"))?;
+            .map_err(|error| unexpected(error, "build diff recipe"))?;
+        let presentation = match present_snapshot(&self.state, vec![recipe])? {
+            SnapshotPresentation::Ready(presentation) => presentation,
+            SnapshotPresentation::ViewerUnavailable(error) => {
+                let response = self
+                    .render_diff(Request::new(render_request))
+                    .await?
+                    .into_inner();
+                presentation_from_render_diff(response, &error)
+            }
+        };
 
-        Ok(Response::new(v1::PrepareDiffResponse {
-            batch: Some(prepared_batch(vec![recipe])),
+        Ok(Response::new(v1::PresentDiffResponse {
+            presentation: Some(presentation),
         }))
     }
 
-    async fn prepare_merge_diff(
+    async fn present_merge_diff(
         &self,
-        request: Request<v1::PrepareMergeDiffRequest>,
-    ) -> Result<Response<v1::PrepareMergeDiffResponse>, Status> {
+        request: Request<v1::PresentMergeDiffRequest>,
+    ) -> Result<Response<v1::PresentMergeDiffResponse>, Status> {
         let request = request.into_inner();
+        let render_request = v1::RenderMergeDiffRequest {
+            working_directory: request.working_directory.clone(),
+            base_revision: request.base_revision.clone(),
+        };
         let base = optional_revision(request.base_revision, "base_revision")?;
         let request = BuildRecipe {
             repo_path: super::absolute_path(request.working_directory, "working_directory")?,
@@ -92,20 +111,35 @@ impl DiffService for DiffApi {
         let state = self.state.clone();
         let recipe = run_blocking(move || build_recipe::execute(request, &state.git))
             .await?
-            .map_err(|error| unexpected(error, "prepare merge diff recipe"))?;
+            .map_err(|error| unexpected(error, "build merge diff recipe"))?;
+        let presentation = match present_snapshot(&self.state, vec![recipe])? {
+            SnapshotPresentation::Ready(presentation) => presentation,
+            SnapshotPresentation::ViewerUnavailable(error) => {
+                let response = self
+                    .render_merge_diff(Request::new(render_request))
+                    .await?
+                    .into_inner();
+                presentation_from_render_merge(response, &error)
+            }
+        };
 
-        Ok(Response::new(v1::PrepareMergeDiffResponse {
-            batch: Some(prepared_batch(vec![recipe])),
+        Ok(Response::new(v1::PresentMergeDiffResponse {
+            presentation: Some(presentation),
         }))
     }
 
-    async fn prepare_subrepository_diffs(
+    async fn present_subrepository_diffs(
         &self,
-        request: Request<v1::PrepareSubrepositoryDiffsRequest>,
-    ) -> Result<Response<v1::PrepareSubrepositoryDiffsResponse>, Status> {
+        request: Request<v1::PresentSubrepositoryDiffsRequest>,
+    ) -> Result<Response<v1::PresentSubrepositoryDiffsResponse>, Status> {
         use gtl_application::repositories::build_recipes;
 
         let request = request.into_inner();
+        let render_request = v1::RenderSubrepositoryDiffsRequest {
+            root: request.root.clone(),
+            target: request.target.clone(),
+            include_linked_worktrees: request.include_linked_worktrees,
+        };
         let operation = RecipeOp::Diff {
             target: viewer_recipe_target(request.target)?,
         };
@@ -117,19 +151,30 @@ impl DiffService for DiffApi {
         let state = self.state.clone();
         let recipes = run_blocking(move || build_recipes::execute(request, &state.git))
             .await?
-            .map_err(|error| unexpected(error, "prepare subrepositories diff recipes"))?;
+            .map_err(|error| unexpected(error, "build subrepositories diff recipes"))?;
+        let presentation = match present_snapshot(&self.state, recipes)? {
+            SnapshotPresentation::Ready(presentation) => presentation,
+            SnapshotPresentation::ViewerUnavailable(error) => {
+                let response = self
+                    .render_subrepository_diffs(Request::new(render_request))
+                    .await?
+                    .into_inner();
+                presentation_from_render_subrepositories(response, &error)
+            }
+        };
 
-        Ok(Response::new(v1::PrepareSubrepositoryDiffsResponse {
-            batch: Some(prepared_batch(recipes)),
+        Ok(Response::new(v1::PresentSubrepositoryDiffsResponse {
+            presentation: Some(presentation),
         }))
     }
 
-    async fn prepare_project_repository_diffs(
+    async fn present_project_repository_diffs(
         &self,
-        _request: Request<v1::PrepareProjectRepositoryDiffsRequest>,
-    ) -> Result<Response<v1::PrepareProjectRepositoryDiffsResponse>, Status> {
+        request: Request<v1::PresentProjectRepositoryDiffsRequest>,
+    ) -> Result<Response<v1::PresentProjectRepositoryDiffsResponse>, Status> {
         use gtl_application::projects::build_recipes;
 
+        let root = request.into_inner().root;
         let repos = self
             .state
             .projects
@@ -145,10 +190,22 @@ impl DiffService for DiffApi {
         let state = self.state.clone();
         let recipes = run_blocking(move || build_recipes::execute(request, &state.git))
             .await?
-            .map_err(|error| unexpected(error, "prepare project diff recipes"))?;
+            .map_err(|error| unexpected(error, "build project diff recipes"))?;
+        let presentation = match present_snapshot(&self.state, recipes)? {
+            SnapshotPresentation::Ready(presentation) => presentation,
+            SnapshotPresentation::ViewerUnavailable(error) => {
+                let response = self
+                    .render_project_repository_diffs(Request::new(
+                        v1::RenderProjectRepositoryDiffsRequest { root },
+                    ))
+                    .await?
+                    .into_inner();
+                presentation_from_render_project(response, &error)
+            }
+        };
 
-        Ok(Response::new(v1::PrepareProjectRepositoryDiffsResponse {
-            batch: Some(prepared_batch(recipes)),
+        Ok(Response::new(v1::PresentProjectRepositoryDiffsResponse {
+            presentation: Some(presentation),
         }))
     }
 
@@ -367,73 +424,124 @@ const fn traversal_scope(include_linked_worktrees: bool) -> RepositoryTraversalS
     }
 }
 
-fn prepared_batch(recipes: Vec<Recipe>) -> v1::RecipeBatch {
-    v1::RecipeBatch {
-        batch_id: RecipeBatchId::generate().to_string(),
-        kind: v1::RecipeBatchKind::Snapshot as i32,
-        recipes: recipes.into_iter().map(recipe).collect(),
+enum SnapshotPresentation {
+    Ready(v1::DiffPresentation),
+    ViewerUnavailable(viewer_process::OpenViewerError),
+}
+
+fn present_snapshot(
+    state: &AppState,
+    recipes: Vec<Recipe>,
+) -> Result<SnapshotPresentation, Status> {
+    if recipes.is_empty() {
+        return Ok(SnapshotPresentation::Ready(v1::DiffPresentation {
+            notes: Vec::new(),
+            outcome: Some(v1::diff_presentation::Outcome::Empty(v1::Empty {})),
+        }));
+    }
+    if let Err(error) = viewer_process::open() {
+        tracing::warn!(error = ?error, "desktop viewer could not be opened");
+        return Ok(SnapshotPresentation::ViewerUnavailable(error));
+    }
+    viewer_runtime::open_recipe_batch(
+        state,
+        RecipeBatch {
+            batch_id: RecipeBatchId::generate(),
+            kind: RecipeBatchKind::Snapshot,
+            recipes,
+        },
+    )
+    .map_err(|error| unexpected(error, "open viewer recipe batch"))?;
+    Ok(SnapshotPresentation::Ready(v1::DiffPresentation {
+        notes: Vec::new(),
+        outcome: Some(v1::diff_presentation::Outcome::ViewerOpened(
+            v1::ViewerOpened {},
+        )),
+    }))
+}
+
+fn viewer_fallback_note(error: &viewer_process::OpenViewerError) -> v1::Note {
+    v1::Note {
+        level: v1::NoteLevel::Warning as i32,
+        text: format!("diff: viewer unavailable ({error}); rendered an artifact instead"),
     }
 }
 
-fn recipe(recipe: Recipe) -> v1::Recipe {
-    let RecipeSource::LocalRepo(repository_root) = recipe.source;
-    let operation = match recipe.op {
-        RecipeOp::Diff { target } => v1::recipe::Operation::Diff(v1::DiffRecipe {
-            target: Some(recipe_target(target)),
+fn presentation_from_render_diff(
+    response: v1::RenderDiffResponse,
+    error: &viewer_process::OpenViewerError,
+) -> v1::DiffPresentation {
+    v1::DiffPresentation {
+        notes: prepend_fallback_note(response.notes, error),
+        outcome: response.outcome.map(|outcome| match outcome {
+            v1::render_diff_response::Outcome::Rendered(artifact) => {
+                v1::diff_presentation::Outcome::Rendered(artifact)
+            }
+            v1::render_diff_response::Outcome::Empty(empty) => {
+                v1::diff_presentation::Outcome::Empty(empty)
+            }
         }),
-        RecipeOp::MergeDiff { base, pinned } => {
-            v1::recipe::Operation::MergeDiff(v1::MergeDiffRecipe {
-                base_revision: base.map(|revision| revision.to_string()),
-                pinned: pinned.as_ref().map(pinned_range),
-            })
-        }
-    };
-    v1::Recipe {
-        repository_root: repository_root.to_string(),
-        operation: Some(operation),
-        name: recipe.name.map(|name| name.to_string()),
     }
 }
 
-fn recipe_target(target: RecipeTarget) -> v1::RecipeTarget {
-    let selection = match target {
-        RecipeTarget::Unpushed { pinned } => {
-            v1::recipe_target::Selection::Unpushed(v1::UnpushedRecipeTarget {
-                pinned: pinned.as_ref().map(pinned_range),
-            })
-        }
-        RecipeTarget::Base { rev } => v1::recipe_target::Selection::Base(v1::BaseRecipeTarget {
-            revision: rev.to_string(),
+fn presentation_from_render_merge(
+    response: v1::RenderMergeDiffResponse,
+    error: &viewer_process::OpenViewerError,
+) -> v1::DiffPresentation {
+    v1::DiffPresentation {
+        notes: prepend_fallback_note(response.notes, error),
+        outcome: response.outcome.map(|outcome| match outcome {
+            v1::render_merge_diff_response::Outcome::Rendered(artifact) => {
+                v1::diff_presentation::Outcome::Rendered(artifact)
+            }
+            v1::render_merge_diff_response::Outcome::Empty(empty) => {
+                v1::diff_presentation::Outcome::Empty(empty)
+            }
         }),
-        RecipeTarget::Range { range, pinned } => {
-            v1::recipe_target::Selection::Range(v1::RangeRecipeTarget {
-                range: range.to_string(),
-                pinned: pinned.as_ref().map(pinned_range),
-            })
-        }
-        RecipeTarget::Merge { base, pinned } => {
-            v1::recipe_target::Selection::Merge(v1::MergeRecipeTarget {
-                base_revision: base.to_string(),
-                pinned: pinned.as_ref().map(pinned_range),
-            })
-        }
-        RecipeTarget::Last { count, pinned } => {
-            v1::recipe_target::Selection::Last(v1::LastRecipeTarget {
-                commit_count: count.get(),
-                pinned: pinned.as_ref().map(pinned_range),
-            })
-        }
-    };
-    v1::RecipeTarget {
-        selection: Some(selection),
     }
 }
 
-fn pinned_range(range: &PinnedRange) -> v1::PinnedRange {
-    v1::PinnedRange {
-        base_commit_id: range.base.to_string(),
-        head_commit_id: range.head.to_string(),
+fn presentation_from_render_subrepositories(
+    response: v1::RenderSubrepositoryDiffsResponse,
+    error: &viewer_process::OpenViewerError,
+) -> v1::DiffPresentation {
+    v1::DiffPresentation {
+        notes: prepend_fallback_note(response.notes, error),
+        outcome: response.outcome.map(|outcome| match outcome {
+            v1::render_subrepository_diffs_response::Outcome::Rendered(artifact) => {
+                v1::diff_presentation::Outcome::Rendered(artifact)
+            }
+            v1::render_subrepository_diffs_response::Outcome::Empty(empty) => {
+                v1::diff_presentation::Outcome::Empty(empty)
+            }
+        }),
     }
+}
+
+fn presentation_from_render_project(
+    response: v1::RenderProjectRepositoryDiffsResponse,
+    error: &viewer_process::OpenViewerError,
+) -> v1::DiffPresentation {
+    v1::DiffPresentation {
+        notes: prepend_fallback_note(response.notes, error),
+        outcome: response.outcome.map(|outcome| match outcome {
+            v1::render_project_repository_diffs_response::Outcome::Rendered(artifact) => {
+                v1::diff_presentation::Outcome::Rendered(artifact)
+            }
+            v1::render_project_repository_diffs_response::Outcome::Empty(empty) => {
+                v1::diff_presentation::Outcome::Empty(empty)
+            }
+        }),
+    }
+}
+
+fn prepend_fallback_note(
+    notes: Vec<v1::Note>,
+    error: &viewer_process::OpenViewerError,
+) -> Vec<v1::Note> {
+    std::iter::once(viewer_fallback_note(error))
+        .chain(notes)
+        .collect()
 }
 
 fn render_error(error: RenderDiffError) -> Status {
@@ -552,20 +660,11 @@ mod tests {
     }
 
     #[test]
-    fn prepared_batch_uses_typed_recipe_fields() {
-        let batch = prepared_batch(vec![Recipe {
-            source: RecipeSource::LocalRepo(repository_root("/repo".into(), "fixture").unwrap()),
-            op: RecipeOp::Diff {
-                target: RecipeTarget::Unpushed { pinned: None },
-            },
-            name: Some(ProjectName::try_new("repo").unwrap()),
-        }]);
+    fn fallback_note_explains_that_the_artifact_was_rendered() {
+        let note = viewer_fallback_note(&viewer_process::OpenViewerError::NotInstalled);
 
-        assert_eq!(batch.kind(), v1::RecipeBatchKind::Snapshot);
-        assert_eq!(batch.recipes[0].repository_root, "/repo");
-        assert!(matches!(
-            batch.recipes[0].operation,
-            Some(v1::recipe::Operation::Diff(_))
-        ));
+        assert_eq!(note.level(), v1::NoteLevel::Warning);
+        assert!(note.text.contains("viewer unavailable"));
+        assert!(note.text.contains("rendered an artifact"));
     }
 }

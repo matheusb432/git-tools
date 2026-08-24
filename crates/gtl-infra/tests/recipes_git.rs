@@ -2,10 +2,12 @@
 
 use std::{path::Path, process::Command};
 
-use gtl_application::repositories::build_recipes::{self, BuildRepositoryRecipes};
+use gtl_application::{
+    recipes::{RecipeOp, RecipeTarget},
+    repositories::build_recipes::{self, BuildRepositoryRecipes},
+};
 use gtl_infra::git_client::HybridGitClient;
 use gtl_models::repository::traversal::RepositoryTraversalScope;
-use gtl_wire::recipes::{RecipeOp, RecipeTarget};
 
 fn git(repository: &Path, arguments: &[&str]) -> String {
     let output = Command::new("git")

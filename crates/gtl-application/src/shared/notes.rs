@@ -1,5 +1,5 @@
 //! User-facing messages a slice wants surfaced, carried out of the core as data
-//! so the caller (cli today, daemon client tomorrow) decides how to render them.
+//! so each transport caller decides how to render them.
 
 /// Where a [`Note`] should land when a terminal caller prints it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

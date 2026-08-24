@@ -1,6 +1,5 @@
 use gtl_models::{live_views::LiveSource, paths::ProjectName, timestamps::MachineTimestamp};
-#[cfg(test)]
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 
 /// One saved live view, keyed by its source identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,6 +8,14 @@ pub struct LiveViewRecord {
     pub display_name: ProjectName,
     pub created_at: MachineTimestamp,
     pub last_opened_at: Option<MachineTimestamp>,
+}
+
+pub(super) fn delete_live_view(connection: &Connection, source: &LiveSource) -> anyhow::Result<()> {
+    let mut statement = connection
+        .prepare_cached("DELETE FROM live_views WHERE source_kind = ?1 AND source_value = ?2")?;
+    let source_value = source.value();
+    statement.execute(params![source.kind(), source_value])?;
+    Ok(())
 }
 
 #[cfg(test)]

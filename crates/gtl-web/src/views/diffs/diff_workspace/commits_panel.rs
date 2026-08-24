@@ -21,6 +21,10 @@ pub fn CommitsPanel(
     test_id: Option<String>,
     onselect: Option<EventHandler<CommitId>>,
     onclear: Option<EventHandler<()>>,
+    #[props(default)] loading: bool,
+    load_error: Option<String>,
+    #[props(default)] has_more: bool,
+    onloadmore: Option<EventHandler<()>>,
 ) -> Element {
     let selected_id = match &view.commit_selection {
         ViewerCommitSelection::None => None,
@@ -32,12 +36,20 @@ pub fn CommitsPanel(
         &view.commit_selection,
         ViewerCommitSelection::Pending { .. }
     );
-    let onselect = onselect.filter(|_| commit_selection_enabled(view.commits.len()));
+    let onselect = onselect.filter(|_| commit_selection_enabled(view.commit_count));
 
     rsx! {
         ScrollArea {
             class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
             "data-testid": test_id,
+            onscroll: move |event: ScrollEvent| {
+                if has_more
+                    && scroll_is_near_bottom(&event.data())
+                    && let Some(onloadmore) = onloadmore
+                {
+                    onloadmore.call(());
+                }
+            },
             CommitsPanelHeader {
                 label: view.commits_label.clone(),
                 selection_active: selected_id.is_some(),
@@ -47,7 +59,7 @@ pub fn CommitsPanel(
             if let ViewerCommitSelection::Error { message, .. } = &view.commit_selection {
                 CommitSelectionError { message: message.clone() }
             }
-            if view.commits.is_empty() {
+            if view.commit_count == 0 {
                 EmptyNotice { "no commits in range" }
             }
             for commit in &view.commits {
@@ -64,8 +76,43 @@ pub fn CommitsPanel(
                     }
                 }
             }
+            if loading {
+                p { class: "px-2 py-3 text-center text-ink-3", role: "status", "Loading commits..." }
+            } else if let Some(message) = load_error {
+                div {
+                    class: "mx-1 mt-2 rounded-sm border border-del-line bg-del-bg px-2 py-2 text-del",
+                    role: "alert",
+                    p { "{message}" }
+                    if let Some(onloadmore) = onloadmore {
+                        Button {
+                            class: "mt-2",
+                            size: ButtonSize::Small,
+                            variant: ButtonVariant::Failure,
+                            onclick: move |_| onloadmore.call(()),
+                            "Retry"
+                        }
+                    }
+                }
+            } else if has_more {
+                if let Some(onloadmore) = onloadmore {
+                    Button {
+                        class: "mx-auto mt-2",
+                        size: ButtonSize::Small,
+                        variant: ButtonVariant::Ghost,
+                        onclick: move |_| onloadmore.call(()),
+                        "Load more"
+                    }
+                }
+            }
         }
     }
+}
+
+fn scroll_is_near_bottom(scroll: &ScrollData) -> bool {
+    const LOAD_AHEAD_PIXELS: f64 = 240.0;
+
+    scroll.scroll_top() + f64::from(scroll.client_height())
+        >= f64::from(scroll.scroll_height()) - LOAD_AHEAD_PIXELS
 }
 
 #[component]

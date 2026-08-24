@@ -3,9 +3,12 @@
 use std::path::PathBuf;
 
 use gtl_models::paths::ProjectName;
-use gtl_wire::recipes::{Recipe, RecipeOp};
 
-use crate::{ports::GitClient, recipes::build_resolved, repositories::resolve_repository_root};
+use crate::{
+    ports::GitClient,
+    recipes::{Recipe, RecipeOp, build_resolved},
+    repositories::resolve_repository_root,
+};
 
 /// Requests one complete snapshot recipe for a repository path.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,20 +59,18 @@ pub fn execute(query: PinRecipe, git: &impl GitClient) -> Result<Recipe, PinReci
 mod tests {
     use std::num::NonZeroU32;
 
-    use gtl_wire::recipes::{RecipeOp, RecipeSource, RecipeTarget};
-
     use super::PinRecipe;
-    use crate::{recipes::pin_recipe, utils::ScriptedGitClient};
+    use crate::{
+        recipes::{RecipeOp, RecipeSource, RecipeTarget, pin_recipe},
+        utils::ScriptedGitClient,
+    };
 
     const BASE_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const HEAD_ID: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     const EXISTING_BASE_ID: &str = "cccccccccccccccccccccccccccccccccccccccc";
     const EXISTING_HEAD_ID: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
-    fn pin(
-        operation: RecipeOp,
-        outputs: Vec<crate::utils::GitResponse>,
-    ) -> gtl_wire::recipes::Recipe {
+    fn pin(operation: RecipeOp, outputs: Vec<crate::utils::GitResponse>) -> crate::recipes::Recipe {
         pin_recipe::execute(
             PinRecipe {
                 repo_path: "/work/repo/nested".into(),
@@ -99,7 +100,7 @@ mod tests {
 
         assert_eq!(
             recipe,
-            gtl_wire::recipes::Recipe {
+            crate::recipes::Recipe {
                 source: RecipeSource::LocalRepo(crate::utils::repository_root("/work/repo")),
                 op: RecipeOp::Diff {
                     target: RecipeTarget::Range {

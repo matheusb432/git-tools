@@ -1,82 +1,80 @@
 mod cache;
-mod pending;
 
 use std::sync::Arc;
 
-#[cfg(feature = "benchmark-support")]
 pub use cache::{CacheDisposition, CachedView, ViewCacheWeight, WeightedViewCache};
-#[cfg(not(feature = "benchmark-support"))]
-pub(crate) use cache::{CachedView, ViewCacheWeight, WeightedViewCache};
-use gtl_application::{
-    diffs::View,
-    viewer::initial_recipe_label::{self, InitialRecipeLabel},
-};
 use gtl_models::{
     diffs::{Commit, CommitId},
     live_views::LiveSource,
     recipes::RecipeBatchId,
     viewer::{
-        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerShellRevision, ViewerTab,
-        ViewerTabId, ViewerTabKind, ViewerTabState,
+        ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTab, ViewerTabId, ViewerTabKind,
+        ViewerTabState, ViewerVersion,
     },
 };
-use gtl_wire::recipes::{Recipe, RecipeSource};
-pub(crate) use pending::{PendingRecipes, PendingRecipesError};
+
+use crate::{
+    diffs::View,
+    recipes::{Recipe, RecipeSource},
+    viewer::initial_recipe_label::{self, InitialRecipeLabel},
+};
+
+pub const DEFAULT_VIEW_CACHE_WEIGHT: ViewCacheWeight = ViewCacheWeight::new(128 * 1024 * 1024);
 
 /// Marks a tab whose view is still being computed.
-pub(crate) const RENDER_PENDING_REASON: &str = "render pending";
+pub const RENDER_PENDING_REASON: &str = "render pending";
 
 /// A generation token authorizing publication for one still-current compute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ComputeTicket {
-    pub(crate) tab_id: ViewerTabId,
-    pub(crate) generation: ViewerRangeGeneration,
+pub struct ComputeTicket {
+    pub tab_id: ViewerTabId,
+    pub generation: ViewerRangeGeneration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct CommitPatchTicket {
-    pub(crate) tab_id: ViewerTabId,
-    pub(crate) range_generation: ViewerRangeGeneration,
-    pub(crate) selection_generation: ViewerSelectionGeneration,
+pub struct CommitPatchTicket {
+    pub tab_id: ViewerTabId,
+    pub range_generation: ViewerRangeGeneration,
+    pub selection_generation: ViewerSelectionGeneration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ActiveContentIdentity {
+pub struct ActiveContentIdentity {
     tab_id: ViewerTabId,
     range_generation: ViewerRangeGeneration,
     selection_generation: ViewerSelectionGeneration,
 }
 
 impl ActiveContentIdentity {
-    pub(crate) const fn tab_id(self) -> ViewerTabId {
+    pub const fn tab_id(self) -> ViewerTabId {
         self.tab_id
     }
 
-    pub(crate) const fn range_generation(self) -> ViewerRangeGeneration {
+    pub const fn range_generation(self) -> ViewerRangeGeneration {
         self.range_generation
     }
 
-    pub(crate) const fn selection_generation(self) -> ViewerSelectionGeneration {
+    pub const fn selection_generation(self) -> ViewerSelectionGeneration {
         self.selection_generation
     }
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ActiveContentSnapshot {
+pub struct ActiveContentSnapshot {
     identity: ActiveContentIdentity,
     view: Arc<View>,
 }
 
 impl ActiveContentSnapshot {
-    pub(crate) const fn identity(&self) -> ActiveContentIdentity {
+    pub const fn identity(&self) -> ActiveContentIdentity {
         self.identity
     }
 
-    pub(crate) fn view(&self) -> &View {
+    pub fn view(&self) -> &View {
         &self.view
     }
 
-    pub(crate) fn shared_view(&self) -> Arc<View> {
+    pub fn shared_view(&self) -> Arc<View> {
         Arc::clone(&self.view)
     }
 }
@@ -98,66 +96,70 @@ enum CommitSelection {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum CommitSelectionSnapshot {
+pub enum CommitSelectionSnapshot {
     None,
     Pending { id: CommitId },
     Ready { id: CommitId, view: Arc<View> },
     Error { id: CommitId, reason: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BeginCommitSelectionError {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum BeginCommitSelectionError {
+    #[error("viewer tab is not available")]
     UnknownTab,
+    #[error("viewer range changed")]
     StaleRange,
+    #[error("commit is not available in this range")]
     UnknownCommit,
+    #[error("another commit selection is pending")]
     SelectionPending,
 }
 
 /// Whether a compute result was current enough to mutate the session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PublishOutcome {
+pub enum PublishOutcome {
     Published,
     Stale,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CloseOutcome {
+pub enum CloseOutcome {
     ActiveChanged,
     ActiveUnchanged,
 }
 
 /// Session-owned metadata for one recipe tab.
 #[derive(Debug, Clone)]
-pub(crate) struct SessionTab {
-    pub(crate) tab: ViewerTab,
-    pub(crate) recipe: Recipe,
-    pub(crate) batch_id: RecipeBatchId,
+pub struct SessionTab {
+    pub tab: ViewerTab,
+    pub recipe: Recipe,
+    pub batch_id: RecipeBatchId,
     generation: ViewerRangeGeneration,
     selection_generation: ViewerSelectionGeneration,
     selection: CommitSelection,
 }
 
 /// Authoritative recipe tabs plus their separately bounded computed views.
-pub(crate) struct ViewerSession {
+pub struct ViewerSession {
     tabs: Vec<SessionTab>,
     cache: WeightedViewCache,
     active: Option<ViewerTabId>,
     next_id: Option<u64>,
-    revision: ViewerShellRevision,
+    version: ViewerVersion,
 }
 
 impl ViewerSession {
-    pub(crate) fn new(max_cache_weight: ViewCacheWeight) -> Self {
+    pub fn new(max_cache_weight: ViewCacheWeight) -> Self {
         Self {
             tabs: Vec::new(),
             cache: WeightedViewCache::new(max_cache_weight),
             active: None,
             next_id: Some(1),
-            revision: ViewerShellRevision::default(),
+            version: ViewerVersion::default(),
         }
     }
 
-    pub(crate) fn open(
+    pub fn open(
         &mut self,
         recipe: Recipe,
         batch_id: RecipeBatchId,
@@ -196,7 +198,7 @@ impl ViewerSession {
             existing.batch_id = batch_id;
             self.active = Some(existing.tab.id());
             let id = existing.tab.id();
-            self.bump_revision();
+            self.bump_version();
             return Some(id);
         }
 
@@ -220,11 +222,11 @@ impl ViewerSession {
             selection: CommitSelection::None,
         });
         self.active = Some(id);
-        self.bump_revision();
+        self.bump_version();
         Some(id)
     }
 
-    pub(crate) fn begin_compute(&mut self, id: ViewerTabId) -> Option<ComputeTicket> {
+    pub fn begin_compute(&mut self, id: ViewerTabId) -> Option<ComputeTicket> {
         let tab = self.tabs.iter_mut().find(|tab| tab.tab.id() == id)?;
         self.cache.remove(id);
         // Tickets are process-local and short-lived; wrapping would require 2^64 mutations while
@@ -241,14 +243,14 @@ impl ViewerSession {
             },
         );
         let generation = tab.generation;
-        self.bump_revision();
+        self.bump_version();
         Some(ComputeTicket {
             tab_id: id,
             generation,
         })
     }
 
-    pub(crate) fn publish_labeled_if_current(
+    pub fn publish_labeled_if_current(
         &mut self,
         ticket: ComputeTicket,
         value: CachedView,
@@ -267,11 +269,11 @@ impl ViewerSession {
 
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), ViewerTabState::Ready);
         self.cache.insert(ticket.tab_id, value);
-        self.bump_revision();
+        self.bump_version();
         PublishOutcome::Published
     }
 
-    pub(crate) fn set_state_if_current(
+    pub fn set_state_if_current(
         &mut self,
         ticket: ComputeTicket,
         state: ViewerTabState,
@@ -288,15 +290,15 @@ impl ViewerSession {
         }
         let label = tab.tab.label().into();
         tab.tab = ViewerTab::new(ticket.tab_id, label, tab.tab.kind(), state);
-        self.bump_revision();
+        self.bump_version();
         PublishOutcome::Published
     }
 
-    pub(crate) fn refresh(&mut self, id: ViewerTabId) -> Option<ComputeTicket> {
+    pub fn refresh(&mut self, id: ViewerTabId) -> Option<ComputeTicket> {
         self.begin_compute(id)
     }
 
-    pub(crate) fn begin_commit_selection(
+    pub fn begin_commit_selection(
         &mut self,
         id: ViewerTabId,
         commit_id: &CommitId,
@@ -343,11 +345,11 @@ impl ViewerSession {
             selection_generation: tab.selection_generation,
         };
         let repo_root = cached.view.repo_root.clone();
-        self.bump_revision();
+        self.bump_version();
         Ok((ticket, repo_root, commit))
     }
 
-    pub(crate) fn publish_commit_patch_if_current(
+    pub fn publish_commit_patch_if_current(
         &mut self,
         ticket: CommitPatchTicket,
         patch: Arc<View>,
@@ -384,11 +386,11 @@ impl ViewerSession {
         };
         debug_assert_eq!(commit.id, selected_id);
         tab.selection = CommitSelection::Ready { commit, transient };
-        self.bump_revision();
+        self.bump_version();
         PublishOutcome::Published
     }
 
-    pub(crate) fn set_commit_patch_error_if_current(
+    pub fn set_commit_patch_error_if_current(
         &mut self,
         ticket: CommitPatchTicket,
         reason: String,
@@ -409,11 +411,11 @@ impl ViewerSession {
             return PublishOutcome::Stale;
         };
         tab.selection = CommitSelection::Error { commit, reason };
-        self.bump_revision();
+        self.bump_version();
         PublishOutcome::Published
     }
 
-    pub(crate) fn clear_commit_selection(&mut self, id: ViewerTabId) -> bool {
+    pub fn clear_commit_selection(&mut self, id: ViewerTabId) -> bool {
         let Some(tab) = self.tabs.iter_mut().find(|tab| tab.tab.id() == id) else {
             return false;
         };
@@ -424,11 +426,11 @@ impl ViewerSession {
         {
             self.cache.insert(id, cached.without_selected());
         }
-        self.bump_revision();
+        self.bump_version();
         true
     }
 
-    pub(crate) fn commit_selection_snapshot(&mut self, id: ViewerTabId) -> CommitSelectionSnapshot {
+    pub fn commit_selection_snapshot(&mut self, id: ViewerTabId) -> CommitSelectionSnapshot {
         let Some(tab) = self.tabs.iter().find(|tab| tab.tab.id() == id) else {
             return CommitSelectionSnapshot::None;
         };
@@ -469,7 +471,7 @@ impl ViewerSession {
         })
     }
 
-    pub(crate) fn close_if_current(&mut self, ticket: ComputeTicket) -> PublishOutcome {
+    pub fn close_if_current(&mut self, ticket: ComputeTicket) -> PublishOutcome {
         if self.current_ticket(ticket.tab_id) != Some(ticket) {
             return PublishOutcome::Stale;
         }
@@ -478,7 +480,7 @@ impl ViewerSession {
         PublishOutcome::Published
     }
 
-    pub(crate) fn close(&mut self, id: ViewerTabId) -> Option<CloseOutcome> {
+    pub fn close(&mut self, id: ViewerTabId) -> Option<CloseOutcome> {
         let index = self.tabs.iter().position(|tab| tab.tab.id() == id)?;
         let outcome = if self.active == Some(id) {
             self.active = self
@@ -493,11 +495,11 @@ impl ViewerSession {
         };
         self.tabs.remove(index);
         self.cache.remove(id);
-        self.bump_revision();
+        self.bump_version();
         Some(outcome)
     }
 
-    pub(crate) fn live_source(&self, id: ViewerTabId) -> Option<LiveSource> {
+    pub fn live_source(&self, id: ViewerTabId) -> Option<LiveSource> {
         let tab = self.tab(id)?;
         if tab.tab.kind() != ViewerTabKind::Live {
             return None;
@@ -507,31 +509,24 @@ impl ViewerSession {
         }
     }
 
-    pub(crate) fn close_live_view(&mut self, id: ViewerTabId, source: &LiveSource) -> bool {
-        if self.live_source(id).as_ref() != Some(source) {
-            return false;
-        }
-        self.close(id).is_some()
-    }
-
-    pub(crate) fn activate(&mut self, id: ViewerTabId) -> bool {
+    pub fn activate(&mut self, id: ViewerTabId) -> bool {
         if self.tabs.iter().any(|tab| tab.tab.id() == id) {
             if self.active != Some(id) {
                 self.clear_every_commit_selection();
             }
             self.active = Some(id);
-            self.bump_revision();
+            self.bump_version();
             true
         } else {
             false
         }
     }
 
-    pub(crate) const fn active(&self) -> Option<ViewerTabId> {
+    pub const fn active(&self) -> Option<ViewerTabId> {
         self.active
     }
 
-    pub(crate) fn active_content_identity(&self) -> Option<ActiveContentIdentity> {
+    pub fn active_content_identity(&self) -> Option<ActiveContentIdentity> {
         let identity = self.active_displayed_content_identity()?;
         let tab = self.tab(identity.tab_id())?;
         if matches!(tab.selection, CommitSelection::Pending { .. }) {
@@ -541,7 +536,7 @@ impl ViewerSession {
         Some(identity)
     }
 
-    pub(crate) fn active_displayed_content_identity(&self) -> Option<ActiveContentIdentity> {
+    pub fn active_displayed_content_identity(&self) -> Option<ActiveContentIdentity> {
         let tab = self.active.and_then(|id| self.tab(id))?;
         if !matches!(tab.tab.state(), ViewerTabState::Ready) {
             return None;
@@ -559,7 +554,7 @@ impl ViewerSession {
         })
     }
 
-    pub(crate) fn active_content_snapshot(&mut self) -> Option<ActiveContentSnapshot> {
+    pub fn active_content_snapshot(&mut self) -> Option<ActiveContentSnapshot> {
         let identity = self.active_content_identity()?;
         let cached = self.cache.get(identity.tab_id()).cloned()?;
         let view = match self.commit_selection_snapshot(identity.tab_id()) {
@@ -571,12 +566,16 @@ impl ViewerSession {
         Some(ActiveContentSnapshot { identity, view })
     }
 
-    pub(crate) const fn revision(&self) -> ViewerShellRevision {
-        self.revision
+    pub const fn version(&self) -> ViewerVersion {
+        self.version
     }
 
-    fn bump_revision(&mut self) {
-        self.revision = self.revision.next();
+    pub fn mark_shell_changed(&mut self) {
+        self.bump_version();
+    }
+
+    fn bump_version(&mut self) {
+        self.version = self.version.next();
     }
 
     fn clear_every_commit_selection(&mut self) {
@@ -591,24 +590,24 @@ impl ViewerSession {
         }
     }
 
-    pub(crate) fn tabs(&self) -> impl ExactSizeIterator<Item = &SessionTab> {
+    pub fn tabs(&self) -> impl ExactSizeIterator<Item = &SessionTab> {
         self.tabs.iter()
     }
 
-    pub(crate) fn tab(&self, id: ViewerTabId) -> Option<&SessionTab> {
+    pub fn tab(&self, id: ViewerTabId) -> Option<&SessionTab> {
         self.tabs.iter().find(|tab| tab.tab.id() == id)
     }
 
     #[cfg(test)]
-    pub(crate) fn cached_view(&mut self, id: ViewerTabId) -> Option<&CachedView> {
+    pub fn cached_view(&mut self, id: ViewerTabId) -> Option<&CachedView> {
         self.cache.get(id)
     }
 
-    pub(crate) fn cached_view_snapshot(&mut self, id: ViewerTabId) -> Option<CachedView> {
+    pub fn cached_view_snapshot(&mut self, id: ViewerTabId) -> Option<CachedView> {
         self.cache.get(id).cloned()
     }
 
-    pub(crate) fn current_ticket(&self, id: ViewerTabId) -> Option<ComputeTicket> {
+    pub fn current_ticket(&self, id: ViewerTabId) -> Option<ComputeTicket> {
         self.tabs
             .iter()
             .find(|tab| tab.tab.id() == id)
@@ -623,14 +622,13 @@ impl ViewerSession {
 mod tests {
     use std::sync::Arc;
 
-    use gtl_application::{
+    use super::*;
+    use crate::{
         diffs::{Cmd, Foot, View},
+        recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
+        utils::{git_head, git_revision, project_name, repository_root},
         viewer::{ViewerTabId, ViewerTabKind},
     };
-    use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
-
-    use super::*;
-    use crate::testing::{git_head, git_revision, project_name, repository_root};
 
     fn cache_weight(bytes: usize) -> ViewCacheWeight {
         ViewCacheWeight::new(bytes)
@@ -697,14 +695,14 @@ mod tests {
             .expect("tab id should be available");
         let ticket = session.begin_compute(id).expect("tab exists");
         let ids = vec![
-            crate::testing::commit_id("a"),
-            crate::testing::commit_id("b"),
+            crate::utils::commit_id_fixture("a"),
+            crate::utils::commit_id_fixture("b"),
         ];
         let mut range = (*view("range")).clone();
         range.commits = ids
             .iter()
             .enumerate()
-            .map(|(index, id)| crate::testing::commit(id.as_ref(), format!("commit {index}")))
+            .map(|(index, id)| crate::utils::commit(id.as_ref(), format!("commit {index}")))
             .collect();
         session.publish_labeled_if_current(
             ticket,
@@ -808,7 +806,7 @@ mod tests {
     #[test]
     fn commit_selection_requires_an_exact_cached_identity() {
         let (mut session, id, _) = ready_session_with_commits();
-        let unknown_id = crate::testing::commit_id("c");
+        let unknown_id = crate::utils::commit_id_fixture("c");
 
         assert_eq!(
             session.begin_commit_selection(id, &unknown_id),
@@ -1015,26 +1013,26 @@ mod tests {
     #[test]
     fn shell_visible_mutations_advance_the_session_revision() {
         let mut session = ViewerSession::new(cache_weight(1024));
-        let start = session.revision();
+        let start = session.version();
         let id = session
             .open(recipe(), batch_id(1), ViewerTabKind::Snapshot)
             .expect("tab id should be available");
-        assert!(session.revision() > start);
-        let opened = session.revision();
+        assert!(session.version() > start);
+        let opened = session.version();
         assert!(session.activate(id));
-        assert!(session.revision() > opened);
+        assert!(session.version() > opened);
         let ticket = session.begin_compute(id).expect("ticket");
-        let pending = session.revision();
+        let pending = session.version();
         session.set_state_if_current(
             ticket,
             ViewerTabState::Error {
                 reason: "safe".into(),
             },
         );
-        assert!(session.revision() > pending);
-        let failed = session.revision();
+        assert!(session.version() > pending);
+        let failed = session.version();
         assert_eq!(session.close(id), Some(CloseOutcome::ActiveChanged));
-        assert!(session.revision() > failed);
+        assert!(session.version() > failed);
     }
 
     #[test]
@@ -1083,7 +1081,7 @@ mod tests {
             source: RecipeSource::LocalRepo(repository_root("/repos/gt")),
             op: RecipeOp::Diff {
                 target: RecipeTarget::Unpushed {
-                    pinned: Some(crate::testing::pinned_range("a", head)),
+                    pinned: Some(crate::utils::pinned_range("a", head)),
                 },
             },
             name: None,

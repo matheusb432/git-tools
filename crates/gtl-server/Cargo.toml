@@ -14,7 +14,10 @@ gtl-infra.workspace = true
 gtl-local-auth.workspace = true
 gtl-models.workspace = true
 gtl-wire = { workspace = true, features = ["grpc"] }
+libc.workspace = true
+prost.workspace = true
 rolling-file.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = [
   "macros",
   "net",
@@ -26,6 +29,8 @@ tokio = { workspace = true, features = [
 tonic = { workspace = true, features = ["router", "transport"] }
 tonic-health.workspace = true
 tonic-reflection.workspace = true
+tonic-web.workspace = true
+tokio-stream.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true
@@ -33,12 +38,10 @@ tracing-subscriber = { workspace = true, features = ["json"] }
 
 [dev-dependencies]
 gtl-application = { workspace = true, features = ["testing"] }
-prost.workspace = true
 prost-types.workspace = true
 serde_json.workspace = true
 serial_test.workspace = true
 tempfile.workspace = true
-tokio-stream.workspace = true
 
 [features]
 benchmark-support = []

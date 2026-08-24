@@ -3467,10 +3467,13 @@ dependencies = [
  "gtl-models",
  "gtl-parser",
  "gtl-wire",
+ "lru",
  "natord",
  "rusqlite",
  "semver",
  "serde",
+ "serde_json",
+ "serde_with",
  "shlex",
  "strum",
  "tempfile",
@@ -3487,10 +3490,12 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "gtl-application",
+ "gtl-infra",
  "gtl-models",
  "gtl-web",
  "gtl-wire",
  "sha2 0.11.0",
+ "tempfile",
 ]
 
 [[package]]
@@ -3501,8 +3506,8 @@ dependencies = [
  "gtl-application",
  "gtl-artifacts",
  "gtl-client",
- "gtl-desktop",
  "gtl-infra",
+ "gtl-local-auth",
  "gtl-models",
  "gtl-parser",
  "gtl-server",
@@ -3514,6 +3519,7 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "toml 1.1.3+spec-1.1.0",
+ "tonic",
 ]
 
 [[package]]
@@ -3533,6 +3539,9 @@ name = "gtl-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "sample_project-client",
+ "sample_project-local-auth",
+ "sample_project-wire",
  "assert_cmd",
  "clap",
  "clap-cargo",
@@ -3548,7 +3557,10 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
+ "tokio-stream",
  "toml 1.1.3+spec-1.1.0",
+ "tonic",
+ "tonic-health",
 ]
 
 [[package]]
@@ -3556,12 +3568,14 @@ name = "gtl-client"
 version = "0.1.0"
 dependencies = [
  "gtl-local-auth",
+ "gtl-models",
  "gtl-wire",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tonic",
  "tonic-health",
+ "tonic-web-wasm-client",
 ]
 
 [[package]]
@@ -3569,18 +3583,13 @@ name = "gtl-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "gtl-application",
- "gtl-artifacts",
- "gtl-infra",
- "gtl-models",
- "gtl-wire",
- "lru",
+ "gtl-local-auth",
  "raw-window-handle",
+ "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
- "tempfile",
  "toml 1.1.3+spec-1.1.0",
  "x11-dl",
 ]
@@ -3684,17 +3693,20 @@ dependencies = [
  "gtl-local-auth",
  "gtl-models",
  "gtl-wire",
+ "libc",
  "prost",
  "prost-types",
  "rolling-file",
  "serde_json",
  "serial_test",
  "tempfile",
+ "thiserror 2.0.19",
  "tokio",
  "tokio-stream",
  "tonic",
  "tonic-health",
  "tonic-reflection",
+ "tonic-web",
  "tower-http 0.7.0",
  "tracing",
  "tracing-appender",
@@ -3709,11 +3721,10 @@ dependencies = [
  "dioxus-primitives",
  "dioxus-sdk-time",
  "dioxus-ssr",
+ "gtl-client",
  "gtl-models",
- "gtl-parser",
  "gtl-web-contracts",
  "gtl-wire",
- "js-sys",
  "lucide-dioxus",
  "serde",
  "serde-wasm-bindgen",
@@ -3732,13 +3743,11 @@ version = "0.1.0"
 name = "gtl-wire"
 version = "0.1.0"
 dependencies = [
- "base64 0.22.1",
  "gtl-models",
  "nutype",
  "prost",
  "serde",
  "serde_json",
- "serde_with",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
@@ -8053,6 +8062,49 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-prost",
+]
+
+[[package]]
+name = "tonic-web"
+version = "0.14.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5e6a1b6319ca4b61a4c0f0c94d439c8f3ed344cca56fe0df40e1fe4be11380b"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "http",
+ "http-body",
+ "pin-project",
+ "tokio-stream",
+ "tonic",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tonic-web-wasm-client"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c0469c353de5f665c95f898074b5b004b500c6722214c3249f1dc79c0a2a3f6"
+dependencies = [
+ "base64 0.22.1",
+ "byteorder",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "httparse",
+ "js-sys",
+ "pin-project",
+ "thiserror 2.0.19",
+ "tonic",
+ "tower-service",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-streams 0.5.0",
+ "web-sys",
 ]
 
 [[package]]

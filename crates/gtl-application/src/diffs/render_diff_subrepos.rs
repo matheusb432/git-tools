@@ -1,9 +1,7 @@
 //! The `render_diff_subrepos` vertical slice: render every discovered repo into
 //! one tabbed artifact, skipping repos whose view is empty (or errors) and
-//! reporting the skip count. Repo *discovery* stays cli-side (filesystem
-//! walking, not a port); the cli's `gtl diff -r` sends the
-//! already-discovered [`RepoRef`]s to the resident daemon over HTTP, which
-//! dispatches this application request directly.
+//! reporting the skip count. The server discovers repositories and dispatches
+//! this application request with the resulting [`RepoRef`] values.
 
 use gtl_models::{
     artifacts::ArtifactDiffIdentity,

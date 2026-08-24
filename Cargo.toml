@@ -56,6 +56,8 @@ gtl-web-contracts = { path = "crates/gtl-web-contracts" }
 
 anyhow = "1"
 sample_project-client = { version = "0.2.0", features = ["grpc"] }
+sample_project-local-auth = { path = "../.sample_project-workspace/crates/sample_project-local-auth" }
+sample_project-wire = { path = "../.sample_project-workspace/crates/sample_project-wire" }
 assert_cmd = "2"
 base64 = "0.22.1"
 cargo_metadata = "0.23.1"
@@ -124,7 +126,10 @@ tonic-health = "0.14.6"
 tonic-prost = "0.14.6"
 tonic-prost-build = "0.14.6"
 tonic-reflection = "0.14.6"
+tonic-web = "0.14.6"
+tonic-web-wasm-client = "0.9.1"
 tower-http = { version = "0.7.0", default-features = false, features = [
+  "cors",
   "trace",
 ] }
 tracing = "0.1"

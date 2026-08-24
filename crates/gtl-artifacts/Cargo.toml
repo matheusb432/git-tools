@@ -15,6 +15,8 @@ sha2.workspace = true
 
 [dev-dependencies]
 flate2.workspace = true
+gtl-infra.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

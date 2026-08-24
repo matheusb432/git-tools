@@ -4,6 +4,7 @@ mod project;
 mod repository;
 mod settings;
 mod tag;
+mod viewer;
 mod worktree;
 
 use std::path::PathBuf;
@@ -22,6 +23,7 @@ pub(crate) use repository::RepositoryApi;
 pub(crate) use settings::SettingsApi;
 pub(crate) use tag::TagApi;
 use tonic::{Code, Status};
+pub(crate) use viewer::ViewerApi;
 pub(crate) use worktree::WorktreeApi;
 
 pub(crate) fn application_notes(notes: &[notes::Note]) -> Vec<v1::Note> {

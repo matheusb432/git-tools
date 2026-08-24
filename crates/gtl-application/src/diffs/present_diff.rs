@@ -2,10 +2,10 @@ use gtl_models::{
     paths::{ProjectName, RepositoryRoot},
     recipes::RecipeBatchId,
 };
-use gtl_wire::recipes::{OpenRecipes, Recipe, RecipeBatchKind, RecipeOp};
 
 use crate::{
     ports::{DiffRenderOutcome, DiffRenderRequest, DiffViewerClient, GitClient},
+    recipes::{Recipe, RecipeBatch, RecipeBatchKind, RecipeOp},
     shared::notes::Note,
 };
 
@@ -117,12 +117,12 @@ fn build_batch(
     batch_id: RecipeBatchId,
     intents: Vec<DiffRecipeIntent>,
     git: &impl GitClient,
-) -> OpenRecipes {
+) -> RecipeBatch {
     let recipes = intents
         .into_iter()
         .map(|intent| build_recipe(intent, git))
         .collect();
-    OpenRecipes {
+    RecipeBatch {
         batch_id,
         kind: RecipeBatchKind::Snapshot,
         recipes,
@@ -136,12 +136,12 @@ fn build_recipe(intent: DiffRecipeIntent, git: &impl GitClient) -> Recipe {
 #[cfg(test)]
 mod tests {
     use gtl_models::recipes::RecipeBatchId;
-    use gtl_wire::recipes::{OpenRecipes, RecipeTarget};
 
     use super::*;
     use crate::{
         diffs::{DiffTargetRequest, present_diff, render_diff::RenderDiff},
         ports::{DiffRenderResponse, DiffViewerClient},
+        recipes::{RecipeBatch, RecipeTarget},
         utils::FakeGitClient,
     };
 
@@ -152,7 +152,7 @@ mod tests {
     }
 
     impl DiffViewerClient for FakeViewer {
-        fn forward(&self, _batch: &OpenRecipes) -> anyhow::Result<()> {
+        fn forward(&self, _batch: &RecipeBatch) -> anyhow::Result<()> {
             match &self.forward_error {
                 Some(error) => anyhow::bail!("{error}"),
                 None => Ok(()),

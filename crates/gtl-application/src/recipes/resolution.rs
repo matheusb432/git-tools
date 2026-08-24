@@ -4,9 +4,12 @@ use gtl_models::{
     git::GitRevision,
     paths::{ProjectName, RepositoryRoot},
 };
-use gtl_wire::recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget};
 
-use crate::{ports::GitClient, shared::git_range_pinning};
+use crate::{
+    ports::GitClient,
+    recipes::{Recipe, RecipeOp, RecipeSource, RecipeTarget},
+    shared::git_range_pinning,
+};
 
 pub(crate) fn build_resolved(
     repo_top: RepositoryRoot,

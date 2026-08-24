@@ -11,11 +11,11 @@ use lucide_dioxus::{
 
 use crate::{
     app::{application_layout::ViewerContext, application_router::Route},
-    entities::diffs::{DiffHistoryApi, history_navigation, recipe_kind_label},
+    entities::diffs::{history_navigation, recipe_kind_label, viewer_server},
     shared::{
-        bridge::ClientApiError,
         browser,
         ui::{Button, ButtonSize, ButtonState, ButtonVariant, ScrollArea, Skeleton},
+        viewer_client::ViewerClientError,
     },
 };
 
@@ -23,7 +23,7 @@ use crate::{
 enum HistoryLoad {
     Loading,
     Ready(ViewerHistoryPage),
-    Error(ClientApiError),
+    Error(ViewerClientError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,7 +102,7 @@ pub(crate) fn DiffHistoryView() -> Element {
     let mut reload = use_signal(|| 0_u64);
     let mut query_generation = use_signal(HistoryQueryGeneration::default);
     let mut history = use_signal(|| HistoryLoad::Loading);
-    let mut action_error = use_signal(|| None::<ClientApiError>);
+    let mut action_error = use_signal(|| None::<ViewerClientError>);
     let mut open_state = use_signal(HistoryOpenState::default);
     let mut copied_id = use_signal(|| None::<RenderHistoryId>);
 
@@ -119,7 +119,7 @@ pub(crate) fn DiffHistoryView() -> Element {
         };
         history.set(HistoryLoad::Loading);
         spawn(async move {
-            let result = DiffHistoryApi::list_history(ListViewerHistory {
+            let result = viewer_server::list_history(ListViewerHistory {
                 cursor: requested_cursor,
             })
             .await;
@@ -214,7 +214,7 @@ pub(crate) fn DiffHistoryView() -> Element {
                                             };
                                             action_error.set(None);
                                             spawn(async move {
-                                                let result = DiffHistoryApi::open_history(open_ticket.request).await;
+                                                let result = viewer_server::open_history(open_ticket.request).await;
                                                 if !open_state().accepts(open_ticket) {
                                                     return;
                                                 }
@@ -231,13 +231,14 @@ pub(crate) fn DiffHistoryView() -> Element {
                                         oncopy: move |render_id: RenderHistoryId| {
                                             action_error.set(None);
                                             spawn(async move {
-                                                match DiffHistoryApi::get_history_copy(GetViewerHistoryCopy { render_id })
+                                                match viewer_server::get_history_copy(GetViewerHistoryCopy { render_id })
                                                     .await
                                                 {
                                                     Ok(payload) => {
-                                                        match browser::copy_json(&payload).await {
-                                                            Ok(()) => copied_id.set(Some(render_id)),
-                                                            Err(error) => action_error.set(Some(error)),
+                                                        if browser::copy_text(&payload.json).await {
+                                                            copied_id.set(Some(render_id));
+                                                        } else {
+                                                            action_error.set(Some(ViewerClientError::Unavailable));
                                                         }
                                                     }
                                                     Err(error) => action_error.set(Some(error)),
