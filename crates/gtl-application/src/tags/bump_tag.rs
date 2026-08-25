@@ -12,12 +12,6 @@ use super::{
 };
 use crate::ports::GitClient;
 
-/// Requests application of the exact proposal displayed to the user.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BumpTag {
-    pub preview: TagBumpPreview,
-}
-
 /// Result of applying one tag-bump proposal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BumpTagOk {
@@ -44,8 +38,7 @@ pub enum BumpTagError {
 
 /// Recomputes the current proposal, compares it with the displayed proposal, and applies it.
 #[cqrsy::command]
-pub fn execute(command: BumpTag, git: &impl GitClient) -> Result<BumpTagOk, BumpTagError> {
-    let BumpTag { preview } = command;
+pub fn execute(preview: TagBumpPreview, git: &impl GitClient) -> Result<BumpTagOk, BumpTagError> {
     let current = match dry_run_tag_bump::execute_resolved(
         dry_run_tag_bump::DryRunResolvedTagBump {
             repo_root: preview.repo_path.clone(),

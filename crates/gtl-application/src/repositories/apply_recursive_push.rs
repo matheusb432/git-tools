@@ -10,18 +10,15 @@ use gtl_models::{
 
 use crate::ports::{GitClient, GitEffect};
 
-/// Push every pushable target of a confirmed recursive-push plan.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApplyRecursivePush {
-    pub targets: Vec<RepoTarget>,
-}
-
 /// Pushes each repo's current branch to its upstream, skipping the un-pushable ones, and
 /// aggregates per-repo outcomes into an overall [`Status`]. Infallible by design: a
 /// failed push becomes a [`RepoOutcome::Failed`] report, never an error.
 #[cqrsy::command]
-pub fn execute(command: ApplyRecursivePush, git: &impl GitClient) -> PushAllResult {
-    let ApplyRecursivePush { targets } = command;
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CQRsy operations own their request value"
+)]
+pub fn execute(targets: Vec<RepoTarget>, git: &impl GitClient) -> PushAllResult {
     let reports: Vec<RepoReport> = targets
         .iter()
         .map(|target| RepoReport {
@@ -87,7 +84,7 @@ mod tests {
     }
 
     fn apply(runner: &ScriptedGitClient, targets: Vec<RepoTarget>) -> PushAllResult {
-        apply_recursive_push::execute(ApplyRecursivePush { targets }, runner)
+        apply_recursive_push::execute(targets, runner)
     }
 
     #[test]

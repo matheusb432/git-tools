@@ -15,12 +15,6 @@ pub struct GetRecentRender {
     pub id: RenderHistoryId,
 }
 
-/// Returns the matching render or a successful miss when it no longer exists.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GetRecentRenderOk {
-    pub entry: Option<RecentRenderRecord>,
-}
-
 /// Reports an unexpected stable-ID recent-render lookup failure.
 #[derive(Debug, thiserror::Error)]
 pub enum GetRecentRenderError {
@@ -34,10 +28,8 @@ pub enum GetRecentRenderError {
 pub fn execute(
     query: &GetRecentRender,
     connection: &Connection,
-) -> Result<GetRecentRenderOk, GetRecentRenderError> {
-    Ok(GetRecentRenderOk {
-        entry: get_recent_render(connection, query.id)?,
-    })
+) -> Result<Option<RecentRenderRecord>, GetRecentRenderError> {
+    get_recent_render(connection, query.id)
 }
 
 fn get_recent_render(
@@ -71,7 +63,7 @@ mod tests {
         let response = get_recent_render::execute(&GetRecentRender { id }, &connection)
             .expect("lookup succeeds");
 
-        assert_eq!(response.entry.expect("record exists").id, id);
+        assert_eq!(response.expect("record exists").id, id);
     }
 
     #[test]
@@ -82,6 +74,6 @@ mod tests {
         let response = get_recent_render::execute(&GetRecentRender { id }, &connection)
             .expect("lookup succeeds");
 
-        assert!(response.entry.is_none());
+        assert!(response.is_none());
     }
 }

@@ -9,7 +9,7 @@ mod worktree;
 
 use std::path::PathBuf;
 
-pub(crate) use diff::DiffApi;
+pub(crate) use diff::DiffGrpcService;
 use gtl_application::{
     ports::{PlacedArtifact, ProjectClientError, UserSettingsLoadError},
     repositories::resolve_repository_root::ResolveRepositoryRootError,
@@ -17,14 +17,14 @@ use gtl_application::{
 };
 use gtl_models::paths::RepositoryRoot;
 use gtl_wire::v1;
-pub(crate) use live_view::LiveViewApi;
-pub(crate) use project::ProjectApi;
-pub(crate) use repository::RepositoryApi;
-pub(crate) use settings::SettingsApi;
-pub(crate) use tag::TagApi;
+pub(crate) use live_view::LiveViewGrpcService;
+pub(crate) use project::ProjectGrpcService;
+pub(crate) use repository::RepositoryGrpcService;
+pub(crate) use settings::SettingsGrpcService;
+pub(crate) use tag::TagGrpcService;
 use tonic::{Code, Status};
-pub(crate) use viewer::ViewerApi;
-pub(crate) use worktree::WorktreeApi;
+pub(crate) use viewer::ViewerGrpcService;
+pub(crate) use worktree::WorktreeGrpcService;
 
 pub(crate) fn application_notes(notes: &[notes::Note]) -> Vec<v1::Note> {
     notes

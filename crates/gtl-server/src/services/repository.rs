@@ -2,16 +2,16 @@ use gtl_application::repositories::{
     apply_commit::{self, ApplyCommit, CommitStatus},
     apply_prune::{self, ApplyPrune, ApplyPruneError, ApplyPruneOk, PruneStatus},
     apply_push::{self, ApplyPush, ApplyPushOk, PushMode},
-    apply_recursive_push::{self, ApplyRecursivePush},
+    apply_recursive_push,
     change_branch::{self, ChangeBranch, ChangeBranchAction, ChangeBranchOk},
     get_recursive_repository_statuses::{
         self, GetRecursiveRepositoryStatuses, GetRecursiveRepositoryStatusesError,
     },
-    get_repository_status::{self, GetRepositoryStatus},
-    plan_commit::{self, CommitTarget, PlanCommit, PlanCommitOk},
+    get_repository_status,
+    plan_commit::{self, CommitTarget, PlanCommitOk},
     plan_prune::{self, PlanPrune, PlanPruneOk, PruneBranch},
-    plan_push::{self, PlanPush, PlanPushOk, PushTarget},
-    plan_recursive_push::{self, PlanRecursivePush},
+    plan_push::{self, PlanPushOk, PushTarget},
+    plan_recursive_push,
 };
 use gtl_models::{
     diffs::CommitId,
@@ -35,26 +35,23 @@ use crate::state::AppState;
 const MAX_BRANCHES_PER_REQUEST: usize = 512;
 const MAX_REPOSITORIES_PER_REQUEST: usize = 512;
 
-#[derive(Clone)]
-pub(crate) struct RepositoryApi {
+pub(crate) struct RepositoryGrpcService {
     state: AppState,
 }
 
-impl RepositoryApi {
+impl RepositoryGrpcService {
     pub(crate) const fn new(state: AppState) -> Self {
         Self { state }
     }
 }
 
 #[tonic::async_trait]
-impl RepositoryService for RepositoryApi {
+impl RepositoryService for RepositoryGrpcService {
     async fn plan_repository_push(
         &self,
         request: Request<v1::PlanRepositoryPushRequest>,
     ) -> Result<Response<v1::PlanRepositoryPushResponse>, Status> {
-        let request = PlanPush {
-            repo_path: absolute_path(request.into_inner().repository_path, "repository_path")?,
-        };
+        let request = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
         let result = run_blocking(move || plan_push::execute(request, &state.git))
             .await?
@@ -114,9 +111,7 @@ impl RepositoryService for RepositoryApi {
         &self,
         request: Request<v1::PlanRepositoryCommitRequest>,
     ) -> Result<Response<v1::PlanRepositoryCommitResponse>, Status> {
-        let request = PlanCommit {
-            repo_path: absolute_path(request.into_inner().repository_path, "repository_path")?,
-        };
+        let request = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
         let result = run_blocking(move || plan_commit::execute(request, &state.git))
             .await?
@@ -174,9 +169,7 @@ impl RepositoryService for RepositoryApi {
         &self,
         request: Request<v1::PlanRecursiveRepositoryPushRequest>,
     ) -> Result<Response<v1::PlanRecursiveRepositoryPushResponse>, Status> {
-        let request = PlanRecursivePush {
-            root: absolute_path(request.into_inner().root, "root")?,
-        };
+        let request = absolute_path(request.into_inner().root, "root")?;
         let state = self.state.clone();
         let result = run_blocking(move || plan_recursive_push::execute(request, &state.git))
             .await?
@@ -215,10 +208,8 @@ impl RepositoryService for RepositoryApi {
             .map(application_recursive_push_target)
             .collect::<Result<Vec<_>, _>>()?;
         let state = self.state.clone();
-        let result = run_blocking(move || {
-            apply_recursive_push::execute(ApplyRecursivePush { targets }, &state.git)
-        })
-        .await?;
+        let result =
+            run_blocking(move || apply_recursive_push::execute(targets, &state.git)).await?;
         let status = match result.status {
             gtl_models::repository::recursive_push::Status::Ok => v1::RecursivePushStatus::Ok,
             gtl_models::repository::recursive_push::Status::Partial => {
@@ -345,9 +336,7 @@ impl RepositoryService for RepositoryApi {
         &self,
         request: Request<v1::GetRepositoryStatusRequest>,
     ) -> Result<Response<v1::GetRepositoryStatusResponse>, Status> {
-        let request = GetRepositoryStatus {
-            repo_path: absolute_path(request.into_inner().repository_path, "repository_path")?,
-        };
+        let request = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
         let result = run_blocking(move || get_repository_status::execute(request, &state.git))
             .await?

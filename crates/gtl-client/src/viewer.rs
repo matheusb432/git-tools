@@ -1,11 +1,9 @@
 #[cfg(all(target_arch = "wasm32", feature = "viewer-web"))]
-mod protobuf;
-
-#[cfg(all(target_arch = "wasm32", feature = "viewer-web"))]
 use std::time::Duration;
 
 #[cfg(all(target_arch = "wasm32", feature = "viewer-web"))]
 use gtl_wire::{
+    proto::viewer as protobuf,
     v1::{self, viewer_service_client::ViewerServiceClient},
     viewer::{
         GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
@@ -52,6 +50,16 @@ impl ViewerClientError {
     }
 }
 
+#[cfg(all(target_arch = "wasm32", feature = "viewer-web"))]
+impl From<protobuf::ViewerCodecError> for ViewerClientError {
+    fn from(error: protobuf::ViewerCodecError) -> Self {
+        match error {
+            protobuf::ViewerCodecError::Unrepresentable => Self::InvalidRequest,
+            protobuf::ViewerCodecError::InvalidMessage => Self::Internal,
+        }
+    }
+}
+
 #[cfg(any(test, all(target_arch = "wasm32", feature = "viewer-web")))]
 fn validate_viewer_protocol(protocol_version: u32) -> Result<(), ViewerClientError> {
     if protocol_version == gtl_wire::viewer::VIEWER_PROTOCOL_VERSION {
@@ -81,7 +89,7 @@ macro_rules! viewer_unary_methods {
                     .await
                     .map(tonic::Response::into_inner)
                     .map_err(decode_status)?;
-                protobuf::$decode(response)
+                protobuf::$decode(response).map_err(Into::into)
             }
         )+
     };
@@ -102,7 +110,7 @@ macro_rules! viewer_unary_methods_with_fallible_request {
                     .await
                     .map(tonic::Response::into_inner)
                     .map_err(decode_status)?;
-                protobuf::$decode(response)
+                protobuf::$decode(response).map_err(Into::into)
             }
         )+
     };
@@ -141,7 +149,7 @@ impl ViewerClient {
             .await
             .map(tonic::Response::into_inner)
             .map_err(decode_status)?;
-        protobuf::decode_get_viewer_shell_response(response)
+        protobuf::decode_get_viewer_shell_response(response).map_err(Into::into)
     }
 
     viewer_unary_methods! {
@@ -193,7 +201,7 @@ impl ViewerClient {
             .await
             .map(tonic::Response::into_inner)
             .map_err(decode_status)?;
-        protobuf::decode_get_viewer_settings_response(response)
+        protobuf::decode_get_viewer_settings_response(response).map_err(Into::into)
     }
 
     pub async fn open_diff_file(
@@ -269,6 +277,7 @@ impl ViewerRowStream {
             .map_err(decode_status)?
             .map(protobuf::decode_stream_viewer_rows_response)
             .transpose()
+            .map_err(Into::into)
     }
 }
 

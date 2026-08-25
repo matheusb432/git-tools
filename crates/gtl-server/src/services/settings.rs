@@ -2,7 +2,7 @@ use gtl_application::{
     ports::UserSettingsEditError,
     settings::{
         get_user_settings::{self, GetUserSettings, GetUserSettingsError},
-        set_setting_key::{self, SetSettingKey, SetSettingKeyError},
+        set_setting_key::{self, SetSettingKeyError},
     },
 };
 use gtl_models::{settings::SettingKeyValue, viewer::Theme};
@@ -12,19 +12,18 @@ use tonic::{Request, Response, Status};
 use super::{run_blocking, unexpected, user_settings_load_error};
 use crate::state::AppState;
 
-#[derive(Clone)]
-pub(crate) struct SettingsApi {
+pub(crate) struct SettingsGrpcService {
     state: AppState,
 }
 
-impl SettingsApi {
+impl SettingsGrpcService {
     pub(crate) const fn new(state: AppState) -> Self {
         Self { state }
     }
 }
 
 #[tonic::async_trait]
-impl SettingsService for SettingsApi {
+impl SettingsService for SettingsGrpcService {
     async fn get_push_confirmation_requirement(
         &self,
         _request: Request<v1::GetPushConfirmationRequirementRequest>,
@@ -36,7 +35,7 @@ impl SettingsService for SettingsApi {
                 GetUserSettingsError::Settings(error) => user_settings_load_error(error),
             })?;
         Ok(Response::new(v1::GetPushConfirmationRequirementResponse {
-            push_confirmation_required: result.settings.push_confirmation_required(),
+            push_confirmation_required: result.push_confirmation_required(),
         }))
     }
 
@@ -52,13 +51,7 @@ impl SettingsService for SettingsApi {
             .to_path_buf();
         let viewer = self.state.viewer.clone();
         run_blocking(move || {
-            set_setting_key::execute(
-                SetSettingKey {
-                    mutation: SettingKeyValue::Theme(theme),
-                },
-                &mut store,
-                &viewer,
-            )
+            set_setting_key::execute(SettingKeyValue::Theme(theme), &mut store, &viewer)
         })
         .await?
         .map_err(set_setting_key_error)?;

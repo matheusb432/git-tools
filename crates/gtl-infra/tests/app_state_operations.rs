@@ -14,7 +14,7 @@ use gtl_application::{
         record_render::{self, RecordRender, RecordRenderError},
     },
     live_views::{
-        delete_live_viewer_tab::{self, DeleteLiveViewerTab},
+        delete_live_viewer_tab,
         list_live_views::{self, ListLiveViews},
         save_live_view::{self, SaveLiveView, SaveLiveViewOutcome},
     },
@@ -107,9 +107,7 @@ fn save_live_view(state: &SqliteAppState, top_level: &Path) {
 
 fn list_live_views(state: &SqliteAppState) -> Vec<gtl_application::live_views::LiveViewRecord> {
     let connection = state.connection_lock().expect("lock state connection");
-    list_live_views::execute(ListLiveViews, &connection)
-        .expect("list live views")
-        .views
+    list_live_views::execute(ListLiveViews, &connection).expect("list live views")
 }
 
 #[test]
@@ -148,10 +146,7 @@ fn public_operations_use_the_migrated_schema() {
         let connection = state.connection_lock().expect("lock state connection");
         get_recent_render::execute(&GetRecentRender { id }, &connection).expect("get recent render")
     };
-    assert_eq!(
-        found.entry.expect("recent render").title,
-        "alpha · unpushed"
-    );
+    assert_eq!(found.expect("recent render").title, "alpha · unpushed");
 
     let viewer = ViewerState::new();
     let tab_id = work::reserve_open(
@@ -165,7 +160,7 @@ fn public_operations_use_the_migrated_schema() {
     .tab_id;
     let refresh = {
         let connection = state.connection_lock().expect("lock state connection");
-        delete_live_viewer_tab::execute(DeleteLiveViewerTab { tab_id }, &connection, &viewer)
+        delete_live_viewer_tab::execute(tab_id, &connection, &viewer)
             .expect("delete live viewer tab")
     };
     assert!(refresh.is_none());

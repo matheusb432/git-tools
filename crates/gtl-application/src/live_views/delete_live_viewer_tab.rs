@@ -8,11 +8,6 @@ use crate::viewer::{
     work::{self, ReserveRecipeError, ReservedRecipeWork},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DeleteLiveViewerTab {
-    pub tab_id: ViewerTabId,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum DeleteLiveViewerTabError {
     #[error("live viewer tab is not available")]
@@ -28,11 +23,10 @@ pub enum DeleteLiveViewerTabError {
 /// Deletes a saved live view and closes its matching viewer tab.
 #[cqrsy::command]
 pub fn execute(
-    command: DeleteLiveViewerTab,
+    tab_id: ViewerTabId,
     connection: &Connection,
     viewer_state: &ViewerState,
 ) -> Result<Option<ReservedRecipeWork>, DeleteLiveViewerTabError> {
-    let DeleteLiveViewerTab { tab_id } = command;
     viewer_state.update(|session| {
         let source = session
             .live_source(tab_id)
@@ -55,7 +49,7 @@ mod tests {
     use gtl_models::viewer::{ViewerTabId, ViewerTabKind};
     use rusqlite::Connection;
 
-    use super::{DeleteLiveViewerTab, DeleteLiveViewerTabError};
+    use super::DeleteLiveViewerTabError;
     use crate::{
         live_views::{delete_live_viewer_tab, list_live_views, persistence::store_test},
         recipes::{RecipeOp, RecipeTarget},
@@ -97,14 +91,12 @@ mod tests {
         let tab_id = open_live_tab(&viewer);
 
         let refresh =
-            delete_live_viewer_tab::execute(DeleteLiveViewerTab { tab_id }, &connection, &viewer)
-                .expect("delete succeeds");
+            delete_live_viewer_tab::execute(tab_id, &connection, &viewer).expect("delete succeeds");
 
         assert!(refresh.is_none());
         assert!(
             list_live_views::execute(list_live_views::ListLiveViews, &connection)
                 .expect("list saved views")
-                .views
                 .is_empty()
         );
         assert!(
@@ -123,9 +115,8 @@ mod tests {
         let viewer = ViewerState::new();
         let tab_id = open_live_tab(&viewer);
 
-        let error =
-            delete_live_viewer_tab::execute(DeleteLiveViewerTab { tab_id }, &connection, &viewer)
-                .expect_err("delete failure rejects");
+        let error = delete_live_viewer_tab::execute(tab_id, &connection, &viewer)
+            .expect_err("delete failure rejects");
 
         assert!(matches!(error, DeleteLiveViewerTabError::Unexpected(_)));
         assert!(

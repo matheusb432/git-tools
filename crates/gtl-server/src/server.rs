@@ -34,8 +34,8 @@ use tower_http::{
 
 use crate::{
     services::{
-        DiffApi, LiveViewApi, ProjectApi, RepositoryApi, SettingsApi, TagApi, ViewerApi,
-        WorktreeApi,
+        DiffGrpcService, LiveViewGrpcService, ProjectGrpcService, RepositoryGrpcService,
+        SettingsGrpcService, TagGrpcService, ViewerGrpcService, WorktreeGrpcService,
     },
     state::AppState,
 };
@@ -95,14 +95,14 @@ pub(crate) async fn serve(
 ) -> anyhow::Result<()> {
     let (health_reporter, health_server) = tonic_health::server::health_reporter();
     let application_service_names = [
-        DiffServiceServer::<DiffApi>::NAME,
-        LiveViewServiceServer::<LiveViewApi>::NAME,
-        ProjectServiceServer::<ProjectApi>::NAME,
-        RepositoryServiceServer::<RepositoryApi>::NAME,
-        SettingsServiceServer::<SettingsApi>::NAME,
-        TagServiceServer::<TagApi>::NAME,
-        ViewerServiceServer::<ViewerApi>::NAME,
-        WorktreeServiceServer::<WorktreeApi>::NAME,
+        DiffServiceServer::<DiffGrpcService>::NAME,
+        LiveViewServiceServer::<LiveViewGrpcService>::NAME,
+        ProjectServiceServer::<ProjectGrpcService>::NAME,
+        RepositoryServiceServer::<RepositoryGrpcService>::NAME,
+        SettingsServiceServer::<SettingsGrpcService>::NAME,
+        TagServiceServer::<TagGrpcService>::NAME,
+        ViewerServiceServer::<ViewerGrpcService>::NAME,
+        WorktreeServiceServer::<WorktreeGrpcService>::NAME,
     ];
     for service_name in application_service_names {
         health_reporter
@@ -115,28 +115,28 @@ pub(crate) async fn serve(
     let health_server = health_server
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let diff_server = DiffServiceServer::new(DiffApi::new(state.clone()))
+    let diff_server = DiffServiceServer::new(DiffGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let live_view_server = LiveViewServiceServer::new(LiveViewApi::new(state.clone()))
+    let live_view_server = LiveViewServiceServer::new(LiveViewGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let project_server = ProjectServiceServer::new(ProjectApi::new(state.clone()))
+    let project_server = ProjectServiceServer::new(ProjectGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let repository_server = RepositoryServiceServer::new(RepositoryApi::new(state.clone()))
+    let repository_server = RepositoryServiceServer::new(RepositoryGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let settings_server = SettingsServiceServer::new(SettingsApi::new(state.clone()))
+    let settings_server = SettingsServiceServer::new(SettingsGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let tag_server = TagServiceServer::new(TagApi::new(state.clone()))
+    let tag_server = TagServiceServer::new(TagGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let worktree_server = WorktreeServiceServer::new(WorktreeApi::new(state.clone()))
+    let worktree_server = WorktreeServiceServer::new(WorktreeGrpcService::new(state.clone()))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(MAX_RESPONSE_MESSAGE_SIZE);
-    let viewer_server = ViewerServiceServer::new(ViewerApi::new(state))
+    let viewer_server = ViewerServiceServer::new(ViewerGrpcService::new(state))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(VIEWER_MAX_RESPONSE_MESSAGE_SIZE);
     let reflection_server = tonic_reflection::server::Builder::configure()

@@ -1,6 +1,6 @@
 use gtl_application::worktrees::{
-    get_worktree_base::{self, GetWorktreeBase, GetWorktreeBaseError, GetWorktreeBaseOk},
-    list_worktrees::{self, ListWorktrees, ListWorktreesError, ListWorktreesOk},
+    get_worktree_base::{self, GetWorktreeBaseError, GetWorktreeBaseOk},
+    list_worktrees::{self, ListWorktreesError, ListWorktreesOk},
 };
 use gtl_models::worktrees::{Worktree, WorktreeCheckout, WorktreeKind};
 use gtl_wire::v1::{self, worktree_service_server::WorktreeService};
@@ -9,30 +9,27 @@ use tonic::{Request, Response, Status};
 use super::{absolute_path, repository_resolution_error, run_blocking, unexpected};
 use crate::state::AppState;
 
-#[derive(Clone)]
-pub(crate) struct WorktreeApi {
+pub(crate) struct WorktreeGrpcService {
     state: AppState,
 }
 
-impl WorktreeApi {
+impl WorktreeGrpcService {
     pub(crate) const fn new(state: AppState) -> Self {
         Self { state }
     }
 }
 
 #[tonic::async_trait]
-impl WorktreeService for WorktreeApi {
+impl WorktreeService for WorktreeGrpcService {
     async fn get_worktree_base(
         &self,
         request: Request<v1::GetWorktreeBaseRequest>,
     ) -> Result<Response<v1::GetWorktreeBaseResponse>, Status> {
         let repo_path = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
-        let result = run_blocking(move || {
-            get_worktree_base::execute(GetWorktreeBase { repo_path }, &state.git)
-        })
-        .await?
-        .map_err(get_base_error)?;
+        let result = run_blocking(move || get_worktree_base::execute(repo_path, &state.git))
+            .await?
+            .map_err(get_base_error)?;
         let outcome = match result {
             GetWorktreeBaseOk::Found { path } => {
                 v1::get_worktree_base_response::Outcome::Found(v1::WorktreePath {
@@ -54,10 +51,9 @@ impl WorktreeService for WorktreeApi {
     ) -> Result<Response<v1::ListWorktreesResponse>, Status> {
         let repo_path = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
-        let result =
-            run_blocking(move || list_worktrees::execute(ListWorktrees { repo_path }, &state.git))
-                .await?
-                .map_err(list_error)?;
+        let result = run_blocking(move || list_worktrees::execute(repo_path, &state.git))
+            .await?
+            .map_err(list_error)?;
         let outcome = match result {
             ListWorktreesOk::Listed { worktrees } => {
                 v1::list_worktrees_response::Outcome::Listed(v1::WorktreeList {

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use super::{
     ViewerTabKind, ViewerTabState,
     complete_recipe_computation::{self, CompleteRecipeComputation, CompleteRecipeComputationOk},
-    compute_recipe::{self, ComputeRecipe},
+    compute_recipe,
     probe_recipe::{self, ProbeRecipe, ProbeRecipeOutcome},
 };
 use crate::{
@@ -63,18 +63,11 @@ pub fn execute(
         },
         git,
     )?;
-    if let ProbeRecipeOutcome::Broken { state } = probe.outcome {
+    if let ProbeRecipeOutcome::Broken { state } = probe {
         return Ok(PrepareRecipeOk::Broken { state });
     }
 
-    let view = compute_recipe::execute(
-        ComputeRecipe {
-            recipe: recipe.clone(),
-        },
-        user_settings,
-        git,
-    )?
-    .view;
+    let view = compute_recipe::execute(recipe.clone(), user_settings, git)?;
     let completed = complete_recipe_computation::execute(CompleteRecipeComputation {
         recipe: recipe.clone(),
         kind,

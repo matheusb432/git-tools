@@ -5,11 +5,6 @@ use crate::ports::{UserSettingsLoadError, UserSettingsStore};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GetUserSettings;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GetUserSettingsOk {
-    pub settings: UserSettings,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum GetUserSettingsError {
     #[error(transparent)]
@@ -20,10 +15,8 @@ pub enum GetUserSettingsError {
 pub fn execute(
     _query: GetUserSettings,
     settings_store: &impl UserSettingsStore,
-) -> Result<GetUserSettingsOk, GetUserSettingsError> {
-    Ok(GetUserSettingsOk {
-        settings: settings_store.load()?,
-    })
+) -> Result<UserSettings, GetUserSettingsError> {
+    Ok(settings_store.load()?)
 }
 
 #[cfg(test)]
@@ -58,7 +51,7 @@ mod tests {
         let response =
             get_user_settings::execute(GetUserSettings, &store).expect("settings query succeeds");
 
-        assert_eq!(response.settings, settings);
+        assert_eq!(response, settings);
     }
 
     #[test]

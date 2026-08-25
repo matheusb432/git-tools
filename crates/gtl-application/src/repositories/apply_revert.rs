@@ -3,12 +3,6 @@
 use super::{BranchRecovery, plan_revert::RevertTarget};
 use crate::ports::{GitClient, GitEffect};
 
-/// Requests applying one confirmed branch recovery.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApplyRevert {
-    pub target: RevertTarget,
-}
-
 /// Reports the closed branch recovery status and its user-facing detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyRevertOk {
@@ -51,11 +45,14 @@ pub enum ApplyRevertError {
 ///
 /// Returns [`ApplyRevertError`] when Git transport fails.
 #[cqrsy::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CQRsy operations own their request value"
+)]
 pub fn execute(
-    command: ApplyRevert,
+    target: RevertTarget,
     git: &impl GitClient,
 ) -> Result<ApplyRevertOk, ApplyRevertError> {
-    let ApplyRevert { target } = command;
     let mut progress = RevertProgress::default();
     match git.switch_previous(&target.top) {
         Ok(GitEffect::Applied(())) => {}
@@ -114,8 +111,8 @@ mod tests {
             prior_id: crate::utils::commit_id_fixture("abc123"),
         };
 
-        let result = apply_revert::execute(ApplyRevert { target }, &git)
-            .expect("branch recovery application succeeds");
+        let result =
+            apply_revert::execute(target, &git).expect("branch recovery application succeeds");
 
         assert_eq!(
             result,
@@ -138,7 +135,7 @@ mod tests {
             prior_id: crate::utils::commit_id_fixture("abc123"),
         };
 
-        let error = apply_revert::execute(ApplyRevert { target }, &git)
+        let error = apply_revert::execute(target, &git)
             .expect_err("transport failure must remain an error");
 
         assert_eq!(
@@ -163,8 +160,8 @@ mod tests {
             prior_id: crate::utils::commit_id_fixture("abc123"),
         };
 
-        let result = apply_revert::execute(ApplyRevert { target }, &git)
-            .expect("a rejected force move is a closed failure");
+        let result =
+            apply_revert::execute(target, &git).expect("a rejected force move is a closed failure");
 
         let ApplyRevertOk::Failed { progress, .. } = result else {
             panic!("rejected force move must report failure");
@@ -192,8 +189,7 @@ mod tests {
             prior_id: crate::utils::commit_id_fixture("abc123"),
         };
 
-        let error = apply_revert::execute(ApplyRevert { target }, &git)
-            .expect_err("force-move transport fails");
+        let error = apply_revert::execute(target, &git).expect_err("force-move transport fails");
         let ApplyRevertError::Transport {
             progress, source, ..
         } = error;

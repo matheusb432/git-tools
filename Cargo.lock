@@ -1186,9 +1186,9 @@ dependencies = [
 
 [[package]]
 name = "cqrsy"
-version = "0.10.2"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a9933926e5a2b2d3c1184c797272632aaef63916b5117a05bc023051451982b"
+checksum = "3e051ec429fdd624e86a19302c5f48de6a307be2118391d30ce5387ea05f6bd3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3748,6 +3748,7 @@ dependencies = [
  "prost",
  "serde",
  "serde_json",
+ "thiserror 2.0.19",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",

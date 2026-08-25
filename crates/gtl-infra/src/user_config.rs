@@ -525,17 +525,13 @@ excluded_from_push_all = true
         let viewer = gtl_application::viewer::ViewerState::new();
 
         let set = set_setting_key::execute(
-            set_setting_key::SetSettingKey {
-                mutation: gtl_models::settings::SettingKeyValue::Theme(Theme::Light),
-            },
+            gtl_models::settings::SettingKeyValue::Theme(Theme::Light),
             &mut store,
             &viewer,
         )
         .expect("set theme");
         let removed = remove_setting_key::execute(
-            remove_setting_key::RemoveSettingKey {
-                key: gtl_models::settings::SettingKey::Layout,
-            },
+            gtl_models::settings::SettingKey::Layout,
             &mut store,
             &viewer,
         )
@@ -575,9 +571,7 @@ excluded_from_push_all = true
         let viewer = gtl_application::viewer::ViewerState::new();
 
         let error = remove_setting_key::execute(
-            remove_setting_key::RemoveSettingKey {
-                key: gtl_models::settings::SettingKey::Layout,
-            },
+            gtl_models::settings::SettingKey::Layout,
             &mut store,
             &viewer,
         )
@@ -601,9 +595,7 @@ excluded_from_push_all = true
         let viewer = gtl_application::viewer::ViewerState::new();
 
         let error = set_setting_key::execute(
-            set_setting_key::SetSettingKey {
-                mutation: gtl_models::settings::SettingKeyValue::Theme(Theme::Light),
-            },
+            gtl_models::settings::SettingKeyValue::Theme(Theme::Light),
             &mut store,
             &viewer,
         )

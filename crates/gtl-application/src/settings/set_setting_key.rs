@@ -7,12 +7,6 @@ use crate::{
     viewer::{ViewerState, ViewerStateError},
 };
 
-/// Requests one validated root-string setting replacement.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct SetSettingKey {
-    pub mutation: SettingKeyValue,
-}
-
 /// Reports a rejected or failed setting replacement.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -33,11 +27,10 @@ pub enum SetSettingKeyError {
 /// failure can be returned after the setting was persisted.
 #[cqrsy::command]
 pub fn execute(
-    command: SetSettingKey,
+    mutation: SettingKeyValue,
     settings_store: &mut impl UserSettingsStore,
     viewer_state: &ViewerState,
 ) -> Result<UserSettingChange, SetSettingKeyError> {
-    let SetSettingKey { mutation } = command;
     let key = mutation.key();
     let outcome = settings_store
         .set_value(mutation)
@@ -63,7 +56,7 @@ mod tests {
         viewer::{DiffDensity, DiffLayout, Theme, ViewerVersion},
     };
 
-    use super::{SetSettingKey, SetSettingKeyError};
+    use super::SetSettingKeyError;
     use crate::{
         ports::{
             UserSettingsEditError, UserSettingsEditOutcome, UserSettingsLoadError,
@@ -105,8 +98,8 @@ mod tests {
     ) -> (crate::settings::UserSettingChange, ViewerVersion) {
         let mut store = FixedUserSettingsEditStore::new(outcome);
         let viewer = ViewerState::new();
-        let response = set_setting_key::execute(SetSettingKey { mutation }, &mut store, &viewer)
-            .expect("setting edit succeeds");
+        let response =
+            set_setting_key::execute(mutation, &mut store, &viewer).expect("setting edit succeeds");
         let version = viewer.version().expect("viewer version remains available");
         (response, version)
     }
@@ -144,9 +137,7 @@ mod tests {
     fn execute_adds_the_setting_key_to_an_invalid_shape_error() {
         let viewer = ViewerState::new();
         let error = set_setting_key::execute(
-            SetSettingKey {
-                mutation: SettingKeyValue::Theme(Theme::Light),
-            },
+            SettingKeyValue::Theme(Theme::Light),
             &mut InvalidShapeSettingsStore,
             &viewer,
         )

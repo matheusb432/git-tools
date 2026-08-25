@@ -7,12 +7,6 @@ use crate::{
     viewer::{ViewerState, ViewerStateError},
 };
 
-/// Requests removal of one supported root-string setting.
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct RemoveSettingKey {
-    pub key: SettingKey,
-}
-
 /// Reports a rejected or failed setting removal.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -33,11 +27,10 @@ pub enum RemoveSettingKeyError {
 /// failure can be returned after the setting was removed.
 #[cqrsy::command]
 pub fn execute(
-    command: RemoveSettingKey,
+    key: SettingKey,
     settings_store: &mut impl UserSettingsStore,
     viewer_state: &ViewerState,
 ) -> Result<UserSettingChange, RemoveSettingKeyError> {
-    let RemoveSettingKey { key } = command;
     let outcome = settings_store
         .remove_key(key)
         .map_err(|error| match error {
@@ -59,7 +52,6 @@ pub fn execute(
 mod tests {
     use gtl_models::{settings::SettingKey, viewer::ViewerVersion};
 
-    use super::RemoveSettingKey;
     use crate::{
         ports::UserSettingsEditOutcome,
         settings::{remove_setting_key, test_support::FixedUserSettingsEditStore},
@@ -72,7 +64,7 @@ mod tests {
     ) -> (crate::settings::UserSettingChange, ViewerVersion) {
         let mut store = FixedUserSettingsEditStore::new(outcome);
         let viewer = ViewerState::new();
-        let response = remove_setting_key::execute(RemoveSettingKey { key }, &mut store, &viewer)
+        let response = remove_setting_key::execute(key, &mut store, &viewer)
             .expect("setting removal succeeds");
         let version = viewer.version().expect("viewer version remains available");
         (response, version)

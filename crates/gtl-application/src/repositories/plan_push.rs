@@ -10,12 +10,6 @@ use gtl_models::{
 
 use crate::ports::{GitClient, GitEffect};
 
-/// Requests a read-only push plan for one repository path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlanPush {
-    pub repo_path: PathBuf,
-}
-
 /// Describes the current repository and upstream selected for a push.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PushTarget {
@@ -53,8 +47,11 @@ pub enum PlanPushError {
 ///
 /// Returns [`PlanPushError`] when Git transport fails.
 #[cqrsy::query]
-pub fn execute(query: PlanPush, git: &impl GitClient) -> Result<PlanPushOk, PlanPushError> {
-    let PlanPush { repo_path } = query;
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CQRsy operations own their request value"
+)]
+pub fn execute(repo_path: PathBuf, git: &impl GitClient) -> Result<PlanPushOk, PlanPushError> {
     let Some(top) = git
         .discover_top(&repo_path)
         .map_err(|source| transport("discover repository", source))?
@@ -137,13 +134,8 @@ mod tests {
             ScriptedGitClient::applied("HEAD\n"),
         ]);
 
-        let plan = plan_push::execute(
-            PlanPush {
-                repo_path: ".".into(),
-            },
-            &git,
-        )
-        .expect("a detached head is an expected refusal");
+        let plan =
+            plan_push::execute(".".into(), &git).expect("a detached head is an expected refusal");
 
         assert_eq!(
             plan,
@@ -159,13 +151,8 @@ mod tests {
             ScriptedGitClient::rejected("no upstream"),
         ]);
 
-        let plan = plan_push::execute(
-            PlanPush {
-                repo_path: ".".into(),
-            },
-            &git,
-        )
-        .expect("a missing upstream is an expected refusal");
+        let plan = plan_push::execute(".".into(), &git)
+            .expect("a missing upstream is an expected refusal");
 
         assert_eq!(
             plan,
@@ -186,13 +173,7 @@ mod tests {
             ScriptedGitClient::applied("2\n"),
         ]);
 
-        let plan = plan_push::execute(
-            PlanPush {
-                repo_path: ".".into(),
-            },
-            &git,
-        )
-        .expect("push plan is built");
+        let plan = plan_push::execute(".".into(), &git).expect("push plan is built");
 
         assert_eq!(
             plan,
@@ -218,13 +199,8 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = plan_push::execute(
-            PlanPush {
-                repo_path: ".".into(),
-            },
-            &git,
-        )
-        .expect_err("transport failure must remain an error");
+        let error = plan_push::execute(".".into(), &git)
+            .expect_err("transport failure must remain an error");
 
         assert_eq!(
             error.to_string(),

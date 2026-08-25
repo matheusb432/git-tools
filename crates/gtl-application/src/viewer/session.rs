@@ -16,7 +16,7 @@ use gtl_models::{
 use crate::{
     diffs::View,
     recipes::{Recipe, RecipeSource},
-    viewer::initial_recipe_label::{self, InitialRecipeLabel},
+    viewer::initial_recipe_label,
 };
 
 pub const DEFAULT_VIEW_CACHE_WEIGHT: ViewCacheWeight = ViewCacheWeight::new(128 * 1024 * 1024);
@@ -165,10 +165,7 @@ impl ViewerSession {
         batch_id: RecipeBatchId,
         kind: ViewerTabKind,
     ) -> Option<ViewerTabId> {
-        let label = initial_recipe_label::execute(InitialRecipeLabel {
-            recipe: recipe.clone(),
-        })
-        .label;
+        let label = initial_recipe_label::execute(recipe.clone());
         self.open_labeled(recipe, batch_id, kind, label)
     }
 

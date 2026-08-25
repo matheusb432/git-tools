@@ -10,12 +10,6 @@ use crate::{
     shared::repository_name,
 };
 
-/// Requests the status of the repository containing `repo_path`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GetRepositoryStatus {
-    pub repo_path: PathBuf,
-}
-
 /// Resolves one repository and classifies its local status.
 ///
 /// # Errors
@@ -24,15 +18,10 @@ pub struct GetRepositoryStatus {
 /// resolved to a repository.
 #[cqrsy::query]
 pub fn execute(
-    query: GetRepositoryStatus,
+    repo_path: PathBuf,
     git: &impl GitClient,
 ) -> Result<StatusResult, resolve_repository_root::ResolveRepositoryRootError> {
-    let root = resolve_repository_root::execute(
-        resolve_repository_root::ResolveRepositoryRoot {
-            repo_path: query.repo_path,
-        },
-        git,
-    )?;
+    let root = resolve_repository_root::execute(repo_path, git)?;
     let target = RepositoryTarget {
         label: repository_name::from_root(&root),
         path: root,
@@ -44,7 +33,6 @@ pub fn execute(
 mod tests {
     use gtl_models::repository::status::{RepositoryStatus, StatusChanges, StatusHead};
 
-    use super::GetRepositoryStatus;
     use crate::{
         repositories::{
             get_repository_status, resolve_repository_root::ResolveRepositoryRootError,
@@ -60,13 +48,8 @@ mod tests {
             ScriptedGitClient::applied(""),
         ]);
 
-        let result = get_repository_status::execute(
-            GetRepositoryStatus {
-                repo_path: "/repos/api/src".into(),
-            },
-            &git,
-        )
-        .expect("repository status resolves");
+        let result = get_repository_status::execute("/repos/api/src".into(), &git)
+            .expect("repository status resolves");
 
         assert_eq!(result.name().as_ref(), "api");
         assert_eq!(
@@ -82,13 +65,8 @@ mod tests {
     fn preserves_a_non_repository_as_a_typed_resolution_failure() {
         let git = ScriptedGitClient::new(vec![ScriptedGitClient::rejected("not a repository")]);
 
-        let error = get_repository_status::execute(
-            GetRepositoryStatus {
-                repo_path: "/tmp/plain".into(),
-            },
-            &git,
-        )
-        .expect_err("plain directory is rejected");
+        let error = get_repository_status::execute("/tmp/plain".into(), &git)
+            .expect_err("plain directory is rejected");
 
         assert!(matches!(
             error,

@@ -19,11 +19,6 @@ use crate::{
 const MAX_CONCURRENT_GIT_OPERATIONS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PushRepositories {
-    pub mode: GitEffectMode,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct PushRepositoriesOk {
     pub selected: Vec<RepoSyncResult>,
     pub excluded: Vec<ProjectName>,
@@ -44,7 +39,7 @@ pub enum PushRepositoriesError {
 /// Pushes every selected project repository through the Git capability.
 #[cqrsy::command]
 pub async fn execute(
-    req: PushRepositories,
+    mode: GitEffectMode,
     git: &impl GitClient,
     projects: &impl ProjectClient,
     clock: &impl Clock,
@@ -55,7 +50,6 @@ pub async fn execute(
         projects.list_projects().await?,
         settings.push_all_exclusions(),
     );
-    let mode = req.mode;
     let tasks = stream::iter(selection.selected.into_iter().enumerate())
         .map(|(index, repo)| {
             let git = git.clone();
@@ -226,21 +220,21 @@ mod tests {
     async fn execute_with(
         remote: ProjectGitScript,
         repos: Vec<ProjectRepository>,
-        request: PushRepositories,
+        mode: GitEffectMode,
     ) -> Result<PushRepositoriesOk, PushRepositoriesError> {
-        execute_with_settings(remote, repos, request, FixedUserSettingsStore::default()).await
+        execute_with_settings(remote, repos, mode, FixedUserSettingsStore::default()).await
     }
 
     async fn execute_with_settings(
         remote: ProjectGitScript,
         repos: Vec<ProjectRepository>,
-        request: PushRepositories,
+        mode: GitEffectMode,
         settings: FixedUserSettingsStore,
     ) -> Result<PushRepositoriesOk, PushRepositoriesError> {
         let projects = FakeProjectClient { repos, error: None };
         let git = remote.git_client();
         push_repositories::execute(
-            request,
+            mode,
             &git,
             &projects,
             &FixedClock::from_raw("2026-07-03T00:00:00Z"),
@@ -263,10 +257,8 @@ mod tests {
         ))
     }
 
-    fn req() -> PushRepositories {
-        PushRepositories {
-            mode: GitEffectMode::Apply,
-        }
+    fn req() -> GitEffectMode {
+        GitEffectMode::Apply
     }
 
     #[tokio::test]
@@ -353,8 +345,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let mut request = req();
-        request.mode = GitEffectMode::DryRun;
+        let request = GitEffectMode::DryRun;
 
         let response = execute_with(remote, vec![repo("a")], request)
             .await
@@ -441,8 +432,7 @@ mod tests {
 
     #[tokio::test]
     async fn exclusions_partition_repositories_before_dry_run_git_operations() {
-        let mut request = req();
-        request.mode = GitEffectMode::DryRun;
+        let request = GitEffectMode::DryRun;
         let response = execute_with_settings(
             ProjectGitScript {
                 present: true,

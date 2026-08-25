@@ -1,29 +1,19 @@
 use super::recipe_label;
 use crate::recipes::Recipe;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InitialRecipeLabel {
-    pub recipe: Recipe,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InitialRecipeLabelOk {
-    pub label: String,
-}
-
 #[cqrsy::query]
-pub fn execute(query: InitialRecipeLabel) -> InitialRecipeLabelOk {
-    let InitialRecipeLabel { recipe } = query;
-    InitialRecipeLabelOk {
-        label: recipe_label::initial(&recipe),
-    }
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CQRsy operations own their request value"
+)]
+pub fn execute(recipe: Recipe) -> String {
+    recipe_label::initial(&recipe)
 }
 
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU32;
 
-    use super::*;
     use crate::{
         recipes::{RecipeOp, RecipeSource, RecipeTarget},
         utils::viewer::recipe,
@@ -91,9 +81,9 @@ mod tests {
         ];
 
         for (op, expected) in cases {
-            let response = initial_recipe_label::execute(InitialRecipeLabel { recipe: recipe(op) });
+            let response = initial_recipe_label::execute(recipe(op));
 
-            assert_eq!(response.label, expected);
+            assert_eq!(response, expected);
         }
     }
 
@@ -105,9 +95,9 @@ mod tests {
         });
         named.name = Some(crate::utils::project_name("Release review"));
 
-        let response = initial_recipe_label::execute(InitialRecipeLabel { recipe: named });
+        let response = initial_recipe_label::execute(named);
 
-        assert_eq!(response.label, "Release review");
+        assert_eq!(response, "Release review");
     }
 
     #[test]
@@ -118,8 +108,8 @@ mod tests {
         });
         root.source = RecipeSource::LocalRepo(crate::utils::repository_root("/"));
 
-        let response = initial_recipe_label::execute(InitialRecipeLabel { recipe: root });
+        let response = initial_recipe_label::execute(root);
 
-        assert_eq!(response.label, "repo: merge ->main");
+        assert_eq!(response, "repo: merge ->main");
     }
 }

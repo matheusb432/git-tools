@@ -5,12 +5,12 @@ use gtl_application::viewer::{
     shell, viewer_diff_file_source,
 };
 use gtl_wire::{
+    proto::viewer as viewer_proto,
     v1,
     viewer::{
         VIEWER_ROW_BATCH_MAX_ENCODED_BYTES, VIEWER_ROW_BATCH_MAX_ROWS,
-        VIEWER_ROW_MAX_ENCODED_BYTES, ViewerCodeLine, ViewerDiffFileId, ViewerDiffLayout,
-        ViewerRows, ViewerSplitCell, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow,
-        ViewerUnifiedSourceRow, ViewerViewIdentity,
+        VIEWER_ROW_MAX_ENCODED_BYTES, ViewerDiffFileId, ViewerDiffLayout, ViewerRows,
+        ViewerSplitRow, ViewerUnifiedRow, ViewerViewIdentity,
     },
 };
 use prost::Message as _;
@@ -260,8 +260,8 @@ fn send_unified_rows(
 ) -> BatchResult {
     let Ok(rows) = rows
         .into_iter()
-        .map(unified_row)
-        .collect::<Result<Vec<_>, ()>>()
+        .map(viewer_proto::encode_viewer_unified_row)
+        .collect::<Result<Vec<_>, _>>()
     else {
         return BatchResult::RowTooLarge;
     };
@@ -280,8 +280,8 @@ fn send_split_rows(
 ) -> BatchResult {
     let Ok(rows) = rows
         .into_iter()
-        .map(split_row)
-        .collect::<Result<Vec<_>, ()>>()
+        .map(viewer_proto::encode_viewer_split_row)
+        .collect::<Result<Vec<_>, _>>()
     else {
         return BatchResult::RowTooLarge;
     };
@@ -329,108 +329,6 @@ where
         return BatchResult::Cancelled;
     }
     BatchResult::Sent
-}
-
-fn unified_row(row: ViewerUnifiedRow) -> Result<v1::ViewerUnifiedRow, ()> {
-    let row = match row {
-        ViewerUnifiedRow::Meta(text) => v1::viewer_unified_row::Row::Meta(text),
-        ViewerUnifiedRow::Hunk(text) => v1::viewer_unified_row::Row::Hunk(text),
-        ViewerUnifiedRow::Context(row) => v1::viewer_unified_row::Row::Context(source_row(row)?),
-        ViewerUnifiedRow::Added(row) => v1::viewer_unified_row::Row::Added(source_row(row)?),
-        ViewerUnifiedRow::Removed(row) => v1::viewer_unified_row::Row::Removed(source_row(row)?),
-    };
-    Ok(v1::ViewerUnifiedRow { row: Some(row) })
-}
-
-fn source_row(row: ViewerUnifiedSourceRow) -> Result<v1::ViewerUnifiedSourceRow, ()> {
-    Ok(v1::ViewerUnifiedSourceRow {
-        old_line_number: row.old_line_number,
-        new_line_number: row.new_line_number,
-        code: Some(code_line(row.code)?),
-    })
-}
-
-fn split_row(row: ViewerSplitRow) -> Result<v1::ViewerSplitRow, ()> {
-    let row = match row {
-        ViewerSplitRow::Meta(text) => v1::viewer_split_row::Row::Meta(text),
-        ViewerSplitRow::Hunk(text) => v1::viewer_split_row::Row::Hunk(text),
-        ViewerSplitRow::Context {
-            old_line_number,
-            new_line_number,
-            code,
-        } => v1::viewer_split_row::Row::Context(v1::ViewerSplitContextRow {
-            old_line_number,
-            new_line_number,
-            code: Some(code_line(code)?),
-        }),
-        ViewerSplitRow::Pair { old, new } => {
-            v1::viewer_split_row::Row::Pair(v1::ViewerSplitPairRow {
-                old: old.map(split_cell).transpose()?,
-                new: new.map(split_cell).transpose()?,
-            })
-        }
-    };
-    Ok(v1::ViewerSplitRow { row: Some(row) })
-}
-
-fn split_cell(cell: ViewerSplitCell) -> Result<v1::ViewerSplitCell, ()> {
-    Ok(v1::ViewerSplitCell {
-        line_number: cell.line_number,
-        code: Some(code_line(cell.code)?),
-    })
-}
-
-fn code_line(line: ViewerCodeLine) -> Result<v1::ViewerCodeLine, ()> {
-    let mut byte_start = 0_usize;
-    let spans = line
-        .spans
-        .into_iter()
-        .map(|span| {
-            let byte_end = byte_start.checked_add(span.text.len()).ok_or(())?;
-            if line.text.get(byte_start..byte_end) != Some(span.text.as_str()) {
-                return Err(());
-            }
-            let projected = v1::ViewerCodeSpan {
-                byte_start: u32::try_from(byte_start).map_err(|_| ())?,
-                byte_end: u32::try_from(byte_end).map_err(|_| ())?,
-                syntax_class: span
-                    .syntax_class
-                    .map_or(v1::ViewerSyntaxClass::Unspecified as i32, |class| {
-                        syntax_class(class) as i32
-                    }),
-                changed: span.changed,
-            };
-            byte_start = byte_end;
-            Ok(projected)
-        })
-        .collect::<Result<Vec<_>, ()>>()?;
-    if byte_start != line.text.len() {
-        return Err(());
-    }
-    Ok(v1::ViewerCodeLine {
-        text: line.text,
-        spans,
-        long_line_character_count: line
-            .long_line_character_count
-            .map(u32::try_from)
-            .transpose()
-            .map_err(|_| ())?,
-    })
-}
-
-const fn syntax_class(class: ViewerSyntaxClass) -> v1::ViewerSyntaxClass {
-    match class {
-        ViewerSyntaxClass::Keyword => v1::ViewerSyntaxClass::Keyword,
-        ViewerSyntaxClass::String => v1::ViewerSyntaxClass::String,
-        ViewerSyntaxClass::Comment => v1::ViewerSyntaxClass::Comment,
-        ViewerSyntaxClass::Type => v1::ViewerSyntaxClass::Type,
-        ViewerSyntaxClass::Function => v1::ViewerSyntaxClass::Function,
-        ViewerSyntaxClass::Number => v1::ViewerSyntaxClass::Number,
-        ViewerSyntaxClass::Constant => v1::ViewerSyntaxClass::Constant,
-        ViewerSyntaxClass::Operator => v1::ViewerSyntaxClass::Operator,
-        ViewerSyntaxClass::Tag => v1::ViewerSyntaxClass::Tag,
-        ViewerSyntaxClass::Variable => v1::ViewerSyntaxClass::Variable,
-    }
 }
 
 fn to_render_options(

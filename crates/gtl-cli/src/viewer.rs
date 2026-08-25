@@ -1,40 +1,4 @@
-//! Viewer/display predicates shared by the CLI's render paths, plus viewer binary
-//! resolution for recipe forwarding.
-use std::{ffi::OsStr, path::PathBuf};
-
-#[derive(Clone, Copy)]
-enum DisplayPlatform {
-    MacOs,
-    Other,
-}
-
-impl DisplayPlatform {
-    const CURRENT: Self = if cfg!(target_os = "macos") {
-        Self::MacOs
-    } else {
-        Self::Other
-    };
-}
-
-const fn display_available(
-    platform: DisplayPlatform,
-    display: Option<&OsStr>,
-    wayland_display: Option<&OsStr>,
-) -> bool {
-    matches!(platform, DisplayPlatform::MacOs) || display.is_some() || wayland_display.is_some()
-}
-
-/// Whether the native viewer is available. macOS uses its native window server;
-/// other platforms require `DISPLAY` or `WAYLAND_DISPLAY` to be present.
-pub fn has_display() -> bool {
-    let display = std::env::var_os("DISPLAY");
-    let wayland_display = std::env::var_os("WAYLAND_DISPLAY");
-    display_available(
-        DisplayPlatform::CURRENT,
-        display.as_deref(),
-        wayland_display.as_deref(),
-    )
-}
+//! Explicit viewer opt-out shared by CLI commands.
 
 /// Returns true if the given env-var value is a truthy `NO_OPEN` sentinel
 /// (`1 | true | TRUE | yes | YES`, after trimming).
@@ -49,50 +13,9 @@ pub(crate) fn no_open_requested() -> bool {
     is_no_open(std::env::var("GIT_TOOLS_NO_OPEN").ok().as_deref())
 }
 
-/// The viewer binary: `gtl-viewer` next to the running CLI exe, else on PATH.
-/// `None` if neither exists (caller degrades to the browser path).
-pub fn resolve_viewer_bin() -> Option<PathBuf> {
-    let name = format!("gtl-viewer{}", std::env::consts::EXE_SUFFIX);
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let sibling = dir.join(&name);
-        if sibling.is_file() {
-            return Some(sibling);
-        }
-    }
-    // PATH fallback: rely on the OS resolver by returning the bare name if any
-    // dir on PATH holds it.
-    std::env::var_os("PATH").and_then(|paths| {
-        std::env::split_paths(&paths)
-            .map(|d| d.join(&name))
-            .find(|c| c.is_file())
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn macos_is_display_capable_without_x11_environment() {
-        assert!(display_available(DisplayPlatform::MacOs, None, None));
-    }
-
-    #[test]
-    fn other_platforms_require_a_display_environment_variable() {
-        assert!(!display_available(DisplayPlatform::Other, None, None));
-        assert!(display_available(
-            DisplayPlatform::Other,
-            Some(std::ffi::OsStr::new("display")),
-            None,
-        ));
-        assert!(display_available(
-            DisplayPlatform::Other,
-            None,
-            Some(std::ffi::OsStr::new("wayland")),
-        ));
-    }
 
     #[test]
     fn is_no_open_accepts_truthy_values() {

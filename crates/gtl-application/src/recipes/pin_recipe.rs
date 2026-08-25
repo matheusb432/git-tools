@@ -41,15 +41,11 @@ pub enum PinRecipeError {
 /// a repository top level.
 #[cqrsy::query]
 pub fn execute(query: PinRecipe, git: &impl GitClient) -> Result<Recipe, PinRecipeError> {
-    let top = resolve_repository_root::execute(
-        resolve_repository_root::ResolveRepositoryRoot {
+    let top = resolve_repository_root::execute(query.repo_path.clone(), git).map_err(|source| {
+        PinRecipeError::TopLevel {
             repo_path: query.repo_path.clone(),
-        },
-        git,
-    )
-    .map_err(|source| PinRecipeError::TopLevel {
-        repo_path: query.repo_path.clone(),
-        source,
+            source,
+        }
     })?;
 
     Ok(build_resolved(top, query.operation, query.name, git))

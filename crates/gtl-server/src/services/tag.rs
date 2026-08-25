@@ -5,11 +5,11 @@ use gtl_application::{
         TagRemotePushProgress,
         add_and_push_tag::{self, AddAndPushTag, AddAndPushTagError},
         add_tag::{self, AddTag, AddTagError},
-        bump_tag::{self, BumpTag, BumpTagOk},
+        bump_tag::{self, BumpTagOk},
         dry_run_tag_bump::{self, DryRunTagBump, DryRunTagBumpOk, TagBumpPreview},
         label_tag::{self, LabelTag, LabelTagError},
         list_tags::{self, ListTags},
-        push_tags::{self, PushTags, PushTagsError},
+        push_tags::{self, PushTagsError},
     },
 };
 use gtl_models::{
@@ -24,19 +24,18 @@ use tonic::{Request, Response, Status};
 use super::{absolute_path, repository_root, required, run_blocking, unexpected};
 use crate::state::AppState;
 
-#[derive(Clone)]
-pub(crate) struct TagApi {
+pub(crate) struct TagGrpcService {
     state: AppState,
 }
 
-impl TagApi {
+impl TagGrpcService {
     pub(crate) const fn new(state: AppState) -> Self {
         Self { state }
     }
 }
 
 #[tonic::async_trait]
-impl TagService for TagApi {
+impl TagService for TagGrpcService {
     async fn plan_tag_bump(
         &self,
         request: Request<v1::PlanTagBumpRequest>,
@@ -55,9 +54,7 @@ impl TagService for TagApi {
         request: Request<v1::ExecuteTagBumpRequest>,
     ) -> Result<Response<v1::ExecuteTagBumpResponse>, Status> {
         let preview = required(request.into_inner().preview, "preview")?;
-        let request = BumpTag {
-            preview: tag_bump_preview(preview)?,
-        };
+        let request = tag_bump_preview(preview)?;
         let state = self.state.clone();
         let result = run_blocking(move || bump_tag::execute(request, &state.git))
             .await?
@@ -141,12 +138,10 @@ impl TagService for TagApi {
         let state = self.state.clone();
         let result = run_blocking(move || {
             let repo_path = resolve_root(repo_path, &state)?;
-            Ok::<_, anyhow::Error>(
-                match push_tags::execute(PushTags { repo_path }, &state.git) {
-                    Ok(outcome) => action_response(&outcome),
-                    Err(error) => push_aborted(error),
-                },
-            )
+            Ok::<_, anyhow::Error>(match push_tags::execute(repo_path, &state.git) {
+                Ok(outcome) => action_response(&outcome),
+                Err(error) => push_aborted(error),
+            })
         })
         .await?
         .map_err(|error| unexpected(error, "push repository tags"))?;
@@ -347,11 +342,7 @@ fn execute_response(result: BumpTagOk) -> v1::ExecuteTagBumpResponse {
 }
 
 fn resolve_root(repo_path: std::path::PathBuf, state: &AppState) -> anyhow::Result<RepositoryRoot> {
-    resolve_repository_root::execute(
-        resolve_repository_root::ResolveRepositoryRoot { repo_path },
-        &state.git,
-    )
-    .map_err(anyhow::Error::from)
+    resolve_repository_root::execute(repo_path, &state.git).map_err(anyhow::Error::from)
 }
 
 fn tag_name(raw: String, field: &'static str) -> Result<TagName, Status> {

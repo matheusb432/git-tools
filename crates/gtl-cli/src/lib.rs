@@ -21,13 +21,13 @@ use crate::{
 pub mod cli;
 pub mod commands;
 pub mod preprocess;
-pub mod viewer;
 
 mod confirm;
 mod diff_viewer_client;
 mod server_client;
 #[cfg(test)]
 mod testing;
+mod viewer;
 
 /// Process exit codes. Stable contract every caller (and justfile shim) depends on.
 /// Extend with command-specific codes as the tool grows (keep 0/1/2 stable).

@@ -7,7 +7,7 @@ use gtl_models::paths::ProjectName;
 use crate::{
     ports::GitClient,
     recipes::{Recipe, RecipeOp},
-    repositories::resolve_repository_root::{self, ResolveRepositoryRoot},
+    repositories::resolve_repository_root,
 };
 
 /// Requests a resolved recipe for one repository path.
@@ -33,12 +33,7 @@ pub enum BuildRecipeError {
 /// Returns [`BuildRecipeError`] when Git cannot resolve the repository path.
 #[cqrsy::query]
 pub fn execute(query: BuildRecipe, git: &impl GitClient) -> Result<Recipe, BuildRecipeError> {
-    let repository_root = resolve_repository_root::execute(
-        ResolveRepositoryRoot {
-            repo_path: query.repo_path,
-        },
-        git,
-    )?;
+    let repository_root = resolve_repository_root::execute(query.repo_path, git)?;
     Ok(super::build_resolved(
         repository_root,
         query.operation,

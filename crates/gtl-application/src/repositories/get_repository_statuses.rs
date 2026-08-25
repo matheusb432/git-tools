@@ -13,19 +13,16 @@ use gtl_models::{
 
 use crate::ports::GitClient;
 
-/// Classifies every supplied repository in order.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GetRepositoryStatuses {
-    pub repos: Vec<RepositoryTarget>,
-}
-
 /// Classifies each repository from local refs without fetching.
 ///
 /// Transport and Git rejections become explicit unavailable facts so an unreadable repository is
 /// never reported as clean.
 #[cqrsy::query]
-pub fn execute(query: GetRepositoryStatuses, git: &impl GitClient) -> Vec<StatusResult> {
-    let GetRepositoryStatuses { repos } = query;
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CQRsy operations own their request value"
+)]
+pub fn execute(repos: Vec<RepositoryTarget>, git: &impl GitClient) -> Vec<StatusResult> {
     repos.iter().map(|repo| get_one(repo, git)).collect()
 }
 
@@ -122,12 +119,7 @@ mod tests {
             .unwrap()
             .push("/repos/api".into());
 
-        let results = get_repository_statuses::execute(
-            GetRepositoryStatuses {
-                repos: vec![repo("api")],
-            },
-            &runner,
-        );
+        let results = get_repository_statuses::execute(vec![repo("api")], &runner);
 
         assert_eq!(results[0].class(), StatusClass::Absent);
         assert_eq!(results[0].detail(), "not present");
@@ -143,13 +135,7 @@ mod tests {
             ScriptedGitClient::applied(""),
         ]);
 
-        let result = get_repository_statuses::execute(
-            GetRepositoryStatuses {
-                repos: vec![repo("api")],
-            },
-            &runner,
-        )
-        .remove(0);
+        let result = get_repository_statuses::execute(vec![repo("api")], &runner).remove(0);
 
         assert_eq!(result.class(), StatusClass::Clean);
         assert_eq!(result.detail(), "✓");
@@ -177,13 +163,7 @@ mod tests {
             ScriptedGitClient::applied(" M src/lib.rs\n?? new.txt\n"),
         ]);
 
-        let result = get_repository_statuses::execute(
-            GetRepositoryStatuses {
-                repos: vec![repo("api")],
-            },
-            &runner,
-        )
-        .remove(0);
+        let result = get_repository_statuses::execute(vec![repo("api")], &runner).remove(0);
 
         assert_eq!(result.class(), StatusClass::Pending);
         assert_eq!(result.detail(), "⇡2 !?");
@@ -201,20 +181,9 @@ mod tests {
             ScriptedGitClient::applied(""),
         ]);
 
-        let detached = get_repository_statuses::execute(
-            GetRepositoryStatuses {
-                repos: vec![repo("api")],
-            },
-            &detached,
-        )
-        .remove(0);
-        let missing = get_repository_statuses::execute(
-            GetRepositoryStatuses {
-                repos: vec![repo("api")],
-            },
-            &missing_upstream,
-        )
-        .remove(0);
+        let detached = get_repository_statuses::execute(vec![repo("api")], &detached).remove(0);
+        let missing =
+            get_repository_statuses::execute(vec![repo("api")], &missing_upstream).remove(0);
 
         assert_eq!(detached.class(), StatusClass::Warn);
         assert_eq!(detached.detail(), "detached");
@@ -231,13 +200,7 @@ mod tests {
             ScriptedGitClient::rejected("status unavailable"),
         ]);
 
-        let result = get_repository_statuses::execute(
-            GetRepositoryStatuses {
-                repos: vec![repo("api")],
-            },
-            &runner,
-        )
-        .remove(0);
+        let result = get_repository_statuses::execute(vec![repo("api")], &runner).remove(0);
 
         assert_eq!(result.class(), StatusClass::Warn);
         assert_eq!(result.detail(), "status-unavailable");

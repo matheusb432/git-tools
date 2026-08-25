@@ -6,7 +6,7 @@ use gtl_application::{
             SaveLiveViewOutcome,
         },
     },
-    projects::select_unpushed_repositories::{self, SelectUnpushedRepositories},
+    projects::select_unpushed_repositories,
     recipes::{Recipe, RecipeBatch, RecipeBatchKind},
 };
 use gtl_models::{live_views::LiveSource, recipes::RecipeBatchId};
@@ -16,19 +16,18 @@ use tonic::{Request, Response, Status};
 use super::{application_notes, project_client_error, run_blocking, unexpected};
 use crate::{state::AppState, viewer_process, viewer_runtime};
 
-#[derive(Clone)]
-pub(crate) struct LiveViewApi {
+pub(crate) struct LiveViewGrpcService {
     state: AppState,
 }
 
-impl LiveViewApi {
+impl LiveViewGrpcService {
     pub(crate) const fn new(state: AppState) -> Self {
         Self { state }
     }
 }
 
 #[tonic::async_trait]
-impl LiveViewService for LiveViewApi {
+impl LiveViewService for LiveViewGrpcService {
     async fn save_and_present_live_view(
         &self,
         request: Request<v1::SaveAndPresentLiveViewRequest>,
@@ -72,11 +71,8 @@ impl LiveViewService for LiveViewApi {
             .map_err(|error| project_client_error(&error))?;
         let state = self.state.clone();
         let results = run_blocking(move || {
-            let selected = select_unpushed_repositories::execute(
-                SelectUnpushedRepositories { repos },
-                &state.git,
-            )
-            .map_err(|error| unexpected(error, "select project live views"))?;
+            let selected = select_unpushed_repositories::execute(repos, &state.git)
+                .map_err(|error| unexpected(error, "select project live views"))?;
             let mut connection = state
                 .database
                 .connection_lock()

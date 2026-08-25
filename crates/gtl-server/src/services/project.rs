@@ -10,8 +10,8 @@ use gtl_application::{
             self, PruneAction, PruneBranches, PruneBranchesError, PruneBranchesOk, PruneExit,
             PruneRepoResult,
         },
-        pull_repositories::{self, PullRepositories, PullRepositoriesError},
-        push_repositories::{self, PushRepositories, PushRepositoriesError},
+        pull_repositories::{self, PullRepositoriesError},
+        push_repositories::{self, PushRepositoriesError},
     },
     repositories::{apply_prune::PruneFailure, get_repository_statuses, plan_prune::PruneBranch},
 };
@@ -29,28 +29,25 @@ use super::{
 };
 use crate::state::AppState;
 
-#[derive(Clone)]
-pub(crate) struct ProjectApi {
+pub(crate) struct ProjectGrpcService {
     state: AppState,
 }
 
-impl ProjectApi {
+impl ProjectGrpcService {
     pub(crate) const fn new(state: AppState) -> Self {
         Self { state }
     }
 }
 
 #[tonic::async_trait]
-impl ProjectService for ProjectApi {
+impl ProjectService for ProjectGrpcService {
     async fn push_project_repositories(
         &self,
         request: Request<v1::PushProjectRepositoriesRequest>,
     ) -> Result<Response<v1::PushProjectRepositoriesResponse>, Status> {
         let state = self.state.clone();
         let result = push_repositories::execute(
-            PushRepositories {
-                mode: effect_mode(request.into_inner().dry_run),
-            },
+            effect_mode(request.into_inner().dry_run),
             &state.git,
             &state.projects,
             &state.clock,
@@ -72,9 +69,7 @@ impl ProjectService for ProjectApi {
     ) -> Result<Response<v1::PullProjectRepositoriesResponse>, Status> {
         let state = self.state.clone();
         let result = pull_repositories::execute(
-            PullRepositories {
-                mode: effect_mode(request.into_inner().dry_run),
-            },
+            effect_mode(request.into_inner().dry_run),
             &state.git,
             &state.projects,
         )
@@ -162,13 +157,8 @@ impl ProjectService for ProjectApi {
                 path: repo.path,
             })
             .collect();
-        let results = run_blocking(move || {
-            get_repository_statuses::execute(
-                get_repository_statuses::GetRepositoryStatuses { repos },
-                &state.git,
-            )
-        })
-        .await?;
+        let results =
+            run_blocking(move || get_repository_statuses::execute(repos, &state.git)).await?;
 
         Ok(Response::new(v1::GetProjectRepositoryStatusesResponse {
             results: status_results(&results),

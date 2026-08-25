@@ -6,7 +6,13 @@ publish.workspace = true
 
 [features]
 default = []
-grpc = ["dep:prost", "dep:tonic", "dep:tonic-prost", "dep:tonic-prost-build"]
+grpc = [
+  "dep:prost",
+  "dep:thiserror",
+  "dep:tonic",
+  "dep:tonic-prost",
+  "dep:tonic-prost-build",
+]
 
 [dependencies]
 gtl-models.workspace = true
@@ -14,6 +20,7 @@ nutype = { workspace = true, features = ["serde"] }
 prost = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
+thiserror = { workspace = true, optional = true }
 tonic = { workspace = true, optional = true }
 tonic-prost = { workspace = true, optional = true }
 

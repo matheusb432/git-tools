@@ -1,5 +1,7 @@
-//! Process-boundary values that are not application operation requests.
-//! Application requests are serialized directly by their presentation layer.
+//! Process-boundary values and their optional protobuf codecs.
+
+#[cfg(feature = "grpc")]
+pub mod proto;
 
 pub mod settings;
 pub mod viewer;

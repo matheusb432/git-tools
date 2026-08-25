@@ -15,12 +15,6 @@ use gtl_models::{
 
 use crate::{ports::GitClient, repositories::find_repositories};
 
-/// Plan a recursive push of every git repo under `root`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlanRecursivePush {
-    pub root: PathBuf,
-}
-
 /// Everything that can go wrong planning a recursive push.
 #[derive(Debug, thiserror::Error)]
 pub enum PlanRecursivePushError {
@@ -31,11 +25,14 @@ pub enum PlanRecursivePushError {
 /// Discovers every git repo under the root and resolves each one's push destination.
 /// Linked worktrees are skipped by the repository traversal scope.
 #[cqrsy::query]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CQRsy operations own their request value"
+)]
 pub fn execute(
-    req: PlanRecursivePush,
+    root: PathBuf,
     git: &impl GitClient,
 ) -> Result<SubreposPlan, PlanRecursivePushError> {
-    let PlanRecursivePush { root } = req;
     let discovered = find_repositories::execute(find_repositories::FindRepositories {
         root: root.clone(),
         scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
@@ -200,9 +197,7 @@ mod tests {
     fn plan_refuses_when_no_repos_are_discovered() {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let plan = plan_recursive_push::execute(
-            PlanRecursivePush {
-                root: temporary.path().to_path_buf(),
-            },
+            temporary.path().to_path_buf(),
             &ScriptedGitClient::default(),
         )
         .expect("planning succeeds");
@@ -227,13 +222,8 @@ mod tests {
             ScriptedGitClient::applied("HEAD\n"),
         ]);
 
-        let plan = plan_recursive_push::execute(
-            PlanRecursivePush {
-                root: temporary.path().to_path_buf(),
-            },
-            &runner,
-        )
-        .expect("planning succeeds");
+        let plan = plan_recursive_push::execute(temporary.path().to_path_buf(), &runner)
+            .expect("planning succeeds");
 
         let SubreposPlan::Ready(targets) = plan else {
             panic!("expected a ready plan, got {plan:?}");

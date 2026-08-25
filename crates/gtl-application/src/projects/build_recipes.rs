@@ -34,10 +34,7 @@ pub fn execute(
     query: BuildProjectRecipes,
     git: &impl GitClient,
 ) -> Result<Vec<Recipe>, BuildProjectRecipesError> {
-    let selected = select_unpushed_repositories::execute(
-        select_unpushed_repositories::SelectUnpushedRepositories { repos: query.repos },
-        git,
-    )?;
+    let selected = select_unpushed_repositories::execute(query.repos, git)?;
     Ok(selected
         .into_iter()
         .map(|repo| {

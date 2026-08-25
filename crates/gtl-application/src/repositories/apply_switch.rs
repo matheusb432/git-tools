@@ -3,12 +3,6 @@
 use super::plan_switch::SwitchTarget;
 use crate::ports::{GitClient, GitEffect};
 
-/// Requests applying one confirmed branch switch.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApplySwitch {
-    pub target: SwitchTarget,
-}
-
 /// Classifies the result of applying a branch switch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SwitchStatus {
@@ -51,11 +45,14 @@ pub enum ApplySwitchError {
 ///
 /// Returns [`ApplySwitchError`] when Git transport fails.
 #[cqrsy::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CQRsy operations own their request value"
+)]
 pub fn execute(
-    command: ApplySwitch,
+    target: SwitchTarget,
     git: &impl GitClient,
 ) -> Result<ApplySwitchOk, ApplySwitchError> {
-    let ApplySwitch { target } = command;
     match git.switch(&target.top, &target.onto) {
         Ok(GitEffect::Applied(())) => Ok(ApplySwitchOk::new(
             SwitchStatus::Switched,
@@ -91,8 +88,7 @@ mod tests {
     fn successful_switch_reports_the_transition() {
         let git = ScriptedGitClient::new(vec![ScriptedGitClient::applied("")]);
 
-        let result = apply_switch::execute(ApplySwitch { target: target() }, &git)
-            .expect("switch application succeeds");
+        let result = apply_switch::execute(target(), &git).expect("switch application succeeds");
 
         assert_eq!(
             result,
@@ -109,8 +105,8 @@ mod tests {
             "error: Your local changes would be overwritten",
         )]);
 
-        let result = apply_switch::execute(ApplySwitch { target: target() }, &git)
-            .expect("a rejected switch is a closed failure");
+        let result =
+            apply_switch::execute(target(), &git).expect("a rejected switch is a closed failure");
 
         assert_eq!(result.status, SwitchStatus::Failed);
         assert!(result.detail.contains("local changes would be overwritten"));
@@ -122,7 +118,7 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = apply_switch::execute(ApplySwitch { target: target() }, &git)
+        let error = apply_switch::execute(target(), &git)
             .expect_err("transport failure must remain an error");
 
         assert_eq!(

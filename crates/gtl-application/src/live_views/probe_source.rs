@@ -12,17 +12,6 @@ use crate::{
     ports::{GitClient, GitRepositoryState},
 };
 
-/// Probes one validated live-view source for git-repository validity.
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProbeSource {
-    pub source: LiveSource,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ProbeSourceOk {
-    pub outcome: ProbeOutcome,
-}
-
 /// What probing a live-view source found.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProbeOutcome {
@@ -41,8 +30,7 @@ pub enum ProbeSourceError {
 
 /// Probes a source's directory through the [`GitClient`] capability.
 #[cqrsy::query]
-pub fn execute(req: ProbeSource, git: &impl GitClient) -> Result<ProbeSourceOk, ProbeSourceError> {
-    let ProbeSource { source } = req;
+pub fn execute(source: LiveSource, git: &impl GitClient) -> Result<ProbeOutcome, ProbeSourceError> {
     let LiveSource::LocalRepo { path } = source;
 
     let outcome = match git.probe_repository(&path)? {
@@ -59,7 +47,7 @@ pub fn execute(req: ProbeSource, git: &impl GitClient) -> Result<ProbeSourceOk, 
         },
     };
 
-    Ok(ProbeSourceOk { outcome })
+    Ok(outcome)
 }
 
 #[cfg(test)]
@@ -74,10 +62,8 @@ mod tests {
         }
     }
 
-    fn request(source_value: &str) -> ProbeSource {
-        ProbeSource {
-            source: LiveSource::local_repo(crate::utils::repository_root(source_value)),
-        }
+    fn request(source_value: &str) -> LiveSource {
+        LiveSource::local_repo(crate::utils::repository_root(source_value))
     }
 
     #[test]
@@ -85,7 +71,7 @@ mod tests {
         let git = git(GitRepositoryState::NotFound);
         let response = probe_source::execute(request("/gone"), &git).expect("probe succeeds");
 
-        match response.outcome {
+        match response {
             ProbeOutcome::Broken { rejection } => {
                 assert_eq!(rejection.code(), "DirNotFound");
                 assert_eq!(
@@ -102,7 +88,7 @@ mod tests {
         let git = git(GitRepositoryState::NotARepository);
         let response = probe_source::execute(request("/plain"), &git).expect("probe succeeds");
 
-        match response.outcome {
+        match response {
             ProbeOutcome::Broken { rejection } => {
                 assert_eq!(rejection.code(), "DirNotGitRepo");
                 assert_eq!(
@@ -121,6 +107,6 @@ mod tests {
         });
         let response = probe_source::execute(request("/repos/gt"), &git).expect("probe succeeds");
 
-        assert_eq!(response.outcome, ProbeOutcome::Ok);
+        assert_eq!(response, ProbeOutcome::Ok);
     }
 }

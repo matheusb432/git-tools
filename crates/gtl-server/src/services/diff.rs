@@ -14,7 +14,7 @@ use gtl_application::{
         render_project_diff::{
             self, RenderProjectDiff, RenderProjectDiffError, RenderProjectDiffOk,
         },
-        select_unpushed_repositories::{self, SelectUnpushedRepositories},
+        select_unpushed_repositories,
     },
     recipes::{
         Recipe, RecipeBatch, RecipeBatchKind, RecipeOp, RecipeTarget,
@@ -38,19 +38,18 @@ use super::{
 };
 use crate::{state::AppState, viewer_process, viewer_runtime};
 
-#[derive(Clone)]
-pub(crate) struct DiffApi {
+pub(crate) struct DiffGrpcService {
     state: AppState,
 }
 
-impl DiffApi {
+impl DiffGrpcService {
     pub(crate) const fn new(state: AppState) -> Self {
         Self { state }
     }
 }
 
 #[tonic::async_trait]
-impl DiffService for DiffApi {
+impl DiffService for DiffGrpcService {
     async fn present_diff(
         &self,
         request: Request<v1::PresentDiffRequest>,
@@ -292,11 +291,8 @@ impl DiffService for DiffApi {
             .map_err(|error| project_client_error(&error))?;
         let state = self.state.clone();
         let result = run_blocking(move || {
-            let repos = select_unpushed_repositories::execute(
-                SelectUnpushedRepositories { repos },
-                &state.git,
-            )
-            .map_err(|error| unexpected(error, "select project diff repositories"))?;
+            let repos = select_unpushed_repositories::execute(repos, &state.git)
+                .map_err(|error| unexpected(error, "select project diff repositories"))?;
             if repos.is_empty() {
                 return Ok(None);
             }

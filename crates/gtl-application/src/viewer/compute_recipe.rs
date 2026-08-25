@@ -10,16 +10,6 @@ use crate::{
     recipes::{Recipe, RecipeOp, RecipeTarget},
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ComputeRecipe {
-    pub recipe: Recipe,
-}
-
-#[derive(Debug, Clone)]
-pub struct ComputeRecipeOk {
-    pub view: View,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ComputeRecipeError {
     #[error(transparent)]
@@ -30,11 +20,10 @@ pub enum ComputeRecipeError {
 
 #[cqrsy::query]
 pub fn execute(
-    query: ComputeRecipe,
+    recipe: Recipe,
     user_settings: &impl UserSettingsStore,
     source: &impl GitClient,
-) -> Result<ComputeRecipeOk, ComputeRecipeError> {
-    let recipe = query.recipe;
+) -> Result<View, ComputeRecipeError> {
     let cwd = recipe.cwd();
     let view = match recipe.op {
         RecipeOp::Diff { target } => {
@@ -62,7 +51,7 @@ pub fn execute(
         }
     };
 
-    Ok(ComputeRecipeOk { view })
+    Ok(view)
 }
 
 fn diff_target(target: RecipeTarget) -> DiffTarget {
@@ -113,19 +102,17 @@ mod tests {
         let source = source();
 
         let response = compute_recipe::execute(
-            ComputeRecipe {
-                recipe: recipe(RecipeOp::Diff {
-                    target: RecipeTarget::Unpushed { pinned: None },
-                }),
-            },
+            recipe(RecipeOp::Diff {
+                target: RecipeTarget::Unpushed { pinned: None },
+            }),
             &FixedUserSettingsStore::default(),
             &source,
         )
         .expect("recipe computes");
 
-        assert_eq!(response.view.repo_name.as_str(), "project");
-        assert_eq!(response.view.branch.to_string(), "feature");
-        assert_eq!(response.view.upstream.as_ref(), "main");
+        assert_eq!(response.repo_name.as_str(), "project");
+        assert_eq!(response.branch.to_string(), "feature");
+        assert_eq!(response.upstream.as_ref(), "main");
     }
 
     #[test]
@@ -171,17 +158,15 @@ mod tests {
 
         for (target, title, range, upstream) in cases {
             let response = compute_recipe::execute(
-                ComputeRecipe {
-                    recipe: recipe(RecipeOp::Diff { target }),
-                },
+                recipe(RecipeOp::Diff { target }),
                 &FixedUserSettingsStore::default(),
                 &source,
             )
             .expect("recipe computes");
 
-            assert_eq!(response.view.title, title);
-            assert_eq!(response.view.cmd.range, range);
-            assert_eq!(response.view.upstream.as_ref(), upstream);
+            assert_eq!(response.title, title);
+            assert_eq!(response.cmd.range, range);
+            assert_eq!(response.upstream.as_ref(), upstream);
         }
     }
 
@@ -194,20 +179,18 @@ mod tests {
         };
 
         let response = compute_recipe::execute(
-            ComputeRecipe {
-                recipe: recipe(RecipeOp::Diff {
-                    target: RecipeTarget::Range {
-                        range: crate::utils::git_range("symbolic..range"),
-                        pinned: Some(pin()),
-                    },
-                }),
-            },
+            recipe(RecipeOp::Diff {
+                target: RecipeTarget::Range {
+                    range: crate::utils::git_range("symbolic..range"),
+                    pinned: Some(pin()),
+                },
+            }),
             &FixedUserSettingsStore::default(),
             &source,
         )
         .expect("pinned recipe computes");
 
-        assert_eq!(response.view.cmd.range, "aaaaaaaaaa..1111111111");
+        assert_eq!(response.cmd.range, "aaaaaaaaaa..1111111111");
     }
 
     #[test]
@@ -218,18 +201,16 @@ mod tests {
             ..Default::default()
         };
         let response = compute_recipe::execute(
-            ComputeRecipe {
-                recipe: recipe(RecipeOp::MergeDiff {
-                    base: Some(crate::utils::git_revision("release")),
-                    pinned: Some(pin()),
-                }),
-            },
+            recipe(RecipeOp::MergeDiff {
+                base: Some(crate::utils::git_revision("release")),
+                pinned: Some(pin()),
+            }),
             &FixedUserSettingsStore::default(),
             &source,
         )
         .expect("recipe computes");
 
-        assert_eq!(response.view.title, "merge-diff");
+        assert_eq!(response.title, "merge-diff");
     }
 
     #[test]
@@ -241,24 +222,20 @@ mod tests {
         };
 
         let diff = compute_recipe::execute(
-            ComputeRecipe {
-                recipe: recipe(RecipeOp::Diff {
-                    target: RecipeTarget::Base {
-                        rev: crate::utils::git_revision("unknown"),
-                    },
-                }),
-            },
+            recipe(RecipeOp::Diff {
+                target: RecipeTarget::Base {
+                    rev: crate::utils::git_revision("unknown"),
+                },
+            }),
             &FixedUserSettingsStore::default(),
             &source,
         )
         .expect_err("unknown diff base fails");
         let merge = compute_recipe::execute(
-            ComputeRecipe {
-                recipe: recipe(RecipeOp::MergeDiff {
-                    base: Some(crate::utils::git_revision("unknown")),
-                    pinned: None,
-                }),
-            },
+            recipe(RecipeOp::MergeDiff {
+                base: Some(crate::utils::git_revision("unknown")),
+                pinned: None,
+            }),
             &FixedUserSettingsStore::default(),
             &source,
         )

@@ -9,12 +9,6 @@ use crate::{
     repositories::resolve_repository_root,
 };
 
-/// Requests the primary worktree path for one repository.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GetWorktreeBase {
-    pub repo_path: PathBuf,
-}
-
 /// Reports either the primary worktree path or the Git failure that prevented discovery.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GetWorktreeBaseOk {
@@ -43,15 +37,10 @@ pub enum GetWorktreeBaseError {
 /// Returns [`GetWorktreeBaseError`] when Git cannot be executed.
 #[cqrsy::query]
 pub fn execute(
-    query: GetWorktreeBase,
+    repo_path: PathBuf,
     git: &impl GitClient,
 ) -> Result<GetWorktreeBaseOk, GetWorktreeBaseError> {
-    let repo_path = resolve_repository_root::execute(
-        resolve_repository_root::ResolveRepositoryRoot {
-            repo_path: query.repo_path,
-        },
-        git,
-    )?;
+    let repo_path = resolve_repository_root::execute(repo_path, git)?;
     let worktrees = git
         .worktrees(&repo_path)
         .map_err(GetWorktreeBaseError::Unexpected)?;
@@ -73,7 +62,7 @@ pub fn execute(
 mod tests {
     use std::error::Error as _;
 
-    use super::{GetWorktreeBase, GetWorktreeBaseOk};
+    use super::GetWorktreeBaseOk;
     use crate::{utils::ScriptedGitClient, worktrees::get_worktree_base};
 
     #[test]
@@ -87,13 +76,8 @@ mod tests {
         ]);
 
         assert_eq!(
-            get_worktree_base::execute(
-                GetWorktreeBase {
-                    repo_path: "/repo/nested".into(),
-                },
-                &git,
-            )
-            .expect("porcelain output should produce a base path"),
+            get_worktree_base::execute("/repo/nested".into(), &git)
+                .expect("porcelain output should produce a base path"),
             GetWorktreeBaseOk::Found {
                 path: crate::utils::repository_root("/repo"),
             }
@@ -108,13 +92,8 @@ mod tests {
         ]);
 
         assert_eq!(
-            get_worktree_base::execute(
-                GetWorktreeBase {
-                    repo_path: "/repo".into(),
-                },
-                &git,
-            )
-            .expect("a Git rejection is a closed base failure"),
+            get_worktree_base::execute("/repo".into(), &git)
+                .expect("a Git rejection is a closed base failure"),
             GetWorktreeBaseOk::Failed {
                 detail: "fatal: not a repo".into(),
             }
@@ -129,13 +108,8 @@ mod tests {
         ]);
 
         assert_eq!(
-            get_worktree_base::execute(
-                GetWorktreeBase {
-                    repo_path: "/repo".into(),
-                },
-                &git,
-            )
-            .expect("empty Git output is a closed base failure"),
+            get_worktree_base::execute("/repo".into(), &git)
+                .expect("empty Git output is a closed base failure"),
             GetWorktreeBaseOk::Failed {
                 detail: "git returned no worktrees".into(),
             }
@@ -149,13 +123,8 @@ mod tests {
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
-        let error = get_worktree_base::execute(
-            GetWorktreeBase {
-                repo_path: "/repo".into(),
-            },
-            &git,
-        )
-        .expect_err("transport failure must remain an error");
+        let error = get_worktree_base::execute("/repo".into(), &git)
+            .expect_err("transport failure must remain an error");
 
         assert_eq!(error.to_string(), "git transport unavailable");
         assert_eq!(

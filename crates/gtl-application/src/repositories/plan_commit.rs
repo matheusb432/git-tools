@@ -10,12 +10,6 @@ use gtl_models::{
 
 use crate::ports::{GitClient, GitEffect};
 
-/// Requests a read-only local commit plan for one repository path.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlanCommit {
-    pub repo_path: PathBuf,
-}
-
 /// Describes the current repository selected for a local-only commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitTarget {
@@ -51,8 +45,11 @@ pub enum PlanCommitError {
 ///
 /// Returns [`PlanCommitError`] when Git transport fails.
 #[cqrsy::query]
-pub fn execute(query: PlanCommit, git: &impl GitClient) -> Result<PlanCommitOk, PlanCommitError> {
-    let PlanCommit { repo_path } = query;
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CQRsy operations own their request value"
+)]
+pub fn execute(repo_path: PathBuf, git: &impl GitClient) -> Result<PlanCommitOk, PlanCommitError> {
     let Some(top) = git
         .discover_top(&repo_path)
         .map_err(|source| transport("discover repository", source))?
@@ -118,13 +115,7 @@ mod tests {
             ScriptedGitClient::applied(" M src/lib.rs\n"),
         ]);
 
-        let plan = plan_commit::execute(
-            PlanCommit {
-                repo_path: ".".into(),
-            },
-            &git,
-        )
-        .expect("commit plan is built");
+        let plan = plan_commit::execute(".".into(), &git).expect("commit plan is built");
 
         assert_eq!(
             plan,
@@ -148,13 +139,8 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = plan_commit::execute(
-            PlanCommit {
-                repo_path: ".".into(),
-            },
-            &git,
-        )
-        .expect_err("transport failure must remain an error");
+        let error = plan_commit::execute(".".into(), &git)
+            .expect_err("transport failure must remain an error");
 
         assert_eq!(
             error.to_string(),

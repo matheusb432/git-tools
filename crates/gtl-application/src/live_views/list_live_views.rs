@@ -13,11 +13,6 @@ use crate::live_views::LiveViewRecord;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListLiveViews;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ListLiveViewsOk {
-    pub views: Vec<LiveViewRecord>,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum ListLiveViewsError {
     #[error(transparent)]
@@ -38,9 +33,8 @@ pub enum ListLiveViewsError {
 pub fn execute(
     _query: ListLiveViews,
     connection: &Connection,
-) -> Result<ListLiveViewsOk, ListLiveViewsError> {
-    let views = list_live_views(connection)?;
-    Ok(ListLiveViewsOk { views })
+) -> Result<Vec<LiveViewRecord>, ListLiveViewsError> {
+    list_live_views(connection)
 }
 
 fn list_live_views(connection: &Connection) -> Result<Vec<LiveViewRecord>, ListLiveViewsError> {
@@ -110,7 +104,6 @@ mod tests {
 
         assert_eq!(
             response
-                .views
                 .iter()
                 .map(|view| view.source.value())
                 .collect::<Vec<_>>(),

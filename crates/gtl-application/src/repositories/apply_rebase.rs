@@ -7,12 +7,6 @@ use gtl_models::diffs::{CommitId, CommitIdAbbreviation};
 use super::{BranchRecovery, plan_rebase::RebaseTarget};
 use crate::ports::{GitClient, GitEffect};
 
-/// Requests applying one confirmed fast-forward.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ApplyRebase {
-    pub target: RebaseTarget,
-}
-
 /// Reports the closed fast-forward status and its user-facing detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyRebaseOk {
@@ -90,11 +84,14 @@ pub enum ApplyRebaseError {
 ///
 /// Returns [`ApplyRebaseError`] when Git transport fails.
 #[cqrsy::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CQRsy operations own their request value"
+)]
 pub fn execute(
-    command: ApplyRebase,
+    target: RebaseTarget,
     git: &impl GitClient,
 ) -> Result<ApplyRebaseOk, ApplyRebaseError> {
-    let ApplyRebase { target } = command;
     let mut progress = RebaseProgress::default();
     match git.switch(&target.top, &target.onto) {
         Ok(GitEffect::Applied(())) => {}
@@ -206,8 +203,8 @@ mod tests {
             ScriptedGitClient::applied("Fast-forward\n"),
         ]);
 
-        let result = apply_rebase::execute(ApplyRebase { target: target() }, &git)
-            .expect("fast-forward application succeeds");
+        let result =
+            apply_rebase::execute(target(), &git).expect("fast-forward application succeeds");
 
         let ApplyRebaseOk::FastForwarded {
             detail,
@@ -236,7 +233,7 @@ mod tests {
             ScriptedGitClient::rejected("fatal: not ff"),
         ]);
 
-        let result = apply_rebase::execute(ApplyRebase { target: target() }, &git)
+        let result = apply_rebase::execute(target(), &git)
             .expect("a rejected log and merge remain closed outcomes");
 
         let ApplyRebaseOk::Failed { detail, progress } = result else {
@@ -262,7 +259,7 @@ mod tests {
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
-        let error = apply_rebase::execute(ApplyRebase { target: target() }, &git)
+        let error = apply_rebase::execute(target(), &git)
             .expect_err("transport failure must remain an error");
 
         assert!(error.to_string().starts_with("read promoted commits:"));

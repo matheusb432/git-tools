@@ -10,10 +10,6 @@ use crate::{
     },
 };
 
-pub struct OpenDiffFileInConfiguredEditor {
-    pub diff_file_path: RepositoryRelativePath,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum OpenDiffFileInConfiguredEditorError {
     #[error("the file is not present in the current diff")]
@@ -91,13 +87,16 @@ impl TextEditorInvocation {
 }
 
 #[cqrsy::command]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "CQRsy operations own their request value"
+)]
 pub fn execute(
-    command: OpenDiffFileInConfiguredEditor,
+    diff_file_path: RepositoryRelativePath,
     current_view: &View,
     file_system: &impl FileSystemClient,
     text_editor: &impl TextEditorClient,
 ) -> Result<(), OpenDiffFileInConfiguredEditorError> {
-    let OpenDiffFileInConfiguredEditor { diff_file_path } = command;
     let file = current_view
         .files
         .iter()
@@ -176,9 +175,7 @@ mod tests {
         paths::{RepositoryRelativePath, RepositoryRoot},
     };
 
-    use super::{
-        OpenDiffFileInConfiguredEditor, OpenDiffFileInConfiguredEditorError, TextEditorInvocation,
-    };
+    use super::{OpenDiffFileInConfiguredEditorError, TextEditorInvocation};
     use crate::{
         diffs::{FileDiff, FileStatus, View, open_diff_file_in_configured_editor},
         ports::{
@@ -343,11 +340,9 @@ mod tests {
         }
     }
 
-    fn command(diff_file_path: impl AsRef<Path>) -> OpenDiffFileInConfiguredEditor {
-        OpenDiffFileInConfiguredEditor {
-            diff_file_path: RepositoryRelativePath::try_new(diff_file_path.as_ref().to_path_buf())
-                .expect("fixture diff path is repository-relative"),
-        }
+    fn command(diff_file_path: impl AsRef<Path>) -> RepositoryRelativePath {
+        RepositoryRelativePath::try_new(diff_file_path.as_ref().to_path_buf())
+            .expect("fixture diff path is repository-relative")
     }
 
     fn available_file_system() -> ScriptedFileSystem {

@@ -25,7 +25,7 @@ pub(crate) fn open_recipe_batch(
 pub(crate) fn restore_saved_live_views(state: &AppState) -> anyhow::Result<()> {
     let records = {
         let connection = state.database.connection_lock()?;
-        list_live_views::execute(list_live_views::ListLiveViews, &connection)?.views
+        list_live_views::execute(list_live_views::ListLiveViews, &connection)?
     };
     if let Some(work) = work::reserve_restored_live_views(&state.viewer, records)? {
         spawn_recipe(state.clone(), work);

@@ -9,12 +9,6 @@ use gtl_models::{
 
 use crate::ports::GitClient;
 
-/// Requests unpushed selection across already-resolved project repositories.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SelectUnpushedRepositories {
-    pub repos: Vec<ProjectRepository>,
-}
-
 /// Reports an unexpected Git failure while selecting unpushed repositories.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -53,11 +47,11 @@ pub enum SelectUnpushedRepositoriesError {
 /// command is rejected, or an ahead repository's top-level path cannot be resolved.
 #[cqrsy::query]
 pub fn execute(
-    query: SelectUnpushedRepositories,
+    repos: Vec<ProjectRepository>,
     git: &impl GitClient,
 ) -> Result<Vec<RepositoryTarget>, SelectUnpushedRepositoriesError> {
     let mut selected = Vec::new();
-    for repo in query.repos {
+    for repo in repos {
         if !git.repo_present(&repo.path) {
             continue;
         }
@@ -109,7 +103,7 @@ mod tests {
 
     use gtl_models::{projects::ProjectRepository, repository::traversal::RepositoryTarget};
 
-    use super::{SelectUnpushedRepositories, SelectUnpushedRepositoriesError};
+    use super::SelectUnpushedRepositoriesError;
     use crate::{projects::select_unpushed_repositories, utils::ScriptedGitClient};
 
     fn repo(name: &str) -> ProjectRepository {
@@ -138,15 +132,13 @@ mod tests {
             .push(PathBuf::from("/repos/absent"));
 
         let selected = select_unpushed_repositories::execute(
-            SelectUnpushedRepositories {
-                repos: vec![
-                    repo("absent"),
-                    repo("api"),
-                    repo("clean"),
-                    repo("untracked"),
-                    repo("invalid"),
-                ],
-            },
+            vec![
+                repo("absent"),
+                repo("api"),
+                repo("clean"),
+                repo("untracked"),
+                repo("invalid"),
+            ],
             &git,
         )
         .expect("Git transport remains available");
@@ -166,13 +158,8 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = select_unpushed_repositories::execute(
-            SelectUnpushedRepositories {
-                repos: vec![repo("api")],
-            },
-            &git,
-        )
-        .expect_err("transport failure must remain an error");
+        let error = select_unpushed_repositories::execute(vec![repo("api")], &git)
+            .expect_err("transport failure must remain an error");
 
         assert_eq!(
             error.source().map(ToString::to_string),

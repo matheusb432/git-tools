@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use gtl_models::git::BranchName;
 
 use super::{
-    apply_rebase::{self, ApplyRebase, ApplyRebaseOk},
-    apply_revert::{self, ApplyRevert, ApplyRevertOk},
-    apply_switch::{self, ApplySwitch, SwitchStatus},
+    apply_rebase::{self, ApplyRebaseOk},
+    apply_revert::{self, ApplyRevertOk},
+    apply_switch::{self, SwitchStatus},
     plan_rebase::{self, PlanRebase, PlanRebaseOk},
     plan_revert::{self, PlanRevert, PlanRevertOk},
     plan_switch::{self, PlanSwitch, PlanSwitchOk},
@@ -93,7 +93,7 @@ fn switch(
             detail: format!("already on '{onto}'"),
         }),
         PlanSwitchOk::Ready(target) => {
-            let result = apply_switch::execute(ApplySwitch { target }, git)?;
+            let result = apply_switch::execute(target, git)?;
             Ok(match result.status {
                 SwitchStatus::Switched => ChangeBranchOk::Switched {
                     detail: result.detail,
@@ -115,7 +115,7 @@ fn rebase(
         PlanRebaseOk::Refused(detail) => Ok(ChangeBranchOk::Refused { detail }),
         PlanRebaseOk::Noop(detail) => Ok(ChangeBranchOk::NoOp { detail }),
         PlanRebaseOk::Ready(target) => {
-            let result = apply_rebase::execute(ApplyRebase { target }, git)?;
+            let result = apply_rebase::execute(target, git)?;
             Ok(match result {
                 ApplyRebaseOk::FastForwarded { detail, .. } => {
                     ChangeBranchOk::FastForwarded { detail }
@@ -134,7 +134,7 @@ fn revert(
     match plan_revert::execute(PlanRevert { repo_path, onto }, git)? {
         PlanRevertOk::Refused(detail) => Ok(ChangeBranchOk::Refused { detail }),
         PlanRevertOk::Ready(target) => {
-            let result = apply_revert::execute(ApplyRevert { target }, git)?;
+            let result = apply_revert::execute(target, git)?;
             Ok(match result {
                 ApplyRevertOk::Reverted { detail } => ChangeBranchOk::Reverted { detail },
                 ApplyRevertOk::Failed { detail, .. } => ChangeBranchOk::Failed { detail },

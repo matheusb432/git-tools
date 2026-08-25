@@ -16,11 +16,6 @@ use crate::{
 const MAX_CONCURRENT_GIT_OPERATIONS: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PullRepositories {
-    pub mode: GitEffectMode,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct PullRepositoriesOk {
     pub results: Vec<RepoSyncResult>,
     pub exit: SyncExit,
@@ -37,12 +32,11 @@ pub enum PullRepositoriesError {
 /// Pulls every project repository through the Git capability.
 #[cqrsy::command]
 pub async fn execute(
-    req: PullRepositories,
+    mode: GitEffectMode,
     git: &impl GitClient,
     projects: &impl ProjectClient,
 ) -> Result<PullRepositoriesOk, PullRepositoriesError> {
     let repos = projects.list_projects().await?;
-    let mode = req.mode;
     let tasks = stream::iter(repos.into_iter().enumerate())
         .map(|(index, repo)| {
             let git = git.clone();
@@ -172,16 +166,14 @@ mod tests {
     async fn execute_with(
         remote: ProjectGitScript,
         repos: Vec<ProjectRepository>,
-        request: PullRepositories,
+        mode: GitEffectMode,
     ) -> Result<PullRepositoriesOk, PullRepositoriesError> {
         let projects = FakeProjectClient { repos, error: None };
-        pull_repositories::execute(request, &remote.git_client(), &projects).await
+        pull_repositories::execute(mode, &remote.git_client(), &projects).await
     }
 
-    fn req() -> PullRepositories {
-        PullRepositories {
-            mode: GitEffectMode::Apply,
-        }
+    fn req() -> GitEffectMode {
+        GitEffectMode::Apply
     }
 
     fn ready_remote() -> ProjectGitScript {
@@ -204,8 +196,7 @@ mod tests {
             rev_list_left_right: (3, 0),
             ..ready_remote()
         };
-        let mut request = req();
-        request.mode = GitEffectMode::DryRun;
+        let request = GitEffectMode::DryRun;
 
         let response = execute_with(remote, vec![repo("a")], request)
             .await

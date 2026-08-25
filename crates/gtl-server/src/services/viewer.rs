@@ -3,36 +3,35 @@ mod rows;
 use std::pin::Pin;
 
 use gtl_application::{
-    diffs::open_diff_file_in_configured_editor::{
-        self, OpenDiffFileInConfiguredEditor, OpenDiffFileInConfiguredEditorError,
-    },
+    diffs::open_diff_file_in_configured_editor::{self, OpenDiffFileInConfiguredEditorError},
     history::{
         RecentRenderRecord, copy_render, get_recent_render,
         list_recent_render_page::{
             self, ListRecentRenderPage, ListRecentRenderPageOk, RecentRenderPageCursor,
         },
     },
-    live_views::delete_live_viewer_tab::{self, DeleteLiveViewerTab, DeleteLiveViewerTabError},
+    live_views::delete_live_viewer_tab::{self, DeleteLiveViewerTabError},
     recipes::RecipeOp,
     settings::{
         get_user_settings::{self, GetUserSettings},
-        set_setting_key::{self, SetSettingKey},
+        set_setting_key,
     },
     viewer::{self, shell, work},
 };
 use gtl_models::{
     diffs::CommitId,
     settings::{SettingKeyValue, UserSettings},
-    viewer::{DiffDensity, DiffLayout, HistoryPageNumber, RenderHistoryId, Theme, ViewerTabId},
+    viewer::{DiffDensity, DiffLayout, RenderHistoryId, Theme, ViewerTabId},
 };
 use gtl_wire::{
+    proto::viewer as viewer_proto,
     v1::{self, viewer_service_server::ViewerService},
     viewer::{
-        VIEWER_COMMIT_BODY_MAX_BYTES, VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES,
-        VIEWER_COMMIT_PAGE_MAX_ENTRIES, ViewerActiveState, ViewerCommitSelection,
-        ViewerDiffDensity, ViewerDiffLayout, ViewerFailureCode, ViewerFeedback, ViewerFileStatus,
-        ViewerRenderOptions, ViewerShell, ViewerTabKind, ViewerTabState, ViewerTheme,
-        ViewerViewIdentity,
+        SetViewerPreference, VIEWER_COMMIT_BODY_MAX_BYTES, VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES,
+        VIEWER_COMMIT_PAGE_MAX_ENTRIES, ViewerDiffDensity, ViewerDiffExclusions, ViewerDiffLayout,
+        ViewerFeedback, ViewerHistoryCursor, ViewerHistoryEntry, ViewerHistoryPage,
+        ViewerProjectDiffExclusions, ViewerRecipeKind, ViewerShell, ViewerTheme,
+        ViewerUserSettings, ViewerViewIdentity,
     },
 };
 use prost::Message as _;
@@ -42,12 +41,11 @@ use tonic::{Request, Response, Status};
 use super::{run_blocking, settings::set_setting_key_error, unexpected, user_settings_load_error};
 use crate::{state::AppState, viewer_runtime};
 
-#[derive(Clone)]
-pub(crate) struct ViewerApi {
+pub(crate) struct ViewerGrpcService {
     state: AppState,
 }
 
-impl ViewerApi {
+impl ViewerGrpcService {
     pub(crate) const fn new(state: AppState) -> Self {
         Self { state }
     }
@@ -56,7 +54,7 @@ impl ViewerApi {
 type WatchStream = Pin<Box<dyn Stream<Item = Result<v1::WatchViewerResponse, Status>> + Send>>;
 
 #[tonic::async_trait]
-impl ViewerService for ViewerApi {
+impl ViewerService for ViewerGrpcService {
     async fn get_viewer_shell(
         &self,
         _request: Request<v1::GetViewerShellRequest>,
@@ -130,7 +128,7 @@ impl ViewerService for ViewerApi {
             viewer_runtime::spawn_recipe(self.state.clone(), work);
         }
         Ok(Response::new(v1::CloseViewerTabResponse {
-            shell: Some(project_shell(&self.state, Some(ViewerFeedback::TabClosed))?),
+            shell: Some(project_shell(&self.state, None)?),
         }))
     }
 
@@ -156,7 +154,7 @@ impl ViewerService for ViewerApi {
         let deletion = run_blocking(move || {
             let connection = state.database.connection_lock()?;
             Ok::<_, anyhow::Error>(delete_live_viewer_tab::execute(
-                DeleteLiveViewerTab { tab_id },
+                tab_id,
                 &connection,
                 &state.viewer,
             ))
@@ -212,11 +210,9 @@ impl ViewerService for ViewerApi {
         let mutation = preference(request.into_inner())?;
         let mut store = self.state.user_settings.clone();
         let viewer = self.state.viewer.clone();
-        let change = run_blocking(move || {
-            set_setting_key::execute(SetSettingKey { mutation }, &mut store, &viewer)
-        })
-        .await?
-        .map_err(set_setting_key_error)?;
+        let change = run_blocking(move || set_setting_key::execute(mutation, &mut store, &viewer))
+            .await?
+            .map_err(set_setting_key_error)?;
         if change.viewer_rows_changed {
             self.state
                 .viewer_row_streams
@@ -357,9 +353,7 @@ impl ViewerService for ViewerApi {
         let state = self.state.clone();
         run_blocking(move || {
             open_diff_file_in_configured_editor::execute(
-                OpenDiffFileInConfiguredEditor {
-                    diff_file_path: path,
-                },
+                path,
                 &view,
                 &state.file_system,
                 &state.text_editor,
@@ -372,13 +366,9 @@ impl ViewerService for ViewerApi {
 }
 
 pub(super) fn load_user_settings(state: &AppState) -> Result<UserSettings, Status> {
-    get_user_settings::execute(GetUserSettings, &state.user_settings)
-        .map(|response| response.settings)
-        .map_err(|error| match error {
-            get_user_settings::GetUserSettingsError::Settings(error) => {
-                user_settings_load_error(error)
-            }
-        })
+    get_user_settings::execute(GetUserSettings, &state.user_settings).map_err(|error| match error {
+        get_user_settings::GetUserSettingsError::Settings(error) => user_settings_load_error(error),
+    })
 }
 
 fn project_shell(
@@ -402,293 +392,44 @@ fn project_shell(
 }
 
 fn project_shell_proto(shell: ViewerShell) -> Result<v1::ViewerShell, Status> {
-    Ok(v1::ViewerShell {
-        version: shell.version.value(),
-        tabs: shell.tabs.into_iter().map(project_tab).collect(),
-        active: Some(project_active_state(shell.active)?),
-        preferences: Some(v1::ViewerPreferences {
-            theme: project_theme(shell.preferences.theme) as i32,
-            render_options: Some(project_render_options(shell.preferences.render_options)),
-        }),
-        feedback: shell.feedback.map(project_feedback),
+    viewer_proto::encode_viewer_shell(shell).map_err(|error| match error {
+        viewer_proto::ViewerCodecError::Unrepresentable => {
+            Status::resource_exhausted("viewer shell exceeds protobuf limits")
+        }
+        viewer_proto::ViewerCodecError::InvalidMessage => {
+            Status::internal("viewer shell encoding failed")
+        }
     })
-}
-
-fn project_tab(tab: gtl_wire::viewer::ViewerTab) -> v1::ViewerTab {
-    v1::ViewerTab {
-        id: u64::from(tab.id),
-        label: tab.label,
-        kind: match tab.kind {
-            ViewerTabKind::Snapshot => v1::ViewerTabKind::Snapshot,
-            ViewerTabKind::Live => v1::ViewerTabKind::Live,
-        } as i32,
-        state: match tab.state {
-            ViewerTabState::Pending => v1::ViewerTabState::Pending,
-            ViewerTabState::Ready => v1::ViewerTabState::Ready,
-            ViewerTabState::Broken => v1::ViewerTabState::Broken,
-            ViewerTabState::Error => v1::ViewerTabState::Error,
-        } as i32,
-    }
-}
-
-fn project_active_state(active: ViewerActiveState) -> Result<v1::ViewerActiveState, Status> {
-    let state = match active {
-        ViewerActiveState::Empty => v1::viewer_active_state::State::Empty(v1::Empty {}),
-        ViewerActiveState::Pending { tab_id } => {
-            v1::viewer_active_state::State::Pending(v1::ViewerPendingState {
-                tab_id: u64::from(tab_id),
-            })
-        }
-        ViewerActiveState::Broken {
-            tab_id,
-            code,
-            message,
-        } => v1::viewer_active_state::State::Broken(project_failure(tab_id, code, message)),
-        ViewerActiveState::Error {
-            tab_id,
-            code,
-            message,
-        } => v1::viewer_active_state::State::Error(project_failure(tab_id, code, message)),
-        ViewerActiveState::Ready { view } => {
-            v1::viewer_active_state::State::Ready(Box::new(v1::ViewerReadyState {
-                view: Some(project_active_view(*view)?),
-            }))
-        }
-    };
-    Ok(v1::ViewerActiveState { state: Some(state) })
-}
-
-fn project_failure(
-    tab_id: ViewerTabId,
-    code: ViewerFailureCode,
-    message: String,
-) -> v1::ViewerFailureState {
-    v1::ViewerFailureState {
-        tab_id: u64::from(tab_id),
-        code: match code {
-            ViewerFailureCode::RepositoryDirectoryNotFound => {
-                v1::ViewerFailureCode::RepositoryDirectoryNotFound
-            }
-            ViewerFailureCode::RepositoryDirectoryNotGitRepository => {
-                v1::ViewerFailureCode::RepositoryDirectoryNotGitRepository
-            }
-            ViewerFailureCode::SourceUnavailable => v1::ViewerFailureCode::SourceUnavailable,
-            ViewerFailureCode::RenderFailed => v1::ViewerFailureCode::RenderFailed,
-        } as i32,
-        message,
-    }
-}
-
-fn project_active_view(
-    view: gtl_wire::viewer::ViewerActiveView,
-) -> Result<v1::ViewerActiveView, Status> {
-    Ok(v1::ViewerActiveView {
-        identity: Some(project_identity(view.identity)),
-        title: view.title,
-        repository_name: view.repository_name.to_string(),
-        branch: view.branch.to_string(),
-        upstream: view.upstream.to_string(),
-        command: Some(v1::ViewerCommandLine {
-            lead: view.command.lead,
-            range: view.command.range,
-            trail: view.command.trail,
-        }),
-        files: view
-            .files
-            .into_iter()
-            .map(|file| {
-                Ok(v1::ViewerFileSummary {
-                    id: file.id.as_str().to_owned(),
-                    path: file.path.to_string_lossy().into_owned(),
-                    absolute_path: file.absolute_path.as_path().to_string_lossy().into_owned(),
-                    anchor_id: file.anchor_id,
-                    added: u32::try_from(file.added.value())
-                        .map_err(|_| Status::resource_exhausted("added line count exceeds u32"))?,
-                    removed: u32::try_from(file.removed.value()).map_err(|_| {
-                        Status::resource_exhausted("removed line count exceeds u32")
-                    })?,
-                    status: match file.status {
-                        ViewerFileStatus::Added => v1::ViewerFileStatus::Added,
-                        ViewerFileStatus::Deleted => v1::ViewerFileStatus::Deleted,
-                        ViewerFileStatus::Renamed => v1::ViewerFileStatus::Renamed,
-                        ViewerFileStatus::Modified => v1::ViewerFileStatus::Modified,
-                    } as i32,
-                    can_open_in_editor: file.can_open_in_editor,
-                    initially_expanded: file.initially_expanded,
-                })
-            })
-            .collect::<Result<Vec<_>, Status>>()?,
-        commits_label: view.commits_label,
-        commit_count: u32::try_from(view.commits.len())
-            .map_err(|_| Status::resource_exhausted("commit count exceeds u32"))?,
-        commit_selection: Some(project_commit_selection(view.commit_selection)),
-        footer: Some(v1::ViewerFooter {
-            command: view.footer.command,
-        }),
-        exclusions: view
-            .exclusions
-            .map(|exclusions| v1::ViewerAppliedExclusions {
-                extensions: exclusions.extensions.extensions().to_vec(),
-                hidden_paths: exclusions
-                    .hidden_paths
-                    .into_iter()
-                    .map(|path| path.to_string_lossy().into_owned())
-                    .collect(),
-            }),
-    })
-}
-
-fn project_commit_selection(selection: ViewerCommitSelection) -> v1::ViewerCommitSelection {
-    let (state, commit_id, message) = match selection {
-        ViewerCommitSelection::None => (v1::ViewerCommitSelectionState::None, None, None),
-        ViewerCommitSelection::Pending { id } => (
-            v1::ViewerCommitSelectionState::Pending,
-            Some(id.to_string()),
-            None,
-        ),
-        ViewerCommitSelection::Ready { id } => (
-            v1::ViewerCommitSelectionState::Ready,
-            Some(id.to_string()),
-            None,
-        ),
-        ViewerCommitSelection::Error { id, message } => (
-            v1::ViewerCommitSelectionState::Error,
-            Some(id.to_string()),
-            Some(message),
-        ),
-    };
-    v1::ViewerCommitSelection {
-        state: state as i32,
-        commit_id,
-        message,
-    }
-}
-
-fn project_feedback(feedback: ViewerFeedback) -> v1::ViewerFeedback {
-    let (kind, labels) = match feedback {
-        ViewerFeedback::TabClosed => (v1::ViewerFeedbackKind::TabClosed, Vec::new()),
-        ViewerFeedback::LiveViewDeleted => (v1::ViewerFeedbackKind::LiveViewDeleted, Vec::new()),
-        ViewerFeedback::SnapshotRecipesSkipped { labels } => {
-            (v1::ViewerFeedbackKind::SnapshotRecipesSkipped, labels)
-        }
-    };
-    v1::ViewerFeedback {
-        kind: kind as i32,
-        labels,
-    }
 }
 
 pub(super) fn parse_identity(
     identity: &v1::ViewerViewIdentity,
 ) -> Result<ViewerViewIdentity, Status> {
-    Ok(ViewerViewIdentity {
-        tab_id: tab_id(identity.tab_id)?,
-        range_generation: gtl_models::viewer::ViewerRangeGeneration::new(identity.range_generation),
-        selection_generation: gtl_models::viewer::ViewerSelectionGeneration::new(
-            identity.selection_generation,
-        ),
-        render_options: parse_render_options(
-            identity
-                .render_options
-                .ok_or_else(|| Status::invalid_argument("identity.render_options is required"))?,
-        )?,
-    })
-}
-
-fn project_identity(identity: ViewerViewIdentity) -> v1::ViewerViewIdentity {
-    v1::ViewerViewIdentity {
-        tab_id: u64::from(identity.tab_id),
-        range_generation: identity.range_generation.value(),
-        selection_generation: identity.selection_generation.value(),
-        render_options: Some(project_render_options(identity.render_options)),
-    }
-}
-
-fn parse_render_options(options: v1::ViewerRenderOptions) -> Result<ViewerRenderOptions, Status> {
-    Ok(ViewerRenderOptions {
-        layout: match v1::ViewerDiffLayout::try_from(options.layout) {
-            Ok(v1::ViewerDiffLayout::Unified) => ViewerDiffLayout::Unified,
-            Ok(v1::ViewerDiffLayout::Split) => ViewerDiffLayout::Split,
-            Ok(v1::ViewerDiffLayout::Unspecified) | Err(_) => {
-                return Err(Status::invalid_argument("viewer layout is invalid"));
-            }
-        },
-        density: match v1::ViewerDiffDensity::try_from(options.density) {
-            Ok(v1::ViewerDiffDensity::Compact) => ViewerDiffDensity::Compact,
-            Ok(v1::ViewerDiffDensity::Full) => ViewerDiffDensity::Full,
-            Ok(v1::ViewerDiffDensity::Unspecified) | Err(_) => {
-                return Err(Status::invalid_argument("viewer density is invalid"));
-            }
-        },
-    })
-}
-
-fn project_render_options(options: ViewerRenderOptions) -> v1::ViewerRenderOptions {
-    v1::ViewerRenderOptions {
-        layout: match options.layout {
-            ViewerDiffLayout::Unified => v1::ViewerDiffLayout::Unified,
-            ViewerDiffLayout::Split => v1::ViewerDiffLayout::Split,
-        } as i32,
-        density: match options.density {
-            ViewerDiffDensity::Compact => v1::ViewerDiffDensity::Compact,
-            ViewerDiffDensity::Full => v1::ViewerDiffDensity::Full,
-        } as i32,
-    }
-}
-
-fn project_theme(theme: ViewerTheme) -> v1::ViewerTheme {
-    match theme {
-        ViewerTheme::Dark => v1::ViewerTheme::Dark,
-        ViewerTheme::Light => v1::ViewerTheme::Light,
-        ViewerTheme::Hearth => v1::ViewerTheme::Hearth,
-        ViewerTheme::Mirage => v1::ViewerTheme::Mirage,
-        ViewerTheme::Glacier => v1::ViewerTheme::Glacier,
-        ViewerTheme::Noir => v1::ViewerTheme::Noir,
-        ViewerTheme::Graphite => v1::ViewerTheme::Graphite,
-    }
+    viewer_proto::decode_viewer_view_identity(*identity)
+        .map_err(|_| Status::invalid_argument("viewer identity is invalid"))
 }
 
 fn preference(request: v1::SetViewerPreferenceRequest) -> Result<SettingKeyValue, Status> {
-    let preference = request
-        .preference
-        .ok_or_else(|| Status::invalid_argument("preference is required"))?;
+    let preference = viewer_proto::decode_set_viewer_preference_request(request)
+        .map_err(|_| Status::invalid_argument("viewer preference is invalid"))?;
     Ok(match preference {
-        v1::set_viewer_preference_request::Preference::Layout(layout) => {
-            SettingKeyValue::Layout(match v1::ViewerDiffLayout::try_from(layout) {
-                Ok(v1::ViewerDiffLayout::Unified) => DiffLayout::Unified,
-                Ok(v1::ViewerDiffLayout::Split) => DiffLayout::Split,
-                Ok(v1::ViewerDiffLayout::Unspecified) | Err(_) => {
-                    return Err(Status::invalid_argument("viewer layout is invalid"));
-                }
-            })
-        }
-        v1::set_viewer_preference_request::Preference::Density(density) => {
-            SettingKeyValue::Density(match v1::ViewerDiffDensity::try_from(density) {
-                Ok(v1::ViewerDiffDensity::Compact) => DiffDensity::Compact,
-                Ok(v1::ViewerDiffDensity::Full) => DiffDensity::Full,
-                Ok(v1::ViewerDiffDensity::Unspecified) | Err(_) => {
-                    return Err(Status::invalid_argument("viewer density is invalid"));
-                }
-            })
-        }
-        v1::set_viewer_preference_request::Preference::Theme(theme) => {
-            SettingKeyValue::Theme(parse_theme(theme)?)
-        }
-    })
-}
-
-fn parse_theme(theme: i32) -> Result<Theme, Status> {
-    Ok(match v1::ViewerTheme::try_from(theme) {
-        Ok(v1::ViewerTheme::Dark) => Theme::Dark,
-        Ok(v1::ViewerTheme::Light) => Theme::Light,
-        Ok(v1::ViewerTheme::Hearth) => Theme::Hearth,
-        Ok(v1::ViewerTheme::Mirage) => Theme::Mirage,
-        Ok(v1::ViewerTheme::Glacier) => Theme::Glacier,
-        Ok(v1::ViewerTheme::Noir) => Theme::Noir,
-        Ok(v1::ViewerTheme::Graphite) => Theme::Graphite,
-        Ok(v1::ViewerTheme::Unspecified) | Err(_) => {
-            return Err(Status::invalid_argument("viewer theme is invalid"));
-        }
+        SetViewerPreference::Layout(layout) => SettingKeyValue::Layout(match layout {
+            ViewerDiffLayout::Unified => DiffLayout::Unified,
+            ViewerDiffLayout::Split => DiffLayout::Split,
+        }),
+        SetViewerPreference::Density(density) => SettingKeyValue::Density(match density {
+            ViewerDiffDensity::Compact => DiffDensity::Compact,
+            ViewerDiffDensity::Full => DiffDensity::Full,
+        }),
+        SetViewerPreference::Theme(theme) => SettingKeyValue::Theme(match theme {
+            ViewerTheme::Dark => Theme::Dark,
+            ViewerTheme::Light => Theme::Light,
+            ViewerTheme::Hearth => Theme::Hearth,
+            ViewerTheme::Mirage => Theme::Mirage,
+            ViewerTheme::Glacier => Theme::Glacier,
+            ViewerTheme::Noir => Theme::Noir,
+            ViewerTheme::Graphite => Theme::Graphite,
+        }),
     })
 }
 
@@ -711,63 +452,48 @@ fn commit_summary(
 }
 
 fn history_cursor(request: v1::ListViewerHistoryRequest) -> Result<RecentRenderPageCursor, Status> {
+    let request = viewer_proto::decode_list_viewer_history_request(request)
+        .map_err(|_| Status::invalid_argument("history cursor is invalid"))?;
     Ok(match request.cursor {
-        Some(v1::list_viewer_history_request::Cursor::Newest(_)) => RecentRenderPageCursor::Newest,
-        Some(v1::list_viewer_history_request::Cursor::Oldest(_)) => RecentRenderPageCursor::Oldest,
-        Some(v1::list_viewer_history_request::Cursor::OlderThan(position)) => {
-            RecentRenderPageCursor::OlderThan {
-                render: render_history_id(position.render_id)?,
-                page: HistoryPageNumber::try_new(position.page)
-                    .map_err(|_| Status::invalid_argument("history page must be positive"))?,
-            }
-        }
-        Some(v1::list_viewer_history_request::Cursor::NewerThan(position)) => {
-            RecentRenderPageCursor::NewerThan {
-                render: render_history_id(position.render_id)?,
-                page: HistoryPageNumber::try_new(position.page)
-                    .map_err(|_| Status::invalid_argument("history page must be positive"))?,
-            }
-        }
-        None => return Err(Status::invalid_argument("history cursor is required")),
+        ViewerHistoryCursor::Newest => RecentRenderPageCursor::Newest,
+        ViewerHistoryCursor::Oldest => RecentRenderPageCursor::Oldest,
+        ViewerHistoryCursor::OlderThan { render_id, page } => RecentRenderPageCursor::OlderThan {
+            render: render_id,
+            page,
+        },
+        ViewerHistoryCursor::NewerThan { render_id, page } => RecentRenderPageCursor::NewerThan {
+            render: render_id,
+            page,
+        },
     })
 }
 
 fn project_history_page(
     page: ListRecentRenderPageOk,
 ) -> Result<v1::ListViewerHistoryResponse, Status> {
-    let entries = page
-        .entries
-        .into_iter()
-        .map(|record| {
-            let id = u64::try_from(i64::from(record.id))
-                .map_err(|_| Status::internal("stored render ID is invalid"))?;
-            let kind = match record.recipe.op {
-                RecipeOp::Diff { .. } => v1::ViewerRecipeKind::Diff,
-                RecipeOp::MergeDiff { .. } => v1::ViewerRecipeKind::MergeDiff,
-            };
-            Ok(v1::ViewerHistoryEntry {
-                id,
+    let page = ViewerHistoryPage {
+        entries: page
+            .entries
+            .into_iter()
+            .map(|record| ViewerHistoryEntry {
+                id: record.id,
                 title: record.title,
-                repository_name: record.repo_name.to_string(),
-                kind: kind as i32,
+                repository_name: record.repo_name,
+                kind: match record.recipe.op {
+                    RecipeOp::Diff { .. } => ViewerRecipeKind::Diff,
+                    RecipeOp::MergeDiff { .. } => ViewerRecipeKind::MergeDiff,
+                },
                 range_label: record.range_label,
-                rendered_at: record.rendered_at.as_ref().to_owned(),
+                rendered_at: record.rendered_at,
             })
-        })
-        .collect::<Result<Vec<_>, Status>>()?;
-    Ok(v1::ListViewerHistoryResponse {
-        entries,
-        total_count: page.total_count.into_inner(),
-        position: page
-            .position
-            .page()
-            .map(|position| v1::ViewerHistoryPagePosition {
-                number: u32::from(position.number()),
-                count: u32::from(position.count()),
-            }),
+            .collect(),
+        total_count: page.total_count,
+        position: page.position,
         has_newer: page.has_newer,
         has_older: page.has_older,
-    })
+    };
+    viewer_proto::encode_list_viewer_history_response(page)
+        .map_err(|_| Status::internal("stored viewer history is invalid"))
 }
 
 async fn history_record(state: &AppState, raw_id: u64) -> Result<RecentRenderRecord, Status> {
@@ -780,7 +506,6 @@ async fn history_record(state: &AppState, raw_id: u64) -> Result<RecentRenderRec
     })
     .await?
     .map_err(|error| unexpected(error, "load viewer history entry"))?
-    .entry
     .ok_or_else(|| Status::not_found("viewer history entry is not available"))
 }
 
@@ -788,32 +513,25 @@ fn project_settings(
     settings: &UserSettings,
     configuration_path: Option<String>,
 ) -> v1::GetViewerSettingsResponse {
-    let configured_theme = settings
-        .theme()
-        .map(viewer::project_theme)
-        .map(project_theme);
+    let configured_theme = settings.theme().map(viewer::project_theme);
     let exclusions = settings.diff_exclusions();
-    v1::GetViewerSettingsResponse {
+    viewer_proto::encode_get_viewer_settings_response(ViewerUserSettings {
         configuration_path,
-        configured_theme: configured_theme.map(|theme| theme as i32),
-        effective_theme: configured_theme.unwrap_or(v1::ViewerTheme::Dark) as i32,
-        render_options: Some(project_render_options(viewer::project_render_options(
-            settings.viewer_render_options(),
-        ))),
+        configured_theme,
+        effective_theme: configured_theme.unwrap_or(ViewerTheme::Dark),
+        render_options: viewer::project_render_options(settings.viewer_render_options()),
         push_confirmation_required: settings.push_confirmation_required(),
-        diff_exclusions: Some(v1::ViewerDiffExclusions {
-            default_extensions: exclusions.default_exclusions().extensions().to_vec(),
+        diff_exclusions: ViewerDiffExclusions {
+            default_extensions: exclusions.default_exclusions().clone(),
             projects: exclusions
                 .project_exclusions()
-                .map(
-                    |(project_name, extensions)| v1::ViewerProjectDiffExclusions {
-                        project_name: project_name.to_string(),
-                        extensions: extensions.extensions().to_vec(),
-                    },
-                )
+                .map(|(project_name, extensions)| ViewerProjectDiffExclusions {
+                    project_name: project_name.clone(),
+                    extensions: extensions.clone(),
+                })
                 .collect(),
-        }),
-    }
+        },
+    })
 }
 
 fn tab_id(raw: u64) -> Result<ViewerTabId, Status> {

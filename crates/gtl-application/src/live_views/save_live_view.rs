@@ -209,9 +209,7 @@ mod tests {
     }
 
     fn list_views(connection: &Connection) -> Vec<LiveViewRecord> {
-        list_live_views::execute(list_live_views::ListLiveViews, connection)
-            .expect("list succeeds")
-            .views
+        list_live_views::execute(list_live_views::ListLiveViews, connection).expect("list succeeds")
     }
 
     fn created_at(raw: &str) -> gtl_models::timestamps::MachineTimestamp {

@@ -52,7 +52,7 @@ where
 }
 
 fn artifact_only(raw: bool) -> bool {
-    raw || !crate::viewer::has_display() || crate::viewer::no_open_requested()
+    raw || crate::viewer::no_open_requested()
 }
 
 #[cfg(test)]

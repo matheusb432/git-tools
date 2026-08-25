@@ -2,7 +2,7 @@ use gtl_models::live_views::LiveSource;
 
 use super::{ViewerTabKind, ViewerTabState};
 use crate::{
-    live_views::probe_source::{self, ProbeOutcome, ProbeSource},
+    live_views::probe_source::{self, ProbeOutcome},
     ports::GitClient,
     recipes::{Recipe, RecipeSource},
 };
@@ -11,11 +11,6 @@ use crate::{
 pub struct ProbeRecipe {
     pub recipe: Recipe,
     pub kind: ViewerTabKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProbeRecipeOk {
-    pub outcome: ProbeRecipeOutcome,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,21 +29,13 @@ pub enum ProbeRecipeError {
 pub fn execute(
     query: ProbeRecipe,
     git: &impl GitClient,
-) -> Result<ProbeRecipeOk, ProbeRecipeError> {
+) -> Result<ProbeRecipeOutcome, ProbeRecipeError> {
     if query.kind == ViewerTabKind::Snapshot {
-        return Ok(ProbeRecipeOk {
-            outcome: ProbeRecipeOutcome::Ready,
-        });
+        return Ok(ProbeRecipeOutcome::Ready);
     }
 
     let RecipeSource::LocalRepo(path) = query.recipe.source;
-    let response = probe_source::execute(
-        ProbeSource {
-            source: LiveSource::local_repo(path),
-        },
-        git,
-    )?;
-    let outcome = match response.outcome {
+    let outcome = match probe_source::execute(LiveSource::local_repo(path), git)? {
         ProbeOutcome::Ok => ProbeRecipeOutcome::Ready,
         ProbeOutcome::Broken { rejection } => ProbeRecipeOutcome::Broken {
             state: ViewerTabState::Broken {
@@ -58,7 +45,7 @@ pub fn execute(
         },
     };
 
-    Ok(ProbeRecipeOk { outcome })
+    Ok(outcome)
 }
 
 #[cfg(test)]
@@ -92,7 +79,7 @@ mod tests {
         )
         .expect("snapshot probe policy succeeds");
 
-        assert_eq!(response.outcome, ProbeRecipeOutcome::Ready);
+        assert_eq!(response, ProbeRecipeOutcome::Ready);
     }
 
     #[test]
@@ -110,7 +97,7 @@ mod tests {
         .expect("live probe succeeds");
 
         assert_eq!(
-            response.outcome,
+            response,
             ProbeRecipeOutcome::Broken {
                 state: ViewerTabState::Broken {
                     code: "DirNotFound".into(),
@@ -135,7 +122,7 @@ mod tests {
         .expect("live probe succeeds");
 
         assert_eq!(
-            response.outcome,
+            response,
             ProbeRecipeOutcome::Broken {
                 state: ViewerTabState::Broken {
                     code: "DirNotGitRepo".into(),
@@ -161,7 +148,7 @@ mod tests {
         )
         .expect("live probe succeeds");
 
-        assert_eq!(response.outcome, ProbeRecipeOutcome::Ready);
+        assert_eq!(response, ProbeRecipeOutcome::Ready);
     }
 
     #[test]

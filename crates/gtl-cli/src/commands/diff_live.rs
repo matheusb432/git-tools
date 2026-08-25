@@ -82,7 +82,7 @@ fn finish_optional_presentation(presentation: Option<v1::DiffPresentation>) -> a
 }
 
 fn open_viewer_requested() -> bool {
-    crate::viewer::has_display() && !crate::viewer::no_open_requested()
+    !crate::viewer::no_open_requested()
 }
 
 fn print_notes(notes: &[v1::Note]) -> anyhow::Result<()> {
