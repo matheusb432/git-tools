@@ -1,7 +1,9 @@
 use std::{future::Future, panic::AssertUnwindSafe, path::PathBuf, pin::Pin};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use futures_util::FutureExt;
+use serde::Deserialize;
+use serde_json::json;
 use thirtyfour::{By, WebDriver};
 
 pub mod evidence;
@@ -9,6 +11,59 @@ pub mod fixture;
 pub mod selectors;
 pub mod session;
 pub mod wait;
+
+#[derive(Deserialize)]
+struct CopyObservation {
+    text: String,
+    prevented: bool,
+}
+
+pub async fn copy_selected_diff_line(
+    driver: &WebDriver,
+    path: &str,
+    marker: &str,
+) -> Result<String> {
+    let result = driver
+        .execute(
+            r#"
+                const [path, marker] = arguments;
+                const file = document.querySelector(
+                    `[data-gtl-diff-file][data-path='${path}']`,
+                );
+                const source = [...file.querySelectorAll("[data-gtl-copy-text]")]
+                    .find((element) => element.textContent.includes(marker));
+                const range = document.createRange();
+                range.selectNodeContents(source);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+
+                const clipboard = new DataTransfer();
+                const event = new ClipboardEvent("copy", {
+                    bubbles: true,
+                    cancelable: true,
+                    clipboardData: clipboard,
+                });
+                source.dispatchEvent(event);
+                return {
+                    text: clipboard.getData("text/plain"),
+                    prevented: event.defaultPrevented,
+                };
+            "#,
+            vec![json!(path), json!(marker)],
+        )
+        .await
+        .context("copy a selected desktop diff line")?;
+    let observation: CopyObservation = result
+        .convert()
+        .context("decode the desktop copy observation")?;
+
+    ensure!(
+        observation.prevented,
+        "the desktop viewer did not intercept native copy"
+    );
+    Ok(observation.text)
+}
 
 pub async fn wait_for_active_diff(
     driver: &WebDriver,

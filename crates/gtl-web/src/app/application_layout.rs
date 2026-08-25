@@ -12,7 +12,7 @@ use crate::{
     shared::{
         browser,
         retry_delay::RetryDelay,
-        ui::{Button, ButtonSize, ButtonVariant, FloatingNotice},
+        ui::{Button, ButtonSize, ButtonVariant, ToastHandle, ToastHost, use_toast},
         viewer_client::{ViewerClientError, discard_viewer_connection},
     },
 };
@@ -191,7 +191,7 @@ pub(crate) struct ViewerContext {
     reconnect_generation: Signal<u64>,
     server_instance_id: Signal<Option<String>>,
     render_command_scheduler: Signal<ViewerRenderCommandScheduler>,
-    render_command_error: Signal<Option<ViewerClientError>>,
+    toast: ToastHandle,
 }
 
 impl ViewerContext {
@@ -216,7 +216,9 @@ impl ViewerContext {
             return ViewerShellReplacement::Stale;
         };
         self.shell_order.set(order);
-        self.render_command_error.set(None);
+        if let Some(notification) = viewer_feedback_toast(shell.feedback.as_ref()) {
+            notification.enqueue(self.toast);
+        }
         self.shell.set(ViewerShellLoad::Ready(shell));
         ViewerShellReplacement::Accepted
     }
@@ -231,11 +233,9 @@ impl ViewerContext {
 
     fn schedule_render_command(mut self, command: ViewerRenderCommand) {
         if !self.actions_enabled() {
-            self.render_command_error
-                .set(Some(ViewerClientError::Unavailable));
+            self.toast.error(ViewerClientError::Unavailable.message());
             return;
         }
-        self.render_command_error.set(None);
         let submission = self.render_command_scheduler.write().submit(command);
         if let ViewerRenderCommandSubmission::Started(ticket) = submission {
             self.start_render_command(ticket, command);
@@ -268,7 +268,7 @@ impl ViewerContext {
         };
         match result {
             Ok(shell) => self.replace_shell(shell),
-            Err(error) => self.render_command_error.set(Some(error)),
+            Err(error) => self.toast.error(error.message()),
         }
         if let Some((ticket, command)) = next {
             self.start_render_command(ticket, command);
@@ -277,10 +277,6 @@ impl ViewerContext {
 
     pub(crate) fn render_command_pending(self) -> bool {
         (self.render_command_scheduler)().is_pending()
-    }
-
-    pub(crate) fn render_command_error(self) -> Option<ViewerClientError> {
-        (self.render_command_error)()
     }
 
     fn connected_to(mut self, server_instance_id: String) -> bool {
@@ -294,7 +290,6 @@ impl ViewerContext {
             self.shell.set(ViewerShellLoad::Loading);
             self.render_command_scheduler
                 .set(ViewerRenderCommandScheduler::default());
-            self.render_command_error.set(None);
         }
         self.server_instance_id.set(Some(server_instance_id));
         self.connection.set(ViewerConnection::Connected);
@@ -307,7 +302,6 @@ impl ViewerContext {
 
     pub(crate) fn reconnect(mut self) {
         discard_viewer_connection();
-        self.render_command_error.set(None);
         if !matches!((self.shell)(), ViewerShellLoad::Ready(_)) {
             self.shell.set(ViewerShellLoad::Loading);
         }
@@ -336,12 +330,14 @@ impl ViewerContext {
                         return;
                     };
                     self.shell_order.set(order);
-                    self.render_command_error.set(None);
+                    if let Some(notification) = viewer_feedback_toast(shell.feedback.as_ref()) {
+                        notification.enqueue(self.toast);
+                    }
                     self.shell.set(ViewerShellLoad::Ready(shell));
                 }
                 Err(error) => {
                     if matches!((self.shell)(), ViewerShellLoad::Ready(_)) {
-                        self.render_command_error.set(Some(error));
+                        self.toast.error(error.message());
                     } else {
                         self.shell.set(ViewerShellLoad::Error(error));
                     }
@@ -365,14 +361,21 @@ impl ViewerContext {
 
 #[component]
 pub(crate) fn ApplicationLayout() -> Element {
+    rsx! {
+        ToastHost { ApplicationLayoutContent {} }
+    }
+}
+
+#[component]
+fn ApplicationLayoutContent() -> Element {
     let shell = use_signal(|| ViewerShellLoad::Loading);
     let connection = use_signal(|| ViewerConnection::Connecting);
     let shell_order = use_signal(ViewerShellOrder::default);
     let reconnect_generation = use_signal(|| 0_u64);
     let server_instance_id = use_signal(|| None::<String>);
     let render_command_scheduler = use_signal(ViewerRenderCommandScheduler::default);
-    let render_command_error = use_signal(|| None::<ViewerClientError>);
     let state_change_version = use_signal(|| None::<ViewerVersion>);
+    let toast = use_toast();
     let context = ViewerContext {
         shell,
         connection,
@@ -380,7 +383,7 @@ pub(crate) fn ApplicationLayout() -> Element {
         reconnect_generation,
         server_instance_id,
         render_command_scheduler,
-        render_command_error,
+        toast,
     };
     use_context_provider(|| context);
 
@@ -452,11 +455,6 @@ pub(crate) fn ApplicationLayout() -> Element {
                 "inert": (!connection.is_connected()).then_some(""),
                 aria_busy: (!connection.is_connected()).to_string(),
                 ApplicationNavigation {}
-                if let ViewerShellLoad::Ready(shell) = &state {
-                    if let Some(feedback) = &shell.feedback {
-                        ViewerFeedbackNotice { feedback: feedback.clone() }
-                    }
-                }
                 div { class: "min-h-0 flex-1 overflow-hidden", Outlet::<Route> {} }
             }
             if !connection.is_connected() {
@@ -500,18 +498,40 @@ fn ViewerConnectionNotice(connection: ViewerConnection, onretry: EventHandler<()
     }
 }
 
-#[component]
-fn ViewerFeedbackNotice(feedback: ViewerFeedback) -> Element {
-    let message = match feedback {
-        ViewerFeedback::TabClosed => "Tab closed.",
-        ViewerFeedback::LiveViewDeleted => "Live view deleted.",
-        ViewerFeedback::SnapshotRecipesSkipped { .. } => {
-            "Some snapshot recipes were skipped because they were already open."
-        }
-    };
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ViewerFeedbackToast {
+    Ok(String),
+    Warn(String),
+}
 
-    rsx! {
-        FloatingNotice { role: "status", "{message}" }
+impl ViewerFeedbackToast {
+    fn enqueue(self, toast: ToastHandle) {
+        match self {
+            Self::Ok(message) => toast.ok(message),
+            Self::Warn(message) => toast.warn(message),
+        }
+    }
+}
+
+fn viewer_feedback_toast(feedback: Option<&ViewerFeedback>) -> Option<ViewerFeedbackToast> {
+    match feedback? {
+        ViewerFeedback::TabClosed => None,
+        ViewerFeedback::LiveViewDeleted => {
+            Some(ViewerFeedbackToast::Ok("Live view deleted.".to_owned()))
+        }
+        ViewerFeedback::SnapshotRecipesSkipped { labels } => {
+            let message = if labels.is_empty() {
+                "Skipped snapshot diffs with no commits or changed files.".to_owned()
+            } else {
+                let noun = if labels.len() == 1 { "diff" } else { "diffs" };
+                format!(
+                    "Skipped {} {noun} with no commits or changed files: {}.",
+                    labels.len(),
+                    labels.join(", ")
+                )
+            };
+            Some(ViewerFeedbackToast::Warn(message))
+        }
     }
 }
 
@@ -519,12 +539,13 @@ fn ViewerFeedbackNotice(feedback: ViewerFeedback) -> Element {
 mod tests {
     use gtl_models::viewer::ViewerVersion;
     use gtl_wire::viewer::{
-        SetViewerPreference, ViewerDiffDensity, ViewerDiffLayout, ViewerTabRequest,
+        SetViewerPreference, ViewerDiffDensity, ViewerDiffLayout, ViewerFeedback, ViewerTabRequest,
     };
 
     use super::{
-        ViewerRenderCommand, ViewerRenderCommandCompletion, ViewerRenderCommandScheduler,
-        ViewerRenderCommandSubmission, ViewerRenderCommandTicket, ViewerShellOrder,
+        ViewerFeedbackToast, ViewerRenderCommand, ViewerRenderCommandCompletion,
+        ViewerRenderCommandScheduler, ViewerRenderCommandSubmission, ViewerRenderCommandTicket,
+        ViewerShellOrder, viewer_feedback_toast,
     };
     use crate::test_support::{TestResult, viewer_tab_id};
 
@@ -697,5 +718,27 @@ mod tests {
         assert!(order.accept_command_response(version(20)).is_none());
         assert_eq!(order.request_generation, request_generation);
         assert_eq!(order.version_watermark, Some(version(21)));
+    }
+
+    #[test]
+    fn tab_close_feedback_never_becomes_a_toast() {
+        assert_eq!(
+            viewer_feedback_toast(Some(&ViewerFeedback::TabClosed)),
+            None
+        );
+    }
+
+    #[test]
+    fn skipped_snapshot_feedback_keeps_every_label() {
+        let feedback = ViewerFeedback::SnapshotRecipesSkipped {
+            labels: vec!["api".to_owned(), "web".to_owned()],
+        };
+
+        assert_eq!(
+            viewer_feedback_toast(Some(&feedback)),
+            Some(ViewerFeedbackToast::Warn(
+                "Skipped 2 diffs with no commits or changed files: api, web.".to_owned()
+            ))
+        );
     }
 }

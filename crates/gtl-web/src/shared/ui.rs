@@ -7,6 +7,7 @@ pub mod code_text;
 mod count_badge;
 mod dialog;
 mod empty_notice;
+#[cfg(feature = "artifact")]
 mod floating_notice;
 mod icon_popover;
 mod menu_action;
@@ -15,6 +16,8 @@ mod scroll_area;
 #[cfg(feature = "desktop")]
 mod skeleton;
 mod text_input;
+#[cfg(feature = "desktop")]
+mod toast;
 
 #[cfg(feature = "desktop")]
 pub(crate) use alert_dialog::AlertDialog;
@@ -24,9 +27,8 @@ pub(crate) use count_badge::CountBadge;
 #[cfg(feature = "artifact")]
 pub(crate) use count_badge::CountBadgeSize;
 pub(crate) use empty_notice::EmptyNotice;
+#[cfg(feature = "artifact")]
 pub(crate) use floating_notice::FloatingNotice;
-#[cfg(feature = "desktop")]
-pub(crate) use floating_notice::FloatingNoticeState;
 #[cfg(feature = "desktop")]
 pub(crate) use icon_popover::IconPopoverIconMotion;
 pub(crate) use icon_popover::{IconPopover, IconPopoverPlacement};
@@ -38,3 +40,5 @@ pub(crate) use scroll_area::ScrollAreaVariant;
 #[cfg(feature = "desktop")]
 pub(crate) use skeleton::Skeleton;
 pub(crate) use text_input::{TextInput, TextInputLabelVisibility};
+#[cfg(feature = "desktop")]
+pub(crate) use toast::{ToastHandle, ToastHost, use_toast};

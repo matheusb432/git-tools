@@ -17,7 +17,41 @@ async fn user_reopens_a_closed_snapshot_from_history() -> Result<()> {
                 "alpha-one-shot-marker",
             )
             .await?;
-            assert_selection_copy_context(session.driver()).await?;
+            let copied = support::copy_selected_diff_line(
+                session.driver(),
+                "work.txt",
+                "alpha-one-shot-marker",
+            )
+            .await?;
+            ensure!(
+                copied == "// * work.txt, lines: 2\nalpha-one-shot-marker",
+                "the desktop viewer copied an unexpected source payload: {copied:?}"
+            );
+            let copy_toast = support::selectors::by_test_id(session.driver(), test_ids::TOAST)
+                .await
+                .context("show copied-line feedback in the global viewport")?;
+            ensure!(
+                copy_toast.text().await?.starts_with("Copied with context"),
+                "copied-line toast has unexpected text"
+            );
+            support::selectors::by_test_id(session.driver(), test_ids::TOAST_DISMISS)
+                .await?
+                .click()
+                .await
+                .context("dismiss copied-line feedback")?;
+            wait::until(
+                "dismissed copied-line feedback",
+                wait::ASSERTION_TIMEOUT,
+                || async {
+                    Ok(session
+                        .driver()
+                        .find_all(By::Css(test_ids::TOAST.selector()))
+                        .await?
+                        .is_empty()
+                        .then_some(()))
+                },
+            )
+            .await?;
             assert_path_copy_popover(session.driver()).await?;
 
             support::selectors::by_test_id(session.driver(), test_ids::VIEWER_TAB_CLOSE)
@@ -26,6 +60,14 @@ async fn user_reopens_a_closed_snapshot_from_history() -> Result<()> {
                 .await
                 .context("close the snapshot")?;
             wait_for_empty_workspace(session.driver()).await?;
+            ensure!(
+                session
+                    .driver()
+                    .find_all(By::Css(test_ids::TOAST.selector()))
+                    .await?
+                    .is_empty(),
+                "closing a snapshot enqueued a toast"
+            );
 
             support::selectors::by_test_id(session.driver(), test_ids::VIEWER_MENU_TRIGGER)
                 .await?
@@ -55,68 +97,15 @@ async fn user_reopens_a_closed_snapshot_from_history() -> Result<()> {
 }
 
 #[derive(Deserialize)]
-struct CopyObservation {
-    text: String,
-    prevented: bool,
-}
-
-#[derive(Deserialize)]
 struct PopoverGeometry {
     vertical_gap: f64,
     end_alignment: f64,
 }
 
-async fn assert_selection_copy_context(driver: &thirtyfour::WebDriver) -> Result<()> {
-    let result = driver
-        .execute(
-            r#"
-                const file = document.querySelector(
-                    "[data-gtl-diff-file][data-path='work.txt']",
-                );
-                const source = [...file.querySelectorAll("[data-gtl-copy-text]")]
-                    .find((element) => element.textContent.includes("alpha-one-shot-marker"));
-                const range = document.createRange();
-                range.selectNodeContents(source);
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
-
-                const clipboard = new DataTransfer();
-                const event = new ClipboardEvent("copy", {
-                    bubbles: true,
-                    cancelable: true,
-                    clipboardData: clipboard,
-                });
-                source.dispatchEvent(event);
-                return {
-                    text: clipboard.getData("text/plain"),
-                    prevented: event.defaultPrevented,
-                };
-            "#,
-            Vec::new(),
-        )
-        .await
-        .context("copy a selected desktop diff line")?;
-    let observation: CopyObservation = result
-        .convert()
-        .context("decode the desktop copy observation")?;
-
-    ensure!(
-        observation.prevented,
-        "the desktop viewer did not intercept native copy"
-    );
-    ensure!(
-        observation.text == "// * work.txt, lines: 2\nalpha-one-shot-marker",
-        "the desktop viewer copied an unexpected source payload: {:?}",
-        observation.text
-    );
-    Ok(())
-}
-
 async fn assert_path_copy_popover(driver: &WebDriver) -> Result<()> {
     let file_selector = "[data-gtl-diff-file][data-path='work.txt']";
     let trigger = driver
-        .find(By::Css(&format!(
+        .find(By::Css(format!(
             "{file_selector} button[aria-label='Copy file path']"
         )))
         .await
@@ -126,7 +115,7 @@ async fn assert_path_copy_popover(driver: &WebDriver) -> Result<()> {
         .await
         .context("open the desktop path popover")?;
     let popover = driver
-        .query(By::Css(&format!(
+        .query(By::Css(format!(
             "{file_selector} [popover][aria-label='Copy file path']"
         )))
         .ignore_errors(true)
@@ -201,7 +190,7 @@ async fn assert_path_copy_popover(driver: &WebDriver) -> Result<()> {
     )
     .await?;
     let file = driver
-        .find(By::Css(&format!("{file_selector}[open]")))
+        .find(By::Css(format!("{file_selector}[open]")))
         .await
         .context("keep the desktop diff file expanded after using its path menu")?;
     ensure!(file.is_displayed().await?, "desktop diff file is hidden");

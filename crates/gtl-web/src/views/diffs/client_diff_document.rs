@@ -2,8 +2,6 @@
 mod copy_context;
 mod file;
 
-#[cfg(feature = "desktop")]
-use dioxus::prelude::dioxus_core::Task;
 use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerViewIdentity};
@@ -14,7 +12,7 @@ use crate::entities::diffs::ClientDiffWorkspace;
 #[cfg(feature = "desktop")]
 use crate::entities::diffs::use_client_diff_workspace;
 #[cfg(feature = "desktop")]
-use crate::shared::ui::FloatingNotice;
+use crate::shared::ui::use_toast;
 use crate::{entities::diffs::ClientDiffFile, shared::ui::EmptyNotice};
 
 #[cfg(feature = "desktop")]
@@ -27,11 +25,10 @@ pub(crate) fn ClientDiffDocument(
     onopen: Option<EventHandler<ViewerDiffFileId>>,
 ) -> Element {
     let workspace = use_client_diff_workspace(view.identity, &view.files);
+    let toast = use_toast();
     let current = workspace.read();
     let is_loading = current.is_loading();
     let retry_allowed = !workspace.row_stream_active();
-    let mut copy_feedback = use_signal(|| None::<String>);
-    let mut copy_feedback_timeout = use_signal(|| None::<Task>);
 
     rsx! {
         section {
@@ -44,16 +41,7 @@ pub(crate) fn ClientDiffDocument(
                 let Some(message) = copy_context::copy_selected_diff_lines(&event) else {
                     return;
                 };
-                if let Some(timeout) = copy_feedback_timeout.write().take() {
-                    timeout.cancel();
-                }
-                copy_feedback.set(Some(message));
-                let timeout = spawn(async move {
-                    dioxus_sdk_time::sleep(std::time::Duration::from_millis(1_600)).await;
-                    copy_feedback.set(None);
-                    copy_feedback_timeout.set(None);
-                });
-                copy_feedback_timeout.set(Some(timeout));
+                toast.ok(message);
             },
             if is_loading {
                 DiffStreamingNotice {}
@@ -69,9 +57,6 @@ pub(crate) fn ClientDiffDocument(
                 onopen,
                 onretry: move |file_id| workspace.retry_file(file_id),
                 artifact_tab_id: None,
-            }
-            if let Some(message) = copy_feedback() {
-                FloatingNotice { role: "status", "{message}" }
             }
         }
     }

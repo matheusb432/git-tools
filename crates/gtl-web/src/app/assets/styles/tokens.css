@@ -11,6 +11,7 @@
     --ink:#c9d1d9; --ink-2:#768390; --ink-3:#788592; --line:#21262d; --line-2:#2d333b;
     --acc:#b69bff; --acc-2:#cbb4ff; --acc-soft:rgba(182,155,255,.14); --acc-line:rgba(182,155,255,.42);
     --add:#3fb950; --add-bg:rgba(46,160,67,.20); --add-gut:rgba(46,160,67,.28); --add-ink:#56d364; --add-line:rgba(63,185,80,.42);
+    --warn:#d29922; --warn-bg:rgba(210,153,34,.16); --warn-line:rgba(210,153,34,.42);
     --del:#f85149; --del-bg:rgba(248,81,73,.20); --del-gut:rgba(248,81,73,.28); --del-ink:#ffa198; --del-line:rgba(248,81,73,.42);
     --code:#adbac7;
     --sy-kw:#ff7b72; --sy-str:#a5d6ff; --sy-com:#8b949e; --sy-typ:#ffa657; --sy-fn:#d2a8ff; --sy-num:#79c0ff; --sy-con:#79c0ff; --sy-op:#ff7b72; --sy-tag:#7ee787; --sy-var:#ffa657;
@@ -24,6 +25,7 @@
     --ink:#1f2328; --ink-2:#656d76; --ink-3:#646c75; --line:#d0d7de; --line-2:#d8dee4;
     --acc:#9a6700; --acc-2:#7a5200; --acc-soft:rgba(154,103,0,.10); --acc-line:rgba(154,103,0,.35);
     --add:#1a7f37; --add-bg:rgba(46,160,67,.16); --add-gut:rgba(46,160,67,.24); --add-ink:#1a7f37; --add-line:rgba(26,127,55,.35);
+    --warn:#9a6700; --warn-bg:rgba(154,103,0,.12); --warn-line:rgba(154,103,0,.38);
     --del:#cf222e; --del-bg:rgba(248,81,73,.16); --del-gut:rgba(248,81,73,.24); --del-ink:#cf222e; --del-line:rgba(207,34,46,.35);
     --code:#24292f;
     --sy-kw:#cf222e; --sy-str:#0a3069; --sy-com:#6e7781; --sy-typ:#953800; --sy-fn:#8250df; --sy-num:#0550ae; --sy-con:#0550ae; --sy-op:#cf222e; --sy-tag:#116329; --sy-var:#953800;
@@ -35,6 +37,7 @@
     --ink:#EAE0D2; --ink-2:#9C8F7E; --ink-3:#8A8073; --line:#241F1A; --line-2:#332B24;
     --acc:#e8730c; --acc-2:#FF8C2E; --acc-soft:rgba(232,115,12,.14); --acc-line:rgba(232,115,12,.42);
     --add:#7FB05C; --add-bg:rgba(120,170,80,.18); --add-gut:rgba(120,170,80,.26); --add-ink:#9DC47C; --add-line:rgba(127,176,92,.42);
+    --warn:#E7C267; --warn-bg:rgba(231,194,103,.14); --warn-line:rgba(231,194,103,.42);
     --del:#DB6650; --del-bg:rgba(215,90,70,.18); --del-gut:rgba(215,90,70,.26); --del-ink:#EC9384; --del-line:rgba(219,102,80,.42);
     --code:#c8bca9;
     --sy-kw:#FF9E4A; --sy-str:#A9C77F; --sy-com:#94876F; --sy-typ:#E7C267; --sy-fn:#E8A0B4; --sy-num:#8FB8D8; --sy-con:#8FB8D8; --sy-op:#FF9E4A; --sy-tag:#9DC47C; --sy-var:#D8B08C;
@@ -45,6 +48,7 @@
     --ink:#cccac2; --ink-2:#82909f; --ink-3:#8492a1; --line:#252c39; --line-2:#303949;
     --acc:#e8730c; --acc-2:#f5832b; --acc-soft:rgba(232,115,12,.14); --acc-line:rgba(232,115,12,.42);
     --add:#87d96c; --add-bg:rgba(135,217,108,.16); --add-gut:rgba(135,217,108,.26); --add-ink:#a5e88f; --add-line:rgba(135,217,108,.42);
+    --warn:#ffd173; --warn-bg:rgba(255,209,115,.14); --warn-line:rgba(255,209,115,.42);
     --del:#f27983; --del-bg:rgba(242,121,131,.16); --del-gut:rgba(242,121,131,.26); --del-ink:#f7a0a7; --del-line:rgba(242,121,131,.42);
     --code:#c9c7bf;
     --sy-kw:#ffad66; --sy-str:#d5ff80; --sy-com:#8494a3; --sy-typ:#73d0ff; --sy-fn:#ffd173; --sy-num:#dfbfff; --sy-con:#dfbfff; --sy-op:#f29e74; --sy-tag:#5ccfe6; --sy-var:#ffdfb3;
@@ -55,6 +59,7 @@
     --ink:#c0caf5; --ink-2:#9aa5ce; --ink-3:#7f89b4; --line:#262a3d; --line-2:#333855;
     --acc:#7dcfff; --acc-2:#a9e2ff; --acc-soft:rgba(125,207,255,.13); --acc-line:rgba(125,207,255,.40);
     --add:#8fd45f; --add-bg:rgba(143,212,95,.15); --add-gut:rgba(143,212,95,.26); --add-ink:#b9e88f; --add-line:rgba(143,212,95,.40);
+    --warn:#e0af68; --warn-bg:rgba(224,175,104,.14); --warn-line:rgba(224,175,104,.40);
     --del:#f7768e; --del-bg:rgba(247,118,142,.16); --del-gut:rgba(247,118,142,.26); --del-ink:#ffa8b8; --del-line:rgba(247,118,142,.40);
     --code:#b4bce0;
     --sy-kw:#bb9af7; --sy-str:#9fe6d1; --sy-com:#8189b3; --sy-typ:#2ac3de; --sy-fn:#7aa2f7; --sy-num:#ff9e64; --sy-con:#ff9e64; --sy-op:#89ddff; --sy-tag:#73daca; --sy-var:#e0af68;
@@ -65,6 +70,7 @@
     --ink:#f2f2f5; --ink-2:#b6b6c0; --ink-3:#85858f; --line:#26262e; --line-2:#35353f;
     --acc:#ff6ac1; --acc-2:#ff92d4; --acc-soft:rgba(255,106,193,.14); --acc-line:rgba(255,106,193,.45);
     --add:#57e389; --add-bg:rgba(87,227,137,.14); --add-gut:rgba(87,227,137,.24); --add-ink:#8ff2b0; --add-line:rgba(87,227,137,.45);
+    --warn:#ffd479; --warn-bg:rgba(255,212,121,.14); --warn-line:rgba(255,212,121,.45);
     --del:#ff5f56; --del-bg:rgba(255,95,86,.15); --del-gut:rgba(255,95,86,.25); --del-ink:#ff9a92; --del-line:rgba(255,95,86,.45);
     --code:#e8e8ee;
     --sy-kw:#c792ea; --sy-str:#b8f27f; --sy-com:#9a9aa6; --sy-typ:#ffd479; --sy-fn:#82d2ff; --sy-num:#ffb86c; --sy-con:#ffb86c; --sy-op:#ff6ac1; --sy-tag:#6ee7d0; --sy-var:#ffd479;
@@ -75,6 +81,7 @@
     --ink:#d6d6d6; --ink-2:#9e9e9e; --ink-3:#898989; --line:#2a2a2a; --line-2:#383838;
     --acc:#6fa8dc; --acc-2:#93c1e8; --acc-soft:rgba(111,168,220,.13); --acc-line:rgba(111,168,220,.40);
     --add:#6fbf73; --add-bg:rgba(111,191,115,.14); --add-gut:rgba(111,191,115,.24); --add-ink:#9ad49d; --add-line:rgba(111,191,115,.40);
+    --warn:#d9b77c; --warn-bg:rgba(217,183,124,.14); --warn-line:rgba(217,183,124,.40);
     --del:#e06c75; --del-bg:rgba(224,108,117,.15); --del-gut:rgba(224,108,117,.25); --del-ink:#eda0a6; --del-line:rgba(224,108,117,.40);
     --code:#c9c9c9;
     --sy-kw:#cf9fdb; --sy-str:#b3ca8c; --sy-com:#8d8d8d; --sy-typ:#d9b77c; --sy-fn:#8fb8dc; --sy-num:#d9a889; --sy-con:#d9a889; --sy-op:#cf9fdb; --sy-tag:#8fb8dc; --sy-var:#d9b77c;

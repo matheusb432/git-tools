@@ -29,6 +29,9 @@
   --color-add-gut: var(--add-gut);
   --color-add-ink: var(--add-ink);
   --color-add-line: var(--add-line);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-warn-line: var(--warn-line);
   --color-del: var(--del);
   --color-del-bg: var(--del-bg);
   --color-del-gut: var(--del-gut);
@@ -41,6 +44,8 @@
   --radius-panel: var(--r);
   --shadow-floating: var(--elevation-floating);
   --animate-popover-enter: popover-enter 150ms ease-out;
+  --animate-toast-enter: toast-enter 180ms ease-out;
+  --animate-toast-expiry: toast-expiry 5s linear forwards;
 }
 
 @keyframes popover-enter {
@@ -52,6 +57,28 @@
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toast-expiry {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
   }
 }
 

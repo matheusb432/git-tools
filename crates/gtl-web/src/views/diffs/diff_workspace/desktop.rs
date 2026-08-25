@@ -21,10 +21,9 @@ use crate::{
     shared::{
         browser,
         ui::{
-            AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, FloatingNotice,
-            FloatingNoticeState, Popover, Skeleton,
+            AlertDialog, Button, ButtonSize, ButtonState, ButtonVariant, Popover, Skeleton,
+            use_toast,
         },
-        viewer_client::ViewerClientError,
     },
     views::diffs::ClientDiffDocument,
 };
@@ -184,7 +183,7 @@ fn ReadyWorkspace(
     is_live: bool,
 ) -> Element {
     let viewer = use_context::<ViewerContext>();
-    let mut action_error = use_signal(|| None::<ViewerClientError>);
+    let toast = use_toast();
     let mut delete_open = use_signal(|| false);
     let mut delete_pending = use_signal(|| false);
     let mut delete_trigger_id = use_signal(|| "delete-live-view-desktop".to_owned());
@@ -205,22 +204,15 @@ fn ReadyWorkspace(
     let commits_has_more = loaded_commit_pages.has_more();
     let onload_commits = use_callback(move |()| commit_pages.load_next(identity));
 
-    let onpreference = move |preference: SetViewerPreference| {
-        action_error.set(None);
-        viewer.set_preference(preference);
-    };
-    let onrefresh = move |_| {
-        action_error.set(None);
-        viewer.refresh_tab(tab_id);
-    };
+    let onpreference = move |preference: SetViewerPreference| viewer.set_preference(preference);
+    let onrefresh = move |_| viewer.refresh_tab(tab_id);
 
     // TODO: remove unit from param
     let onclear_commit = use_callback(move |()| {
-        action_error.set(None);
         spawn(async move {
             match viewer_server::clear_commit_selection(ViewerTabRequest { tab_id }).await {
                 Ok(shell) => viewer.replace_shell(shell),
-                Err(error) => action_error.set(Some(error)),
+                Err(error) => toast.error(error.message()),
             }
         });
     });
@@ -229,11 +221,10 @@ fn ReadyWorkspace(
     let onselect_commit = use_callback(move |id: CommitId| {
         match make_commit_selection_action(&commit_selection, tab_id, id) {
             CommitSelectionAction::FetchCommit(request) => {
-                action_error.set(None);
                 spawn(async move {
                     match viewer_server::select_commit(request).await {
                         Ok(shell) => viewer.replace_shell(shell),
-                        Err(error) => action_error.set(Some(error)),
+                        Err(error) => toast.error(error.message()),
                     }
                 });
             }
@@ -253,12 +244,11 @@ fn ReadyWorkspace(
         });
     };
     let onopen = move |file: gtl_wire::viewer::ViewerDiffFileId| {
-        action_error.set(None);
         spawn(async move {
             if let Err(error) =
                 viewer_server::open_diff_file(OpenViewerDiffFile { identity, file }).await
             {
-                action_error.set(Some(error));
+                toast.error(error.message());
             }
         });
     };
@@ -333,10 +323,6 @@ fn ReadyWorkspace(
                 commits_has_more,
                 onload_commits,
             }
-        }
-
-        if let Some(error) = action_error().or_else(|| viewer.render_command_error()) {
-            FloatingNotice { state: FloatingNoticeState::Error, role: "alert", "{error.message()}" }
         }
 
         Popover {
@@ -417,14 +403,13 @@ fn ReadyWorkspace(
                     return;
                 }
                 delete_pending.set(true);
-                action_error.set(None);
                 spawn(async move {
                     match viewer_server::delete_live_tab(ViewerTabRequest { tab_id }).await {
                         Ok(shell) => {
                             delete_open.set(false);
                             viewer.replace_shell(shell);
                         }
-                        Err(error) => action_error.set(Some(error)),
+                        Err(error) => toast.error(error.message()),
                     }
                     delete_pending.set(false);
                 });

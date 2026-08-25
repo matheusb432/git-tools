@@ -16,11 +16,9 @@ use crate::{
     shared::{
         browser,
         ui::{
-            Button, ButtonSize, ButtonVariant, CountBadge, FloatingNotice, FloatingNoticeState,
-            IconPopover, IconPopoverIconMotion, MENU_ACTION_HOST_CLASSES, MenuActionContent,
-            ScrollArea, ScrollAreaVariant,
+            Button, ButtonSize, ButtonVariant, CountBadge, IconPopover, IconPopoverIconMotion,
+            MENU_ACTION_HOST_CLASSES, MenuActionContent, ScrollArea, ScrollAreaVariant, use_toast,
         },
-        viewer_client::ViewerClientError,
     },
 };
 
@@ -30,7 +28,7 @@ const VIEWER_MENU_ID: &str = "viewer-menu";
 pub(crate) fn ApplicationNavigation() -> Element {
     let viewer = use_context::<ViewerContext>();
     let navigator = use_navigator();
-    let mut action_error = use_signal(|| None::<ViewerClientError>);
+    let toast = use_toast();
     let shell = match viewer.read() {
         ViewerShellLoad::Ready(shell) => Some(shell),
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => None,
@@ -75,7 +73,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                     tabindex: if active { "0" } else { "-1" },
                                     title: tab.label.clone(),
                                     onclick: move |_| {
-                                        action_error.set(None);
                                         if active {
                                             navigator.push(Route::Workspace {});
                                             return;
@@ -86,7 +83,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                                     viewer.replace_shell(shell);
                                                     navigator.push(Route::Workspace {});
                                                 }
-                                                Err(error) => action_error.set(Some(error)),
+                                                Err(error) => toast.error(error.message()),
                                             }
                                         });
                                     },
@@ -113,7 +110,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                                             navigator.push(Route::Workspace {});
                                                             browser::focus_element(tab_element_id(target));
                                                         }
-                                                        Err(error) => action_error.set(Some(error)),
+                                                        Err(error) => toast.error(error.message()),
                                                     }
                                                 });
                                             }
@@ -138,7 +135,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                     title: "Close tab",
                                     "data-testid": test_ids::VIEWER_TAB_CLOSE.value(),
                                     onclick: move |_| {
-                                        action_error.set(None);
                                         spawn(async move {
                                             match viewer_server::close_tab(ViewerTabRequest { tab_id }).await {
                                                 Ok(shell) => {
@@ -149,7 +145,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                                         browser::focus_element("workspace-heading".to_owned());
                                                     }
                                                 }
-                                                Err(error) => action_error.set(Some(error)),
+                                                Err(error) => toast.error(error.message()),
                                             }
                                         });
                                     },
@@ -205,9 +201,6 @@ pub(crate) fn ApplicationNavigation() -> Element {
                     }
                 }
             }
-        }
-        if let Some(error) = action_error() {
-            FloatingNotice { state: FloatingNoticeState::Error, role: "alert", "{error.message()}" }
         }
     }
 }
