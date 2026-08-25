@@ -34,7 +34,6 @@ pub(crate) enum ButtonVariant {
     Pressed,
     #[cfg(feature = "desktop")]
     Destructive,
-    Success,
     Failure,
     Outline,
     Ghost,
@@ -56,9 +55,6 @@ impl ButtonVariant {
             #[cfg(feature = "desktop")]
             Self::Destructive => {
                 "border border-del-line bg-del-bg text-del hover:border-del hover:bg-del hover:text-bg active:border-del active:bg-del active:text-bg"
-            }
-            Self::Success => {
-                "border border-add bg-add text-bg hover:border-add-line hover:bg-add-bg hover:text-add active:border-add active:bg-add active:text-bg"
             }
             Self::Failure => {
                 "border border-del bg-del text-bg hover:border-del-line hover:bg-del-bg hover:text-del active:border-del active:bg-del active:text-bg"

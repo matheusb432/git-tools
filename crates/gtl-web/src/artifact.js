@@ -5,6 +5,7 @@
   if (root === null) return;
 
   const feedbackTimers = new WeakMap();
+  const copyContextFeedbackTimers = new WeakMap();
   const flashTimers = new WeakMap();
 
   function classWords(value) {
@@ -204,6 +205,15 @@
     for (const dialog of panel.querySelectorAll("dialog[open]")) {
       closeDialog(dialog, false);
     }
+    const copyContextFeedback = panel.querySelector(
+      "[data-gtl-copy-context-feedback]",
+    );
+    if (copyContextFeedback !== null) {
+      const timer = copyContextFeedbackTimers.get(copyContextFeedback);
+      if (timer !== undefined) clearTimeout(timer);
+      copyContextFeedbackTimers.delete(copyContextFeedback);
+      copyContextFeedback.hidden = true;
+    }
   }
 
   function navigateFile(action) {
@@ -235,11 +245,38 @@
     );
   }
 
-  function codePayload(file, includeContext) {
+  function copyContextHeader(file, firstLine, lastLine) {
+    let range = "";
+    if (firstLine !== undefined && lastLine !== undefined) {
+      range = firstLine === lastLine
+        ? ", lines: " + firstLine
+        : ", lines: " + firstLine + ".." + lastLine;
+    }
+    const leader = file.dataset.gtlCommentLeader ?? "//";
+    const path = file.dataset.gtlPath ?? file.dataset.path ?? "";
+    return leader + " * " + path + range;
+  }
+
+  function diffFileForNode(node) {
+    const element = node instanceof Element ? node : node?.parentElement;
+    return element?.closest("details[data-gtl-diff-file]") ?? null;
+  }
+
+  function selectedCodePayload(selection) {
+    if (selection.isCollapsed || selection.rangeCount === 0) return null;
+    const file = diffFileForNode(selection.anchorNode);
+    if (file === null || file !== diffFileForNode(selection.focusNode)) {
+      return null;
+    }
+    const panel = artifactPanel(file);
+    const workspace = panel === null ? null : panelWorkspace(panel);
+    if (workspace?.dataset.gtlCopyContext === "false") return null;
+
     const lines = [];
     let firstLine;
     let lastLine;
     for (const row of file.querySelectorAll("[data-gtl-copy-line]")) {
+      if (!selection.containsNode(row, true)) continue;
       const text = row.querySelector("[data-gtl-copy-text]");
       if (text === null) continue;
       lines.push(text.textContent ?? "");
@@ -249,18 +286,40 @@
         lastLine = lineNumber;
       }
     }
-    const code = lines.join("\n");
-    if (!includeContext || lines.length === 0) return code;
+    if (lines.length === 0) return null;
 
-    let range = "";
-    if (firstLine !== undefined && lastLine !== undefined) {
-      range = firstLine === lastLine
-        ? ", lines: " + firstLine
-        : ", lines: " + firstLine + ".." + lastLine;
-    }
-    const leader = file.dataset.gtlCommentLeader ?? "//";
-    const path = file.dataset.gtlPath ?? file.dataset.path ?? "";
-    return leader + " * " + path + range + "\n" + code;
+    const lineRange = firstLine === undefined || lastLine === undefined
+      ? undefined
+      : firstLine === lastLine
+      ? firstLine
+      : firstLine + ".." + lastLine;
+    return {
+      file,
+      lineRange,
+      text: copyContextHeader(file, firstLine, lastLine) + "\n" +
+        lines.join("\n"),
+    };
+  }
+
+  function showCopyContextFeedback(file, lineRange) {
+    const panel = artifactPanel(file);
+    const feedback = panel?.querySelector(
+      "[data-gtl-copy-context-feedback]",
+    );
+    if (feedback === null || feedback === undefined) return;
+    feedback.textContent = lineRange === undefined
+      ? "Copied with context"
+      : "Copied with context - lines " + lineRange;
+    feedback.hidden = false;
+    const previousTimer = copyContextFeedbackTimers.get(feedback);
+    if (previousTimer !== undefined) clearTimeout(previousTimer);
+    copyContextFeedbackTimers.set(
+      feedback,
+      setTimeout(() => {
+        feedback.hidden = true;
+        copyContextFeedbackTimers.delete(feedback);
+      }, 1600),
+    );
   }
 
   function copyPayload(action) {
@@ -274,11 +333,6 @@
       return file.dataset.gtlPath ?? file.dataset.path ?? "";
     }
     if (kind === "absolute") return file.dataset.gtlAbsolutePath ?? "";
-    if (kind === "code") {
-      const panel = artifactPanel(action);
-      const workspace = panel === null ? null : panelWorkspace(panel);
-      return codePayload(file, workspace?.dataset.gtlCopyContext !== "false");
-    }
     return "";
   }
 
@@ -308,31 +362,26 @@
     return copied;
   }
 
+  function setCopyFeedback(action, state) {
+    const feedback = action.querySelector("[data-gtl-copy-feedback]");
+    if (feedback === null) return false;
+    feedback.dataset.state = state;
+    feedback.textContent = state === "success"
+      ? "Copied"
+      : state === "failure"
+      ? "Failed"
+      : "";
+    return true;
+  }
+
   function showCopyFeedback(action, copied) {
-    const idleLabel = action.dataset.gtlIdleLabel ??
-      action.textContent ??
-      "";
-    action.dataset.gtlIdleLabel = idleLabel;
-    action.textContent = copied ? "copied" : "failed";
-    swapClasses(
-      action,
-      action.dataset.gtlIdleClasses,
-      copied
-        ? action.dataset.gtlSuccessClasses
-        : action.dataset.gtlFailureClasses,
-    );
+    if (!setCopyFeedback(action, copied ? "success" : "failure")) return;
     const previousTimer = feedbackTimers.get(action);
     if (previousTimer !== undefined) clearTimeout(previousTimer);
     feedbackTimers.set(
       action,
       setTimeout(() => {
-        action.textContent = idleLabel;
-        swapClasses(
-          action,
-          (action.dataset.gtlSuccessClasses ?? "") + " " +
-            (action.dataset.gtlFailureClasses ?? ""),
-          action.dataset.gtlIdleClasses,
-        );
+        setCopyFeedback(action, "idle");
         feedbackTimers.delete(action);
       }, 1200),
     );
@@ -362,6 +411,16 @@
       );
     }
   }
+
+  root.addEventListener("copy", (event) => {
+    const selection = window.getSelection();
+    if (selection === null || event.clipboardData === null) return;
+    const copied = selectedCodePayload(selection);
+    if (copied === null) return;
+    event.clipboardData.setData("text/plain", copied.text);
+    event.preventDefault();
+    showCopyContextFeedback(copied.file, copied.lineRange);
+  });
 
   root.addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;

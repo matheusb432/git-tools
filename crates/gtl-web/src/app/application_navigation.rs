@@ -5,7 +5,7 @@ use gtl_wire::viewer::{
     SetViewerPreference, ViewerActiveState, ViewerTab, ViewerTabKind, ViewerTabRequest,
     ViewerTabState, ViewerTheme,
 };
-use lucide_dioxus::{CircleDot, History, LoaderCircle, Settings, TriangleAlert, X};
+use lucide_dioxus::{CircleDot, Ellipsis, History, LoaderCircle, Settings, TriangleAlert, X};
 
 use super::{
     application_layout::{ViewerContext, ViewerShellLoad},
@@ -17,8 +17,8 @@ use crate::{
         browser,
         ui::{
             Button, ButtonSize, ButtonVariant, CountBadge, FloatingNotice, FloatingNoticeState,
-            IconDropdown, MENU_ACTION_HOST_CLASSES, MenuActionContent, ScrollArea,
-            ScrollAreaVariant,
+            IconPopover, IconPopoverIconMotion, MENU_ACTION_HOST_CLASSES, MenuActionContent,
+            ScrollArea, ScrollAreaVariant,
         },
         viewer_client::ViewerClientError,
     },
@@ -163,14 +163,14 @@ pub(crate) fn ApplicationNavigation() -> Element {
                 }
             }
 
-            IconDropdown {
+            IconPopover {
                 id: VIEWER_MENU_ID,
                 aria_label: "Viewer menu",
                 trigger_test_id: test_ids::VIEWER_MENU_TRIGGER.value(),
-                div { class: "flex items-center justify-between gap-3 border-b border-line px-3 py-2.5",
-                    strong { class: "text-xs font-semibold text-ink", "Viewer" }
-                    span { class: "text-xs text-ink-3", "3 actions" }
-                }
+                icon_motion: IconPopoverIconMotion::QuarterTurn,
+                icon: rsx! {
+                    Ellipsis { size: 18 }
+                },
                 div { class: "grid gap-0.5 p-1.5",
                     Link {
                         class: MENU_ACTION_HOST_CLASSES,

@@ -1,6 +1,6 @@
 use anyhow::{Context as _, ensure};
 use gtl_web_contracts::test_ids;
-use playwright_rs::expect;
+use playwright_rs::{expect, protocol::Page};
 
 use crate::support;
 
@@ -52,6 +52,8 @@ async fn user_opens_and_navigates_an_offline_diff() -> anyhow::Result<()> {
             .to_have_count(1)
             .await
             .context("retain the requested split full presentation")?;
+        assert_selection_copy_context(page).await?;
+        assert_path_copy_popover(page).await?;
         support::click(
             &page
                 .locator(test_ids::CHANGED_FILES_PANEL.selector())
@@ -137,4 +139,141 @@ async fn user_opens_and_navigates_an_offline_diff() -> anyhow::Result<()> {
     }
     .await;
     spec.finish(outcome).await
+}
+
+async fn assert_selection_copy_context(page: &Page) -> anyhow::Result<()> {
+    page.evaluate::<(), ()>(
+        r#"() => {
+            const file = document.querySelector(
+                "[data-gtl-diff-file][data-path='src/alpha.rs']",
+            );
+            const source = [...file.querySelectorAll("[data-gtl-copy-text]")]
+                .find((element) => element.textContent.includes("alpha-marker"));
+            const range = document.createRange();
+            range.selectNodeContents(source);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+
+            const root = document.querySelector("[data-gtl-artifact-ready='true']");
+            root.addEventListener("copy", (event) => {
+                globalThis.__gtlCopyObservation = [
+                    event.clipboardData?.getData("text/plain") ?? "",
+                    event.defaultPrevented,
+                ];
+            }, { once: true });
+        }"#,
+        None,
+    )
+    .await
+    .context("select one added source line")?;
+    page.keyboard()
+        .press("Control+c", None)
+        .await
+        .context("copy the selected source line")?;
+    let (text, prevented): (String, bool) = page
+        .evaluate("() => globalThis.__gtlCopyObservation", None::<&()>)
+        .await
+        .context("observe the native copy event")?;
+
+    ensure!(prevented, "the raw artifact did not intercept native copy");
+    ensure!(
+        text == "// * src/alpha.rs, lines: 5\nfn alpha_5() { println!(\"alpha-marker\"); }",
+        "the raw artifact copied an unexpected source payload: {text:?}"
+    );
+    expect(page.get_by_text("Copied with context - lines 5", true))
+        .to_be_visible()
+        .await
+        .context("confirm contextual selection copy")?;
+    Ok(())
+}
+
+async fn assert_path_copy_popover(page: &Page) -> anyhow::Result<()> {
+    page.evaluate::<(), ()>(
+        r#"() => {
+            Object.defineProperty(navigator, "clipboard", {
+                configurable: true,
+                value: {
+                    writeText: async (value) => {
+                        globalThis.__gtlWrittenPath = value;
+                    },
+                },
+            });
+        }"#,
+        None,
+    )
+    .await
+    .context("observe path clipboard writes")?;
+
+    let file = page.locator("[data-gtl-diff-file][data-path='src/alpha.rs']");
+    let trigger = file.locator("button[aria-label='Copy file path']");
+    let popover = file.locator("[popover][aria-label='Copy file path']");
+    support::click(&trigger, "open the raw file path popover").await?;
+    expect(popover.clone())
+        .to_be_visible()
+        .await
+        .context("show the raw file path options")?;
+    expect(popover.locator("button[aria-label='Copy relative path']"))
+        .to_be_visible()
+        .await
+        .context("show the relative path option")?;
+    expect(popover.locator("button[aria-label='Copy absolute path']"))
+        .to_be_visible()
+        .await
+        .context("show the absolute path option")?;
+    expect(page.locator("[data-gtl-copy='code']"))
+        .to_have_count(0)
+        .await
+        .context("omit the removed whole-file code action")?;
+
+    let trigger_box = trigger
+        .bounding_box()
+        .await
+        .context("measure the path popover trigger")?
+        .context("path popover trigger has no layout box")?;
+    let popover_box = popover
+        .bounding_box()
+        .await
+        .context("measure the path popover")?
+        .context("path popover has no layout box")?;
+    let vertical_gap = popover_box.y - (trigger_box.y + trigger_box.height);
+    let end_alignment =
+        (popover_box.x + popover_box.width - trigger_box.x - trigger_box.width).abs();
+    ensure!(
+        (-0.5..=8.0).contains(&vertical_gap),
+        "path popover is not anchored below its trigger: gap {vertical_gap}"
+    );
+    ensure!(
+        end_alignment <= 1.0,
+        "path popover is not end-aligned with its trigger: delta {end_alignment}"
+    );
+
+    let relative_action = popover.locator("button[data-gtl-copy='path']");
+    support::click(&relative_action, "copy the raw relative file path").await?;
+    expect(relative_action.locator("[data-gtl-copy-feedback][data-state='success']"))
+        .to_be_visible()
+        .await
+        .context("confirm the relative path copy")?;
+    let copied_path: String = page
+        .evaluate("() => globalThis.__gtlWrittenPath", None::<&()>)
+        .await
+        .context("observe the copied relative path")?;
+    ensure!(
+        copied_path == "src/alpha.rs",
+        "the path menu copied an unexpected value: {copied_path:?}"
+    );
+
+    page.keyboard()
+        .press("Escape", None)
+        .await
+        .context("close the raw file path popover")?;
+    expect(popover)
+        .to_be_hidden()
+        .await
+        .context("dismiss the raw file path popover")?;
+    expect(page.locator("[data-gtl-diff-file][data-path='src/alpha.rs'][open]"))
+        .to_have_count(1)
+        .await
+        .context("keep the file expanded after using its path menu")?;
+    Ok(())
 }

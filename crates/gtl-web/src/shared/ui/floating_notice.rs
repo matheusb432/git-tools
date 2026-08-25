@@ -7,6 +7,7 @@ const FLOATING_NOTICE_CLASSES: &str = "pointer-events-none fixed inset-x-4 botto
 pub(crate) enum FloatingNoticeState {
     #[default]
     Status,
+    #[cfg(feature = "desktop")]
     Error,
 }
 
@@ -14,6 +15,7 @@ impl FloatingNoticeState {
     const fn classes(self) -> &'static str {
         match self {
             Self::Status => "border-acc-line text-ink",
+            #[cfg(feature = "desktop")]
             Self::Error => "border-del-line text-del",
         }
     }
@@ -35,7 +37,7 @@ pub(crate) fn FloatingNotice(
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "desktop"))]
 mod tests {
     use super::FloatingNoticeState;
 

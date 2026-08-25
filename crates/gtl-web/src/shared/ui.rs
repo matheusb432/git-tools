@@ -7,11 +7,8 @@ pub mod code_text;
 mod count_badge;
 mod dialog;
 mod empty_notice;
-#[cfg(feature = "desktop")]
 mod floating_notice;
-#[cfg(feature = "desktop")]
-mod icon_dropdown;
-#[cfg(feature = "desktop")]
+mod icon_popover;
 mod menu_action;
 mod popover;
 mod scroll_area;
@@ -27,11 +24,12 @@ pub(crate) use count_badge::CountBadge;
 #[cfg(feature = "artifact")]
 pub(crate) use count_badge::CountBadgeSize;
 pub(crate) use empty_notice::EmptyNotice;
+pub(crate) use floating_notice::FloatingNotice;
 #[cfg(feature = "desktop")]
-pub(crate) use floating_notice::{FloatingNotice, FloatingNoticeState};
+pub(crate) use floating_notice::FloatingNoticeState;
 #[cfg(feature = "desktop")]
-pub(crate) use icon_dropdown::IconDropdown;
-#[cfg(feature = "desktop")]
+pub(crate) use icon_popover::IconPopoverIconMotion;
+pub(crate) use icon_popover::{IconPopover, IconPopoverPlacement};
 pub(crate) use menu_action::{MENU_ACTION_HOST_CLASSES, MenuActionContent};
 pub(crate) use popover::Popover;
 pub(crate) use scroll_area::ScrollArea;

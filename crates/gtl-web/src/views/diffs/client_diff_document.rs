@@ -1,5 +1,9 @@
+#[cfg(feature = "desktop")]
+mod copy_context;
 mod file;
 
+#[cfg(feature = "desktop")]
+use dioxus::prelude::dioxus_core::Task;
 use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
 use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerViewIdentity};
@@ -9,6 +13,8 @@ use self::file::DiffFileCard;
 use crate::entities::diffs::ClientDiffWorkspace;
 #[cfg(feature = "desktop")]
 use crate::entities::diffs::use_client_diff_workspace;
+#[cfg(feature = "desktop")]
+use crate::shared::ui::FloatingNotice;
 use crate::{entities::diffs::ClientDiffFile, shared::ui::EmptyNotice};
 
 #[cfg(feature = "desktop")]
@@ -24,11 +30,31 @@ pub(crate) fn ClientDiffDocument(
     let current = workspace.read();
     let is_loading = current.is_loading();
     let retry_allowed = !workspace.row_stream_active();
+    let mut copy_feedback = use_signal(|| None::<String>);
+    let mut copy_feedback_timeout = use_signal(|| None::<Task>);
 
     rsx! {
         section {
             class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
             aria_label: "Rendered diff",
+            oncopy: move |event: ClipboardEvent| {
+                if !copy_context_enabled {
+                    return;
+                }
+                let Some(message) = copy_context::copy_selected_diff_lines(&event) else {
+                    return;
+                };
+                if let Some(timeout) = copy_feedback_timeout.write().take() {
+                    timeout.cancel();
+                }
+                copy_feedback.set(Some(message));
+                let timeout = spawn(async move {
+                    dioxus_sdk_time::sleep(std::time::Duration::from_millis(1_600)).await;
+                    copy_feedback.set(None);
+                    copy_feedback_timeout.set(None);
+                });
+                copy_feedback_timeout.set(Some(timeout));
+            },
             if is_loading {
                 DiffStreamingNotice {}
             }
@@ -37,13 +63,15 @@ pub(crate) fn ClientDiffDocument(
                 files: current.files,
                 identity: view.identity,
                 folded,
-                copy_context_enabled,
                 flashing_file,
                 is_loading,
                 retry_allowed,
                 onopen,
                 onretry: move |file_id| workspace.retry_file(file_id),
                 artifact_tab_id: None,
+            }
+            if let Some(message) = copy_feedback() {
+                FloatingNotice { role: "status", "{message}" }
             }
         }
     }
@@ -64,7 +92,6 @@ pub(crate) fn StaticDiffDocument(
                 files: workspace.files,
                 identity: workspace.identity,
                 folded: None,
-                copy_context_enabled: true,
                 flashing_file: None,
                 is_loading: false,
                 retry_allowed: false,
@@ -93,7 +120,6 @@ fn DiffDocumentBody(
     files: Vec<ClientDiffFile>,
     identity: ViewerViewIdentity,
     folded: Option<bool>,
-    copy_context_enabled: bool,
     flashing_file: Option<String>,
     is_loading: bool,
     retry_allowed: bool,
@@ -138,7 +164,6 @@ fn DiffDocumentBody(
                             layout,
                             density,
                             folded,
-                            copy_context_enabled,
                             is_flashing,
                             onopen,
                             onretry: move |()| onretry.call(file_id.clone()),

@@ -1,6 +1,7 @@
-use anyhow::{Context as _, Result};
+use anyhow::{Context as _, Result, ensure};
 use gtl_web_contracts::test_ids;
-use thirtyfour::By;
+use serde::Deserialize;
+use thirtyfour::{By, WebDriver, prelude::ElementQueryable as _};
 
 use crate::support::{self, fixture::OneShotFixture, wait};
 
@@ -16,6 +17,8 @@ async fn user_reopens_a_closed_snapshot_from_history() -> Result<()> {
                 "alpha-one-shot-marker",
             )
             .await?;
+            assert_selection_copy_context(session.driver()).await?;
+            assert_path_copy_popover(session.driver()).await?;
 
             support::selectors::by_test_id(session.driver(), test_ids::VIEWER_TAB_CLOSE)
                 .await?
@@ -49,6 +52,160 @@ async fn user_reopens_a_closed_snapshot_from_history() -> Result<()> {
         })
     })
     .await
+}
+
+#[derive(Deserialize)]
+struct CopyObservation {
+    text: String,
+    prevented: bool,
+}
+
+#[derive(Deserialize)]
+struct PopoverGeometry {
+    vertical_gap: f64,
+    end_alignment: f64,
+}
+
+async fn assert_selection_copy_context(driver: &thirtyfour::WebDriver) -> Result<()> {
+    let result = driver
+        .execute(
+            r#"
+                const file = document.querySelector(
+                    "[data-gtl-diff-file][data-path='work.txt']",
+                );
+                const source = [...file.querySelectorAll("[data-gtl-copy-text]")]
+                    .find((element) => element.textContent.includes("alpha-one-shot-marker"));
+                const range = document.createRange();
+                range.selectNodeContents(source);
+                const selection = window.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+
+                const clipboard = new DataTransfer();
+                const event = new ClipboardEvent("copy", {
+                    bubbles: true,
+                    cancelable: true,
+                    clipboardData: clipboard,
+                });
+                source.dispatchEvent(event);
+                return {
+                    text: clipboard.getData("text/plain"),
+                    prevented: event.defaultPrevented,
+                };
+            "#,
+            Vec::new(),
+        )
+        .await
+        .context("copy a selected desktop diff line")?;
+    let observation: CopyObservation = result
+        .convert()
+        .context("decode the desktop copy observation")?;
+
+    ensure!(
+        observation.prevented,
+        "the desktop viewer did not intercept native copy"
+    );
+    ensure!(
+        observation.text == "// * work.txt, lines: 2\nalpha-one-shot-marker",
+        "the desktop viewer copied an unexpected source payload: {:?}",
+        observation.text
+    );
+    Ok(())
+}
+
+async fn assert_path_copy_popover(driver: &WebDriver) -> Result<()> {
+    let file_selector = "[data-gtl-diff-file][data-path='work.txt']";
+    let trigger = driver
+        .find(By::Css(&format!(
+            "{file_selector} button[aria-label='Copy file path']"
+        )))
+        .await
+        .context("find the desktop path popover trigger")?;
+    trigger
+        .click()
+        .await
+        .context("open the desktop path popover")?;
+    let popover = driver
+        .query(By::Css(&format!(
+            "{file_selector} [popover][aria-label='Copy file path']"
+        )))
+        .ignore_errors(true)
+        .and_displayed()
+        .wait(
+            wait::ASSERTION_TIMEOUT,
+            std::time::Duration::from_millis(100),
+        )
+        .first()
+        .await
+        .context("show the desktop path popover")?;
+    let options = popover
+        .text()
+        .await
+        .context("read the desktop path options")?;
+    ensure!(
+        options.contains("Relative path") && options.contains("Absolute path"),
+        "desktop path popover is missing an option: {options:?}"
+    );
+    ensure!(
+        popover
+            .find_all(By::Css("[data-gtl-copy='code']"))
+            .await
+            .context("inspect desktop code-copy actions")?
+            .is_empty(),
+        "desktop path popover retained the removed code action"
+    );
+    let geometry: PopoverGeometry = driver
+        .execute(
+            r#"
+                const file = document.querySelector(
+                    "[data-gtl-diff-file][data-path='work.txt']",
+                );
+                const trigger = file.querySelector(
+                    "button[aria-label='Copy file path']",
+                );
+                const popover = file.querySelector(
+                    "[popover][aria-label='Copy file path']",
+                );
+                const triggerBox = trigger.getBoundingClientRect();
+                const popoverBox = popover.getBoundingClientRect();
+                return {
+                    vertical_gap: popoverBox.top - triggerBox.bottom,
+                    end_alignment: Math.abs(popoverBox.right - triggerBox.right),
+                };
+            "#,
+            Vec::new(),
+        )
+        .await
+        .context("measure the desktop path popover")?
+        .convert()
+        .context("decode the desktop path popover geometry")?;
+    ensure!(
+        (-0.5..=8.0).contains(&geometry.vertical_gap),
+        "desktop path popover is not anchored below its trigger: gap {}",
+        geometry.vertical_gap
+    );
+    ensure!(
+        geometry.end_alignment <= 1.0,
+        "desktop path popover is not end-aligned with its trigger: delta {}",
+        geometry.end_alignment
+    );
+
+    trigger
+        .click()
+        .await
+        .context("close the desktop path popover")?;
+    wait::until(
+        "closed desktop path popover",
+        wait::ASSERTION_TIMEOUT,
+        || async { Ok((!popover.is_displayed().await?).then_some(())) },
+    )
+    .await?;
+    let file = driver
+        .find(By::Css(&format!("{file_selector}[open]")))
+        .await
+        .context("keep the desktop diff file expanded after using its path menu")?;
+    ensure!(file.is_displayed().await?, "desktop diff file is hidden");
+    Ok(())
 }
 
 async fn wait_for_empty_workspace(driver: &thirtyfour::WebDriver) -> Result<()> {

@@ -134,97 +134,6 @@ impl ClientDiffFile {
             state: ClientDiffFileState::Loading,
         }
     }
-
-    pub(crate) fn copy_code(&self, include_context: bool) -> String {
-        let copied = match &self.rows {
-            ClientDiffRows::Unified(batches) => {
-                copied_unified_rows(batches.iter().flat_map(|batch| batch.iter()))
-            }
-            ClientDiffRows::Split(batches) => {
-                copied_split_rows(batches.iter().flat_map(|batch| batch.iter()))
-            }
-        };
-        let code = copied.lines.join("\n");
-        if !include_context || copied.lines.is_empty() {
-            return code;
-        }
-
-        let line_range = copied.line_range();
-        format!(
-            "{} * {}{}\n{code}",
-            comment_leader(&self.summary.path),
-            self.summary.path.display(),
-            line_range
-                .map(|range| format!(", lines: {range}"))
-                .unwrap_or_default(),
-        )
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-struct CopiedRows {
-    lines: Vec<String>,
-    first_line: Option<u32>,
-    last_line: Option<u32>,
-}
-
-impl CopiedRows {
-    fn push(&mut self, line: String, line_number: Option<u32>) {
-        self.lines.push(line);
-        if let Some(line_number) = line_number {
-            self.first_line.get_or_insert(line_number);
-            self.last_line = Some(line_number);
-        }
-    }
-
-    fn line_range(&self) -> Option<String> {
-        match (self.first_line, self.last_line) {
-            (Some(first), Some(last)) if first == last => Some(first.to_string()),
-            (Some(first), Some(last)) => Some(format!("{first}..{last}")),
-            _ => None,
-        }
-    }
-}
-
-fn copied_unified_rows<'rows>(rows: impl Iterator<Item = &'rows ViewerUnifiedRow>) -> CopiedRows {
-    let mut copied = CopiedRows::default();
-    for row in rows {
-        if let ViewerUnifiedRow::Added(row) | ViewerUnifiedRow::Context(row) = row {
-            copied.push(row.code.text.clone(), row.new_line_number);
-        }
-    }
-    copied
-}
-
-fn copied_split_rows<'rows>(rows: impl Iterator<Item = &'rows ViewerSplitRow>) -> CopiedRows {
-    let mut copied = CopiedRows::default();
-    for row in rows {
-        match row {
-            ViewerSplitRow::Context {
-                new_line_number,
-                code,
-                ..
-            } => copied.push(code.text.clone(), Some(*new_line_number)),
-            ViewerSplitRow::Pair {
-                new: Some(cell), ..
-            } => copied.push(cell.code.text.clone(), Some(cell.line_number)),
-            ViewerSplitRow::Meta(_)
-            | ViewerSplitRow::Hunk(_)
-            | ViewerSplitRow::Pair { new: None, .. } => {}
-        }
-    }
-    copied
-}
-
-fn comment_leader(path: &gtl_models::paths::RepositoryRelativePath) -> &'static str {
-    let extension = path
-        .as_path()
-        .extension()
-        .and_then(|extension| extension.to_str());
-    match extension {
-        Some(extension) if extension.eq_ignore_ascii_case("sh") => "#",
-        _ => "//",
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -741,13 +650,9 @@ async fn read_row_stream(
 
 #[cfg(all(test, feature = "desktop"))]
 mod tests {
-    use gtl_wire::viewer::{
-        ViewerCodeLine, ViewerCodeSpan, ViewerDiffFileId, ViewerSplitRow, ViewerUnifiedSourceRow,
-    };
+    use gtl_wire::viewer::{ViewerDiffFileId, ViewerSplitRow};
 
     use super::*;
-    use crate::test_support::{TestResult, absolute_file_path, repository_relative_path};
-
     #[test]
     fn unavailable_row_streams_retry_automatically_but_invalid_rows_do_not() {
         assert!(
@@ -770,56 +675,6 @@ mod tests {
         attempts.finish(&file, old);
 
         assert!(attempts.is_current(&file, current));
-    }
-
-    fn file_summary(
-        index: usize,
-        path: &str,
-        initially_expanded: bool,
-    ) -> TestResult<ViewerFileSummary> {
-        Ok(ViewerFileSummary {
-            id: ViewerDiffFileId::for_index(index),
-            path: repository_relative_path(path)?,
-            absolute_path: absolute_file_path(format!("/repo/{path}"))?,
-            anchor_id: format!("file-{index}"),
-            added: gtl_models::diffs::DiffLineCount::new(1),
-            removed: gtl_models::diffs::DiffLineCount::new(1),
-            status: gtl_wire::viewer::ViewerFileStatus::Modified,
-            can_open_in_editor: true,
-            initially_expanded,
-        })
-    }
-
-    #[test]
-    fn copied_rows_keep_new_side_source_and_context() -> TestResult {
-        let summary = file_summary(0, "src/example.rs", true)?;
-        let file = ClientDiffFile {
-            summary,
-            rows: ClientDiffRows::Unified(vec![Arc::new(vec![
-                ViewerUnifiedRow::Context(source_row("keep", Some(3), Some(7))),
-                ViewerUnifiedRow::Removed(source_row("old", Some(4), None)),
-                ViewerUnifiedRow::Added(source_row("new", None, Some(8))),
-            ])]),
-            line_number_digits: 1,
-            state: ClientDiffFileState::Complete,
-        };
-
-        assert_eq!(file.copy_code(false), "keep\nnew");
-        assert_eq!(
-            file.copy_code(true),
-            "// * src/example.rs, lines: 7..8\nkeep\nnew"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn shell_copy_context_uses_hash_comment_syntax() -> TestResult {
-        assert_eq!(comment_leader(&repository_relative_path("script.SH")?), "#");
-        assert_eq!(
-            comment_leader(&repository_relative_path("src/lib.rs")?),
-            "//"
-        );
-        Ok(())
     }
 
     #[test]
@@ -851,25 +706,5 @@ mod tests {
             ClientDiffRows::Unified(_) => Vec::new(),
         };
         assert_eq!(split_lengths, vec![64, 64, 1]);
-    }
-
-    fn source_row(
-        text: &str,
-        old_line_number: Option<u32>,
-        new_line_number: Option<u32>,
-    ) -> ViewerUnifiedSourceRow {
-        ViewerUnifiedSourceRow {
-            old_line_number,
-            new_line_number,
-            code: ViewerCodeLine {
-                text: text.to_owned(),
-                spans: vec![ViewerCodeSpan {
-                    text: text.to_owned(),
-                    syntax_class: None,
-                    changed: false,
-                }],
-                long_line_character_count: None,
-            },
-        }
     }
 }

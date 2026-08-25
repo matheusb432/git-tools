@@ -17,7 +17,7 @@ use self::{
 #[cfg(feature = "artifact")]
 use crate::shared::ui::{
     Button, ButtonLayout, ButtonSize, ButtonState, ButtonVariant, CountBadge, CountBadgeSize,
-    Popover,
+    FloatingNotice, Popover,
 };
 #[cfg(feature = "artifact")]
 use crate::{entities::diffs::ClientDiffWorkspace, views::diffs::StaticDiffDocument};
@@ -140,6 +140,12 @@ pub(crate) fn ArtifactDiffWorkspace(
                 mobile_navigation,
                 artifact_view_id: Some(markup.view_id()),
             }
+        }
+        FloatingNotice {
+            hidden: true,
+            role: "status",
+            aria_live: "polite",
+            "data-gtl-copy-context-feedback": "",
         }
 
         Popover {
@@ -443,6 +449,7 @@ mod artifact_tests {
         assert!(html.contains(r#"data-gtl-view="7""#));
         assert!(html.contains(r#"data-gtl-files-folded="false""#));
         assert!(html.contains(r#"data-gtl-copy-context="true""#));
+        assert_copy_context_feedback_markup(&html);
         assert_eq!(html.matches(r#"data-gtl-action="filter-files""#).count(), 2);
         assert_eq!(html.matches(r#"data-gtl-action="toggle-files""#).count(), 2);
         assert_eq!(
@@ -473,6 +480,11 @@ mod artifact_tests {
         );
         assert!(!html.contains(r#"id="src/<unsafe>.rs""#));
         Ok(())
+    }
+
+    fn assert_copy_context_feedback_markup(html: &str) {
+        assert!(html.contains(r#"data-gtl-copy-context-feedback="""#));
+        assert!(html.contains(r#"aria-live="polite""#));
     }
 
     #[test]

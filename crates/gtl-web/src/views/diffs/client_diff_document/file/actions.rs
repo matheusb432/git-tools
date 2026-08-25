@@ -8,22 +8,25 @@ use crate::{
     entities::diffs::ClientDiffFile,
     shared::{
         browser,
-        ui::{Button, ButtonSize, ButtonVariant},
+        ui::{
+            Button, ButtonSize, ButtonVariant, IconPopover, IconPopoverPlacement,
+            MENU_ACTION_HOST_CLASSES, MenuActionContent,
+        },
     },
 };
 
 #[component]
 pub(super) fn DiffFileActions(
     file: ClientDiffFile,
-    copy_context_enabled: bool,
+    copy_popover_id: String,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     artifact_enhancement: bool,
 ) -> Element {
     rsx! {
-        span { class: "flex flex-none items-center gap-2 mobile:hidden",
-            DiffCopyActions {
+        span { class: "flex flex-none items-center gap-1 mobile:hidden",
+            DiffPathCopyMenu {
                 file: file.clone(),
-                copy_context_enabled,
+                popover_id: copy_popover_id,
                 artifact_enhancement,
             }
             if let Some(onopen) = onopen.filter(|_| file.summary.can_open_in_editor) {
@@ -34,28 +37,53 @@ pub(super) fn DiffFileActions(
 }
 
 #[component]
-fn DiffCopyActions(
+fn DiffPathCopyMenu(
     file: ClientDiffFile,
-    copy_context_enabled: bool,
+    popover_id: String,
     artifact_enhancement: bool,
 ) -> Element {
+    let relative_path = file.summary.path.to_string_lossy().into_owned();
+    let absolute_path = file
+        .summary
+        .absolute_path
+        .as_path()
+        .to_string_lossy()
+        .into_owned();
+
     rsx! {
-        span { class: "flex flex-none gap-2 print:hidden!",
-            DiffCopyAction {
-                kind: DiffCopyKind::Path,
-                payload: file.summary.path.to_string_lossy().into_owned(),
-                artifact_enhancement,
+        span {
+            class: "flex flex-none print:hidden!",
+            onclick: move |event: MouseEvent| event.stop_propagation(),
+            IconPopover {
+                id: popover_id,
+                aria_label: "Copy file path",
+                placement: IconPopoverPlacement::TriggerEnd,
+                icon: rsx! {
+                    CopyMark {}
+                },
+                span { class: "grid gap-0.5 p-1.5",
+                    DiffPathCopyAction {
+                        kind: DiffPathCopyKind::Relative,
+                        payload: relative_path,
+                        artifact_enhancement,
+                    }
+                    DiffPathCopyAction {
+                        kind: DiffPathCopyKind::Absolute,
+                        payload: absolute_path,
+                        artifact_enhancement,
+                    }
+                }
             }
-            DiffCopyAction {
-                kind: DiffCopyKind::Absolute,
-                payload: file.summary.absolute_path.as_path().to_string_lossy().into_owned(),
-                artifact_enhancement,
-            }
-            DiffCodeCopyAction {
-                file,
-                include_context: copy_context_enabled,
-                artifact_enhancement,
-            }
+        }
+    }
+}
+
+#[component]
+fn CopyMark() -> Element {
+    rsx! {
+        span { class: "relative block size-4",
+            span { class: "absolute top-0 right-0 size-2.5 rounded-xs border border-current" }
+            span { class: "absolute bottom-0 left-0 size-2.5 rounded-xs border border-current" }
         }
     }
 }
@@ -67,110 +95,105 @@ enum CopyState {
     Failed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DiffCopyKind {
-    Path,
-    Absolute,
-    Code,
+impl CopyState {
+    const fn value(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Copied => "success",
+            Self::Failed => "failure",
+        }
+    }
+
+    const fn message(self) -> &'static str {
+        match self {
+            Self::Idle => "",
+            Self::Copied => "Copied",
+            Self::Failed => "Failed",
+        }
+    }
 }
 
-impl DiffCopyKind {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiffPathCopyKind {
+    Relative,
+    Absolute,
+}
+
+impl DiffPathCopyKind {
     const fn label(self) -> &'static str {
         match self {
-            Self::Path => "path",
-            Self::Absolute => "abs",
-            Self::Code => "code",
+            Self::Relative => "Relative path",
+            Self::Absolute => "Absolute path",
         }
     }
 
-    const fn as_str(self) -> &'static str {
+    const fn aria_label(self) -> &'static str {
         match self {
-            Self::Path => "path",
+            Self::Relative => "Copy relative path",
+            Self::Absolute => "Copy absolute path",
+        }
+    }
+
+    const fn artifact_value(self) -> &'static str {
+        match self {
+            Self::Relative => "path",
             Self::Absolute => "absolute",
-            Self::Code => "code",
         }
     }
 }
 
 #[component]
-fn DiffCopyAction(kind: DiffCopyKind, payload: String, artifact_enhancement: bool) -> Element {
-    let state = use_signal(|| CopyState::Idle);
-    rsx! {
-        CopyButton {
-            kind,
-            state: state(),
-            artifact_enhancement,
-            onclick: move |event: MouseEvent| {
-                event.prevent_default();
-                event.stop_propagation();
-                let payload = payload.clone();
-                spawn(async move {
-                    update_copy_state(state, &payload).await;
-                });
-            },
-        }
-    }
-}
-
-#[component]
-fn DiffCodeCopyAction(
-    file: ClientDiffFile,
-    include_context: bool,
+fn DiffPathCopyAction(
+    kind: DiffPathCopyKind,
+    payload: String,
     artifact_enhancement: bool,
 ) -> Element {
     let state = use_signal(|| CopyState::Idle);
-    rsx! {
-        CopyButton {
-            kind: DiffCopyKind::Code,
-            state: state(),
-            artifact_enhancement,
-            onclick: move |event: MouseEvent| {
-                event.prevent_default();
-                event.stop_propagation();
-                let payload = file.copy_code(include_context);
-                spawn(async move {
-                    update_copy_state(state, &payload).await;
-                });
-            },
-        }
-    }
-}
+    let copied_payload = payload.clone();
+    let artifact_copy = artifact_enhancement.then_some(kind.artifact_value());
+    let icon = match kind {
+        DiffPathCopyKind::Relative => rsx! {
+            span { class: "text-xs font-bold tracking-tight", "./" }
+        },
+        DiffPathCopyKind::Absolute => rsx! {
+            span { class: "text-sm font-bold", "/" }
+        },
+    };
 
-// TODO: restyle. looks a bit ugly
-#[component]
-fn CopyButton(
-    kind: DiffCopyKind,
-    state: CopyState,
-    artifact_enhancement: bool,
-    onclick: EventHandler<MouseEvent>,
-) -> Element {
-    let label = kind.label();
-    let display = match state {
-        CopyState::Idle => label,
-        CopyState::Copied => "copied",
-        CopyState::Failed => "failed",
-    };
-    let variant = match state {
-        CopyState::Idle => ButtonVariant::Secondary,
-        CopyState::Copied => ButtonVariant::Success,
-        CopyState::Failed => ButtonVariant::Failure,
-    };
-    let artifact_copy = artifact_enhancement.then_some(kind.as_str());
-    let artifact_idle_label = artifact_enhancement.then_some(label);
-    let artifact_idle_classes = artifact_enhancement.then_some(ButtonVariant::Secondary.classes());
-    let artifact_success_classes = artifact_enhancement.then_some(ButtonVariant::Success.classes());
-    let artifact_failure_classes = artifact_enhancement.then_some(ButtonVariant::Failure.classes());
     rsx! {
-        Button {
-            size: ButtonSize::Small,
-            variant,
-            onclick,
+        button {
+            class: MENU_ACTION_HOST_CLASSES,
+            r#type: "button",
+            aria_label: kind.aria_label(),
             "data-gtl-copy": artifact_copy,
-            "data-gtl-idle-label": artifact_idle_label,
-            "data-gtl-idle-classes": artifact_idle_classes,
-            "data-gtl-success-classes": artifact_success_classes,
-            "data-gtl-failure-classes": artifact_failure_classes,
-            "{display}"
+            onclick: move |event: MouseEvent| {
+                event.prevent_default();
+                event.stop_propagation();
+                let payload = copied_payload.clone();
+                spawn(async move {
+                    update_copy_state(state, &payload).await;
+                });
+            },
+            MenuActionContent { icon, label: kind.label(),
+                CopyActionFeedback { state: state(), artifact_enhancement }
+            }
+        }
+    }
+}
+
+#[component]
+fn CopyActionFeedback(state: CopyState, artifact_enhancement: bool) -> Element {
+    let artifact_feedback = artifact_enhancement.then_some("");
+
+    rsx! {
+        span {
+            class: "min-w-12 flex-none text-right text-[0.6875rem] font-semibold text-ink-3 data-[state=success]:text-add data-[state=failure]:text-del",
+            role: "status",
+            aria_live: "polite",
+            aria_atomic: "true",
+            "data-state": state.value(),
+            "data-gtl-copy-feedback": artifact_feedback,
+            {state.message()}
         }
     }
 }
@@ -191,10 +214,8 @@ fn OpenInTextEditorAction(
     onopen: EventHandler<ViewerDiffFileId>,
 ) -> Element {
     rsx! {
-        // TODO: make it use icon button primitive (create it)
         Button {
-            class: "p-0",
-            size: ButtonSize::Content,
+            size: ButtonSize::IconSmall,
             variant: ButtonVariant::Ghost,
             aria_label: "Open in text editor",
             title: "Open in text editor",
@@ -203,16 +224,9 @@ fn OpenInTextEditorAction(
                 event.stop_propagation();
                 onopen.call(file_id.clone());
             },
-            OpenInTextEditorIcon {}
-        }
-    }
-}
-
-#[component]
-fn OpenInTextEditorIcon() -> Element {
-    rsx! {
-        span { aria_hidden: "true",
-            ExternalLink { size: 16, stroke_width: 2 }
+            span { aria_hidden: "true",
+                ExternalLink { size: 16, stroke_width: 2 }
+            }
         }
     }
 }

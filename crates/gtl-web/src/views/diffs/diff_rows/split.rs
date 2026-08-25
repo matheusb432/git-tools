@@ -51,42 +51,38 @@ fn SplitDiffRowView(row: ViewerSplitRow, artifact_enhancement: bool) -> Element 
             new_line_number,
             code,
         } => rsx! {
-            SplitRowShell { copy_line_number: artifact_enhancement.then_some(new_line_number),
+            SplitRowShell {
                 SplitContextCell {
                     side: SplitSide::Old,
                     line_number: old_line_number,
                     code: code.clone(),
                     artifact_enhancement,
-                    copy_text: false,
+                    copy_line_number: None,
                 }
                 SplitContextCell {
                     side: SplitSide::New,
                     line_number: new_line_number,
                     code,
                     artifact_enhancement,
-                    copy_text: artifact_enhancement,
+                    copy_line_number: Some(new_line_number),
                 }
             }
         },
         ViewerSplitRow::Pair { old, new } => {
-            let copy_line_number = if artifact_enhancement {
-                new.as_ref().map(|cell| cell.line_number)
-            } else {
-                None
-            };
+            let copy_line_number = new.as_ref().map(|cell| cell.line_number);
             rsx! {
-                SplitRowShell { copy_line_number,
+                SplitRowShell {
                     SplitCell {
                         cell: old,
                         side: SplitSide::Old,
                         artifact_enhancement,
-                        copy_text: false,
+                        copy_line_number: None,
                     }
                     SplitCell {
                         cell: new,
                         side: SplitSide::New,
                         artifact_enhancement,
-                        copy_text: copy_line_number.is_some(),
+                        copy_line_number,
                     }
                 }
             }
@@ -111,15 +107,11 @@ fn SplitHeaderRow(tone: HeaderTone, text: String) -> Element {
 }
 
 #[component]
-fn SplitRowShell(copy_line_number: Option<u32>, children: Element) -> Element {
-    let copy_line = copy_line_number.map(|_| "");
-    let new_line_number = copy_line_number.map(|number| number.to_string());
+fn SplitRowShell(children: Element) -> Element {
     rsx! {
         div {
             class: "grid grid-cols-[44px_minmax(0,1fr)_44px_minmax(0,1fr)] items-stretch whitespace-normal tablet:grid-cols-[44px_minmax(0,1fr)] mobile:grid-cols-[30px_minmax(0,1fr)]",
             "data-gtl-diff-row": "",
-            "data-gtl-copy-line": copy_line,
-            "data-gtl-new-line": new_line_number,
             {children}
         }
     }
@@ -131,7 +123,7 @@ fn SplitContextCell(
     line_number: u32,
     code: ViewerCodeLine,
     artifact_enhancement: bool,
-    copy_text: bool,
+    copy_line_number: Option<u32>,
 ) -> Element {
     rsx! {
         SplitGutter { side, number: Some(line_number) }
@@ -142,7 +134,7 @@ fn SplitContextCell(
             },
             code,
             artifact_enhancement,
-            copy_text,
+            copy_line_number,
         }
     }
 }
@@ -152,7 +144,7 @@ fn SplitCell(
     cell: Option<ViewerSplitCell>,
     side: SplitSide,
     artifact_enhancement: bool,
-    copy_text: bool,
+    copy_line_number: Option<u32>,
 ) -> Element {
     let presentation = match side {
         SplitSide::Old => SplitCellPresentation::Removed,
@@ -165,7 +157,7 @@ fn SplitCell(
                 presentation,
                 code: cell.code,
                 artifact_enhancement,
-                copy_text,
+                copy_line_number,
             }
         },
         None => rsx! {
@@ -195,7 +187,7 @@ fn SplitCodeCell(
     presentation: SplitCellPresentation,
     code: ViewerCodeLine,
     artifact_enhancement: bool,
-    copy_text: bool,
+    copy_line_number: Option<u32>,
 ) -> Element {
     let marker = Some(match presentation {
         SplitCellPresentation::OldContext | SplitCellPresentation::NewContext => ' ',
@@ -215,11 +207,15 @@ fn SplitCodeCell(
         SplitCellPresentation::Removed => "bg-del-bg",
         SplitCellPresentation::Added => "bg-add-bg tablet:border-t tablet:border-line",
     };
+    let copy_line = copy_line_number.map(|_| "");
+    let new_line_number = copy_line_number.map(|number| number.to_string());
 
     rsx! {
         code {
             class: "{SPLIT_CODE_CELL_CLASSES}",
             class: "{presentation_classes}",
+            "data-gtl-copy-line": copy_line,
+            "data-gtl-new-line": new_line_number,
             SplitCodeContent {
                 marker,
                 body: code.text,
@@ -227,7 +223,7 @@ fn SplitCodeCell(
                 changed_text_tone,
                 long_line_character_count: code.long_line_character_count,
                 artifact_enhancement,
-                copy_text,
+                copy_text: copy_line_number.is_some(),
             }
         }
     }
@@ -325,6 +321,8 @@ mod tests {
         assert_eq!(html.matches("4 chars").count(), 3);
         assert!(html.contains("bg-sunk tablet:border-t tablet:border-line"));
         assert!(absent_gutter.ends_with("></span>"));
+        assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 1);
+        assert!(html.contains(r#"data-gtl-copy-text="">abce</span>"#));
     }
 
     #[test]

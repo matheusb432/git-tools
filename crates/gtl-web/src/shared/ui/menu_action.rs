@@ -6,7 +6,7 @@ pub(crate) const MENU_ACTION_HOST_CLASSES: &str = "group/action flex min-h-12 w-
 pub(crate) fn MenuActionContent(
     icon: Element,
     label: String,
-    description: String,
+    description: Option<String>,
     children: Option<Element>,
 ) -> Element {
     rsx! {
@@ -17,7 +17,9 @@ pub(crate) fn MenuActionContent(
         }
         span { class: "min-w-0 flex-1",
             strong { class: "block text-xs font-semibold text-inherit", "{label}" }
-            small { class: "mt-0.5 block truncate text-xs text-ink-3", "{description}" }
+            if let Some(description) = description {
+                small { class: "mt-0.5 block truncate text-xs text-ink-3", "{description}" }
+            }
         }
         {children}
     }

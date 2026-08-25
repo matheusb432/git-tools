@@ -94,10 +94,10 @@ fn UnifiedSourceRow(
         UnifiedSourceTone::Added => (UnifiedGutterTone::Hidden, UnifiedGutterTone::Added),
         UnifiedSourceTone::Removed => (UnifiedGutterTone::Removed, UnifiedGutterTone::Hidden),
     };
-    let copy_line_number = if artifact_enhancement && tone != UnifiedSourceTone::Removed {
-        row.new_line_number
-    } else {
+    let copy_line_number = if tone == UnifiedSourceTone::Removed {
         None
+    } else {
+        row.new_line_number
     };
 
     rsx! {
@@ -225,6 +225,8 @@ mod tests {
         assert!(html.contains(">10000</span>"));
         assert_eq!(html.matches("class=\"hidden").count(), 4);
         assert_eq!(html.matches("4 chars").count(), 2);
+        assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 1);
+        assert!(html.contains(r#"data-gtl-copy-text="">abce</span>"#));
     }
 
     #[test]

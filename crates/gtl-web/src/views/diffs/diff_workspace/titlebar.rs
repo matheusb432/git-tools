@@ -128,7 +128,7 @@ pub(super) fn ViewActions(
                 size: button_size,
                 variant: if copy_context_enabled { ButtonVariant::Pressed } else { ButtonVariant::Outline },
                 aria_pressed: copy_context_enabled.to_string(),
-                title: "Prepend a commented path and line range when copying code",
+                title: "Prepend a commented path and selected line range when copying diff lines",
                 "data-gtl-action": artifact_view_id.as_ref().map(|_| "toggle-copy-context"),
                 "data-gtl-selected-classes": artifact_selected_classes,
                 "data-gtl-unselected-classes": artifact_unselected_classes,
