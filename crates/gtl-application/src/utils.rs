@@ -76,9 +76,9 @@ pub fn absolute_file_path(path: &str) -> AbsoluteFilePath {
 use crate::ports::{
     ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, CommitLogEntry, GitClient,
     GitCommitReceipt, GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState,
-    GitWorkingTree, HistoryRecord, HtmlRenderer, MergedBranch, PlacedArtifact,
-    ProjectCatalogueUnavailableError, ProjectClient, ProjectClientError, UserSettingsEditError,
-    UserSettingsLoadError, UserSettingsStore,
+    GitWorkingTree, HistoryRecord, HtmlRenderer, PlacedArtifact, ProjectCatalogueUnavailableError,
+    ProjectClient, ProjectClientError, UserSettingsEditError, UserSettingsLoadError,
+    UserSettingsStore,
 };
 
 fn try_commit_id_fixture(raw: &str) -> Result<CommitId, CommitIdError> {
@@ -473,13 +473,6 @@ impl GitClient for FakeGitClient {
     fn working_tree(&self, _repo: &RepositoryRoot) -> anyhow::Result<GitEffect<GitWorkingTree>> {
         Ok(GitEffect::Applied(GitWorkingTree::default()))
     }
-    fn merged_branches(
-        &self,
-        _repo: &RepositoryRoot,
-        _into: &GitRevision,
-    ) -> anyhow::Result<GitEffect<Vec<MergedBranch>>> {
-        Ok(GitEffect::Applied(Vec::new()))
-    }
     fn worktrees(
         &self,
         _repo: &RepositoryRoot,
@@ -498,9 +491,6 @@ impl GitClient for FakeGitClient {
         _remote: &RemoteName,
     ) -> anyhow::Result<GitEffect<BTreeMap<TagName, GitObjectId>>> {
         Ok(GitEffect::Applied(BTreeMap::new()))
-    }
-    fn previous_checkout(&self, _repo: &RepositoryRoot) -> anyhow::Result<Option<GitRevision>> {
-        Ok(None)
     }
     fn brief_log(
         &self,
@@ -530,16 +520,6 @@ impl GitClient for FakeGitClient {
             id: fallback_commit_id(),
         }))
     }
-    fn switch(
-        &self,
-        _repo: &RepositoryRoot,
-        _branch: &BranchName,
-    ) -> anyhow::Result<GitEffect<()>> {
-        Ok(GitEffect::Applied(()))
-    }
-    fn switch_previous(&self, _repo: &RepositoryRoot) -> anyhow::Result<GitEffect<()>> {
-        Ok(GitEffect::Applied(()))
-    }
     fn fast_forward(
         &self,
         _repo: &RepositoryRoot,
@@ -549,28 +529,6 @@ impl GitClient for FakeGitClient {
             || GitEffect::Applied(String::new()),
             |script| script.merge_result.effect(),
         ))
-    }
-    fn move_branch(
-        &self,
-        _repo: &RepositoryRoot,
-        _branch: &BranchName,
-        _revision: &GitRevision,
-    ) -> anyhow::Result<GitEffect<()>> {
-        Ok(GitEffect::Applied(()))
-    }
-    fn delete_branch(
-        &self,
-        _repo: &RepositoryRoot,
-        _branch: &BranchName,
-    ) -> anyhow::Result<GitEffect<()>> {
-        Ok(GitEffect::Applied(()))
-    }
-    fn soft_reset(
-        &self,
-        _repo: &RepositoryRoot,
-        _revision: &GitRevision,
-    ) -> anyhow::Result<GitEffect<()>> {
-        Ok(GitEffect::Applied(()))
     }
     fn push_branch(
         &self,
@@ -1155,35 +1113,6 @@ impl GitClient for ScriptedGitClient {
             GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
         }
     }
-    fn merged_branches(
-        &self,
-        repo_path: &RepositoryRoot,
-        into: &GitRevision,
-    ) -> anyhow::Result<GitEffect<Vec<MergedBranch>>> {
-        scripted_effect(
-            self,
-            repo_path,
-            &[
-                "for-each-ref",
-                "--merged",
-                into.as_ref(),
-                "--format=%(refname:short) %(objectname)",
-                "refs/heads/",
-            ],
-            |output| {
-                output
-                    .lines()
-                    .filter_map(|line| {
-                        let (name, raw_id) = line.trim().split_once(char::is_whitespace)?;
-                        Some(MergedBranch {
-                            name: BranchName::try_new(name.to_owned()).ok()?,
-                            id: try_commit_id_fixture(raw_id.trim()).ok()?,
-                        })
-                    })
-                    .collect()
-            },
-        )
-    }
     fn worktrees(
         &self,
         repo_path: &RepositoryRoot,
@@ -1223,12 +1152,6 @@ impl GitClient for ScriptedGitClient {
             &["ls-remote", "--tags", remote.as_ref()],
             tags::parse_remote_refs,
         )
-    }
-    fn previous_checkout(&self, repo_path: &RepositoryRoot) -> anyhow::Result<Option<GitRevision>> {
-        scripted_capture(self, repo_path, &["rev-parse", "@{-1}"])?
-            .map(GitRevision::try_new)
-            .transpose()
-            .map_err(Into::into)
     }
     fn brief_log(
         &self,
@@ -1290,16 +1213,6 @@ impl GitClient for ScriptedGitClient {
             }
         })
     }
-    fn switch(
-        &self,
-        repo_path: &RepositoryRoot,
-        branch: &BranchName,
-    ) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(self, repo_path, &["switch", branch.as_ref()], |_| ())
-    }
-    fn switch_previous(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(self, repo_path, &["switch", "-"], |_| ())
-    }
     fn fast_forward(
         &self,
         repo_path: &RepositoryRoot,
@@ -1310,38 +1223,6 @@ impl GitClient for ScriptedGitClient {
             repo_path,
             &["merge", "--ff-only", revision.as_ref()],
             str::to_string,
-        )
-    }
-    fn move_branch(
-        &self,
-        repo_path: &RepositoryRoot,
-        branch: &BranchName,
-        revision: &GitRevision,
-    ) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(
-            self,
-            repo_path,
-            &["branch", "-f", branch.as_ref(), revision.as_ref()],
-            |_| (),
-        )
-    }
-    fn delete_branch(
-        &self,
-        repo_path: &RepositoryRoot,
-        branch: &BranchName,
-    ) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(self, repo_path, &["branch", "-D", branch.as_ref()], |_| ())
-    }
-    fn soft_reset(
-        &self,
-        repo_path: &RepositoryRoot,
-        revision: &GitRevision,
-    ) -> anyhow::Result<GitEffect<()>> {
-        scripted_effect(
-            self,
-            repo_path,
-            &["reset", "--soft", revision.as_ref()],
-            |_| (),
         )
     }
     fn push_branch(

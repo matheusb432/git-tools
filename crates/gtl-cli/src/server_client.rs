@@ -122,15 +122,6 @@ impl ServerClient {
             .block_on(self.client.commit_project_repositories(request))?)
     }
 
-    pub(crate) fn prune_project_branches(
-        &self,
-        request: v1::PruneProjectBranchesRequest,
-    ) -> anyhow::Result<v1::PruneProjectBranchesResponse> {
-        Ok(self
-            .runtime
-            .block_on(self.client.prune_project_branches(request))?)
-    }
-
     pub(crate) fn get_project_repository_statuses(
         &self,
     ) -> anyhow::Result<v1::GetProjectRepositoryStatusesResponse> {
@@ -191,33 +182,6 @@ impl ServerClient {
         Ok(self
             .runtime
             .block_on(self.client.execute_recursive_repository_push(request))?)
-    }
-
-    pub(crate) fn change_repository_branch(
-        &self,
-        request: v1::ChangeRepositoryBranchRequest,
-    ) -> anyhow::Result<v1::ChangeRepositoryBranchResponse> {
-        Ok(self
-            .runtime
-            .block_on(self.client.change_repository_branch(request))?)
-    }
-
-    pub(crate) fn plan_repository_prune(
-        &self,
-        request: v1::PlanRepositoryPruneRequest,
-    ) -> anyhow::Result<v1::PlanRepositoryPruneResponse> {
-        Ok(self
-            .runtime
-            .block_on(self.client.plan_repository_prune(request))?)
-    }
-
-    pub(crate) fn execute_repository_prune(
-        &self,
-        request: v1::ExecuteRepositoryPruneRequest,
-    ) -> anyhow::Result<v1::ExecuteRepositoryPruneResponse> {
-        Ok(self
-            .runtime
-            .block_on(self.client.execute_repository_prune(request))?)
     }
 
     pub(crate) fn get_repository_status(

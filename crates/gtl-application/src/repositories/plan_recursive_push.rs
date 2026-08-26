@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn inspect_pushes_when_ahead_count_is_unavailable() {
         // A failed `rev-list --count` must never read as "0 / already synced" — fall back to
-        // attempting the push, exactly as the sibling checks do (`switch`, `diff -r`).
+        // attempting the push, exactly as the sibling checks do.
         let runner = ScriptedGitClient::new(vec![
             ScriptedGitClient::applied("main\n"),
             ScriptedGitClient::applied("origin\n"),

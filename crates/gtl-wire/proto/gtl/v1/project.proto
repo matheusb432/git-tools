@@ -8,7 +8,6 @@ service ProjectService {
   rpc PushProjectRepositories(PushProjectRepositoriesRequest) returns (PushProjectRepositoriesResponse);
   rpc PullProjectRepositories(PullProjectRepositoriesRequest) returns (PullProjectRepositoriesResponse);
   rpc CommitProjectRepositories(CommitProjectRepositoriesRequest) returns (CommitProjectRepositoriesResponse);
-  rpc PruneProjectBranches(PruneProjectBranchesRequest) returns (PruneProjectBranchesResponse);
   rpc GetProjectRepositoryStatuses(GetProjectRepositoryStatusesRequest) returns (GetProjectRepositoryStatusesResponse);
 }
 
@@ -97,40 +96,6 @@ enum ProjectCommitExit {
 message CommitProjectRepositoriesResponse {
   repeated ProjectCommitResult results = 1;
   ProjectCommitExit exit = 2;
-  optional string failure_detail = 3;
-}
-
-message PruneProjectBranchesRequest {
-  string onto_branch = 1;
-  bool dry_run = 2;
-}
-
-enum ProjectPruneAction {
-  PROJECT_PRUNE_ACTION_UNSPECIFIED = 0;
-  PROJECT_PRUNE_ACTION_ABSENT = 1;
-  PROJECT_PRUNE_ACTION_REFUSED = 2;
-  PROJECT_PRUNE_ACTION_NOTHING = 3;
-  PROJECT_PRUNE_ACTION_WOULD_DELETE = 4;
-  PROJECT_PRUNE_ACTION_APPLIED = 5;
-}
-
-message ProjectPruneResult {
-  string project_name = 1;
-  ProjectPruneAction action = 2;
-  repeated PruneBranch deleted = 3;
-  repeated PruneFailure failures = 4;
-  string detail = 5;
-}
-
-enum ProjectPruneExit {
-  PROJECT_PRUNE_EXIT_UNSPECIFIED = 0;
-  PROJECT_PRUNE_EXIT_CLEAN = 1;
-  PROJECT_PRUNE_EXIT_WARNING = 2;
-}
-
-message PruneProjectBranchesResponse {
-  repeated ProjectPruneResult results = 1;
-  ProjectPruneExit exit = 2;
   optional string failure_detail = 3;
 }
 

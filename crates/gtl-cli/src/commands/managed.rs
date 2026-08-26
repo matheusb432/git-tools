@@ -1,18 +1,16 @@
 //! Fanning Git operations out across active projects listed by sample_project: `push --all`,
-//! `pull --all`, `commit --all`, `status --all`, and `prune --all`. Managed push omits
+//! `pull --all`, `commit --all`, and `status --all`. Managed push omits
 //! its configured project exclusions. Each concern lives in its own submodule;
 //! this facade owns the shared request/response seam (`ManagedOptions`, `ManagedRun`,
 //! `ManagedExit`) and re-exports each submodule's entry points under the historical
 //! `managed::` path.
 
 mod commit;
-mod prune_all;
 mod push_pull;
 mod push_summary;
 mod status;
 
 pub use commit::{CommitFile, CommitResult, run_commit_all, run_commit_for_push_all};
-pub use prune_all::{PruneRepoResult, PrunedBranch, run_prune_all};
 pub use push_pull::{PushPullResult, RepoSyncStatus, run_pull_all, run_push_all};
 pub(crate) use push_summary::{PushOutcome, PushSummary};
 pub use status::{StatusResult, run_status, run_status_current, run_status_recursive};

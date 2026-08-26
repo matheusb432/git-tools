@@ -9,9 +9,6 @@ service RepositoryService {
   rpc ExecuteRepositoryCommit(ExecuteRepositoryCommitRequest) returns (ExecuteRepositoryCommitResponse);
   rpc PlanRecursiveRepositoryPush(PlanRecursiveRepositoryPushRequest) returns (PlanRecursiveRepositoryPushResponse);
   rpc ExecuteRecursiveRepositoryPush(ExecuteRecursiveRepositoryPushRequest) returns (ExecuteRecursiveRepositoryPushResponse);
-  rpc ChangeRepositoryBranch(ChangeRepositoryBranchRequest) returns (ChangeRepositoryBranchResponse);
-  rpc PlanRepositoryPrune(PlanRepositoryPruneRequest) returns (PlanRepositoryPruneResponse);
-  rpc ExecuteRepositoryPrune(ExecuteRepositoryPruneRequest) returns (ExecuteRepositoryPruneResponse);
   rpc GetRepositoryStatus(GetRepositoryStatusRequest) returns (GetRepositoryStatusResponse);
   rpc GetRecursiveRepositoryStatuses(GetRecursiveRepositoryStatusesRequest) returns (GetRecursiveRepositoryStatusesResponse);
 }
@@ -165,82 +162,6 @@ message RecursivePushRepositoryResult {
 message ExecuteRecursiveRepositoryPushResponse {
   RecursivePushStatus status = 1;
   repeated RecursivePushRepositoryResult results = 2;
-}
-
-enum RepositoryBranchAction {
-  REPOSITORY_BRANCH_ACTION_UNSPECIFIED = 0;
-  REPOSITORY_BRANCH_ACTION_SWITCH = 1;
-  REPOSITORY_BRANCH_ACTION_REBASE = 2;
-  REPOSITORY_BRANCH_ACTION_REVERT = 3;
-}
-
-message ChangeRepositoryBranchRequest {
-  string repository_path = 1;
-  string onto_branch = 2;
-  RepositoryBranchAction action = 3;
-}
-
-enum RepositoryBranchStatus {
-  REPOSITORY_BRANCH_STATUS_UNSPECIFIED = 0;
-  REPOSITORY_BRANCH_STATUS_SWITCHED = 1;
-  REPOSITORY_BRANCH_STATUS_ALREADY_THERE = 2;
-  REPOSITORY_BRANCH_STATUS_FAST_FORWARDED = 3;
-  REPOSITORY_BRANCH_STATUS_REVERTED = 4;
-  REPOSITORY_BRANCH_STATUS_NO_OP = 5;
-  REPOSITORY_BRANCH_STATUS_REFUSED = 6;
-  REPOSITORY_BRANCH_STATUS_FAILED = 7;
-}
-
-message ChangeRepositoryBranchResponse {
-  RepositoryBranchStatus status = 1;
-  string detail = 2;
-}
-
-message PruneBranch {
-  string name = 1;
-  string commit_id = 2;
-}
-
-message PlanRepositoryPruneRequest {
-  string repository_path = 1;
-  string onto_branch = 2;
-}
-
-message RepositoryPrunePlan {
-  string repository_root = 1;
-  repeated PruneBranch branches = 2;
-}
-
-message PlanRepositoryPruneResponse {
-  oneof outcome {
-    RepositoryPrunePlan ready = 1;
-    OperationDetail nothing = 2;
-    OperationDetail refused = 3;
-  }
-}
-
-message ExecuteRepositoryPruneRequest {
-  RepositoryPrunePlan plan = 1;
-}
-
-enum RepositoryPruneStatus {
-  REPOSITORY_PRUNE_STATUS_UNSPECIFIED = 0;
-  REPOSITORY_PRUNE_STATUS_OK = 1;
-  REPOSITORY_PRUNE_STATUS_PARTIAL = 2;
-  REPOSITORY_PRUNE_STATUS_FAILED = 3;
-  REPOSITORY_PRUNE_STATUS_ABORTED = 4;
-}
-
-message PruneFailure {
-  string name = 1;
-  string reason = 2;
-}
-
-message ExecuteRepositoryPruneResponse {
-  RepositoryPruneStatus status = 1;
-  repeated PruneBranch deleted = 2;
-  repeated PruneFailure failures = 3;
-  optional string failure_detail = 4;
 }
 
 message GetRepositoryStatusRequest {

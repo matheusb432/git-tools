@@ -63,12 +63,6 @@ pub struct GitWorkingTree {
     pub unprepared: PathCount,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MergedBranch {
-    pub name: BranchName,
-    pub id: CommitId,
-}
-
 /// One validated commit and subject returned by a brief Git log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitLogEntry {
@@ -146,12 +140,6 @@ pub trait GitClient: Clone + Send + Sync + 'static {
     fn working_tree(&self, repo_path: &RepositoryRoot)
     -> anyhow::Result<GitEffect<GitWorkingTree>>;
 
-    fn merged_branches(
-        &self,
-        repo_path: &RepositoryRoot,
-        into: &GitRevision,
-    ) -> anyhow::Result<GitEffect<Vec<MergedBranch>>>;
-
     fn worktrees(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<Vec<Worktree>>>;
 
     fn local_tags(
@@ -164,8 +152,6 @@ pub trait GitClient: Clone + Send + Sync + 'static {
         repo_path: &RepositoryRoot,
         remote: &RemoteName,
     ) -> anyhow::Result<GitEffect<BTreeMap<TagName, GitObjectId>>>;
-
-    fn previous_checkout(&self, repo_path: &RepositoryRoot) -> anyhow::Result<Option<GitRevision>>;
 
     fn brief_log(
         &self,
@@ -188,38 +174,11 @@ pub trait GitClient: Clone + Send + Sync + 'static {
         message: &str,
     ) -> anyhow::Result<GitEffect<GitCommitReceipt>>;
 
-    fn switch(
-        &self,
-        repo_path: &RepositoryRoot,
-        branch: &BranchName,
-    ) -> anyhow::Result<GitEffect<()>>;
-
-    fn switch_previous(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<()>>;
-
     fn fast_forward(
         &self,
         repo_path: &RepositoryRoot,
         revision: &GitRevision,
     ) -> anyhow::Result<GitEffect<String>>;
-
-    fn move_branch(
-        &self,
-        repo_path: &RepositoryRoot,
-        branch: &BranchName,
-        revision: &GitRevision,
-    ) -> anyhow::Result<GitEffect<()>>;
-
-    fn delete_branch(
-        &self,
-        repo_path: &RepositoryRoot,
-        branch: &BranchName,
-    ) -> anyhow::Result<GitEffect<()>>;
-
-    fn soft_reset(
-        &self,
-        repo_path: &RepositoryRoot,
-        revision: &GitRevision,
-    ) -> anyhow::Result<GitEffect<()>>;
 
     fn push_branch(
         &self,

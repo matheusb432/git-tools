@@ -1,15 +1,12 @@
 //! git-tools - CLI entry point: clap parsing + a machine-readable exit-code contract.
 
-use std::path::{Path, PathBuf};
-
-use gtl_models::git::BranchName;
 use gtl_wire::v1;
 
 use crate::{
     cli::{
         Cli, ColorChoice, Command, CommitArgs, DiffArgs, DiffSub, DiffTarget, DiffTargetArgs,
-        DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs, PruneArgs, PushArgs,
-        ServerArgs, ServerCommand, StatusArgs, SwitchArgs, Theme, WorktreeCommand,
+        DiffTargetParseError, ManagedArgs, ManagedReadArgs, MergeArgs, PushArgs, ServerArgs,
+        ServerCommand, StatusArgs, Theme, WorktreeCommand,
     },
     commands::managed::{
         ManagedExit, ManagedOptions, ManagedOutput, ManagedRun, PushOutcome, PushSummary,
@@ -100,8 +97,6 @@ fn dispatch(command: Command) -> ExitCode {
             None,
         ))),
         Command::Commit(args) => run_commit(args),
-        Command::Switch(args) => run_switch(&args),
-        Command::Prune(args) => run_prune(&args),
         Command::Tag(args) => commands::tag::run(args.command, args.commits, args.state),
         Command::Worktree(args) => run_worktree(&args.command),
         Command::Status(args) => managed_exit(&run_status(&args)),
@@ -757,219 +752,6 @@ fn format_push_subrepos_result(
     detail
 }
 
-/// Orchestrates `switch`: pick the flow from flags, run the plan read-only, then apply.
-/// All git work is local; refusals go to stderr (exit 1), logs to stdout (exit 0).
-fn run_switch(args: &SwitchArgs) -> ExitCode {
-    let repo_path = match canonical_working_directory_or_exit("switch") {
-        Ok(path) => path,
-        Err(code) => return code,
-    };
-    run_switch_with_path(args, &repo_path)
-}
-
-fn run_switch_with_path(args: &SwitchArgs, repo_path: &Path) -> ExitCode {
-    let onto = match parse_branch_name("switch", args.onto.as_deref().unwrap_or("main")) {
-        Ok(onto) => onto,
-        Err(code) => return code,
-    };
-    let action = if args.revert {
-        v1::RepositoryBranchAction::Revert
-    } else if args.rebase {
-        v1::RepositoryBranchAction::Rebase
-    } else {
-        v1::RepositoryBranchAction::Switch
-    };
-    let client = match ServerClient::connect() {
-        Ok(client) => client,
-        Err(error) => {
-            eprintln!("switch: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let result = match client.change_repository_branch(v1::ChangeRepositoryBranchRequest {
-        repository_path: repo_path.to_string_lossy().into_owned(),
-        onto_branch: onto.to_string(),
-        action: action as i32,
-    }) {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("switch: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    match v1::RepositoryBranchStatus::try_from(result.status) {
-        Ok(v1::RepositoryBranchStatus::FastForwarded) => {
-            println!("{}", result.detail);
-            if args.diff {
-                diff_exit(commands::diff::run(
-                    &DiffTarget::Unpushed { pinned: None },
-                    None,
-                    false,
-                ))
-            } else {
-                ExitCode::Ok
-            }
-        }
-        Ok(
-            v1::RepositoryBranchStatus::Switched
-            | v1::RepositoryBranchStatus::AlreadyThere
-            | v1::RepositoryBranchStatus::Reverted
-            | v1::RepositoryBranchStatus::NoOp,
-        ) => {
-            println!("{}", result.detail);
-            ExitCode::Ok
-        }
-        Ok(v1::RepositoryBranchStatus::Refused | v1::RepositoryBranchStatus::Failed) => {
-            eprintln!("switch: {}", result.detail);
-            ExitCode::Internal
-        }
-        Ok(v1::RepositoryBranchStatus::Unspecified) | Err(_) => {
-            eprintln!("switch: gtl-server returned an invalid branch-change status");
-            ExitCode::Internal
-        }
-    }
-}
-
-fn parse_branch_name(command: &str, raw: &str) -> Result<BranchName, ExitCode> {
-    BranchName::try_new(raw.to_owned()).map_err(|error| {
-        eprintln!("{command}: invalid branch name: {error}");
-        ExitCode::Usage
-    })
-}
-
-/// Orchestrates `prune`: `--all` fans out over managed repos (preview unless `-y`); the
-/// single-repo path plans read-only, shows the will-delete block, gates on `-y`/TTY like
-/// `push "<message>"`, then deletes. All git work is local; refusals → stderr, logs → stdout.
-fn run_prune(args: &PruneArgs) -> ExitCode {
-    let onto = match parse_branch_name("prune", args.onto.as_deref().unwrap_or("main")) {
-        Ok(onto) => onto,
-        Err(code) => return code,
-    };
-
-    if args.all {
-        let options = ManagedOptions {
-            dry: !args.yes,
-            output: ManagedOutput::from_flags(args.json, false),
-            message_for_all: None,
-            interactive: confirm::stdin_is_terminal(),
-        };
-        return managed_exit(&commands::managed::run_prune_all(&onto, &options));
-    }
-
-    let repo_path = match commands::canonical_working_directory() {
-        Ok(path) => path,
-        Err(error) => {
-            eprintln!("prune: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    run_prune_current(args, &onto, &repo_path)
-}
-
-fn run_prune_current(args: &PruneArgs, onto: &BranchName, repo_path: &Path) -> ExitCode {
-    use crate::commands::prune;
-
-    let client = match ServerClient::connect() {
-        Ok(client) => client,
-        Err(error) => {
-            eprintln!("prune: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let response = match client.plan_repository_prune(v1::PlanRepositoryPruneRequest {
-        repository_path: repo_path.to_string_lossy().into_owned(),
-        onto_branch: onto.to_string(),
-    }) {
-        Ok(response) => response,
-        Err(error) => {
-            eprintln!("prune: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let plan = match response.outcome {
-        Some(v1::plan_repository_prune_response::Outcome::Refused(refusal)) => {
-            eprintln!("prune: {}", refusal.detail);
-            return ExitCode::Internal;
-        }
-        Some(v1::plan_repository_prune_response::Outcome::Nothing(nothing)) => {
-            println!("{}", nothing.detail);
-            return ExitCode::Ok;
-        }
-        Some(v1::plan_repository_prune_response::Outcome::Ready(plan)) => plan,
-        None => {
-            eprintln!("prune: gtl-server returned no prune plan outcome");
-            return ExitCode::Internal;
-        }
-    };
-    let repository_root = plan.repository_root.clone();
-    let branches = match prune::plan_from_grpc(plan) {
-        Ok(branches) => branches,
-        Err(error) => {
-            eprintln!("prune: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-
-    println!("{}", prune::confirmation(onto, &branches));
-
-    match confirm::request(&RealConfirm, args.yes, "Proceed?", DefaultAnswer::Yes) {
-        Confirmation::RefuseNonInteractive => {
-            eprintln!("prune: non-interactive shell; pass --yes to confirm the deletion");
-            return ExitCode::Usage;
-        }
-        Confirmation::Declined => {
-            println!("prune: aborted — nothing deleted");
-            return ExitCode::Ok;
-        }
-        Confirmation::Invalid(err) => {
-            eprintln!("prune: {err} — nothing deleted");
-            return ExitCode::Usage;
-        }
-        Confirmation::Proceed => {}
-    }
-
-    let response = match client.execute_repository_prune(v1::ExecuteRepositoryPruneRequest {
-        plan: Some(prune::plan_to_grpc(repository_root, &branches)),
-    }) {
-        Ok(response) => response,
-        Err(error) => {
-            eprintln!("prune: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let result = match prune::result_from_grpc(response) {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("prune: {}", error_text(&error));
-            return ExitCode::Internal;
-        }
-    };
-    let detail = prune::render_result(&result);
-    match result.status {
-        prune::PruneStatus::Ok => {
-            println!("{detail}");
-            ExitCode::Ok
-        }
-        prune::PruneStatus::Partial | prune::PruneStatus::Failed => {
-            eprintln!("prune: {detail}");
-            ExitCode::Internal
-        }
-        prune::PruneStatus::Aborted => {
-            if !result.deleted.is_empty() || !result.failed.is_empty() {
-                println!("{detail}");
-            }
-            eprintln!(
-                "prune: {}",
-                result
-                    .failure_detail
-                    .as_deref()
-                    .unwrap_or("branch prune stopped before completion")
-            );
-            ExitCode::Internal
-        }
-    }
-}
-
 /// Dispatches `status` by scope: `--all` uses sample_project's active projects, `-r` recursively scans
 /// the current directory, default ⇒ the current repo alone.
 fn run_status(args: &StatusArgs) -> ManagedRun<commands::managed::StatusResult> {
@@ -998,13 +780,6 @@ fn status_path_error(error: &anyhow::Error) -> ManagedRun<commands::managed::Sta
         stdout: String::new(),
         stderr: format!("status: {}", error_text(error)),
     }
-}
-
-fn canonical_working_directory_or_exit(command: &str) -> Result<PathBuf, ExitCode> {
-    commands::canonical_working_directory().map_err(|error| {
-        eprintln!("{command}: {}", error_text(&error));
-        ExitCode::Internal
-    })
 }
 
 /// Builds the [`ManagedOptions`] for a read-only managed command from its parsed flags.
@@ -1166,11 +941,6 @@ mod tests {
             run(&["commit".into(), "--all".into(), String::new()]),
             ExitCode::Usage
         );
-    }
-
-    #[test]
-    fn prune_help_exits_ok() {
-        assert_eq!(run(&["prune".into(), "--help".into()]), ExitCode::Ok);
     }
 
     #[test]

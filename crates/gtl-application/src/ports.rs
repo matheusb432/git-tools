@@ -25,7 +25,7 @@ pub use file_system_client::{
 };
 pub use git_client::{
     CommitLogEntry, GitClient, GitCommitReceipt, GitDiffFormat, GitDiffRequest, GitEffect,
-    GitPushReceipt, GitRepositoryState, GitWorkingTree, MergedBranch,
+    GitPushReceipt, GitRepositoryState, GitWorkingTree,
 };
 pub use html_renderer::HtmlRenderer;
 pub use project_client::{

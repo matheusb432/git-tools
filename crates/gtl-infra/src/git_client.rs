@@ -11,7 +11,7 @@ use anyhow::Context as _;
 use gix::bstr::ByteSlice;
 use gtl_application::ports::{
     CommitLogEntry, GitClient, GitCommitReceipt, GitDiffRequest, GitEffect, GitPushReceipt,
-    GitRepositoryState, GitWorkingTree, MergedBranch,
+    GitRepositoryState, GitWorkingTree,
 };
 use gtl_models::{
     diffs::{Commit, CommitId},
@@ -163,41 +163,6 @@ impl GitClient for HybridGitClient {
     ) -> anyhow::Result<GitEffect<GitWorkingTree>> {
         effect_result(repo_path, &["status", "--porcelain"], parse_working_tree)
     }
-    fn merged_branches(
-        &self,
-        repo_path: &RepositoryRoot,
-        into: &GitRevision,
-    ) -> anyhow::Result<GitEffect<Vec<MergedBranch>>> {
-        match effect(
-            repo_path,
-            &[
-                "for-each-ref",
-                "--merged",
-                into.as_ref(),
-                "--format=%(refname:short) %(objectname)",
-                "refs/heads/",
-            ],
-            |output| -> anyhow::Result<Vec<MergedBranch>> {
-                output
-                    .lines()
-                    .map(str::trim)
-                    .filter(|line| !line.is_empty())
-                    .map(|line| {
-                        let (name, raw_id) = line
-                            .split_once(char::is_whitespace)
-                            .ok_or_else(|| anyhow::anyhow!("Git branch output omitted its ID"))?;
-                        Ok(MergedBranch {
-                            name: BranchName::try_new(name.to_owned())?,
-                            id: raw_id.trim().try_into()?,
-                        })
-                    })
-                    .collect()
-            },
-        )? {
-            GitEffect::Applied(branches) => branches.map(GitEffect::Applied),
-            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
-        }
-    }
     fn worktrees(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<Vec<Worktree>>> {
         match effect(
             repo_path,
@@ -235,12 +200,6 @@ impl GitClient for HybridGitClient {
             &["ls-remote", "--tags", remote.as_ref()],
             parse_remote_tags,
         )
-    }
-    fn previous_checkout(&self, repo_path: &RepositoryRoot) -> anyhow::Result<Option<GitRevision>> {
-        capture(repo_path, &["rev-parse", "@{-1}"])?
-            .map(GitRevision::try_new)
-            .transpose()
-            .map_err(Into::into)
     }
     fn brief_log(
         &self,
@@ -287,16 +246,6 @@ impl GitClient for HybridGitClient {
             GitEffect::Rejected(detail) => GitEffect::Rejected(detail),
         })
     }
-    fn switch(
-        &self,
-        repo_path: &RepositoryRoot,
-        branch: &BranchName,
-    ) -> anyhow::Result<GitEffect<()>> {
-        effect(repo_path, &["switch", branch.as_ref()], |_| ())
-    }
-    fn switch_previous(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<()>> {
-        effect(repo_path, &["switch", "-"], |_| ())
-    }
     fn fast_forward(
         &self,
         repo_path: &RepositoryRoot,
@@ -307,32 +256,6 @@ impl GitClient for HybridGitClient {
             &["merge", "--ff-only", revision.as_ref()],
             str::to_string,
         )
-    }
-    fn move_branch(
-        &self,
-        repo_path: &RepositoryRoot,
-        branch: &BranchName,
-        revision: &GitRevision,
-    ) -> anyhow::Result<GitEffect<()>> {
-        effect(
-            repo_path,
-            &["branch", "-f", branch.as_ref(), revision.as_ref()],
-            |_| (),
-        )
-    }
-    fn delete_branch(
-        &self,
-        repo_path: &RepositoryRoot,
-        branch: &BranchName,
-    ) -> anyhow::Result<GitEffect<()>> {
-        effect(repo_path, &["branch", "-D", branch.as_ref()], |_| ())
-    }
-    fn soft_reset(
-        &self,
-        repo_path: &RepositoryRoot,
-        revision: &GitRevision,
-    ) -> anyhow::Result<GitEffect<()>> {
-        effect(repo_path, &["reset", "--soft", revision.as_ref()], |_| ())
     }
     fn push_branch(
         &self,

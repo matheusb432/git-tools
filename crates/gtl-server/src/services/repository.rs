@@ -1,20 +1,16 @@
 use gtl_application::repositories::{
     apply_commit::{self, ApplyCommit, CommitStatus},
-    apply_prune::{self, ApplyPrune, ApplyPruneError, ApplyPruneOk, PruneStatus},
     apply_push::{self, ApplyPush, ApplyPushOk, PushMode},
     apply_recursive_push,
-    change_branch::{self, ChangeBranch, ChangeBranchAction, ChangeBranchOk},
     get_recursive_repository_statuses::{
         self, GetRecursiveRepositoryStatuses, GetRecursiveRepositoryStatusesError,
     },
     get_repository_status,
     plan_commit::{self, CommitTarget, PlanCommitOk},
-    plan_prune::{self, PlanPrune, PlanPruneOk, PruneBranch},
     plan_push::{self, PlanPushOk, PushTarget},
     plan_recursive_push,
 };
 use gtl_models::{
-    diffs::CommitId,
     git::{BranchName, CommitCount, RemoteName, RemoteUrl},
     paths::ProjectName,
     repository::{
@@ -32,7 +28,6 @@ use super::{
 };
 use crate::state::AppState;
 
-const MAX_BRANCHES_PER_REQUEST: usize = 512;
 const MAX_REPOSITORIES_PER_REQUEST: usize = 512;
 
 pub(crate) struct RepositoryGrpcService {
@@ -245,93 +240,6 @@ impl RepositoryService for RepositoryGrpcService {
         }))
     }
 
-    async fn change_repository_branch(
-        &self,
-        request: Request<v1::ChangeRepositoryBranchRequest>,
-    ) -> Result<Response<v1::ChangeRepositoryBranchResponse>, Status> {
-        let request = request.into_inner();
-        let repo_path = absolute_path(request.repository_path, "repository_path")?;
-        let onto = BranchName::try_new(request.onto_branch)
-            .map_err(|_| Status::invalid_argument("onto_branch must not be empty"))?;
-        let action = repository_branch_action(request.action)?;
-        let state = self.state.clone();
-        let result = run_blocking(move || {
-            change_branch::execute(
-                ChangeBranch {
-                    repo_path,
-                    onto,
-                    action,
-                },
-                &state.git,
-            )
-        })
-        .await?
-        .map_err(|error| unexpected(error, "change repository branch"))?;
-
-        Ok(Response::new(change_branch_response(result)))
-    }
-
-    async fn plan_repository_prune(
-        &self,
-        request: Request<v1::PlanRepositoryPruneRequest>,
-    ) -> Result<Response<v1::PlanRepositoryPruneResponse>, Status> {
-        let request = request.into_inner();
-        let request = PlanPrune {
-            repo_path: absolute_path(request.repository_path, "repository_path")?,
-            onto: BranchName::try_new(request.onto_branch)
-                .map_err(|_| Status::invalid_argument("onto_branch must not be empty"))?,
-        };
-        let state = self.state.clone();
-        let result = run_blocking(move || plan_prune::execute(request, &state.git))
-            .await?
-            .map_err(|error| unexpected(error, "plan repository branch prune"))?;
-        let outcome = match result {
-            PlanPruneOk::Ready { top, branches, .. } => {
-                v1::plan_repository_prune_response::Outcome::Ready(v1::RepositoryPrunePlan {
-                    repository_root: top.to_string(),
-                    branches: branches.iter().map(prune_branch).collect(),
-                })
-            }
-            PlanPruneOk::Nothing(detail) => {
-                v1::plan_repository_prune_response::Outcome::Nothing(v1::OperationDetail { detail })
-            }
-            PlanPruneOk::Refused(detail) => {
-                v1::plan_repository_prune_response::Outcome::Refused(v1::OperationDetail { detail })
-            }
-        };
-
-        Ok(Response::new(v1::PlanRepositoryPruneResponse {
-            outcome: Some(outcome),
-        }))
-    }
-
-    async fn execute_repository_prune(
-        &self,
-        request: Request<v1::ExecuteRepositoryPruneRequest>,
-    ) -> Result<Response<v1::ExecuteRepositoryPruneResponse>, Status> {
-        let plan = required(request.into_inner().plan, "plan")?;
-        if plan.branches.len() > MAX_BRANCHES_PER_REQUEST {
-            return Err(Status::resource_exhausted(format!(
-                "plan.branches cannot contain more than {MAX_BRANCHES_PER_REQUEST} entries"
-            )));
-        }
-        let command = ApplyPrune {
-            top: repository_root(plan.repository_root, "plan.repository_root")?,
-            branches: plan
-                .branches
-                .into_iter()
-                .map(application_prune_branch)
-                .collect::<Result<Vec<_>, _>>()?,
-        };
-        let state = self.state.clone();
-        let result = run_blocking(move || apply_prune::execute(command, &state.git)).await?;
-
-        Ok(Response::new(match result {
-            Ok(result) => applied_prune_response(result, None),
-            Err(error) => aborted_prune_response(error)?,
-        }))
-    }
-
     async fn get_repository_status(
         &self,
         request: Request<v1::GetRepositoryStatusRequest>,
@@ -501,103 +409,6 @@ fn application_push_destination(
         Dest::Push { branch, remote }
     } else {
         Dest::Synced { branch, remote }
-    })
-}
-
-fn repository_branch_action(raw: i32) -> Result<ChangeBranchAction, Status> {
-    match v1::RepositoryBranchAction::try_from(raw)
-        .map_err(|_| Status::invalid_argument("action is invalid"))?
-    {
-        v1::RepositoryBranchAction::Switch => Ok(ChangeBranchAction::Switch),
-        v1::RepositoryBranchAction::Rebase => Ok(ChangeBranchAction::Rebase),
-        v1::RepositoryBranchAction::Revert => Ok(ChangeBranchAction::Revert),
-        v1::RepositoryBranchAction::Unspecified => {
-            Err(Status::invalid_argument("action is required"))
-        }
-    }
-}
-
-fn change_branch_response(result: ChangeBranchOk) -> v1::ChangeRepositoryBranchResponse {
-    let (status, detail) = match result {
-        ChangeBranchOk::Switched { detail } => (v1::RepositoryBranchStatus::Switched, detail),
-        ChangeBranchOk::AlreadyThere { detail } => {
-            (v1::RepositoryBranchStatus::AlreadyThere, detail)
-        }
-        ChangeBranchOk::FastForwarded { detail } => {
-            (v1::RepositoryBranchStatus::FastForwarded, detail)
-        }
-        ChangeBranchOk::Reverted { detail } => (v1::RepositoryBranchStatus::Reverted, detail),
-        ChangeBranchOk::NoOp { detail } => (v1::RepositoryBranchStatus::NoOp, detail),
-        ChangeBranchOk::Refused { detail } => (v1::RepositoryBranchStatus::Refused, detail),
-        ChangeBranchOk::Failed { detail } => (v1::RepositoryBranchStatus::Failed, detail),
-    };
-    v1::ChangeRepositoryBranchResponse {
-        status: status as i32,
-        detail,
-    }
-}
-
-fn aborted_prune_response(
-    error: ApplyPruneError,
-) -> Result<v1::ExecuteRepositoryPruneResponse, Status> {
-    let detail = error.to_string();
-    tracing::error!(error = ?error, "repository branch prune stopped before completion");
-    match error {
-        ApplyPruneError::Transport {
-            completed_result, ..
-        } => Ok(match completed_result {
-            None => v1::ExecuteRepositoryPruneResponse {
-                status: v1::RepositoryPruneStatus::Aborted as i32,
-                deleted: Vec::new(),
-                failures: Vec::new(),
-                failure_detail: Some(detail),
-            },
-            Some(result) => applied_prune_response(*result, Some(detail)),
-        }),
-        _ => Err(Status::internal("execute repository branch prune failed")),
-    }
-}
-
-fn applied_prune_response(
-    result: ApplyPruneOk,
-    failure_detail: Option<String>,
-) -> v1::ExecuteRepositoryPruneResponse {
-    let status = failure_detail.as_ref().map_or_else(
-        || match result.status {
-            PruneStatus::Ok => v1::RepositoryPruneStatus::Ok,
-            PruneStatus::Partial => v1::RepositoryPruneStatus::Partial,
-            PruneStatus::Fail => v1::RepositoryPruneStatus::Failed,
-        },
-        |_| v1::RepositoryPruneStatus::Aborted,
-    );
-    v1::ExecuteRepositoryPruneResponse {
-        status: status as i32,
-        deleted: result.deleted.iter().map(prune_branch).collect(),
-        failures: result
-            .failed
-            .into_iter()
-            .map(|failure| v1::PruneFailure {
-                name: failure.name.to_string(),
-                reason: failure.reason,
-            })
-            .collect(),
-        failure_detail,
-    }
-}
-
-fn prune_branch(branch: &PruneBranch) -> v1::PruneBranch {
-    v1::PruneBranch {
-        name: branch.name.to_string(),
-        commit_id: branch.id.to_string(),
-    }
-}
-
-fn application_prune_branch(branch: v1::PruneBranch) -> Result<PruneBranch, Status> {
-    Ok(PruneBranch {
-        name: BranchName::try_new(branch.name)
-            .map_err(|_| Status::invalid_argument("plan.branches.name must not be empty"))?,
-        id: CommitId::try_from(branch.commit_id)
-            .map_err(|_| Status::invalid_argument("plan.branches.commit_id is invalid"))?,
     })
 }
 

@@ -5,7 +5,6 @@ use gtl_models::{paths::ProjectName, projects::ProjectRepository, settings::Push
 pub mod build_recipes;
 pub mod commit_repositories;
 pub mod plan_push;
-pub mod prune_branches;
 pub mod pull_repositories;
 pub mod push_repositories;
 mod remote_sync;

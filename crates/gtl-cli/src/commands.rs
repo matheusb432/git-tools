@@ -9,7 +9,6 @@ pub mod diff_live;
 pub mod diff_subrepos;
 pub mod managed;
 pub mod merge_diff;
-pub mod prune;
 pub mod push_subrepos;
 pub mod server_ctl;
 pub mod sync;

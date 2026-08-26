@@ -73,18 +73,12 @@ pub enum Command {
     /// Inspect git worktrees.
     #[command(visible_alias = "wk")]
     Worktree(WorktreeArgs),
-    /// Switch to the main branch; with `--rebase`, fast-forward it onto the current branch's
-    /// commits.
-    #[command(visible_alias = "sw")]
-    Switch(SwitchArgs),
     /// Show git status for the current repo; `--all` fans out over managed repos, `-r` recurses
     /// into nested subrepos.
     #[command(visible_alias = "s")]
     Status(StatusArgs),
     /// Aliases `status --all`
     Ls(LsArgs),
-    /// Delete local branches whose commits are already merged into main.
-    Prune(PruneArgs),
     /// Inspect the resident gtl-server.
     Server(ServerArgs),
 }
@@ -402,41 +396,6 @@ pub enum ColorChoice {
     Never,
 }
 
-/// Arguments for `switch`.
-#[derive(Debug, Args)]
-pub struct SwitchArgs {
-    /// Fast-forward the target branch onto the current branch's commits after switching.
-    #[arg(long, conflicts_with = "revert")]
-    pub rebase: bool,
-    /// Branch to switch to / fast-forward onto / revert (default: main).
-    #[arg(long)]
-    pub onto: Option<String>,
-    /// After rebasing, render an HTML diff of the now-unpushed commits (requires --rebase).
-    #[arg(short = 'd', long = "diff", requires = "rebase")]
-    pub diff: bool,
-    /// Undo the last `switch --rebase`: reset the target branch and switch back to the previous
-    /// branch.
-    #[arg(short = 'r', long = "revert")]
-    pub revert: bool,
-}
-
-/// Arguments for `prune`.
-#[derive(Debug, Args)]
-pub struct PruneArgs {
-    /// Integration branch that branches must be merged into to qualify (default: main).
-    #[arg(long)]
-    pub onto: Option<String>,
-    /// Actually delete (skip the prompt; required to delete in a non-interactive shell).
-    #[arg(short = 'y', long = "yes")]
-    pub yes: bool,
-    /// Prune every active project listed by sample_project instead of the current repo.
-    #[arg(long)]
-    pub all: bool,
-    /// Emit machine-readable JSON instead of human text (with `--all`).
-    #[arg(long, requires = "all")]
-    pub json: bool,
-}
-
 /// Flags shared by the managed-repo fan-out commands (`push --all`, `pull --all`, `commit --all`).
 #[derive(Debug, Clone, Copy, Args)]
 pub struct ManagedArgs {
@@ -582,19 +541,6 @@ mod tests {
                 assert!(Cli::parse_args(&[command.into(), "--all".into(), flag.into()]).is_ok());
             }
         }
-    }
-
-    #[test]
-    fn parse_args_prune_json_requires_all() {
-        assert!(Cli::parse_args(&["prune".into(), "--json".into()]).is_err());
-        assert!(Cli::parse_args(&["prune".into(), "--all".into(), "--json".into()]).is_ok());
-    }
-
-    #[test]
-    fn parse_args_switch_scenarios() {
-        assert!(Cli::parse_args(&["switch".into(), "--diff".into()]).is_err());
-        assert!(Cli::parse_args(&["sw".into(), "--rebase".into(), "-d".into()]).is_ok());
-        assert!(Cli::parse_args(&["switch".into(), "--rebase".into(), "--revert".into()]).is_err());
     }
 
     #[test]

@@ -6,20 +6,12 @@ use gtl_application::{
             self, CommitAction, CommitExit, CommitRepositories, CommitRepositoriesError,
             CommitRepositoriesMode, CommitRepositoriesOk, CommitRepositoriesScope, CommitResult,
         },
-        prune_branches::{
-            self, PruneAction, PruneBranches, PruneBranchesError, PruneBranchesOk, PruneExit,
-            PruneRepoResult,
-        },
         pull_repositories::{self, PullRepositoriesError},
         push_repositories::{self, PushRepositoriesError},
     },
-    repositories::{apply_prune::PruneFailure, get_repository_statuses, plan_prune::PruneBranch},
+    repositories::get_repository_statuses,
 };
-use gtl_models::{
-    git::{BranchName, GitEffectMode},
-    paths::ProjectName,
-    repository::traversal::RepositoryTarget,
-};
+use gtl_models::{git::GitEffectMode, paths::ProjectName, repository::traversal::RepositoryTarget};
 use gtl_wire::v1::{self, project_service_server::ProjectService};
 use tonic::{Request, Response, Status};
 
@@ -117,28 +109,6 @@ impl ProjectService for ProjectGrpcService {
         .await?;
 
         Ok(Response::new(commit_response(result)))
-    }
-
-    async fn prune_project_branches(
-        &self,
-        request: Request<v1::PruneProjectBranchesRequest>,
-    ) -> Result<Response<v1::PruneProjectBranchesResponse>, Status> {
-        let request = request.into_inner();
-        let onto = BranchName::try_new(request.onto_branch)
-            .map_err(|_| Status::invalid_argument("onto_branch must not be empty"))?;
-        let state = self.state.clone();
-        let repos = state
-            .projects
-            .list_projects()
-            .await
-            .map_err(|error| project_client_error(&error))?;
-        let mode = effect_mode(request.dry_run);
-        let result = run_blocking(move || {
-            prune_branches::execute(PruneBranches { repos, onto, mode }, &state.git)
-        })
-        .await?;
-
-        Ok(Response::new(prune_response(result)))
     }
 
     async fn get_project_repository_statuses(
@@ -308,99 +278,6 @@ fn commit_result(result: &CommitResult) -> v1::ProjectCommitResult {
             CommitAction::Fail => v1::ProjectCommitAction::Failed,
         } as i32,
         detail: result.detail().into_owned(),
-    }
-}
-
-fn prune_response(
-    result: Result<PruneBranchesOk, PruneBranchesError>,
-) -> v1::PruneProjectBranchesResponse {
-    match result {
-        Ok(result) => v1::PruneProjectBranchesResponse {
-            results: result.results.into_iter().map(prune_result).collect(),
-            exit: match result.exit {
-                PruneExit::Clean => v1::ProjectPruneExit::Clean,
-                PruneExit::Warn => v1::ProjectPruneExit::Warning,
-            } as i32,
-            failure_detail: None,
-        },
-        Err(error) => {
-            let failure_detail = error.to_string();
-            tracing::error!(error = ?error, "project prune stopped before completion");
-            let completed_results = match error {
-                PruneBranchesError::Transport {
-                    mut completed_results,
-                    failed_result,
-                    ..
-                } => {
-                    if let Some(failed_result) = failed_result {
-                        completed_results.push(*failed_result);
-                    }
-                    completed_results
-                }
-                _ => Vec::new(),
-            };
-            v1::PruneProjectBranchesResponse {
-                results: completed_results.into_iter().map(prune_result).collect(),
-                exit: v1::ProjectPruneExit::Warning as i32,
-                failure_detail: Some(failure_detail),
-            }
-        }
-    }
-}
-
-fn prune_result(result: PruneRepoResult) -> v1::ProjectPruneResult {
-    let (action, deleted, failures, detail) = match result.action {
-        PruneAction::Absent => (
-            v1::ProjectPruneAction::Absent,
-            Vec::new(),
-            Vec::new(),
-            String::new(),
-        ),
-        PruneAction::Refused(detail) => (
-            v1::ProjectPruneAction::Refused,
-            Vec::new(),
-            Vec::new(),
-            detail,
-        ),
-        PruneAction::Nothing(detail) => (
-            v1::ProjectPruneAction::Nothing,
-            Vec::new(),
-            Vec::new(),
-            detail,
-        ),
-        PruneAction::WouldDelete(branches) => (
-            v1::ProjectPruneAction::WouldDelete,
-            branches.iter().map(prune_branch).collect(),
-            Vec::new(),
-            String::new(),
-        ),
-        PruneAction::Applied(applied) => (
-            v1::ProjectPruneAction::Applied,
-            applied.deleted.iter().map(prune_branch).collect(),
-            applied.failed.into_iter().map(prune_failure).collect(),
-            String::new(),
-        ),
-    };
-    v1::ProjectPruneResult {
-        project_name: result.name.to_string(),
-        action: action as i32,
-        deleted,
-        failures,
-        detail,
-    }
-}
-
-fn prune_branch(branch: &PruneBranch) -> v1::PruneBranch {
-    v1::PruneBranch {
-        name: branch.name.to_string(),
-        commit_id: branch.id.to_string(),
-    }
-}
-
-fn prune_failure(failure: PruneFailure) -> v1::PruneFailure {
-    v1::PruneFailure {
-        name: failure.name.to_string(),
-        reason: failure.reason,
     }
 }
 

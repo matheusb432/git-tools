@@ -245,17 +245,6 @@ impl GtlClient {
             .map_err(ClientError::from)
     }
 
-    pub async fn prune_project_branches(
-        &self,
-        request: v1::PruneProjectBranchesRequest,
-    ) -> Result<v1::PruneProjectBranchesResponse, ClientError> {
-        self.project_client()
-            .prune_project_branches(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
     pub async fn get_project_repository_statuses(
         &self,
     ) -> Result<v1::GetProjectRepositoryStatusesResponse, ClientError> {
@@ -327,39 +316,6 @@ impl GtlClient {
     ) -> Result<v1::ExecuteRecursiveRepositoryPushResponse, ClientError> {
         self.repository_client()
             .execute_recursive_repository_push(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
-    pub async fn change_repository_branch(
-        &self,
-        request: v1::ChangeRepositoryBranchRequest,
-    ) -> Result<v1::ChangeRepositoryBranchResponse, ClientError> {
-        self.repository_client()
-            .change_repository_branch(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
-    pub async fn plan_repository_prune(
-        &self,
-        request: v1::PlanRepositoryPruneRequest,
-    ) -> Result<v1::PlanRepositoryPruneResponse, ClientError> {
-        self.repository_client()
-            .plan_repository_prune(request)
-            .await
-            .map(tonic::Response::into_inner)
-            .map_err(ClientError::from)
-    }
-
-    pub async fn execute_repository_prune(
-        &self,
-        request: v1::ExecuteRepositoryPruneRequest,
-    ) -> Result<v1::ExecuteRepositoryPruneResponse, ClientError> {
-        self.repository_client()
-            .execute_repository_prune(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(ClientError::from)
