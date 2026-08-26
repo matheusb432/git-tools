@@ -184,14 +184,14 @@ mod tests {
     #[test]
     fn unexpected_application_failure_preserves_its_display_message() {
         let status = unexpected(
-            anyhow::anyhow!("read working tree: repository-relative path must be normalized"),
+            anyhow::anyhow!("read working tree: object database is unavailable"),
             "plan repository push",
         );
 
         assert_eq!(status.code(), Code::Internal);
         assert_eq!(
             status.message(),
-            "read working tree: repository-relative path must be normalized"
+            "read working tree: object database is unavailable"
         );
     }
 }

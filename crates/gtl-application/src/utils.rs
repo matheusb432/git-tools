@@ -74,11 +74,10 @@ pub fn absolute_file_path(path: &str) -> AbsoluteFilePath {
 }
 
 use crate::ports::{
-    ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, CommitLogEntry, GitClient,
-    GitCommitReceipt, GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState,
-    GitWorkingTree, HistoryRecord, HtmlRenderer, PlacedArtifact, ProjectCatalogueUnavailableError,
-    ProjectClient, ProjectClientError, UserSettingsEditError, UserSettingsLoadError,
-    UserSettingsStore,
+    ArtifactMeta, ArtifactRangeKey, ArtifactStore, Clock, GitClient, GitCommitReceipt,
+    GitDiffFormat, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState, GitWorkingTree,
+    HistoryRecord, HtmlRenderer, PlacedArtifact, ProjectCatalogueUnavailableError, ProjectClient,
+    ProjectClientError, UserSettingsEditError, UserSettingsLoadError, UserSettingsStore,
 };
 
 fn try_commit_id_fixture(raw: &str) -> Result<CommitId, CommitIdError> {
@@ -462,14 +461,6 @@ impl GitClient for FakeGitClient {
             ahead: CommitCount::new(u64::try_from(ahead)?),
         }))
     }
-    fn is_ancestor(
-        &self,
-        _repo: &RepositoryRoot,
-        _ancestor: &GitRevision,
-        _descendant: &GitRevision,
-    ) -> anyhow::Result<bool> {
-        Ok(true)
-    }
     fn working_tree(&self, _repo: &RepositoryRoot) -> anyhow::Result<GitEffect<GitWorkingTree>> {
         Ok(GitEffect::Applied(GitWorkingTree::default()))
     }
@@ -491,21 +482,6 @@ impl GitClient for FakeGitClient {
         _remote: &RemoteName,
     ) -> anyhow::Result<GitEffect<BTreeMap<TagName, GitObjectId>>> {
         Ok(GitEffect::Applied(BTreeMap::new()))
-    }
-    fn brief_log(
-        &self,
-        _repo: &RepositoryRoot,
-        _range: &GitRange,
-    ) -> anyhow::Result<GitEffect<Vec<CommitLogEntry>>> {
-        Ok(GitEffect::Applied(Vec::new()))
-    }
-    fn diff_stat(
-        &self,
-        _repo: &RepositoryRoot,
-        _before: &GitRevision,
-        _after: &GitRevision,
-    ) -> anyhow::Result<GitEffect<String>> {
-        Ok(GitEffect::Applied(String::new()))
     }
     fn stage_all(&self, _repo: &RepositoryRoot) -> anyhow::Result<GitEffect<()>> {
         Ok(GitEffect::Applied(()))
@@ -625,9 +601,6 @@ impl GitClient for FakeGitClient {
             return Ok(self.full_diff_output.clone());
         }
         Ok(self.scripted_diff(repo_path))
-    }
-    fn root_commit(&self, _repo: &RepositoryRoot) -> Option<CommitId> {
-        try_commit_id_fixture("root").ok()
     }
     fn resolve_commit_id(
         &self,
@@ -1055,23 +1028,6 @@ impl GitClient for ScriptedGitClient {
             })
         }))
     }
-    fn is_ancestor(
-        &self,
-        repo_path: &RepositoryRoot,
-        ancestor: &GitRevision,
-        descendant: &GitRevision,
-    ) -> anyhow::Result<bool> {
-        scripted_success(
-            self,
-            repo_path,
-            &[
-                "merge-base",
-                "--is-ancestor",
-                ancestor.as_ref(),
-                descendant.as_ref(),
-            ],
-        )
-    }
     fn working_tree(
         &self,
         repo_path: &RepositoryRoot,
@@ -1151,49 +1107,6 @@ impl GitClient for ScriptedGitClient {
             repo_path,
             &["ls-remote", "--tags", remote.as_ref()],
             tags::parse_remote_refs,
-        )
-    }
-    fn brief_log(
-        &self,
-        repo_path: &RepositoryRoot,
-        range: &GitRange,
-    ) -> anyhow::Result<GitEffect<Vec<CommitLogEntry>>> {
-        match scripted_effect(
-            self,
-            repo_path,
-            &["log", "--format=%H%x1f%s", range.as_ref()],
-            |output| -> anyhow::Result<Vec<CommitLogEntry>> {
-                output
-                    .lines()
-                    .map(str::trim)
-                    .filter(|line| !line.is_empty())
-                    .map(|line| {
-                        let (raw_id, subject) = line.split_once('\x1f').ok_or_else(|| {
-                            anyhow::anyhow!("git log entry omitted its subject delimiter")
-                        })?;
-                        Ok(CommitLogEntry {
-                            id: try_commit_id_fixture(raw_id)?,
-                            subject: subject.trim().to_owned(),
-                        })
-                    })
-                    .collect()
-            },
-        )? {
-            GitEffect::Applied(commits) => commits.map(GitEffect::Applied),
-            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
-        }
-    }
-    fn diff_stat(
-        &self,
-        repo_path: &RepositoryRoot,
-        before: &GitRevision,
-        after: &GitRevision,
-    ) -> anyhow::Result<GitEffect<String>> {
-        scripted_effect(
-            self,
-            repo_path,
-            &["diff", "--stat", before.as_ref(), after.as_ref()],
-            str::to_string,
         )
     }
     fn stage_all(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<()>> {
@@ -1371,9 +1284,6 @@ impl GitClient for ScriptedGitClient {
     }
     fn diff(&self, _repo: &RepositoryRoot, _request: &GitDiffRequest) -> anyhow::Result<String> {
         anyhow::bail!("ScriptedGitClient does not implement diff output")
-    }
-    fn root_commit(&self, _repo: &RepositoryRoot) -> Option<CommitId> {
-        None
     }
     fn resolve_commit_id(
         &self,

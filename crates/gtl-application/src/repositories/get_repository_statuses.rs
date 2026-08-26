@@ -1,7 +1,9 @@
 //! Classifies repositories from local head, upstream, and working-tree facts.
 
+use std::collections::BTreeMap;
+
 use gtl_models::{
-    git::{CommitCount, GitHead, GitRange},
+    git::{GitHead, GitRange},
     paths::RepositoryRoot,
     repository::{
         PathCount,
@@ -11,7 +13,10 @@ use gtl_models::{
     },
 };
 
-use crate::ports::GitClient;
+use crate::ports::{
+    GitClient, GitEffect, GitStatusSnapshot, GitStatusUpstream, GitWorkingTree,
+    GitWorkingTreeSummary,
+};
 
 /// Classifies each repository from local refs without fetching.
 ///
@@ -22,71 +27,145 @@ pub fn execute(repos: Vec<RepositoryTarget>, git: &impl GitClient) -> Vec<Status
     repos.into_iter().map(|repo| get_one(repo, git)).collect()
 }
 
-pub(crate) fn get_one(repo: RepositoryTarget, git: &impl GitClient) -> StatusResult {
-    let RepositoryTarget { path, label } = repo;
-    if !git.repo_present(&path) {
-        return StatusResult::absent(label);
-    }
+pub(crate) fn execute_with_known_descendants(
+    repos: Vec<RepositoryTarget>,
+    git: &impl GitClient,
+) -> Vec<StatusResult> {
+    let mut indexed_repos = repos.into_iter().enumerate().collect::<Vec<_>>();
+    indexed_repos.sort_by_key(|(_, repo)| std::cmp::Reverse(repo.path.components().count()));
 
-    let head = status_head(git, &path);
-    let changes = status_changes(git, &path);
-    StatusResult::present(label, head, changes)
+    let mut known_descendants = BTreeMap::new();
+    let mut results = Vec::with_capacity(indexed_repos.len());
+    for (index, repo) in indexed_repos {
+        let path = repo.path.clone();
+        let (result, summary) = get_one_with_known_descendants(repo, git, &known_descendants);
+        if let Some(summary) = summary {
+            known_descendants.insert(path, summary);
+        }
+        results.push((index, result));
+    }
+    results.sort_by_key(|(index, _)| *index);
+    results.into_iter().map(|(_, result)| result).collect()
 }
 
-fn status_head(git: &impl GitClient, repo_path: &RepositoryRoot) -> StatusHead {
+pub(crate) fn get_one(repo: RepositoryTarget, git: &impl GitClient) -> StatusResult {
+    get_one_from_snapshot(repo, git, |path| git.status_snapshot(path)).0
+}
+
+fn get_one_with_known_descendants(
+    repo: RepositoryTarget,
+    git: &impl GitClient,
+    known_descendants: &BTreeMap<RepositoryRoot, GitWorkingTreeSummary>,
+) -> (StatusResult, Option<GitWorkingTreeSummary>) {
+    get_one_from_snapshot(repo, git, |path| {
+        git.status_snapshot_with_known_descendants(path, known_descendants)
+    })
+}
+
+fn get_one_from_snapshot(
+    repo: RepositoryTarget,
+    git: &impl GitClient,
+    read_snapshot: impl FnOnce(&RepositoryRoot) -> anyhow::Result<GitEffect<GitStatusSnapshot>>,
+) -> (StatusResult, Option<GitWorkingTreeSummary>) {
+    let RepositoryTarget { path, label } = repo;
+    if !git.repo_present(&path) {
+        return (StatusResult::absent(label), None);
+    }
+
+    match read_snapshot(&path) {
+        Ok(GitEffect::Applied(snapshot)) => {
+            let GitStatusSnapshot {
+                head,
+                upstream,
+                working_tree,
+            } = snapshot;
+            let summary = GitWorkingTreeSummary::from_working_tree(&working_tree);
+            (
+                StatusResult::present(
+                    label,
+                    snapshot_head(head, upstream),
+                    snapshot_changes(&working_tree),
+                ),
+                Some(summary),
+            )
+        }
+        Ok(GitEffect::Rejected(_)) | Err(_) => (
+            StatusResult::present(
+                label,
+                fallback_head(git, &path),
+                fallback_changes(git, &path),
+            ),
+            None,
+        ),
+    }
+}
+
+fn snapshot_head(head: GitHead, upstream: Option<GitStatusUpstream>) -> StatusHead {
+    match head {
+        GitHead::Detached => StatusHead::Detached,
+        GitHead::Branch(name) => StatusHead::Branch {
+            name,
+            upstream: upstream.map_or(StatusUpstream::Missing, |upstream| {
+                StatusUpstream::Tracking {
+                    reference: upstream.reference,
+                    ahead: upstream.ahead,
+                }
+            }),
+        },
+    }
+}
+
+fn snapshot_changes(working_tree: &GitWorkingTree) -> StatusChanges {
+    changes_from_files(&working_tree.files)
+}
+
+fn changes_from_files(files: &[gtl_models::repository::working_tree::CommitFile]) -> StatusChanges {
+    let untracked = files.iter().filter(|file| file.is_untracked()).count();
+    let tracked = files.len().saturating_sub(untracked);
+    StatusChanges::from_counts(PathCount::from_len(tracked), PathCount::from_len(untracked))
+}
+
+fn fallback_head(git: &impl GitClient, repo_path: &RepositoryRoot) -> StatusHead {
     match git.current_branch(repo_path) {
         Ok(GitHead::Detached) => StatusHead::Detached,
         Ok(GitHead::Branch(name)) => StatusHead::Branch {
             name,
-            upstream: upstream(git, repo_path),
+            upstream: fallback_upstream(git, repo_path),
         },
         Err(_) => StatusHead::Unavailable,
     }
 }
 
-fn upstream(git: &impl GitClient, repo_path: &RepositoryRoot) -> StatusUpstream {
-    let Ok(crate::ports::GitEffect::Applied(reference)) = git.upstream(repo_path) else {
+fn fallback_upstream(git: &impl GitClient, repo_path: &RepositoryRoot) -> StatusUpstream {
+    let Ok(GitEffect::Applied(reference)) = git.upstream(repo_path) else {
         return StatusUpstream::Missing;
     };
     StatusUpstream::Tracking {
         reference,
-        ahead: ahead_count(git, repo_path),
+        ahead: git
+            .commit_count(repo_path, &GitRange::upstream_to_head())
+            .ok()
+            .flatten()
+            .unwrap_or_default(),
     }
 }
 
-fn ahead_count(git: &impl GitClient, repo_path: &RepositoryRoot) -> CommitCount {
-    git.commit_count(repo_path, &GitRange::upstream_to_head())
-        .ok()
-        .flatten()
-        .unwrap_or_default()
-}
-
-fn status_changes(git: &impl GitClient, repo_path: &RepositoryRoot) -> StatusChanges {
-    match working_tree_state(git, repo_path) {
+fn fallback_changes(git: &impl GitClient, repo_path: &RepositoryRoot) -> StatusChanges {
+    let state =
+        super::working_tree::read(git, repo_path).unwrap_or_else(|error| DirtyState::Unavailable {
+            detail: error.to_string(),
+        });
+    match state {
         DirtyState::Clean => StatusChanges::Clean,
-        DirtyState::Dirty(files) => {
-            let untracked = files
-                .as_slice()
-                .iter()
-                .filter(|file| file.is_untracked())
-                .count();
-            let tracked = files.len().saturating_sub(untracked);
-            StatusChanges::from_counts(PathCount::from_len(tracked), PathCount::from_len(untracked))
-        }
+        DirtyState::Dirty(files) => changes_from_files(files.as_slice()),
         DirtyState::Unavailable { .. } | DirtyState::Absent => StatusChanges::Unavailable,
     }
-}
-
-fn working_tree_state(git: &impl GitClient, repo_path: &RepositoryRoot) -> DirtyState {
-    super::working_tree::read(git, repo_path).unwrap_or_else(|error| DirtyState::Unavailable {
-        detail: error.to_string(),
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use gtl_models::{
-        git::GitRefName,
+        git::{CommitCount, GitRefName},
         repository::status::{
             RepositoryStatus, StatusChanges, StatusClass, StatusHead, StatusUpstream,
         },
@@ -193,11 +272,51 @@ mod tests {
             ScriptedGitClient::applied("origin/main\n"),
             ScriptedGitClient::applied("0\n"),
             ScriptedGitClient::rejected("status unavailable"),
+            ScriptedGitClient::applied("main\n"),
+            ScriptedGitClient::applied("origin/main\n"),
+            ScriptedGitClient::applied("0\n"),
+            ScriptedGitClient::rejected("status unavailable"),
         ]);
 
         let result = get_repository_statuses::execute(vec![repo("api")], &runner).remove(0);
 
         assert_eq!(result.class(), StatusClass::Warn);
         assert_eq!(result.detail(), "status-unavailable");
+    }
+
+    #[test]
+    fn descendant_aware_statuses_inspect_children_first_and_preserve_output_order() {
+        let runner = ScriptedGitClient::new(vec![
+            ScriptedGitClient::applied("child\n"),
+            ScriptedGitClient::rejected("fatal: no upstream"),
+            ScriptedGitClient::applied(""),
+            ScriptedGitClient::applied("parent\n"),
+            ScriptedGitClient::rejected("fatal: no upstream"),
+            ScriptedGitClient::applied(""),
+        ]);
+        let parent = repo("parent");
+        let child = RepositoryTarget {
+            label: crate::utils::project_name("parent/child"),
+            path: crate::utils::repository_root("/repos/parent/child"),
+        };
+
+        let results = execute_with_known_descendants(vec![parent, child], &runner);
+
+        assert_eq!(results[0].name().as_ref(), "parent");
+        assert_eq!(results[1].name().as_ref(), "parent/child");
+        assert!(matches!(
+            results[0].repository(),
+            RepositoryStatus::Present {
+                head: StatusHead::Branch { name, .. },
+                ..
+            } if name.as_ref() == "parent"
+        ));
+        assert!(matches!(
+            results[1].repository(),
+            RepositoryStatus::Present {
+                head: StatusHead::Branch { name, .. },
+                ..
+            } if name.as_ref() == "child"
+        ));
     }
 }

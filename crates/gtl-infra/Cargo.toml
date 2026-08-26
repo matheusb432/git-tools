@@ -8,7 +8,6 @@ publish.workspace = true
 anyhow.workspace = true
 sample_project-client.workspace = true
 gtl-application.workspace = true
-command-group.workspace = true
 directories.workspace = true
 gtl-wire.workspace = true
 gtl-models.workspace = true

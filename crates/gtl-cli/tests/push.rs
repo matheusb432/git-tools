@@ -99,6 +99,15 @@ impl PushFixture {
         Ok(())
     }
 
+    fn write_untracked_file(&self, path: &str, contents: &str) -> Result<()> {
+        let path = self.repository.join(path);
+        let parent = path
+            .parent()
+            .context("untracked fixture file has a parent")?;
+        std::fs::create_dir_all(parent).context("create untracked fixture directory")?;
+        std::fs::write(path, contents).context("write untracked fixture file")
+    }
+
     fn run(&self, arguments: &[&str]) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_git-tools"));
         command.args(arguments).current_dir(&self.repository);
@@ -385,7 +394,7 @@ fn managed_report(fixture: &PushFixture, config: &Path) -> Result<serde_json::Va
 }
 
 #[test]
-fn push_modes_apply_exclusions_only_to_push_all() -> Result<()> {
+fn push_modes_apply_exclusions_and_commit_nested_untracked_files() -> Result<()> {
     let fixture = PushFixture::new()?;
     let project_catalogue = fixture.start_project_catalogue()?;
     let config = fixture.config_path("config.toml");
@@ -443,6 +452,24 @@ excluded_from_push_all = true
         .stdout(contains("review before pushing").not())
         .stdout(contains("push: pushed 1 commit(s)"))
         .stderr(contains("pass --yes").not());
+    assert_eq!(fixture.commits_unpushed_count()?, 0);
+
+    fixture.write_untracked_file("new-work/nested.txt", "new work\n")?;
+    fixture
+        .run(&["p", "--yes", "feat: add nested work"])
+        .env("GIT_TOOLS_CONFIG", &config)
+        .assert()
+        .success()
+        .stdout(contains("push: staged, committed, and pushed"));
+    assert_eq!(fixture.git(&["status", "--porcelain"])?, "");
+    assert_eq!(
+        fixture.git(&["log", "-1", "--format=%s"])?,
+        "feat: add nested work"
+    );
+    assert_eq!(
+        fixture.git(&["show", "origin/main:new-work/nested.txt"])?,
+        "new work"
+    );
     assert_eq!(fixture.commits_unpushed_count()?, 0);
 
     let recursive = PushFixture::new()?;

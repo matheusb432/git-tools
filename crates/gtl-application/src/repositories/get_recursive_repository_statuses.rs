@@ -47,7 +47,9 @@ pub fn execute(
     if repos.is_empty() {
         return Err(GetRecursiveRepositoryStatusesError::NoRepositories { root });
     }
-    Ok(get_repository_statuses::execute(repos, git))
+    Ok(get_repository_statuses::execute_with_known_descendants(
+        repos, git,
+    ))
 }
 
 #[cfg(test)]

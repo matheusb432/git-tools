@@ -1,6 +1,7 @@
 //! The production Git adapter.
 
 mod parsing;
+mod working_tree;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -10,8 +11,8 @@ use std::{
 use anyhow::Context as _;
 use gix::bstr::ByteSlice;
 use gtl_application::ports::{
-    CommitLogEntry, GitClient, GitCommitReceipt, GitDiffRequest, GitEffect, GitPushReceipt,
-    GitRepositoryState, GitWorkingTree,
+    GitClient, GitCommitReceipt, GitDiffRequest, GitEffect, GitPushReceipt, GitRepositoryState,
+    GitStatusSnapshot, GitStatusUpstream, GitWorkingTree, GitWorkingTreeSummary,
 };
 use gtl_models::{
     diffs::{Commit, CommitId},
@@ -25,7 +26,7 @@ use gtl_models::{
     worktrees::Worktree,
 };
 
-use self::parsing::{parse_local_tags, parse_remote_tags, parse_working_tree, parse_worktrees};
+use self::parsing::{parse_local_tags, parse_remote_tags, parse_worktrees};
 
 /// Production Git adapter using stable `gix` facade APIs with a private process fallback.
 #[derive(Debug, Clone, Copy, Default)]
@@ -43,7 +44,7 @@ impl GitClient for HybridGitClient {
         let Ok(repository) = gix::discover(dir) else {
             return Ok(GitRepositoryState::NotARepository);
         };
-        let Some(top_level) = repository.work_dir() else {
+        let Some(top_level) = repository.workdir() else {
             return Ok(GitRepositoryState::NotARepository);
         };
         let top_level = RepositoryRoot::try_new(
@@ -56,7 +57,7 @@ impl GitClient for HybridGitClient {
         let Ok(repository) = gix::discover(dir) else {
             return Ok(None);
         };
-        let Some(top_level) = repository.work_dir() else {
+        let Some(top_level) = repository.workdir() else {
             return Ok(None);
         };
         Ok(Some(RepositoryRoot::try_new(
@@ -71,28 +72,28 @@ impl GitClient for HybridGitClient {
     }
     fn current_branch(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitHead> {
         let repository = gix::discover(repo_path)?;
-        repository
-            .head_name()?
-            .map_or(Ok(GitHead::Detached), |name| {
-                BranchName::try_new(name.shorten().to_str_lossy().into_owned())
-                    .map(GitHead::Branch)
-                    .map_err(Into::into)
-            })
+        repository_head(&repository)
     }
     fn upstream(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<GitRefName>> {
-        effect_result(
-            repo_path,
-            &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-            |output| GitRefName::try_new(output.trim().to_owned()).map_err(Into::into),
-        )
+        let repository = gix::open(repo_path.as_ref())?;
+        let Some(upstream) = repository_upstream(&repository)? else {
+            return Ok(GitEffect::Rejected("current branch has no upstream".into()));
+        };
+        Ok(GitEffect::Applied(upstream))
     }
     fn branch_remote(
         &self,
         repo_path: &RepositoryRoot,
         branch: &BranchName,
     ) -> anyhow::Result<Option<RemoteName>> {
-        capture(repo_path, &["config", &format!("branch.{branch}.remote")])?
-            .map(RemoteName::try_new)
+        let repository = gix::open(repo_path.as_ref())?;
+        let branch_name: &str = branch.as_ref();
+        repository
+            .branch_remote_name(
+                branch_name.as_bytes().as_bstr(),
+                gix::remote::Direction::Fetch,
+            )
+            .map(|remote| RemoteName::try_new(remote.as_bstr().to_str_lossy().into_owned()))
             .transpose()
             .map_err(Into::into)
     }
@@ -101,8 +102,17 @@ impl GitClient for HybridGitClient {
         repo_path: &RepositoryRoot,
         remote: &RemoteName,
     ) -> anyhow::Result<Option<RemoteUrl>> {
-        capture(repo_path, &["remote", "get-url", remote.as_ref()])?
-            .map(RemoteUrl::try_new)
+        let repository = gix::open(repo_path.as_ref())?;
+        let remote_name: &str = remote.as_ref();
+        let Some(remote) = repository
+            .try_find_remote(remote_name.as_bytes().as_bstr())
+            .transpose()?
+        else {
+            return Ok(None);
+        };
+        remote
+            .url(gix::remote::Direction::Fetch)
+            .map(|url| RemoteUrl::try_new(url.to_bstring().to_str_lossy().into_owned()))
             .transpose()
             .map_err(Into::into)
     }
@@ -124,6 +134,19 @@ impl GitClient for HybridGitClient {
                 .map(CommitCount::new),
         )
     }
+    fn status_snapshot(
+        &self,
+        repo_path: &RepositoryRoot,
+    ) -> anyhow::Result<GitEffect<GitStatusSnapshot>> {
+        status_snapshot(repo_path, &BTreeMap::new())
+    }
+    fn status_snapshot_with_known_descendants(
+        &self,
+        repo_path: &RepositoryRoot,
+        known_descendants: &BTreeMap<RepositoryRoot, GitWorkingTreeSummary>,
+    ) -> anyhow::Result<GitEffect<GitStatusSnapshot>> {
+        status_snapshot(repo_path, known_descendants)
+    }
     fn ahead_behind(
         &self,
         repo_path: &RepositoryRoot,
@@ -141,27 +164,11 @@ impl GitClient for HybridGitClient {
             })
         }))
     }
-    fn is_ancestor(
-        &self,
-        repo_path: &RepositoryRoot,
-        ancestor: &GitRevision,
-        descendant: &GitRevision,
-    ) -> anyhow::Result<bool> {
-        succeeds(
-            repo_path,
-            &[
-                "merge-base",
-                "--is-ancestor",
-                ancestor.as_ref(),
-                descendant.as_ref(),
-            ],
-        )
-    }
     fn working_tree(
         &self,
         repo_path: &RepositoryRoot,
     ) -> anyhow::Result<GitEffect<GitWorkingTree>> {
-        effect_result(repo_path, &["status", "--porcelain"], parse_working_tree)
+        working_tree::read(repo_path).map(GitEffect::Applied)
     }
     fn worktrees(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<Vec<Worktree>>> {
         match effect(
@@ -199,32 +206,6 @@ impl GitClient for HybridGitClient {
             repo_path,
             &["ls-remote", "--tags", remote.as_ref()],
             parse_remote_tags,
-        )
-    }
-    fn brief_log(
-        &self,
-        repo_path: &RepositoryRoot,
-        range: &GitRange,
-    ) -> anyhow::Result<GitEffect<Vec<CommitLogEntry>>> {
-        match effect(
-            repo_path,
-            &["log", "--format=%H%x1f%s", range.as_ref()],
-            parse_brief_log,
-        )? {
-            GitEffect::Applied(commits) => commits.map(GitEffect::Applied),
-            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
-        }
-    }
-    fn diff_stat(
-        &self,
-        repo_path: &RepositoryRoot,
-        before: &GitRevision,
-        after: &GitRevision,
-    ) -> anyhow::Result<GitEffect<String>> {
-        effect(
-            repo_path,
-            &["diff", "--stat", before.as_ref(), after.as_ref()],
-            str::to_string,
         )
     }
     fn stage_all(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<()>> {
@@ -355,9 +336,6 @@ impl GitClient for HybridGitClient {
     fn diff(&self, repo_path: &RepositoryRoot, request: &GitDiffRequest) -> anyhow::Result<String> {
         crate::git_capture::diff(repo_path, request)
     }
-    fn root_commit(&self, repo_path: &RepositoryRoot) -> Option<CommitId> {
-        crate::git_capture::root_commit(repo_path)
-    }
     fn resolve_commit_id(
         &self,
         repo_path: &RepositoryRoot,
@@ -387,6 +365,54 @@ impl GitClient for HybridGitClient {
     ) -> Option<MachineTimestamp> {
         crate::git_capture::committed_at(repo_path, rev)
     }
+}
+
+fn status_snapshot(
+    repo_path: &RepositoryRoot,
+    known_descendants: &BTreeMap<RepositoryRoot, GitWorkingTreeSummary>,
+) -> anyhow::Result<GitEffect<GitStatusSnapshot>> {
+    let repository = gix::open(repo_path.as_ref()).context("open Git repository")?;
+    let head = repository_head(&repository)?;
+    let upstream = repository_upstream(&repository)?
+        .map(|reference| -> anyhow::Result<GitStatusUpstream> {
+            let ahead = capture(repo_path, &["rev-list", "--count", "@{u}..HEAD"])?
+                .and_then(|count| count.parse().ok())
+                .map(CommitCount::new)
+                .unwrap_or_default();
+            Ok(GitStatusUpstream { reference, ahead })
+        })
+        .transpose()?;
+    let working_tree =
+        working_tree::read_repository_with_known_descendants(&repository, known_descendants)?;
+    Ok(GitEffect::Applied(GitStatusSnapshot {
+        head,
+        upstream,
+        working_tree,
+    }))
+}
+
+fn repository_head(repository: &gix::Repository) -> anyhow::Result<GitHead> {
+    repository
+        .head_name()?
+        .map_or(Ok(GitHead::Detached), |name| {
+            BranchName::try_new(name.shorten().to_str_lossy().into_owned())
+                .map(GitHead::Branch)
+                .map_err(Into::into)
+        })
+}
+
+fn repository_upstream(repository: &gix::Repository) -> anyhow::Result<Option<GitRefName>> {
+    let Some(branch) = repository.head_name()? else {
+        return Ok(None);
+    };
+    let Some(upstream) =
+        repository.branch_remote_tracking_ref_name(branch.as_ref(), gix::remote::Direction::Fetch)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(GitRefName::try_new(
+        upstream?.shorten().to_str_lossy().into_owned(),
+    )?))
 }
 
 fn raw(repo_path: &Path, args: &[&str]) -> anyhow::Result<crate::git_process::GitProcessOutput> {
@@ -435,48 +461,4 @@ fn last_line(output: &str) -> Option<&str> {
         .rev()
         .map(str::trim)
         .find(|line| !line.is_empty())
-}
-
-fn parse_brief_log(output: &str) -> anyhow::Result<Vec<CommitLogEntry>> {
-    output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|line| {
-            let (raw_id, subject) = line
-                .split_once('\x1f')
-                .ok_or_else(|| anyhow::anyhow!("git log entry omitted its subject delimiter"))?;
-            let id: CommitId = raw_id.try_into()?;
-            Ok(CommitLogEntry {
-                id,
-                subject: subject.trim().to_owned(),
-            })
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::parse_brief_log;
-
-    #[test]
-    fn brief_log_retains_validated_full_commit_ids() {
-        let output = concat!(
-            "1111111111111111111111111111111111111111\x1ffeat: one\n",
-            "2222222222222222222222222222222222222222\x1ffix: two\n"
-        );
-
-        let commits = parse_brief_log(output).expect("valid brief log");
-        assert_eq!(
-            commits[0].id.to_string(),
-            "1111111111111111111111111111111111111111"
-        );
-        assert_eq!(commits[0].subject, "feat: one");
-        assert_eq!(
-            commits[1].id.to_string(),
-            "2222222222222222222222222222222222222222"
-        );
-        assert_eq!(commits[1].subject, "fix: two");
-        assert!(parse_brief_log("invalid\x1fsubject").is_err());
-    }
 }

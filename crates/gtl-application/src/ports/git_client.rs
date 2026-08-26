@@ -63,11 +63,44 @@ pub struct GitWorkingTree {
     pub unprepared: PathCount,
 }
 
-/// One validated commit and subject returned by a brief Git log.
+/// Whether a completed repository snapshot found working-tree changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitWorkingTreeSummary {
+    /// No staged, unstaged, or untracked files were found.
+    Clean,
+    /// At least one staged, unstaged, or untracked file was found.
+    Dirty,
+}
+
+impl GitWorkingTreeSummary {
+    /// Collapses a completed working-tree snapshot to clean or dirty.
+    pub fn from_working_tree(working_tree: &GitWorkingTree) -> Self {
+        if working_tree.files.is_empty() {
+            Self::Clean
+        } else {
+            Self::Dirty
+        }
+    }
+
+    /// Returns whether the snapshot contained any working-tree changes.
+    pub const fn is_dirty(self) -> bool {
+        matches!(self, Self::Dirty)
+    }
+}
+
+/// Upstream facts collected with a repository status snapshot.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommitLogEntry {
-    pub id: CommitId,
-    pub subject: String,
+pub struct GitStatusUpstream {
+    pub reference: GitRefName,
+    pub ahead: CommitCount,
+}
+
+/// Branch, upstream, and working-tree facts collected by one Git status operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitStatusSnapshot {
+    pub head: GitHead,
+    pub upstream: Option<GitStatusUpstream>,
+    pub working_tree: GitWorkingTree,
 }
 
 /// Classification of a path as a working-tree repository.
@@ -124,18 +157,50 @@ pub trait GitClient: Clone + Send + Sync + 'static {
         range: &GitRange,
     ) -> anyhow::Result<Option<CommitCount>>;
 
+    /// Reads the facts needed to classify one repository status.
+    fn status_snapshot(
+        &self,
+        repo_path: &RepositoryRoot,
+    ) -> anyhow::Result<GitEffect<GitStatusSnapshot>> {
+        let head = self.current_branch(repo_path)?;
+        let upstream = match &head {
+            GitHead::Detached => None,
+            GitHead::Branch(_) => match self.upstream(repo_path) {
+                Ok(GitEffect::Applied(reference)) => Some(GitStatusUpstream {
+                    reference,
+                    ahead: self
+                        .commit_count(repo_path, &GitRange::upstream_to_head())
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default(),
+                }),
+                Ok(GitEffect::Rejected(_)) | Err(_) => None,
+            },
+        };
+        match self.working_tree(repo_path)? {
+            GitEffect::Applied(working_tree) => Ok(GitEffect::Applied(GitStatusSnapshot {
+                head,
+                upstream,
+                working_tree,
+            })),
+            GitEffect::Rejected(detail) => Ok(GitEffect::Rejected(detail)),
+        }
+    }
+
+    /// Reads one status snapshot while allowing adapters to reuse completed descendant states.
+    fn status_snapshot_with_known_descendants(
+        &self,
+        repo_path: &RepositoryRoot,
+        _known_descendants: &BTreeMap<RepositoryRoot, GitWorkingTreeSummary>,
+    ) -> anyhow::Result<GitEffect<GitStatusSnapshot>> {
+        self.status_snapshot(repo_path)
+    }
+
     fn ahead_behind(
         &self,
         repo_path: &RepositoryRoot,
         range: &GitRange,
     ) -> anyhow::Result<Option<AheadBehind>>;
-
-    fn is_ancestor(
-        &self,
-        repo_path: &RepositoryRoot,
-        ancestor: &GitRevision,
-        descendant: &GitRevision,
-    ) -> anyhow::Result<bool>;
 
     fn working_tree(&self, repo_path: &RepositoryRoot)
     -> anyhow::Result<GitEffect<GitWorkingTree>>;
@@ -152,19 +217,6 @@ pub trait GitClient: Clone + Send + Sync + 'static {
         repo_path: &RepositoryRoot,
         remote: &RemoteName,
     ) -> anyhow::Result<GitEffect<BTreeMap<TagName, GitObjectId>>>;
-
-    fn brief_log(
-        &self,
-        repo_path: &RepositoryRoot,
-        range: &GitRange,
-    ) -> anyhow::Result<GitEffect<Vec<CommitLogEntry>>>;
-
-    fn diff_stat(
-        &self,
-        repo_path: &RepositoryRoot,
-        before: &GitRevision,
-        after: &GitRevision,
-    ) -> anyhow::Result<GitEffect<String>>;
 
     fn stage_all(&self, repo_path: &RepositoryRoot) -> anyhow::Result<GitEffect<()>>;
 
@@ -246,9 +298,6 @@ pub trait GitClient: Clone + Send + Sync + 'static {
 
     /// A unified diff or changed-path listing for a revision range.
     fn diff(&self, repo_path: &RepositoryRoot, request: &GitDiffRequest) -> anyhow::Result<String>;
-
-    /// The repository's stable oldest root commit, or `None` when it has no commits.
-    fn root_commit(&self, repo_path: &RepositoryRoot) -> Option<CommitId>;
 
     /// Resolves `rev` to its full validated commit ID.
     fn resolve_commit_id(

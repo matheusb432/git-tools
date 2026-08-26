@@ -5,7 +5,6 @@ use gtl_application::ports::TextEditorClient;
 use gtl_models::paths::RepositoryRoot;
 
 mod git;
-mod process;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GitTextEditorClient;

@@ -74,7 +74,11 @@ getrandom = "0.4.3"
 flate2 = { version = "1.1.9", default-features = false, features = [
   "rust_backend",
 ] }
-gix = { version = "0.56", default-features = false, features = ["revision"] }
+gix = { version = "0.87.1", default-features = false, features = [
+  "revision",
+  "sha1",
+  "status",
+] }
 ico = "0.5"
 image = { version = "0.25", default-features = false, features = ["png"] }
 indicatif = { version = "0.18.6", default-features = false }

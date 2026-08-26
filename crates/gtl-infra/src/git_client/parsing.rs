@@ -1,42 +1,14 @@
 use std::collections::BTreeMap;
 
 use anyhow::Context as _;
-use gtl_application::ports::GitWorkingTree;
 use gtl_models::{
     diffs::CommitId,
     git::{BranchName, GitObjectId, TagName},
-    paths::{RepositoryRelativePath, RepositoryRoot},
-    repository::working_tree::CommitFile,
+    paths::RepositoryRoot,
     tags::Tag,
     timestamps::MachineTimestamp,
     worktrees::{Worktree, WorktreeCheckout, WorktreeKind},
 };
-
-pub(super) fn parse_working_tree(raw: &str) -> anyhow::Result<GitWorkingTree> {
-    let mut tree = GitWorkingTree::default();
-    for line in raw.lines().filter(|line| !line.is_empty()) {
-        let bytes = line.as_bytes();
-        if bytes.len() < 2 {
-            continue;
-        }
-        tree.files.push(CommitFile {
-            status: line.get(0..2).unwrap_or("").trim().to_string(),
-            path: RepositoryRelativePath::try_new(line.get(3..).unwrap_or("").into())?,
-        });
-        let (index, worktree) = (bytes[0], bytes[1]);
-        if index == b'?' && worktree == b'?' {
-            tree.unprepared.increment();
-        } else {
-            if index != b' ' {
-                tree.staged.increment();
-            }
-            if worktree != b' ' {
-                tree.unprepared.increment();
-            }
-        }
-    }
-    Ok(tree)
-}
 
 struct WorktreeBuilder {
     path: RepositoryRoot,
@@ -175,22 +147,7 @@ pub(super) fn parse_remote_tags(output: &str) -> anyhow::Result<BTreeMap<TagName
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_local_tags, parse_working_tree};
-
-    #[test]
-    fn porcelain_status_becomes_a_semantic_working_tree() {
-        let tree = parse_working_tree("M  staged\n M changed\nMM both\n?? new\n")
-            .expect("valid repository-relative status paths");
-
-        assert_eq!(tree.files.len(), 4);
-        assert_eq!(tree.staged.value(), 2);
-        assert_eq!(tree.unprepared.value(), 3);
-    }
-
-    #[test]
-    fn porcelain_status_rejects_parent_traversal() {
-        assert!(parse_working_tree("M  ../outside\n").is_err());
-    }
+    use super::parse_local_tags;
 
     #[test]
     fn local_tags_reject_an_invalid_resolved_commit_id() {
