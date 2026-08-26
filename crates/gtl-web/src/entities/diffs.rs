@@ -7,11 +7,16 @@ mod rows;
 #[cfg(feature = "desktop")]
 pub(crate) mod viewer_server;
 
+#[cfg(test)]
+pub(crate) use client_diff::ClientDiffRows;
+#[cfg(feature = "artifact")]
+pub(crate) use client_diff::static_diff_workspace;
 #[cfg(feature = "desktop")]
 pub(crate) use client_diff::use_client_diff_workspace;
-pub(crate) use client_diff::{ClientDiffFile, ClientDiffFileState, ClientDiffRows};
-#[cfg(feature = "artifact")]
-pub(crate) use client_diff::{ClientDiffWorkspace, static_diff_workspace};
+pub(crate) use client_diff::{
+    ClientDiffFile, ClientDiffFileState, ClientDiffFileStoreExt, ClientDiffRowsStoreExt,
+    ClientDiffWorkspace, ClientDiffWorkspaceStoreExt,
+};
 #[cfg(feature = "desktop")]
 pub(crate) use commit_pages::use_viewer_commit_pages;
 #[cfg(feature = "desktop")]
@@ -20,10 +25,7 @@ pub(crate) use diff_history::history_navigation;
 use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout, ViewerRecipeKind, ViewerTheme};
 #[cfg(feature = "desktop")]
 pub(crate) use rows::ViewerRowEvent;
-pub(crate) use rows::{
-    ViewerCodeLine, ViewerCodeSpan, ViewerSplitCell, ViewerSplitRow, ViewerSyntaxClass,
-    ViewerUnifiedRow, ViewerUnifiedSourceRow,
-};
+pub(crate) use rows::{ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow};
 #[cfg(feature = "desktop")]
 pub(crate) const fn theme_value(theme: ViewerTheme) -> &'static str {
     theme.as_str()

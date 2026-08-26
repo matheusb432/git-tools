@@ -4,38 +4,41 @@ mod file;
 
 use dioxus::prelude::*;
 use gtl_models::viewer::ViewerTabId;
-use gtl_wire::viewer::{ViewerActiveView, ViewerDiffFileId, ViewerViewIdentity};
+use gtl_wire::viewer::{ViewerDiffFileId, ViewerViewIdentity};
 
 use self::file::DiffFileCard;
-#[cfg(feature = "artifact")]
-use crate::entities::diffs::ClientDiffWorkspace;
 #[cfg(feature = "desktop")]
 use crate::entities::diffs::use_client_diff_workspace;
 #[cfg(feature = "desktop")]
 use crate::shared::ui::use_toast;
-use crate::{entities::diffs::ClientDiffFile, shared::ui::EmptyNotice};
+use crate::{
+    entities::diffs::{ClientDiffFileStoreExt, ClientDiffWorkspace, ClientDiffWorkspaceStoreExt},
+    shared::ui::EmptyNotice,
+};
 
 #[cfg(feature = "desktop")]
 #[component]
-pub(crate) fn ClientDiffDocument(
-    view: ViewerActiveView,
-    folded: Option<bool>,
-    copy_context_enabled: bool,
-    flashing_file: Option<String>,
-    onopen: Option<EventHandler<ViewerDiffFileId>>,
-) -> Element {
-    let workspace = use_client_diff_workspace(view.identity, &view.files);
+pub(crate) fn ClientDiffDocument(onopen: Option<EventHandler<ViewerDiffFileId>>) -> Element {
+    let diff = super::diff_workspace::use_workspace_context();
+    let view = diff.view;
+    let workspace = use_client_diff_workspace(view);
     let toast = use_toast();
-    let current = workspace.read();
-    let is_loading = current.is_loading();
+    let workspace_store = workspace.workspace();
+    use_context_provider(|| workspace_store);
+    let is_loading = use_memo(move || {
+        workspace_store.files().iter().any(|file| {
+            *file.state().read() == crate::entities::diffs::ClientDiffFileState::Loading
+        })
+    });
     let retry_allowed = !workspace.row_stream_active();
+    let (title, identity) = view.with(|view| (view.title.clone(), view.identity));
 
     rsx! {
         section {
             class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
             aria_label: "Rendered diff",
             oncopy: move |event: ClipboardEvent| {
-                if !copy_context_enabled {
+                if !(diff.copy_context_enabled)() {
                     return;
                 }
                 let Some(message) = copy_context::copy_selected_diff_lines(&event) else {
@@ -43,16 +46,16 @@ pub(crate) fn ClientDiffDocument(
                 };
                 toast.ok(message);
             },
-            if is_loading {
+            if is_loading() {
                 DiffStreamingNotice {}
             }
             DiffDocumentBody {
-                title: view.title,
-                files: current.files,
-                identity: view.identity,
-                folded,
-                flashing_file,
-                is_loading,
+                title,
+                workspace: workspace_store,
+                identity,
+                folded: diff.files_folded,
+                flashing_file: diff.flashing_file,
+                is_loading: is_loading(),
                 retry_allowed,
                 onopen,
                 onretry: move |file_id| workspace.retry_file(file_id),
@@ -64,25 +67,27 @@ pub(crate) fn ClientDiffDocument(
 
 #[cfg(feature = "artifact")]
 #[component]
-pub(crate) fn StaticDiffDocument(
-    view: ViewerActiveView,
-    workspace: ClientDiffWorkspace,
-) -> Element {
+pub(crate) fn StaticDiffDocument(workspace: ClientDiffWorkspace) -> Element {
+    let diff = super::diff_workspace::use_workspace_context();
+    let workspace = use_store(move || workspace);
+    use_context_provider(|| workspace);
+    let title = diff.view.read().title.clone();
+    let identity = workspace.identity().cloned();
     rsx! {
         section {
             class: "relative col-start-2 row-start-2 h-full min-h-0 min-w-0 overflow-hidden bg-bg",
             aria_label: "Rendered diff",
             DiffDocumentBody {
-                title: view.title,
-                files: workspace.files,
-                identity: workspace.identity,
-                folded: None,
-                flashing_file: None,
+                title,
+                workspace,
+                identity,
+                folded: diff.files_folded,
+                flashing_file: diff.flashing_file,
                 is_loading: false,
                 retry_allowed: false,
                 onopen: None,
                 onretry: move |_file_id| {},
-                artifact_tab_id: Some(workspace.identity.tab_id),
+                artifact_tab_id: Some(identity.tab_id),
             }
         }
     }
@@ -102,10 +107,10 @@ fn DiffStreamingNotice() -> Element {
 #[component]
 fn DiffDocumentBody(
     title: String,
-    files: Vec<ClientDiffFile>,
+    workspace: ReadStore<ClientDiffWorkspace>,
     identity: ViewerViewIdentity,
-    folded: Option<bool>,
-    flashing_file: Option<String>,
+    folded: ReadSignal<Option<bool>>,
+    flashing_file: ReadSignal<Option<String>>,
     is_loading: bool,
     retry_allowed: bool,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
@@ -134,22 +139,20 @@ fn DiffDocumentBody(
             "data-view-identity": view_identity,
             "data-layout": layout.as_str(),
             "data-density": density.as_str(),
-            if files.is_empty() {
+            if workspace.files().is_empty() {
                 EmptyNotice { "no file changes" }
             }
-            for (index, file) in files.into_iter().enumerate() {
+            for (index, file) in workspace.files().iter().enumerate() {
                 {
-                    let file_id = file.summary.id.clone();
-                    let is_flashing = flashing_file.as_deref()
-                        == Some(file.summary.anchor_id.as_str());
+                    let file_id = file.summary().peek().id.clone();
                     rsx! {
                         DiffFileCard {
-                            key: "{file.summary.id.as_str()}",
+                            key: "{file_id.as_str()}",
                             file,
                             layout,
                             density,
                             folded,
-                            is_flashing,
+                            flashing_file,
                             onopen,
                             onretry: move |()| onretry.call(file_id.clone()),
                             retry_allowed,

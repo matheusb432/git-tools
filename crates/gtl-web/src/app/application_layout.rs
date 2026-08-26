@@ -186,6 +186,7 @@ pub(crate) enum ViewerShellReplacement {
 #[derive(Clone, Copy)]
 pub(crate) struct ViewerContext {
     shell: Signal<ViewerShellLoad>,
+    shell_reader: ReadSignal<ViewerShellLoad>,
     connection: Signal<ViewerConnection>,
     shell_order: Signal<ViewerShellOrder>,
     reconnect_generation: Signal<u64>,
@@ -195,8 +196,8 @@ pub(crate) struct ViewerContext {
 }
 
 impl ViewerContext {
-    pub(crate) fn read(self) -> ViewerShellLoad {
-        (self.shell)()
+    pub(crate) fn shell(self) -> ReadSignal<ViewerShellLoad> {
+        self.shell_reader
     }
 
     pub(crate) fn replace_shell(self, shell: ViewerShell) {
@@ -369,6 +370,7 @@ pub(crate) fn ApplicationLayout() -> Element {
 #[component]
 fn ApplicationLayoutContent() -> Element {
     let shell = use_signal(|| ViewerShellLoad::Loading);
+    let shell_reader = use_hook(move || shell.into());
     let connection = use_signal(|| ViewerConnection::Connecting);
     let shell_order = use_signal(ViewerShellOrder::default);
     let reconnect_generation = use_signal(|| 0_u64);
@@ -378,6 +380,7 @@ fn ApplicationLayoutContent() -> Element {
     let toast = use_toast();
     let context = ViewerContext {
         shell,
+        shell_reader,
         connection,
         shell_order,
         reconnect_generation,
@@ -436,9 +439,10 @@ fn ApplicationLayoutContent() -> Element {
         }
     });
 
-    let state = context.read();
+    let shell = context.shell();
+    let state = shell.read();
     let connection = context.connection();
-    let theme = match &state {
+    let theme = match &*state {
         ViewerShellLoad::Ready(shell) => shell.preferences.theme,
         ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => ViewerTheme::Dark,
     };

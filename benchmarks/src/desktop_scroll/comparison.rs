@@ -23,6 +23,8 @@ pub struct FrameGapComparison {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DesktopScrollComparison {
+    pub readiness_wall_time_milliseconds: MetricDelta,
+    pub readiness_process_cpu_time_milliseconds: MetricDelta,
     pub changed_files: PanelComparison,
     pub commits: PanelComparison,
     pub peak_rss_bytes: MetricDelta,
@@ -86,6 +88,8 @@ pub enum DesktopScrollComparisonError {
     },
     #[error("{report} desktop scroll report has no launches")]
     MissingLaunches { report: DesktopScrollReportRole },
+    #[error("{report} desktop scroll report has a zero process CPU clock frequency")]
+    InvalidProcessCpuClockFrequency { report: DesktopScrollReportRole },
     #[error(
         "{report} desktop scroll report contains {actual} launches but its protocol records {expected}"
     )]
@@ -210,6 +214,24 @@ pub fn compare_reports(
     let current_commits = panel_metrics(current, DesktopScrollPanel::Commits);
 
     Ok(DesktopScrollComparison {
+        readiness_wall_time_milliseconds: MetricDelta::between(
+            median_u64_as_f64(
+                baseline
+                    .launches
+                    .iter()
+                    .map(|launch| launch.readiness.wall_time_milliseconds),
+            ),
+            median_u64_as_f64(
+                current
+                    .launches
+                    .iter()
+                    .map(|launch| launch.readiness.wall_time_milliseconds),
+            ),
+        ),
+        readiness_process_cpu_time_milliseconds: MetricDelta::between(
+            process_cpu_time_milliseconds(baseline),
+            process_cpu_time_milliseconds(current),
+        ),
         changed_files: compare_panels(baseline_changed_files, current_changed_files),
         commits: compare_panels(baseline_commits, current_commits),
         peak_rss_bytes: MetricDelta::between(
@@ -256,6 +278,13 @@ fn validate_report(
             report: report_role,
         });
     }
+    if report.protocol.process_cpu_clock_ticks_per_second == 0 {
+        return Err(
+            DesktopScrollComparisonError::InvalidProcessCpuClockFrequency {
+                report: report_role,
+            },
+        );
+    }
     if report.launches.len() != report.protocol.independent_launches {
         return Err(DesktopScrollComparisonError::LaunchCountMismatch {
             report: report_role,
@@ -274,7 +303,7 @@ fn validate_report(
             });
         }
         let memory_snapshots = [
-            &launch.readiness_memory,
+            &launch.readiness.peak_memory,
             &launch.memory_after_changed_files,
             &launch.memory_after_commits,
         ];
@@ -411,13 +440,34 @@ fn u64_to_f64(value: u64) -> f64 {
     f64::from(high).mul_add(4_294_967_296.0, f64::from(low))
 }
 
+fn median_u64_as_f64(values: impl Iterator<Item = u64>) -> f64 {
+    let mut values = values.collect::<Vec<_>>();
+    values.sort_unstable();
+    let middle = values.len() / 2;
+    if values.len() % 2 == 0 {
+        f64::midpoint(u64_to_f64(values[middle - 1]), u64_to_f64(values[middle]))
+    } else {
+        u64_to_f64(values[middle])
+    }
+}
+
+fn process_cpu_time_milliseconds(report: &DesktopScrollReport) -> f64 {
+    median_u64_as_f64(
+        report
+            .launches
+            .iter()
+            .map(|launch| launch.readiness.process_cpu_clock_ticks),
+    ) / u64_to_f64(report.protocol.process_cpu_clock_ticks_per_second)
+        * 1_000.0
+}
+
 fn peak_rss_bytes(report: &DesktopScrollReport) -> u64 {
     report
         .launches
         .iter()
         .flat_map(|launch| {
             [
-                launch.readiness_memory.rss_bytes,
+                launch.readiness.peak_memory.rss_bytes,
                 launch.memory_after_changed_files.rss_bytes,
                 launch.memory_after_commits.rss_bytes,
             ]
@@ -431,8 +481,8 @@ mod tests {
     use super::*;
     use crate::desktop_scroll::{
         DesktopScrollBenchmarkProtocol, DesktopScrollLaunch, DesktopScrollProcessMemory,
-        DesktopScrollResourceBounds, DesktopScrollRunner, DesktopScrollSource,
-        DesktopScrollSystemConditions, DesktopScrollWindow, ScrollProtocol,
+        DesktopScrollReadinessSample, DesktopScrollResourceBounds, DesktopScrollRunner,
+        DesktopScrollSource, DesktopScrollSystemConditions, DesktopScrollWindow, ScrollProtocol,
     };
 
     #[test]
@@ -440,16 +490,33 @@ mod tests {
         let baseline = report(
             [vec![10.0, 20.0], vec![30.0, 40.0], vec![25.0, 35.0]],
             [vec![16.0, 16.0], vec![16.0, 16.0], vec![16.0, 16.0]],
+            [900, 1_000, 1_100],
+            [90, 100, 110],
             [100, 120, 110],
         );
         let current = report(
             [vec![20.0, 30.0], vec![40.0, 50.0], vec![35.0, 45.0]],
             [vec![17.0, 17.0], vec![17.0, 17.0], vec![17.0, 17.0]],
+            [700, 800, 900],
+            [70, 80, 90],
             [140, 150, 145],
         );
 
         let comparison = compare_reports(&baseline, &current).expect("reports are compatible");
 
+        assert_close(
+            comparison.readiness_wall_time_milliseconds.baseline,
+            1_000.0,
+        );
+        assert_close(comparison.readiness_wall_time_milliseconds.current, 800.0);
+        assert_close(
+            comparison.readiness_process_cpu_time_milliseconds.baseline,
+            1_000.0,
+        );
+        assert_close(
+            comparison.readiness_process_cpu_time_milliseconds.current,
+            800.0,
+        );
         assert_eq!(
             comparison.changed_files.frame_gap_ms.p50,
             MetricDelta {
@@ -481,10 +548,14 @@ mod tests {
             [vec![0.0], vec![0.0], vec![0.0]],
             [vec![0.0], vec![0.0], vec![0.0]],
             [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0],
         );
         let current = report(
             [vec![1.0], vec![1.0], vec![1.0]],
             [vec![1.0], vec![1.0], vec![1.0]],
+            [1, 1, 1],
+            [1, 1, 1],
             [1, 1, 1],
         );
 
@@ -499,6 +570,12 @@ mod tests {
             None
         );
         assert_eq!(comparison.peak_rss_bytes.relative_change_percent, None);
+        assert_eq!(
+            comparison
+                .readiness_process_cpu_time_milliseconds
+                .relative_change_percent,
+            None
+        );
     }
 
     #[test]
@@ -562,10 +639,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn zero_process_cpu_clock_frequency_is_rejected() {
+        let baseline = standard_report();
+        let mut current = standard_report();
+        current.protocol.process_cpu_clock_ticks_per_second = 0;
+
+        assert_eq!(
+            compare_reports(&baseline, &current),
+            Err(
+                DesktopScrollComparisonError::InvalidProcessCpuClockFrequency {
+                    report: DesktopScrollReportRole::Current,
+                }
+            )
+        );
+    }
+
     fn standard_report() -> DesktopScrollReport {
         report(
             [vec![16.0], vec![16.0], vec![16.0]],
             [vec![16.0], vec![16.0], vec![16.0]],
+            [1_000, 1_000, 1_000],
+            [100, 100, 100],
             [100, 100, 100],
         )
     }
@@ -573,6 +668,8 @@ mod tests {
     fn report(
         changed_files_gaps: [Vec<f64>; 3],
         commit_gaps: [Vec<f64>; 3],
+        readiness_wall_time_milliseconds: [u64; 3],
+        readiness_process_cpu_clock_ticks: [u64; 3],
         peak_rss_bytes: [u64; 3],
     ) -> DesktopScrollReport {
         let launches = changed_files_gaps
@@ -590,9 +687,13 @@ mod tests {
                         width: 1_200,
                         height: 700,
                     },
-                    readiness_memory: memory(peak_rss_bytes.saturating_sub(2)),
+                    readiness: DesktopScrollReadinessSample {
+                        wall_time_milliseconds: readiness_wall_time_milliseconds[index],
+                        process_cpu_clock_ticks: readiness_process_cpu_clock_ticks[index],
+                        peak_memory: memory(peak_rss_bytes),
+                    },
                     changed_files: sample("changed-files", changed_files),
-                    memory_after_changed_files: memory(peak_rss_bytes),
+                    memory_after_changed_files: memory(peak_rss_bytes.saturating_sub(2)),
                     commits: sample("commits", commits),
                     memory_after_commits: memory(peak_rss_bytes.saturating_sub(1)),
                 },
@@ -618,6 +719,7 @@ mod tests {
                 expected_density: "compact".to_owned(),
                 readiness: "complete production view".to_owned(),
                 memory_attribution: "server and viewer process trees".to_owned(),
+                process_cpu_clock_ticks_per_second: 100,
                 script_timeout_seconds: 30,
                 scroll: ScrollProtocol {
                     distance_css_pixels: 160,

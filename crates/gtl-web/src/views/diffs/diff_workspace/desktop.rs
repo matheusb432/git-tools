@@ -3,14 +3,13 @@ use gtl_models::diffs::CommitId;
 use gtl_web_contracts::test_ids;
 use gtl_wire::viewer::{
     CommitSelectionAction, OpenViewerDiffFile, SetViewerPreference, ViewerActiveState,
-    ViewerActiveView, ViewerPreferences, ViewerShell, ViewerTabKind, ViewerTabRequest,
-    make_commit_selection_action,
+    ViewerActiveView, ViewerTabKind, ViewerTabRequest, make_commit_selection_action,
 };
 use lucide_dioxus::{FileDiff, LoaderCircle, RefreshCw};
 
 use super::{
     DiffWorkspaceDocument, MobilePanel,
-    commits_panel::CommitsPanel,
+    commits_panel::WorkspaceCommitsPanel,
     display_controls::{DisplayControls, MobilePanelButton},
     files_panel::FilesPanel,
     titlebar::{ViewActions, ViewActionsLayout},
@@ -31,7 +30,7 @@ use crate::{
 #[component]
 pub(crate) fn DiffWorkspaceView() -> Element {
     let viewer = use_context::<ViewerContext>();
-    let shell = viewer.read();
+    let shell = viewer.shell();
 
     use_effect(move || {
         browser::focus_element("workspace-heading".into());
@@ -41,7 +40,7 @@ pub(crate) fn DiffWorkspaceView() -> Element {
         document::Title { "Viewer - git-tools" }
         main { class: "grid h-full min-h-0 grid-rows-[minmax(0,1fr)] overflow-hidden bg-bg",
             h1 { id: "workspace-heading", class: "sr-only", tabindex: "-1", "Diff viewer" }
-            match shell {
+            match &*shell.read() {
                 ViewerShellLoad::Loading => rsx! {
                     WorkspaceLoading {}
                 },
@@ -60,7 +59,7 @@ pub(crate) fn DiffWorkspaceView() -> Element {
                         }
                     }
                 }
-                ViewerShellLoad::Ready(shell) => rsx! {
+                ViewerShellLoad::Ready(_) => rsx! {
                     WorkspaceShell { shell }
                 },
             }
@@ -94,7 +93,12 @@ fn WorkspaceLoading() -> Element {
 }
 
 #[component]
-fn WorkspaceShell(shell: ViewerShell) -> Element {
+fn WorkspaceShell(shell: ReadSignal<ViewerShellLoad>) -> Element {
+    let view = use_hook(move || shell.map(ready_active_view));
+    let shell_state = shell.read();
+    let ViewerShellLoad::Ready(shell_state) = &*shell_state else {
+        return rsx! {};
+    };
     rsx! {
         section {
             id: "viewer-active-view",
@@ -102,7 +106,7 @@ fn WorkspaceShell(shell: ViewerShell) -> Element {
             role: "tabpanel",
             aria_label: "Active diff",
             div { class: "min-h-0 flex-1 overflow-hidden",
-                match shell.active {
+                match &shell_state.active {
                     ViewerActiveState::Empty => rsx! {
                         EmptyWorkspace {}
                     },
@@ -110,26 +114,33 @@ fn WorkspaceShell(shell: ViewerShell) -> Element {
                         PendingWorkspace {}
                     },
                     ViewerActiveState::Broken { code, message, .. } => rsx! {
-                        WorkspaceFailure { title: format!("Render stopped ({})", code.as_str()), message }
+                        WorkspaceFailure {
+                            title: format!("Render stopped ({})", code.as_str()),
+                            message: message.clone(),
+                        }
                     },
                     ViewerActiveState::Error { message, .. } => rsx! {
-                        WorkspaceFailure { title: "Render failed".to_owned(), message }
+                        WorkspaceFailure { title: "Render failed".to_owned(), message: message.clone() }
                     },
-                    ViewerActiveState::Ready { view } => {
-                        let is_live = shell
-                            .tabs
-                            .iter()
-                            .any(|tab| {
-                                tab.id == view.identity.tab_id && tab.kind == ViewerTabKind::Live
-                            });
-                        rsx! {
-                            ReadyWorkspace { view: *view, preferences: shell.preferences, is_live }
-                        }
-                    }
+                    ViewerActiveState::Ready { .. } => rsx! {
+                        ReadyWorkspace { view, shell }
+                    },
                 }
             }
         }
     }
+}
+
+// The mapped signal is created only for the parent branch that owns a ready active view.
+#[allow(clippy::unreachable)]
+fn ready_active_view(shell: &ViewerShellLoad) -> &ViewerActiveView {
+    let ViewerShellLoad::Ready(shell) = shell else {
+        unreachable!("the ready workspace is mounted only for a ready shell");
+    };
+    let ViewerActiveState::Ready { view } = &shell.active else {
+        unreachable!("the ready workspace is mounted only for a ready active view");
+    };
+    view
 }
 
 #[component]
@@ -178,9 +189,8 @@ fn WorkspaceFailure(title: String, message: String) -> Element {
 
 #[component]
 fn ReadyWorkspace(
-    mut view: ViewerActiveView,
-    preferences: ViewerPreferences,
-    is_live: bool,
+    view: ReadSignal<ViewerActiveView>,
+    shell: ReadSignal<ViewerShellLoad>,
 ) -> Element {
     let viewer = use_context::<ViewerContext>();
     let toast = use_toast();
@@ -188,21 +198,36 @@ fn ReadyWorkspace(
     let mut delete_pending = use_signal(|| false);
     let mut delete_trigger_id = use_signal(|| "delete-live-view-desktop".to_owned());
     let mut mobile_panel = use_signal(|| None::<MobilePanel>);
-    let mut file_filter = use_signal(String::new);
-    let mut files_folded = use_signal(|| None::<bool>);
-    let mut copy_context_enabled = use_signal(|| true);
+    let file_filter = use_signal(String::new);
+    let files_folded = use_signal(|| None::<bool>);
+    let copy_context_enabled = use_signal(|| true);
     let mut flashing_file = use_signal(|| None::<String>);
-    let tab_id = view.identity.tab_id;
-    let identity = view.identity;
-    let commit_pages = use_viewer_commit_pages(identity, view.commit_count);
-    let loaded_commit_pages = commit_pages.read();
-    view.commits.clone_from(&loaded_commit_pages.commits);
-    let commits_loading = loaded_commit_pages.is_loading();
-    let commits_error = loaded_commit_pages
-        .error()
-        .map(|error| error.message().to_owned());
-    let commits_has_more = loaded_commit_pages.has_more();
-    let onload_commits = use_callback(move |()| commit_pages.load_next(identity));
+    let commit_pages = use_viewer_commit_pages(view);
+    let _workspace = super::use_diff_workspace_context(
+        view,
+        commit_pages.commits(),
+        file_filter,
+        files_folded,
+        copy_context_enabled,
+        flashing_file,
+    );
+    let (tab_id, identity) = view.with(|view| (view.identity.tab_id, view.identity));
+    let ready_shell = shell.with(|shell| {
+        let ViewerShellLoad::Ready(shell) = shell else {
+            return None;
+        };
+        Some((
+            shell.preferences,
+            shell
+                .tabs
+                .iter()
+                .any(|tab| tab.id == tab_id && tab.kind == ViewerTabKind::Live),
+        ))
+    });
+    let commits_loading = commit_pages.is_loading();
+    let commits_error = commit_pages.error().map(|error| error.message().to_owned());
+    let commits_has_more = commit_pages.has_more();
+    let onload_commits = use_callback(move |()| commit_pages.load_next());
 
     let onpreference = move |preference: SetViewerPreference| viewer.set_preference(preference);
     let onrefresh = move |_| viewer.refresh_tab(tab_id);
@@ -217,8 +242,8 @@ fn ReadyWorkspace(
         });
     });
 
-    let commit_selection = view.commit_selection.clone();
     let onselect_commit = use_callback(move |id: CommitId| {
+        let commit_selection = view.peek().commit_selection.clone();
         match make_commit_selection_action(&commit_selection, tab_id, id) {
             CommitSelectionAction::FetchCommit(request) => {
                 spawn(async move {
@@ -251,6 +276,9 @@ fn ReadyWorkspace(
                 toast.error(error.message());
             }
         });
+    };
+    let Some((preferences, is_live)) = ready_shell else {
+        return rsx! {};
     };
     rsx! {
         section { class: "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden",
@@ -299,22 +327,9 @@ fn ReadyWorkspace(
             }
 
             DiffWorkspaceDocument {
-                view: view.clone(),
                 diff_document: rsx! {
-                    ClientDiffDocument {
-                        view: view.clone(),
-                        folded: files_folded(),
-                        copy_context_enabled: copy_context_enabled(),
-                        flashing_file: flashing_file(),
-                        onopen,
-                    }
+                    ClientDiffDocument { onopen }
                 },
-                files_folded: files_folded(),
-                copy_context_enabled: copy_context_enabled(),
-                file_filter: file_filter(),
-                onfold: move |folded| files_folded.set(Some(folded)),
-                oncontext: move |enabled| copy_context_enabled.set(enabled),
-                onfilter: move |value| file_filter.set(value),
                 onnavigate,
                 onselect_commit,
                 onclear_commit,
@@ -345,13 +360,7 @@ fn ReadyWorkspace(
                         delete_open.set(true);
                     },
                 }
-                ViewActions {
-                    layout: ViewActionsLayout::Panel,
-                    files_folded: files_folded().unwrap_or(false),
-                    copy_context_enabled: copy_context_enabled(),
-                    onfold: move |folded| files_folded.set(Some(folded)),
-                    oncontext: move |enabled| copy_context_enabled.set(enabled),
-                }
+                ViewActions { layout: ViewActionsLayout::Panel }
             }
         }
         Popover {
@@ -360,12 +369,7 @@ fn ReadyWorkspace(
             open: mobile_panel() == Some(MobilePanel::Files),
             title: "Changed files",
             onclose: move |()| mobile_panel.set(None),
-            FilesPanel {
-                view: view.clone(),
-                filter: file_filter(),
-                onfilter: move |value| file_filter.set(value),
-                onnavigate,
-            }
+            FilesPanel { onnavigate }
         }
         Popover {
             // TODO: organize this more intuitively. not obvious that this is where the mobile view is.
@@ -374,8 +378,7 @@ fn ReadyWorkspace(
             open: mobile_panel() == Some(MobilePanel::Commits),
             title: "Commits",
             onclose: move |()| mobile_panel.set(None),
-            CommitsPanel {
-                view: view.clone(),
+            WorkspaceCommitsPanel {
                 onselect: onselect_commit,
                 onclear: onclear_commit,
                 loading: commits_loading,

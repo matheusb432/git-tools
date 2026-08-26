@@ -1,12 +1,13 @@
-use std::sync::Arc;
-
 use dioxus::prelude::*;
 
 use super::{
     HeaderTone,
-    content::{ChangedTextTone, LongLine, SemanticText, non_breaking_if_empty},
+    content::{ChangedTextTone, CodeCellContent, CodeLineSource, non_breaking_if_empty},
 };
-use crate::entities::diffs::{ViewerCodeLine, ViewerSplitCell, ViewerSplitRow};
+use crate::entities::diffs::{
+    ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ClientDiffWorkspace,
+    ClientDiffWorkspaceStoreExt, ViewerSplitRow,
+};
 
 const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-sm text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
 const SPLIT_CODE_CELL_CLASSES: &str = "min-w-0 border-0 px-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
@@ -27,66 +28,122 @@ enum SplitCellPresentation {
 
 #[component]
 pub(crate) fn SplitDiffRowBatch(
-    rows: Arc<Vec<ViewerSplitRow>>,
+    file_index: usize,
+    batch_index: usize,
     artifact_enhancement: bool,
 ) -> Element {
+    let workspace = use_context::<Store<ClientDiffWorkspace>>();
+    let Some(file) = workspace.files().get(file_index) else {
+        return rsx! {};
+    };
+    let Some(rows) = file.rows().split().get(batch_index) else {
+        return rsx! {};
+    };
+    let rows: ReadStore<Vec<ViewerSplitRow>> = rows.into();
     rsx! {
-        for (index, row) in rows.iter().cloned().enumerate() {
+        SplitRows { rows, artifact_enhancement }
+    }
+}
+
+#[component]
+fn SplitRows(rows: ReadStore<Vec<ViewerSplitRow>>, artifact_enhancement: bool) -> Element {
+    rsx! {
+        for (index, row) in rows.iter().enumerate() {
             SplitDiffRowView { key: "{index}", row, artifact_enhancement }
         }
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SplitRowPresentation {
+    Header {
+        tone: HeaderTone,
+        text: String,
+    },
+    Context {
+        old_line_number: u32,
+        new_line_number: u32,
+    },
+    Pair {
+        old_line_number: Option<u32>,
+        new_line_number: Option<u32>,
+    },
+}
+
 #[component]
-fn SplitDiffRowView(row: ViewerSplitRow, artifact_enhancement: bool) -> Element {
-    match row {
-        ViewerSplitRow::Meta(text) => rsx! {
-            SplitHeaderRow { tone: HeaderTone::Meta, text: non_breaking_if_empty(&text) }
+fn SplitDiffRowView(row: ReadStore<ViewerSplitRow>, artifact_enhancement: bool) -> Element {
+    let presentation = {
+        let row = row.read();
+        match &*row {
+            ViewerSplitRow::Meta(text) => SplitRowPresentation::Header {
+                tone: HeaderTone::Meta,
+                text: non_breaking_if_empty(text),
+            },
+            ViewerSplitRow::Hunk(text) => SplitRowPresentation::Header {
+                tone: HeaderTone::Hunk,
+                text: text.clone(),
+            },
+            ViewerSplitRow::Context {
+                old_line_number,
+                new_line_number,
+                ..
+            } => SplitRowPresentation::Context {
+                old_line_number: *old_line_number,
+                new_line_number: *new_line_number,
+            },
+            ViewerSplitRow::Pair { old, new } => SplitRowPresentation::Pair {
+                old_line_number: old.as_ref().map(|cell| cell.line_number),
+                new_line_number: new.as_ref().map(|cell| cell.line_number),
+            },
+        }
+    };
+
+    match presentation {
+        SplitRowPresentation::Header { tone, text } => rsx! {
+            SplitHeaderRow { tone, text }
         },
-        ViewerSplitRow::Hunk(text) => rsx! {
-            SplitHeaderRow { tone: HeaderTone::Hunk, text }
-        },
-        ViewerSplitRow::Context {
+        SplitRowPresentation::Context {
             old_line_number,
             new_line_number,
-            code,
         } => rsx! {
             SplitRowShell {
                 SplitContextCell {
+                    row,
                     side: SplitSide::Old,
                     line_number: old_line_number,
-                    code: code.clone(),
                     artifact_enhancement,
                     copy_line_number: None,
                 }
                 SplitContextCell {
+                    row,
                     side: SplitSide::New,
                     line_number: new_line_number,
-                    code,
                     artifact_enhancement,
                     copy_line_number: Some(new_line_number),
                 }
             }
         },
-        ViewerSplitRow::Pair { old, new } => {
-            let copy_line_number = new.as_ref().map(|cell| cell.line_number);
-            rsx! {
-                SplitRowShell {
-                    SplitCell {
-                        cell: old,
-                        side: SplitSide::Old,
-                        artifact_enhancement,
-                        copy_line_number: None,
-                    }
-                    SplitCell {
-                        cell: new,
-                        side: SplitSide::New,
-                        artifact_enhancement,
-                        copy_line_number,
-                    }
+        SplitRowPresentation::Pair {
+            old_line_number,
+            new_line_number,
+        } => rsx! {
+            SplitRowShell {
+                SplitCell {
+                    row,
+                    line_number: old_line_number,
+                    side: SplitSide::Old,
+                    artifact_enhancement,
+                    copy_line_number: None,
+                }
+                SplitCell {
+                    row,
+                    line_number: new_line_number,
+                    side: SplitSide::New,
+                    artifact_enhancement,
+                    copy_line_number: new_line_number,
                 }
             }
-        }
+        },
     }
 }
 
@@ -119,9 +176,9 @@ fn SplitRowShell(children: Element) -> Element {
 
 #[component]
 fn SplitContextCell(
+    row: ReadStore<ViewerSplitRow>,
     side: SplitSide,
     line_number: u32,
-    code: ViewerCodeLine,
     artifact_enhancement: bool,
     copy_line_number: Option<u32>,
 ) -> Element {
@@ -132,7 +189,7 @@ fn SplitContextCell(
                 SplitSide::Old => SplitCellPresentation::OldContext,
                 SplitSide::New => SplitCellPresentation::NewContext,
             },
-            code,
+            source: CodeLineSource::SplitContext(row),
             artifact_enhancement,
             copy_line_number,
         }
@@ -141,7 +198,8 @@ fn SplitContextCell(
 
 #[component]
 fn SplitCell(
-    cell: Option<ViewerSplitCell>,
+    row: ReadStore<ViewerSplitRow>,
+    line_number: Option<u32>,
     side: SplitSide,
     artifact_enhancement: bool,
     copy_line_number: Option<u32>,
@@ -150,17 +208,26 @@ fn SplitCell(
         SplitSide::Old => SplitCellPresentation::Removed,
         SplitSide::New => SplitCellPresentation::Added,
     };
-    match cell {
-        Some(cell) => rsx! {
-            SplitGutter { side, number: Some(cell.line_number) }
+    match (side, line_number) {
+        (SplitSide::Old, Some(line_number)) => rsx! {
+            SplitGutter { side, number: Some(line_number) }
             SplitCodeCell {
                 presentation,
-                code: cell.code,
+                source: CodeLineSource::SplitOld(row),
                 artifact_enhancement,
                 copy_line_number,
             }
         },
-        None => rsx! {
+        (SplitSide::New, Some(line_number)) => rsx! {
+            SplitGutter { side, number: Some(line_number) }
+            SplitCodeCell {
+                presentation,
+                source: CodeLineSource::SplitNew(row),
+                artifact_enhancement,
+                copy_line_number,
+            }
+        },
+        (_, None) => rsx! {
             SplitPad { side }
         },
     }
@@ -185,7 +252,7 @@ fn SplitGutter(side: SplitSide, number: Option<u32>) -> Element {
 #[component]
 fn SplitCodeCell(
     presentation: SplitCellPresentation,
-    code: ViewerCodeLine,
+    source: CodeLineSource,
     artifact_enhancement: bool,
     copy_line_number: Option<u32>,
 ) -> Element {
@@ -216,57 +283,14 @@ fn SplitCodeCell(
             class: "{presentation_classes}",
             "data-gtl-copy-line": copy_line,
             "data-gtl-new-line": new_line_number,
-            SplitCodeContent {
+            CodeCellContent {
+                source,
                 marker,
-                body: code.text,
-                semantic_spans: code.spans,
                 changed_text_tone,
-                long_line_character_count: code.long_line_character_count,
                 artifact_enhancement,
                 copy_text: copy_line_number.is_some(),
             }
         }
-    }
-}
-
-#[component]
-fn SplitCodeContent(
-    marker: Option<char>,
-    body: String,
-    semantic_spans: Vec<crate::entities::diffs::ViewerCodeSpan>,
-    changed_text_tone: ChangedTextTone,
-    long_line_character_count: Option<usize>,
-    artifact_enhancement: bool,
-    copy_text: bool,
-) -> Element {
-    if let Some(character_count) = long_line_character_count {
-        return rsx! {
-            LongLine {
-                text: body,
-                marker,
-                character_count,
-                artifact_enhancement,
-                copy_text,
-            }
-        };
-    }
-
-    rsx! {
-        SplitMarker { marker }
-        SemanticText {
-            text: body,
-            semantic_spans,
-            changed_text_tone,
-            copy_text,
-        }
-    }
-}
-
-#[component]
-fn SplitMarker(marker: Option<char>) -> Element {
-    let marker = marker.map(|value| value.to_string());
-    rsx! {
-        span { {marker} }
     }
 }
 
@@ -284,8 +308,18 @@ fn SplitPad(side: SplitSide) -> Element {
 
 #[cfg(test)]
 mod tests {
+    use gtl_wire::viewer::ViewerSplitCell;
+
     use super::*;
     use crate::test_support::code_line;
+
+    #[component]
+    fn SplitBatchFixture(rows: Vec<ViewerSplitRow>, artifact_enhancement: bool) -> Element {
+        let rows = use_store(move || rows);
+        rsx! {
+            SplitRows { rows, artifact_enhancement }
+        }
+    }
 
     #[test]
     fn renders_typed_line_numbers_long_lines_and_an_absent_split_cell() {
@@ -310,7 +344,7 @@ mod tests {
             },
         ];
         let html = dioxus_ssr::render_element(rsx! {
-            SplitDiffRowBatch { rows: Arc::new(rows), artifact_enhancement: false }
+            SplitBatchFixture { rows, artifact_enhancement: false }
         });
         let absent_gutter = dioxus_ssr::render_element(rsx! {
             SplitGutter { side: SplitSide::New, number: None }
@@ -353,7 +387,7 @@ mod tests {
             },
         ];
         let html = dioxus_ssr::render_element(rsx! {
-            SplitDiffRowBatch { rows: Arc::new(rows), artifact_enhancement: true }
+            SplitBatchFixture { rows, artifact_enhancement: true }
         });
 
         assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 3);

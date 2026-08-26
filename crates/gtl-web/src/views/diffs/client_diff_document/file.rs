@@ -7,53 +7,59 @@ use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout};
 
 use self::{actions::DiffFileActions, rows::DiffFileBody};
 use crate::{
-    entities::diffs::ClientDiffFile,
+    entities::diffs::{ClientDiffFile, ClientDiffFileStoreExt},
     views::diffs::{DiffFileStatusBadge, DiffLineChangeKind, DiffLineChangeText},
 };
 
 #[component]
 pub(super) fn DiffFileCard(
-    file: ClientDiffFile,
+    file: ReadStore<ClientDiffFile>,
     layout: ViewerDiffLayout,
     density: ViewerDiffDensity,
-    folded: Option<bool>,
-    is_flashing: bool,
+    folded: ReadSignal<Option<bool>>,
+    flashing_file: ReadSignal<Option<String>>,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     onretry: EventHandler<()>,
     retry_allowed: bool,
     file_index: usize,
     artifact_tab_id: Option<ViewerTabId>,
 ) -> Element {
-    let mut open = use_signal(|| file.summary.initially_expanded);
-    use_effect(use_reactive((&folded,), move |(folded,)| {
-        if let Some(folded) = folded {
+    let initially_expanded = file.summary().peek().initially_expanded;
+    let mut open = use_signal(|| initially_expanded);
+    use_effect(move || {
+        if let Some(folded) = folded() {
             open.set(!folded);
         }
-    }));
-    let artifact_file_id =
-        artifact_tab_id.map(|tab_id| static_artifact_file_id(tab_id, &file.summary.id));
-    let anchor_id = artifact_file_id
-        .clone()
-        .unwrap_or_else(|| file.summary.anchor_id.clone());
+    });
+    let summary = file.summary();
+    let (file_id, original_anchor_id, path, absolute_path, initially_expanded, comment_leader) =
+        summary.with(|summary| {
+            (
+                summary.id.clone(),
+                summary.anchor_id.clone(),
+                summary.path.to_string_lossy().into_owned(),
+                summary
+                    .absolute_path
+                    .as_path()
+                    .to_string_lossy()
+                    .into_owned(),
+                summary.initially_expanded,
+                copy_comment_leader(&summary.path),
+            )
+        });
+    let artifact_file_id = artifact_tab_id.map(|tab_id| static_artifact_file_id(tab_id, &file_id));
+    let anchor_id = artifact_file_id.clone().unwrap_or(original_anchor_id);
     let copy_popover_id = format!("{anchor_id}-copy-menu");
-    let path = file.summary.path.to_string_lossy().into_owned();
-    let absolute_path = file
-        .summary
-        .absolute_path
-        .as_path()
-        .to_string_lossy()
-        .into_owned();
     let artifact_path = artifact_file_id.as_ref().map(|_| path.clone());
     let artifact_absolute_path = artifact_file_id.as_ref().map(|_| absolute_path);
-    let comment_leader = copy_comment_leader(&file.summary.path);
-    let artifact_initial_open = artifact_file_id.as_ref().map(|_| {
-        if file.summary.initially_expanded {
-            "true"
-        } else {
-            "false"
-        }
-    });
+    let artifact_initial_open = artifact_file_id
+        .as_ref()
+        .map(|_| if initially_expanded { "true" } else { "false" });
     let artifact_enhancement = artifact_file_id.is_some();
+    let is_flashing = flashing_file
+        .read()
+        .as_deref()
+        .is_some_and(|flashing| flashing == anchor_id);
 
     rsx! {
         details {
@@ -70,7 +76,7 @@ pub(super) fn DiffFileCard(
             class: if is_flashing { "outline outline-acc outline-offset-[-1px]" },
             open: open(),
             DiffFileHeader {
-                file: file.clone(),
+                summary,
                 open,
                 copy_popover_id,
                 onopen,
@@ -91,16 +97,14 @@ pub(super) fn DiffFileCard(
 
 #[component]
 fn DiffFileHeader(
-    // TODO: refactor - this must **not** need the entire diff rows!
-    // this must be shared state too, not drilled props.
-    file: ClientDiffFile,
+    summary: ReadSignal<gtl_wire::viewer::ViewerFileSummary>,
     mut open: Signal<bool>,
     copy_popover_id: String,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     artifact_enhancement: bool,
 ) -> Element {
-    let background_classes = file_header_background(file.summary.status);
-    let file_summary = file.summary.clone();
+    let file_summary = summary.read();
+    let background_classes = file_header_background(file_summary.status);
     rsx! {
         summary {
             class: "sticky top-0 z-2 flex cursor-pointer list-none items-center gap-2 rounded-t-panel border-b border-line px-2.5 py-2 hover:bg-line focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden mobile:flex-wrap mobile:gap-x-1.5 mobile:px-2 mobile:py-1.5 print:static print:bg-[#f2f2f2]",
@@ -113,7 +117,7 @@ fn DiffFileHeader(
             DiffFilePath { path: file_summary.path.to_string_lossy().into_owned() }
             DiffFileStatusBadge { status: file_summary.status }
             DiffFileActions {
-                file,
+                summary,
                 copy_popover_id,
                 onopen,
                 artifact_enhancement,
@@ -180,17 +184,17 @@ fn DiffLineStats(added: DiffLineCount, removed: DiffLineCount) -> Element {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use gtl_models::diffs::DiffLineCount;
     use gtl_wire::viewer::{
         ViewerDiffDensity, ViewerDiffFileId, ViewerDiffLayout, ViewerFileStatus, ViewerFileSummary,
-        ViewerUnifiedRow,
+        ViewerRenderOptions, ViewerUnifiedRow, ViewerViewIdentity,
     };
 
     use super::*;
     use crate::{
-        entities::diffs::{ClientDiffFileState, ClientDiffRows},
+        entities::diffs::{
+            ClientDiffFileState, ClientDiffRows, ClientDiffWorkspace, ClientDiffWorkspaceStoreExt,
+        },
         test_support::{
             TestResult, absolute_file_path, repository_relative_path, unified_source_row,
             viewer_tab_id,
@@ -210,10 +214,13 @@ mod tests {
                 can_open_in_editor: true,
                 initially_expanded: false,
             },
-            rows: ClientDiffRows::Unified(vec![Arc::new(vec![
-                ViewerUnifiedRow::Hunk("@@ -1 +1 @@".to_owned()),
-                ViewerUnifiedRow::Added(unified_source_row("echo static", None, Some(1), None)),
-            ])]),
+            rows: ClientDiffRows {
+                unified: vec![vec![
+                    ViewerUnifiedRow::Hunk("@@ -1 +1 @@".to_owned()),
+                    ViewerUnifiedRow::Added(unified_source_row("echo static", None, Some(1), None)),
+                ]],
+                split: Vec::new(),
+            },
             line_number_digits: 1,
             state: ClientDiffFileState::Complete,
         })
@@ -223,22 +230,58 @@ mod tests {
         file: ClientDiffFile,
         artifact_tab_id: Option<gtl_models::viewer::ViewerTabId>,
     ) -> String {
-        let event_handler_owner = VirtualDom::new(VNode::empty);
-        let props = event_handler_owner.in_scope(ScopeId::ROOT, || DiffFileCardProps {
-            file,
-            layout: ViewerDiffLayout::Unified,
-            density: ViewerDiffDensity::Compact,
-            folded: None,
-            is_flashing: false,
-            onopen: None,
-            onretry: EventHandler::new(|()| {}),
-            retry_allowed: false,
-            file_index: 3,
-            artifact_tab_id,
-        });
-        let mut file_card = VirtualDom::new_with_props(DiffFileCard, props);
+        let mut file_card = VirtualDom::new_with_props(
+            TestDiffFile,
+            TestDiffFileProps {
+                file,
+                artifact_tab_id,
+            },
+        );
         file_card.rebuild_in_place();
         dioxus_ssr::render(&file_card)
+    }
+
+    #[component]
+    fn TestDiffFile(
+        file: ClientDiffFile,
+        artifact_tab_id: Option<gtl_models::viewer::ViewerTabId>,
+    ) -> Element {
+        let Some(tab_id) = artifact_tab_id.or_else(|| viewer_tab_id(1).ok()) else {
+            return rsx! {};
+        };
+        let files = vec![file.clone(), file.clone(), file.clone(), file];
+        let workspace = use_store(move || ClientDiffWorkspace {
+            identity: ViewerViewIdentity {
+                tab_id,
+                range_generation: gtl_models::viewer::ViewerRangeGeneration::default(),
+                selection_generation: gtl_models::viewer::ViewerSelectionGeneration::default(),
+                render_options: ViewerRenderOptions {
+                    layout: ViewerDiffLayout::Unified,
+                    density: ViewerDiffDensity::Compact,
+                },
+            },
+            files,
+        });
+        use_context_provider(|| workspace);
+        let Some(file) = workspace.files().get(3) else {
+            return rsx! {};
+        };
+        let folded = use_signal(|| None::<bool>);
+        let flashing_file = use_signal(|| None::<String>);
+        rsx! {
+            DiffFileCard {
+                file,
+                layout: ViewerDiffLayout::Unified,
+                density: ViewerDiffDensity::Compact,
+                folded,
+                flashing_file,
+                onopen: None,
+                onretry: move |()| {},
+                retry_allowed: false,
+                file_index: 3,
+                artifact_tab_id,
+            }
+        }
     }
 
     #[test]

@@ -1,12 +1,13 @@
-use std::sync::Arc;
-
 use dioxus::prelude::*;
 
 use super::{
     HeaderTone,
-    content::{ChangedTextTone, CodeCellContent, non_breaking_if_empty},
+    content::{ChangedTextTone, CodeCellContent, CodeLineSource, non_breaking_if_empty},
 };
-use crate::entities::diffs::{ViewerCodeLine, ViewerUnifiedRow, ViewerUnifiedSourceRow};
+use crate::entities::diffs::{
+    ClientDiffFileStoreExt, ClientDiffRowsStoreExt, ClientDiffWorkspace,
+    ClientDiffWorkspaceStoreExt, ViewerUnifiedRow,
+};
 
 const HEADER_CODE_CLASSES: &str = "min-w-0 border-0 bg-transparent px-3 text-sm text-ink-3 whitespace-pre-wrap [overflow-wrap:anywhere] mobile:px-2 print:text-[#111]";
 const UNIFIED_GUTTER_CLASSES: &str = "col-start-1 row-start-1 select-none whitespace-nowrap px-0 text-center text-sm [font-variant-numeric:tabular-nums]";
@@ -29,45 +30,67 @@ enum UnifiedGutterTone {
 
 #[component]
 pub(crate) fn UnifiedDiffRowBatch(
-    rows: Arc<Vec<ViewerUnifiedRow>>,
+    file_index: usize,
+    batch_index: usize,
     artifact_enhancement: bool,
 ) -> Element {
+    let workspace = use_context::<Store<ClientDiffWorkspace>>();
+    let Some(file) = workspace.files().get(file_index) else {
+        return rsx! {};
+    };
+    let Some(rows) = file.rows().unified().get(batch_index) else {
+        return rsx! {};
+    };
+    let rows: ReadStore<Vec<ViewerUnifiedRow>> = rows.into();
     rsx! {
-        for (index, row) in rows.iter().cloned().enumerate() {
+        UnifiedRows { rows, artifact_enhancement }
+    }
+}
+
+#[component]
+fn UnifiedRows(rows: ReadStore<Vec<ViewerUnifiedRow>>, artifact_enhancement: bool) -> Element {
+    rsx! {
+        for (index, row) in rows.iter().enumerate() {
             UnifiedDiffRow { key: "{index}", row, artifact_enhancement }
         }
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum UnifiedRowPresentation {
+    Header { tone: HeaderTone, text: String },
+    Source(UnifiedSourceTone),
+}
+
 #[component]
-fn UnifiedDiffRow(row: ViewerUnifiedRow, artifact_enhancement: bool) -> Element {
-    match row {
-        ViewerUnifiedRow::Meta(text) => rsx! {
-            UnifiedHeaderRow { tone: HeaderTone::Meta, text: non_breaking_if_empty(&text) }
-        },
-        ViewerUnifiedRow::Hunk(text) => rsx! {
-            UnifiedHeaderRow { tone: HeaderTone::Hunk, text: non_breaking_if_empty(&text) }
-        },
-        ViewerUnifiedRow::Context(row) => rsx! {
-            UnifiedSourceRow {
-                row,
-                tone: UnifiedSourceTone::Context,
-                artifact_enhancement,
+fn UnifiedDiffRow(row: ReadStore<ViewerUnifiedRow>, artifact_enhancement: bool) -> Element {
+    let presentation = {
+        let row = row.read();
+        match &*row {
+            ViewerUnifiedRow::Meta(text) => UnifiedRowPresentation::Header {
+                tone: HeaderTone::Meta,
+                text: non_breaking_if_empty(text),
+            },
+            ViewerUnifiedRow::Hunk(text) => UnifiedRowPresentation::Header {
+                tone: HeaderTone::Hunk,
+                text: non_breaking_if_empty(text),
+            },
+            ViewerUnifiedRow::Context(_) => {
+                UnifiedRowPresentation::Source(UnifiedSourceTone::Context)
             }
-        },
-        ViewerUnifiedRow::Added(row) => rsx! {
-            UnifiedSourceRow {
-                row,
-                tone: UnifiedSourceTone::Added,
-                artifact_enhancement,
+            ViewerUnifiedRow::Added(_) => UnifiedRowPresentation::Source(UnifiedSourceTone::Added),
+            ViewerUnifiedRow::Removed(_) => {
+                UnifiedRowPresentation::Source(UnifiedSourceTone::Removed)
             }
+        }
+    };
+
+    match presentation {
+        UnifiedRowPresentation::Header { tone, text } => rsx! {
+            UnifiedHeaderRow { tone, text }
         },
-        ViewerUnifiedRow::Removed(row) => rsx! {
-            UnifiedSourceRow {
-                row,
-                tone: UnifiedSourceTone::Removed,
-                artifact_enhancement,
-            }
+        UnifiedRowPresentation::Source(tone) => rsx! {
+            UnifiedSourceRow { row, tone, artifact_enhancement }
         },
     }
 }
@@ -85,10 +108,24 @@ fn UnifiedHeaderRow(tone: HeaderTone, text: String) -> Element {
 
 #[component]
 fn UnifiedSourceRow(
-    row: ViewerUnifiedSourceRow,
+    row: ReadStore<ViewerUnifiedRow>,
     tone: UnifiedSourceTone,
     artifact_enhancement: bool,
 ) -> Element {
+    let line_numbers = {
+        let row = row.read();
+        match &*row {
+            ViewerUnifiedRow::Context(source)
+            | ViewerUnifiedRow::Added(source)
+            | ViewerUnifiedRow::Removed(source) => {
+                Some((source.old_line_number, source.new_line_number))
+            }
+            ViewerUnifiedRow::Meta(_) | ViewerUnifiedRow::Hunk(_) => None,
+        }
+    };
+    let Some((old_line_number, new_line_number)) = line_numbers else {
+        return rsx! {};
+    };
     let (old_gutter_tone, new_gutter_tone) = match tone {
         UnifiedSourceTone::Context => (UnifiedGutterTone::Hidden, UnifiedGutterTone::Neutral),
         UnifiedSourceTone::Added => (UnifiedGutterTone::Hidden, UnifiedGutterTone::Added),
@@ -97,15 +134,15 @@ fn UnifiedSourceRow(
     let copy_line_number = if tone == UnifiedSourceTone::Removed {
         None
     } else {
-        row.new_line_number
+        new_line_number
     };
 
     rsx! {
         UnifiedSourceRowShell { tone, copy_line_number,
-            UnifiedGutter { number: row.old_line_number, tone: old_gutter_tone }
-            UnifiedGutter { number: row.new_line_number, tone: new_gutter_tone }
+            UnifiedGutter { number: old_line_number, tone: old_gutter_tone }
+            UnifiedGutter { number: new_line_number, tone: new_gutter_tone }
             UnifiedCodeCell {
-                code: row.code,
+                row,
                 artifact_enhancement,
                 copy_text: copy_line_number.is_some(),
             }
@@ -190,14 +227,17 @@ fn UnifiedHeaderCode(tone: HeaderTone, text: String) -> Element {
 }
 
 #[component]
-fn UnifiedCodeCell(code: ViewerCodeLine, artifact_enhancement: bool, copy_text: bool) -> Element {
+fn UnifiedCodeCell(
+    row: ReadStore<ViewerUnifiedRow>,
+    artifact_enhancement: bool,
+    copy_text: bool,
+) -> Element {
     rsx! {
         code { class: "col-start-2 row-start-1 min-w-0 border-0 bg-transparent py-0 pr-1 pl-3 text-sm text-code whitespace-pre-wrap [overflow-wrap:anywhere] print:text-[#111]",
             CodeCellContent {
-                text: code.text,
-                semantic_spans: code.spans,
+                source: CodeLineSource::Unified(row),
+                marker: None,
                 changed_text_tone: ChangedTextTone::None,
-                long_line_character_count: code.long_line_character_count,
                 artifact_enhancement,
                 copy_text,
             }
@@ -210,6 +250,14 @@ mod tests {
     use super::*;
     use crate::test_support::unified_source_row;
 
+    #[component]
+    fn UnifiedBatchFixture(rows: Vec<ViewerUnifiedRow>, artifact_enhancement: bool) -> Element {
+        let rows = use_store(move || rows);
+        rsx! {
+            UnifiedRows { rows, artifact_enhancement }
+        }
+    }
+
     #[test]
     fn renders_typed_line_numbers_absent_gutters_and_long_line_counts() {
         let rows = vec![
@@ -218,7 +266,7 @@ mod tests {
             ViewerUnifiedRow::Added(unified_source_row("abce", None, Some(10000), Some(4))),
         ];
         let html = dioxus_ssr::render_element(rsx! {
-            UnifiedDiffRowBatch { rows: Arc::new(rows), artifact_enhancement: false }
+            UnifiedBatchFixture { rows, artifact_enhancement: false }
         });
 
         assert!(html.contains(">9999</span>"));
@@ -239,7 +287,7 @@ mod tests {
             ViewerUnifiedRow::Added(unified_source_row("abcdefgh", None, Some(12), Some(8))),
         ];
         let html = dioxus_ssr::render_element(rsx! {
-            UnifiedDiffRowBatch { rows: Arc::new(rows), artifact_enhancement: true }
+            UnifiedBatchFixture { rows, artifact_enhancement: true }
         });
 
         assert_eq!(html.matches(r#"data-gtl-copy-line="""#).count(), 3);

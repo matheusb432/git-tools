@@ -21,9 +21,10 @@ pub use comparison::{
 };
 pub use report::{
     BENCHMARK_NAME, DesktopScrollBenchmarkProtocol, DesktopScrollLaunch,
-    DesktopScrollProcessMemory, DesktopScrollReport, DesktopScrollResourceBounds,
-    DesktopScrollRunner, DesktopScrollSource, DesktopScrollSystemConditions, DesktopScrollWindow,
-    REPORT_FORMAT_VERSION, ScrollProtocol, ScrollSample,
+    DesktopScrollProcessMemory, DesktopScrollReadinessSample, DesktopScrollReport,
+    DesktopScrollResourceBounds, DesktopScrollRunner, DesktopScrollSource,
+    DesktopScrollSystemConditions, DesktopScrollWindow, REPORT_FORMAT_VERSION, ScrollProtocol,
+    ScrollSample,
 };
 
 pub const FIXTURE_RELATIVE_PATH: &str = "benchmarks/fixtures/desktop-scroll";

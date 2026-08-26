@@ -5,7 +5,7 @@ use std::{
     io::Write as _,
     path::{Path, PathBuf},
     process::Command,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
@@ -245,6 +245,7 @@ async fn production_viewer_scrolls_realistic_files_and_commits() -> Result<()> {
             expected_density: "compact".to_owned(),
             readiness: "active production view with 10 commits, 50 file summaries, and all 50 retained diff-file cards complete".to_owned(),
             memory_attribution: process_memory::ATTRIBUTION.to_owned(),
+            process_cpu_clock_ticks_per_second: process_memory::clock_ticks_per_second()?,
             script_timeout_seconds: SCRIPT_TIMEOUT.as_secs(),
             scroll: ScrollProtocol::fixed(),
         },
@@ -303,8 +304,16 @@ async fn measure_launch(
         .set_window_rect(20, 20, WINDOW_WIDTH, WINDOW_HEIGHT)
         .await
         .context("set fixed desktop benchmark window")?;
+    let mut readiness_process_sampler = wait::until(
+        "one stable top-level viewer and server process tree",
+        ASSERTION_TIMEOUT,
+        || async { process_memory::ReadinessProcessSampler::try_start(session.data_root()) },
+    )
+    .await?;
+    let readiness_started_at = Instant::now();
     forward_fixture(&repository, session.data_root())?;
-    wait_for_ready_view(driver).await?;
+    wait_for_ready_view(driver, &mut readiness_process_sampler).await?;
+    let readiness = readiness_process_sampler.finish(readiness_started_at.elapsed())?;
     driver
         .set_script_timeout(SCRIPT_TIMEOUT)
         .await
@@ -314,7 +323,6 @@ async fn measure_launch(
         .get_window_rect()
         .await
         .context("read fixed desktop benchmark window")?;
-    let readiness_memory = process_memory::snapshot(session.data_root())?;
     let changed_files_element = visible_element(
         driver,
         test_ids::CHANGED_FILES_PANEL.selector(),
@@ -347,7 +355,7 @@ async fn measure_launch(
             width: window.width,
             height: window.height,
         },
-        readiness_memory,
+        readiness,
         changed_files,
         memory_after_changed_files,
         commits,
@@ -385,13 +393,20 @@ fn forward_fixture(repository: &Path, data_root: &Path) -> Result<()> {
     )
 }
 
-async fn wait_for_ready_view(driver: &WebDriver) -> Result<()> {
+async fn wait_for_ready_view(
+    driver: &WebDriver,
+    process_sampler: &mut process_memory::ReadinessProcessSampler,
+) -> Result<()> {
     let readiness = wait::until(
         "complete 10-commit, 50-file production desktop view",
         ASSERTION_TIMEOUT,
-        || async {
-            let snapshot = readiness_snapshot(driver).await?;
-            Ok(snapshot.is_ready().then_some(()))
+        || {
+            let process_observation = process_sampler.observe();
+            async move {
+                process_observation?;
+                let snapshot = readiness_snapshot(driver).await?;
+                Ok(snapshot.is_ready().then_some(()))
+            }
         },
     )
     .await;

@@ -357,6 +357,16 @@ fn print_comparison(comparison: &DesktopScrollComparison) {
         "{:<34} {:>14} {:>14} {:>10}",
         "metric", "baseline", "current", "change"
     );
+    print_metric(
+        "readiness wall time",
+        comparison.readiness_wall_time_milliseconds,
+        |value| format!("{value:.2} ms"),
+    );
+    print_metric(
+        "readiness process CPU time",
+        comparison.readiness_process_cpu_time_milliseconds,
+        |value| format!("{value:.2} ms"),
+    );
     print_panel("changed files", comparison.changed_files);
     print_panel("commits", comparison.commits);
     print_metric("peak RSS", comparison.peak_rss_bytes, |value| {

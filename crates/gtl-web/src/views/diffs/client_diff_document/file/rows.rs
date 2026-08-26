@@ -4,13 +4,15 @@ use gtl_wire::viewer::{ViewerDiffDensity, ViewerDiffLayout};
 #[cfg(feature = "desktop")]
 use crate::shared::ui::{Button, ButtonSize, ButtonVariant};
 use crate::{
-    entities::diffs::{ClientDiffFile, ClientDiffFileState, ClientDiffRows},
+    entities::diffs::{
+        ClientDiffFile, ClientDiffFileState, ClientDiffFileStoreExt, ClientDiffRowsStoreExt,
+    },
     views::diffs::{SplitDiffRowBatch, UnifiedDiffRowBatch},
 };
 
 #[component]
 pub(super) fn DiffFileBody(
-    file: ClientDiffFile,
+    file: ReadStore<ClientDiffFile>,
     layout: ViewerDiffLayout,
     density: ViewerDiffDensity,
     file_index: usize,
@@ -35,7 +37,7 @@ pub(super) fn DiffFileBody(
 
 #[component]
 fn DiffFileRows(
-    file: ClientDiffFile,
+    file: ReadStore<ClientDiffFile>,
     layout: ViewerDiffLayout,
     density: ViewerDiffDensity,
     file_index: usize,
@@ -45,9 +47,14 @@ fn DiffFileRows(
 ) -> Element {
     let density_label = density.as_str();
     let layout_label = layout.as_str();
-    let style = unified_line_number_width_style(layout, file.line_number_digits);
+    let style = unified_line_number_width_style(layout, file.line_number_digits().cloned());
     let artifact_enhancement = artifact_file_id.is_some();
     let row_container_id = diff_rows_id(file_index, artifact_file_id.as_deref());
+    let rows = file.rows();
+    let unified_batches = rows.unified();
+    let split_batches = rows.split();
+    let unified_batch_count = unified_batches.len();
+    let split_batch_count = split_batches.len();
 
     rsx! {
         div {
@@ -57,19 +64,26 @@ fn DiffFileRows(
             aria_label: "{layout_label} {density_label} diff rows",
             "data-layout": layout_label,
             "data-density": density_label,
-            match &file.rows {
-                ClientDiffRows::Unified(batches) => rsx! {
-                    for (batch_index, batch) in batches.iter().enumerate() {
-                        UnifiedDiffRowBatch { key: "{batch_index}", rows: batch.clone(), artifact_enhancement }
+            if layout == ViewerDiffLayout::Unified {
+                for batch_index in 0..unified_batch_count {
+                    UnifiedDiffRowBatch {
+                        key: "{file_index}:{batch_index}",
+                        file_index,
+                        batch_index,
+                        artifact_enhancement,
                     }
-                },
-                ClientDiffRows::Split(batches) => rsx! {
-                    for (batch_index, batch) in batches.iter().enumerate() {
-                        SplitDiffRowBatch { key: "{batch_index}", rows: batch.clone(), artifact_enhancement }
+                }
+            } else {
+                for batch_index in 0..split_batch_count {
+                    SplitDiffRowBatch {
+                        key: "{file_index}:{batch_index}",
+                        file_index,
+                        batch_index,
+                        artifact_enhancement,
                     }
-                },
+                }
             }
-            DiffFileLoadState { state: file.state, retry_allowed, onretry }
+            DiffFileLoadState { state: file.state(), retry_allowed, onretry }
         }
     }
 }
@@ -91,11 +105,11 @@ fn unified_line_number_width_style(
 
 #[component]
 fn DiffFileLoadState(
-    state: ClientDiffFileState,
+    state: ReadSignal<ClientDiffFileState>,
     retry_allowed: bool,
     onretry: EventHandler<()>,
 ) -> Element {
-    match state {
+    match &*state.read() {
         #[cfg(feature = "desktop")]
         ClientDiffFileState::Loading => rsx! {
             DiffFileLoading {}

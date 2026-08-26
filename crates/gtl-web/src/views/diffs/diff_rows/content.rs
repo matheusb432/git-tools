@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::{
-    entities::diffs::{ViewerCodeSpan, ViewerSyntaxClass},
+    entities::diffs::{ViewerCodeLine, ViewerSplitRow, ViewerSyntaxClass, ViewerUnifiedRow},
     shared::ui::{Button, ButtonSize, ButtonVariant},
 };
 
@@ -16,40 +16,103 @@ pub(super) enum ChangedTextTone {
     Added,
 }
 
-#[component]
-pub(super) fn CodeCellContent(
-    text: String,
-    semantic_spans: Vec<ViewerCodeSpan>,
-    changed_text_tone: ChangedTextTone,
-    long_line_character_count: Option<usize>,
-    artifact_enhancement: bool,
-    copy_text: bool,
-) -> Element {
-    if let Some(character_count) = long_line_character_count {
-        return rsx! {
-            LongLine {
-                text,
-                marker: None,
-                character_count,
-                artifact_enhancement,
-                copy_text,
-            }
-        };
-    }
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum CodeLineSource {
+    Unified(ReadStore<ViewerUnifiedRow>),
+    SplitContext(ReadStore<ViewerSplitRow>),
+    SplitOld(ReadStore<ViewerSplitRow>),
+    SplitNew(ReadStore<ViewerSplitRow>),
+}
 
-    rsx! {
-        SemanticText {
-            text,
-            semantic_spans,
-            changed_text_tone,
-            copy_text,
+impl CodeLineSource {
+    fn with<R>(self, read: impl FnOnce(Option<&ViewerCodeLine>) -> R) -> R {
+        match self {
+            Self::Unified(row) => {
+                let row = row.read();
+                let code = match &*row {
+                    ViewerUnifiedRow::Context(source)
+                    | ViewerUnifiedRow::Added(source)
+                    | ViewerUnifiedRow::Removed(source) => Some(&source.code),
+                    ViewerUnifiedRow::Meta(_) | ViewerUnifiedRow::Hunk(_) => None,
+                };
+                read(code)
+            }
+            Self::SplitContext(row) => {
+                let row = row.read();
+                let code = match &*row {
+                    ViewerSplitRow::Context { code, .. } => Some(code),
+                    ViewerSplitRow::Meta(_)
+                    | ViewerSplitRow::Hunk(_)
+                    | ViewerSplitRow::Pair { .. } => None,
+                };
+                read(code)
+            }
+            Self::SplitOld(row) => {
+                let row = row.read();
+                let code = match &*row {
+                    ViewerSplitRow::Pair {
+                        old: Some(cell), ..
+                    } => Some(&cell.code),
+                    ViewerSplitRow::Meta(_)
+                    | ViewerSplitRow::Hunk(_)
+                    | ViewerSplitRow::Context { .. }
+                    | ViewerSplitRow::Pair { old: None, .. } => None,
+                };
+                read(code)
+            }
+            Self::SplitNew(row) => {
+                let row = row.read();
+                let code = match &*row {
+                    ViewerSplitRow::Pair {
+                        new: Some(cell), ..
+                    } => Some(&cell.code),
+                    ViewerSplitRow::Meta(_)
+                    | ViewerSplitRow::Hunk(_)
+                    | ViewerSplitRow::Context { .. }
+                    | ViewerSplitRow::Pair { new: None, .. } => None,
+                };
+                read(code)
+            }
         }
     }
 }
 
 #[component]
+pub(super) fn CodeCellContent(
+    source: CodeLineSource,
+    marker: Option<char>,
+    changed_text_tone: ChangedTextTone,
+    artifact_enhancement: bool,
+    copy_text: bool,
+) -> Element {
+    source.with(|code| {
+        let Some(code) = code else {
+            return rsx! {};
+        };
+        if let Some(character_count) = code.long_line_character_count {
+            return rsx! {
+                LongLine {
+                    source,
+                    marker,
+                    character_count,
+                    artifact_enhancement,
+                    copy_text,
+                }
+            };
+        }
+
+        rsx! {
+            if let Some(marker) = marker {
+                span { "{marker}" }
+            }
+            SemanticText { source, changed_text_tone, copy_text }
+        }
+    })
+}
+
+#[component]
 pub(super) fn LongLine(
-    text: String,
+    source: CodeLineSource,
     marker: Option<char>,
     character_count: usize,
     artifact_enhancement: bool,
@@ -65,7 +128,7 @@ pub(super) fn LongLine(
             "data-gtl-long-line": artifact_long_line,
             "data-gtl-expanded": artifact_expanded,
             LongLineText {
-                text,
+                source,
                 marker,
                 expanded: is_expanded,
                 artifact_enhancement,
@@ -83,7 +146,7 @@ pub(super) fn LongLine(
 
 #[component]
 fn LongLineText(
-    text: String,
+    source: CodeLineSource,
     marker: Option<char>,
     expanded: bool,
     artifact_enhancement: bool,
@@ -98,21 +161,27 @@ fn LongLineText(
     } else {
         LONG_LINE_COLLAPSED_CLASSES
     };
-    rsx! {
-        span {
-            class: "{LONG_LINE_TEXT_CLASSES}",
-            class: "{overflow_classes}",
-            "data-gtl-long-line-text": artifact_long_line_text,
-            "data-gtl-expanded-classes": artifact_expanded_classes,
-            "data-gtl-collapsed-classes": artifact_collapsed_classes,
-            {marker}
-            if copy_text {
-                span { "data-gtl-copy-text": "", "{text}" }
-            } else {
-                "{text}"
+    source.with(|code| {
+        let Some(code) = code else {
+            return rsx! {};
+        };
+        let text = code.text.as_str();
+        rsx! {
+            span {
+                class: "{LONG_LINE_TEXT_CLASSES}",
+                class: "{overflow_classes}",
+                "data-gtl-long-line-text": artifact_long_line_text,
+                "data-gtl-expanded-classes": artifact_expanded_classes,
+                "data-gtl-collapsed-classes": artifact_collapsed_classes,
+                {marker}
+                if copy_text {
+                    span { "data-gtl-copy-text": "", "{text}" }
+                } else {
+                    "{text}"
+                }
             }
         }
-    }
+    })
 }
 
 #[component]
@@ -138,71 +207,59 @@ fn LongLineControl(
 
 #[component]
 pub(super) fn SemanticText(
-    text: String,
-    semantic_spans: Vec<ViewerCodeSpan>,
+    source: CodeLineSource,
     changed_text_tone: ChangedTextTone,
     copy_text: bool,
 ) -> Element {
-    let spans = semantic_spans
-        .into_iter()
-        .map(|span| (span.text, span.syntax_class, span.changed))
-        .collect::<Vec<_>>();
-    if copy_text && spans.is_empty() {
-        return rsx! {
-            span { "data-gtl-copy-text": "" }
-            "\u{00a0}"
+    source.with(|code| {
+        let Some(code) = code else {
+            return rsx! {};
         };
-    }
+        let spans = &code.spans;
+        if copy_text && spans.is_empty() {
+            return rsx! {
+                span { "data-gtl-copy-text": "" }
+                "\u{00a0}"
+            };
+        }
 
-    let content = rsx! {
-        if spans.is_empty() {
-            "\u{00a0}"
-        } else {
-            for (index, (text, syntax_class, changed)) in spans.into_iter().enumerate() {
-                SemanticSpan {
-                    key: "{index}",
-                    text,
-                    syntax_class,
-                    changed_text_tone: if changed { changed_text_tone } else { ChangedTextTone::None },
+        let content = rsx! {
+            if spans.is_empty() {
+                "\u{00a0}"
+            } else {
+                for (index, semantic_span) in spans.iter().enumerate() {
+                    {
+                        let syntax_class = syntax_classes(semantic_span.syntax_class);
+                        let changed_class = changed_text_classes(
+                            if semantic_span.changed { changed_text_tone } else { ChangedTextTone::None },
+                        );
+                        rsx! {
+                            span { key: "{index}", class: "{syntax_class} {changed_class}", "{semantic_span.text}" }
+                        }
+                    }
                 }
             }
+        };
+        if copy_text {
+            rsx! {
+                span { "data-gtl-copy-text": "", {content} }
+            }
+        } else {
+            content
         }
-    };
-    if copy_text {
-        rsx! {
-            span { "data-gtl-copy-text": "", {content} }
-        }
-    } else {
-        content
-    }
+    })
 }
 
-#[component]
-fn SemanticSpan(
-    text: String,
-    syntax_class: Option<ViewerSyntaxClass>,
-    changed_text_tone: ChangedTextTone,
-) -> Element {
+const fn changed_text_classes(changed_text_tone: ChangedTextTone) -> &'static str {
     match changed_text_tone {
-        ChangedTextTone::None => rsx! {
-            SyntaxSpan { text, syntax_class }
-        },
-        ChangedTextTone::Removed => rsx! {
-            span { class: "rounded-xs bg-[color-mix(in_srgb,var(--del)_34%,transparent)]",
-                SyntaxSpan { text, syntax_class }
-            }
-        },
-        ChangedTextTone::Added => rsx! {
-            span { class: "rounded-xs bg-[color-mix(in_srgb,var(--add)_34%,transparent)]",
-                SyntaxSpan { text, syntax_class }
-            }
-        },
+        ChangedTextTone::None => "",
+        ChangedTextTone::Removed => "rounded-xs bg-[color-mix(in_srgb,var(--del)_34%,transparent)]",
+        ChangedTextTone::Added => "rounded-xs bg-[color-mix(in_srgb,var(--add)_34%,transparent)]",
     }
 }
 
-#[component]
-fn SyntaxSpan(text: String, syntax_class: Option<ViewerSyntaxClass>) -> Element {
-    let classes = match syntax_class {
+const fn syntax_classes(syntax_class: Option<ViewerSyntaxClass>) -> &'static str {
+    match syntax_class {
         None => "",
         Some(ViewerSyntaxClass::Keyword) => "text-[var(--sy-kw)]",
         Some(ViewerSyntaxClass::String) => "text-[var(--sy-str)]",
@@ -214,10 +271,6 @@ fn SyntaxSpan(text: String, syntax_class: Option<ViewerSyntaxClass>) -> Element 
         Some(ViewerSyntaxClass::Operator) => "text-[var(--sy-op)]",
         Some(ViewerSyntaxClass::Tag) => "text-[var(--sy-tag)]",
         Some(ViewerSyntaxClass::Variable) => "text-[var(--sy-var)]",
-    };
-
-    rsx! {
-        span { class: "{classes}", "{text}" }
     }
 }
 
@@ -233,15 +286,33 @@ pub(super) fn non_breaking_if_empty(text: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn copy_text_keeps_an_empty_source_line_distinct_from_its_visual_placeholder() {
-        let html = dioxus_ssr::render_element(rsx! {
+    #[component]
+    fn EmptySemanticText() -> Element {
+        let row = use_store(|| {
+            ViewerUnifiedRow::Added(gtl_wire::viewer::ViewerUnifiedSourceRow {
+                old_line_number: None,
+                new_line_number: Some(1),
+                code: ViewerCodeLine {
+                    text: String::new(),
+                    spans: Vec::new(),
+                    long_line_character_count: None,
+                },
+            })
+        });
+        let row: ReadStore<ViewerUnifiedRow> = row.into();
+        rsx! {
             SemanticText {
-                text: String::new(),
-                semantic_spans: Vec::new(),
+                source: CodeLineSource::Unified(row),
                 changed_text_tone: ChangedTextTone::None,
                 copy_text: true,
             }
+        }
+    }
+
+    #[test]
+    fn copy_text_keeps_an_empty_source_line_distinct_from_its_visual_placeholder() {
+        let html = dioxus_ssr::render_element(rsx! {
+            EmptySemanticText {}
         });
 
         assert!(html.contains(r#"<span data-gtl-copy-text=""></span>"#));

@@ -284,24 +284,28 @@ async fn connect_driver(
     let deadline = Instant::now() + START_ATTEMPT_TIMEOUT;
 
     loop {
-        match WebDriver::new(&driver_url, capabilities.clone()).await {
-            Ok(driver) => return Ok(driver),
-            Err(error) => {
-                if driver_child
-                    .try_wait()
-                    .context("inspect tauri-driver launch")?
-                    .is_some()
-                {
-                    return Err(anyhow::Error::new(error)
-                        .context("tauri-driver exited before WebDriver session creation"));
-                }
-                if Instant::now() >= deadline {
-                    return Err(error.into());
-                }
-                sleep(CONNECTION_RETRY_INTERVAL).await;
-            }
+        if tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .is_ok()
+        {
+            break;
         }
+        if driver_child
+            .try_wait()
+            .context("inspect tauri-driver launch")?
+            .is_some()
+        {
+            bail!("tauri-driver exited before accepting WebDriver connections");
+        }
+        if Instant::now() >= deadline {
+            bail!("tauri-driver did not accept connections within {START_ATTEMPT_TIMEOUT:?}");
+        }
+        sleep(CONNECTION_RETRY_INTERVAL).await;
     }
+
+    WebDriver::new(&driver_url, capabilities)
+        .await
+        .context("create one WebDriver session after tauri-driver became reachable")
 }
 
 fn verify_runtime_environment() -> Result<()> {

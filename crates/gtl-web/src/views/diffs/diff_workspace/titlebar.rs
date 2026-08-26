@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use gtl_models::git::{GitHead, GitRevision};
-use gtl_wire::viewer::{ViewerActiveView, ViewerAppliedExclusions};
+use gtl_wire::viewer::ViewerAppliedExclusions;
 
 use crate::shared::ui::{Badge, BadgeVariant, Button, ButtonSize, ButtonVariant};
 
@@ -12,14 +12,11 @@ pub(super) enum ViewActionsLayout {
 
 #[component]
 pub(super) fn ViewTitlebar(
-    view: ViewerActiveView,
-    files_folded: bool,
-    copy_context_enabled: bool,
     mobile_navigation: Option<Element>,
-    onfold: EventHandler<bool>,
-    oncontext: EventHandler<bool>,
     artifact_view_id: Option<String>,
 ) -> Element {
+    let workspace = super::use_workspace_context();
+    let view = workspace.view.read();
     rsx! {
         header { class: "col-span-3 row-start-1 flex min-w-0 items-center gap-4 border-b border-line bg-surface px-5 py-3 tablet:flex-wrap tablet:gap-2.5 tablet:px-3 tablet:py-2.5 mobile:gap-1.5 mobile:px-2 mobile:py-2",
             RepositoryIdentity {
@@ -34,14 +31,7 @@ pub(super) fn ViewTitlebar(
             if let Some(mobile_navigation) = mobile_navigation {
                 {mobile_navigation}
             }
-            ViewActions {
-                layout: ViewActionsLayout::Toolbar,
-                files_folded,
-                copy_context_enabled,
-                onfold,
-                oncontext,
-                artifact_view_id,
-            }
+            ViewActions { layout: ViewActionsLayout::Toolbar, artifact_view_id }
         }
     }
 }
@@ -87,14 +77,10 @@ fn ExclusionsBadge(exclusions: ViewerAppliedExclusions) -> Element {
 }
 
 #[component]
-pub(super) fn ViewActions(
-    layout: ViewActionsLayout,
-    files_folded: bool,
-    copy_context_enabled: bool,
-    onfold: EventHandler<bool>,
-    oncontext: EventHandler<bool>,
-    artifact_view_id: Option<String>,
-) -> Element {
+pub(super) fn ViewActions(layout: ViewActionsLayout, artifact_view_id: Option<String>) -> Element {
+    let mut workspace = super::use_workspace_context();
+    let files_folded = (workspace.files_folded)().unwrap_or(false);
+    let copy_context_enabled = (workspace.copy_context_enabled)();
     let container_classes = match layout {
         ViewActionsLayout::Panel => "grid grid-cols-2 gap-2",
         ViewActionsLayout::Toolbar => "flex items-center gap-2 mobile:hidden",
@@ -117,7 +103,7 @@ pub(super) fn ViewActions(
                 variant: ButtonVariant::Outline,
                 title: "Collapse or expand all files",
                 "data-gtl-action": artifact_view_id.as_ref().map(|_| "toggle-files"),
-                onclick: move |_| onfold.call(!files_folded),
+                onclick: move |_| workspace.files_folded.set(Some(!files_folded)),
                 if files_folded {
                     "Expand all"
                 } else {
@@ -132,7 +118,7 @@ pub(super) fn ViewActions(
                 "data-gtl-action": artifact_view_id.as_ref().map(|_| "toggle-copy-context"),
                 "data-gtl-selected-classes": artifact_selected_classes,
                 "data-gtl-unselected-classes": artifact_unselected_classes,
-                onclick: move |_| oncontext.call(!copy_context_enabled),
+                onclick: move |_| workspace.copy_context_enabled.set(!copy_context_enabled),
                 "+ context"
             }
         }

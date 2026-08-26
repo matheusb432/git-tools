@@ -36,21 +36,13 @@ impl WorkspaceLineTotals {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct WorkspaceFileTree {
     directories: Vec<(String, Self)>,
-    files: Vec<(String, ViewerFileSummary)>,
+    files: Vec<usize>,
 }
 
 impl WorkspaceFileTree {
-    fn from_files(files: &[ViewerFileSummary]) -> Self {
-        let mut root = Self::default();
-        for file in files {
-            root.insert(file.path.to_string_lossy().as_ref(), file.clone());
-        }
-        root
-    }
-
-    fn insert(&mut self, path: &str, file: ViewerFileSummary) {
+    fn insert(&mut self, path: &str, file_index: usize) {
         let Some((directory_name, remainder)) = path.split_once('/') else {
-            self.files.push((path.to_owned(), file));
+            self.files.push(file_index);
             return;
         };
         let index = self
@@ -62,92 +54,107 @@ impl WorkspaceFileTree {
                     .push((directory_name.to_owned(), Self::default()));
                 self.directories.len() - 1
             });
-        self.directories[index].1.insert(remainder, file);
+        self.directories[index].1.insert(remainder, file_index);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct WorkspaceFilesModel {
+    totals: WorkspaceLineTotals,
+    tree: WorkspaceFileTree,
+    matching_count: usize,
+    file_count: usize,
+    commit_count: usize,
+}
+
+impl WorkspaceFilesModel {
+    pub(super) fn new(view: &ViewerActiveView, filter: &str) -> Self {
+        let filter = filter.to_lowercase();
+        let mut tree = WorkspaceFileTree::default();
+        let mut matching_count = 0;
+        for (file_index, file) in view.files.iter().enumerate() {
+            let path = file.path.to_string_lossy();
+            if path.to_lowercase().contains(&filter) {
+                tree.insert(path.as_ref(), file_index);
+                matching_count += 1;
+            }
+        }
+        Self {
+            totals: WorkspaceLineTotals::from_files(&view.files),
+            tree,
+            matching_count,
+            file_count: view.files.len(),
+            commit_count: view.commit_count,
+        }
+    }
+
+    #[cfg(feature = "artifact")]
+    pub(super) const fn file_count(&self) -> usize {
+        self.file_count
+    }
+
+    #[cfg(feature = "artifact")]
+    pub(super) const fn commit_count(&self) -> usize {
+        self.commit_count
     }
 }
 
 #[component]
 pub(super) fn FilesPanel(
-    view: ViewerActiveView,
-    filter: String,
     test_id: Option<String>,
-    onfilter: EventHandler<String>,
     onnavigate: EventHandler<String>,
     artifact_view_id: Option<String>,
 ) -> Element {
-    let filter_normalized = filter.to_lowercase();
-    let files = view
-        .files
-        .iter()
-        .filter(|file| {
-            file.path
-                .to_string_lossy()
-                .to_lowercase()
-                .contains(&filter_normalized)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    let totals = WorkspaceLineTotals::from_files(&view.files);
-    let tree = WorkspaceFileTree::from_files(&files);
-    let artifact_file_panel = artifact_view_id.as_ref().map(|_| "");
+    let workspace = super::use_workspace_context();
+    let model = workspace.files.read();
+    let artifact_enhancement = artifact_view_id.is_some();
+    let artifact_file_panel = artifact_enhancement.then_some("");
 
     rsx! {
         ScrollArea {
             class: "h-full min-h-0 overflow-auto bg-surface p-3 compact:p-2.5",
             "data-testid": test_id,
             "data-gtl-file-panel": artifact_file_panel,
-            FilesFilter {
-                filter,
-                onfilter,
-                artifact_view_id: artifact_view_id.clone(),
-            }
-            FilesPanelHeading {
-                commits_label: view.commits_label.clone(),
-                file_count: view.files.len(),
-            }
-            FilesPanelSummary { commit_count: view.commit_count, totals }
-            if artifact_view_id.is_some() {
-                WorkspaceFileTreeView {
-                    tree,
-                    onnavigate,
-                    artifact_view_id: artifact_view_id.clone(),
-                }
-                EmptyNotice { hidden: !files.is_empty(), "data-gtl-files-empty": "",
+            FilesFilter { artifact_enhancement }
+            FilesPanelHeading { file_count: model.file_count }
+            FilesPanelSummary { commit_count: model.commit_count, totals: model.totals }
+            if artifact_enhancement {
+                {render_file_tree(&model.tree, false, onnavigate, true)}
+                EmptyNotice {
+                    hidden: model.matching_count > 0,
+                    "data-gtl-files-empty": "",
                     "no files match this filter"
                 }
-            } else if files.is_empty() {
+            } else if model.matching_count == 0 {
                 EmptyNotice { "no files match this filter" }
             } else {
-                WorkspaceFileTreeView { tree, onnavigate, artifact_view_id }
+                {render_file_tree(&model.tree, false, onnavigate, false)}
             }
         }
     }
 }
 
 #[component]
-fn FilesFilter(
-    filter: String,
-    onfilter: EventHandler<String>,
-    artifact_view_id: Option<String>,
-) -> Element {
-    let artifact_action = artifact_view_id.as_ref().map(|_| "filter-files");
+fn FilesFilter(artifact_enhancement: bool) -> Element {
+    let artifact_action = artifact_enhancement.then_some("filter-files");
+    let mut workspace = super::use_workspace_context();
     rsx! {
         div { class: "relative mb-3",
             TextInput {
                 label: "Filter files",
                 label_visibility: TextInputLabelVisibility::Hidden,
                 class: "h-9 py-2",
-                value: filter,
+                value: (workspace.file_filter)(),
                 placeholder: "Filter files\u{2026}  /",
                 "data-gtl-action": artifact_action,
-                oninput: move |event: FormEvent| onfilter.call(event.value()),
+                oninput: move |event: FormEvent| workspace.file_filter.set(event.value()),
             }
         }
     }
 }
 
 #[component]
-fn FilesPanelHeading(commits_label: String, file_count: usize) -> Element {
+fn FilesPanelHeading(file_count: usize) -> Element {
     let file_label = super::file_label(file_count);
     rsx! {
         div { class: "mx-1 mt-1.5 mb-2 flex justify-between tracking-wider text-ink-3 uppercase",
@@ -181,58 +188,37 @@ fn CommitCountBadge(count: usize) -> Element {
     }
 }
 
-#[component]
-fn WorkspaceFileTreeView(
-    tree: WorkspaceFileTree,
+fn render_file_tree(
+    tree: &WorkspaceFileTree,
+    nested: bool,
     onnavigate: EventHandler<String>,
-    artifact_view_id: Option<String>,
-    #[props(default)] nested: bool,
+    artifact_enhancement: bool,
 ) -> Element {
-    let artifact_tree = (!nested && artifact_view_id.is_some()).then_some("");
+    let artifact_tree = (!nested && artifact_enhancement).then_some("");
     rsx! {
         ul {
             class: if nested { "m-0 list-none p-0 pl-2.5" } else { "m-0 list-none p-0" },
             "data-gtl-file-tree": artifact_tree,
-            for (directory_name, directory) in tree.directories {
-                WorkspaceDirectoryItem {
-                    directory_name,
-                    directory,
-                    onnavigate,
-                    artifact_view_id: artifact_view_id.clone(),
+            for (directory_name, directory) in &tree.directories {
+                li {
+                    class: "min-w-0",
+                    "data-gtl-file-directory": artifact_enhancement.then_some(""),
+                    details { class: "group", open: true,
+                        summary { class: "flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-snug text-ink-3 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden",
+                            WorkspaceDirectoryCaret {}
+                            span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+                                "{directory_name}"
+                            }
+                        }
+                        {render_file_tree(directory, true, onnavigate, artifact_enhancement)}
+                    }
                 }
             }
-            for (file_name, file) in tree.files {
+            for file_index in &tree.files {
                 WorkspaceFileItem {
-                    file_name,
-                    file,
+                    file_index: *file_index,
                     onnavigate,
-                    artifact_view_id: artifact_view_id.clone(),
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn WorkspaceDirectoryItem(
-    directory_name: String,
-    directory: WorkspaceFileTree,
-    onnavigate: EventHandler<String>,
-    artifact_view_id: Option<String>,
-) -> Element {
-    let artifact_directory = artifact_view_id.as_ref().map(|_| "");
-    rsx! {
-        li { class: "min-w-0", "data-gtl-file-directory": artifact_directory,
-            details { class: "group", open: true,
-                summary { class: "flex cursor-pointer list-none items-center gap-1.5 rounded-sm px-1.5 py-0.5 leading-snug text-ink-3 hover:bg-surface-2 hover:text-ink active:bg-acc-soft focus-visible:-outline-offset-2 focus-visible:outline-2 focus-visible:outline-acc [&::-webkit-details-marker]:hidden",
-                    WorkspaceDirectoryCaret {}
-                    WorkspaceTreeLabel { label: directory_name }
-                }
-                WorkspaceFileTreeView {
-                    tree: directory,
-                    onnavigate,
-                    artifact_view_id,
-                    nested: true,
+                    artifact_enhancement,
                 }
             }
         }
@@ -252,16 +238,25 @@ fn WorkspaceDirectoryCaret() -> Element {
 
 #[component]
 fn WorkspaceFileItem(
-    file_name: String,
-    file: ViewerFileSummary,
+    file_index: usize,
     onnavigate: EventHandler<String>,
-    artifact_view_id: Option<String>,
+    artifact_enhancement: bool,
 ) -> Element {
+    let workspace = super::use_workspace_context();
+    let _data_generation = (workspace.data_generation)();
+    let view = workspace.view.peek();
+    let Some(file) = view.files.get(file_index) else {
+        return rsx! {};
+    };
+    let file_name = file.path.as_path().file_name().map_or_else(
+        || file.path.to_string_lossy(),
+        |name| name.to_string_lossy(),
+    );
     let anchor_id = file.anchor_id.clone();
     let filter_key = file.path.to_string_lossy().to_lowercase();
     let tone_classes = file_item_tone_classes(file.status);
-    let artifact_file = artifact_view_id.as_ref().map(|_| "");
-    let artifact_action = artifact_view_id.as_ref().map(|_| "navigate-file");
+    let artifact_file = artifact_enhancement.then_some("");
+    let artifact_action = artifact_enhancement.then_some("navigate-file");
     let item_attributes = merge_attributes(vec![
         attributes!(div {
             class: "gap-1.5 px-1.5 py-0.5 text-left leading-snug text-ink-2 hover:text-ink",
@@ -275,7 +270,7 @@ fn WorkspaceFileItem(
         li {
             class: "min-w-0",
             "data-gtl-file-leaf": artifact_file,
-            "data-gtl-filter-key": artifact_view_id.as_ref().map(|_| filter_key.clone()),
+            "data-gtl-filter-key": artifact_enhancement.then_some(filter_key),
             Button {
                 layout: ButtonLayout::FullWidthStart,
                 size: ButtonSize::Content,
@@ -289,17 +284,10 @@ fn WorkspaceFileItem(
                     status: file.status,
                     size: DiffFileStatusBadgeSize::Compact,
                 }
-                WorkspaceTreeLabel { label: file_name }
+                span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
+                    "{file_name}"
+                }
             }
-        }
-    }
-}
-
-#[component]
-fn WorkspaceTreeLabel(label: String) -> Element {
-    rsx! {
-        span { class: "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap",
-            "{label}"
         }
     }
 }
@@ -357,16 +345,18 @@ mod tests {
             file("crates/web/src/view.rs", 1, 5)?,
         ];
 
-        let tree = WorkspaceFileTree::from_files(&files);
+        let mut tree = WorkspaceFileTree::default();
+        for (index, file) in files.iter().enumerate() {
+            tree.insert(file.path.to_string_lossy().as_ref(), index);
+        }
 
         assert_eq!(tree.directories[0].0, "crates");
         assert_eq!(tree.directories[0].1.directories[0].0, "web");
         assert_eq!(
             tree.directories[0].1.directories[0].1.directories[0]
                 .1
-                .files[0]
-                .0,
-            "app.rs"
+                .files[0],
+            0
         );
         Ok(())
     }

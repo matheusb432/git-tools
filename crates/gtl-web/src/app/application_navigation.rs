@@ -29,16 +29,16 @@ pub(crate) fn ApplicationNavigation() -> Element {
     let viewer = use_context::<ViewerContext>();
     let navigator = use_navigator();
     let toast = use_toast();
-    let shell = match viewer.read() {
-        ViewerShellLoad::Ready(shell) => Some(shell),
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => None,
+    let shell = viewer.shell();
+    let tab_ids = use_memo(move || match &*shell.read() {
+        ViewerShellLoad::Ready(shell) => shell.tabs.iter().map(|tab| tab.id).collect(),
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => Vec::new(),
+    });
+    let shell_state = shell.read();
+    let (active_tab_id, tabs) = match &*shell_state {
+        ViewerShellLoad::Ready(shell) => (active_tab_id(&shell.active), shell.tabs.as_slice()),
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => (None, &[] as &[ViewerTab]),
     };
-    let active_tab_id = shell
-        .as_ref()
-        .and_then(|shell| active_tab_id(&shell.active));
-    let tabs = shell
-        .as_ref()
-        .map_or_else(Vec::new, |shell| shell.tabs.clone());
 
     rsx! {
         nav {
@@ -56,8 +56,8 @@ pub(crate) fn ApplicationNavigation() -> Element {
                     {
                         let tab_id = tab.id;
                         let active = active_tab_id == Some(tab_id);
-                        let focus_tab_id = close_focus_target(&tabs, tab_id);
-                        let key_tabs = tabs.clone();
+                        let focus_tab_id = close_focus_target(tabs, tab_id);
+                        let key_tabs = tab_ids;
                         let tab_label = tab.label.clone();
                         rsx! {
                             div {
@@ -97,8 +97,7 @@ pub(crate) fn ApplicationNavigation() -> Element {
                                         };
                                         if let Some(movement) = movement {
                                             event.prevent_default();
-                                            let ids = key_tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
-                                            if let Some(target) = tab_focus_target(&ids, tab_id, movement) {
+                                            if let Some(target) = tab_focus_target(&key_tabs.peek(), tab_id, movement) {
                                                 spawn(async move {
                                                     match viewer_server::activate_tab(ViewerTabRequest {
                                                             tab_id: target,
@@ -209,13 +208,12 @@ pub(crate) fn ApplicationNavigation() -> Element {
 #[component]
 fn ThemePicker() -> Element {
     let viewer = use_context::<ViewerContext>();
-    let shell = match viewer.read() {
-        ViewerShellLoad::Ready(shell) => Some(shell),
-        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => None,
+    let shell = viewer.shell();
+    let shell = shell.read();
+    let (theme, shell_ready) = match &*shell {
+        ViewerShellLoad::Ready(shell) => (shell.preferences.theme, true),
+        ViewerShellLoad::Loading | ViewerShellLoad::Error(_) => (ViewerTheme::Dark, false),
     };
-    let theme = shell
-        .as_ref()
-        .map_or(ViewerTheme::Dark, |shell| shell.preferences.theme);
 
     rsx! {
         label { class: "flex h-8 flex-none items-center gap-2 rounded-sm border border-transparent bg-transparent px-2.5 text-ink-2 hover:border-line-2 hover:bg-surface-2 hover:text-ink focus-within:border-acc-line has-[select:disabled]:cursor-not-allowed has-[select:disabled]:opacity-50",
@@ -226,7 +224,7 @@ fn ThemePicker() -> Element {
             select {
                 class: "cursor-pointer appearance-none bg-transparent text-inherit outline-none disabled:cursor-not-allowed",
                 value: theme_value(theme),
-                disabled: shell.is_none() || viewer.render_command_pending(),
+                disabled: !shell_ready || viewer.render_command_pending(),
                 aria_label: "Theme",
                 onchange: move |event| {
                     if let Some(theme) = theme_from_value(&event.value()) {

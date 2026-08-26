@@ -1,36 +1,35 @@
 use std::time::Duration;
 
 use dioxus::prelude::*;
-use gtl_wire::viewer::ViewerDiffFileId;
+use gtl_wire::viewer::{ViewerDiffFileId, ViewerFileSummary};
 use lucide_dioxus::ExternalLink;
 
-use crate::{
-    entities::diffs::ClientDiffFile,
-    shared::{
-        browser,
-        ui::{
-            Button, ButtonSize, ButtonVariant, IconPopover, IconPopoverPlacement,
-            MENU_ACTION_HOST_CLASSES, MenuActionContent,
-        },
+use crate::shared::{
+    browser,
+    ui::{
+        Button, ButtonSize, ButtonVariant, IconPopover, IconPopoverPlacement,
+        MENU_ACTION_HOST_CLASSES, MenuActionContent,
     },
 };
 
 #[component]
 pub(super) fn DiffFileActions(
-    file: ClientDiffFile,
+    summary: ReadSignal<ViewerFileSummary>,
     copy_popover_id: String,
     onopen: Option<EventHandler<ViewerDiffFileId>>,
     artifact_enhancement: bool,
 ) -> Element {
+    let (file_id, can_open_in_editor) =
+        summary.with(|summary| (summary.id.clone(), summary.can_open_in_editor));
     rsx! {
         span { class: "flex flex-none items-center gap-1 mobile:hidden",
             DiffPathCopyMenu {
-                file: file.clone(),
+                summary,
                 popover_id: copy_popover_id,
                 artifact_enhancement,
             }
-            if let Some(onopen) = onopen.filter(|_| file.summary.can_open_in_editor) {
-                OpenInTextEditorAction { file_id: file.summary.id, onopen }
+            if let Some(onopen) = onopen.filter(|_| can_open_in_editor) {
+                OpenInTextEditorAction { file_id, onopen }
             }
         }
     }
@@ -38,17 +37,20 @@ pub(super) fn DiffFileActions(
 
 #[component]
 fn DiffPathCopyMenu(
-    file: ClientDiffFile,
+    summary: ReadSignal<ViewerFileSummary>,
     popover_id: String,
     artifact_enhancement: bool,
 ) -> Element {
-    let relative_path = file.summary.path.to_string_lossy().into_owned();
-    let absolute_path = file
-        .summary
-        .absolute_path
-        .as_path()
-        .to_string_lossy()
-        .into_owned();
+    let (relative_path, absolute_path) = summary.with(|summary| {
+        (
+            summary.path.to_string_lossy().into_owned(),
+            summary
+                .absolute_path
+                .as_path()
+                .to_string_lossy()
+                .into_owned(),
+        )
+    });
 
     rsx! {
         span {

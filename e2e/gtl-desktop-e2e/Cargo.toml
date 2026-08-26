@@ -14,6 +14,7 @@ command-group.workspace = true
 futures-util.workspace = true
 gtl-benchmarks.workspace = true
 gtl-web-contracts.workspace = true
+libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

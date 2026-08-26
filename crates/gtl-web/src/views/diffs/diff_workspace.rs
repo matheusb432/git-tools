@@ -1,18 +1,22 @@
 use dioxus::prelude::*;
-use gtl_models::diffs::CommitId;
-#[cfg(feature = "artifact")]
-use gtl_models::viewer::ViewerTabId;
+use gtl_models::{
+    diffs::CommitId,
+    viewer::{ViewerRangeGeneration, ViewerSelectionGeneration, ViewerTabId},
+};
 use gtl_web_contracts::test_ids;
-use gtl_wire::viewer::ViewerActiveView;
 #[cfg(feature = "artifact")]
 use gtl_wire::viewer::ViewerDiffFileId;
+use gtl_wire::viewer::{ViewerActiveView, ViewerCommitSummary};
 #[cfg(feature = "artifact")]
 use lucide_dioxus::{History, Menu, SlidersHorizontal};
 
 #[cfg(feature = "artifact")]
 use self::titlebar::{ViewActions, ViewActionsLayout};
 use self::{
-    commits_panel::CommitsPanel, files_panel::FilesPanel, keybar::Keybar, titlebar::ViewTitlebar,
+    commits_panel::WorkspaceCommitsPanel,
+    files_panel::{FilesPanel, WorkspaceFilesModel},
+    keybar::Keybar,
+    titlebar::ViewTitlebar,
 };
 #[cfg(feature = "artifact")]
 use crate::shared::ui::{
@@ -33,6 +37,60 @@ mod titlebar;
 
 #[cfg(feature = "desktop")]
 pub(crate) use desktop::DiffWorkspaceView;
+
+#[derive(Clone, Copy)]
+pub(super) struct DiffWorkspaceContext {
+    pub(super) view: ReadSignal<ViewerActiveView>,
+    pub(super) data_generation: Memo<(
+        ViewerTabId,
+        ViewerRangeGeneration,
+        ViewerSelectionGeneration,
+    )>,
+    commits: ReadStore<Vec<ViewerCommitSummary>>,
+    files: Memo<WorkspaceFilesModel>,
+    file_filter: Signal<String>,
+    pub(super) files_folded: Signal<Option<bool>>,
+    pub(super) copy_context_enabled: Signal<bool>,
+    pub(super) flashing_file: Signal<Option<String>>,
+}
+
+fn use_diff_workspace_context(
+    view: ReadSignal<ViewerActiveView>,
+    commits: ReadStore<Vec<ViewerCommitSummary>>,
+    file_filter: Signal<String>,
+    files_folded: Signal<Option<bool>>,
+    copy_context_enabled: Signal<bool>,
+    flashing_file: Signal<Option<String>>,
+) -> DiffWorkspaceContext {
+    let data_generation = use_memo(move || {
+        let identity = view.read().identity;
+        (
+            identity.tab_id,
+            identity.range_generation,
+            identity.selection_generation,
+        )
+    });
+    let files = use_memo(move || {
+        let _data_generation = data_generation();
+        WorkspaceFilesModel::new(&view.peek(), &file_filter.read())
+    });
+    let context = DiffWorkspaceContext {
+        view,
+        data_generation,
+        commits,
+        files,
+        file_filter,
+        files_folded,
+        copy_context_enabled,
+        flashing_file,
+    };
+    use_context_provider(|| context);
+    context
+}
+
+pub(super) fn use_workspace_context() -> DiffWorkspaceContext {
+    use_context::<DiffWorkspaceContext>()
+}
 
 #[cfg(feature = "artifact")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +142,24 @@ pub(crate) fn ArtifactDiffWorkspace(
     for file in &mut workspace.files {
         file.summary.anchor_id = markup.file_target_id(&file.summary.id);
     }
+    let commits = std::mem::take(&mut view.commits);
+    let view = use_signal(move || view);
+    let commits = use_store(move || commits);
+    let file_filter = use_signal(String::new);
+    let files_folded = use_signal(|| None::<bool>);
+    let copy_context_enabled = use_signal(|| true);
+    let flashing_file = use_signal(|| None::<String>);
+    let context = use_diff_workspace_context(
+        view.into(),
+        commits.into(),
+        file_filter,
+        files_folded,
+        copy_context_enabled,
+        flashing_file,
+    );
+    let (file_count, commit_count) = context
+        .files
+        .with(|files| (files.file_count(), files.commit_count()));
 
     let files_trigger = markup.control_id("files-trigger");
     let files_dialog = markup.control_id("files-dialog");
@@ -98,8 +174,8 @@ pub(crate) fn ArtifactDiffWorkspace(
             label: "Files",
             aria_label: "Changed files",
             panel: ArtifactMobilePanel::Files,
-            count: view.files.len(),
-            enabled: !view.files.is_empty(),
+            count: file_count,
+            enabled: file_count > 0,
             onclick: move |_| {},
         }
         ArtifactNavigationButton {
@@ -107,8 +183,8 @@ pub(crate) fn ArtifactDiffWorkspace(
             dialog_id: commits_dialog.clone(),
             label: "History",
             panel: ArtifactMobilePanel::Commits,
-            count: view.commit_count,
-            enabled: view.commit_count > 0,
+            count: commit_count,
+            enabled: commit_count > 0,
             onclick: move |_| {},
         }
         ArtifactNavigationButton {
@@ -122,20 +198,13 @@ pub(crate) fn ArtifactDiffWorkspace(
         }
     };
     let diff_document = rsx! {
-        StaticDiffDocument { view: view.clone(), workspace }
+        StaticDiffDocument { workspace }
     };
 
     rsx! {
         section { class: "h-full min-h-0 overflow-hidden",
             DiffWorkspaceDocument {
-                view: view.clone(),
                 diff_document,
-                files_folded: None,
-                copy_context_enabled: true,
-                file_filter: String::new(),
-                onfold: move |_| {},
-                oncontext: move |_| {},
-                onfilter: move |_| {},
                 onnavigate: move |_| {},
                 mobile_navigation,
                 artifact_view_id: Some(markup.view_id()),
@@ -156,9 +225,6 @@ pub(crate) fn ArtifactDiffWorkspace(
             onclose: move |()| {},
             artifact_view_id: Some(markup.view_id()),
             FilesPanel {
-                view: view.clone(),
-                filter: String::new(),
-                onfilter: move |_| {},
                 onnavigate: move |_| {},
                 artifact_view_id: Some(markup.view_id()),
             }
@@ -170,7 +236,7 @@ pub(crate) fn ArtifactDiffWorkspace(
             title: "Commits",
             onclose: move |()| {},
             artifact_view_id: Some(markup.view_id()),
-            CommitsPanel { view: view.clone() }
+            WorkspaceCommitsPanel {}
         }
         Popover {
             id: view_dialog,
@@ -181,10 +247,6 @@ pub(crate) fn ArtifactDiffWorkspace(
             artifact_view_id: Some(markup.view_id()),
             ViewActions {
                 layout: ViewActionsLayout::Panel,
-                files_folded: false,
-                copy_context_enabled: true,
-                onfold: move |_| {},
-                oncontext: move |_| {},
                 artifact_view_id: Some(markup.view_id()),
             }
         }
@@ -261,14 +323,7 @@ fn ArtifactNavigationLabel(label: String) -> Element {
 
 #[component]
 fn DiffWorkspaceDocument(
-    view: ViewerActiveView,
     diff_document: Element,
-    files_folded: Option<bool>,
-    copy_context_enabled: bool,
-    file_filter: String,
-    onfold: EventHandler<bool>,
-    oncontext: EventHandler<bool>,
-    onfilter: EventHandler<String>,
     onnavigate: EventHandler<String>,
     mobile_navigation: Option<Element>,
     onselect_commit: Option<EventHandler<CommitId>>,
@@ -279,7 +334,9 @@ fn DiffWorkspaceDocument(
     onload_commits: Option<EventHandler<()>>,
     artifact_view_id: Option<String>,
 ) -> Element {
-    let footer = view.footer.clone();
+    let workspace = use_workspace_context();
+    let files_folded = (workspace.files_folded)();
+    let copy_context_enabled = (workspace.copy_context_enabled)();
     let artifact_workspace = artifact_view_id.as_ref().map(|_| "");
     let artifact_files_folded = artifact_view_id
         .as_ref()
@@ -296,23 +353,14 @@ fn DiffWorkspaceDocument(
             "data-gtl-files-folded": artifact_files_folded,
             "data-gtl-copy-context": artifact_copy_context,
             ViewTitlebar {
-                view: view.clone(),
-                files_folded: files_folded.unwrap_or(false),
-                copy_context_enabled,
                 mobile_navigation,
-                onfold,
-                oncontext,
                 artifact_view_id: artifact_view_id.clone(),
             }
             aside {
                 class: "col-start-1 row-start-2 hidden min-h-0 overflow-hidden border-r border-line bg-surface workspace:block",
                 aria_label: "Changed files",
                 FilesPanel {
-                    // TODO: optimize. this (and ClientDiffDocument, and CommitsPanel) clone the view many times, despite most not needing all its data.
-                    view: view.clone(),
-                    filter: file_filter,
                     test_id: Some(test_ids::CHANGED_FILES_PANEL.value().to_owned()),
-                    onfilter,
                     onnavigate,
                     artifact_view_id: artifact_view_id.clone(),
                 }
@@ -321,8 +369,7 @@ fn DiffWorkspaceDocument(
             aside {
                 class: "col-start-3 row-start-2 hidden min-h-0 overflow-hidden border-l border-line bg-surface workspace:block",
                 aria_label: "Commits",
-                CommitsPanel {
-                    view,
+                WorkspaceCommitsPanel {
                     test_id: Some(test_ids::COMMITS_PANEL.value().to_owned()),
                     onselect: onselect_commit,
                     onclear: onclear_commit,
@@ -332,7 +379,7 @@ fn DiffWorkspaceDocument(
                     onloadmore: onload_commits,
                 }
             }
-            Keybar { footer }
+            Keybar {}
         }
     }
 }

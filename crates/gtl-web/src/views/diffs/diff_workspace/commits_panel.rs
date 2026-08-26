@@ -4,7 +4,7 @@ use gtl_models::{
     diffs::{CommitId, CommitIdAbbreviation},
     timestamps::MachineTimestamp,
 };
-use gtl_wire::viewer::{ViewerActiveView, ViewerCommitSelection, ViewerCommitSummary};
+use gtl_wire::viewer::{ViewerCommitSelection, ViewerCommitSummary};
 use lucide_dioxus::CircleDot;
 
 use crate::shared::{
@@ -17,7 +17,7 @@ use crate::shared::{
 
 #[component]
 pub fn CommitsPanel(
-    view: ViewerActiveView,
+    mut view: gtl_wire::viewer::ViewerActiveView,
     test_id: Option<String>,
     onselect: Option<EventHandler<CommitId>>,
     onclear: Option<EventHandler<()>>,
@@ -26,6 +26,47 @@ pub fn CommitsPanel(
     #[props(default)] has_more: bool,
     onloadmore: Option<EventHandler<()>>,
 ) -> Element {
+    let commits = std::mem::take(&mut view.commits);
+    let view = use_signal(move || view);
+    let commits = use_store(move || commits);
+    let file_filter = use_signal(String::new);
+    let files_folded = use_signal(|| None::<bool>);
+    let copy_context_enabled = use_signal(|| true);
+    let flashing_file = use_signal(|| None::<String>);
+    let _context = super::use_diff_workspace_context(
+        view.into(),
+        commits.into(),
+        file_filter,
+        files_folded,
+        copy_context_enabled,
+        flashing_file,
+    );
+
+    rsx! {
+        WorkspaceCommitsPanel {
+            test_id,
+            onselect,
+            onclear,
+            loading,
+            load_error,
+            has_more,
+            onloadmore,
+        }
+    }
+}
+
+#[component]
+pub(super) fn WorkspaceCommitsPanel(
+    test_id: Option<String>,
+    onselect: Option<EventHandler<CommitId>>,
+    onclear: Option<EventHandler<()>>,
+    #[props(default)] loading: bool,
+    load_error: Option<String>,
+    #[props(default)] has_more: bool,
+    onloadmore: Option<EventHandler<()>>,
+) -> Element {
+    let workspace = super::use_workspace_context();
+    let view = workspace.view.read();
     let selected_id = match &view.commit_selection {
         ViewerCommitSelection::None => None,
         ViewerCommitSelection::Pending { id }
@@ -62,13 +103,14 @@ pub fn CommitsPanel(
             if view.commit_count == 0 {
                 EmptyNotice { "no commits in range" }
             }
-            for commit in &view.commits {
+            for (commit_index, commit) in workspace.commits.iter().enumerate() {
                 {
-                    let selected = selected_id == Some(&commit.id);
+                    let commit_id = commit.peek().id.clone();
+                    let selected = selected_id == Some(&commit_id);
                     rsx! {
                         CommitCard {
-                            key: "{commit.id}",
-                            commit: commit.clone(),
+                            key: "{commit_index}:{commit_id}",
+                            commit_index,
                             selected,
                             selection_pending,
                             onselect,
@@ -172,12 +214,22 @@ const COMMIT_CARD_CLASSES: &str = "relative ml-1.5 w-[calc(100%_-_0.375rem)] rou
 
 #[component]
 fn CommitCard(
-    commit: ViewerCommitSummary,
+    commit_index: usize,
     selected: bool,
     selection_pending: bool,
     onselect: Option<EventHandler<CommitId>>,
 ) -> Element {
-    let title = (!commit.body.is_empty()).then(|| commit.body.clone());
+    let workspace = super::use_workspace_context();
+    let Some(commit) = workspace.commits.get(commit_index) else {
+        return rsx! {};
+    };
+    let commit: ReadStore<ViewerCommitSummary> = commit.into();
+    let (title, id) = commit.with(|commit| {
+        (
+            (!commit.body.is_empty()).then(|| commit.body.clone()),
+            commit.id.clone(),
+        )
+    });
     let tone_classes = commit_card_tone_classes(selected);
     let card_attributes = merge_attributes(vec![
         attributes!(div {
@@ -189,7 +241,6 @@ fn CommitCard(
     ]);
 
     if let Some(onselect) = onselect {
-        let id = commit.id.clone();
         return rsx! {
             Button {
                 layout: ButtonLayout::Block,
@@ -216,7 +267,8 @@ fn CommitCard(
 }
 
 #[component]
-fn CommitCardContent(commit: ViewerCommitSummary, selected: bool) -> Element {
+fn CommitCardContent(commit: ReadStore<ViewerCommitSummary>, selected: bool) -> Element {
+    let commit = commit.read();
     rsx! {
         CommitTimelineMarker { selected }
         span { class: "mb-1 flex min-w-0 items-center gap-1.5",
@@ -224,9 +276,9 @@ fn CommitCardContent(commit: ViewerCommitSummary, selected: bool) -> Element {
             if commit.is_merge {
                 Badge { variant: BadgeVariant::Neutral, "merge" }
             }
-            CommitDate { committed_at: commit.committed_at }
+            CommitDate { committed_at: commit.committed_at.clone() }
         }
-        CommitSubject { subject: commit.subject }
+        span { class: "block text-wrap leading-normal text-ink-2", "{commit.subject}" }
     }
 }
 
@@ -281,13 +333,6 @@ fn CommitDate(committed_at: MachineTimestamp) -> Element {
             title: iso,
             "{date}"
         }
-    }
-}
-
-#[component]
-fn CommitSubject(subject: String) -> Element {
-    rsx! {
-        span { class: "block text-wrap leading-normal text-ink-2", "{subject}" }
     }
 }
 
