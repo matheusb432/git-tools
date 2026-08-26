@@ -18,24 +18,19 @@ use crate::ports::GitClient;
 /// Transport and Git rejections become explicit unavailable facts so an unreadable repository is
 /// never reported as clean.
 #[cqrsy::query]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
 pub fn execute(repos: Vec<RepositoryTarget>, git: &impl GitClient) -> Vec<StatusResult> {
-    repos.iter().map(|repo| get_one(repo, git)).collect()
+    repos.into_iter().map(|repo| get_one(repo, git)).collect()
 }
 
-pub(crate) fn get_one(repo: &RepositoryTarget, git: &impl GitClient) -> StatusResult {
-    if !git.repo_present(&repo.path) {
-        return StatusResult::absent(repo.label.clone());
+pub(crate) fn get_one(repo: RepositoryTarget, git: &impl GitClient) -> StatusResult {
+    let RepositoryTarget { path, label } = repo;
+    if !git.repo_present(&path) {
+        return StatusResult::absent(label);
     }
 
-    StatusResult::present(
-        repo.label.clone(),
-        status_head(git, &repo.path),
-        status_changes(git, &repo.path),
-    )
+    let head = status_head(git, &path);
+    let changes = status_changes(git, &path);
+    StatusResult::present(label, head, changes)
 }
 
 fn status_head(git: &impl GitClient, repo_path: &RepositoryRoot) -> StatusHead {

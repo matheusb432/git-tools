@@ -165,7 +165,7 @@ impl ViewerSession {
         batch_id: RecipeBatchId,
         kind: ViewerTabKind,
     ) -> Option<ViewerTabId> {
-        let label = initial_recipe_label::execute(recipe.clone());
+        let label = initial_recipe_label::execute(&recipe);
         self.open_labeled(recipe, batch_id, kind, label)
     }
 
@@ -247,7 +247,7 @@ impl ViewerSession {
         })
     }
 
-    pub fn publish_labeled_if_current(
+    pub(super) fn publish_labeled_if_current(
         &mut self,
         ticket: ComputeTicket,
         value: CachedView,
@@ -270,7 +270,7 @@ impl ViewerSession {
         PublishOutcome::Published
     }
 
-    pub fn set_state_if_current(
+    pub(super) fn set_state_if_current(
         &mut self,
         ticket: ComputeTicket,
         state: ViewerTabState,
@@ -346,7 +346,7 @@ impl ViewerSession {
         Ok((ticket, repo_root, commit))
     }
 
-    pub fn publish_commit_patch_if_current(
+    pub(super) fn publish_commit_patch_if_current(
         &mut self,
         ticket: CommitPatchTicket,
         patch: Arc<View>,
@@ -387,7 +387,7 @@ impl ViewerSession {
         PublishOutcome::Published
     }
 
-    pub fn set_commit_patch_error_if_current(
+    pub(super) fn set_commit_patch_error_if_current(
         &mut self,
         ticket: CommitPatchTicket,
         reason: String,
@@ -468,7 +468,7 @@ impl ViewerSession {
         })
     }
 
-    pub fn close_if_current(&mut self, ticket: ComputeTicket) -> PublishOutcome {
+    pub(super) fn close_if_current(&mut self, ticket: ComputeTicket) -> PublishOutcome {
         if self.current_ticket(ticket.tab_id) != Some(ticket) {
             return PublishOutcome::Stale;
         }

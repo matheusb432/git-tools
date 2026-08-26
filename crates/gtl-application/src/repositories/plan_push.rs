@@ -1,6 +1,6 @@
 //! Plans the current repository's push without changing Git state.
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use gtl_models::{
     git::{BranchName, CommitCount, GitHead, GitRange, RemoteName, RemoteUrl},
@@ -47,13 +47,9 @@ pub enum PlanPushError {
 ///
 /// Returns [`PlanPushError`] when Git transport fails.
 #[cqrsy::query]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
-pub fn execute(repo_path: PathBuf, git: &impl GitClient) -> Result<PlanPushOk, PlanPushError> {
+pub fn execute(repo_path: &Path, git: &impl GitClient) -> Result<PlanPushOk, PlanPushError> {
     let Some(top) = git
-        .discover_top(&repo_path)
+        .discover_top(repo_path)
         .map_err(|source| transport("discover repository", source))?
     else {
         return Ok(PlanPushOk::Refused("not a git repo".into()));
@@ -134,8 +130,8 @@ mod tests {
             ScriptedGitClient::applied("HEAD\n"),
         ]);
 
-        let plan =
-            plan_push::execute(".".into(), &git).expect("a detached head is an expected refusal");
+        let plan = plan_push::execute(Path::new("."), &git)
+            .expect("a detached head is an expected refusal");
 
         assert_eq!(
             plan,
@@ -151,7 +147,7 @@ mod tests {
             ScriptedGitClient::rejected("no upstream"),
         ]);
 
-        let plan = plan_push::execute(".".into(), &git)
+        let plan = plan_push::execute(Path::new("."), &git)
             .expect("a missing upstream is an expected refusal");
 
         assert_eq!(
@@ -173,7 +169,7 @@ mod tests {
             ScriptedGitClient::applied("2\n"),
         ]);
 
-        let plan = plan_push::execute(".".into(), &git).expect("push plan is built");
+        let plan = plan_push::execute(Path::new("."), &git).expect("push plan is built");
 
         assert_eq!(
             plan,
@@ -199,7 +195,7 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = plan_push::execute(".".into(), &git)
+        let error = plan_push::execute(Path::new("."), &git)
             .expect_err("transport failure must remain an error");
 
         assert_eq!(

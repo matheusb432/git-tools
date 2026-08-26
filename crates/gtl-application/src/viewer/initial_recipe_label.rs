@@ -2,12 +2,8 @@ use super::recipe_label;
 use crate::recipes::Recipe;
 
 #[cqrsy::query]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
-pub fn execute(recipe: Recipe) -> String {
-    recipe_label::initial(&recipe)
+pub fn execute(recipe: &Recipe) -> String {
+    recipe_label::initial(recipe)
 }
 
 #[cfg(test)]
@@ -81,7 +77,7 @@ mod tests {
         ];
 
         for (op, expected) in cases {
-            let response = initial_recipe_label::execute(recipe(op));
+            let response = initial_recipe_label::execute(&recipe(op));
 
             assert_eq!(response, expected);
         }
@@ -95,7 +91,7 @@ mod tests {
         });
         named.name = Some(crate::utils::project_name("Release review"));
 
-        let response = initial_recipe_label::execute(named);
+        let response = initial_recipe_label::execute(&named);
 
         assert_eq!(response, "Release review");
     }
@@ -108,7 +104,7 @@ mod tests {
         });
         root.source = RecipeSource::LocalRepo(crate::utils::repository_root("/"));
 
-        let response = initial_recipe_label::execute(root);
+        let response = initial_recipe_label::execute(&root);
 
         assert_eq!(response, "repo: merge ->main");
     }

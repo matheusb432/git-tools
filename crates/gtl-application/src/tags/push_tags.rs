@@ -34,15 +34,11 @@ pub enum PushTagsError {
 ///
 /// Returns [`PushTagsError`] when Git cannot be executed.
 #[cqrsy::command]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
 pub fn execute(
-    repo_path: RepositoryRoot,
+    repo_path: &RepositoryRoot,
     git: &impl GitClient,
 ) -> Result<TagActionOutcome, PushTagsError> {
-    match push(&repo_path, git) {
+    match push(repo_path, git) {
         Ok(outcome) => Ok(outcome),
         Err(GitCommandError::Rejected { detail, progress }) => {
             Ok(TagActionOutcome::failed_with_progress(detail, *progress))
@@ -202,7 +198,7 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = push_tags::execute(crate::utils::repository_root("/repo"), &git)
+        let error = push_tags::execute(&crate::utils::repository_root("/repo"), &git)
             .expect_err("transport failure must remain an error");
 
         assert_transport_error(&error);
@@ -214,7 +210,7 @@ mod tests {
             ScriptedGitClient::new(vec![ScriptedGitClient::rejected("fatal: refs unavailable")]);
 
         assert_eq!(
-            push_tags::execute(crate::utils::repository_root("/repo"), &git)
+            push_tags::execute(&crate::utils::repository_root("/repo"), &git)
                 .expect("a Git rejection is a closed action failure"),
             failed("git for-each-ref failed: fatal: refs unavailable")
         );
@@ -228,7 +224,7 @@ mod tests {
             Err(anyhow::anyhow!("git transport unavailable")),
         ]);
 
-        let error = push_tags::execute(crate::utils::repository_root("/repo"), &git)
+        let error = push_tags::execute(&crate::utils::repository_root("/repo"), &git)
             .expect_err("transport failure must remain an error");
 
         let PushTagsError::Unexpected { progress, source } = error;
@@ -249,7 +245,7 @@ mod tests {
             ScriptedGitClient::rejected("fatal: remote rejected"),
         ]);
 
-        let outcome = push_tags::execute(crate::utils::repository_root("/repo"), &git)
+        let outcome = push_tags::execute(&crate::utils::repository_root("/repo"), &git)
             .expect("a Git rejection is a closed action failure");
 
         assert_eq!(
@@ -272,7 +268,7 @@ mod tests {
             ScriptedGitClient::applied(""),
         ]);
 
-        let outcome = push_tags::execute(crate::utils::repository_root("/repo"), &git)
+        let outcome = push_tags::execute(&crate::utils::repository_root("/repo"), &git)
             .expect("scripted git succeeds");
 
         assert_eq!(outcome.status(), TagActionStatus::Pushed);
@@ -288,7 +284,7 @@ mod tests {
             ),
         ]);
 
-        let outcome = push_tags::execute(crate::utils::repository_root("/repo"), &git)
+        let outcome = push_tags::execute(&crate::utils::repository_root("/repo"), &git)
             .expect("scripted git succeeds");
 
         assert_eq!(outcome.status(), TagActionStatus::Noop);

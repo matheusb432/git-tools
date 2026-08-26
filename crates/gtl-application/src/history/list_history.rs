@@ -2,7 +2,7 @@
 //! dispatches in-process. Sort order (newest-first) is this query's contract,
 //! not any one UI's rendering choice.
 
-use std::{cmp::Ordering, path::PathBuf};
+use std::{cmp::Ordering, path::Path};
 
 use crate::ports::{ArtifactStore, HistoryRecord};
 
@@ -24,27 +24,24 @@ fn compare_recency(left: &HistoryRecord, right: &HistoryRecord) -> Ordering {
 
 /// Lists artifact history in newest-first order.
 #[cqrsy::query]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
 pub fn execute(
-    store_root: PathBuf,
+    store_root: &Path,
     store: &impl ArtifactStore,
 ) -> Result<Vec<HistoryRecord>, ListHistoryError> {
-    let mut entries = store.list_history(&store_root)?;
+    let mut entries = store.list_history(store_root)?;
     entries.sort_by(|a, b| compare_recency(b, a).then_with(|| b.generated_at.cmp(&a.generated_at)));
     Ok(entries)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use gtl_models::{
         artifacts::{ArtifactByteSize, ArtifactContentHash, RepositoryStoreId},
         timestamps::MachineTimestamp,
     };
 
-    use super::*;
     use crate::{history::list_history, ports::HistoryRecord, utils::InMemoryArtifactStore};
 
     fn record(repo_id: &str, committed: &str, generated: &str) -> HistoryRecord {
@@ -92,7 +89,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = list_history::execute(req(), &store).expect("list succeeds");
+        let response = list_history::execute(&req(), &store).expect("list succeeds");
 
         assert_eq!(response[0].repo_id.as_ref(), "cccccccccccccccc");
         assert_eq!(response[2].repo_id.as_ref(), "aaaaaaaaaaaaaaaa");
@@ -114,7 +111,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let response = list_history::execute(req(), &store).expect("list succeeds");
+        let response = list_history::execute(&req(), &store).expect("list succeeds");
 
         assert_eq!(response[0].repo_id.as_ref(), "ffffffffffffffff");
         assert_eq!(response[1].repo_id.as_ref(), "1111111111111111");
@@ -138,7 +135,7 @@ mod tests {
             ..Default::default()
         };
 
-        let response = list_history::execute(req(), &store).expect("list succeeds");
+        let response = list_history::execute(&req(), &store).expect("list succeeds");
 
         assert_eq!(response[0].repo_id.as_ref(), "2222222222222222");
     }
@@ -146,7 +143,7 @@ mod tests {
     #[test]
     fn empty_store_returns_an_empty_list() {
         let store = InMemoryArtifactStore::default();
-        let response = list_history::execute(req(), &store).expect("list succeeds");
+        let response = list_history::execute(&req(), &store).expect("list succeeds");
 
         assert!(response.is_empty());
     }

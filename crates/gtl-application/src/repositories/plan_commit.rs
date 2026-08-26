@@ -1,6 +1,6 @@
 //! Plans a local-only commit without changing Git state.
 
-use std::path::PathBuf;
+use std::path::Path;
 
 use gtl_models::{
     git::{BranchName, CommitCount, GitHead},
@@ -45,13 +45,9 @@ pub enum PlanCommitError {
 ///
 /// Returns [`PlanCommitError`] when Git transport fails.
 #[cqrsy::query]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
-pub fn execute(repo_path: PathBuf, git: &impl GitClient) -> Result<PlanCommitOk, PlanCommitError> {
+pub fn execute(repo_path: &Path, git: &impl GitClient) -> Result<PlanCommitOk, PlanCommitError> {
     let Some(top) = git
-        .discover_top(&repo_path)
+        .discover_top(repo_path)
         .map_err(|source| transport("discover repository", source))?
     else {
         return Ok(PlanCommitOk::Refused("not a git repo".into()));
@@ -115,7 +111,7 @@ mod tests {
             ScriptedGitClient::applied(" M src/lib.rs\n"),
         ]);
 
-        let plan = plan_commit::execute(".".into(), &git).expect("commit plan is built");
+        let plan = plan_commit::execute(Path::new("."), &git).expect("commit plan is built");
 
         assert_eq!(
             plan,
@@ -139,7 +135,7 @@ mod tests {
             "git transport unavailable"
         ))]);
 
-        let error = plan_commit::execute(".".into(), &git)
+        let error = plan_commit::execute(Path::new("."), &git)
             .expect_err("transport failure must remain an error");
 
         assert_eq!(

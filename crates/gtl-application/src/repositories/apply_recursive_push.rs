@@ -14,17 +14,10 @@ use crate::ports::{GitClient, GitEffect};
 /// aggregates per-repo outcomes into an overall [`Status`]. Infallible by design: a
 /// failed push becomes a [`RepoOutcome::Failed`] report, never an error.
 #[cqrsy::command]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
 pub fn execute(targets: Vec<RepoTarget>, git: &impl GitClient) -> PushAllResult {
     let reports: Vec<RepoReport> = targets
-        .iter()
-        .map(|target| RepoReport {
-            label: target.label.clone(),
-            outcome: push_one(git, target),
-        })
+        .into_iter()
+        .map(|target| push_one(git, target))
         .collect();
 
     let failed = reports
@@ -46,22 +39,28 @@ pub fn execute(targets: Vec<RepoTarget>, git: &impl GitClient) -> PushAllResult 
     PushAllResult { status, reports }
 }
 
-/// Pushes one repo, mapping git's exit and output to a [`RepoOutcome`].
-fn push_one(runner: &impl GitClient, target: &RepoTarget) -> RepoOutcome {
-    let (branch, remote) = match &target.dest {
-        Dest::Skip { reason } => return RepoOutcome::Skipped(reason.clone()),
-        Dest::Synced { .. } => return RepoOutcome::UpToDate,
-        Dest::Push { branch, remote } => (branch, remote),
+fn push_one(runner: &impl GitClient, target: RepoTarget) -> RepoReport {
+    let RepoTarget { path, label, dest } = target;
+    let outcome = match dest {
+        Dest::Skip { reason } => RepoOutcome::Skipped(reason),
+        Dest::Synced { .. } => RepoOutcome::UpToDate,
+        Dest::Push { branch, remote } => {
+            match runner.push_branch(&path, &remote, &branch, GitEffectMode::Apply) {
+                Ok(GitEffect::Applied(crate::ports::GitPushReceipt::UpToDate { .. })) => {
+                    RepoOutcome::UpToDate
+                }
+                Ok(GitEffect::Applied(crate::ports::GitPushReceipt::Updated { .. })) => {
+                    RepoOutcome::Pushed
+                }
+                Ok(GitEffect::Rejected(detail)) => {
+                    RepoOutcome::Failed(format!("push failed: {detail}"))
+                }
+                Err(error) => RepoOutcome::Failed(error.to_string()),
+            }
+        }
     };
 
-    match runner.push_branch(&target.path, remote, branch, GitEffectMode::Apply) {
-        Ok(GitEffect::Applied(crate::ports::GitPushReceipt::UpToDate { .. })) => {
-            RepoOutcome::UpToDate
-        }
-        Ok(GitEffect::Applied(crate::ports::GitPushReceipt::Updated { .. })) => RepoOutcome::Pushed,
-        Ok(GitEffect::Rejected(detail)) => RepoOutcome::Failed(format!("push failed: {detail}")),
-        Err(error) => RepoOutcome::Failed(error.to_string()),
-    }
+    RepoReport { label, outcome }
 }
 
 #[cfg(test)]

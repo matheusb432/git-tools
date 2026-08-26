@@ -17,7 +17,7 @@ pub struct PlanRebase {
 }
 
 /// Identifies the safe fast-forward ready to apply.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RebaseTarget {
     pub top: RepositoryRoot,
     pub onto: BranchName,
@@ -35,7 +35,7 @@ impl RebaseTarget {
 }
 
 /// Represents a refused, unnecessary, or ready fast-forward.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum PlanRebaseOk {
     Refused(String),
     Ready(RebaseTarget),

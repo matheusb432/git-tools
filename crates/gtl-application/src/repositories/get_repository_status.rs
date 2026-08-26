@@ -26,7 +26,7 @@ pub fn execute(
         label: repository_name::from_root(&root),
         path: root,
     };
-    Ok(get_repository_statuses::get_one(&target, git))
+    Ok(get_repository_statuses::get_one(target, git))
 }
 
 #[cfg(test)]

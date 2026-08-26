@@ -53,7 +53,7 @@ impl RepositoryService for RepositoryGrpcService {
     ) -> Result<Response<v1::PlanRepositoryPushResponse>, Status> {
         let request = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
-        let result = run_blocking(move || plan_push::execute(request, &state.git))
+        let result = run_blocking(move || plan_push::execute(&request, &state.git))
             .await?
             .map_err(|error| unexpected(error, "plan repository push"))?;
         let outcome = match result {
@@ -113,7 +113,7 @@ impl RepositoryService for RepositoryGrpcService {
     ) -> Result<Response<v1::PlanRepositoryCommitResponse>, Status> {
         let request = absolute_path(request.into_inner().repository_path, "repository_path")?;
         let state = self.state.clone();
-        let result = run_blocking(move || plan_commit::execute(request, &state.git))
+        let result = run_blocking(move || plan_commit::execute(&request, &state.git))
             .await?
             .map_err(|error| unexpected(error, "plan repository commit"))?;
         let outcome = match result {

@@ -17,7 +17,7 @@ pub struct PlanSwitch {
 }
 
 /// Identifies the branch transition ready to apply.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct SwitchTarget {
     pub top: RepositoryRoot,
     pub onto: BranchName,
@@ -25,7 +25,7 @@ pub struct SwitchTarget {
 }
 
 /// Represents a refused, unnecessary, or ready branch switch.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum PlanSwitchOk {
     Refused(String),
     Ready(SwitchTarget),

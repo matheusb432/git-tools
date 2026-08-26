@@ -87,12 +87,8 @@ impl TextEditorInvocation {
 }
 
 #[cqrsy::command]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
 pub fn execute(
-    diff_file_path: RepositoryRelativePath,
+    diff_file_path: &RepositoryRelativePath,
     current_view: &View,
     file_system: &impl FileSystemClient,
     text_editor: &impl TextEditorClient,
@@ -100,7 +96,7 @@ pub fn execute(
     let file = current_view
         .files
         .iter()
-        .find(|file| file.path == diff_file_path)
+        .find(|file| &file.path == diff_file_path)
         .ok_or(OpenDiffFileInConfiguredEditorError::FileNotInCurrentDiff)?;
     if file.status() == FileStatus::Deleted {
         return Err(OpenDiffFileInConfiguredEditorError::DiffFileDeleted);
@@ -111,7 +107,7 @@ pub fn execute(
         current_view.repo_root.as_ref(),
     )?)
     .map_err(|error| OpenDiffFileInConfiguredEditorError::FileSystem(error.to_string()))?;
-    let candidate_file_path = repository_root.join(&diff_file_path);
+    let candidate_file_path = repository_root.join(diff_file_path);
     let file_path = AbsoluteFilePath::try_new(canonicalize_required(
         file_system,
         candidate_file_path.as_path(),
@@ -395,7 +391,7 @@ mod tests {
         let text_editor = ScriptedTextEditor::with_command(Ok("helix --reuse".into()));
 
         open_diff_file_in_configured_editor::execute(
-            command("src/main.rs"),
+            &command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &file_system,
             &text_editor,
@@ -455,7 +451,7 @@ mod tests {
             let text_editor = ScriptedTextEditor::default();
 
             let error = open_diff_file_in_configured_editor::execute(
-                command(command_path),
+                &command(command_path),
                 &current_view,
                 &file_system,
                 &text_editor,
@@ -486,7 +482,7 @@ mod tests {
         ]);
         let not_found_editor = ScriptedTextEditor::with_command(Ok("helix".into()));
         let not_found_error = open_diff_file_in_configured_editor::execute(
-            command("src/main.rs"),
+            &command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &not_found_file_system,
             &not_found_editor,
@@ -508,7 +504,7 @@ mod tests {
         );
         let non_file_editor = ScriptedTextEditor::with_command(Ok("helix".into()));
         let non_file_error = open_diff_file_in_configured_editor::execute(
-            command("src/main.rs"),
+            &command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &non_file_system,
             &non_file_editor,
@@ -527,7 +523,7 @@ mod tests {
         ]);
         let escaping_editor = ScriptedTextEditor::with_command(Ok("helix".into()));
         let escaping_error = open_diff_file_in_configured_editor::execute(
-            command("src/main.rs"),
+            &command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &escaping_file_system,
             &escaping_editor,
@@ -547,7 +543,7 @@ mod tests {
             let text_editor = ScriptedTextEditor::with_command(Ok(configured_command.into()));
 
             let error = open_diff_file_in_configured_editor::execute(
-                command("src/main.rs"),
+                &command("src/main.rs"),
                 &view([("src/main.rs", FileStatus::Modified)]),
                 &available_file_system(),
                 &text_editor,
@@ -565,7 +561,7 @@ mod tests {
     #[test]
     fn file_system_editor_discovery_and_open_failures_remain_distinct() {
         let file_system_error = open_diff_file_in_configured_editor::execute(
-            command("src/main.rs"),
+            &command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &ScriptedFileSystem::with_canonicalize_results([Err(FileSystemClientError::new(
                 FileSystemClientErrorKind::Other,
@@ -580,7 +576,7 @@ mod tests {
         ));
 
         let discovery_error = open_diff_file_in_configured_editor::execute(
-            command("src/main.rs"),
+            &command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &available_file_system(),
             &ScriptedTextEditor::with_command(Err(anyhow::anyhow!("discovery failure"))),
@@ -592,7 +588,7 @@ mod tests {
         ));
 
         let open_error = open_diff_file_in_configured_editor::execute(
-            command("src/main.rs"),
+            &command("src/main.rs"),
             &view([("src/main.rs", FileStatus::Modified)]),
             &available_file_system(),
             &ScriptedTextEditor::with_open_result(

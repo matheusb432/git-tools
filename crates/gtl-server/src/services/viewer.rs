@@ -353,7 +353,7 @@ impl ViewerService for ViewerGrpcService {
         let state = self.state.clone();
         run_blocking(move || {
             open_diff_file_in_configured_editor::execute(
-                path,
+                &path,
                 &view,
                 &state.file_system,
                 &state.text_editor,

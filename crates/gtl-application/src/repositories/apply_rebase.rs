@@ -2,7 +2,10 @@
 
 use std::fmt::Write as _;
 
-use gtl_models::diffs::{CommitId, CommitIdAbbreviation};
+use gtl_models::{
+    diffs::{CommitId, CommitIdAbbreviation},
+    git::{BranchName, GitRange, GitRevision},
+};
 
 use super::{BranchRecovery, plan_rebase::RebaseTarget};
 use crate::ports::{GitClient, GitEffect};
@@ -84,56 +87,71 @@ pub enum ApplyRebaseError {
 ///
 /// Returns [`ApplyRebaseError`] when Git transport fails.
 #[cqrsy::command]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
 pub fn execute(
     target: RebaseTarget,
     git: &impl GitClient,
 ) -> Result<ApplyRebaseOk, ApplyRebaseError> {
-    let mut progress = RebaseProgress::default();
-    match git.switch(&target.top, &target.onto) {
+    let range = target.range();
+    let RebaseTarget { top, onto, feature } = target;
+    match git.switch(&top, &onto) {
         Ok(GitEffect::Applied(())) => {}
         Ok(GitEffect::Rejected(detail)) => {
-            return Ok(ApplyRebaseOk::Failed { detail, progress });
+            return Ok(ApplyRebaseOk::Failed {
+                detail,
+                progress: RebaseProgress::NotStarted,
+            });
         }
-        Err(source) => return Err(transport("switch branch", progress, source)),
+        Err(source) => {
+            return Err(transport(
+                "switch branch",
+                RebaseProgress::NotStarted,
+                source,
+            ));
+        }
     }
-    let recovery = BranchRecovery::switch_to(&target.feature);
-    progress = RebaseProgress::BranchSwitched {
-        recovery: recovery.clone(),
-    };
+    let recovery = BranchRecovery::switch_to(feature);
 
     // The range becomes empty after the fast-forward, so select promoted commits first.
-    let commits = promoted_commits(git, &target, &progress)?;
-    progress = RebaseProgress::Prepared {
-        promoted_commits: commits.clone(),
-        recovery,
+    let commits = match promoted_commits(git, &top, &range) {
+        Ok(commits) => commits,
+        Err(source) => {
+            return Err(transport(
+                "read promoted commits",
+                RebaseProgress::BranchSwitched { recovery },
+                source,
+            ));
+        }
     };
-    match git.fast_forward(
-        &target.top,
-        &gtl_models::git::GitRevision::from(&target.feature),
-    ) {
+
+    match git.fast_forward(&top, &GitRevision::from(&recovery.original_branch)) {
         Ok(GitEffect::Applied(_)) => Ok(ApplyRebaseOk::FastForwarded {
-            detail: rebase_log(&target, commits.as_slice()),
+            detail: rebase_log(&onto, &recovery.original_branch, commits.as_slice()),
             promoted_commits: commits,
         }),
-        Ok(GitEffect::Rejected(detail)) => Ok(ApplyRebaseOk::Failed { detail, progress }),
-        Err(source) => Err(transport("fast-forward branch", progress, source)),
+        Ok(GitEffect::Rejected(detail)) => Ok(ApplyRebaseOk::Failed {
+            detail,
+            progress: RebaseProgress::Prepared {
+                promoted_commits: commits,
+                recovery,
+            },
+        }),
+        Err(source) => Err(transport(
+            "fast-forward branch",
+            RebaseProgress::Prepared {
+                promoted_commits: commits,
+                recovery,
+            },
+            source,
+        )),
     }
 }
 
 fn promoted_commits(
     git: &impl GitClient,
-    target: &RebaseTarget,
-    progress: &RebaseProgress,
-) -> Result<PromotedCommits, ApplyRebaseError> {
-    let range = target.range();
-    match git
-        .brief_log(&target.top, &range)
-        .map_err(|source| transport("read promoted commits", progress.clone(), source))?
-    {
+    top: &gtl_models::paths::RepositoryRoot,
+    range: &GitRange,
+) -> Result<PromotedCommits, anyhow::Error> {
+    match git.brief_log(top, range)? {
         GitEffect::Rejected(_) => Ok(PromotedCommits::Unavailable),
         GitEffect::Applied(entries) => Ok(PromotedCommits::Known(
             entries
@@ -155,12 +173,12 @@ fn transport(command: &str, progress: RebaseProgress, source: anyhow::Error) -> 
     }
 }
 
-fn rebase_log(target: &RebaseTarget, commits: &[PromotedCommit]) -> String {
+fn rebase_log(onto: &BranchName, feature: &BranchName, commits: &[PromotedCommit]) -> String {
     let mut detail = format!(
         "switched to '{}' from '{}'\nfast-forwarded {} +{} commits:",
-        target.onto,
-        target.feature,
-        target.onto,
+        onto,
+        feature,
+        onto,
         commits.len()
     );
     for commit in commits {

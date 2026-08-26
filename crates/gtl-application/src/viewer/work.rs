@@ -27,7 +27,7 @@ const COMPUTE_FAILED_MESSAGE: &str = "The diff could not be rendered. Please ret
 const COMMIT_FAILED_MESSAGE: &str =
     "The selected commit could not be rendered. Show all changes and retry.";
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ReservedRecipeWork {
     recipe: Recipe,
     kind: ViewerTabKind,
@@ -40,7 +40,7 @@ impl ReservedRecipeWork {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ReservedCommitWork {
     repo_root: gtl_models::paths::RepositoryRoot,
     commit: gtl_models::diffs::Commit,
@@ -51,6 +51,20 @@ impl ReservedCommitWork {
     pub const fn ticket(&self) -> CommitPatchTicket {
         self.ticket
     }
+}
+
+/// Contains completed recipe work ready for one publication attempt.
+#[derive(Debug)]
+pub struct ComputedRecipeWork {
+    ticket: ComputeTicket,
+    result: Result<PrepareRecipeOk, PrepareRecipeError>,
+}
+
+/// Contains completed commit work ready for one publication attempt.
+#[derive(Debug)]
+pub struct ComputedCommitWork {
+    ticket: CommitPatchTicket,
+    result: Result<crate::diffs::View, ComputeCommitPatchError>,
 }
 
 #[derive(Debug)]
@@ -236,35 +250,33 @@ fn reserve_refresh_in_session(
 }
 
 pub fn compute_recipe(
-    work: &ReservedRecipeWork,
+    work: ReservedRecipeWork,
     settings: &impl UserSettingsStore,
     git: &impl GitClient,
-) -> Result<PrepareRecipeOk, PrepareRecipeError> {
-    prepare_recipe::execute(
-        PrepareRecipe {
-            recipe: work.recipe.clone(),
-            kind: work.kind,
-        },
-        settings,
-        git,
-    )
+) -> ComputedRecipeWork {
+    let ReservedRecipeWork {
+        recipe,
+        kind,
+        ticket,
+    } = work;
+    let result = prepare_recipe::execute(PrepareRecipe { recipe, kind }, settings, git);
+    ComputedRecipeWork { ticket, result }
 }
 
-/// Consumes the reservation so one computation cannot be published twice.
-#[allow(clippy::needless_pass_by_value)]
+/// Consumes completed work so one computation cannot be published twice.
 pub fn publish_recipe(
     state: &ViewerState,
-    work: ReservedRecipeWork,
-    result: Result<PrepareRecipeOk, PrepareRecipeError>,
+    work: ComputedRecipeWork,
 ) -> Result<RecipePublication, ViewerStateError> {
+    let ComputedRecipeWork { ticket, result } = work;
     state.update(|session| match result {
         Ok(PrepareRecipeOk::Broken { state }) => {
-            match session.set_state_if_current(work.ticket, state) {
+            match session.set_state_if_current(ticket, state) {
                 PublishOutcome::Published => RecipePublication::Broken,
                 PublishOutcome::Stale => RecipePublication::Stale,
             }
         }
-        Ok(PrepareRecipeOk::Skipped { .. }) => match session.close_if_current(work.ticket) {
+        Ok(PrepareRecipeOk::Skipped { .. }) => match session.close_if_current(ticket) {
             PublishOutcome::Published => RecipePublication::Skipped,
             PublishOutcome::Stale => RecipePublication::Stale,
         },
@@ -272,13 +284,13 @@ pub fn publish_recipe(
             label,
             view,
             history,
-        }) => match session.publish_labeled_if_current(work.ticket, CachedView::new(view), label) {
+        }) => match session.publish_labeled_if_current(ticket, CachedView::new(view), label) {
             PublishOutcome::Published => RecipePublication::Published { history },
             PublishOutcome::Stale => RecipePublication::Stale,
         },
         Err(error) => {
             let outcome = session.set_state_if_current(
-                work.ticket,
+                ticket,
                 gtl_models::viewer::ViewerTabState::Error {
                     reason: COMPUTE_FAILED_MESSAGE.to_owned(),
                 },
@@ -307,34 +319,33 @@ pub fn reserve_commit(
 }
 
 pub fn compute_commit(
-    work: &ReservedCommitWork,
+    work: ReservedCommitWork,
     settings: &impl UserSettingsStore,
     git: &impl GitClient,
-) -> Result<crate::diffs::View, ComputeCommitPatchError> {
-    compute_commit_patch::execute(
-        ComputeCommitPatch {
-            repo_root: work.repo_root.clone(),
-            commit: work.commit.clone(),
-        },
-        settings,
-        git,
-    )
+) -> ComputedCommitWork {
+    let ReservedCommitWork {
+        repo_root,
+        commit,
+        ticket,
+    } = work;
+    let result =
+        compute_commit_patch::execute(ComputeCommitPatch { repo_root, commit }, settings, git);
+    ComputedCommitWork { ticket, result }
 }
 
-/// Consumes the reservation so one commit computation cannot be published twice.
-#[allow(clippy::needless_pass_by_value)]
+/// Consumes completed work so one commit computation cannot be published twice.
 pub fn publish_commit(
     state: &ViewerState,
-    work: ReservedCommitWork,
-    result: Result<crate::diffs::View, ComputeCommitPatchError>,
+    work: ComputedCommitWork,
 ) -> Result<CommitPublication, ViewerStateError> {
+    let ComputedCommitWork { ticket, result } = work;
     state.update(|session| match result {
-        Ok(view) => match session.publish_commit_patch_if_current(work.ticket, Arc::new(view)) {
+        Ok(view) => match session.publish_commit_patch_if_current(ticket, Arc::new(view)) {
             PublishOutcome::Published => CommitPublication::Published,
             PublishOutcome::Stale => CommitPublication::Stale,
         },
         Err(error) => match session
-            .set_commit_patch_error_if_current(work.ticket, COMMIT_FAILED_MESSAGE.to_owned())
+            .set_commit_patch_error_if_current(ticket, COMMIT_FAILED_MESSAGE.to_owned())
         {
             PublishOutcome::Published => CommitPublication::Failed { error },
             PublishOutcome::Stale => CommitPublication::Stale,
@@ -390,14 +401,13 @@ mod tests {
             ViewerTabKind::Snapshot,
         )
         .expect("work reserves");
-        let error = compute_recipe(
-            &work,
+        let work = compute_recipe(
+            work,
             &FixedUserSettingsStore::default(),
             &crate::utils::FakeGitClient::default(),
-        )
-        .expect_err("missing source fails before publication");
+        );
 
-        let publication = publish_recipe(&state, work, Err(error)).expect("failure publishes");
+        let publication = publish_recipe(&state, work).expect("failure publishes");
 
         assert!(matches!(publication, RecipePublication::Failed { .. }));
         assert_eq!(

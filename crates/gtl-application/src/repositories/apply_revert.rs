@@ -1,5 +1,7 @@
 //! Applies a planned recovery of a branch's prior position.
 
+use gtl_models::git::GitRevision;
+
 use super::{BranchRecovery, plan_revert::RevertTarget};
 use crate::ports::{GitClient, GitEffect};
 
@@ -45,39 +47,53 @@ pub enum ApplyRevertError {
 ///
 /// Returns [`ApplyRevertError`] when Git transport fails.
 #[cqrsy::command]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
 pub fn execute(
     target: RevertTarget,
     git: &impl GitClient,
 ) -> Result<ApplyRevertOk, ApplyRevertError> {
-    let mut progress = RevertProgress::default();
-    match git.switch_previous(&target.top) {
+    let RevertTarget {
+        top,
+        onto,
+        prior_id,
+    } = target;
+    match git.switch_previous(&top) {
         Ok(GitEffect::Applied(())) => {}
         Ok(GitEffect::Rejected(detail)) => {
-            return Ok(ApplyRevertOk::Failed { detail, progress });
+            return Ok(ApplyRevertOk::Failed {
+                detail,
+                progress: RevertProgress::NotStarted,
+            });
         }
-        Err(source) => return Err(transport("switch to previous branch", progress, source)),
+        Err(source) => {
+            return Err(transport(
+                "switch to previous branch",
+                RevertProgress::NotStarted,
+                source,
+            ));
+        }
     }
-    progress = RevertProgress::BranchSwitched {
-        recovery: BranchRecovery::switch_to(&target.onto),
-    };
+    let recovery = BranchRecovery::switch_to(onto);
 
     match git.move_branch(
-        &target.top,
-        &target.onto,
-        &gtl_models::git::GitRevision::from(&target.prior_id),
+        &top,
+        &recovery.original_branch,
+        &GitRevision::from(&prior_id),
     ) {
         Ok(GitEffect::Applied(())) => Ok(ApplyRevertOk::Reverted {
             detail: format!(
                 "reverted '{}' to {} and switched back",
-                target.onto, target.prior_id
+                recovery.original_branch, prior_id
             ),
         }),
-        Ok(GitEffect::Rejected(detail)) => Ok(ApplyRevertOk::Failed { detail, progress }),
-        Err(source) => Err(transport("move branch", progress, source)),
+        Ok(GitEffect::Rejected(detail)) => Ok(ApplyRevertOk::Failed {
+            detail,
+            progress: RevertProgress::BranchSwitched { recovery },
+        }),
+        Err(source) => Err(transport(
+            "move branch",
+            RevertProgress::BranchSwitched { recovery },
+            source,
+        )),
     }
 }
 

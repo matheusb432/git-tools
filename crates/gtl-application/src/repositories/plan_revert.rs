@@ -18,7 +18,7 @@ pub struct PlanRevert {
 }
 
 /// Identifies the prior branch position ready to restore.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct RevertTarget {
     pub top: RepositoryRoot,
     pub onto: BranchName,
@@ -26,7 +26,7 @@ pub struct RevertTarget {
 }
 
 /// Represents a refused or ready branch recovery.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum PlanRevertOk {
     Refused(String),
     Ready(RevertTarget),

@@ -25,23 +25,17 @@ pub enum PlanRecursivePushError {
 /// Discovers every git repo under the root and resolves each one's push destination.
 /// Linked worktrees are skipped by the repository traversal scope.
 #[cqrsy::query]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
 pub fn execute(
     root: PathBuf,
     git: &impl GitClient,
 ) -> Result<SubreposPlan, PlanRecursivePushError> {
+    let repositories_empty_detail = format!("no git repos found under {}", root.display());
     let discovered = find_repositories::execute(find_repositories::FindRepositories {
-        root: root.clone(),
+        root,
         scope: RepositoryTraversalScope::ExcludeLinkedWorktrees,
     })?;
     if discovered.is_empty() {
-        return Ok(SubreposPlan::Refused(format!(
-            "no git repos found under {}",
-            root.display()
-        )));
+        return Ok(SubreposPlan::Refused(repositories_empty_detail));
     }
     let targets = discovered
         .into_iter()

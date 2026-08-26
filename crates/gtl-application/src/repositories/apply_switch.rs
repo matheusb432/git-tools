@@ -45,22 +45,19 @@ pub enum ApplySwitchError {
 ///
 /// Returns [`ApplySwitchError`] when Git transport fails.
 #[cqrsy::command]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "CQRsy operations own their request value"
-)]
 pub fn execute(
     target: SwitchTarget,
     git: &impl GitClient,
 ) -> Result<ApplySwitchOk, ApplySwitchError> {
-    match git.switch(&target.top, &target.onto) {
+    let SwitchTarget { top, onto, from } = target;
+    match git.switch(&top, &onto) {
         Ok(GitEffect::Applied(())) => Ok(ApplySwitchOk::new(
             SwitchStatus::Switched,
-            format!("switched to '{}' from '{}'", target.onto, target.from),
+            format!("switched to '{onto}' from '{from}'"),
         )),
         Ok(GitEffect::Rejected(detail)) => Ok(ApplySwitchOk::new(SwitchStatus::Failed, detail)),
         Err(source) => Err(ApplySwitchError::Transport {
-            command: format!("switch to {}", target.onto),
+            command: format!("switch to {onto}"),
             source,
         }),
     }

@@ -10,10 +10,11 @@ pub struct BranchRecovery {
 }
 
 impl BranchRecovery {
-    pub(super) fn switch_to(branch: &BranchName) -> Self {
+    pub(super) fn switch_to(branch: BranchName) -> Self {
+        let command = format!("git switch {branch}");
         Self {
-            original_branch: branch.clone(),
-            command: format!("git switch {branch}"),
+            original_branch: branch,
+            command,
         }
     }
 }

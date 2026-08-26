@@ -138,7 +138,7 @@ impl TagService for TagGrpcService {
         let state = self.state.clone();
         let result = run_blocking(move || {
             let repo_path = resolve_root(repo_path, &state)?;
-            Ok::<_, anyhow::Error>(match push_tags::execute(repo_path, &state.git) {
+            Ok::<_, anyhow::Error>(match push_tags::execute(&repo_path, &state.git) {
                 Ok(outcome) => action_response(&outcome),
                 Err(error) => push_aborted(error),
             })

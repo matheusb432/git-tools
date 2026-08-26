@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use gtl_application::viewer::{
     rows::{ViewerFileRowParser, ViewerRowBatch, ViewerSyntaxDiagnostic},
     shell, viewer_diff_file_source,
@@ -63,7 +61,7 @@ pub(super) fn start(
             state,
             identity,
             proto_identity,
-            snapshot.shared_view(),
+            snapshot.view(),
             files,
             row_stream,
             sender,
@@ -72,12 +70,11 @@ pub(super) fn start(
     Ok(ReceiverStream::new(receiver))
 }
 
-#[allow(clippy::needless_pass_by_value)]
 fn produce_rows(
     state: AppState,
     identity: ViewerViewIdentity,
     proto_identity: v1::ViewerViewIdentity,
-    view: Arc<gtl_application::diffs::View>,
+    view: &gtl_application::diffs::View,
     files: Vec<ViewerDiffFileId>,
     row_stream: u64,
     sender: mpsc::Sender<Result<v1::StreamViewerRowsResponse, Status>>,
@@ -98,8 +95,7 @@ fn produce_rows(
         )) {
             return;
         }
-        let Some(source) =
-            viewer_diff_file_source(&view, &file_id, identity.render_options.density)
+        let Some(source) = viewer_diff_file_source(view, &file_id, identity.render_options.density)
         else {
             if !writer.file_failed(
                 &file_id,

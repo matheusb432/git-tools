@@ -35,8 +35,8 @@ pub(crate) fn restore_saved_live_views(state: &AppState) -> anyhow::Result<()> {
 
 pub(crate) fn spawn_recipe(state: AppState, work: ReservedRecipeWork) {
     tokio::task::spawn_blocking(move || {
-        let result = work::compute_recipe(&work, &state.user_settings, &state.git);
-        match work::publish_recipe(&state.viewer, work, result) {
+        let work = work::compute_recipe(work, &state.user_settings, &state.git);
+        match work::publish_recipe(&state.viewer, work) {
             Ok(RecipePublication::Published { history }) => {
                 record_history(&state, &history);
             }
@@ -55,8 +55,8 @@ pub(crate) fn spawn_recipe(state: AppState, work: ReservedRecipeWork) {
 
 pub(crate) fn spawn_commit(state: AppState, work: ReservedCommitWork) {
     tokio::task::spawn_blocking(move || {
-        let result = work::compute_commit(&work, &state.user_settings, &state.git);
-        match work::publish_commit(&state.viewer, work, result) {
+        let work = work::compute_commit(work, &state.user_settings, &state.git);
+        match work::publish_commit(&state.viewer, work) {
             Ok(CommitPublication::Failed { error }) => {
                 tracing::error!(error = ?error, "viewer commit computation failed");
             }
