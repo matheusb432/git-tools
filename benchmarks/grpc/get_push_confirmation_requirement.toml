@@ -1,0 +1,11 @@
+proto = "crates/gtl-wire/proto/gtl/v1/settings.proto"
+call = "gtl.v1.SettingsService.GetPushConfirmationRequirement"
+total = 10200
+skipFirst = 200
+concurrency = 1
+connections = 1
+cpus = 1
+insecure = true
+timeout = "2s"
+disable-template-data = true
+data = {}

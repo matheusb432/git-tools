@@ -31,6 +31,10 @@ harness = false
 name = "server-highlighting-driver"
 path = "src/bin/server_highlighting_driver/main.rs"
 
+[[bin]]
+name = "grpc-transport-driver"
+path = "src/bin/grpc_transport_driver/main.rs"
+
 [dependencies]
 anyhow.workspace = true
 gtl-client.workspace = true

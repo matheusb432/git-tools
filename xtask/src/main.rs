@@ -31,6 +31,10 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::ServerHighlightingBenchmark(arguments) => {
             verbs::server_highlighting::run_benchmark(&arguments)
         }
+        cli::Command::GrpcTransportBenchmark(arguments) => {
+            verbs::grpc_transport::run_benchmark(&arguments)
+        }
+        cli::Command::GrpcTransportSmoke => verbs::grpc_transport::run_smoke(),
         cli::Command::ServerHighlightingProfile => verbs::server_highlighting::run_profile(),
         cli::Command::DesktopScrollFixtureWorker => verbs::desktop_scroll::run_fixture_worker(),
         cli::Command::DesktopScrollBenchmarkWorker => verbs::desktop_scroll::run_benchmark_worker(),

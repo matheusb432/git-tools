@@ -4,6 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::verbs::{
     Verb, desktop_scroll::DesktopScrollBenchmarkArguments,
+    grpc_transport::GrpcTransportBenchmarkArguments,
     server_highlighting::ServerHighlightingBenchmarkArguments, test::TestArguments,
 };
 
@@ -70,6 +71,12 @@ pub enum Command {
     /// Measure production server-owned syntax highlighting and compare it with the local baseline.
     #[command(name = Verb::SERVER_HIGHLIGHTING_BENCHMARK.as_str())]
     ServerHighlightingBenchmark(ServerHighlightingBenchmarkArguments),
+    /// Measure the release gRPC transport with ghz and compare it with the local baseline.
+    #[command(name = Verb::GRPC_TRANSPORT_BENCHMARK.as_str())]
+    GrpcTransportBenchmark(GrpcTransportBenchmarkArguments),
+    /// Validate the release gRPC transport with a short, non-comparable ghz workload.
+    #[command(name = Verb::GRPC_TRANSPORT_SMOKE.as_str())]
+    GrpcTransportSmoke,
     /// Attribute full-language server highlighting allocations with Valgrind Massif.
     #[command(name = Verb::SERVER_HIGHLIGHTING_PROFILE.as_str())]
     ServerHighlightingProfile,

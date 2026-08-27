@@ -79,6 +79,17 @@ bench-scroll update="":
 bench-highlight update="":
     cargo run --quiet -p xtask -- server-highlighting-benchmark {{ update }}
 
+# Compare the release gRPC transport against the local ghz baseline. Use --update to replace it.
+[arg("update", long="update", value="--update", help="Compare and replace the local baseline")]
+[group('performance')]
+bench-grpc update="":
+    cargo run --quiet -p xtask -- grpc-transport-benchmark {{ update }}
+
+# Validate the release gRPC transport with a short workload that never touches the baseline.
+[group('performance')]
+bench-grpc-smoke:
+    cargo run --quiet -p xtask -- grpc-transport-smoke
+
 # Attribute full-language release server highlighting allocations with Valgrind Massif.
 [group('performance')]
 profile-highlight:

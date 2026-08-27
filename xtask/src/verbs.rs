@@ -14,6 +14,7 @@ pub(crate) mod desktop_scroll;
 pub(crate) mod dioxus_web;
 pub(crate) mod drift;
 pub(crate) mod format;
+pub(crate) mod grpc_transport;
 pub(crate) mod icon;
 pub(crate) mod install;
 pub(crate) mod pre_commit;
@@ -39,6 +40,8 @@ impl Verb {
     pub(crate) const SERVER_HIGHLIGHTING_PROFILE: Self = Self("server-highlighting-profile");
     pub(crate) const PRE_COMMIT: Self = Self("pre-commit");
     pub(crate) const GEN_ICON: Self = Self("gen-icon");
+    pub(crate) const GRPC_TRANSPORT_BENCHMARK: Self = Self("grpc-transport-benchmark");
+    pub(crate) const GRPC_TRANSPORT_SMOKE: Self = Self("grpc-transport-smoke");
     pub(crate) const INSTALL: Self = Self("install");
     pub(crate) const SETUP: Self = Self("setup");
     pub(crate) const SHIP: Self = Self("ship");
