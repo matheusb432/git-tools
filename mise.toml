@@ -17,7 +17,6 @@ rust = { version = "stable", profile = "minimal", components = [
   "wasm32-unknown-unknown",
   "x86_64-pc-windows-msvc",
 ] }
-deno = "2.9.2"
 just = "1.56.0"
 taplo = "0.10.0"
 rumdl = "0.2.41"

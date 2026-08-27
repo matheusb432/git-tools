@@ -144,6 +144,11 @@ drift-check:
 doctor:
     @mise ls --local --missing --locked --no-header
 
+# Compile optimized native Tree-sitter dependencies into Cargo's reusable debug cache.
+[group('setup')]
+prepare-tree-sitter:
+    cargo build --locked -p gtl-parser --features syntax
+
 # Cross-build all three Win11 exes; runs `just test --all` first unless -f/--force. --smoke selects a debug linkage build; use `--smoke --force` for the fast smoke path.
 # // uncomment to test VM
 # [group('windows')]

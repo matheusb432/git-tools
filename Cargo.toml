@@ -165,6 +165,7 @@ sample_project-client = { path = "../.sample_project-workspace/crates/sample_pro
 
 [profile.dev.package."*"]
 debug = false
+opt-level = 3
 
 [profile.test.package."*"]
 debug = false
