@@ -55,7 +55,8 @@ pub(crate) fn code_line(text: &str, long_line_character_count: Option<usize>) ->
     ViewerCodeLine {
         text: text.to_owned(),
         spans: vec![ViewerCodeSpan {
-            text: text.to_owned(),
+            byte_start: 0,
+            byte_end: text.len(),
             syntax_class: None,
             changed: false,
         }],

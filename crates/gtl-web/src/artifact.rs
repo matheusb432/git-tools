@@ -295,7 +295,8 @@ mod tests {
                 code: ViewerCodeLine {
                     text: text.to_owned(),
                     spans: vec![ViewerCodeSpan {
-                        text: text.to_owned(),
+                        byte_start: 0,
+                        byte_end: text.len(),
                         syntax_class: None,
                         changed: false,
                     }],

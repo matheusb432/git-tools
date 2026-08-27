@@ -212,7 +212,8 @@ fn project_code_line(
         spans: spans
             .iter()
             .map(|span| ViewerCodeSpan {
-                text: span.text(text).to_owned(),
+                byte_start: span.byte_start(),
+                byte_end: span.byte_end(),
                 syntax_class: span.syntax_class().map(project_syntax_class),
                 changed: span.change() == SemanticTextChange::Changed,
             })

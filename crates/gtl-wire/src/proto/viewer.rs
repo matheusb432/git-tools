@@ -1061,21 +1061,22 @@ fn encode_viewer_split_cell(
 }
 
 fn encode_viewer_code_line(line: ViewerCodeLine) -> Result<v1::ViewerCodeLine, ViewerCodecError> {
-    let mut byte_start = 0_usize;
+    let mut next_byte = 0_usize;
     let spans = line
         .spans
         .into_iter()
         .map(|span| {
-            let byte_end = byte_start
-                .checked_add(span.text.len())
-                .ok_or(ViewerCodecError::Unrepresentable)?;
-            if line.text.get(byte_start..byte_end) != Some(span.text.as_str()) {
+            if span.byte_start != next_byte
+                || span.byte_end < span.byte_start
+                || line.text.get(span.byte_start..span.byte_end).is_none()
+            {
                 return Err(ViewerCodecError::Unrepresentable);
             }
             let projected = v1::ViewerCodeSpan {
-                byte_start: u32::try_from(byte_start)
+                byte_start: u32::try_from(span.byte_start)
                     .map_err(|_| ViewerCodecError::Unrepresentable)?,
-                byte_end: u32::try_from(byte_end).map_err(|_| ViewerCodecError::Unrepresentable)?,
+                byte_end: u32::try_from(span.byte_end)
+                    .map_err(|_| ViewerCodecError::Unrepresentable)?,
                 syntax_class: span
                     .syntax_class
                     .map_or(v1::ViewerSyntaxClass::Unspecified as i32, |class| {
@@ -1083,11 +1084,11 @@ fn encode_viewer_code_line(line: ViewerCodeLine) -> Result<v1::ViewerCodeLine, V
                     }),
                 changed: span.changed,
             };
-            byte_start = byte_end;
+            next_byte = span.byte_end;
             Ok(projected)
         })
         .collect::<Result<Vec<_>, ViewerCodecError>>()?;
-    if byte_start != line.text.len() {
+    if next_byte != line.text.len() {
         return Err(ViewerCodecError::Unrepresentable);
     }
     Ok(v1::ViewerCodeLine {
@@ -1184,13 +1185,12 @@ fn decode_viewer_code_line(line: v1::ViewerCodeLine) -> Result<ViewerCodeLine, V
         if byte_start != next_byte || byte_end < byte_start {
             return Err(ViewerCodecError::InvalidMessage);
         }
-        let text = line
-            .text
+        line.text
             .get(byte_start..byte_end)
-            .ok_or(ViewerCodecError::InvalidMessage)?
-            .to_owned();
+            .ok_or(ViewerCodecError::InvalidMessage)?;
         spans.push(ViewerCodeSpan {
-            text,
+            byte_start,
+            byte_end,
             syntax_class: decode_viewer_syntax_class(span.syntax_class)?,
             changed: span.changed,
         });
@@ -1201,7 +1201,8 @@ fn decode_viewer_code_line(line: v1::ViewerCodeLine) -> Result<ViewerCodeLine, V
             return Err(ViewerCodecError::InvalidMessage);
         }
         spans.push(ViewerCodeSpan {
-            text: line.text.clone(),
+            byte_start: 0,
+            byte_end: line.text.len(),
             syntax_class: None,
             changed: false,
         });

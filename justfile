@@ -73,6 +73,17 @@ bench-scroll-fixture-update:
 bench-scroll update="":
     cargo run --quiet -p xtask -- desktop-scroll-benchmark {{ update }}
 
+# Compare release server highlighting against the local baseline. Use --update to replace it.
+[arg("update", long="update", value="--update", help="Compare and replace the local baseline")]
+[group('performance')]
+bench-highlight update="":
+    cargo run --quiet -p xtask -- server-highlighting-benchmark {{ update }}
+
+# Attribute full-language release server highlighting allocations with Valgrind Massif.
+[group('performance')]
+profile-highlight:
+    cargo run --quiet -p xtask -- server-highlighting-profile
+
 # Run tests, or use `just test coverage`; coverage defaults to quiet and forwards cargo-llvm-cov arguments.
 [group('quality')]
 test *args:

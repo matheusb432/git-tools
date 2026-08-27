@@ -3,7 +3,7 @@ use std::time::Duration;
 
 #[cfg(all(target_arch = "wasm32", feature = "viewer-web"))]
 use gtl_wire::{
-    proto::viewer as protobuf,
+    proto,
     v1::{self, viewer_service_client::ViewerServiceClient},
     viewer::{
         GetViewerHistoryCopy, ListViewerCommits, ListViewerHistory, OpenViewerDiffFile,
@@ -51,11 +51,11 @@ impl ViewerClientError {
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "viewer-web"))]
-impl From<protobuf::ViewerCodecError> for ViewerClientError {
-    fn from(error: protobuf::ViewerCodecError) -> Self {
+impl From<proto::viewer::ViewerCodecError> for ViewerClientError {
+    fn from(error: proto::viewer::ViewerCodecError) -> Self {
         match error {
-            protobuf::ViewerCodecError::Unrepresentable => Self::InvalidRequest,
-            protobuf::ViewerCodecError::InvalidMessage => Self::Internal,
+            proto::viewer::ViewerCodecError::Unrepresentable => Self::InvalidRequest,
+            proto::viewer::ViewerCodecError::InvalidMessage => Self::Internal,
         }
     }
 }
@@ -82,14 +82,14 @@ macro_rules! viewer_unary_methods {
                 &mut self,
                 request: $request,
             ) -> Result<$response, ViewerClientError> {
-                let request = self.unary_request(protobuf::$encode(request));
+                let request = self.unary_request(proto::viewer::$encode(request));
                 let response = self
                     .client
                     .$rpc(request)
                     .await
                     .map(tonic::Response::into_inner)
                     .map_err(decode_status)?;
-                protobuf::$decode(response).map_err(Into::into)
+                proto::viewer::$decode(response).map_err(Into::into)
             }
         )+
     };
@@ -103,14 +103,14 @@ macro_rules! viewer_unary_methods_with_fallible_request {
                 &mut self,
                 request: $request,
             ) -> Result<$response, ViewerClientError> {
-                let request = self.unary_request(protobuf::$encode(request)?);
+                let request = self.unary_request(proto::viewer::$encode(request)?);
                 let response = self
                     .client
                     .$rpc(request)
                     .await
                     .map(tonic::Response::into_inner)
                     .map_err(decode_status)?;
-                protobuf::$decode(response).map_err(Into::into)
+                proto::viewer::$decode(response).map_err(Into::into)
             }
         )+
     };
@@ -149,7 +149,7 @@ impl ViewerClient {
             .await
             .map(tonic::Response::into_inner)
             .map_err(decode_status)?;
-        protobuf::decode_get_viewer_shell_response(response).map_err(Into::into)
+        proto::viewer::decode_get_viewer_shell_response(response).map_err(Into::into)
     }
 
     viewer_unary_methods! {
@@ -182,15 +182,18 @@ impl ViewerClient {
         &mut self,
         request: GetViewerHistoryCopy,
     ) -> Result<ViewerHistoryCopyPayload, ViewerClientError> {
-        let request =
-            self.unary_request(protobuf::encode_get_viewer_history_copy_request(request)?);
+        let request = self.unary_request(proto::viewer::encode_get_viewer_history_copy_request(
+            request,
+        )?);
         let response = self
             .client
             .get_viewer_history_copy(request)
             .await
             .map(tonic::Response::into_inner)
             .map_err(decode_status)?;
-        Ok(protobuf::decode_get_viewer_history_copy_response(response))
+        Ok(proto::viewer::decode_get_viewer_history_copy_response(
+            response,
+        ))
     }
 
     pub async fn get_settings(&mut self) -> Result<ViewerUserSettings, ViewerClientError> {
@@ -201,14 +204,15 @@ impl ViewerClient {
             .await
             .map(tonic::Response::into_inner)
             .map_err(decode_status)?;
-        protobuf::decode_get_viewer_settings_response(response).map_err(Into::into)
+        proto::viewer::decode_get_viewer_settings_response(response).map_err(Into::into)
     }
 
     pub async fn open_diff_file(
         &mut self,
         request: OpenViewerDiffFile,
     ) -> Result<(), ViewerClientError> {
-        let request = self.unary_request(protobuf::encode_open_viewer_diff_file_request(request));
+        let request =
+            self.unary_request(proto::viewer::encode_open_viewer_diff_file_request(request));
         self.client
             .open_viewer_diff_file(request)
             .await
@@ -220,7 +224,8 @@ impl ViewerClient {
         &mut self,
         request: StreamViewerRows,
     ) -> Result<ViewerRowStream, ViewerClientError> {
-        let request = self.streaming_request(protobuf::encode_stream_viewer_rows_request(request));
+        let request =
+            self.streaming_request(proto::viewer::encode_stream_viewer_rows_request(request));
         let stream = self
             .client
             .stream_viewer_rows(request)
@@ -275,7 +280,7 @@ impl ViewerRowStream {
             .message()
             .await
             .map_err(decode_status)?
-            .map(protobuf::decode_stream_viewer_rows_response)
+            .map(proto::viewer::decode_stream_viewer_rows_response)
             .transpose()
             .map_err(Into::into)
     }
@@ -308,7 +313,7 @@ impl ViewerVersionStream {
             .message()
             .await
             .map_err(decode_status)
-            .map(|response| response.map(protobuf::decode_watch_viewer_response))
+            .map(|response| response.map(proto::viewer::decode_watch_viewer_response))
     }
 }
 

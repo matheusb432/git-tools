@@ -3813,6 +3813,7 @@ dependencies = [
 name = "gtl-benchmarks"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "criterion",
  "gtl-application",
  "gtl-artifacts",
@@ -3823,8 +3824,10 @@ dependencies = [
  "gtl-parser",
  "gtl-server",
  "gtl-wire",
+ "libc",
  "prost",
  "serde",
+ "serde_json",
  "sha2 0.11.0",
  "tempfile",
  "thiserror 2.0.19",

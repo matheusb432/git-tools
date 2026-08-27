@@ -1,6 +1,7 @@
 //! Shared support for repository benchmarks.
 
 pub mod desktop_scroll;
+pub mod server_highlighting;
 
 /// Returns a benchmark fixture value or terminates the benchmark process with context.
 pub fn require<T, Error>(result: Result<T, Error>, context: &str) -> T

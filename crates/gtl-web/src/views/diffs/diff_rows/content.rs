@@ -229,12 +229,13 @@ pub(super) fn SemanticText(
             } else {
                 for (index, semantic_span) in spans.iter().enumerate() {
                     {
+                        let text = semantic_span.text(&code.text).unwrap_or_default();
                         let syntax_class = syntax_classes(semantic_span.syntax_class);
                         let changed_class = changed_text_classes(
                             if semantic_span.changed { changed_text_tone } else { ChangedTextTone::None },
                         );
                         rsx! {
-                            span { key: "{index}", class: "{syntax_class} {changed_class}", "{semantic_span.text}" }
+                            span { key: "{index}", class: "{syntax_class} {changed_class}", "{text}" }
                         }
                     }
                 }

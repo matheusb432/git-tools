@@ -28,6 +28,10 @@ fn run(command: cli::Command) -> Result<()> {
         cli::Command::DesktopScrollBenchmark(arguments) => {
             verbs::desktop_scroll::run_benchmark(&arguments)
         }
+        cli::Command::ServerHighlightingBenchmark(arguments) => {
+            verbs::server_highlighting::run_benchmark(&arguments)
+        }
+        cli::Command::ServerHighlightingProfile => verbs::server_highlighting::run_profile(),
         cli::Command::DesktopScrollFixtureWorker => verbs::desktop_scroll::run_fixture_worker(),
         cli::Command::DesktopScrollBenchmarkWorker => verbs::desktop_scroll::run_benchmark_worker(),
         cli::Command::E2eRuntimeWorker {

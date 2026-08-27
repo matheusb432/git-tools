@@ -21,6 +21,16 @@ pub struct SemanticTextSpan {
 }
 
 impl SemanticTextSpan {
+    /// Returns the byte offset at which this span starts.
+    pub const fn byte_start(self) -> usize {
+        self.byte_start
+    }
+
+    /// Returns the byte offset at which this span ends.
+    pub const fn byte_end(self) -> usize {
+        self.byte_end
+    }
+
     /// Returns the source text covered by this span.
     ///
     /// # Panics

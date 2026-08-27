@@ -24,7 +24,7 @@ use gtl_models::{
     viewer::{DiffDensity, DiffLayout, RenderHistoryId, Theme, ViewerTabId},
 };
 use gtl_wire::{
-    proto::viewer as viewer_proto,
+    proto,
     v1::{self, viewer_service_server::ViewerService},
     viewer::{
         SetViewerPreference, VIEWER_COMMIT_BODY_MAX_BYTES, VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES,
@@ -392,11 +392,11 @@ fn project_shell(
 }
 
 fn project_shell_proto(shell: ViewerShell) -> Result<v1::ViewerShell, Status> {
-    viewer_proto::encode_viewer_shell(shell).map_err(|error| match error {
-        viewer_proto::ViewerCodecError::Unrepresentable => {
+    proto::viewer::encode_viewer_shell(shell).map_err(|error| match error {
+        proto::viewer::ViewerCodecError::Unrepresentable => {
             Status::resource_exhausted("viewer shell exceeds protobuf limits")
         }
-        viewer_proto::ViewerCodecError::InvalidMessage => {
+        proto::viewer::ViewerCodecError::InvalidMessage => {
             Status::internal("viewer shell encoding failed")
         }
     })
@@ -405,12 +405,12 @@ fn project_shell_proto(shell: ViewerShell) -> Result<v1::ViewerShell, Status> {
 pub(super) fn parse_identity(
     identity: &v1::ViewerViewIdentity,
 ) -> Result<ViewerViewIdentity, Status> {
-    viewer_proto::decode_viewer_view_identity(*identity)
+    proto::viewer::decode_viewer_view_identity(*identity)
         .map_err(|_| Status::invalid_argument("viewer identity is invalid"))
 }
 
 fn preference(request: v1::SetViewerPreferenceRequest) -> Result<SettingKeyValue, Status> {
-    let preference = viewer_proto::decode_set_viewer_preference_request(request)
+    let preference = proto::viewer::decode_set_viewer_preference_request(request)
         .map_err(|_| Status::invalid_argument("viewer preference is invalid"))?;
     Ok(match preference {
         SetViewerPreference::Layout(layout) => SettingKeyValue::Layout(match layout {
@@ -452,7 +452,7 @@ fn commit_summary(
 }
 
 fn history_cursor(request: v1::ListViewerHistoryRequest) -> Result<RecentRenderPageCursor, Status> {
-    let request = viewer_proto::decode_list_viewer_history_request(request)
+    let request = proto::viewer::decode_list_viewer_history_request(request)
         .map_err(|_| Status::invalid_argument("history cursor is invalid"))?;
     Ok(match request.cursor {
         ViewerHistoryCursor::Newest => RecentRenderPageCursor::Newest,
@@ -492,7 +492,7 @@ fn project_history_page(
         has_newer: page.has_newer,
         has_older: page.has_older,
     };
-    viewer_proto::encode_list_viewer_history_response(page)
+    proto::viewer::encode_list_viewer_history_response(page)
         .map_err(|_| Status::internal("stored viewer history is invalid"))
 }
 
@@ -515,7 +515,7 @@ fn project_settings(
 ) -> v1::GetViewerSettingsResponse {
     let configured_theme = settings.theme().map(viewer::project_theme);
     let exclusions = settings.diff_exclusions();
-    viewer_proto::encode_get_viewer_settings_response(ViewerUserSettings {
+    proto::viewer::encode_get_viewer_settings_response(ViewerUserSettings {
         configuration_path,
         configured_theme,
         effective_theme: configured_theme.unwrap_or(ViewerTheme::Dark),

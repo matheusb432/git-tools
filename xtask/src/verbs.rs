@@ -17,6 +17,7 @@ pub(crate) mod format;
 pub(crate) mod icon;
 pub(crate) mod install;
 pub(crate) mod pre_commit;
+pub(crate) mod server_highlighting;
 pub(crate) mod setup;
 pub(crate) mod ship;
 pub(crate) mod status_notifier;
@@ -34,6 +35,8 @@ impl Verb {
     pub(crate) const DRIFT_CHECK: Self = Self("drift-check");
     pub(crate) const DESKTOP_SCROLL_BENCHMARK: Self = Self("desktop-scroll-benchmark");
     pub(crate) const DESKTOP_SCROLL_FIXTURE: Self = Self("desktop-scroll-fixture");
+    pub(crate) const SERVER_HIGHLIGHTING_BENCHMARK: Self = Self("server-highlighting-benchmark");
+    pub(crate) const SERVER_HIGHLIGHTING_PROFILE: Self = Self("server-highlighting-profile");
     pub(crate) const PRE_COMMIT: Self = Self("pre-commit");
     pub(crate) const GEN_ICON: Self = Self("gen-icon");
     pub(crate) const INSTALL: Self = Self("install");

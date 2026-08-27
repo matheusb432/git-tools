@@ -20,12 +20,11 @@ use gtl_wire::{
         ViewerViewIdentity, stream_viewer_rows_response, viewer_unified_row,
     },
     viewer::{
-        ViewerActiveState, ViewerCodeLine as ContractCodeLine, ViewerCodeSpan, ViewerDiffDensity,
-        ViewerDiffExclusions, ViewerDiffFileId, ViewerDiffLayout, ViewerFeedback,
-        ViewerHistoryEntry, ViewerHistoryPage, ViewerPreferences, ViewerProjectDiffExclusions,
-        ViewerRecipeKind, ViewerRowEvent, ViewerShell, ViewerSyntaxClass, ViewerTab, ViewerTabKind,
-        ViewerTabState, ViewerTheme, ViewerUnifiedRow as ContractUnifiedRow,
-        ViewerUnifiedSourceRow, ViewerUserSettings, ViewerViewIdentity as ContractViewIdentity,
+        self, ViewerActiveState, ViewerCodeSpan, ViewerDiffDensity, ViewerDiffExclusions,
+        ViewerDiffFileId, ViewerDiffLayout, ViewerFeedback, ViewerHistoryEntry, ViewerHistoryPage,
+        ViewerPreferences, ViewerProjectDiffExclusions, ViewerRecipeKind, ViewerRowEvent,
+        ViewerShell, ViewerSyntaxClass, ViewerTab, ViewerTabKind, ViewerTabState, ViewerTheme,
+        ViewerUnifiedSourceRow, ViewerUserSettings,
     },
 };
 
@@ -104,7 +103,7 @@ fn shell_codec_round_trips_the_process_neutral_contract() {
 
 #[test]
 fn streamed_row_codec_round_trips_utf8_span_boundaries() {
-    let identity = ContractViewIdentity {
+    let identity = viewer::ViewerViewIdentity {
         tab_id: ViewerTabId::try_new(7).expect("positive tab ID"),
         range_generation: ViewerRangeGeneration::new(3),
         selection_generation: ViewerSelectionGeneration::new(2),
@@ -114,19 +113,21 @@ fn streamed_row_codec_round_trips_utf8_span_boundaries() {
         },
     };
     let file = ViewerDiffFileId::for_index(0);
-    let row = ContractUnifiedRow::Added(ViewerUnifiedSourceRow {
+    let row = viewer::ViewerUnifiedRow::Added(ViewerUnifiedSourceRow {
         old_line_number: None,
         new_line_number: Some(42),
-        code: ContractCodeLine {
+        code: viewer::ViewerCodeLine {
             text: "let café = 42;".into(),
             spans: vec![
                 ViewerCodeSpan {
-                    text: "let".into(),
+                    byte_start: 0,
+                    byte_end: 3,
                     syntax_class: Some(ViewerSyntaxClass::Keyword),
                     changed: false,
                 },
                 ViewerCodeSpan {
-                    text: " café = 42;".into(),
+                    byte_start: 3,
+                    byte_end: 15,
                     syntax_class: None,
                     changed: true,
                 },
@@ -156,6 +157,39 @@ fn streamed_row_codec_round_trips_utf8_span_boundaries() {
             rows: vec![row],
         }
     );
+}
+
+#[test]
+fn streamed_row_codec_rejects_invalid_handwritten_span_ranges() {
+    for spans in [
+        vec![ViewerCodeSpan {
+            byte_start: 1,
+            byte_end: 5,
+            syntax_class: None,
+            changed: false,
+        }],
+        vec![ViewerCodeSpan {
+            byte_start: 0,
+            byte_end: 4,
+            syntax_class: None,
+            changed: false,
+        }],
+    ] {
+        let row = viewer::ViewerUnifiedRow::Added(ViewerUnifiedSourceRow {
+            old_line_number: None,
+            new_line_number: Some(1),
+            code: viewer::ViewerCodeLine {
+                text: "café".into(),
+                spans,
+                long_line_character_count: None,
+            },
+        });
+
+        assert_eq!(
+            encode_viewer_unified_row(row),
+            Err(ViewerCodecError::Unrepresentable)
+        );
+    }
 }
 
 #[test]

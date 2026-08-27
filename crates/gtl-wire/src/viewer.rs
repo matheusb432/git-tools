@@ -551,9 +551,17 @@ pub enum ViewerSyntaxClass {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ViewerCodeSpan {
-    pub text: String,
+    pub byte_start: usize,
+    pub byte_end: usize,
     pub syntax_class: Option<ViewerSyntaxClass>,
     pub changed: bool,
+}
+
+impl ViewerCodeSpan {
+    /// Returns this span's text when its byte range is valid for `line`.
+    pub fn text<'line>(&self, line: &'line str) -> Option<&'line str> {
+        line.get(self.byte_start..self.byte_end)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

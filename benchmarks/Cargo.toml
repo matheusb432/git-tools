@@ -27,27 +27,34 @@ harness = false
 name = "grpc_requests"
 harness = false
 
+[[bin]]
+name = "server-highlighting-driver"
+path = "src/bin/server_highlighting_driver/main.rs"
+
 [dependencies]
+anyhow.workspace = true
+gtl-client.workspace = true
+gtl-local-auth.workspace = true
+gtl-wire = { workspace = true, features = ["grpc"] }
+libc.workspace = true
+prost.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 toml.workspace = true
+tonic = { workspace = true, features = ["transport"] }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio"] }
 gtl-application.workspace = true
-gtl-client.workspace = true
 gtl-models.workspace = true
-gtl-wire = { workspace = true, features = ["grpc"] }
 gtl-server = { workspace = true, features = ["benchmark-support"] }
 gtl-infra.workspace = true
-gtl-local-auth.workspace = true
 gtl-artifacts.workspace = true
 gtl-parser = { workspace = true, features = ["syntax"] }
-prost.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread"] }
-tonic = { workspace = true, features = ["transport"] }
 
 [lints]
 workspace = true

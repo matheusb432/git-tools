@@ -2,7 +2,10 @@ use std::{ffi::OsString, path::PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use crate::verbs::{Verb, desktop_scroll::DesktopScrollBenchmarkArguments, test::TestArguments};
+use crate::verbs::{
+    Verb, desktop_scroll::DesktopScrollBenchmarkArguments,
+    server_highlighting::ServerHighlightingBenchmarkArguments, test::TestArguments,
+};
 
 #[derive(Parser)]
 #[command(
@@ -64,6 +67,12 @@ pub enum Command {
     /// Measure production desktop scrolling against the committed realistic fixture.
     #[command(name = Verb::DESKTOP_SCROLL_BENCHMARK.as_str())]
     DesktopScrollBenchmark(DesktopScrollBenchmarkArguments),
+    /// Measure production server-owned syntax highlighting and compare it with the local baseline.
+    #[command(name = Verb::SERVER_HIGHLIGHTING_BENCHMARK.as_str())]
+    ServerHighlightingBenchmark(ServerHighlightingBenchmarkArguments),
+    /// Attribute full-language server highlighting allocations with Valgrind Massif.
+    #[command(name = Verb::SERVER_HIGHLIGHTING_PROFILE.as_str())]
+    ServerHighlightingProfile,
     /// Regenerate the desktop scroll fixture inside the bounded worker scope.
     #[command(hide = true)]
     DesktopScrollFixtureWorker,

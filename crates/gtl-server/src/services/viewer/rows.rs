@@ -3,8 +3,7 @@ use gtl_application::viewer::{
     shell, viewer_diff_file_source,
 };
 use gtl_wire::{
-    proto::viewer as viewer_proto,
-    v1,
+    proto, v1,
     viewer::{
         VIEWER_ROW_BATCH_MAX_ENCODED_BYTES, VIEWER_ROW_BATCH_MAX_ROWS,
         VIEWER_ROW_MAX_ENCODED_BYTES, ViewerDiffFileId, ViewerDiffLayout, ViewerRows,
@@ -256,7 +255,7 @@ fn send_unified_rows(
 ) -> BatchResult {
     let Ok(rows) = rows
         .into_iter()
-        .map(viewer_proto::encode_viewer_unified_row)
+        .map(proto::viewer::encode_viewer_unified_row)
         .collect::<Result<Vec<_>, _>>()
     else {
         return BatchResult::RowTooLarge;
@@ -276,7 +275,7 @@ fn send_split_rows(
 ) -> BatchResult {
     let Ok(rows) = rows
         .into_iter()
-        .map(viewer_proto::encode_viewer_split_row)
+        .map(proto::viewer::encode_viewer_split_row)
         .collect::<Result<Vec<_>, _>>()
     else {
         return BatchResult::RowTooLarge;
@@ -295,29 +294,61 @@ fn send_bounded<Row>(
     event: impl Fn(Vec<Row>) -> v1::stream_viewer_rows_response::Event,
 ) -> BatchResult
 where
-    Row: prost::Message + Clone,
+    Row: prost::Message,
 {
+    let empty_event = event(Vec::new());
+    let Some(empty_event_encoded_len) = row_event_encoded_len(&empty_event) else {
+        return BatchResult::RowTooLarge;
+    };
+    let mut empty_response_encoded_len = writer.response(empty_event).encoded_len();
     let mut batch = Vec::new();
+    let mut rows_encoded_len = 0_usize;
     for row in rows {
         if row.encoded_len() > VIEWER_ROW_MAX_ENCODED_BYTES {
             return BatchResult::RowTooLarge;
         }
-        let mut candidate = batch.clone();
-        candidate.push(row.clone());
-        let candidate_response = writer.response(event(candidate));
+        let framed_row_len = prost::encoding::message::encoded_len(2, &row);
+        let Some(candidate_rows_encoded_len) = rows_encoded_len.checked_add(framed_row_len) else {
+            return BatchResult::RowTooLarge;
+        };
+        let Some(candidate_response_len) = row_batch_response_encoded_len(
+            empty_response_encoded_len,
+            empty_event_encoded_len,
+            candidate_rows_encoded_len,
+        ) else {
+            return BatchResult::RowTooLarge;
+        };
         let crosses_bound = !batch.is_empty()
             && (batch.len() >= VIEWER_ROW_BATCH_MAX_ROWS
-                || candidate_response.encoded_len() > VIEWER_ROW_BATCH_MAX_ENCODED_BYTES);
+                || candidate_response_len > VIEWER_ROW_BATCH_MAX_ENCODED_BYTES);
         if crosses_bound && !writer.send(event(std::mem::take(&mut batch))) {
             return BatchResult::Cancelled;
         }
+        if crosses_bound {
+            rows_encoded_len = 0;
+            empty_response_encoded_len = writer.response(event(Vec::new())).encoded_len();
+        }
+        let Some(next_rows_encoded_len) = rows_encoded_len.checked_add(framed_row_len) else {
+            return BatchResult::RowTooLarge;
+        };
+        rows_encoded_len = next_rows_encoded_len;
         batch.push(row);
         if batch.len() == 1 {
-            let single = writer.response(event(batch.clone()));
-            if single.encoded_len() > VIEWER_ROW_BATCH_MAX_ENCODED_BYTES
+            let Some(single_response_len) = row_batch_response_encoded_len(
+                empty_response_encoded_len,
+                empty_event_encoded_len,
+                rows_encoded_len,
+            ) else {
+                return BatchResult::RowTooLarge;
+            };
+            if single_response_len > VIEWER_ROW_BATCH_MAX_ENCODED_BYTES
                 && !writer.send(event(std::mem::take(&mut batch)))
             {
                 return BatchResult::Cancelled;
+            }
+            if batch.is_empty() {
+                rows_encoded_len = 0;
+                empty_response_encoded_len = writer.response(event(Vec::new())).encoded_len();
             }
         }
     }
@@ -325,6 +356,32 @@ where
         return BatchResult::Cancelled;
     }
     BatchResult::Sent
+}
+
+fn row_event_encoded_len(event: &v1::stream_viewer_rows_response::Event) -> Option<usize> {
+    match event {
+        v1::stream_viewer_rows_response::Event::UnifiedRows(rows) => Some(rows.encoded_len()),
+        v1::stream_viewer_rows_response::Event::SplitRows(rows) => Some(rows.encoded_len()),
+        v1::stream_viewer_rows_response::Event::FileStarted(_)
+        | v1::stream_viewer_rows_response::Event::FileFinished(_)
+        | v1::stream_viewer_rows_response::Event::FileFailed(_) => None,
+    }
+}
+
+fn row_batch_response_encoded_len(
+    empty_response_encoded_len: usize,
+    empty_event_encoded_len: usize,
+    rows_encoded_len: usize,
+) -> Option<usize> {
+    let event_encoded_len = empty_event_encoded_len.checked_add(rows_encoded_len)?;
+    let empty_event_prefix_len =
+        prost::encoding::encoded_len_varint(u64::try_from(empty_event_encoded_len).ok()?);
+    let event_prefix_len =
+        prost::encoding::encoded_len_varint(u64::try_from(event_encoded_len).ok()?);
+    empty_response_encoded_len
+        .checked_add(rows_encoded_len)?
+        .checked_add(event_prefix_len)?
+        .checked_sub(empty_event_prefix_len)
 }
 
 fn to_render_options(
@@ -351,6 +408,51 @@ fn log_syntax_diagnostics(file: &ViewerDiffFileId, diagnostics: &[ViewerSyntaxDi
             side = ?diagnostic.side,
             error = diagnostic.message,
             "viewer syntax highlighting skipped part of a diff"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incremental_row_batch_size_matches_protobuf_encoding() {
+        let rows = vec![
+            v1::ViewerUnifiedRow {
+                row: Some(v1::viewer_unified_row::Row::Meta("short".to_owned())),
+            },
+            v1::ViewerUnifiedRow {
+                row: Some(v1::viewer_unified_row::Row::Meta("x".repeat(200))),
+            },
+        ];
+        let empty_event = v1::ViewerUnifiedRows {
+            file_id: "file-0".to_owned(),
+            rows: Vec::new(),
+        };
+        let response = |rows| v1::StreamViewerRowsResponse {
+            identity: Some(v1::ViewerViewIdentity::default()),
+            sequence: 7,
+            event: Some(v1::stream_viewer_rows_response::Event::UnifiedRows(
+                v1::ViewerUnifiedRows {
+                    file_id: empty_event.file_id.clone(),
+                    rows,
+                },
+            )),
+        };
+        let empty_response_encoded_len = response(Vec::new()).encoded_len();
+        let rows_encoded_len = rows
+            .iter()
+            .map(|row| prost::encoding::message::encoded_len(2, row))
+            .sum();
+
+        assert_eq!(
+            row_batch_response_encoded_len(
+                empty_response_encoded_len,
+                empty_event.encoded_len(),
+                rows_encoded_len,
+            ),
+            Some(response(rows).encoded_len())
         );
     }
 }
