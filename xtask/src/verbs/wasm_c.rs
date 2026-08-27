@@ -88,6 +88,8 @@ pub(crate) fn check_parser(root: &Path) -> Result<()> {
             "gtl-parser",
             "--all-features",
             "--all-targets",
+            "--jobs",
+            "1",
             "--target",
             "wasm32-unknown-unknown",
         ],
@@ -132,7 +134,10 @@ fn compiler_arguments(
         let argument = argument.to_string_lossy().replace('\\', "/");
         argument.contains("/tree-sitter-language-") && argument.ends_with("/wasm/src/stdlib.c")
     });
-    let mut configured = Vec::with_capacity(arguments.len() + 7);
+    let mut configured = Vec::with_capacity(arguments.len() + 9);
+    // Zig's debug instrumentation makes large generated grammars exceed workstation memory.
+    configured.push("-fno-sanitize=undefined".into());
+    configured.push("-g0".into());
     if !compiles_upstream_wasm_shim {
         configured.push("-include".into());
         configured.push(compat_directory.join("compat.h").into_os_string());
@@ -211,6 +216,8 @@ mod tests {
 
         assert!(arguments.contains(&TARGET_FREESTANDING.to_owned()));
         assert!(!arguments.contains(&TARGET_UNKNOWN.to_owned()));
+        assert!(arguments.contains(&"-fno-sanitize=undefined".to_owned()));
+        assert!(arguments.contains(&"-g0".to_owned()));
         assert!(arguments.contains(&"/repo/compat/compat.h".to_owned()));
         assert!(arguments.contains(&"/cargo/tree-sitter-language/wasm/include".to_owned()));
     }

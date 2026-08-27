@@ -8,13 +8,19 @@ publish.workspace = true
 [features]
 default = []
 syntax = [
+  "dep:unicase",
   "dep:tree-sitter",
+  "dep:tree-sitter-c",
+  "dep:tree-sitter-c-sharp",
+  "dep:tree-sitter-cpp",
   "dep:tree-sitter-highlight",
   "dep:tree-sitter-html",
   "dep:tree-sitter-javascript",
   "dep:tree-sitter-md",
   "dep:tree-sitter-python",
   "dep:tree-sitter-rust",
+  "dep:tree-sitter-swift",
+  "dep:tree-sitter-toml-ng",
   "dep:tree-sitter-typescript",
   "dep:tree-sitter-yaml",
 ]
@@ -22,13 +28,19 @@ syntax = [
 [dependencies]
 nutype.workspace = true
 similar.workspace = true
+unicase = { workspace = true, optional = true }
 tree-sitter = { workspace = true, optional = true }
+tree-sitter-c = { workspace = true, optional = true }
+tree-sitter-c-sharp = { workspace = true, optional = true }
+tree-sitter-cpp = { workspace = true, optional = true }
 tree-sitter-highlight = { workspace = true, optional = true }
 tree-sitter-html = { workspace = true, optional = true }
 tree-sitter-javascript = { workspace = true, optional = true }
 tree-sitter-md = { workspace = true, optional = true }
 tree-sitter-python = { workspace = true, optional = true }
 tree-sitter-rust = { workspace = true, optional = true }
+tree-sitter-swift = { workspace = true, optional = true }
+tree-sitter-toml-ng = { workspace = true, optional = true }
 tree-sitter-typescript = { workspace = true, optional = true }
 tree-sitter-yaml = { workspace = true, optional = true }
 

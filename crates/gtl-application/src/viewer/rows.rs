@@ -45,7 +45,7 @@ pub struct ViewerFileRowParser {
 impl ViewerFileRowParser {
     #[must_use]
     pub fn new(layout: ViewerDiffLayout, path: &RepositoryRelativePath) -> Self {
-        let syntax = SyntaxLanguage::from_path(path.to_string_lossy().as_ref());
+        let syntax = SyntaxLanguage::from_path(path.as_path());
         Self {
             parser: DiffParser::new().with_syntax(syntax).stream(),
             split: (layout == ViewerDiffLayout::Split).then(SplitDiffStream::new),

@@ -119,6 +119,8 @@ fn downstream_consumer_can_select_a_language_and_attach_semantic_tokens() {
 #[cfg(feature = "syntax")]
 #[test]
 fn downstream_consumer_can_resolve_every_supported_extension() {
+    use std::path::Path;
+
     use gtl_parser::SyntaxLanguage;
 
     for (path, expected) in [
@@ -130,8 +132,14 @@ fn downstream_consumer_can_resolve_every_supported_extension() {
         ("source.HTML", SyntaxLanguage::Html),
         ("source.YML", SyntaxLanguage::Yaml),
         ("source.YAML", SyntaxLanguage::Yaml),
+        ("source.TOML", SyntaxLanguage::Toml),
+        ("source.H", SyntaxLanguage::C),
+        ("source.C", SyntaxLanguage::C),
+        ("source.CPP", SyntaxLanguage::Cpp),
+        ("source.SWIFT", SyntaxLanguage::Swift),
+        ("source.CS", SyntaxLanguage::CSharp),
     ] {
-        assert_eq!(SyntaxLanguage::from_path(path), Some(expected));
+        assert_eq!(SyntaxLanguage::from_path(Path::new(path)), Some(expected));
     }
-    assert_eq!(SyntaxLanguage::from_path("source.unknown"), None);
+    assert_eq!(SyntaxLanguage::from_path(Path::new("source.unknown")), None);
 }

@@ -1,9 +1,35 @@
-use std::{cell::RefCell, path::Path, sync::OnceLock};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    path::Path,
+    sync::{LazyLock, OnceLock},
+};
 
 use tree_sitter::Language;
 use tree_sitter_highlight::{HighlightConfiguration, HighlightEvent, Highlighter};
+use unicase::Ascii;
 
 use crate::SyntaxTokenClass;
+
+static SYNTAX_LANGUAGES_BY_EXTENSION: LazyLock<HashMap<Ascii<&'static str>, SyntaxLanguage>> =
+    LazyLock::new(|| {
+        HashMap::from([
+            (Ascii::new("js"), SyntaxLanguage::JavaScript),
+            (Ascii::new("ts"), SyntaxLanguage::TypeScript),
+            (Ascii::new("py"), SyntaxLanguage::Python),
+            (Ascii::new("rs"), SyntaxLanguage::Rust),
+            (Ascii::new("md"), SyntaxLanguage::Markdown),
+            (Ascii::new("html"), SyntaxLanguage::Html),
+            (Ascii::new("yml"), SyntaxLanguage::Yaml),
+            (Ascii::new("yaml"), SyntaxLanguage::Yaml),
+            (Ascii::new("toml"), SyntaxLanguage::Toml),
+            (Ascii::new("h"), SyntaxLanguage::C),
+            (Ascii::new("c"), SyntaxLanguage::C),
+            (Ascii::new("cpp"), SyntaxLanguage::Cpp),
+            (Ascii::new("swift"), SyntaxLanguage::Swift),
+            (Ascii::new("cs"), SyntaxLanguage::CSharp),
+        ])
+    });
 
 /// A syntax grammar compiled into the `syntax` feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,29 +41,20 @@ pub enum SyntaxLanguage {
     Markdown,
     Html,
     Yaml,
+    Toml,
+    C,
+    Cpp,
+    Swift,
+    CSharp,
 }
 
 impl SyntaxLanguage {
     /// Resolves a supported file extension without consulting the filesystem.
-    pub fn from_path(path: &str) -> Option<Self> {
-        let extension = Path::new(path).extension()?.to_str()?;
-        if extension.eq_ignore_ascii_case("js") {
-            Some(Self::JavaScript)
-        } else if extension.eq_ignore_ascii_case("ts") {
-            Some(Self::TypeScript)
-        } else if extension.eq_ignore_ascii_case("py") {
-            Some(Self::Python)
-        } else if extension.eq_ignore_ascii_case("rs") {
-            Some(Self::Rust)
-        } else if extension.eq_ignore_ascii_case("md") {
-            Some(Self::Markdown)
-        } else if extension.eq_ignore_ascii_case("html") {
-            Some(Self::Html)
-        } else if extension.eq_ignore_ascii_case("yml") || extension.eq_ignore_ascii_case("yaml") {
-            Some(Self::Yaml)
-        } else {
-            None
-        }
+    pub fn from_path(path: &Path) -> Option<Self> {
+        let extension = path.extension()?.to_str()?;
+        SYNTAX_LANGUAGES_BY_EXTENSION
+            .get(&Ascii::new(extension))
+            .copied()
     }
 }
 
@@ -144,6 +161,11 @@ struct SyntaxConfigurations {
     markdown_inline: OnceLock<Result<HighlightConfiguration, String>>,
     html: OnceLock<Result<HighlightConfiguration, String>>,
     yaml: OnceLock<Result<HighlightConfiguration, String>>,
+    toml: OnceLock<Result<HighlightConfiguration, String>>,
+    c: OnceLock<Result<HighlightConfiguration, String>>,
+    cpp: OnceLock<Result<HighlightConfiguration, String>>,
+    swift: OnceLock<Result<HighlightConfiguration, String>>,
+    c_sharp: OnceLock<Result<HighlightConfiguration, String>>,
 }
 
 impl SyntaxConfigurations {
@@ -157,6 +179,11 @@ impl SyntaxConfigurations {
             markdown_inline: OnceLock::new(),
             html: OnceLock::new(),
             yaml: OnceLock::new(),
+            toml: OnceLock::new(),
+            c: OnceLock::new(),
+            cpp: OnceLock::new(),
+            swift: OnceLock::new(),
+            c_sharp: OnceLock::new(),
         }
     }
 
@@ -169,6 +196,11 @@ impl SyntaxConfigurations {
             SyntaxLanguage::Markdown => self.markdown.get_or_init(markdown_configuration),
             SyntaxLanguage::Html => self.html.get_or_init(html_configuration),
             SyntaxLanguage::Yaml => self.yaml.get_or_init(yaml_configuration),
+            SyntaxLanguage::Toml => self.toml.get_or_init(toml_configuration),
+            SyntaxLanguage::C => self.c.get_or_init(c_configuration),
+            SyntaxLanguage::Cpp => self.cpp.get_or_init(cpp_configuration),
+            SyntaxLanguage::Swift => self.swift.get_or_init(swift_configuration),
+            SyntaxLanguage::CSharp => self.c_sharp.get_or_init(c_sharp_configuration),
         };
         configuration.as_ref().map_err(Clone::clone)
     }
@@ -194,6 +226,20 @@ impl SyntaxConfigurations {
             self.for_language(SyntaxLanguage::Html).map(Some)
         } else if name.eq_ignore_ascii_case("yaml") || name.eq_ignore_ascii_case("yml") {
             self.for_language(SyntaxLanguage::Yaml).map(Some)
+        } else if name.eq_ignore_ascii_case("toml") {
+            self.for_language(SyntaxLanguage::Toml).map(Some)
+        } else if name.eq_ignore_ascii_case("c") {
+            self.for_language(SyntaxLanguage::C).map(Some)
+        } else if name.eq_ignore_ascii_case("cpp") || name.eq_ignore_ascii_case("c++") {
+            self.for_language(SyntaxLanguage::Cpp).map(Some)
+        } else if name.eq_ignore_ascii_case("swift") {
+            self.for_language(SyntaxLanguage::Swift).map(Some)
+        } else if name.eq_ignore_ascii_case("c_sharp")
+            || name.eq_ignore_ascii_case("csharp")
+            || name.eq_ignore_ascii_case("c#")
+            || name.eq_ignore_ascii_case("cs")
+        {
+            self.for_language(SyntaxLanguage::CSharp).map(Some)
         } else {
             Ok(None)
         }
@@ -280,6 +326,56 @@ fn yaml_configuration() -> Result<HighlightConfiguration, String> {
     )
 }
 
+fn toml_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_toml_ng::LANGUAGE.into(),
+        "toml",
+        tree_sitter_toml_ng::HIGHLIGHTS_QUERY,
+        "",
+        "",
+    )
+}
+
+fn c_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_c::LANGUAGE.into(),
+        "c",
+        tree_sitter_c::HIGHLIGHT_QUERY,
+        "",
+        "",
+    )
+}
+
+fn cpp_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_cpp::LANGUAGE.into(),
+        "cpp",
+        tree_sitter_cpp::HIGHLIGHT_QUERY,
+        "",
+        "",
+    )
+}
+
+fn swift_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_swift::LANGUAGE.into(),
+        "swift",
+        tree_sitter_swift::HIGHLIGHTS_QUERY,
+        tree_sitter_swift::INJECTIONS_QUERY,
+        tree_sitter_swift::LOCALS_QUERY,
+    )
+}
+
+fn c_sharp_configuration() -> Result<HighlightConfiguration, String> {
+    configuration(
+        tree_sitter_c_sharp::LANGUAGE.into(),
+        "c_sharp",
+        tree_sitter_c_sharp::HIGHLIGHTS_QUERY,
+        "",
+        "",
+    )
+}
+
 fn configuration(
     language: Language,
     name: &str,
@@ -348,16 +444,37 @@ mod tests {
             ("a.HTML", SyntaxLanguage::Html),
             ("a.YmL", SyntaxLanguage::Yaml),
             ("a.YAML", SyntaxLanguage::Yaml),
+            ("a.ToMl", SyntaxLanguage::Toml),
+            ("a.H", SyntaxLanguage::C),
+            ("a.C", SyntaxLanguage::C),
+            ("a.CpP", SyntaxLanguage::Cpp),
+            ("a.SwIfT", SyntaxLanguage::Swift),
+            ("a.Cs", SyntaxLanguage::CSharp),
         ] {
-            assert_eq!(SyntaxLanguage::from_path(path), Some(expected), "{path}");
+            assert_eq!(
+                SyntaxLanguage::from_path(Path::new(path)),
+                Some(expected),
+                "{path}"
+            );
         }
     }
 
     #[test]
     fn unknown_or_missing_extensions_resolve_none() {
         for path in ["file.zzzunknown", "no-extension", ""] {
-            assert_eq!(SyntaxLanguage::from_path(path), None);
+            assert_eq!(SyntaxLanguage::from_path(Path::new(path)), None);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn supported_extension_does_not_require_a_utf8_path() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt as _, path::PathBuf};
+
+        let mut path = PathBuf::from(OsString::from_vec(vec![b'd', 0x80]));
+        path.push("file.RS");
+
+        assert_eq!(SyntaxLanguage::from_path(&path), Some(SyntaxLanguage::Rust));
     }
 
     #[test]
@@ -370,6 +487,11 @@ mod tests {
             (SyntaxLanguage::Markdown, "# heading with **weight**"),
             (SyntaxLanguage::Html, "<main data-value=\"1\">text</main>"),
             (SyntaxLanguage::Yaml, "key: 1"),
+            (SyntaxLanguage::Toml, "key = 1"),
+            (SyntaxLanguage::C, "int value = 1;"),
+            (SyntaxLanguage::Cpp, "auto value = 1;"),
+            (SyntaxLanguage::Swift, "let value = 1"),
+            (SyntaxLanguage::CSharp, "var value = 1;"),
         ] {
             let tokens = SideHighlighter::new()
                 .tokens(language, source)
@@ -395,6 +517,11 @@ mod tests {
         assert!(configurations.markdown_inline.get().is_none());
         assert!(configurations.html.get().is_none());
         assert!(configurations.yaml.get().is_none());
+        assert!(configurations.toml.get().is_none());
+        assert!(configurations.c.get().is_none());
+        assert!(configurations.cpp.get().is_none());
+        assert!(configurations.swift.get().is_none());
+        assert!(configurations.c_sharp.get().is_none());
     }
 
     #[test]
