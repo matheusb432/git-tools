@@ -1,8 +1,4 @@
-use std::{
-    error::Error,
-    io::{Read as _, Write as _},
-    time::Duration,
-};
+use std::{error::Error, time::Duration};
 
 use gtl_wire::v1::{
     DiffTarget, Empty, GetRecursiveRepositoryStatusesRequest, GetRepositoryStatusRequest,
@@ -41,6 +37,21 @@ const PRIVATE_METADATA_VALUE: &str = "gtl-observability-private-metadata";
 const DIFF_RENDER_URI: &str = "/gtl.v1.DiffService/RenderDiff";
 const HEALTH_CHECK_URI: &str = "/grpc.health.v1.Health/Check";
 const REFLECTION_URI: &str = "/grpc.reflection.v1.ServerReflection/ServerReflectionInfo";
+
+#[tokio::test]
+#[cfg(windows)]
+async fn tcp_incoming_disables_nagle() -> TestResult {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let address = listener.local_addr()?;
+    let mut incoming = Box::pin(super::tcp_incoming(listener));
+
+    let (client, accepted) = tokio::join!(tokio::net::TcpStream::connect(address), incoming.next());
+    let _client = client?;
+    let accepted = accepted.ok_or("TCP incoming ended before accepting a connection")??;
+
+    assert!(accepted.nodelay()?);
+    Ok(())
+}
 
 #[tokio::test]
 #[serial(server_tracing)]
@@ -151,20 +162,19 @@ async fn rejects_requests_without_the_capability() -> TestResult {
 }
 
 #[tokio::test]
-async fn viewer_service_accepts_only_the_browser_capability() -> TestResult {
+async fn viewer_service_accepts_the_native_capability() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
 
-    let error =
-        ViewerServiceClient::with_interceptor(server.viewer_channel(), server.authorization())
-            .get_viewer_shell(GetViewerShellRequest {})
-            .await
-            .expect_err("the native client capability must not authorize the viewer service");
-    assert_eq!(error.code(), tonic::Code::Unauthenticated);
-
-    ViewerServiceClient::with_interceptor(server.viewer_channel(), server.viewer_authorization())
+    ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization())
         .get_viewer_shell(GetViewerShellRequest {})
         .await?;
+
+    let error = ViewerServiceClient::new(server.native_channel())
+        .get_viewer_shell(GetViewerShellRequest {})
+        .await
+        .expect_err("viewer requests require native authentication");
+    assert_eq!(error.code(), tonic::Code::Unauthenticated);
 
     server.stop().await?;
     Ok(())
@@ -175,10 +185,8 @@ async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResu
     let directory = tempfile::tempdir()?;
     let settings_path = directory.path().join("config.toml");
     let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
-    let mut viewer = ViewerServiceClient::with_interceptor(
-        server.viewer_channel(),
-        server.viewer_authorization(),
-    );
+    let mut viewer =
+        ViewerServiceClient::with_interceptor(server.native_channel(), server.authorization());
     let mut viewer_updates = viewer
         .watch_viewer(WatchViewerRequest {})
         .await?
@@ -203,35 +211,6 @@ async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResu
         .ok_or("viewer watch ended before the theme change")??
         .version;
     assert!(changed_version > initial_version);
-
-    server.stop().await?;
-    Ok(())
-}
-
-#[tokio::test]
-async fn viewer_cors_accepts_only_the_packaged_and_development_origins() -> TestResult {
-    let directory = tempfile::tempdir()?;
-    let server = ServerHarness::start(directory.path(), None).await?;
-    let address = server.viewer_address();
-
-    for origin in [
-        "http://tauri.localhost",
-        "tauri://localhost",
-        "http://127.0.0.1:8080",
-    ] {
-        let response = send_http1_request(address, cors_preflight(address, origin)).await?;
-        assert!(response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.1 204"));
-        let response = response.to_ascii_lowercase();
-        assert!(response.contains(&format!("access-control-allow-origin: {origin}")));
-        assert!(response.contains("access-control-allow-methods: post"));
-        assert!(response.contains("authorization"));
-        assert!(response.contains("x-grpc-web"));
-    }
-
-    let rejected = send_http1_request(address, cors_preflight(address, "https://example.invalid"))
-        .await?
-        .to_ascii_lowercase();
-    assert!(!rejected.contains("access-control-allow-origin"));
 
     server.stop().await?;
     Ok(())
@@ -349,6 +328,7 @@ async fn assert_health_serving(
         "gtl.v1.RepositoryService",
         "gtl.v1.SettingsService",
         "gtl.v1.TagService",
+        "gtl.v1.ViewerService",
         "gtl.v1.WorktreeService",
     ] {
         let response = client
@@ -360,26 +340,6 @@ async fn assert_health_serving(
         assert_eq!(response.status, ServingStatus::Serving as i32);
     }
     Ok(())
-}
-
-fn cors_preflight(address: std::net::SocketAddr, origin: &str) -> String {
-    format!(
-        "OPTIONS /gtl.v1.ViewerService/GetViewerShell HTTP/1.1\r\nHost: {address}\r\nOrigin: {origin}\r\nAccess-Control-Request-Method: POST\r\nAccess-Control-Request-Headers: authorization,x-grpc-web\r\nConnection: close\r\n\r\n"
-    )
-}
-
-async fn send_http1_request(address: std::net::SocketAddr, request: String) -> TestResult<String> {
-    Ok(
-        tokio::task::spawn_blocking(move || -> std::io::Result<String> {
-            let mut connection = std::net::TcpStream::connect(address)?;
-            connection.set_read_timeout(Some(Duration::from_secs(2)))?;
-            connection.write_all(request.as_bytes())?;
-            let mut response = String::new();
-            connection.read_to_string(&mut response)?;
-            Ok(response)
-        })
-        .await??,
-    )
 }
 
 async fn assert_health_update(
@@ -435,6 +395,7 @@ async fn assert_reflection_describes_gtl_contract(
             "gtl.v1.RepositoryService",
             "gtl.v1.SettingsService",
             "gtl.v1.TagService",
+            "gtl.v1.ViewerService",
             "gtl.v1.WorktreeService",
         ]
     );

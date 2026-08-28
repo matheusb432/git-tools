@@ -24,9 +24,9 @@ use tonic::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 use tonic_health::pb::{HealthCheckRequest, health_client::HealthClient};
-#[cfg(all(target_arch = "wasm32", feature = "viewer-web"))]
-pub use viewer::ViewerClient;
-pub use viewer::{ViewerClientError, ViewerRowStream, ViewerVersionStream};
+pub use viewer::ViewerClientError;
+#[cfg(any(not(target_arch = "wasm32"), feature = "viewer-ipc"))]
+pub use viewer::{ViewerClient, ViewerRowStream, ViewerVersionStream};
 
 #[cfg(not(target_arch = "wasm32"))]
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(1);

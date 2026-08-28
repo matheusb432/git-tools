@@ -152,19 +152,17 @@ const EDGE_POLICIES: [EdgePolicy; 10] = [
     },
     EdgePolicy {
         from: "gtl-desktop",
-        label: "gtl-desktop stays a bootstrap shell",
+        label: "gtl-desktop stays a transport shell",
         forbidden: &[
             "gtl-application",
             "gtl-artifacts",
-            "gtl-client",
             "gtl-infra",
             "gtl-models",
             "gtl-parser",
             "gtl-server",
-            "gtl-wire",
         ],
         forbid_workspace_packages: false,
-        reason: "the Tauri process may bootstrap and manage its window but must not execute viewer behavior",
+        reason: "the Tauri process may forward typed client operations but must not execute application or infrastructure behavior",
     },
     EdgePolicy {
         from: "gtl-cli",
@@ -439,20 +437,20 @@ mod tests {
     }
 
     #[test]
-    fn desktop_policy_accepts_only_shell_dependencies() {
+    fn desktop_policy_accepts_transport_dependencies() {
         let desktop_policy = EDGE_POLICIES
             .iter()
             .find(|policy| policy.from == "gtl-desktop")
             .expect("desktop policy should exist");
 
-        for dependency in ["gtl-application", "gtl-infra", "gtl-wire"] {
+        for dependency in ["gtl-application", "gtl-infra", "gtl-models", "gtl-server"] {
             assert!(dependency_is_forbidden(
                 desktop_policy,
                 dependency,
                 &BTreeSet::new()
             ));
         }
-        for dependency in ["gtl-local-auth", "tauri", "serde_json"] {
+        for dependency in ["gtl-client", "gtl-wire", "tauri", "serde_json"] {
             assert!(!dependency_is_forbidden(
                 desktop_policy,
                 dependency,

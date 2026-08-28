@@ -100,22 +100,26 @@ impl ServerProcess {
 }
 
 async fn connect_viewer_client(auth: &LocalAuth) -> Result<BenchmarkViewerClient> {
-    let bootstrap = auth
-        .load_viewer_bootstrap()
-        .context("load isolated viewer bootstrap")?;
-    let endpoint = tonic::transport::Endpoint::from_shared(format!(
-        "http://{}",
-        bootstrap.endpoint().address()
-    ))
-    .context("build isolated viewer endpoint")?;
+    let endpoint = auth
+        .load_endpoint()
+        .context("load isolated server endpoint")?;
+    #[cfg(unix)]
+    let target = format!("unix://{}", endpoint.uds_path().to_string_lossy());
+    #[cfg(windows)]
+    let target = format!("http://{}", endpoint.tcp_address());
+    let endpoint = tonic::transport::Endpoint::from_shared(target)
+        .context("build isolated viewer endpoint")?;
     let channel = endpoint
         .connect()
         .await
         .context("connect isolated viewer channel")?;
+    let capability = auth
+        .load_client_token()
+        .context("load isolated native capability")?;
     let authorization = ViewerAuthorization {
-        value: format!("Bearer {}", bootstrap.capability().expose_secret())
+        value: format!("Bearer {}", capability.expose_secret())
             .parse()
-            .context("encode isolated viewer capability")?,
+            .context("encode isolated native capability")?,
     };
     Ok(
         ViewerServiceClient::with_interceptor(channel, authorization)

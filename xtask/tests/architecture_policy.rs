@@ -185,7 +185,7 @@ fn check_structure_rejects_application_behavior_in_desktop() {
     assert_eq!(output.status.code(), Some(3));
     assert!(
         String::from_utf8_lossy(&output.stderr)
-            .contains("[gtl-desktop stays a bootstrap shell] gtl-desktop -> gtl-application"),
+            .contains("[gtl-desktop stays a transport shell] gtl-desktop -> gtl-application"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );

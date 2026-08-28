@@ -1,74 +1,30 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{
-    CapabilityToken, LocalAuthError, ServerInstanceId, private_directory::PrivateDirectory,
-};
+use crate::{LocalAuthError, ServerInstanceId, private_directory::PrivateDirectory};
 
 pub(crate) const VIEWER_BOOTSTRAP_FILE_NAME: &str = "viewer.json";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ViewerEndpoint {
-    address: SocketAddr,
-    instance_id: ServerInstanceId,
-}
-
-impl ViewerEndpoint {
-    pub fn try_new(
-        address: SocketAddr,
-        instance_id: ServerInstanceId,
-    ) -> Result<Self, LocalAuthError> {
-        if !address.ip().is_loopback() || address.port() == 0 {
-            return Err(LocalAuthError::InvalidViewerEndpoint);
-        }
-        Ok(Self {
-            address,
-            instance_id,
-        })
-    }
-
-    #[must_use]
-    pub const fn address(&self) -> SocketAddr {
-        self.address
-    }
-
-    #[must_use]
-    pub const fn instance_id(&self) -> &ServerInstanceId {
-        &self.instance_id
-    }
-}
-
-#[derive(Clone)]
 pub struct ViewerBootstrap {
-    endpoint: ViewerEndpoint,
-    capability: CapabilityToken,
+    instance_id: ServerInstanceId,
     protocol_version: u32,
 }
 
 impl ViewerBootstrap {
     #[must_use]
-    pub const fn new(
-        endpoint: ViewerEndpoint,
-        capability: CapabilityToken,
-        protocol_version: u32,
-    ) -> Self {
+    pub const fn new(instance_id: ServerInstanceId, protocol_version: u32) -> Self {
         Self {
-            endpoint,
-            capability,
+            instance_id,
             protocol_version,
         }
     }
 
     #[must_use]
-    pub const fn endpoint(&self) -> &ViewerEndpoint {
-        &self.endpoint
-    }
-
-    #[must_use]
-    pub const fn capability(&self) -> &CapabilityToken {
-        &self.capability
+    pub const fn instance_id(&self) -> &ServerInstanceId {
+        &self.instance_id
     }
 
     #[must_use]
@@ -77,32 +33,17 @@ impl ViewerBootstrap {
     }
 }
 
-impl std::fmt::Debug for ViewerBootstrap {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("ViewerBootstrap")
-            .field("endpoint", &self.endpoint)
-            .field("capability", &"REDACTED")
-            .field("protocol_version", &self.protocol_version)
-            .finish()
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ViewerBootstrapRecord {
-    address: SocketAddr,
     instance_id: Uuid,
-    capability: String,
     protocol_version: u32,
 }
 
 impl From<&ViewerBootstrap> for ViewerBootstrapRecord {
     fn from(bootstrap: &ViewerBootstrap) -> Self {
         Self {
-            address: bootstrap.endpoint.address(),
-            instance_id: bootstrap.endpoint.instance_id().as_uuid(),
-            capability: bootstrap.capability.expose_secret().to_owned(),
+            instance_id: bootstrap.instance_id.as_uuid(),
             protocol_version: bootstrap.protocol_version,
         }
     }
@@ -118,7 +59,7 @@ impl Drop for PublishedViewerBootstrap {
         let Ok(current) = load(&self.directory) else {
             return;
         };
-        if current.endpoint.instance_id() == &self.instance_id {
+        if current.instance_id() == &self.instance_id {
             let _ = self.directory.remove(VIEWER_BOOTSTRAP_FILE_NAME);
         }
     }
@@ -134,7 +75,7 @@ pub(crate) fn publish(
     directory.write_and_replace(VIEWER_BOOTSTRAP_FILE_NAME, &contents)?;
     Ok(PublishedViewerBootstrap {
         directory: Arc::new(directory),
-        instance_id: bootstrap.endpoint.instance_id().clone(),
+        instance_id: bootstrap.instance_id.clone(),
     })
 }
 
@@ -151,16 +92,8 @@ pub(crate) fn load(directory: &PrivateDirectory) -> Result<ViewerBootstrap, Loca
     };
     let record = serde_json::from_slice::<ViewerBootstrapRecord>(&contents)
         .map_err(|_| LocalAuthError::MalformedViewerBootstrap { path: path.clone() })?;
-    let endpoint = ViewerEndpoint::try_new(
-        record.address,
-        ServerInstanceId::from_uuid(record.instance_id),
-    )
-    .map_err(|_| LocalAuthError::MalformedViewerBootstrap { path: path.clone() })?;
-    let capability = CapabilityToken::parse(record.capability.as_bytes())
-        .ok_or(LocalAuthError::MalformedViewerBootstrap { path })?;
     Ok(ViewerBootstrap::new(
-        endpoint,
-        capability,
+        ServerInstanceId::from_uuid(record.instance_id),
         record.protocol_version,
     ))
 }

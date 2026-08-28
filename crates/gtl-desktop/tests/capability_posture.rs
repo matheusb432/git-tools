@@ -86,7 +86,7 @@ fn macos_bundle_contains_the_cli_and_server_sidecars() {
 }
 
 #[test]
-fn production_flavor_allows_wasm_and_the_loopback_viewer_server() {
+fn production_flavor_allows_wasm_without_a_network_endpoint() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
     let production_conf = fs::read_to_string(manifest_dir.join("tauri.production.conf.json"))
         .expect("tauri.production.conf.json must exist");
@@ -101,7 +101,7 @@ fn production_flavor_allows_wasm_and_the_loopback_viewer_server() {
         [
             "default-src 'self'",
             "base-uri 'self'",
-            "connect-src 'self' http://127.0.0.1:* http://[::1]:*",
+            "connect-src 'self'",
             "font-src 'self' data:",
             "form-action 'none'",
             "frame-src 'none'",

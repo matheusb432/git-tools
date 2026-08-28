@@ -1,5 +1,6 @@
 //! Tauri shell for the server-owned git-tools viewer.
 
+mod viewer_ipc;
 mod window_activation;
 
 use std::sync::{
@@ -7,12 +8,18 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use gtl_local_auth::{LocalAuth, ViewerBootstrap};
-use serde::Serialize;
 use tauri::{
     Manager, Url, WebviewUrl, WebviewWindowBuilder, WindowEvent,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
+};
+use viewer_ipc::{
+    ViewerIpcState, viewer_activate_tab, viewer_clear_commit_selection, viewer_close_tab,
+    viewer_connect, viewer_delete_live_tab, viewer_get_history_copy, viewer_get_settings,
+    viewer_get_shell, viewer_list_commits, viewer_list_history, viewer_open_diff_file,
+    viewer_open_history, viewer_refresh_tab, viewer_select_commit, viewer_set_preference,
+    viewer_stream_rows_cancel, viewer_stream_rows_next, viewer_stream_rows_start,
+    viewer_watch_cancel, viewer_watch_next, viewer_watch_start,
 };
 
 const MAIN_WINDOW_TITLE: &str = "git-tools diff viewer";
@@ -104,32 +111,6 @@ fn main_window_url() -> WebviewUrl {
     WebviewUrl::App("index.html".into())
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-struct ViewerConnectionPayload {
-    endpoint: String,
-    instance_id: String,
-    capability: String,
-    protocol_version: u32,
-}
-
-fn viewer_connection_payload(bootstrap: &ViewerBootstrap) -> ViewerConnectionPayload {
-    ViewerConnectionPayload {
-        endpoint: format!("http://{}", bootstrap.endpoint().address()),
-        instance_id: bootstrap.endpoint().instance_id().to_string(),
-        capability: bootstrap.capability().expose_secret().to_owned(),
-        protocol_version: bootstrap.protocol_version(),
-    }
-}
-
-#[tauri::command]
-fn load_viewer_connection() -> Result<ViewerConnectionPayload, String> {
-    LocalAuth::from_environment()
-        .and_then(|auth| auth.load_viewer_bootstrap())
-        .map(|bootstrap| viewer_connection_payload(&bootstrap))
-        .map_err(|error| error.to_string())
-}
-
 fn viewer_navigation_allowed(url: &Url) -> bool {
     matches!(
         (url.scheme(), url.host_str(), url.port_or_known_default()),
@@ -209,7 +190,30 @@ fn setup_viewer(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> 
 pub fn run() -> anyhow::Result<()> {
     tauri::Builder::default()
         .manage(MainWindowLifecycle::default())
-        .invoke_handler(tauri::generate_handler![load_viewer_connection])
+        .manage(ViewerIpcState::default())
+        .invoke_handler(tauri::generate_handler![
+            viewer_connect,
+            viewer_get_shell,
+            viewer_activate_tab,
+            viewer_close_tab,
+            viewer_refresh_tab,
+            viewer_delete_live_tab,
+            viewer_select_commit,
+            viewer_clear_commit_selection,
+            viewer_set_preference,
+            viewer_list_commits,
+            viewer_list_history,
+            viewer_open_history,
+            viewer_get_history_copy,
+            viewer_get_settings,
+            viewer_open_diff_file,
+            viewer_stream_rows_start,
+            viewer_stream_rows_next,
+            viewer_stream_rows_cancel,
+            viewer_watch_start,
+            viewer_watch_next,
+            viewer_watch_cancel,
+        ])
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 focus_main(&window);
@@ -223,8 +227,6 @@ pub fn run() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use gtl_local_auth::{CapabilityToken, ServerInstanceId, ViewerEndpoint};
-
     use super::*;
 
     fn successful_restoration() -> NativeRestoration {
@@ -244,22 +246,6 @@ mod tests {
             main_window_url(),
             WebviewUrl::App(path) if path == std::path::Path::new("index.html")
         ));
-    }
-
-    #[test]
-    fn viewer_connection_payload_contains_only_browser_connection_data() {
-        let capability = CapabilityToken::generate().expect("generate viewer capability");
-        let endpoint = ViewerEndpoint::try_new(
-            "127.0.0.1:4317".parse().expect("parse loopback address"),
-            ServerInstanceId::generate(),
-        )
-        .expect("create viewer endpoint");
-        let payload = viewer_connection_payload(&ViewerBootstrap::new(endpoint, capability, 7));
-
-        assert_eq!(payload.endpoint, "http://127.0.0.1:4317");
-        assert!(!payload.instance_id.is_empty());
-        assert!(!payload.capability.is_empty());
-        assert_eq!(payload.protocol_version, 7);
     }
 
     #[test]

@@ -12,7 +12,7 @@ use directories::ProjectDirs;
 pub use endpoint::{PublishedEndpoint, ServerEndpoint, ServerInstanceId};
 pub use error::LocalAuthError;
 pub use token::CapabilityToken;
-pub use viewer_bootstrap::{PublishedViewerBootstrap, ViewerBootstrap, ViewerEndpoint};
+pub use viewer_bootstrap::{PublishedViewerBootstrap, ViewerBootstrap};
 
 const DATA_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "GIT_TOOLS_DATA_DIR";
 const SERVER_DIRECTORY_NAME: &str = "server";
@@ -77,7 +77,7 @@ impl LocalAuth {
         endpoint::load(&self.server_directory()?)
     }
 
-    /// Publishes the instance-scoped credential used only by the desktop `WebView`.
+    /// Publishes the viewer protocol metadata for the active server instance.
     pub fn publish_viewer_bootstrap(
         &self,
         bootstrap: &ViewerBootstrap,
@@ -85,12 +85,12 @@ impl LocalAuth {
         viewer_bootstrap::publish(self.server_directory()?, bootstrap)
     }
 
-    /// Loads the active server address and viewer-only browser credential.
+    /// Loads viewer protocol metadata for the active server instance.
     pub fn load_viewer_bootstrap(&self) -> Result<ViewerBootstrap, LocalAuthError> {
         let directory = self.server_directory()?;
         let bootstrap = viewer_bootstrap::load(&directory)?;
         let endpoint = endpoint::load(&directory)?;
-        if bootstrap.endpoint().instance_id() != endpoint.instance_id() {
+        if bootstrap.instance_id() != endpoint.instance_id() {
             return Err(LocalAuthError::MalformedViewerBootstrap {
                 path: directory.path(viewer_bootstrap::VIEWER_BOOTSTRAP_FILE_NAME),
             });
@@ -110,22 +110,10 @@ impl LocalAuth {
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
-
     use super::*;
 
     fn local_auth(directory: &tempfile::TempDir) -> LocalAuth {
         LocalAuth::from_data_root(directory.path()).expect("absolute temporary data root")
-    }
-
-    fn viewer_endpoint(instance_id: ServerInstanceId) -> ViewerEndpoint {
-        ViewerEndpoint::try_new(
-            "127.0.0.1:4317"
-                .parse::<SocketAddr>()
-                .expect("parse loopback address"),
-            instance_id,
-        )
-        .expect("bound viewer endpoint")
     }
 
     #[cfg(unix)]
@@ -211,11 +199,7 @@ mod tests {
         let auth = local_auth(&directory);
         let endpoint = server_endpoint(&auth, ServerInstanceId::generate());
         let _published_endpoint = auth.publish_endpoint(endpoint).expect("publish endpoint");
-        let bootstrap = ViewerBootstrap::new(
-            viewer_endpoint(ServerInstanceId::generate()),
-            CapabilityToken::generate().expect("viewer token"),
-            1,
-        );
+        let bootstrap = ViewerBootstrap::new(ServerInstanceId::generate(), 1);
         let _published_viewer = auth
             .publish_viewer_bootstrap(&bootstrap)
             .expect("publish viewer bootstrap");
@@ -274,21 +258,13 @@ mod tests {
             std::fs::metadata(&server_directory).unwrap().mode() & 0o777,
             0o700
         );
-        let viewer_capability = CapabilityToken::generate().expect("viewer token");
-        let viewer_endpoint = viewer_endpoint(instance_id);
-        let viewer_bootstrap =
-            ViewerBootstrap::new(viewer_endpoint.clone(), viewer_capability.clone(), 1);
+        let viewer_bootstrap = ViewerBootstrap::new(instance_id, 1);
         let _published_viewer = auth
             .publish_viewer_bootstrap(&viewer_bootstrap)
             .expect("publish viewer bootstrap");
         let loaded_viewer = auth.load_viewer_bootstrap().expect("load viewer bootstrap");
-        assert_eq!(loaded_viewer.endpoint(), &viewer_endpoint);
+        assert_eq!(loaded_viewer.instance_id(), endpoint.instance_id());
         assert_eq!(loaded_viewer.protocol_version(), 1);
-        assert!(
-            loaded_viewer
-                .capability()
-                .authenticates(viewer_capability.expose_secret())
-        );
         for name in [
             token::CAPABILITY_FILE_NAME,
             endpoint::ENDPOINT_FILE_NAME,

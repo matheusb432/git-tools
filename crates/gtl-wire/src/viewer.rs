@@ -13,7 +13,7 @@ use gtl_models::{
 use nutype::nutype;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
-pub const VIEWER_PROTOCOL_VERSION: u32 = 1;
+pub const VIEWER_PROTOCOL_VERSION: u32 = 2;
 pub const VIEWER_COMMIT_PAGE_MAX_ENTRIES: usize = 100;
 pub const VIEWER_COMMIT_PAGE_MAX_ENCODED_BYTES: usize = 256 * 1024;
 pub const VIEWER_COMMIT_BODY_MAX_BYTES: usize = 4 * 1024 * 1024;

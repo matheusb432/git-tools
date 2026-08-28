@@ -93,8 +93,6 @@ pub enum LocalAuthError {
         path.display()
     )]
     UnexpectedServerEndpointPath { path: PathBuf, expected: PathBuf },
-    #[error("local viewer endpoint must use a bound loopback TCP address")]
-    InvalidViewerEndpoint,
     #[error("gtl-server has not published viewer access at {}", path.display())]
     ViewerBootstrapNotPublished { path: PathBuf },
     #[error("local viewer bootstrap is malformed: {}", path.display())]

@@ -279,25 +279,30 @@ async fn consume_viewer_rows(
 }
 
 async fn connect_viewer_client(auth: &LocalAuth) -> BenchmarkViewerClient {
-    let bootstrap = require(
-        auth.load_viewer_bootstrap(),
-        "loading the benchmark viewer connection",
-    );
     let endpoint = require(
-        tonic::transport::Endpoint::from_shared(format!(
-            "http://{}",
-            bootstrap.endpoint().address()
-        )),
+        auth.load_endpoint(),
+        "loading the benchmark server endpoint",
+    );
+    #[cfg(unix)]
+    let target = format!("unix://{}", endpoint.uds_path().to_string_lossy());
+    #[cfg(windows)]
+    let target = format!("http://{}", endpoint.tcp_address());
+    let endpoint = require(
+        tonic::transport::Endpoint::from_shared(target),
         "building the benchmark viewer endpoint",
     );
     let channel = require(
         endpoint.connect().await,
         "connecting the benchmark viewer client",
     );
+    let capability = require(
+        auth.load_client_token(),
+        "loading the benchmark native capability",
+    );
     let authorization = ViewerAuthorization {
         value: require(
-            format!("Bearer {}", bootstrap.capability().expose_secret()).parse(),
-            "encoding the benchmark viewer capability",
+            format!("Bearer {}", capability.expose_secret()).parse(),
+            "encoding the benchmark native capability",
         ),
     };
     ViewerServiceClient::with_interceptor(channel, authorization)

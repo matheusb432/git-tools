@@ -3,9 +3,7 @@ use std::{future::Future, time::Duration};
 use anyhow::Context as _;
 #[cfg(windows)]
 use gtl_local_auth::ServerEndpoint;
-use gtl_local_auth::{
-    CapabilityToken, LocalAuth, ServerInstanceId, ViewerBootstrap, ViewerEndpoint,
-};
+use gtl_local_auth::{LocalAuth, ServerInstanceId, ViewerBootstrap};
 use gtl_wire::viewer::VIEWER_PROTOCOL_VERSION;
 
 #[cfg(any(test, feature = "benchmark-support"))]
@@ -23,6 +21,7 @@ mod viewer_runtime;
 pub use harness::ServerHarness;
 
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(10);
+#[cfg(windows)]
 const LOOPBACK_EPHEMERAL_ADDRESS: &str = "127.0.0.1:0";
 
 pub async fn run() -> anyhow::Result<()> {
@@ -34,21 +33,14 @@ pub async fn run() -> anyhow::Result<()> {
         .context("restoring saved live views into the server viewer session")?;
     let instance_id = ServerInstanceId::generate();
     #[cfg(unix)]
-    let (endpoint, viewer_endpoint, listeners) = {
+    let (endpoint, listeners) = {
         let endpoint = local_auth.server_endpoint(instance_id.clone())?;
         let native_listener = uds_listener::BoundUdsListener::bind(endpoint.uds_path())?;
-        let viewer_listener = tokio::net::TcpListener::bind(LOOPBACK_EPHEMERAL_ADDRESS)
-            .await
-            .context("binding the gRPC-Web viewer endpoint to loopback")?;
-        let viewer_address = viewer_listener
-            .local_addr()
-            .context("reading the gRPC-Web viewer listen address")?;
-        let viewer_endpoint = ViewerEndpoint::try_new(viewer_address, instance_id)?;
-        let listeners = server::ServerListeners::new(native_listener, viewer_listener);
-        (endpoint, viewer_endpoint, listeners)
+        let listeners = server::ServerListeners::new(native_listener);
+        (endpoint, listeners)
     };
     #[cfg(windows)]
-    let (endpoint, viewer_endpoint, listeners) = {
+    let (endpoint, listeners) = {
         let listener = tokio::net::TcpListener::bind(LOOPBACK_EPHEMERAL_ADDRESS)
             .await
             .context("binding gtl-server to loopback")?;
@@ -56,25 +48,16 @@ pub async fn run() -> anyhow::Result<()> {
             .local_addr()
             .context("reading the gtl-server listen address")?;
         let endpoint = ServerEndpoint::try_new(address, instance_id.clone())?;
-        let viewer_endpoint = ViewerEndpoint::try_new(address, instance_id)?;
         let listeners = server::ServerListeners::new(listener);
-        (endpoint, viewer_endpoint, listeners)
+        (endpoint, listeners)
     };
-    let viewer_capability = CapabilityToken::generate()?;
-    let _published_viewer = local_auth.publish_viewer_bootstrap(&ViewerBootstrap::new(
-        viewer_endpoint.clone(),
-        viewer_capability.clone(),
-        VIEWER_PROTOCOL_VERSION,
-    ))?;
+    let _published_viewer = local_auth
+        .publish_viewer_bootstrap(&ViewerBootstrap::new(instance_id, VIEWER_PROTOCOL_VERSION))?;
     let _published_endpoint = local_auth.publish_endpoint(endpoint.clone())?;
     let shutdown = shutdown_signal()?;
 
     #[cfg(unix)]
-    tracing::info!(
-        native_path = %endpoint.uds_path().display(),
-        viewer_address = %viewer_endpoint.address(),
-        "gtl-server ready"
-    );
+    tracing::info!(native_path = %endpoint.uds_path().display(), "gtl-server ready");
     #[cfg(windows)]
     tracing::info!(address = %endpoint.tcp_address(), "gtl-server ready");
     server::serve(
@@ -82,7 +65,6 @@ pub async fn run() -> anyhow::Result<()> {
         shutdown,
         SHUTDOWN_GRACE_PERIOD,
         capability,
-        viewer_capability,
         state,
     )
     .await

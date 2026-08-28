@@ -7,20 +7,24 @@ publish.workspace = true
 
 [dependencies]
 gtl-models.workspace = true
-gtl-wire = { workspace = true, features = ["grpc"] }
+gtl-wire.workspace = true
+serde.workspace = true
 thiserror.workspace = true
-tonic.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 gtl-local-auth.workspace = true
+gtl-wire = { workspace = true, features = ["grpc"] }
 tonic = { workspace = true, features = ["router", "transport"] }
 tonic-health.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-tonic-web-wasm-client = { workspace = true, optional = true }
+serde-wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen = { workspace = true, optional = true }
+wasm-bindgen-futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true
+serde_json.workspace = true
 tokio = { workspace = true, features = [
   "macros",
   "net",
@@ -34,4 +38,8 @@ tokio-stream = { workspace = true, features = ["net"] }
 workspace = true
 
 [features]
-viewer-web = ["dep:tonic-web-wasm-client"]
+viewer-ipc = [
+  "dep:serde-wasm-bindgen",
+  "dep:wasm-bindgen",
+  "dep:wasm-bindgen-futures",
+]

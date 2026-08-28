@@ -5,9 +5,11 @@ use std::{
 
 use anyhow::{Context as _, anyhow};
 use gtl_infra::user_config::TomlSettingsStore;
+#[cfg(test)]
+use gtl_local_auth::CapabilityToken;
 use gtl_local_auth::{
-    CapabilityToken, LocalAuth, PublishedEndpoint, PublishedViewerBootstrap, ServerEndpoint,
-    ServerInstanceId, ViewerBootstrap, ViewerEndpoint,
+    LocalAuth, PublishedEndpoint, PublishedViewerBootstrap, ServerEndpoint, ServerInstanceId,
+    ViewerBootstrap,
 };
 use gtl_wire::viewer::VIEWER_PROTOCOL_VERSION;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -40,36 +42,27 @@ pub struct ServerHarness {
     #[cfg(test)]
     native_channel: Channel,
     #[cfg(test)]
-    viewer_channel: Channel,
-    #[cfg(test)]
     authorization: ServerHarnessAuthorization,
-    #[cfg(test)]
-    viewer_authorization: ServerHarnessAuthorization,
-    #[cfg(test)]
-    viewer_address: std::net::SocketAddr,
 }
 
 impl ServerHarness {
     pub async fn start(data_root: &Path, settings_path: Option<PathBuf>) -> anyhow::Result<Self> {
         let auth = LocalAuth::from_data_root(data_root)?;
         let capability = auth.load_or_create_server_token()?;
-        let viewer_capability = CapabilityToken::generate()?;
         let state = AppState::open_with_settings(data_root, TomlSettingsStore::new(settings_path))?;
         crate::viewer_runtime::restore_saved_live_views(&state)?;
-        let (endpoint, viewer_endpoint, listeners) =
-            bind_harness_listeners(&auth, ServerInstanceId::generate()).await?;
-        #[cfg(test)]
-        let viewer_address = viewer_endpoint.address();
+        let instance_id = ServerInstanceId::generate();
+        #[cfg(unix)]
+        let (endpoint, listeners) = bind_harness_listeners(&auth, instance_id.clone())?;
+        #[cfg(windows)]
+        let (endpoint, listeners) = bind_harness_listeners(&auth, instance_id.clone()).await?;
         let published_viewer = auth.publish_viewer_bootstrap(&ViewerBootstrap::new(
-            viewer_endpoint,
-            viewer_capability.clone(),
+            instance_id,
             VIEWER_PROTOCOL_VERSION,
         ))?;
         let published_endpoint = auth.publish_endpoint(endpoint.clone())?;
         #[cfg(test)]
         let authorization = ServerHarnessAuthorization::new(&capability)?;
-        #[cfg(test)]
-        let viewer_authorization = ServerHarnessAuthorization::new(&viewer_capability)?;
         let (shutdown, shutdown_receiver) = oneshot::channel();
         let server_state = state.clone();
         let task = tokio::spawn(async move {
@@ -80,14 +73,13 @@ impl ServerHarness {
                 },
                 SHUTDOWN_GRACE_PERIOD,
                 capability,
-                viewer_capability,
                 server_state,
             )
             .await
         });
+        tokio::task::yield_now().await;
         #[cfg(test)]
-        let (native_channel, viewer_channel) =
-            connect_harness_channels(&endpoint, viewer_address).await?;
+        let native_channel = connect_harness_channel(&endpoint).await?;
 
         Ok(Self {
             #[cfg(feature = "benchmark-support")]
@@ -101,13 +93,7 @@ impl ServerHarness {
             #[cfg(test)]
             native_channel,
             #[cfg(test)]
-            viewer_channel,
-            #[cfg(test)]
             authorization,
-            #[cfg(test)]
-            viewer_authorization,
-            #[cfg(test)]
-            viewer_address,
         })
     }
 
@@ -150,52 +136,26 @@ impl ServerHarness {
     }
 
     #[cfg(test)]
-    pub(crate) fn viewer_channel(&self) -> Channel {
-        self.viewer_channel.clone()
-    }
-
-    #[cfg(test)]
     pub(crate) fn authorization(&self) -> ServerHarnessAuthorization {
         self.authorization.clone()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn viewer_authorization(&self) -> ServerHarnessAuthorization {
-        self.viewer_authorization.clone()
-    }
-
-    #[cfg(test)]
-    pub(crate) const fn viewer_address(&self) -> std::net::SocketAddr {
-        self.viewer_address
     }
 }
 
 #[cfg(unix)]
-async fn bind_harness_listeners(
+fn bind_harness_listeners(
     auth: &LocalAuth,
     instance_id: ServerInstanceId,
-) -> anyhow::Result<(ServerEndpoint, ViewerEndpoint, ServerListeners)> {
-    let endpoint = auth.server_endpoint(instance_id.clone())?;
+) -> anyhow::Result<(ServerEndpoint, ServerListeners)> {
+    let endpoint = auth.server_endpoint(instance_id)?;
     let native_listener = BoundUdsListener::bind(endpoint.uds_path())?;
-    let viewer_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .context("binding harness gRPC-Web viewer endpoint")?;
-    let viewer_address = viewer_listener
-        .local_addr()
-        .context("reading harness gRPC-Web viewer address")?;
-    let viewer_endpoint = ViewerEndpoint::try_new(viewer_address, instance_id)?;
-    Ok((
-        endpoint,
-        viewer_endpoint,
-        ServerListeners::new(native_listener, viewer_listener),
-    ))
+    Ok((endpoint, ServerListeners::new(native_listener)))
 }
 
 #[cfg(windows)]
 async fn bind_harness_listeners(
     _auth: &LocalAuth,
     instance_id: ServerInstanceId,
-) -> anyhow::Result<(ServerEndpoint, ViewerEndpoint, ServerListeners)> {
+) -> anyhow::Result<(ServerEndpoint, ServerListeners)> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .context("binding harness gRPC server")?;
@@ -203,17 +163,13 @@ async fn bind_harness_listeners(
         .local_addr()
         .context("reading harness gRPC server address")?;
     Ok((
-        ServerEndpoint::try_new(address, instance_id.clone())?,
-        ViewerEndpoint::try_new(address, instance_id)?,
+        ServerEndpoint::try_new(address, instance_id)?,
         ServerListeners::new(listener),
     ))
 }
 
 #[cfg(test)]
-async fn connect_harness_channels(
-    endpoint: &ServerEndpoint,
-    viewer_address: std::net::SocketAddr,
-) -> anyhow::Result<(Channel, Channel)> {
+async fn connect_harness_channel(endpoint: &ServerEndpoint) -> anyhow::Result<Channel> {
     #[cfg(unix)]
     let native_target = format!(
         "unix://{}",
@@ -224,14 +180,10 @@ async fn connect_harness_channels(
     );
     #[cfg(windows)]
     let native_target = format!("http://{}", endpoint.tcp_address());
-    let native_channel = tonic::transport::Endpoint::from_shared(native_target)?
+    let channel = tonic::transport::Endpoint::from_shared(native_target)?
         .connect()
         .await?;
-    let viewer_channel =
-        tonic::transport::Endpoint::from_shared(format!("http://{viewer_address}"))?
-            .connect()
-            .await?;
-    Ok((native_channel, viewer_channel))
+    Ok(channel)
 }
 
 #[cfg(test)]

@@ -147,15 +147,20 @@ fn open_existing_private_file(path: &Path) -> Result<File, LocalAuthError> {
 }
 
 fn private_open_options() -> OpenOptions {
-    let mut options = OpenOptions::new();
+    #[cfg(not(unix))]
+    {
+        OpenOptions::new()
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt as _;
+
+        let mut options = OpenOptions::new();
         options
             .mode(0o600)
             .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW);
+        options
     }
-    options
 }
 
 #[derive(Debug, Clone, Copy)]
