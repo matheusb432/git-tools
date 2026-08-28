@@ -34,14 +34,14 @@ pub struct GrpcTransportProtocol {
 #[serde(rename_all = "kebab-case")]
 pub enum TransportKind {
     Tcp,
-    Unix,
+    Uds,
 }
 
 impl std::fmt::Display for TransportKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Tcp => formatter.write_str("tcp"),
-            Self::Unix => formatter.write_str("unix"),
+            Self::Uds => formatter.write_str("uds"),
         }
     }
 }

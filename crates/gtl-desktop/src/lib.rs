@@ -223,7 +223,7 @@ pub fn run() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use gtl_local_auth::{CapabilityToken, ServerEndpoint, ServerInstanceId};
+    use gtl_local_auth::{CapabilityToken, ServerInstanceId, ViewerEndpoint};
 
     use super::*;
 
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn viewer_connection_payload_contains_only_browser_connection_data() {
         let capability = CapabilityToken::generate().expect("generate viewer capability");
-        let endpoint = ServerEndpoint::try_new(
+        let endpoint = ViewerEndpoint::try_new(
             "127.0.0.1:4317".parse().expect("parse loopback address"),
             ServerInstanceId::generate(),
         )

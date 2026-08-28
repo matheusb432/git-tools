@@ -371,12 +371,12 @@ mod tests {
     #[test]
     fn comparison_aggregates_raw_samples_and_allows_transport_changes() {
         let baseline = report(TransportKind::Tcp, 100);
-        let current = report(TransportKind::Unix, 80);
+        let current = report(TransportKind::Uds, 80);
 
         let comparison = compare_reports(&baseline, &current).unwrap();
 
         assert_eq!(comparison.baseline_transport, TransportKind::Tcp);
-        assert_eq!(comparison.current_transport, TransportKind::Unix);
+        assert_eq!(comparison.current_transport, TransportKind::Uds);
         assert_approximately(comparison.latency_p50_nanoseconds.baseline, 102.0);
         assert_approximately(comparison.latency_p50_nanoseconds.current, 82.0);
         assert_approximately(comparison.latency_p95_nanoseconds.baseline, 104.0);
@@ -384,14 +384,14 @@ mod tests {
         assert_approximately(comparison.latency_p99_nanoseconds.baseline, 104.0);
         assert_approximately(comparison.latency_p99_nanoseconds.current, 84.0);
         let summary = summarize_report(&current).unwrap();
-        assert_eq!(summary.transport, TransportKind::Unix);
+        assert_eq!(summary.transport, TransportKind::Uds);
         assert_approximately(summary.requests_per_second.median, 10_002.0);
     }
 
     #[test]
     fn comparison_rejects_workload_drift() {
         let baseline = report(TransportKind::Tcp, 100);
-        let mut current = report(TransportKind::Unix, 80);
+        let mut current = report(TransportKind::Uds, 80);
         current.protocol.connections = 2;
 
         assert_eq!(

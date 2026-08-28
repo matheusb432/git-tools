@@ -64,8 +64,37 @@ pub enum LocalAuthError {
     EndpointNotPublished { path: PathBuf },
     #[error("local server endpoint is malformed: {}", path.display())]
     MalformedEndpoint { path: PathBuf },
-    #[error("local server endpoint must use a bound loopback address")]
-    InvalidEndpoint,
+    #[cfg(windows)]
+    #[error("local server endpoint must use a bound loopback TCP address")]
+    InvalidServerEndpoint,
+    #[cfg(unix)]
+    #[error("local server UDS path must be absolute: {}", path.display())]
+    ServerEndpointPathRelative { path: PathBuf },
+    #[cfg(unix)]
+    #[error("local server UDS path must not contain a NUL byte: {}", path.display())]
+    ServerEndpointPathContainsNul { path: PathBuf },
+    #[cfg(unix)]
+    #[error("local server UDS path must be valid UTF-8: {}", path.display())]
+    ServerEndpointPathNotUtf8 { path: PathBuf },
+    #[cfg(unix)]
+    #[error(
+        "local server UDS path is {bytes} bytes, exceeding the platform limit of {maximum_bytes}: {}",
+        path.display()
+    )]
+    ServerEndpointPathTooLong {
+        path: PathBuf,
+        bytes: usize,
+        maximum_bytes: usize,
+    },
+    #[cfg(unix)]
+    #[error(
+        "local server UDS path must be {}, not {}",
+        expected.display(),
+        path.display()
+    )]
+    UnexpectedServerEndpointPath { path: PathBuf, expected: PathBuf },
+    #[error("local viewer endpoint must use a bound loopback TCP address")]
+    InvalidViewerEndpoint,
     #[error("gtl-server has not published viewer access at {}", path.display())]
     ViewerBootstrapNotPublished { path: PathBuf },
     #[error("local viewer bootstrap is malformed: {}", path.display())]

@@ -60,7 +60,6 @@ impl ServerProcess {
                 ReleaseServerConfig {
                     server_binary: &config.server_binary,
                     settings: SETTINGS,
-                    bind_address: Some("127.0.0.1:0"),
                     profiler,
                 },
                 root,

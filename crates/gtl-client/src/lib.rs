@@ -542,7 +542,11 @@ impl GtlClient {
         endpoint: &ServerEndpoint,
         token: &CapabilityToken,
     ) -> Result<Self, ConnectError> {
-        let channel_endpoint = Endpoint::from_shared(format!("http://{}", endpoint.address()))
+        #[cfg(unix)]
+        let target = format!("unix://{}", endpoint.uds_path().to_string_lossy());
+        #[cfg(windows)]
+        let target = format!("http://{}", endpoint.tcp_address());
+        let channel_endpoint = Endpoint::from_shared(target)
             .map_err(ConnectError::InvalidEndpoint)?
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(OPERATION_TIMEOUT);
@@ -625,11 +629,11 @@ mod tests {
         diff_target, render_diff_response,
     };
     use tokio::sync::oneshot;
-    use tonic::{
-        Response,
-        service::InterceptorLayer,
-        transport::{Server, server::TcpIncoming},
-    };
+    #[cfg(unix)]
+    use tokio_stream::wrappers::UnixListenerStream;
+    #[cfg(windows)]
+    use tonic::transport::server::TcpIncoming;
+    use tonic::{Response, service::InterceptorLayer, transport::Server};
 
     use super::*;
 
@@ -696,7 +700,7 @@ mod tests {
         let client = GtlClient::connect(&harness.auth).await?;
 
         client.check_health().await?;
-        assert_eq!(client.endpoint().address(), harness.address);
+        assert_eq!(client.endpoint(), &harness.endpoint);
         harness.stop().await?;
         Ok(())
     }
@@ -817,7 +821,7 @@ mod tests {
         _directory: tempfile::TempDir,
         _published_endpoint: gtl_local_auth::PublishedEndpoint,
         auth: LocalAuth,
-        address: std::net::SocketAddr,
+        endpoint: ServerEndpoint,
         shutdown: oneshot::Sender<()>,
         task: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
     }
@@ -853,10 +857,20 @@ mod tests {
             } else {
                 CapabilityToken::generate()?
             };
-            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-            let address = listener.local_addr()?;
-            let endpoint = ServerEndpoint::try_new(address, ServerInstanceId::generate())?;
-            let published_endpoint = auth.publish_endpoint(endpoint)?;
+            let instance_id = ServerInstanceId::generate();
+            #[cfg(unix)]
+            let (endpoint, listener) = {
+                let endpoint = auth.server_endpoint(instance_id)?;
+                let listener = tokio::net::UnixListener::bind(endpoint.uds_path())?;
+                (endpoint, listener)
+            };
+            #[cfg(windows)]
+            let (endpoint, listener) = {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+                let endpoint = ServerEndpoint::try_new(listener.local_addr()?, instance_id)?;
+                (endpoint, listener)
+            };
+            let published_endpoint = auth.publish_endpoint(endpoint.clone())?;
             let authentication = TestAuthentication {
                 capability: server_capability,
             };
@@ -865,12 +879,16 @@ mod tests {
                 .set_service_status("", tonic_health::ServingStatus::Serving)
                 .await;
             let (shutdown, shutdown_receiver) = oneshot::channel();
+            #[cfg(unix)]
+            let incoming = UnixListenerStream::new(listener);
+            #[cfg(windows)]
+            let incoming = TcpIncoming::from(listener);
             let task = tokio::spawn(async move {
                 Server::builder()
                     .layer(InterceptorLayer::new(authentication))
                     .add_service(health_service)
                     .add_service(DiffServiceServer::new(TestDiff))
-                    .serve_with_incoming_shutdown(TcpIncoming::from(listener), async move {
+                    .serve_with_incoming_shutdown(incoming, async move {
                         let _ = shutdown_receiver.await;
                     })
                     .await
@@ -880,7 +898,7 @@ mod tests {
                 _directory: directory,
                 _published_endpoint: published_endpoint,
                 auth,
-                address,
+                endpoint,
                 shutdown,
                 task,
             })

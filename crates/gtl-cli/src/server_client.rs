@@ -7,7 +7,10 @@ pub(crate) struct ServerClient {
 }
 
 pub(crate) struct ServerStatus {
-    pub(crate) address: std::net::SocketAddr,
+    #[cfg(unix)]
+    pub(crate) uds_path: std::path::PathBuf,
+    #[cfg(windows)]
+    pub(crate) tcp_address: std::net::SocketAddr,
     pub(crate) instance_id: String,
 }
 
@@ -22,7 +25,10 @@ impl ServerClient {
 
     pub(crate) fn status(&self) -> ServerStatus {
         ServerStatus {
-            address: self.client.endpoint().address(),
+            #[cfg(unix)]
+            uds_path: self.client.endpoint().uds_path().to_path_buf(),
+            #[cfg(windows)]
+            tcp_address: self.client.endpoint().tcp_address(),
             instance_id: self.client.endpoint().instance_id().to_string(),
         }
     }

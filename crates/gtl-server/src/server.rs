@@ -1,6 +1,6 @@
 use std::{future::Future, time::Duration};
 
-use anyhow::Context as _;
+use anyhow::{Context as _, bail};
 use gtl_local_auth::CapabilityToken;
 use gtl_wire::{
     FILE_DESCRIPTOR_SET,
@@ -23,6 +23,7 @@ use tonic::{
     service::{Interceptor, InterceptorLayer, LayerExt as _},
     transport::{Server, server::TcpIncoming},
 };
+use tonic_health::server::HealthReporter;
 use tower_http::{
     LatencyUnit,
     cors::{AllowOrigin, CorsLayer},
@@ -32,6 +33,8 @@ use tower_http::{
     },
 };
 
+#[cfg(unix)]
+use crate::uds_listener::BoundUdsListener;
 use crate::{
     services::{
         DiffGrpcService, LiveViewGrpcService, ProjectGrpcService, RepositoryGrpcService,
@@ -47,6 +50,17 @@ const VIEWER_MAX_RESPONSE_MESSAGE_SIZE: usize = VIEWER_ROW_MAX_ENCODED_BYTES + 6
 
 const AUTHORIZATION_METADATA_KEY: &str = "authorization";
 const AUTHORIZATION_SCHEME: &str = "Bearer ";
+const HEALTH_SERVICE_NAME: &str = "grpc.health.v1.Health";
+const REFLECTION_SERVICE_NAME: &str = "grpc.reflection.v1.ServerReflection";
+const NATIVE_APPLICATION_SERVICE_NAMES: [&str; 7] = [
+    DiffServiceServer::<DiffGrpcService>::NAME,
+    LiveViewServiceServer::<LiveViewGrpcService>::NAME,
+    ProjectServiceServer::<ProjectGrpcService>::NAME,
+    RepositoryServiceServer::<RepositoryGrpcService>::NAME,
+    SettingsServiceServer::<SettingsGrpcService>::NAME,
+    TagServiceServer::<TagGrpcService>::NAME,
+    WorktreeServiceServer::<WorktreeGrpcService>::NAME,
+];
 
 type GrpcTraceLayer = TraceLayer<
     GrpcMakeClassifier,
@@ -57,6 +71,31 @@ type GrpcTraceLayer = TraceLayer<
     DefaultOnEos,
     DefaultOnFailure,
 >;
+
+#[cfg(unix)]
+pub(crate) struct ServerListeners {
+    native: BoundUdsListener,
+    viewer: tokio::net::TcpListener,
+}
+
+#[cfg(unix)]
+impl ServerListeners {
+    pub(crate) const fn new(native: BoundUdsListener, viewer: tokio::net::TcpListener) -> Self {
+        Self { native, viewer }
+    }
+}
+
+#[cfg(windows)]
+pub(crate) struct ServerListeners {
+    combined: tokio::net::TcpListener,
+}
+
+#[cfg(windows)]
+impl ServerListeners {
+    pub(crate) const fn new(combined: tokio::net::TcpListener) -> Self {
+        Self { combined }
+    }
+}
 
 #[derive(Clone)]
 struct Authentication {
@@ -86,7 +125,7 @@ impl Interceptor for Authentication {
 
 #[allow(clippy::too_many_lines)]
 pub(crate) async fn serve(
-    listener: tokio::net::TcpListener,
+    listeners: ServerListeners,
     shutdown: impl Future<Output = ()> + Send + 'static,
     shutdown_grace_period: Duration,
     capability: CapabilityToken,
@@ -94,17 +133,7 @@ pub(crate) async fn serve(
     state: AppState,
 ) -> anyhow::Result<()> {
     let (health_reporter, health_server) = tonic_health::server::health_reporter();
-    let application_service_names = [
-        DiffServiceServer::<DiffGrpcService>::NAME,
-        LiveViewServiceServer::<LiveViewGrpcService>::NAME,
-        ProjectServiceServer::<ProjectGrpcService>::NAME,
-        RepositoryServiceServer::<RepositoryGrpcService>::NAME,
-        SettingsServiceServer::<SettingsGrpcService>::NAME,
-        TagServiceServer::<TagGrpcService>::NAME,
-        ViewerServiceServer::<ViewerGrpcService>::NAME,
-        WorktreeServiceServer::<WorktreeGrpcService>::NAME,
-    ];
-    for service_name in application_service_names {
+    for service_name in NATIVE_APPLICATION_SERVICE_NAMES {
         health_reporter
             .set_service_status(service_name, tonic_health::ServingStatus::Serving)
             .await;
@@ -139,9 +168,15 @@ pub(crate) async fn serve(
     let viewer_server = ViewerServiceServer::new(ViewerGrpcService::new(state))
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
         .max_encoding_message_size(VIEWER_MAX_RESPONSE_MESSAGE_SIZE);
-    let reflection_server = tonic_reflection::server::Builder::configure()
+    let mut reflection_builder = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(FILE_DESCRIPTOR_SET)
-        .register_encoded_file_descriptor_set(tonic_health::pb::FILE_DESCRIPTOR_SET)
+        .register_encoded_file_descriptor_set(tonic_health::pb::FILE_DESCRIPTOR_SET);
+    for service_name in NATIVE_APPLICATION_SERVICE_NAMES {
+        reflection_builder = reflection_builder.with_service_name(service_name);
+    }
+    let reflection_server = reflection_builder
+        .with_service_name(HEALTH_SERVICE_NAME)
+        .with_service_name(REFLECTION_SERVICE_NAME)
         .build_v1()
         .context("building the gRPC reflection service")?
         .max_decoding_message_size(MAX_REQUEST_MESSAGE_SIZE)
@@ -169,41 +204,127 @@ pub(crate) async fn serve(
     .named_layer(viewer_server);
     let viewer_server = tonic_web::GrpcWebLayer::new().named_layer(viewer_server);
     let viewer_server = viewer_cors_layer().named_layer(viewer_server);
-    let (shutdown_started_sender, shutdown_started_receiver) = tokio::sync::oneshot::channel();
-    let shutdown = async move {
-        shutdown.await;
-        for service_name in application_service_names {
-            health_reporter
-                .set_service_status(service_name, tonic_health::ServingStatus::NotServing)
-                .await;
-        }
-        health_reporter
-            .set_service_status("", tonic_health::ServingStatus::NotServing)
-            .await;
-        let _ = shutdown_started_sender.send(());
-    };
-    let grpc_server = Server::builder()
-        .accept_http1(true)
-        .layer(grpc_trace_layer())
-        .concurrency_limit_per_connection(MAX_CONCURRENT_REQUESTS_PER_CONNECTION)
-        .load_shed(true)
-        .add_service(health_server)
-        .add_service(reflection_server)
-        .add_service(diff_server)
-        .add_service(live_view_server)
-        .add_service(project_server)
-        .add_service(repository_server)
-        .add_service(settings_server)
-        .add_service(tag_server)
-        .add_service(viewer_server)
-        .add_service(worktree_server)
-        .serve_with_incoming_shutdown(TcpIncoming::from(listener), shutdown);
-    tokio::pin!(grpc_server);
+    let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
 
-    let result = tokio::select! {
-        result = &mut grpc_server => result,
-        _ = shutdown_started_receiver => {
-            let Ok(result) = tokio::time::timeout(shutdown_grace_period, &mut grpc_server).await else {
+    #[cfg(unix)]
+    {
+        let native_shutdown = wait_for_shutdown(shutdown_receiver.clone());
+        let viewer_shutdown = wait_for_shutdown(shutdown_receiver);
+        let native_server = Server::builder()
+            .layer(grpc_trace_layer())
+            .concurrency_limit_per_connection(MAX_CONCURRENT_REQUESTS_PER_CONNECTION)
+            .load_shed(true)
+            .add_service(health_server)
+            .add_service(reflection_server)
+            .add_service(diff_server)
+            .add_service(live_view_server)
+            .add_service(project_server)
+            .add_service(repository_server)
+            .add_service(settings_server)
+            .add_service(tag_server)
+            .add_service(worktree_server)
+            .serve_with_incoming_shutdown(listeners.native, native_shutdown);
+        let viewer_server = Server::builder()
+            .accept_http1(true)
+            .layer(grpc_trace_layer())
+            .concurrency_limit_per_connection(MAX_CONCURRENT_REQUESTS_PER_CONNECTION)
+            .load_shed(true)
+            .add_service(viewer_server)
+            .serve_with_incoming_shutdown(TcpIncoming::from(listeners.viewer), viewer_shutdown);
+        supervise_unix_servers(
+            native_server,
+            viewer_server,
+            shutdown,
+            shutdown_sender,
+            health_reporter,
+            shutdown_grace_period,
+        )
+        .await
+    }
+
+    #[cfg(windows)]
+    {
+        let server_shutdown = wait_for_shutdown(shutdown_receiver);
+        let grpc_server = Server::builder()
+            .accept_http1(true)
+            .layer(grpc_trace_layer())
+            .concurrency_limit_per_connection(MAX_CONCURRENT_REQUESTS_PER_CONNECTION)
+            .load_shed(true)
+            .add_service(health_server)
+            .add_service(reflection_server)
+            .add_service(diff_server)
+            .add_service(live_view_server)
+            .add_service(project_server)
+            .add_service(repository_server)
+            .add_service(settings_server)
+            .add_service(tag_server)
+            .add_service(viewer_server)
+            .add_service(worktree_server)
+            .serve_with_incoming_shutdown(TcpIncoming::from(listeners.combined), server_shutdown);
+        supervise_windows_server(
+            grpc_server,
+            shutdown,
+            shutdown_sender,
+            health_reporter,
+            shutdown_grace_period,
+        )
+        .await
+    }
+}
+
+async fn wait_for_shutdown(mut receiver: tokio::sync::watch::Receiver<bool>) {
+    while !*receiver.borrow() {
+        if receiver.changed().await.is_err() {
+            break;
+        }
+    }
+}
+
+async fn signal_shutdown(
+    health_reporter: &HealthReporter,
+    shutdown_sender: &tokio::sync::watch::Sender<bool>,
+) {
+    for service_name in NATIVE_APPLICATION_SERVICE_NAMES {
+        health_reporter
+            .set_service_status(service_name, tonic_health::ServingStatus::NotServing)
+            .await;
+    }
+    health_reporter
+        .set_service_status("", tonic_health::ServingStatus::NotServing)
+        .await;
+    let _ = shutdown_sender.send(true);
+}
+
+#[cfg(unix)]
+async fn supervise_unix_servers<Native, Viewer, Shutdown>(
+    native_server: Native,
+    viewer_server: Viewer,
+    shutdown: Shutdown,
+    shutdown_sender: tokio::sync::watch::Sender<bool>,
+    health_reporter: HealthReporter,
+    shutdown_grace_period: Duration,
+) -> anyhow::Result<()>
+where
+    Native: Future<Output = Result<(), tonic::transport::Error>>,
+    Viewer: Future<Output = Result<(), tonic::transport::Error>>,
+    Shutdown: Future<Output = ()>,
+{
+    tokio::pin!(native_server);
+    tokio::pin!(viewer_server);
+    tokio::pin!(shutdown);
+
+    tokio::select! {
+        () = &mut shutdown => {
+            signal_shutdown(&health_reporter, &shutdown_sender).await;
+            let servers = async {
+                native_server
+                    .await
+                    .context("native gRPC server failure during shutdown")?;
+                viewer_server
+                    .await
+                    .context("viewer gRPC server failure during shutdown")
+            };
+            let Ok(result) = tokio::time::timeout(shutdown_grace_period, servers).await else {
                 tracing::warn!(
                     shutdown_grace_period = ?shutdown_grace_period,
                     "gRPC connections exceeded the shutdown grace period"
@@ -212,9 +333,75 @@ pub(crate) async fn serve(
             };
             result
         }
-    };
+        result = &mut native_server => {
+            signal_shutdown(&health_reporter, &shutdown_sender).await;
+            if tokio::time::timeout(shutdown_grace_period, &mut viewer_server)
+                .await
+                .is_err()
+            {
+                tracing::warn!(
+                    shutdown_grace_period = ?shutdown_grace_period,
+                    "viewer gRPC connections exceeded the shutdown grace period"
+                );
+            }
+            match result {
+                Err(error) => Err(error).context("native gRPC server failure"),
+                Ok(()) => bail!("native gRPC server stopped unexpectedly"),
+            }
+        }
+        result = &mut viewer_server => {
+            signal_shutdown(&health_reporter, &shutdown_sender).await;
+            if tokio::time::timeout(shutdown_grace_period, &mut native_server)
+                .await
+                .is_err()
+            {
+                tracing::warn!(
+                    shutdown_grace_period = ?shutdown_grace_period,
+                    "native gRPC connections exceeded the shutdown grace period"
+                );
+            }
+            match result {
+                Err(error) => Err(error).context("viewer gRPC server failure"),
+                Ok(()) => bail!("viewer gRPC server stopped unexpectedly"),
+            }
+        }
+    }
+}
 
-    result.context("gRPC server failure")
+#[cfg(windows)]
+async fn supervise_windows_server<Grpc, Shutdown>(
+    grpc_server: Grpc,
+    shutdown: Shutdown,
+    shutdown_sender: tokio::sync::watch::Sender<bool>,
+    health_reporter: HealthReporter,
+    shutdown_grace_period: Duration,
+) -> anyhow::Result<()>
+where
+    Grpc: Future<Output = Result<(), tonic::transport::Error>>,
+    Shutdown: Future<Output = ()>,
+{
+    tokio::pin!(grpc_server);
+    tokio::pin!(shutdown);
+
+    tokio::select! {
+        () = &mut shutdown => {
+            signal_shutdown(&health_reporter, &shutdown_sender).await;
+            let Ok(result) =
+                tokio::time::timeout(shutdown_grace_period, &mut grpc_server).await
+            else {
+                tracing::warn!(
+                    shutdown_grace_period = ?shutdown_grace_period,
+                    "gRPC connections exceeded the shutdown grace period"
+                );
+                return Ok(());
+            };
+            result.context("gRPC server failure during shutdown")
+        }
+        result = &mut grpc_server => match result {
+            Err(error) => Err(error).context("gRPC server failure"),
+            Ok(()) => bail!("gRPC server stopped unexpectedly"),
+        },
+    }
 }
 
 fn viewer_cors_layer() -> CorsLayer {

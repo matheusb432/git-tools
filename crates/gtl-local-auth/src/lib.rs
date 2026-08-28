@@ -12,7 +12,7 @@ use directories::ProjectDirs;
 pub use endpoint::{PublishedEndpoint, ServerEndpoint, ServerInstanceId};
 pub use error::LocalAuthError;
 pub use token::CapabilityToken;
-pub use viewer_bootstrap::{PublishedViewerBootstrap, ViewerBootstrap};
+pub use viewer_bootstrap::{PublishedViewerBootstrap, ViewerBootstrap, ViewerEndpoint};
 
 const DATA_DIRECTORY_ENVIRONMENT_VARIABLE: &str = "GIT_TOOLS_DATA_DIR";
 const SERVER_DIRECTORY_NAME: &str = "server";
@@ -55,6 +55,15 @@ impl LocalAuth {
         token::load(&self.server_directory()?)
     }
 
+    /// Resolves the deterministic native gRPC endpoint within the private server directory.
+    #[cfg(unix)]
+    pub fn server_endpoint(
+        &self,
+        instance_id: ServerInstanceId,
+    ) -> Result<ServerEndpoint, LocalAuthError> {
+        endpoint::for_directory(&self.server_directory()?, instance_id)
+    }
+
     /// Publishes the currently listening server endpoint.
     pub fn publish_endpoint(
         &self,
@@ -81,7 +90,7 @@ impl LocalAuth {
         let directory = self.server_directory()?;
         let bootstrap = viewer_bootstrap::load(&directory)?;
         let endpoint = endpoint::load(&directory)?;
-        if bootstrap.endpoint() != &endpoint {
+        if bootstrap.endpoint().instance_id() != endpoint.instance_id() {
             return Err(LocalAuthError::MalformedViewerBootstrap {
                 path: directory.path(viewer_bootstrap::VIEWER_BOOTSTRAP_FILE_NAME),
             });
@@ -101,12 +110,39 @@ impl LocalAuth {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+    use std::net::SocketAddr;
 
     use super::*;
 
     fn local_auth(directory: &tempfile::TempDir) -> LocalAuth {
         LocalAuth::from_data_root(directory.path()).expect("absolute temporary data root")
+    }
+
+    fn viewer_endpoint(instance_id: ServerInstanceId) -> ViewerEndpoint {
+        ViewerEndpoint::try_new(
+            "127.0.0.1:4317"
+                .parse::<SocketAddr>()
+                .expect("parse loopback address"),
+            instance_id,
+        )
+        .expect("bound viewer endpoint")
+    }
+
+    #[cfg(unix)]
+    fn server_endpoint(auth: &LocalAuth, instance_id: ServerInstanceId) -> ServerEndpoint {
+        auth.server_endpoint(instance_id)
+            .expect("deterministic UDS endpoint")
+    }
+
+    #[cfg(windows)]
+    fn server_endpoint(_auth: &LocalAuth, instance_id: ServerInstanceId) -> ServerEndpoint {
+        ServerEndpoint::try_new(
+            "127.0.0.1:4318"
+                .parse::<SocketAddr>()
+                .expect("parse loopback address"),
+            instance_id,
+        )
+        .expect("bound native endpoint")
     }
 
     #[test]
@@ -131,16 +167,36 @@ mod tests {
     fn endpoint_publication_is_instance_owned() {
         let directory = tempfile::tempdir().expect("temporary data root");
         let auth = local_auth(&directory);
-        let endpoint = ServerEndpoint::try_new(
-            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 4317)),
-            ServerInstanceId::generate(),
-        )
-        .expect("loopback endpoint");
+        let endpoint = server_endpoint(&auth, ServerInstanceId::generate());
 
         let published = auth
             .publish_endpoint(endpoint.clone())
             .expect("publish endpoint");
         assert_eq!(auth.load_endpoint().expect("load endpoint"), endpoint);
+        let record: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(
+                auth.data_root()
+                    .join(SERVER_DIRECTORY_NAME)
+                    .join(endpoint::ENDPOINT_FILE_NAME),
+            )
+            .expect("read endpoint record"),
+        )
+        .expect("decode endpoint record");
+        #[cfg(unix)]
+        {
+            assert_eq!(record["transport"], "uds");
+            assert_eq!(record["path"].as_str(), endpoint.uds_path().to_str());
+            assert!(record.get("address").is_none());
+        }
+        #[cfg(windows)]
+        {
+            assert_eq!(record["transport"], "tcp");
+            assert_eq!(
+                record["address"].as_str(),
+                Some(endpoint.tcp_address().to_string().as_str())
+            );
+            assert!(record.get("path").is_none());
+        }
 
         drop(published);
         assert!(matches!(
@@ -149,6 +205,28 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn viewer_bootstrap_must_match_the_active_server_instance() {
+        let directory = tempfile::tempdir().expect("temporary data root");
+        let auth = local_auth(&directory);
+        let endpoint = server_endpoint(&auth, ServerInstanceId::generate());
+        let _published_endpoint = auth.publish_endpoint(endpoint).expect("publish endpoint");
+        let bootstrap = ViewerBootstrap::new(
+            viewer_endpoint(ServerInstanceId::generate()),
+            CapabilityToken::generate().expect("viewer token"),
+            1,
+        );
+        let _published_viewer = auth
+            .publish_viewer_bootstrap(&bootstrap)
+            .expect("publish viewer bootstrap");
+
+        assert!(matches!(
+            auth.load_viewer_bootstrap(),
+            Err(LocalAuthError::MalformedViewerBootstrap { .. })
+        ));
+    }
+
+    #[cfg(windows)]
     #[test]
     fn endpoint_rejects_non_loopback_and_unbound_addresses() {
         let instance_id = ServerInstanceId::generate();
@@ -162,6 +240,22 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn endpoint_rejects_relative_and_overlong_uds_paths() {
+        let instance_id = ServerInstanceId::generate();
+        assert!(matches!(
+            ServerEndpoint::try_new("native-grpc.sock", instance_id.clone()),
+            Err(LocalAuthError::ServerEndpointPathRelative { .. })
+        ));
+
+        let overlong = std::path::Path::new("/").join("x".repeat(512));
+        assert!(matches!(
+            ServerEndpoint::try_new(overlong, instance_id),
+            Err(LocalAuthError::ServerEndpointPathTooLong { .. })
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn capability_and_endpoint_are_user_private() {
         use std::os::unix::fs::MetadataExt as _;
 
@@ -169,11 +263,8 @@ mod tests {
         let auth = local_auth(&directory);
         auth.load_or_create_server_token()
             .expect("provision capability");
-        let endpoint = ServerEndpoint::try_new(
-            "127.0.0.1:4317".parse().unwrap(),
-            ServerInstanceId::generate(),
-        )
-        .expect("loopback endpoint");
+        let instance_id = ServerInstanceId::generate();
+        let endpoint = server_endpoint(&auth, instance_id.clone());
         let _published = auth
             .publish_endpoint(endpoint.clone())
             .expect("publish endpoint");
@@ -184,12 +275,14 @@ mod tests {
             0o700
         );
         let viewer_capability = CapabilityToken::generate().expect("viewer token");
-        let viewer_bootstrap = ViewerBootstrap::new(endpoint.clone(), viewer_capability.clone(), 1);
+        let viewer_endpoint = viewer_endpoint(instance_id);
+        let viewer_bootstrap =
+            ViewerBootstrap::new(viewer_endpoint.clone(), viewer_capability.clone(), 1);
         let _published_viewer = auth
             .publish_viewer_bootstrap(&viewer_bootstrap)
             .expect("publish viewer bootstrap");
         let loaded_viewer = auth.load_viewer_bootstrap().expect("load viewer bootstrap");
-        assert_eq!(loaded_viewer.endpoint(), &endpoint);
+        assert_eq!(loaded_viewer.endpoint(), &viewer_endpoint);
         assert_eq!(loaded_viewer.protocol_version(), 1);
         assert!(
             loaded_viewer

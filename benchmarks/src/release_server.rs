@@ -14,7 +14,6 @@ const DIAGNOSTIC_BYTES_MAX: usize = 16 * 1_024;
 pub struct ReleaseServerConfig<'config> {
     pub server_binary: &'config Path,
     pub settings: &'config str,
-    pub bind_address: Option<&'config str>,
     pub profiler: Option<MassifProfiler<'config>>,
 }
 
@@ -65,9 +64,6 @@ impl ReleaseServerProcess {
             .stdin(Stdio::null())
             .stdout(Stdio::from(stdout))
             .stderr(Stdio::from(stderr));
-        if let Some(bind_address) = config.bind_address {
-            command.env("GTL_SERVER_BIND_ADDRESS", bind_address);
-        }
         let child = command.spawn().context("start isolated release server")?;
         Ok(Self {
             child,

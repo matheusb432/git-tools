@@ -4,15 +4,45 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    CapabilityToken, LocalAuthError, ServerEndpoint, ServerInstanceId,
-    private_directory::PrivateDirectory,
+    CapabilityToken, LocalAuthError, ServerInstanceId, private_directory::PrivateDirectory,
 };
 
 pub(crate) const VIEWER_BOOTSTRAP_FILE_NAME: &str = "viewer.json";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewerEndpoint {
+    address: SocketAddr,
+    instance_id: ServerInstanceId,
+}
+
+impl ViewerEndpoint {
+    pub fn try_new(
+        address: SocketAddr,
+        instance_id: ServerInstanceId,
+    ) -> Result<Self, LocalAuthError> {
+        if !address.ip().is_loopback() || address.port() == 0 {
+            return Err(LocalAuthError::InvalidViewerEndpoint);
+        }
+        Ok(Self {
+            address,
+            instance_id,
+        })
+    }
+
+    #[must_use]
+    pub const fn address(&self) -> SocketAddr {
+        self.address
+    }
+
+    #[must_use]
+    pub const fn instance_id(&self) -> &ServerInstanceId {
+        &self.instance_id
+    }
+}
+
 #[derive(Clone)]
 pub struct ViewerBootstrap {
-    endpoint: ServerEndpoint,
+    endpoint: ViewerEndpoint,
     capability: CapabilityToken,
     protocol_version: u32,
 }
@@ -20,7 +50,7 @@ pub struct ViewerBootstrap {
 impl ViewerBootstrap {
     #[must_use]
     pub const fn new(
-        endpoint: ServerEndpoint,
+        endpoint: ViewerEndpoint,
         capability: CapabilityToken,
         protocol_version: u32,
     ) -> Self {
@@ -32,7 +62,7 @@ impl ViewerBootstrap {
     }
 
     #[must_use]
-    pub const fn endpoint(&self) -> &ServerEndpoint {
+    pub const fn endpoint(&self) -> &ViewerEndpoint {
         &self.endpoint
     }
 
@@ -59,6 +89,7 @@ impl std::fmt::Debug for ViewerBootstrap {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ViewerBootstrapRecord {
     address: SocketAddr,
     instance_id: Uuid,
@@ -120,7 +151,7 @@ pub(crate) fn load(directory: &PrivateDirectory) -> Result<ViewerBootstrap, Loca
     };
     let record = serde_json::from_slice::<ViewerBootstrapRecord>(&contents)
         .map_err(|_| LocalAuthError::MalformedViewerBootstrap { path: path.clone() })?;
-    let endpoint = ServerEndpoint::try_new(
+    let endpoint = ViewerEndpoint::try_new(
         record.address,
         ServerInstanceId::from_uuid(record.instance_id),
     )

@@ -7,7 +7,7 @@ use anyhow::{Context as _, anyhow};
 use gtl_infra::user_config::TomlSettingsStore;
 use gtl_local_auth::{
     CapabilityToken, LocalAuth, PublishedEndpoint, PublishedViewerBootstrap, ServerEndpoint,
-    ServerInstanceId, ViewerBootstrap,
+    ServerInstanceId, ViewerBootstrap, ViewerEndpoint,
 };
 use gtl_wire::viewer::VIEWER_PROTOCOL_VERSION;
 use tokio::{sync::oneshot, task::JoinHandle};
@@ -19,7 +19,12 @@ use tonic::{
     transport::Channel,
 };
 
-use crate::{server::serve, state::AppState};
+#[cfg(unix)]
+use crate::uds_listener::BoundUdsListener;
+use crate::{
+    server::{ServerListeners, serve},
+    state::AppState,
+};
 
 const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_millis(250);
 
@@ -33,13 +38,15 @@ pub struct ServerHarness {
     shutdown: Option<oneshot::Sender<()>>,
     task: JoinHandle<anyhow::Result<()>>,
     #[cfg(test)]
-    channel: Channel,
+    native_channel: Channel,
+    #[cfg(test)]
+    viewer_channel: Channel,
     #[cfg(test)]
     authorization: ServerHarnessAuthorization,
     #[cfg(test)]
     viewer_authorization: ServerHarnessAuthorization,
     #[cfg(test)]
-    address: std::net::SocketAddr,
+    viewer_address: std::net::SocketAddr,
 }
 
 impl ServerHarness {
@@ -49,19 +56,16 @@ impl ServerHarness {
         let viewer_capability = CapabilityToken::generate()?;
         let state = AppState::open_with_settings(data_root, TomlSettingsStore::new(settings_path))?;
         crate::viewer_runtime::restore_saved_live_views(&state)?;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .context("binding harness gRPC server")?;
-        let address = listener
-            .local_addr()
-            .context("reading harness gRPC server address")?;
-        let endpoint = ServerEndpoint::try_new(address, ServerInstanceId::generate())?;
-        let published_endpoint = auth.publish_endpoint(endpoint.clone())?;
+        let (endpoint, viewer_endpoint, listeners) =
+            bind_harness_listeners(&auth, ServerInstanceId::generate()).await?;
+        #[cfg(test)]
+        let viewer_address = viewer_endpoint.address();
         let published_viewer = auth.publish_viewer_bootstrap(&ViewerBootstrap::new(
-            endpoint,
+            viewer_endpoint,
             viewer_capability.clone(),
             VIEWER_PROTOCOL_VERSION,
         ))?;
+        let published_endpoint = auth.publish_endpoint(endpoint.clone())?;
         #[cfg(test)]
         let authorization = ServerHarnessAuthorization::new(&capability)?;
         #[cfg(test)]
@@ -70,7 +74,7 @@ impl ServerHarness {
         let server_state = state.clone();
         let task = tokio::spawn(async move {
             serve(
-                listener,
+                listeners,
                 async move {
                     let _ = shutdown_receiver.await;
                 },
@@ -82,9 +86,8 @@ impl ServerHarness {
             .await
         });
         #[cfg(test)]
-        let channel = tonic::transport::Endpoint::from_shared(format!("http://{address}"))?
-            .connect()
-            .await?;
+        let (native_channel, viewer_channel) =
+            connect_harness_channels(&endpoint, viewer_address).await?;
 
         Ok(Self {
             #[cfg(feature = "benchmark-support")]
@@ -96,13 +99,15 @@ impl ServerHarness {
             shutdown: Some(shutdown),
             task,
             #[cfg(test)]
-            channel,
+            native_channel,
+            #[cfg(test)]
+            viewer_channel,
             #[cfg(test)]
             authorization,
             #[cfg(test)]
             viewer_authorization,
             #[cfg(test)]
-            address,
+            viewer_address,
         })
     }
 
@@ -140,8 +145,13 @@ impl ServerHarness {
     }
 
     #[cfg(test)]
-    pub(crate) fn channel(&self) -> Channel {
-        self.channel.clone()
+    pub(crate) fn native_channel(&self) -> Channel {
+        self.native_channel.clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn viewer_channel(&self) -> Channel {
+        self.viewer_channel.clone()
     }
 
     #[cfg(test)]
@@ -155,9 +165,73 @@ impl ServerHarness {
     }
 
     #[cfg(test)]
-    pub(crate) const fn address(&self) -> std::net::SocketAddr {
-        self.address
+    pub(crate) const fn viewer_address(&self) -> std::net::SocketAddr {
+        self.viewer_address
     }
+}
+
+#[cfg(unix)]
+async fn bind_harness_listeners(
+    auth: &LocalAuth,
+    instance_id: ServerInstanceId,
+) -> anyhow::Result<(ServerEndpoint, ViewerEndpoint, ServerListeners)> {
+    let endpoint = auth.server_endpoint(instance_id.clone())?;
+    let native_listener = BoundUdsListener::bind(endpoint.uds_path())?;
+    let viewer_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .context("binding harness gRPC-Web viewer endpoint")?;
+    let viewer_address = viewer_listener
+        .local_addr()
+        .context("reading harness gRPC-Web viewer address")?;
+    let viewer_endpoint = ViewerEndpoint::try_new(viewer_address, instance_id)?;
+    Ok((
+        endpoint,
+        viewer_endpoint,
+        ServerListeners::new(native_listener, viewer_listener),
+    ))
+}
+
+#[cfg(windows)]
+async fn bind_harness_listeners(
+    _auth: &LocalAuth,
+    instance_id: ServerInstanceId,
+) -> anyhow::Result<(ServerEndpoint, ViewerEndpoint, ServerListeners)> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .context("binding harness gRPC server")?;
+    let address = listener
+        .local_addr()
+        .context("reading harness gRPC server address")?;
+    Ok((
+        ServerEndpoint::try_new(address, instance_id.clone())?,
+        ViewerEndpoint::try_new(address, instance_id)?,
+        ServerListeners::new(listener),
+    ))
+}
+
+#[cfg(test)]
+async fn connect_harness_channels(
+    endpoint: &ServerEndpoint,
+    viewer_address: std::net::SocketAddr,
+) -> anyhow::Result<(Channel, Channel)> {
+    #[cfg(unix)]
+    let native_target = format!(
+        "unix://{}",
+        endpoint
+            .uds_path()
+            .to_str()
+            .context("harness UDS path is UTF-8")?
+    );
+    #[cfg(windows)]
+    let native_target = format!("http://{}", endpoint.tcp_address());
+    let native_channel = tonic::transport::Endpoint::from_shared(native_target)?
+        .connect()
+        .await?;
+    let viewer_channel =
+        tonic::transport::Endpoint::from_shared(format!("http://{viewer_address}"))?
+            .connect()
+            .await?;
+    Ok((native_channel, viewer_channel))
 }
 
 #[cfg(test)]

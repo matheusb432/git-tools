@@ -48,8 +48,9 @@ async fn serves_authenticated_health_and_reflection() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
 
-    assert_health_serving(server.channel(), server.authorization()).await?;
-    assert_reflection_describes_gtl_contract(server.channel(), server.authorization()).await?;
+    assert_health_serving(server.native_channel(), server.authorization()).await?;
+    assert_reflection_describes_gtl_contract(server.native_channel(), server.authorization())
+        .await?;
 
     server.stop().await?;
     Ok(())
@@ -60,7 +61,8 @@ async fn serves_authenticated_health_and_reflection() -> TestResult {
 async fn validates_application_requests_through_the_generated_client() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let mut client = DiffServiceClient::with_interceptor(server.channel(), server.authorization());
+    let mut client =
+        DiffServiceClient::with_interceptor(server.native_channel(), server.authorization());
 
     let error = client
         .render_diff(relative_working_directory_diff_request())
@@ -80,7 +82,7 @@ async fn rejects_map_based_diff_settings_before_managed_push_dependencies() -> T
     std::fs::write(&settings_path, "[diff.exclude]\ndefaults = [\"md\"]\n")?;
     let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
     let mut client =
-        ProjectServiceClient::with_interceptor(server.channel(), server.authorization());
+        ProjectServiceClient::with_interceptor(server.native_channel(), server.authorization());
 
     let error = client
         .push_project_repositories(PushProjectRepositoriesRequest { dry_run: true })
@@ -99,7 +101,7 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
     let mut client =
-        RepositoryServiceClient::with_interceptor(server.channel(), server.authorization());
+        RepositoryServiceClient::with_interceptor(server.native_channel(), server.authorization());
     let root = directory.path().to_string_lossy().into_owned();
 
     let error = client
@@ -117,7 +119,7 @@ async fn maps_repository_discovery_failures_to_grpc_statuses() -> TestResult {
     assert_eq!(error.code(), tonic::Code::NotFound);
 
     let mut worktree_client =
-        WorktreeServiceClient::with_interceptor(server.channel(), server.authorization());
+        WorktreeServiceClient::with_interceptor(server.native_channel(), server.authorization());
     let error = worktree_client
         .get_worktree_base(GetWorktreeBaseRequest {
             repository_path: directory.path().to_string_lossy().into_owned(),
@@ -136,7 +138,7 @@ async fn rejects_requests_without_the_capability() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
 
-    let error = HealthClient::new(server.channel())
+    let error = HealthClient::new(server.native_channel())
         .check(HealthCheckRequest {
             service: String::new(),
         })
@@ -153,13 +155,14 @@ async fn viewer_service_accepts_only_the_browser_capability() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
 
-    let error = ViewerServiceClient::with_interceptor(server.channel(), server.authorization())
-        .get_viewer_shell(GetViewerShellRequest {})
-        .await
-        .expect_err("the native client capability must not authorize the viewer service");
+    let error =
+        ViewerServiceClient::with_interceptor(server.viewer_channel(), server.authorization())
+            .get_viewer_shell(GetViewerShellRequest {})
+            .await
+            .expect_err("the native client capability must not authorize the viewer service");
     assert_eq!(error.code(), tonic::Code::Unauthenticated);
 
-    ViewerServiceClient::with_interceptor(server.channel(), server.viewer_authorization())
+    ViewerServiceClient::with_interceptor(server.viewer_channel(), server.viewer_authorization())
         .get_viewer_shell(GetViewerShellRequest {})
         .await?;
 
@@ -172,8 +175,10 @@ async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResu
     let directory = tempfile::tempdir()?;
     let settings_path = directory.path().join("config.toml");
     let server = ServerHarness::start(directory.path(), Some(settings_path)).await?;
-    let mut viewer =
-        ViewerServiceClient::with_interceptor(server.channel(), server.viewer_authorization());
+    let mut viewer = ViewerServiceClient::with_interceptor(
+        server.viewer_channel(),
+        server.viewer_authorization(),
+    );
     let mut viewer_updates = viewer
         .watch_viewer(WatchViewerRequest {})
         .await?
@@ -184,7 +189,7 @@ async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResu
         .ok_or("viewer watch ended before its initial version")??
         .version;
     let mut settings =
-        SettingsServiceClient::with_interceptor(server.channel(), server.authorization());
+        SettingsServiceClient::with_interceptor(server.native_channel(), server.authorization());
 
     settings
         .set_viewer_theme(SetViewerThemeRequest {
@@ -207,7 +212,7 @@ async fn settings_service_notifies_the_viewer_after_a_theme_change() -> TestResu
 async fn viewer_cors_accepts_only_the_packaged_and_development_origins() -> TestResult {
     let directory = tempfile::tempdir()?;
     let server = ServerHarness::start(directory.path(), None).await?;
-    let address = server.address();
+    let address = server.viewer_address();
 
     for origin in [
         "http://tauri.localhost",
@@ -237,9 +242,10 @@ async fn viewer_cors_accepts_only_the_packaged_and_development_origins() -> Test
 async fn shutdown_reports_not_serving_and_stops_with_an_open_health_watch() -> TestResult {
     let directory = tempfile::tempdir()?;
     let mut server = ServerHarness::start(directory.path(), None).await?;
-    let mut server_health = health_watch(server.channel(), server.authorization(), "").await?;
+    let mut server_health =
+        health_watch(server.native_channel(), server.authorization(), "").await?;
     let mut diff_health = health_watch(
-        server.channel(),
+        server.native_channel(),
         server.authorization(),
         "gtl.v1.DiffService",
     )
@@ -268,7 +274,8 @@ async fn writes_transport_traces_without_private_metadata() -> TestResult {
     let data_directory = tempfile::tempdir()?;
     let server = ServerHarness::start(data_directory.path(), None).await?;
 
-    let mut diff = DiffServiceClient::with_interceptor(server.channel(), server.authorization());
+    let mut diff =
+        DiffServiceClient::with_interceptor(server.native_channel(), server.authorization());
     let mut request = Request::new(relative_working_directory_diff_request());
     request
         .metadata_mut()
@@ -279,12 +286,12 @@ async fn writes_transport_traces_without_private_metadata() -> TestResult {
         .expect_err("relative working directory must fail");
     assert_eq!(error.code(), tonic::Code::InvalidArgument);
 
-    HealthClient::with_interceptor(server.channel(), server.authorization())
+    HealthClient::with_interceptor(server.native_channel(), server.authorization())
         .check(HealthCheckRequest {
             service: "gtl.v1.DiffService".to_owned(),
         })
         .await?;
-    request_reflection(server.channel(), server.authorization()).await?;
+    request_reflection(server.native_channel(), server.authorization()).await?;
     server.stop().await?;
     drop(default_dispatch_guard);
     drop(dispatch);
@@ -342,7 +349,6 @@ async fn assert_health_serving(
         "gtl.v1.RepositoryService",
         "gtl.v1.SettingsService",
         "gtl.v1.TagService",
-        "gtl.v1.ViewerService",
         "gtl.v1.WorktreeService",
     ] {
         let response = client
@@ -393,16 +399,45 @@ async fn assert_reflection_describes_gtl_contract(
     channel: Channel,
     authorization: ServerHarnessAuthorization,
 ) -> TestResult {
-    let requests = tokio_stream::iter([ServerReflectionRequest {
-        host: String::new(),
-        message_request: Some(MessageRequest::FileByFilename(
-            "gtl/v1/diff.proto".to_owned(),
-        )),
-    }]);
+    let requests = tokio_stream::iter([
+        ServerReflectionRequest {
+            host: String::new(),
+            message_request: Some(MessageRequest::ListServices(String::new())),
+        },
+        ServerReflectionRequest {
+            host: String::new(),
+            message_request: Some(MessageRequest::FileByFilename(
+                "gtl/v1/diff.proto".to_owned(),
+            )),
+        },
+    ]);
     let mut responses = ServerReflectionClient::with_interceptor(channel, authorization)
         .server_reflection_info(Request::new(requests))
         .await?
         .into_inner();
+    let mut advertised_services = match next_reflection_response(&mut responses).await? {
+        Some(MessageResponse::ListServicesResponse(response)) => response
+            .service
+            .into_iter()
+            .map(|service| service.name)
+            .collect::<Vec<_>>(),
+        _ => return Err("reflection returned an unexpected service-list response".into()),
+    };
+    advertised_services.sort_unstable();
+    assert_eq!(
+        advertised_services,
+        [
+            "grpc.health.v1.Health",
+            "grpc.reflection.v1.ServerReflection",
+            "gtl.v1.DiffService",
+            "gtl.v1.LiveViewService",
+            "gtl.v1.ProjectService",
+            "gtl.v1.RepositoryService",
+            "gtl.v1.SettingsService",
+            "gtl.v1.TagService",
+            "gtl.v1.WorktreeService",
+        ]
+    );
     let encoded_descriptors = match next_reflection_response(&mut responses).await? {
         Some(MessageResponse::FileDescriptorResponse(response)) => response.file_descriptor_proto,
         _ => return Err("reflection returned an unexpected descriptor response".into()),

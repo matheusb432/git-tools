@@ -32,7 +32,6 @@ impl BenchmarkServer {
                 ReleaseServerConfig {
                     server_binary: &config.server_binary,
                     settings: SETTINGS,
-                    bind_address: None,
                     profiler: None,
                 },
                 root,
@@ -94,5 +93,15 @@ impl BenchmarkServer {
 }
 
 fn benchmark_target(endpoint: &ServerEndpoint) -> (String, TransportKind) {
-    (endpoint.address().to_string(), TransportKind::Tcp)
+    #[cfg(unix)]
+    {
+        (
+            format!("unix://{}", endpoint.uds_path().to_string_lossy()),
+            TransportKind::Uds,
+        )
+    }
+    #[cfg(windows)]
+    {
+        (endpoint.tcp_address().to_string(), TransportKind::Tcp)
+    }
 }
